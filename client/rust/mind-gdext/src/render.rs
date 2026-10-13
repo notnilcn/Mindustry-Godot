@@ -52,6 +52,7 @@ mod minimap;
 mod objective_markers;
 mod overlays;
 mod pixelate;
+mod plans;
 mod shaders;
 mod shadow;
 mod shields;
@@ -238,6 +239,8 @@ pub struct MindWorldRenderer {
     shields: Option<Gd<shields::ShieldRenderer>>,
     /// Command-mode selection overlay (`Layer.plans` band; T16/PAR-0157).
     command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
+    /// Placement preview (`Layer.plans` band; G03 T2).
+    plan_overlay: Option<Gd<plans::PlanOverlay>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -278,6 +281,7 @@ impl INode2D for MindWorldRenderer {
             status: None,
             shields: None,
             command_overlay: None,
+            plan_overlay: None,
             env: None,
             fog: None,
             overlays: None,
@@ -537,6 +541,15 @@ impl MindWorldRenderer {
             // the pipeline, not by content.
             plans_band.clone().add_child(&node);
             self.command_overlay = Some(node.clone());
+        }
+        // Placement preview at `Layer.plans` (`DesktopInput.drawBottom`; G03 T2).
+        if let Some(plans_band) = self.band_node_at(BandKey::base(Layer::Plans)) {
+            let mut node = plans::PlanOverlay::new_alloc();
+            node.set_name("PlanOverlay");
+            // code-instantiated: one placement-preview pass; the node count is
+            // fixed by the pipeline, not by content.
+            plans_band.clone().add_child(&node);
+            self.plan_overlay = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));

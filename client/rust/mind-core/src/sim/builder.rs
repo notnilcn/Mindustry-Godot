@@ -796,6 +796,16 @@ impl Sim {
         true
     }
 
+    /// `InputHandler.validPlace(x, y, block, rot)` for the local team: the
+    /// placement-preview validity check, no side effects and nothing queued
+    /// (`InputHandler.java:2029-2032` calls `Build.validPlace`).
+    pub fn preview_can_place(&self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
+        let team = self.live_default_team();
+        self.block_runtime.as_ref().is_some_and(|runtime| {
+            runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rotation, team)
+        })
+    }
+
     /// Queues a deconstruction on the player unit
     /// (`InputHandler.removeSelection`); a queued placement covering the tile
     /// is removed instead.
@@ -1405,5 +1415,28 @@ mod tests {
         assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(BlockId::AIR));
         // 6 copper * 0.5 refund.
         assert_eq!(core_copper(&sim), 13);
+    }
+
+    /// G03 T2: the preview validity check agrees with the queued placement.
+    #[test]
+    fn preview_can_place_matches_queue() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        sim.tick().expect("tick");
+        assert!(
+            sim.preview_can_place(20, 20, wall, 0),
+            "empty tile is placeable in preview"
+        );
+        assert!(
+            !sim.preview_can_place(10, 10, wall, 0),
+            "the core footprint is not placeable"
+        );
+        assert!(
+            sim.queue_player_place(20, 20, wall, 0),
+            "the queued placement agrees"
+        );
+        assert!(
+            !sim.queue_player_place(10, 10, wall, 0),
+            "the queued placement rejects the core tile"
+        );
     }
 }

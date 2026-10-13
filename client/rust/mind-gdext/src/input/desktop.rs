@@ -56,6 +56,24 @@ struct Drag {
     moved: bool,
 }
 
+/// Read-only view for the placement overlay (`DesktopInput.drawBottom` /
+/// `InputHandler.drawBreakSelection`; G03 T2).
+#[derive(Debug, Clone)]
+pub struct PlacementView {
+    /// Cursor tile from the camera transform (`cursor_tile`).
+    pub cursor: Option<(i32, i32)>,
+    /// Selected block (`input.block`; may be `Some(BlockId::AIR)`).
+    pub block: Option<BlockId>,
+    /// Placement rotation.
+    pub rotation: u8,
+    /// Active interaction (`InputHandler.mode`).
+    pub mode: PlaceMode,
+    /// Line/area plans being dragged (cloned only while `mode == Placing`).
+    pub line_plans: Vec<ClientPlan>,
+    /// Right-drag break rectangle as `(start, last)` in tiles.
+    pub break_rect: Option<((i32, i32), (i32, i32))>,
+}
+
 /// A UI-side action the shell must resolve against the scene tree.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Effect {
@@ -999,6 +1017,26 @@ impl DesktopBridge {
         Some((tile.x, tile.y))
     }
 
+    /// Snapshot for the placement overlay pass (G03 T2).
+    pub fn placement_view(&self) -> PlacementView {
+        let mode = self.controller.state.place_mode;
+        PlacementView {
+            cursor: self.cursor_tile(),
+            block: self.controller.state.block,
+            rotation: self.controller.state.rotation,
+            mode,
+            line_plans: if mode == PlaceMode::Placing {
+                self.controller.state.line_plans.clone()
+            } else {
+                Vec::new()
+            },
+            break_rect: match self.drag {
+                Some(drag) if drag.kind == DragKind::Break => Some((drag.start, drag.last)),
+                _ => None,
+            },
+        }
+    }
+
     /// World pixel center of the cursor tile (Java `Tile.worldx()`).
     fn cursor_world(&self) -> Option<(f32, f32)> {
         let (x, y) = self.cursor_tile()?;
@@ -1777,5 +1815,22 @@ mod tests {
             .select_block(Some(BlockId::STONE_WALL));
         bridge.update_command_mode(&bindings, None);
         assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn placement_view_reports_break_drag() {
+        // G03 T2: the break rectangle is exposed while a right-drag is held.
+        let mut bridge = DesktopBridge::new();
+        bridge.controller.state.place_mode = PlaceMode::Breaking;
+        bridge.drag = Some(Drag {
+            kind: DragKind::Break,
+            start: (1, 1),
+            last: (3, 4),
+            moved: true,
+        });
+        let view = bridge.placement_view();
+        assert_eq!(view.break_rect, Some(((1, 1), (3, 4))));
+        assert_eq!(view.mode, PlaceMode::Breaking);
+        assert!(view.line_plans.is_empty());
     }
 }

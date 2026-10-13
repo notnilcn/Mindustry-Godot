@@ -42,11 +42,13 @@ pub(crate) fn draw_region(
         .rotation(rot_deg.to_radians())
         .done();
     // Negative height = vertical flip: the camera renders +y up, textures are
-    // top-row-first.
+    // top-row-first. `draw_texture_rect` builds the quad as `[position,
+    // position + |size|]`, so the position is the quad's minimum corner
+    // (`-h / 2`), not the Java-style bottom-left.
     canvas
         .draw_texture_rect_ex(
             texture,
-            Rect2::new(Vector2::new(-w / 2.0, h / 2.0), Vector2::new(w, -h)),
+            Rect2::new(Vector2::new(-w / 2.0, -h / 2.0), Vector2::new(w, -h)),
             false,
         )
         .modulate(color)

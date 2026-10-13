@@ -305,7 +305,9 @@ impl MindFx {
                     // texture needs a negative-height rect (the third
                     // `draw_texture_rect` argument is `tile`, not a flip; the
                     // old `true` both tiled and mirrored every region).
-                    // `draw_region` in `render/canvas.rs` is the shared form.
+                    // `draw_texture_rect` builds the quad from the position
+                    // with positive extents, so the position uses the negated
+                    // origin fractions (Java-style bottom-left anchor).
                     base.draw_set_transform_ex(Vector2::new(*x, *y))
                         .rotation(rotation_deg.to_radians())
                         .scale(Vector2::ONE)
@@ -313,7 +315,7 @@ impl MindFx {
                     base.draw_texture_rect_ex(
                         &texture,
                         Rect2::new(
-                            Vector2::new(-w * origin.0, h * (1.0 - origin.1)),
+                            Vector2::new(-w * origin.0, -h * origin.1),
                             Vector2::new(*w, -h),
                         ),
                         false,

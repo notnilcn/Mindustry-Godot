@@ -598,7 +598,7 @@ impl BlockRenderer {
 
 /// Whether the block's sprite follows `Building.rotation` (`rotate` blocks
 /// that draw their region with `rotdeg()`: belts, conduits, ducts).
-fn rotates_sprite(def: &BlockDef) -> bool {
+pub(crate) fn rotates_sprite(def: &BlockDef) -> bool {
     matches!(
         def.kind,
         BlockKind::Conveyor

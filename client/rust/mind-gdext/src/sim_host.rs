@@ -120,6 +120,22 @@ struct CaptureRequest {
     frames_waited: u32,
 }
 
+/// `Block.drawPlace` range-circle kinds (G03 T2): which Arc helper the
+/// placement preview uses and which colour applies. The range value comes
+/// from `MindSimHost::block_place_range`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceRangeKind {
+    /// `BaseTurret.drawPlace` (`BaseTurret.java:84-90`): `Drawf.dashCircle`
+    /// in `Pal.placing`.
+    Turret,
+    /// `PowerNode.drawPlace` (`PowerNode.java:159-173`): `Drawf.circles` in
+    /// `Pal.placing` at `laserRange * 8`.
+    PowerNode,
+    /// `MendProjector`/`OverdriveProjector.drawPlace`: `Drawf.dashCircle` in
+    /// the projector's `baseColor`.
+    Projector,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -166,6 +182,9 @@ pub struct MindSimHost {
     input: Option<Gd<MindInput>>,
     /// Enemy spawn-overlay count of the last loaded sector grid.
     sector_spawns: i32,
+    /// Turret `BaseTurret.range` cache for `block_place_range` (`config_for`
+    /// rebuilds the whole config each call; the ghost asks per frame).
+    place_range_cache: std::cell::RefCell<std::collections::HashMap<BlockId, Option<f32>>>,
 }
 
 #[godot_api]
@@ -194,6 +213,7 @@ impl INode for MindSimHost {
             sector_plans: Vec::new(),
             input: None,
             sector_spawns: 0,
+            place_range_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -3355,6 +3375,107 @@ impl MindSimHost {
             Some(mut module) => module.remove(item, amount),
             None => 0,
         }
+    }
+
+    // ---- G03 T2 placement preview seams (Rust-only) ----
+
+    /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;
+    /// preview only, no side effects (G03 T2).
+    pub fn preview_can_place(&self, x: i32, y: i32, block: BlockId, rot: u8) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.sim.preview_can_place(x, y, block, rot)
+    }
+
+    /// `Block.drawPlace` range circle for `block` (G03 T2): `(radius world px,
+    /// kind, rgba8888 colour)`. `None` = the block draws no range circle.
+    ///
+    /// Turret ranges come from the ported `TurretConfig`
+    /// (`BaseTurret.java:84-90`); power-node `laserRange` (6/15/40) and the
+    /// projector table are transcribed from `Blocks.java:2483-2504,1921-1958`.
+    pub fn block_place_range(&self, block: BlockId) -> Option<(f32, PlaceRangeKind, u32)> {
+        use mind_core::render::drawf::{self, pal};
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(block)?;
+        if matches!(
+            def.kind,
+            BlockKind::MendProjector | BlockKind::OverdriveProjector
+        ) {
+            const PROJECTOR_RANGES: [(&str, f32, u32); 4] = [
+                ("mender", 40.0, 0x84f4_91ff),
+                ("mend-projector", 85.0, 0x84f4_91ff),
+                ("overdrive-projector", 80.0, 0xfeb3_80ff),
+                ("overdrive-dome", 200.0, 0xfeb3_80ff),
+            ];
+            return PROJECTOR_RANGES
+                .iter()
+                .find(|(name, ..)| *name == def.name)
+                .map(|(_, range, color)| (*range, PlaceRangeKind::Projector, *color));
+        }
+        let accent = drawf::to_bits(pal::ACCENT);
+        let laser_range = match def.name.as_str() {
+            "power-node" => 6.0,
+            "power-node-large" => 15.0,
+            "surge-tower" => 40.0,
+            _ => 0.0,
+        };
+        if laser_range > 0.0 {
+            return Some((laser_range * 8.0, PlaceRangeKind::PowerNode, accent));
+        }
+        let cached = self.place_range_cache.borrow().get(&block).copied();
+        let range = match cached {
+            Some(range) => range,
+            None => {
+                // Turret ranges resolve against the *sim runtime* content: it is
+                // the registry the live `TurretBehavior` was built from and
+                // carries the named turret-ammo fixtures (`install_turret_ammo`),
+                // unlike the view snapshot (`create_base_content` only).
+                let range = self
+                    .sim
+                    .block_runtime()
+                    .and_then(|runtime| {
+                        let runtime_content = runtime.content();
+                        let runtime_def = runtime_content.block(block)?;
+                        mind_core::world::blocks::defense::turrets::config_for(
+                            runtime_content,
+                            &runtime_def.name,
+                            runtime_content.bullet_names(),
+                        )
+                    })
+                    .map(|config| config.range)
+                    .or_else(|| {
+                        mind_core::world::blocks::defense::turrets::config_for(
+                            content,
+                            &def.name,
+                            content.bullet_names(),
+                        )
+                        .map(|config| config.range)
+                    });
+                self.place_range_cache.borrow_mut().insert(block, range);
+                range
+            }
+        };
+        range.map(|range| (range, PlaceRangeKind::Turret, accent))
+    }
+
+    /// `InputHandler.validBreak(x, y)`: whether the local team may deconstruct
+    /// the building at `(x, y)`. Builds `BuildRules` from the world resource
+    /// like `SimRuntime::can_place` does. Rust-only seam for the break-rect
+    /// preview (G03 T2).
+    pub fn preview_can_break(&self, x: i32, y: i32) -> bool {
+        let team = self.sim.live_default_team();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        let rules = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::limits::BuildRules>()
+            .cloned()
+            .unwrap_or_default();
+        mind_core::world::build::valid_break(content, &self.sim.grid, &rules, team, x, y)
     }
 }
 
