@@ -1339,3 +1339,88 @@ fn heat_crafter_accepts_inputs() {
         world, crucible, crucible, copper
     ));
 }
+
+/// T5: a powered incinerator heats up (`Incinerator.java:30-81`:
+/// `heat = approachDelta(heat, efficiency, 0.04)`), then accepts and destroys
+/// belt items; before `heat > 0.5` it rejects them (`acceptItem`).
+#[test]
+fn incinerator_burns_belt_items() {
+    let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let incinerator = place(&mut sim, "incinerator", 5, 5);
+    let item_source = place(&mut sim, "item-source", 6, 5);
+    let copper = item(&sim, "copper");
+    configure(
+        &mut sim,
+        6,
+        5,
+        crate::determinism::ConfigValue::Content("copper".to_owned()),
+    );
+    for _ in 0..12 {
+        sim.tick().expect("tick");
+    }
+    let heat = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::IncineratorState>(incinerator)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    assert!(
+        heat < 0.5,
+        "heat still below the acceptance threshold: {heat}"
+    );
+    assert!(
+        !transfer::dispatch_accept_item(&sim.ecs.0, incinerator, item_source, copper),
+        "cold incinerator rejects items"
+    );
+    for _ in 0..18 {
+        sim.tick().expect("tick");
+    }
+    let heat = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::IncineratorState>(incinerator)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    assert_eq!(heat, 1.0, "heat clamped at efficiency after ~25 ticks");
+    assert!(
+        transfer::dispatch_accept_item(&sim.ecs.0, incinerator, item_source, copper),
+        "hot incinerator accepts any item"
+    );
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        emitted(&sim, item_source) > 0,
+        "the item source ran and fed the incinerator"
+    );
+    assert_eq!(
+        stored_item(&sim, incinerator, copper),
+        0,
+        "the incinerator stores nothing"
+    );
+}
+
+/// T5: the item incinerator accepts while powered (`ItemIncinerator.java:36-66`)
+/// and stores nothing; the slag incinerator is its behavior, not a crafter.
+#[test]
+fn item_incinerator_needs_power() {
+    let mut sim = runtime_sim();
+    let slag = place(&mut sim, "slag-incinerator", 5, 5);
+    let copper = item(&sim, "copper");
+    {
+        let world = &mut sim.ecs.0;
+        world
+            .get_mut::<crate::entities::comp::Building>(slag)
+            .expect("building")
+            .efficiency = 0.0;
+        assert!(!transfer::dispatch_accept_item(world, slag, slag, copper));
+        world
+            .get_mut::<crate::entities::comp::Building>(slag)
+            .expect("building")
+            .efficiency = 1.0;
+        assert!(transfer::dispatch_accept_item(world, slag, slag, copper));
+        transfer::dispatch_handle_item(world, slag, slag, copper);
+    }
+    assert_eq!(stored_item(&sim, slag, copper), 0, "destroyed on intake");
+}

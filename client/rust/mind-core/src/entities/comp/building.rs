@@ -200,6 +200,13 @@ pub struct RadarState {
     pub progress: f32,
 }
 
+/// `Incinerator` build state (`Incinerator.java:30-81`).
+#[derive(Debug, Clone, Default, PartialEq, Component)]
+pub struct IncineratorState {
+    /// Burn heat ramped toward `efficiency` (`heat`).
+    pub heat: f32,
+}
+
 /// Generic sandbox source/sink state (`ItemSource`/`LiquidSource`).
 #[derive(Debug, Clone, Default, PartialEq, Component)]
 pub struct SandboxState {

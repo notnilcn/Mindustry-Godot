@@ -1337,38 +1337,96 @@ impl BuildingBehavior for SolidPumpBehavior {
     }
 }
 
-/// `Incinerator` behavior (power-gated burn).
+/// `Incinerator` behavior (`Incinerator.java:30-81`): the block heats up with
+/// power (`heat = approachDelta(heat, efficiency, 0.04)`), then accepts and
+/// destroys any item and every incinerable liquid while `heat > 0.5`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IncineratorBehavior;
 
 impl BuildingBehavior for IncineratorBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        if world
+            .get::<crate::entities::comp::IncineratorState>(e)
+            .is_none()
+        {
+            world
+                .entity_mut(e)
+                .insert(crate::entities::comp::IncineratorState::default());
+        }
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let efficiency = world
             .get::<Building>(e)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
-        if efficiency <= 0.0 {
-            return;
-        }
-        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
-            let stacks: Vec<ItemId> = items.stacks().map(|(item, _)| item).collect();
-            for item in stacks {
-                items.remove(item, i32::MAX);
-            }
-        }
-        if let Some(mut liquids) = world.get_mut::<LiquidModule>(e) {
-            let present: Vec<LiquidId> = liquids
-                .liquids
-                .iter()
-                .enumerate()
-                .filter(|(_, amount)| **amount > 0.0)
-                .map(|(index, _)| LiquidId::new(index as u16))
-                .collect();
-            for liquid in present {
-                liquids.remove(liquid, f32::MAX);
-            }
+        if let Some(mut state) = world.get_mut::<crate::entities::comp::IncineratorState>(e) {
+            state.heat = approach(state.heat, efficiency, 0.04);
         }
     }
+
+    /// `IncineratorBuild.acceptItem`: `heat > 0.5f && enabled`.
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, _item: ItemId) -> bool {
+        burning(world, e)
+    }
+
+    /// `IncineratorBuild.handleItem`: effect only — the item vanishes.
+    fn handle_item(&self, _world: &mut World, _e: Entity, _src: Entity, _item: ItemId) {}
+
+    /// `IncineratorBuild.acceptLiquid`: `heat > 0.5f && liquid.incinerable &&
+    /// enabled`.
+    fn accept_liquid(&self, world: &World, e: Entity, _src: Entity, liquid: LiquidId) -> bool {
+        let incinerable = world
+            .get_resource::<crate::world::modules::LiquidTraits>()
+            .is_some_and(|traits| {
+                traits
+                    .incinerable
+                    .get(liquid.index())
+                    .copied()
+                    .unwrap_or(false)
+            });
+        incinerable && burning(world, e)
+    }
+
+    /// `IncineratorBuild.handleLiquid`: effect only — nothing is stored.
+    fn handle_liquid(
+        &self,
+        _world: &mut World,
+        _e: Entity,
+        _src: Entity,
+        _liquid: LiquidId,
+        _amount: f32,
+    ) {
+    }
+}
+
+/// Whether an incinerator is up to temperature and enabled.
+fn burning(world: &World, e: Entity) -> bool {
+    let heat = world
+        .get::<crate::entities::comp::IncineratorState>(e)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    heat > 0.5
+        && world
+            .get::<Building>(e)
+            .is_some_and(|building| building.enabled)
+}
+
+/// `ItemIncinerator` behavior (`ItemIncinerator.java:36-66`): accepts any item
+/// while powered and destroys it; no per-tick update.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ItemIncineratorBehavior;
+
+impl BuildingBehavior for ItemIncineratorBehavior {
+    /// `ItemIncineratorBuild.acceptItem`: `efficiency > 0`.
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, _item: ItemId) -> bool {
+        world
+            .get::<Building>(e)
+            .is_some_and(|building| building.efficiency > 0.0)
+    }
+
+    /// `ItemIncineratorBuild.handleItem`: effect only — the item vanishes.
+    fn handle_item(&self, _world: &mut World, _e: Entity, _src: Entity, _item: ItemId) {}
 }
 
 #[cfg(test)]
