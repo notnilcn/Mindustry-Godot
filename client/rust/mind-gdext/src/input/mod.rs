@@ -120,6 +120,8 @@ impl INode for MindInput {
         if needs_state {
             self.bridge.text_focus = self.text_field_focused();
             self.bridge.ui_dialog = dialog_open;
+            self.refresh_game_state();
+            self.refresh_top_dialog();
             let locked = self.locks.any();
             if self.bridge.locked != locked {
                 self.bridge.locked = locked;
@@ -173,6 +175,12 @@ impl INode for MindInput {
                     self.mark_input_handled();
                     continue;
                 }
+                // `state.isGame()` (`Control.java:690`): the menu has no world;
+                // the click must not reach `MindSimHost::unhandled_input`.
+                if !self.bridge.in_game {
+                    self.mark_input_handled();
+                    continue;
+                }
             }
             self.bridge.handle(&self.bindings, raw);
             if is_press {
@@ -189,6 +197,8 @@ impl INode for MindInput {
         self.last_event_count = pending.len();
         self.bridge.text_focus = self.text_field_focused();
         self.bridge.ui_dialog = self.dialog_open();
+        self.refresh_game_state();
+        self.refresh_top_dialog();
         // `InputHandler.locked()`: the host zeroes the player axis while any
         // lock is active (PAR-0100).
         let locked = self.locks.any();
@@ -438,6 +448,47 @@ impl MindInput {
             .unwrap_or(false)
     }
 
+    /// `state.isGame()` / `state.isCampaign()` mirrors for the binding gates
+    /// (`Control.java:690-760`): a hidden `MenuGroup` means in game; a live
+    /// campaign session means campaign. Missing nodes default to in game so
+    /// headless/partial scenes keep working.
+    fn refresh_game_state(&mut self) {
+        self.bridge.in_game = self
+            .base()
+            .try_get_node_as::<Control>("../Ui/UiRoot/MenuGroup")
+            .is_none_or(|menu| !menu.is_visible_in_tree());
+        self.bridge.campaign_active = self
+            .base()
+            .try_get_node_as::<Node>("/root/Spine/MindCampaign")
+            .is_some_and(|mut campaign| {
+                campaign
+                    .call("campaign_active", &[])
+                    .try_to::<bool>()
+                    .unwrap_or(false)
+            });
+    }
+
+    /// Top of `MindUi.dialog_stack()` (the research/planet close keys read it).
+    fn refresh_top_dialog(&mut self) {
+        let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") else {
+            self.bridge.top_dialog.clear();
+            return;
+        };
+        let stack = ui
+            .call("dialog_stack", &[])
+            .try_to::<PackedStringArray>()
+            .unwrap_or_default();
+        let top = if stack.is_empty() {
+            String::new()
+        } else {
+            stack
+                .get(stack.len() - 1)
+                .map(|name| name.to_string())
+                .unwrap_or_default()
+        };
+        self.bridge.top_dialog = top;
+    }
+
     /// Folds a Godot touch event into the mobile gesture bridge and applies the
     /// resulting camera pan/zoom. Returns whether the event was a touch event.
     fn route_touch(&mut self, raw: &RawEvent) -> bool {
@@ -562,6 +613,11 @@ impl MindInput {
                             "capture",
                             &[GString::from("user://screenshot.png").to_variant()],
                         );
+                    }
+                }
+                Effect::CloseTopDialog => {
+                    if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
+                        let _ = ui.call("close_top_dialog", &[]);
                     }
                 }
                 Effect::Hotkey(action) => {

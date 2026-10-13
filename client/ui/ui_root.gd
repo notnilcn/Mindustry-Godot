@@ -71,16 +71,13 @@ func _check_uiscale_changed() -> void:
 
 ## `Control.java:746-750` (`Binding.menu`, ESC): close the top dialog, hide the
 ## fullscreen minimap, or open the in-game pause menu. Game-over and
-## campaign-complete stay modal (no ESC close), matching upstream.
+## campaign-complete stay modal (no ESC close), matching upstream. M/F8 are
+## owned by the `MindInput` binding path (rebindable), not this handler.
 func _unhandled_key_input(event: InputEvent) -> void:
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
 	if key.keycode == KEY_ESCAPE and _on_escape():
-		get_viewport().set_input_as_handled()
-	elif key.keycode == KEY_M and _on_minimap_key():
-		get_viewport().set_input_as_handled()
-	elif key.keycode == KEY_F8 and _on_console_key():
 		get_viewport().set_input_as_handled()
 
 
@@ -115,35 +112,14 @@ func _on_escape() -> bool:
 		return true
 	if menu_group.visible:
 		return false
-	return bool(ui.call("open_dialog", "paused", ""))
-
-
-## `Binding.minimap` (M): toggles the fullscreen minimap fragment while in game
-## with no dialog up.
-func _on_minimap_key() -> bool:
-	var ui := _ui()
-	if ui == null or menu_group.visible or bool(ui.call("has_dialog")):
-		return false
-	var minimap := get_node_or_null("HudGroup/minimap") as Control
-	if minimap == null:
-		return false
-	if minimap.has_method("toggle"):
-		minimap.call("toggle")
-	else:
-		minimap.visible = not minimap.visible
-	return true
-
-
-## `Binding.console` (F8): toggles the in-game console fragment.
-func _on_console_key() -> bool:
-	var ui := _ui()
-	if ui == null or menu_group.visible:
-		return false
-	var console := get_node_or_null("HudGroup/console")
-	if console == null or not console.has_method("toggle"):
-		return false
-	console.call("toggle")
-	return true
+	# `Control.java:733-736`: Esc pauses the sim (`state.set(paused)`) when not
+	# in a network game and `pauseDisabled` is off.
+	var opened: bool = bool(ui.call("open_dialog", "paused", ""))
+	if opened:
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host != null and host.has_method("set_paused"):
+			host.call("set_paused", true)
+	return opened
 
 
 func _process(delta: float) -> void:

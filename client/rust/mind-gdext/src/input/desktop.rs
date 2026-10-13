@@ -111,6 +111,8 @@ pub enum Effect {
     },
     /// Capture the running viewport.
     Screenshot,
+    /// `MindUi.close_top_dialog()` (research/planet toggle keys).
+    CloseTopDialog,
     /// A binding fired (probe/UI signal).
     Hotkey(String),
     /// The RTS selection changed; payload is a JSON id array.
@@ -173,6 +175,16 @@ const PLAYER_SELECT_RANGE: f32 = 11.0;
 /// `rules.itemDepositCooldown` default 0.5 s (`Rules.java`), the minimum gap
 /// between two tap-unit deposits.
 const ITEM_DEPOSIT_COOLDOWN_MS: u64 = 500;
+
+/// `settings.getBool("console")` (default false, `SettingsMenuDialog.java:566`):
+/// the F8 console toggle is gated on it (`ConsoleFragment.java:43`).
+fn console_setting_enabled() -> bool {
+    let store = mind_core::io::SettingsStore::load(
+        &mind_core::io::NativeFs,
+        &mind_core::io::Paths::resolve(None),
+    );
+    store.get_bool("console", false)
+}
 
 /// Parses a selectable-unit snapshot (`[{id,type,x,y,team,commandable}]`).
 fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
@@ -239,6 +251,14 @@ pub struct DesktopBridge {
     /// A dialog is open (`scene.hasDialog()`): key edges fire no bindings and
     /// the camera does not pan/zoom.
     pub ui_dialog: bool,
+    /// Top of `MindUi.dialog_stack()` (refreshed with `ui_dialog`); the
+    /// research/planet dialogs close on their own binding key.
+    pub top_dialog: String,
+    /// `state.isGame()` mirror (`Control.java:690-760`): gameplay bindings fire
+    /// only while the in-game HUD is up (no menu group).
+    pub in_game: bool,
+    /// `state.isCampaign()` mirror: J/N open research/planet only in a campaign.
+    pub campaign_active: bool,
     /// `InputHandler.locked()` mirror (PAR-0100): world clicks and scroll are
     /// ignored while set.
     pub locked: bool,
@@ -284,6 +304,9 @@ impl DesktopBridge {
             last_tap_type: None,
             text_focus: false,
             ui_dialog: false,
+            top_dialog: String::new(),
+            in_game: false,
+            campaign_active: false,
             locked: false,
             shooting: false,
             dropping_item: false,
@@ -419,8 +442,20 @@ impl DesktopBridge {
                 if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
                     command_edge = Some(true);
                 }
-                if fresh && !self.text_focus && !self.ui_dialog {
-                    self.key_down_event(bindings, &code);
+                if fresh && !self.text_focus {
+                    if self.ui_dialog {
+                        // ResearchDialog.java:145-149 / PlanetDialog.java:92:
+                        // the dialog's own key closes it (J/N toggle).
+                        self.close_dialog_key(bindings, &code);
+                    } else if self.in_game {
+                        // `Control.java:690-760`: gameplay binds run only while
+                        // `state.isGame()`.
+                        self.key_down_event(bindings, &code);
+                    } else if bindings.name(ids::FULLSCREEN) == Some(code.as_str()) {
+                        // `fullscreen` is a `Control` bind handled before the
+                        // `state.isGame()` gate and works on the menu.
+                        self.dispatch_action(bindings, "fullscreen");
+                    }
                 }
             }
             RawEvent::KeyUp { code } => {
@@ -457,6 +492,21 @@ impl DesktopBridge {
         // `DesktopInput.update` runs once per frame; applying it per edge keeps
         // hold mode in step with the event stream.
         self.update_command_mode(bindings, command_edge);
+    }
+
+    /// `ResearchDialog.java:145-149` / `PlanetDialog.java:92`: while the dialog
+    /// is topmost, its own binding key closes it (`J`/`N` toggle).
+    fn close_dialog_key(&mut self, bindings: &BindingState, code: &str) {
+        let closes = if self.top_dialog == "research" {
+            bindings.name(ids::RESEARCH) == Some(code)
+        } else if self.top_dialog == "planet" {
+            bindings.name(ids::PLANET_MAP) == Some(code)
+        } else {
+            false
+        };
+        if closes {
+            self.effects.push(Effect::CloseTopDialog);
+        }
     }
 
     /// Dispatches every binding whose current key matches a down edge.
@@ -624,16 +674,27 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "console" => {
-                self.effects
-                    .push(Effect::ToggleFragment(String::from("console")));
+                // `ConsoleFragment.java:43`: the console key only acts when the
+                // `console` client setting is on (default false,
+                // SettingsMenuDialog.java:566).
+                if console_setting_enabled() {
+                    self.effects
+                        .push(Effect::ToggleFragment(String::from("console")));
+                }
                 self.fire_hotkey(name);
             }
             "research" => {
-                self.open_dialog("research", "");
+                // `DesktopInput.java:446-461`: J/N toggle campaign screens only
+                // while a campaign sector is live.
+                if self.campaign_active {
+                    self.open_dialog("research", "");
+                }
                 self.fire_hotkey(name);
             }
             "planet_map" => {
-                self.open_dialog("planet", "");
+                if self.campaign_active {
+                    self.open_dialog("planet", "");
+                }
                 self.fire_hotkey(name);
             }
             "schematic_menu" => {
@@ -1904,6 +1965,8 @@ mod tests {
         // `commandmodehold=false`: `input.keyTap` toggles on the press edge.
         let mut bridge = DesktopBridge::new();
         bridge.set_command_mode_hold(false);
+        // The tap path runs through the gameplay binding gate (`state.isGame()`).
+        bridge.in_game = true;
         let bindings = BindingState::new();
 
         bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
@@ -1963,6 +2026,55 @@ mod tests {
             .select_block(Some(BlockId::STONE_WALL));
         bridge.update_command_mode(&bindings, None);
         assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn bindings_do_not_fire_outside_game() {
+        // `Control.java:690-760`: gameplay binds are gated on `state.isGame()`;
+        // the menu renders no world and the HUD fragments stay closed.
+        let bindings = BindingState::new();
+        assert_eq!(bindings.name(ids::SCHEMATIC_MENU), Some("t"));
+        let mut bridge = DesktopBridge::new();
+        bridge.handle(&bindings, RawEvent::key_down("t"));
+        assert!(bridge.take_effects().is_empty(), "menu T is inert");
+        bridge.handle(&bindings, RawEvent::key_up("t"));
+
+        bridge.in_game = true;
+        bridge.handle(&bindings, RawEvent::key_down("t"));
+        let effects = bridge.take_effects();
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::OpenDialog { name, .. } if name == "schematics"
+            )),
+            "in game T opens schematics"
+        );
+    }
+
+    #[test]
+    fn campaign_keys_need_an_active_campaign() {
+        // `DesktopInput.java:446-461`: research/planet open only in a campaign.
+        let bindings = BindingState::new();
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        bridge.campaign_active = false;
+        bridge.handle(&bindings, RawEvent::key_down("j"));
+        assert!(
+            !bridge
+                .take_effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::OpenDialog { .. })),
+            "J outside a campaign opens nothing"
+        );
+        bridge.campaign_active = true;
+        bridge.handle(&bindings, RawEvent::key_down("n"));
+        assert!(
+            bridge.take_effects().iter().any(|effect| matches!(
+                effect,
+                Effect::OpenDialog { name, .. } if name == "planet"
+            )),
+            "N in a campaign opens the planet map"
+        );
     }
 
     #[test]

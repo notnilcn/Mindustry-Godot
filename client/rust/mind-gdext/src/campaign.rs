@@ -2871,6 +2871,14 @@ impl MindCampaign {
         self.content_error = None;
     }
 
+    /// `state.isCampaign()`: a live campaign sector is loaded (the same
+    /// condition `get_hud_state` reports as `campaign`). The J/N toggles read
+    /// it (`DesktopInput.java:446-461`).
+    #[func]
+    pub fn campaign_active(&self) -> bool {
+        self.session.is_campaign()
+    }
+
     /// Live HUD/status fields (`HudFragment` read surface, gap3 C-10). Appended
     /// for `MindHud`; additive and read-only. Includes the campaign session's
     /// wave/enemy/timer/goal state the other getters do not expose.
