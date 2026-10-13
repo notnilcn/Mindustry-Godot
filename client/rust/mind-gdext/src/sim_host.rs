@@ -136,6 +136,26 @@ pub enum PlaceRangeKind {
     Projector,
 }
 
+/// Player-builder draw state (`BuilderComp.drawBuilding`, G03 T3).
+pub struct BuilderView {
+    /// Player unit position (world px).
+    pub x: f32,
+    /// Player unit position (world px).
+    pub y: f32,
+    /// Player unit rotation (degrees).
+    pub rotation: f32,
+    /// `UnitType.buildBeamOffset`.
+    pub beam_offset: f32,
+    /// `UnitType.buildRange`.
+    pub build_range: f32,
+    /// `UnitType.drawBuildBeam`.
+    pub draw_beam: bool,
+    /// `BuilderComp.updateBuilding`.
+    pub update_building: bool,
+    /// Live plan queue copy (head first).
+    pub plans: Vec<mind_core::sim::builder::UnitBuildPlan>,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -3476,6 +3496,69 @@ impl MindSimHost {
             .cloned()
             .unwrap_or_default();
         mind_core::world::build::valid_break(content, &self.sim.grid, &rules, team, x, y)
+    }
+
+    // ---- G03 T3 build-plan / beam seams (Rust-only) ----
+
+    /// One player-builder draw state (`BuilderComp.drawBuilding`, G03 T3).
+    pub fn player_builder_view(&self) -> Option<BuilderView> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+        use mind_core::sim::builder::BuilderPlans;
+        let entity = self.sim.player_unit()?;
+        let pos = self.sim.ecs.0.get::<Pos>(entity)?;
+        let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(entity)?;
+        let def = self.content_snapshot.as_ref()?.unit(type_comp.type_id)?;
+        let update_building = self
+            .sim
+            .ecs
+            .0
+            .get::<BuilderPlans>(entity)
+            .map(|plans| plans.update_building)
+            .unwrap_or(false);
+        let rotation = self
+            .sim
+            .ecs
+            .0
+            .get::<UnitCore>(entity)
+            .map(|core| core.rotation)
+            .unwrap_or(0.0);
+        Some(BuilderView {
+            x: pos.x,
+            y: pos.y,
+            rotation,
+            beam_offset: def.build_beam_offset,
+            build_range: def.build_range,
+            draw_beam: def.draw_build_beam,
+            update_building,
+            plans: self.sim.player_build_plans(),
+        })
+    }
+
+    /// Whether `(x, y)` holds a construct site building `block`
+    /// (`InputHandler.planMatches`, `InputHandler.java:1515-1518`).
+    pub fn plan_matches(&self, x: i32, y: i32, block: BlockId) -> bool {
+        self.construct_at(x, y)
+            .is_some_and(|(current, _, _)| current == block)
+    }
+
+    /// The player team's rebuild ghosts (`TeamData.plans`, pushed by
+    /// `Sim::resolve_deaths`): `(x, y, rotation, block)` in insertion order.
+    pub fn team_block_plans(&self) -> Vec<(i16, i16, i8, BlockId)> {
+        let team = mind_core::ecs::TeamId(self.player_team());
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .and_then(|runtime| runtime.session.teams.data(team))
+            .map(|data| {
+                data.plans
+                    .iter()
+                    .filter(|plan| !plan.removed)
+                    .map(|plan| (plan.x, plan.y, plan.rotation, plan.block))
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 }
 

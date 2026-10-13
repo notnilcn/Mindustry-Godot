@@ -85,6 +85,10 @@ pub struct PlanOverlay {
     /// This node as a `Gd<Node2D>` for the region resolver (`RegionCache::get`
     /// takes a plain node reference; `Base<Node2D>` has no deref).
     node: Option<Gd<Node2D>>,
+    /// `BlockRenderer.brokenFade` (G03 T3): 1 while placing/breaking.
+    broken_fade: f32,
+    /// `destroyedblocks` setting (read once per frame).
+    destroyed_blocks: bool,
 }
 
 #[godot_api]
@@ -96,6 +100,8 @@ impl INode2D for PlanOverlay {
             input: None,
             regions: RegionCache::new(),
             node: None,
+            broken_fade: 0.0,
+            destroyed_blocks: true,
         }
     }
 
@@ -109,12 +115,28 @@ impl INode2D for PlanOverlay {
         }
     }
 
-    fn process(&mut self, _delta: f64) {
+    fn process(&mut self, delta: f64) {
         // The ghost pulse animates while a plan is visible; the pass is cheap
         // (empty without a selection).
-        if self.input.is_some() {
-            self.base_mut().queue_redraw();
-        }
+        let Some(input) = self.input.clone() else {
+            return;
+        };
+        // `BlockRenderer.drawDestroyed`: `brokenFade` lerps to 1 while the
+        // player is placing or breaking, to 0 otherwise (Arc `lerpDelta(..,
+        // 0.1)` on the frame delta in ticks).
+        let (placing, breaking) = {
+            let view = input.bind().placement_view();
+            (
+                view.block.is_some_and(|block| block != BlockId::AIR),
+                view.mode == PlaceMode::Breaking,
+            )
+        };
+        let target = f32::from(u8::from(placing || breaking));
+        let delta_ticks = ((delta * 60.0) as f32).max(0.0);
+        let t = 1.0 - (1.0f32 - 0.1).powf(delta_ticks);
+        self.broken_fade += (target - self.broken_fade) * t;
+        self.destroyed_blocks = self.setting_bool("destroyedblocks");
+        self.base_mut().queue_redraw();
     }
 
     fn draw(&mut self) {
@@ -142,6 +164,63 @@ impl INode2D for PlanOverlay {
             // passes; push it first so the ghosts draw over it.
             if let Some(rect) = view.break_rect {
                 self.push_break_selection(&mut cmds, &guard, content, rect);
+            }
+
+            // Queued build plans (`InputHandler.drawBuildPlans`,
+            // `InputHandler.java:1438-1473`): drawn first, under the cursor
+            // preview (T3).
+            if let Some(builder) = guard.player_builder_view() {
+                let head = builder.plans.first().cloned();
+                for plan in &builder.plans {
+                    if plan.progress > 0.01 {
+                        continue;
+                    }
+                    let is_head = head
+                        .as_ref()
+                        .is_some_and(|h| h.x == plan.x && h.y == plan.y && h.block == plan.block);
+                    if is_head && plan.initialized {
+                        let (wx, wy) = (plan.x as f32 * 8.0, plan.y as f32 * 8.0);
+                        if (wx - builder.x).hypot(wy - builder.y) < builder.build_range {
+                            continue;
+                        }
+                    }
+                    if plan.breaking {
+                        // `drawBreaking(plan)` on the current tile block.
+                        if let Some(def) =
+                            tile_block_def(&guard, content, i32::from(plan.x), i32::from(plan.y))
+                        {
+                            self.push_selected_corners(
+                                &mut cmds,
+                                i32::from(plan.x),
+                                i32::from(plan.y),
+                                def.size,
+                                def.offset,
+                                canvas::color_f4(pal::REMOVE),
+                            );
+                        }
+                    } else {
+                        let valid = guard.preview_can_place(
+                            i32::from(plan.x),
+                            i32::from(plan.y),
+                            plan.block,
+                            plan.rotation,
+                        ) || guard.plan_matches(
+                            i32::from(plan.x),
+                            i32::from(plan.y),
+                            plan.block,
+                        );
+                        self.push_ghost(
+                            &mut cmds,
+                            content,
+                            i32::from(plan.x),
+                            i32::from(plan.y),
+                            plan.rotation,
+                            plan.block,
+                            valid,
+                            pulse,
+                        );
+                    }
+                }
             }
 
             let selected = view.block.filter(|block| *block != BlockId::AIR);
@@ -212,6 +291,42 @@ impl INode2D for PlanOverlay {
                     }
                 }
             }
+
+            // Rebuild ghosts (`BlockRenderer.drawDestroyed`,
+            // `BlockRenderer.java:454-475`): 33%-alpha white ghosts of the
+            // team's broken plans while the player is placing/breaking.
+            if self.destroyed_blocks
+                && self.broken_fade > 0.001
+                && (selected.is_some() || view.mode == PlaceMode::Breaking)
+            {
+                let alpha = 0.33 * self.broken_fade;
+                let color = Color::from_rgba(1.0, 1.0, 1.0, alpha);
+                for (x, y, rot, block) in guard.team_block_plans() {
+                    let Some(def) = content.block(block) else {
+                        continue;
+                    };
+                    let rotation = if rotates_sprite(def) {
+                        rot as f32 * 90.0
+                    } else {
+                        0.0
+                    };
+                    for name in block_region_candidates(&def.name, &def.region) {
+                        if let Some(texture) = self.region(&name) {
+                            let (w, h) = RegionCache::natural_size(&texture);
+                            cmds.push(DrawCmd::Region {
+                                texture: Some(texture),
+                                x: x as f32 * 8.0 + def.offset,
+                                y: y as f32 * 8.0 + def.offset,
+                                w,
+                                h,
+                                rot: rotation,
+                                color,
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         let mut base = self.base_mut();
@@ -267,6 +382,41 @@ impl PlanOverlay {
     fn region(&mut self, name: &str) -> Option<Gd<Texture2D>> {
         let node = self.node.clone()?;
         self.regions.get(&node, name)
+    }
+
+    /// `settings_get_bool` from `/root/MindUi` (`None` => false).
+    fn setting_bool(&self, key: &str) -> bool {
+        self.base()
+            .try_get_node_as::<Node>("/root/MindUi")
+            .map(|mut ui| {
+                ui.call("settings_get_bool", &[GString::from(key).to_variant()])
+                    .booleanize()
+            })
+            .unwrap_or(false)
+    }
+
+    /// `Drawf.selected` corner marks for one tile (`InputHandler.drawBreaking`).
+    fn push_selected_corners(
+        &mut self,
+        cmds: &mut Vec<DrawCmd>,
+        x: i32,
+        y: i32,
+        size: i32,
+        offset: f32,
+        color: Color,
+    ) {
+        let texture = self.region("block-select");
+        for (cx, cy, rot) in drawf::selected_corners(x, y, size, offset) {
+            cmds.push(DrawCmd::Region {
+                texture: texture.clone(),
+                x: cx,
+                y: cy,
+                w: 8.0,
+                h: 8.0,
+                rot,
+                color,
+            });
+        }
     }
 
     /// `Block.drawPlan` ghost: pulsing tint, `fullIcon`-chain region at the
@@ -487,4 +637,17 @@ fn ghost_color(valid: bool, pulse: f32) -> Color {
         1.0 + (c.b - 1.0) * amount,
         1.0,
     )
+}
+
+/// Block definition of the tile at `(x, y)` (`None` for air/out of bounds).
+fn tile_block_def<'a>(
+    host: &MindSimHost,
+    content: &'a ContentRegistry,
+    x: i32,
+    y: i32,
+) -> Option<&'a BlockDef> {
+    if !host.grid().tiles.in_bounds(x, y) {
+        return None;
+    }
+    content.block(host.grid().tile(x, y).block)
 }

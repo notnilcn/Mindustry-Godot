@@ -288,6 +288,52 @@ pub fn selected_corners(x: i32, y: i32, size: i32, offset: f32) -> [(f32, f32, f
     out
 }
 
+/// `Drawf.buildBeam(x, y, tx, ty, radius)` (`Drawf.java:131-157`): the fan
+/// triangles from the emitter to the target square's corner pair. `animate`
+/// is Java's `renderer.animateShields` (the port always draws the filled
+/// branch, `settings animatedshields` row pending in T17).
+pub fn build_beam_tris(x: f32, y: f32, tx: f32, ty: f32, radius: f32) -> Vec<[(f32, f32); 3]> {
+    let axis = (ty - y).atan2(tx - x).to_degrees();
+    let angle = |p: (f32, f32)| (p.1 - y).atan2(p.0 - x).to_degrees();
+    let dist = |p: (f32, f32)| {
+        let d = (angle(p) - axis).abs() % 360.0;
+        if d > 180.0 { 360.0 - d } else { d }
+    };
+    let mut corners = [
+        (tx - radius, ty - radius),
+        (tx + radius, ty - radius),
+        (tx - radius, ty + radius),
+        (tx + radius, ty + radius),
+    ];
+    // `Structs.comparingFloat(vec -> -angleDist(..))`: descending distance,
+    // stable (ties keep the declaration order, Arc `Arrays.sort`).
+    corners.sort_by(|a, b| {
+        dist(*b)
+            .partial_cmp(&dist(*a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    // `Geometry.findClosest`: first strict minimum.
+    let mut close = corners[0];
+    let mut best = (close.0 - x).powi(2) + (close.1 - y).powi(2);
+    for corner in &corners[1..] {
+        let d = (corner.0 - x).powi(2) + (corner.1 - y).powi(2);
+        if d < best {
+            best = d;
+            close = *corner;
+        }
+    }
+    let (x1, y1) = corners[0];
+    let (x3, y3) = corners[1];
+    if close != corners[0] && close != corners[1] {
+        vec![
+            [(x, y), (x1, y1), (close.0, close.1)],
+            [(x, y), (x3, y3), (close.0, close.1)],
+        ]
+    } else {
+        vec![[(x, y), (x1, y1), (x3, y3)]]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +418,20 @@ mod tests {
         assert!((ring[0].0 - 11.0).abs() < 1e-4);
         assert!((ring[0].1 - 2.0).abs() < 1e-4);
         assert_eq!(ring[0], ring[4]);
+    }
+
+    #[test]
+    fn build_beam_tris_axis_aligned() {
+        // Emitter (0,0), target (20,0), radius 4: the two x=16 corners are the
+        // farthest from the beam axis, and the closest corner is also one of
+        // them, so `Drawf.buildBeam` draws one triangle.
+        let tris = build_beam_tris(0.0, 0.0, 20.0, 0.0, 4.0);
+        assert_eq!(tris.len(), 1);
+        let tri = tris[0];
+        assert!((tri[0].0 - 0.0).abs() < 1e-4 && (tri[0].1 - 0.0).abs() < 1e-4);
+        assert!((tri[1].0 - 16.0).abs() < 1e-4);
+        assert!((tri[2].0 - 16.0).abs() < 1e-4);
+        assert!((tri[1].1 + 4.0).abs() < 1e-4);
+        assert!((tri[2].1 - 4.0).abs() < 1e-4);
     }
 }

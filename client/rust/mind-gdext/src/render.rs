@@ -37,6 +37,7 @@ use crate::sim_host::MindSimHost;
 
 mod atlas_bind;
 mod blocks;
+mod build_beam;
 mod building_cache;
 mod canvas;
 mod command_overlay;
@@ -241,6 +242,8 @@ pub struct MindWorldRenderer {
     command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
     /// Placement preview (`Layer.plans` band; G03 T2).
     plan_overlay: Option<Gd<plans::PlanOverlay>>,
+    /// Build-beam fan (`Layer.buildBeam` band; G03 T3).
+    build_beam: Option<Gd<build_beam::BuildBeamOverlay>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -282,6 +285,7 @@ impl INode2D for MindWorldRenderer {
             shields: None,
             command_overlay: None,
             plan_overlay: None,
+            build_beam: None,
             env: None,
             fog: None,
             overlays: None,
@@ -550,6 +554,15 @@ impl MindWorldRenderer {
             // fixed by the pipeline, not by content.
             plans_band.clone().add_child(&node);
             self.plan_overlay = Some(node.clone());
+        }
+        // Build-beam fan at `Layer.buildBeam` (`BuilderComp.drawBuilding`; G03 T3).
+        if let Some(beam_band) = self.band_node_at(BandKey::base(Layer::BuildBeam)) {
+            let mut node = build_beam::BuildBeamOverlay::new_alloc();
+            node.set_name("BuildBeamOverlay");
+            // code-instantiated: one beam pass; the node count is fixed by the
+            // pipeline, not by content.
+            beam_band.clone().add_child(&node);
+            self.build_beam = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));
