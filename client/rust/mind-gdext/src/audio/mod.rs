@@ -19,11 +19,14 @@ use godot::classes::{
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
+use indexmap::IndexMap;
+
+use mind_core::audio::frame::{LoopPos, LoopSource, TurretLoopSource};
 use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
     AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput, MusicContext,
-    MusicOutput, MusicPlayer, MusicRef, SeededAudioRng, SharedAudioLog, SoundId,
-    SoundPriorityTable, TickedAudioEvent, bus_for_sound, settings_keys,
+    MusicOutput, MusicPlayer, MusicRef, SeededAudioRng, SharedAudioLog, SoundId, SoundLoopAction,
+    SoundLoopState, SoundPriorityTable, TickedAudioEvent, bus_for_sound, settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
@@ -45,6 +48,14 @@ pub struct MindAudio {
     poller: AmbientPoller,
     /// Live ambient source snapshot (rebuilt at the poll rate).
     ambient: AmbientSnapshot,
+    /// Per-frame `control.sound.loop` sources (T6).
+    frame_loops: Vec<LoopSource>,
+    /// Per-frame turret `SoundLoop` inputs (T6).
+    turret_loop_sources: Vec<TurretLoopSource>,
+    /// Live turret `SoundLoop` fade states by key (T6).
+    turret_loops: IndexMap<u64, SoundLoopState>,
+    /// Scratch: voices stopped by the turret-loop sweep.
+    stopped_voices: Vec<u64>,
     /// `debug_hold_loop` test seam: `(sound, x, y, volume, frames_left)`.
     debug_loop_hold: Option<(SoundId, f32, f32, f32, i64)>,
     music_player: Option<Gd<AudioStreamPlayer>>,
@@ -106,6 +117,10 @@ impl INode for MindAudio {
             loop_pool: None,
             poller: AmbientPoller::new(50.0),
             ambient: AmbientSnapshot::default(),
+            frame_loops: Vec::with_capacity(16),
+            turret_loop_sources: Vec::with_capacity(8),
+            turret_loops: IndexMap::new(),
+            stopped_voices: Vec::with_capacity(8),
             debug_loop_hold: None,
             music_player: None,
             music: MusicPlayer::new(),
@@ -263,6 +278,105 @@ impl INode for MindAudio {
             &self.ambient,
             listener,
         );
+
+        // T6: per-frame loop sources (builder/miner/unit/tank/fire/weather/
+        // tractor beam) and turret `SoundLoop` instances
+        // (`Turret.updateTile`, `Turret.java:304,504`).
+        if in_game && !context.paused {
+            if let Some(host) = self.sim_host() {
+                let host = host.bind();
+                host.audio_frame_loops(&mut self.frame_loops);
+                host.audio_turret_loops(&mut self.turret_loop_sources);
+            } else {
+                self.frame_loops.clear();
+                self.turret_loop_sources.clear();
+            }
+            for source in &self.frame_loops {
+                let (x, y) = match source.pos {
+                    LoopPos::World(x, y) => (x, y),
+                    LoopPos::Camera => (listener.x, listener.y),
+                };
+                self.mixer
+                    .accumulate(source.sound, x, y, source.volume, source.pitch, listener);
+            }
+            // `SoundLoop` instances: volumes include `sfxvol` (Java
+            // `calcVolume`), unlike the `SoundControl.loop` aggregation.
+            let sfx = self.sfx_scale();
+            for source in &self.turret_loop_sources {
+                let state = self.turret_loops.entry(source.key).or_insert_with(|| {
+                    SoundLoopState::new(source.sound, source.base_volume, source.key)
+                });
+                let action =
+                    state.update(source.x, source.y, source.play, source.volume_scl, listener);
+                match action {
+                    SoundLoopAction::Start { volume, pan, pitch } => {
+                        if let Some(pool) = self.loop_pool.as_mut()
+                            && let Some(stream) = self.streams.sound(state.sound.name(), true)
+                        {
+                            let voice = pool.start(
+                                stream,
+                                volume * sfx,
+                                pitch,
+                                pan,
+                                (listener.x, listener.y),
+                                listener.width,
+                            );
+                            state.voice = Some(voice);
+                        }
+                    }
+                    SoundLoopAction::Update { voice, volume, pan } => {
+                        if let Some(pool) = self.loop_pool.as_mut() {
+                            pool.update(
+                                voice,
+                                volume * sfx,
+                                1.0,
+                                pan,
+                                (listener.x, listener.y),
+                                listener.width,
+                            );
+                        }
+                    }
+                    SoundLoopAction::Stop { voice } => {
+                        if let Some(pool) = self.loop_pool.as_mut() {
+                            pool.stop(voice);
+                        }
+                    }
+                    SoundLoopAction::None => {}
+                }
+            }
+            // Keys not reported this frame stop (`remove()`/`onDestroyed` ->
+            // `soundLoop.stop()`).
+            {
+                let sources = &self.turret_loop_sources;
+                let stopped = &mut self.stopped_voices;
+                self.turret_loops.retain(|key, state| {
+                    let live = sources.iter().any(|source| source.key == *key);
+                    if !live && let Some(voice) = state.stop() {
+                        stopped.push(voice);
+                    }
+                    live
+                });
+            }
+            if let Some(pool) = self.loop_pool.as_mut() {
+                for voice in &self.stopped_voices {
+                    pool.stop(*voice);
+                }
+            }
+            self.stopped_voices.clear();
+        } else if !self.turret_loops.is_empty() {
+            // Leaving the game (or pausing into a teardown): stop every turret
+            // loop voice.
+            let states = std::mem::take(&mut self.turret_loops);
+            if let Some(pool) = self.loop_pool.as_mut() {
+                for (_, mut state) in states {
+                    if let Some(voice) = state.stop() {
+                        pool.stop(voice);
+                    }
+                }
+            }
+            self.turret_loop_sources.clear();
+        }
+
         if let Some((sound, x, y, volume, remaining)) = &mut self.debug_loop_hold
             && *remaining > 0
         {

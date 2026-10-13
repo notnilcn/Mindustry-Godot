@@ -2655,6 +2655,36 @@ impl MindSimHost {
         mind_core::audio::ambient::collect_ambient(&self.sim.ecs.0, content, out);
     }
 
+    /// T6: per-frame `control.sound.loop` sources (Rust-only).
+    pub fn audio_frame_loops(&self, out: &mut Vec<mind_core::audio::frame::LoopSource>) {
+        let Some(content) = self.sim.block_runtime().map(|runtime| runtime.content()) else {
+            out.clear();
+            return;
+        };
+        let infinite = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+            .is_some_and(|campaign| campaign.session.rules.infinite_resources);
+        mind_core::audio::frame::collect_frame_loops(
+            &self.sim.ecs.0,
+            content,
+            self.sim.tick_count() as f32,
+            infinite,
+            out,
+        );
+    }
+
+    /// T6: turret `SoundLoop` inputs (Rust-only).
+    pub fn audio_turret_loops(&self, out: &mut Vec<mind_core::audio::frame::TurretLoopSource>) {
+        let Some(content) = self.sim.block_runtime().map(|runtime| runtime.content()) else {
+            out.clear();
+            return;
+        };
+        mind_core::audio::frame::collect_turret_loops(&self.sim.ecs.0, content, out);
+    }
+
     /// Read-only content registry snapshot for block draw metadata.
     pub fn content_registry(&self) -> Option<&ContentRegistry> {
         self.content_snapshot.as_ref()

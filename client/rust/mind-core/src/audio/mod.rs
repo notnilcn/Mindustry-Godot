@@ -12,6 +12,7 @@
 pub mod ambient;
 pub mod blocks;
 pub mod events;
+pub mod frame;
 pub mod ids;
 pub mod loops;
 pub mod math;
