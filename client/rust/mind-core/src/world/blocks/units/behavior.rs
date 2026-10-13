@@ -282,6 +282,20 @@ impl BuildingBehavior for UnitFactoryBehavior {
             .get::<ItemModule>(e)
             .and_then(|items| state.update(&self.factory, delta_progress, items));
         if let Some(unit) = produced {
+            let def = self.units.get(&unit.raw());
+            // `UnitPayload.dump` refuses when `!Units.canCreate(team, type)`
+            // (UnitPayload.java:104-112; G01 T12): hold the finished payload —
+            // no item consumption and no spawn until the cap frees up.
+            let allowed = def.is_some_and(|def| {
+                crate::entities::comp::unit::queries::can_create_unit(world, team, def)
+            });
+            if !allowed {
+                if let Some(mut st) = world.get_mut::<UnitFactoryBuild>(e) {
+                    st.progress = 1.0;
+                }
+                world.entity_mut(e).insert(state);
+                return;
+            }
             // `consume()` with the `ConsumeItemDynamic` multiplier
             // (`UnitFactory.java:108`: `c.multiplier = rules.unitCost(team)`).
             if let Some(index) = plan_index
@@ -294,7 +308,7 @@ impl BuildingBehavior for UnitFactoryBehavior {
                     }
                 }
             }
-            if let Some(def) = self.units.get(&unit.raw()) {
+            if let Some(def) = def {
                 // The port has no factory command config, so the spawn applies
                 // the type's `defaultCommand` (`UnitFactory.java:425-433`).
                 spawn_output_unit_with_command(world, e, def, None);
@@ -1303,6 +1317,161 @@ mod tests {
                 .iter_entities()
                 .any(|entity_ref| entity_ref.contains::<Unit>()),
             "ground-factory produced a dagger through update_buildings"
+        );
+    }
+
+    fn campaign_runtime(
+        content: &ContentRegistry,
+        rules: crate::game::rules::Rules,
+    ) -> crate::game::runtime::CampaignRuntime {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::universe::Campaign;
+
+        let campaign = Campaign::from_registry(content, &EmptyNeighborhood);
+        crate::game::runtime::CampaignRuntime::new(PlaySession::new(rules), campaign)
+    }
+
+    fn feed_factory(world: &mut World, entity: Entity, content: &ContentRegistry) {
+        let silicon = content.item_id("silicon").expect("silicon");
+        let lead = content.item_id("lead").expect("lead");
+        if let Some(mut items) = world.get_mut::<ItemModule>(entity) {
+            items.add(silicon, 400, 400);
+            items.add(lead, 400, 400);
+        }
+        if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(entity) {
+            state.current_plan = 0;
+        }
+        if let Some(mut power) = world.get_mut::<crate::world::modules::PowerModule>(entity) {
+            power.status = 1.0;
+        }
+    }
+
+    /// G01 T12: `UnitPayload.dump` holds the finished payload when
+    /// `Units.canCreate` is false (`rules.unit_cap = 1`).
+    #[test]
+    fn factory_respects_unit_cap() {
+        let content = content();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("ground-factory")
+            .expect("ground-factory")
+            .clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        world.insert_resource(campaign_runtime(
+            &content,
+            crate::game::rules::Rules {
+                unit_cap: 1,
+                unit_cap_variable: false,
+                ..crate::game::rules::Rules::default()
+            },
+        ));
+        let entity = inst.spawn(
+            &mut world,
+            1,
+            crate::world::TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        feed_factory(&mut world, entity, &content);
+        for _ in 0..3000 {
+            update_buildings(&mut world);
+        }
+        let daggers = world
+            .iter_entities()
+            .filter(|entity_ref| entity_ref.contains::<Unit>())
+            .count();
+        assert_eq!(daggers, 1, "the cap stops further production");
+    }
+
+    /// G01 T12: a `core-shard` raises the team's cap by `unitCapModifier` 8
+    /// (`TeamData.unitCap`) and the 9th live dagger dies on spawn.
+    #[test]
+    fn core_modifier_raises_cap() {
+        let content = content();
+        let table = BlockTable::build_default(&content).expect("table");
+        let core = table.get_named("core-shard").expect("core-shard").clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        world.insert_resource(campaign_runtime(
+            &content,
+            crate::game::rules::Rules {
+                unit_cap: 0,
+                unit_cap_variable: true,
+                ..crate::game::rules::Rules::default()
+            },
+        ));
+        core.spawn(
+            &mut world,
+            1,
+            crate::world::TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        assert_eq!(
+            crate::entities::comp::unit::queries::unit_cap(&world, 0),
+            Some(8),
+            "the core's unitCapModifier raises the cap"
+        );
+        for i in 0..9u64 {
+            crate::entities::comp::unit::lifecycle::spawn_unit(
+                &mut world,
+                &content,
+                100 + i,
+                "dagger",
+                0,
+                64.0 + i as f32 * 8.0,
+                64.0,
+                0.0,
+            );
+        }
+        let dagger = content.unit_by_name("dagger").expect("dagger").id;
+        let alive = crate::entities::comp::unit::queries::live_type_count(&world, 0, dagger);
+        assert_eq!(alive, 8, "the 9th dagger dies on spawn");
+    }
+
+    /// G01 T12: the wave team is uncapped outside PvP.
+    #[test]
+    fn wave_team_uncapped() {
+        let content = content();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(campaign_runtime(
+            &content,
+            crate::game::rules::Rules {
+                unit_cap: 0,
+                unit_cap_variable: false,
+                ..crate::game::rules::Rules::default()
+            },
+        ));
+        assert_eq!(
+            crate::entities::comp::unit::queries::unit_cap(&world, 2),
+            None,
+            "wave team uncapped"
+        );
+        for i in 0..5u64 {
+            crate::entities::comp::unit::lifecycle::spawn_unit(
+                &mut world,
+                &content,
+                100 + i,
+                "dagger",
+                2,
+                64.0 + i as f32 * 8.0,
+                64.0,
+                0.0,
+            );
+        }
+        let dagger = content.unit_by_name("dagger").expect("dagger").id;
+        assert_eq!(
+            crate::entities::comp::unit::queries::live_type_count(&world, 2, dagger),
+            5
         );
     }
 }

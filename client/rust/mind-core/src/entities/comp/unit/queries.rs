@@ -186,6 +186,88 @@ pub fn can_create(use_unit_cap: bool, type_count: i32, cap: Option<usize>, banne
     !use_unit_cap || (cap.is_none_or(|limit| type_count < limit as i32) && !banned)
 }
 
+/// Sum of `BlockDef.unitCapModifier` over the live buildings of `team`
+/// (`TeamData.unitCap`, BlockIndexer.java:216,614): Serpulo shard/foundation/
+/// nucleus 8/16/24, Erekir 15).
+pub fn team_unit_cap_modifier(world: &bevy_ecs::world::World, team: u8) -> i32 {
+    use crate::entities::comp::{Building, TeamComp};
+
+    let Some(table) = world.get_resource::<crate::world::BlockTable>() else {
+        return 0;
+    };
+    let mut total = 0;
+    for entity_ref in world.iter_entities() {
+        let Some(building) = entity_ref.get::<Building>() else {
+            continue;
+        };
+        if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+            continue;
+        }
+        if let Some(def) = table.get(building.block) {
+            total += def.def.unit_cap_modifier;
+        }
+    }
+    total
+}
+
+/// `Units.getCap(team)` against the live world: `None` = uncapped. Without a
+/// `CampaignRuntime` (harness worlds) the cap is not enforced, matching the
+/// pre-T12 behaviour (documented deviation).
+pub fn unit_cap(world: &bevy_ecs::world::World, team: u8) -> Option<usize> {
+    let campaign = world.get_resource::<crate::game::runtime::CampaignRuntime>()?;
+    let rules = &campaign.session.rules;
+    let data_cap = team_unit_cap_modifier(world, team);
+    get_cap(
+        rules,
+        crate::game::team::Team::get(team),
+        campaign.session.is_campaign(),
+        data_cap,
+    )
+}
+
+/// Live units of `type_id` on `team` (`TeamData.countType`; the runtime
+/// snapshot's per-type counts are rebuilt lazily, so count the entities).
+pub fn live_type_count(
+    world: &bevy_ecs::world::World,
+    team: u8,
+    type_id: crate::content::UnitTypeId,
+) -> i32 {
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+    use crate::entities::comp::{Health, TeamComp};
+
+    let mut count = 0;
+    for entity_ref in world.iter_entities() {
+        if entity_ref.get::<UnitTypeComp>().map(|comp| comp.type_id) != Some(type_id) {
+            continue;
+        }
+        if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+            continue;
+        }
+        if entity_ref.get::<Health>().is_some_and(|health| health.dead) {
+            continue;
+        }
+        count += 1;
+    }
+    count
+}
+
+/// `Units.canCreate(team, type)` against the live world (`Units.java:115-125`).
+pub fn can_create_unit(
+    world: &bevy_ecs::world::World,
+    team: u8,
+    def: &crate::content::registries::units::UnitTypeDef,
+) -> bool {
+    if !def.use_unit_cap {
+        return true;
+    }
+    let cap = unit_cap(world, team);
+    let count = live_type_count(world, team, def.id);
+    let banned = world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .is_some_and(|campaign| campaign.session.rules.is_banned_unit(&def.name));
+    can_create(true, count, cap, banned)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

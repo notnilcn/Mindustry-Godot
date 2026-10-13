@@ -1643,6 +1643,8 @@ fn weather_rain_spawns_and_wets_units() {
     let mut session = PlaySession::new(Rules {
         default_team: 1,
         wave_team: 2,
+        unit_cap: 100,
+        unit_cap_variable: false,
         weather: vec![WeatherEntry {
             weather: String::from("rain"),
             always: true,
@@ -3039,6 +3041,8 @@ fn hold_fire_stops_shooting() {
     let session = PlaySession::new(Rules {
         default_team: 1,
         waves: true,
+        unit_cap: 100,
+        unit_cap_variable: false,
         ..Rules::default()
     });
     sim.ecs
@@ -3116,6 +3120,8 @@ fn boost_stance_lifts_nova() {
     let session = PlaySession::new(Rules {
         default_team: 1,
         waves: true,
+        unit_cap: 100,
+        unit_cap_variable: false,
         ..Rules::default()
     });
     sim.ecs
