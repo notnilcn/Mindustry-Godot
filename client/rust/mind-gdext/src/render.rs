@@ -37,7 +37,10 @@ use crate::sim_host::MindSimHost;
 
 mod atlas_bind;
 mod blocks;
+mod build_beam;
 mod building_cache;
+mod bullets;
+mod canvas;
 mod command_overlay;
 mod debug;
 mod env;
@@ -51,10 +54,12 @@ mod minimap;
 mod objective_markers;
 mod overlays;
 mod pixelate;
+mod plans;
 mod shaders;
 mod shadow;
 mod shields;
 mod status;
+mod unit_overlays;
 mod units;
 
 pub use blocks::BlockRenderer;
@@ -237,6 +242,16 @@ pub struct MindWorldRenderer {
     shields: Option<Gd<shields::ShieldRenderer>>,
     /// Command-mode selection overlay (`Layer.plans` band; T16/PAR-0157).
     command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
+    /// Placement preview (`Layer.plans` band; G03 T2).
+    plan_overlay: Option<Gd<plans::PlanOverlay>>,
+    /// Build-beam fan (`Layer.buildBeam` band; G03 T3).
+    build_beam: Option<Gd<build_beam::BuildBeamOverlay>>,
+    /// Bullet pass (`Layer.bullet` band; G03 T4).
+    bullets: Option<Gd<bullets::BulletRenderer>>,
+    /// Unit effects overlay (mining/items; `Layer.flyingUnit`; G03 T5).
+    unit_overlay: Option<Gd<unit_overlays::UnitOverlay>>,
+    /// Unit engines + trails (`Layer.flyingUnitLow`; G03 T5).
+    unit_engines: Option<Gd<unit_overlays::UnitOverlay>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -277,6 +292,11 @@ impl INode2D for MindWorldRenderer {
             status: None,
             shields: None,
             command_overlay: None,
+            plan_overlay: None,
+            build_beam: None,
+            bullets: None,
+            unit_overlay: None,
+            unit_engines: None,
             env: None,
             fog: None,
             overlays: None,
@@ -536,6 +556,53 @@ impl MindWorldRenderer {
             // the pipeline, not by content.
             plans_band.clone().add_child(&node);
             self.command_overlay = Some(node.clone());
+        }
+        // Placement preview at `Layer.plans` (`DesktopInput.drawBottom`; G03 T2).
+        if let Some(plans_band) = self.band_node_at(BandKey::base(Layer::Plans)) {
+            let mut node = plans::PlanOverlay::new_alloc();
+            node.set_name("PlanOverlay");
+            // code-instantiated: one placement-preview pass; the node count is
+            // fixed by the pipeline, not by content.
+            plans_band.clone().add_child(&node);
+            self.plan_overlay = Some(node.clone());
+        }
+        // Build-beam fan at `Layer.buildBeam` (`BuilderComp.drawBuilding`; G03 T3).
+        if let Some(beam_band) = self.band_node_at(BandKey::base(Layer::BuildBeam)) {
+            let mut node = build_beam::BuildBeamOverlay::new_alloc();
+            node.set_name("BuildBeamOverlay");
+            // code-instantiated: one beam pass; the node count is fixed by the
+            // pipeline, not by content.
+            beam_band.clone().add_child(&node);
+            self.build_beam = Some(node.clone());
+        }
+        // Bullets at `Layer.bullet` (`BulletType.draw`; G03 T4).
+        if let Some(bullet_band) = self.band_node_at(BandKey::base(Layer::Bullet)) {
+            let mut node = bullets::BulletRenderer::new_alloc();
+            node.set_name("BulletRenderer");
+            // code-instantiated: one bullet pass; the node count is fixed by
+            // the pipeline, not by content.
+            bullet_band.clone().add_child(&node);
+            self.bullets = Some(node.clone());
+        }
+        // Mining beam + carried items at `Layer.flyingUnit` (G03 T5).
+        if let Some(unit_band) = self.band_node_at(BandKey::base(Layer::FlyingUnit)) {
+            let mut node = unit_overlays::UnitOverlay::new_alloc();
+            node.set_name("UnitOverlay");
+            node.bind_mut().mode = unit_overlays::OverlayMode::Effects;
+            // code-instantiated: one overlay pass; the node count is fixed by
+            // the pipeline, not by content.
+            unit_band.clone().add_child(&node);
+            self.unit_overlay = Some(node.clone());
+        }
+        // Engines + trails at `Layer.flyingUnitLow` (G03 T5).
+        if let Some(unit_band) = self.band_node_at(BandKey::base(Layer::FlyingUnitLow)) {
+            let mut node = unit_overlays::UnitOverlay::new_alloc();
+            node.set_name("UnitEngines");
+            node.bind_mut().mode = unit_overlays::OverlayMode::Engines;
+            // code-instantiated: one engine/trail pass; the node count is fixed
+            // by the pipeline, not by content.
+            unit_band.clone().add_child(&node);
+            self.unit_engines = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));

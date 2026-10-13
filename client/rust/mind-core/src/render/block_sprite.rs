@@ -31,6 +31,19 @@ pub fn block_region_candidates(name: &str, region: &str) -> [String; 3] {
     ]
 }
 
+/// `BuildingComp.drawCracks` (`BuildingComp.java:1236-1244`):
+/// `index = clamp((int)((1 - healthf) * 8), 0, 7)` for the `cracks-<size>-<i>`
+/// region.
+pub fn crack_index(healthf: f32) -> usize {
+    (((1.0 - healthf) * 8.0) as i32).clamp(0, 7) as usize
+}
+
+/// `BuildingComp.drawCracks` rotation: `(pos % 4) * 90` with
+/// `pos = Point2.pack(x, y)` (`(x << 16) | y`), i.e. the tile y's low bits.
+pub fn crack_rotation(tile_y: i32) -> f32 {
+    (tile_y.rem_euclid(4)) as f32 * 90.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -63,5 +76,19 @@ mod tests {
                 "snow-boulder-0-0"
             ]
         );
+    }
+
+    #[test]
+    fn crack_index_clamps_to_eight_steps() {
+        assert_eq!(crack_index(1.0), 0);
+        assert_eq!(crack_index(0.3), 5);
+        assert_eq!(crack_index(0.0), 7);
+    }
+
+    #[test]
+    fn crack_rotation_uses_tile_y_low_bits() {
+        assert_eq!(crack_rotation(6), 180.0);
+        assert_eq!(crack_rotation(4), 0.0);
+        assert_eq!(crack_rotation(-1), 270.0);
     }
 }

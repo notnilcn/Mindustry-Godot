@@ -17,11 +17,18 @@ use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::content::{BlockDef, BlockKind};
+use mind_core::render::block_sprite::{crack_index, crack_rotation};
 use mind_core::render::scan::{CameraKey, CameraView, visible_blocks};
 
 use crate::sim_host::MindSimHost;
 
 use super::atlas_bind::{RegionResolver, ResolvedRegion};
+
+/// Core `Rgba` -> RGBA8888.
+fn rgba_u32(color: mind_core::content::Rgba) -> u32 {
+    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (q(color.r) << 24) | (q(color.g) << 16) | (q(color.b) << 8) | q(color.a)
+}
 use super::shaders::ShaderRegistry;
 use super::units::{UnitQuad, build_unit_mesh};
 
@@ -134,6 +141,9 @@ impl BlockRenderer {
         // `Layer.block - 0.1`, above all belts (drawn at `Layer.block - 0.2`).
         let mut item_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> =
             BTreeMap::new();
+        // Cracks + enemy team marks draw above block items (T8).
+        let mut crack_groups: BTreeMap<i32, (Option<Gd<Texture2D>>, Vec<UnitQuad>)> =
+            BTreeMap::new();
         // Construct sites draw through the `blockbuild` shader on their own
         // pooled nodes (T9).
         let mut sites: Vec<ConstructSite> = Vec::new();
@@ -147,6 +157,7 @@ impl BlockRenderer {
             let Some(content) = host.content_registry() else {
                 return;
             };
+            let player_team = host.player_team();
             let size = TILESIZE as f32;
             for tile in visible_blocks(world, content, view) {
                 let Some(def) = content.block(tile.block) else {
@@ -340,6 +351,157 @@ impl BlockRenderer {
                     }
                     continue;
                 }
+                // T8: door/switch/sorter/source/unloader state sprites.
+                let state = host.block_state_draw(tile.x, tile.y);
+                if matches!(def.kind, BlockKind::Door | BlockKind::AutoDoor) {
+                    // `Door.draw`: `<name>-open` while open (`Door.java:132-135`).
+                    let open = state.as_ref().is_some_and(|state| state.door_open);
+                    let name = if open {
+                        format!("{}-open", def.name)
+                    } else {
+                        def.region.clone()
+                    };
+                    if let Some(region) = self.resolver.find(&name) {
+                        push(
+                            &region,
+                            region.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            rot,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    // Doors toggle on tap without a revision bump.
+                    animating = true;
+                    dynamic += 1;
+                    continue;
+                }
+                if def.kind == BlockKind::SwitchBlock {
+                    // `SwitchBlock.draw`: base, then `<name>-on` (`:64-71`).
+                    if let Some(base) = self.resolver.find(&def.region) {
+                        push(
+                            &base,
+                            base.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            rot,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    if state.as_ref().is_some_and(|state| state.enabled)
+                        && let Some(on) = self.resolver.find(&format!("{}-on", def.name))
+                    {
+                        push(&on, on.uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
+                    }
+                    animating = true;
+                    dynamic += 1;
+                    continue;
+                }
+                if matches!(def.kind, BlockKind::Sorter | BlockKind::ItemSource) {
+                    // `Sorter.draw`/`ItemSource.draw`: the item-colour square
+                    // under the frame, `cross-full` when unset (`:76-88`).
+                    let item = state.as_ref().and_then(|state| match def.kind {
+                        BlockKind::Sorter => state.sort_item,
+                        _ => state.source_item,
+                    });
+                    if let Some(item) = item {
+                        if let Some(white) = self.resolver.find("white")
+                            && let Some(item_def) = content.item(item)
+                        {
+                            push(
+                                &white,
+                                white.uv,
+                                anchor_x,
+                                anchor_y,
+                                8.0,
+                                8.0,
+                                0.0,
+                                rgba_u32(item_def.color),
+                                1.0,
+                            );
+                        }
+                    } else {
+                        let cross = self
+                            .resolver
+                            .find(&format!("{}-cross", def.name))
+                            .or_else(|| self.resolver.find("cross-full"));
+                        if let Some(cross) = cross {
+                            push(
+                                &cross,
+                                cross.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                0.0,
+                                0xffff_ffff,
+                                1.0,
+                            );
+                        }
+                    }
+                    if let Some(base) = self.resolver.find(&def.region) {
+                        push(
+                            &base,
+                            base.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            rot,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    animating = true;
+                    dynamic += 1;
+                    continue;
+                }
+                if def.kind == BlockKind::Unloader {
+                    // `Unloader.draw`: base, then the tinted centre (`:263-269`).
+                    if let Some(base) = self.resolver.find(&def.region) {
+                        push(
+                            &base,
+                            base.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            rot,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    if let Some(item) = state.as_ref().and_then(|state| state.unloader_item)
+                        && let Some(item_def) = content.item(item)
+                    {
+                        let center = self
+                            .resolver
+                            .find(&format!("{}-center", def.name))
+                            .or_else(|| self.resolver.find("unloader-center"));
+                        if let Some(center) = center {
+                            push(
+                                &center,
+                                center.uv,
+                                anchor_x,
+                                anchor_y,
+                                w,
+                                w,
+                                0.0,
+                                rgba_u32(item_def.color),
+                                1.0,
+                            );
+                        }
+                    }
+                    animating = true;
+                    dynamic += 1;
+                    continue;
+                }
                 // `ConveyorBuild.draw`: `regions[blendbits][frame]` with the
                 // autotile scales from `Autotiler.buildBlending` (cached by
                 // the sim on proximity updates). A negative scale mirrors the
@@ -465,6 +627,58 @@ impl BlockRenderer {
                         );
                     }
                 }
+                // `BuildingComp.drawCracks` (`:1236-1244`): `cracks-<size>-<i>`
+                // at `Layer.blockCracks` (above belt items), grey 0.2 with
+                // alpha `0.1 + (1 - healthf) * 0.6`, rotation from the tile y.
+                if let Some(state) = state.as_ref()
+                    && state.damaged
+                    && def.size <= 7
+                    && let Some(region) = self.resolver.find(&format!(
+                        "cracks-{}-{}",
+                        def.size,
+                        crack_index(state.healthf)
+                    ))
+                {
+                    let alpha =
+                        ((0.1 + (1.0 - state.healthf) * 0.6).clamp(0.0, 1.0) * 255.0) as u32;
+                    let entry = crack_groups
+                        .entry(region.page)
+                        .or_insert((region.texture.clone(), Vec::new()));
+                    let [u0, v0, u1, v1] = region.uv;
+                    entry.1.push(UnitQuad {
+                        cx: anchor_x,
+                        cy: anchor_y,
+                        w,
+                        h: w,
+                        rot: crack_rotation(tile.y),
+                        uv: [u0, v0, u1, v1],
+                        color: 0x3333_3300 | alpha,
+                    });
+                    // Health changes do not bump the world revision.
+                    animating = true;
+                }
+                // `BuildingComp.drawTeam` (enemy/derelict corner mark,
+                // `BlockRenderer.java:752-757`).
+                if def.draw_team_overlay
+                    && let Some(team) = host.building_team(tile.x, tile.y)
+                    && team != player_team
+                    && let Some(border) = self.resolver.find("block-border")
+                {
+                    let half = def.size as f32 * 4.0;
+                    let entry = crack_groups
+                        .entry(border.page)
+                        .or_insert((border.texture.clone(), Vec::new()));
+                    let [u0, v0, u1, v1] = border.uv;
+                    entry.1.push(UnitQuad {
+                        cx: anchor_x - half + 4.0,
+                        cy: anchor_y - half + 4.0,
+                        w: 8.0,
+                        h: 8.0,
+                        rot: 0.0,
+                        uv: [u0, v0, u1, v1],
+                        color: mind_core::game::team::Team::get(team).color.to_rgba8888(),
+                    });
+                }
                 dynamic += 1;
             }
         }
@@ -472,6 +686,11 @@ impl BlockRenderer {
 
         // Items on top of every block quad of their page.
         for (page, (texture, quads)) in item_groups {
+            let entry = groups.entry(page).or_insert((texture, Vec::new()));
+            entry.1.extend(quads);
+        }
+        // Cracks + team marks above the items (Layer.blockCracks 30.1).
+        for (page, (texture, quads)) in crack_groups {
             let entry = groups.entry(page).or_insert((texture, Vec::new()));
             entry.1.extend(quads);
         }
@@ -598,7 +817,7 @@ impl BlockRenderer {
 
 /// Whether the block's sprite follows `Building.rotation` (`rotate` blocks
 /// that draw their region with `rotdeg()`: belts, conduits, ducts).
-fn rotates_sprite(def: &BlockDef) -> bool {
+pub(crate) fn rotates_sprite(def: &BlockDef) -> bool {
     matches!(
         def.kind,
         BlockKind::Conveyor

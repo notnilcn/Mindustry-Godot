@@ -58,6 +58,10 @@ var _top_requirements: Array[Dictionary] = []
 ## Last live re-read of the requirement `have` counts (msec).
 var _top_refreshed_ms := 0
 const TOP_REFRESH_MS := 250
+## Hovered building tile (T6); `-1` while not over a building.
+var _hover_tile := Vector2i(-1, -1)
+## Live `Block.setBars` rows: `[[row_dict, MindBar], ...]` (T6).
+var _hover_bars: Array = []
 
 
 func _ready() -> void:
@@ -166,6 +170,12 @@ func _update_top_table() -> void:
 			var info: Variant = host.call("hover_info", int(tile.x), int(tile.y))
 			if info is Dictionary and not str((info as Dictionary).get("kind", "")).is_empty():
 				hover = info
+	# T6: the bar read needs the hovered tile (the hover dict carries no coords).
+	_hover_tile = Vector2i(-1, -1)
+	if not hover.is_empty() and str(hover.get("kind", "")) == "building":
+		var tile: Variant = _mouse_tile()
+		if tile != null:
+			_hover_tile = tile
 	if display.is_empty() and hover.is_empty():
 		_set_top_visible(false)
 		return
@@ -173,11 +183,23 @@ func _update_top_table() -> void:
 	var state := (
 		"b:%s" % display
 		if not display.is_empty()
-		else "h:%s:%s" % [str(hover.get("kind", "")), str(hover.get("name", ""))]
+		else
+			"h:%s:%s:%d,%d"
+			% [
+				str(hover.get("kind", "")),
+				str(hover.get("name", "")),
+				_hover_tile.x,
+				_hover_tile.y,
+			]
 	)
 	if state == _top_state:
 		if not display.is_empty():
 			_refresh_top_amounts(display)
+		elif not _hover_bars.is_empty():
+			var now := Time.get_ticks_msec()
+			if now - _top_refreshed_ms >= TOP_REFRESH_MS:
+				_top_refreshed_ms = now
+				_refresh_hover_bars()
 		return
 	_top_state = state
 	_rebuild_top(display, hover)
@@ -225,6 +247,7 @@ func _rebuild_top(display: String, hover: Dictionary) -> void:
 		child.queue_free()
 	_top_amounts.clear()
 	_top_requirements.clear()
+	_hover_bars.clear()
 	if display.is_empty():
 		_build_hover_row(hover)
 		return
@@ -367,6 +390,77 @@ func _build_hover_row(hover: Dictionary) -> void:
 	label.text = MindWidgets.markup("@%s" % label_key)
 	row.add_child(label)
 	top_rows.add_child(row)
+	# T6: `BuildingComp.display`'s bar table (only for the player's buildings;
+	# `building_bars_json` gates the team).
+	if str(hover.get("kind", "")) == "building" and _hover_tile.x >= 0:
+		_rebuild_hover_bars()
+
+
+## `Block.setBars` rows from `building_bars_json` (`Block.java:709-760`): one
+## 18px `MindBar` per row inside a 4px margin.
+func _rebuild_hover_bars() -> void:
+	_hover_bars.clear()
+	var rows: Variant = _hover_bar_rows()
+	if not (rows is Array):
+		return
+	for entry in rows:
+		if not (entry is Dictionary):
+			continue
+		# code-instantiated: one bar per `Block.setBars` entry (T6).
+		var margin := MarginContainer.new()
+		margin.add_theme_constant_override("margin_left", 4)
+		margin.add_theme_constant_override("margin_right", 4)
+		margin.add_theme_constant_override("margin_top", 4)
+		margin.add_theme_constant_override("margin_bottom", 4)
+		var bar := MindBar.new()
+		bar.custom_minimum_size = Vector2(0, 18)
+		bar.setup(
+			_bar_text(entry), _bar_color(entry), float((entry as Dictionary).get("value", 0.0))
+		)
+		margin.add_child(bar)
+		top_rows.add_child(margin)
+		_hover_bars.append([entry, bar])
+
+
+## Live re-read of the bar rows (`TOP_REFRESH_MS`): fractions every tick, text
+## when the formatted argument changed.
+func _refresh_hover_bars() -> void:
+	var rows: Variant = _hover_bar_rows()
+	if not (rows is Array) or rows.size() != _hover_bars.size():
+		for pair in _hover_bars:
+			(pair[1] as Node).queue_free()
+		_hover_bars.clear()
+		_rebuild_hover_bars()
+		return
+	for i in rows.size():
+		var entry: Dictionary = rows[i]
+		var pair: Array = _hover_bars[i]
+		var bar: MindBar = pair[1]
+		bar.fraction = float(entry.get("value", 0.0))
+		if str(entry.get("label_arg", "")) != str((pair[0] as Dictionary).get("label_arg", "")):
+			bar.setup(_bar_text(entry), _bar_color(entry), float(entry.get("value", 0.0)))
+			_hover_bars[i] = [entry, bar]
+
+
+func _hover_bar_rows() -> Variant:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("building_bars_json") or _hover_tile.x < 0:
+		return null
+	return JSON.parse_string(
+		str(host.call("building_bars_json", _hover_tile.x, _hover_tile.y))
+	)
+
+
+func _bar_text(entry: Dictionary) -> String:
+	var key := str(entry.get("label_key", ""))
+	var arg: Variant = entry.get("label_arg", null)
+	if arg != null:
+		return MindWidgets.markup(_bundle(key, key).replace("{0}", str(arg)))
+	return MindWidgets.markup("@%s" % key)
+
+
+func _bar_color(entry: Dictionary) -> Color:
+	return Color(str(entry.get("color", "ffffffff")))
 
 
 ## `PlacementFragment` key combo: category hotkey + row/column digits from the

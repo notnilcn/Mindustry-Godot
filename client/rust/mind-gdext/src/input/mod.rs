@@ -886,6 +886,12 @@ impl MindInput {
         self.bridge.controller.state.command_mode
     }
 
+    /// Read-only placement state for the world overlay pass (G03 T2).
+    /// Rust-only seam (`DesktopBridge::placement_view`).
+    pub fn placement_view(&self) -> desktop::PlacementView {
+        self.bridge.placement_view()
+    }
+
     /// Feeds the selectable-unit list (`[{id,type,x,y,team,commandable}]`).
     #[func]
     pub fn set_selectable_units_json(&mut self, json: GString) -> i64 {

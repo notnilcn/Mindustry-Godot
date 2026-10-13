@@ -52,6 +52,16 @@ pub struct UnitDraw {
     pub mech: Option<MechDraw>,
     /// Live weapon mounts (`UnitWeapons`).
     pub weapons: Vec<WeaponDraw>,
+    /// `EntitySeq.0` (view-state key; entities are reused).
+    pub id: u64,
+    /// `MinerComp.mine_tile` when `MinerComp.mining` (world tile).
+    pub mine_tile: Option<(i16, i16)>,
+    /// `ItemsComp.item` as `(item name, amount)`.
+    pub item: Option<(String, i32)>,
+    /// Whether this is the local player's unit.
+    pub is_player: bool,
+    /// Absolute health (`Health.health`).
+    pub health: f32,
 }
 
 /// `MechComp` walk state resolved for drawing (`drawMech`).
@@ -120,6 +130,84 @@ struct CaptureRequest {
     frames_waited: u32,
 }
 
+/// `Block.drawPlace` range-circle kinds (G03 T2): which Arc helper the
+/// placement preview uses and which colour applies. The range value comes
+/// from `MindSimHost::block_place_range`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlaceRangeKind {
+    /// `BaseTurret.drawPlace` (`BaseTurret.java:84-90`): `Drawf.dashCircle`
+    /// in `Pal.placing`.
+    Turret,
+    /// `PowerNode.drawPlace` (`PowerNode.java:159-173`): `Drawf.circles` in
+    /// `Pal.placing` at `laserRange * 8`.
+    PowerNode,
+    /// `MendProjector`/`OverdriveProjector.drawPlace`: `Drawf.dashCircle` in
+    /// the projector's `baseColor`.
+    Projector,
+}
+
+/// Player-builder draw state (`BuilderComp.drawBuilding`, G03 T3).
+pub struct BuilderView {
+    /// Player unit position (world px).
+    pub x: f32,
+    /// Player unit position (world px).
+    pub y: f32,
+    /// Player unit rotation (degrees).
+    pub rotation: f32,
+    /// `UnitType.buildBeamOffset`.
+    pub beam_offset: f32,
+    /// `UnitType.buildRange`.
+    pub build_range: f32,
+    /// `UnitType.drawBuildBeam`.
+    pub draw_beam: bool,
+    /// `BuilderComp.updateBuilding`.
+    pub update_building: bool,
+    /// Live plan queue copy (head first).
+    pub plans: Vec<mind_core::sim::builder::UnitBuildPlan>,
+}
+
+/// One live bullet for the draw pass (`Groups.bullet`; G03 T4).
+#[derive(Clone)]
+pub struct BulletDraw {
+    /// `EntitySeq` (`Bullet.id`; bevy entities are reused).
+    pub id: u64,
+    /// World position.
+    pub x: f32,
+    /// World position.
+    pub y: f32,
+    /// Rotation in degrees.
+    pub rotation: f32,
+    /// Ticks lived.
+    pub time: f32,
+    /// Lifetime in ticks.
+    pub lifetime: f32,
+    /// Effect parameter (`Bullet.fdata`).
+    pub fdata: f32,
+    /// Bullet content id.
+    pub def: mind_core::content::BulletId,
+    /// Owning team (bullets are teamless in the port; kept for parity).
+    pub team: u8,
+}
+
+/// Per-building draw state (`Door`/`SwitchBlock`/`Sorter`/`ItemSource`/
+/// `Unloader` + cracks/team marks; G03 T8).
+pub struct BlockStateDraw {
+    /// `DoorState.open`.
+    pub door_open: bool,
+    /// `Building.enabled`.
+    pub enabled: bool,
+    /// `SorterBuild.sort_item`.
+    pub sort_item: Option<mind_core::content::ItemId>,
+    /// `UnloaderBuild.sort_item`.
+    pub unloader_item: Option<mind_core::content::ItemId>,
+    /// `SandboxState.item` (item source).
+    pub source_item: Option<mind_core::content::ItemId>,
+    /// `Health.fraction`.
+    pub healthf: f32,
+    /// `damaged()` = `health < maxHealth - 0.001`.
+    pub damaged: bool,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -166,6 +254,9 @@ pub struct MindSimHost {
     input: Option<Gd<MindInput>>,
     /// Enemy spawn-overlay count of the last loaded sector grid.
     sector_spawns: i32,
+    /// Turret `BaseTurret.range` cache for `block_place_range` (`config_for`
+    /// rebuilds the whole config each call; the ghost asks per frame).
+    place_range_cache: std::cell::RefCell<std::collections::HashMap<BlockId, Option<f32>>>,
 }
 
 #[godot_api]
@@ -194,6 +285,7 @@ impl INode for MindSimHost {
             sector_plans: Vec::new(),
             input: None,
             sector_spawns: 0,
+            place_range_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
         }
     }
 
@@ -2375,6 +2467,40 @@ impl MindSimHost {
                             .collect()
                     })
                     .unwrap_or_default();
+                let id = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::ecs::EntitySeq>(*entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(0);
+                let mine_tile = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::MinerComp>(*entity)
+                    .filter(|miner| miner.mining)
+                    .and_then(|miner| miner.mine_tile.map(|pos| (pos.x(), pos.y())));
+                let item = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::ItemsComp>(*entity)
+                    .and_then(|items| items.item)
+                    .and_then(|(item, amount)| {
+                        self.content_snapshot
+                            .as_ref()
+                            .and_then(|content| content.item(item))
+                            .map(|item| (item.name.clone(), amount))
+                    });
+                let is_player = self.sim.player_unit() == Some(*entity);
+                let health = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<Health>(*entity)
+                    .map(|health| health.health)
+                    .unwrap_or(0.0);
                 Some(UnitDraw {
                     x: pos.x,
                     y: pos.y,
@@ -2388,6 +2514,11 @@ impl MindSimHost {
                     hit_size: def.hit_size,
                     mech,
                     weapons,
+                    id,
+                    mine_tile,
+                    item,
+                    is_player,
+                    health,
                 })
             })
             .collect()
@@ -3372,6 +3503,352 @@ impl MindSimHost {
             None => 0,
         }
     }
+
+    // ---- G03 T2 placement preview seams (Rust-only) ----
+
+    /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;
+    /// preview only, no side effects (G03 T2).
+    pub fn preview_can_place(&self, x: i32, y: i32, block: BlockId, rot: u8) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.sim.preview_can_place(x, y, block, rot)
+    }
+
+    /// `Block.drawPlace` range circle for `block` (G03 T2): `(radius world px,
+    /// kind, rgba8888 colour)`. `None` = the block draws no range circle.
+    ///
+    /// Turret ranges come from the ported `TurretConfig`
+    /// (`BaseTurret.java:84-90`); power-node `laserRange` (6/15/40) and the
+    /// projector table are transcribed from `Blocks.java:2483-2504,1921-1958`.
+    pub fn block_place_range(&self, block: BlockId) -> Option<(f32, PlaceRangeKind, u32)> {
+        use mind_core::render::drawf::{self, pal};
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(block)?;
+        if matches!(
+            def.kind,
+            BlockKind::MendProjector | BlockKind::OverdriveProjector
+        ) {
+            const PROJECTOR_RANGES: [(&str, f32, u32); 4] = [
+                ("mender", 40.0, 0x84f4_91ff),
+                ("mend-projector", 85.0, 0x84f4_91ff),
+                ("overdrive-projector", 80.0, 0xfeb3_80ff),
+                ("overdrive-dome", 200.0, 0xfeb3_80ff),
+            ];
+            return PROJECTOR_RANGES
+                .iter()
+                .find(|(name, ..)| *name == def.name)
+                .map(|(_, range, color)| (*range, PlaceRangeKind::Projector, *color));
+        }
+        let accent = drawf::to_bits(pal::ACCENT);
+        let laser_range = match def.name.as_str() {
+            "power-node" => 6.0,
+            "power-node-large" => 15.0,
+            "surge-tower" => 40.0,
+            _ => 0.0,
+        };
+        if laser_range > 0.0 {
+            return Some((laser_range * 8.0, PlaceRangeKind::PowerNode, accent));
+        }
+        let cached = self.place_range_cache.borrow().get(&block).copied();
+        let range = match cached {
+            Some(range) => range,
+            None => {
+                // Turret ranges resolve against the *sim runtime* content: it is
+                // the registry the live `TurretBehavior` was built from and
+                // carries the named turret-ammo fixtures (`install_turret_ammo`),
+                // unlike the view snapshot (`create_base_content` only).
+                let range = self
+                    .sim
+                    .block_runtime()
+                    .and_then(|runtime| {
+                        let runtime_content = runtime.content();
+                        let runtime_def = runtime_content.block(block)?;
+                        mind_core::world::blocks::defense::turrets::config_for(
+                            runtime_content,
+                            &runtime_def.name,
+                            runtime_content.bullet_names(),
+                        )
+                    })
+                    .map(|config| config.range)
+                    .or_else(|| {
+                        mind_core::world::blocks::defense::turrets::config_for(
+                            content,
+                            &def.name,
+                            content.bullet_names(),
+                        )
+                        .map(|config| config.range)
+                    });
+                self.place_range_cache.borrow_mut().insert(block, range);
+                range
+            }
+        };
+        range.map(|range| (range, PlaceRangeKind::Turret, accent))
+    }
+
+    /// `InputHandler.validBreak(x, y)`: whether the local team may deconstruct
+    /// the building at `(x, y)`. Builds `BuildRules` from the world resource
+    /// like `SimRuntime::can_place` does. Rust-only seam for the break-rect
+    /// preview (G03 T2).
+    pub fn preview_can_break(&self, x: i32, y: i32) -> bool {
+        let team = self.sim.live_default_team();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        let rules = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::limits::BuildRules>()
+            .cloned()
+            .unwrap_or_default();
+        mind_core::world::build::valid_break(content, &self.sim.grid, &rules, team, x, y)
+    }
+
+    // ---- G03 T3 build-plan / beam seams (Rust-only) ----
+
+    /// One player-builder draw state (`BuilderComp.drawBuilding`, G03 T3).
+    pub fn player_builder_view(&self) -> Option<BuilderView> {
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+        use mind_core::sim::builder::BuilderPlans;
+        let entity = self.sim.player_unit()?;
+        let pos = self.sim.ecs.0.get::<Pos>(entity)?;
+        let type_comp = self.sim.ecs.0.get::<UnitTypeComp>(entity)?;
+        let def = self.content_snapshot.as_ref()?.unit(type_comp.type_id)?;
+        let update_building = self
+            .sim
+            .ecs
+            .0
+            .get::<BuilderPlans>(entity)
+            .map(|plans| plans.update_building)
+            .unwrap_or(false);
+        let rotation = self
+            .sim
+            .ecs
+            .0
+            .get::<UnitCore>(entity)
+            .map(|core| core.rotation)
+            .unwrap_or(0.0);
+        Some(BuilderView {
+            x: pos.x,
+            y: pos.y,
+            rotation,
+            beam_offset: def.build_beam_offset,
+            build_range: def.build_range,
+            draw_beam: def.draw_build_beam,
+            update_building,
+            plans: self.sim.player_build_plans(),
+        })
+    }
+
+    /// Whether `(x, y)` holds a construct site building `block`
+    /// (`InputHandler.planMatches`, `InputHandler.java:1515-1518`).
+    pub fn plan_matches(&self, x: i32, y: i32, block: BlockId) -> bool {
+        self.construct_at(x, y)
+            .is_some_and(|(current, _, _)| current == block)
+    }
+
+    /// Per-building state for the block pass (G03 T8): door open, switch
+    /// enabled, sorter/unloader/source items, damage and team mark inputs.
+    pub fn block_state_draw(&self, x: i32, y: i32) -> Option<BlockStateDraw> {
+        use mind_core::entities::comp::building::{DoorState, SandboxState};
+        use mind_core::entities::comp::health::Health;
+        use mind_core::world::blocks::distribution::sorter::SorterBuild;
+        use mind_core::world::blocks::storage::unloader::UnloaderBuild;
+        let entity = self.tile_at(x, y)?.build?;
+        let healthf = self
+            .sim
+            .ecs
+            .0
+            .get::<Health>(entity)
+            .map(Health::fraction)
+            .unwrap_or(1.0);
+        Some(BlockStateDraw {
+            door_open: self
+                .sim
+                .ecs
+                .0
+                .get::<DoorState>(entity)
+                .map(|door| door.open)
+                .unwrap_or(false),
+            enabled: self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::building::Building>(entity)
+                .map(|building| building.enabled)
+                .unwrap_or(true),
+            sort_item: self
+                .sim
+                .ecs
+                .0
+                .get::<SorterBuild>(entity)
+                .and_then(|sorter| sorter.sort_item),
+            unloader_item: self
+                .sim
+                .ecs
+                .0
+                .get::<UnloaderBuild>(entity)
+                .and_then(|unloader| unloader.sort_item),
+            source_item: self
+                .sim
+                .ecs
+                .0
+                .get::<SandboxState>(entity)
+                .and_then(|state| state.item),
+            healthf,
+            damaged: healthf < 0.999,
+        })
+    }
+
+    /// The player team's rebuild ghosts (`TeamData.plans`, pushed by
+    /// `Sim::resolve_deaths`): `(x, y, rotation, block)` in insertion order.
+    pub fn team_block_plans(&self) -> Vec<(i16, i16, i8, BlockId)> {
+        let team = mind_core::ecs::TeamId(self.player_team());
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .and_then(|runtime| runtime.session.teams.data(team))
+            .map(|data| {
+                data.plans
+                    .iter()
+                    .filter(|plan| !plan.removed)
+                    .map(|plan| (plan.x, plan.y, plan.rotation, plan.block))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // ---- G03 T4 bullet draw seam (Rust-only) ----
+
+    /// Live bullets in spawn order (`Groups.bullet`, G03 T4). Skips bullets
+    /// already marked finished (removed this tick).
+    pub fn bullet_draws(&self) -> Vec<BulletDraw> {
+        use mind_core::combat::bullet::Bullet;
+        use mind_core::ecs::EntitySeq;
+        use mind_core::entities::comp::Pos;
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for &entity in &runtime.bullets {
+            let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                continue;
+            };
+            let Some(bullet) = self.sim.ecs.0.get::<Bullet>(entity) else {
+                continue;
+            };
+            if bullet.finished() {
+                continue;
+            }
+            let id = self
+                .sim
+                .ecs
+                .0
+                .get::<EntitySeq>(entity)
+                .map(|seq| seq.0)
+                .unwrap_or(0);
+            out.push(BulletDraw {
+                id,
+                x: pos.x,
+                y: pos.y,
+                rotation: bullet.rotation,
+                time: bullet.time,
+                lifetime: bullet.lifetime,
+                fdata: bullet.fdata,
+                def: bullet.def,
+                team: 0,
+            });
+        }
+        out
+    }
+
+    // ---- G03 T6 hovered-building bars (MCP/API seam) ----
+
+    /// `Block.setBars` rows for the player-team building at `(x, y)` (G03 T6),
+    /// in Java order: `[{"key","label_key","label_arg","color","value"}]`.
+    /// `[]` without a player building. Label text is formatted in GDScript.
+    #[func]
+    pub fn building_bars_json(&self, x: i32, y: i32) -> GString {
+        let Some(tile) = self.tile_at(x, y) else {
+            return GString::from("[]");
+        };
+        let Some(entity) = tile.build else {
+            return GString::from("[]");
+        };
+        if self.building_team(x, y) != Some(self.player_team()) {
+            return GString::from("[]");
+        }
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("[]");
+        };
+        let Some(def) = content.block(tile.block) else {
+            return GString::from("[]");
+        };
+        let healthf = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::health::Health>(entity)
+            .map(mind_core::entities::comp::health::Health::fraction)
+            .unwrap_or(1.0);
+        let power_status = self
+            .sim
+            .ecs
+            .0
+            .get::<PowerModule>(entity)
+            .map(|module| module.status);
+        let items_total = self
+            .sim
+            .ecs
+            .0
+            .get::<ItemModule>(entity)
+            .map(|module| module.total);
+        let liquids = self
+            .sim
+            .ecs
+            .0
+            .get::<LiquidModule>(entity)
+            .map(|module| module.liquids.clone());
+        let liquid_info: Vec<(String, u32)> = content
+            .liquids()
+            .iter()
+            .map(|liquid| {
+                (
+                    liquid.name.clone(),
+                    mind_core::render::drawf::to_bits([
+                        liquid.color.r,
+                        liquid.color.g,
+                        liquid.color.b,
+                        liquid.color.a,
+                    ]),
+                )
+            })
+            .collect();
+        let rows = building_bar_rows(
+            def,
+            healthf,
+            power_status,
+            items_total,
+            liquids.as_deref(),
+            &liquid_info,
+        );
+        let json: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "key": row.key,
+                    "label_key": row.label_key,
+                    "label_arg": row.label_arg,
+                    "color": format!("{:08x}", row.color),
+                    "value": row.value,
+                })
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(json).to_string().as_str())
+    }
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core
@@ -3691,6 +4168,133 @@ fn first_core_position(grid: &WorldGrid, content: &ContentRegistry) -> Option<(f
     })
 }
 
+/// One hovered-building bar row (`Block.setBars`, G03 T6).
+pub struct BarRow {
+    /// `"health" | "power" | "items" | "liquid"`.
+    pub key: &'static str,
+    /// Bundle key (no `@`).
+    pub label_key: String,
+    /// `{0}` argument for the bundle format (`None` = no argument).
+    pub label_arg: Option<String>,
+    /// `Bar` colour RGBA8888.
+    pub color: u32,
+    /// Fraction `0..=1`.
+    pub value: f32,
+}
+
+/// `Block.setBars` base rows (`Block.java:709-760`) in Java order: health,
+/// power (when consumed), items (when `hasItems && configurable`) and liquids
+/// (per consumed liquid, else the dynamic current=max entry bar).
+///
+/// `health` is the health **fraction** (`Health.fraction`); `liquid_info` is
+/// `(name, rgba8888)` per liquid in id order (colour for the bar; `name` for
+/// the `liquid.<name>.name` label key).
+pub fn building_bar_rows(
+    def: &mind_core::content::registries::blocks::BlockDef,
+    health: f32,
+    power_status: Option<f32>,
+    items_total: Option<i32>,
+    liquids: Option<&[f32]>,
+    liquid_info: &[(String, u32)],
+) -> Vec<BarRow> {
+    use mind_core::content::registries::blocks::Consume;
+    let mut rows = Vec::new();
+    rows.push(BarRow {
+        key: "health",
+        label_key: String::from("stat.health"),
+        label_arg: None,
+        color: 0xff34_1cff,
+        value: health.clamp(0.0, 1.0),
+    });
+    if let Some(status) = power_status {
+        let buffered = def.consumes.iter().find_map(|spec| match &spec.consume {
+            Consume::Power { buffered, .. } if *buffered > 0.0 => Some(*buffered),
+            _ => None,
+        });
+        let (label_key, label_arg) = match buffered {
+            Some(capacity) => (
+                String::from("bar.poweramount"),
+                Some(((status * capacity) as i32).to_string()),
+            ),
+            None => (String::from("bar.power"), None),
+        };
+        rows.push(BarRow {
+            key: "power",
+            label_key,
+            label_arg,
+            color: 0xec7b_4cff,
+            value: status.clamp(0.0, 1.0),
+        });
+    }
+    if def.has_items
+        && def.configurable
+        && def.item_capacity > 0
+        && let Some(total) = items_total
+    {
+        rows.push(BarRow {
+            key: "items",
+            label_key: String::from("bar.items"),
+            label_arg: Some(total.to_string()),
+            color: 0x2ea7_56ff,
+            value: (total as f32 / def.item_capacity as f32).clamp(0.0, 1.0),
+        });
+    }
+    if def.has_liquids && def.liquid_capacity > 0.0 {
+        let amounts = liquids.unwrap_or(&[]);
+        let mut added = false;
+        for spec in &def.consumes {
+            let consumed: Vec<mind_core::content::LiquidId> = match &spec.consume {
+                Consume::Liquid { liquid, .. } => vec![*liquid],
+                Consume::Liquids(stacks) => stacks.iter().map(|stack| stack.liquid).collect(),
+                _ => Vec::new(),
+            };
+            for liquid in consumed {
+                let Some((name, color)) = liquid_info.get(liquid.index()) else {
+                    continue;
+                };
+                let amount = amounts.get(liquid.index()).copied().unwrap_or(0.0);
+                rows.push(BarRow {
+                    key: "liquid",
+                    label_key: format!("liquid.{name}.name"),
+                    label_arg: None,
+                    color: *color,
+                    value: (amount / def.liquid_capacity).clamp(0.0, 1.0),
+                });
+                added = true;
+            }
+        }
+        if !added {
+            // Dynamic current-liquid bar (`bar.liquid` when empty).
+            let (index, amount) = amounts.iter().enumerate().fold(
+                (usize::MAX, 0.0f32),
+                |(best, max), (i, amount)| {
+                    if *amount > max {
+                        (i, *amount)
+                    } else {
+                        (best, max)
+                    }
+                },
+            );
+            let (label_key, color) = if amount > 0.0 {
+                liquid_info
+                    .get(index)
+                    .map(|(name, color)| (format!("liquid.{name}.name"), *color))
+                    .unwrap_or((String::from("bar.liquid"), 0x596a_b8ff))
+            } else {
+                (String::from("bar.liquid"), 0x596a_b8ff)
+            };
+            rows.push(BarRow {
+                key: "liquid",
+                label_key,
+                label_arg: None,
+                color,
+                value: (amount / def.liquid_capacity).clamp(0.0, 1.0),
+            });
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3852,5 +4456,54 @@ mod tests {
             None => panic!("items JSON missing"),
         };
         assert!(json.contains("\"copper\":3"), "unexpected JSON: {json}");
+    }
+
+    #[test]
+    fn building_bars_items_row() {
+        // Java gates `bar.items` on `hasItems && configurable`
+        // (`Block.java:724`); the launch pad satisfies both.
+        let registry = base_registry();
+        let Some(block) = registry.block_id("launch-pad") else {
+            panic!("launch-pad missing");
+        };
+        let Some(def) = registry.block(block) else {
+            panic!("launch-pad def missing");
+        };
+        assert!(def.has_items && def.configurable && def.item_capacity > 0);
+        let rows = building_bar_rows(def, 1.0, None, Some(5), None, &[]);
+        assert_eq!(rows.len(), 2, "rows: {:?}", rows.len());
+        assert_eq!(rows[0].key, "health");
+        assert_eq!(rows[1].key, "items");
+        assert_eq!(rows[1].label_key, "bar.items");
+        assert_eq!(rows[1].label_arg.as_deref(), Some("5"));
+        let expected = 5.0 / def.item_capacity as f32;
+        assert!((rows[1].value - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn building_bars_conduit_dynamic_liquid() {
+        // Conduit: `has_liquids` with no liquid consumer -> dynamic max bar.
+        let registry = base_registry();
+        let Some(conduit) = registry.block_id("conduit") else {
+            panic!("conduit missing");
+        };
+        let Some(def) = registry.block(conduit) else {
+            panic!("conduit def missing");
+        };
+        assert!(def.has_liquids && def.liquid_capacity > 0.0);
+        let liquid_info: Vec<(String, u32)> = registry
+            .liquids()
+            .iter()
+            .map(|liquid| (liquid.name.clone(), 0))
+            .collect();
+        let capacity = def.liquid_capacity;
+        let liquids = vec![0.0, capacity * 0.4];
+        let rows = building_bar_rows(def, 1.0, None, None, Some(&liquids), &liquid_info);
+        let row = rows
+            .iter()
+            .find(|row| row.key == "liquid")
+            .unwrap_or_else(|| panic!("liquid row"));
+        assert!((row.value - 0.4).abs() < 1e-3, "value: {}", row.value);
+        assert_eq!(row.label_key, format!("liquid.{}.name", liquid_info[1].0));
     }
 }
