@@ -47,7 +47,7 @@ use super::super::settings_store::UnlockStore;
 use super::super::stacks::{ItemSeq, ItemStack, round_to_i32};
 use super::super::{ContentError, ContentRef, ContentType};
 use super::blocks::{BlockFlag, Consume, EnvMask, round_to, ui_round_amount};
-use super::bullets::{BulletDef, BulletSpec};
+use super::bullets::{BulletDef, BulletKind, BulletSpec};
 use super::pal;
 use super::sound_meta::SoundId;
 use super::{ContentRegistry, planets::EnvFlag};
@@ -1456,6 +1456,42 @@ fn resolve_statuses(
 }
 
 impl UnitTypeDef {
+    /// `UnitType.supportsEnv(env)` (`UnitType.java`): `(envEnabled & env) != 0
+    /// && (envDisabled & env) == 0 && (envRequired == 0 || (envRequired & env)
+    /// == envRequired)`. Unset `envEnabled` defaults to `Env.terrestrial`.
+    pub fn supports_env(&self, env: i32) -> bool {
+        /// Java `Env` bit of a flag (`mindustry.world.meta.Env`).
+        fn env_bit(flag: EnvFlag) -> i32 {
+            match flag {
+                EnvFlag::Terrestrial => 1,
+                EnvFlag::Space => 1 << 1,
+                EnvFlag::Underwater => 1 << 2,
+                EnvFlag::Spores => 1 << 3,
+                EnvFlag::Scorching => 1 << 4,
+                EnvFlag::GroundOil => 1 << 5,
+                EnvFlag::GroundWater => 1 << 6,
+                EnvFlag::Oxygen => 1 << 7,
+            }
+        }
+        fn mask_bits(mask: &EnvMask, empty: i32) -> i32 {
+            if mask.any {
+                return -1;
+            }
+            if mask.flags.is_empty() {
+                return empty;
+            }
+            mask.flags
+                .iter()
+                .fold(0, |bits, flag| bits | env_bit(*flag))
+        }
+        let enabled = mask_bits(&self.env_enabled, env_bit(EnvFlag::Terrestrial));
+        let disabled = mask_bits(&self.env_disabled, 0);
+        let required = mask_bits(&self.env_required, 0);
+        (enabled & env) != 0
+            && (disabled & env) == 0
+            && (required == 0 || (required & env) == required)
+    }
+
     /// Resolves the scalar fields of a generated [`UnitSpec`] (weapons are
     /// attached by the load pass after their bullets register).
     pub fn from_spec(
@@ -2179,6 +2215,24 @@ struct RegistrySink<'a> {
 }
 
 impl RegistrySink<'_> {
+    /// `BulletType.calculateRange()` for a registered bullet id; resolves
+    /// `MultiBulletType` against its registered children
+    /// (`MultiBulletType.java:36`), so the unit-load snapshot is correct even
+    /// though it is taken before the `init()` sweep.
+    fn resolved_bullet_range(&self, id: BulletId) -> f32 {
+        let Some(bullet) = self.registry.bullet(id) else {
+            return 0.0;
+        };
+        if bullet.kind == BulletKind::Multi {
+            return bullet
+                .spawn_bullets
+                .iter()
+                .map(|child| self.resolved_bullet_range(*child))
+                .fold(0.0f32, f32::max);
+        }
+        bullet.compute_range()
+    }
+
     /// Snapshots the values `UnitType.init()` reads from a registered bullet.
     fn resolved_bullet(&self, id: BulletId) -> Result<ResolvedBullet, ContentError> {
         let bullet = self
@@ -2187,7 +2241,7 @@ impl RegistrySink<'_> {
             .ok_or(ContentError::UnknownId(id.raw()))?;
         Ok(ResolvedBullet {
             id,
-            range: bullet.compute_range(),
+            range: self.resolved_bullet_range(id),
             heals: bullet.heals(),
             kill_shooter: bullet.kill_shooter,
             dps: 0.0,
@@ -2779,5 +2833,45 @@ mod tests {
             zb.range,
             expected
         );
+    }
+
+    /// `unit_ranges_match_jvm`: bullet `calculateRange` subclass overrides and
+    /// the `PointDefenseWeapon`/`RepairBeamWeapon` instance-initializer defaults
+    /// (`UnitType.java:966-997` inputs). Values from the JVM content dump
+    /// (`parity/java/jvm_golden_content.json`).
+    #[test]
+    fn unit_ranges_match_jvm() {
+        let registry = test_registry();
+        let expected: [(&str, f32); 12] = [
+            ("pulsar", 65.0),
+            ("quasar", 146.0),
+            ("vela", 176.0),
+            ("corvus", 456.0),
+            ("spiroct", 36.0),
+            ("arkyid", 51.0),
+            ("toxopid", 86.0),
+            ("eclipse", 184.0),
+            ("omura", 496.0),
+            ("locus", 156.0),
+            ("cleroi", 136.0),
+            ("navanax", 91.0),
+        ];
+        for (name, value) in expected {
+            let def = get(&registry, name);
+            assert!(
+                (def.range - value).abs() < 0.01,
+                "{name} range {} vs JVM {value}",
+                def.range
+            );
+        }
+        assert_eq!(get(&registry, "spiroct").max_range, 71.0);
+        assert_eq!(get(&registry, "eclipse").max_range, 226.0);
+        assert!((get(&registry, "oxynoe").max_range - 57.2).abs() < 0.01);
+        assert!((get(&registry, "cyerce").range - 221.66).abs() < 0.01);
+
+        // `RepairBeamWeapon.noAttack` -> `UnitType.canAttack` false.
+        for name in ["evoke", "incite", "emanate"] {
+            assert!(!get(&registry, name).can_attack, "{name} can_attack");
+        }
     }
 }

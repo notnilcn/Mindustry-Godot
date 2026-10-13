@@ -37,6 +37,7 @@ use crate::audio::AudioSinkRes;
 use crate::combat::bullet::{self, CombatCtx};
 use crate::combat::targeting::TargetQueries;
 use crate::combat::view::{FxHandle, noop_fx};
+use crate::content::ctype::Mappable;
 use crate::content::{BlockKind, ContentRegistry, UnitTypeId};
 use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::{BuildingComp, EntitySeq};
@@ -888,12 +889,530 @@ impl Sim {
             .entity_mut(entity)
             .insert(crate::entities::comp::Player);
         self.player_unit = Some(entity);
+        self.player_team = Some(team);
+        self.player_death_timer = 0.0;
         Some(entity)
+    }
+
+    /// `PlayerComp.bestCore()` (`PlayerComp.java:121-126`): the largest core,
+    /// then the closest to the last player position; supported-env cores are
+    /// preferred unless there is only one core.
+    pub fn best_core_for_player(&self, team: u8) -> Option<Entity> {
+        use crate::world::blocks::storage::core_block::CoreBuild;
+        let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+        let content = &runtime.content;
+        let env = crate::game::runtime::rules_of(&self.ecs.0).map_or(1, |rules| rules.env);
+        let pos = self.player_last_pos.or_else(|| self.player_unit_position());
+        let mut cores: Vec<(Entity, i32, bool, f32)> = Vec::new();
+        for entity_ref in self.ecs.0.iter_entities() {
+            if entity_ref.get::<CoreBuild>().is_none() {
+                continue;
+            }
+            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+                continue;
+            }
+            let Some(build) = entity_ref.get::<Building>() else {
+                continue;
+            };
+            let size = content.block(build.block).map_or(1, |def| def.size);
+            let supported = content
+                .block(build.block)
+                .and_then(|def| def.core_unit)
+                .and_then(|name| content.unit_by_name(name))
+                .is_none_or(|unit| unit.supports_env(env));
+            let dst2 = entity_ref.get::<Pos>().map_or(0.0, |p| {
+                pos.map_or(0.0, |(px, py)| (p.x - px).powi(2) + (p.y - py).powi(2))
+            });
+            cores.push((entity_ref.id(), size, supported, dst2));
+        }
+        let single = cores.len() <= 1;
+        cores
+            .iter()
+            .filter(|(_, _, supported, _)| single || *supported)
+            .min_by(|a, b| {
+                b.1.cmp(&a.1)
+                    .then(a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
+            })
+            .map(|(entity, _, _, _)| *entity)
+    }
+
+    /// `CoreBlock.playerSpawn` (`CoreBlock.java:95-125`): spawn the core's
+    /// `unitType` at the core with reloaded mounts, `spawnedByCore` set and the
+    /// upward impulse; `None` when the core unit type does not support the
+    /// sector env.
+    pub fn spawn_player_at_best_core(&mut self, team: u8) -> Option<Entity> {
+        let core = self.best_core_for_player(team)?;
+        let (x, y) = self.ecs.0.get::<Pos>(core).map(|pos| (pos.x, pos.y))?;
+        let (name, env): (String, i32) = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            let content = &runtime.content;
+            let block = self.ecs.0.get::<Building>(core).map(|b| b.block)?;
+            let name = content
+                .block(block)
+                .and_then(|def| def.core_unit)
+                .unwrap_or("alpha")
+                .to_string();
+            let env = crate::game::runtime::rules_of(&self.ecs.0).map_or(1, |rules| rules.env);
+            (name, env)
+        };
+        // `CoreBlock.requestSpawn`: bail when the unit type does not support
+        // the sector env (the caller retries on the next death timer window).
+        let supports = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            runtime
+                .content
+                .unit_by_name(&name)
+                .is_some_and(|def| def.supports_env(env))
+        };
+        if !supports {
+            return None;
+        }
+        let entity = self.spawn_player_unit(&name, team, x, y, 90.0)?;
+        // `for(mount : unit.mounts) mount.reload = mount.weapon.reload;`
+        let reloads: Vec<f32> = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map(|def| def.weapons.iter().map(|weapon| weapon.reload).collect())
+                .unwrap_or_default()
+        };
+        if let Some(mut weapons) = self.ecs.0.get_mut::<UnitWeapons>(entity) {
+            for (mount, reload) in weapons.mounts.iter_mut().zip(reloads) {
+                mount.reload = reload;
+            }
+        }
+        if let Some(mut core_comp) = self.ecs.0.get_mut::<UnitCore>(entity) {
+            core_comp.spawned_by_core = true;
+        }
+        // `unit.impulse(0, 3)`: `vel += v / mass`, `mass = hitSize^2 * PI`.
+        let hit_size = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map_or(8.0, |def| def.hit_size)
+        };
+        let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
+        if let Some(mut vel) = self.ecs.0.get_mut::<Vel>(entity) {
+            vel.y += 3.0 / mass;
+        }
+        Some(entity)
+    }
+
+    /// `PlayerComp.update` (`PlayerComp.java:214-243`): clear a dead player
+    /// unit, then respawn at the best core after `deathDelay` (60 ticks) while
+    /// the team still has a core.
+    pub fn update_player_respawn(&mut self) {
+        if let Some(entity) = self.player_unit {
+            if let Some(pos) = self.ecs.0.get::<Pos>(entity) {
+                self.player_last_pos = Some((pos.x, pos.y));
+            }
+            let gone = self.ecs.0.get_entity(entity).is_err()
+                || self
+                    .ecs
+                    .0
+                    .get::<Health>(entity)
+                    .is_none_or(|health| health.dead);
+            if gone {
+                self.player_unit = None;
+                self.player_death_timer = 0.0;
+                if self.ecs.0.get_entity(entity).is_ok() {
+                    let _ = self.ecs.0.despawn(entity);
+                }
+            }
+        }
+        if self.player_unit.is_some() {
+            self.player_death_timer = 0.0;
+            return;
+        }
+        let Some(team) = self.player_team else {
+            return;
+        };
+        if self.best_core_for_player(team).is_none() {
+            return;
+        }
+        self.player_death_timer += 1.0;
+        if self.player_death_timer >= 60.0 {
+            self.player_death_timer = 0.0;
+            let _ = self.spawn_player_at_best_core(team);
+        }
+    }
+
+    /// `InputHandler.unitControl` (`InputHandler.java:775-822`): possess an own
+    /// AI unit, moving the `Player` controller to it; a previous core-spawned
+    /// unit is despawned without death effects and its type docked.
+    pub fn possess_unit(&mut self, seq: i32) -> bool {
+        use crate::entities::comp::Player;
+        use crate::entities::comp::unit::comp::{DockedType, UnitCore};
+        let Some(team) = self.player_team else {
+            return false;
+        };
+        let target = self
+            .ecs
+            .0
+            .iter_entities()
+            .find(|entity| {
+                entity
+                    .get::<crate::ecs::EntitySeq>()
+                    .is_some_and(|s| s.0 == seq as u64)
+            })
+            .map(|entity| entity.id());
+        let Some(target) = target else {
+            return false;
+        };
+        if self.ecs.0.get::<TeamComp>(target).map(|t| t.team) != Some(team) {
+            return false;
+        }
+        if self
+            .ecs
+            .0
+            .get::<Health>(target)
+            .is_none_or(|health| health.dead)
+        {
+            return false;
+        }
+        let def = {
+            let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+                return false;
+            };
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(target)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .cloned()
+        };
+        let Some(def) = def else {
+            return false;
+        };
+        if !def.player_controllable {
+            return false;
+        }
+        if self
+            .ecs
+            .0
+            .get::<ControllerSlot>(target)
+            .is_some_and(|slot| slot.kind == AiKind::Player)
+        {
+            return false;
+        }
+        let before = self.player_unit.filter(|entity| *entity != target);
+        if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(target) {
+            slot.kind = AiKind::Player;
+            slot.target = None;
+        }
+        self.ecs.0.entity_mut(target).insert(Player);
+        self.player_unit = Some(target);
+        self.player_death_timer = 0.0;
+        if let Some(before) = before {
+            let core_spawned = self
+                .ecs
+                .0
+                .get::<UnitCore>(before)
+                .is_some_and(|core| core.spawned_by_core);
+            // `unit.dockedType = before.type` for a core spawn; otherwise carry
+            // a dockable type from the previous unit.
+            let docked = if core_spawned {
+                self.ecs
+                    .0
+                    .get::<UnitTypeComp>(before)
+                    .map(|comp| comp.type_id)
+            } else {
+                let carried = self.ecs.0.get::<DockedType>(before).map(|docked| docked.0);
+                carried.or_else(|| {
+                    self.ecs
+                        .0
+                        .get::<UnitTypeComp>(before)
+                        .map(|comp| comp.type_id)
+                        .filter(|id| {
+                            self.ecs
+                                .0
+                                .get_non_send::<UnitRuntime>()
+                                .and_then(|runtime| runtime.content.unit(*id))
+                                .is_some_and(|def| def.core_unit_dock)
+                        })
+                })
+            };
+            if let Some(id) = docked {
+                self.ecs.0.entity_mut(target).insert(DockedType(id));
+            }
+            if core_spawned {
+                // `Call.unitDespawn(before)`: removal without death effects.
+                let _ = self.ecs.0.despawn(before);
+                if let Some(mut runtime) = self.ecs.0.get_non_send_mut::<UnitRuntime>() {
+                    runtime.units.retain(|entity| *entity != before);
+                }
+            } else {
+                let before_def = {
+                    let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+                        return false;
+                    };
+                    self.ecs
+                        .0
+                        .get::<UnitTypeComp>(before)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .cloned()
+                };
+                let kind = before_def.map_or(AiKind::Ground, |def| {
+                    crate::entities::comp::unit::lifecycle::select_team_controller(
+                        &self.ecs.0,
+                        &def,
+                        team,
+                    )
+                });
+                self.ecs.0.entity_mut(before).remove::<Player>();
+                if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(before) {
+                    slot.kind = kind;
+                    slot.target = None;
+                }
+            }
+        }
+        true
+    }
+
+    /// `InputHandler.unitClear` (`InputHandler.java:824-875`): dock into the
+    /// carried core unit type when possible, otherwise release the unit and
+    /// respawn at the best core immediately.
+    pub fn clear_unit(&mut self) -> bool {
+        use crate::entities::comp::Player;
+        use crate::entities::comp::unit::comp::{DockedType, HitboxComp, UnitCore};
+        let Some(current) = self.player_unit else {
+            return false;
+        };
+        let Some(team) = self.player_team else {
+            return false;
+        };
+        let core_spawned = self
+            .ecs
+            .0
+            .get::<UnitCore>(current)
+            .is_some_and(|core| core.spawned_by_core);
+        if !core_spawned {
+            // `docked == null` -> the best core's unit type is the fallback.
+            let docked = self
+                .ecs
+                .0
+                .get::<DockedType>(current)
+                .map(|docked| docked.0)
+                .or_else(|| {
+                    let core = self.best_core_for_player(team)?;
+                    let block = self.ecs.0.get::<Building>(core).map(|build| build.block)?;
+                    let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+                    let name = runtime.content.block(block).and_then(|def| def.core_unit)?;
+                    runtime.content.unit_by_name(name).map(|def| def.id)
+                });
+            let dock_info = docked.and_then(|id| {
+                let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+                let def = runtime.content.unit(id)?;
+                def.core_unit_dock
+                    .then(|| (def.name().to_string(), def.flying, def.hit_size))
+            });
+
+            if let Some((name, dock_flying, dock_hit)) = dock_info {
+                let (px, py) = self
+                    .ecs
+                    .0
+                    .get::<Pos>(current)
+                    .map_or((0.0, 0.0), |pos| (pos.x, pos.y));
+                let rotation = self
+                    .ecs
+                    .0
+                    .get::<UnitCore>(current)
+                    .map_or(0.0, |core| core.rotation);
+                let (current_flying, current_hit) = {
+                    let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+                        return false;
+                    };
+                    let flying = self
+                        .ecs
+                        .0
+                        .get::<UnitTypeComp>(current)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .is_some_and(|def| def.flying);
+                    let hit = self
+                        .ecs
+                        .0
+                        .get::<HitboxComp>(current)
+                        .map_or(8.0, |hitbox| hitbox.hit_size);
+                    (flying, hit)
+                };
+                // Translate backwards so the docked unit is not stuck inside
+                // the possessed one (`InputHandler.java:851-854`).
+                let (sx, sy) = if current_flying && dock_flying {
+                    let rad = (rotation + 180.0).to_radians();
+                    let len = current_hit / 2.0 + dock_hit / 2.0;
+                    (px + rad.cos() * len, py + rad.sin() * len)
+                } else {
+                    (px, py)
+                };
+                let Some(entity) = self.spawn_player_unit(&name, team, sx, sy, rotation) else {
+                    return false;
+                };
+                if let Some(mut core_comp) = self.ecs.0.get_mut::<UnitCore>(entity) {
+                    core_comp.spawned_by_core = true;
+                }
+                return true;
+            }
+        }
+        // Standard respawn: release the unit to AI, then `player.checkSpawn()`.
+        let def = {
+            let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+                return false;
+            };
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(current)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .cloned()
+        };
+        let kind = def.map_or(AiKind::Ground, |def| {
+            crate::entities::comp::unit::lifecycle::select_team_controller(&self.ecs.0, &def, team)
+        });
+        self.ecs.0.entity_mut(current).remove::<Player>();
+        if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(current) {
+            slot.kind = kind;
+            slot.target = None;
+        }
+        self.player_unit = None;
+        let _ = self.spawn_player_at_best_core(team);
+        true
     }
 
     /// The controlled player unit entity, if any.
     pub fn player_unit(&self) -> Option<Entity> {
         self.player_unit
+    }
+
+    /// Debug seam (G01 T19): apply a status by name to a unit selected by
+    /// `EntitySeq`; returns false for unknown id/status/entity.
+    pub fn debug_apply_status(&mut self, seq: i64, status: &str, ticks: f32) -> bool {
+        let Some(status_id) = self
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.status_id(status))
+        else {
+            return false;
+        };
+        let target = self
+            .ecs
+            .0
+            .iter_entities()
+            .find(|entity| {
+                entity
+                    .get::<crate::ecs::EntitySeq>()
+                    .is_some_and(|s| s.0 == seq as u64)
+            })
+            .map(|entity| entity.id());
+        let Some(target) = target else {
+            return false;
+        };
+        crate::combat::damage::status::apply_status(&mut self.ecs.0, target, status_id, ticks);
+        true
+    }
+
+    /// `boss_json` seam (G01 T19): `Teams.bosses`/`GameState.boss()` for the
+    /// HUD boss bar (G03 T9) and the `guardian` hint (G05).
+    pub fn boss_json(&self) -> String {
+        use crate::content::ctype::Mappable;
+        use crate::entities::comp::unit::comp::{StatusComp, UnitTypeComp};
+        let bosses = self.bosses();
+        let runtime = self.unit_runtime();
+        let mut names: Vec<String> = Vec::new();
+        let mut health_sum = 0.0f32;
+        let mut max_sum = 0.0f32;
+        let mut first: Option<serde_json::Value> = None;
+        for (index, &entity) in bosses.iter().enumerate() {
+            let def = runtime.and_then(|runtime| {
+                self.ecs
+                    .0
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id))
+            });
+            let name = def.map(|def| def.name().to_string()).unwrap_or_default();
+            if index < 6 {
+                names.push(name.clone());
+            }
+            let health = self.ecs.0.get::<Health>(entity).copied();
+            health_sum += health.map_or(0.0, |h| h.health.max(0.0));
+            max_sum += health.map_or(0.0, |h| h.max_health);
+            if index == 0 {
+                let armor_override = self
+                    .ecs
+                    .0
+                    .get::<StatusComp>(entity)
+                    .map(|status| status.armor_override);
+                let armor = armor_override
+                    .filter(|value| *value >= 0.0)
+                    .unwrap_or_else(|| def.map_or(0.0, |def| def.armor));
+                first = Some(serde_json::json!({
+                    "id": self.ecs.0.get::<crate::ecs::EntitySeq>(entity).map_or(0, |seq| seq.0),
+                    "type": name,
+                    "armor": armor,
+                    "flying": crate::combat::bullet::unit_is_flying(&self.ecs.0, entity),
+                    "health": health.map_or(0.0, |h| h.health),
+                    "max_health": health.map_or(0.0, |h| h.max_health),
+                }));
+            }
+        }
+        let value = if max_sum > 0.0 {
+            health_sum / max_sum
+        } else {
+            0.0
+        };
+        serde_json::json!({
+            "count": bosses.len(),
+            "names": names,
+            "value": value,
+            "first": first,
+        })
+        .to_string()
+    }
+
+    /// `Teams.bosses` (`Teams.java:213-223`): live wave-team units with the
+    /// `boss` status, in `EntitySeq` order.
+    pub fn bosses(&self) -> Vec<Entity> {
+        let Some(runtime) = self.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(boss) = runtime.content.status_id("boss") else {
+            return Vec::new();
+        };
+        let wave_team = crate::game::runtime::rules_of(&self.ecs.0)
+            .map_or(runtime.wave_team, |rules| rules.wave_team);
+        let mut bosses: Vec<(u64, Entity)> = Vec::new();
+        for &entity in &runtime.units {
+            if self.ecs.0.get_entity(entity).is_err() {
+                continue;
+            }
+            if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(wave_team) {
+                continue;
+            }
+            if self
+                .ecs
+                .0
+                .get::<Health>(entity)
+                .is_none_or(|health| health.dead)
+            {
+                continue;
+            }
+            let has_boss = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+                .is_some_and(|statuses| statuses.statuses.iter().any(|entry| entry.effect == boss));
+            if !has_boss {
+                continue;
+            }
+            let seq = self
+                .ecs
+                .0
+                .get::<crate::ecs::EntitySeq>(entity)
+                .map_or(u64::MAX, |seq| seq.0);
+            bosses.push((seq, entity));
+        }
+        bosses.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+        bosses.into_iter().map(|(_, entity)| entity).collect()
     }
 
     /// World-pixel position of the player unit (`Player.x/y` mirror).
@@ -1145,6 +1664,20 @@ pub fn unit_update_system(world: &mut World) {
             .get::<TeamComp>(entity)
             .map(|team| team.team)
             .unwrap_or(0);
+
+        // `UnitComp.update` (`UnitComp.java:869-871`): remove units spawned by
+        // the core that are not player-controlled.
+        if world
+            .get::<crate::entities::comp::unit::comp::UnitCore>(entity)
+            .is_some_and(|core| core.spawned_by_core)
+            && slot.kind != AiKind::Player
+            && !world
+                .get::<crate::entities::comp::Health>(entity)
+                .is_none_or(|health| health.dead)
+        {
+            let _ = world.despawn(entity);
+            continue;
+        }
 
         if slot.kind == AiKind::Player {
             // `Player` possession: the host-uploaded axis drives the unit

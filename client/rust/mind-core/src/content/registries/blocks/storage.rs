@@ -42,6 +42,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         destructible: Some(true),
         always_unlocked: Some(true),
+        core_unit: Some("alpha"),
         ..spec("core-shard", BlockKind::CoreBlock)
     })?;
 
@@ -65,6 +66,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         destructible: Some(true),
+        core_unit: Some("beta"),
         ..spec("core-foundation", BlockKind::CoreBlock)
     })?;
 
@@ -89,6 +91,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         destructible: Some(true),
+        core_unit: Some("gamma"),
         ..spec("core-nucleus", BlockKind::CoreBlock)
     })?;
 
@@ -115,6 +118,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         destructible: Some(true),
         always_unlocked: Some(true),
+        core_unit: Some("evoke"),
         ..spec("core-bastion", BlockKind::CoreBlock)
     })?;
 
@@ -142,6 +146,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         destructible: Some(true),
+        core_unit: Some("incite"),
         ..spec("core-citadel", BlockKind::CoreBlock)
     })?;
 
@@ -170,6 +175,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         destructible: Some(true),
+        core_unit: Some("emanate"),
         ..spec("core-acropolis", BlockKind::CoreBlock)
     })?;
 

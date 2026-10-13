@@ -41,7 +41,11 @@ pub const PLACE_INTERVAL_MIN: f32 = 12.0 * 60.0;
 pub const PLACE_INTERVAL_MAX: f32 = 2.0 * 60.0;
 /// Path trace steps per update (`pathStep`).
 pub const PATH_STEP: usize = 50;
-/// Placement scatter radius in world pixels (`range`).
+/// Placement scatter radius in tiles (`range`).
+///
+/// Upstream scatters in TILE units (`World.toTile(pos) + Tmp.v1`,
+/// `BaseBuilderAI.java:159-160`); the offset from the core can be up to 150
+/// tiles (the map clamp makes edge tiles common).
 pub const PLACE_RANGE: f32 = 150.0;
 
 const TIMER_STEP: usize = 0;
@@ -251,15 +255,16 @@ impl BaseBuilderAi {
                 let Some(pos) = Self::random_position(input) else {
                     return actions;
                 };
-                let angle = input.rng.next_float() * std::f32::consts::TAU;
-                let len = input.rng.random_float(PLACE_RANGE);
-                // Upstream scatters in WORLD pixels around the core
-                // (`world.tile(pos.x + trnsx(angle, len), ...)`); the port
-                // previously added pixel lengths to tile indices (PAR-0139).
-                let ts = crate::config::TILESIZE as f32;
-                let wx = (pos.x() as f32 + 0.5) * ts + angle.cos() * len;
-                let wy = (pos.y() as f32 + 0.5) * ts + angle.sin() * len;
-                let tile = input.grid.tiles.getc((wx / ts) as i32, (wy / ts) as i32);
+                // Java scatters in TILE units (`World.toTile(pos) + Tmp.v1`,
+                // BaseBuilderAI.java:159-160): `Tmp.v1.rnd(Mathf.random(150))`
+                // draws the integer length FIRST (`rand.nextInt(151)`), then the
+                // angle (`Vec2.setToRandomDirection`), and adds the offset to
+                // the core's tile position before the `(int)` truncation.
+                let len = input.rng.random_inclusive(PLACE_RANGE as i32) as f32;
+                let theta = input.rng.random_range_float(0.0, std::f32::consts::TAU);
+                let wx = (pos.x() as f32 + theta.cos() * len) as i32;
+                let wy = (pos.y() as f32 + theta.sin() * len) as i32;
+                let tile = input.grid.tiles.getc(wx, wy);
                 let tx = tile.x as i32;
                 let ty = tile.y as i32;
 
@@ -272,19 +277,24 @@ impl BaseBuilderAi {
                     continue;
                 }
 
-                let parts = if let Some(item) = tile_drop(tile, input.content) {
-                    input.bases.for_resource(BaseResource::Item(item))
-                } else if input.rng.chance(EMPTY_CHANCE) {
-                    &input.bases.parts
-                } else {
-                    continue;
-                };
+                // Part selection (BaseBuilderAI.java:175-186): the ore drop's
+                // part list wins only when it is non-empty; otherwise
+                // `Mathf.chance(emptyChance)` = `rand.nextFloat() < 0.01` picks
+                // the generic list. A failed guard draw falls through to the
+                // empty chance, like the Java `else if`.
+                let drop = tile_drop(tile, input.content);
+                let parts =
+                    match drop.map(|item| input.bases.for_resource(BaseResource::Item(item))) {
+                        Some(parts) if !parts.is_empty() => parts,
+                        _ if input.rng.next_float() < EMPTY_CHANCE as f32 => &input.bases.parts,
+                        _ => continue,
+                    };
                 if parts.is_empty() {
                     continue;
                 }
 
                 let index = input.rng.next_int_bound(parts.len() as i32) as usize;
-                let rotation = input.rng.next_int_bound(2);
+                let rotation = input.rng.range_int(2);
                 let part = &parts[index];
                 if self.try_place(part, tx, ty, rotation, input, plans) {
                     actions.queued_plan = true;
@@ -786,5 +796,84 @@ mod tests {
         }
         assert!(!plans.is_empty(), "base builder queued a plan");
         assert_eq!(plans[0].block, wall);
+    }
+
+    /// Java scatters candidate positions by up to 150 **tiles**
+    /// (`BaseBuilderAI.java:159-160`, `Tmp.v1.rnd(Mathf.random(150))` added to
+    /// the core's tile position). The pixel-scatter regression capped the
+    /// offset at 150 px = 18.75 tiles, so a plan more than 40 tiles away from
+    /// the core is impossible unless the scatter is in tiles.
+    #[test]
+    fn base_builder_scatter_reaches_far_tiles() {
+        let registry = content();
+        let mut harness = BuildHarness::new(200, 200, 13);
+        let wall = registry.block_id("copper-wall").unwrap();
+        let source = registry.block_id("item-source").unwrap();
+        let copper = registry.item_by_name("copper").unwrap().id;
+        // Required part: the wall plus a copper item source (registers it in
+        // `bases.for_resource(BaseResource::Item(copper))`).
+        let schem = Schematic::from_tiles(
+            vec![
+                Stile::new(wall, 0, 0, ConfigValue::None, 0),
+                Stile::new(source, 1, 0, ConfigValue::Item(copper), 0),
+            ],
+            IndexMap::new(),
+            2,
+            1,
+        );
+        let mut bases = BaseRegistry::new();
+        bases.load(&registry, vec![schem]);
+
+        // Copper ore everywhere: every scattered tile has a matching drop.
+        let ore = registry.block_id("ore-copper").unwrap();
+        for y in 0..200 {
+            for x in 0..200 {
+                harness.grid.tiles.get_mut(x, y).floor = ore;
+            }
+        }
+
+        // `buildAiTier 1.0` -> the placement interval lerps to `PLACE_INTERVAL_MAX` (120 ticks).
+        let team_rule = TeamRule {
+            build_ai_tier: 1.0,
+            ..TeamRule::default()
+        };
+        let rules = Rules::default();
+        let cores = [TilePos::new(100, 100)];
+        let spawns: [TilePos; 0] = [];
+        let mut builder = BaseBuilderAi::new();
+        let mut rng = ArcRand::new(13);
+        let mut planned_x: Vec<i32> = Vec::new();
+
+        for _ in 0..120 * 60 {
+            let mut plans = VecDeque::new();
+            let mut input = BaseBuildInput {
+                content: &harness.content,
+                grid: &harness.grid,
+                table: harness.table(),
+                build_rules: &harness.rules,
+                counter: &harness.counter,
+                team_rule: &team_rule,
+                rules: &rules,
+                team: 0,
+                cores: &cores,
+                spawns: &spawns,
+                enemy_core_field: None,
+                enemy_cores: &[],
+                core_unit_count: 0,
+                bases: &bases,
+                rng: &mut rng,
+            };
+            let _ = builder.update(&mut input, &mut plans);
+            for plan in &plans {
+                planned_x.push(plan.x as i32);
+            }
+        }
+
+        assert!(!planned_x.is_empty(), "base builder queued no plans at all");
+        assert!(
+            planned_x.iter().any(|x| (*x - 100).abs() > 40),
+            "tile-unit scatter must reach beyond 40 tiles from the core \
+             (pixel scatter capped at 150/8 = 18.75); plans: {planned_x:?}"
+        );
     }
 }

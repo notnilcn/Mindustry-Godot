@@ -612,6 +612,11 @@ impl MindSimHost {
                     y: fy as f32,
                 }
             }
+            // `InputHandler.unitControl`/`unitClear` (G01 T9).
+            "unit_control" => SimCommand::UnitControl {
+                unit: value.get("unit").and_then(|v| v.as_i64()).map(|v| v as i32),
+            },
+            "unit_clear" => SimCommand::UnitClear,
             other => {
                 log::warn!("apply_sim_command_json: unsupported op `{other}`");
                 return false;
@@ -642,6 +647,21 @@ impl MindSimHost {
     #[func]
     pub fn unit_debug_json(&self) -> GString {
         GString::from(self.sim.unit_debug_json().as_str())
+    }
+
+    /// `Teams.bosses`/`GameState.boss()` seam (G01 T19): G03's boss bar reads
+    /// count/names/value, G05's guardian hint reads `first`.
+    #[func]
+    pub fn boss_json(&self) -> GString {
+        GString::from(self.sim.boss_json().as_str())
+    }
+
+    /// Debug seam (G01 T19): apply a status by name to a unit by `EntitySeq`
+    /// (`apply_sim_command_json` has no status op).
+    #[func]
+    pub fn debug_apply_status(&mut self, seq: i64, status: GString, ticks: f64) -> bool {
+        self.sim
+            .debug_apply_status(seq, &status.to_string(), ticks as f32)
     }
 
     /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).
@@ -1914,21 +1934,17 @@ impl MindSimHost {
         if self.sim.player_unit_position().is_some() {
             return true;
         }
-        let Some((x, y)) = self.best_core_position_px() else {
-            log::warn!("spawn_player_unit: no core in the loaded sector");
-            return false;
-        };
         // `CoreBlock.playerSpawn` spawns on `rules.defaultTeam`
-        // (`Team.sharded` = 1 for the campaign, not `TeamId::SHARDED`).
+        // (`Team.sharded` = 1 for the campaign, not `TeamId::SHARDED`) with
+        // the best core's `unitType` (`CoreBlock.java:95-125`).
         let team = self
             .last_sector_rules()
             .map_or(1, |rules| rules.default_team);
-        let spawned = self
-            .sim
-            .spawn_player_unit("alpha", team, x, y, 90.0)
-            .is_some();
+        let spawned = self.sim.spawn_player_at_best_core(team).is_some();
         if spawned {
-            log::info!("spawn_player_unit: alpha team {team} at ({x:.1}, {y:.1})");
+            log::info!("spawn_player_unit: core unit team {team} spawned");
+        } else {
+            log::warn!("spawn_player_unit: no supported core in the loaded sector");
         }
         spawned
     }

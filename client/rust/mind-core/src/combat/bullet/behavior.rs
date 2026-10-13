@@ -39,13 +39,13 @@ pub trait BulletBehavior: Sync + 'static {
         &self,
         ctx: &mut CombatCtx<'_>,
         b: Entity,
-        _build: Entity,
+        build: Entity,
         x: f32,
         y: f32,
-        _initial_health: f32,
-        _direct: bool,
+        initial_health: f32,
+        direct: bool,
     ) {
-        super::hit_bullet(ctx, b, x, y, true);
+        super::hit_tile(ctx, b, build, x, y, initial_health, direct);
     }
 
     /// `BulletType.despawned(Bullet)`.
@@ -122,6 +122,7 @@ pub fn behavior_for(kind: BulletKind) -> &'static dyn BulletBehavior {
         K::Liquid | K::SpaceLiquid => &super::kinds::liquid::LIQUID,
         K::Fire => &super::kinds::fire::FIRE,
         K::Laser => &super::kinds::laser::LASER,
+        K::Rail => &super::kinds::rail::RAIL,
         _ => &BASE,
     }
 }

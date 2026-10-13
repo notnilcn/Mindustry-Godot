@@ -228,6 +228,14 @@ impl CampaignRuntime {
     }
 }
 
+/// Live match rules from a world, or `None` in test/harness worlds without a
+/// [`CampaignRuntime`] (combat multipliers are 1.0 there).
+pub fn rules_of(world: &World) -> Option<&Rules> {
+    world
+        .get_resource::<CampaignRuntime>()
+        .map(|runtime| &runtime.session.rules)
+}
+
 /// Registers the live world's core buildings into the session team registry and
 /// reports the spawn accounting. `map_spawns` is the loaded map's enemy
 /// spawn-point count (0 when the map has none).

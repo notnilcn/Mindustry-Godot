@@ -112,6 +112,41 @@ pub fn collide_line(
     (first, total)
 }
 
+/// `Geometry.raycastRect` (`ARC/arc-core/src/arc/math/geom/Geometry.java:310-339`):
+/// slab test, returns the segment's entry point into the rect or `None`.
+#[allow(clippy::too_many_arguments)]
+pub fn raycast_rect(
+    startx: f32,
+    starty: f32,
+    endx: f32,
+    endy: f32,
+    x: f32,
+    y: f32,
+    halfx: f32,
+    halfy: f32,
+) -> Option<(f32, f32)> {
+    let deltax = endx - startx;
+    let deltay = endy - starty;
+    let scale_x = 1.0 / deltax;
+    let scale_y = 1.0 / deltay;
+    let sign_x: f32 = if scale_x < 0.0 { -1.0 } else { 1.0 };
+    let sign_y: f32 = if scale_y < 0.0 { -1.0 } else { 1.0 };
+    let near_time_x = (x - sign_x * halfx - startx) * scale_x;
+    let near_time_y = (y - sign_y * halfy - starty) * scale_y;
+    let far_time_x = (x + sign_x * halfx - startx) * scale_x;
+    let far_time_y = (y + sign_y * halfy - starty) * scale_y;
+    if near_time_x > far_time_y || near_time_y > far_time_x {
+        return None;
+    }
+    let near_time = near_time_x.max(near_time_y);
+    let far_time = far_time_x.min(far_time_y);
+    if near_time >= 1.0 || far_time <= 0.0 {
+        return None;
+    }
+    let t = near_time.clamp(0.0, 1.0);
+    Some((startx + t * deltax, starty + t * deltay))
+}
+
 /// `Damage.findLength`: distance along the ray to the first building.
 pub fn find_length(
     grid: &WorldGrid,

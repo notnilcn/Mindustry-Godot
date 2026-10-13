@@ -915,6 +915,19 @@ fn factory_output() -> Result<ScenarioOutput> {
         items.add(silicon, 40, 60);
         items.add(lead, 40, 60);
     }
+    // `UnitFactory.updateTile` only advances when `efficiency > 0`
+    // (`UnitFactory.java:406`, the port gates through `edelta`). The harness has
+    // no power graph, so mark the consumer satisfied as
+    // `PowerGraph.distributePower` would (same as the
+    // `placed_factory_produces_unit_through_update_buildings` unit test).
+    if let Some(mut power) =
+        harness
+            .build
+            .world
+            .get_mut::<mind_core::world::modules::PowerModule>(entity)
+    {
+        power.status = 1.0;
+    }
     let count_units = |world: &bevy_ecs::world::World| {
         world
             .iter_entities()

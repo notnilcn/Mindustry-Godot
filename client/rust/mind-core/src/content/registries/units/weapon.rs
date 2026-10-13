@@ -752,7 +752,15 @@ impl WeaponDef {
                 def.use_attack_range = false;
                 // `bullet = new BulletType()` is emitted inline by the generator.
             }
-            WeaponKind::PointDefenseWeapon => {}
+            WeaponKind::PointDefenseWeapon => {
+                // `PointDefenseWeapon.java:33-40`.
+                def.predict_target = false;
+                def.auto_target = true;
+                def.controllable = false;
+                def.rotate = true;
+                def.use_attack_range = false;
+                def.target_interval = 10.0;
+            }
             WeaponKind::PointDefenseBulletWeapon => {
                 def.auto_target = true;
                 def.controllable = false;
@@ -762,6 +770,7 @@ impl WeaponDef {
                 def.target_switch_interval = 5.0;
             }
             WeaponKind::RepairBeamWeapon => {
+                // `RepairBeamWeapon.java:52-64`.
                 def.reload = 1.0;
                 def.predict_target = false;
                 def.auto_target = true;
@@ -769,6 +778,8 @@ impl WeaponDef {
                 def.rotate = true;
                 def.heal_beam_mount = true;
                 def.recoil = 0.0;
+                def.no_attack = true;
+                def.use_attack_range = false;
             }
         }
         // Spec overrides.

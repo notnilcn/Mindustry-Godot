@@ -12,6 +12,7 @@
 
 pub mod behavior;
 pub mod kinds;
+pub mod line_hit;
 pub mod raycast;
 pub mod spawn;
 
@@ -21,7 +22,7 @@ use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
 use crate::audio::{AudioSinkRes, sim as audio_sim};
-use crate::content::{BulletId, ContentRegistry};
+use crate::content::{BlockKind, BulletId, ContentRegistry};
 use crate::determinism::{RngStream, SimRng};
 use crate::ecs::BuildingComp;
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
@@ -29,6 +30,7 @@ use crate::fx::TrailChannelId;
 use crate::world::WorldGrid;
 
 pub use behavior::{BulletBehavior, behavior_for};
+pub use line_hit::{collide_line_bullet, linecast_enemy};
 pub use spawn::{BulletSpawn, create};
 
 /// Bullet flag: `keepAlive` was requested (lifetime extension).
@@ -543,6 +545,68 @@ pub fn hit_building(ctx: &mut CombatCtx<'_>, bullet: Entity, target: Entity) -> 
     applied
 }
 
+/// `BulletType.hitTile` (`BulletType.java:465-486`): create a fire on enemy
+/// hits, heal friendly non-construct buildings, or run the `hit` pipeline for
+/// direct enemy hits. Pierce bookkeeping stays in the callers
+/// (`collide_bullet`/`collide_line_bullet`).
+pub(crate) fn hit_tile(
+    ctx: &mut CombatCtx<'_>,
+    bullet: Entity,
+    target: Entity,
+    x: f32,
+    y: f32,
+    _initial_health: f32,
+    direct: bool,
+) {
+    let Some(state) = ctx.bullet(bullet).cloned() else {
+        return;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return;
+    };
+    let bullet_team = ctx.team(bullet);
+    let target_team = ctx
+        .world
+        .get::<TeamComp>(target)
+        .map_or(bullet_team, |t| t.team);
+    let same_team = target_team == bullet_team;
+    let (make_fire, heals, heal_percent, heal_amount) = (
+        def.make_fire,
+        def.heals(),
+        def.heal_percent,
+        def.heal_amount,
+    );
+    if make_fire && !same_team {
+        // `Fires.create(build.tile)`.
+        let tile = ctx
+            .world
+            .get::<crate::entities::comp::Building>(target)
+            .map(|build| build.tile);
+        if let Some(tile) = tile {
+            let _ = crate::combat::fires::create(ctx.world, tile.x(), tile.y(), ctx.rng);
+        }
+    }
+    let construct = ctx
+        .world
+        .get::<crate::entities::comp::Building>(target)
+        .and_then(|build| ctx.content.block(build.block))
+        .is_some_and(|block| block.kind == BlockKind::ConstructBlock);
+    if heals && same_team && !construct {
+        let max_health = ctx
+            .world
+            .get::<Health>(target)
+            .map_or(0.0, |health| health.max_health);
+        super::damage::area::heal_health(
+            ctx.world,
+            target,
+            heal_percent / 100.0 * max_health + heal_amount,
+        );
+        behavior_hit(ctx, bullet, x, y, true);
+    } else if !same_team && direct {
+        behavior_hit(ctx, bullet, x, y, true);
+    }
+}
+
 /// `BulletType.hit` effect pipeline (frags/splash; kind-specific overrides via
 /// [`BulletBehavior::hit`]).
 pub(crate) fn hit_bullet(
@@ -586,7 +650,13 @@ pub(crate) fn hit_bullet(
 }
 
 /// Calls the kind-specific `BulletType.hit` override (or the base pipeline).
-fn behavior_hit(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32, create_frags: bool) {
+pub(crate) fn behavior_hit(
+    ctx: &mut CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    create_frags: bool,
+) {
     let Some(kind) = ctx
         .bullet(bullet)
         .and_then(|state| ctx.content.bullet(state.def))
@@ -954,12 +1024,14 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
                 .get::<Health>(target)
                 .map(|h| h.health)
                 .unwrap_or(0.0);
-            hit_building(ctx, bullet, target);
-            // Direct enemy hit runs the effect pipeline (splash/frags).
+            let (hit_x, hit_y) = ctx.pos(bullet).unwrap_or(state.last);
             if !same_team {
-                let (x, y) = ctx.pos(bullet).unwrap_or(state.last);
-                behavior_hit(ctx, bullet, x, y, true);
+                hit_building(ctx, bullet, target);
             }
+            // `BulletType.hitTile` (`BulletType.java:465-486`): enemy direct
+            // hits run the effect pipeline, friendly heals apply, pierce stays
+            // below.
+            hit_tile(ctx, bullet, target, hit_x, hit_y, initial_health, true);
             if pierce_building {
                 let sub = if pierce_damage_factor == 0.0 {
                     0.0
@@ -1028,9 +1100,16 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
         {
             let same_team = ctx.world.get::<TeamComp>(target).map(|t| t.team) == Some(bullet_team);
             if !same_team || collide_team {
-                hit_building(ctx, bullet, target);
+                let initial_health = ctx
+                    .world
+                    .get::<Health>(target)
+                    .map(|h| h.health)
+                    .unwrap_or(0.0);
                 let (x, y) = ctx.pos(bullet).unwrap_or(state.last);
-                behavior_hit(ctx, bullet, x, y, true);
+                if !same_team {
+                    hit_building(ctx, bullet, target);
+                }
+                hit_tile(ctx, bullet, target, x, y, initial_health, true);
                 if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
                     b.set(HIT);
                 }
@@ -1048,7 +1127,7 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
 /// (`aimTile.build == build`), its def sets `hitUnder`, the building is
 /// friendly, a piercing bullet has already overshot its aim tile, or the bullet
 /// had no aim at all.
-fn passes_under_build(
+pub(crate) fn passes_under_build(
     ctx: &CombatCtx<'_>,
     state: &Bullet,
     bullet: Entity,
@@ -1552,7 +1631,10 @@ mod tests {
         for x in 12..=14 {
             assert!(harness.place(x, 8, wall, 0, true));
         }
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds, so spawn on the tile corner (`y = 8 * 8`) to
+        // keep the beam inside row 8; a tile-centre y (68) rounds up to row 9.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let _ = harness.spawn_bullet("rail", x, y, 0.0, 1).expect("spawn");
         for _ in 0..80 {
             harness.tick();
@@ -1607,13 +1689,67 @@ mod tests {
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(12, 8, wall, 0, true));
         let before = harness.building_health_at(12, 8);
-        let (x, y) = CombatHarness::tile_center(6, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(6, 8);
+        let y = 8.0 * 8.0;
         let e = harness.spawn_bullet("laser", x, y, 0.0, 1).expect("spawn");
         assert!(
             harness.building_health_at(12, 8) < before,
             "laser dealt damage on spawn"
         );
         assert!(!bullet_alive(&harness.build.world, e));
+    }
+
+    /// G01 T4: `BulletType.hitTile` heals a friendly building by
+    /// `healPercent / 100 * maxHealth + healAmount` (nova's bolt shape).
+    #[test]
+    fn heal_bolt_heals_friendly_wall() {
+        use crate::entities::comp::{Health, TeamComp};
+
+        let mut harness = CombatHarness::new(32, 16, 4);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(10, 8, wall, 0, true));
+        let wall_entity = harness.build_at(10, 8).expect("wall entity");
+        // Harness buildings default to team 0; make the wall friendly to the
+        // team-1 bolt.
+        if let Some(mut team) = harness.build.world.get_mut::<TeamComp>(wall_entity) {
+            team.team = 1;
+        }
+        if let Some(mut health) = harness.build.world.get_mut::<Health>(wall_entity) {
+            health.health = 100.0;
+        }
+        let (x, y) = CombatHarness::tile_center(6, 8);
+        let _ = harness
+            .spawn_bullet("heal_bolt", x, y, 0.0, 1)
+            .expect("spawn");
+        for _ in 0..30 {
+            harness.step_bullets_only();
+        }
+        assert_eq!(
+            harness.building_health_at(10, 8),
+            116.0,
+            "healed by 5% of the 320 max health"
+        );
+    }
+
+    /// G01 T4: an enemy wall takes the bolt's raw damage instead.
+    #[test]
+    fn heal_bolt_damages_enemy_wall() {
+        let mut harness = CombatHarness::new(32, 16, 4);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(10, 8, wall, 0, true));
+        let (x, y) = CombatHarness::tile_center(6, 8);
+        let _ = harness
+            .spawn_bullet("heal_bolt", x, y, 0.0, 1)
+            .expect("spawn");
+        for _ in 0..30 {
+            harness.step_bullets_only();
+        }
+        assert_eq!(
+            harness.building_health_at(10, 8),
+            320.0 - 13.0,
+            "enemy wall takes the bolt damage"
+        );
     }
 
     #[test]
@@ -1736,7 +1872,9 @@ mod tests {
         let wall = wall(&harness);
         assert!(harness.place(10, 8, wall, 0, true));
         let before = harness.building_health_at(10, 8);
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let e = harness.spawn_bullet("sap", x, y, 0.0, 1).expect("spawn");
         assert!(harness.building_health_at(10, 8) < before, "sap damaged");
         assert!(!bullet_alive(&harness.build.world, e));
@@ -1748,7 +1886,9 @@ mod tests {
         let wall = wall(&harness);
         assert!(harness.place(8, 8, wall, 0, true));
         assert!(harness.place(10, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let _ = harness
             .spawn_bullet("shrapnel", x, y, 0.0, 1)
             .expect("spawn");
@@ -1790,7 +1930,9 @@ mod tests {
         let mut harness = CombatHarness::new(32, 16, 7);
         let wall = wall(&harness);
         assert!(harness.place(10, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let _ = harness
             .spawn_bullet("continuous", x, y, 0.0, 1)
             .expect("spawn");

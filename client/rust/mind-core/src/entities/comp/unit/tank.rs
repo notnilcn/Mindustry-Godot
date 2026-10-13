@@ -167,14 +167,17 @@ fn apply_crush(
             }
             let tile = grid.tile(tx, ty);
             if let Some(build) = tile.build {
-                if world.get::<TeamComp>(build).map(|comp| comp.team) != Some(team)
-                    && let Some(mut health) = world.get_mut::<Health>(build)
-                {
+                if world.get::<TeamComp>(build).map(|comp| comp.team) != Some(team) {
                     let multiplier = content
                         .block(tile.block)
                         .map(|def| def.crush_damage_multiplier)
                         .unwrap_or(1.0);
-                    health.health -= unit_def.crush_damage * multiplier;
+                    // `TankComp:92`/`CrawlComp:82`: `* rules.unitDamage(team)`.
+                    let rules_multiplier = crate::game::runtime::rules_of(world)
+                        .map_or(1.0, |rules| rules.unit_damage(team));
+                    if let Some(mut health) = world.get_mut::<Health>(build) {
+                        health.health -= unit_def.crush_damage * multiplier * rules_multiplier;
+                    }
                 }
             } else if tile.block != BlockId::AIR
                 && content

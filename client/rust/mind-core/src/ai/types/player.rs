@@ -235,8 +235,13 @@ fn update_mining(
         set_mining(world, entity, None, false);
         return;
     }
-    // `rate = Time.delta * mineSpeed`; threshold `50 + hardness*15` or `50+15`.
-    input.mine_timer += def.mine_speed.max(0.0);
+    // `rate = Time.delta * mineSpeed * rules.unitMineSpeed(team)`; threshold
+    // `50 + hardness*15` or `50+15`.
+    let mine_speed_multiplier = {
+        let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+        crate::game::runtime::rules_of(world).map_or(1.0, |rules| rules.unit_mine_speed(team))
+    };
+    input.mine_timer += def.mine_speed.max(0.0) * mine_speed_multiplier;
     let threshold = 50.0
         + if def.mine_hardness_scaling {
             hardness as f32 * 15.0

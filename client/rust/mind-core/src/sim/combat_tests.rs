@@ -1741,3 +1741,497 @@ fn live_combat_emits_fx_on_the_installed_sink() {
     }
     assert!(events > 0, "combat emitted no FxSink events");
 }
+
+/// G01 T3: a team-1 `quasar` beam (`LaserBulletType`, `Damage.collideLine`)
+/// kills a team-2 dagger 100 px away. Needs T2's range fix (146 >= 100).
+#[test]
+fn quasar_laser_kills_dagger() {
+    let mut sim = live_sim(48);
+    let _quasar = sim
+        .spawn_live_unit("quasar", 1, 100.0, 100.0, 0.0)
+        .expect("quasar");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 200.0, 100.0, 180.0)
+        .expect("dagger");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+    }
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "quasar beam killed the dagger; health {:?}",
+        health(&sim, dagger)
+    );
+}
+
+/// G01 T3: a team-1 `locus` rail (`RailBulletType.init` -> `Damage.collideLine`)
+/// kills a team-2 dagger 120 px away.
+#[test]
+fn locus_rail_kills_dagger() {
+    let mut sim = live_sim(48);
+    let _locus = sim
+        .spawn_live_unit("locus", 1, 100.0, 100.0, 0.0)
+        .expect("locus");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 220.0, 100.0, 180.0)
+        .expect("dagger");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+    }
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "locus rail killed the dagger; health {:?}",
+        health(&sim, dagger)
+    );
+}
+
+/// G01 T3: `RailBulletType.handlePierce` drains the rail's damage by
+/// `initialHealth * pierceDamageFactor` after the first pierce, so only the
+/// first dagger in the line takes the full 48 damage.
+#[test]
+fn rail_pierces_units_with_damage_falloff() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(48);
+    let mut daggers = Vec::new();
+    for x in [140.0, 160.0, 180.0] {
+        let dagger = sim
+            .spawn_live_unit("dagger", 2, x, 100.0, 180.0)
+            .expect("dagger");
+        if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(dagger) {
+            slot.kind = AiKind::NoAi;
+        }
+        daggers.push(dagger);
+    }
+    let locus = sim
+        .spawn_live_unit("locus", 1, 100.0, 100.0, 0.0)
+        .expect("locus");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(locus) {
+        slot.kind = AiKind::NoAi;
+    }
+    // Force one shot straight east (`WeaponsComp` aim + shoot).
+    if let Some(mut weapons) = sim.ecs.0.get_mut::<crate::weapons::UnitWeapons>(locus) {
+        let mount = &mut weapons.mounts[0];
+        mount.aim_x = 300.0;
+        mount.aim_y = 100.0;
+        mount.rotate = true;
+        mount.rotation = 0.0;
+        mount.shoot = true;
+    }
+    // Read the weapon bullet's damage/falloff from content directly.
+    let (rail_damage, pierce_factor) = {
+        let rt = sim.unit_runtime().expect("rt");
+        let unit = rt.content.unit_by_name("locus").expect("locus def").clone();
+        let bullet = rt
+            .content
+            .bullet(unit.weapons[0].bullet.id)
+            .expect("rail bullet");
+        (bullet.damage, bullet.pierce_damage_factor)
+    };
+    let before: Vec<f32> = daggers
+        .iter()
+        .map(|d| health(&sim, *d).expect("dagger health"))
+        .collect();
+    let mut fired = 0;
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+        fired = sim.unit_runtime().expect("rt").bullets_created;
+        if fired > 0 {
+            break;
+        }
+    }
+    assert!(fired > 0, "locus fired its rail");
+    let after: Vec<f32> = daggers
+        .iter()
+        .map(|d| health(&sim, *d).unwrap_or(0.0))
+        .collect();
+    let health = before[0];
+    let second = (rail_damage - pierce_factor * health).max(0.0);
+    assert_eq!(
+        before[0] - after[0],
+        rail_damage,
+        "first dagger takes the full rail damage"
+    );
+    assert!(
+        (before[1] - after[1] - second).abs() < 0.01,
+        "second dagger takes the falloff-drained damage: {} vs {second}",
+        before[1] - after[1]
+    );
+    assert!(
+        (before[2] - after[2] - second).abs() < 0.01,
+        "third dagger takes the falloff-drained damage: {} vs {second}",
+        before[2] - after[2]
+    );
+}
+
+/// G01 T3: `SapBulletType.init` (`Damage.linecast`) damages a target unit and
+/// heals the shooter by `sapStrength` of the capped damage.
+#[test]
+fn spiroct_sap_heals() {
+    let mut sim = live_sim(48);
+    let spiroct = sim
+        .spawn_live_unit("spiroct", 1, 100.0, 100.0, 0.0)
+        .expect("spiroct");
+    let max_health = sim
+        .ecs
+        .0
+        .get::<Health>(spiroct)
+        .map(|h| h.max_health)
+        .expect("spiroct health");
+    if let Some(mut h) = sim.ecs.0.get_mut::<Health>(spiroct) {
+        h.health = max_health - 100.0;
+    }
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 130.0, 100.0, 180.0)
+        .expect("dagger");
+    let dagger_start = health(&sim, dagger).expect("dagger health");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let spiroct_now = health(&sim, spiroct).expect("spiroct alive");
+    assert!(
+        spiroct_now > max_health - 100.0,
+        "sap healed the spiroct ({max_health} max -> {spiroct_now})"
+    );
+    let dagger_now = health(&sim, dagger).unwrap_or(0.0);
+    assert!(
+        dagger_now < dagger_start,
+        "sap damaged the dagger ({dagger_start} -> {dagger_now})"
+    );
+}
+
+/// Builds a `live_sim` with a `CampaignRuntime` whose rules are mutated by
+/// `mutate` (team multipliers for the G01 T5 tests).
+fn campaign_sim(size: i32, mutate: impl FnOnce(&mut crate::game::rules::Rules)) -> Sim {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(size);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    mutate(&mut rules);
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
+    sim
+}
+
+/// G01 T5: `ShieldComp.damage` divides by `rules.unitHealth(team)`, so a
+/// wave-team `unitHealthMultiplier` of 2 halves incoming damage.
+#[test]
+fn wave_unit_health_multiplier_halves_damage() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.team_rule_mut(2).unit_health_multiplier = 2.0;
+    });
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let before = health(&sim, dagger).expect("health");
+    let content = crate::content::test_support::test_registry();
+    let applied = crate::combat::damage::area::damage_entity(
+        &mut sim.ecs.0,
+        &content,
+        dagger,
+        20.0,
+        true,
+        1.0,
+    );
+    let after = health(&sim, dagger).expect("health");
+    assert_eq!(
+        before - after,
+        10.0,
+        "unitHealth 2 halves 20 damage (applied {applied})"
+    );
+}
+
+/// G01 T5: `BulletType.damageMultiplier` scales a unit-owned bullet by
+/// `rules.unitDamage(team)`.
+#[test]
+fn unit_damage_multiplier_scales_bullets() {
+    use crate::combat::bullet::{Bullet, BulletSpawn};
+    use crate::determinism::SimRng;
+
+    let mut sim = campaign_sim(48, |rules| {
+        rules.team_rule_mut(1).unit_damage_multiplier = 2.0;
+    });
+    let shooter = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let def_id = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime
+            .content
+            .unit_by_name("dagger")
+            .expect("dagger def")
+            .weapons[0]
+            .bullet
+            .id
+    };
+    let content = crate::content::test_support::test_registry();
+    let mut rng = SimRng::new(7);
+    let spawn = BulletSpawn {
+        def: def_id,
+        owner: Some(shooter),
+        team: 1,
+        x: 100.0,
+        y: 100.0,
+        damage: -1.0,
+        damage_multiplier: 1.0,
+        ..BulletSpawn::default()
+    };
+    let bullet = crate::combat::bullet::create(&mut sim.ecs.0, &content, &mut rng, 1, &spawn)
+        .expect("bullet");
+    let state = sim.ecs.0.get::<Bullet>(bullet).expect("bullet state");
+    let base = content.bullet(def_id).expect("def").damage;
+    assert_eq!(
+        state.damage,
+        2.0 * base,
+        "unitDamage 2 doubles the {base} base damage"
+    );
+}
+
+/// G01 T5: `BuildingComp.damage` turns a zero `rules.blockHealth(team)` into
+/// `damage = health + 1` (any hit kills).
+#[test]
+fn block_health_zero_kills() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.block_health_multiplier = 0.0;
+    });
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    crate::combat::damage::area::apply_health(&mut sim.ecs.0, wall, 1.0);
+    let state = sim.ecs.0.get::<Health>(wall).expect("health");
+    assert!(
+        state.dead || state.health <= 0.0,
+        "blockHealth 0 kills on 1 damage (health {})",
+        state.health
+    );
+}
+
+/// G01 T8: `CoreBlock.playerSpawn` uses the core's `unitType` and the death
+/// timer respawns at the best core after 60 ticks.
+#[test]
+fn player_respawns_after_death() {
+    use crate::content::ctype::Mappable;
+    use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-foundation", 1);
+    let player = sim.spawn_player_at_best_core(1).expect("player spawn");
+    let unit_type = sim.ecs.0.get::<UnitTypeComp>(player).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(unit_type, Some("beta"), "foundation core spawns beta");
+    assert!(
+        sim.ecs
+            .0
+            .get::<UnitCore>(player)
+            .is_some_and(|core| core.spawned_by_core),
+        "spawnedByCore set"
+    );
+    // Kill the player unit.
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(player) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    for _ in 0..59 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.player_unit().is_none(),
+        "no respawn before the 60-tick death delay"
+    );
+    sim.tick().expect("tick");
+    let respawned = sim.player_unit().expect("respawned after 60 ticks");
+    let (rx, ry) = sim.player_unit_position().expect("position");
+    assert!(
+        (rx - 164.0).abs() <= 3.0 && (ry - 164.0).abs() <= 3.0,
+        "respawn at the foundation core centre ({rx}, {ry})"
+    );
+    let kind = sim.ecs.0.get::<UnitTypeComp>(respawned).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(kind, Some("beta"), "respawn uses the core's unit type");
+}
+
+/// G01 T8: a shard core spawns `alpha`.
+#[test]
+fn core_shard_spawns_alpha() {
+    use crate::content::ctype::Mappable;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let player = sim.spawn_player_at_best_core(1).expect("player spawn");
+    let name = sim.ecs.0.get::<UnitTypeComp>(player).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(name, Some("alpha"));
+}
+
+/// G01 T9: possessing an own AI unit moves the Player controller and despawns
+/// the previous core-spawned unit without death effects.
+#[test]
+fn possess_own_dagger_despawns_core_alpha() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::entities::comp::Player;
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let alpha = sim.spawn_player_at_best_core(1).expect("alpha");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
+        .expect("dagger");
+    let seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(sim.possess_unit(seq), "possess the dagger");
+    assert_eq!(sim.player_unit(), Some(dagger));
+    assert!(
+        sim.ecs.0.get_entity(alpha).is_err(),
+        "core alpha despawned by possession"
+    );
+    assert!(
+        sim.ecs.0.get::<Player>(dagger).is_some(),
+        "dagger carries the Player marker"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Player)
+    );
+}
+
+/// G01 T9: `UnitClear` on a possessed unit releases it to AI and respawns at
+/// the core.
+#[test]
+fn clear_unit_returns_to_core() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::content::ctype::Mappable;
+    use crate::entities::comp::Player;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _alpha = sim.spawn_player_at_best_core(1).expect("alpha");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
+        .expect("dagger");
+    let seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(sim.possess_unit(seq));
+    assert!(sim.clear_unit(), "unit clear");
+    let respawned = sim.player_unit().expect("respawned at the core");
+    assert_ne!(respawned, dagger, "a fresh core unit was spawned");
+    assert!(
+        sim.ecs.0.get::<Player>(dagger).is_none(),
+        "released unit dropped the Player marker"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Ground),
+        "released unit went back to its team AI"
+    );
+    let name = sim.ecs.0.get::<UnitTypeComp>(respawned).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(name, Some("alpha"), "respawn uses the core unit type");
+}
+
+/// G01 T9: enemy and dead units cannot be possessed.
+#[test]
+fn cannot_possess_enemy_or_dead_unit() {
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _alpha = sim.spawn_player_at_best_core(1).expect("alpha");
+    let enemy = sim
+        .spawn_live_unit("dagger", 2, 220.0, 220.0, 0.0)
+        .expect("enemy");
+    let enemy_seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(enemy)
+        .expect("seq")
+        .0 as i32;
+    assert!(
+        !sim.possess_unit(enemy_seq),
+        "enemy unit is not possessable"
+    );
+    let own = sim
+        .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
+        .expect("own");
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(own) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    let own_seq = sim.ecs.0.get::<crate::ecs::EntitySeq>(own).expect("seq").0 as i32;
+    assert!(!sim.possess_unit(own_seq), "dead unit is not possessable");
+}
+
+/// G01 T19: `Teams.bosses` lists wave-team units carrying the `boss` status.
+#[test]
+fn boss_list_tracks_wave_boss() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.wave_team = 2;
+    });
+    let boss = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("wave dagger");
+    let own = sim
+        .spawn_live_unit("dagger", 1, 130.0, 100.0, 0.0)
+        .expect("own dagger");
+    let boss_status = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .status_id("boss")
+        .expect("boss status");
+    for entity in [boss, own] {
+        crate::combat::damage::status::apply_status(&mut sim.ecs.0, entity, boss_status, 999_999.0);
+    }
+    assert_eq!(sim.bosses(), vec![boss], "only the wave-team boss listed");
+    let json: serde_json::Value = serde_json::from_str(&sim.boss_json()).expect("boss json parses");
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["names"][0], "dagger");
+    let first = &json["first"];
+    assert_eq!(first["type"], "dagger");
+    assert_eq!(first["flying"], false);
+    // After the boss dies the list is empty.
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(boss) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    assert!(sim.bosses().is_empty(), "dead boss is dropped");
+    let json: serde_json::Value = serde_json::from_str(&sim.boss_json()).expect("boss json parses");
+    assert_eq!(json["count"], 0);
+    assert!(json["first"].is_null());
+}
