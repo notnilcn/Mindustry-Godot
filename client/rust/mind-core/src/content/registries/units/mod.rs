@@ -1456,6 +1456,42 @@ fn resolve_statuses(
 }
 
 impl UnitTypeDef {
+    /// `UnitType.supportsEnv(env)` (`UnitType.java`): `(envEnabled & env) != 0
+    /// && (envDisabled & env) == 0 && (envRequired == 0 || (envRequired & env)
+    /// == envRequired)`. Unset `envEnabled` defaults to `Env.terrestrial`.
+    pub fn supports_env(&self, env: i32) -> bool {
+        /// Java `Env` bit of a flag (`mindustry.world.meta.Env`).
+        fn env_bit(flag: EnvFlag) -> i32 {
+            match flag {
+                EnvFlag::Terrestrial => 1,
+                EnvFlag::Space => 1 << 1,
+                EnvFlag::Underwater => 1 << 2,
+                EnvFlag::Spores => 1 << 3,
+                EnvFlag::Scorching => 1 << 4,
+                EnvFlag::GroundOil => 1 << 5,
+                EnvFlag::GroundWater => 1 << 6,
+                EnvFlag::Oxygen => 1 << 7,
+            }
+        }
+        fn mask_bits(mask: &EnvMask, empty: i32) -> i32 {
+            if mask.any {
+                return -1;
+            }
+            if mask.flags.is_empty() {
+                return empty;
+            }
+            mask.flags
+                .iter()
+                .fold(0, |bits, flag| bits | env_bit(*flag))
+        }
+        let enabled = mask_bits(&self.env_enabled, env_bit(EnvFlag::Terrestrial));
+        let disabled = mask_bits(&self.env_disabled, 0);
+        let required = mask_bits(&self.env_required, 0);
+        (enabled & env) != 0
+            && (disabled & env) == 0
+            && (required == 0 || (required & env) == required)
+    }
+
     /// Resolves the scalar fields of a generated [`UnitSpec`] (weapons are
     /// attached by the load pass after their bullets register).
     pub fn from_spec(

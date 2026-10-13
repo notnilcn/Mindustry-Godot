@@ -888,7 +888,156 @@ impl Sim {
             .entity_mut(entity)
             .insert(crate::entities::comp::Player);
         self.player_unit = Some(entity);
+        self.player_team = Some(team);
+        self.player_death_timer = 0.0;
         Some(entity)
+    }
+
+    /// `PlayerComp.bestCore()` (`PlayerComp.java:121-126`): the largest core,
+    /// then the closest to the last player position; supported-env cores are
+    /// preferred unless there is only one core.
+    pub fn best_core_for_player(&self, team: u8) -> Option<Entity> {
+        use crate::world::blocks::storage::core_block::CoreBuild;
+        let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+        let content = &runtime.content;
+        let env = crate::game::runtime::rules_of(&self.ecs.0).map_or(1, |rules| rules.env);
+        let pos = self.player_last_pos.or_else(|| self.player_unit_position());
+        let mut cores: Vec<(Entity, i32, bool, f32)> = Vec::new();
+        for entity_ref in self.ecs.0.iter_entities() {
+            if entity_ref.get::<CoreBuild>().is_none() {
+                continue;
+            }
+            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+                continue;
+            }
+            let Some(build) = entity_ref.get::<Building>() else {
+                continue;
+            };
+            let size = content.block(build.block).map_or(1, |def| def.size);
+            let supported = content
+                .block(build.block)
+                .and_then(|def| def.core_unit)
+                .and_then(|name| content.unit_by_name(name))
+                .is_none_or(|unit| unit.supports_env(env));
+            let dst2 = entity_ref.get::<Pos>().map_or(0.0, |p| {
+                pos.map_or(0.0, |(px, py)| (p.x - px).powi(2) + (p.y - py).powi(2))
+            });
+            cores.push((entity_ref.id(), size, supported, dst2));
+        }
+        let single = cores.len() <= 1;
+        cores
+            .iter()
+            .filter(|(_, _, supported, _)| single || *supported)
+            .min_by(|a, b| {
+                b.1.cmp(&a.1)
+                    .then(a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
+            })
+            .map(|(entity, _, _, _)| *entity)
+    }
+
+    /// `CoreBlock.playerSpawn` (`CoreBlock.java:95-125`): spawn the core's
+    /// `unitType` at the core with reloaded mounts, `spawnedByCore` set and the
+    /// upward impulse; `None` when the core unit type does not support the
+    /// sector env.
+    pub fn spawn_player_at_best_core(&mut self, team: u8) -> Option<Entity> {
+        let core = self.best_core_for_player(team)?;
+        let (x, y) = self.ecs.0.get::<Pos>(core).map(|pos| (pos.x, pos.y))?;
+        let (name, env): (String, i32) = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            let content = &runtime.content;
+            let block = self.ecs.0.get::<Building>(core).map(|b| b.block)?;
+            let name = content
+                .block(block)
+                .and_then(|def| def.core_unit)
+                .unwrap_or("alpha")
+                .to_string();
+            let env = crate::game::runtime::rules_of(&self.ecs.0).map_or(1, |rules| rules.env);
+            (name, env)
+        };
+        // `CoreBlock.requestSpawn`: bail when the unit type does not support
+        // the sector env (the caller retries on the next death timer window).
+        let supports = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            runtime
+                .content
+                .unit_by_name(&name)
+                .is_some_and(|def| def.supports_env(env))
+        };
+        if !supports {
+            return None;
+        }
+        let entity = self.spawn_player_unit(&name, team, x, y, 90.0)?;
+        // `for(mount : unit.mounts) mount.reload = mount.weapon.reload;`
+        let reloads: Vec<f32> = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map(|def| def.weapons.iter().map(|weapon| weapon.reload).collect())
+                .unwrap_or_default()
+        };
+        if let Some(mut weapons) = self.ecs.0.get_mut::<UnitWeapons>(entity) {
+            for (mount, reload) in weapons.mounts.iter_mut().zip(reloads) {
+                mount.reload = reload;
+            }
+        }
+        if let Some(mut core_comp) = self.ecs.0.get_mut::<UnitCore>(entity) {
+            core_comp.spawned_by_core = true;
+        }
+        // `unit.impulse(0, 3)`: `vel += v / mass`, `mass = hitSize^2 * PI`.
+        let hit_size = {
+            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .map_or(8.0, |def| def.hit_size)
+        };
+        let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
+        if let Some(mut vel) = self.ecs.0.get_mut::<Vel>(entity) {
+            vel.y += 3.0 / mass;
+        }
+        Some(entity)
+    }
+
+    /// `PlayerComp.update` (`PlayerComp.java:214-243`): clear a dead player
+    /// unit, then respawn at the best core after `deathDelay` (60 ticks) while
+    /// the team still has a core.
+    pub fn update_player_respawn(&mut self) {
+        if let Some(entity) = self.player_unit {
+            if let Some(pos) = self.ecs.0.get::<Pos>(entity) {
+                self.player_last_pos = Some((pos.x, pos.y));
+            }
+            let gone = self.ecs.0.get_entity(entity).is_err()
+                || self
+                    .ecs
+                    .0
+                    .get::<Health>(entity)
+                    .is_none_or(|health| health.dead);
+            if gone {
+                self.player_unit = None;
+                self.player_death_timer = 0.0;
+                if self.ecs.0.get_entity(entity).is_ok() {
+                    let _ = self.ecs.0.despawn(entity);
+                }
+            }
+        }
+        if self.player_unit.is_some() {
+            self.player_death_timer = 0.0;
+            return;
+        }
+        let Some(team) = self.player_team else {
+            return;
+        };
+        if self.best_core_for_player(team).is_none() {
+            return;
+        }
+        self.player_death_timer += 1.0;
+        if self.player_death_timer >= 60.0 {
+            self.player_death_timer = 0.0;
+            let _ = self.spawn_player_at_best_core(team);
+        }
     }
 
     /// The controlled player unit entity, if any.

@@ -2020,3 +2020,67 @@ fn block_health_zero_kills() {
         state.health
     );
 }
+
+/// G01 T8: `CoreBlock.playerSpawn` uses the core's `unitType` and the death
+/// timer respawns at the best core after 60 ticks.
+#[test]
+fn player_respawns_after_death() {
+    use crate::content::ctype::Mappable;
+    use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-foundation", 1);
+    let player = sim.spawn_player_at_best_core(1).expect("player spawn");
+    let unit_type = sim.ecs.0.get::<UnitTypeComp>(player).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(unit_type, Some("beta"), "foundation core spawns beta");
+    assert!(
+        sim.ecs
+            .0
+            .get::<UnitCore>(player)
+            .is_some_and(|core| core.spawned_by_core),
+        "spawnedByCore set"
+    );
+    // Kill the player unit.
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(player) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    for _ in 0..59 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.player_unit().is_none(),
+        "no respawn before the 60-tick death delay"
+    );
+    sim.tick().expect("tick");
+    let respawned = sim.player_unit().expect("respawned after 60 ticks");
+    let (rx, ry) = sim.player_unit_position().expect("position");
+    assert!(
+        (rx - 164.0).abs() <= 3.0 && (ry - 164.0).abs() <= 3.0,
+        "respawn at the foundation core centre ({rx}, {ry})"
+    );
+    let kind = sim.ecs.0.get::<UnitTypeComp>(respawned).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(kind, Some("beta"), "respawn uses the core's unit type");
+}
+
+/// G01 T8: a shard core spawns `alpha`.
+#[test]
+fn core_shard_spawns_alpha() {
+    use crate::content::ctype::Mappable;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let player = sim.spawn_player_at_best_core(1).expect("player spawn");
+    let name = sim.ecs.0.get::<UnitTypeComp>(player).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(name, Some("alpha"));
+}

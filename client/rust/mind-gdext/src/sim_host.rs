@@ -1914,21 +1914,17 @@ impl MindSimHost {
         if self.sim.player_unit_position().is_some() {
             return true;
         }
-        let Some((x, y)) = self.best_core_position_px() else {
-            log::warn!("spawn_player_unit: no core in the loaded sector");
-            return false;
-        };
         // `CoreBlock.playerSpawn` spawns on `rules.defaultTeam`
-        // (`Team.sharded` = 1 for the campaign, not `TeamId::SHARDED`).
+        // (`Team.sharded` = 1 for the campaign, not `TeamId::SHARDED`) with
+        // the best core's `unitType` (`CoreBlock.java:95-125`).
         let team = self
             .last_sector_rules()
             .map_or(1, |rules| rules.default_team);
-        let spawned = self
-            .sim
-            .spawn_player_unit("alpha", team, x, y, 90.0)
-            .is_some();
+        let spawned = self.sim.spawn_player_at_best_core(team).is_some();
         if spawned {
-            log::info!("spawn_player_unit: alpha team {team} at ({x:.1}, {y:.1})");
+            log::info!("spawn_player_unit: core unit team {team} spawned");
+        } else {
+            log::warn!("spawn_player_unit: no supported core in the loaded sector");
         }
         spawned
     }

@@ -1208,6 +1208,8 @@ pub struct BlockSpec {
     pub priority: Option<f32>,
     /// Unit cap contribution.
     pub unit_cap_modifier: Option<i32>,
+    /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
+    pub core_unit: Option<&'static str>,
     /// Special flags (effective: class defaults + body overrides).
     pub flags: Vec<BlockFlag>,
     /// Consumers.
@@ -1377,6 +1379,7 @@ impl Default for BlockSpec {
             group: None,
             priority: None,
             unit_cap_modifier: None,
+            core_unit: None,
             flags: Vec::new(),
             consumes: Vec::new(),
             unit_plans: Vec::new(),
@@ -2022,6 +2025,8 @@ pub struct BlockDef {
     pub rebuildable: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
+    /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
+    pub core_unit: Option<&'static str>,
     /// Special flags.
     pub flags: Vec<BlockFlag>,
     /// Consumers in declaration order.
@@ -2363,6 +2368,7 @@ impl BlockDef {
                 BlockKind::BaseShield | BlockKind::NuclearReactor | BlockKind::VariableReactor
             ),
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
+            core_unit: spec.core_unit,
             flags: spec.flags,
             consumes,
             unit_plans,

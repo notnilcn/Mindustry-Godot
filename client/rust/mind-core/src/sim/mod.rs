@@ -178,6 +178,12 @@ pub struct Sim {
     controlled_unit: Option<i32>,
     /// The campaign player unit entity (`Player.unit()`); runtime-only.
     player_unit: Option<Entity>,
+    /// Player team used by respawn (`Player.team`); `None` before the first spawn.
+    player_team: Option<u8>,
+    /// Ticks since the player unit died (`PlayerComp.deathTimer`).
+    player_death_timer: f32,
+    /// Last known player position (`Player.x/y`); `bestCore` distance key.
+    player_last_pos: Option<(f32, f32)>,
     /// Currently selected controllable building (`buildingControlSelect`).
     control_building: Option<TilePos>,
 
@@ -214,6 +220,9 @@ impl Sim {
             block_runtime: None,
             controlled_unit: None,
             player_unit: None,
+            player_team: None,
+            player_death_timer: 0.0,
+            player_last_pos: None,
             control_building: None,
             seed,
             // Upstream `player.block == null` at boot: no placement block is
@@ -601,6 +610,8 @@ impl Sim {
         self.update_builders();
         // Zero-health units/buildings die (`HealthComp.damage` -> `kill`).
         let _ = self.resolve_deaths();
+        // `PlayerComp.update`: respawn at the best core after `deathDelay`.
+        self.update_player_respawn();
         self.flush_events();
         self.time.update();
         self.clock.update(&mut self.ecs.0);
