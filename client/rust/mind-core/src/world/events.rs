@@ -129,4 +129,23 @@ pub struct BuildDamageEvent {
     pub y: i16,
     /// Damage amount.
     pub amount: f32,
+    /// Team of the damaged building (`Control.java:68-72` filters by it).
+    pub team: u8,
+}
+
+/// Undrained `BuildDamageEvent`s for the current tick (G01 T15). Bounded at
+/// [`MAX_BUILD_DAMAGE_LOG`] entries.
+#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+pub struct BuildDamageLog(pub Vec<BuildDamageEvent>);
+
+/// Cap for [`BuildDamageLog`] when nobody drains it (plan G01 T15).
+pub const MAX_BUILD_DAMAGE_LOG: usize = 4096;
+
+/// Pushes one event into the log (no-op when absent or full).
+pub fn push_build_damage(world: &mut bevy_ecs::world::World, event: BuildDamageEvent) {
+    if let Some(mut log) = world.get_resource_mut::<BuildDamageLog>()
+        && log.0.len() < MAX_BUILD_DAMAGE_LOG
+    {
+        log.0.push(event);
+    }
 }

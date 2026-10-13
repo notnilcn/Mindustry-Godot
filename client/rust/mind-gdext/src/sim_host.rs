@@ -857,6 +857,23 @@ impl MindSimHost {
         GString::from(self.sim.unit_debug_json().as_str())
     }
 
+    /// G01 T15: drains the per-tick building-damage log as
+    /// `[[tile_x, tile_y, team], ...]`; G03 filters by the player team and
+    /// forwards to `MindMinimap.add_indicator`.
+    #[func]
+    fn drain_build_damage_json(&mut self) -> GString {
+        let events = self.sim.drain_build_damage_events();
+        let rows: Vec<[f64; 3]> = events
+            .iter()
+            .map(|event| [event.x as f64, event.y as f64, event.team as f64])
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
     /// `Teams.bosses`/`GameState.boss()` seam (G01 T19): G03's boss bar reads
     /// count/names/value, G05's guardian hint reads `first`.
     #[func]

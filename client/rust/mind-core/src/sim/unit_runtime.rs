@@ -870,6 +870,10 @@ impl Sim {
         // apply a status (`StatusApplier` resource; NEW-1): install it while
         // the registry is still owned here, then move it into the runtime.
         crate::combat::damage::status::install_status_applier(&mut self.ecs.0, &content);
+        // `BuildDamageEvent` log (G01 T15): drained by the minimap seam.
+        self.ecs
+            .0
+            .insert_resource(crate::world::events::BuildDamageLog::default());
         let wave_team = crate::game::rules::Rules::default().wave_team;
         let runtime = UnitRuntime::new(content, &self.grid, wave_team);
         self.ecs.0.insert_non_send(runtime);

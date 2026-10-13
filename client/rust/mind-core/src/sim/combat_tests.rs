@@ -3453,3 +3453,38 @@ fn drop_zone_pushes_player_units() {
     eprintln!("drop-zone distance {start} -> {end}");
     assert!(end > start, "the unit was pushed outward: {start} -> {end}");
 }
+
+/// G01 T15: a bullet hitting a building emits a `BuildDamageEvent`
+/// (`BuildingComp.damage(Bullet, ..)` -> `Events.fire`); draining clears it.
+#[test]
+fn bullet_hit_emits_build_damage_event() {
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    sim.spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0, 180.0)
+        .expect("dagger");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let events = sim.drain_build_damage_events();
+    let wall_events: Vec<_> = events
+        .iter()
+        .filter(|event| event.x == 20 && event.y == 20)
+        .collect();
+    eprintln!(
+        "build damage events: {} (wall {})",
+        events.len(),
+        wall_events.len()
+    );
+    assert!(!wall_events.is_empty(), "the wall took bullet damage");
+    assert!(
+        wall_events.iter().all(|event| event.team == 1),
+        "events carry the damaged building's team"
+    );
+    assert!(
+        wall_events.iter().all(|event| event.amount > 0.0),
+        "applied damage recorded"
+    );
+    let _ = wall;
+    let second = sim.drain_build_damage_events();
+    assert!(second.is_empty(), "the drain clears the log");
+}

@@ -721,6 +721,16 @@ impl Sim {
         applied
     }
 
+    /// Drains the per-tick `BuildDamageEvent` log (G01 T15): one entry per
+    /// building hit by a bullet (direct or bullet-sourced splash).
+    pub fn drain_build_damage_events(&mut self) -> Vec<crate::world::events::BuildDamageEvent> {
+        self.ecs
+            .0
+            .get_resource_mut::<crate::world::events::BuildDamageLog>()
+            .map(|mut log| std::mem::take(&mut log.0))
+            .unwrap_or_default()
+    }
+
     fn runtime_place(&mut self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {
             return false;

@@ -28,6 +28,9 @@ pub struct DamageOptions {
     pub armor_multiplier: f32,
     /// Whether distance is measured from the target's hitbox edge (`scaled`).
     pub scaled: bool,
+    /// Whether the damage comes from a bullet (`BuildDamageEvent` emission,
+    /// G01 T15).
+    pub source_is_bullet: bool,
 }
 
 impl Default for DamageOptions {
@@ -36,6 +39,7 @@ impl Default for DamageOptions {
             pierce_armor: false,
             armor_multiplier: 1.0,
             scaled: false,
+            source_is_bullet: false,
         }
     }
 }
@@ -154,6 +158,25 @@ pub fn damage_area(
         let armor = armor_of(content, world, target.entity) * opts.armor_multiplier;
         let applied = apply_armor_opt(raw, armor, opts.pierce_armor);
         apply_health(world, target.entity, applied);
+        // `Damage.damage(.., source)` -> `BuildDamageEvent` for buildings
+        // (G01 T15).
+        if opts.source_is_bullet
+            && let Some(building) = world.get::<crate::entities::comp::Building>(target.entity)
+        {
+            let team = world
+                .get::<crate::entities::comp::TeamComp>(target.entity)
+                .map(|team| team.team)
+                .unwrap_or(0);
+            crate::world::events::push_build_damage(
+                world,
+                crate::world::events::BuildDamageEvent {
+                    x: building.tile.x(),
+                    y: building.tile.y(),
+                    amount: applied,
+                    team,
+                },
+            );
+        }
         total += applied;
     }
     total
