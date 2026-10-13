@@ -596,7 +596,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/units/units_base_build.json",
       "owner_plan": "11",
-      "sha256": "7d9acef2e9cb14f843a525dae69fffb8dfbfa5f33da2beab38f3d75407b6b25f"
+      "sha256": "084dcfd2cc1baa52b149eff686d3f4ff9653e124472c960663bca4daa5653403"
     },
     {
       "id": "oracle_logic_field_order",
