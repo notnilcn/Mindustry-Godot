@@ -195,6 +195,52 @@ pub fn memory2_text(java_mb: i32, native_mb: i32, bundle: &Bundle) -> String {
     bundle.format("memory2", &[&java_mb.to_string(), &native_mb.to_string()])
 }
 
+/// Guardian-wave toast scan (`HudFragment.java:241-260` on `WaveEvent`): from
+/// `wave - 1` to `min(wave + 10, win_wave - 2)` (unbounded when `win_wave` is
+/// 0), find the first boss spawn group with `get_spawned(i) > 0`; when its gap
+/// `diff = (i + 2) - wave` is one of {1, 2, 5, 10}, return
+/// `(unit name, diff)`. The scan stops at the first boss hit regardless of the
+/// diff (Java `break outer`).
+pub fn guardian_warnings(
+    spawns: &[crate::io::json::rules::SpawnGroup],
+    wave: i32,
+    win_wave: i32,
+) -> Option<(String, i32)> {
+    // `SpawnGroup.getSpawned` (the JSON rules type keeps no behavior).
+    let spawned = |group: &crate::io::json::rules::SpawnGroup, i: i32| -> i32 {
+        let spacing = group.spacing.max(1);
+        if i < group.begin || i > group.end || (i - group.begin) % spacing != 0 {
+            return 0;
+        }
+        let steps = (i - group.begin) / spacing;
+        let scaling = if group.unit_scaling <= 0.0 {
+            1.0
+        } else {
+            group.unit_scaling
+        };
+        let scaled = steps as f32 / scaling;
+        group
+            .unit_amount
+            .saturating_add(scaled as i32)
+            .min(group.max)
+    };
+    let last = if win_wave > 0 {
+        (win_wave - 2).min(wave + 10)
+    } else {
+        wave + 10
+    };
+    for i in (wave - 1)..=last {
+        for group in spawns {
+            if group.effect.as_deref() != Some("boss") || spawned(group, i) <= 0 {
+                continue;
+            }
+            let diff = (i + 2) - wave;
+            return matches!(diff, 1 | 2 | 5 | 10).then(|| (group.type_.clone(), diff));
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,5 +405,39 @@ mod tests {
         assert_eq!(tps_value(59), 59);
         assert_eq!(memory_text(128, &bundle), "Mem: 128mb");
         assert_eq!(memory2_text(64, 32, &bundle), "Mem:\n 64mb +\n 32mb");
+    }
+
+    #[test]
+    fn guardian_warnings_scans_the_first_boss_hit() {
+        use crate::io::json::rules::SpawnGroup;
+        let group = SpawnGroup {
+            type_: String::from("fortress"),
+            begin: 9,
+            spacing: 100,
+            effect: Some(String::from("boss")),
+            ..SpawnGroup::default()
+        };
+        let spawns = vec![group];
+        // `get_spawned(i) > 0` only at i = 9; `diff = 11 - wave`.
+        assert_eq!(
+            guardian_warnings(&spawns, 1, 0),
+            Some((String::from("fortress"), 10))
+        );
+        assert_eq!(
+            guardian_warnings(&spawns, 6, 0),
+            Some((String::from("fortress"), 5))
+        );
+        // diff 3: the scan stops at the first boss hit, no toast.
+        assert_eq!(guardian_warnings(&spawns, 8, 0), None);
+        assert_eq!(
+            guardian_warnings(&spawns, 9, 0),
+            Some((String::from("fortress"), 2))
+        );
+        assert_eq!(
+            guardian_warnings(&spawns, 10, 0),
+            Some((String::from("fortress"), 1))
+        );
+        // i starts at wave - 1 = 10, past the only boss wave.
+        assert_eq!(guardian_warnings(&spawns, 11, 0), None);
     }
 }

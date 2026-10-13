@@ -193,6 +193,15 @@ impl Sim {
         self.io.pending_len()
     }
 
+    /// Whether any *pending* request is a save (`control.saves.isSaving()`
+    /// view half; G03 T9's small `@saving` label).
+    pub fn io_saving(&self) -> bool {
+        self.io
+            .pending()
+            .iter()
+            .any(|request| matches!(request, IoRequest::Save { .. }))
+    }
+
     /// Responses produced since the last drain.
     pub fn io_responses(&self) -> &[IoResponse] {
         self.io.responses()

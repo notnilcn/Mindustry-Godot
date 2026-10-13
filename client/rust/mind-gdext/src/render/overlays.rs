@@ -29,7 +29,7 @@ pub struct OverlayStats {
 }
 
 /// Team color palette (plan 02/12 replacement seam).
-fn team_color(team: u8) -> u32 {
+pub(crate) fn team_color(team: u8) -> u32 {
     match team {
         0 => 0x8f8f8fff,
         1 => 0xd4816bff,

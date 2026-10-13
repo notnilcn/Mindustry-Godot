@@ -32,9 +32,30 @@ var _game_over_shown := false
 @onready var hud_text: RichTextLabel = get_node_or_null("CoreInfo/HudText")
 @onready var position_label: RichTextLabel = get_node_or_null("MinimapBox/Position")
 @onready var minimap_widget: MindMinimapWidget = get_node_or_null("MinimapBox/Minimap")
+@onready var core_attack: PanelContainer = get_node_or_null("CoreInfo/CoreAttack")
+@onready var core_attack_label: Label = get_node_or_null("CoreInfo/CoreAttack/Label")
+@onready var boss_bar: MarginContainer = get_node_or_null("CoreInfo/BossBar")
+@onready var boss_mind_bar: MindBar = get_node_or_null("CoreInfo/BossBar/Bar")
+@onready var status_icons: HBoxContainer = get_node_or_null("WavesStack/WavesMain/StatusIcons")
+@onready var near_point: PanelContainer = get_node_or_null("NearPoint")
+@onready var near_point_label: RichTextLabel = get_node_or_null("NearPoint/Label")
+@onready var saving_label: RichTextLabel = get_node_or_null("Saving")
 
 var _skip_button: Button = null
 var _minimap_last_zoom := 1.0
+## Per-core healths keyed `"x,y"` (HUD-side diff for the core-attack banner).
+var _core_healths: Dictionary = {}
+var _core_attack_time := 0.0
+var _core_attack_total := 0.0
+var _last_damaged_core := Vector2.ZERO
+## Near-point banner alpha (`WaveSpawner.playerNear` lerp).
+var _near_alpha := 0.0
+## Applied status names signature (icon rebuild cache).
+var _status_names := ""
+## First-use UI-hidden announce latch.
+var _ui_hidden_warned := false
+## Whether the 3 s game-over timer is in flight (T16).
+var _game_over_pending := false
 
 
 func _ready() -> void:
@@ -65,18 +86,66 @@ func _ready() -> void:
 		and not input.is_connected("hotkey", Callable(self, "_on_hotkey"))
 	):
 		input.connect("hotkey", Callable(self, "_on_hotkey"))
+	if core_attack != null:
+		core_attack.visible = false
+		if not core_attack.gui_input.is_connected(_on_core_attack_input):
+			core_attack.gui_input.connect(_on_core_attack_input)
 	refresh()
 
 
 ## View-toggle hotkeys owned by the HUD fragment (`Renderer.drawStatus`).
 func _on_hotkey(action: String) -> void:
-	if action != "toggle_block_status":
-		return
+	if action == "toggle_block_status":
+		var ui := get_node_or_null("/root/MindUi")
+		if ui == null or not ui.has_method("settings_get_bool"):
+			return
+		var current := bool(ui.call("settings_get_bool", "blockstatus"))
+		ui.call("settings_set", "blockstatus", not current)
+	elif action == "toggle_menus":
+		_toggle_menus()
+
+
+## `HudFragment.toggleMenus` (`HudFragment.java:455-461`): flip every HUD table;
+## the first use announces the bind once (`getBoolOnce("ui-hidden")`).
+func _toggle_menus() -> void:
 	var ui := get_node_or_null("/root/MindUi")
-	if ui == null or not ui.has_method("settings_get_bool"):
+	var shown := true
+	if ui != null and ui.has_method("settings_get_bool"):
+		shown = not bool(ui.call("settings_get_bool", "ui-hidden"))
+		ui.call("settings_set", "ui-hidden", not shown)
+	else:
+		shown = false
+	var hud := get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
+	if hud == null:
 		return
-	var current := bool(ui.call("settings_get_bool", "blockstatus"))
-	ui.call("settings_set", "blockstatus", not current)
+	for path in ["WavesStack", "CoreInfo", "MinimapBox", "FpsBox", "placement"]:
+		var node := hud.get_node_or_null(path)
+		if node != null:
+			node.visible = shown
+	if shown and not _ui_hidden_warned and ui != null:
+		_ui_hidden_warned = true
+		if ui.has_method("announce"):
+			var key_display := _bind_display("toggle_menus")
+			var assets := get_node_or_null("/root/MindAssets")
+			if assets != null and assets.has_method("bundle_get"):
+				var fmt := str(assets.call("bundle_get", "showui"))
+				ui.call("announce", fmt.replace("{0}", key_display), 5.0)
+
+
+## Display name of one binding (`keybinds_json`), for the `showui` announce.
+func _bind_display(action: String) -> String:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null or not input.has_method("keybinds_json"):
+		return "C"
+	var parsed: Variant = JSON.parse_string(str(input.call("keybinds_json")))
+	if parsed is Array:
+		for entry_variant in parsed as Array:
+			if (
+				entry_variant is Dictionary
+				and str((entry_variant as Dictionary).get("name", "")) == action
+			):
+				return str((entry_variant as Dictionary).get("display", "C"))
+	return "C"
 
 
 ## `HudFragment.java:336-351`: the embedded minimap pans/zooms the camera and
@@ -122,11 +191,39 @@ func _setup_status_style() -> void:
 
 
 func _process(delta: float) -> void:
+	_tick_banners(delta)
 	_accum += delta
 	if _accum < REFRESH_INTERVAL:
 		return
 	_accum = 0.0
 	refresh()
+
+
+## Per-frame banner timers (core-attack countdown, near-point fade; Java runs
+## both outside the 5 Hz table refresh).
+func _tick_banners(delta: float) -> void:
+	var paused := _hud != null and bool(_hud.get("paused"))
+	if _core_attack_time > 0.0 and not paused:
+		_core_attack_time = maxf(0.0, _core_attack_time - delta * 60.0)
+	if core_attack != null:
+		core_attack.visible = _core_attack_time > 0.0
+		if core_attack.visible and core_attack_label != null:
+			# `orange.lerp(scarlet, absin(Time.time, 2, 1))` (`Java absin`).
+			var t := Time.get_ticks_msec() * 0.06
+			var f := (sin(t / 4.0) + 1.0) * 0.5
+			core_attack_label.add_theme_color_override(
+				"font_color", Color("ffa500").lerp(Color("ff2400"), f)
+			)
+	# `table.alpha` lerp toward `playerNear() ? 1 : 0` by 0.1/tick.
+	var near := false
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host != null and host.has_method("player_near_drop_zone"):
+		near = bool(host.call("player_near_drop_zone"))
+	var target := 1.0 if near else 0.0
+	_near_alpha += (target - _near_alpha) * (1.0 - pow(0.9, delta * 60.0))
+	if near_point != null:
+		near_point.visible = _near_alpha > 0.005
+		near_point.modulate.a = _near_alpha
 
 
 ## Banner texts from the bundle (`@paused`/`@waiting.players`), replacing the
@@ -136,6 +233,12 @@ func _localize_banners() -> void:
 		paused_banner.text = "[center]" + MindWidgets.markup("@paused")
 	if waiting_banner != null:
 		waiting_banner.text = "[center]" + MindWidgets.markup("@waiting.players")
+	if core_attack_label != null:
+		core_attack_label.text = MindWidgets.markup("@coreattack")
+	if near_point_label != null:
+		near_point_label.text = "[center]" + MindWidgets.markup("@nearpoint")
+	if saving_label != null:
+		saving_label.text = "[center]" + MindWidgets.markup("@saving")
 
 
 ## `HudFragment.java:491-510`: the icon-only skip-wave button lives inside the
@@ -179,6 +282,10 @@ func refresh() -> void:
 		ping_label.text = "%d ms" % int(_hud.get("ping"))
 	if paused_banner != null:
 		paused_banner.visible = bool(_hud.get("paused"))
+		var paused_key := str(_hud.get("paused_text"))
+		if paused_key.is_empty():
+			paused_key = "@paused"
+		paused_banner.text = "[center]" + MindWidgets.markup(paused_key)
 	if waiting_banner != null:
 		waiting_banner.visible = bool(_hud.get("waiting"))
 	if position_label != null:
@@ -187,6 +294,10 @@ func refresh() -> void:
 		position_label.visible = not position.is_empty()
 	_refresh_core_items()
 	_refresh_skip_button()
+	_refresh_boss()
+	_refresh_core_attack()
+	_refresh_status_icons()
+	_refresh_saving()
 	_refresh_loading()
 	_check_game_over()
 
@@ -239,13 +350,16 @@ func _refresh_loading() -> void:
 	if host == null or not host.has_method("io_pending"):
 		return
 	var pending := int(host.call("io_pending"))
+	var saving := host.has_method("io_saving") and bool(host.call("io_saving"))
 	var loading := get_node_or_null("/root/Spine/Ui/UiRoot/LoadingLayer/loading")
 	if loading == null:
 		return
 	var shown := bool(loading.call("is_shown")) if loading.has_method("is_shown") else false
-	if pending > 0 and not shown:
+	# Saves show the small bottom `@saving` label, loads the full overlay
+	# (`HudFragment.java:668-673`; previously any IO covered the screen).
+	if pending > 0 and not saving and not shown:
 		loading.call("set_progress", 0.0, "")
-	elif pending == 0 and shown:
+	elif (pending == 0 or saving) and shown:
 		loading.call("hide_loading")
 
 
@@ -254,26 +368,47 @@ func _refresh_loading() -> void:
 func _check_game_over() -> void:
 	if _hud == null:
 		return
-	var campaign := bool(_hud.get("campaign"))
-	var captured := campaign and bool(_hud.get("has_core")) and bool(_hud.get("was_captured"))
 	var over := bool(_hud.get("game_over"))
-	if over or captured:
+	# T16: `Logic.java:435-440` opens the dialog 3 s after `GameOverEvent`
+	# (`Time.run(60 * 3, () -> ui.restart.show(winner))`); captures show the
+	# `@sector.capture.current` announce instead (T9).
+	if over:
 		if not _game_over_shown:
 			_game_over_shown = true
-			_open_game_over(captured)
-	elif not captured:
+			_schedule_game_over()
+	else:
 		_game_over_shown = false
+		_game_over_pending = false
 
 
-func _open_game_over(captured: bool) -> void:
+## 3 s timer before the restart dialog (`Time.run(60 * 3, ...)`); cancelled
+## when `gameOver` flips back.
+func _schedule_game_over() -> void:
+	_game_over_pending = true
+	get_tree().create_timer(3.0).timeout.connect(_open_game_over_now)
+
+
+func _open_game_over_now() -> void:
+	if _hud == null or not bool(_hud.get("game_over")):
+		_game_over_pending = false
+		return
+	_game_over_pending = false
+	_open_game_over(false)
+
+
+func _open_game_over(_captured: bool) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui == null or not ui.has_method("open_dialog"):
 		return
+	var stats: Variant = {}
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("game_stats_json"):
+		stats = JSON.parse_string(str(campaign.call("game_stats_json")))
 	var context := {
 		"winner": str(_hud.get("sector_name")),
 		"campaign": bool(_hud.get("campaign")),
-		"captured": captured,
 		"sector": str(_hud.get("sector_name")),
+		"stats": stats if stats is Dictionary else {},
 	}
 	ui.call("open_dialog", "restart", JSON.stringify(context))
 
@@ -328,6 +463,126 @@ func _on_minimap_zoom(factor: float) -> void:
 	_minimap_last_zoom = factor
 	if absf(step) > 0.0001:
 		camera.call("zoom_by", step)
+
+
+## `HudFragment` boss bar (`:633-656`): visible while `rules.waves` and the
+## wave team has bosses; text = up to 6 boss emojis + `@guardian`, colour
+## `Pal.health` (`ff341c`), value = sum(health)/sum(max).
+func _refresh_boss() -> void:
+	if boss_bar == null:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("boss_json"):
+		boss_bar.visible = false
+		return
+	var parsed: Variant = JSON.parse_string(str(host.call("boss_json")))
+	if not (parsed is Dictionary):
+		boss_bar.visible = false
+		return
+	var state: Dictionary = parsed
+	var count := int(state.get("count", 0))
+	boss_bar.visible = bool(_hud.get("waves")) and count > 0
+	if not boss_bar.visible:
+		return
+	if boss_mind_bar != null:
+		var names: Array = state.get("names", [])
+		var prefix := ""
+		if count > 6:
+			prefix = "[accent]+[] "
+		var text := prefix + str(MindWidgets.markup("@guardian"))
+		boss_mind_bar.setup(
+			text, Color("ff341c"), clampf(float(state.get("value", 0.0)), 0.0, 1.0)
+		)
+
+
+## Core-attack banner (`HudFragment.java:596-631`): a health drop between
+## refreshes shows the flashing `< Core is under attack! >` for 240 ticks; the
+## tap pans to the damaged core.
+func _refresh_core_attack() -> void:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("player_core_healths_json"):
+		return
+	var parsed: Variant = JSON.parse_string(str(host.call("player_core_healths_json")))
+	if not (parsed is Array):
+		return
+	var next: Dictionary = {}
+	var total := 0.0
+	for entry_variant in parsed as Array:
+		if not (entry_variant is Dictionary):
+			continue
+		var entry: Dictionary = entry_variant
+		var key := "%s,%s" % [str(entry.get("x", 0.0)), str(entry.get("y", 0.0))]
+		var health := float(entry.get("health", 0.0))
+		next[key] = health
+		total += health
+		if _core_healths.has(key) and health < float(_core_healths[key]) - 0.001:
+			_last_damaged_core = Vector2(float(entry.get("x", 0.0)), float(entry.get("y", 0.0)))
+			_core_attack_time = 240.0
+	if total < _core_attack_total - 0.001 and not _core_healths.is_empty():
+		_core_attack_time = 240.0
+	_core_attack_total = total
+	_core_healths = next
+
+
+## Tapping the core-attack banner pans the camera to the damaged core
+## (`HudFragment.java:596-631`).
+func _on_core_attack_input(event: InputEvent) -> void:
+	if not (event is InputEventMouseButton and event.pressed):
+		return
+	if event.button_index != MOUSE_BUTTON_LEFT:
+		return
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if camera != null and camera.has_method("pan_to"):
+		camera.call("pan_to", _last_damaged_core.x, _last_damaged_core.y)
+
+
+## `HudFragment.addInfoTable` (`:1205-1231`): one 32x32 icon per applied
+## status effect with its localized name.
+func _refresh_status_icons() -> void:
+	if status_icons == null:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("player_unit_status"):
+		return
+	var status: Variant = host.call("player_unit_status")
+	var list: Variant = null
+	if status is Dictionary:
+		list = JSON.parse_string(str((status as Dictionary).get("statuses", "[]")))
+	if not (list is Array):
+		list = []
+	var names: Array[String] = []
+	for entry in list as Array:
+		if entry is Dictionary:
+			names.append(str((entry as Dictionary).get("name", "")))
+	var signature := ",".join(names)
+	if signature == _status_names:
+		return
+	_status_names = signature
+	for child in status_icons.get_children():
+		child.queue_free()
+	for name in names:
+		if name.is_empty():
+			continue
+		# code-instantiated: one icon per applied status effect (T9).
+		var icon := TextureRect.new()
+		icon.custom_minimum_size = Vector2(32, 32)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture = MindWidgets.icon_texture("status-%s-ui" % name)
+		if icon.texture == null:
+			icon.texture = MindWidgets.icon_texture("status-%s" % name)
+		icon.tooltip_text = MindWidgets.markup("@status.%s.name" % name)
+		status_icons.add_child(icon)
+
+
+## `@saving` label while a save is queued (`control.saves.isSaving()`).
+func _refresh_saving() -> void:
+	if saving_label == null:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	saving_label.visible = (
+		host != null and host.has_method("io_saving") and bool(host.call("io_saving"))
+	)
 
 
 ## `Minimap.clicked` -> `ui.minimapfrag.toggle()`.

@@ -135,6 +135,30 @@ mod tests {
     }
 
     #[test]
+    fn darkness_map_with_border() {
+        use crate::world::WorldGrid;
+        use crate::world::darkness::border_darkness;
+        // 6x6 empty map, border on, static darkness 0.
+        let grid = WorldGrid::new(6, 6);
+        let dark = |x: i32, y: i32| border_darkness(&grid, true, None, x, y);
+        let map = build_darkness_map(6, 6, None, dark);
+        let grey = |x: i32, y: i32| map[(y * 6 + x) as usize][0];
+        // texel (0,3): edge distance 0 -> darkness 4 -> 1 - min(4.5/4, 1) = 0.
+        assert_eq!(grey(0, 3), 0.0);
+        // texel (1,3): edge distance 1 -> darkness 2 -> 1 - 2.5/4 = 0.375.
+        assert!((grey(1, 3) - 0.375).abs() < 1e-6);
+        // texel (2,3): edge distance 2 -> darkness 0 -> white.
+        assert_eq!(grey(2, 3), 1.0);
+
+        // With limit [1,1,4,4]: outside is black; (2,2) is the rect edge.
+        let dark = |x: i32, y: i32| border_darkness(&grid, true, Some((1, 1, 4, 4)), x, y);
+        let map = build_darkness_map(6, 6, Some([1, 1, 4, 4]), dark);
+        let grey = |x: i32, y: i32| map[(y * 6 + x) as usize][0];
+        assert_eq!(grey(0, 0), 0.0, "outside the limit rect is black");
+        assert!((grey(2, 2) - 0.375).abs() < 1e-6, "rect edge fades");
+    }
+
+    #[test]
     fn limit_map_area_fill_clip() {
         let limit = [2, 2, 3, 3]; // fill x 2..=4, clip x 2..=3
         let map = build_darkness_map(6, 6, Some(limit), |_, _| 0.0);

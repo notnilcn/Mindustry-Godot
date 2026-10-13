@@ -55,6 +55,10 @@ fn load_block_colors() -> Vec<u32> {
         .collect()
 }
 
+/// Change key for the darkness/minimap rebuild: `(world revision,
+/// borderDarkness, limitMapArea)` (G03 T11).
+type DarknessKey = (i64, bool, Option<(i32, i32, i32, i32)>);
+
 /// `MindMinimap` — the plan-14 minimap provider (plan 16 §3.7).
 #[derive(GodotClass)]
 #[class(base=Node2D)]
@@ -69,7 +73,8 @@ pub struct MindMinimap {
     zoom: f32,
     counter: f32,
     dirty: HashSet<i32>,
-    last_revision: i64,
+    /// Change key: `(world revision, borderDarkness, limitMapArea)` (T11).
+    last_key: DarknessKey,
     /// `sprites/block_colors.png` row 0 (`ContentLoader.loadColors`), loaded once.
     block_colors: Option<Vec<u32>>,
     /// `AttackIndicators` rows `(tile x, tile y, age ticks)` for the pulsing
@@ -91,7 +96,7 @@ impl INode2D for MindMinimap {
             zoom: 4.0,
             counter: 0.0,
             dirty: HashSet::new(),
-            last_revision: i64::MIN,
+            last_key: (i64::MIN, true, None),
             block_colors: None,
             indicators: Vec::new(),
         }
@@ -120,10 +125,14 @@ impl INode2D for MindMinimap {
             return;
         };
         let host = host.bind();
-        let revision = host.world_revision();
+        let key = (
+            host.world_revision(),
+            host.border_darkness_enabled(),
+            host.grid().limit_area,
+        );
         drop(host);
-        if revision != self.last_revision {
-            self.last_revision = revision;
+        if key != self.last_key {
+            self.last_key = key;
             self.rebuild_all();
             return;
         }
@@ -167,12 +176,15 @@ impl MindMinimap {
             }
             let mut palette = BlockPalette::of(content);
             palette.apply_block_colors(self.block_colors.get_or_insert_with(load_block_colors));
+            let border = host.border_darkness_enabled();
+            let limit = world.limit_area;
             let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
             for y in 0..height {
                 // Top row first: `pixmap.set(x, height - 1 - y)`.
                 for x in 0..width {
                     let team = host.building_team(x, y).unwrap_or(0);
-                    let color = self.tile_color(&palette, world, content, x, y, team);
+                    let color =
+                        self.tile_color(&palette, world, content, x, y, team, border, limit);
                     rgba.extend_from_slice(&color.to_be_bytes());
                 }
             }
@@ -228,11 +240,13 @@ impl MindMinimap {
             return;
         };
         let indices: Vec<i32> = self.dirty.drain().collect();
+        let border = host.border_darkness_enabled();
+        let limit = host.grid().limit_area;
         for index in indices {
             let x = index % width;
             let y = index / width;
             let team = host.building_team(x, y).unwrap_or(0);
-            let color = self.tile_color(&palette, world, content, x, y, team);
+            let color = self.tile_color(&palette, world, content, x, y, team, border, limit);
             // Texture is top-row-first.
             image.set_pixel(x, height - 1 - y, color_from(color));
         }
@@ -240,6 +254,7 @@ impl MindMinimap {
     }
 
     /// `MinimapRenderer.colorFor` over plan-02 metadata + plan-04 `color_for`.
+    #[allow(clippy::too_many_arguments)]
     fn tile_color(
         &self,
         palette: &BlockPalette,
@@ -248,7 +263,16 @@ impl MindMinimap {
         x: i32,
         y: i32,
         team: u8,
+        border: bool,
+        limit: Option<(i32, i32, i32, i32)>,
     ) -> u32 {
+        // Outside the play rect: fully black (`World.getDarkness` >= 4 -> the
+        // minimap multiplier is 0; G03 T11).
+        if let Some((lx, ly, lw, lh)) = limit
+            && (x < lx || y < ly || x >= lx + lw || y >= ly + lh)
+        {
+            return 0x0000_00ff;
+        }
         let tile = world.tile(x, y);
         let wall = tile.block.raw();
         let floor = tile.floor.raw();
@@ -260,9 +284,11 @@ impl MindMinimap {
         let mut color = color_for(palette, real, floor, overlay, team);
         color = shade(
             color,
-            mind_core::render::minimap::darkness_multiplier(get_static_darkness(
-                world, content, x, y,
-            )),
+            mind_core::render::minimap::darkness_multiplier(
+                get_static_darkness(world, content, x, y).max(
+                    mind_core::world::darkness::border_darkness(world, border, limit, x, y),
+                ),
+            ),
         );
 
         let real_air = real == 0;
@@ -479,6 +505,8 @@ impl MindMinimap {
             return 0;
         }
         let team = host.building_team(x, y).unwrap_or(0);
-        self.tile_color(&palette, world, content, x, y, team) as i64
+        let border = host.border_darkness_enabled();
+        let limit = host.grid().limit_area;
+        self.tile_color(&palette, world, content, x, y, team, border, limit) as i64
     }
 }

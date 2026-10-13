@@ -259,6 +259,26 @@ impl MindCamera2D {
         GString::from(value.to_string().as_str())
     }
 
+    /// `CoreBlock.drawLaunch` streak rays (G03 T18): `Angles.randLenVectors(1,
+    /// fin, 100, length)` rows `[ax, ay, angleDeg, ffin]`; the fragment strokes
+    /// each ray `ffin * pf * 3` wide and `(ffin * 20 + 1)` long from
+    /// `(x + ax, y + ay)` toward `angleDeg`.
+    #[func]
+    pub fn landing_streaks_json(&self, fin: f64, length: f64) -> GString {
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        mind_core::fx::angles::rand_len_vectors_fin(
+            1,
+            fin as f32,
+            100,
+            length as f32,
+            |ax, ay, ffin, _ffout| {
+                let angle = ay.atan2(ax).to_degrees();
+                rows.push(serde_json::json!([ax, ay, angle, ffin]));
+            },
+        );
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
     /// `Renderer.isCutscene()` (landing/launch animation running).
     #[func]
     pub fn is_cutscene(&self) -> bool {
@@ -394,6 +414,13 @@ impl MindCamera2D {
     pub fn tile_to_screen(&self, x: i32, y: i32) -> Vector2 {
         let world = Vector2::new(x as f32 * TILESIZE as f32, y as f32 * TILESIZE as f32);
         self.base().get_canvas_transform() * world
+    }
+
+    /// World pixels → viewport position (`tile_to_screen` without the `*8`
+    /// tile-centre convention; used by the block-inventory popup, G03 T13).
+    #[func]
+    pub fn world_to_screen(&self, wx: f64, wy: f64) -> Vector2 {
+        self.base().get_canvas_transform() * Vector2::new(wx as f32, wy as f32)
     }
 
     /// Centers the camera on tile `(x, y)` (`x * TILESIZE` center, Java

@@ -791,6 +791,10 @@ impl DesktopBridge {
                 // reads it (`Renderer.drawStatus`).
                 self.fire_hotkey(name);
             }
+            "toggle_menus" => {
+                // `HudFragment.java:455-461`: the HUD fragment flips its tables.
+                self.fire_hotkey(name);
+            }
             "category_prev" | "category_next" => {
                 // The placement fragment owns the category rail; it reacts to
                 // the hotkey signal and pushes the new index back.

@@ -67,6 +67,32 @@ impl Default for RulesRenderView {
 }
 
 impl RulesRenderView {
+    /// plan-12 `Rules` → render view (G03 T12): the renderer's live rules feed.
+    /// Background/planet fields (not on `Rules`) keep their `Default` values.
+    pub fn from_rules(rules: &crate::io::json::rules::Rules) -> Self {
+        let color = |value: &crate::io::json::content_serde::ColorHex| {
+            let c = value.0;
+            [c.r, c.g, c.b, c.a]
+        };
+        Self {
+            static_fog: rules.static_fog,
+            fog: rules.fog,
+            dynamic_color: color(&rules.dynamic_color),
+            static_color: color(&rules.static_color),
+            lighting: rules.lighting,
+            ambient_light: color(&rules.ambient_light),
+            env: rules.env as u32,
+            limit_map_area: rules.limit_map_area,
+            limit_rect: [
+                rules.limit_x,
+                rules.limit_y,
+                rules.limit_width,
+                rules.limit_height,
+            ],
+            ..Self::default()
+        }
+    }
+
     /// `FogRenderer.drawFog`: the dynamic fog color with the `0.5` alpha floor
     /// (NaN treated as `0.5`).
     pub fn dynamic_fog_color(&self) -> [f32; 4] {
@@ -100,6 +126,29 @@ mod tests {
         assert!(!rules.static_fog && !rules.fog && !rules.lighting);
         assert_eq!(rules.ambient_light, [0.01, 0.01, 0.04, 0.99]);
         assert_eq!(rules.env, 0);
+    }
+
+    #[test]
+    fn from_rules_maps_the_render_slice() {
+        let rules = crate::io::json::rules::Rules::default();
+        let view = RulesRenderView::from_rules(&rules);
+        assert!(!view.lighting);
+        assert_eq!(view.env, rules.env as u32);
+        assert_eq!(view.limit_map_area, rules.limit_map_area);
+        assert_eq!(
+            view.limit_rect,
+            [
+                rules.limit_x,
+                rules.limit_y,
+                rules.limit_width,
+                rules.limit_height
+            ]
+        );
+        let ambient = rules.ambient_light.0;
+        assert_eq!(
+            view.ambient_light,
+            [ambient.r, ambient.g, ambient.b, ambient.a]
+        );
     }
 
     #[test]

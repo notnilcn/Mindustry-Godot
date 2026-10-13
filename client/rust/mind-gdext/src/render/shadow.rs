@@ -20,6 +20,7 @@ use godot::prelude::*;
 use mind_core::config::TILESIZE;
 use mind_core::render::BlockDrawMeta;
 use mind_core::render::shadow::{build_darkness_map, build_shadow_map, shadow_tile_color};
+use mind_core::world::darkness::border_darkness;
 use mind_core::world::darkness::get_static_darkness;
 
 use crate::sim_host::MindSimHost;
@@ -38,6 +39,10 @@ pub struct ShadowStats {
     pub shadow_events: i64,
 }
 
+/// Change key for the darkness/minimap rebuild: `(world revision,
+/// borderDarkness, limitMapArea)` (G03 T11).
+type DarknessKey = (i64, bool, Option<(i32, i32, i32, i32)>);
+
 /// Shadow + darkness composite pass.
 pub struct ShadowRenderer {
     host: Gd<MindSimHost>,
@@ -45,7 +50,8 @@ pub struct ShadowRenderer {
     dark_node: Gd<MeshInstance2D>,
     shadow_material: Option<Gd<ShaderMaterial>>,
     dark_material: Option<Gd<ShaderMaterial>>,
-    last_revision: i64,
+    /// Change key: `(world revision, borderDarkness, limitMapArea)` (T11).
+    last_key: DarknessKey,
     stats: ShadowStats,
 }
 
@@ -74,7 +80,7 @@ impl ShadowRenderer {
             dark_node,
             shadow_material,
             dark_material,
-            last_revision: i64::MIN,
+            last_key: (i64::MIN, true, None),
             stats: ShadowStats::default(),
         }
     }
@@ -86,11 +92,20 @@ impl ShadowRenderer {
 
     /// Rebuilds the maps when the world changed, then composites.
     pub fn update(&mut self, force: bool) {
-        let revision = self.host.clone().bind().world_revision();
-        if !force && revision == self.last_revision {
+        let (revision, border, limit) = {
+            let host = self.host.clone();
+            let host = host.bind();
+            (
+                host.world_revision(),
+                host.border_darkness_enabled(),
+                host.grid().limit_area,
+            )
+        };
+        let key = (revision, border, limit);
+        if !force && key == self.last_key {
             return;
         }
-        self.last_revision = revision;
+        self.last_key = key;
 
         let Some(mut shadow_material) = self.shadow_material.clone() else {
             return;
@@ -132,9 +147,19 @@ impl ShadowRenderer {
             let shadow_pixels = build_shadow_map(width, height, &events);
             let event_count = events.len() as i64;
 
-            let dark_pixels = build_darkness_map(width, height, None, |x, y| {
-                get_static_darkness(world, content, x, y)
-            });
+            // `World.getDarkness`: the static-wall term maxes with the border/
+            // limit-rect falloff; a limit rect turns outside tiles fully black
+            // (`BlockRenderer.updateDarkness` clears to black when set).
+            let limit = world.limit_area;
+            let dark_pixels = build_darkness_map(
+                width,
+                height,
+                limit.map(|(x, y, w, h)| [x, y, w, h]),
+                |x, y| {
+                    get_static_darkness(world, content, x, y)
+                        .max(border_darkness(world, border, limit, x, y))
+                },
+            );
             (width, height, shadow_pixels, dark_pixels, event_count)
         };
 

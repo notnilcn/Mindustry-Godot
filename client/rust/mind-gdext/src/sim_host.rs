@@ -107,14 +107,18 @@ use mind_core::content::{
     content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
+use mind_core::ecs::BuildingComp;
 use mind_core::game::rules::Rules;
 use mind_core::game::runtime::{CampaignRuntime, SessionSync, sync_session_with_sim};
+use mind_core::render::scan::{CameraView, visible_blocks};
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
+use mind_core::world::TilePos;
 use mind_core::world::WorldGrid;
 use mind_core::world::blocks::heat::HeatState;
 use mind_core::world::blocks::power::PowerGrids;
 use mind_core::world::modules::{ItemModule, LiquidModule, PowerModule};
+use mind_core::world::pos::unpack;
 
 /// Maximum ticks accepted by one `step()` call (defensive; UI/MCP only).
 const MAX_STEP_TICKS: i64 = 1_000_000;
@@ -185,6 +189,91 @@ pub struct BulletDraw {
     pub def: mind_core::content::BulletId,
     /// Owning team (bullets are teamless in the port; kept for parity).
     pub team: u8,
+}
+
+/// One power-node laser link (`PowerNode.drawLaser`, G03 T7).
+pub struct LaserLink {
+    /// Source building centre (world px).
+    pub x1: f32,
+    /// Source building centre (world px).
+    pub y1: f32,
+    /// Source `Block.size`.
+    pub size1: i32,
+    /// Target building centre (world px).
+    pub x2: f32,
+    /// Target building centre (world px).
+    pub y2: f32,
+    /// Target `Block.size`.
+    pub size2: i32,
+    /// Owning graph satisfaction (`setupColor`).
+    pub satisfaction: f32,
+    /// Source block id (region fallbacks).
+    pub block: BlockId,
+}
+
+/// One item-bridge link (`ItemBridge.draw`, G03 T7).
+pub struct BridgeLink {
+    /// Source tile.
+    pub x: i32,
+    /// Source tile.
+    pub y: i32,
+    /// Linked tile.
+    pub ox: i32,
+    /// Linked tile.
+    pub oy: i32,
+    /// `ItemBridgeBuild.warmup`.
+    pub warmup: f32,
+    /// `ItemBridgeBuild.time`.
+    pub time: f32,
+    /// `Block.hasPower` (fade-in only for phase conveyors).
+    pub has_power: bool,
+    /// Source block id (region names).
+    pub block: BlockId,
+}
+
+/// Laser/bridge visible-rect growth: the longest link is a surge tower's
+/// 40 tiles = 320 px (`Blocks.java:2502`; G03 T7 pitfall).
+const POWER_GROW: f32 = 320.0;
+/// Bridge links reach `range 4` tiles (`Blocks.java`); 64 px covers it.
+const BRIDGE_GROW: f32 = 64.0;
+/// Light sources are stamped from outside the view too (`LightRenderer`
+/// quads), so grow the collection rect by the largest radius (G03 T12).
+const LIGHT_GROW: f32 = 200.0;
+
+/// One `LightRenderer.add` source (G03 T12): world centre, radius, RGBA
+/// colour and the per-source opacity the pass multiplies into the alpha.
+pub struct LightSource {
+    /// World x.
+    pub x: f32,
+    /// World y.
+    pub y: f32,
+    /// World-pixel radius.
+    pub radius: f32,
+    /// RGBA colour `[r, g, b, a]`.
+    pub color: [f32; 4],
+    /// Accumulated-alpha multiplier (`LightRenderer.add` opacity).
+    pub opacity: f32,
+}
+
+/// Unpacks a packed `rgba8888` into float RGBA.
+fn rgba_f32(packed: u32) -> [f32; 4] {
+    [
+        ((packed >> 24) & 0xff) as f32 / 255.0,
+        ((packed >> 16) & 0xff) as f32 / 255.0,
+        ((packed >> 8) & 0xff) as f32 / 255.0,
+        (packed & 0xff) as f32 / 255.0,
+    ]
+}
+
+/// Building sprite centre (`anchor * 8 + Block.offset`; Java `Building.x`).
+fn building_center(
+    x: i32,
+    y: i32,
+    def: &mind_core::content::registries::blocks::BlockDef,
+) -> (f32, f32) {
+    let anchor_x = (x + (def.size - 1) / 2) as f32 * 8.0 + def.offset;
+    let anchor_y = (y + (def.size - 1) / 2) as f32 * 8.0 + def.offset;
+    (anchor_x, anchor_y)
 }
 
 /// Per-building draw state (`Door`/`SwitchBlock`/`Sorter`/`ItemSource`/
@@ -1507,6 +1596,13 @@ impl MindSimHost {
         self.sim.io_pending() as i64
     }
 
+    /// Whether a *save* is queued (`control.saves.isSaving()`; G03 T9 shows
+    /// the small `@saving` label instead of the full loading overlay).
+    #[func]
+    pub fn io_saving(&self) -> bool {
+        self.sim.io_saving()
+    }
+
     /// Stores host playtime (`Saves.getTotalPlaytime`) for the next save's meta
     /// region (`SaveVersion.writeMeta`).
     #[func]
@@ -2512,6 +2608,7 @@ impl MindSimHost {
     #[func]
     pub fn player_unit_status(&self) -> VarDictionary {
         use mind_core::entities::comp::Health;
+        use mind_core::entities::comp::unit::comp::StatusComp;
         use mind_core::entities::comp::unit::comp::UnitTypeComp;
         let mut dict = VarDictionary::new();
         let entity = self.sim.player_unit();
@@ -2526,10 +2623,430 @@ impl MindSimHost {
         let healthf = health
             .filter(|h| h.max_health > 0.0)
             .map_or(0.0, |h| h.health / h.max_health);
+        // `HudFragment.addInfoTable` (`:1205-1231`): applied status effects
+        // with their remaining duration (view-only entries, G03 T9).
+        let statuses: Vec<serde_json::Value> = entity
+            .and_then(|e| world.get::<StatusComp>(e))
+            .map(|comp| {
+                comp.statuses
+                    .iter()
+                    .map(|entry| {
+                        let name = self
+                            .content_snapshot
+                            .as_ref()
+                            .and_then(|content| content.status(entry.effect))
+                            .map(|def| def.name.clone())
+                            .unwrap_or_default();
+                        serde_json::json!({
+                            "name": name,
+                            "duration": entry.duration,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         dict.set("dead", dead);
         dict.set("healthf", if dead { 0.0 } else { healthf });
         dict.set("type", &GString::from(type_name.as_str()));
+        dict.set(
+            "statuses",
+            &GString::from(serde_json::Value::Array(statuses).to_string().as_str()),
+        );
         dict
+    }
+
+    // ---- G03 T9 HUD seams ----
+
+    /// Player-team cores `[{x, y, health, max}]` in row-major order (G03 T9):    /// the core-attack banner sums the healths and pans to the core whose
+    /// health dropped last. Java fires `Trigger.teamCoreDamage` on
+    /// `CoreBuild.damage` (`CoreBlock.java:842-848`); the port diffs these
+    /// values between 5 Hz refreshes (documented deviation).
+    #[func]
+    pub fn player_core_healths_json(&self) -> GString {
+        use mind_core::entities::comp::health::Health;
+        let team = self.player_team();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("[]");
+        };
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        let mut seen = Vec::new();
+        let unit = mind_core::config::TILESIZE as f32;
+        for (pos, index) in self.sim.grid.iter_row_major() {
+            let Some(def) = content.block(self.sim.grid.block_id_at(index)) else {
+                continue;
+            };
+            if def.kind != BlockKind::CoreBlock {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(pos.x() as i32, pos.y() as i32).build else {
+                continue;
+            };
+            if seen.contains(&entity) {
+                continue;
+            }
+            if self.building_team(pos.x() as i32, pos.y() as i32) != Some(team) {
+                continue;
+            }
+            seen.push(entity);
+            let anchor_x = (pos.x() as i32 - def.size_offset) as f32 * unit + def.offset;
+            let anchor_y = (pos.y() as i32 - def.size_offset) as f32 * unit + def.offset;
+            let (health, max) = self
+                .sim
+                .ecs
+                .0
+                .get::<Health>(entity)
+                .map(|health| (health.health, health.max_health))
+                .unwrap_or((0.0, 0.0));
+            rows.push(serde_json::json!({
+                "x": anchor_x,
+                "y": anchor_y,
+                "health": health,
+                "max": max,
+            }));
+        }
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// `WaveSpawner.playerNear()` (`WaveSpawner.java:58-60`, G03 T9): spawns
+    /// exist, the player unit is alive, a spawn tile is within
+    /// `rules.dropZoneRadius` of the player and the player team is not the
+    /// wave team.
+    #[func]
+    pub fn player_near_drop_zone(&self) -> bool {
+        let spawns: Vec<(i32, i32)> = self
+            .sim
+            .unit_runtime()
+            .map(|runtime| {
+                runtime
+                    .wave_spawner
+                    .spawns
+                    .iter()
+                    .map(|pos| (pos.x() as i32, pos.y() as i32))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let rules = self.render_rules_or_default();
+        player_near_drop_zone_predicate(
+            &spawns,
+            self.sim.player_unit_position(),
+            self.player_team(),
+            rules.wave_team,
+            rules.drop_zone_radius,
+        )
+    }
+
+    /// Live sector rules when available (campaign session first, then the last
+    /// `load_sector` rules), else defaults.
+    fn render_rules_or_default(&self) -> Rules {
+        self.live_rules().unwrap_or_default()
+    }
+
+    /// Live sector rules for the renderer's per-frame feed (G03 T12):
+    /// campaign session first, else the last `load_sector` rules.
+    pub fn live_rules(&self) -> Option<Rules> {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.clone())
+            .or_else(|| self.sector_rules.clone())
+    }
+
+    /// `LightRenderer` sources in the (grown) camera rect (G03 T12): cores
+    /// (`CoreBlock.java:158,739-741`), illuminators (`LightBlock.java:40,105,
+    /// 126-129`), static `emitLight` blocks (`Block.lightRadius` default 60),
+    /// units when `rules.unitLight` (`UnitType.java:954,1800-1804`) and bullets
+    /// (`BulletType.drawLight` defaults `max(18, hitSize*5)`,
+    /// `Pal.powerLight`, 0.3 — `BulletDef` has no light fields yet).
+    pub fn light_sources(&self, rect: (f32, f32, f32, f32)) -> Vec<LightSource> {
+        use mind_core::combat::bullet::Bullet;
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        use mind_core::render::draw_meta::BlockDrawMeta;
+        use mind_core::render::drawf::pal;
+        use mind_core::world::behavior::light::LightState;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let rules = self.render_rules_or_default();
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * LIGHT_GROW,
+            h: rect.3 + 2.0 * LIGHT_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            let (cx, cy) = building_center(tile.x, tile.y, def);
+            match def.kind {
+                BlockKind::CoreBlock => {
+                    // `CoreBlock.java:739-741`: `0.65 + absin(time, 20, 0.1)`.
+                    let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
+                    out.push(LightSource {
+                        x: cx,
+                        y: cy,
+                        radius: 30.0 + 20.0 * def.size as f32,
+                        color: pal::ACCENT,
+                        opacity: 0.65 + mind_core::render::drawf::absin(ticks, 20.0, 0.1),
+                    });
+                }
+                BlockKind::LightBlock => {
+                    let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                        continue;
+                    };
+                    let state = self.sim.ecs.0.get::<LightState>(entity);
+                    let color = state.map_or(0xffd3_7fff_u32, |s| s.color);
+                    let smooth = state.map_or(1.0, |s| s.smooth_time).min(2.0);
+                    out.push(LightSource {
+                        x: cx,
+                        y: cy,
+                        // `illuminator` radius 140 * 2.5 (per-block radius is
+                        // not in `BlockDef` yet; G03 T12 note).
+                        radius: 350.0 * smooth,
+                        color: rgba_f32(color),
+                        opacity: 0.75,
+                    });
+                }
+                _ if BlockDrawMeta::from_def(def).emit_light => out.push(LightSource {
+                    x: cx,
+                    y: cy,
+                    radius: 60.0,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    opacity: 1.0,
+                }),
+                _ => {}
+            }
+        }
+        if rules.unit_light
+            && let Some(runtime) = self.sim.unit_runtime()
+        {
+            for &entity in &runtime.units {
+                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                    continue;
+                };
+                let Some(type_comp) = self.sim.ecs.0.get::<UnitTypeComp>(entity) else {
+                    continue;
+                };
+                let Some(def) = content.unit(type_comp.type_id) else {
+                    continue;
+                };
+                let radius = if def.light_radius > 0.0 {
+                    def.light_radius
+                } else {
+                    60.0f32.max(def.hit_size * 2.3)
+                };
+                let opacity = if def.light_opacity > 0.0 {
+                    def.light_opacity
+                } else {
+                    0.6
+                };
+                let c = def.light_color;
+                out.push(LightSource {
+                    x: pos.x,
+                    y: pos.y,
+                    radius,
+                    color: [c.r, c.g, c.b, c.a],
+                    opacity,
+                });
+            }
+        }
+        if let Some(runtime) = self.sim.unit_runtime() {
+            for &entity in &runtime.bullets {
+                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                    continue;
+                };
+                let Some(bullet) = self.sim.ecs.0.get::<Bullet>(entity) else {
+                    continue;
+                };
+                if bullet.finished() {
+                    continue;
+                }
+                out.push(LightSource {
+                    x: pos.x,
+                    y: pos.y,
+                    radius: 18.0f32.max(bullet.hit_size * 5.0),
+                    color: pal::POWER_LIGHT,
+                    opacity: 0.3,
+                });
+            }
+        }
+        out
+    }
+
+    /// `rules.borderDarkness` for the darkness/minimap passes (G03 T11):
+    /// live campaign rules, else the last `load_sector` rules, else `true`.
+    pub fn border_darkness_enabled(&self) -> bool {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.border_darkness)
+            .or_else(|| {
+                self.sector_rules
+                    .as_ref()
+                    .map(|rules| rules.border_darkness)
+            })
+            .unwrap_or(true)
+    }
+
+    /// Player-team colour as packed `rgba8888` (landing flame circles,
+    /// `CoreBlock.java:505-512`; G03 T18).
+    #[func]
+    pub fn player_team_color(&self) -> i64 {
+        i64::from(crate::render::overlays::team_color(self.player_team()))
+    }
+
+    // ---- G03 T7 power/bridge link seams (Rust-only) ----
+
+    /// Power-node laser links in the (grown) visible rect (`PowerNode.draw`,
+    /// `PowerNode.java:496-512`): each node pair once (the other node's entity
+    /// index must be below ours), derelicts skipped.
+    pub fn power_lasers(&self, rect: (f32, f32, f32, f32)) -> Vec<LaserLink> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * POWER_GROW,
+            h: rect.3 + 2.0 * POWER_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if def.kind != BlockKind::PowerNode {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                continue;
+            };
+            let Some(module) = self.sim.ecs.0.get::<PowerModule>(entity) else {
+                continue;
+            };
+            let satisfaction = self
+                .sim
+                .ecs
+                .0
+                .get_resource::<PowerGrids>()
+                .and_then(|grids| grids.graph(module.graph))
+                .map(|graph| graph.get_satisfaction())
+                .unwrap_or(1.0);
+            let (x1, y1) = building_center(tile.x, tile.y, def);
+            for packed in &module.links {
+                let (lx, ly) = unpack(*packed);
+                if !self.sim.grid.tiles.in_bounds(lx as i32, ly as i32) {
+                    continue;
+                }
+                let Some(other) = self.sim.grid.entity_at(TilePos::new(lx, ly)) else {
+                    continue;
+                };
+                if other == entity {
+                    continue;
+                }
+                if self.building_team(lx as i32, ly as i32) == Some(0) {
+                    continue;
+                }
+                let Some(other_def) = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<BuildingComp>(other)
+                    .and_then(|comp| content.block(comp.block))
+                else {
+                    continue;
+                };
+                // Each node pair once (`link.id >= id` skip on the other node).
+                if other_def.kind == BlockKind::PowerNode && other.index() >= entity.index() {
+                    continue;
+                }
+                let (x2, y2) = building_center(lx as i32, ly as i32, other_def);
+                out.push(LaserLink {
+                    x1,
+                    y1,
+                    size1: def.size,
+                    x2,
+                    y2,
+                    size2: other_def.size,
+                    satisfaction,
+                    block: tile.block,
+                });
+            }
+        }
+        out
+    }
+
+    /// Item-bridge links in the (grown) visible rect (`ItemBridge.draw`,
+    /// `ItemBridge.java:384-432`).
+    pub fn bridge_links(&self, rect: (f32, f32, f32, f32)) -> Vec<BridgeLink> {
+        use mind_core::world::blocks::distribution::item_bridge::ItemBridgeBuild;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * BRIDGE_GROW,
+            h: rect.3 + 2.0 * BRIDGE_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if !matches!(
+                def.kind,
+                BlockKind::ItemBridge | BlockKind::BufferedItemBridge
+            ) {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                continue;
+            };
+            let Some(bridge) = self.sim.ecs.0.get::<ItemBridgeBuild>(entity) else {
+                continue;
+            };
+            if bridge.link < 0 {
+                continue;
+            }
+            let (lx, ly) = unpack(bridge.link);
+            if !self.sim.grid.tiles.in_bounds(lx as i32, ly as i32) {
+                continue;
+            }
+            let Some(other) = self.sim.grid.entity_at(TilePos::new(lx, ly)) else {
+                continue;
+            };
+            let linked_same = self
+                .sim
+                .ecs
+                .0
+                .get::<BuildingComp>(other)
+                .is_some_and(|comp| comp.block == tile.block);
+            if !linked_same {
+                continue;
+            }
+            out.push(BridgeLink {
+                x: tile.x,
+                y: tile.y,
+                ox: lx as i32,
+                oy: ly as i32,
+                warmup: bridge.warmup,
+                time: bridge.time,
+                has_power: def.has_power,
+                block: tile.block,
+            });
+        }
+        out
     }
 
     /// Debug probe: `{name, x, y, team}` rows for every live unit (render
@@ -4321,6 +4838,16 @@ impl MindSimHost {
             .is_some_and(|(current, _, _)| current == block)
     }
 
+    /// Building footprint size at `(x, y)` (`Block.size`; G03 T13 inventory
+    /// anchoring). Read-only MCP/HUD probe; `1` without a building.
+    #[func]
+    pub fn block_size(&self, x: i32, y: i32) -> i32 {
+        self.tile_at(x, y)
+            .and_then(|tile| self.content_snapshot.as_ref()?.block(tile.block))
+            .map(|def| def.size.max(1))
+            .unwrap_or(1)
+    }
+
     /// Per-building state for the block pass (G03 T8): door open, switch
     /// enabled, sorter/unloader/source items, damage and team mark inputs.
     pub fn block_state_draw(&self, x: i32, y: i32) -> Option<BlockStateDraw> {
@@ -5001,6 +5528,31 @@ fn first_core_position(grid: &WorldGrid, content: &ContentRegistry) -> Option<(f
     })
 }
 
+/// `WaveSpawner.playerNear()` (`WaveSpawner.java:58-60`): spawns exist, the
+/// player is alive, a spawn tile is within `radius` of the player and the
+/// player team is not the wave team. `spawns` are tiles; the player position
+/// is world px.
+pub fn player_near_drop_zone_predicate(
+    spawns: &[(i32, i32)],
+    player: Option<(f32, f32)>,
+    player_team: u8,
+    wave_team: u8,
+    radius: f32,
+) -> bool {
+    if spawns.is_empty() || player_team == wave_team {
+        return false;
+    }
+    let Some((px, py)) = player else {
+        return false;
+    };
+    let unit = mind_core::config::TILESIZE as f32;
+    spawns.iter().any(|(sx, sy)| {
+        let dx = *sx as f32 * unit - px;
+        let dy = *sy as f32 * unit - py;
+        dx.hypot(dy) < radius
+    })
+}
+
 /// One hovered-building bar row (`Block.setBars`, G03 T6).
 pub struct BarRow {
     /// `"health" | "power" | "items" | "liquid"`.
@@ -5338,5 +5890,41 @@ mod tests {
             .unwrap_or_else(|| panic!("liquid row"));
         assert!((row.value - 0.4).abs() < 1e-3, "value: {}", row.value);
         assert_eq!(row.label_key, format!("liquid.{}.name", liquid_info[1].0));
+    }
+
+    #[test]
+    fn drop_zone_predicate_uses_the_radius() {
+        // Spawn tile (10,10) -> world (80,80); radius 300 (G03 T9).
+        let spawns = [(10, 10)];
+        assert!(player_near_drop_zone_predicate(
+            &spawns,
+            Some((80.0 + 299.0, 80.0)),
+            1,
+            2,
+            300.0
+        ));
+        assert!(!player_near_drop_zone_predicate(
+            &spawns,
+            Some((80.0 + 301.0, 80.0)),
+            1,
+            2,
+            300.0
+        ));
+        // No spawns / same team / dead player.
+        assert!(!player_near_drop_zone_predicate(
+            &[],
+            Some((80.0, 80.0)),
+            1,
+            2,
+            300.0
+        ));
+        assert!(!player_near_drop_zone_predicate(
+            &spawns,
+            Some((80.0, 80.0)),
+            2,
+            2,
+            300.0
+        ));
+        assert!(!player_near_drop_zone_predicate(&spawns, None, 1, 2, 300.0));
     }
 }
