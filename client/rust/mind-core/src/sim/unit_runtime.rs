@@ -854,6 +854,33 @@ impl Sim {
         self.ecs.0.insert_resource(input);
     }
 
+    /// Uploads the full desktop control state (`DesktopInput.updateMovement`):
+    /// movement axis, `player.shooting`, the cursor aim point and the boost
+    /// key. Read by [`crate::ai::types::player::update_player`].
+    pub fn set_player_control(
+        &mut self,
+        axis_x: f32,
+        axis_y: f32,
+        shooting: bool,
+        aim_x: f32,
+        aim_y: f32,
+        boosting: bool,
+    ) {
+        let mut input = self
+            .ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .copied()
+            .unwrap_or_default();
+        input.axis_x = axis_x;
+        input.axis_y = axis_y;
+        input.shooting = shooting;
+        input.aim_x = aim_x;
+        input.aim_y = aim_y;
+        input.boosting = boosting;
+        self.ecs.0.insert_resource(input);
+    }
+
     /// Sets or clears the player unit's mine order
     /// (`InputHandler.tryBeginMine`/`tryStopMine` set `player.unit().mineTile`).
     pub fn set_player_mine_tile(&mut self, tile: Option<TilePos>) {

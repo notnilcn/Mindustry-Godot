@@ -319,11 +319,13 @@ impl INode for MindSimHost {
         if steps == 0 {
             return;
         }
-        // `DesktopInput.updateMovement`: the axis reaches the player unit each
-        // tick; the same axis no longer pans the camera while a player exists
+        // `DesktopInput.updateMovement`: the full control state (axis, shooting,
+        // cursor aim, boost) reaches the player unit each tick; the same axis no
+        // longer pans the camera while a player exists
         // (`MindCamera2D::process`).
-        let (axis_x, axis_y) = self.player_axis();
-        self.sim.set_player_input(axis_x, axis_y);
+        let (axis_x, axis_y, shooting, aim_x, aim_y, boosting) = self.player_control();
+        self.sim
+            .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting);
         self.advance_steps(steps);
         self.emit_state();
         self.emit_world_changed();
@@ -2070,19 +2072,21 @@ impl MindSimHost {
             .unwrap_or_default()
     }
 
-    /// Binding-driven move axis from the sibling `Input`. `MindInput.pan_axis`
-    /// is the shared `move_x`/`move_y` axis; with a player unit it drives the
-    /// unit instead of the camera (`DesktopInput.updateMovement`).
-    fn player_axis(&self) -> (f32, f32) {
+    /// Binding-driven control state from the sibling `Input`:
+    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`.
+    /// `MindInput.player_control` shares the `move_x`/`move_y` axis; with a
+    /// player unit it drives the unit instead of the camera
+    /// (`DesktopInput.updateMovement`).
+    fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
         if self.input_locked {
-            // `InputHandler.locked()`: movement is gated off (PAR-0100).
-            return (0.0, 0.0);
+            // `InputHandler.locked()`: movement and firing are gated off
+            // (PAR-0100).
+            return (0.0, 0.0, false, 0.0, 0.0, false);
         }
         let Some(input) = self.input.clone() else {
-            return (0.0, 0.0);
+            return (0.0, 0.0, false, 0.0, 0.0, false);
         };
-        let axis = input.bind().pan_axis();
-        (axis.x, axis.y)
+        input.bind().player_control()
     }
 
     /// `InputHandler.locked()` push from `MindInput` (PAR-0100): while set, the
@@ -2091,13 +2095,20 @@ impl MindSimHost {
     pub fn set_input_locked(&mut self, locked: bool) {
         self.input_locked = locked;
         if locked {
-            self.sim.set_player_input(0.0, 0.0);
+            self.sim
+                .set_player_control(0.0, 0.0, false, 0.0, 0.0, false);
         }
     }
 
     /// Player unit world position (`Player` mirror) for the camera follow.
     pub fn player_unit_position(&self) -> Option<(f32, f32)> {
         self.sim.player_unit_position()
+    }
+
+    /// `BuilderComp.activelyBuilding` for the player unit: the `canShoot` gate
+    /// the world input checks before latching `player.shooting`.
+    pub fn player_actively_building(&self) -> bool {
+        self.sim.player_actively_building()
     }
 
     /// Team a local placement carries (`state.rules.defaultTeam`; the live

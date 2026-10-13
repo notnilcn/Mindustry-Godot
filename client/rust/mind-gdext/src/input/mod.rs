@@ -849,6 +849,30 @@ impl MindInput {
         Vector2::new(x, y)
     }
 
+    /// `DesktopInput.updateMovement` inputs for the sim host:
+    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`. Only `bind`s the
+    /// camera (the caller may hold the host) — never touches `MindSimHost`.
+    pub fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
+        let (axis_x, axis_y) = self.bridge.pan_axis(&self.bindings);
+        let (aim_x, aim_y) = self.bridge.aim_world().unwrap_or((0.0, 0.0));
+        let boosting =
+            self.bridge.key_down(&self.bindings, ids::BOOST) && self.gameplay_input_active();
+        (
+            axis_x,
+            axis_y,
+            self.bridge.shooting_allowed(),
+            aim_x,
+            aim_y,
+            boosting,
+        )
+    }
+
+    /// `player.shooting` probe (left button held on a free tile).
+    #[func]
+    pub fn is_shooting(&self) -> bool {
+        self.bridge.shooting
+    }
+
     /// Whether a placement block is selected (`state.block`); `false` after the
     /// deselect key clears it (`InputHandler.tryBeginMine` gate).
     pub fn block_selected(&self) -> bool {

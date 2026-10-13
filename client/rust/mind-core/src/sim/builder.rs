@@ -810,6 +810,22 @@ impl Sim {
         true
     }
 
+    /// `BuilderComp.activelyBuilding` for the live player unit
+    /// (`BuilderComp.java:301-309`): the `canShoot` gate for left presses.
+    pub fn player_actively_building(&self) -> bool {
+        let Some(unit) = self.player_unit else {
+            return false;
+        };
+        let Some(pos) = self.ecs.0.get::<Pos>(unit).map(|pos| (pos.x, pos.y)) else {
+            return false;
+        };
+        let Some(runtime) = self.unit_runtime() else {
+            return false;
+        };
+        crate::ai::types::player::player_actively_building(&self.ecs.0, &runtime.content, unit, pos)
+            .is_some()
+    }
+
     /// `InputHandler.validPlace(x, y, block, rot)` for the local team: the
     /// placement-preview validity check, no side effects and nothing queued
     /// (`InputHandler.java:2029-2032` calls `Build.validPlace`).

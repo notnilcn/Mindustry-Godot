@@ -234,6 +234,9 @@ pub struct DesktopBridge {
     /// `InputHandler.locked()` mirror (PAR-0100): world clicks and scroll are
     /// ignored while set.
     pub locked: bool,
+    /// `player.shooting`: left button held on a free tile
+    /// (`DesktopInput.java:701-721`); uploaded through `MindInput::player_control`.
+    pub shooting: bool,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -269,6 +272,7 @@ impl DesktopBridge {
             text_focus: false,
             ui_dialog: false,
             locked: false,
+            shooting: false,
             command_mode_hold: true,
         }
     }
@@ -388,6 +392,11 @@ impl DesktopBridge {
 
     /// Consumes one raw event (bindings are only read).
     pub fn handle(&mut self, bindings: &BindingState, event: RawEvent) {
+        // `DesktopInput.java:465-469`: while a dialog owns input, the held
+        // select button no longer keeps `player.shooting` latched.
+        if self.ui_dialog && !matches!(event, RawEvent::MouseMove { .. }) {
+            self.shooting = false;
+        }
         let mut command_edge: Option<bool> = None;
         match event {
             RawEvent::KeyDown { code } => {
@@ -1017,6 +1026,23 @@ impl DesktopBridge {
         Some((tile.x, tile.y))
     }
 
+    /// Exact cursor world position (`input.mouseWorldX/Y`), not tile-snapped.
+    pub fn aim_world(&self) -> Option<(f32, f32)> {
+        let camera = self.camera.clone()?;
+        let point = camera
+            .bind()
+            .screen_to_world(self.mouse.0 as f64, self.mouse.1 as f64);
+        Some((point.x, point.y))
+    }
+
+    /// `player.shooting` after the input-side `canShoot` gates
+    /// (`InputHandler.java:2269-2272`; the sim half re-checks building/mining).
+    pub fn shooting_allowed(&self) -> bool {
+        self.shooting
+            && self.controller.state.block.is_none()
+            && !self.controller.state.command_mode
+    }
+
     /// Snapshot for the placement overlay pass (G03 T2).
     pub fn placement_view(&self) -> PlacementView {
         let mode = self.controller.state.place_mode;
@@ -1083,15 +1109,25 @@ impl DesktopBridge {
             return;
         }
         if self.controller.state.block.is_none() {
-            // `InputHandler.tryStopMine`/`tryBeginMine`: a no-selection left
-            // press on a mineable tile orders the player unit to mine it (and a
-            // press on the active tile stops mining).
+            // `DesktopInput.java:701-721` order: `tileTapped`, the active build
+            // plan, then `tryStopMine`/`tryBeginMine`; anything consumed keeps
+            // `player.shooting` false. (T2b inserts `tryTapPlayer` first.)
+            if self.tile_tapped(x, y) {
+                return;
+            }
+            if self
+                .host
+                .as_ref()
+                .is_some_and(|host| host.bind().player_actively_building())
+            {
+                return;
+            }
             if self.try_mine_at(x, y) {
                 return;
             }
-            // No placement selected: a left tap is `tileTapped`
-            // (`InputHandler.java:1973`), which owns config/inventory.
-            self.tile_tapped(x, y);
+            // `shouldShoot = !scene.hasMouse() && !locked && !state.isEditor()`;
+            // the UI gates ran in `MindInput::input`.
+            self.shooting = !self.locked;
             return;
         }
         if !self.controller.state.is_building {
@@ -1108,6 +1144,8 @@ impl DesktopBridge {
     }
 
     fn left_release(&mut self) {
+        // `DesktopInput.java:507-509`: releasing select stops shooting.
+        self.shooting = false;
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -1139,21 +1177,23 @@ impl DesktopBridge {
         true
     }
 
-    /// `tileTapped` (`InputHandler.java:1973`): a left tap on a placed building
-    /// opens its config UI, or its inventory when it stores items.
-    fn tile_tapped(&mut self, x: i32, y: i32) {
+    /// `tileTapped` (`InputHandler.java:1973-2029`): a left tap on a placed
+    /// building opens its config UI, or its inventory when it stores items.
+    /// Returns `true` when the tap was consumed (`InputHandler.tileTapped`
+    /// returns `consumed`; `DesktopInput.java:701` gates shooting on it).
+    fn tile_tapped(&mut self, x: i32, y: i32) -> bool {
         // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
         // returns false, so no panel opens (PAR-0108).
         if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
             let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-                return;
+                return false;
             };
             let Some(host) = self.host.clone() else {
-                return;
+                return false;
             };
             let enabled = match host.bind().building_enabled(x, y).try_to::<bool>() {
                 Ok(enabled) => enabled,
-                Err(_) => return,
+                Err(_) => return false,
             };
             // `SwitchBlock.SwitchBuild.clickSound.at(this)`
             // (`SwitchBlock.java:58-62`; T9): the UI click goes through the
@@ -1167,7 +1207,7 @@ impl DesktopBridge {
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!enabled),
             });
-            return;
+            return true;
         }
         // `Door.tapped` (`Door.java:148-154`, T13): a tap toggles unless a unit
         // stands in an open door; `Door.configurable` is false upstream, so no
@@ -1177,21 +1217,22 @@ impl DesktopBridge {
             Some(BlockKind::Door | BlockKind::AutoDoor)
         ) {
             let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-                return;
+                return false;
             };
             let Some(host) = self.host.clone() else {
-                return;
+                return false;
             };
             let open = host.bind().building_config_json(x, y) == "true";
             if open && host.bind().building_has_unit_overlap(x, y) {
-                return;
+                // `Door.tapped` returns without toggling: the tap is not consumed.
+                return false;
             }
             self.emit_action(RemoteAction::Configure {
                 x: tx,
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!open),
             });
-            return;
+            return true;
         }
         if let Some(spec) = self.config_spec(x, y) {
             self.effects.push(Effect::OpenBlockConfig {
@@ -1200,10 +1241,10 @@ impl DesktopBridge {
                 screen: self.mouse,
                 spec,
             });
-            return;
+            return true;
         }
         let Some(host) = self.host.clone() else {
-            return;
+            return false;
         };
         let items = host.bind().block_items_json(x, y);
         if let Some(items) = items {
@@ -1213,7 +1254,9 @@ impl DesktopBridge {
                 screen: self.mouse,
                 items,
             });
+            return true;
         }
+        false
     }
 
     fn right_press(&mut self, bindings: &BindingState) {
