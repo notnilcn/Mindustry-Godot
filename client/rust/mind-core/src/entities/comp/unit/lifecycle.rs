@@ -208,6 +208,14 @@ fn spawn_single(
     ));
 
     insert_kind_components(world, entity, unit, x, y, rotation);
+    // `BuilderComp` plan queue (G01 T10c): every unit with `buildSpeed > 0`
+    // carries `BuilderPlans` (the player path re-inserts it through
+    // `with_player_plans`).
+    if unit.build_speed > 0.0 {
+        world
+            .entity_mut(entity)
+            .insert(crate::sim::builder::BuilderPlans::default());
+    }
     // `UnitType.setType`: copy the type's abilities (`Ability.created` runs
     // `ForceField`/`ShieldArc` max-shield initialization).
     crate::combat::abilities::init_unit_abilities(world, entity, unit);

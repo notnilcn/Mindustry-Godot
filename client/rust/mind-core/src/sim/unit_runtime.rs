@@ -1931,6 +1931,50 @@ pub fn unit_update_system(world: &mut World) {
                 } else if world.get_entity(entity).is_ok() {
                     world.entity_mut(entity).insert(repair);
                 }
+            } else if matches!(
+                command_kind,
+                Some(crate::content::registries::commands::ControllerKind::Builder)
+                    | Some(crate::content::registries::commands::ControllerKind::BuilderAssist)
+            ) {
+                // `UnitCommand.loadAll`: rebuild -> `BuilderAI()` (alwaysFlee
+                // false, fleeRange 370); assist -> `BuilderAI{onlyAssist=true}`
+                // (UnitCommand.java:73-116).
+                let only_assist = command_kind
+                    == Some(crate::content::registries::commands::ControllerKind::BuilderAssist);
+                let mut builder = world
+                    .get::<crate::ai::types::builder::BuilderAiState>(entity)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        let mut state =
+                            crate::ai::types::builder::BuilderAiState::with_flee(false, 370.0);
+                        state.only_assist = only_assist;
+                        state
+                    });
+                {
+                    let UnitRuntime {
+                        content,
+                        grid,
+                        pathfinder,
+                        ..
+                    } = &mut runtime;
+                    let mut ctx = crate::ai::ai_controller::AiCtx {
+                        world,
+                        grid,
+                        content,
+                        pathfinder,
+                        team,
+                    };
+                    crate::ai::types::builder::update_builder_ai(&mut ctx, entity, &mut builder);
+                }
+                if let Some(mut stored) =
+                    world.get_mut::<crate::ai::types::builder::BuilderAiState>(entity)
+                {
+                    *stored = builder;
+                } else if world.get_entity(entity).is_ok() {
+                    world.entity_mut(entity).insert(builder);
+                }
+                let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+                set_mount_targets(world, &runtime.content, entity, mount_target, None);
             } else {
                 // Targeting runs for the weapons (`updateTargeting`, autoTarget);
                 // movement only follows an explicit order (`targetPos`); with none
@@ -2117,17 +2161,28 @@ pub fn unit_update_system(world: &mut World) {
                 };
                 let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
             }
-        } else if slot.kind == AiKind::Builder && slot.target.is_some() {
-            // `BuilderAI` (`ai/types/builder.rs`): walk to the assigned plan
-            // and repair it. Without a commanded tile the generic behavior
-            // below keeps the wave-unit approximation (the live build-plan
-            // machinery is not wired to `unit.plans` yet).
-            let mut state = crate::ai::types::builder::BuilderAi {
-                unit: Some(entity),
-                only_assist: false,
-                target: slot.target,
-                in_range: false,
-            };
+        } else if slot.kind == AiKind::Builder && !builder_falls_back(world, team) {
+            // `BuilderAI` (T10c): pull ghost plans from the team queue and
+            // move toward the active plan; `Sim::update_builders` executes it.
+            let mut state = world
+                .get::<crate::ai::types::builder::BuilderAiState>(entity)
+                .copied()
+                .unwrap_or_else(|| {
+                    // AI-team core builders construct with
+                    // `BuilderAI(true, coreFleeRange)` (`UnitTypes.java:2495`,
+                    // 4352; the def carries the range).
+                    let core_flee_range = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .and_then(|def| match def.controller {
+                            crate::content::registries::units::ControllerKind::Builder {
+                                core_flee_range,
+                            } => Some(core_flee_range),
+                            _ => None,
+                        })
+                        .unwrap_or(400.0);
+                    crate::ai::types::builder::BuilderAiState::with_flee(true, core_flee_range)
+                });
             {
                 let UnitRuntime {
                     content,
@@ -2142,7 +2197,14 @@ pub fn unit_update_system(world: &mut World) {
                     pathfinder,
                     team,
                 };
-                let _ = crate::ai::types::builder::update_builder(&mut ctx, entity, &mut state);
+                crate::ai::types::builder::update_builder_ai(&mut ctx, entity, &mut state);
+            }
+            if let Some(mut stored) =
+                world.get_mut::<crate::ai::types::builder::BuilderAiState>(entity)
+            {
+                *stored = state;
+            } else if world.get_entity(entity).is_ok() {
+                world.entity_mut(entity).insert(state);
             }
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
             set_mount_targets(world, &runtime.content, entity, mount_target, None);
@@ -3360,6 +3422,17 @@ pub fn enemy_count_system(world: &mut World) {
     campaign.session.enemies = enemies;
     campaign.session.is_spawning = spawning;
     world.insert_resource(campaign);
+}
+
+/// `BuilderAI.fallback`/`useFallback` (BuilderAI.java:264-278): wave-team
+/// builders without the `rtsAi` rule fight (GroundAI/FlyingAI) instead of
+/// building.
+fn builder_falls_back(world: &World, team: u8) -> bool {
+    let Some(campaign) = world.get_resource::<CampaignRuntime>() else {
+        return false;
+    };
+    let rules = &campaign.session.rules;
+    rules.waves && team == campaign.session.wave_team() && !rules.team_rule(team).rts_ai
 }
 
 /// The `CommandAI` command controller for `entity` (`CommandAI.init`:

@@ -1109,40 +1109,63 @@ fn crawler_rams_and_explodes() {
     );
 }
 
-/// T14: a commanded builder runs `BuilderAI` (`AiKind::Builder`): it walks to
-/// the assigned tile and repairs the building there (`ai/types/builder.rs`).
+/// T14/T10c: a builder unit (`AiKind::Builder`) picks up the ghost plan of a
+/// destroyed friendly wall and rebuilds it (`BuilderAI` +
+/// `Sim::update_builders`, G01 T10c semantics).
 #[test]
 fn commanded_builder_repairs_target() {
     use crate::ai::controller::{AiKind, ControllerSlot};
-    use crate::world::TilePos;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::modules::ItemModule;
 
     let mut sim = live_sim(48);
-    let wall = place(&mut sim, 16, 12, "copper-wall", 1);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
     sim.ecs
         .0
-        .get_mut::<Health>(wall)
-        .expect("wall health")
-        .health = 100.0;
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let core = place(&mut sim, 8, 8, "core-shard", 1);
+    let copper = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("copper")
+        .expect("copper");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(core) {
+        items.add(copper, 500, 4000);
+    }
+    let wall = place(&mut sim, 16, 12, "copper-wall", 1);
+    // Destroy it so `resolve_deaths` queues the team ghost plan.
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    sim.tick().expect("tick");
     let builder = sim
         .spawn_live_unit("alpha", 1, 100.0, 100.0, 0.0)
         .expect("alpha");
     // `alpha`'s content controller is `BuilderOrCommand` -> `AiKind::Builder`
-    // for spawned units; assign the repair tile.
+    // for spawned units.
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(builder) {
         slot.kind = AiKind::Builder;
-        slot.target = Some(TilePos::new(16, 12));
     }
-    for _ in 0..120 {
+    for _ in 0..1200 {
         sim.tick().expect("tick");
     }
-    assert!(
-        health(&sim, wall).is_some_and(|hp| hp > 100.0),
-        "the builder repaired the wall: {:?}",
-        health(&sim, wall)
-    );
-    let pos = sim.ecs.0.get::<Pos>(builder).copied().expect("builder pos");
-    let dist = ((pos.x - 132.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
-    assert!(dist < 40.0, "the builder closed on the target ({dist} px)");
+    let rebuilt = sim.grid.tiles.get(16, 12).build.is_some();
+    assert!(rebuilt, "the builder rebuilt the destroyed wall");
 }
 
 /// T14: the `Boost` kind enables `UnitCore.boosting`, which lifts a mech
@@ -2870,4 +2893,129 @@ fn mega_repairs_damaged_wall() {
     eprintln!("wall {healed} hp, mega {dist} px away");
     assert!(healed > 100.0, "the mega healed the wall: {healed}");
     assert!(dist < 178.0, "the mega stays within range: {dist}");
+}
+
+/// G01 T10c: a team-1 `poly` (default command `rebuild`) pulls the destroyed
+/// wall's ghost plan from the team queue and rebuilds it, paying the block
+/// cost from the core (`BuilderAI` + `Sim::update_builders`).
+#[test]
+fn poly_rebuilds_destroyed_wall() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let copper = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("copper")
+        .expect("copper");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(core) {
+        items.add(copper, 500, 4000);
+    }
+    let before = sim
+        .ecs
+        .0
+        .get::<ItemModule>(core)
+        .map_or(0, |items| items.get(copper));
+    let wall = place(&mut sim, 20, 10, "copper-wall", 1);
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    sim.tick().expect("tick");
+    let poly = sim
+        .spawn_live_unit("poly", 1, 10.5 * 8.0, 10.5 * 8.0, 0.0)
+        .expect("poly");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(poly) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..1200 {
+        sim.tick().expect("tick");
+    }
+    let rebuilt = sim.grid.tiles.get(20, 10).build;
+    let after = sim
+        .ecs
+        .0
+        .get::<ItemModule>(core)
+        .map_or(0, |items| items.get(copper));
+    eprintln!("rebuilt {rebuilt:?}, core copper {before} -> {after}");
+    let entity = rebuilt.expect("the wall tile holds a building again");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::ecs::BuildingComp>(entity)
+            .map(|c| c.block.get()),
+        Some(216),
+        "the rebuilt block is a copper-wall"
+    );
+    assert!(
+        after <= before - 6,
+        "the core paid 6 copper ({before} -> {after})"
+    );
+}
+
+/// G01 T10c: a wave-team core builder falls back to the ground AI
+/// (`BuilderAI.fallback`, BuilderAI.java:264-278): the alpha walks the
+/// enemy-core field instead of running the builder logic.
+#[test]
+fn wave_alpha_falls_back_to_ground_ai() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    place(&mut sim, 10, 48, "core-shard", 1);
+    let alpha = sim
+        .spawn_live_unit("alpha", 2, 80.0 * 8.0, 48.0 * 8.0, 180.0)
+        .expect("alpha");
+    let start_x = sim.ecs.0.get::<Pos>(alpha).expect("pos").x;
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+    }
+    let x = sim
+        .ecs
+        .0
+        .get::<Pos>(alpha)
+        .map(|pos| pos.x)
+        .unwrap_or(f32::MAX);
+    eprintln!("alpha x {start_x} -> {x}");
+    assert!(
+        start_x - x > 200.0,
+        "the wave alpha walked toward the enemy core ({start_x} -> {x})"
+    );
 }

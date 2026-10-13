@@ -1210,53 +1210,87 @@ impl Sim {
     /// Runs `BuilderComp.updateBuildLogic` for every builder unit with plans
     /// (today the player unit). Called once per tick from [`Sim::tick`].
     pub(crate) fn update_builders(&mut self) {
-        let Some(unit) = self.player_unit else {
-            return;
-        };
-        if self.ecs.0.get_entity(unit).is_err() {
-            return;
-        }
-        let Some(mut plans) = self
+        // `Groups.unit` (G01 T10c): every unit with a non-empty plan queue
+        // advances its own `BuilderComp`; iteration is `EntitySeq` order and
+        // the player unit is not special-cased (its events additionally feed
+        // the hint sets).
+        let player = self
+            .player_unit
+            .filter(|unit| self.ecs.0.get_entity(*unit).is_ok());
+        let mut units: Vec<Entity> = self
             .ecs
             .0
-            .get_mut::<BuilderPlans>(unit)
-            .map(|mut p| std::mem::take(&mut *p))
-        else {
-            return;
-        };
-        if plans.plans.is_empty() {
-            self.with_player_plans(unit, |slot| *slot = plans);
-            return;
-        }
-        let Some(mut runtime) = self.block_runtime.take() else {
-            self.with_player_plans(unit, |slot| *slot = plans);
-            return;
-        };
-        let outcome = update_builder(
-            &mut self.ecs.0,
-            &mut self.grid,
-            &mut runtime,
-            unit,
-            &mut plans,
-        );
-        self.block_runtime = Some(runtime);
-        self.with_player_plans(unit, |slot| *slot = plans);
-        for event in outcome.events {
-            // `HintsFragment.java:74-102`: placed/break events feed the hint
-            // sets before the event is dispatched.
-            match &event {
-                SimEvent::BlockPlacedEvent(placed) => {
-                    self.hint_events.placed_by_player.insert(placed.block);
-                }
-                SimEvent::BlockBrokenEvent(_) => {
-                    self.hint_events.events.insert("break");
-                }
-                _ => {}
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .map(|runtime| runtime.units.clone())
+            .unwrap_or_default();
+        units.sort_unstable_by_key(|entity| {
+            self.ecs
+                .0
+                .get::<crate::ecs::EntitySeq>(*entity)
+                .map(|seq| seq.0)
+                .unwrap_or(u64::MAX)
+        });
+        for unit in units {
+            if self.ecs.0.get_entity(unit).is_err() {
+                continue;
             }
-            self.push_event(event);
-        }
-        if outcome.changed {
-            self.refresh_unit_runtime();
+            let has_plans = self
+                .ecs
+                .0
+                .get::<BuilderPlans>(unit)
+                .is_some_and(|plans| !plans.plans.is_empty());
+            if !has_plans {
+                continue;
+            }
+            let Some(mut plans) = self
+                .ecs
+                .0
+                .get_mut::<BuilderPlans>(unit)
+                .map(|mut plans| std::mem::take(&mut *plans))
+            else {
+                continue;
+            };
+            let Some(mut runtime) = self.block_runtime.take() else {
+                if self.player_unit == Some(unit) {
+                    self.with_player_plans(unit, |slot| *slot = plans);
+                } else if let Some(mut stored) = self.ecs.0.get_mut::<BuilderPlans>(unit) {
+                    *stored = plans;
+                }
+                return;
+            };
+            let outcome = update_builder(
+                &mut self.ecs.0,
+                &mut self.grid,
+                &mut runtime,
+                unit,
+                &mut plans,
+            );
+            self.block_runtime = Some(runtime);
+            if self.player_unit == Some(unit) {
+                self.with_player_plans(unit, |slot| *slot = plans);
+            } else if let Some(mut stored) = self.ecs.0.get_mut::<BuilderPlans>(unit) {
+                *stored = plans;
+            }
+            let is_player = player == Some(unit);
+            for event in outcome.events {
+                // `HintsFragment.java:74-102`: placed/break events feed the hint
+                // sets before the event is dispatched (player unit only).
+                if is_player {
+                    match &event {
+                        SimEvent::BlockPlacedEvent(placed) => {
+                            self.hint_events.placed_by_player.insert(placed.block);
+                        }
+                        SimEvent::BlockBrokenEvent(_) => {
+                            self.hint_events.events.insert("break");
+                        }
+                        _ => {}
+                    }
+                }
+                self.push_event(event);
+            }
+            if outcome.changed {
+                self.refresh_unit_runtime();
+            }
         }
     }
 }
