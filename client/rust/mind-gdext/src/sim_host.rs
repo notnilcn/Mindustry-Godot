@@ -3676,6 +3676,91 @@ impl MindSimHost {
         }
         out
     }
+
+    // ---- G03 T6 hovered-building bars (MCP/API seam) ----
+
+    /// `Block.setBars` rows for the player-team building at `(x, y)` (G03 T6),
+    /// in Java order: `[{"key","label_key","label_arg","color","value"}]`.
+    /// `[]` without a player building. Label text is formatted in GDScript.
+    #[func]
+    pub fn building_bars_json(&self, x: i32, y: i32) -> GString {
+        let Some(tile) = self.tile_at(x, y) else {
+            return GString::from("[]");
+        };
+        let Some(entity) = tile.build else {
+            return GString::from("[]");
+        };
+        if self.building_team(x, y) != Some(self.player_team()) {
+            return GString::from("[]");
+        }
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("[]");
+        };
+        let Some(def) = content.block(tile.block) else {
+            return GString::from("[]");
+        };
+        let healthf = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::health::Health>(entity)
+            .map(mind_core::entities::comp::health::Health::fraction)
+            .unwrap_or(1.0);
+        let power_status = self
+            .sim
+            .ecs
+            .0
+            .get::<PowerModule>(entity)
+            .map(|module| module.status);
+        let items_total = self
+            .sim
+            .ecs
+            .0
+            .get::<ItemModule>(entity)
+            .map(|module| module.total);
+        let liquids = self
+            .sim
+            .ecs
+            .0
+            .get::<LiquidModule>(entity)
+            .map(|module| module.liquids.clone());
+        let liquid_info: Vec<(String, u32)> = content
+            .liquids()
+            .iter()
+            .map(|liquid| {
+                (
+                    liquid.name.clone(),
+                    mind_core::render::drawf::to_bits([
+                        liquid.color.r,
+                        liquid.color.g,
+                        liquid.color.b,
+                        liquid.color.a,
+                    ]),
+                )
+            })
+            .collect();
+        let rows = building_bar_rows(
+            def,
+            healthf,
+            power_status,
+            items_total,
+            liquids.as_deref(),
+            &liquid_info,
+        );
+        let json: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "key": row.key,
+                    "label_key": row.label_key,
+                    "label_arg": row.label_arg,
+                    "color": format!("{:08x}", row.color),
+                    "value": row.value,
+                })
+            })
+            .collect();
+        GString::from(serde_json::Value::Array(json).to_string().as_str())
+    }
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core
@@ -3995,6 +4080,133 @@ fn first_core_position(grid: &WorldGrid, content: &ContentRegistry) -> Option<(f
     })
 }
 
+/// One hovered-building bar row (`Block.setBars`, G03 T6).
+pub struct BarRow {
+    /// `"health" | "power" | "items" | "liquid"`.
+    pub key: &'static str,
+    /// Bundle key (no `@`).
+    pub label_key: String,
+    /// `{0}` argument for the bundle format (`None` = no argument).
+    pub label_arg: Option<String>,
+    /// `Bar` colour RGBA8888.
+    pub color: u32,
+    /// Fraction `0..=1`.
+    pub value: f32,
+}
+
+/// `Block.setBars` base rows (`Block.java:709-760`) in Java order: health,
+/// power (when consumed), items (when `hasItems && configurable`) and liquids
+/// (per consumed liquid, else the dynamic current=max entry bar).
+///
+/// `health` is the health **fraction** (`Health.fraction`); `liquid_info` is
+/// `(name, rgba8888)` per liquid in id order (colour for the bar; `name` for
+/// the `liquid.<name>.name` label key).
+pub fn building_bar_rows(
+    def: &mind_core::content::registries::blocks::BlockDef,
+    health: f32,
+    power_status: Option<f32>,
+    items_total: Option<i32>,
+    liquids: Option<&[f32]>,
+    liquid_info: &[(String, u32)],
+) -> Vec<BarRow> {
+    use mind_core::content::registries::blocks::Consume;
+    let mut rows = Vec::new();
+    rows.push(BarRow {
+        key: "health",
+        label_key: String::from("stat.health"),
+        label_arg: None,
+        color: 0xff34_1cff,
+        value: health.clamp(0.0, 1.0),
+    });
+    if let Some(status) = power_status {
+        let buffered = def.consumes.iter().find_map(|spec| match &spec.consume {
+            Consume::Power { buffered, .. } if *buffered > 0.0 => Some(*buffered),
+            _ => None,
+        });
+        let (label_key, label_arg) = match buffered {
+            Some(capacity) => (
+                String::from("bar.poweramount"),
+                Some(((status * capacity) as i32).to_string()),
+            ),
+            None => (String::from("bar.power"), None),
+        };
+        rows.push(BarRow {
+            key: "power",
+            label_key,
+            label_arg,
+            color: 0xec7b_4cff,
+            value: status.clamp(0.0, 1.0),
+        });
+    }
+    if def.has_items
+        && def.configurable
+        && def.item_capacity > 0
+        && let Some(total) = items_total
+    {
+        rows.push(BarRow {
+            key: "items",
+            label_key: String::from("bar.items"),
+            label_arg: Some(total.to_string()),
+            color: 0x2ea7_56ff,
+            value: (total as f32 / def.item_capacity as f32).clamp(0.0, 1.0),
+        });
+    }
+    if def.has_liquids && def.liquid_capacity > 0.0 {
+        let amounts = liquids.unwrap_or(&[]);
+        let mut added = false;
+        for spec in &def.consumes {
+            let consumed: Vec<mind_core::content::LiquidId> = match &spec.consume {
+                Consume::Liquid { liquid, .. } => vec![*liquid],
+                Consume::Liquids(stacks) => stacks.iter().map(|stack| stack.liquid).collect(),
+                _ => Vec::new(),
+            };
+            for liquid in consumed {
+                let Some((name, color)) = liquid_info.get(liquid.index()) else {
+                    continue;
+                };
+                let amount = amounts.get(liquid.index()).copied().unwrap_or(0.0);
+                rows.push(BarRow {
+                    key: "liquid",
+                    label_key: format!("liquid.{name}.name"),
+                    label_arg: None,
+                    color: *color,
+                    value: (amount / def.liquid_capacity).clamp(0.0, 1.0),
+                });
+                added = true;
+            }
+        }
+        if !added {
+            // Dynamic current-liquid bar (`bar.liquid` when empty).
+            let (index, amount) = amounts.iter().enumerate().fold(
+                (usize::MAX, 0.0f32),
+                |(best, max), (i, amount)| {
+                    if *amount > max {
+                        (i, *amount)
+                    } else {
+                        (best, max)
+                    }
+                },
+            );
+            let (label_key, color) = if amount > 0.0 {
+                liquid_info
+                    .get(index)
+                    .map(|(name, color)| (format!("liquid.{name}.name"), *color))
+                    .unwrap_or((String::from("bar.liquid"), 0x596a_b8ff))
+            } else {
+                (String::from("bar.liquid"), 0x596a_b8ff)
+            };
+            rows.push(BarRow {
+                key: "liquid",
+                label_key,
+                label_arg: None,
+                color,
+                value: (amount / def.liquid_capacity).clamp(0.0, 1.0),
+            });
+        }
+    }
+    rows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4156,5 +4368,54 @@ mod tests {
             None => panic!("items JSON missing"),
         };
         assert!(json.contains("\"copper\":3"), "unexpected JSON: {json}");
+    }
+
+    #[test]
+    fn building_bars_items_row() {
+        // Java gates `bar.items` on `hasItems && configurable`
+        // (`Block.java:724`); the launch pad satisfies both.
+        let registry = base_registry();
+        let Some(block) = registry.block_id("launch-pad") else {
+            panic!("launch-pad missing");
+        };
+        let Some(def) = registry.block(block) else {
+            panic!("launch-pad def missing");
+        };
+        assert!(def.has_items && def.configurable && def.item_capacity > 0);
+        let rows = building_bar_rows(def, 1.0, None, Some(5), None, &[]);
+        assert_eq!(rows.len(), 2, "rows: {:?}", rows.len());
+        assert_eq!(rows[0].key, "health");
+        assert_eq!(rows[1].key, "items");
+        assert_eq!(rows[1].label_key, "bar.items");
+        assert_eq!(rows[1].label_arg.as_deref(), Some("5"));
+        let expected = 5.0 / def.item_capacity as f32;
+        assert!((rows[1].value - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn building_bars_conduit_dynamic_liquid() {
+        // Conduit: `has_liquids` with no liquid consumer -> dynamic max bar.
+        let registry = base_registry();
+        let Some(conduit) = registry.block_id("conduit") else {
+            panic!("conduit missing");
+        };
+        let Some(def) = registry.block(conduit) else {
+            panic!("conduit def missing");
+        };
+        assert!(def.has_liquids && def.liquid_capacity > 0.0);
+        let liquid_info: Vec<(String, u32)> = registry
+            .liquids()
+            .iter()
+            .map(|liquid| (liquid.name.clone(), 0))
+            .collect();
+        let capacity = def.liquid_capacity;
+        let liquids = vec![0.0, capacity * 0.4];
+        let rows = building_bar_rows(def, 1.0, None, None, Some(&liquids), &liquid_info);
+        let row = rows
+            .iter()
+            .find(|row| row.key == "liquid")
+            .unwrap_or_else(|| panic!("liquid row"));
+        assert!((row.value - 0.4).abs() < 1e-3, "value: {}", row.value);
+        assert_eq!(row.label_key, format!("liquid.{}.name", liquid_info[1].0));
     }
 }
