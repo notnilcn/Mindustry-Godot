@@ -17,6 +17,7 @@ use super::meta::SaveMeta;
 use super::options::SaveOptions;
 use super::state::{CustomChunk, EntitySource, MapSource, MarkersIo, PatchSetIo, SaveReadState};
 use super::versions::v1::SaveV1;
+use super::versions::v2::SaveV2;
 use crate::content::ContentRegistry;
 
 /// One native save format version (`SaveVersion`).
@@ -83,7 +84,9 @@ static VERSIONS: OnceLock<Vec<Arc<dyn SaveVersion>>> = OnceLock::new();
 
 /// All native versions in order.
 pub fn version_array() -> &'static [Arc<dyn SaveVersion>] {
-    VERSIONS.get_or_init(|| vec![Arc::new(SaveV1)]).as_slice()
+    VERSIONS
+        .get_or_init(|| vec![Arc::new(SaveV1), Arc::new(SaveV2)])
+        .as_slice()
 }
 
 /// The current writer (`SaveIO.getSaveWriter()`): the last chain entry.
@@ -113,10 +116,12 @@ mod tests {
     #[test]
     fn version_chain_is_append_only_native_v1() {
         let array = version_array();
-        assert_eq!(array.len(), 1);
+        assert_eq!(array.len(), 2);
         assert_eq!(array[0].version(), 1);
-        assert_eq!(current_version(), 1);
+        assert_eq!(array[1].version(), 2);
+        assert_eq!(current_version(), 2);
         assert!(get_writer(1).is_some());
+        assert!(get_writer(2).is_some());
         assert!(get_writer(13).is_none());
         // Same registry instance every call.
         assert!(std::ptr::eq(version_array(), version_array()));

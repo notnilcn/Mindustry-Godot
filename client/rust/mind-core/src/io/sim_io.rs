@@ -942,6 +942,97 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// PAR-0161: a live save round-trips the per-kind bodies — the drill keeps
+    /// its progress/warmup and the sorter keeps its configured item. Before the
+    /// fix both were dropped by the v1 `read_building` (progress 0, config None).
+    #[test]
+    fn live_save_restores_drill_and_sorter_bodies() {
+        fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
+            sim.command(crate::determinism::SimCommand::Configure { x, y, value })
+                .expect("configure");
+        }
+
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        let drill = sim
+            .content()
+            .id("mechanical-drill")
+            .expect("mechanical-drill");
+        let sorter = sim.content().id("sorter").expect("sorter");
+        sim.apply(Command::Place {
+            x: 4,
+            y: 4,
+            block: drill,
+        })
+        .expect("place drill");
+        sim.apply(Command::Place {
+            x: 8,
+            y: 8,
+            block: sorter,
+        })
+        .expect("place sorter");
+        let drill_entity = sim.grid.tile(4, 4).build.expect("drill entity");
+        {
+            let mut state = sim
+                .ecs
+                .0
+                .get_mut::<crate::entities::comp::DrillState>(drill_entity)
+                .expect("drill state");
+            state.progress = 123.5;
+            state.warmup = 0.75;
+        }
+        configure(
+            &mut sim,
+            8,
+            8,
+            crate::determinism::ConfigValue::Content("copper".to_owned()),
+        );
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("drill-sorter-bodies");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load must rebuild the per-kind bodies.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let drill_entity = sim.grid.tile(4, 4).build.expect("drill respawned");
+        let state = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::DrillState>(drill_entity)
+            .expect("drill state");
+        assert!(
+            (state.progress - 123.5).abs() < 1e-6,
+            "drill progress {}",
+            state.progress
+        );
+        assert!(
+            (state.warmup - 0.75).abs() < 1e-6,
+            "drill warmup {}",
+            state.warmup
+        );
+
+        let sorter_entity = sim.grid.tile(8, 8).build.expect("sorter respawned");
+        match crate::world::config::read_config(&sim.ecs.0, sorter_entity) {
+            crate::world::config::ConfigValue::Item(item) => {
+                assert_eq!(item, crate::content::ItemId::COPPER, "sorter keeps copper");
+            }
+            other => panic!("sorter config lost: {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn load_of_a_missing_file_is_a_failed_response() {
         let mut sim = Sim::new(1, 4, 4, BlockId::AIR, BlockId::AIR);

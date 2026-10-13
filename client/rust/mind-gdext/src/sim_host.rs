@@ -804,6 +804,21 @@ impl MindSimHost {
                 Variant::from(f64::from(building.optional_efficiency)),
             );
             put("time_scale", Variant::from(f64::from(building.time_scale)));
+            // Per-kind body readback after a load (PAR-0161): drill progress,
+            // crafter progress and turret ammo.
+            if let Some(state) = world.get::<mind_core::entities::comp::DrillState>(entity) {
+                put("drill_progress", Variant::from(f64::from(state.progress)));
+                put("drill_warmup", Variant::from(f64::from(state.warmup)));
+            }
+            if let Some(state) = world.get::<mind_core::entities::comp::CrafterState>(entity) {
+                put("crafter_progress", Variant::from(f64::from(state.progress)));
+                put("crafter_warmup", Variant::from(f64::from(state.warmup)));
+            }
+            if let Some(state) =
+                world.get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)
+            {
+                put("turret_total_ammo", Variant::from(state.total_ammo));
+            }
             // In-progress construction (`ConstructBuild`; PAR-0098 §2d).
             if let Some(state) = world.get::<mind_core::world::construct::ConstructState>(entity) {
                 put(

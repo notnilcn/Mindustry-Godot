@@ -5,3 +5,4 @@
 //! version, wired into [`super::version::version_array`].
 
 pub mod v1;
+pub mod v2;

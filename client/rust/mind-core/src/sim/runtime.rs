@@ -803,6 +803,10 @@ impl SimRuntime {
                 .map(|def| def.health.max(0) as f32)
                 .unwrap_or(f32::MAX);
             building_io::apply_base(ecs, entity, decoded, max_health);
+            // Per-kind body (`BuildingComp.readAll` = `readBase(); read()`;
+            // `BuildingComp.java:284-292`), before the proximity/power pass
+            // like Java where `readAll` runs during the map pass.
+            building_io::apply_body(ecs, entity, decoded);
             spawned.push(entity);
         }
         grid.generating = generating;

@@ -154,10 +154,14 @@ impl SaveIo {
         let writer = version::get_writer(format).ok_or(IoError::UnknownVersion(format))?;
         let result = writer.read(&mut reader, state);
         // Upstream `finally { content.setTemporaryMapper(null) }` (SaveIO.load):
-        // the temporary mapper never escapes a load attempt.
-        if let Some(content) = state.content.as_deref_mut() {
+        // the temporary mapper never escapes a load attempt. Snapshot it first
+        // for the content-order guard test (plan G04 T1).
+        let last_mapper = state.content.as_deref_mut().and_then(|content| {
+            let mapper = content.temporary_mapper().cloned();
             content.set_temporary_mapper(None);
-        }
+            mapper
+        });
+        state.last_mapper = last_mapper;
         result
     }
 

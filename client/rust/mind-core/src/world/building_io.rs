@@ -64,6 +64,12 @@ pub struct DecodedBase {
     pub optional_efficiency: f32,
     /// Visibility flags (version 4).
     pub visible_flags: u64,
+    /// Per-kind revision byte (`Building.version()`); `None` for native v1
+    /// saves, which did not store it.
+    pub kind_revision: Option<u8>,
+    /// Remaining chunk bytes after `readBase`: the per-kind body
+    /// (`Building.read`).
+    pub body: Vec<u8>,
 }
 
 /// Computes `BuildingComp.moduleBitmask()`.
@@ -99,6 +105,43 @@ pub fn write_base(
     w: &mut EntityWriter,
     fog: bool,
 ) -> Result<(), IoError> {
+    write_base_impl(world, entity, w, fog, false)
+}
+
+/// Writes one full Java tile-entity chunk: `out.b(tile.build.version())` then
+/// `tile.build.writeAll(out)` = `writeBase` (with the embedded base version
+/// byte) + the per-kind `write` body.
+///
+/// Java: `SaveVersion.writeMap` (`SaveVersion.java:257-269`) and
+/// `BuildingComp.writeAll`/`writeBase` (`BuildingComp.java:185-292`).
+pub fn write_all_java(
+    world: &World,
+    entity: Entity,
+    w: &mut EntityWriter,
+    fog: bool,
+) -> Result<(), IoError> {
+    // `Building.version()`; blocks without a behavior write revision 0.
+    let kind_version = behavior_instance(world, entity)
+        .map(|inst| inst.behavior.version(world, entity))
+        .unwrap_or(0);
+    w.ub(kind_version);
+    write_base_impl(world, entity, w, fog, true)?;
+    if let Some(inst) = behavior_instance(world, entity) {
+        inst.behavior.write(world, entity, w);
+    }
+    Ok(())
+}
+
+/// Shared `writeBase` body. `embed_version` selects the Java layout (version
+/// byte after the team byte, `BuildingComp.java:191-193`); native v1 keeps the
+/// version byte in the chunk header (written by the caller).
+fn write_base_impl(
+    world: &World,
+    entity: Entity,
+    w: &mut EntityWriter,
+    fog: bool,
+    embed_version: bool,
+) -> Result<(), IoError> {
     let Some(building) = world.get::<Building>(entity) else {
         return Err(IoError::corrupt("entity has no Building component"));
     };
@@ -110,8 +153,13 @@ pub fn write_base(
     w.f(health);
     w.b((building.rotation | 0x80) as i8);
     w.b(team as i8);
+    if embed_version {
+        // `BuildingComp.writeBase`: 4 when fog written, else 3.
+        w.ub(if write_visibility { 4 } else { 3 });
+    }
     // The version byte is emitted once by the plan-04 save chunk writer
-    // (`WriteContext::write_building`); `read_base` receives it as an argument.
+    // (`WriteContext::write_building`) for native v1; `read_base` receives it
+    // as an argument.
     w.b(if building.enabled { 1 } else { 0 });
     w.b(module_bitmask(world, entity) as i8);
 
@@ -359,6 +407,36 @@ pub fn apply_base(world: &mut World, entity: Entity, decoded: &DecodedBase, max_
     }
 }
 
+/// Applies the per-kind body after [`apply_base`] (`BuildingComp.readAll` =
+/// `readBase(); read(read, revision)`; `BuildingComp.java:284-292`).
+///
+/// Native v1 saves store no per-kind revision: the behavior's current
+/// `version()` is used. Bytes the port's behavior does not consume are logged
+/// at debug level and dropped — the tile chunk is length-bounded, so the next
+/// building stays aligned (Java subclasses the port maps to a parent behavior
+/// legitimately leave bytes, e.g. Separator `seed`).
+pub fn apply_body(world: &mut World, entity: Entity, decoded: &DecodedBase) {
+    if decoded.body.is_empty() {
+        return;
+    }
+    let Some(inst) = behavior_instance(world, entity) else {
+        return;
+    };
+    let revision = decoded
+        .kind_revision
+        .unwrap_or_else(|| inst.behavior.version(world, entity));
+    let mut r = EntityReader::new(&decoded.body);
+    inst.behavior.read(world, entity, &mut r, revision);
+    if r.remaining() != 0 {
+        log::debug!(
+            "building body `{}` rev {}: {} byte(s) unread",
+            inst.name,
+            revision,
+            r.remaining()
+        );
+    }
+}
+
 /// Per-`BuildingKind` IO revision (`world/building_io.rs` manifests).
 pub fn kind_revision(kind: crate::world::BuildingKind) -> u8 {
     kind.revision()
@@ -476,6 +554,81 @@ mod tests {
         let mut decoded = DecodedBase::default();
         read_base(&mut decoded, &mut reader, 3).expect("read");
         assert!(decoded.items.contains(&(0, 7)));
+    }
+
+    /// PAR-0161: `write_all_java` emits the Java chunk layout —
+    /// `[kind revision][writeBase with the embedded base version][body]`
+    /// (`SaveVersion.java:257-269`, `BuildingComp.java:185-292`) — and the
+    /// legacy base reader + `apply_body` consume it.
+    #[test]
+    fn write_all_java_matches_java_layout() {
+        let content = test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("silicon-smelter")
+            .expect("silicon-smelter")
+            .clone();
+        let mut world = EcsWorld::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let src = inst.spawn(
+            &mut world,
+            0,
+            TilePos::new(3, 3),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        inst.behavior.create_state(&mut world, src);
+        {
+            let mut state = world
+                .get_mut::<crate::entities::comp::CrafterState>(src)
+                .expect("crafter state");
+            state.progress = 12.5;
+            state.warmup = 0.5;
+        }
+        let health = world.get::<Health>(src).map(|h| h.health).unwrap_or(0.0);
+
+        let mut bytes = Vec::new();
+        {
+            let mut writer = WireWriter::new(&mut bytes);
+            write_all_java(&world, src, &mut writer, false).expect("write");
+        }
+        // Byte 0 is the per-kind revision (crafter has no override → 0).
+        assert_eq!(bytes[0], 0, "per-kind revision byte");
+        // Bytes 1..5 are the health f32 (big-endian).
+        assert_eq!(&bytes[1..5], &health.to_be_bytes(), "health f32 BE");
+        // Byte 5 is `rotation | 0x80`; byte 6 the team; byte 7 the embedded
+        // base version (3 without fog).
+        assert_eq!(bytes[5] & 0x80, 0x80, "rotation visibility bit");
+        assert_eq!(bytes[6], 0, "team");
+        assert_eq!(bytes[7], 3, "embedded base version");
+
+        // Round trip through the legacy reader + apply_body.
+        let mut reader = WireReader::new(&bytes);
+        let revision = reader.ub().expect("kind revision");
+        let mut decoded = DecodedBase::default();
+        read_base_legacy(&mut decoded, &mut reader).expect("read base");
+        decoded.kind_revision = Some(revision);
+        decoded.body = reader.bytes(reader.remaining()).expect("body").to_vec();
+        let dst = inst.spawn(
+            &mut world,
+            1,
+            TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        inst.behavior.create_state(&mut world, dst);
+        apply_base(&mut world, dst, &decoded, 1000.0);
+        apply_body(&mut world, dst, &decoded);
+        let state = world
+            .get::<crate::entities::comp::CrafterState>(dst)
+            .expect("crafter state");
+        assert_eq!(state.progress, 12.5);
+        assert_eq!(state.warmup, 0.5);
     }
 
     #[test]

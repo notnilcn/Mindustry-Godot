@@ -22,6 +22,10 @@ pub struct Context<'a> {
     pub content: &'a ContentRegistry,
     /// Owning sector, when the load is a campaign sector (plan 12 write-back).
     pub sector: Option<SectorId>,
+    /// Legacy `MSAV` tile-entity layout (version byte inside the payload).
+    /// Set by `SaveV2::read` (native v2 chunks equal the Java layout) and the
+    /// legacy `MSAV` readers via [`WorldContext::set_legacy_entities`].
+    pub legacy_entities: bool,
     /// Decoded tile-entity payloads awaiting spawn by the ECS-owning host.
     ///
     /// Plan 07 §3.10: `read_building` decodes `writeBase` byte-for-byte. Spawning
@@ -39,6 +43,7 @@ impl<'a> Context<'a> {
             grid,
             content,
             sector: None,
+            legacy_entities: false,
             pending_buildings: Vec::new(),
         }
     }
@@ -49,6 +54,7 @@ impl<'a> Context<'a> {
             grid,
             content,
             sector: Some(sector),
+            legacy_entities: false,
             pending_buildings: Vec::new(),
         }
     }
@@ -136,9 +142,23 @@ impl WorldContext for Context<'_> {
         // Plan 07 decodes `BuildingComp.writeBase`; the ECS-owning host drains
         // `pending_buildings` and spawns/applies the entity after `end()`.
         let mut decoded = super::building_io::DecodedBase::default();
-        super::building_io::read_base(&mut decoded, reader, version)?;
+        if self.legacy_entities {
+            super::building_io::read_base_legacy(&mut decoded, reader)?;
+            // The legacy chunk header byte is the per-kind revision
+            // (`out.b(tile.build.version())`).
+            decoded.kind_revision = Some(version);
+        } else {
+            super::building_io::read_base(&mut decoded, reader, version)?;
+        }
+        // Everything after the base is the per-kind body (`Building.read`);
+        // it is applied by `building_io::apply_body` after materialization.
+        decoded.body = reader.bytes(reader.remaining())?.to_vec();
         self.pending_buildings.push((index, decoded));
         Ok(())
+    }
+
+    fn set_legacy_entities(&mut self, legacy: bool) {
+        self.legacy_entities = legacy;
     }
 }
 

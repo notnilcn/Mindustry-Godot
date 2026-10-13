@@ -103,10 +103,11 @@ impl MapSource for EcsMapSource<'_> {
         {
             return Ok(());
         }
-        // Tile-entity base revision paired with `read_base`: 3 reads enabled,
-        // module bits and the efficiency bytes that `write_base` emits.
-        chunk.b(3);
-        crate::world::building_io::BuildingCodec::write(self.ecs, entity, chunk, false)
+        // Java tile-entity chunk: `out.b(tile.build.version());
+        // tile.build.writeAll(out)` (`SaveVersion.java:257-269`) — the
+        // per-kind revision, then `writeBase` with its embedded base version,
+        // then the per-kind body. Native v2 (never v1) produces this layout.
+        crate::world::building_io::write_all_java(self.ecs, entity, chunk, false)
     }
 
     fn core_team(&self, index: usize) -> Option<u8> {
