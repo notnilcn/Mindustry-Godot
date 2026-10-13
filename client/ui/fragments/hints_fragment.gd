@@ -6,8 +6,9 @@
 ## upstream predicate or the Skip button (which persists `<name>-hint-done`), a
 ## hint whose `shown` predicate turns false is hidden without persisting, and
 ## the display gate is `saves.getTotalPlaytime() > 8000` (total, not session,
-## and only when not in a cutscene). The T4a slice ports the `desktopMove`/`zoom`/
-## `desktopPause`/`launch`/`presetLaunch` predicates; T4b adds the rest.
+## and only when not in a cutscene). Input completions consume
+## `MindInput.take_hint_keys()` (G08 T15); `derelictmouse` is host-detected from
+## the hovered tile's team.
 
 extends Control
 
@@ -52,6 +53,10 @@ var _done := {}
 var _finished := {}
 var _ui: Node = null
 var _last_zoom := 0.0
+## Pending input triggers from `MindInput.take_hint_keys()` (G08 T15).
+var _hint_keys: PackedStringArray = []
+## Last probed hover tile (`derelictmouse`).
+var _mouse_tile := Vector2i(-1, -1)
 
 @onready var _panel: Control = get_node_or_null("Panel")
 @onready var _label: RichTextLabel = get_node_or_null("Panel/Layout/Box/Label")
@@ -77,29 +82,32 @@ func _process(_delta: float) -> void:
 	if not _hints_enabled() or not _in_game():
 		visible = false
 		return
+	_poll_hint_keys()
+	# One poll per frame (`hint_state_json` sweeps the buildings and grid).
+	var hints := _hint_state()
+	var state := _sector_state()
 	# `HintsFragment.java:46-68` driver (the current hint first).
 	if not _current.is_empty():
 		visible = not _is_cutscene()
-		if _hint_complete(_current):
+		if _hint_complete(_current, state, hints):
 			complete_hint()
-		elif not _hint_shown(_current, _sector_state()):
+		elif not _hint_shown(_current, state, hints):
 			# `hide()`: not persisted; the hint stays in the list.
 			_hide_current()
 		return
 	visible = false
+	_poll_derelict_mouse()
 	# `else if(!hints.isEmpty())`: first hint in ordinal order whose `show()`
 	# holds. A hint already complete is removed silently (never persisted).
-	var state := _sector_state()
 	for hint_name in HINTS:
 		if _done.has(hint_name) or _finished.has(hint_name) or _hint_finished(hint_name):
 			continue
-		if not _hint_shown(hint_name, state):
+		if not _hint_shown(hint_name, state, hints):
 			continue
-		if _hint_complete(hint_name):
+		if _hint_complete(hint_name, state, hints):
 			_finished[hint_name] = true
 			continue
-		# `renderer.isCutscene() || !state.isGame()`: wait (no display, no
-		# derelict-mouse fallback in this slice).
+		# `renderer.isCutscene() || !state.isGame()`: wait (no display).
 		if _is_cutscene():
 			return
 		if _total_playtime_ms() <= PLAYTIME_GATE_MS:
@@ -108,10 +116,89 @@ func _process(_delta: float) -> void:
 		return
 
 
-## `HintsFragment.java:169-304` per-hint `complete()` predicates ported in T4a
-## (the remaining 22 land with T4b; their input-key completions need the G08
-## `MindInput.take_hint_keys()` seam).
-func _hint_complete(hint_name: String) -> bool:
+## `HintsFragment.java:169-304` per-hint `shown()` predicates. `state` is the
+## `MindCampaign.get_sector_state()` projection, `hints` the `hint_state_json`
+## poll (both fetched once per frame).
+func _hint_shown(hint_name: String, state: Dictionary, hints: Dictionary) -> bool:
+	var preset := str(state.get("preset", ""))
+	var campaign := bool(state.get("campaign", false))
+	var planet := str(state.get("planet", ""))
+	var tutorial := preset == "groundZero"
+	var serpulo := bool(hints.get("serpulo", true))
+	var dead := bool(hints.get("player_dead", true))
+	match hint_name:
+		"desktopMove", "zoom":
+			return true
+		"breaking":
+			# `isTutorial && team conveyor count > 5`
+			return tutorial and int(hints.get("conveyors", 0)) > 5
+		"desktopShoot":
+			# `isSerpulo && enemies > 0`
+			return serpulo and int(hints.get("enemies", 0)) > 0
+		"depositItems":
+			return not dead and bool(hints.get("player_has_item", false))
+		"desktopPause":
+			# `isTutorial && !net.active() && state.wave >= 2`
+			return tutorial and int(state.get("wave", 0)) >= 2
+		"unitControl":
+			return serpulo and int(hints.get("team_units", 0)) > 2 and not dead
+		"unitSelectControl":
+			return serpulo and int(hints.get("team_units", 0)) > 3 and not dead \
+				and (preset != "fungalPass" or not bool(hints.get("fungal_pass_saved", false)))
+		"launch":
+			return (preset == "groundZero" or preset == "onset") and bool(state.get("captured", false))
+		"schematicSelect":
+			return _placed_has(hints, ["router", "duct-router"])
+		"conveyorPathfind":
+			return _selected_block() == "titanium-conveyor"
+		"boost":
+			return not dead and bool(hints.get("player_can_boost", false))
+		"blockInfo":
+			return _selected_block() == "graphite-press"
+		"derelict":
+			return _has_event(hints, "derelictmouse") and not tutorial
+		"payloadPickup":
+			return serpulo and not dead and int(hints.get("player_payload", -1)) == 0
+		"payloadDrop":
+			return not dead and int(hints.get("player_payload", -1)) > 0
+		"waveFire":
+			return _has_event(hints, "fire") and _content_unlocked("wave")
+		"rebuildSelect":
+			return int(hints.get("team_rebuild_plans", 0)) >= 10
+		"guardian":
+			var boss := _boss(hints)
+			return not boss.is_empty() and serpulo \
+				and float(boss.get("armor", 0.0)) >= 4.0 \
+				and _content_unlocked("salvo") \
+				and not bool(boss.get("flying", false))
+		"cannotUpgrade":
+			return _has_event(hints, "cannotupgrade")
+		"factoryControl":
+			return not (campaign and preset == "onset") and int(hints.get("fabricators", 0)) > 0
+		"coreUpgrade":
+			return campaign and planet == "serpulo" \
+				and _content_unlocked("core-foundation") \
+				and str(hints.get("core_block", "")) == "core-shard" \
+				and bool(hints.get("core_has_foundation_cost", false))
+		"serpuloCoreZone":
+			return campaign and planet == "serpulo" \
+				and bool(hints.get("core_zone_present", false)) \
+				and (not bool(hints.get("attack_mode", false)) or int(hints.get("cores_destroyed", 0)) > 0)
+		"presetLaunch":
+			return campaign and preset.is_empty() and state.has("sector")
+		"presetDifficulty":
+			return campaign and preset.is_empty() \
+				and float(hints.get("sector_threat", 0.0)) >= 0.5 \
+				and not bool(hints.get("tar_fields_captured", true))
+		"coreIncinerate":
+			return campaign and not str(hints.get("core_block", "")).is_empty() \
+				and int(hints.get("core_copper", 0)) >= int(hints.get("core_capacity", 0)) - 10
+		_:
+			return false
+
+
+## The matching `complete()` predicates (`HintsFragment.java:169-304`).
+func _hint_complete(hint_name: String, state: Dictionary, hints: Dictionary) -> bool:
 	match hint_name:
 		"desktopMove":
 			return _player_unit_moved()
@@ -124,36 +211,57 @@ func _hint_complete(hint_name: String) -> bool:
 			var zoomed := absf(zoom - _last_zoom) > 0.01
 			_last_zoom = zoom
 			return zoomed
+		"breaking":
+			return _has_event(hints, "break")
+		"desktopShoot":
+			return _consume_hint_key("shoot")
+		"depositItems":
+			return not bool(hints.get("player_dead", true)) and not bool(hints.get("player_has_item", false))
 		"desktopPause":
 			return _is_paused()
+		"unitControl":
+			return not bool(hints.get("player_dead", true)) and not bool(hints.get("player_spawned_by_core", true))
+		"unitSelectControl":
+			# `commandMode && selectedUnits > 0` (the CommandAI/targetPos clause
+			# needs the unit command readback; eased - see the commit).
+			return _input_command_mode() and _selection_size() > 0
 		"launch":
-			# `ui.planet.isShown()`.
-			return _ui != null and _ui.has_method("is_dialog_shown") \
-				and bool(_ui.call("is_dialog_shown", "planet"))
-		"presetLaunch":
-			var state := _sector_state()
-			return bool(state.get("campaign", false)) \
-				and str(state.get("preset", "")) == "frozenForest"
-		_:
+			return _dialog_shown("planet")
+		"schematicSelect":
+			return _consume_hint_key("schematic_select_release") or _consume_hint_key("pick_tap")
+		"conveyorPathfind":
+			return _consume_hint_key("diagonal_release")
+		"boost":
+			return _consume_hint_key("boost_down")
+		"blockInfo":
+			return _dialog_shown("content")
+		"derelict":
+			return _has_event(hints, "derelictbreak")
+		"payloadPickup":
+			return int(hints.get("player_payload", -1)) > 0
+		"payloadDrop":
+			return int(hints.get("player_payload", -1)) == 0
+		"waveFire":
+			return int(hints.get("extinguishers", 0)) > 0
+		"rebuildSelect":
+			return _consume_hint_key("rebuild_selecting")
+		"guardian":
+			return int(_boss_root(hints).get("count", 0)) == 0
+		"cannotUpgrade":
+			# `Trigger.cannotUpgrade` has no firing site in the port yet.
 			return false
-
-
-## `DefaultHint.show()` predicates the port can evaluate (T4a set; T4b adds the
-## rest). Hints whose predicate needs state the port does not expose yet stay
-## hidden rather than firing out of context.
-func _hint_shown(hint_name: String, state: Dictionary) -> bool:
-	var preset := str(state.get("preset", ""))
-	var campaign := bool(state.get("campaign", false))
-	match hint_name:
-		"desktopMove", "zoom":
-			return true
-		"desktopPause":
-			# `isTutorial && !net.active() && state.wave >= 2`
-			return preset == "groundZero" and int(state.get("wave", 0)) >= 2
-		"launch":
-			return (preset == "groundZero" or preset == "onset") and bool(state.get("captured", false))
+		"factoryControl":
+			return _has_event(hints, "factorycontrol")
+		"coreUpgrade":
+			return _placed_has(hints, ["core-foundation"])
+		"serpuloCoreZone":
+			return int(hints.get("cores", 0)) > 1
 		"presetLaunch":
-			return campaign and preset.is_empty() and state.has("sector")
+			return bool(state.get("campaign", false)) and not str(state.get("preset", "")).is_empty()
+		"presetDifficulty":
+			return bool(state.get("campaign", false)) and not str(state.get("preset", "")).is_empty()
+		"coreIncinerate":
+			return false
 		_:
 			return false
 
@@ -202,12 +310,59 @@ func show_hint(hint_name: String) -> void:
 	_snapshot_zoom()
 
 
+## `MindInput.take_hint_keys()` (G08 T15) buffered into `_hint_keys`.
+func _poll_hint_keys() -> void:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null or not input.has_method("take_hint_keys"):
+		return
+	var keys: PackedStringArray = input.call("take_hint_keys")
+	for key in keys:
+		if not _hint_keys.has(key):
+			_hint_keys.append(key)
+
+
+## Consumes a pending input trigger (one-shot; `keyTap`/`keyRelease` parity).
+func _consume_hint_key(key: String) -> bool:
+	var index := _hint_keys.find(key)
+	if index < 0:
+		return false
+	_hint_keys.remove_at(index)
+	return true
+
+
+## `HintsFragment.java:100-102`: while no hint is up, hovering a team-0
+## (derelict) building adds `derelictmouse`.
+func _poll_derelict_mouse() -> void:
+	var camera := _camera()
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if camera == null or host == null or not host.has_method("building_team_at"):
+		return
+	if not camera.has_method("screen_to_tile"):
+		return
+	var mouse := get_viewport().get_mouse_position()
+	var tile: Vector2i = camera.call("screen_to_tile", mouse.x, mouse.y)
+	if tile.x < 0 or tile.y < 0 or tile == _mouse_tile:
+		return
+	_mouse_tile = tile
+	if int(host.call("building_team_at", tile.x, tile.y)) == 0:
+		host.call("hint_event", "derelictmouse")
+
+
 func _sector_state() -> Dictionary:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign == null or not campaign.has_method("get_sector_state"):
 		return {}
 	var state: Variant = campaign.call("get_sector_state")
 	return state if state is Dictionary else {}
+
+
+## `MindSimHost.hint_state_json()` (one sweep per frame).
+func _hint_state() -> Dictionary:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("hint_state_json"):
+		return {}
+	var parsed: Variant = JSON.parse_string(str(host.call("hint_state_json")))
+	return parsed if parsed is Dictionary else {}
 
 
 ## `DefaultHint.finished`: `Core.settings.getBool(name + "-hint-done")`.
@@ -262,6 +417,68 @@ func _camera() -> Node:
 func _player_unit_moved() -> bool:
 	var host := get_node_or_null("/root/Spine/SimHost")
 	return host != null and host.has_method("player_unit_moved") and bool(host.call("player_unit_moved"))
+
+
+## Whether `placedBlocks` contains any of `names` (`HintsFragment.schematicSelect`
+## and `coreUpgrade` predicates).
+func _placed_has(hints: Dictionary, names: Array) -> bool:
+	var placed: Array = hints.get("placed", [])
+	for name in names:
+		if placed.has(name):
+			return true
+	return false
+
+
+## Whether the event set contains `name`.
+func _has_event(hints: Dictionary, name: String) -> bool:
+	return (hints.get("events", []) as Array).has(name)
+
+
+## The first boss entry (`boss_json.first`), or `{}`.
+func _boss(hints: Dictionary) -> Dictionary:
+	var boss: Variant = _boss_root(hints).get("first")
+	return boss if boss is Dictionary else {}
+
+
+## The whole `boss_json` object (count/names/value/first).
+func _boss_root(hints: Dictionary) -> Dictionary:
+	var boss: Variant = hints.get("boss")
+	return boss if boss is Dictionary else {}
+
+
+## `UnlockableContent.unlockedHost()` by name (G05 T4b gates).
+func _content_unlocked(name: String) -> bool:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign == null or not campaign.has_method("content_unlocked"):
+		return true
+	return bool(campaign.call("content_unlocked", name))
+
+
+## `state.block.name` (`MindSimHost.selected_block`).
+func _selected_block() -> String:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("selected_block"):
+		return ""
+	return str(host.call("selected_block"))
+
+
+## `input.commandMode` (G08).
+func _input_command_mode() -> bool:
+	var input := get_node_or_null("/root/Spine/Input")
+	return input != null and input.has_method("command_mode") and bool(input.call("command_mode"))
+
+
+## Selected unit count (`control.input.selectedUnits.size`).
+func _selection_size() -> int:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null or not input.has_method("selection_json"):
+		return 0
+	var parsed: Variant = JSON.parse_string(str(input.call("selection_json")))
+	return (parsed as Array).size() if parsed is Array else 0
+
+
+func _dialog_shown(name: String) -> bool:
+	return _ui != null and _ui.has_method("is_dialog_shown") and bool(_ui.call("is_dialog_shown", name))
 
 
 func _snapshot_zoom() -> void:

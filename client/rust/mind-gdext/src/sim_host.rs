@@ -2776,6 +2776,16 @@ impl MindSimHost {
         )
     }
 
+    /// Inserts a hint event by name (G05 T4b). `derelictmouse` is host-detected
+    /// (`HintsFragment.java:100-102`, `Trigger.derelictMouse`); unknown names
+    /// are ignored.
+    #[func]
+    pub fn hint_event(&mut self, name: GString) {
+        if name == "derelictmouse" {
+            self.sim.hint_events.events.insert("derelictmouse");
+        }
+    }
+
     /// `BuilderComp.updateBuilding` (`InputHandler.update`; PAR-0098 §2b).
     #[func]
     pub fn set_player_building_paused(&mut self, paused: bool) {
@@ -4076,6 +4086,15 @@ impl MindSimHost {
             .map(|comp| comp.team.0)
     }
 
+    /// [`building_team`](Self::building_team) for GDScript (`-1` = no building;
+    /// G05 T4b `derelictmouse` probe).
+    #[func]
+    pub fn building_team_at(&self, x: i32, y: i32) -> i64 {
+        self.building_team(x, y)
+            .map(|team| team as i64)
+            .unwrap_or(-1)
+    }
+
     /// `Team.items().remove(item, amount)` on the first core of `team`; returns
     /// the removed amount (`0` without a matching core/item). Rust-only seam for
     /// the campaign research spend.
@@ -4619,15 +4638,56 @@ fn hint_state_value(sim: &Sim, content: Option<&ContentRegistry>, team: u8) -> s
     // `Trigger.blockInfo`-style live plan count (the player's build queue).
     let plans = sim.player_build_plans().len() as i64;
 
-    // `Indexer.isBlockPresent(Blocks.coreZone)`; the port models `core-zone` as
-    // a floor block, so the floor layer is the match.
+    // `Indexer.isBlockPresent(Blocks.coreZone)`; checked across the tile's
+    // block/floor/overlay layers.
     let core_zone_present = content
         .and_then(|content| content.block_id("core-zone"))
         .is_some_and(|zone| {
             sim.grid.iter_row_major().any(|(pos, _)| {
-                sim.grid.floor_at(pos) == Some(zone) || sim.grid.block_at(pos) == Some(zone)
+                sim.grid
+                    .tiles
+                    .getn(pos.x() as i32, pos.y() as i32)
+                    .is_some_and(|tile| {
+                        tile.block == zone || tile.floor == zone || tile.overlay == zone
+                    })
             })
         });
+
+    // Campaign facts for the T4b predicates (live runtime campaign + rules).
+    let rules = mind_core::game::runtime::rules_of(&sim.ecs.0);
+    let attack_mode = rules.is_some_and(|rules| rules.attack_mode);
+    // `!rules.hasEnv(Env.scorching)` (`EnvFlag::Scorching` = bit 4).
+    let serpulo = rules.is_none_or(|rules| rules.env & (1 << 4) == 0);
+    let team_rebuild_plans = runtime
+        .and_then(|runtime| {
+            runtime
+                .session
+                .teams
+                .get_or_null(mind_core::ecs::TeamId(team))
+        })
+        .map(|data| data.plans.len() as i64)
+        .unwrap_or(0);
+    let sector_fact = |name: &str| -> (bool, bool) {
+        let (Some(registry), Some(campaign)) = (content, runtime.map(|r| &r.campaign)) else {
+            return (false, false);
+        };
+        let Some(preset) = registry.sector_by_name(name) else {
+            return (false, false);
+        };
+        let Some(record) = campaign.sector(preset.planet, preset.sector) else {
+            return (false, false);
+        };
+        (record.has_save(), record.is_captured(None))
+    };
+    let (fungal_pass_saved, _) = sector_fact("fungalPass");
+    let (_, tar_fields_captured) = sector_fact("tarFields");
+    let sector_threat = runtime
+        .and_then(|runtime| runtime.session.sector)
+        .and_then(|(planet, sector)| {
+            runtime.and_then(|runtime| runtime.campaign.sector(planet, sector))
+        })
+        .map(|record| record.threat as f64)
+        .unwrap_or(0.0);
 
     // `state.stats.destroyed` cores: not tracked per core block yet (T4b).
     let cores_destroyed = 0i64;
@@ -4657,6 +4717,12 @@ fn hint_state_value(sim: &Sim, content: Option<&ContentRegistry>, team: u8) -> s
         "core_zone_present": core_zone_present,
         "cores_destroyed": cores_destroyed,
         "boss": boss,
+        "team_rebuild_plans": team_rebuild_plans,
+        "serpulo": serpulo,
+        "fungal_pass_saved": fungal_pass_saved,
+        "tar_fields_captured": tar_fields_captured,
+        "sector_threat": sector_threat,
+        "attack_mode": attack_mode,
     })
 }
 
