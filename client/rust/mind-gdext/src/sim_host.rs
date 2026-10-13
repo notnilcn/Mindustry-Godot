@@ -2106,6 +2106,27 @@ impl MindSimHost {
             .is_some()
     }
 
+    /// `MapObjectives.CommandModeObjective` input read (G08 T15): whether any
+    /// selected unit holds a command order (`CommandAI.hasCommand()`).
+    pub fn any_unit_has_command(&self, ids: &[i32]) -> bool {
+        self.sim.any_unit_has_command(ids)
+    }
+
+    /// `ObjectiveInputState.command_mode_satisfied` (G04 T4/G08 T15).
+    pub fn command_mode_satisfied(&self) -> bool {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::ObjectiveInputState>()
+            .is_some_and(|state| state.command_mode_satisfied)
+    }
+
+    /// Verify seam: the `ObjectiveInputState.command_mode_satisfied` flag.
+    #[func]
+    pub fn command_mode_objective(&self) -> bool {
+        self.command_mode_satisfied()
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {

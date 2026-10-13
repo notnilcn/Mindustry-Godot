@@ -2447,6 +2447,31 @@ impl Sim {
         serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
     }
 
+    /// `MapObjectives.CommandModeObjective.update` (`MapObjectives.java:671-675`):
+    /// any live unit whose `EntitySeq` is in `ids`, on `live_default_team()`,
+    /// has a `Command` controller with a live order target
+    /// (`CommandAI.hasCommand()` = `targetPos != null`).
+    pub fn any_unit_has_command(&self, ids: &[i32]) -> bool {
+        if ids.is_empty() {
+            return false;
+        }
+        let team = self.live_default_team();
+        self.ecs.0.iter_entities().any(|entity_ref| {
+            let Some(seq) = entity_ref.get::<EntitySeq>() else {
+                return false;
+            };
+            if !ids.contains(&(seq.0 as i32)) {
+                return false;
+            }
+            if entity_ref.get::<TeamComp>().map(|team_comp| team_comp.team) != Some(team) {
+                return false;
+            }
+            entity_ref
+                .get::<ControllerSlot>()
+                .is_some_and(|slot| slot.kind == AiKind::Command && slot.target.is_some())
+        })
+    }
+
     /// Debug-only live unit dump (`id`, `type`, `team`, `kind`, position,
     /// rotation, health, `can_shoot` and per-mount aim/fire state); MCP probes
     /// only, never saved or synced.

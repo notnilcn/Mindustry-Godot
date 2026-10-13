@@ -1337,6 +1337,69 @@ fn commanded_dagger_reaches_target() {
     );
 }
 
+/// G08 T15: a unit counts as having a command only with a live order target
+/// (`CommandAI.hasCommand()` = `targetPos != null`), and
+/// `set_command_mode_satisfied` flips the objective resource (G04 T4).
+#[test]
+fn any_unit_has_command_needs_target() {
+    use crate::game::State;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{CampaignRuntime, ObjectiveInputState};
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let registry = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(registry, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        waves: false,
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    session.phase = State::Playing;
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let id = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(
+        !sim.any_unit_has_command(&[id]),
+        "no order yet -> no command"
+    );
+    assert!(!sim.any_unit_has_command(&[]), "empty selection");
+    sim.command(SimCommand::UnitCommand {
+        units: smallvec::smallvec![id],
+        command: 0,
+        x: 200.0,
+        y: 100.0,
+    })
+    .expect("move order");
+    assert!(
+        sim.any_unit_has_command(&[id]),
+        "move order sets the target"
+    );
+
+    sim.set_command_mode_satisfied(true);
+    let state = sim
+        .ecs
+        .0
+        .get_resource::<ObjectiveInputState>()
+        .expect("input state");
+    assert!(state.command_mode_satisfied);
+}
+
 /// PAR-0091: a deposited water puddle applies `wet` to a unit standing in it
 /// and evaporates to nothing on a dry floor (live `update_puddles`).
 #[test]

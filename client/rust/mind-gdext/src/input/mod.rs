@@ -218,6 +218,26 @@ impl INode for MindInput {
         self.bridge.update_command_mode(&self.bindings, None);
         // Cargo keys repeat while held (`DesktopInput.updateMovement`).
         self.bridge.update_payload_hold(&self.bindings);
+        // G05 T4b hint triggers while a key is held (`boost`,
+        // `rebuild_selecting`).
+        self.bridge.refresh_hints(&self.bindings);
+        // G04 T4 `CommandModeObjective`: a selected unit with a live order
+        // satisfies the objective each frame (`MapObjectives.java:671-675`).
+        let selected: Vec<i32> = self
+            .bridge
+            .controller
+            .state
+            .selected_units
+            .iter()
+            .copied()
+            .collect();
+        if let Some(mut host) = self.bridge.host.clone() {
+            let sat = host.bind().any_unit_has_command(&selected);
+            let current = host.bind().command_mode_satisfied();
+            if current != sat {
+                host.bind_mut().set_command_mode_satisfied(sat);
+            }
+        }
         self.drain_effects();
         // M3: drive the mobile gesture detector's long-press timer. The touch
         // stream itself is folded in by the `mobile_*` callbacks (plan 14).
@@ -945,6 +965,19 @@ impl MindInput {
     #[func]
     pub fn is_shooting(&self) -> bool {
         self.bridge.shooting
+    }
+
+    /// G05 T4b hint completions (`HintsFragment`): returns and clears the hint
+    /// trigger keys collected since the last call
+    /// (`shoot`, `boost_down`, `schematic_select_release`, `pick_tap`,
+    /// `diagonal_release`, `rebuild_selecting`).
+    #[func]
+    pub fn take_hint_keys(&mut self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for key in self.bridge.take_hint_keys() {
+            out.push(&GString::from(key));
+        }
+        out
     }
 
     /// Whether a placement block is selected (`state.block`); `false` after the
