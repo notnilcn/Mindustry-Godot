@@ -733,6 +733,22 @@ impl MindCampaign {
                 &mut self.reloader,
             )
         };
+        // T2: `readMeta`'s resume fields — `wavetime`/`stats`/markers — from the
+        // save `MindSimHost.load_sector` just decoded. Java restores them inside
+        // `SaveIO.load` (`SaveVersion.readMeta`) before the `SaveLoadEvent`
+        // rule merge; the host also resumed the saved `tick`.
+        if has_save
+            && !lost_replay
+            && let Some(meta) = self
+                .host()
+                .and_then(|mut host| host.bind_mut().take_sector_resume())
+        {
+            self.session.wavetime = meta.wavetime.unwrap_or(self.session.rules.wave_spacing);
+            if let Some(stats) = meta.stats {
+                self.session.stats = stats;
+            }
+            self.session.markers = meta.markers;
+        }
         // Merge the loaded map/generator rules (waves/spawns) captured by
         // `MindSimHost.load_sector` so the session and the world agree.
         if let Some(host) = self.host()
