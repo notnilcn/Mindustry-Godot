@@ -2254,6 +2254,34 @@ impl MindSimHost {
         self.sim.player_mined_count()
     }
 
+    /// The player unit's carried stack as `(item name, amount)` (`unit.stack`).
+    pub fn player_unit_stack(&self) -> Option<(String, i32)> {
+        let (item, amount) = self.sim.player_unit_stack()?;
+        let name = self
+            .sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.item(item))
+            .map(|def| def.name.clone())?;
+        Some((name, amount))
+    }
+
+    /// Playtest seam: the player unit's stack as `{"item":..,"amount":..}` or
+    /// `{}` when empty.
+    #[func]
+    pub fn player_stack_json(&self) -> GString {
+        match self.player_unit_stack() {
+            Some((item, amount)) => GString::from(
+                serde_json::json!({
+                    "item": item,
+                    "amount": amount,
+                })
+                .to_string()
+                .as_str(),
+            ),
+            None => GString::from("{}"),
+        }
+    }
+
     /// Debug/playtest seam: adds `amount` of `item` to the player team's first
     /// core (the Java console/sandbox `core.items.add`); returns the amount
     /// accepted (negative removes).

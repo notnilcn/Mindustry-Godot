@@ -148,6 +148,29 @@ pub fn dispatch_handle_stack(world: &mut World, target: Entity, item: ItemId, am
     inst.behavior.handle_stack(world, target, item, amount);
 }
 
+/// Dispatches `acceptStack` to `target`'s registered behavior
+/// (`BuildingComp.acceptStack` / the G08 T2a turret override).
+pub fn dispatch_accept_stack(
+    world: &World,
+    target: Entity,
+    item: ItemId,
+    amount: i32,
+    source: Option<Entity>,
+) -> i32 {
+    let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
+        return 0;
+    };
+    match world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.instance(block))
+    {
+        Some(inst) => inst
+            .behavior
+            .accept_stack(world, target, item, amount, source),
+        None => 0,
+    }
+}
+
 /// Dispatches `canDump` to `target`'s registered behavior.
 pub fn dispatch_can_dump(world: &World, target: Entity, src: Entity, item: ItemId) -> bool {
     let Some(block) = world.get::<Building>(target).map(|b| b.block) else {
