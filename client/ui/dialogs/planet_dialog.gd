@@ -603,6 +603,12 @@ func _maybe_show_remap_notice() -> void:
 
 # --- Planet view --------------------------------------------------------------
 
+## `ResearchDialog.hidden(ui.planet::setup)`: re-runs the planet page for the
+## selected planet (without re-selecting a default sector).
+func refresh_page() -> void:
+	_show_planet(_selected_planet, false)
+
+
 ## `PlanetDialog.setup`: globe + left planet/difficulty rail + bottom sector
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String, select_default := true) -> void:
