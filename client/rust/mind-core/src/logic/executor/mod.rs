@@ -114,12 +114,14 @@ pub enum Instruction {
         /// Format string.
         value: VarRef,
     },
-    /// `LookupI` (always null without `logicids.dat`).
+    /// `LookupI` (`GlobalVars.lookupContent` via `logicids.dat`).
     Lookup {
         /// Result.
         result: VarRef,
         /// Logic id.
         id: VarRef,
+        /// `writableLookableContent` type.
+        type_: crate::content::ContentType,
     },
     /// `PackColorI`.
     PackColor {
@@ -621,7 +623,7 @@ impl Instruction {
             | Instruction::Print { value }
             | Instruction::PrintChar { value }
             | Instruction::Format { value } => f(value),
-            Instruction::Lookup { result, id } => {
+            Instruction::Lookup { result, id, .. } => {
                 f(result);
                 f(id);
             }
@@ -1079,10 +1081,17 @@ impl Instruction {
                 let names = |obj: &LogicObject| crate::logic::access::name_of(world, obj);
                 exec.append_format(&value, &names);
             }
-            Instruction::Lookup { result, .. } => {
+            Instruction::Lookup { result, id, type_ } => {
+                // `LookupI.run`: `dest.setobj(lookupContent(type, from.numi()))`;
+                // the live resource wins over the load-time globals copy.
+                let logic_id = exec.arena.get(id.id()).numi();
+                let value = world
+                    .get_resource::<crate::logic::globals::GlobalVars>()
+                    .map(|globals| globals.lookup_content(*type_, logic_id))
+                    .unwrap_or_else(|| exec.globals.lookup_content(*type_, logic_id));
                 let result = result.id();
                 if !exec.is_constant(result) {
-                    exec.arena.get_mut(result).set_obj(None);
+                    exec.arena.get_mut(result).set_obj(value);
                 }
             }
             Instruction::PackColor { result, r, g, b, a } => {
@@ -2149,10 +2158,14 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
         Statement::Format { value } => Instruction::Format {
             value: asm.var(value),
         },
-        Statement::Lookup { result, id, .. } => {
+        Statement::Lookup { result, id, type_ } => {
             let result = asm.var(result);
             let id = asm.var(id);
-            Instruction::Lookup { result, id }
+            Instruction::Lookup {
+                result,
+                id,
+                type_: *type_,
+            }
         }
         Statement::PackColor { result, r, g, b, a } => {
             let result = asm.var(result);

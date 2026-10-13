@@ -2130,3 +2130,57 @@ fn building_xy_tiles() {
     assert_eq!(x(micro), Sensed::Num(3.0));
     assert_eq!(y(micro), Sensed::Num(4.0));
 }
+
+/// G06 T3 (PAR-0107): `lookup item r 0` resolves through `logicids.dat`.
+#[test]
+fn lookup_resolves_content_from_logic_ids() {
+    let mut sim = runtime_sim();
+    let (globals, copper) = {
+        let content = sim.block_runtime().expect("runtime").content();
+        (
+            crate::logic::globals::GlobalVars::with_content(content),
+            content.item_id("copper").expect("copper"),
+        )
+    };
+    sim.ecs.0.insert_resource(globals);
+    let id = sim.world_block_id("micro-processor").expect("block");
+    sim.command(SimCommand::Place {
+        x: 10,
+        y: 10,
+        block: id,
+        rotation: 0,
+        team: 1,
+        player: None,
+    })
+    .expect("placed");
+    let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let bytes = crate::logic::blocks::logic_block::compress(
+        "lookup item r 0\nlookup team t 1\nstop\n",
+        &[],
+    );
+    configure(
+        &mut sim,
+        10,
+        10,
+        crate::determinism::ConfigValue::Bytes(bytes),
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::logic::blocks::LogicBlockState>(processor)
+        .expect("state");
+    let r = state.executor.optional_var("r").expect("r");
+    assert!(
+        matches!(
+            &state.executor.arena.get(r).obj,
+            Some(crate::logic::value::LogicObject::Content(c))
+                if c.type_ == crate::content::ContentType::Item && c.id == copper.raw()
+        ),
+        "lookup item 0 -> copper"
+    );
+    let t = state.executor.optional_var("t").expect("t");
+    assert_eq!(state.executor.arena.get(t).num(), 1.0, "team 1 = sharded");
+}

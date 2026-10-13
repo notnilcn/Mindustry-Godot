@@ -304,7 +304,13 @@ pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
         LogicObject::Building(e) => sense_building(world, *e, a),
         LogicObject::Unit(e) => sense_unit(world, *e, a),
         LogicObject::Content(c) => match a {
-            LAccess::Id => Sensed::Num(c.id as f64),
+            // `Block/Item/Liquid/UnitType.sense(@id)` = `getLogicId()`.
+            LAccess::Id => Sensed::Num(
+                world
+                    .get_resource::<crate::logic::globals::GlobalVars>()
+                    .map(|globals| globals.lookup_logic_id(*c) as f64)
+                    .unwrap_or(-1.0),
+            ),
             _ => Sensed::Num(1.0),
         },
         _ => Sensed::Obj(None),

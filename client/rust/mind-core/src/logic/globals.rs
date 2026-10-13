@@ -3,13 +3,11 @@
 
 //! Global logic variables and constants.
 //!
-//! Ported from `core/src/mindustry/logic/GlobalVars.java`. This milestone
-//! registers the state-independent constants (math, team control ids, `LAccess`
-//! names, align names, named colors); the content/`@sfx-*`/time-client constants
-//! and the per-tick `update()` land with the M7 content integration.
-//!
-//! `logicids.dat` is intentionally absent (HLP §9): `lookup` returns null,
-//! `lookup_logic_id` returns `-1`, and no `@<type>Count` constants exist.
+//! Ported from `core/src/mindustry/logic/GlobalVars.java`. Registers the
+//! state-independent constants (math, team control ids, `LAccess` names, align
+//! names, named colors), the content/`@sfx-*`/time-client constants, the
+//! `logicids.dat` lookup tables (shipped asset copied into
+//! `mind-core/assets/logicids.dat`) and the per-tick `update()`.
 
 use indexmap::{IndexMap, IndexSet};
 
@@ -100,6 +98,39 @@ pub struct GlobalVars {
     pub entries: Vec<VarEntry>,
     /// Global random stream (`GlobalVars.rand`).
     pub rand: ArcRand,
+    /// `logicIdToContent` per `writableLookableContent`
+    /// (`0 block, 1 unit, 2 item, 3 liquid`; `None` = unknown name).
+    pub logic_to_content: [Vec<Option<u16>>; 4],
+    /// `contentIdToLogicId` per type (`-1` = absent).
+    pub content_to_logic: [Vec<i32>; 4],
+}
+
+/// The shipped `logicids.dat` (copied from the Java assets; `GlobalVars.init`).
+const LOGIC_IDS: &[u8] = include_bytes!("../../assets/logicids.dat");
+
+/// Parses `logicids.dat`: for each of `writableLookableContent` a big-endian
+/// `short` count then `count` `DataInputStream.readUTF` strings.
+pub fn parse_logic_ids(bytes: &[u8]) -> Option<[Vec<String>; 4]> {
+    let mut out: [Vec<String>; 4] = std::array::from_fn(|_| Vec::new());
+    let mut offset = 0usize;
+    for table in out.iter_mut() {
+        let amount = i16::from_be_bytes([*bytes.get(offset)?, *bytes.get(offset + 1)?]);
+        offset += 2;
+        if amount < 0 {
+            return None;
+        }
+        for _ in 0..amount {
+            let len = u16::from_be_bytes([*bytes.get(offset)?, *bytes.get(offset + 1)?]) as usize;
+            offset += 2;
+            let name = std::str::from_utf8(bytes.get(offset..offset + len)?).ok()?;
+            offset += len;
+            table.push(name.to_owned());
+        }
+    }
+    if offset != bytes.len() {
+        return None;
+    }
+    Some(out)
 }
 
 impl Default for GlobalVars {
@@ -116,6 +147,8 @@ impl GlobalVars {
             privileged_names: IndexSet::new(),
             entries: Vec::new(),
             rand: ArcRand::new(0),
+            logic_to_content: std::array::from_fn(|_| Vec::new()),
+            content_to_logic: std::array::from_fn(|_| Vec::new()),
         };
         globals.init_static();
         // Plan 18 seeds the full `Sounds` table unconditionally, so `@sfx-*`
@@ -308,8 +341,42 @@ impl GlobalVars {
             let key = format!("@status-{name}");
             self.put_content(&key, ContentType::Status, entry.id, false);
         }
+        self.init_logic_ids(content);
         self.init_sfx();
         self.reindex();
+    }
+
+    /// `GlobalVars.init` logic-id pass: parse the shipped `logicids.dat`, map
+    /// each name to the content records and register `@<type>Count`.
+    fn init_logic_ids(&mut self, content: &ContentRegistry) {
+        let Some(tables) = parse_logic_ids(LOGIC_IDS) else {
+            return;
+        };
+        for (index, type_) in WRITABLE_LOOKABLE_CONTENT.iter().enumerate() {
+            let type_name = match type_ {
+                ContentType::Block => "block",
+                ContentType::Unit => "unit",
+                ContentType::Item => "item",
+                ContentType::Liquid => "liquid",
+                _ => continue,
+            };
+            let names = &tables[index];
+            let mut to_content = vec![None; names.len()];
+            for (logic_id, name) in names.iter().enumerate() {
+                if let Some(record) = content.get_by_name(*type_, name) {
+                    to_content[logic_id] = Some(record.id);
+                }
+            }
+            let mut to_logic = vec![-1i32; content.type_len(*type_)];
+            for (logic_id, record) in to_content.iter().enumerate() {
+                if let Some(id) = record {
+                    to_logic[*id as usize] = logic_id as i32;
+                }
+            }
+            self.logic_to_content[index] = to_content;
+            self.content_to_logic[index] = to_logic;
+            self.put_num(&format!("@{type_name}Count"), names.len() as f64, false);
+        }
     }
 
     /// Registers `@sfx-<file>` sound-id constants (`GlobalVars.init` audio block).
@@ -473,7 +540,8 @@ impl GlobalVars {
         self.cells.get("@wait")
     }
 
-    /// `GlobalVars.lookupContent`: teams by index (0..255), otherwise `None`.
+    /// `GlobalVars.lookupContent`: teams by index (0..255), writable-lookable
+    /// content through the `logicids.dat` tables, otherwise `None`.
     pub fn lookup_content(&self, type_: ContentType, id: i32) -> Option<LogicObject> {
         if type_ == ContentType::Team {
             if (0..256).contains(&id) {
@@ -481,12 +549,27 @@ impl GlobalVars {
             }
             return None;
         }
-        None
+        let index = WRITABLE_LOOKABLE_CONTENT
+            .iter()
+            .position(|candidate| *candidate == type_)?;
+        let logic_id = usize::try_from(id).ok()?;
+        let content_id = *self.logic_to_content[index].get(logic_id)?;
+        content_id.map(|id| LogicObject::Content(ContentRef::new(type_, id)))
     }
 
-    /// `GlobalVars.lookupLogicId`: always `-1` without `logicids.dat`.
-    pub fn lookup_logic_id(&self, _content: ContentRef) -> i32 {
-        -1
+    /// `GlobalVars.lookupLogicId`: the logic id of a content record, `-1` when
+    /// absent (`Block/Item/Liquid/UnitType.getLogicId`).
+    pub fn lookup_logic_id(&self, content: ContentRef) -> i32 {
+        let Some(index) = WRITABLE_LOOKABLE_CONTENT
+            .iter()
+            .position(|candidate| *candidate == content.type_)
+        else {
+            return -1;
+        };
+        self.content_to_logic[index]
+            .get(content.id as usize)
+            .copied()
+            .unwrap_or(-1)
     }
 
     /// `GlobalVars.remove(name)` (data-patch reset).
@@ -669,8 +752,8 @@ mod tests {
         assert!(g.get("@legacy-mech-pad", false).is_none());
         assert!(g.get("@block", false).is_none());
         assert!(g.get("@dummy", false).is_none());
-        // Deviation 9: no `@<type>Count` constants without `logicids.dat`.
-        assert!(g.get("@itemCount", false).is_none());
+        // `@<type>Count` constants come from the shipped `logicids.dat`.
+        assert_eq!(g.get("@itemCount", false).unwrap().num, 20.0);
     }
 
     #[test]
@@ -753,13 +836,51 @@ mod tests {
     }
 
     #[test]
-    fn lookup_is_absent_file_behavior() {
-        let g = GlobalVars::new();
-        assert_eq!(g.lookup_logic_id(ContentRef::new(ContentType::Item, 0)), -1);
-        assert_eq!(g.lookup_content(ContentType::Item, 0), None);
+    fn lookup_maps_logic_ids() {
+        use crate::world::harness::BuildHarness;
+        let content = BuildHarness::load_content();
+        let g = GlobalVars::with_content(&content);
+        // File-derived counts (`logicids.dat`): 262 blocks / 56 units /
+        // 20 items / 11 liquids.
+        assert_eq!(g.get("@blockCount", false).unwrap().num, 262.0);
+        assert_eq!(g.get("@unitCount", false).unwrap().num, 56.0);
+        assert_eq!(g.get("@itemCount", false).unwrap().num, 20.0);
+        assert_eq!(g.get("@liquidCount", false).unwrap().num, 11.0);
+        // `lookup item 0` -> copper; `sensor @copper @id` -> 0.
+        let copper = content.item_id("copper").expect("copper");
+        let copper_ref = ContentRef::new(ContentType::Item, copper.raw());
+        assert_eq!(
+            g.lookup_content(ContentType::Item, 0),
+            Some(LogicObject::Content(copper_ref))
+        );
+        assert_eq!(g.lookup_logic_id(copper_ref), 0);
+        // First/last block entries.
+        let press = content.block_id("graphite-press").expect("graphite-press");
+        assert_eq!(
+            g.lookup_content(ContentType::Block, 0),
+            Some(LogicObject::Content(ContentRef::new(
+                ContentType::Block,
+                press.raw()
+            )))
+        );
+        let dummy = content.block_id("target-dummy").expect("target-dummy");
+        let dummy_ref = ContentRef::new(ContentType::Block, dummy.raw());
+        assert_eq!(
+            g.lookup_content(ContentType::Block, 261),
+            Some(LogicObject::Content(dummy_ref))
+        );
+        assert_eq!(g.lookup_logic_id(dummy_ref), 261);
+        // Teams stay index-based.
         assert_eq!(
             g.lookup_content(ContentType::Team, 3),
             Some(LogicObject::Team(3))
+        );
+        // `GlobalVars::new()` (no content) keeps empty tables.
+        let empty = GlobalVars::new();
+        assert_eq!(empty.lookup_content(ContentType::Item, 0), None);
+        assert_eq!(
+            empty.lookup_logic_id(ContentRef::new(ContentType::Item, 0)),
+            -1
         );
     }
 }
