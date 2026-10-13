@@ -2685,6 +2685,14 @@ impl MindSimHost {
         mind_core::audio::frame::collect_turret_loops(&self.sim.ecs.0, content, out);
     }
 
+    /// T7: in-game music context state (rules/wave/boss/core hp; Rust-only).
+    pub fn audio_game_state(&self) -> mind_core::audio::frame::AudioGameState {
+        let Some(content) = self.sim.block_runtime().map(|runtime| runtime.content()) else {
+            return Default::default();
+        };
+        mind_core::audio::frame::read_game_state(&self.sim.ecs.0, content)
+    }
+
     /// Read-only content registry snapshot for block draw metadata.
     pub fn content_registry(&self) -> Option<&ContentRegistry> {
         self.content_snapshot.as_ref()

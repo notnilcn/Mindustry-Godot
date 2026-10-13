@@ -13,12 +13,14 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use super::ids::SoundId;
+use super::ids::{MusicRef, SoundId};
+use super::music::MusicRules;
 use crate::content::ContentRegistry;
 use crate::ecs::EntitySeq;
-use crate::entities::comp::unit::comp::{MinerComp, TankComp, UnitCore, UnitTypeComp};
+use crate::entities::comp::unit::comp::{MinerComp, StatusComp, TankComp, UnitCore, UnitTypeComp};
 use crate::entities::comp::weather::WeatherRuntime;
-use crate::entities::comp::{Building, Pos, Vel};
+use crate::entities::comp::{Building, Health, Pos, TeamComp, Vel};
+use crate::game::runtime::CampaignRuntime;
 use crate::sim::builder::BuilderPlans;
 use crate::world::blocks::defense::turrets::{TurretKind, TurretState};
 
@@ -290,6 +292,123 @@ pub fn collect_turret_loops(
     }
 }
 
+/// Everything `SoundControl.update` reads from the live game state (G07 T7).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct AudioGameState {
+    /// `state.isCampaign()`.
+    pub in_campaign: bool,
+    /// `state.rules.editor`.
+    pub editor: bool,
+    /// Rules music fields (`Rules.ambientMusic`/`darkMusic`/...).
+    pub rules: MusicRules,
+    /// `state.wave`.
+    pub wave: i32,
+    /// `state.enemies`.
+    pub enemies: i32,
+    /// Player core health fraction (`player.team().data().core().healthf()`).
+    pub core_hp_fraction: Option<f32>,
+    /// `state.boss() != null` — a live `boss`-status enemy unit.
+    pub live_boss: bool,
+    /// A spawn group at `wave - 2` has the `boss` effect
+    /// (`SoundControl.java:75-83`).
+    pub boss_spawn_group: bool,
+}
+
+/// `SpawnGroup.getSpawned` over the JSON spawn-group form
+/// (`SoundControl.java:75-83` reads `Rules.spawns`).
+fn json_spawned(group: &crate::io::json::rules::SpawnGroup, wave: i32) -> i32 {
+    let spacing = group.spacing.max(1);
+    if wave < group.begin || wave > group.end || (wave - group.begin) % spacing != 0 {
+        return 0;
+    }
+    let steps = (wave - group.begin) / spacing;
+    let scaled = steps as f32 / group.unit_scaling;
+    group
+        .unit_amount
+        .saturating_add(scaled as i32)
+        .min(group.max)
+}
+
+/// Reads the in-game music context state from the campaign session.
+pub fn read_game_state(world: &World, content: &ContentRegistry) -> AudioGameState {
+    let Some(campaign) = world.get_resource::<CampaignRuntime>() else {
+        return AudioGameState::default();
+    };
+    let session = &campaign.session;
+    let rules = &session.rules;
+
+    let music = MusicRules {
+        ambient: rules.ambient_music.as_ref().map(|containers| {
+            containers
+                .iter()
+                .map(|container| MusicRef::new(container.name()))
+                .collect()
+        }),
+        dark: rules.dark_music.as_ref().map(|containers| {
+            containers
+                .iter()
+                .map(|container| MusicRef::new(container.name()))
+                .collect()
+        }),
+        disable: rules.disable_music,
+        always: rules.always_play_music,
+        volume: rules.music_volume,
+    };
+
+    // First (lowest EntitySeq) player-team core's health fraction.
+    let mut core_hp: Option<(u64, f32)> = None;
+    for entity in world.iter_entities() {
+        let Some(building) = entity.get::<Building>() else {
+            continue;
+        };
+        if entity.get::<TeamComp>().map(|team| team.team) != Some(rules.default_team) {
+            continue;
+        }
+        if content
+            .block(building.block)
+            .is_none_or(|def| def.kind != crate::content::BlockKind::CoreBlock)
+        {
+            continue;
+        }
+        let Some(health) = entity.get::<Health>() else {
+            continue;
+        };
+        if health.max_health <= 0.0 {
+            continue;
+        }
+        let seq = entity.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0);
+        let fraction = health.health / health.max_health;
+        match core_hp {
+            Some((best, _)) if best <= seq => {}
+            _ => core_hp = Some((seq, fraction)),
+        }
+    }
+
+    let live_boss = content.status_id("boss").is_some_and(|boss| {
+        world.iter_entities().any(|entity| {
+            entity.get::<TeamComp>().map(|team| team.team) == Some(rules.wave_team)
+                && entity
+                    .get::<StatusComp>()
+                    .is_some_and(|status| status.has_effect_of(boss))
+        })
+    });
+
+    let boss_spawn_group = rules.spawns.iter().any(|group| {
+        group.effect.as_deref() == Some("boss") && json_spawned(group, session.wave - 2) > 0
+    });
+
+    AudioGameState {
+        in_campaign: session.is_campaign(),
+        editor: rules.editor,
+        rules: music,
+        wave: session.wave,
+        enemies: session.enemies,
+        core_hp_fraction: core_hp.map(|(_, fraction)| fraction),
+        live_boss,
+        boss_spawn_group,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +559,50 @@ mod tests {
         assert_eq!(out[0].sound, SoundId::LOOP_SPRAY);
         assert!(out[0].play);
         assert_eq!(out[0].base_volume, 0.5);
+    }
+
+    #[test]
+    fn read_game_state_defaults_without_campaign() {
+        let world = World::new();
+        let content = crate::world::harness::BuildHarness::load_content();
+        assert_eq!(read_game_state(&world, &content), AudioGameState::default());
+    }
+
+    #[test]
+    fn boss_spawn_group_uses_wave_minus_two() {
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+        use crate::io::json::rules::SpawnGroup;
+
+        let content = crate::world::harness::BuildHarness::load_content();
+        let campaign = Campaign::from_registry(&content, &crate::game::planet::EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            spawns: vec![SpawnGroup {
+                begin: 10,
+                end: 10,
+                spacing: 1,
+                unit_amount: 1,
+                max: 100,
+                unit_scaling: 1.0,
+                effect: Some(String::from("boss")),
+                ..SpawnGroup::default()
+            }],
+            ..Rules::default()
+        });
+        session.wave = 12;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+        let state = read_game_state(&world, &content);
+        assert!(state.boss_spawn_group, "wave-2 = 10 matches the group");
+        assert_eq!(state.wave, 12);
+
+        world
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("campaign")
+            .session
+            .wave = 11;
+        assert!(!read_game_state(&world, &content).boss_spawn_group);
     }
 }

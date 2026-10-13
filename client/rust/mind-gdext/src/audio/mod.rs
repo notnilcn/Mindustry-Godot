@@ -21,7 +21,7 @@ use godot::prelude::*;
 
 use indexmap::IndexMap;
 
-use mind_core::audio::frame::{LoopPos, LoopSource, TurretLoopSource};
+use mind_core::audio::frame::{AudioGameState, LoopPos, LoopSource, TurretLoopSource};
 use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
     AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput, MusicContext,
@@ -56,9 +56,17 @@ pub struct MindAudio {
     turret_loops: IndexMap<u64, SoundLoopState>,
     /// Scratch: voices stopped by the turret-loop sweep.
     stopped_voices: Vec<u64>,
+    /// Previous frame's `in_game` (`ResetEvent` mirror, T7).
+    last_in_game: Option<bool>,
+    /// Previous observed wave (wave-event edge detection, T7).
+    last_wave: Option<i32>,
+    /// Previous sim tick (backwards tick = fresh sector, T7).
+    last_tick: i64,
     /// `debug_hold_loop` test seam: `(sound, x, y, volume, frames_left)`.
     debug_loop_hold: Option<(SoundId, f32, f32, f32, i64)>,
     music_player: Option<Gd<AudioStreamPlayer>>,
+    /// `Musics.land` player (`Trigger.newGame` landing cue, T7).
+    land_player: Option<Gd<AudioStreamPlayer>>,
     music: MusicPlayer,
     rng: SeededAudioRng,
     mixer: LoopMixer,
@@ -121,8 +129,12 @@ impl INode for MindAudio {
             turret_loop_sources: Vec::with_capacity(8),
             turret_loops: IndexMap::new(),
             stopped_voices: Vec::with_capacity(8),
+            last_in_game: None,
+            last_wave: None,
+            last_tick: 0,
             debug_loop_hold: None,
             music_player: None,
+            land_player: None,
             music: MusicPlayer::new(),
             rng: SeededAudioRng::new(0),
             mixer: LoopMixer::new(),
@@ -169,10 +181,16 @@ impl INode for MindAudio {
         let mut music_player = AudioStreamPlayer::new_alloc();
         music_player.set_bus(&StringName::from("Music"));
         self.base_mut().add_child(&music_player);
+        // `Musics.land` (`Trigger.newGame` landing cue) gets its own player so
+        // it does not fight the `SoundControl` music state machine (T7).
+        let mut land_player = AudioStreamPlayer::new_alloc();
+        land_player.set_bus(&StringName::from("Music"));
+        self.base_mut().add_child(&land_player);
         pool.stop_all();
         self.pool = Some(pool);
         self.loop_pool = Some(loop_pool);
         self.music_player = Some(music_player);
+        self.land_player = Some(land_player);
 
         // Audio listener on the spine camera (plan 18 §3.10).
         if let Some(camera) = self.find_camera() {
@@ -253,11 +271,47 @@ impl INode for MindAudio {
 
         let context = self.music_context(now_ms, delta_frames);
 
+        // T7 `ResetEvent` mirror (`SoundControl.java:85-89`): the first in-game
+        // frame, leaving the game, or a backwards sim tick (a fresh sector)
+        // resets `lastPlayed` and stops the sound bus + loops.
+        let in_game = !context.is_menu;
+        let tick = self
+            .sim_host()
+            .map(|host| host.bind().get_tick())
+            .unwrap_or(0);
+        let in_game_changed = self.last_in_game != Some(in_game);
+        if in_game_changed || tick < self.last_tick {
+            self.music.last_played_ms = now_ms;
+            if let Some(pool) = &self.pool {
+                pool.stop_all();
+            }
+            if let Some(loop_pool) = &mut self.loop_pool {
+                loop_pool.stop_all();
+            }
+            self.mixer = LoopMixer::new();
+            self.turret_loops.clear();
+            self.last_wave = None;
+        }
+        self.last_in_game = Some(in_game);
+        self.last_tick = tick;
+
+        // `WaveEvent` (`SoundControl.java:56-83`, `Control.java:123-130`):
+        // `waveSpawn` plays on the UI bus and the delayed wave music is armed.
+        if in_game {
+            let wave = context.wave;
+            if let Some(last) = self.last_wave
+                && wave > last
+            {
+                self.music.on_wave_event(now_ms, &mut self.rng);
+                self.play_sound("waveSpawn", self.sfx_scale(), 1.0, 0.0);
+            }
+            self.last_wave = Some(wave);
+        }
+
         // T4: per-frame loop mixing (`SoundControl.updateLoops`,
         // `SoundControl.java:410-469`). Leaving the game stops every loop
         // voice instead of just clearing the data.
         let listener = self.listener();
-        let in_game = !context.is_menu;
         let avol = self.settings.ambientvol as f32 / 100.0;
         // T5: 20 Hz ambient source refresh (`AudioThread.update`,
         // `SoundControl.java:475-503`). The snapshot is only rebuilt when the
@@ -461,12 +515,16 @@ impl MindAudio {
     /// menu); `dialog` is `state.isGame() && Core.scene.hasDialog()`
     /// (`SoundControl.java:120,130-132`).
     fn music_context(&self, now_ms: f64, delta_frames: f32) -> MusicContext {
-        let (state, paused) = match self.sim_host() {
+        let (state, paused, game) = match self.sim_host() {
             Some(host) => {
                 let host = host.bind();
-                (host.get_state().to_string(), host.is_paused())
+                (
+                    host.get_state().to_string(),
+                    host.is_paused(),
+                    host.audio_game_state(),
+                )
             }
-            None => (String::from("menu"), false),
+            None => (String::from("menu"), false, AudioGameState::default()),
         };
         let menu_background = self
             .base()
@@ -479,6 +537,13 @@ impl MindAudio {
             is_game: !is_menu,
             paused,
             dialog: !is_menu && self.ui_has_dialog(),
+            editor_rules: game.editor,
+            rules_music: game.rules.clone(),
+            core_hp_fraction: game.core_hp_fraction,
+            wave: game.wave,
+            enemies: game.enemies,
+            live_boss: game.live_boss,
+            boss_spawn_group: game.boss_spawn_group,
             musicvol_setting: self.settings.musicvol,
             always_music_setting: self.settings.alwaysmusic,
             now_ms,
@@ -843,6 +908,62 @@ impl MindAudio {
         self.music_player
             .as_ref()
             .is_some_and(|player| player.is_playing())
+    }
+
+    /// T7 inspector: in-game music context state.
+    #[func]
+    pub fn music_debug(&self) -> VarDictionary {
+        let mut dict = VarDictionary::new();
+        let key = |name: &str| GString::from(name);
+        let game = self
+            .sim_host()
+            .map(|host| host.bind().audio_game_state())
+            .unwrap_or_default();
+        dict.set(&key("wave"), &(game.wave as i64).to_variant());
+        dict.set(
+            &key("core_hp"),
+            &(game.core_hp_fraction.unwrap_or(-1.0) as f64).to_variant(),
+        );
+        dict.set(&key("live_boss"), &game.live_boss.to_variant());
+        dict.set(
+            &key("last_played_ms"),
+            &self.music.last_played_ms.to_variant(),
+        );
+        dict.set(
+            &key("wave_music_due_ms"),
+            &self.music.wave_music_due_ms.unwrap_or(-1.0).to_variant(),
+        );
+        dict.set(&key("current"), &self.current_track().to_variant());
+        dict.set(
+            &key("in_game"),
+            &self.last_in_game.unwrap_or(false).to_variant(),
+        );
+        dict.set(&key("land_playing"), &self.land_playing().to_variant());
+        dict
+    }
+
+    /// Whether the landing music voice is playing (T7 inspector).
+    #[func]
+    pub fn land_playing(&self) -> bool {
+        self.land_player
+            .as_ref()
+            .is_some_and(|player| player.is_playing())
+    }
+
+    /// T7: `Trigger.newGame` landing cue (`Control.java:198-222`) —
+    /// `coreLand.at(camera.position)` (`CoreBlock.java:375-376`) plus
+    /// `Musics.land` at `musicvol / 100`.
+    #[func]
+    pub fn play_landing(&mut self) {
+        self.play_sound("coreLand", self.sfx_scale(), 1.0, 0.0);
+        if self.settings.musicvol > 0
+            && let Some(player) = self.land_player.as_mut()
+            && let Some(stream) = self.streams.music("land")
+        {
+            player.set_stream(&stream);
+            player.set_volume_linear(self.settings.musicvol as f32 / 100.0);
+            player.play();
+        }
     }
 
     /// Forces a track by name (`findMusic`-style), optionally interrupting.
