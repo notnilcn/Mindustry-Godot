@@ -2832,6 +2832,12 @@ impl MindCampaign {
             &key("waitEnemies"),
             &self.session.rules.wait_enemies.to_variant(),
         );
+        // `Logic.isWaitingWave` (`Logic.java:621-624`); G03 reads it for
+        // `wave.waveInProgress`.
+        dict.set(
+            &key("waitingWave"),
+            &mind_core::game::play::is_waiting_wave(&self.session).to_variant(),
+        );
         dict.set(&key("gameOver"), &self.session.game_over.to_variant());
         dict.set(
             &key("afterGameOver"),

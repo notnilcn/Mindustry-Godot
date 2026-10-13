@@ -18,7 +18,9 @@ use bevy_ecs::world::World;
 use std::sync::{Arc, Mutex};
 
 use super::map_objectives::{ObjectiveEnv, ObjectiveRunParams};
-use super::play::{PlayEvent, PlaySession, apply_sector_loss, check_game_state, run_wave_campaign};
+use super::play::{
+    PlayEvent, PlaySession, apply_sector_loss, check_game_state, is_waiting_wave, run_wave_campaign,
+};
 use super::rules::Rules;
 use super::stats::GameStats;
 use super::teams::Teams;
@@ -351,27 +353,30 @@ pub fn campaign_tick_system(world: &mut World) {
             apply_sector_lighting(&mut runtime, seconds);
         }
 
-        // `Logic.update` wave timer (`!net.client()`, waves enabled).
-        if runtime.session.rules.waves
-            && runtime.session.rules.wave_timer
-            && !runtime.session.game_over
+        // `Logic.update` wave timer (`!net.client()`, `Logic.java:560-569`):
+        // `state.wavetime = Math.max(state.wavetime - Time.delta, 0)` while not
+        // waiting for enemies (Time.delta is 1 per 60 Hz tick), then an
+        // unconditional `runWave` gate on `state.wavetime <= 0 && rules.waves`.
         {
-            runtime.session.wavetime = (runtime.session.wavetime - 1.0 / TICKS_PER_SECOND).max(0.0);
-            if runtime.session.wavetime <= 0.0 {
-                runtime.events.push(run_wave_campaign(&mut runtime.session));
-                // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
-                // runtime spawns the pre-increment wave in `TickSet::RunWave`.
-                if let Some(mut unit_runtime) =
-                    world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
-                {
-                    unit_runtime.pending_wave = Some(runtime.session.wave - 1);
-                }
-                // `WaveEvent` listener: `stats.wavesLasted++`.
-                if let Some((planet, _)) = runtime.session.sector
-                    && let Some(stats) = runtime.campaign.stats_for_mut(planet)
-                {
-                    stats.waves_lasted += 1;
-                }
+            let s = &mut runtime.session;
+            if s.rules.waves && s.rules.wave_timer && !s.game_over && !is_waiting_wave(s) {
+                s.wavetime = (s.wavetime - 1.0).max(0.0);
+            }
+        }
+        if runtime.session.wavetime <= 0.0 && runtime.session.rules.waves {
+            runtime.events.push(run_wave_campaign(&mut runtime.session));
+            // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
+            // runtime spawns the pre-increment wave in `TickSet::RunWave`.
+            if let Some(mut unit_runtime) =
+                world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
+            {
+                unit_runtime.pending_wave = Some(runtime.session.wave - 1);
+            }
+            // `WaveEvent` listener: `stats.wavesLasted++`.
+            if let Some((planet, _)) = runtime.session.sector
+                && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+            {
+                stats.waves_lasted += 1;
             }
         }
 
@@ -1628,6 +1633,104 @@ mod tests {
                 .campaign
                 .sector(planet, sector_id)
                 .is_some_and(|sector| sector.info.info.was_captured)
+        );
+    }
+
+    #[test]
+    fn wave_timer_counts_ticks() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: true,
+            wave_spacing: 7200.0,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        // No sector: the non-campaign multiplier is 1.0.
+        session.phase = State::Playing;
+        session.wavetime = 120.0;
+        session.spawn_count = 1;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        for _ in 0..119 {
+            campaign_tick_system(&mut world);
+        }
+        {
+            let runtime = world.get_resource::<CampaignRuntime>().expect("runtime");
+            assert_eq!(runtime.session.wave, 0, "wave not due yet");
+            assert_eq!(runtime.session.wavetime, 1.0, "one tick per tick");
+        }
+        campaign_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert_eq!(runtime.session.wave, 1, "wave fired at zero");
+        assert_eq!(runtime.session.wavetime, 7200.0, "spacing re-armed");
+    }
+
+    #[test]
+    fn waiting_wave_holds_timer() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: true,
+            wave_spacing: 7200.0,
+            wait_enemies: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.wavetime = 50.0;
+        session.enemies = 3;
+        session.spawn_count = 1;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        for _ in 0..10 {
+            campaign_tick_system(&mut world);
+        }
+        {
+            let runtime = world.get_resource::<CampaignRuntime>().expect("runtime");
+            assert_eq!(runtime.session.wavetime, 50.0, "held while enemies alive");
+        }
+        world
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("runtime")
+            .session
+            .enemies = 0;
+        for _ in 0..10 {
+            campaign_tick_system(&mut world);
+        }
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert_eq!(runtime.session.wavetime, 40.0, "countdown resumes");
+    }
+
+    #[test]
+    fn wave_runs_without_timer_when_due() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: false,
+            wave_spacing: 7200.0,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.wavetime = 0.0;
+        session.spawn_count = 1;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        campaign_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert_eq!(
+            runtime.session.wave, 1,
+            "Java runs the wave regardless of timer"
         );
     }
 

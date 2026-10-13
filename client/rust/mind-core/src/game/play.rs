@@ -481,6 +481,10 @@ pub fn play_sector(
 }
 
 /// `Logic.play()` campaign half: wave timing, stats reset, loadout, `PlayEvent`.
+///
+/// Called on every new play (`playMap`/`playNewSector`), never on a save load;
+/// save loads keep the saved weather cooldowns (`rules.weather` is in the
+/// saved rules) and the saved `wavetime`/`tick`/`stats` (T2).
 pub fn logic_play(session: &mut PlaySession) -> Vec<PlayEvent> {
     session.phase = State::Playing;
     let base = if session.rules.initial_wave_spacing <= 0.0 {
@@ -513,6 +517,15 @@ pub fn run_wave_campaign(session: &mut PlaySession) -> PlayEvent {
     };
     session.wavetime = session.rules.wave_spacing * multiplier;
     PlayEvent::Wave
+}
+
+/// `Logic.isWaitingWave` (`Logic.java:621-624`): the countdown is held while
+/// enemies are alive and either `waitEnemies` is set or the win wave has been
+/// reached.
+pub fn is_waiting_wave(session: &PlaySession) -> bool {
+    (session.rules.wait_enemies
+        || (session.wave >= session.rules.win_wave && session.rules.win_wave > 0))
+        && session.enemies > 0
 }
 
 /// `Logic.checkGameState()` (campaign + non-campaign branches).
