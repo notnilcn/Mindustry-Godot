@@ -2644,6 +2644,17 @@ impl MindSimHost {
         self.audio_log.clone()
     }
 
+    // ---- G07 audio/weather seams ----
+
+    /// T5: live ambient sources for `MindAudio`'s 20 Hz poll (Rust-only).
+    pub fn ambient_snapshot(&self, out: &mut mind_core::audio::AmbientSnapshot) {
+        let Some(content) = self.sim.block_runtime().map(|runtime| runtime.content()) else {
+            out.entries.clear();
+            return;
+        };
+        mind_core::audio::ambient::collect_ambient(&self.sim.ecs.0, content, out);
+    }
+
     /// Read-only content registry snapshot for block draw metadata.
     pub fn content_registry(&self) -> Option<&ContentRegistry> {
         self.content_snapshot.as_ref()

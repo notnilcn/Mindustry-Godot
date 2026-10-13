@@ -21,9 +21,9 @@ use godot::prelude::*;
 
 use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
-    AmbientPoller, AudioEvent, AudioRng, LoopMixer, LoopOutput, MusicContext, MusicOutput,
-    MusicPlayer, MusicRef, SeededAudioRng, SharedAudioLog, SoundId, SoundPriorityTable,
-    TickedAudioEvent, bus_for_sound, settings_keys,
+    AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput, MusicContext,
+    MusicOutput, MusicPlayer, MusicRef, SeededAudioRng, SharedAudioLog, SoundId,
+    SoundPriorityTable, TickedAudioEvent, bus_for_sound, settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
@@ -43,6 +43,8 @@ pub struct MindAudio {
     loop_pool: Option<LoopVoicePool>,
     /// 20 Hz ambient poller (T5 fills its snapshot).
     poller: AmbientPoller,
+    /// Live ambient source snapshot (rebuilt at the poll rate).
+    ambient: AmbientSnapshot,
     /// `debug_hold_loop` test seam: `(sound, x, y, volume, frames_left)`.
     debug_loop_hold: Option<(SoundId, f32, f32, f32, i64)>,
     music_player: Option<Gd<AudioStreamPlayer>>,
@@ -103,6 +105,7 @@ impl INode for MindAudio {
             pool: None,
             loop_pool: None,
             poller: AmbientPoller::new(50.0),
+            ambient: AmbientSnapshot::default(),
             debug_loop_hold: None,
             music_player: None,
             music: MusicPlayer::new(),
@@ -241,6 +244,25 @@ impl INode for MindAudio {
         let listener = self.listener();
         let in_game = !context.is_menu;
         let avol = self.settings.ambientvol as f32 / 100.0;
+        // T5: 20 Hz ambient source refresh (`AudioThread.update`,
+        // `SoundControl.java:475-503`). The snapshot is only rebuilt when the
+        // poll is due; the poller keeps the last aggregate rows between polls.
+        let delta_ms = delta * 1000.0;
+        let due = self.poller.accum_ms + delta_ms >= self.poller.interval_ms;
+        if due && in_game {
+            if let Some(host) = self.sim_host() {
+                host.bind().ambient_snapshot(&mut self.ambient);
+            } else {
+                self.ambient.entries.clear();
+            }
+        }
+        self.poller.update(
+            delta_ms,
+            context.is_menu,
+            in_game && !context.paused,
+            &self.ambient,
+            listener,
+        );
         if let Some((sound, x, y, volume, remaining)) = &mut self.debug_loop_hold
             && *remaining > 0
         {
@@ -861,6 +883,10 @@ impl MindAudio {
         let mut dict = VarDictionary::new();
         let key = |name: &str| GString::from(name);
         dict.set(&key("frames"), &(self.frames as i64).to_variant());
+        dict.set(
+            &key("ambient_sources"),
+            &(self.ambient.entries.len() as i64).to_variant(),
+        );
         dict.set(&key("voices"), &(self.voice_count().to_variant()));
         dict.set(&key("loop_sounds"), &(self.mixer.len() as i64).to_variant());
         dict.set(&key("events"), &(self.pending_events().to_variant()));
