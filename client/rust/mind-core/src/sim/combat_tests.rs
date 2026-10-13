@@ -2272,3 +2272,46 @@ fn repair_point_heals_damaged_dagger() {
     // `UnitTypes.java:104`: dagger `health = 150`.
     assert_eq!(max, 150.0, "dagger max health");
 }
+
+/// PAR-0073/T3: a killed wall plays `destroySound` (an `At` with the size-1
+/// alternate pair) and no `Construct`/break sound (`BuildingComp.java:1524-1543`).
+#[test]
+fn destroyed_wall_emits_destroy_sound() {
+    use crate::audio::{AudioEvent, SharedAudioLog, SoundId};
+
+    let mut sim = live_sim(32);
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let wall = place(&mut sim, 10, 10, "copper-wall", 1);
+    sim.tick().expect("tick");
+    // Drop the placement's own place sound so only the death remains.
+    log.clear();
+    sim.ecs
+        .0
+        .get_mut::<Health>(wall)
+        .expect("wall health")
+        .health = 0.0;
+    sim.tick().expect("tick");
+    let events = log.events();
+    let ats: Vec<SoundId> = events
+        .iter()
+        .filter_map(|ticked| match &ticked.event {
+            AudioEvent::At { sound, .. } => Some(*sound),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        ats.iter().any(|sound| {
+            *sound == SoundId::BLOCK_EXPLODE1 || *sound == SoundId::BLOCK_EXPLODE1_ALT
+        }),
+        "destroy sound in {ats:?}"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|ticked| matches!(ticked.event, AudioEvent::Construct { .. })),
+        "a destroyed wall must not play place/break sounds: {events:?}"
+    );
+}

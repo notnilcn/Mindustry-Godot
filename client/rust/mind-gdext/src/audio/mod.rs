@@ -21,8 +21,9 @@ use godot::prelude::*;
 
 use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
-    AudioEvent, LoopMixer, MusicContext, MusicOutput, MusicPlayer, MusicRef, SeededAudioRng,
-    SharedAudioLog, SoundId, SoundPriorityTable, TickedAudioEvent, bus_for_sound, settings_keys,
+    AudioEvent, AudioRng, LoopMixer, MusicContext, MusicOutput, MusicPlayer, MusicRef,
+    SeededAudioRng, SharedAudioLog, SoundId, SoundPriorityTable, TickedAudioEvent, bus_for_sound,
+    settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
@@ -56,6 +57,12 @@ pub struct MindAudio {
     audio_log: Option<SharedAudioLog>,
     /// Events applied through the sink drain (inspector stat).
     events_applied: u64,
+    /// `ConstructBlock.shouldPlay` wall clock (`ConstructBlock.java:58-69`).
+    construct_last_played_ms: f64,
+    /// `calcPitch` run window (`ConstructBlock.java:71-120`).
+    construct_last_time_ms: f64,
+    /// `calcPitch` sequence counter.
+    construct_pitch_seq: i32,
     log: Vec<String>,
     missing: Vec<String>,
 }
@@ -103,6 +110,9 @@ impl INode for MindAudio {
             frames: 0,
             audio_log: None,
             events_applied: 0,
+            construct_last_played_ms: 0.0,
+            construct_last_time_ms: 0.0,
+            construct_pitch_seq: 0,
             log: Vec::new(),
             missing: Vec::new(),
         }
@@ -374,7 +384,10 @@ impl MindAudio {
                     pan,
                     ..
                 } => {
-                    self.play_sound(sound.name(), *volume, *pitch, *pan);
+                    // `Sound.play` call sites pass `volume * sfxVolume`
+                    // (`CoreBlock.java:712`, `LExecutor.java:2256`); the sim
+                    // stores the raw volume (T3).
+                    self.play_sound(sound.name(), *volume * self.sfx_scale(), *pitch, *pan);
                 }
                 AudioEvent::LoopAdd {
                     sound,
@@ -422,6 +435,39 @@ impl MindAudio {
                 AudioEvent::KeepSilent => self.music.keep_silent(),
                 AudioEvent::StopLoops => {
                     self.mixer = LoopMixer::new();
+                }
+                AudioEvent::Construct {
+                    sound,
+                    x,
+                    y,
+                    place,
+                    pitch_change,
+                } => {
+                    // `ConstructBlock.shouldPlay` gates on the call, before
+                    // `calcPitch` (`ConstructBlock.java:58-120`).
+                    if now_ms - self.construct_last_played_ms < 32.0 {
+                        continue;
+                    }
+                    self.construct_last_played_ms = now_ms;
+                    let pitch = if !pitch_change {
+                        1.0
+                    } else if now_ms - self.construct_last_time_ms < 16.0 * 30.0 {
+                        self.construct_last_time_ms = now_ms;
+                        self.construct_pitch_seq += 1;
+                        if self.construct_pitch_seq > 30 {
+                            self.construct_pitch_seq = 0;
+                        }
+                        1.0 + (self.construct_pitch_seq as f32 / 30.0).clamp(0.0, 1.0)
+                            * if *place { 1.9 } else { -0.4 }
+                    } else {
+                        self.construct_pitch_seq = 0;
+                        self.construct_last_time_ms = now_ms;
+                        0.7 + self.rng.next_f32() * 0.6
+                    };
+                    let scaled = calc_falloff(*x, *y, listener, 0.0) * self.sfx_scale();
+                    if scaled >= MIN_PLAY_VOLUME {
+                        self.play_sound(sound.name(), scaled, pitch, calc_pan(*x, listener));
+                    }
                 }
             }
         }

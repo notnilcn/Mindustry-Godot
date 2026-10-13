@@ -9,6 +9,7 @@
 //! tokio-free (HLP §2.2). Sim code emits [`AudioEvent`]s through the installed
 //! [`AudioSink`]; the headless/dedicated default is [`NoopAudioSink`].
 
+pub mod blocks;
 pub mod events;
 pub mod ids;
 pub mod loops;
