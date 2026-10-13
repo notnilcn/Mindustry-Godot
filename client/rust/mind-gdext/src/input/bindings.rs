@@ -110,6 +110,30 @@ pub fn rebind(state: &mut BindingState, name: &str, code: &str) -> bool {
     true
 }
 
+/// Rebinds an axis binding to a negative/positive key pair; empty strings clear
+/// a direction and `scroll` is stored as the single positive key
+/// (`KeybindDialog.rebind`, `KeybindDialog.java:96-145`). Returns whether it
+/// applied.
+pub fn rebind_axis(state: &mut BindingState, name: &str, negative: &str, positive: &str) -> bool {
+    let Some(id) = KeyBindTable::all()
+        .iter()
+        .position(|entry| entry.name == name)
+        .map(|index| index as u16)
+    else {
+        return false;
+    };
+    // A wheel capture arrives as `scroll` in the positive slot
+    // (`KeyCode.scroll` is an Arc axis key).
+    if negative == "scroll" || positive == "scroll" {
+        state.set_axis(id, None, Some("scroll"));
+        return true;
+    }
+    let negative = (!negative.is_empty()).then_some(negative);
+    let positive = (!positive.is_empty()).then_some(positive);
+    state.set_axis(id, negative, positive);
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -132,5 +156,32 @@ mod tests {
         assert_eq!(state.name(mind_core::input::ids::SELECT), Some("q"));
         assert!(rebind(&mut state, "move_x", "left"));
         assert_eq!(state.name(mind_core::input::ids::MOVE_X), Some("left"));
+    }
+
+    #[test]
+    fn axis_rebind_keeps_both() {
+        use mind_core::input::ids;
+        let mut state = BindingState::new();
+        assert!(rebind_axis(&mut state, "move_x", "j", "l"));
+        assert_eq!(state.axis_of(ids::MOVE_X, "j"), Some(-1.0));
+        assert_eq!(state.axis_of(ids::MOVE_X, "l"), Some(1.0));
+        // Empty halves clear a direction.
+        assert!(rebind_axis(&mut state, "move_x", "", "l"));
+        assert_eq!(state.axis_of(ids::MOVE_X, "l"), Some(1.0));
+        assert_eq!(state.axis_of(ids::MOVE_X, "j"), None);
+    }
+
+    #[test]
+    fn axis_rebind_scroll() {
+        use mind_core::input::ids;
+        let mut state = BindingState::new();
+        assert!(rebind_axis(&mut state, "zoom", "", "scroll"));
+        assert_eq!(
+            state.value(ids::ZOOM),
+            &mind_core::input::BindingValue::Axis {
+                negative: None,
+                positive: Some("scroll".to_owned())
+            }
+        );
     }
 }

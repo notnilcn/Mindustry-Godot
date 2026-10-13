@@ -764,6 +764,22 @@ impl MindInput {
         }
     }
 
+    /// Rebinds an axis binding to a negative/positive key pair (PAR-0102,
+    /// `KeybindDialog.rebind`): both halves are Godot key display strings
+    /// (empty clears a direction) and a wheel capture passes `scroll`. Persists
+    /// on success.
+    #[func]
+    pub fn rebind_axis(&mut self, name: GString, negative: GString, positive: GString) -> bool {
+        let negative = events::normalize_key_name(&negative.to_string());
+        let positive = events::normalize_key_name(&positive.to_string());
+        if bindings::rebind_axis(&mut self.bindings, &name.to_string(), &negative, &positive) {
+            bindings::save(&self.bindings);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Resets one binding to its upstream default and persists it.
     #[func]
     pub fn reset_keybind(&mut self, name: GString) -> bool {
