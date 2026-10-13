@@ -2595,6 +2595,22 @@ impl MindSimHost {
             .unwrap_or_default()
     }
 
+    /// `rules.borderDarkness` for the darkness/minimap passes (G03 T11):
+    /// live campaign rules, else the last `load_sector` rules, else `true`.
+    pub fn border_darkness_enabled(&self) -> bool {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.border_darkness)
+            .or_else(|| {
+                self.sector_rules
+                    .as_ref()
+                    .map(|rules| rules.border_darkness)
+            })
+            .unwrap_or(true)
+    }
+
     /// Debug probe: `{name, x, y, team}` rows for every live unit (render
     /// verification; companion to `tile_debug`).
     #[func]
