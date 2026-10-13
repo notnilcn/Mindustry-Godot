@@ -1238,7 +1238,14 @@ impl Instruction {
                     exec.arena.get(p4.id()).clone(),
                 ];
                 let refs: Vec<&LVar> = params.iter().collect();
-                crate::logic::access::control(world, &target_obj, *type_, &refs);
+                crate::logic::access::control(
+                    world,
+                    &target_obj,
+                    *type_,
+                    &refs,
+                    exec.build,
+                    exec.privileged,
+                );
             }
             Instruction::SetProp { type_, of, value } => {
                 let target = exec.arena.get(of.id()).value_obj().cloned();

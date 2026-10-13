@@ -163,6 +163,31 @@ pub trait BuildingBehavior: Send + Sync {
         true
     }
 
+    /// `Building.sense(LAccess)` override hook (G06 T7); `None` = fall back to
+    /// the base `BuildingComp.sense` table in `logic::access`.
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        let _ = (world, e, a);
+        None
+    }
+
+    /// `Building.control(LAccess, ...)` override hook (G06 T7/T8); `true` =
+    /// the accessor was handled by the family.
+    fn logic_control(
+        &self,
+        world: &mut World,
+        e: Entity,
+        a: crate::logic::LAccess,
+        p: &[crate::logic::LVar; 4],
+    ) -> bool {
+        let _ = (world, e, a, p);
+        false
+    }
+
     /// `ItemBridge.linkValid(tile, other, true)` for bridge families; `false`
     /// for every other block (T11 bridge chaining).
     fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {

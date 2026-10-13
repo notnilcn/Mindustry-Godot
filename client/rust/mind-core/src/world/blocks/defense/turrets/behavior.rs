@@ -23,7 +23,7 @@ use crate::world::behavior::{BuildingBehavior, PayloadRef};
 use crate::world::{BuildingReader, BuildingWriter};
 
 use super::{
-    TurretConfig, TurretState, accept_item, accept_liquid, accept_payload, handle_item,
+    TurretAmmo, TurretConfig, TurretState, accept_item, accept_liquid, accept_payload, handle_item,
     handle_liquid, handle_payload, save,
 };
 
@@ -100,6 +100,85 @@ impl BuildingBehavior for TurretBehavior {
         if let Some(mut state) = world.get_mut::<TurretState>(e) {
             let _ = save::read(r, &mut state, revision);
         }
+    }
+
+    /// `Turret.sense`/`ItemTurret.sense`/`PowerTurret.sense` overrides
+    /// (`J/world/blocks/defense/turrets/Turret.java:635-665`).
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        let state = world.get::<TurretState>(e)?;
+        let cfg = &self.config;
+        Some(match a {
+            LAccess::Ammo => Sensed::Num(match cfg.ammo {
+                TurretAmmo::Power(_) => world
+                    .get::<crate::world::modules::PowerModule>(e)
+                    .map(|p| p.status as f64)
+                    .unwrap_or(0.0),
+                TurretAmmo::Liquid(_) => world
+                    .get::<crate::world::modules::LiquidModule>(e)
+                    .map(|m| m.current() as f64)
+                    .unwrap_or(0.0),
+                _ => state.total_ammo as f64,
+            }),
+            LAccess::AmmoCapacity => Sensed::Num(match cfg.ammo {
+                TurretAmmo::Power(_) => 1.0,
+                _ => cfg.max_ammo as f64,
+            }),
+            // `BaseTurretBuild.sense`: rotation in degrees.
+            LAccess::Rotation => Sensed::Num(state.rotation as f64),
+            LAccess::Shooting => Sensed::Num(if state.is_shooting { 1.0 } else { 0.0 }),
+            LAccess::ShootX => Sensed::Num((state.target_pos.0 / 8.0) as f64),
+            LAccess::ShootY => Sensed::Num((state.target_pos.1 / 8.0) as f64),
+            LAccess::Progress => Sensed::Num(if cfg.reload > 0.0 {
+                (state.reload_counter / cfg.reload).clamp(0.0, 1.0) as f64
+            } else {
+                1.0
+            }),
+            LAccess::Heat => Sensed::Num(if state.heat_req > 0.0 {
+                state.heat_req as f64
+            } else {
+                f64::NAN
+            }),
+            LAccess::CurrentAmmoType => match &cfg.ammo {
+                TurretAmmo::Item(_) => state
+                    .ammo
+                    .last()
+                    .map(|entry| {
+                        Sensed::Obj(Some(crate::logic::value::LogicObject::Content(
+                            crate::content::ContentRef::item(entry.item),
+                        )))
+                    })
+                    .unwrap_or(Sensed::Obj(None)),
+                TurretAmmo::Liquid(_) => {
+                    let current = world
+                        .get::<crate::world::modules::LiquidModule>(e)
+                        .and_then(|m| {
+                            m.liquids
+                                .iter()
+                                .enumerate()
+                                .max_by(|(_, a), (_, b)| a.total_cmp(b))
+                                .filter(|(_, amount)| **amount > 0.0)
+                                .map(|(i, _)| i)
+                        });
+                    Sensed::Obj(current.map(|i| {
+                        crate::logic::value::LogicObject::Content(crate::content::ContentRef::new(
+                            crate::content::ContentType::Liquid,
+                            i as u16,
+                        ))
+                    }))
+                }
+                _ => Sensed::Obj(None),
+            },
+            // `Ranged.range()/8`.
+            LAccess::Range => Sensed::Num((cfg.range / 8.0) as f64),
+            _ => return None,
+        })
     }
 }
 

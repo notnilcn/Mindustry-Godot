@@ -2067,3 +2067,66 @@ fn message_wait_blocks_until_announcement_expires() {
     }
     assert_eq!(state_at(&sim), 2.0, "wait released after the announcement");
 }
+
+// ---- G06 T7 (sensor/control coverage) ----
+
+/// Ground Zero's `duoAmmo` objective: `sensor amount d @ammo` on a duo reads
+/// `TurretState.total_ammo` (`ItemTurretBuild.sense`), not 0.
+#[test]
+fn duo_ammo_sensed() {
+    let mut sim = runtime_sim();
+    let duo = place(&mut sim, "duo", 20, 20);
+    let copper = item(&sim, "copper");
+    let world = &mut sim.ecs.0;
+    assert!(transfer::dispatch_accept_item(world, duo, duo, copper));
+    for _ in 0..5 {
+        transfer::dispatch_handle_item(world, duo, duo, copper);
+    }
+    let total = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
+        .map(|state| state.total_ammo)
+        .unwrap_or(0);
+    assert!(total > 0, "turret holds ammo");
+    use crate::logic::LAccess;
+    use crate::logic::access::{Sensed, sense};
+    use crate::logic::value::LogicObject;
+    let target = LogicObject::Building(duo);
+    assert_eq!(
+        sense(&sim.ecs.0, &target, LAccess::Ammo),
+        Sensed::Num(total as f64)
+    );
+    let cap = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
+        .map(|state| state.config.max_ammo)
+        .unwrap_or(0);
+    assert_eq!(
+        sense(&sim.ecs.0, &target, LAccess::AmmoCapacity),
+        Sensed::Num(cap as f64)
+    );
+    assert_eq!(
+        sense(&sim.ecs.0, &target, LAccess::Shooting),
+        Sensed::Num(0.0)
+    );
+}
+
+/// `@x/@y` match Java's building centre: 1x1/3x3 -> tile, 2x2 -> tile + 0.5.
+#[test]
+fn building_xy_tiles() {
+    let mut sim = runtime_sim();
+    let hyper = place(&mut sim, "hyper-processor", 10, 10);
+    let logic = place(&mut sim, "logic-processor", 20, 20);
+    let micro = place(&mut sim, "micro-processor", 3, 4);
+    use crate::logic::LAccess;
+    use crate::logic::access::{Sensed, sense};
+    use crate::logic::value::LogicObject;
+    let x = |e| sense(&sim.ecs.0, &LogicObject::Building(e), LAccess::X);
+    let y = |e| sense(&sim.ecs.0, &LogicObject::Building(e), LAccess::Y);
+    assert_eq!(x(hyper), Sensed::Num(10.0));
+    assert_eq!(x(logic), Sensed::Num(20.5));
+    assert_eq!(x(micro), Sensed::Num(3.0));
+    assert_eq!(y(micro), Sensed::Num(4.0));
+}
