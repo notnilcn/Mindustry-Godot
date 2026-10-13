@@ -759,3 +759,61 @@ pid), THEN restore the saves dir from the snapshot again and `cmp` the settings;
 re-verify with `diff -r` after the kill, never trust the post-leg restore while
 a client may still hold the profile.
 Run: runs/20261011-113747-PAR-0039/.
+
+## 2026-10-14 — session 2: Ground Zero wave cannot be triggered on the tutorial save
+Symptom: Play > Campaign > Sectors > Ground Zero > Go (display :11, worktree
+parity-java-home) opens Ground Zero paused with the "Obtain 0/15 Copper"
+objective; `java_input.py key space` and `keydown/keyup space` did not clear the
+`< Paused >` banner, and the HUD shows the objective panel instead of the
+wave/skip panel (the world processor keeps `waveTimer` off until later
+objectives), so wave 1 cannot be spawned for a composition check.
+Workaround: none within the 20-min budget; wave composition derived from
+source (`WaveSpawner.java:74` `getSpawned(state.wave - 1)`). Killed the JVM by
+its own pid (session 3's JVM on :12 matched the same pgrep pattern — check
+`/proc/<pid>/environ` DISPLAY/HOME before killing).
+Run: runs/20261014-s2-verify/java-0*.png.
+
+## 2026-10-14 — session 3 (display :12) Ground Zero route; wheel zooms during a drag
+
+- Route from the main menu (window +190+10, 900x700, worktree parity-java-home): Play
+  (410,186) → Campaign (640,186) → Sectors dropdown (940,45) → "Ground Zero" row (890,143) →
+  Go (640,678); in game ~8 s later, paused at start.
+- `java_input.py scroll 1` while holding a conveyor drag zoomed the camera instead of rotating
+  (twice; once before and once after the alpha spawned; the "Paused" label stayed after a
+  Space press). Wheel-during-drag rotation was not observable this way; use the R/rotate key
+  route or a fresh unpaused session next time.
+- Another session's Java (DISPLAY :11) runs under the same jar name: identify your pid via
+  `/proc/<pid>/environ` (`DISPLAY`, `HOME`) before killing.
+
+## 2026-10-14 — session 2 round 2: background pause on :11; keyboard never reaches the client
+
+- Symptom: Ground Zero (seeded profile, display :11) opens with `< Paused >` and Space does not clear it.
+  Cause: `Control.pause()` sets `backgroundPaused` when the SDL window is not focused
+  (`Control.java:619-632`) and `update()` re-pauses every frame while `backgroundpause` is on
+  (`:725-727`); on Xvfb without a WM the window never counts as focused.
+- Workaround: stop the client, back up `parity-java-home/.local/share/Mindustry/settings.bin`, run
+  `SetSettings <dir> backgroundpause false` (the program in
+  `runs/20261009-150509-PAR-0037-twin/java/settingsfix/`, compiled against the Mindustry jar), relaunch:
+  Ground Zero then runs unpaused. Restore the backup afterwards (done).
+- Still open: keyboard input (Space, WASD `key d 800`, Shift held via `keydown` or one `seq`) had no
+  visible effect while mouse clicks drove the menus fine — Shift command mode and WASD were not
+  observable. Next attempt: check `_NET_ACTIVE_WINDOW` (it was "not found" on :11) and try
+  `send_event_click.py`-style XSendEvent key events.
+- The seeded profile's Ground Zero has no active weather (`runs/20261014-s2-verify2/java-09-gz-10s.png`);
+  the snow in `runs/20261009-065416-ref-ground-zero/java/r03-02-mine.png` comes from an older save.
+
+## 2026-10-14 — session 3 plan verification round 3 (display :12)
+
+- Menu route (window +190+10, 900x700; screen = window origin + client): Database (415,255) ->
+  Schematics (645,255) / Core Database (645,325); Play (410,186) -> Campaign (640,186) /
+  Custom Game (645,325); custom map `sandbox` card (850,510) -> Play (748,614).
+- The sandbox custom game opened `< Paused >` and neither `key space` nor keydown/keyup space
+  unpaused it on Xvfb (same as round 1) — plans placed there never build. UI taps (core
+  inventory, palette, `?` info, Escape -> pause menu) still work while paused.
+- Seeded profile: every numbered Serpulo sector hovered shows "Locked" (no based neighbour with
+  a size >= 4 core), so a Java numbered-sector launch is not reachable without changing the
+  profile.
+- Planet globe: `java_input.py drag 780 400 480 400 left 600` rotates it (Java drag works).
+- Graceful quit from a custom game: Esc -> Save & Quit (640,477) -> confirm OK (742,393) ->
+  main-menu Quit (415,535).
+Run: runs/20261014-s3-verify3/ (java-*.png).

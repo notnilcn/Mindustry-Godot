@@ -1,0 +1,2272 @@
+# open-godot-mcp learnings
+
+Operational friction hit while driving the Godot client through open-godot-mcp
+and the `playtest` skill, with the workaround that got past it. Reusable
+sequences belong in `chains/`; this file is for everything that is not a chain:
+environment quirks, tool errors, timing traps.
+
+The `/loop` or `/goal` session appends a dated entry **the moment friction costs
+a retry** (a hiccup) — not only at the end of a run — with the exact failing
+call, what worked, and the run directory or chain that shows it. One entry per
+distinct issue per session; add bullets to it if it recurs. Never rewrite
+another session's entry. If nothing new happened, no entry.
+
+Entries dated before 2026-10-09 describe the retired dual-loop workflow
+(`.opencode/loops`, `PARITY_LOOP_DIR`, weston/Xvfb displays, worktree editors);
+those paths no longer exist, but the workarounds still apply.
+
+## 2026-10-07 — Seed notes from the playtest and parity-eval skills
+
+- `godot_game play` without an explicit `params.scene` reports success but
+  attaches nothing; every later `godot_exec` fails with
+  `RUNTIME_NOT_CONNECTED`. Always pass `res://scenes/game.tscn`.
+- Injected input sits in the accumulated-input buffer: after a `godot_input`
+  press/release, flush with `Input.flush_buffered_events()` and assert the
+  target state in the same eval.
+- `godot_screenshot game` can return a stale presented frame when the editor
+  covers the game window. Call `get_window().move_to_foreground()` first, or
+  capture the X screen and crop.
+- Eval bodies with `for`/`while` time out; a `null` result with `ok: true`
+  usually means the body errored — check `godot_log errors` before retrying.
+- An eval that errors stops in the editor Debugger (break-on-error) and freezes
+  the frame loop; clear `godot_log` before a scenario and recover with
+  `godot_game stop` + `godot_game play`.
+
+## 2026-10-07 — Slot limiter counts a dead owner's lease until TTL; check the fix is in this worktree first
+
+- The first `godot_health check` after launching the loop-1 editor was refused
+  with `[mcp-slot-guard] MCP slot limit reached (MCP_SLOT_LIMIT)` even though one
+  holder was obviously dead. `mcp_slot.py status` showed `free: 0`: stale lease
+  `oc-4240` (pid 11854 dead) still counted because its heartbeat was inside the
+  default 900 s TTL (expires ~15:12Z), and loop-2's live lease held the second
+  slot. `gc` cannot reap before the TTL; the guard's documented behavior is to
+  stay off MCP and release the finding as `godot-open` with the refusal as the
+  blocker. If a slot is needed sooner, only the TTL expiry frees it.
+- Before spending a slot on a named writer commit, verify it is actually in this
+  loop's worktree: `git merge-base --is-ancestor <fix> HEAD` and
+  `strings client/bin/rust/debug/libmind_gdext.so | grep -c <new_fn>`. Here
+  EV-0037's fix `e85732c` existed only on `parity/loop-2` (its binary, built
+  01:04, contained `materialize_map_buildings`), while the finding's session label
+  was loop-1 whose worktree (`main @5f5719d`) and pre-fix binary (20:16) lacked
+  it entirely; a ledger recovery note had claimed "present on main" from a
+  `git log --all` sighting. An in-engine run there could only re-observe the
+  unfixed behavior, so the evaluation was released `godot-open` with the worktree
+  mismatch, not a verdict on the fix.
+- Evidence: `runs/20261007-150716-ev0037-core-launch-godot/` (blocked before any
+  repro; no game started).
+
+## 2026-10-08 — Drag input: select through MindInput, and the preview lies over occupied tiles
+
+- `SimHost.select_block(name)` (the sim-host API) only changes the host's
+  selected block; the input controller keeps the settings-persisted block from
+  boot. The first left-drag after a restart therefore placed the persisted
+  `duo` line at x=10..15 y=16 even though `SimHost.selected_block()` read
+  `conveyor`. Use `godot_exec call MindInput.select_block_by_name(name)` and
+  assert `get_input_state_json().block` before dragging. Sequence in
+  `.opencode/chains/pause-step-interact.md` step 1.
+- `placement_preview_json()` keeps painting the drag rect over
+  occupied/blocked tiles; the release enqueues `Place` commands that leave the
+  occupied tiles unchanged, so a drag can look accepted while the dump shows
+  nothing placed (and `commands_applied` still grows). Assert tiles from
+  `get_state_json()`, not the preview.
+- Right-press behavior on an empty conveyor in the same run: opens
+  `OverlayLayer/block_inventory` at the click position with a 1-child grid
+  (close X only) and does not enter breaking mode; right-drag over
+  x=10..15 y=16 leaves all 6 placed (`commands_applied` unchanged) while the
+  copper-wall control breaks 6 -> 0. This is the EV-0043 gap still reproducing
+  at main 5f5719d, not a setup error.
+- Slot limiter: the stale `oc-4240` lease from the entry above expired on
+  schedule at 15:12:26Z; a retry of `godot_health check` after that minute had
+  the guard reap it and acquire succeeded (loop-2's live lease kept the other
+  slot). Waiting out the TTL and retrying once is the working path.
+- Evidence: `runs/20261008-011233-input_controls-godot/` (clean repro on pid
+  27548; first instance pid 20742 discarded, notes in the run's `godot/`).
+
+## 2026-10-08 — a frozen frame loop: `godot_game resume` is a no-op, stop+play is the fix
+
+- An eval error (`Invalid access to property or key 'text' on a base object of
+  type 'VBoxContainer'`) tripped the editor break-on-error as the seed note
+  warns, but recovery differed: `godot_game resume` returned `ok: true` and
+  `get_tree().paused` read `false`, yet `Engine.get_process_frames()` stayed at
+  1493 across ~10 s and no `godot_input` landed. `godot_game stop` + `play` was
+  the only thing that revived the loop; every artifact after that is from the
+  fresh runtime (pid 32663). Check the frame counter (not just `paused`) before
+  trusting an input call, and expect to restart rather than resume.
+- `godot_input sequence` timed out after 15 s and injected nothing (the rail
+  `button_pressed` did not change); the same click as discrete
+  `mouse_button` press/release + `Input.flush_buffered_events()` landed. Chains
+  now carry the discrete form (`chains/research-purchase.md`).
+- Evidence: `runs/l2-20261008-012103-ev0052-research-purchase-godot/` (EV-0052
+  godot-pass; stalled instance discarded, fresh run recorded).
+
+## 2026-10-08 — a file-write eval times out; after the EV-0061 panic, state evals still answer
+
+- A `godot_exec` eval that wrote `MindCampaign.get_rules_json()` to a run-dir file with
+  `FileAccess.open_absolute_path(path, FileAccess.WRITE).store_string(...)` timed out after
+  15 s and wrote nothing, while the frame loop was already stalled (frames stuck at 1079 after
+  the EV-0061 `MindUi::hud_set_visible` panic). Plain state evals kept answering through the
+  debugger channel and read identical rules values, so the panic stalls the frame loop but not
+  `godot_exec`; do not mistake a stall for a dead runtime. Recovered with `godot_game stop` +
+  `play` (fresh pid 50912) and captured the rules JSON from the eval response host-side instead
+  of writing from inside the game.
+- On main/loop-1 a bare Ground Zero launch always ends in the EV-0061 panic (zero-core game over,
+  because EV-0037 means `load_sector` has no ECS building entities and `hasCore=false`). The
+  rules values under test are unaffected and stable across two fresh instances; attribute the
+  panic to EV-0037/EV-0061, never to the campaign-rules path.
+- Evidence: `runs/20261007-152746-ev0049-campaign-preset-rules-godot/` (EV-0049 godot-pass;
+  run1 pid 47764 discarded after the stall, run2 pid 50912 recorded). Sequence now in
+  `chains/sector-preset-rules.md`.
+
+## 2026-10-08 — a frozen *viewport* (not just stale screenshots): frames_drawn pins, xwd is the fallback
+
+- `godot_screenshot game` returned byte-identical PNGs for hours (7 files, md5
+  `946100a1…`, including frames captured by an earlier session), and
+  `get_window().move_to_foreground()` did not change that. The underlying state
+  was worse than the seed note's "stale presented frame": `Engine.get_frames_drawn()`
+  stayed pinned at 11703 while `Engine.get_process_frames()`, `Time.get_ticks_msec()`
+  and every `godot_exec` kept advancing — the render loop was not drawing at all
+  (editor-embedded game window spawned with `--wid <editor host>` under Xvfb).
+  `xwd -id <game window>` of the live window showed the same frozen menu, and
+  input-driven UI state (dialog visible, cards built, `_slots`) was correct but
+  never rendered.
+- `godot_game stop` + `play` revived drawing: a fresh pid's `frames_drawn` advanced
+  ~140/s and an `xwd` capture of the game window showed the opened Load Game
+  dialog. Check `frames_drawn` twice before trusting any screenshot; restart rather
+  than trying to force a repaint. After the restart the MCP `godot_screenshot`
+  content was again byte-identical to the pre-restart menu frames while frames
+  advanced (static menu, possibly a cached image), so the run's visual evidence was
+  taken from the game X window (`xwininfo -root -children` to find it, `xwd -id`
+  to dump, a local XWD->PNG parser to decode). When the render is live, prefer
+  structured state; keep xwd for the pixels.
+- A separate eval trap: calling a CanvasItem-only method bare in an eval body
+  (`get_viewport_rect()`) timed out for the full 15 s with **no** `godot_log errors`
+  entry, so the documented "timeout means the body errored, check the log" gave no
+  signal. Use `DisplayServer.window_get_size()` / `get_tree().root.get_visible_rect()`
+  instead, and prefer `map`/`filter` over `for` loops (a 3-iteration loop over
+  `get_children()` returned, an 8-iteration dict-building loop timed out).
+- UI layout trap seen in the same session: the Play submenu's `Submenu/Buttons`
+  has a non-Button spacer at child 0 and its rows are laid out relative to the
+  clicked button; the Load Game button's resolved center moved from (460,35) after
+  first show to (460,359) once layout settled. Always re-resolve the rect in the
+  eval immediately before the click — see `chains/load-game-dialog.md`.
+- Evidence: `runs/l2-20261008-012632-ev0054-load-game-godot/` (EV-0054 godot-pass;
+  stalled pid 44068 discarded, fresh pid 56232 recorded, `godot/step-02-load-dialog.png`
+  from xwd). Sequence now in `chains/load-game-dialog.md`.
+
+## 2026-10-08 — eval-body errors can pin the viewport, and the campaign dialogs read a boot-time fixture
+
+- Two `godot_exec` evals timed out back-to-back while reading campaign data: the
+  first body called a method that does not exist on the node
+  (`MindCampaign.campaign_views()` logged `Invalid call. Nonexistent function` and
+  the wrapper still burned its 15 s), the second built a large array inside a
+  `filter` lambda. After that `Engine.get_frames_drawn()` pinned at 13903 for ~40 s
+  while `Time.get_ticks_msec()` and evals kept advancing, `godot_screenshot game`
+  returned byte-identical stale menu PNGs, and an `xwd` capture of window
+  0x1200002 on :11 showed the same stale frame — UI node state still updated
+  (planet dialog closed, settings dialog `visible=true`) but nothing was drawn.
+  `godot_game stop` + `play` recovered; the documented "check the log on eval
+  timeout" did give the culprit here (unlike the earlier silent-timeout case).
+- Project fact discovered in the same run: `MindUi.campaign_views()` falls back to
+  `CampaignViews::vanilla_fixture()` when the live
+  `MindCampaign.campaign_views_json` endpoint is absent, and the planet/loadout
+  dialogs cache that snapshot at `_ready()`. In this build the endpoint is absent,
+  so the planet dialog shows fixture sector flags (`groundZero` `has_base`/`captured`
+  → action `@sectors.go`) no matter the real save state, and clearing campaign saves
+  mid-process does not refresh it. Restart the game after clearing, and check
+  `MindCampaign ready (0 save slot(s))` + `list_save_slots()` for live state. A
+  no-save `go` click still launches fresh (`play_sector` → `play_new_sector`).
+- Evidence: `runs/l2-20261008-014155-ev0037-core-launch-godot/` (EV-0037 godot-pass;
+  stalled pid 85285 discarded, pids 111646/114964 recorded; stall in
+  `evidence/stall-observation.md`; sequence now in `chains/ground-zero-fresh-launch.md`).
+
+## 2026-10-08 — config-fragment close X ignores injected clicks (hover still works)
+
+- While staging the sorter config check for EV-0043, the `block_config`
+  fragment's close X (`@Button@2583`, global rect (617,294,28,34),
+  `mouse_filter=0`, one `pressed` connection) would not fire from any injected
+  click: discrete `godot_input mouse_button` press+release, the one-call
+  `godot_input sequence` (motion + press + release, frame_delay 1), and a
+  synchronous `get_viewport().push_input(down)` / `push_input(up)` pair all left
+  `block_config.visible == true`. `get_tree().root.gui_get_hovered_control()`
+  did report the X after the same injected motion, so the coordinates map and
+  the Control is pickable — only activation fails. The handler itself works:
+  `xb.emit_signal("pressed")` closed the fragment immediately.
+- Workaround used for the run (staging only, no sim state touched): close the
+  fragment via its own emitted `pressed` signal, and capture the config-open
+  artifact while it is open instead of after a click. A future test that needs a
+  real click path on an `OverlayLayer` fragment `Button` should budget for this
+  and record the fallback in `run.json`.
+- Evidence: `runs/20261008-015146-input_controls-godot/` (EV-0043 godot-pass),
+  staging note in `godot/godot-break-evidence.json`.
+
+## 2026-10-08 — a malformed eval body pauses the debugger (frames freeze) and mimics the EV-0041 wedge
+
+- While evaluating EV-0041, two `godot_exec` eval bodies errored and froze the
+  running game's frames/tick: `await Engine.get_main_loop().process_frame`
+  (logged `Trying to call an async function without "await"`) and a multi-line
+  lambda (`var extra = …` + `if/elif` inside `func`). `godot_debugger sessions`
+  reported `{active:true,paused:true}` and `stack_trace` pointed into
+  `gdscript://<negative-id>.gd`; `godot_debugger resume` re-broke immediately and
+  only `godot_game stop` + `play` recovered. While paused, `godot_input sequence`
+  calls time out (their `process_frame` await never resolves) and screenshots
+  repeat byte-identical frozen frames. This is exactly the pre-fix EV-0041
+  symptom (frozen `Engine.get_process_frames()`), so a debugger pause must be
+  ruled out before attributing a freeze to the game.
+- Workaround: keep eval bodies to simple statements and single-expression
+  `map`/`filter` lambdas, never `await` inside eval; on a frozen frames read,
+  check `godot_debugger sessions` + `stack_trace` first. Also
+  `move_to_foreground()` logs a deprecation error on Godot 4.7.2 — use
+  `get_window().grab_focus()` before screenshots (`probe-hud` chain updated).
+- Evidence: `runs/l2-20261007-160101-ev0041-campaign-rules-godot/` (EV-0041
+  godot-pass; pids 154748/161392 recorded; sequence in
+  `chains/campaign-rules-dialog.md`).
+
+## 2026-10-08 — `SimHost.place_block` returns true when the live runtime silently rejects; anchor differs by block size
+
+- Staging the EV-0047 production probe, `place_block(128, 47, "mechanical-drill")`
+  returned true but placed nothing: the 2x2 drill footprint overlapped a
+  just-placed `core-shard` (3x3). The runtime logged only
+  `[D] place command rejected at (128, 47) by the live block runtime` and
+  `SimHost::apply` still returns `Ok`, so the GDScript bool is not a placement
+  result. Read back a filtered `get_state_json()` tile window after placing.
+- Anchor convention: odd-size blocks anchor on the given tile (center), even-size
+  blocks use it as the top-left (`valid_place` offset `-(size-1)/2`). A 2x2 at
+  (129,48) is (129-130,48-49); a 3x3 at (130,46) is (129-131,45-47).
+- Project fact from the same run: `core_items_json()` reports the first core in
+  `entities_by_seq()` order, so a materialized map core (Ground Zero build_id 5)
+  shadows any later-placed core; break it first when a placed core must be
+  observed.
+- Also: a mechanical drill (`drillTime 600`, max 4 ore tiles) delivers its first
+  item only at tick ~183 including warmup, so an empty core at the repro's
+  120-tick sample is expected rate behavior, not inertness.
+- Evidence: `runs/l2-20261008-021834-ev0047-production-godot/` (EV-0047
+  godot-pass; pid 182200; sequence in `chains/ground-zero-production-probe.md`).
+
+## 2026-10-08 — a batched drag loses its tail: the final masked motion + release coalesce
+
+- Sending a right-drag as one `godot_batch` of `godot_input` ops broke only 5 of
+  6 conveyors: the final masked motion onto tile 15 and the release at the same
+  position were processed too tightly and tile 15 survived (`commands_applied`
+  6 -> 11; `mode=none`). A discrete right-press at the survivor broke it
+  (11 -> 12). Re-running the sweep with one discrete tool call per event broke
+  all 6 (18 -> 24). Placement drags were fine in a batch; only the break sweep
+  tail lost an event.
+- Workaround: for break/sweep tails, send one `godot_input` call per motion and
+  release; keep `godot_batch` for placement drags. Chain
+  `pause-step-interact.md` now carries the note.
+- Also re-confirmed: an eval body that *times out* (here a `while`-loop tree
+  walk) stalls the frame loop like an error break — `godot_game resume` does
+  not revive it, `stop` + `play` does; check `Engine.get_process_frames()`
+  twice before trusting input. Two stalled pids (231551, 245330) were discarded
+  this way.
+- Evidence: `runs/20261008-020931-input_controls-twin/` (EV-0043 twin pass,
+  pid 249867; `godot/godot-break-evidence.json` step_3/step_4).
+
+## 2026-10-08 — `start_sector_with_loadout` takes a JSON string; persistent `settings.bin` unlocks defeat the EV-0052 baseline
+
+- `MindCampaign.start_sector_with_loadout(planet, sector, loadout)`'s third
+  parameter is a GString (JSON), not a Godot Array: passing `[{...}]` raises
+  `parameter #2 (GString) conversion` in the Rust call, logs
+  `Bug: Invalid call error code 1337`, and trips break-on-error
+  (`godot_debugger sessions` → paused). `godot_debugger resume` recovered it
+  here. The accepted shape is
+  `JSON.stringify([{"item":"copper","amount":500},{"item":"lead","amount":500}])`;
+  the Java-style `{"copper":500}` deserializes to amount 0 and silently yields
+  an empty core.
+- The port persists tech unlocks as `*-unlocked` keys in
+  `user://config/settings.bin`
+  (`…/xdg-data/godot/app_userdata/Mindustry-Godot/config/settings.bin`) and they
+  survive process restarts. After my EV-0037 UI launch the live tech state
+  booted at `unlocked=70` and `research("conveyor")` returned true without
+  spending (already unlocked live, while the fixture dialog row still showed it
+  locked) — the EV-0052 purchase only reproduces from the repro's 9 baseline.
+  Back up/remove settings.bin before the setup; clear saves and then restart,
+  or the campaign model loads the boot-time autosave and carries its unlock set.
+- With the fresh profile the exact repro works first try: `unlocked` 9 → 70,
+  copper 500 → 495, log `[I] research auto-unlocked 60 content`.
+- Evidence: `runs/l2-20261007-171145-ev0052-research-twin/` (pid 248258;
+  `godot/state-01-purchase.json`, `godot/settings-pre-reset.bin`).
+
+## 2026-10-08 — a loaded 256x256 sector dump cannot be JSON-parsed in one eval; `get_meta` logs on missing keys
+
+- `SimHost.get_state_json()` on a fresh Ground Zero is ~6.6 MB (len 6_622_635).
+  Calling `JSON.parse_string()` on it inside one eval exceeds the 30 s
+  `godot_exec` budget, and the oversized reply then trips the editor websocket:
+  `godot_log errors` shows source `editor`, message
+  `Condition "outbound_buffer_size > 0 && (wslay_event_get_queued_msg_length(wsl_ctx) + p_buffer_size > (uint32_t)outbound_buffer_size)" is true. Returning: ERR_OUT_OF_MEMORY`.
+  Workaround: call `get_state_json()` once, stash it with
+  `SimHost.set_meta("dump", s)`, then read with `String.find/count/substr`
+  (substring context around a `find` gives tile coordinates). Never return the
+  dump through the bridge.
+- `Node.get_meta("k")` on a missing key logs
+  `The object does not have any 'meta' values with the key 'dump'.` to the game
+  log (it counts as a `godot_log errors` entry); guard with `has_meta("k")` or
+  set the meta first.
+- `UiRoot.set_menu_visible(false)` hides `MenuGroup`/shows `HudGroup`, but the
+  standalone `menu` fragment node under `MenuGroup` keeps `.visible == true`;
+  assert on `MenuGroup`/`HudGroup` (or a screenshot), not the fragment.
+- Evidence: `runs/l2-20261008-034337-ev0047-production-twin/` (twin sweep, pid
+  267163; `godot/map-probe.json`, `godot/game.log`) and
+  `runs/l2-20261008-034014-ev0054-load-game-twin/`.
+
+## 2026-10-08 — an *errored* eval (not just a timeout) stalls the loop; camera transform lags a frame; paused HUD covers the center probe point
+
+- An eval body that errors trips break-on-error and pins the frame loop just like
+  a timeout: a probe using a guessed dialog button path
+  (`/root/Spine/Ui/UiRoot/DialogLayer/paused/settings`) logged `Node not found`
+  plus `has_meta` on a null instance, and `Engine.get_process_frames()` stayed at
+  10368 for ~14 s (`godot_log errors` shows the cause). Recovery is
+  `godot_game stop` + `play` (restart, do not resume). Locate dialog buttons with
+  `paused.find_child("settings", true, false)` — the real path is
+  `/root/Spine/Ui/UiRoot/DialogLayer/paused/Center/Panel/Layout/Buttons/settings`,
+  not a direct child of the dialog (which also cost a 15 s TIMEOUT).
+- `Camera2D.tile_to_screen`/`screen_to_tile` read the viewport canvas transform,
+  which updates on the next frame after `center_on_tile`/`pan_to`: reading back in
+  the same eval returns stale coordinates (tile (16,16) resolved to (5841,5589)
+  instead of (576,324)). Resolve click coordinates one MCP round-trip after moving
+  the camera.
+- While paused, the viewport center is covered by the STOP
+  `HudGroup/hud/PausedBanner` and the lower-right by `HudGroup/placement/Panel`.
+  A paused world-click probe aimed at center reads `pending_command_count == 0`
+  and looks like an input regression; probe a point whose
+  `gui_get_hovered_control()` is a PASS control (or none) first — at (200,200)
+  hovered was `HudGroup/hud` (PASS), the click enqueued (`pending` 1), and
+  `step(1)` applied a conveyor at tile (4,12).
+- Evidence: `runs/20261008-133538-ev0062-ui-click-godot/` (EV-0062 godot-pass,
+  pid 20583; `godot/state-05-world-input-regression.json`).
+
+## 2026-10-08 — `godot_exec` budget is 15 s, not 30 s; a timed-out `step(50000)` keeps running and freezes the campaign HUD mirror
+
+- A single `SimHost.step(50000)` eval returned
+  `TIMEOUT ... timed out after 15.0s` (the earlier 6.6 MB-dump entry says 30 s —
+  the wrapper's actual budget on this host is 15 s). The game does **not**
+  abort the eval: the step ran to completion (`get_tick()` came back at
+  +50000), and every later eval blocked until it finished (`sleep 20` + poll,
+  then a cheap eval answered again).
+- After that timed-out step the campaign HUD mirror went stale in a way that
+  outlived the timeout: `MindCampaign.get_hud_state()` kept returning the
+  pre-step `wavetime`/`enemies` (wavetime 7184.54 unchanged across a `step(600)`
+  and a later pump), while `SimHost.get_group_counts()` stayed correct. For
+  live-runtime liveness, assert on `get_group_counts()` / `str()` aggregates,
+  not the mirrored HUD.
+- Budget workaround: chunk large advances (e.g. 6-10 × `step(600)`) and read the
+  group counts each chunk; unit movement/weapons evidence is then visible
+  without any single long call.
+- Also confirmed for the EV-0048 leg: `place_block` can return `true` while the
+  live block runtime rejects the tile — the only trace is a `[D] place command
+  rejected at (x, y)` info line and an unchanged `build` group count.
+- Evidence: `runs/20261008-134638-ev0048-live-unit-runtime-godot/` (EV-0048
+  godot-pass, pid 36615; `run.json` anomalies, `report.md`).
+
+## 2026-10-08 — a rebuilt GDExtension is not picked up by a running loop editor; verify what the game actually mapped
+
+- The loop-2 editor (pid 17601, started 13:35) was already running when the
+  writer's fix `ca81672` was committed at 14:00 and the extension rebuilt at
+  14:02. `godot_game play` starts the game *inside* the editor process, which
+  mmap'd `libmind_gdext.so` at editor start: playing without restarting the
+  editor would have evaluated the pre-fix code even though the file on disk was
+  new. The library mtime/sha alone cannot tell you what a long-lived editor
+  loaded.
+- Workaround: compare the built `client/bin/rust/debug/libmind_gdext.so`
+  mtime/sha against the fix commit; rebuild with `tools/build.sh` when it
+  predates the commit; then kill the editor and relaunch
+  `.opencode/loops/bin/run-godot-editor.sh` before `godot_game play`. Cheap
+  pre-flight on the artifact: `nm -C <so> | grep <new-symbol>` (the pre-fix .so
+  had no `read_command_mode_hold`/`update_command_mode`). Post-play proof of what
+  is loaded: `grep libmind_gdext /proc/<game pid>/maps` plus a `sha256sum` of
+  that path.
+- Evidence: `.opencode/evals/runs/l2-20261008-140421-input_controls-godot/`
+  (EV-0044 godot-pass, game pid 81133; `godot/rts-evidence.json` library block).
+
+## 2026-10-08 — loop-1 twin Godot leg (EV-0048): no new friction
+
+- Explicitly nothing new: the `units-live-wave-runtime` chain ran unchanged at
+  a1ca816 (fresh groundZero checksum `4353bdfd835ec038`, `run_wave` + `step(1)`
+  -> unit 0->1 at checksum `9f527206f0c78da9`, second wave -> 4 units, bullets
+  by tick 420, empty error log). Recorded for the next twin evaluator; no entry
+  beyond this one. Evidence:
+  `runs/20261008-040830-ev0048-live-unit-runtime-twin/godot/`.
+
+## 2026-10-08 — loop-1 twin Godot leg (EV-0062): window resize no-op, `move_to_foreground()` deprecation in the error log, `center_on_tile` applies next frame
+
+- `get_window().size = Vector2i(900,700)` did not stick (the next read still
+  reported 1152x648). Record the actual window size instead of assuming the
+  resize took effect.
+- `get_window().move_to_foreground()` (the screenshot-staleness workaround)
+  records an ERROR in the log: `The "move_to_foreground()" method is
+  deprecated, use "grab_focus()" instead.` It was the only non-empty error-log
+  artifact of this run; clearing the log and re-doing one click gave
+  `godot_log errors: []`. Prefer `grab_focus()` for the staleness workaround.
+- `MindCamera2D.center_on_tile(x,y)` takes effect on the next frame:
+  `screen_to_tile()` in the same eval read a stale transform ((-270,-262)
+  instead of (4,12)); after a frame the mapping was (200,200) -> (4,12) as in
+  the EV-0062 godot-pass run.
+- No other friction: `boot-and-identity` + `ui-control-click` ran unchanged at
+  a1ca816 (pid 145410, frames 614..21295, errors [] after the clean click).
+  Evidence: `runs/20261008-143432-ev0062-twin/godot/`.
+
+## 2026-10-08 — loop-2 twin Godot leg (EV-0044): eval `await` stalls the frame loop; the editor game is embedded and cannot be resized
+
+- `godot_exec` eval code containing `await get_tree().process_frame` (without the
+  eval `await` param) errored with `Trying to call an async function without
+  "await".` and wedged the frame loop: `Engine.get_process_frames()` stayed at
+  1372 while `Time.get_ticks_msec()` advanced 4.4 s across two reads, and a
+  `window_set_size` from the same eval never applied. Recovery per the existing
+  rule: `godot_game stop` + `play` (new pid 197940), re-stamp before any input.
+  The quoted log error is the probe's own, not a game defect.
+- The editor game runs **embedded**: `DisplayServer.window_set_size(Vector2i(900,700))`
+  returns but the next read still reports 1152x648 and the log says `Embedded
+  window can't be resized.` Do not plan a pixel comparison around matching the
+  Java window size; for EV-0044 the Godot side compared structured input state.
+- Evidence artifact that worked: append one JSON line per probe from the eval
+  with `FileAccess.open("user://ev0044-evidence.jsonl", FileAccess.READ_WRITE)` +
+  `seek_end()`/`store_line()`, then copy the file out of
+  `<worktree>/.opencode/loops/run/loop-2/xdg-data/godot/app_userdata/Mindustry-Godot/`
+  into the run dir — the exact eval-produced samples survive as evidence.
+- `get_window().move_to_foreground()` re-confirmed the EV-0062 deprecation ERROR
+  in the log; prefer `grab_focus()`.
+- Evidence: `runs/l2-20261008-150205-input_controls-twin/` (`godot/rts-evidence.jsonl`,
+  `godot/log-errors.json`, `run.json`).
+
+## 2026-10-08 — loop-2 twin Godot leg (EV-0055): `toggle_command_mode()` is transient under hold-mode; tap radius
+
+- `MindInput.toggle_command_mode()` returns true and `get_input_state_json`
+  reads `command_mode: true` when sampled in the **same** `godot_exec` eval, but
+  a separate read one frame later is false again while Shift is up: with the
+  default `commandmodehold=true` the update recomputes
+  `command_mode = keyDown(shift)` every frame, so the API latch only survives
+  within the frame. For a persistent command mode hold Shift (the player path);
+  use the API only as a same-eval positive control.
+- The `set_selectable_units_json` seam takes **world pixels** (TILESIZE=8) and a
+  tap selects the closest commandable unit within `UNIT_TAP_RADIUS` (11 world
+  px) of the cursor; a tap outside that radius silently reads as empty ground
+  and clears the selection. Registration order/visible icons do not matter —
+  the unit must sit at the tap point's world coords. `chains/rts-select-orders.md`
+  corrected accordingly.
+- `get_window().move_to_foreground()` re-confirmed the already-logged
+  deprecation ERROR (`use "grab_focus()" instead`); it was the only error entry
+  and landed after all input probes. Prefer `grab_focus()` and attribute the
+  entry in the report when the workaround is used.
+- Evidence: `runs/l2-20261008-051657-ev0055-rts-select-twin/godot/rts-evidence.json`,
+  `godot/step-01-command-mode-selected.png`.
+
+## 2026-10-08 — a loop worktree without the generated atlas silently text-falls-back every icon check
+
+- The loop-2 worktree (`Mindustry-Godot-loop2`) has no
+  `assets/sprites/sprites.atlas.json`: it is gitignored and produced by
+  `tools/pack.sh`, and the sync/merge does not carry it into a fresh worktree
+  (main checkout has it). `MindAssets` resolves the asset dir by probing
+  `res://assets` then `<project>/../assets` and therefore boots with zero
+  regions; the run log shows `[assets] ready ok=…` before any evaluator
+  `godot_log clear`, so the condition is easy to miss.
+- Symptom: every `MindWidgets.image_button_first` icon resolves `null`, so
+  `PlacementFragment` block buttons keep `has_icon: false` and render their
+  label text at 67–120px instead of 46px icons; category glyphs still render
+  (they are child `Label`s, not `icon`), and the world background can render
+  blank. Distinguish from a code regression by probing the atlas, not the UI:
+  `get_node("/root/MindAssets").call("region_count")` is 0 and
+  `call("has_region", "block-duo-ui")` is false.
+- Workaround for icon-dependent checks in a fresh worktree: run the pack
+  (`tools/pack.sh`) or point `mindustry/assets_dir` at a checkout whose atlas
+  exists before launching the editor; otherwise record the limitation and judge
+  only code-path observables. This run (`EV-0013`) failed on the catalog
+  filtering independently of the atlas and recorded the icon half as
+  environment-limited.
+- Evidence: `runs/l2-20261008-133536-ev0013-block-picker-godot/` (pid 18767;
+  `godot/state-04-ingame.json` assets.region_count = 0,
+  `godot/step-04-ingame-hud.png` text-fallback buttons).
+
+## 2026-10-08 — the paused banner is a STOP Control at viewport center; paused-run world clicks there vanish
+
+- While `SimHost.set_paused(true)`, `/root/Spine/Ui/UiRoot/HudGroup/hud/PausedBanner`
+  is visible with `mouse_filter=0` (STOP) and a ~64x26 `get_global_rect()`
+  centered on the viewport. `MindInput.ui_captures_at` (upstream
+  `Core.scene.hasMouse()`) drops any world press whose point falls inside a STOP
+  control, so a right-click `command_tap` or selection tap aimed at the exact
+  center silently does nothing while paused — `pending_command_count` and
+  `selected_units` stay unchanged with no log entry.
+- Workaround: before injecting a world click, probe the point in one eval —
+  `get_tree().get_root().find_children("*", "", true, false).filter(func(n):
+  n is Control and n.is_visible_in_tree() and int(n.get("mouse_filter")) == 0
+  and n.get_global_rect().has_point(pt))` — or simply click off-center. Do not
+  use viewport center for paused-run probes, and when a click appears to be a
+  no-op, check STOP hits before suspecting the input path.
+- Node-path reminder for the RTS checks: `get_input_state_json` /
+  `toggle_command_mode` / `set_selectable_units_json` / `selection_json` live on
+  `/root/Spine/Input` (`MindInput`), while `set_paused` / `step` /
+  `pending_command_count` / `get_state_json` live on `/root/Spine/SimHost`.
+- Evidence: `runs/l2-20261008-134830-ev0055-rts-select-godot/` (pid 33526; step 5
+  of `godot/rts-selection-evidence.json`, screenshot
+  `godot/step-06-after-live-order.png`).
+
+## 2026-10-08 — loop editor predating a rebuild; `campaign_views_json` needs a planet arg
+
+- Binary freshness for a loop editor is two-tier: the game process loads
+  `libmind_gdext.so` when it starts, but the editor itself was started at 14:03
+  with the pre-7352edb library while the writer's build landed at 14:24. The
+  editor was killed and relaunched with
+  `.opencode/loops/bin/run-godot-editor.sh` (same bridge 6980) before the run; a
+  cheap in-engine probe settles it either way —
+  `MindCampaign.has_method("block_catalog_json")` was `true` at 7352edb and
+  `false` at a1ca816. `strings libmind_gdext.so | grep block_catalog_json` plus
+  `stat` on the `.so` prove the library, not the process that loaded it.
+- `MindUi.campaign_views_json()` takes one parameter (planet GString); calling
+  it with zero arguments logs `godot-rust function call failed:
+  MindUi::campaign_views_json() … function has 1 parameter, but received 0
+  arguments` and burns the full 15 s eval timeout. Unlike the earlier
+  "malformed eval body pauses the debugger" entry, this one did **not** stall
+  the frame loop: `Time.get_ticks_msec()` kept advancing, the pid stayed live
+  and the next eval answered normally — check `godot_log errors` for the
+  godot-rust reason before assuming a frozen loop. It also falls back to
+  `CampaignViews::vanilla_fixture()` (no live `MindCampaign.campaign_views_json`
+  in this build), so it is not a usable way to enumerate live unlock state; that
+  is what `MindCampaign.block_catalog_json()` / `get_tech_state()` are for.
+- Evidence: `runs/l2-20261008-142848-ev0013-block-picker-godot/` (EV-0013
+  godot-open; pid 133157; the fixture fallback and freshness probe in
+  `godot/state-04-ingame.json`, the timeout error in `godot/log-launch-errors.json`).
+
+## 2026-10-08 — data-driven fragment reads are one frame late; `godot_input sequence` wants `steps[]`
+
+- The placement fragment rebuilds its rail/grid with `child.queue_free()` for
+  the old children, and `queue_free` only removes them at the end of the
+  frame. A `godot_exec` that toggles `visible` (or calls the fragment's reload)
+  and reads `get_children()` in the **same eval** still sees the old, queued
+  children — a cleared catalog then looked like "8 categories / 2 blocks"
+  instead of 0/0, and the first `state-04` artifact had to be rewritten from a
+  follow-up eval. Read data-driven Control children in a later eval than the
+  rebuild that queued them (same-frame reads are fine only when the previous
+  list was already empty).
+- `godot_input sequence` takes `{"steps":[{"type":"mouse_button","params":{...}},
+  ...],"frame_delay":1}`. The flat `{"events":[...]}` form fails with
+  `INVALID_ARGUMENT: steps[] required (array of {type, params} dicts)` and
+  injects nothing; the per-click press+release form above landed every UI step
+  of the campaign launch at 986cda3.
+- Evidence: `runs/l2-20261008-145144-ev0013-block-picker-godot/` (EV-0013
+  godot-pass; pid 179192; the rewritten `godot/state-04-fresh-groundzero.json`
+  and the 8-category post-research read in `godot/state-05-after-research.json`).
+
+## 2026-10-08 — a parse-error eval freezes the game while `godot_game status` still looks live
+
+- A `godot_exec` body that used `(var c = …; {…})` as a dict value (a GDScript
+  parse error) returned `TIMEOUT` after 15 s and left the game loop paused at
+  the debugger. Unlike `godot_game status`, which kept reporting
+  `fps: 145`, `draw_calls: 88`, `process_time_ms: 3` (those monitors come from
+  the editor process, not the game), the game's own
+  `Engine.get_process_frames()` stayed frozen at the same value across later
+  evals. `godot_log errors` stayed empty.
+- Consequence for UI evals: injected `mouse_button`/`mouse_motion` calls return
+  `ok` and `Input.flush_buffered_events()` runs, but nothing dispatches while
+  the loop is frozen — a real Host-button click looked like a dead UI and the
+  first EV-0059 pre-fix repro at pid 10878 was discarded as contaminated. The
+  clean repro is pid 15176 in
+  `godot/state-pre-fix-repro.json` (`runs/20261008-083744-ev0059-host-godot/`).
+- Workaround: prove liveness with two pid-stamped eval reads of
+  `Engine.get_process_frames()` (not `godot_game status`); on a pin,
+  `godot_debugger sessions` + `stop`/`play` (never `resume`).
+- Evidence: `runs/20261008-083744-ev0059-host-godot/` (EV-0059 godot-pass; pids
+  10878 frozen / 15176 clean / 19772 final; sequence in
+  `chains/host-match-from-pause.md`).
+
+## 2026-10-08 — `godot_input text` errors and never types; use fresh push_input key events
+
+- Typing `127.0.0.1` into the join dialog's focused `LineEdit` failed with both
+  input actions: `godot_input {"action":"text",...}` returned `ok` but the field
+  stayed empty **and** left a Godot error in the log (`An input event object is
+  being parsed more than once in the same frame…` — the runtime autoload reuses
+  one `InputEventKey` object for the press and the release in one frame), while
+  `godot_input {"action":"key",...}` sets `keycode`/`physical_keycode` but no
+  `unicode`, which `LineEdit` ignores. Workaround (parity-eval skill fallback,
+  validated): an eval loop that pushes a **fresh** `InputEventKey` down+up per
+  character — `keycode = OS.find_keycode_from_string(ch)`, `physical_keycode`
+  the same, `unicode = ch.unicode_at(0)`, `vp.push_input(...)` — typed all nine
+  characters in one eval. `godot_input text` should be avoided on this project
+  until the addon reuses fresh events.
+- Same run, a `godot_exec` eval that used a `filter` lambda on the dialog's
+  button row (`b.get_child(0).get_child(1).text`) errored on the childless `?`
+  button and paused the debugger loop — the existing "parse-error eval freezes"
+  entry class, but this was a **runtime** null/child-access error, not a parse
+  error, and `godot_debugger resume` again did not unpause. Recovery is
+  `godot_game stop` + `play`; index the known button order instead of mapping
+  with lambdas over mixed rows.
+- Small `for` evals were otherwise fine (9-char typing loop, 4-element list
+  loop) — the 15 s timeout is not triggered by short loops, only by errors.
+- Evidence: `runs/20261008-184534-ev0060-join-godot/` (EV-0060 godot-pass; pid
+  50570; fallback typing recorded in `godot/state-04-typed.json`, clean
+  `godot/game.log` final run; sequence in `chains/join-direct-connect.md`).
+
+## 2026-10-08 — launching the loop wrapper from the worktree breaks the bridge; and the boot camera edge-pans away
+
+- Launch the editor through the **main checkout's** wrapper
+  (`$PARITY_MAIN/.opencode/loops/bin/run-godot-editor.sh`), not the worktree
+  copy. `loop-vars.sh` resolves `main` from the wrapper's own path, so
+  `.opencode/loops/bin/run-godot-editor.sh` executed inside
+  `Mindustry-Godot-loop2` computed `PARITY_LOOP_DIR` as the *worktree* runtime
+  dir and started a second `wayland-mind2` weston under it. The Godot Wayland
+  socket path then became
+  `<worktree>/.opencode/loops/run/loop-2/wayland/godot-wayland-0` (109 bytes),
+  over the 108-byte UNIX limit: `Can't connect to a Wayland display` → x11
+  fallback, editor game `--display-driver x11`, and `godot_health check`
+  `BRIDGE_NOT_CONNECTED` while the editor process still lived. The wrapper
+  printed `[parity-loop 2] starting weston headless on wayland-mind2` plus a
+  fresh java weston — a duplicate-compositor tell. Recovery: kill the worktree
+  editor/game/duplicate westons, relaunch the main wrapper (reuses the pidfile
+  compositor in the main `.opencode/loops/run/loop-2`).
+- Default-world camera edge pan: after boot the OS pointer sits at (0,0), and
+  `MindCamera2D` edge-pans while idle — camera position went (128,128) →
+  (-7507,-7507) over ~2 minutes, so `tile_to_screen(7,7)` returned (27285,27033)
+  and a click there would have missed the world. Park the pointer first
+  (`godot_input mouse_motion` to the viewport center) and `center_on_tile(16,16)`
+  before resolving coordinates; the verified sequence is
+  `chains/placement-rotation.md` step 1.
+- `MindSimHost.apply_sim_command_json` has no `rotate` op (only `place`/`break`),
+  so a finding's "send SimCommand::Rotate via MCP" repro alternative must go
+  through `MindInput.rotate_placed()`/the `rotateplaced` (R) binding instead.
+- State-dump tiles hardcoded `rot: 0` (and `team: 0`) in `sim/dump.rs`; a rotated
+  building placed through the real input path still read `rot: 0` until 996f288
+  made the dump read `BuildingComp.rot`. When a rotation finding's oracle is
+  `get_state_json`, assert the dump, not just the input-state `rotation` field.
+- Evidence: `runs/l2-20261008-184642-ev0056-rotation-godot/` (pre-fix fail, pids
+  32063/33292) and `runs/l2-20261008-185444-ev0056-rotation-godot/` (EV-0056
+  godot-pass, pid 71447; sequence in `chains/placement-rotation.md`).
+
+## 2026-10-08 — MindHud/MindUi live at `/root`, not under `/root/Spine`; and `stop` leaves a crash-looking warning
+
+- An EV-0061 probe used `/root/Spine/MindHud` (the other Rust facades are scene
+  children there). Both `MindHud` and `MindUi` are **autoloads at the tree root**
+  (`/root/MindHud`, `/root/MindUi`), so the eval raised `Node not found` + a null
+  call, and because an errored eval trips break-on-error the frame loop pinned
+  (`godot_debugger sessions` -> `paused: true`) while the next `godot_exec`
+  timed out after 15 s. Recovery: `godot_game stop` + `play` (fresh pid), redo
+  with the autoload paths. The verified sequence is `chains/game-over-loss.md`.
+- `godot_game stop` does not delete `launchid.dat`, so the next launch logs
+  `[W] previous launch may have crashed (leftover launchid.dat); check .../crashes/`
+  even for a clean stop. Do not treat the warning as a crash: compare mtimes in
+  `$PARITY_LOOP_DIR/xdg-data/Mindustry-Godot/crashes/` against the run start.
+- Evidence: `runs/20261008-185511-ev0061-game-over-godot/` (EV-0061 godot-pass,
+  pid 74313; the aborted first attempt was discarded and the repro re-run after
+  stop+play, so the recorded state files are all from the fresh pid).
+
+## 2026-10-08 — editor-shell frames stay byte-identical across map loads/grid toggles (MapView `_draw` vs SubViewportContainer layering)
+
+- During the EV-0038 Godot leg, `godot_screenshot game` and
+  `get_viewport().get_texture().get_image()` returned the same bytes for two
+  different loaded maps (Archipelago 500x500, Ancient Caldera 256x256) and for a
+  `MindEditor.set_grid(true/false)` toggle, even though `Engine.get_frames_drawn()`
+  advanced in lockstep with `Engine.get_process_frames()` and the game window had
+  lost focus (`get_window().has_focus() == false`; `grab_focus()` did not restore
+  it). Do not immediately call this "stale screenshot".
+- Probe liveness with a scene change the shell really draws: setting
+  `EditorDialog.modulate = Color(1,0,0,1)` changed the captured pixels, proving the
+  capture path was live. The identical frames come from layering:
+  `scenes/editor/map_view.tscn` puts a full-rect `SubViewportContainer` (with an
+  empty `EditorWorldView` Node2D) over the `MapView` root, so the script's `_draw`
+  border/grid/brush primitives never composite into the window (plan-19
+  EditorWorldView render stub — a separate gap, not EV-0038).
+- Judge editor row/load flows on `MindEditor.status()` JSON (file/width/height/
+  last_error) rather than pixels, and keep `godot_log clear` + empty
+  `godot_log errors` as the clean-run evidence.
+- Also: the map-editor shell is `/root/Spine/Ui/EditorDialog` (a sibling of
+  `UiRoot`), not `/root/Spine/Ui/UiRoot/EditorDialog`; the wrong path reads null
+  and looks like the dialog never opened.
+- Evidence: `runs/20261008-190113-ev0038-editor-row-godot/` (EV-0038 godot-pass,
+  pid 87432; sequence in `chains/editor-maps-row-click.md`).
+
+## 2026-10-08 — EV-0057: a rebind target key that is also bound elsewhere opens that action's dialog and gates the camera
+
+- Rebinding Pan Left (`move_x`) to `J` in Settings > Controls and holding it
+  moved the camera for exactly one frame, then `pan_axis` read `[0,0]` and
+  `gameplay_input_active` false. `J` is still the default `research` binding, so
+  the same key-down opened the research dialog (`dialog_stack` `["research"]`)
+  and `DesktopBridge.pan_axis` gates to `(0,0)` while `ui_dialog` is true. The
+  binding consumption was working; the key choice was the confound. Rebind to an
+  unbound key (`U`/`K`/`O`/`L`) before judging, and read the dialog stack before
+  calling a rebind dead.
+- The KeybindDialog search filter only updates through `_on_search_changed`;
+  assigning `_search_field.text` and calling `_rebuild` leaves all 88 entries
+  visible (`_entries` is never filtered — matching runs at render time).
+- Restarted instance edge pan: after `stop`+`play` the OS pointer can sit at
+  viewport `(0,0)` and `Input.warp_mouse` is a no-op under the loop's Wayland
+  compositor, so `MouseInput.auto_pan` drifts the camera every frame (measured
+  -0.919 px/frame/axis). Judge reload legs on `pan_axis`/`boost_pressed` plus
+  drift reversal, or take a no-key baseline first.
+- `get_window().move_to_foreground()` for screenshot freshness logs
+  `The "move_to_foreground()" method is deprecated...` as an error-level entry in
+  `godot_log errors`; treat it as a known tool-side warning, not a run failure.
+- Evidence: `runs/l2-20261008-190017-ev0057-keybind-rebind-godot/` (EV-0057
+  godot-pass, pids 83855/96741; sequence in `chains/keybind-rebind-camera.md`).
+
+## 2026-10-08 — `godot_game play` reports `runtime_ready` before the runtime can be reached
+
+- `godot_game play {scene: res://scenes/game.tscn}` returned `runtime_ready: true`,
+  but the immediate follow-up `godot_game status` reported `runtime_connected:
+  false` with `instances[0] = {active: true, args: [...], instance: 1, pid: 0,
+  ready: false}` and no `viewport_size`/`fps` fields. Reading that first status as
+  a failed attach wastes a stop/play cycle: poll `status` (the runtime connected
+  after ~5 s in this run, pid 101131, viewport 1152x648) and only treat a
+  persistently `false` status as broken.
+- Same run: the initial `godot_log` buffer after `clear` is empty until the game
+  boots, so a `godot_log errors` check taken immediately after `play` is not a
+  clean-run signal yet — re-read it after the first eval answers.
+- Evidence: `runs/20261008-190748-ev0039-custom-game-godot/` (EV-0039 godot-pass,
+  pid 101131; sequence in `chains/custom-game-map-list.md`).
+
+
+## 2026-10-08 — EV-0051: eval TIMEOUTs are usually eval-body errors; no frame_diff deps in the loop env
+
+- A `godot_exec` eval that read `.text` on a Control (the Play submenu's child 0
+  is a spacer, not a Button) came back as `TIMEOUT ... after 15.0s` and left the
+  editor debugger `paused: true` with `Engine.get_process_frames()` pinned. The
+  actual message was only in `godot_log errors` (`Invalid access to property or
+  key 'text' on a base object of type 'Control'`). Never attribute a 15 s eval
+  timeout to the method being called (the earlier EV-0051 note blamed
+  `MindUi.campaign_views()`) until `godot_log errors` is read; recover with
+  `godot_game stop` + `play` (`resume` re-breaks), and clear the log so the
+  aborted eval does not count as run noise.
+- This loop session had no Python imaging stack: the default
+  `$HOME/.local/share/mcp-venv` does not exist, system `python3` has no numpy
+  and the uv-tool python has no PIL, so `frame_diff.py` cannot run. Fall back to
+  the structured JSON comparison (which is higher in the comparison order
+  anyway) and record the PNG sha256s as the only frame evidence; do not block
+  the verdict on frame metrics.
+- The Play → Campaign submenu is data-built and starts with a spacer Control:
+  Campaign is `MenuGroup/menu/Submenu/Buttons` child 1, not 0. Planet-dialog
+  clicks and the capture read-back sequence are in `chains/campaign-live-views-capture.md`.
+- Evidence: `runs/20261008-191650-ev0051-campaign-live-views-godot/` (EV-0051
+  godot-pass, pid 123288; earlier aborted pid 121357 recovered with stop+play).
+
+## 2026-10-08 — EV-0058: frozen viewport again on the loop-2 GPU weston session; `move_to_foreground` is an error in 4.7
+
+- The loop-2 game viewport froze for the whole EV-0058 run:
+  `Engine.get_frames_drawn()` pinned at 482 (run 1) then 94 (after a
+  `godot_game stop`+`play`, which briefly revived drawing 2 → 94) while
+  `Engine.get_process_frames()` advanced 14706 → 15829 (run 1) and 3068 → 4250
+  (run 2). `MindSimHost.capture("user://…")`, `godot_screenshot game` and
+  `RenderingServer.force_draw()` all returned the same stale 1152x648 frame
+  (sha256 `429c93dc…a269`, even across restarts). Verdict was taken from the
+  pid-stamped `core_items_json()`/checksum JSON per the comparison order; the
+  PNGs are recorded as frozen-viewport artifacts, not as before/after evidence.
+- `get_window().move_to_foreground()` is deprecated in Godot 4.7 and lands as an
+  **error-level** `godot_log` entry ("The \"move_to_foreground()\" method is
+  deprecated, use \"grab_focus()\" instead."), which fails the empty-error-log
+  requirement if it runs inside the scenario window. The 4.7 replacement is
+  `get_window().grab_focus()`; the run had to `godot_log clear` + replay the
+  repro to get a clean error list.
+- `frame_diff.py` still cannot run in this loop env (no `$MCP_VENV`), but
+  `uv run --with pillow --with numpy python3 …` works and gives mean/std for a
+  single PNG when frame metrics are needed.
+- Ore coordinates for a feedable factory came from an offline MSAV probe
+  (`SaveIo::load_bytes` behind the `msav-import` feature in a throwaway
+  `/tmp` crate): frozenForest (serpulo/86) has `ore-coal` at (104-107,54-58),
+  groundZero has none. The state dump omits floor/overlay, so this offline probe
+  is the only way to find ore without loading a sector and scanning tiles.
+- Evidence: `runs/l2-20261008-192815-ev0058-factory-recipes-godot/` (EV-0058
+  godot-pass, pid 148326; sequence now in `chains/factory-recipe-probe.md`).
+
+## 2026-10-08 — EV-0053: two eval traps that pin the frame loop; same-eval toast assertion
+
+- `godot_exec` evals that `await` without `params.await: true` fail with
+  "Trying to call an async function without \"await\"" — the eval returns a 15 s
+  `TIMEOUT`, break-on-error pins the frame loop (`godot_debugger sessions` →
+  `paused: true`) and every later eval also times out. Recovery is
+  `godot_game stop` + `play` (`resume` re-breaks); one game instance was lost
+  to this in the EV-0053 run (pid 132811). Split the eval instead of awaiting,
+  or pass `await: true` explicitly.
+- `MindUi` exports both a `toast` **method** and a `toast` signal. GDScript
+  `ui.toast` resolves to the method Callable, so `ui.toast.connect(cb)` and
+  `ui.toast.is_connected(...)` error with "Nonexistent function … in base
+  'Callable'" — same break-on-error pin (this cost two more EV-0053 instances,
+  pids 140553 and 141380). Connect the signal by name: `ui.connect("toast",
+  cb)`. MindHud has no `toast` method, so `h.toast.connect(cb)` is safe there.
+- Capture-edge toast read-back: in two EV-0053 instances, reading
+  `OverlayLayer` children 0.7–0.8 s after `MindCampaign.capture_sector()` showed
+  no label even though a recorder on `MindHud.toast` (and later `MindUi.toast`)
+  had the event; repeating the edge in an instrumented instance (pid 147174)
+  with the recorder and the overlay read in the **same eval immediately after**
+  the capture call showed the label ("Sector [accent]groundZero[white]
+  Captured!") at all three points. Assert transient toasts on signal recorders
+  plus an immediate same-eval overlay read, not on a post-sleep overlay probe.
+- Breaking the player core with `SimHost.break_block(129,55)` removed the core
+  building (group `build` 61 → 60, remaining core tiles rejected as empty) but
+  `get_hud_state().hasCore` stayed true for 400+ ticks with the pump running,
+  so the `sector.lost` HUD toast edge never fired. Core-count bookkeeping is a
+  campaign-runtime seam, not a HUD producer gap; plan core-loss toasts through
+  a scenario that actually lands a `GameOver`/`SectorLose` event.
+- Evidence: `runs/20261008-192317-ev0053-hud-wave-enemies/` (EV-0053
+  godot-pass, pid 147174; sequence now in `chains/hud-wave-enemies-skip.md`).
+
+## 2026-10-08 — EV-0063: a dialog `shown()` callback into `MindUi` poisons the node; empty loop-2 atlas pack
+
+- `MindUi.open_dialog` holds a mutable Rust bind for the whole call, so a
+  dialog's `shown()` must never call back into `MindUi` (`is_mobile()`,
+  `dialog_stack()`, …): the reentrant `Gd<T>::bind()` panics "failed, already
+  bound", the eval that triggered it (and every later `MindUi` call) times out,
+  and the process must be restarted — `godot_game status` still reports
+  `runtime_connected: true` and healthy fps while the UI host stays wedged.
+  Defer the callback out of the bind (`call_deferred`, the EV-0061/EV-0063
+  idiom) or read the value in `_ready`. Evidence:
+  `runs/l2-20261008-193444-ev0063-paused-dialog-godot/` (pre-fix panic on pids
+  160535/161231; `godot_log errors` shows the panic and crash reports).
+- The loop-2 worktree's `assets/` did not carry the packed sprite atlas, so
+  `MindAssets.load_assets()` returns before `load_bundle`: `bundle_get(
+  "objective")` echoed the raw key and the headless `ui_widgets_check.gd` failed
+  10 asset/credits assertions (`[assets] ready ok=false … regions=0`). Copying
+  the generated `assets/sprites/sprites.atlas.json` + `sprites.png`/`sprites2-4.png`
+  from the main checkout into the worktree (same `inputsHash`) made
+  `[assets] ready ok=true pages=4 regions=5135` and the check `failed=0`.
+  Generated/gitignored content; do not commit it.
+- `start_sector('serpulo',170)` (generated, no core) game-overs before an Escape
+  can open the pause dialog; pause in the same eval as the launch, or launch a
+  preset sector (`serpulo:15` = groundZero, which also carries the `@objective`
+  description). Sequence: `chains/paused-dialog-buttons.md`.
+
+## 2026-10-08 — EV-0024: `godot_log get count=N` returns the oldest N, not the newest
+
+- After a long verification window, `godot_log {"action":"get","params":{"count":5}}`
+  returned the first five buffered entries (the whole window's oldest lines), not
+  the last five; the fresh backend lines (`imported … restarting`) looked missing
+  until `count` was raised past the buffer size. `godot_log errors` is unaffected.
+  Ask for `count` >= the buffer size when reading a `[ui]` backend log tail.
+- Same run: the Rust `MindUi.data_export/import/export_crash_logs` endpoints take
+  literal filesystem paths; passing `user://…` from an eval wrote a relative
+  `client/user:/…` directory until the path was `ProjectSettings.globalize_path`d
+  first. The button flow is unaffected (the native chooser yields absolute paths).
+- Evidence: `runs/l2-20261008-195122-ev0024-gamedata-godot/` (EV-0024 godot-pass,
+  pid 180250/186793; sequence now in `chains/settings-gamedata-actions.md`).
+
+## 2026-10-08 — EV-0028: mutation + `get_global_rect()` in one eval reads the pre-layout center
+
+- Resolving a runtime cell's center immediately after mutating scroll state in
+  the same eval returns the position from before the re-layout:
+  `body.scroll_vertical = 0` followed by
+  `content-copper.get_global_rect().get_center()` reported `y = -64` (the scrolled
+  position); a second eval one frame later returned the correct `(331, 316)` and
+  the click landed. Resolve centers in a follow-up eval after any scroll, tab
+  switch, or dialog rebuild — same class as the accumulated-input flush rule.
+- The menu/submenu Buttons keep their text on a child Label row, so
+  `button.text` is empty for the sidebar entries; index the child row or read
+  `get_child(0).get_child(1).text` instead of matching on `text`.
+- Evidence: `runs/l2-20261008-201236-ui_dialogs-godot/` (EV-0028 godot-pass,
+  pid 214901; sequence now in `chains/database-grid-audit.md`).
+
+## 2026-10-08 — EV-0059 twin Godot leg: no new friction
+
+- The Godot leg followed `chains/host-match-from-pause.md` exactly (fresh editor
+  via `run-godot-editor.sh`, `game.tscn`, pid 33491, 1152x648) with no new
+  tooling issues: clicks landed, the screenshot was non-stale
+  (`frames_drawn` 17014), and `godot_log errors` was `[]`. Nothing to add
+  beyond the existing entries. Evidence:
+  `runs/20261008-105728-ev0059-host-twin/godot/`.
+
+## 2026-10-08 — EV-0060 twin Godot leg: embedded-game `frames_drawn` is not a staleness gate; list-rebuild eval pitfalls
+
+- `Engine.get_frames_drawn()` stayed pinned at 2 across the whole
+  editor-embedded game session while `Engine.get_process_frames()` grew,
+  `get_window().grab_focus()` changed nothing, and `godot_game stop` + `play`
+  did not change it either — yet `godot_screenshot game` returned live,
+  state-current frames (menu → submenu → join dialog → typed address all
+  differed and showed the current state). Do not use a pinned `frames_drawn`
+  alone to declare captures stale for the editor-embedded game; cross-check the
+  frame content/metrics.
+- Do not rebuild a dialog list and read its children in the same eval:
+  `_rebuild_public()` followed by `_global_list.get_child(0).…` errored
+  (`Index p_index = 0 is out of bounds`) and tripped break-on-error (debugger
+  `paused: true`; `resume` no-ops — recover with `godot_game stop` + `play`).
+  An eval body containing `await` wedged the same way.
+- The join dialog's public list only rebuilds in `shown()`: after the connector
+  becomes `browsing` with the dialog open, the visible list still renders the
+  pre-connect state. The reliable visible check is Back → Play → Join Game:
+  the reopened dialog rendered 2 live rows (`spine survival 1/8`), and
+  `_global_list.get_child_count()` returned 2.
+- Evidence: `runs/20261008-112749-ev0060-join-twin/`
+  (`godot/state-connect-56882.json`, `godot/step-07-public-list.png`,
+  `godot/godot-runtime.log`).
+
+## 2026-10-08 — EV-0061 twin: pinned frames_drawn returned a stale boot-menu screenshot
+
+- Both twin instances (primary pid 78253 and a fresh pid 80270 after stop+play)
+  had `frames_drawn` pinned at 2-4 while `Engine.get_process_frames()`
+  advanced (1854→4230, 5065→5632) and `godot_game status` reported fps=145 /
+  draw_calls=28-38. `godot_screenshot game` returned the boot main-menu frame
+  even while the game-over dialog node was visible with `hud_visible=false`;
+  the writer's earlier screenshot at afd380f shows the same stale menu. So for
+  the editor-embedded PIE window a pinned `frames_drawn` can still mean the
+  presented image is stale — read structured state (dialog node
+  labels/visible, MindUi stack) for the verdict and note the caveat. This is
+  the mirror of the EV-0060 entry above where the same pinned counter still
+  produced live captures; cross-check the frame content.
+- Reading a dialog's action button: `Button.text` is empty because
+  `MindWidgets.icon_button` nests an HBox with icon+label Labels; use
+  `button.find_children("*","Label",true,false)` and
+  `Array.map(func(l): return str(l.text))`. The game-over dialog's campaign
+  action read back as `["", "Continue"]` with one `pressed` connection
+  (`chains/game-over-loss.md`).
+- Evidence: `runs/20261008-215055-ev0061-game-over-twin/`
+  (`godot/state-05-dialog-node.json`, `godot/step-01-game-over-dialog.png`).
+
+## 2026-10-08 — EV-0038 twin: EditorDialog shell makes a re-opened editor_maps list input-dead
+
+- Re-opening the maps list with `MindUi.open_dialog("editor_maps", "{}")`
+  while `/root/Spine/Ui/EditorDialog` is visible leaves the list present but
+  unable to receive clicks: a row click at the resolved center (572,99) did
+  nothing and `MindEditor.status` kept the previously loaded map.
+  `gui_get_hovered_control()` at that point returned
+  `/root/Spine/Ui/EditorDialog/MapView` — the shell is a full-rect
+  (1152x648) node layered above the UiRoot DialogLayer, so it eats the press
+  even though the row button's `get_global_rect().get_center()` still resolves.
+- Workaround: exit the editor with the shell's
+  `/root/Spine/Ui/EditorDialog/LeftTools/BackButton` (center 181,52), then the
+  reopened list receives input and the first-row click works (caldera.msav
+  256x256, `last_error {}`). The chain's old variant note claiming
+  `MindUi.open_dialog` is a valid back-out was corrected in
+  `chains/editor-maps-row-click.md`.
+- Boot note for this run: `godot_log errors` carried two `[W]` entries
+  (leftover `launchid.dat` from a previous unclean stop; "menu background 1224
+  tiles missing regions"). The second appears in 43 unrelated run logs and the
+  first is a launch artifact; neither is EV-0038-related, and no
+  editor/save-version errors were present.
+- Evidence: `runs/20261008-121029-ev0038-editor-row-twin/`
+  (`godot/state-03-row-click-archipelago.json`, `godot/state-04-first-row-caldera.json`,
+  `godot/log-errors.json`).
+
+## 2026-10-08 — loop-1 EV-0039 twin Godot leg: clearing the log after boot loses the boot banner
+
+- `godot_log clear` right after `godot_game status` -> `runtime_connected`
+  drops the boot lines (`[I] MindPreview ready (18 maps)`); while the client
+  idles in the menus no new lines are emitted, so a later `godot_log get`
+  returns `[]` and `errors` returns `[]`. The banner only reappears on a fresh
+  boot: capture `godot_log get` before clearing, or stop+play and read it (done
+  here at pid 104609).
+- `Engine.get_frames_drawn()` read 14 while process frames advanced and
+  `godot_screenshot game` returned three distinct, current dialog frames
+  (Custom Game grid at pid 99383, Editor map list, MapPlay). This matches the
+  EV-0060 datapoint in this file: a small/pinned-looking counter alone is not
+  proof of stale captures — cross-check successive captures against the
+  structured state rather than trusting the counter.
+- Evidence: `runs/20261008-221916-ev0039-twin/` (`godot/game.log`,
+  `godot/step-01-custom-dialog.png`, `godot/step-02-editor-maps.png`,
+  `godot/step-03-map-play.png`).
+
+## 2026-10-08 — loop-1 EV-0051 twin Godot leg: live model vs snapshot panel widget
+
+- `MindDialog.campaign_views()` re-fetches `MindCampaign.campaign_views_json`
+  on every call (`mind_dialog.gd:315-320`), so structured reads after a state
+  change are live immediately. The **built side-panel widget** is a snapshot of
+  the rows at build time: after `capture_sector` the dialog's `campaign_views()`
+  already returned `captured=true`, but the action button still showed the old
+  label until `MindUi.open_dialog("planet","{}")` rebuilt the panel. The
+  `campaign-live-views-capture` chain's reopen step is therefore mandatory for
+  player-visible assertions; the JSON read alone is not.
+- `capture_sector` opens the `restart` (sector captured) dialog on top of
+  `planet`; close it with `MindUi.close_dialog("restart")` before reading the
+  panel (stack becomes `["planet"]`).
+- `godot_log clear` before play then `godot_log errors` reports the startup
+  `[W] [platform] previous launch may have crashed (leftover launchid.dat)`
+  entry at level `error`; it is a launch artifact of this host, not a scenario
+  error. The scenario itself added no error lines (pid 116138).
+- The port's planet view (`client/ui/planet_view.gd`) has no wheel zoom or
+  per-sector colour/marker rendering (the globe is shader/selected-tile based),
+  so Java-vs-Godot pixel comparison of sector ownership colours is not possible
+  from screenshots; use the dialog JSON rows plus the panel label.
+- Evidence: `runs/20261008-223232-ev0051-campaign-live-views-twin/`
+  (`godot/state-01-planet-view-before-capture.json`,
+  `godot/state-02-planet-view-after-capture.json`,
+  `godot/step-03-gz-owned-attacked.png`, `godot/game.log`).
+
+## 2026-10-08 — loop-1 EV-0053 twin Godot leg: LoadingLayer swallows the first HUD click; toast label timing
+
+- After `start_sector_with_loadout` the HUD is visible but
+  `/root/Spine/Ui/UiRoot/LoadingLayer/loading` shows "Loading... 0%" and
+  intercepts input (`SimHost.io_pending()` = 1). A discrete `godot_input`
+  press/release on the skip button did nothing; `gui_get_hovered_control()`
+  named `LoadingLayer/loading/Background` instead of `skip`. `step(30)` drained
+  the pending save (`io_pending` 0), the fragment's 0.2 s refresh then hid the
+  overlay, and the same discrete click drove the button (wave 0->1, wavetime
+  14400->7200). Probe hover before concluding a control is dead.
+- `capture_sector()`'s toast label has left `OverlayLayer` within ~0.6 s, so a
+  delayed read looks like nothing rendered. The signal recorders still capture
+  `MindHud.toast` + the `MindUi` toast, and
+  `MindHud.push_toast("probe", "ok")` read in the same eval shows the rendered
+  label synchronously — use that for the render hop instead of a sleep.
+- Evidence: `runs/20261008-225009-ev0053-hud-twin/`
+  (`godot/state-01-baseline-hud.json`, `godot/state-03-capture-toast.json`,
+  `godot/step-03-captured.png`, `godot/game.log`); chain updated
+  (`chains/hud-wave-enemies-skip.md`).
+
+## 2026-10-08 — loop-2 worktree runtime dir exceeds the 108-byte UNIX socket limit; killed editors leave embedder sockets
+
+- The worktree `.opencode/loops/bin/run-godot-editor.sh` resolves loop vars
+  relative to its own location, so a loop-2 launch from
+  `Mindustry-Godot-loop2/.opencode/...` uses the worktree loop dir. Godot's
+  Wayland embedder socket path there
+  (`.../Mindustry-Godot-loop2/.opencode/loops/run/loop-2/wayland/godot-wayland-0`,
+  108 chars + NUL) is over the 108-byte limit: the editor logs `socket path
+  "..." plus null terminator exceeds 108 bytes` / `Can't connect to a Wayland
+  display` and falls back to X11, where the worktree Xwayland `:3` had already
+  died (`X connection to :3 broken` killed the embedded game). Launch loop-2
+  through the main checkout instead — `$PARITY_MAIN/.opencode/loops/bin/
+  run-godot-editor.sh` — whose `.../Mindustry-Godot/.opencode/loops/run/loop-2/
+  wayland` dir is 102 bytes and matches the session env/MCP paths.
+- A killed (`godot_editor_edit quit` or SIGTERM) editor leaves its
+  `godot-wayland-*` socket + `.lock` behind; the next editor's bind fails while
+  the path exists (`Can't bind embedding socket`), so remove the stale files in
+  `$PARITY_WAYLAND_DIR` before relaunching. Beware: a stale socket can also be
+  held by an unrelated desktop process, so `ss -xlp` (not the file alone) tells
+  you whether a listener is live.
+- The worktree launch also spawned duplicate `wayland-mind2`/`mind2-java`
+  weston compositors under the worktree dir while the main-path ones (session
+  env) stayed up; the duplicate java weston's Xwayland died mid-run. Use the
+  main wrapper so the session's compositors are reused.
+- Evidence: `$PARITY_LOOP_DIR/logs/editor.log` 2026-10-08 20:30-20:35;
+  `runs/l2-20261008-203338-input_controls-godot/`.
+
+## 2026-10-08 — hints panel swallows center clicks; edge pan drifts the camera between evals
+
+- After ~8 s of playtime the HUD `hints` fragment shows its full-screen
+  `Panel` with `mouse_filter` STOP; `MindInput.ui_captures_at` then drops world
+  presses at the point, so a left tap on a placed building looks dead
+  (`block_config` stays hidden, `action_count` unchanged). Exhaust the
+  catalogue before clicking (`hints.set("_next", 27)` + `complete_hint()`) or
+  click off-center; one eval probing STOP hits at the point
+  (`find_children("*", "Control", true, false).filter(...)`) localizes it.
+- On the headless compositor the OS pointer parks at a window edge, so
+  `MindCamera2D` edge-pans every frame: the camera drifted from (128,128) to
+  (-3947,-3963) between two evals because every mouse injection was overridden
+  by auto-pan. Call `Camera2D.set_process(false)` before `center_on_tile` and
+  resolve `tile_to_screen` in a **later** eval (the canvas transform updates at
+  frame end, so the same-eval point after a recenter is stale); restore
+  `set_process(true)` before teardown.
+- Reusable sequence in `chains/block-config-fragment.md`; evidence
+  `runs/l2-20261008-203338-input_controls-godot/` (pid 249159; fragment
+  `_config.options` 22 after the fix).
+
+## 2026-10-09 — loop-2 worktree-wrapper launch hang repeats; `godot_input action=text` drops keystrokes
+
+- Launching `.opencode/loops/bin/run-godot-editor.sh` from the loop-2 worktree
+  (instead of `$PARITY_MAIN/.opencode/loops/bin/run-godot-editor.sh`) reproduced
+  the 2026-10-08 entry: it started duplicate `wayland-mind2`/`mind2-java`
+  westons under the worktree runtime dir and the editor fell back to X11 on the
+  worktree Xwayland `:3`, which died. Then `godot_game status` timed out and
+  every later MCP call reported `BRIDGE_NOT_CONNECTED` while `ss -ltnp` showed
+  `127.0.0.1:6980` LISTEN with a growing backlog (the editor was hung on the
+  dead embedded game; the game pid stayed a zombie). Recovery: kill the editor
+  and the duplicate westons, `rm` the stale `godot-wayland-0{,.lock}` in
+  `$PARITY_WAYLAND_DIR` (no live listener per `ss -xlp`), relaunch with the main
+  wrapper (`[parity-loop 2] editor: display=:2` and no "starting weston" line is
+  the tell). Evidence: `$PARITY_LOOP_DIR/logs/editor.log` 2026-10-09 00:01;
+  `runs/l2-20261009-000205-ev0066-save-menu-godot/`.
+- `godot_input {"action":"text"}` does not type into a focused `LineEdit` with
+  this addon: `runtime_autoload.gd _input_text` sends one `InputEventKey`
+  object for both the press and the release in the same frame, and the engine
+  discards it ("input event object is being parsed more than once in the same
+  frame", logged as an error). The field stays empty and the prompt's OK stays
+  disabled. Workaround: set `field.text` in an eval and emit the field's own
+  `text_changed` (`f.text_changed.emit(str(f.text))`; assigning `text` alone
+  does not emit it), then click OK with real mouse input — everything after OK
+  is the real UI path. Sequence:
+  `chains/pause-save-dialog.md` step 5.
+
+## 2026-10-09 — Rust-only methods are not eval-reachable; `godot_game stop` skips the scene teardown
+
+- Calling a `mind-gdext` method that is `pub fn` without `#[func]` from
+  `godot_exec` (here `MindSimHost.tile_region`) errors with `Invalid call.
+  Nonexistent function`, times the eval out after 15 s and trips break-on-error
+  (`godot_debugger sessions` -> `paused: true`), pinning the frame loop; recover
+  with `godot_game stop` + `play` (resume re-breaks). Probe tiles through a
+  `#[func]` sibling instead: `MindCampaign.write_schematic_selection(x,y,x,y)`
+  returns `""` for air and a base64 `.msch` payload for a placed block, without
+  the multi-MB `get_state_json` dump. Evidence:
+  `runs/20261009-003000-ev0064-autosave-playtime-godot/`.
+- `godot_game stop` terminates the game process without running a scene
+  teardown, so `Node.exit_tree` hooks (`MindCampaign`'s `Control.dispose` exit
+  save) never fire; an msav mtime that does not move after `stop` is not
+  evidence a dispose hook is missing. Exercise the dispose path with a clean
+  quit: `godot_exec eval "get_tree().quit()"` (the eval may not return; the
+  write lands), then check the file mtime/sha and the editor log.
+  Evidence: same run, steps 08-09 (`saved on exit` only appears after the clean
+  quit).
+- Save-interval trap for repro design: the Settings slider is
+  `sliderPref("saveinterval", 60, 10, 5*120, 10, seconds)` (`SettingsMenuDialog.java:373`;
+  `MindUi.settings_set` clamps to the same bounds), and `Saves.update` keeps
+  upstream's `time > saveinterval * 60` math, so the shortest interval a player
+  can set is 10 -> **600 s of playing ticks** (>= 36000 ticks), not the 60 s the
+  label suggests (`setting.seconds` formats the raw value). Chunk
+  `step(5000..12000)` while paused-without-dialog to cross it; the pump consumes
+  each chunk's delta on the next frame.
+
+## 2026-10-09 — save/load restore leg: positional dump-meta, unpaused post-restart pump, stale editor lib
+
+- `mind-headless io dump-meta` takes the save path **positionally**; `--file`
+  is rejected (`error: unexpected argument '--file' found`). Use
+  `client/bin/rust/debug/mind-headless io dump-meta <file> --json`. Needed for
+  the EV-0065 meta evidence; `runs/20261009-005513-ev0065-save-restore-godot-2/godot/meta-dump.json`.
+- After `godot_game stop` + `play` the fresh sim is **unpaused**: the fixed-step
+  pump advances during each MCP round-trip, so a post-load "no production"
+  reading over `step(600)` was confounded (the returned tick had jumped ~1000
+  ticks past the pre-step value). Always `SimHost.set_paused(true)` before
+  `load_slot`/`step` measurements; the deterministic replay then showed copper
+  3 → 6 → 10. The round-1 run dir (`...005006-ev0065-save-restore-godot`) keeps
+  the confounded trace; round 2 is the verified one.
+- The editor must be relaunched after `tools/build.sh`: the loop's running
+  editor (pid 113152, started 00:29) still had the previous
+  `libmind_gdext.so` mmap'd; `godot_game play` bindings advertised the new
+  method but the engine ran the old code. Kill+relaunch via
+  `.opencode/loops/bin/run-godot-editor.sh` before the run (the skill already
+  documents this; this run re-confirmed the cost — `runs/20261009-005513-ev0065-save-restore-godot-2/`).
+- Grid-derived behavior state is not part of the save format: `materialize_map_buildings`
+  now calls `refresh_drill_ore` for spawned drills, or a loaded save's drill
+  keeps `dominantItem = None` and never mines (this was the EV-0065 production
+  half; see `chains/campaign-save-restore.md`).
+
+## 2026-10-09 — loop-2 EV-0056 Godot leg: main-wrapper editor launch worked; wheel injection recipe
+
+- An editor from the loop's previous session (pid 65783, started 00:01 with the
+  main wrapper, worktree project `<worktree>/client`, `:2`) was **still alive
+  and still owned** `127.0.0.1:6980`; the orchestrator's "bridge is down" state
+  was a health-check miss, not a dead editor. Launching a second editor with
+  the main wrapper (pid 133811) worked but was redundant and could not bind
+  6980. Check `ss -ltnp | grep $PARITY_BRIDGE_PORT` before launching an editor,
+  and reap only your own redundant process. The whole leg ran in the
+  pre-existing editor: `godot_game play` + explicit `res://scenes/game.tscn`
+  attached at pid 135151, window 1152x648.
+- `godot_input` has no wheel action; the shared rotate axis (default `scroll`)
+  is driven by pushing an `InputEventMouseButton` through the viewport
+  (`button_index = MOUSE_BUTTON_WHEEL_UP/DOWN`, `pressed = true`,
+  `factor = 1.0`, `position` set). WHEEL_UP rotated pending placement +1,
+  WHEEL_DOWN -1 (`get_input_state_json().rotation` 2->3->2, `last_action=rotate`)
+  — sequence recorded in `chains/placement-rotation.md` step 3.
+- Port behavior worth knowing (documented in the chain, not a friction): with
+  the block selection cleared, holding R and scrolling over a placed building
+  enqueues one Rotate via the R press edge **and** zooms the camera
+  (4.0->5.0); upstream suppresses zoom while `rotateplaced` is held.
+- Evidence: `runs/l2-20261009-001432-ev0056-rotation-twin/` (`godot/step-results.json`,
+  pid 135151; `godot/log-errors.json` empty).
+
+## 2026-10-09 — campaign-views eval times out; sector panel markup is a finding, not a label bug
+
+- `godot_exec` eval calling `MindCampaign.campaign_views_json("serpulo")` timed
+  out after 30 s from the planet dialog; `godot_debugger sessions` reported
+  `paused: false` afterwards and later evals answered. Avoid the campaign-views
+  endpoint in eval; read `get_sector_state()` plus the dialog's
+  RichTextLabel/Label text instead.
+- Recurrence (godot-walk-s1, `runs/20261009-085712-PAR-0037/`, pid 78152): a
+  follow-up eval doing `JSON.parse_string(campaign_views_json(...))` + a
+  `for` loop over `sectors` timed out after 15 s and this time tripped
+  break-on-error — `godot_debugger sessions` showed `paused: true` and the
+  frame loop pinned. Same rule applies: keep `campaign_views_json` out of
+  eval bodies (parse the dialog's own labels), and recover with
+  `godot_game stop` + `play` (`resume` re-breaks).
+- Recurrence 2 (same session/run, pid 80031): even a plain
+  `menu.find_children("*","Button",true,false).filter(...)` + `for` loop with
+  `get_path_to`/`get_global_rect` per button timed out and pinned the loop
+  again. Treat *any* eval body that builds a list with a loop as unsafe on
+  this host; query one known node per eval (`get_children()[i]`, single
+  `get_global_rect().get_center()`) or use native `.map` on a filtered array
+  if a list is unavoidable.
+- Recurrence 3 (same session/run, pid 96741): `JSON.parse_string(get_state_json())`
+  plus `tiles.filter(...)` over the sparse tile list timed out and pinned the
+  loop. The full state dump is megabytes; never parse+filter it inside an eval.
+  Query tile info through a purpose-built endpoint or a `step`-free
+  targeted check instead. Recovery remains `godot_game stop` + `play` (the
+  resumed sector is re-created by the scripted prefix in ~4 calls).
+- Resolve button centers **after** `PlanetDialog._show_planet()` in a *later*
+  eval: calling `_show_planet` and resolving the sector-panel action in one
+  eval returns pre-sort coordinates (Go read as (93,652) once). The deferred
+  `sort_now` needs a frame; a second eval gives the settled (576,613).
+- A facade-path run (`load_sector` + `start_sector` without the planet-dialog
+  Go click) leaves `MenuGroup` visible: the resume world renders *behind* the
+  menu and a `godot_screenshot game` shows the logo/sidebar over the baked
+  menu background, not the live world. Call
+  `UiRoot.set_menu_visible(false)` before judging or capturing a facade-run
+  world. Cost one probe capture (runs/20261009-085712-PAR-0037/godot/probe-flip.png).
+- The world render was y-inverted vs the Java reference (fixed 2026-10-09 in
+  the PAR-0037 working tree): Godot 2D maps +y to screen-down while Java/Arc
+  projects +y to screen-up, so `MindCamera2D` now writes
+  `set_zoom(Vector2(zoom, -zoom))`. A quick orientation check after any camera
+  change: `tile_to_screen(132,48)` (groundZero copper) must sit BELOW
+  `tile_to_screen(129,55)` (the core); ground-truth rows come from the map
+  file (core rows 54-56, copper rows 41-53). Run:
+  `runs/20261009-085712-PAR-0037/`.
+- `tools/godot.sh` resolves only `$GODOT_BIN` -> `godot4` -> `godot4-mono`;
+  this host ships the binary as `~/.local/bin/godot`, so the headless
+  import/parse gate needs `GODOT_BIN=$HOME/.local/bin/godot bash tools/godot.sh
+  --headless --editor --quit --path client` (plain `tools/godot.sh` exits with
+  "no Godot binary found"). Used 2026-10-09 for the round-4 HUD scene changes.
+- UI state read immediately after `godot_game play` can be pre-`_ready`/
+  pre-bind: a probe in the same evaluate-call as the first play reported the
+  placement panel visible and `clear_planet_campaign_saves` returning false,
+  while the same probe one call later was correct. Re-query UI/campaign state
+  after the first eval before concluding a scene/script change failed (cost two
+  restarts + an editor relaunch chasing a phantom stale script, round 5).
+- Fragment **root** visibility is manifest-driven: `ui_root._bind` sets
+  `instance.visible` from the fragment entry's `hidden` flag, overriding a
+  fragment `_ready` that hides its own root. Collapse an inner child (e.g.
+  `placement`'s `Panel`) instead of the fragment root. Run:
+  `runs/20261009-085712-PAR-0037/` (round 5).
+- gdext 0.5 enum paths are module-scoped, not class-nested:
+  `godot::classes::canvas_item::TextureFilter::NEAREST` compiles while
+  `godot::classes::CanvasItem::TextureFilter` fails with E0223 (cost one
+  build+editor cycle in round 7). `CanvasItem.texture_filter` is inherited by
+  children (`PARENT_NODE`), so setting it once on `MindWorldRenderer` covers
+  every band mesh; at integer camera positions nearest vs linear renders
+  identically (sub-pixel sampling only).
+- PIL crops outside the image bounds return empty/black images, so two
+  off-screen crops compare as a 0.0 diff and look "pixel-identical" - a false
+  positive that cost analysis time in rounds 7-8. Assert
+  `0 <= x < 1152` and `0 <= y < 648` for both crop corners (or use
+  `crop(box)` only after clamping) before trusting any tile comparison.
+- Color-mask landmarks for camera mapping must be unique: an "orange" mask
+  (r>150, 60<g<170, b<110) matches the Java player mech AND the copper ore as
+  well as the core's centre, so centroid-derived cameras came out inconsistent
+  (round 9: implied Java camera (1030.8,447.7) vs the known viewpos
+  (1032.0,440.3)). Pick a landmark with no confusers, or verify the mapping
+  against a second independent feature, before using screen->tile math for a
+  verdict.
+- Orphaned game processes survive `godot_game stop` + editor kills across many
+  rounds and burn ~30-200% CPU each (rounds 1-9 left seven of them). After a
+  session ends, sweep `pgrep -f "Mindustry-Godot/client" | grep -v session2`
+  (leave sibling-loop worktrees alone) and kill the game children.
+- The planet dialog sector panel exposes raw bundle markup in
+  `RichTextLabel.text` (`[scarlet]Under attack!`,
+  `[red]:warning:[accent] Sector currently under attack...`) and renders it
+  literally on screen (PAR-0016) — record as a parity finding, not a
+  measurement problem.
+- Run: `runs/20261009-052658-seed-campaign/`.
+
+- State alignment for campaign comparisons: back up
+  `app_userdata/Mindustry-Godot/{saves,config}`, call
+  `MindCampaign.clear_campaign_saves()` (`@settings.clearcampaignsaves`
+  semantics: planet stats, sector info, sector save slots), then
+  `godot_game stop` + `play`; the first-run chooser returns and the fresh
+  sector panel matches Java's fields. Used 2026-10-09:
+  `runs/20261009-052658-seed-campaign/` (iteration 2).
+
+- In-game captures include two debug overlays with no Java counterpart:
+  `HudGroup/hud/FpsBox/{Fps,Memory,Ping}` and
+  `HudGroup/performance/Panel/Label` (fps/cpu/mem). Set those nodes'
+  `visible = false` in an eval before world captures, or the pixel diff is
+  dominated by them. Run: `runs/20261009-052658-seed-campaign/` (iteration 3).
+
+- Camera drift during idle in-game probes: with the OS pointer parked near the
+  game-window edge, the port edge-pans continuously (`Camera2D` center reached
+  y=32870 on a 256x256 map) and captures show an empty world while the HUD
+  stays live. Park the pointer mid-window to stop it; recover with
+  `get_node("/root/Spine/World/Camera2D").recenter_player()` (snaps to and
+  follows the best core). Run: `runs/20261009-052658-seed-campaign/`
+  (iteration 4, PAR-0031).
+
+## 2026-10-09 — session-2 worktree missing generated asset outputs (placeholder-quad renderer); exec timeout after chooser OK
+
+- Symptom: session-2 game boot logs `[E] [assets] missing manifest
+  .../assets/sprites/sprites.atlas.json`, `[W] MindWorldRenderer: atlas
+  manifest unavailable; using placeholder quads`, `[W] [shaders] index
+  missing: .../assets/shaders/shader.index.json`. `assets/sprites/` has 12
+  entries vs 19 in the main checkout; the generated pipeline outputs
+  (`sprites*.png`, `sprites.atlas.json`, `fallback/`, `block_colors.png`,
+  `assets/icons/icon_codes.json`, `assets/sounds.index.json`, `assets/locales`,
+  `assets/shaders/godot/`, `assets/shaders/shader.index.json`) are gitignored
+  and were never seeded by `tools/parity-session.sh` (it copies only
+  `client/bin/rust` and `client/.godot`). Workaround: run `bash tools/pack.sh
+  pack` in the session worktree (self-contained; do not copy outputs from
+  another checkout that may be on a different commit; `tools/pack.sh` is not
+  executable in the worktree, invoke it with `bash`). Run:
+  `runs/20261009-085822-PAR-0044/`.
+- Symptom: a `godot_exec` eval timed out after 15 s immediately after clicking
+  OK in the `campaign.select` chooser (planet page opening); the game stayed
+  alive (fps 90, pid unchanged) and later evals answered. Workaround: retry
+  after the dialog transition settles; avoid evals during planet-view load.
+  Run: `runs/20261009-085822-PAR-0044/`.
+
+## 2026-10-09 — `godot_exec` eval with a nested `var` in an `if` block pauses the game (break-on-error)
+
+- Symptom: an eval of the shape `if dlg:\n vis = dlg.visible\n var t =
+  dlg.get_node_or_null(...)` timed out after 15 s and left
+  `godot_debugger sessions` -> `paused: true` while a trivial eval still
+  answered and `Time.get_ticks_msec()` advanced but `SimHost.get_tick()` was
+  frozen. Two evals in a row; every retry of the same body re-broke.
+- Cause: the eval wrapper rejects/mangles a `var` declaration nested inside an
+  `if` block; the body errors, break-on-error pins the frame loop.
+- Workaround: keep every declaration at the top level of the eval body and
+  guard later:
+  `var vis = false\nif dlg: vis = dlg.visible\nvar tn = null\nif dlg: tn = ...`.
+  After a timeout always check `godot_debugger sessions` and recover with
+  `godot_game stop` + `play` (re-stamp the pid); `resume` re-breaks.
+- Run: `runs/20261009-085822-PAR-0044/`.
+
+## 2026-10-09 — launch path: 3-arg `start_sector` call errors and pauses the game (break-on-error)
+
+- Symptom: clicking Launch in the `launch_loadout` dialog logged
+  `godot-rust function call failed: MindCampaign::start_sector() Reason: function
+  has 2 parameters, but received 3 arguments` + `Error calling method from
+  'callv'`; the sector still loaded and `spawn_player_unit: alpha at (1028.0,
+  436.0)` ran, but `godot_debugger sessions` showed `paused: true` and
+  `SimHost.get_tick()` froze while `Time.get_ticks_msec()` advanced.
+- Cause: `client/ui/dialogs/planet_dialog.gd::_launch` called
+  `campaign.callv("start_sector", [planet, sector, loadout])` when a loadout
+  index was selected; the real 3-arg entry point is
+  `MindCampaign.start_sector_with_loadout(planet, sector, loadout_json)` and the
+  dialog only has the index (no item stacks). The error aborted the call, the
+  `result == null` fallback then launched without the loadout, yet the engine had
+  already broken.
+- Workaround/fix: the dialog now calls the 2-arg `start_sector` directly
+  (loadout selection remains unimplemented; tracked by PAR-0054). Recover a
+  paused game with `godot_game stop` + `play` (re-walk the launch).
+- Run: `runs/20261009-092821-PAR-0044/`.
+
+## 2026-10-09 — `godot_input sequence` frame_delay is process frames, not sim ticks; timer hints advance across tool gaps
+
+- Symptom: a 54-frame S hold moved the player ~40 tiles (~108 sim ticks) instead of
+  the reference's ~20 tiles; the after-S capture showed `hint.desktopShoot`
+  instead of `hint.zoom` because 15 s of wall time passed between the movement
+  call and the screenshot (assistant think time), so the timer auto-advanced.
+- Cause: `sequence` awaits `get_tree().process_frame`, so the hold length is
+  wall time = frames/fps; the sim catch-up pumps ~60 ticks/s regardless. And
+  the hint driver's 15 s fallback keeps running between tool calls.
+- Workaround: drive exact sim ticks with `set_paused(true)` + `SimHost.step(54)`
+  + `set_paused(false)` between key down/up, and keep movement + capture in ONE
+  `execute` block (pad with a few dummy evals for the camera lerp to settle);
+  never rely on think-time gaps for settle.
+- Run: `runs/20261009-092821-PAR-0044/`.
+
+## 2026-10-09 — world clicks are consumed by `MindInput`; `MindSimHost::unhandled_input` never fires
+
+- Symptom: `godot_input mouse_button` on a world tile (resolved via
+  `Camera2D.tile_to_screen`, `coords: viewport`) placed nothing and produced no
+  `mouse tile ... applied` log; `gui_get_hovered_control()` reported
+  `HudGroup/hud` (mouse_filter PASS), and setting `hud`/`UiRoot` to IGNORE
+  changed nothing.
+- Cause: `mind-gdext/src/input/mod.rs::MindInput::input` handles every world
+  mouse press itself: it skips when a STOP-filter control owns the point, then
+  calls `bridge.handle(...)` and `mark_input_handled()` (viewport
+  `set_input_as_handled`), so `MindSimHost::unhandled_input` is dead code for
+  real clicks. World-click semantics (placement drags, `tileTapped`) live in
+  `mind-gdext/src/input/desktop.rs` and enqueue `SimCommand`s through
+  `enqueue_commands` -> `MindSimHost::enqueue_sim_command`.
+- Workaround: implement new world-click behavior in `desktop.rs` (this is where
+  PAR-0045's `tryBeginMine`/`tryStopMine` mining order landed), never in
+  `unhandled_input`.
+- Run: `runs/20261009-095320-PAR-0045/`.
+
+## 2026-10-09 — editor died mid-leg; orphan game process from a killed editor
+
+- Symptom: `godot_exec` started failing with `BRIDGE_NOT_CONNECTED
+  (host=127.0.0.1:6980)`; `pgrep` showed no editor for the session worktree but a
+  stale game process (`--editor-pid 77445` from an earlier relaunch) still alive.
+- Workaround: kill the orphan game process, relaunch the editor with
+  `runs/20261009-092821-PAR-0044/relaunch-editor.sh`; re-walk from the menu.
+- Also: a GDScript call to a non-`#[func]` Rust method (`player_can_mine`) errors
+  and trips break-on-error; `godot_debugger resume` does not stick — recover with
+  `godot_game stop` + `play`. Run: `runs/20261009-095320-PAR-0045/`.
+
+## 2026-10-09 — PAR-0037 round 9: `tile_blocks()` + `for` loop in one eval timed out and pinned the frame loop
+
+- Symptom: `godot_exec` eval walking `SimHost.tile_blocks()` (whole-map block list) with a
+  GDScript `for` loop timed out after 15 s; `godot_debugger sessions` then reported
+  `paused: true` while `get_tick()` still answered. The loop-free rule applies to the
+  *loop body budget*, not just `while`: `tile_blocks()` alone is already heavy.
+- Failing call: `godot_exec {"action":"eval","params":{"code":"var blocks = h.tile_blocks() ... for tb in blocks: ..."}}`
+- Workaround: never iterate `tile_blocks()` in an eval; probe tiles from `get_state_json()`
+  parsed host-side, or add a targeted `#[func]` accessor. Recover the pinned loop with
+  `godot_game stop` + `play` (re-walk the fork; the campaign save survives the restart).
+- Run: `runs/20261009-132040-PAR-0037/`.
+
+## 2026-10-09 — PAR-0037 round 9: byte-identical captures are not proof of staleness on a static scene; band-hide probes localise a render diff
+
+- Symptom: `godot_screenshot game` returned the exact same `size_bytes` (and bytes) across two
+  processes (pid 79240, pid 82352) and repeated calls; initial reading suspected a stale
+  capture, but `Engine.get_frames_drawn()` advanced 15343 -> 15349 and the scene updates.
+  Cause: the resumed Ground Zero world is static (no waves, hint fixed, player idle), so the
+  encoding is identical. Do not classify identity as staleness without a state change.
+- Useful technique from the same round: to tell a **world-render** difference from a **UI**
+  difference, hide the layers one at a time and re-capture — `get_node("/root/Spine/Ui").visible
+  = false`, then `World/Renderer` band nodes (`Band_floor_*`, `Band_block*`, `ObjectiveMarkers`).
+  The grey copper field stayed after hiding UI (world), disappeared only with the floor bands
+  hidden, which located the missing floor under ore overlays in `render/floor.rs`.
+- Run: `runs/20261009-132040-PAR-0037/`.
+
+## 2026-10-09 — strings updated, but a running MCP keeps serving its boot-time copy; docs still teach the broken `text`
+
+- The 2026-10-09 pass folded this file's entries into the tool descriptions
+  (`input.py`, `exec_tool.py`, `game.py`, `screenshot.py`, `filesystem.py`,
+  `batch.py`, `debugger.py`, `game_time.py`), the `server.py` instructions and
+  the `playtest` prompt, plus `.opencode/skills/playtest/SKILL.md` — all
+  uncommitted working-tree edits; the uv-tool install
+  (`~/.local/share/uv/tools/open-godot-mcp/...`) was refreshed to match. No
+  front-facing string is stale relative to the files.
+- Tool schemas load at server-process start: at 23:41 three
+  open-godot-mcp/computer-mcp pairs were alive (22:36, 22:38, 23:37); the first
+  two predate the 23:34-23:36 edits and still advertise the old text. Restart
+  the MCP/session after editing front-facing strings; do not re-verify the file
+  against a stale running server.
+- Still uncovered (chain-only or project code guidance, not in the strings):
+  `MindUi.toast` method-vs-signal (connect by name), sim is unpaused after
+  `stop`+`play` (set_paused before `load_slot`/`step` measurements), a
+  data-driven fragment rebuild read in the same eval sees queue_freed children,
+  `MindUi.campaign_views()` fixture fallback, pre-`_ready` UI reads right after
+  `play`, `tools/godot.sh` needing `GODOT_BIN`.
+- Docs lag: `../Open-Godot-MCP/Docs/03-Realtime-Testing/Interactive-Playtest.md`
+  still says TYPE = `grab_focus()` + `godot_input text` (the broken path the
+  tool description now forbids), and `Docs/02-Tools/Input.md` lacks the
+  text/wheel/flush notes — update them before pointing agents at the docs.
+- Evidence: `git diff` in `../Open-Godot-MCP` (10 files) and the skill; process
+  table at 2026-10-09 23:41; uv-tool mtimes 23:35:35 / 23:36:18.
+
+## 2026-10-09 — PAR-0037 rounds 10: probe right after the chooser OK can read `_selected_sector=-1` (planet view still building)
+
+- Symptom: after Play/Campaign (first-run chooser) + card + OK, an eval in the same `execute`
+  chain read `_selected_sector: -1` and no sector-action button; clicking the (then -1,-1)
+  resolved point mistimed and the dialog closed. Recovered by re-walking from the menu:
+  the second card+OK pass read `_selected_sector: 15` and the Go button at (576,613).
+- Likely cause: `_show_planet` runs `refresh_campaign_views` + panel rebuild; a probe issued
+  in the same round-trip can observe the pre-populated view (`campaign_section("sectors")`
+  still empty) so `_default_sector` finds nothing.
+- Workaround: after clicking OK in the chooser, run the fork-probe as its own `execute`
+  call (or click OK a second time and re-probe) before resolving the sector action; never
+  resolve a click point from a `-1` probe.
+- Run: `runs/20261009-132040-PAR-0037/` (round 10 leg). Second occurrence in two legs.
+
+## 2026-10-09 — PAR-0037 round 10: `get_hud_state` is a MindCampaign method; calling it on `/root/Spine/SimHost` errors and pins the frame loop
+
+- Symptom: `godot_exec` eval `var h = get_node("/root/Spine/SimHost"); h.call("get_hud_state")` timed
+  out after 15 s; the game log then showed `Invalid call. Nonexistent function 'get_hud_state (via
+  call)' in base 'MindSimHost'`, `godot_debugger sessions` -> `paused: true`.
+- Cause: `get_hud_state` lives on `MindCampaign`, not `MindSimHost`; the errored eval trips
+  break-on-error and pins rendering while later evals still answer.
+- Workaround: call `get_hud_state` on `/root/Spine/MindCampaign` only; recover a pinned loop with
+  `godot_game stop` + `play`. Prefer one known method per eval and check the exposing class first.
+- Run: `runs/20261009-132040-PAR-0037/` (round 10 leg).
+
+## 2026-10-09 — PAR-0037 round 11: eval issued in the same call as `godot_game play` races the runtime attach
+
+- Symptom: a `godot_exec` in the same `execute` block as `godot_game play` failed with
+  `RUNTIME_NOT_CONNECTED: No active debugger session`; the next call after a `godot_game status`
+  worked.
+- Workaround: `godot_game play` -> `godot_game status` (`runtime_connected: true`) -> evals;
+  never issue the first eval in the same block that starts the game.
+- Run: `runs/20261009-132040-PAR-0037/` (round 11).
+
+## 2026-10-09 — PAR-0037 round 12: Play/Campaign clicks can miss while the submenu fades; probe between clicks
+
+- Symptom: Play (230,149) + Campaign (460,149) issued in one `execute` returned "ok" but the
+  planet dialog never opened (`DialogLayer/planet.visible == false`, `dialog_stack == []`); the
+  follow-up card/OK clicks landed on the bare menu.
+- Cause: the Play submenu buttons only appear after the fade-in; a click in the same round-trip
+  as the Play click can land before the submenu exists.
+- Workaround: drive the menu walk one click per `execute` and probe `DialogLayer/planet.visible`
+  (or the submenu button list) before the next click; on a miss re-walk from the menu.
+- Run: `runs/20261009-132040-PAR-0037/` (round 12 leg). Third variant of menu-path flakiness
+  this session (see the chooser-OK and play-race entries).
+
+## 2026-10-10 — PAR-0037 round 13: batched view-setup eval (menu hide + overlay hide + center_on_tile) timed out mid-launch
+
+- Symptom: right after a facade `load_sector` + `start_sector`, one eval doing
+  `UiRoot.set_menu_visible(false)` + hiding FpsBox/performance + `Camera2D.center_on_tile(129,55)`
+  timed out (30 s) and `godot_debugger sessions` went `paused: true` with the tick frozen at 3.
+- Workaround: keep view setup to one simple statement per eval after a sector launch (the launch
+  still has deferred UI work queued); recover a pinned loop with `godot_game stop` + `play`.
+- Run: `runs/20261009-132040-PAR-0037/` (round 13 leg).
+
+## 2026-10-10 — PAR-0037 round 13: `MindRender.get_stats()` eval timed out and pinned the loop
+
+- Symptom: `godot_exec {"action":"eval","params":{"code":"var r = get_node(\"/root/Spine/MindRender\")\nreturn {\"stats\": str(r.call(\"get_stats\"))}"}}` timed out (15 s) mid-session;
+  `godot_debugger sessions` -> `paused: true` while trivial evals still answered.
+- Workaround: do not call `MindRender.get_stats()` from an eval while a sector is loaded; read
+  block/render metadata headlessly (`mind-headless content ...`) or from the source instead.
+  Recover with `godot_game stop` + `play` (re-walk/re-load).
+- Run: `runs/20261009-132040-PAR-0037/` (round 13 leg).
+
+## 2026-10-10 — PAR-0037 twin Godot leg: three eval-timeout pins (for-loop, get_viewport hover, if-block hide) — single-statement evals are the safe form
+
+- Symptom: three `godot_exec eval` calls timed out (15 s) and left
+  `godot_debugger sessions` -> `paused: true` while trivial evals still
+  answered; each cost a `godot_game stop` + `play` recovery and a re-walk.
+  Failing bodies: (a) `for ch in dl.get_children():` building a visibility list
+  (same class as the round-9 `tile_blocks()` + `for` timeout); (b) a hover probe
+  starting `var c = get_viewport().gui_get_hovered_control()` — the eval node is
+  not in a viewport, so the call errors on a null receiver; (c) a
+  statement-level `if n != null: n.visible = false` hiding
+  `HudGroup/performance`, around which the game log recorded
+  `Parameter "mesh" is null.` (engine error) at the same minute.
+- Workaround: keep every eval a single statement or a pure ternary chain. The
+  same operations as single-statement evals returned instantly and cleanly (both
+  overlay hides; per-node probes). Hover reads from evals must use
+  `get_tree().root.gui_get_hovered_control()`, not `get_viewport()`. Recover a
+  pinned loop with `stop` + `play`; the campaign save slot survives, only the UI
+  walk must be replayed.
+- Evidence: `runs/20261009-150509-PAR-0037-twin/` (`godot/log-errors.json`,
+  `run.json` game pids 199781/200047/201354/202345/204104; the final run hid
+  both overlays with single-statement evals and captured the clean frame).
+
+## 2026-10-10 — PAR-0037 twin: the chooser OK -> `_selected_sector == -1` race recurred once and self-resolved on the next probe
+
+- Symptom: after Play -> Campaign -> Serpulo card -> OK, the immediate probe read
+  `_selected_sector: -1` / action `@sectors.launch` (round-10 class); the next
+  probe in a separate call read `sel 15`, `groundZero`, `@sectors.go` with no
+  re-walk. In the following walk the same click landed with `sel 15` immediately.
+- Workaround unchanged: never resolve a click from a `-1` probe; re-probe once.
+- Run: `runs/20261009-150509-PAR-0037-twin/`.
+
+## 2026-10-10 — PAR-0046: `player_unit_position` is Rust-only (not `#[func]`); calling it from an eval pins the loop
+
+- Symptom: an eval combining `Camera2D.tile_to_screen(137,53)` with
+  `SimHost.call("player_unit_position")` timed out (15 s) and
+  `godot_debugger sessions` -> `paused: true` (tick frozen while trivial evals answered).
+- Cause: `player_unit_position` has no `#[func]`; the invalid call errors and trips break-on-error.
+- Workaround: read the player position through `get_state_json()` entities or the camera
+  position, or use the `#[func]` `player_mine_tile`/`player_mined_count`; never call Rust-only
+  helpers from an eval. Recover with `godot_game stop` + `play`.
+- Run: `runs/20261009-153006-PAR-0046/`.
+
+- Recurrence 2026-10-10 (PAR-0046): even a SINGLE-statement `set_menu_visible(false)` eval right
+  after a facade `load_sector`+`start_sector` timed out and pinned the loop (the launch still has
+  deferred work queued). Wait a few seconds (or poll a trivial eval) after the launch before any
+  UI eval; recover with stop+play. Run: `runs/20261009-153006-PAR-0046/`.
+
+## 2026-10-10 — PAR-0046: `MindUi.active_dialog` is not a method; calling it pins the loop
+
+- Symptom: eval `ui.call("active_dialog")` (combined with `objective_markers_json`)
+  timed out; `godot_debugger sessions` -> paused:true. The fork + research state in
+  the running game was lost to the mandatory stop+play recovery.
+- Cause: `active_dialog` does not exist on MindUi; the invalid call errors and trips
+  break-on-error. `objective_markers_json` (MindCampaign) is a valid #[func].
+- Workaround: probe dialog visibility via the dialog node itself
+  (`DialogLayer/research.visible`) or `visible_dialog`-style #[var]s; never call
+  unverified facade methods from evals. Recover with godot_game stop+play.
+- Run: `runs/20261009-153006-PAR-0046/`.
+
+## 2026-10-10 — PAR-0046: same-frame close_palette+open_palette leaves auto-renamed duplicate buttons; get_node on the stale name pins the loop
+
+- Symptom: after `p.call("close_palette")` + `p.call("open_palette")` in ONE eval, the
+  categories grid held both generations (8 named + 8 `@Button@NNNN` auto-renames); the
+  next eval's `categories.get_node("category-production")` hit the dying node / null and
+  `(null as Control).get_global_rect()` errored -> break-on-error pin (state lost to stop+play).
+- Cause: `_build_categories`/`_rebuild` `queue_free()` the old children and immediately add
+  the new ones; same-frame the names still collide, so Godot renames the NEW buttons.
+- Workaround: drive the collapse/expand as two separate calls (one frame apart), then
+  resolve targets by iterating the container and skipping `is_queued_for_deletion()` nodes.
+- Run: `runs/20261009-153006-PAR-0046/`.
+- Recurrence 2026-10-10 (PAR-0046 twin): with the research unlock reloading the pane, the
+  category buttons were STILL auto-renamed (`@Button@NNNN`) even though close/open ran in
+  separate evals. Resolve by iterating `p.categories.get_children()` and matching
+  `tooltip_text` ("Production"), never by node name; the block button kept its
+  `block-mechanical-drill` name. Run: `runs/20261009-162304-PAR-0046-twin/`.
+
+## 2026-10-10 — PAR-0046 twin: `/root/MindInput` does not exist; a flush eval on it pinned the frame loop
+
+- Symptom: after a direct `load_sector` launch, an eval doing
+  `Input.flush_buffered_events()` + `get_node("/root/MindInput").get_input_state_json()`
+  timed out; `Engine.get_process_frames()` then froze (1132 for minutes) while evals still
+  answered, `SimHost.is_paused()` false, `get_tree().paused` false.
+- Cause: the input autoload path is `/root/Spine/Input`, not `/root/MindInput` — the null
+  lookup errored (`Node not found: "/root/MindInput"` + null-instance `get_input_state_json`)
+  and break-on-error pinned the frame loop.
+- Workaround: keep the flush eval minimal (`Input.flush_buffered_events()` + pid), read the
+  selection from `SimHost.selected_block()`; recover the pin with `godot_game stop` + `play`.
+  `stop` autosaves the campaign, so re-run `clear_planet_campaign_saves` after the restart
+  (the save slot reappeared in the next boot).
+- Also: `MindCampaign.load_sector` is invalid (the method is on `SimHost`); the wrapper
+  still timed out at 15 s and the error landed in the log — split
+  `SimHost.load_sector` / `MindCampaign.start_sector` / `SimHost.step(3)` into evals.
+- Placement hover: an injected `mouse_motion` did not render the drill ghost over the
+  marker (`godot/crop-target-preview.png` empty); the press+release at the same viewport
+  point placed at (136,52). Judge placement from `get_state_json`, not the preview.
+- Run: `runs/20261009-162304-PAR-0046-twin/` (final pid 280832; first attempt 279613).
+
+## 2026-10-10 — PAR-0049: port research persists across launches; the fork needs `clear_research` + a relaunch
+
+- Symptom: fresh launch after the PAR-0046 twin showed the Mechanical Drill row
+  DISABLED (already unlocked) and the Pneumatic Drill enabled in the research dialog:
+  the port's user:// settings carry `<name>-unlocked`/research state written by the
+  previous run's purchase (`clear_planet_campaign_saves` clears saves, not research).
+- Workaround: call `MindCampaign.clear_research()` (or clear_planet_research(planet))
+  BEFORE stop+play + the sector launch, so the tutorial starts with the drill locked.
+- Run: `runs/20261009-164959-PAR-0049/`.
+
+## 2026-10-10 — PAR-0049 twin Godot leg: one eval combining `core_items_json` + `get_objective_state().slice()` timed out and pinned the loop
+
+- Symptom: after the tutorial ore click (pid 418995, mine [137,53]), the object-state probe
+  `{"pid": OS.get_process_id(), "core": str(c.call("core_items_json")), "obj0": str(c.call("get_objective_state").slice(0,600))}`
+  timed out (15 s); the follow-up probe also timed out (blocked); `godot_debugger sessions`
+  -> `paused: true` (break-on-error pin) while a trivial eval still answered (tick advancing
+  in between). The first call of this shape cannot be split from the culprit by the log alone;
+  `get_objective_state` alone (str(), no slice) and `clear_research`/`start_sector` had all
+  answered instantly earlier in the same session.
+- Workaround: recover with `godot_game stop` + `play` (new pid 420222, `paused:false`); the
+  replay restarts from `clear_research` + `clear_planet_campaign_saves` — do not call the combo
+  again; call `core_items_json` and `get_objective_state` separately and never `.slice()` the
+  result of `call()`.
+- Evidence: run `runs/20261010-060551-PAR-0049-twin/` (godot leg, pid 418995 -> 420222).
+
+- Follow-up 2026-10-10 (same PAR-0049 twin run, final investigation): the pin is caused by
+  **`core_items_json` not existing on `MindCampaign` in the final lib** — the game log records
+  `Invalid call. Nonexistent function 'core_items_json (via call)' in base 'MindCampaign'.`
+  and the errored eval trips break-on-error (the eval wrapper times out at 15 s while the loop
+  stays `paused: true`). Calling it alone reproduces the pin. `campaign_views_json` (the
+  documented slow one) timed out at 30 s WITHOUT pinning the loop. Both calls must be avoided;
+  use `MindCampaign.get_objective_state()` and `SimHost.get_group_counts()` for the R05-family
+  asserts. Same run also logged `Parameter "mesh" is null.` alongside the `Wrong texture
+  folder` world-sprite placeholder labels for the placed drill/conveyors (icons render fine).
+
+## 2026-10-10 — the 2026-10-09 gap list is folded in; running servers still serve the old strings
+
+- Closed since the 2026-10-09 entry: the docs no longer teach `godot_input text`
+  (`Docs/03-Realtime-Testing/Interactive-Playtest.md` TYPE/WHEEL sections and
+  `Docs/02-Tools/Input.md` now carry the fresh-InputEventKey recipe, wheel
+  injection, the flush rule, and the fade-click rule), and the front-facing
+  strings gained the overnight traps — single-statement evals, a method that
+  does not exist on the called class pinning the loop, `MindRender.get_stats()`,
+  for-loops over dialog children, the `play`/eval attach race, post-launch
+  deferred evals, palette auto-renames, and sentinel-probe clicks.
+- Both skills carry them too, and `.opencode/skills/parity-eval/SKILL.md` was
+  synced to the WORKFLOW_PROMPTS.md ledger protocol it had drifted from (claim
+  under flock, `fix.plan` resume, the twin settle).
+- Tool schemas still load at server-process start: the three server pairs alive
+  before these edits predate them. Restart the MCP/session before trusting the
+  descriptions an agent sees (the uv-tool install was refreshed at edit time).
+- Evidence: `git diff` in `../Open-Godot-MCP` (tools/prompts/server + Docs) and
+  both skills; `uv tool install --reinstall ../Open-Godot-MCP` output.
+
+## 2026-10-10 — silent break-on-error during a rotation replay: null eval results, frames pinned
+
+- Symptom: four `godot_exec eval` "readTile" results (flush + `step(1)` + a
+  `for t in tiles` scan + input-state read) came back `ok:true, result:null` in a
+  burst; `Engine.get_process_frames()` then read a constant 1908 while eval
+  calls still answered, and `godot_debugger sessions` reported `paused: true`.
+  `godot_log errors` was empty (the break is debugger-side; the eval wrapper
+  can still return null results while the session is paused, and
+  `SimHost.step(n)` still advances the tick).
+- Exact calls: `godot_exec eval {"code":"Input.flush_buffered_events()...for t
+  in st[\"world\"][\"tiles\"]...last_action..."}` x4 after 8 discrete R
+  press/release `godot_input` calls in the placement-rotation chain; recovery
+  probe `godot_debugger {"action":"sessions"}` -> `[{active:true,paused:true}]`.
+- Workaround: recover with `godot_game stop` + `play` (resume re-breaks); then
+  drive one read per round-trip and read the tile with a single targeted scan.
+  A paused-at-error session still applies `SimHost.step`, so a test can appear
+  to progress while the visual pump is frozen — read `get_process_frames()`
+  twice before trusting frames or captures.
+- Run: `runs/20261010-084701-placement-rotation/` (pid 485970; the rotation
+  values before the break were captured in the response transcript).
+- Bullet (same day, recovered session pid 487152): the suspect is one *compound*
+  eval body — `Input.flush_buffered_events()` + `SimHost.step(1)` +
+  `JSON.parse_string(get_state_json())` + a `for` tile scan + an input-state
+  read. Replayed alone it TIMED OUT at 15 s and pinned the debugger again
+  (`sessions paused:true`, frames 978 constant, tick still advanced by `step`).
+  Split it: `step(1)` in one eval, the tile read via
+  `str(get_state_json()).find/substr` in a second, the input state as a bare
+  `get_input_state_json()` string in a third.
+
+## 2026-10-10 — Escape lands on the LoadingLayer branch after a facade launch (pause dialog never opens)
+
+- Symptom: after `start_sector_with_loadout` + `set_paused(true)`, three
+  `godot_input key Escape` (and one `push_input(InputEventKey)` fallback) left
+  `dialog_stack []` — `UiRoot._on_escape()` consumes Escape while
+  `LoadingLayer/loading.visible` is true (`client/ui/ui_root.gd:91-95`), so the
+  key only hits the loading branch. `io_pending` was 1 because the sim was
+  paused, so the launch IO job never drained; after `step(30)` the flag cleared
+  but `loading.visible` stayed true for another poll cycle.
+- Exact calls: `godot_input {"action":"key","params":{"key":"Escape"}}` x3 with
+  a `get_node("/root/Spine/Ui/UiRoot/LoadingLayer/loading").visible` probe
+  between; the eval fallback `get_viewport().push_input(InputEventKey KEY_ESCAPE)`
+  behaved identically.
+- Workaround: `step(30)` to drain IO, wait one loading-fragment poll (~0.2 s)
+  until `loading.visible == false`, then Escape opens `paused`.
+- Run: `runs/20261010-085323-paused-dialog-buttons/` (pid 488187).
+
+## 2026-10-10 — `MindUi.dialog_stack()` right after the Custom Game click panics the Rust autoload
+
+- Symptom: an eval that read `str(get_node("/root/MindUi").call("dialog_stack"))`
+  immediately after the Custom Game click TIMED OUT at 15 s; `godot_log errors`
+  then carried a crash report and `panic before unwinding into Godot: Gd<T>::bind()
+  failed, already bound; T = mind_gdext::ui::ui_host::MindUi ... in
+  MindUi::dialog_stack()`. Crash reports:
+  `crash-report-10_10_2026_09_04_17.txt`, `..._09_04_52.txt`, `..._09_05_48.txt`.
+- Exact call: `godot_exec {"action":"eval","params":{"code":"Input.flush_buffered_events()\nreturn str(get_node(\"/root/MindUi\").call(\"dialog_stack\"))"}}`
+  issued in the same execute chain as the Custom Game click
+  (`runs/20261010-090352-custom-game-map-list/`, pid 494734/495421).
+- It is a **build-window race, not persistent**: opening the dialog, waiting
+  ~4 s, then `has_dialog()` -> true and `dialog_stack()` -> `["custom"]` both
+  succeed (pid 496365, same run dir). The dialog's build path holds the mutable
+  MindUi bind for a few frames after the click.
+- Bullet (same day, pid 497422): the same panic fires on the **close** side —
+  two Escapes (content -> database -> menu) followed by an immediate
+  `dialog_stack()` wrote `crash-report-10_10_2026_09_09_19.txt`
+  (`in MindUi::dialog_stack()`) and pinned the loop. Treat every dialog
+  open/close as needing a settle beat before any `MindUi.dialog_stack()` read;
+  `has_dialog()` and `DialogLayer/<name>.visible` did not panic.
+- Workaround: after opening a runtime-built dialog, wait/settle before any
+  `MindUi.*` stack read; probe with `DialogLayer/<name>.visible` /
+  `_maps().size()` first, and derive row flags from
+  `str(<dialog>.call("_maps"))` host-side rather than iterating rows in-eval
+  (`all`/`any`/`map`/`slice` and even a plain `for r in rows:` over the rows
+  array also timed out — the safest read is a single expression).
+- Run: `runs/20261010-090352-custom-game-map-list/`.
+
+- Bullet (same day, database audit, pid 496365): `dlg.get_node_or_null("tab-serpulo")`
+  returned null (the tab is not a direct child) and the chained
+  `(b as Control).get_global_rect()` on the null instance tripped
+  break-on-error -> 15 s timeout + `debugger sessions paused:true`. Resolve dialog
+  children with `find_children("<name>", "Button", true, false)[0]`, never a
+  guessed direct path; a null deref pins exactly like a bad method call.
+  Run: `runs/20261010-090740-database-grid-audit/`.
+
+## 2026-10-11 — bare autoload identifier in an eval body pins the loop (session 2, display :11, bridge 6980)
+
+- Symptom: the first eval after `godot_game play` timed out at 15 s; `godot_debugger
+  sessions` then reported `paused: true` (break-on-error pin), while a trivial
+  `OS.get_process_id()` eval still answered (pid 364376).
+- Exact failing call: `godot_exec {"action":"eval","params":{"code":"return
+  {\"pid\": OS.get_process_id(), \"menu\": MenuGroup.visible, \"project\":
+  ProjectSettings.globalize_path(\"res://\")}"}}` — `MenuGroup` is not resolvable
+  as a bare identifier in the eval body (autoloads exist as scene nodes, not eval
+  globals).
+- Workaround: read UI nodes via `get_node("/root/Spine/Ui/UiRoot/MenuGroup")`
+  (`/root/MindUi`, `/root/MindHud` for the Rust autoloads); recover a pinned loop
+  with `godot_game stop` + `play`.
+- Run: `runs/20261011-091537-PAR-0015/`.
+
+- Bullet (2026-10-11, session 2 bootstrap): the session-2 worktree is created with
+  seeded cargo caches but **no pack outputs** — booting the client without a pack
+  shows raw bundle keys in every label and `[assets] ready ok=false ... regions=0`
+  in `godot_log errors` ("atlas manifest unavailable; using placeholder quads").
+  Workaround: run `bash tools/pack.sh pack` once in the worktree (the file is not
+  executable in a fresh worktree, so call it through `bash`; ~1 min with warm
+  caches), then `godot_game stop` + `play`. `tools/godot.sh` similarly needs
+  `GODOT_BIN=$HOME/.local/bin/godot` in the session shell (no `godot4` on PATH).
+  Run: `runs/20261011-091537-PAR-0015/` (pack.log, parse-gate.log).
+
+- Bullet (2026-10-11, session 2): an editor relaunch done from the session shell without the
+  parity-session XDG env silently moves the client's `user://` to the global
+  `~/.local/share/godot/app_userdata/Mindustry-Godot` (the screenshot path is the tell:
+  `/home/<user>/.local/share/godot/...` instead of
+  `Mindustry-Godot/.opencode/parity-session/session-2/xdg-data/godot/...`). That breaks the
+  one-data-dir-per-session rule. Relaunch with the session env explicitly:
+  `XDG_DATA_HOME=<repo>/.opencode/parity-session/session-2/xdg-data XDG_CONFIG_HOME=.../xdg-config
+  XDG_CACHE_HOME=.../xdg-cache DISPLAY=:11 OPEN_GODOT_MCP_PORT=6980 godot --editor --path client`.
+  Run: `runs/20261011-091537-PAR-0015/`.
+
+## 2026-10-11 — additive glow in the transparent SubViewport needs the backdrop inside the viewport (session 2)
+
+- Symptom: wiring `atmosphere.gdshader` (blend_add) onto a billboard in the
+  transparent `SubViewport` rendered a big BLACK parallelogram over the starfield —
+  `ALPHA = 1.0` on cleared pixels made the viewport texture opaque black, and the
+  `ViewportContainer` composites with MIX (it cannot add to the 2D `$Space` behind it).
+  A follow-up `ALPHA = clamp(luma)` fix removed the black but dimmed the halo by the
+  composite's alpha² term.
+- Workaround that matches Java: keep the starfield INSIDE the viewport — a camera-facing
+  `Background` quad (space.png, `uv1_scale/offset` reproducing the 2D
+  `STRETCH_KEEP_ASPECT_COVERED` crop, `DEPTH_DRAW_DISABLED`, priority -10) makes the
+  viewport opaque, then the additive atmosphere (ALPHA=1) composites the halo over the
+  stars with no black. Also: a `ShaderMaterial` has no billboard flag — face the quad by
+  copying `camera.rotation` when the camera moves.
+- Run: `runs/20261011-091537-PAR-0015/` (steps r3/r4/r5 + `godot/atmos-off.png`).
+- Bullet (same run): `const X := Vector3(...).normalized()` is not a constant expression
+  in GDScript (parse error at the const, surfaced only on scene load) — precompute the
+  literal or make it a `static var`.
+## 2026-10-11 — PAR-0010 Godot leg: menu clicks miss until the menu layout settles
+
+- Symptom: fresh `stop`+`play`, then `godot_input` press/release at the hardcoded
+  Play row (viewport 230,149) returns `ok: true` but `MenuGroup/menu/Submenu.visible`
+  stays false; three retries with 700 ms waits all missed. The same coordinates
+  land fine once the menu has been up for a while (earlier runs with a longer gap
+  before the click worked first try).
+- Cause: the Play button's `get_global_rect()` right after boot is not settled —
+  center `(230, 35)` at +2.5 s vs `y ≈ 114` after the menu layout pass runs; a
+  click at (230,149) hits nothing. Injected input was never the problem.
+- Workaround (validated): poll an eval on the target button's global rect until
+  `y` stabilizes, then click its `get_global_rect().get_center()` — never a
+  hardcoded row coordinate. `get_viewport().push_input(...)` remains the fallback
+  when a click at a *settled* rect still does not land.
+- Extra: an eval statement typo (`global_position = c` missing the `up.` prefix)
+  errors at runtime and trips break-on-error, pinning the frame loop (later evals
+  answer, `godot_debugger sessions` shows `paused: true`); recover with
+  `stop`+`play`. Keep duplicate-building evals fully prefixed.
+- Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0010: tools/godot.sh needs GODOT_BIN on this host
+
+- Symptom: `bash tools/godot.sh --headless --editor --quit --path client` exits
+  with "no Godot binary found" — the wrapper looks for `godot4`/`godot4-mono`,
+  but this host ships the binary as `godot` (`~/.local/bin/godot`).
+- Workaround: `export GODOT_BIN=$(command -v godot)` before the call (the
+  parity-session wrapper already resolves `godot` itself, which is why the editor
+  launch works without it).
+- Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0010: eval runtime errors pin the loop; the call times out
+
+- Symptom: `godot_exec eval` returns `TIMEOUT ("Runtime call 'exec' timed out
+  after 15.0s")` even though later evals answer; `godot_debugger sessions` shows
+  `paused: true`. Two instances this run: a `d._root` dynamic property access on
+  a `Node`-typed value, and `global_position = c` missing the `up.` prefix — both
+  are runtime errors that trip the editor break-on-error and stop the frame loop
+  mid-call, so the eval never returns.
+- Workaround: recover with `godot_game stop` + `play` (`resume` re-breaks); write
+  eval bodies defensively (`d.get("_root")`, fully prefixed duplicates) and keep
+  them loop-free.
+- Validated fallback for flaky clicks: resolve `get_global_rect().get_center()`
+  and call `get_viewport().push_input(down/up)` in one eval — worked every time
+  when `godot_input` press/release did not (menu settle race).
+- Run dir: `runs/20261011-085604-PAR-0010/`.
+
+## 2026-10-11 — PAR-0011: execute-tool JS syntax error in a long chained script
+
+- Symptom: a single `execute` call with a ~75-line fast-forward chain (nested
+  template literals for the push_input helpers + long single-quoted eval bodies)
+  failed with `Unexpected token (62:545)` before any tool ran; the same chain split
+  across two calls worked unchanged.
+- Workaround: keep execute chains short and build eval code strings by
+  concatenation (`"..." + cx + "..."`) instead of embedding long template literals
+  and mixed quotes in one helper.
+- Run dir: `runs/20261011-092614-PAR-0011/`.
+
+## 2026-10-11 — PAR-0016: RichTextLabel `[icon]` tags rendered literally for pre-tree text
+
+- Symptom: every `[icon name="…"]` tag (all content icons in markup labels) rendered as
+  literal text. Two layers: (a) `MindRichLabel` attached its `MindIconEffect` in `_ready`,
+  but widgets assign `.text` before the label enters the tree — the BBCode was shaped with
+  no effect attached and adding the effect later does not re-parse; (b) a bare
+  `[icon name="…"]` opens an effect span that swallows every following tag as literal
+  content (a stray `[/color]` appeared in the parsed text).
+- Workaround (validated): attach the effect in `_init` (before any text assignment) and
+  close icon spans (`[icon name="…"][/icon]`). Diagnostic: `RichTextLabel.get_parsed_text()`
+  on a live label shows exactly what will draw — use it to tell "tag consumed" from
+  "tag literal".
+- Run dir: `runs/20261011-094516-PAR-0016/`.
+
+## 2026-10-11 — PAR-0019: for-loop evals time out (recurrence) — use map/dump-to-file
+
+- Symptom (again): `godot_exec eval` bodies containing a `for` loop over the sector
+  views returned `TIMEOUT ("Runtime call 'exec' timed out after 15.0s")` and left the
+  game paused (`godot_debugger sessions` -> `paused: true`); later evals still answer.
+  Two occurrences this item (the 12-sector panel-label loop and the campaign-views loop).
+- Workaround (validated): loop-free evals — either GDScript `Array.map`/`filter`, or
+  dump the payload to `user://views.json` with FileAccess and parse it in the shell
+  (used for the 145 KB campaign views). Recover a paused game with `stop`+`play`.
+- Rule of thumb: any eval that needs iteration goes through map/filter or a file dump.
+- Run dir: `runs/20261011-100323-PAR-0019/`.
+
+## 2026-10-11 — PAR-0024: execute-chain typo (recurrence of the syntax class)
+
+- Symptom: a long single-`execute` walk failed with `Unexpected token (59:107)`
+  before any tool ran — an unbalanced quote in one eval string inside the chain.
+- Workaround: keep each execute chain to a few calls, or split; the concat-built
+  push_input helpers stay fine. Retry with the typo removed only.
+- Run dir: `runs/20261011-102658-PAR-0024/`.
+
+## 2026-10-11 — PAR-0029: blocking delays starve the game clock (hint gate waits)
+
+- Symptom: waiting with `godot_exec` + `OS.delay_msec(9000)` did NOT advance the
+  hints fragment's 8 s playtime gate — the blocking sleep stops the main thread, so
+  `_process` deltas (and the capped fixed-step catch-up) never accumulate; after the
+  block the panel stayed hidden (`hints.vis false`).
+- Workaround: wait with real wall time on the SHELL side between execute calls
+  (`sleep 12`); the game runs unblocked and the gate passes (hint + Skip then show).
+- Run dir: `runs/20261011-102959-PAR-0029/`.
+
+## 2026-10-11 — Fresh-launch verification resumed a stale save (PAR-0030)
+Symptom: after rebuilding libmind_gdext.so + relaunching the editor, a "fresh tutorial"
+walk read `MindHud.wave_sending == true` although `merge_map_rules` sets it from the
+map (`waveSending:false` in groundZero.msav) — and the unit test for the exact parse
+passed, and a map-rules probe showed both `waveTimer:false` (merged) and `waveSending`
+(not) coming from the same `Rules` object. Root cause was state, not code: the
+pre-fix walk's launch had already written
+`~/.local/share/godot/app_userdata/Mindustry-Godot/saves/sector-serpulo-15.msav`,
+so the post-fix game boot read `MindCampaign ready (1 save slot(s))` and the sector
+launch took the RESUME path (`load_sector: resuming serpulo:15`) — the save carried
+the pre-fix rules (wave_sending=true). The fix never ran.
+Workaround: staging the `saves/` dir aside is not enough by itself; the campaign
+records save presence at BOOT. Sequence for a truly fresh tutorial walk:
+1) `godot_game stop` (no autosaves while moving dirs),
+2) move `saves/` aside, 3) `godot_game play res://scenes/game.tscn` (rebootstrap:
+log must say `MindCampaign ready (0 save slot(s))`), 4) then drive the menu walk.
+Verify with `grep "save slot" last_log.txt` before trusting a fresh-launch read.
+Run: runs/20261011-103326-PAR-0030/ (pre-fix boot A fresh / post-fix boot B resumed).
+
+## 2026-10-11 — Centring a dialog block inside MindDialog (PAR-0038)
+Symptom: the pause dialog's rows stayed top-aligned under the title after
+(a) giving the rows VBox `SIZE_SHRINK_CENTER` inside `Body/Content` and
+(b) adding expand spacers around it, and (c) setting the Body scroll mode to
+SCROLL_MODE_DISABLED. Root cause: `Body` is a ScrollContainer and `Content` a
+VBoxContainer that sizes to its children, so the scroll child never gets the
+viewport height and neither centre flag nor spacers have free space to claim.
+Workaround that worked: hide `Body` and add a `CenterContainer` (EXPAND_FILL)
+to `Center/Panel/Layout` just before the `Buttons` row, hosting the block; the
+Java `cont.grow()`-centred content then lands mid-screen (rows rect
+(351,203,450,260) vs the r01-00 reference's block around (350,190..440)).
+Run: runs/20261011-112541-PAR-0038/.
+
+## 2026-10-11 — PAR-0048: section_json in an exec eval times out
+`MindCampaign.section_json("research")` parsed inside `godot_exec` exceeds the
+15s exec limit (223 nodes; same class as the seed's `campaign_views_json`
+timeout note). Read the dialog's cached `_campaign_views_cache` instead (a
+cheap script-var read) or query through a file dump. Run:
+runs/20261011-114802-PAR-0048/.
+
+## 2026-10-11 — PAR-0050: heavy evals timeout AND trip break-on-error
+`tile_blocks()` (the whole-grid walk) and `MindCampaign.section_json("research")`
+both blow the 15 s exec budget inside `godot_exec`; per the tool docs both are
+known-timeout bodies. Worse, each timed-out eval tripped break-on-error:
+`godot_debugger sessions` reported `paused: true` while plain evals still
+answered - the frame loop was pinned and no input/placement would land.
+Recovery: `godot_game stop` + `play` (resume re-breaks). To read the tech/block
+state, use cheap reads (the research dialog's `_campaign_views_cache`, a
+specific node) and never `tile_blocks()`/`section_json` in eval. Also: world
+placements/breaks must go through `godot_input` (the real OS cursor); synthetic
+`get_viewport().push_input` works for Control clicks but not for the world
+placement path. Run: runs/20261011-115026-PAR-0050/.
+
+## 2026-10-11 — PAR-0045: the placement selection traps world clicks
+Symptom: with a block selected in the picker (`selected_block != air`), left
+clicks never mine/act on the world; selecting "air" on the SIM
+(`MindSimHost.select_block("air")`) does not clear the INPUT controller's own
+`state.block`, so the trap persists until the Java deselect path runs.
+Root cause: `DesktopInput.java:737` clears the block when the deselect binding
+(right mouse) fires while placing; the port's `right_press` always began
+breaking. Fixed in 3741270 (right press deselects first). Diagnostic lesson:
+`player_can_mine`/`tile_region`/`tile_blocks` are not eval-reachable; a
+temporary `#[func]` probe on SimHost (returning flat variant dicts) plus
+`Camera2D.tile_to_screen`/`screen_to_tile` solved it. Run:
+runs/20261011-123501-PAR-0045-fix/.
+
+## 2026-10-11 — Vulkan TDR killed the editor: clean up orphaned game processes
+Symptom: after a long session with many `godot_game stop/play` cycles the whole
+bridge died (`BRIDGE_NOT_CONNECTED`), `godot_game status` timed out, and
+`runs/editor-console.log` ended with:
+  `ERROR: Vulkan device was lost... driver resetting itself because it was
+   unresponsive for too long (TDR).` + `handle_crash: Program crashed with
+   signal 4`.
+Root cause: `pgrep -af "godot --path.*game.tscn"` showed **12** game processes -
+most orphaned (`--editor-pid` pointing at long-dead editors, spawned by earlier
+relaunches). On the software Vulkan stack (Xvfb :10) the accumulated contexts
+push the GPU path into a TDR and the editor dies with it.
+Workaround: kill every game process whose `--editor-pid` is not alive:
+  for pid in $(pgrep -f 'godot --path.*game.tscn'); do owner=$(tr '\0' ' ' < /proc/$pid/cmdline | grep -o 'editor-pid [0-9]*' | awk '{print $2}'); kill -0 $owner 2>/dev/null || kill -9 $pid; done
+then `nohup tools/parity-session.sh` again. Verified 12 -> 1 processes and a
+healthy bridge afterwards. Run: the PAR-0066 verification session.
+
+## 2026-10-11 — post-restart walks: menu clicks are swallowed during the boot fade (session 2)
+
+- Symptom: after `godot_game stop` + `play`, the first Play/Campaign click batch often
+  lands during the boot-cover fade: `godot_input` returns ok, the submenu opens from the
+  first click, the second click misses and the walk strands at the menu (`chooser:false`).
+  Recurred 3+ times across PAR-0015/PAR-0018/PAR-0017 walks.
+- Workaround that works every time: click Play, probe
+  `MenuGroup/menu/Submenu/Buttons.get_children().size()` (5 when open), click Campaign,
+  then probe `DialogLayer/planet.visible` and RE-PROBE once before concluding a miss (the
+  dialog appears a few frames after the click).
+- Run: `runs/20261011-095656-PAR-0018/`.
+
+- Bullet (2026-10-11, session 2): `pgrep -f 'godot --path .../session2/client'` matches the
+  tool shell's OWN command line → a `kill $(pgrep -f ...)` loop SIGTERMed the session shell
+  mid-command ("Killed by SIGTERM"). Same trap as the `pkill -f <jar>` warning in
+  `java-leg-learnings.md`. Use `pgrep -x godot`/exact pids from a separate probe, or filter
+  `pgrep -f pattern | grep -v $$`.
+
+- Bullet (2026-10-11, session 2): an editor relaunch whose predecessor is still alive makes the MCP addon
+  FALL BACK to another port (observed: new editor bound 6971 while the stale one held 6980, so the
+  session MCP kept talking to the old editor with the pre-build library). The old editor is easy to miss:
+  its cmdline is `godot --editor --path client` (relative) and does not contain the worktree name.
+  Always (a) kill the previous editor pid explicitly before relaunching, (b) gate the relaunch on the
+  EXACT port line (`Bridge listening on ws://127.0.0.1:6980`), and (c) verify `godot_health` +
+  `godot_game instances` pid after the game starts.
+
+## 2026-10-11 — parity-hunt start: session-1 editor + Xvfb were dead (stale "already started")
+
+- Symptom: `godot_health check` -> `{ok:false, error:{code:"BRIDGE_NOT_CONNECTED"}}` and
+  `godot_instance list` -> `{instances: []}`; the session-1 runtime pidfiles held dead pids
+  (`.opencode/parity-session/editor.pid` 571169, `.opencode/parity-session/xvfb.pid` 14271),
+  no `godot`/`Xvfb`/weston process on the host, nothing listening on 6970/6971/6980, and
+  `/tmp/.X11-unix/` held only the greeter `X0`. `runs/editor-console.log` was last written
+  13:30 and `.opencode/parity-session/xvfb.log` 13:52 — the session went down after the
+  PAR-0066 run and nobody restarted it.
+- Failing call: `godot_health check` at iteration 0 (the goal prompt assumes
+  `tools/parity-session.sh` already started the editor+bridge — it had not).
+- Workaround: re-run `tools/parity-session.sh` (session 1: Xvfb :10 + editor on bridge 6970)
+  and gate on the printed bridge line before any `godot_game play`; if the port never comes
+  up, read `runs/editor-console.log` tail (boot failure) before relaunching.
+- Run: the parity-hunt iteration at 2026-10-11T15:5x local (run dir stamped after the claim).
+
+## 2026-10-11 — eval calling non-#[func] SimHost Rust methods pins the loop (PAR-0080 walk)
+
+- Symptom: a PAR-0080 fork probe eval returned TIMEOUT (15 s) and afterwards
+  `godot_debugger sessions` showed `{active:true, paused:true}` with a trivial eval still
+  answering (`OS.get_process_id()` -> 68185) and `godot_game status` reporting a normal pid.
+- Failing call: `godot_exec eval` body calling `SimHost.player_unit_position()` and
+  `SimHost.player_can_mine(137,53)` — both `pub fn` in `sim_host.rs` **without** the
+  `#[func]` attribute (only `player_unit_moved`/`player_mine_tile`/`player_mined_count`
+  are exported). GDScript "Invalid call. Nonexistent function" errors trip the editor
+  break-on-error and pin the frame loop; the eval then burns its 15 s budget.
+  The mining chain (`chains/ground-zero-click-mining.md`) warns "player_can_mine is
+  Rust-only" — read the #[func] list before composing probes.
+- Workaround: recover with `godot_game stop` + `play` (`resume` re-breaks), then
+  re-launch/resume the sector; only call #[func]-exported methods.
+- Run: runs/20261011-155700-PAR-0080/ (new process pid 68185, paused after the bad probe).
+
+- Bullet (2026-10-11, parity-hunt PAR-0080): the same pin recurred via `SimHost.is_playing()` in an
+  eval body — `is_playing` is NOT in the `#[func]` list (only `is_paused`/`has_player_unit` are the
+  boolean probes; `get_sector_state()` on MindCampaign is fine). Before composing any eval probe,
+  grep the exported surface:
+  `python3 - <<.. re.findall(r"#\[func\]\\s*\\n\\s*pub fn (\\w+)", src)` over `sim_host.rs` /
+  `campaign.rs` / `camera.rs` (49/44/20 names as of af5c41d). Two pins in one run cost two
+  stop+play recoveries; the fresh sector launch survives only through the auto-written save slot.
+
+- Bullet (2026-10-11, PAR-0080 fix round): after `tools/build.sh` the editor relaunch
+  (`tools/parity-session.sh --stop` then the plain run) printed the full "ready" summary
+  (bridge listening on 6970), but the editor process was gone within ~30 s — no crash
+  report (`~/.local/share/Mindustry-Godot/crashes/` newest was 13:29), no OOM (free -h
+  ~11 GiB available), pidfile already removed. A plain re-run of `tools/parity-session.sh`
+  started a stable editor (pid 80791) that answered `godot_health` immediately. If the
+  bridge is down right after a successful-looking launch summary, just relaunch once and
+  health-check; do not debug the corpse.
+- Run: runs/20261011-161200-PAR-0080-fix/ (post-fix re-run).
+
+- Bullet (2026-10-11, PAR-0081 walks): after `godot_game stop` + `play`, the first UI clicks
+  land before the game loop starts and the whole batch is swallowed — the frames probe reads
+  `{"frames":0}` for ~10-30 evals while the process boots, and the submenu-open probe then
+  races the click (it can report `sub:0` even when the click actually opened the menu a frame
+  later; a retry click then TOGGLES it closed). Workarounds that worked: gate the walk on a
+  frames poll (`frames > 120` via repeated trivial evals — no sleeps in Code Mode), click the
+  sidebar entry ONCE, then verify the *outcome* (planet dialog visible / submenu visible) with
+  a re-probe before clicking the next entry; if the outcome probe says closed, hover first and
+  re-check `gui_get_hovered_control()` for a modal eater (a leftover `restart` dialog swallowed
+  three Play clicks until its button was closed).
+- Run: runs/20261011-161201-PAR-0081/.
+
+- Bullet (2026-10-11, PAR-0082 walks): after a planet-page resume the planet dialog
+  LINGERS over the live world (hover = planet panel, SimHost.is_paused() true) while the
+  sector is already playing, so the first ore click lands on the dialog and sets no mine
+  order. Closing it with Back (109,615) once surfaced a "restart" dialog (empty button
+  list, vanished on the next probe) and a second Back left `dialogs: []` with the world
+  live. Also: a naive close-loop that clicks each modals
+
+- Bullet (2026-10-11, PAR-0082 walks): after a planet-page resume the planet dialog
+  LINGERS over the live world (hover = planet panel, `SimHost.is_paused()` true) while the
+  sector is already playing, so the first ore click lands on the dialog and sets no mine
+  order. Closing it with Back (109,615) once surfaced a "restart" dialog (empty button
+  list, vanished on the next probe) and a second Back left `dialogs: []` with the world
+  live. Also: a naive close-loop that clicks each modal's FIRST button picked the
+  Erekir planet-switch (107,25) instead of Back — resolve the Back button by position
+  (109,615) or by excluding the planet-rail buttons, and re-probe until `dialogs: []`
+  AND `is_paused() == false` before driving world input.
+- Run: runs/20261011-162529-PAR-0082/, runs/20261011-162705-PAR-0082/.
+
+- Bullet (2026-10-11, PAR-0083): the `-p mind-headless` suite carried TWO pre-existing golden
+  drifts unrelated to the fix (the `ui text.json` golden was stale since the PAR-0016 markup
+  change - `render_markup` now emits `[icon name="x"][/icon]`; the `fx/fx_program_explosion.json`
+  golden differs in one f32 last bit). Regenerating a golden needs the right dump command:
+  `mind-headless ui <scenario> --dump <golden>` and `campaign tech/sector/play --dump` -
+  the campaign planet/sector args are FLAGS (`--planet serpulo --sector groundZero`), not
+  positionals; a positional form fails with a bare usage hint. Every regenerated golden must
+  update its `parity/golden_manifest.json` sha256 in the same commit or `parity check` fails.
+- Bullet (2026-10-11, PAR-0083): a facade-only `MindCampaign.start_sector(planet, id)` does NOT
+  load the map (the world stays stale and the launch ends in `spawn_player_unit: no core` +
+  game over). The working sequence is `SimHost.load_sector(planet, id)` FIRST, then
+  `MindCampaign.start_sector(planet, id)` (the documented chain facade variant); the 470x470
+  authored map load exceeds the 15 s eval budget, so the load eval TIMES OUT while the load
+  still completes - poll the log (`loaded preset map ...` / `materialized N map building(s)`)
+  instead of retrying, and expect the world to settle before reading state.
+- Bullet (2026-10-11, PAR-0083): launch leftovers stack dialogs and session state - after a
+  game-over ("Sector sector-serpulo-76 lost!") the client returns to the menu over the live
+  map; a fresh stop+play process is the reliable reset before a launch verification.
+- Run: runs/20261011-164851-PAR-0083/.
+
+- Bullet (2026-10-11, PAR-0084 staging): `SimHost.building_team(x, y)` is Rust-only (no `#[func]`); calling it
+  from an eval errors and trips break-on-error; the eval then times out after 15 s and the debugger
+  shows `sessions: paused:true` (trivial evals still answer and frames/tick keep advancing, which makes
+  the pin easy to misread as a slow world). THIRD instance of this trap in the session: before any
+  `h.call("<method>")`, grep the exported list with
+  `grep -A1 "#\[func\]" client/rust/mind-gdext/src/sim_host.rs`. Recover with `godot_game stop` + `play`.
+  To find a building tile, parse `get_state_json()` (cheap on the 61-building Ground Zero) instead.
+- Run: the PAR-0084 loss staging (pid 197467/198336).
+
+- Bullet (2026-10-11, PAR-0084 replay staging): after `break_block` on a core + `set_paused(true)/step(N)/set_paused(false)`,
+  the loss HUD reads can lag 1-2 pumps behind (`hud gameOver:false/hasCore:true` immediately, `true/false` two calls
+  later) - re-probe before concluding the loss did not fire. The replay staging recipe that works:
+  `clear_planet_campaign_saves` -> `load_sector(170)+start_sector(170)` -> `run_exit_save()` (writes the save + the record
+  prepare with `spawnPosition`) -> resume -> `place_block(100,100,"copper-wall")` style distant survivors (the tiny tutorial
+  base is wiped by `SectorDamage(1f)`; distant blocks survive) -> `break_block(129,55)` -> step -> `load_sector(170)+start_sector(170)`
+  again -> expect `start_sector: lost-sector replay ... restored N survivor(s)` and the restored tiles at team 0 (derelict).
+- Run: runs/20261011-172322-PAR-0084/.
+
+- Bullet (2026-10-11, PAR-0155): reproducing an import failure headlessly is fastest with a small
+  integration test that mirrors `MindSimHost::load_grid_file` (WorldGrid + `begin_map_load` +
+  `EditorContext::new(&mut grid, registry)` + `SaveReadState { context, content, .. }` +
+  `SaveIo::load_bytes` on the real `assets/maps/...` file) - it reproduced the exact
+  `JSON error: expected value at line 1 column NNNN` in seconds. Note `EditorContext::new` now takes
+  `&ContentRegistry` (no extra `&mut`), and the `--features msav-import` builds recompile the crate:
+  clippy/test calls for it need long timeouts (a 300 s wrapper timed out twice).
+- Run: runs/20261011-175400-PAR-0155/.
+
+- Bullet (2026-10-11, PAR-0139 round 1): after `tools/parity-session.sh --stop` + restart, the
+  first 30-60 s of `godot_health`/`godot_exec` calls return `BRIDGE_NOT_CONNECTED` (the editor is
+  still booting); wrap the first game call in a retry loop (`godot_health` until `bridge_connected`,
+  then `godot_exec` until it answers) instead of assuming the printed "editor bridge listening"
+  line means ready. Also: with a 11837-building attack sector presented, the editor game pumps at
+  ~2 ticks/s (tick delta 100 in 50 s of wall time) - long in-game waits (unit travel across the
+  map) are impractical; judge from logs + structured state (`get_group_counts`, rules JSON) and use
+  the headless unit tests for movement/order assertions.
+- Bullet (2026-10-11, PAR-0139 round 1): embedding Rust code with backticks/`'` inside a
+  `bash -lc 'python3 - <<"PYEOF" ...'` heredoc breaks on the shell quoting; write the patch script
+  to `/tmp/opencode/*.py` with the write tool and run `python3 <file>` instead.
+- Bullet (2026-10-11, PAR-0139 round 1): a parity-ABI change that moves a packed value inside a
+  hashed field (here `world::pos::pack` order -> the `door.link` in the wall_door harness
+  checksum) fails `tests/blocks_golden.rs`; update the golden value + re-hash the file into
+  `parity/golden_manifest.json` in the same commit (and keep the manifest's `\u00a7` escapes intact
+  when rewriting - a pretty-print rewrite unescapes them).
+- Run: runs/20261011-192234-PAR-0139/.
+- Bullet (2026-10-11, PAR-0139 round 2): stale game processes accumulate across `tools/parity-session.sh --stop` + restart cycles: after ~6 restarts, TEN orphaned `godot --scene res://scenes/game.tscn` processes (editors long dead, `--editor-pid <dead>`) were still running at ~90-100% CPU each, starving the live editor/game (sim pumped ~2 ticks/s) and the bridge (`godot_health` BRIDGE_NOT_CONNECTED while the editor process was alive). Cleanup: list `ps aux | grep scenes/game.tscn | grep -v grep` and kill every pid whose `--editor-pid` arg is not the current `parity-session/editor.pid` (`for pid ...; tr "\0" " " < /proc/$pid/cmdline | grep -o -- "--editor-pid [0-9]*"`). Do this before long in-engine runs.
+
+- Bullet (2026-10-11, PAR-0139 round 2): `Error writing region "meta"` = silent sector-save failures.
+  The save writer caps a single wire string at `u16::MAX` bytes; the merged campaign rules (the
+  map's 256-team `teams` block) serialized to 152,950 bytes because the port's `TeamRule` wrote all
+  23 fields per entry (upstream `JsonIO` runs Arc `Json` with `usePrototypes=false`). Fix: per-field
+  `skip_serializing_if` (defaults omitted -> `{"teams":{"0":{}...}}`, 11.8 KB). Because nothing read
+  `Sim::take_io_responses`, the failure was invisible: `MindSimHost.take_io_responses_json` now
+  drains `[{kind,path,as_map?,error?}]`. Check it after `request_save`.
+- Bullet (2026-10-11, PAR-0139 round 2): a system-only view of the ECS world hides `Sim`-private
+  state. `BlockCounter` lived on `SimRuntime` (a `Sim` field), so `team_ai_system` could not read
+  it and silently skipped the base-builder half (`world.get_resource::<BlockCounter>()` = None).
+  Moved it to a world resource (place/break/checksum/reset updated). Same trap class as the
+  earlier "Rust-only #[func]" notes: before wiring a system, check where each input actually lives.
+- Bullet (2026-10-11, PAR-0139 round 2): staging rules a campaign map cannot carry (`buildAi`) is
+  done offline on the sector save: patch the MGRS meta `rules` string
+  (`/tmp/opencode/patch_sector_rules.py`), and to prove an AI plan->placement chain deterministically
+  seed team plans into the entities region (`/tmp/opencode/seed_save_plans.py <save> <team> x,y,block...`).
+  Natural BaseBuilderAI placement runs at the upstream 1% empty-chance per attempt, so seeded plans
+  are the practical evidence path; an errored eval can trip break-on-error and pin the frame loop
+  (`godot_debugger sessions` -> `paused:true`; recover with stop+play) - an evaled `Dictionary`
+  key miss counts as an error, so guard `has()`/`get()` in evals.
+- Run: runs/20261011-203001-PAR-0139-r2/.
+
+- Bullet (2026-10-11, PAR-0140 round 1, stopped): command mode (RTS) is gated by
+  `DesktopBridge::command_mode_allowed` = `state.block.is_none() && !text_focus && !ui_dialog`.
+  Two live-client gate bugs found on the way: (a) `Sim.selected_block` defaulted to STONE_WALL so
+  `player.block` was never null (upstream starts with none) - now AIR, with
+  `sync_selected_block`/`select_block_by_name` mapping AIR to *no selection*; (b) the placement
+  fragment's boot `set_catalog_category(...)` called `select_catalog_block(0)` and auto-selected
+  the category's first block ("duo") - removed. Debugging notes: `MindInput.get_input_state_json()`
+  is the best structured probe (`block`, `command_mode`, `action_count`, `last_action`,
+  `selected_units`); `Input.push_event('{"t":"KeyDown","code":"shiftLeft"}')` / `inject_key` is the
+  reliable key path for MCP staging (the runtime autoload's `Input.parse_input_event` press did not
+  flip the held state), and a KeyUp edge is what clears a hold-latched command mode. Residual after
+  the two fixes: the input state still showed `block:"duo"` with `action_count:0` while
+  `SimHost.selected_block()` was `air` - the writer is still unidentified (resume from the item's
+  fix.plan). Also: `apply_sim_command_json` now accepts px/py-only spawn_unit JSON (the old shared
+  x/y guard rejected it).
+- Run: runs/20261011-203146-PAR-0140/ (partial).
+
+## 2026-10-11 — Claude Code session: open-godot-mcp tools not registered
+Symptom: the Claude Code /loop session was started from the workspace root
+(`code_examples/`), so `Mindustry-Godot/.mcp.json` never loaded and no
+`mcp__open-godot-mcp__godot_*` tools existed (ToolSearch `+godot` -> none).
+Workaround: a one-shot stdio wrapper over `tools/mcp_smoke.py`'s `McpClient`:
+`~/.local/share/parity-eval/bin/gmcp <tool> '<json args>' [timeout]` (spawns a
+fresh `open-godot-mcp` per call; the bridge accepts multiple clients).
+`gmcp godot_health '{"action":"check"}'` -> bridge_connected true. Fix for good:
+start Claude Code inside `Mindustry-Godot/` (CLAUDE_GOAL_PROMPT.md says so).
+
+## 2026-10-14 — session 2 plan verification (H00/H01/H09): four gmcp traps
+- `Camera2D.center_on_tile(x, y)` is overridden the next frame while the camera
+  follows the player (`is_following()` true after a sector entry with a player
+  unit): `camera_state_json().position` stays on the alpha. `tile_to_screen`
+  still returns correct viewport coords, so click at those; or
+  `set_follow(false)` first if a tile must be centred.
+- A player-queued copper wall (alpha builds it in ~33 ticks) finishes between
+  the `godot_input` click and the next eval, so `player_build_plans_json()`
+  reads `[]` and the plan looks "instant". Pause first (`set_paused(true)`),
+  click, then `step(10)`: the click command is only flushed into the sim on a
+  tick, after which the plan and `construct_progress` (~0.31) are readable.
+- `SimHost.best_core_position()` returns WORLD PIXELS of the core (`drawx`), not
+  a tile (`(1032,440)` on Ground Zero, `(2208,856)` on Onset). Divide by 8.
+- `SimHost.block_size(x, y)` takes a tile, not a block name; calling it with a
+  string timed out the eval (15 s) — the loop recovered without `--play` this
+  time, but check signatures before mixing a probe into a batched eval.
+- One transient `godot_exec: No Godot instance connected` inside a 16-call
+  `step(5)` loop; the next call succeeded (no recovery needed).
+- `apply_sim_command_json` `place` defaults `"team"` to 0 when omitted: a
+  `"player":0` place without `"team":1` builds a derelict block instantly.
+Run: runs/20261014-s2-verify/.
+
+## 2026-10-14 — session 3 plan verification (H02/H08): pre-H00 player, camera follow, Ground Zero free ground
+
+- Pre-H00 `debug_spawn_player("alpha",1,1032,440)` returns `true` but `has_player_unit()` is
+  `false` on the next call: env 31 has the scorching bit, so the environment pass kills the
+  alpha immediately (`environment.rs:233-240`). `MindCampaign.set_rules_json` refuses campaign
+  edits (`allowEditRules`), so env cannot be patched live; a local H00-T1 `env_bit` patch works.
+- With a live player, `Camera2D.center_on_tile` is undone next frame (follow). For screenshots
+  of other areas: `$C.set_process(false); $C.center_on_tile(x,y)`; restore with `set_process(true)`.
+- Ground Zero free ground: (132..147, 57..72). x >= 150 at y 55..80 is static wall; y > 80 is
+  outside `limit_area` (90,20,70,60). A unit spawned in rock beyond the limit area vanishes.
+- `clear_player_build_plans()` is a no-op for plans whose commands are still queued (paused sim):
+  `step(1)` first.
+- Synthetic `godot_input` GUI clicks work (dialog, HUD, menu buttons), with or without a
+  preceding motion, viewport or window coords (identical at 1152x648).
+- An eval `get_node(".../block_config").visible = false; $C.center_on_tile(...); return true`
+  timed out once and pinned frames; `tools/session-play.sh 3 --play` recovered.
+
+## 2026-10-14 — session 3 plan verification round 2 (H04/H06): settings readback, world processors, wrong-arity evals
+
+- `MindCampaign.get_campaign_rules_json()` takes NO argument; passing `"serpulo"` raised a
+  SCRIPT ERROR and every later eval timed out (break-on-error). `tools/session-play.sh 3 --play`
+  recovered. Grep the `#[func]` signature before adding arguments.
+- No seam exposes the persisted universe turn or sector records before H04 T1. Read
+  `$U/config/settings.bin` (format `MGST`, u16 version, u16 count, then `str key, u8 tag, value`)
+  with `runs/20261014-s3-verify2/tools/settings_read.py` / `settings_record.py`; patch a record
+  with `settings_patch_record.py` then `MindCampaign.reload_from_disk()`.
+- `apply_sim_command_json` `place` takes the NUMERIC `block` id (`content_list("block").find(name)`);
+  a name string returns false.
+- World processors are not `accessible()` in campaign (Java-correct): a `Configure Bytes` for a
+  world processor is dropped silently. A debug code seam must write `LogicBlockState` directly.
+- `MindUi.close_top_dialog()` returns false right after `--import`, but the "Campaign Changes
+  Notice" pops up a few seconds into the first sector entry; close it again before screenshots.
+- A Ground Zero session autosaves within minutes: flags/area changes (e.g. `mineOver`) persist
+  into the sector save and survive an editor restart; re-import cleanly before a "fresh GZ" check.
+- Escape with the block config panel open opens the pause menu and leaves the panel up.
+- A building scan over the whole 256x256 map in one eval (`for i in range(65536): building_debug(...)`)
+  takes ~1 s — fine for locating world processors (GZ: (94..96,42..43)).
+Run: runs/20261014-s3-verify2/.
+
+## 2026-10-14 — session 2 (round-2 plan verification, H03/H07)
+
+- An eval using a GDScript lambda (`get_children().map(func(n): ...)`) timed out and wedged the
+  frame loop (tick frozen; `tools/session-play.sh 2 --play` recovered). A later `.filter(func ...)`
+  worked, so it is flaky: use a one-line `for` + `return` instead (`var a=[]; for n in X: a.append(..)`
+  newline `return a`). A single-line `for` with an inline `if` body worked for a 2500-tile
+  `tile_debug` sampling loop.
+- A transient `No Godot instance connected` on one call does not stop the next call in the same
+  shell line: a queued `step(300)` ran while the "kill the enemy" call had failed and the core nearly
+  died. Check each result before stepping.
+- A team-2 dagger spawned near the Ground Zero core kills the 1100-HP shard in ~30 s (about -36 HP/s)
+  -> Sector Lost + autosave -> clean re-import needed. Neutralise test enemies with
+  `debug_apply_status(id, "disarmed", 5000)` (`melting` does not kill quickly).
+- `apply_sim_command_json` `place` takes a NUMERIC `block` id (`content_list("block").find(name)`) and
+  the key `rotation`; a string block parses as 0 (air). `unit_command`:
+  `{"op":"unit_command","units":[id],"command":0,"x":px,"y":py}` (command 0 = move).
+- `godot_input` supports `{"action":"mouse_motion","params":{"position":{"x":X,"y":Y},"coords":"viewport"}}`
+  (the placement ghost follows it).
+- `$C.set_process(false)` survives a sector switch: the next sector looks black/frozen until
+  `$C.set_process(true)`.
+- Forcing lighting: `get_node("/root/Spine/World/Renderer").set_rules_lighting(true, r, g, b, a)` /
+  `clear_rules_override()` (class `MindWorldRenderer`). Layer bisection:
+  `set_layer_visible("<java layer name>", false)` (`shields`, `effect`, `light`, `fogOfWar`, ...).
+- The packed shader copies under `WT/assets/shaders/godot/` are gitignored and loaded first; copying a
+  `client/shaders/*.gdshader` over its packed copy takes effect on `--play` (no rebuild). Restore the
+  packed copy afterwards.
+
+## 2026-10-14 — session 3 plan verification round 3 (H05 campaign UI, H08 leftovers)
+
+- `dialog_stack()` is on `/root/MindUi`, not on `UiRoot`; calling it on UiRoot raised a SCRIPT
+  ERROR and wedged the game (`--play` recovered).
+- `get_input_state_json()` fields `select_plans`/`line_plans` are NUMBERS (counts), not arrays:
+  `.size()` on one raised a SCRIPT ERROR and pinned the frame loop (tick frozen). Read them raw.
+- `tile_debug(x, y)` out of bounds returns `{}` (no error) — usable as a size probe.
+- `MindUi.toast(...)` draws its label even at the main menu (only the sound is gated).
+- RTS: the selection is cleared when Shift is released — keep `shiftLeft` held from the
+  drag-select through the right-click. Units that existed before a save/reload come back with
+  `GroundAI` and are `commandable: false`; spawn fresh units for command tests.
+- The Custom Game flow (`custom` -> `_choose_map` -> `map_play._play("sandbox")`) never loads the
+  map: empty grey world, stale HUD. Do not use it as a non-campaign session.
+- Killing processes by `/proc/<pid>/cmdline` match on "godot" + the worktree path also matches
+  the shell running the loop (it carries both strings): exclude `$$` or match the binary path.
+- Arc oracle: `/usr/bin/javac` + `Arc/arc-core/build/libs/arc-core-1.0.jar` run Arc helpers
+  (`Strings.autoFixed`, `Noise.noise`) directly: `javac -cp $JAR X.java && java -cp $JAR:. X`.
+Run: runs/20261014-s3-verify3/.
