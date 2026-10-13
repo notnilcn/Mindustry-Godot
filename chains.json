@@ -1,6 +1,6 @@
 {
 "schema":"mindustry-godot/chains@1",
-"updated":"2026-10-13T22:00:00+10:00",
+"updated":"2026-10-13T23:30:00+10:00",
 "sources":{"chains":"chains/*.md (49)","ledger":"parity-ledger.json (166 items)"},
 "guide":{"summary":"Lightweight chain library. Query with jq; never read the whole file. 'chains' = curated recipes from chains/*.md (steps inline; notes/failure_modes/variants in the maps below). 'ledger' = one compact record per parity item; exact call sequences are joinable via 'calls'/'seqs' refs. Notes/failure_modes/fixes are kept out of the records so a default query stays small. Keys of notes/failure_modes/variants/fixes are chain ids (kebab-case) or ledger item ids (PAR-####).","list_chains":"jq -r '.chains[] | [.id, .status, .title] | @tsv' chains.json","chain":"jq '.chains[] | select(.id==\"ground-zero-conveyor-line\")' chains.json","chain_steps":"jq -r '.chains[] | select(.id==\"<id>\") | .steps[]' chains.json","chain_notes":"jq -r '(.notes[\"<id>\"] // [])[]' chains.json","chain_failure_modes":"jq -r '(.failure_modes[\"<id>\"] // [])[]' chains.json","chain_variants":"jq -r '(.variants[\"<id>\"] // [])[]' chains.json","chains_for_item":"jq -r '.chains[] | select(.par | index(\"PAR-0049\")) | .id' chains.json","ledger_item":"jq '.ledger[\"PAR-0049\"]' chains.json  # t=title s=surface st=status par=parent item u=updated run=last run to=fork state path/rep=sequence refs conf=confirm ref","ledger_item_steps":"jq -r '(.ledger[\"PAR-0049\"].steps // [])[] | .a' chains.json","ledger_calls":"jq -r '. as $root | (.ledger[\"PAR-0049\"].rep // {}) | .[] as $s | $root.seqs[$s][] as $c | $root.calls[$c]' chains.json","ledger_notes":"jq -r '(.notes[\"PAR-0049\"] // [])[]' chains.json","ledger_failure_modes":"jq -r '(.failure_modes[\"PAR-0049\"] // [])[]' chains.json","ledger_fixes":"jq -r '(.fixes[\"PAR-0049\"] // [])[]' chains.json","find_by_title":"jq -r '.ledger | to_entries[] | select(.value.t|test(\"loadout\";\"i\")) | .key' chains.json","fields":{"ledger":"t title, s surface, st status, par parent, u updated, run run dir, chain md chain id, to fork state, path {java,godot}->seq ids, conf->pool id, rep {java,godot,compare}->seq ids, steps [{a action, v verdict}].","calls":"exact call object/string as stored in parity-ledger.json.","seqs":"ordered arrays of calls[] ids."}},
 "chains":[
@@ -1599,7 +1599,7 @@
 "PAR-0128":{"t":"Effect, decal and weather sprites draw as flat colour rectangles (no atlas region execution in the FX pass)","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"MindFx dev probe: set_weather('rain', ...) or spawn_effect on the running client, screenshot and compare with the Java weather/effect art","path":{"java":"s397","godot":"s398"},"conf":"k65","rep":{"java":"s399","godot":"s400","compare":"s401"}},
 "PAR-0129":{"t":"Shields are invisible: force-projector domes and unit shield bubbles never render","s":"world","st":"fixing","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"A sector where a powered ForceProjector is placed (sandbox/infinite resources), stepped for a few ticks; compare the dome against Java","path":{"java":"s402","godot":"s403"},"conf":"k66","rep":{"java":"s404","godot":"s405"}},
 "PAR-0130":{"t":"Items travelling on conveyor belts are invisible","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261009-065416-ref-ground-zero/","to":"Ground Zero tutorial repaved in PAR-0049 (drill -> conveyor -> core) with items flowing","path":{"java":"s406","godot":"s407"},"conf":"k67","rep":{"java":"s408","godot":"s409","compare":"s410"}},
-"PAR-0131":{"t":"Sector launch has no landing cutscene: the core does not drop in and the camera does not zoom","s":"world","st":"fixing","u":"2026-10-13","run":"runs/20261009-065416-ref-ground-zero/","to":"Planet page -> Ground Zero -> Go, capturing frames during the first two seconds after the world loads, Java vs Godot","path":{"java":"s411","godot":"s412"},"conf":"k68","rep":{"java":"s413","godot":"s414","compare":"s415"}},
+"PAR-0131":{"t":"Sector launch has no landing cutscene: the core does not drop in and the camera does not zoom","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261009-065416-ref-ground-zero/","to":"Planet page -> Ground Zero -> Go, capturing frames during the first two seconds after the world loads, Java vs Godot","path":{"java":"s411","godot":"s412"},"conf":"k68","rep":{"java":"s413","godot":"s414","compare":"s415"}},
 "PAR-0132":{"t":"Custom Rules dialog renders no rule rows, so Customize and in-game rule editing cannot change any rule","s":"ui","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Custom Game -> pick a map -> Customize (or open_dialog(\"custom_rules\", {\"rules\": ...}) directly; the port's pause menu has no rules entry)","path":{"java":"s416","godot":"s417"},"rep":{"java":"s418","godot":"s419","compare":"s420"}},
 "PAR-0133":{"t":"Map Play 'Play' neither loads the selected map nor applies the selected gamemode","s":"menu","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Custom Game -> map tile -> Map Play dialog -> Play (or open_dialog(\"map_play\", {\"map\": \"...\"}) then Play)","path":{"java":"s421","godot":"s422"},"rep":{"java":"s423","godot":"s424","compare":"s425"}},
 "PAR-0134":{"t":"Load Game 'Import Save' does nothing: no .msav is imported after picking a file","s":"ui","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Pause (non-campaign) or menu -> Load Game -> @save.import -> pick a .msav in the fallback file chooser","path":{"java":"s426","godot":"s427"},"rep":{"java":"s428","godot":"s429","compare":"s430"}},
@@ -1611,7 +1611,7 @@
 "PAR-0140":{"t":"RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units","s":"input","st":"verified","u":"2026-10-13","run":"runs/20261011-225200-PAR-0140-r2/","to":"campaign/in-game command mode (Shift) drag-select units, then right-click a move target","path":{"java":"s451","godot":"s452"},"conf":"k70","rep":{"java":"s453","godot":"s454"},"steps":[{"a":"Shift held (push_event KeyDown shiftLeft) + drag-select a spawned friendly dagger","v":"partial: selection_json=[1000000002] OK; no selection overlay (Java drawCommanded) drawn"},{"a":"right-click a move target (world 960,400)","v":"mismatch: dagger ignores the order and keeps walking +y under GroundAI (y 470.5->500->529.5 per 60 ticks); a direct unit_command op is ignored too"}]},
 "PAR-0141":{"t":"Direct bullet hits pass through units: only splash/EMP/ability damage can kill them","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero wave defense: let a wave Dagger stand next to a Duo or another Dagger and fire","rep":{"java":"s455","godot":"s456","compare":"s457"}},
 "PAR-0142":{"t":"Planet globe surface renders flat: Java sphere surface shader (term/gloss/shadow) + bloom pass missing (atmosphere halo ported)","s":"campaign","st":"seeded","par":"PAR-0015","u":"2026-10-10","run":"runs/20261011-091537-PAR-0015","to":"planet page (Play > Campaign > chooser Serpulo + OK)","path":{"godot":"s458"},"conf":"k71","rep":{"godot":"s459","compare":"s460"}},
-"PAR-0143":{"t":"Schematics dialog content: Java Tags filter row + card grid vs the port's list + details layout","s":"ui","st":"seeded","par":"PAR-0033","u":"2026-10-11","run":"runs/20261011-110622-PAR-0033/","to":"in-game > paste button > schematics dialog","conf":"k72","rep":{"java":"s461","godot":"s462","compare":"s463"}},
+"PAR-0143":{"t":"Schematics dialog content: Java Tags filter row + card grid vs the port's list + details layout","s":"ui","st":"fixing","par":"PAR-0033","u":"2026-10-13","run":"runs/20261011-110622-PAR-0033/","to":"in-game > paste button > schematics dialog","conf":"k72","rep":{"java":"s461","godot":"s462","compare":"s463"}},
 "PAR-0144":{"t":"Database dialog: planet filter row renders icons in Java (eye + planet glyphs) vs the port's All/Erekir/Serpulo text buttons","s":"ui","st":"seeded","par":"PAR-0034","u":"2026-10-11","run":"runs/20261011-112115-PAR-0034/","to":"in-game > book button > database dialog","conf":"k73","rep":{"java":"s464","godot":"s465","compare":"s466"}},
 "PAR-0145":{"t":"Research dialog content: Java's connected node graph (TechTreeNode + TreeLayout + connectors, planet tab, hover/purchase) vs the port's overlapping row list","s":"ui","st":"fixing","par":"PAR-0035","u":"2026-10-13","run":"runs/20261011-112224-PAR-0035/","to":"in-game > tree button > research dialog","conf":"k74","rep":{"java":"s467","godot":"s468","compare":"s469"}},
 "PAR-0146":{"t":"Planet page opened from the in-game map button draws over the live world + HUD (Java covers with the space backdrop)","s":"ui","st":"verified","par":"PAR-0036","u":"2026-10-11","run":"runs/20261011-230500-PAR-0147/","to":"in-game > map button > planet page","conf":"k75","rep":{"java":"s470","godot":"s471","compare":"s472"},"steps":[{"a":"in-game map button (1027,619)","v":"mismatch: chooser instead of the current planet page; hint overlay draws above the dialog"},{"a":"fixed: in-game map button","v":"match (structural): current planet page, world+HUD+markers hidden"}]},
@@ -1638,7 +1638,8 @@
 "PAR-0167":{"t":"Research dialog listed only the root row: ResearchView rows carried no tree name","s":"campaign","st":"verified","u":"2026-10-13","run":"runs/20261012-session5-campaign-import/"},
 "PAR-0168":{"t":"Enemy base-builder AI queues no plans (units_base_build golden: 0 of 28)","s":"campaign","st":"seeded","par":"PAR-0139","u":"2026-10-13"},"PAR-0169":{"t":"BaseBuilderAI scatter regression (units_base_build golden: 0 of 28)","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0170":{"t":"Units with laser/rail/sap weapons have range -4 versus the JVM","s":"world","st":"verified","u":"2026-10-13"},"PAR-0171":{"t":"Line weapons (laser, continuous, shrapnel, rail, sap) never damage units","s":"world","st":"verified","u":"2026-10-13"},"PAR-0172":{"t":"Heal bullets damage the player's own buildings","s":"world","st":"verified","u":"2026-10-13"},"PAR-0173":{"t":"Team rule multipliers ignored by combat","s":"world","st":"verified","u":"2026-10-13"},"PAR-0174":{"t":"Player unit never respawns after death; core unit type ignored","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0175":{"t":"Unit possession / unit clear do nothing","s":"world","st":"verified","u":"2026-10-13"},"PAR-0176":{"t":"No boss list (state.boss()/teams.bosses): no boss bar can be fed","s":"world","st":"verified","u":"2026-10-13"},"PAR-0177":{"t":"Blocks without a consumer override reject all items and liquids","s":"world","st":"verified","u":"2026-10-13"},"PAR-0178":{"t":"Power-node knobs reset to defaults; Configure link toggle and diodes dead","s":"world","st":"verified","u":"2026-10-13"},"PAR-0179":{"t":"Incinerators accept and destroy nothing","s":"world","st":"verified","u":"2026-10-13"},"PAR-0180":{"t":"Drill period ignores hardness; burst drills never burst","s":"world","st":"verified","u":"2026-10-13"},"PAR-0181":{"t":"Menders/overdrive affect enemy buildings and never consume boost items","s":"world","st":"verified","u":"2026-10-13"},"PAR-0182":{"t":"Repair point never heals friendly units","s":"world","st":"verified","u":"2026-10-13"},"PAR-0183":{"t":"Placed blocks show no placement ghost, rotation arrow or range circle","s":"world","st":"verified","u":"2026-10-13"},"PAR-0184":{"t":"Queued build plans and the build beam are invisible","s":"world","st":"verified","u":"2026-10-13"},"PAR-0185":{"t":"Bullets are not drawn at all","s":"world","st":"verified","u":"2026-10-13"},"PAR-0186":{"t":"Mining beam, carried items and engine glows are not drawn","s":"world","st":"verified","u":"2026-10-13"},"PAR-0187":{"t":"Hovered buildings show no health/items/power bars","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0188":{"t":"Doors/switches/sorters show no state sprites; no damage cracks","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0189":{"t":"Plans: queued-plan ghost staging impossible (plans build in ~2 ticks or are dropped)","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0190":{"t":"Configure may not reach BuildingBehavior::configured() (sorter/door state did not change)","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0191":{"t":"No place/break/rotate block effects","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0192":{"t":"Sector resume drops units/fires/puddles/markers/wavetime/stats","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0193":{"t":"Wave countdown runs 60x too slowly; isWaitingWave missing","s":"campaign","st":"fixing","u":"2026-10-13"},"PAR-0194":{"t":"Objectives: completion not saved; Timer 60x slow; DestroyUnits never completes; DestroyBlock instant","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0195":{"t":"Capture leaves the enemy base active; coreDestroyClear missing","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0196":{"t":"Sector map/save rules dropped (limitMapArea, weather, ...); planet ruleSetter + campaign load overrides missing","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0197":{"t":"T2 regression: the legacy UBJson markers region broke preset reloads","s":"campaign","st":"verified","u":"2026-10-13"},
 "PAR-0198":{"t":"Launch pads never launch; landing pads never land","s":"campaign","st":"seeded","u":"2026-10-13"},"PAR-0199":{"t":"Unit weapons are silent: no shoot/charge sounds","s":"world","st":"verified","u":"2026-10-13"},"PAR-0200":{"t":"Most turrets have no shoot sound","s":"world","st":"verified","u":"2026-10-13"},"PAR-0201":{"t":"Weather attributes never reach generators","s":"world","st":"verified","u":"2026-10-13"},"PAR-0202":{"t":"Sandstorm/sporestorm wind force does not move units","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0203":{"t":"Fresh sectors never call planet addWeather","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0204":{"t":"UI sounds are never played","s":"ui","st":"verified","u":"2026-10-13"},"PAR-0205":{"t":"Payload pickup/drop and block configure sounds are missing","s":"world","st":"verified","u":"2026-10-13"},"PAR-0206":{"t":"Player unit never aims, fires or faces from desktop input","s":"input","st":"verified","u":"2026-10-13"},"PAR-0207":{"t":"Item withdraw/deposit use a phantom relay stack; no range/acceptStack; no tap-unit deposit","s":"input","st":"verified","u":"2026-10-13"},"PAR-0208":{"t":"Even-size blocks are placed one tile off the cursor","s":"input","st":"verified","u":"2026-10-13"},"PAR-0209":{"t":"Build plans drop their config (rebuild/sorter nextConfig)","s":"input","st":"fixing","u":"2026-10-13"},"PAR-0210":{"t":"Rebuild ghosts never clear; B rebuild select missing; right-drag does not cancel queued plans","s":"input","st":"verified","u":"2026-10-13"},"PAR-0211":{"t":"Wheel scroll does not zoom/rotate as DesktopInput","s":"input","st":"verified","u":"2026-10-13"},"PAR-0212":{"t":"Hint seams absent (take_hint_keys, command-mode objective input)","s":"input","st":"verified","u":"2026-10-13"},"PAR-0213":{"t":"Player input matrix incomplete (mouse bindings C/F5/F11)","s":"input","st":"seeded","u":"2026-10-13"},"PAR-0214":{"t":"Block hotkey combos/pick/F1 not implemented","s":"input","st":"seeded","u":"2026-10-13"},"PAR-0215":{"t":"Live player:Some placements apply instantly instead of queuing (player_can_build())","s":"input","st":"seeded","u":"2026-10-13"},"PAR-0216":{"t":"mlog wait 0/negative waits hang the processor","s":"world","st":"verified","u":"2026-10-13"},"PAR-0217":{"t":"mlog op strictEqual always 0; format inverted; print of blocks/units/content prints ids","s":"world","st":"verified","u":"2026-10-13"},"PAR-0218":{"t":"sensor returns 0 for most properties instead of Java values/null; building/unit @x/@y in pixels","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0219":{"t":"@thisx/@thisy are 8x the tile coordinate","s":"world","st":"verified","u":"2026-10-13"},"PAR-0220":{"t":"Processor links cannot be created by tapping; control enabled ignores link range","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0221":{"t":"ucontrol/ubind mostly inert; LogicAI never runs","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0222":{"t":"radar sorts health/shield/armor backwards and ignores range","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0223":{"t":"control shoot cannot aim turrets","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0224":{"t":"Objective completionLogicCode runs in a throwaway world","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0225":{"t":"Canvas blocks render blank","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0226":{"t":"Planet sector panel: no launch candidate / locked objectives / vulnerable rule / threat colour","s":"campaign","st":"verified","u":"2026-10-13"},
-"PAR-0227":{"t":"Hints auto-complete after 15 s; no playtime gate / hide-vs-complete semantics","s":"hud","st":"verified","u":"2026-10-13"}
+"PAR-0227":{"t":"Hints auto-complete after 15 s; no playtime gate / hide-vs-complete semantics","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0228":{"t":"Enemy GroundAI ignores the core flowfield (nearest-building anchor)","s":"world","st":"verified","u":"2026-10-13"},"PAR-0229":{"t":"FlyingAI main target ignores targetFlags","s":"world","st":"verified","u":"2026-10-13"},"PAR-0230":{"t":"WaveSpawner: wrong per-spawn group counts, no flyer edge spawns, no drop-zone shockwave","s":"world","st":"verified","u":"2026-10-13"},"PAR-0231":{"t":"Units never mine (generic MinerComp/MinerAI, mono mine command)","s":"world","st":"verified","u":"2026-10-13"},"PAR-0232":{"t":"RepairAI missing for the repair command","s":"world","st":"verified","u":"2026-10-13"},"PAR-0233":{"t":"BuilderAI absent for non-player builders (team ghost-plan pickup)","s":"world","st":"verified","u":"2026-10-13"},"PAR-0234":{"t":"Live unit stances (holdFire, boost, pursueTarget, holdPosition, mine items) ignored","s":"world","st":"verified","u":"2026-10-13"},"PAR-0235":{"t":"Unit cap ignored (Units.canCreate/getCap)","s":"world","st":"verified","u":"2026-10-13"},"PAR-0236":{"t":"Unit environment update missing (drowning, floor status/drag, bounds, solid kill, drop-zone push)","s":"world","st":"verified","u":"2026-10-13"},"PAR-0237":{"t":"No unit death explosions; ExplosionShield ignored; fire env rules missing","s":"world","st":"verified","u":"2026-10-13"},"PAR-0238":{"t":"BuildDamageEvent never emitted (minimap damage feed)","s":"world","st":"verified","u":"2026-10-13"},"PAR-0239":{"t":"Commanded units do not track attack targets","s":"world","st":"verified","u":"2026-10-13"},"PAR-0240":{"t":"HUD: boss bar, guardian warnings, core-attack/drop-point warnings absent","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0241":{"t":"HUD: no core damage/capture/saving surfaces","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0242":{"t":"Border and map-area darkness ignored in the world and minimap","s":"world","st":"verified","u":"2026-10-13"},"PAR-0243":{"t":"Block inventory popup is static (no live grid/hold-to-take/follow)","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0244":{"t":"Power-node lasers and item-bridge links not drawn","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0245":{"t":"Game-over dialog opens on the wrong trigger and shows no stats","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0246":{"t":"Sector rules never reach the renderer; light pass placeholder","s":"world","st":"fixing","u":"2026-10-13"},
+"PAR-0247":{"t":"Hints: 22 remaining predicates and input completions absent","s":"hud","st":"verified","u":"2026-10-13"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -3400,6 +3401,66 @@
 "k85":{"godot":"chooser shown (Select Starting Campaign)"}
 },
 "notes":{
+"PAR-0228":[
+"2026-10-13 re-run: G01 T6a e3d7dfca: Pathfinder.fieldCore (sorted core+spawn tiles), 40/90 retarget cadence, core override, in-range shoot gate; in-engine dagger walks the core field."
+],
+"PAR-0229":[
+"2026-10-13 re-run: G01 T6b 4b585210: findMainTarget (core-in-range -> targetFlags -> core) + spawner shuttle; in-engine flare passes the wall to the core."
+],
+"PAR-0230":[
+"2026-10-13 re-run: G01 T7 5d231265: N per spawn, map-edge flyers, shockwave, spawn statuses, difficulty multiplier; in-engine drop-zone kill + 17.5 px spread."
+],
+"PAR-0231":[
+"2026-10-13 re-run: G01 T10a 5b8aa93c: MinerComp.update + MinerAI + mine-command dispatch; in-engine mono delivers 28 copper + 43 lead."
+],
+"PAR-0232":[
+"2026-10-13 re-run: G01 T10b 43e97ddc: Units.findDamagedTile targets, heal-bolt hitTile, retreat; headless (no building-health readback seam)."
+],
+"PAR-0233":[
+"2026-10-13 re-run: G01 T10c 460c435d: team ghost-plan pickup + movement, update_builders for all builders, BuilderPlans on buildSpeed>0 units; in-engine poly rebuilds a mace-destroyed wall."
+],
+"PAR-0234":[
+"2026-10-13 re-run: G01 T11 9d02d0e6: UnitStancesComp + apply_live_unit_stance + JSON op + consumers; in-engine holdFire freezes shots."
+],
+"PAR-0235":[
+"2026-10-13 re-run: G01 T12 1d500cb6: world cap helpers, factory payload hold, spawn cap death."
+],
+"PAR-0236":[
+"2026-10-13 re-run: G01 T13 a3bb4f28: UnitComp.update environment half + vanilla floor fields; clamp precedes the -250 kill check per Java."
+],
+"PAR-0237":[
+"2026-10-13 re-run: G01 T14 81dbd6dc: item explosion on death, shield absorption, CombatEnv sync."
+],
+"PAR-0238":[
+"2026-10-13 re-run: G01 T15 1bf6788b: event team + bounded log + drain seam + gdext JSON."
+],
+"PAR-0239":[
+"2026-10-13 re-run: G01 T16 c3a5e48e: AttackTargetComp + command_targets_json seam (feeds G03 T10/G05)."
+],
+"PAR-0240":[
+"2026-10-13 re-run: G03 T9 2b31beeb: boss_json bar, health-diff core-attack banner, player_near_drop_zone, guardian_warnings, capture announce, saving label, status icons; evidence runs/20261013-s3-G03-T9."
+],
+"PAR-0241":[
+"2026-10-13 re-run: G03 T9: same commit; staged evidence."
+],
+"PAR-0242":[
+"2026-10-13 re-run: G03 T11 5cbddcd6: border_darkness + limit_area feed the darkness map and minimap with (revision,border,limit) keys; in-engine minimap-limit evidence."
+],
+"PAR-0243":[
+"2026-10-13 re-run: G03 T13 76a921c3: Java-exact 3-column 40x40 cells, live amounts, hold-to-take, follows the building corner; in-engine inventory.png."
+],
+"PAR-0244":[
+"2026-10-13 re-run: G03 T7 07ebf538: lasers + weighted colours done; bridge half blocked by the configure_building hang (G02/G08 finding)."
+],
+"PAR-0245":[
+"2026-10-13 re-run: G03 T16 0ddd005d: 3 s delayed open, game_stats_json, six animated stat rows; in-engine screenshots."
+],
+"PAR-0246":[
+"2026-10-13 re-run: G03 T12 f03e00d8: RulesRenderView::from_rules + 30-frame feed + light_sources seam landed; the light composite is flagged (quad not visibly rendering)."
+],
+"PAR-0247":[
+"2026-10-13 re-run: G05 T4b 4283156e: all HintsFragment predicates + take_hint_keys completions + fire/derelictbreak sim hooks; in-engine runs/20261013-s5-G05-T4b."
+],
 "PAR-0199":[
 "2026-10-13 wave-2: G07 T2 95d015b: emit_weapon_sound + weapon charge/shoot through the sink; events_sim golden regenerated; in-engine runs/20261013-s3-G07-T2."
 ],
@@ -3868,19 +3929,22 @@
 "Reference soak: staging blocker: same as PAR-0024 (no launchable sector in the imported campaign). Re-confirmed in-engine 2026-10-11 (parity-hunt-s1, run runs/20261011-155631-PAR-0025/): the live Godot campaign state has exactly one has_base sector - 15 groundZero - and it is attacked=true, so planet_dialog.gd _find_launcher returns {} and every Launch takes the free-launch branch (no dialog); DialogLayer/launch_loadout cannot be opened in the port today, and the Java soak's own blocker stands (step-361-panel.png: Stained Mountains reads 'No Launch Sector'). Unblock path: PAR-0082/PAR-0083 launch-candidate + attack-sector support, then a fresh-profile campaign progressed past a first sector capture on both legs.",
 "2026-10-12 (session 5 §D): fixed — `27b59e4`; Launch confirms the launch with `lastloadout-core-shard` written; evidence `runs/20261012-session5/launch-loadout.png`.",
 "2026-10-12 audit (fixing): campaign-import: button parity partial; order fixed to Back/Resources/Launch in a77e7b9; Launch-disable gate missing (audit-campaign-import.md T1).",
-"2026-10-13 G00: Configure Loadout Max toggle, valid gate, rows, capacity landed in 44b0f7b (session 5 T1); 200 px SchematicImage toggles tracked by G05."
+"2026-10-13 G00: Configure Loadout Max toggle, valid gate, rows, capacity landed in 44b0f7b (session 5 T1); 200 px SchematicImage toggles tracked by G05.",
+"2026-10-13 re-run: G05 re-run T10a 84cb2135: SchematicImage widget + 200 px toggles; golden regenerated and pinned."
 ],
 "PAR-0026":[
 "Reference soak: staging blocker: same as PAR-0024.",
 "2026-10-12 (session 5 §D): fixed — `27b59e4`; Resources opens the loadout dialog (`launch-resources-dialog.png`).",
 "2026-10-12 audit (fixing): campaign-import: Resources picker partial (no Max toggle/capacity) — audit-campaign-import.md T1.",
-"2026-10-13 G00: same as PAR-0025."
+"2026-10-13 G00: same as PAR-0025.",
+"2026-10-13 re-run: G05 re-run T10a 84cb2135: same as PAR-0025."
 ],
 "PAR-0027":[
 "Reference soak: staging blocker: same as PAR-0024.",
 "2026-10-12 (session 5 §D): fixed — `27b59e4`; Back closes the dialog and cancels the launch.",
 "2026-10-12 audit (fixing): campaign-import: partial with the dialog rework — audit-campaign-import.md T1.",
-"2026-10-13 G00: same as PAR-0025."
+"2026-10-13 G00: same as PAR-0025.",
+"2026-10-13 re-run: G05 re-run T10a 84cb2135: same as PAR-0025."
 ],
 "PAR-0028":[
 " | R00 (2026-10-09): fresh-profile Java tutorial start re-captured as the stored reference runs/20261009-065416-ref-ground-zero/java/r00-03-tutorial.png (objective Obtain: 0/15 Copper; hint Use [WASD] to move.; prompt Move near the copper ore...); checkpoint runs/20261009-065416-ref-ground-zero/checkpoints/r00-sector-serpulo-170.msav.",
@@ -3944,7 +4008,8 @@
 ],
 "PAR-0047":[
 "Blocked half: the research click (r05-14) and node hover popups (r05-02) are not exercisable - campaign_views.research has only node[0] rooted 'serpulo' and the dialog shows one disabled row + techtree.<null>. Verified half: info dialog, tooltips, escape/back to the world.",
-"2026-10-13 wave-2: G05 T1b/T1c: node graph + hover popup halves done; the full click+spend replay remains."
+"2026-10-13 wave-2: G05 T1b/T1c: node graph + hover popup halves done; the full click+spend replay remains.",
+"2026-10-13 re-run: G05 re-run: graph/hover halves remain done; full click+spend replay still pending."
 ],
 "PAR-0048":[
 "Picker mechanics verified (category switch + grid + selection). The shown block set is downstream of the auto-unlock/research semantics (PAR-0080); the port's session reports 61 unlocked, so the distribution grid shows all 9 vs the Java r05-16's conveyor-only (fresh-soak state). Category buttons carry auto names in the live tree (cosmetic)."
@@ -4080,7 +4145,8 @@
 "Code-scan 2026-10-10 (campaign): S3/high. `_launch(planet, sector, loadout, resume)` receives the chosen schematic index (planet_dialog.gd:732/753, launch_loadout_dialog.gd:14-15) but never uses it; `start_sector_with_loadout` is only called from `start_sector` with an empty string (campaign.rs:473-474, 533-534). Adjacent ledger item: PAR-0054 recorded the earlier 3-arg arity error/break-on-error pause in this same flow; this is the residual silent no-op now that the 2-arg call works, so it is filed as a distinct symptom. Also note PAR-0024 (the dialog appearing on a free launch) is a separate mismatch. In-engine verification pending.",
 "2026-10-12 (session 5 §D): fixed steps 1-4 — `abcb17e`; launched frozenForest with basicShard, core exactly {copper:1000, lead:800}, launcher 1200 -> 200, `lastloadout-core-shard` written (`frozenforest-launch-loadout.png`). Remain: step 5 (schematic core block).",
 "2026-10-12 audit (fixing): campaign-import: launched core held loadout cost + resources; fixed to resources only in a77e7b9. Remaining: Launch never disabled when the launcher cannot pay, no Max toggle/capacity/header/item rows, schematic core block not placed (audit-campaign-import.md T1/T2).",
-"2026-10-13 G00: 44b0f7b + fe9381b (loadout validity + schematic core); in-engine evidence runs/20261012-session5-campaign-import/t1-*.png, t2-launch-foundation.png."
+"2026-10-13 G00: 44b0f7b + fe9381b (loadout validity + schematic core); in-engine evidence runs/20261012-session5-campaign-import/t1-*.png, t2-launch-foundation.png.",
+"2026-10-13 re-run: G05 re-run T10a 84cb2135: loadout schematic cards render (plan region + silhouette)."
 ],
 "PAR-0086":[
 "Code-scan 2026-10-10 (combat): S2 high. All 29 vanilla turret blocks resolve to `NoopBehavior` in the shipped client: `FIXTURE_NAMES` is set only by `CombatHarness` (test-only), `default_behavior` maps every turret kind to `NoopBehavior` (behavior/mod.rs:573), `create_state` default inserts nothing, and no live system calls `update_turrets`, so placed turrets never rotate, shoot, consume ammo or accept coolant. The JVM bullet count 202 vs rust 112 (parity/reports/jvm_golden_diff.md:12) is the same root cause: ~90 turret-ammo bullets live only in the harness fixture map. In-engine verification pending. Merged with the sibling scan item (same symptom, same seam); evidence combined.",
@@ -4110,7 +4176,8 @@
 "2026-10-12 (session 2 §8): fixed — `1e74c4d` (tick hook + puddle effects/status + container splash), docs `5c43acb`; 4 tests incl. `live_puddle_evaporates`.",
 "2026-10-12 audit (fixing): combat-units: live update works; puddle/splash gates fixed in 8841d62; destroyed buildings do not explode (audit-combat-units.md).",
 "2026-10-13 G00: afaeebb building dynamicExplosion; unit-death explosion, ExplosionShield, rules.fire gating remain (G01).",
-"2026-10-13 wave-1: G01: T14 (explosions) not executed this session."
+"2026-10-13 wave-1: G01: T14 (explosions) not executed this session.",
+"2026-10-13 re-run: G01 re-run: unit-death explosions, ExplosionShield absorption and fire env rules landed (T14 81dbd6dc); lightning/fireballs remain unported."
 ],
 "PAR-0092":[
 "Code-scan 2026-10-10 (hud-world-ui): S2 high confidence - the unit/production side of the game is unconfigurable, so a factory can only ever build its default plan and a reconstructor cannot be given a command; payload rout/source selection (Erekir) is equally unreachable. This is the per-block-config half of BlockConfigFragment; the item/liquid pickers for sorters/unloaders/duct-routers do work. Distinct from the logic-scan switch/message items. In-engine verification pending.",
@@ -4133,7 +4200,8 @@
 ],
 "PAR-0096":[
 "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence for the dead display path - AttackIndicators is never fed and never drawn. Observation depends on enemy damage reaching player buildings (turret/enemy-AI gaps in the combat/units-ai scans), so the evaluator should force-damage a building or use a sandbox scenario. PAR-0032/0057 cover minimap rendering only; no ledger item covers indicators. In-engine verification pending.",
-"2026-10-13 G00: minimap indicators + unit icons b03aed9; the sim never emits BuildDamageEvent (G01 emits, G03 drains)."
+"2026-10-13 G00: minimap indicators + unit icons b03aed9; the sim never emits BuildDamageEvent (G01 emits, G03 drains).",
+"2026-10-13 re-run: G01 T15 1bf6788b emitted BuildDamageEvent + drain_build_damage_events + gdext JSON seam; G03's minimap-drain half is now unblocked for a later pass."
 ],
 "PAR-0097":[
 "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the concrete F6 control is dead and the in-world block status readout (power/liquid/items) never renders; core-items HUD (CoreItemsDisplay) and wave pane do work, so this is the missing per-building status half of lead 8. Bars default off in Java, so the repro must enable F6. In-engine verification pending.",
@@ -4273,7 +4341,8 @@
 "2026-10-12 (session 5 §E, partial): `bdc29ec` wires the core landing camera zoom (0.02 -> 4) to launch (`cutscene-t1..t3.png`); remain: scaled core sprite, white fade, announce, hide-real-core.",
 "2026-10-12 audit (fixing): campaign-import: zoom curve correct; landing no longer plays on resume, input lock + smooth handoff added in 09ba3d0. Remaining: core drop sprite, white fade, announce (audit-campaign-import.md T3, audit-rendering-hud.md).",
 "2026-10-13 G00: landing sprite/fade/announce/timing/locks landed 659146d; remaining: thruster flames + hiding the real core under the landing sprite (G03).",
-"2026-10-13 wave-1: G03: T18 (landing) not run this session."
+"2026-10-13 wave-1: G03: T18 (landing) not run this session.",
+"2026-10-13 re-run: G03 T18 ac097896: landing core thrusters/streaks/retraction/shake landed; evidence runs/20261013-s3-G03-T18."
 ],
 "PAR-0132":[
 "Code-scan 2026-10-10 (ui-dialogs): S2, high confidence. Player impact: the entire custom-rules editing surface is absent - Customize is an empty shell and the pause menu has no rule-edit entry, so custom game and sandbox rule changes are impossible. PAR-0066 only blocks the Custom Game window for the repro; the dialog can be opened directly. Related dialogs but distinct symptoms: PAR-0023 (campaign difficulty), PAR-0024 (launch loadout)."
@@ -4320,14 +4389,16 @@
 "2026-10-12 (round-1 landing recorded late): `91ed4a4` swept unit collision + `hit_entity` (maxDamageFraction, shield, armor/pierce, knockback, status chance); tests share PAR-0086's."
 ],
 "PAR-0143":[
-"Revealed by PAR-0033: the Java dialog has a Tags filter row (heart/Reactor/power/logic/... icons), a schematic CARD grid with per-card info/upload/edit/delete icons, and Back + Import Schematic... buttons; the port renders a left list + a details pane (3x3 tiles / item costs / Edit-Export-Icon Tag-Delete-Configure Loadout)."
+"Revealed by PAR-0033: the Java dialog has a Tags filter row (heart/Reactor/power/logic/... icons), a schematic CARD grid with per-card info/upload/edit/delete icons, and Back + Import Schematic... buttons; the port renders a left list + a details pane (3x3 tiles / item costs / Edit-Export-Icon Tag-Delete-Configure Loadout).",
+"2026-10-13 re-run: G05 T10b e9c9c54b: schematics dialog tags row + card grid + in-game use_schematic click path done; showAllTags editor/workshop links deferred."
 ],
 "PAR-0144":[
 "Revealed by PAR-0034. Java DatabaseDialog planet tabs draw Icon.eye / the planet UI icons; the port's text buttons keep the planet colors but not the icon surface."
 ],
 "PAR-0145":[
 "Revealed by PAR-0035. Java: ResearchDialog.treeLayout() (ResearchDialog.java:332-353) positions TechTreeNode cells as a connected graph (yellow connector lines, planet tab, pan/zoom, hover popups, purchase). Port: research_dialog.gd builds a root rail + node rows; the rail shows 'techtree.<null>' for nodes without a root (campaign_views.research has 223 nodes, only node[0] carries root 'serpulo'), and the rows overlap the rail. Requires: the view's tech-tree root grouping (or the Rust TechStore's roots) + a TreeLayout port (client/ui/layout/tree_layout.gd is a cursor-row stub) + the TechTreeNode widget. Cross-link PAR-0047.",
-"2026-10-13 wave-2: G05 T1a/T1b/T1c cd39ed4/863be28/ef2ea54: research tree read model, Java canSpend partial spending, node graph with connectors/pan/zoom, hover info + unlock sound; in-engine runs/20261013-s5-G05-T1a/-T1b/-T1c; full click+spend replay for verified remains."
+"2026-10-13 wave-2: G05 T1a/T1b/T1c cd39ed4/863be28/ef2ea54: research tree read model, Java canSpend partial spending, node graph with connectors/pan/zoom, hover info + unlock sound; in-engine runs/20261013-s5-G05-T1a/-T1b/-T1c; full click+spend replay for verified remains.",
+"2026-10-13 re-run: G05 re-run: T4b/T10a/T10b landed (hints 4283156e, schematic toggles 84cb2135, dialog grid e9c9c54b); full click+spend replay for verified remains."
 ],
 "PAR-0146":[
 "Revealed by PAR-0036. Opened from the HUD, the port's planet dialog shows the live world through its backdrop and the world HUD above it; the Java PlanetDialog renders its own space scene and the HUD hides behind the modal. The campaign-path page (PAR-0015) is unaffected. Also observed on PAR-0038: the tutorial objective banner renders above the pause dialog's 0.9 dim (255 vs the Java's 81)."
@@ -4371,7 +4442,8 @@
 ],
 "PAR-0156":[
 "Seeded from the PAR-0139 round-2 verification: the RTS/base halves run, but `prebuildAi` core defenders and the estimateStats turret term remain unimplemented (both are small, self-contained).",
-"2026-10-13 wave-1: G01: T17 (prebuildAi/estimateStats) not executed this session."
+"2026-10-13 wave-1: G01: T17 (prebuildAi/estimateStats) not executed this session.",
+"2026-10-13 re-run: G01 re-run T17 (estimateStats/prebuild/aiCoreSpawn/fillItems) not reached (budget); no dep missing."
 ],
 "PAR-0157":[
 "Seeded by the PAR-0140 round-2 walk (presentation half of RTS selection).",
