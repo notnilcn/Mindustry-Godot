@@ -21,14 +21,14 @@ use godot::prelude::*;
 
 use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
-    AudioEvent, AudioRng, LoopMixer, MusicContext, MusicOutput, MusicPlayer, MusicRef,
-    SeededAudioRng, SharedAudioLog, SoundId, SoundPriorityTable, TickedAudioEvent, bus_for_sound,
-    settings_keys,
+    AmbientPoller, AudioEvent, AudioRng, LoopMixer, LoopOutput, MusicContext, MusicOutput,
+    MusicPlayer, MusicRef, SeededAudioRng, SharedAudioLog, SoundId, SoundPriorityTable,
+    TickedAudioEvent, bus_for_sound, settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
 use streams::StreamCache;
-use voices::VoicePool;
+use voices::{LoopVoicePool, VoicePool};
 
 /// The audio node.
 #[derive(GodotClass)]
@@ -39,6 +39,12 @@ pub struct MindAudio {
     bus: BusLayout,
     streams: StreamCache,
     pool: Option<VoicePool>,
+    /// Persistent loop voices (`LoopMixer` output).
+    loop_pool: Option<LoopVoicePool>,
+    /// 20 Hz ambient poller (T5 fills its snapshot).
+    poller: AmbientPoller,
+    /// `debug_hold_loop` test seam: `(sound, x, y, volume, frames_left)`.
+    debug_loop_hold: Option<(SoundId, f32, f32, f32, i64)>,
     music_player: Option<Gd<AudioStreamPlayer>>,
     music: MusicPlayer,
     rng: SeededAudioRng,
@@ -95,6 +101,9 @@ impl INode for MindAudio {
             bus: BusLayout::default(),
             streams: StreamCache::default(),
             pool: None,
+            loop_pool: None,
+            poller: AmbientPoller::new(50.0),
+            debug_loop_hold: None,
             music_player: None,
             music: MusicPlayer::new(),
             rng: SeededAudioRng::new(0),
@@ -134,6 +143,7 @@ impl INode for MindAudio {
         // high-churn players (plan 18 §3.6); not expressible as static nodes.
         let mut self_node: Gd<GdNode> = self.base_mut().clone().upcast::<GdNode>();
         let pool = VoicePool::new(&mut self_node, "Sound", "UI");
+        let loop_pool = LoopVoicePool::new(&mut self_node, "Sound");
         if !self.bus.is_ready() {
             log::warn!("[audio] bus layout incomplete: {:?}", self.bus);
         }
@@ -143,6 +153,7 @@ impl INode for MindAudio {
         self.base_mut().add_child(&music_player);
         pool.stop_all();
         self.pool = Some(pool);
+        self.loop_pool = Some(loop_pool);
         self.music_player = Some(music_player);
 
         // Audio listener on the spine camera (plan 18 §3.10).
@@ -206,6 +217,9 @@ impl INode for MindAudio {
         if let Some(pool) = &self.pool {
             pool.set_paused(self.sound_paused);
         }
+        if let Some(loop_pool) = &self.loop_pool {
+            loop_pool.set_paused(self.sound_paused);
+        }
 
         // Plan-18 sink drain: fetch the sim log lazily (the `SimHost` may
         // finish `_ready` after `MindAudio`) and apply every queued event.
@@ -219,11 +233,40 @@ impl INode for MindAudio {
             .unwrap_or_default();
         self.apply_events(&events, now_ms, delta_frames);
 
+        let context = self.music_context(now_ms, delta_frames);
+
+        // T4: per-frame loop mixing (`SoundControl.updateLoops`,
+        // `SoundControl.java:410-469`). Leaving the game stops every loop
+        // voice instead of just clearing the data.
+        let listener = self.listener();
+        let in_game = !context.is_menu;
+        let avol = self.settings.ambientvol as f32 / 100.0;
+        if let Some((sound, x, y, volume, remaining)) = &mut self.debug_loop_hold
+            && *remaining > 0
+        {
+            self.mixer
+                .accumulate(*sound, *x, *y, *volume, 1.0, listener);
+            *remaining -= 1;
+        }
+        if let Some(pool) = self.loop_pool.as_mut() {
+            let mut out = GodotLoopOutput {
+                pool,
+                streams: &mut self.streams,
+                listener,
+            };
+            if in_game {
+                self.mixer
+                    .update(avol, true, self.sound_paused, listener, &mut out);
+            } else {
+                self.mixer.stop_all(&mut out);
+            }
+        }
+        self.mixer.merge_ambient(self.poller.last_output());
+
         if self.music_override {
             return;
         }
 
-        let context = self.music_context(now_ms, delta_frames);
         let Some(player) = self.music_player.clone() else {
             return;
         };
@@ -434,6 +477,10 @@ impl MindAudio {
                 AudioEvent::MusicStop => self.stop_music(),
                 AudioEvent::KeepSilent => self.music.keep_silent(),
                 AudioEvent::StopLoops => {
+                    // `ResetEvent` teardown: stop every loop voice.
+                    if let Some(loop_pool) = &mut self.loop_pool {
+                        loop_pool.stop_all();
+                    }
                     self.mixer = LoopMixer::new();
                 }
                 AudioEvent::Construct {
@@ -575,6 +622,48 @@ impl MusicOutput for GodotMusicOutput<'_> {
         if !playing {
             self.player.stop();
         }
+    }
+}
+
+/// `LoopOutput` backed by the pooled looping 2D voices.
+struct GodotLoopOutput<'a> {
+    pool: &'a mut LoopVoicePool,
+    streams: &'a mut StreamCache,
+    listener: Listener,
+}
+
+impl LoopOutput for GodotLoopOutput<'_> {
+    fn start_loop(&mut self, sound: SoundId, volume: f32, pitch: f32, pan: f32) -> u64 {
+        match self.streams.sound(sound.name(), true) {
+            Some(stream) => self.pool.start(
+                stream,
+                volume,
+                pitch,
+                pan,
+                (self.listener.x, self.listener.y),
+                self.listener.width,
+            ),
+            None => 0,
+        }
+    }
+
+    fn update_loop(&mut self, voice: u64, volume: f32, pitch: f32, pan: f32) {
+        self.pool.update(
+            voice,
+            volume,
+            pitch,
+            pan,
+            (self.listener.x, self.listener.y),
+            self.listener.width,
+        );
+    }
+
+    fn stop_loop(&mut self, voice: u64) {
+        self.pool.stop(voice);
+    }
+
+    fn is_playing(&self, voice: u64) -> bool {
+        voice != 0 && self.pool.is_playing(voice)
     }
 }
 
@@ -751,14 +840,18 @@ impl MindAudio {
     #[func]
     pub fn debug_emit_loop(&mut self, sound: GString, x: f64, y: f64, volume: f64) {
         if let Some(id) = SoundId::by_name(&sound.to_string()) {
-            self.mixer.accumulate(
-                id,
-                x as f32,
-                y as f32,
-                volume as f32,
-                1.0,
-                Listener::default(),
-            );
+            let listener = self.listener();
+            self.mixer
+                .accumulate(id, x as f32, y as f32, volume as f32, 1.0, listener);
+        }
+    }
+
+    /// Test seam: re-accumulates a loop source for `frames` frames
+    /// (audio can't be asserted any other way; `Call.createWeather`-style).
+    #[func]
+    pub fn debug_hold_loop(&mut self, sound: GString, x: f64, y: f64, volume: f64, frames: i64) {
+        if let Some(id) = SoundId::by_name(&sound.to_string()) {
+            self.debug_loop_hold = Some((id, x as f32, y as f32, volume as f32, frames));
         }
     }
 

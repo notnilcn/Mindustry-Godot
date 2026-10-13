@@ -437,6 +437,8 @@ pub struct AmbientPoller {
     /// Total polls performed.
     pub polls: u64,
     scratch: IndexMap<SoundId, AmbientSoundData>,
+    /// Sound ids that became non-silent in the current pass (clone order).
+    output_order: Vec<SoundId>,
     output: Vec<AmbientSoundData>,
 }
 
@@ -454,6 +456,7 @@ impl AmbientPoller {
             accum_ms: 0.0,
             polls: 0,
             scratch: IndexMap::with_capacity(16),
+            output_order: Vec::with_capacity(16),
             output: Vec::with_capacity(16),
         }
     }
@@ -461,7 +464,9 @@ impl AmbientPoller {
     /// Advances the clock and, when due, runs `AudioThread.doLoop`.
     ///
     /// `is_playing` is the upstream `state.isPlaying()` gate (menu breaks the
-    /// thread). Returns the aggregate list (empty when not due).
+    /// thread). Returns the aggregate list; between polls it returns the last
+    /// poll's rows (`updateLoops` merges them every frame,
+    /// `SoundControl.java:452-468`).
     pub fn update(
         &mut self,
         delta_ms: f64,
@@ -470,17 +475,14 @@ impl AmbientPoller {
         snapshot: &AmbientSnapshot,
         listener: Listener,
     ) -> &[AmbientSoundData] {
-        if is_menu {
-            self.output.clear();
-            return &self.output;
-        }
-        if !is_playing {
+        if is_menu || !is_playing {
             self.output.clear();
             return &self.output;
         }
         self.accum_ms += delta_ms;
         if self.accum_ms < self.interval_ms {
-            self.output.clear();
+            // Not due: keep the previous poll's rows (Java's merge source
+            // persists between polls).
             return &self.output;
         }
         self.accum_ms -= self.interval_ms;
@@ -488,9 +490,17 @@ impl AmbientPoller {
         self.do_loop(snapshot, listener)
     }
 
+    /// The last poll's aggregate rows (merged by `LoopMixer::merge_ambient`).
+    pub fn last_output(&self) -> &[AmbientSoundData] {
+        &self.output
+    }
+
+    /// `AudioThread.doLoop` (`SoundControl.java:505-561`): accumulate every
+    /// source into per-sound scratch, remember the sounds that became
+    /// non-silent, then clone the **full** sums into the output.
     fn do_loop(&mut self, snapshot: &AmbientSnapshot, listener: Listener) -> &[AmbientSoundData] {
         self.scratch.clear();
-        self.output.clear();
+        self.output_order.clear();
 
         for entry in &snapshot.entries {
             let data = self
@@ -512,7 +522,16 @@ impl AmbientPoller {
             data.sum_x += entry.x * base_vol;
             data.sum_y += entry.y * base_vol;
 
-            if silent && data.volume > 0.0 && !self.output.iter().any(|o| o.sound == entry.sound) {
+            if silent && data.volume > 0.0 {
+                self.output_order.push(entry.sound);
+            }
+        }
+
+        // Clone after the pass so each row holds the sum of *all* sources
+        // (the old code cloned on first touch and missed later sources).
+        self.output.clear();
+        for sound in &self.output_order {
+            if let Some(data) = self.scratch.get(sound) {
                 self.output.push(data.clone());
             }
         }
@@ -754,5 +773,77 @@ mod tests {
         let mut snapshot = AmbientSnapshot::default();
         snapshot.build_from([&provider as &dyn AmbientProvider]);
         assert!(snapshot.entries.is_empty());
+    }
+
+    /// T4: the output row must hold the **full sum** of every source of the
+    /// sound (`SoundControl.AudioThread.doLoop` clones after the pass,
+    /// `SoundControl.java:526-549`).
+    #[test]
+    fn do_loop_output_holds_full_sum() {
+        let mut snapshot = AmbientSnapshot::default();
+        snapshot.entries.push(AmbientEntry {
+            sound: SoundId::LOOP_HUM,
+            x: 0.0,
+            y: 0.0,
+            volume: 0.5,
+        });
+        snapshot.entries.push(AmbientEntry {
+            sound: SoundId::LOOP_HUM,
+            x: 10.0,
+            y: 0.0,
+            volume: 0.5,
+        });
+        let mut poller = AmbientPoller::new(50.0);
+        let out = poller
+            .update(50.0, false, true, &snapshot, listener())
+            .to_vec();
+        assert_eq!(out.len(), 1);
+        // falloff (0,0) = clamp(1/(0/16000)) = 1; (10,0) = 16000/100 -> 1.
+        assert!(
+            (out[0].volume - 1.0).abs() < 1.0e-6,
+            "volume {}",
+            out[0].volume
+        );
+        assert!(
+            (out[0].total - 2.0).abs() < 1.0e-6,
+            "total {}",
+            out[0].total
+        );
+        assert!(
+            (out[0].sum_x - 10.0).abs() < 1.0e-6,
+            "sum_x {}",
+            out[0].sum_x
+        );
+    }
+
+    /// T4: Java merges the last poll's rows every frame; between polls the
+    /// output must persist instead of clearing (`SoundControl.java:452-468`).
+    #[test]
+    fn poller_keeps_output_between_polls() {
+        let provider = TestProvider {
+            valid: true,
+            sound: true,
+            volume: 1.0,
+            sound_id: SoundId::LOOP_HUM,
+            pos: (0.0, 0.0),
+        };
+        let mut snapshot = AmbientSnapshot::default();
+        snapshot.build_from([&provider as &dyn AmbientProvider]);
+        let mut poller = AmbientPoller::new(50.0);
+        let due = poller
+            .update(50.0, false, true, &snapshot, listener())
+            .to_vec();
+        assert_eq!(due.len(), 1);
+        // Not due: same rows.
+        let between = poller.update(10.0, false, true, &snapshot, listener());
+        assert_eq!(between, due.as_slice());
+        assert_eq!(poller.last_output().len(), 1);
+        // Menu/not-playing still clears.
+        assert!(
+            poller
+                .update(60.0, true, false, &snapshot, listener())
+                .is_empty()
+        );
+        assert!(poller.last_output().is_empty());
     }
 }
