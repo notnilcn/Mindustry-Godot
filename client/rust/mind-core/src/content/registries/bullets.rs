@@ -1149,20 +1149,38 @@ impl BulletDef {
         bullet
     }
 
-    /// `BulletType.calculateRange()` (`BulletType.java:443-449`).
+    /// `BulletType.calculateRange()` (`BulletType.java:443-449`) with the
+    /// subclass overrides that replace the whole method (`LaserBulletType:62`,
+    /// `ContinuousBulletType:47` incl. its ContinuousLaser/ContinuousFlame
+    /// subclasses, `ShrapnelBulletType:50`, `SapBulletType:68`,
+    /// `RailBulletType:31`, `LightningBulletType:27`, `MultiBulletType:36`).
     ///
-    /// Computed at registration from load-time constants (vanilla never
-    /// mutates the inputs between load and `init`); `init_self` re-derives the
-    /// same value into [`BulletDef::range`].
+    /// The subclass overrides do NOT consult `rangeOverride`, so the kind match
+    /// comes first. `Multi` is resolved separately because it needs the
+    /// registered children ([`link`] and the unit-load snapshot).
     pub fn compute_range(&self) -> f32 {
+        match self.kind {
+            BulletKind::Laser
+            | BulletKind::Continuous
+            | BulletKind::ContinuousLaser
+            | BulletKind::ContinuousFlame
+            | BulletKind::Shrapnel
+            | BulletKind::Sap => return self.length.max(self.max_range),
+            BulletKind::Rail => return self.length,
+            BulletKind::Lightning => {
+                return (self.lightning_length as f32 + self.lightning_length_rand as f32 / 2.0)
+                    * 6.0;
+            }
+            _ => {}
+        }
         if self.range_override > 0.0 {
             return self.range_override;
         }
         if let Some((lifetime, speed)) = self.spawn_unit_range {
             return lifetime * speed;
         }
-        if let Some((lifetime, speed)) = self.despawn_unit_range {
-            return lifetime * speed;
+        if let Some((despawn_lifetime, despawn_speed)) = self.despawn_unit_range {
+            return despawn_lifetime * despawn_speed;
         }
         // `Mathf.zero(drag)`.
         if self.drag.abs() <= 0.001 {
@@ -1551,6 +1569,26 @@ pub(crate) fn link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
     for (id, default) in lightning_defaults {
         if let Some(bullet) = registry.bullet_mut(id) {
             bullet.lightning_type = Some(default);
+        }
+    }
+    // `MultiBulletType.calculateRange()`: the max over the registered children
+    // (`MultiBulletType.java:36`). Children are registered after their parent
+    // (higher ids), so reverse id order resolves nested Multi bullets bottom-up.
+    for index in (0..registry.bullets().len()).rev() {
+        let id = BulletId::new(index as u16);
+        let Some(bullet) = registry.bullet(id) else {
+            continue;
+        };
+        if bullet.kind != BulletKind::Multi {
+            continue;
+        }
+        let range = bullet
+            .spawn_bullets
+            .iter()
+            .filter_map(|child| registry.bullet(*child))
+            .fold(0.0f32, |max, child| max.max(child.range));
+        if let Some(bullet) = registry.bullet_mut(id) {
+            bullet.range = range;
         }
     }
     Ok(())
