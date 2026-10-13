@@ -32,6 +32,8 @@ var _uiscale_countdown := 0.0
 var _uiscale_shown_seconds := -1
 ## The active transient prompt root (`showConfirm`/`showTextInput`/`showText`).
 var _active_prompt: Control = null
+## Current centred announce box (`UI.announce` replaces the last one).
+var _announce_node: Control = null
 ## Its cancel path (Esc); invalid when no prompt is up.
 var _prompt_cancel: Callable = Callable()
 
@@ -413,7 +415,39 @@ func _on_toast(text: String, _icon: String) -> void:
 
 
 func _on_announce(text: String, duration: float) -> void:
-	_toast_label(text, maxf(1.0, duration))
+	_announce_box(text, maxf(1.0, duration))
+
+
+## `UI.announce(CharSequence, float)` (`UI.java:636-652`): a `Styles.black3`
+## table, margin 8, centred `outlineLabel`, at the viewport centre, fading out
+## over `duration` with `Interp.pow4In`; a new announce replaces the last.
+func _announce_box(text: String, duration: float) -> void:
+	# code-instantiated: announces are transient, high-churn centred boxes.
+	if _announce_node != null and is_instance_valid(_announce_node):
+		_announce_node.queue_free()
+	var box := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0, 0, 0, 0.3)
+	style.content_margin_left = 8.0
+	style.content_margin_top = 8.0
+	style.content_margin_right = 8.0
+	style.content_margin_bottom = 8.0
+	box.add_theme_stylebox_override("panel", style)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var label := MindRichLabel.new()
+	label.text = "[center]" + text
+	box.add_child(label)
+	# Centred on the viewport (`setPosition(0, 0, Align.center)`).
+	box.set_anchors_preset(Control.PRESET_CENTER)
+	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	box.grow_vertical = Control.GROW_DIRECTION_BOTH
+	overlay_layer.add_child(box)
+	_announce_node = box
+	var tween := create_tween()
+	tween.tween_interval(duration)
+	tween.set_trans(Tween.TRANS_QUART).set_ease(Tween.EASE_IN)
+	tween.tween_property(box, "modulate:a", 0.0, 0.4)
+	tween.tween_callback(box.queue_free)
 
 
 func _toast_label(text: String, duration: float) -> void:

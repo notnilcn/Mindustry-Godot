@@ -1443,6 +1443,13 @@ impl MindSimHost {
         self.sim.io_pending() as i64
     }
 
+    /// Whether a *save* is queued (`control.saves.isSaving()`; G03 T9 shows
+    /// the small `@saving` label instead of the full loading overlay).
+    #[func]
+    pub fn io_saving(&self) -> bool {
+        self.sim.io_saving()
+    }
+
     /// Stores host playtime (`Saves.getTotalPlaytime`) for the next save's meta
     /// region (`SaveVersion.writeMeta`).
     #[func]
@@ -2448,6 +2455,7 @@ impl MindSimHost {
     #[func]
     pub fn player_unit_status(&self) -> VarDictionary {
         use mind_core::entities::comp::Health;
+        use mind_core::entities::comp::unit::comp::StatusComp;
         use mind_core::entities::comp::unit::comp::UnitTypeComp;
         let mut dict = VarDictionary::new();
         let entity = self.sim.player_unit();
@@ -2462,10 +2470,129 @@ impl MindSimHost {
         let healthf = health
             .filter(|h| h.max_health > 0.0)
             .map_or(0.0, |h| h.health / h.max_health);
+        // `HudFragment.addInfoTable` (`:1205-1231`): applied status effects
+        // with their remaining duration (view-only entries, G03 T9).
+        let statuses: Vec<serde_json::Value> = entity
+            .and_then(|e| world.get::<StatusComp>(e))
+            .map(|comp| {
+                comp.statuses
+                    .iter()
+                    .map(|entry| {
+                        let name = self
+                            .content_snapshot
+                            .as_ref()
+                            .and_then(|content| content.status(entry.effect))
+                            .map(|def| def.name.clone())
+                            .unwrap_or_default();
+                        serde_json::json!({
+                            "name": name,
+                            "duration": entry.duration,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         dict.set("dead", dead);
         dict.set("healthf", if dead { 0.0 } else { healthf });
         dict.set("type", &GString::from(type_name.as_str()));
+        dict.set(
+            "statuses",
+            &GString::from(serde_json::Value::Array(statuses).to_string().as_str()),
+        );
         dict
+    }
+
+    // ---- G03 T9 HUD seams ----
+
+    /// Player-team cores `[{x, y, health, max}]` in row-major order (G03 T9):
+    /// the core-attack banner sums the healths and pans to the core whose
+    /// health dropped last. Java fires `Trigger.teamCoreDamage` on
+    /// `CoreBuild.damage` (`CoreBlock.java:842-848`); the port diffs these
+    /// values between 5 Hz refreshes (documented deviation).
+    #[func]
+    pub fn player_core_healths_json(&self) -> GString {
+        use mind_core::entities::comp::health::Health;
+        let team = self.player_team();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("[]");
+        };
+        let mut rows: Vec<serde_json::Value> = Vec::new();
+        let mut seen = Vec::new();
+        let unit = mind_core::config::TILESIZE as f32;
+        for (pos, index) in self.sim.grid.iter_row_major() {
+            let Some(def) = content.block(self.sim.grid.block_id_at(index)) else {
+                continue;
+            };
+            if def.kind != BlockKind::CoreBlock {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(pos.x() as i32, pos.y() as i32).build else {
+                continue;
+            };
+            if seen.contains(&entity) {
+                continue;
+            }
+            if self.building_team(pos.x() as i32, pos.y() as i32) != Some(team) {
+                continue;
+            }
+            seen.push(entity);
+            let anchor_x = (pos.x() as i32 - def.size_offset) as f32 * unit + def.offset;
+            let anchor_y = (pos.y() as i32 - def.size_offset) as f32 * unit + def.offset;
+            let (health, max) = self
+                .sim
+                .ecs
+                .0
+                .get::<Health>(entity)
+                .map(|health| (health.health, health.max_health))
+                .unwrap_or((0.0, 0.0));
+            rows.push(serde_json::json!({
+                "x": anchor_x,
+                "y": anchor_y,
+                "health": health,
+                "max": max,
+            }));
+        }
+        GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// `WaveSpawner.playerNear()` (`WaveSpawner.java:58-60`, G03 T9): spawns
+    /// exist, the player unit is alive, a spawn tile is within
+    /// `rules.dropZoneRadius` of the player and the player team is not the
+    /// wave team.
+    #[func]
+    pub fn player_near_drop_zone(&self) -> bool {
+        let spawns: Vec<(i32, i32)> = self
+            .sim
+            .unit_runtime()
+            .map(|runtime| {
+                runtime
+                    .wave_spawner
+                    .spawns
+                    .iter()
+                    .map(|pos| (pos.x() as i32, pos.y() as i32))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let rules = self.render_rules_or_default();
+        player_near_drop_zone_predicate(
+            &spawns,
+            self.sim.player_unit_position(),
+            self.player_team(),
+            rules.wave_team,
+            rules.drop_zone_radius,
+        )
+    }
+
+    /// Live sector rules when available (campaign session first, then the last
+    /// `load_sector` rules), else defaults.
+    fn render_rules_or_default(&self) -> Rules {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.clone())
+            .or_else(|| self.sector_rules.clone())
+            .unwrap_or_default()
     }
 
     /// Debug probe: `{name, x, y, team}` rows for every live unit (render
@@ -4937,6 +5064,31 @@ fn first_core_position(grid: &WorldGrid, content: &ContentRegistry) -> Option<(f
     })
 }
 
+/// `WaveSpawner.playerNear()` (`WaveSpawner.java:58-60`): spawns exist, the
+/// player is alive, a spawn tile is within `radius` of the player and the
+/// player team is not the wave team. `spawns` are tiles; the player position
+/// is world px.
+pub fn player_near_drop_zone_predicate(
+    spawns: &[(i32, i32)],
+    player: Option<(f32, f32)>,
+    player_team: u8,
+    wave_team: u8,
+    radius: f32,
+) -> bool {
+    if spawns.is_empty() || player_team == wave_team {
+        return false;
+    }
+    let Some((px, py)) = player else {
+        return false;
+    };
+    let unit = mind_core::config::TILESIZE as f32;
+    spawns.iter().any(|(sx, sy)| {
+        let dx = *sx as f32 * unit - px;
+        let dy = *sy as f32 * unit - py;
+        dx.hypot(dy) < radius
+    })
+}
+
 /// One hovered-building bar row (`Block.setBars`, G03 T6).
 pub struct BarRow {
     /// `"health" | "power" | "items" | "liquid"`.
@@ -5274,5 +5426,41 @@ mod tests {
             .unwrap_or_else(|| panic!("liquid row"));
         assert!((row.value - 0.4).abs() < 1e-3, "value: {}", row.value);
         assert_eq!(row.label_key, format!("liquid.{}.name", liquid_info[1].0));
+    }
+
+    #[test]
+    fn drop_zone_predicate_uses_the_radius() {
+        // Spawn tile (10,10) -> world (80,80); radius 300 (G03 T9).
+        let spawns = [(10, 10)];
+        assert!(player_near_drop_zone_predicate(
+            &spawns,
+            Some((80.0 + 299.0, 80.0)),
+            1,
+            2,
+            300.0
+        ));
+        assert!(!player_near_drop_zone_predicate(
+            &spawns,
+            Some((80.0 + 301.0, 80.0)),
+            1,
+            2,
+            300.0
+        ));
+        // No spawns / same team / dead player.
+        assert!(!player_near_drop_zone_predicate(
+            &[],
+            Some((80.0, 80.0)),
+            1,
+            2,
+            300.0
+        ));
+        assert!(!player_near_drop_zone_predicate(
+            &spawns,
+            Some((80.0, 80.0)),
+            2,
+            2,
+            300.0
+        ));
+        assert!(!player_near_drop_zone_predicate(&spawns, None, 1, 2, 300.0));
     }
 }

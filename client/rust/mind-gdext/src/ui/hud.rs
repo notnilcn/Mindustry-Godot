@@ -135,6 +135,10 @@ pub struct MindHud {
     /// Composed wave/status text (`ui::hud_text`).
     #[var]
     status_text: GString,
+    /// Paused-banner bundle key: `@sector.curlost` after a campaign loss,
+    /// `@paused` otherwise (`HudFragment.java:286-297`).
+    #[var]
+    paused_text: GString,
 }
 
 #[godot_api]
@@ -179,6 +183,7 @@ impl INode for MindHud {
             tps: 60,
             position_text: GString::new(),
             status_text: GString::new(),
+            paused_text: GString::from("@paused"),
         }
     }
 
@@ -382,12 +387,36 @@ impl MindHud {
         if !sector_changed {
             if wave != self.last_wave {
                 let _ = self.base_mut().emit_signal("wave_event", &[]);
+                // `HudFragment.java:241-260`: warn about the next guardian wave.
+                if let Some(mut campaign) = self.campaign_node.clone()
+                    && let Ok(json) = campaign.call("get_rules_json", &[]).try_to::<GString>()
+                    && let Ok(rules) = serde_json::from_str::<Rules>(json.to_string().as_str())
+                    && let Some((unit, diff)) =
+                        hud_text::guardian_warnings(&rules.spawns, wave, win_wave)
+                {
+                    let key = if diff == 1 {
+                        "wave.guardianwarn.one"
+                    } else {
+                        "wave.guardianwarn"
+                    };
+                    let message = self.bundle.format(key, &[&diff.to_string()]);
+                    let emoji = self
+                        .iconc
+                        .get(&format!("unit-{unit}-ui"))
+                        .or_else(|| self.iconc.get(&format!("unit-{unit}")))
+                        .map(|glyph| format!("{glyph} "))
+                        .unwrap_or_default();
+                    self.push_toast(
+                        GString::from(format!("{emoji}{message}").as_str()),
+                        GString::from("warning"),
+                    );
+                }
             }
             if was_captured && !self.last_captured {
-                let text = self
-                    .bundle
-                    .format("sector.capture", &[sector_name.as_str()]);
-                self.push_toast(GString::from(text.as_str()), GString::from("ok"));
+                // `SectorCaptureEvent` while playing: the centred announce
+                // (`HudFragment.java:262-268`), not a toast.
+                let text = self.bundle.get("sector.capture.current");
+                self.push_announce(GString::from(text), 5.0);
                 let _ = self.base_mut().emit_signal(
                     "sector_event",
                     &[
@@ -427,6 +456,11 @@ impl MindHud {
         self.won = won;
         self.has_core = has_core;
         self.was_captured = was_captured;
+        self.paused_text = if game_over && campaign_mode {
+            GString::from("@sector.curlost")
+        } else {
+            GString::from("@paused")
+        };
         self.enemy_cores = enemy_cores;
         self.sector_name = GString::from(sector_name.as_str());
 
