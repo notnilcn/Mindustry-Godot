@@ -290,8 +290,16 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         group: Some(BlockGroup::Projectors),
         flags: vec![BlockFlag::Repair],
         has_power: Some(true),
+        has_liquids: Some(true),
+        // Java `Block.java:1439`: `round(10 * 0.16 * 60) = 96` (the port's
+        // truncating `round_to` would give 95; pin the Java value).
+        liquid_capacity: Some(96.0),
         solid: Some(true),
         update: Some(true),
+        // `RepairTurret.init()` (`RepairTurret.java:83-86`): `hasLiquids = true;
+        // consume(new ConsumeCoolant(coolantUse)).optional(true, true)`
+        // (`Blocks.java:6439 coolantUse = 0.16`).
+        consumes: vec![consume_optional(consume_coolant(0.16, true, true))],
         ..spec("repair-turret", BlockKind::RepairTurret)
     })?;
     let _ = sink;
