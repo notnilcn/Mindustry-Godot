@@ -401,14 +401,17 @@ pub fn collide_line_bullet(
         }
         if is_building {
             let target_team = ctx.world.get::<TeamComp>(target).map_or(0, |t| t.team);
+            let initial_health = ctx.world.get::<Health>(target).map_or(0.0, |h| h.health);
             if target_team != team {
                 hit_building(ctx, bullet, target);
                 behavior_hit(ctx, bullet, cx, cy, true);
                 count += 1;
             }
-            // NOTE: `BulletType.hitTile` (heal/fire/pierce, incl. the rail
-            // falloff for buildings) lands in G01 T4; until then friendly
-            // buildings take no line hit at all.
+            // `if(hitter.type.testCollision(hitter, tile))
+            //     hitter.type.hitTile(hitter, tile, c.x, c.y, health, false);`
+            if behavior_for(kind).test_collision(ctx.content, state.def, team, target_team) {
+                behavior_for(kind).hit_tile(ctx, bullet, target, cx, cy, initial_health, false);
+            }
         } else {
             line_hit_unit(ctx, bullet, target, cx, cy);
             count += 1;

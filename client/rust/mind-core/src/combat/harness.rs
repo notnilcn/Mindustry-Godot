@@ -926,6 +926,17 @@ fn register_fixture_bullets(content: &mut ContentRegistry) -> BTreeMap<String, B
         def.length = 200.0;
         def.drag = 0.0;
     });
+    // G01 T4: `LaserBoltBulletType(5.2f, 13){ healPercent = 5f;
+    // collidesTeam = true; }` (nova's bolt shape).
+    add("heal_bolt", BulletKind::LaserBolt, &|def| {
+        def.speed = 5.2;
+        def.lifetime = 60.0;
+        def.damage = 13.0;
+        def.hit_size = 4.0;
+        def.heal_percent = 5.0;
+        def.collides_team = true;
+        def.drag = 0.0;
+    });
     add("fire_bullet", BulletKind::Fire, &|def| {
         def.speed = 2.0;
         def.lifetime = 40.0;

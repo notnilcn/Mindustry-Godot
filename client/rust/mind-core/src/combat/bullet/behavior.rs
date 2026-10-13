@@ -39,13 +39,13 @@ pub trait BulletBehavior: Sync + 'static {
         &self,
         ctx: &mut CombatCtx<'_>,
         b: Entity,
-        _build: Entity,
+        build: Entity,
         x: f32,
         y: f32,
-        _initial_health: f32,
-        _direct: bool,
+        initial_health: f32,
+        direct: bool,
     ) {
-        super::hit_bullet(ctx, b, x, y, true);
+        super::hit_tile(ctx, b, build, x, y, initial_health, direct);
     }
 
     /// `BulletType.despawned(Bullet)`.
