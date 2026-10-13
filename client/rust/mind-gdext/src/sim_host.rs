@@ -189,6 +189,25 @@ pub struct BulletDraw {
     pub team: u8,
 }
 
+/// Per-building draw state (`Door`/`SwitchBlock`/`Sorter`/`ItemSource`/
+/// `Unloader` + cracks/team marks; G03 T8).
+pub struct BlockStateDraw {
+    /// `DoorState.open`.
+    pub door_open: bool,
+    /// `Building.enabled`.
+    pub enabled: bool,
+    /// `SorterBuild.sort_item`.
+    pub sort_item: Option<mind_core::content::ItemId>,
+    /// `UnloaderBuild.sort_item`.
+    pub unloader_item: Option<mind_core::content::ItemId>,
+    /// `SandboxState.item` (item source).
+    pub source_item: Option<mind_core::content::ItemId>,
+    /// `Health.fraction`.
+    pub healthf: f32,
+    /// `damaged()` = `health < maxHealth - 0.001`.
+    pub damaged: bool,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -3612,6 +3631,59 @@ impl MindSimHost {
     pub fn plan_matches(&self, x: i32, y: i32, block: BlockId) -> bool {
         self.construct_at(x, y)
             .is_some_and(|(current, _, _)| current == block)
+    }
+
+    /// Per-building state for the block pass (G03 T8): door open, switch
+    /// enabled, sorter/unloader/source items, damage and team mark inputs.
+    pub fn block_state_draw(&self, x: i32, y: i32) -> Option<BlockStateDraw> {
+        use mind_core::entities::comp::building::{DoorState, SandboxState};
+        use mind_core::entities::comp::health::Health;
+        use mind_core::world::blocks::distribution::sorter::SorterBuild;
+        use mind_core::world::blocks::storage::unloader::UnloaderBuild;
+        let entity = self.tile_at(x, y)?.build?;
+        let healthf = self
+            .sim
+            .ecs
+            .0
+            .get::<Health>(entity)
+            .map(Health::fraction)
+            .unwrap_or(1.0);
+        Some(BlockStateDraw {
+            door_open: self
+                .sim
+                .ecs
+                .0
+                .get::<DoorState>(entity)
+                .map(|door| door.open)
+                .unwrap_or(false),
+            enabled: self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::building::Building>(entity)
+                .map(|building| building.enabled)
+                .unwrap_or(true),
+            sort_item: self
+                .sim
+                .ecs
+                .0
+                .get::<SorterBuild>(entity)
+                .and_then(|sorter| sorter.sort_item),
+            unloader_item: self
+                .sim
+                .ecs
+                .0
+                .get::<UnloaderBuild>(entity)
+                .and_then(|unloader| unloader.sort_item),
+            source_item: self
+                .sim
+                .ecs
+                .0
+                .get::<SandboxState>(entity)
+                .and_then(|state| state.item),
+            healthf,
+            damaged: healthf < 0.999,
+        })
     }
 
     /// The player team's rebuild ghosts (`TeamData.plans`, pushed by
