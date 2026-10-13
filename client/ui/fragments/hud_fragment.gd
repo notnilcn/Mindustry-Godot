@@ -54,6 +54,8 @@ var _near_alpha := 0.0
 var _status_names := ""
 ## First-use UI-hidden announce latch.
 var _ui_hidden_warned := false
+## Whether the 3 s game-over timer is in flight (T16).
+var _game_over_pending := false
 
 
 func _ready() -> void:
@@ -367,25 +369,46 @@ func _check_game_over() -> void:
 	if _hud == null:
 		return
 	var over := bool(_hud.get("game_over"))
-	# T16 owns the 3 s delay; captures show the `@sector.capture.current`
-	# announce instead of the dialog (T9).
+	# T16: `Logic.java:435-440` opens the dialog 3 s after `GameOverEvent`
+	# (`Time.run(60 * 3, () -> ui.restart.show(winner))`); captures show the
+	# `@sector.capture.current` announce instead (T9).
 	if over:
 		if not _game_over_shown:
 			_game_over_shown = true
-			_open_game_over(false)
+			_schedule_game_over()
 	else:
 		_game_over_shown = false
+		_game_over_pending = false
 
 
-func _open_game_over(captured: bool) -> void:
+## 3 s timer before the restart dialog (`Time.run(60 * 3, ...)`); cancelled
+## when `gameOver` flips back.
+func _schedule_game_over() -> void:
+	_game_over_pending = true
+	get_tree().create_timer(3.0).timeout.connect(_open_game_over_now)
+
+
+func _open_game_over_now() -> void:
+	if _hud == null or not bool(_hud.get("game_over")):
+		_game_over_pending = false
+		return
+	_game_over_pending = false
+	_open_game_over(false)
+
+
+func _open_game_over(_captured: bool) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui == null or not ui.has_method("open_dialog"):
 		return
+	var stats: Variant = {}
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("game_stats_json"):
+		stats = JSON.parse_string(str(campaign.call("game_stats_json")))
 	var context := {
 		"winner": str(_hud.get("sector_name")),
 		"campaign": bool(_hud.get("campaign")),
-		"captured": captured,
 		"sector": str(_hud.get("sector_name")),
+		"stats": stats if stats is Dictionary else {},
 	}
 	ui.call("open_dialog", "restart", JSON.stringify(context))
 

@@ -3408,6 +3408,24 @@ impl MindCampaign {
         self.content_error = None;
     }
 
+    /// `GameOverDialog` stats rows (`state.stats`, G03 T16):
+    /// `{"wave", "unitsCreated", "enemiesDestroyed", "built", "destroyed",
+    /// "deconstructed", "waves"}` in Java label order.
+    #[func]
+    pub fn game_stats_json(&self) -> GString {
+        let stats = &self.session.stats;
+        let value = serde_json::json!({
+            "wave": stats.waves_lasted,
+            "unitsCreated": stats.units_created,
+            "enemiesDestroyed": stats.enemy_units_destroyed,
+            "built": stats.buildings_built,
+            "destroyed": stats.buildings_destroyed,
+            "deconstructed": stats.buildings_deconstructed,
+            "waves": self.session.rules.waves,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
     /// `state.isCampaign()`: a live campaign sector is loaded (the same
     /// condition `get_hud_state` reports as `campaign`). The J/N toggles read
     /// it (`DesktopInput.java:446-461`).
