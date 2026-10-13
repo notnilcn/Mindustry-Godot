@@ -3488,3 +3488,147 @@ fn bullet_hit_emits_build_damage_event() {
     let second = sim.drain_build_damage_events();
     assert!(second.is_empty(), "the drain clears the log");
 }
+
+/// G01 T16: an attack order on a *unit* follows the moving target
+/// (`CommandAI.defaultBehavior`: `targetPos.set(attackTarget)` every tick) and
+/// kills it.
+#[test]
+fn commanded_dagger_chases_moving_target() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::TilePos;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        unit_cap: 100,
+        unit_cap_variable: false,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let attacker = sim
+        .spawn_live_unit("dagger", 1, 40.0 * 8.0, 40.0 * 8.0, 0.0)
+        .expect("attacker");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 50.0 * 8.0, 40.0 * 8.0, 180.0)
+        .expect("target");
+    // Walk the target east at full speed.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(target) {
+        slot.kind = AiKind::Command;
+        slot.target = Some(TilePos::new(80, 40));
+    }
+    // The wire unit-id channel is `f32` and live seqs are ~1e9 (not exactly
+    // representable), so seed the attack target component directly — the RT
+    // tracking below is what this task owns.
+    let target_pos = sim.ecs.0.get::<Pos>(target).copied().expect("target pos");
+    sim.ecs
+        .0
+        .entity_mut(attacker)
+        .insert(crate::ai::types::command::AttackTargetComp(Some(target)));
+    if let Some(mut slot) = sim
+        .ecs
+        .0
+        .get_mut::<crate::ai::controller::ControllerSlot>(attacker)
+    {
+        slot.target = Some(crate::world::TilePos::new(
+            crate::world::WorldGrid::to_tile(target_pos.x) as i16,
+            crate::world::WorldGrid::to_tile(target_pos.y) as i16,
+        ));
+    }
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(target).is_err() {
+            break;
+        }
+    }
+    assert!(
+        sim.ecs.0.get_entity(target).is_err()
+            || sim
+                .ecs
+                .0
+                .get::<Health>(target)
+                .is_some_and(|health| health.dead),
+        "the attacker killed the fleeing target"
+    );
+}
+
+/// G01 T16: the reticle seam reports the tracked entity's position.
+#[test]
+fn command_target_seam_reports_position() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        unit_cap: 100,
+        unit_cap_variable: false,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let attacker = sim
+        .spawn_live_unit("dagger", 1, 40.0 * 8.0, 40.0 * 8.0, 0.0)
+        .expect("attacker");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 50.0 * 8.0, 40.0 * 8.0, 180.0)
+        .expect("target");
+    let attacker_id = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(attacker)
+        .expect("seq")
+        .0 as i32;
+    sim.ecs
+        .0
+        .entity_mut(attacker)
+        .insert(crate::ai::types::command::AttackTargetComp(Some(target)));
+    let target_pos = sim.ecs.0.get::<Pos>(target).copied().expect("target pos");
+    if let Some(mut slot) = sim
+        .ecs
+        .0
+        .get_mut::<crate::ai::controller::ControllerSlot>(attacker)
+    {
+        slot.kind = crate::ai::controller::AiKind::Command;
+        slot.target = Some(crate::world::TilePos::new(
+            crate::world::WorldGrid::to_tile(target_pos.x) as i16,
+            crate::world::WorldGrid::to_tile(target_pos.y) as i16,
+        ));
+    }
+    sim.tick().expect("tick");
+    let rows = sim.command_targets();
+    let row = rows
+        .iter()
+        .find(|(id, _, _, _)| *id == attacker_id)
+        .copied()
+        .expect("the attacker reports a command target");
+    let target_pos = sim.ecs.0.get::<Pos>(target).copied().expect("target pos");
+    eprintln!("command target row {row:?}, target {target_pos:?}");
+    assert!(row.3, "marked as an attack target");
+    assert!(
+        (row.1 - target_pos.x).abs() < 32.0 && (row.2 - target_pos.y).abs() < 32.0,
+        "reports the tracked entity's position"
+    );
+}

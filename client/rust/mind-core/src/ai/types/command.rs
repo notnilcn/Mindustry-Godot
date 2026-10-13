@@ -45,6 +45,12 @@ pub enum AttackTarget {
     Unit(i32),
 }
 
+/// Live `CommandAI.attackTarget` as an entity (G01 T16): the RT command branch
+/// refreshes `ControllerSlot.target` to the target's current tile each tick and
+/// stops moving within `range - 10`.
+#[derive(bevy_ecs::component::Component, Debug, Clone, Copy, Default, PartialEq)]
+pub struct AttackTargetComp(pub Option<bevy_ecs::entity::Entity>);
+
 impl AttackTarget {
     /// Serialized kind byte (`TypeIO.writeController` entityType).
     pub const fn kind(self) -> u8 {

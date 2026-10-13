@@ -541,6 +541,26 @@ impl Sim {
         let is_move = command == MOVE_COMMAND.raw();
         let default_team = self.live_default_team();
         let target = resolve_wire_target(x, y);
+        // `CommandAI.commandTarget` (G01 T16): Unit/Building wire targets keep
+        // the entity so the order follows moving targets.
+        let attack_entity = match &target {
+            crate::input::action::CommandTarget::Unit(target_id) => runtime
+                .units
+                .iter()
+                .find(|&&entity| {
+                    self.ecs
+                        .0
+                        .get::<crate::ecs::EntitySeq>(entity)
+                        .is_some_and(|seq| seq.0 as i32 == *target_id)
+                })
+                .copied(),
+            crate::input::action::CommandTarget::Building(pos) => self
+                .grid
+                .tiles
+                .getn(pos.x() as i32, pos.y() as i32)
+                .and_then(|tile| tile.build),
+            crate::input::action::CommandTarget::Position { .. } => None,
+        };
         let tile = match target {
             // `World.toTile` (rounded): tile `t` spans `t*8 ± 4` world px.
             crate::input::action::CommandTarget::Position { x, y } => Some(TilePos::new(
@@ -565,7 +585,7 @@ impl Sim {
                 }),
             crate::input::action::CommandTarget::Building(pos) => Some(pos),
         };
-        let mut orders: Vec<(Entity, Option<TilePos>)> = Vec::new();
+        let mut orders: Vec<(Entity, Option<TilePos>, Option<Entity>)> = Vec::new();
         for &id in ids {
             let Some(&entity) = runtime.units.iter().find(|&&entity| {
                 self.ecs
@@ -613,10 +633,10 @@ impl Sim {
             } else {
                 None
             };
-            orders.push((entity, order));
+            orders.push((entity, order, attack_entity));
         }
         let mut ordered = 0usize;
-        for (entity, order) in orders {
+        for (entity, order, attack_entity) in orders {
             // `CommandAI.command`: `this.command = command` (CommandAI.java:62);
             // the move target is cleared when switching away from move, and
             // `unit.mineTile`/build plans are dropped (CommandAI.java:59-63).
@@ -625,6 +645,10 @@ impl Sim {
                 .entity_mut(entity)
                 .insert(crate::ai::controller::UnitCommandComp(command));
             crate::entities::comp::unit::miner::clear_mine_tile(&mut self.ecs.0, entity);
+            self.ecs
+                .0
+                .entity_mut(entity)
+                .insert(crate::ai::types::command::AttackTargetComp(attack_entity));
             if let Some(mut slot) = self
                 .ecs
                 .0
@@ -719,6 +743,52 @@ impl Sim {
             applied += 1;
         }
         applied
+    }
+
+    /// Live command targets for the HUD reticle (G01 T16):
+    /// `(seq, world_x, world_y, is_attack)`. Move orders report their tile
+    /// centre; attack orders report the tracked entity's position.
+    pub fn command_targets(&self) -> Vec<(i32, f32, f32, bool)> {
+        let Some(runtime) = self
+            .ecs
+            .0
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for &entity in &runtime.units {
+            let Some(seq) = self.ecs.0.get::<crate::ecs::EntitySeq>(entity) else {
+                continue;
+            };
+            let attack = self
+                .ecs
+                .0
+                .get::<crate::ai::types::command::AttackTargetComp>(entity)
+                .and_then(|comp| comp.0);
+            let move_tile = self
+                .ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(entity)
+                .and_then(|slot| slot.target);
+            if attack.is_none() && move_tile.is_none() {
+                continue;
+            }
+            let pos = attack
+                .and_then(|target| self.ecs.0.get::<crate::entities::comp::Pos>(target))
+                .map(|pos| (pos.x, pos.y))
+                .or_else(|| {
+                    move_tile.map(|tile| {
+                        (
+                            (tile.x() as f32 + 0.5) * crate::config::TILESIZE as f32,
+                            (tile.y() as f32 + 0.5) * crate::config::TILESIZE as f32,
+                        )
+                    })
+                })
+                .unwrap_or((0.0, 0.0));
+            out.push((seq.0 as i32, pos.0, pos.1, attack.is_some()));
+        }
+        out
     }
 
     /// Drains the per-tick `BuildDamageEvent` log (G01 T15): one entry per

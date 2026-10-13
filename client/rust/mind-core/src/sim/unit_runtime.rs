@@ -2017,6 +2017,42 @@ pub fn unit_update_system(world: &mut World) {
                         crate::world::WorldGrid::to_tile(pos.y) as i16,
                     ));
                 }
+                // `CommandAI.defaultBehavior` attack tracking (G01 T16):
+                // `targetPos.set(attackTarget)` every tick, dead targets are
+                // cleared, and the unit stops within `range - 10`.
+                let mut move_target = slot.target;
+                if let Some(target) = world
+                    .get::<crate::ai::types::command::AttackTargetComp>(entity)
+                    .and_then(|comp| comp.0)
+                {
+                    let alive = world.get_entity(target).is_ok()
+                        && world
+                            .get::<Health>(target)
+                            .is_none_or(|health| !health.dead);
+                    if !alive {
+                        world
+                            .entity_mut(entity)
+                            .insert(crate::ai::types::command::AttackTargetComp(None));
+                        move_target = None;
+                        if let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+                            stored.target = None;
+                        }
+                    } else if let Some(target_pos) = world.get::<Pos>(target).copied() {
+                        let within = world.get::<Pos>(entity).copied().is_some_and(|pos| {
+                            let dx = target_pos.x - pos.x;
+                            let dy = target_pos.y - pos.y;
+                            dx * dx + dy * dy <= (def_range - 10.0).max(0.0).powi(2)
+                        });
+                        move_target = if within {
+                            None
+                        } else {
+                            Some(TilePos::new(
+                                crate::world::WorldGrid::to_tile(target_pos.x) as i16,
+                                crate::world::WorldGrid::to_tile(target_pos.y) as i16,
+                            ))
+                        };
+                    }
+                }
                 if command_kind == Some(crate::content::registries::commands::ControllerKind::Miner)
                 {
                     // `CommandAI.updateUnit`: the mine command auto-adds
@@ -2070,7 +2106,7 @@ pub fn unit_update_system(world: &mut World) {
                     // The default `defaultBehavior` movement runs for commands
                     // without a controller (`None`: move/enterPayload/...) and for
                     // the not-yet-dispatched Repair/Builder controllers.
-                    match slot.target {
+                    match move_target {
                         Some(target) => {
                             let flying = world
                                 .get::<PhysicsComp>(entity)

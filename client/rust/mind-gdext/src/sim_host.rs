@@ -857,6 +857,30 @@ impl MindSimHost {
         GString::from(self.sim.unit_debug_json().as_str())
     }
 
+    /// G01 T16: live command targets for the HUD reticle
+    /// (`[{"id":seq,"x":wx,"y":wy,"attack":bool}, ...]`).
+    #[func]
+    fn command_targets_json(&self) -> GString {
+        let rows: Vec<serde_json::Value> = self
+            .sim
+            .command_targets()
+            .into_iter()
+            .map(|(id, x, y, attack)| {
+                serde_json::json!({
+                    "id": id,
+                    "x": x,
+                    "y": y,
+                    "attack": attack,
+                })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
     /// G01 T15: drains the per-tick building-damage log as
     /// `[[tile_x, tile_y, team], ...]`; G03 filters by the player team and
     /// forwards to `MindMinimap.add_indicator`.
