@@ -612,6 +612,11 @@ impl MindSimHost {
                     y: fy as f32,
                 }
             }
+            // `InputHandler.unitControl`/`unitClear` (G01 T9).
+            "unit_control" => SimCommand::UnitControl {
+                unit: value.get("unit").and_then(|v| v.as_i64()).map(|v| v as i32),
+            },
+            "unit_clear" => SimCommand::UnitClear,
             other => {
                 log::warn!("apply_sim_command_json: unsupported op `{other}`");
                 return false;

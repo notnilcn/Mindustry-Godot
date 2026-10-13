@@ -568,6 +568,12 @@ impl StatusComp {
     }
 }
 
+/// The unit type a possessed unit was docked from (`Unit.dockedType`); set on
+/// the new unit when the previous player unit was core-spawned
+/// (`InputHandler.unitControl`, InputHandler.java:802-807).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Component)]
+pub struct DockedType(pub crate::content::UnitTypeId);
+
 /// Mining state (`MinerComp.mineTile`); mining logic lands with M2's `MinerAI`.
 #[derive(Debug, Clone, Copy, PartialEq, Component, Default)]
 pub struct MinerComp {

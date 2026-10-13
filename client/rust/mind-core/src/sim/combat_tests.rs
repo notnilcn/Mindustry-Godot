@@ -2084,3 +2084,115 @@ fn core_shard_spawns_alpha() {
     });
     assert_eq!(name, Some("alpha"));
 }
+
+/// G01 T9: possessing an own AI unit moves the Player controller and despawns
+/// the previous core-spawned unit without death effects.
+#[test]
+fn possess_own_dagger_despawns_core_alpha() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::entities::comp::Player;
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let alpha = sim.spawn_player_at_best_core(1).expect("alpha");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
+        .expect("dagger");
+    let seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(sim.possess_unit(seq), "possess the dagger");
+    assert_eq!(sim.player_unit(), Some(dagger));
+    assert!(
+        sim.ecs.0.get_entity(alpha).is_err(),
+        "core alpha despawned by possession"
+    );
+    assert!(
+        sim.ecs.0.get::<Player>(dagger).is_some(),
+        "dagger carries the Player marker"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Player)
+    );
+}
+
+/// G01 T9: `UnitClear` on a possessed unit releases it to AI and respawns at
+/// the core.
+#[test]
+fn clear_unit_returns_to_core() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::content::ctype::Mappable;
+    use crate::entities::comp::Player;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _alpha = sim.spawn_player_at_best_core(1).expect("alpha");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
+        .expect("dagger");
+    let seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(sim.possess_unit(seq));
+    assert!(sim.clear_unit(), "unit clear");
+    let respawned = sim.player_unit().expect("respawned at the core");
+    assert_ne!(respawned, dagger, "a fresh core unit was spawned");
+    assert!(
+        sim.ecs.0.get::<Player>(dagger).is_none(),
+        "released unit dropped the Player marker"
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Ground),
+        "released unit went back to its team AI"
+    );
+    let name = sim.ecs.0.get::<UnitTypeComp>(respawned).and_then(|comp| {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.unit(comp.type_id).map(|def| def.name())
+    });
+    assert_eq!(name, Some("alpha"), "respawn uses the core unit type");
+}
+
+/// G01 T9: enemy and dead units cannot be possessed.
+#[test]
+fn cannot_possess_enemy_or_dead_unit() {
+    let mut sim = live_sim(48);
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let _alpha = sim.spawn_player_at_best_core(1).expect("alpha");
+    let enemy = sim
+        .spawn_live_unit("dagger", 2, 220.0, 220.0, 0.0)
+        .expect("enemy");
+    let enemy_seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(enemy)
+        .expect("seq")
+        .0 as i32;
+    assert!(
+        !sim.possess_unit(enemy_seq),
+        "enemy unit is not possessable"
+    );
+    let own = sim
+        .spawn_live_unit("dagger", 1, 180.0, 180.0, 0.0)
+        .expect("own");
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(own) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    let own_seq = sim.ecs.0.get::<crate::ecs::EntitySeq>(own).expect("seq").0 as i32;
+    assert!(!sim.possess_unit(own_seq), "dead unit is not possessable");
+}

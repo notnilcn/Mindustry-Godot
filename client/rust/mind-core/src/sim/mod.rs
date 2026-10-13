@@ -795,11 +795,22 @@ impl Sim {
                 return Ok(());
             }
             SimCommand::UnitControl { unit } => {
+                // `InputHandler.unitControl` (`InputHandler.java:775-822`):
+                // possess an own unit, or clear the possession.
+                match unit {
+                    Some(seq) => {
+                        self.possess_unit(*seq);
+                    }
+                    None => {
+                        self.clear_unit();
+                    }
+                }
                 self.controlled_unit = *unit;
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
             SimCommand::UnitClear => {
+                self.clear_unit();
                 self.controlled_unit = None;
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
