@@ -711,6 +711,13 @@ fn update_builder(
                     .remove_block_raw(world, grid, anchor.x(), anchor.y())
                     .is_some()
                 {
+                    emit_construct_fx(
+                        world,
+                        runtime,
+                        state.current,
+                        (anchor.x() as i32, anchor.y() as i32),
+                        true,
+                    );
                     out.events
                         .push(SimEvent::BlockBrokenEvent(BlockBrokenEvent {
                             x: anchor.x(),
@@ -743,6 +750,13 @@ fn update_builder(
                         anchor,
                     );
                 }
+                emit_construct_fx(
+                    world,
+                    runtime,
+                    state.current,
+                    (anchor.x() as i32, anchor.y() as i32),
+                    false,
+                );
                 out.events
                     .push(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                         x: anchor.x(),
@@ -988,6 +1002,40 @@ impl Sim {
             self.refresh_unit_runtime();
         }
     }
+}
+
+/// `ConstructBlock.constructFinish`/`deconstructFinish` FX (`ConstructBlock
+/// .java:59-116`): `block.placeEffect`/`breakEffect` at the tile's draw centre
+/// with the block size as the rotation. Fog is not ported, so the visibility
+/// gate is skipped (documented).
+fn emit_construct_fx(
+    world: &World,
+    runtime: &crate::sim::runtime::SimRuntime,
+    block: BlockId,
+    anchor: (i32, i32),
+    active_deconstruct: bool,
+) {
+    use crate::content::EffectId;
+    use crate::content::registries::fx_meta::EffectRef;
+    let Some(def) = runtime.content().block(block) else {
+        return;
+    };
+    let Some(unit_runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+        return;
+    };
+    let cx = anchor.0 as f32 * 8.0 + def.offset;
+    let cy = anchor.1 as f32 * 8.0 + def.offset;
+    let (id, color) = if active_deconstruct {
+        (
+            EffectId::BREAK_BLOCK,
+            def.map_color.unwrap_or(crate::content::Rgba::WHITE),
+        )
+    } else {
+        (EffectId::PLACE_BLOCK, crate::content::Rgba::WHITE)
+    };
+    unit_runtime
+        .fx
+        .effect(&EffectRef::Named(id), cx, cy, def.size as f32, color);
 }
 
 #[cfg(test)]
@@ -1415,6 +1463,68 @@ mod tests {
         assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(BlockId::AIR));
         // 6 copper * 0.5 refund.
         assert_eq!(core_copper(&sim), 13);
+    }
+
+    /// G03 T22: finishing a construct emits `PLACE_BLOCK`, deconstructing
+    /// `BREAK_BLOCK` (rotation argument = the block size).
+    #[test]
+    fn construct_finish_emits_place_fx() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Default)]
+        struct RecordingSink(Mutex<Vec<(crate::content::EffectId, f32, f32, f32)>>);
+
+        impl crate::combat::view::FxSink for RecordingSink {
+            fn effect(
+                &self,
+                effect: &crate::content::registries::fx_meta::EffectRef,
+                x: f32,
+                y: f32,
+                rotation: f32,
+                _color: crate::content::Rgba,
+            ) {
+                if let crate::content::registries::fx_meta::EffectRef::Named(id) = effect {
+                    self.0.lock().expect("lock").push((*id, x, y, rotation));
+                }
+            }
+        }
+
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        let sink = Arc::new(RecordingSink::default());
+        if let Some(mut runtime) = sim.unit_runtime_mut() {
+            runtime.fx = sink.clone();
+        }
+        set_core_copper(&mut sim, 100);
+        assert!(sim.queue_player_place(20, 20, wall, 1), "wall queued");
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        {
+            let events = sink.0.lock().expect("lock");
+            let place = events
+                .iter()
+                .find(|(id, ..)| *id == crate::content::EffectId::PLACE_BLOCK)
+                .unwrap_or_else(|| panic!("PLACE_BLOCK missing: {events:?}"));
+            assert!((place.1 - 160.0).abs() < 1e-3, "cx: {place:?}");
+            assert!((place.2 - 160.0).abs() < 1e-3, "cy: {place:?}");
+            assert!((place.3 - 1.0).abs() < 1e-3, "rotation = size: {place:?}");
+        }
+        assert!(
+            sim.command(SimCommand::Break {
+                x: 20,
+                y: 20,
+                player: Some(0),
+            }) == Ok(())
+        );
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        let events = sink.0.lock().expect("lock");
+        let count = events
+            .iter()
+            .filter(|(id, ..)| *id == crate::content::EffectId::BREAK_BLOCK)
+            .count();
+        assert!(count >= 1, "BREAK_BLOCK missing: {events:?}");
     }
 
     /// G03 T2: the preview validity check agrees with the queued placement.

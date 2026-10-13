@@ -869,6 +869,28 @@ impl Sim {
                         entity,
                     );
                 }
+                // `Build.beginPlace` (same-block rotate) FX (`Build.java:88,112`):
+                // `Fx.rotateBlock.at(build.x, build.y, build.block.size)`.
+                let placed_block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
+                if let Some(def) = self
+                    .block_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.content().block(placed_block))
+                {
+                    let (offset, size) = (def.offset, def.size);
+                    if let Some(runtime) = self.unit_runtime() {
+                        use crate::content::registries::fx_meta::EffectRef;
+                        let cx = *x as f32 * 8.0 + offset;
+                        let cy = *y as f32 * 8.0 + offset;
+                        runtime.fx.effect(
+                            &EffectRef::Named(crate::content::EffectId::ROTATE_BLOCK),
+                            cx,
+                            cy,
+                            size as f32,
+                            crate::content::Rgba::WHITE,
+                        );
+                    }
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
