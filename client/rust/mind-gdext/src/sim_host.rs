@@ -2095,6 +2095,17 @@ impl MindSimHost {
         true
     }
 
+    /// Playtest seam: force-spawns the player unit without the sector env gate
+    /// (`CoreBlock.requestSpawn` refuses alpha when `rules.env` wrongly carries
+    /// scorching — G01's recorded divergence). Lets input-path probes run on
+    /// Ground Zero; the real spawn stays `spawn_player_unit()`.
+    #[func]
+    pub fn debug_spawn_player(&mut self, name: GString, team: i64, x: f32, y: f32) -> bool {
+        self.sim
+            .spawn_player_unit(&name.to_string(), team.max(0) as u8, x, y, 90.0)
+            .is_some()
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {
