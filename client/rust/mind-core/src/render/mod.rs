@@ -16,6 +16,7 @@ pub mod block_cache;
 pub mod block_sprite;
 pub mod block_status;
 pub mod bloom;
+pub mod bullet_draw;
 pub mod commands;
 pub mod conveyor_items;
 pub mod cutscene;

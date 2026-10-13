@@ -156,6 +156,29 @@ pub struct BuilderView {
     pub plans: Vec<mind_core::sim::builder::UnitBuildPlan>,
 }
 
+/// One live bullet for the draw pass (`Groups.bullet`; G03 T4).
+#[derive(Clone)]
+pub struct BulletDraw {
+    /// `EntitySeq` (`Bullet.id`; bevy entities are reused).
+    pub id: u64,
+    /// World position.
+    pub x: f32,
+    /// World position.
+    pub y: f32,
+    /// Rotation in degrees.
+    pub rotation: f32,
+    /// Ticks lived.
+    pub time: f32,
+    /// Lifetime in ticks.
+    pub lifetime: f32,
+    /// Effect parameter (`Bullet.fdata`).
+    pub fdata: f32,
+    /// Bullet content id.
+    pub def: mind_core::content::BulletId,
+    /// Owning team (bullets are teamless in the port; kept for parity).
+    pub team: u8,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -3559,6 +3582,50 @@ impl MindSimHost {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    // ---- G03 T4 bullet draw seam (Rust-only) ----
+
+    /// Live bullets in spawn order (`Groups.bullet`, G03 T4). Skips bullets
+    /// already marked finished (removed this tick).
+    pub fn bullet_draws(&self) -> Vec<BulletDraw> {
+        use mind_core::combat::bullet::Bullet;
+        use mind_core::ecs::EntitySeq;
+        use mind_core::entities::comp::Pos;
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for &entity in &runtime.bullets {
+            let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                continue;
+            };
+            let Some(bullet) = self.sim.ecs.0.get::<Bullet>(entity) else {
+                continue;
+            };
+            if bullet.finished() {
+                continue;
+            }
+            let id = self
+                .sim
+                .ecs
+                .0
+                .get::<EntitySeq>(entity)
+                .map(|seq| seq.0)
+                .unwrap_or(0);
+            out.push(BulletDraw {
+                id,
+                x: pos.x,
+                y: pos.y,
+                rotation: bullet.rotation,
+                time: bullet.time,
+                lifetime: bullet.lifetime,
+                fdata: bullet.fdata,
+                def: bullet.def,
+                team: 0,
+            });
+        }
+        out
     }
 }
 
