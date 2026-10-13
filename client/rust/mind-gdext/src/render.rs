@@ -38,6 +38,7 @@ use crate::sim_host::MindSimHost;
 mod atlas_bind;
 mod blocks;
 mod building_cache;
+mod canvas;
 mod command_overlay;
 mod debug;
 mod env;

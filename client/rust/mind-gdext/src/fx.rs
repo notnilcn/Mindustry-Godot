@@ -302,8 +302,10 @@ impl MindFx {
                         final_color = final_color.lerp(to_color(*mix), f64::from(mix.a));
                     }
                     // World space is y-up through the flipped camera, so the
-                    // texture needs the same vertical flip the world meshes
-                    // apply (`build_unit_mesh`'s top-row-first mapping).
+                    // texture needs a negative-height rect (the third
+                    // `draw_texture_rect` argument is `tile`, not a flip; the
+                    // old `true` both tiled and mirrored every region).
+                    // `draw_region` in `render/canvas.rs` is the shared form.
                     base.draw_set_transform_ex(Vector2::new(*x, *y))
                         .rotation(rotation_deg.to_radians())
                         .scale(Vector2::ONE)
@@ -311,10 +313,10 @@ impl MindFx {
                     base.draw_texture_rect_ex(
                         &texture,
                         Rect2::new(
-                            Vector2::new(-w * origin.0, -h * origin.1),
-                            Vector2::new(*w, *h),
+                            Vector2::new(-w * origin.0, h * (1.0 - origin.1)),
+                            Vector2::new(*w, -h),
                         ),
-                        true,
+                        false,
                     )
                     .modulate(final_color)
                     .done();
