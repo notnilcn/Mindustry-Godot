@@ -1904,3 +1904,119 @@ fn spiroct_sap_heals() {
         "sap damaged the dagger ({dagger_start} -> {dagger_now})"
     );
 }
+
+/// Builds a `live_sim` with a `CampaignRuntime` whose rules are mutated by
+/// `mutate` (team multipliers for the G01 T5 tests).
+fn campaign_sim(size: i32, mutate: impl FnOnce(&mut crate::game::rules::Rules)) -> Sim {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(size);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    mutate(&mut rules);
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
+    sim
+}
+
+/// G01 T5: `ShieldComp.damage` divides by `rules.unitHealth(team)`, so a
+/// wave-team `unitHealthMultiplier` of 2 halves incoming damage.
+#[test]
+fn wave_unit_health_multiplier_halves_damage() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.team_rule_mut(2).unit_health_multiplier = 2.0;
+    });
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let before = health(&sim, dagger).expect("health");
+    let content = crate::content::test_support::test_registry();
+    let applied = crate::combat::damage::area::damage_entity(
+        &mut sim.ecs.0,
+        &content,
+        dagger,
+        20.0,
+        true,
+        1.0,
+    );
+    let after = health(&sim, dagger).expect("health");
+    assert_eq!(
+        before - after,
+        10.0,
+        "unitHealth 2 halves 20 damage (applied {applied})"
+    );
+}
+
+/// G01 T5: `BulletType.damageMultiplier` scales a unit-owned bullet by
+/// `rules.unitDamage(team)`.
+#[test]
+fn unit_damage_multiplier_scales_bullets() {
+    use crate::combat::bullet::{Bullet, BulletSpawn};
+    use crate::determinism::SimRng;
+
+    let mut sim = campaign_sim(48, |rules| {
+        rules.team_rule_mut(1).unit_damage_multiplier = 2.0;
+    });
+    let shooter = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let def_id = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime
+            .content
+            .unit_by_name("dagger")
+            .expect("dagger def")
+            .weapons[0]
+            .bullet
+            .id
+    };
+    let content = crate::content::test_support::test_registry();
+    let mut rng = SimRng::new(7);
+    let spawn = BulletSpawn {
+        def: def_id,
+        owner: Some(shooter),
+        team: 1,
+        x: 100.0,
+        y: 100.0,
+        damage: -1.0,
+        damage_multiplier: 1.0,
+        ..BulletSpawn::default()
+    };
+    let bullet = crate::combat::bullet::create(&mut sim.ecs.0, &content, &mut rng, 1, &spawn)
+        .expect("bullet");
+    let state = sim.ecs.0.get::<Bullet>(bullet).expect("bullet state");
+    let base = content.bullet(def_id).expect("def").damage;
+    assert_eq!(
+        state.damage,
+        2.0 * base,
+        "unitDamage 2 doubles the {base} base damage"
+    );
+}
+
+/// G01 T5: `BuildingComp.damage` turns a zero `rules.blockHealth(team)` into
+/// `damage = health + 1` (any hit kills).
+#[test]
+fn block_health_zero_kills() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.block_health_multiplier = 0.0;
+    });
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    crate::combat::damage::area::apply_health(&mut sim.ecs.0, wall, 1.0);
+    let state = sim.ecs.0.get::<Health>(wall).expect("health");
+    assert!(
+        state.dead || state.health <= 0.0,
+        "blockHealth 0 kills on 1 damage (health {})",
+        state.health
+    );
+}

@@ -236,6 +236,33 @@ pub fn apply_health(world: &mut World, entity: Entity, amount: f32) {
     if !amount.is_finite() || amount <= 0.0 {
         return;
     }
+    // `ShieldComp.damage` divides by `rules.unitHealth(team)`; `BuildingComp.
+    // damage` divides by `rules.blockHealth(team)` (a zero multiplier turns any
+    // hit into a kill, `damage = health + 1`).
+    if let Some(rules) = crate::game::runtime::rules_of(world) {
+        let team = world.get::<TeamComp>(entity).map_or(0, |t| t.team);
+        if world
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+            .is_some()
+        {
+            amount /= rules.unit_health(team);
+        } else if world
+            .get::<crate::entities::comp::Building>(entity)
+            .is_some()
+        {
+            let dm = rules.block_health(team);
+            amount = if dm.abs() <= 1e-6 {
+                world
+                    .get::<Health>(entity)
+                    .map_or(amount, |h| h.health + 1.0)
+            } else {
+                amount / dm
+            };
+        }
+    }
+    if !amount.is_finite() || amount <= 0.0 {
+        return;
+    }
     if let Some(mut shield) = world.get_mut::<ShieldComp>(entity) {
         let absorbed = shield.shield.max(0.0).min(amount);
         shield.shield -= absorbed;

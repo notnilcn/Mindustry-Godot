@@ -108,15 +108,30 @@ pub fn create(
     } else {
         spawn.damage
     } * spawn.damage_multiplier;
-    // `BulletType.damageMultiplier(b)`: a unit owner scales the bullet by its
-    // status damage multiplier (`StatusComp.damageMultiplier`).
+    // `BulletType.damageMultiplier(b)` (`BulletType.java:546-551`): a unit
+    // owner scales by its status damage multiplier and `rules.unitDamage`, a
+    // building owner by `rules.blockDamage`; no owner leaves 1.
     let damage = match spawn.owner {
         Some(owner) => {
-            damage
+            let mut damage = damage
                 * world
                     .get::<crate::entities::comp::unit::comp::StatusComp>(owner)
                     .map(|status| status.damage_multiplier)
-                    .unwrap_or(1.0)
+                    .unwrap_or(1.0);
+            if let Some(rules) = crate::game::runtime::rules_of(world) {
+                if world
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(owner)
+                    .is_some()
+                {
+                    damage *= rules.unit_damage(spawn.team);
+                } else if world
+                    .get::<crate::entities::comp::Building>(owner)
+                    .is_some()
+                {
+                    damage *= rules.block_damage(spawn.team);
+                }
+            }
+            damage
         }
         None => damage,
     };
