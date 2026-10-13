@@ -50,6 +50,8 @@ pub struct MindAudio {
     lowpass_wet: f32,
     sound_paused: bool,
     audition: bool,
+    /// `_process` dispatch counter (T1 liveness probe / PAR-0072 gate).
+    frames: u64,
     /// Plan-18 sim→client sink, fetched from `/root/Spine/SimHost`.
     audio_log: Option<SharedAudioLog>,
     /// Events applied through the sink drain (inspector stat).
@@ -98,6 +100,7 @@ impl INode for MindAudio {
             lowpass_wet: 0.0,
             sound_paused: false,
             audition: false,
+            frames: 0,
             audio_log: None,
             events_applied: 0,
             log: Vec::new(),
@@ -114,7 +117,7 @@ impl INode for MindAudio {
 
         self.bus = buses::ensure_buses();
 
-        let assets_dir = resolve_assets_dir();
+        let assets_dir = crate::assets::loader::resolve_assets_dir();
         self.streams = StreamCache::load(&assets_dir);
 
         // code-instantiated: the pool is a fixed, preallocated set of pooled
@@ -142,15 +145,29 @@ impl INode for MindAudio {
 
         self.ready = true;
         log::info!(
-            "[audio] ready (buses {:?}, {} sounds)",
+            "[audio] ready (buses {:?}, {} sounds, dir {})",
             self.bus,
-            self.streams.sound_count()
+            self.streams.sound_count(),
+            assets_dir
         );
+        // `Core.settings` is one global store; pull the sound keys once so the
+        // sliders are live before the first frame (PAR-0074).
+        self.refresh_settings();
+        // `Control.update` drives `sound.update()` every frame
+        // (`SoundControl.java:89`); GDExtension nodes must enable `_process`
+        // explicitly. Deferred: the node is mutably borrowed right now
+        // (see the `ready()`-only invariant in `mind-gdext/AGENTS.md`).
+        self.base_mut()
+            .call_deferred("set_process", &[true.to_variant()]);
     }
 
     fn process(&mut self, delta: f64) {
         if !self.ready {
             return;
+        }
+        self.frames = self.frames.wrapping_add(1);
+        if self.frames.is_multiple_of(30) {
+            self.refresh_settings();
         }
         let now_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -168,6 +185,12 @@ impl INode for MindAudio {
             self.lowpass_wet -= rate;
         }
         self.apply_lowpass();
+
+        // `Core.audio.setPaused(soundBus.id, state.isPaused())`
+        // (`SoundControl.java:151`).
+        if let Some(host) = self.sim_host() {
+            self.sound_paused = host.bind().is_paused();
+        }
 
         // Pause mirror (Sound bus voices only; Music/UI unaffected).
         if let Some(pool) = &self.pool {
@@ -219,27 +242,35 @@ impl MindAudio {
     }
 
     /// Current camera listener (`calcFalloff`/`calcPan` frame).
+    ///
+    /// `Sound.calcPan` divides by `camera.width / 2` in **world units**
+    /// (`ARC/.../Sound.java:166-170`); the viewport size is screen pixels, so
+    /// divide by the camera zoom (T1).
     fn listener(&self) -> Listener {
-        let width = self
+        let viewport_width = self
             .base()
             .get_viewport()
             .map(|viewport| viewport.get_visible_rect().size.x)
             .filter(|width| *width > 0.0)
             .unwrap_or(1.0);
-        let (x, y) = self
+        let (x, y, zoom) = self
             .find_camera()
+            .as_ref()
             .map(|camera| {
                 let position = camera.get_global_position();
-                (position.x, position.y)
+                let zoom = camera.get_zoom().x.abs().max(0.01);
+                (position.x, position.y, zoom)
             })
-            .unwrap_or((0.0, 0.0));
-        Listener::new(x, y, width)
+            .unwrap_or((0.0, 0.0, 1.0));
+        Listener::new(x, y, viewport_width / zoom)
     }
 
     /// Derives the plan-18 `MusicContext` from the live `MindSimHost` phase.
     ///
-    /// `dialog` is approximated from the paused phase until plan 14 exposes
-    /// `hasDialog()` (the MCP §7c step-5 lowpass check).
+    /// `is_menu` also accepts a visible menu background (`Control` boots in
+    /// `State::Playing`, so the sim state alone reports "game" at the main
+    /// menu); `dialog` is `state.isGame() && Core.scene.hasDialog()`
+    /// (`SoundControl.java:120,130-132`).
     fn music_context(&self, now_ms: f64, delta_frames: f32) -> MusicContext {
         let (state, paused) = match self.sim_host() {
             Some(host) => {
@@ -248,18 +279,62 @@ impl MindAudio {
             }
             None => (String::from("menu"), false),
         };
-        let is_menu = state == "menu";
+        let menu_background = self
+            .base()
+            .get_node_or_null("/root/Spine/Ui/MenuBackground")
+            .and_then(|node| node.get("visible").try_to::<bool>().ok())
+            .unwrap_or(false);
+        let is_menu = state == "menu" || menu_background;
         MusicContext {
             is_menu,
             is_game: !is_menu,
             paused,
-            dialog: paused,
+            dialog: !is_menu && self.ui_has_dialog(),
             musicvol_setting: self.settings.musicvol,
             always_music_setting: self.settings.alwaysmusic,
             now_ms,
             delta_frames,
             ..MusicContext::default()
         }
+    }
+
+    /// `Core.scene.hasDialog()` — non-empty `MindUi` dialog stack
+    /// (`gdext/input/mod.rs::dialog_open` pattern).
+    fn ui_has_dialog(&self) -> bool {
+        let Some(mut ui) = self.base().try_get_node_as::<GdNode>("/root/MindUi") else {
+            return false;
+        };
+        if !ui.has_method("dialog_stack") {
+            return false;
+        }
+        ui.call("dialog_stack", &[])
+            .try_to::<PackedStringArray>()
+            .map(|stack| !stack.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Pulls the sound settings from the `MindUi` store (`Core.settings` is
+    /// one global store, `ARC/.../Settings.java`). Dynamic `call` on purpose:
+    /// `MindUi` is an autoload this module does not bind by type.
+    fn refresh_settings(&mut self) {
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            return;
+        };
+        let int = |ui: &mut Gd<GdNode>, key: &str| {
+            ui.call("settings_get_i32", &[GString::from(key).to_variant()])
+                .try_to::<i64>()
+                .unwrap_or(100) as i32
+        };
+        self.settings.musicvol = int(&mut ui, settings_keys::MUSIC_VOLUME).clamp(0, 100);
+        self.settings.sfxvol = int(&mut ui, settings_keys::SFX_VOLUME).clamp(0, 100);
+        self.settings.ambientvol = int(&mut ui, settings_keys::AMBIENT_VOLUME).clamp(0, 100);
+        self.settings.alwaysmusic = ui
+            .call(
+                "settings_get_bool",
+                &[GString::from(settings_keys::ALWAYS_MUSIC).to_variant()],
+            )
+            .try_to::<bool>()
+            .unwrap_or(false);
     }
 
     fn sfx_scale(&self) -> f32 {
@@ -354,11 +429,12 @@ impl MindAudio {
 
     /// Plays one one-shot through the UI or world voice pool.
     fn play_sound(&mut self, name: &str, volume: f32, pitch: f32, pan: f32) {
+        let file = self.streams.file_of(name).map(str::to_owned);
         let Some(stream) = self.streams.sound(name, false) else {
             self.log_missing(name);
             return;
         };
-        let ui = bus_for_sound(name, None) == mind_core::audio::BusKind::Ui;
+        let ui = bus_for_sound(name, file.as_deref()) == mind_core::audio::BusKind::Ui;
         let listener = self.listener();
         let Some(pool) = self.pool.as_mut() else {
             return;
@@ -406,9 +482,21 @@ struct GodotMusicOutput<'a> {
 }
 
 impl MusicOutput for GodotMusicOutput<'_> {
-    fn play(&mut self, track: &MusicRef, volume: f32, _looping: bool) {
+    fn play(&mut self, track: &MusicRef, volume: f32, looping: bool) {
         if let Some(stream) = self.streams.music(track.name()) {
             self.player.set_stream(&stream);
+        }
+        // `playOnce` plays non-looping so the finished-track detector clears
+        // `current`; `play` (menu/editor fade) loops (`SoundControl.java:288,327`).
+        if let Some(stream) = self.player.get_stream() {
+            if let Ok(mut ogg) = stream
+                .clone()
+                .try_cast::<godot::classes::AudioStreamOggVorbis>()
+            {
+                ogg.set_loop(looping);
+            } else if let Ok(mut mp3) = stream.try_cast::<godot::classes::AudioStreamMp3>() {
+                mp3.set_loop(looping);
+            }
         }
         self.player.set_volume_linear(volume.clamp(0.0, 1.0));
         self.player.play();
@@ -442,17 +530,6 @@ impl MusicOutput for GodotMusicOutput<'_> {
             self.player.stop();
         }
     }
-}
-
-/// Resolves the runtime asset root (`res://assets` else `<project>/../assets`).
-fn resolve_assets_dir() -> String {
-    for candidate in ["res://assets", "res://../assets"] {
-        let probe = format!("{candidate}/sounds.index.json");
-        if godot::classes::FileAccess::file_exists(&probe) {
-            return candidate.to_owned();
-        }
-    }
-    String::from("res://assets")
 }
 
 #[godot_api]
@@ -601,6 +678,7 @@ impl MindAudio {
             self.log_missing(&name);
             return -1;
         };
+        let file = self.streams.file_of(&name).map(str::to_owned);
         let Some(stream) = self.streams.sound(&name, false) else {
             self.log_missing(&name);
             return -1;
@@ -609,7 +687,7 @@ impl MindAudio {
             return -1;
         };
         let _ = id;
-        if bus_for_sound(&name, None) == mind_core::audio::BusKind::Ui {
+        if bus_for_sound(&name, file.as_deref()) == mind_core::audio::BusKind::Ui {
             pool.play_ui(stream, volume as f32, pitch as f32)
         } else {
             pool.play_world(
@@ -643,6 +721,7 @@ impl MindAudio {
     pub fn stats(&self) -> VarDictionary {
         let mut dict = VarDictionary::new();
         let key = |name: &str| GString::from(name);
+        dict.set(&key("frames"), &(self.frames as i64).to_variant());
         dict.set(&key("voices"), &(self.voice_count().to_variant()));
         dict.set(&key("loop_sounds"), &(self.mixer.len() as i64).to_variant());
         dict.set(&key("events"), &(self.pending_events().to_variant()));
