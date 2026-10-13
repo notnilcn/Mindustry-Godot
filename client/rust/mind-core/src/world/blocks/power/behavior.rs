@@ -280,6 +280,23 @@ impl BuildingBehavior for ConsumeGeneratorBehavior {
     ) {
         default_handle_liquid(world, e, liquid, amount);
     }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
+    }
 }
 
 impl ConsumeGeneratorBehavior {
@@ -416,6 +433,32 @@ impl BuildingBehavior for HeaterGeneratorBehavior {
     ) {
         self.generator.handle_liquid(world, e, src, liquid, amount);
     }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+        // `HeaterGenerator.HeaterGeneratorBuild.write`: `f heat`.
+        w.f(world
+            .get::<HeatState>(e)
+            .map(|state| state.heat)
+            .unwrap_or_default());
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
+        let heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<HeatState>(e) {
+            state.heat = heat;
+        }
+    }
 }
 
 /// `ThermalGenerator` behavior (`ThermalGeneratorBuild.updateTile`).
@@ -492,6 +535,23 @@ impl BuildingBehavior for ThermalGeneratorBehavior {
             }
         }
     }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
+    }
 }
 
 /// `SolarGenerator` behavior (`SolarGeneratorBuild.updateTile`).
@@ -520,6 +580,23 @@ impl BuildingBehavior for SolarGeneratorBehavior {
             env.ambient_light_alpha,
         );
         set_direct_production(world, e, production_efficiency, production_efficiency);
+    }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
     }
 }
 
@@ -610,6 +687,33 @@ impl BuildingBehavior for ImpactReactorBehavior {
             .map(|state| state.warmup)
             .unwrap_or(0.0);
         fire_generator_explosion(world, e, &self.config, warmup, true);
+    }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+        // `ImpactReactor.ImpactReactorBuild.write`: `f warmup`.
+        let warmup = world
+            .get::<ImpactReactorState>(e)
+            .map(|state| state.warmup)
+            .unwrap_or_default();
+        w.f(warmup);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
+        let warmup = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<ImpactReactorState>(e) {
+            state.warmup = warmup;
+        }
     }
 }
 
@@ -779,6 +883,34 @@ impl BuildingBehavior for NuclearReactorBehavior {
         let should = nuclear_should_explode(world, e, self.config.trigger_items.first());
         fire_generator_explosion_cond(world, e, &self.config, should, true);
     }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+        // `NuclearReactor.NuclearReactorBuild.write`: `f heat`.
+        let heat = world
+            .get::<NuclearReactorState>(e)
+            .map(|state| state.heat)
+            .unwrap_or_default();
+        w.f(heat);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
+        let heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<NuclearReactorState>(e) {
+            state.heat = heat;
+            state.heat_last_frame = heat;
+        }
+    }
 }
 
 /// `NuclearReactorBuild.shouldExplode`'s extra gate (`fuel >= 5 || heat >= 0.5`).
@@ -903,6 +1035,40 @@ impl BuildingBehavior for VariableReactorBehavior {
             .map(|state| state.heat)
             .unwrap_or(0.0);
         fire_generator_explosion_cond(world, e, &self.config, heat > 0.0, true);
+    }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        crate::world::building_io::write_generator_body(world, e, w);
+        // `VariableReactor.VariableReactorBuild.write`: `f heat, f instability,
+        // f warmup`.
+        let (heat, instability, warmup) = world
+            .get::<VariableReactorState>(e)
+            .map(|state| (state.heat, state.instability, state.warmup))
+            .unwrap_or((0.0, 0.0, 0.0));
+        w.f(heat);
+        w.f(instability);
+        w.f(warmup);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        crate::world::building_io::read_generator_body(world, e, r, revision);
+        let heat = r.f().unwrap_or(0.0);
+        let instability = r.f().unwrap_or(0.0);
+        let warmup = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<VariableReactorState>(e) {
+            state.heat = heat;
+            state.instability = instability;
+            state.warmup = warmup;
+        }
     }
 }
 
@@ -1676,3 +1842,7 @@ mod tests {
         assert!(heat > 0.0, "heat={heat}");
     }
 }
+
+// --- G04 T3a: per-kind save IO (`Building.write`/`read`) ---------------------
+// Java bodies: PowerGenerator.java:213-231 (productionEfficiency, generateTime
+// with the revision-1 gate) and the subclass extras below it.

@@ -74,6 +74,37 @@ impl BuildingBehavior for HeatProducerBehavior {
             );
         }
     }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let (progress, warmup) = world
+            .get::<crate::entities::comp::CrafterState>(e)
+            .map(|state| (state.progress, state.warmup))
+            .unwrap_or((0.0, 0.0));
+        w.f(progress);
+        w.f(warmup);
+        w.f(world
+            .get::<HeatState>(e)
+            .map(|state| state.heat)
+            .unwrap_or_default());
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let progress = r.f().unwrap_or(0.0);
+        let warmup = r.f().unwrap_or(0.0);
+        let heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<crate::entities::comp::CrafterState>(e) {
+            state.progress = progress;
+            state.warmup = warmup;
+        }
+        if let Some(mut state) = world.get_mut::<HeatState>(e) {
+            state.heat = heat;
+        }
+    }
 }
 
 /// `HeatCrafter` behavior (`HeatCrafterBuild.updateTile`/`efficiencyScale`).
@@ -242,6 +273,10 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
         }),
     );
 }
+
+// --- G04 T3a: per-kind save IO -------------------------------------------------
+// Java body: HeatProducer.java:71-80 — GenericCrafter (`f progress, f warmup`)
+// then `f heat`.
 
 #[cfg(test)]
 mod tests {

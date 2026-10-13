@@ -442,6 +442,48 @@ pub fn kind_revision(kind: crate::world::BuildingKind) -> u8 {
     kind.revision()
 }
 
+/// `PowerGenerator.GeneratorBuild.write`: `productionEfficiency` then
+/// `generateTime` (`PowerGenerator.java:213-231`); inherited by solar, thermal,
+/// reactors and the heater generator.
+pub fn write_generator_body(world: &World, entity: Entity, w: &mut EntityWriter) {
+    let (efficiency, generate_time) = world
+        .get::<crate::world::blocks::power::generator::GeneratorState>(entity)
+        .map(|state| (state.production_efficiency, state.generate_time))
+        .unwrap_or((0.0, 0.0));
+    w.f(efficiency);
+    w.f(generate_time);
+}
+
+/// `PowerGenerator.GeneratorBuild.read`: `productionEfficiency` always,
+/// `generateTime` only for revision >= 1.
+pub fn read_generator_body(world: &mut World, entity: Entity, r: &mut EntityReader, revision: u8) {
+    let efficiency = r.f().unwrap_or(0.0);
+    let generate_time = if revision >= 1 {
+        r.f().unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    if let Some(mut state) =
+        world.get_mut::<crate::world::blocks::power::generator::GeneratorState>(entity)
+    {
+        state.production_efficiency = efficiency;
+        state.generate_time = generate_time;
+    }
+}
+
+/// `GenericCrafter.legacyReadWarmup`: only `cultivator` appends a zero float to
+/// its body (`Blocks.java:2969`).
+pub fn legacy_read_warmup(world: &World, entity: Entity) -> bool {
+    world
+        .get::<Building>(entity)
+        .and_then(|building| {
+            world
+                .get_resource::<crate::world::block::BlockTable>()?
+                .instance(building.block)
+        })
+        .is_some_and(|inst| inst.name == "cultivator")
+}
+
 /// Manual entity codec for `Building` (upstream `@EntityDef(genio=false,
 /// serialize=false)`; plan 07 §3.10 R3). Registered with plan 04 as the
 /// `BuildingComp` class; writes `writeBase` then the per-kind behavior fields.
@@ -505,6 +547,10 @@ fn behavior_instance(
 }
 
 #[cfg(test)]
+#[path = "building_io_kinds_tests.rs"]
+mod building_io_kinds_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::content::test_support::test_registry;
@@ -513,7 +559,6 @@ mod tests {
     use crate::world::block::BlockTable;
     use crate::world::limits::BuildRules;
     use bevy_ecs::world::World as EcsWorld;
-
     fn spawn_smelter() -> (EcsWorld, Entity) {
         let content = test_registry();
         let table = BlockTable::build_default(&content).expect("table");

@@ -455,6 +455,36 @@ impl BuildingBehavior for StackConveyorBehavior {
             self.poof_out(world, e);
         }
     }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let (link, cooldown) = world
+            .get::<StackConveyorBuild>(e)
+            .map(|state| (state.link, state.cooldown))
+            .unwrap_or((-1, 0.0));
+        w.i(link);
+        w.f(cooldown);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let link = r.i().unwrap_or(-1);
+        let cooldown = r.f().unwrap_or(0.0);
+        let first_item = world
+            .get::<crate::world::modules::ItemModule>(e)
+            .and_then(|items| items.first());
+        let mut state = world
+            .get::<StackConveyorBuild>(e)
+            .cloned()
+            .unwrap_or_default();
+        state.link = link;
+        state.cooldown = cooldown;
+        state.last_item = first_item;
+        world.entity_mut(e).insert(state);
+    }
 }
 
 impl StackConveyorBehavior {
@@ -520,6 +550,10 @@ fn same_team(world: &World, a: Entity, b: Entity) -> bool {
 fn _edelta(world: &World, e: Entity) -> f32 {
     edelta(world, e)
 }
+
+// --- G04 T3a: per-kind save IO -------------------------------------------------
+// Java body: StackConveyor.java:389-403 (`i link, f cooldown`;
+// `lastItem = items.first()`).
 
 #[cfg(test)]
 mod tests {
