@@ -2691,3 +2691,131 @@ fn flare_falls_back_to_core() {
     // The flare stops at `type.range * 0.8` = 60.8 px, circling.
     assert!(end < 75.0, "the flare flew to the core: {end}");
 }
+
+/// G01 T10a: a team-1 `mono` (default command `mine`) picks copper ore next to
+/// its core, mines it (`MinerAI.updateMovement` + `MinerComp.update`) and
+/// delivers a full stack to the core.
+#[test]
+fn mono_mines_and_delivers() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let ore = {
+        let rt = sim.unit_runtime().expect("rt");
+        rt.content.block_id("ore-copper").expect("ore-copper")
+    };
+    for i in 0..3 {
+        sim.grid.tiles.get_mut(20 + i, 10).overlay = ore;
+    }
+    sim.refresh_unit_runtime();
+    let mono = sim
+        .spawn_live_unit("mono", 1, 10.5 * 8.0, 10.5 * 8.0, 0.0)
+        .expect("mono");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mono) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..2000 {
+        sim.tick().expect("tick");
+    }
+    let copper = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("copper")
+        .expect("copper");
+    let delivered = sim
+        .ecs
+        .0
+        .get::<ItemModule>(core)
+        .map_or(0, |items| items.get(copper));
+    let mined = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::unit::comp::MinerComp>(mono)
+        .map_or(0, |comp| comp.mined);
+    eprintln!("mono mined {mined}, core copper {delivered}");
+    assert!(delivered >= 20, "the mono delivered copper: {delivered}");
+}
+
+/// G01 T10a: titanium ore (hardness 3) is above the mono's `mineTier` 1, so the
+/// target-item selection skips it and nothing is mined.
+#[test]
+fn miner_comp_respects_tier() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let ore = {
+        let rt = sim.unit_runtime().expect("rt");
+        rt.content.block_id("ore-titanium").expect("ore-titanium")
+    };
+    for i in 0..3 {
+        sim.grid.tiles.get_mut(20 + i, 10).overlay = ore;
+    }
+    sim.refresh_unit_runtime();
+    let mono = sim
+        .spawn_live_unit("mono", 1, 10.5 * 8.0, 10.5 * 8.0, 0.0)
+        .expect("mono");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mono) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let titanium = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("titanium")
+        .expect("titanium");
+    let mined = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::unit::comp::MinerComp>(mono)
+        .map_or(0, |comp| comp.mined);
+    let delivered = sim
+        .ecs
+        .0
+        .get::<ItemModule>(core)
+        .map_or(0, |items| items.get(titanium));
+    assert_eq!(mined, 0, "titanium is above the mono's tier");
+    assert_eq!(delivered, 0, "nothing reaches the core");
+}

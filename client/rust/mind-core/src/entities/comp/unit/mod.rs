@@ -14,6 +14,7 @@ pub mod inverse_kinematics;
 pub mod legs;
 pub mod lifecycle;
 pub mod mech;
+pub mod miner;
 pub mod movement;
 pub mod queries;
 pub mod tank;

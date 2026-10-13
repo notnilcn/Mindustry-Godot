@@ -1904,37 +1904,81 @@ pub fn unit_update_system(world: &mut World) {
             // idles in place instead of walking to the core anchor.
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
             set_mount_targets(world, &runtime.content, entity, mount_target, None);
-            match slot.target {
-                Some(target) => {
-                    let flying = world
-                        .get::<PhysicsComp>(entity)
-                        .is_some_and(|physics| physics.flying);
-                    // Refresh the lazy control path before borrowing fields.
-                    runtime.control_path();
+            // `CommandAI.updateUnit`'s `commandController` (mine/repair/rebuild/
+            // assist) replaces the default movement (T10a: MinerAI).
+            let command_kind = resolve_command_kind(world, &runtime.content, entity, &slot);
+            if command_kind == Some(crate::content::registries::commands::ControllerKind::Miner) {
+                let mut miner = world
+                    .get::<crate::ai::types::miner::MinerAiState>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                {
                     let UnitRuntime {
-                        grid,
                         content,
-                        control_path,
+                        grid,
+                        pathfinder,
                         ..
                     } = &mut runtime;
-                    let arrived = crate::ai::types::command::update_command_move(
+                    let mut ctx = crate::ai::ai_controller::AiCtx {
                         world,
                         grid,
                         content,
-                        control_path,
-                        entity,
-                        target,
-                        flying,
-                    );
-                    if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
-                        // `finishPath`: `targetPos = null`.
-                        stored.target = None;
-                    }
+                        pathfinder,
+                        team,
+                    };
+                    crate::ai::types::miner::update_miner_ai(&mut ctx, entity, &mut miner);
                 }
-                None => {
-                    if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(entity) {
-                        vel.x = 0.0;
-                        vel.y = 0.0;
+                if let Some(mut stored) =
+                    world.get_mut::<crate::ai::types::miner::MinerAiState>(entity)
+                {
+                    *stored = miner;
+                } else if world.get_entity(entity).is_ok() {
+                    world.entity_mut(entity).insert(miner);
+                }
+            } else {
+                if world
+                    .get::<crate::entities::comp::unit::comp::MinerComp>(entity)
+                    .is_some_and(|comp| comp.mine_tile.is_some())
+                {
+                    // `CommandAI.command`: a non-mine command clears `mineTile`.
+                    crate::entities::comp::unit::miner::clear_mine_tile(world, entity);
+                }
+                // The default `defaultBehavior` movement runs for commands
+                // without a controller (`None`: move/enterPayload/...) and for
+                // the not-yet-dispatched Repair/Builder controllers.
+                match slot.target {
+                    Some(target) => {
+                        let flying = world
+                            .get::<PhysicsComp>(entity)
+                            .is_some_and(|physics| physics.flying);
+                        // Refresh the lazy control path before borrowing fields.
+                        runtime.control_path();
+                        let UnitRuntime {
+                            grid,
+                            content,
+                            control_path,
+                            ..
+                        } = &mut runtime;
+                        let arrived = crate::ai::types::command::update_command_move(
+                            world,
+                            grid,
+                            content,
+                            control_path,
+                            entity,
+                            target,
+                            flying,
+                        );
+                        if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity)
+                        {
+                            // `finishPath`: `targetPos = null`.
+                            stored.target = None;
+                        }
+                    }
+                    None => {
+                        if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(entity) {
+                            vel.x = 0.0;
+                            vel.y = 0.0;
+                        }
                     }
                 }
             }
@@ -2135,6 +2179,15 @@ pub fn unit_update_system(world: &mut World) {
             };
             let _ =
                 movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
+
+            // `MinerComp.update` runs after the controller and the kind
+            // kinematics for every unit (G01 T10a).
+            crate::entities::comp::unit::miner::update_miner_comp(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                entity,
+            );
 
             // `TimedKillComp.update`: `time = min(time + delta, lifetime)`;
             // at the lifetime the unit is marked dead and `resolve_deaths`
@@ -3272,6 +3325,23 @@ pub fn enemy_count_system(world: &mut World) {
     campaign.session.enemies = enemies;
     campaign.session.is_spawning = spawning;
     world.insert_resource(campaign);
+}
+
+/// The `CommandAI` command controller for `entity` (`CommandAI.init`:
+/// `command` or the type's `defaultCommand`, CommandAI.java:96-101).
+fn resolve_command_kind(
+    world: &World,
+    content: &ContentRegistry,
+    entity: Entity,
+    slot: &ControllerSlot,
+) -> Option<crate::content::registries::commands::ControllerKind> {
+    let command = slot.command.or_else(|| {
+        world
+            .get::<UnitTypeComp>(entity)
+            .and_then(|comp| content.unit(comp.type_id))
+            .and_then(|def| def.default_command)
+    })?;
+    content.unit_command(command).map(|def| def.controller)
 }
 
 /// The `state.rules` fields `GroundAI` reads (`Rules.waves`, `defaultTeam`,

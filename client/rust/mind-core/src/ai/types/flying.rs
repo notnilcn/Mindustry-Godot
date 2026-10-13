@@ -317,6 +317,57 @@ pub fn move_to_point(
     write_back(world, entity, &pos, &vel, &core);
 }
 
+/// `AIController.circle(target, circleLength)` (AIController.java:353-365): with
+/// `vec = target - unit`, rotate by `(circleLength - len)/circleLength * 180`
+/// when closer than `circleLength`, then move at `prefSpeed` in that direction.
+pub fn circle_pos(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &crate::content::ContentRegistry,
+    entity: Entity,
+    target_x: f32,
+    target_y: f32,
+    circle_length: f32,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let mut core = world
+        .get::<UnitCore>(entity)
+        .copied()
+        .unwrap_or(UnitCore::new(0.0));
+    let mut vel = world
+        .get::<Vel>(entity)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
+    let (omni, rotate_speed, accel) = unit_control(world, content, entity);
+
+    // `vec.set(target).sub(unit)`.
+    let (mut vx, mut vy) = (target_x - pos.x, target_y - pos.y);
+    let len = (vx * vx + vy * vy).sqrt();
+    if len < circle_length && circle_length > 0.0001 {
+        // `vec.rotate((circleLength - len) / circleLength * 180f)`.
+        let angle = (circle_length - len) / circle_length * 180.0;
+        let radians = angle.to_radians();
+        let (sin, cos) = radians.sin_cos();
+        let rx = vx * cos - vy * sin;
+        let ry = vx * sin + vy * cos;
+        vx = rx;
+        vy = ry;
+    }
+    // `vec.setLength(speed)`.
+    let vlen = (vx * vx + vy * vy).sqrt();
+    if vlen > 0.0001 {
+        vx = vx / vlen * speed;
+        vy = vy / vlen * speed;
+    }
+    if vx.abs() > 0.0001 || vy.abs() > 0.0001 {
+        move_pref(&mut core, &mut vel, omni, rotate_speed, accel, (vx, vy));
+    }
+    write_back(world, entity, &pos, &vel, &core);
+}
+
 fn ang_to(from: &Pos, to: Pos) -> f32 {
     (to.y - from.y).atan2(to.x - from.x).to_degrees()
 }

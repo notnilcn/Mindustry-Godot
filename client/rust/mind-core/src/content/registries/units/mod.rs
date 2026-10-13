@@ -1047,6 +1047,9 @@ pub struct UnitTypeDef {
     pub max_range: f32,
     /// Mining range.
     pub mine_range: f32,
+    /// Items the miner AI prefers, in id order (`UnitType.mineItems`;
+    /// vanilla `[copper, lead, titanium, thorium]`, `UnitType.java:398`).
+    pub mine_items: Vec<crate::content::ItemId>,
     /// Build range.
     pub build_range: f32,
     /// Circle-target radius.
@@ -1550,6 +1553,14 @@ impl UnitTypeDef {
             range: spec.range.unwrap_or(-1.0),
             max_range: spec.max_range.unwrap_or(-1.0),
             mine_range: spec.mine_range.unwrap_or(70.0),
+            mine_items: ["copper", "lead", "titanium", "thorium"]
+                .iter()
+                .map(|name| {
+                    registry
+                        .item_id(name)
+                        .ok_or_else(|| ContentError::UnknownName((*name).to_owned()))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
             build_range: spec.build_range.unwrap_or(BUILDING_RANGE),
             circle_target_radius: spec.circle_target_radius.unwrap_or(80.0),
             crash_damage_multiplier: spec.crash_damage_multiplier.unwrap_or(1.0),

@@ -618,16 +618,19 @@ impl Sim {
         let mut ordered = 0usize;
         for (entity, order) in orders {
             // `CommandAI.command`: `this.command = command` (CommandAI.java:62);
-            // the move target is cleared when switching away from move.
+            // the move target is cleared when switching away from move, and
+            // `unit.mineTile`/build plans are dropped (CommandAI.java:59-63).
             self.ecs
                 .0
                 .entity_mut(entity)
                 .insert(crate::ai::controller::UnitCommandComp(command));
+            crate::entities::comp::unit::miner::clear_mine_tile(&mut self.ecs.0, entity);
             if let Some(mut slot) = self
                 .ecs
                 .0
                 .get_mut::<crate::ai::controller::ControllerSlot>(entity)
             {
+                slot.command = Some(command_id);
                 slot.target = order;
                 ordered += 1;
             }
