@@ -1970,6 +1970,19 @@ impl MindSimHost {
         self.sim.queue_player_place(x, y, block, rotation)
     }
 
+    /// Queues a player construction plan carrying a config (G08 T5: schematic
+    /// copies, rebuild ghosts, line plan configs, `nextConfig`).
+    pub fn queue_player_place_config(
+        &mut self,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rot: u8,
+        config: mind_core::world::config::ConfigValue,
+    ) -> bool {
+        self.sim.queue_player_place_config(x, y, block, rot, config)
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {

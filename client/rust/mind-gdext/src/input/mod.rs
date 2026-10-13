@@ -1106,6 +1106,10 @@ impl MindInput {
             "bool" => ConfigValue::Bool(value == "true" || value == "1"),
             _ => ConfigValue::String(value),
         };
+        // `BuildingComp.configure` -> `Block.lastConfig`: the next plan of this
+        // block carries the value (`nextConfig`, T5).
+        self.bridge
+            .record_last_config(i32::from(x), i32::from(y), config.clone());
         self.bridge
             .emit_action(mind_core::input::RemoteAction::Configure {
                 x,

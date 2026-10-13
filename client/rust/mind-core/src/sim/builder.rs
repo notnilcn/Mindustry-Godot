@@ -54,6 +54,9 @@ pub struct UnitBuildPlan {
     pub rotation: u8,
     /// Block to place (`AIR` for a deconstruction).
     pub block: BlockId,
+    /// `BuildPlan.config`; applied on finish
+    /// (`ConstructBlock.constructFinish`, `ConstructBlock.java:72-118`).
+    pub config: crate::world::config::ConfigValue,
     /// Whether this is a deconstruction order.
     pub breaking: bool,
     /// `BuildPlan.initialized`: the construct block was begun.
@@ -72,6 +75,7 @@ impl UnitBuildPlan {
             y,
             rotation,
             block,
+            config: crate::world::config::ConfigValue::None,
             breaking: false,
             initialized: false,
             stuck: false,
@@ -593,6 +597,16 @@ fn update_builder(
                             team,
                             rules.economy.cost_multiplier,
                         ) {
+                            // `BuilderComp` passes `current.config` into the
+                            // construct (`Call.beginPlace` L173 / `construct`
+                            // L217); `ConstructBuild.construct` stores it as
+                            // `lastConfig` (`ConstructBlock.java:278-288`).
+                            if !current.breaking
+                                && let Some(construct) = grid.entity_at(pos)
+                                && let Some(mut state) = world.get_mut::<ConstructState>(construct)
+                            {
+                                state.last_config = current.config.clone();
+                            }
                             out.changed = true;
                         }
                     } else {
@@ -699,6 +713,12 @@ fn update_builder(
             .get::<Building>(entity)
             .map(|b| b.rotation)
             .unwrap_or(current.rotation);
+        if !current.breaking {
+            // `BuilderComp.java:217`: the builder passes its plan config on
+            // every `construct` step; `ConstructBuild.construct` stores it as
+            // `lastConfig` (`ConstructBlock.java:288`).
+            state.last_config = current.config.clone();
+        }
         world.entity_mut(entity).insert(state.clone());
         if let Some(head) = plans.plans.front_mut() {
             *head = current.clone();
@@ -740,6 +760,16 @@ fn update_builder(
                 if let Some(placed) = grid.entity_at(anchor) {
                     let grid_ref: &WorldGrid = grid;
                     runtime.placed_hooks(world, grid_ref, placed);
+                    // `ConstructBlock.constructFinish` (`ConstructBlock.java:72-118`):
+                    // after `tile.setBlock`, a non-null config is applied.
+                    if !matches!(current.config, crate::world::config::ConfigValue::None) {
+                        let _ = crate::world::config::configure(
+                            world,
+                            placed,
+                            Some(unit),
+                            current.config.clone(),
+                        );
+                    }
                     chain_bridge(
                         world,
                         grid_ref,
@@ -789,6 +819,26 @@ impl Sim {
     /// Queues a placement on the player unit (`InputHandler.flushPlans` ->
     /// `player.unit().addBuild(plan)`); invalid placements are dropped.
     pub fn queue_player_place(&mut self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
+        self.queue_player_place_config(
+            x,
+            y,
+            block,
+            rotation,
+            crate::world::config::ConfigValue::None,
+        )
+    }
+
+    /// Queues a placement carrying a config (`InputHandler.updateLine` plan
+    /// configs, schematic copies, rebuild ghosts; the value is applied when the
+    /// construct completes).
+    pub fn queue_player_place_config(
+        &mut self,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rotation: u8,
+        config: crate::world::config::ConfigValue,
+    ) -> bool {
         let Some(unit) = self.player_unit else {
             return false;
         };
@@ -800,6 +850,7 @@ impl Sim {
             return false;
         }
         let mut plan = UnitBuildPlan::place(x, y, rotation, block);
+        plan.config = config;
         // `addBuild`: carry the progress of an in-flight construct block.
         if let Some(entity) = self.grid.entity_at(TilePos::new(x, y))
             && let Some(state) = self.ecs.0.get::<ConstructState>(entity)
@@ -1105,6 +1156,20 @@ mod tests {
         module.add(copper, amount, 100_000);
     }
 
+    fn set_core_item(sim: &mut Sim, name: &str, amount: i32) {
+        let item = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id(name)
+            .expect("item");
+        let core = team_core(&sim.ecs.0, 1).expect("core");
+        let mut module = sim.ecs.0.get_mut::<ItemModule>(core).expect("items");
+        let have = module.get(item);
+        module.remove(item, have);
+        module.add(item, amount, 100_000);
+    }
+
     #[test]
     fn player_place_builds_over_time_and_spends_core_items() {
         let (mut sim, _unit, _core, wall) = sim_with_player();
@@ -1138,6 +1203,59 @@ mod tests {
         );
         assert!(sim.player_build_plans().is_empty());
         assert_eq!(core_copper(&sim), 94, "requirements drawn from the core");
+    }
+
+    #[test]
+    fn player_plan_config_applies_on_finish() {
+        use crate::world::config::{ConfigValue, read_config};
+
+        let (mut sim, _unit, _core, _wall) = sim_with_player();
+        // sorter = 2 lead + 2 copper (build_cost_multiplier 3).
+        set_core_item(&mut sim, "copper", 500);
+        set_core_item(&mut sim, "lead", 500);
+        let sorter = BlockId::new(sim.world_block_id("sorter").expect("sorter"));
+        let copper = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("copper")
+            .expect("copper");
+        assert!(sim.queue_player_place_config(14, 10, sorter, 0, ConfigValue::Item(copper)));
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(sorter),
+            "sorter finished"
+        );
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(14, 10))
+            .expect("sorter entity");
+        assert_eq!(
+            read_config(&sim.ecs.0, entity),
+            ConfigValue::Item(copper),
+            "plan config applied on finish"
+        );
+    }
+
+    #[test]
+    fn plan_without_config_keeps_default() {
+        use crate::world::config::{ConfigValue, read_config};
+
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        assert!(sim.queue_player_place(14, 10, wall, 0));
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(14, 10))
+            .expect("wall entity");
+        assert_eq!(read_config(&sim.ecs.0, entity), ConfigValue::None);
     }
 
     #[test]

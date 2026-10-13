@@ -231,6 +231,9 @@ pub struct DesktopBridge {
     pub camera: Option<Gd<MindCamera2D>>,
     /// Selectable units fed by the sim/GDScript (`set_selectable_units_json`).
     pub selectable: Vec<SelectableUnit>,
+    /// `Block.lastConfig` per block (`Block.java:827-832` `nextConfig`): the
+    /// last submitted config, carried onto the next plan of that block.
+    last_config: HashMap<u16, mind_core::world::config::ConfigValue>,
     /// Last fired binding name (probe).
     pub last_action: String,
     /// Fired binding count (probe).
@@ -295,6 +298,7 @@ impl DesktopBridge {
             host: None,
             camera: None,
             selectable: Vec::new(),
+            last_config: HashMap::new(),
             last_action: String::new(),
             action_count: 0,
             effects: Vec::new(),
@@ -1142,6 +1146,68 @@ impl DesktopBridge {
             && !self.controller.state.command_mode
     }
 
+    /// `BuildingComp.configure` -> `Block.lastConfig` (`Block.java:827-832`):
+    /// remembers the submitted config per saveConfig block for `nextConfig`.
+    pub fn record_last_config(
+        &mut self,
+        x: i32,
+        y: i32,
+        value: mind_core::world::config::ConfigValue,
+    ) {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return;
+        };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        let Some(content) = guard.content_registry() else {
+            return;
+        };
+        let Some(block) = guard.grid().block_at(TilePos::new(tx, ty)) else {
+            return;
+        };
+        let Some(def) = content.block(block) else {
+            return;
+        };
+        if !def.save_config {
+            return;
+        }
+        // The wire carries content names (`to_sim_config`); resolve them like
+        // the sim's `Configure` arm so `nextConfig` stores the typed value.
+        use mind_core::world::config::ConfigValue;
+        let value = match value {
+            ConfigValue::String(name) => {
+                if let Some(item) = content.item_by_name(&name) {
+                    ConfigValue::Item(item.id)
+                } else if let Some(block) = content.block_by_name(&name) {
+                    ConfigValue::Block(block.id)
+                } else if let Some(unit) = content.unit_by_name(&name) {
+                    ConfigValue::Unit(unit.id)
+                } else if let Some(liquid) = content.liquid_by_name(&name) {
+                    ConfigValue::Liquid(liquid.id)
+                } else {
+                    ConfigValue::String(name)
+                }
+            }
+            other => other,
+        };
+        self.last_config.insert(block.raw(), value);
+    }
+
+    /// `Block.saveConfig` for `block` (`nextConfig` gate, `Block.java:827-832`).
+    fn block_save_config(&self, block: BlockId) -> bool {
+        self.host
+            .clone()
+            .and_then(|host| {
+                host.bind()
+                    .content_registry()
+                    .and_then(|content| content.block(block))
+                    .map(|def| def.save_config)
+            })
+            .unwrap_or(false)
+    }
+
     /// Snapshot for the placement overlay pass (G03 T2).
     pub fn placement_view(&self) -> PlacementView {
         let mode = self.controller.state.place_mode;
@@ -1638,21 +1704,58 @@ impl DesktopBridge {
             .clone()
             .map(|host| host.bind().player_team())
             .unwrap_or(0);
-        let commands: Vec<SimCommand> = plans
-            .iter()
-            .take(DRAG_TILE_CAP)
-            .filter(|plan| !plan.breaking && plan.block != BlockId::AIR)
-            .map(|plan| SimCommand::Place {
-                x: plan.x as i16,
-                y: plan.y as i16,
-                block: plan.block.raw(),
-                rotation: plan.rotation as i8,
-                team,
-                // Player input queues on the player unit (`flushPlans` ->
-                // `BuilderComp.addBuild`); the builder constructs it (PAR-0098).
-                player: Some(0),
-            })
-            .collect();
+        // `Block.nextConfig` (`Block.java:827-832`): a block with a remembered
+        // config (`saveConfig`) queues through the config-carrying path; line
+        // plans may carry their own config (T6b/T8).
+        let remembered = self
+            .last_config
+            .get(&block.raw())
+            .cloned()
+            .filter(|_| self.block_save_config(block));
+        let mut commands: Vec<SimCommand> = Vec::new();
+        let mut configured: Vec<(i16, i16, BlockId, u8, mind_core::world::config::ConfigValue)> =
+            Vec::new();
+        for plan in plans.iter().take(DRAG_TILE_CAP) {
+            if plan.breaking || plan.block == BlockId::AIR {
+                continue;
+            }
+            let config = if !matches!(plan.config, mind_core::world::config::ConfigValue::None) {
+                plan.config.clone()
+            } else if plan.block == block {
+                remembered
+                    .clone()
+                    .unwrap_or(mind_core::world::config::ConfigValue::None)
+            } else {
+                mind_core::world::config::ConfigValue::None
+            };
+            if matches!(config, mind_core::world::config::ConfigValue::None) {
+                commands.push(SimCommand::Place {
+                    x: plan.x as i16,
+                    y: plan.y as i16,
+                    block: plan.block.raw(),
+                    rotation: plan.rotation as i8,
+                    team,
+                    // Player input queues on the player unit (`flushPlans` ->
+                    // `BuilderComp.addBuild`); the builder constructs it (PAR-0098).
+                    player: Some(0),
+                });
+            } else {
+                configured.push((
+                    plan.x as i16,
+                    plan.y as i16,
+                    plan.block,
+                    plan.rotation,
+                    config,
+                ));
+            }
+        }
+        if let Some(mut host) = self.host.clone() {
+            for (x, y, plan_block, rotation, config) in configured {
+                let _ = host
+                    .bind_mut()
+                    .queue_player_place_config(x, y, plan_block, rotation, config);
+            }
+        }
         self.enqueue_commands(&commands);
         self.controller.state.line_plans.clear();
         self.controller.state.line.clear();
