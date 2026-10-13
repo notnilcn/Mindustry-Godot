@@ -461,8 +461,16 @@ pub fn valid_link(world: &World, this: Entity, privileged: bool, other: Option<E
         return false;
     }
     if privileged {
-        // `!(privileged && !worldProcessorPlayerLink && other.team == defaultTeam)`;
-        // `worldProcessorPlayerLink` defaults to true (plan 12).
+        // `!(privileged && !worldProcessorPlayerLink && other.team == defaultTeam)`
+        // (LogicBlock.java:727-729): a world processor cannot link the default
+        // team's buildings when `worldProcessorPlayerLink` is off.
+        let rules = super::rules_ref(world);
+        if !rules.world_processor_player_link() {
+            let other_team = world.get::<TeamComp>(other).map(|t| t.team);
+            if other_team == Some(rules.default_team().0) {
+                return false;
+            }
+        }
         return true;
     }
     if privileged_of(world, other) {
@@ -614,10 +622,7 @@ impl BuildingBehavior for LogicBlockBehavior {
         }
 
         // `state.rules.disableWorldProcessors && privileged` gate (plan 12).
-        let disabled_world_processors = world
-            .get_resource::<super::LogicRulesRes>()
-            .map(|rules| rules.0.disable_world_processors())
-            .unwrap_or(false);
+        let disabled_world_processors = super::rules_ref(world).disable_world_processors();
         if disabled_world_processors && def.privileged {
             world.entity_mut(e).insert(state);
             return;

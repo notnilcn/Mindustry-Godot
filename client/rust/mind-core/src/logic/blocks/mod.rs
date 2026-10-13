@@ -161,9 +161,50 @@ impl LogicRulesApi for DefaultLogicRules {
 #[derive(Resource)]
 pub struct LogicRulesRes(pub Box<dyn LogicRulesApi + Send + Sync>);
 
-/// Borrows the installed rules seam, falling back to upstream defaults.
+/// `LogicBuild.accessible()`/privilege checks read the live `state.rules`
+/// (`LogicBlock.java:120`): the campaign session's rules when present, the
+/// standalone [`LogicWorldState`](crate::logic::world::LogicWorldState) copy
+/// otherwise, then the seam resource/upstream defaults.
+impl LogicRulesApi for crate::io::json::rules::Rules {
+    fn editor(&self) -> bool {
+        self.editor
+    }
+    fn allow_edit_world_processors(&self) -> bool {
+        self.allow_edit_world_processors
+    }
+    fn disable_world_processors(&self) -> bool {
+        self.disable_world_processors
+    }
+    fn logic_unit_control(&self) -> bool {
+        self.logic_unit_control
+    }
+    fn logic_unit_build(&self) -> bool {
+        self.logic_unit_build
+    }
+    fn logic_unit_deconstruct(&self) -> bool {
+        self.logic_unit_deconstruct
+    }
+    fn allow_logic_data(&self) -> bool {
+        self.allow_logic_data
+    }
+    fn world_processor_player_link(&self) -> bool {
+        self.world_processor_player_link
+    }
+    fn default_team(&self) -> TeamId {
+        TeamId(self.default_team)
+    }
+}
+
+/// Borrows the live rules seam: campaign session rules, then `LogicWorldState`,
+/// then the installed seam resource, then upstream defaults.
 pub fn rules_ref(world: &World) -> &dyn LogicRulesApi {
     static DEFAULT: DefaultLogicRules = DefaultLogicRules;
+    if let Some(rt) = world.get_resource::<crate::game::runtime::CampaignRuntime>() {
+        return &rt.session.rules;
+    }
+    if let Some(state) = world.get_resource::<crate::logic::world::LogicWorldState>() {
+        return &state.rules;
+    }
     match world.get_resource::<LogicRulesRes>() {
         Some(rules) => rules.0.as_ref(),
         None => &DEFAULT,

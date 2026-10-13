@@ -62,6 +62,10 @@ pub struct MessageState {
     pub has_toast: bool,
     /// `state.rules.mission` visible text.
     pub mission: Option<String>,
+    /// World tick after which no announcement is visible (`UI.announce`).
+    pub announce_until: u64,
+    /// World tick after which no info toast is visible (3.5 s).
+    pub toast_until: u64,
 }
 
 /// `Call.syncVariable` payload (plan 21 handshake).
@@ -420,6 +424,41 @@ impl LogicWorldState {
 /// Borrows the installed world state, if any.
 pub fn state_ref(world: &World) -> Option<&LogicWorldState> {
     world.get_resource::<LogicWorldState>()
+}
+
+/// Live `state.rules`: the campaign session's rules when present, else the
+/// standalone [`LogicWorldState`] copy (plan G06 T4).
+pub fn with_rules<R>(world: &mut World, f: impl FnOnce(&mut Rules) -> R) -> Option<R> {
+    if let Some(mut rt) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>() {
+        return Some(f(&mut rt.session.rules));
+    }
+    world
+        .get_resource_mut::<LogicWorldState>()
+        .map(|mut state| f(&mut state.rules))
+}
+
+/// Live `state.markers` (campaign session first, standalone copy otherwise).
+pub fn with_markers<R>(world: &mut World, f: impl FnOnce(&mut MapMarkers) -> R) -> Option<R> {
+    if let Some(mut rt) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>() {
+        return Some(f(&mut rt.session.markers));
+    }
+    world
+        .get_resource_mut::<LogicWorldState>()
+        .map(|mut state| f(&mut state.markers))
+}
+
+/// Live `state.wave`/`state.wavetime` (ticks) writable pair.
+pub fn with_wave<R>(world: &mut World, f: impl FnOnce(&mut i32, &mut f32) -> R) -> Option<R> {
+    if let Some(mut rt) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>() {
+        let session = &mut rt.session;
+        return Some(f(&mut session.wave, &mut session.wavetime));
+    }
+    world
+        .get_resource_mut::<LogicWorldState>()
+        .map(|mut state| {
+            let state = &mut *state;
+            f(&mut state.wave, &mut state.wavetime)
+        })
 }
 
 /// Borrows the installed message state, if any.
@@ -861,12 +900,11 @@ pub fn run_set_block(
         return;
     }
     let block_obj = obj_of(exec, block);
-    let team_id = exec.arena.get(team.id()).team().unwrap_or_else(|| {
-        world
-            .get_resource::<LogicWorldState>()
-            .map(|s| s.rules.default_team)
-            .unwrap_or(0)
-    });
+    let team_id = exec
+        .arena
+        .get(team.id())
+        .team()
+        .unwrap_or_else(|| with_rules(world, |rules| rules.default_team).unwrap_or(0));
     let rot = numi(exec, rotation).clamp(0, 3);
 
     // Map-generation/editor worlds carry the live `WorldGrid`; apply the
@@ -1098,8 +1136,50 @@ pub fn run_set_rule(
     let p2 = exec.arena.get(p2.id()).clone();
     let p3 = exec.arena.get(p3.id()).clone();
     let p4 = exec.arena.get(p4.id()).clone();
-    if let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
-        crate::logic::rules::apply_to_state(&mut state, rule, &value, &p1, &p2, &p3, &p4);
+
+    // `checkMapArea` clamps against `world.width()/height()` (`TileBuilds`).
+    let (map_w, map_h) = world
+        .get_resource::<crate::world::TileBuilds>()
+        .map(|builds| (builds.width, builds.height))
+        .unwrap_or((0, 0));
+    // `ban`/`unban` resolve content ids to the name sets `Rules` stores.
+    let content = world
+        .get_resource::<crate::logic::globals::LogicContentInfo>()
+        .cloned();
+    let (mut wave, mut wavetime) =
+        with_wave(world, |wave, wavetime| (*wave, *wavetime)).unwrap_or((1, 0.0));
+    let applied = with_rules(world, |rules| {
+        crate::logic::rules::apply_rule(
+            rules,
+            &mut wave,
+            &mut wavetime,
+            map_w,
+            map_h,
+            content.as_ref(),
+            rule,
+            &value,
+            &p1,
+            &p2,
+            &p3,
+            &p4,
+        )
+    })
+    .unwrap_or(false);
+    if !applied {
+        return;
+    }
+    with_wave(world, |wave_ref, wavetime_ref| {
+        *wave_ref = wave;
+        *wavetime_ref = wavetime;
+    });
+    if rule == LogicRule::MapArea {
+        // G04 T5's world re-derive (`grid.limit_area` + border darkness) runs
+        // from `Sim::tick` when `rules_world_dirty` is set. G02 T8's
+        // `sync_build_rules` is not on main yet (noted in the summary).
+        if let Some(mut runtime) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+        {
+            runtime.rules_world_dirty = true;
+        }
     }
 }
 
@@ -1122,10 +1202,18 @@ pub fn run_flush_message(
         return;
     }
 
-    let (has_announcement, has_toast) = world
+    // `@wait` blocking keys off the message timers (`ui.hasAnnouncement` /
+    // `hudfrag.hasToast`, LExecutor.java:1934-1946).
+    let tick = world
+        .get_resource::<LogicWorldState>()
+        .map(|state| state.tick)
+        .unwrap_or(0);
+    let (announce_until, toast_until) = world
         .get_resource::<MessageState>()
-        .map(|m| (m.has_announcement, m.has_toast))
-        .unwrap_or((false, false));
+        .map(|m| (m.announce_until, m.toast_until))
+        .unwrap_or((0, 0));
+    let has_announcement = tick < announce_until;
+    let has_toast = tick < toast_until;
     let blocking = (type_ == MessageType::Announce && has_announcement)
         || (type_ == MessageType::Notify && has_toast)
         || (type_ == MessageType::Toast && has_announcement);
@@ -1142,23 +1230,38 @@ pub fn run_flush_message(
         return;
     }
 
-    let mut text = exec.text_buffer.clone();
-    if let Some(stripped) = text.strip_prefix('@') {
-        text = stripped.to_owned();
-    }
+    // Java keeps the `@`-prefixed text; the bundle substitution happens only
+    // when the bundle has the key (host-side, T6).
+    let text = exec.text_buffer.clone();
     let duration_s = num(exec, duration) as f32;
     exec.text_buffer.clear();
 
-    if let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
-        if type_ == MessageType::Mission {
-            state.rules.mission = Some(text.clone());
-        } else {
-            state.emit(LogicWorldEvent::Message {
-                type_,
-                text: text.clone(),
-                duration: duration_s,
-            });
+    if type_ == MessageType::Mission {
+        with_rules(world, |rules| rules.mission = Some(text.clone()));
+        return;
+    }
+
+    // Announce/toast are shown for `ceil(duration)` seconds, notify toasts for
+    // 3.5 s (`UI.java:636-653`, `HudFragment.java:741-743`).
+    if let Some(mut messages) = world.get_resource_mut::<MessageState>() {
+        match type_ {
+            MessageType::Announce | MessageType::Toast => {
+                messages.announce_until = tick + (duration_s.max(0.0) * 60.0).ceil() as u64;
+            }
+            MessageType::Notify => {
+                messages.toast_until = tick + 210;
+            }
+            MessageType::Mission => {}
         }
+        messages.has_announcement = tick < messages.announce_until;
+        messages.has_toast = tick < messages.toast_until;
+    }
+    if let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
+        state.emit(LogicWorldEvent::Message {
+            type_,
+            text,
+            duration: duration_s,
+        });
     }
 }
 
@@ -1267,9 +1370,8 @@ pub fn run_explosion(
 pub fn run_get_flag(exec: &mut Executor, world: &mut World, result: VarRef, flag: VarRef) {
     match obj_of(exec, flag) {
         Some(LogicObject::Str(name)) => {
-            let present = world
-                .get_resource::<LogicWorldState>()
-                .is_some_and(|state| state.rules.objective_flags.contains(&name));
+            let present =
+                with_rules(world, |rules| rules.objective_flags.contains(&name)).unwrap_or(false);
             exec.set_num(result.id(), if present { 1.0 } else { 0.0 });
         }
         _ => out_obj(exec, result, None),
@@ -1282,25 +1384,28 @@ pub fn run_set_flag(exec: &mut Executor, world: &mut World, flag: VarRef, value:
         return;
     };
     let on = bool_of(exec, value);
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
-    let present = state.rules.objective_flags.contains(&name);
-    if present == on {
-        return;
+    let changed = with_rules(world, |rules| {
+        let present = rules.objective_flags.contains(&name);
+        if present == on {
+            return false;
+        }
+        if on {
+            rules.objective_flags.insert(name.clone());
+        } else {
+            rules.objective_flags.shift_remove(&name);
+        }
+        true
+    })
+    .unwrap_or(false);
+    if changed && let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
+        state.emit(LogicWorldEvent::Flag {
+            flag: name,
+            value: on,
+        });
     }
-    if on {
-        state.rules.objective_flags.insert(name.clone());
-    } else {
-        state.rules.objective_flags.shift_remove(&name);
-    }
-    state.emit(LogicWorldEvent::Flag {
-        flag: name,
-        value: on,
-    });
 }
 
-/// `SetMarkerI` against plan 12's `MapMarkers`.
+/// `SetMarkerI` against plan 12's `MapMarkers` (live session first).
 pub fn run_set_marker(
     exec: &mut Executor,
     world: &mut World,
@@ -1315,39 +1420,38 @@ pub fn run_set_marker(
         return;
     }
     let id = mid as u32;
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+    let Some(()) = with_markers(world, |markers| {
+        if type_ == LMarkerControl::Remove {
+            markers.remove(id);
+            return;
+        }
+        if markers.get(id).is_none() {
+            return;
+        }
+        if type_ == LMarkerControl::FlushText {
+            let text = exec.text_buffer.clone();
+            markers.set_text(id, &text, bool_of(exec, p1), &no_locale());
+            exec.text_buffer.clear();
+        } else if type_ == LMarkerControl::Texture {
+            if bool_of(exec, p1) {
+                let text = exec.text_buffer.clone();
+                markers.set_texture(id, TextureValue::String(text));
+                exec.text_buffer.clear();
+            } else if let Some(LogicObject::Str(texture)) = obj_of(exec, p2) {
+                markers.set_texture(id, TextureValue::String(texture));
+            }
+        } else {
+            markers.control(
+                id,
+                type_,
+                exec.arena.get(p1.id()).num_or_nan(),
+                exec.arena.get(p2.id()).num_or_nan(),
+                exec.arena.get(p3.id()).num_or_nan(),
+            );
+        }
+    }) else {
         return;
     };
-    if type_ == LMarkerControl::Remove {
-        state.markers.remove(id);
-        return;
-    }
-    if state.markers.get(id).is_none() {
-        return;
-    }
-    if type_ == LMarkerControl::FlushText {
-        let text = exec.text_buffer.clone();
-        state
-            .markers
-            .set_text(id, &text, bool_of(exec, p1), &no_locale());
-        exec.text_buffer.clear();
-    } else if type_ == LMarkerControl::Texture {
-        if bool_of(exec, p1) {
-            let text = exec.text_buffer.clone();
-            state.markers.set_texture(id, TextureValue::String(text));
-            exec.text_buffer.clear();
-        } else if let Some(LogicObject::Str(texture)) = obj_of(exec, p2) {
-            state.markers.set_texture(id, TextureValue::String(texture));
-        }
-    } else {
-        state.markers.control(
-            id,
-            type_,
-            exec.arena.get(p1.id()).num_or_nan(),
-            exec.arena.get(p2.id()).num_or_nan(),
-            exec.arena.get(p3.id()).num_or_nan(),
-        );
-    }
 }
 
 /// `MakeMarkerI`.
@@ -1371,16 +1475,17 @@ pub fn run_make_marker(
     let replace = bool_of(exec, replace);
     let xv = exec.arena.get(x.id()).num_or_nan();
     let yv = exec.arena.get(y.id()).num_or_nan();
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+    let Some(()) = with_markers(world, |markers| {
+        if markers.size() >= MAKE_MARKER_MAX {
+            return;
+        }
+        if replace || !markers.has(mid) {
+            markers.add(mid, factory);
+            markers.control(mid, LMarkerControl::Pos, xv, yv, 0.0);
+        }
+    }) else {
         return;
     };
-    if state.markers.size() >= MAKE_MARKER_MAX {
-        return;
-    }
-    if replace || !state.markers.has(mid) {
-        state.markers.add(mid, factory);
-        state.markers.control(mid, LMarkerControl::Pos, xv, yv, 0.0);
-    }
 }
 
 /// `PlaySoundI` (plan 18 `SoundId` resolution is a host sink).
@@ -1488,10 +1593,8 @@ pub fn run_client_data(
     value: VarRef,
     reliable: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
-    if !state.rules.allow_logic_data {
+    let allowed = with_rules(world, |rules| rules.allow_logic_data).unwrap_or(false);
+    if !allowed {
         return;
     }
     let Some(LogicObject::Str(channel)) = obj_of(exec, channel) else {
@@ -1500,6 +1603,9 @@ pub fn run_client_data(
     let is_obj = exec.arena.get(value.id()).is_obj;
     let numv = exec.arena.get(value.id()).num;
     let objv = exec.arena.get(value.id()).obj.clone();
+    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+        return;
+    };
     state.emit(LogicWorldEvent::ClientData(Box::new(
         ClientLogicDataEvent {
             channel,

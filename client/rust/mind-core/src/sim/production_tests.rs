@@ -1805,3 +1805,265 @@ fn live_tick_global_advances() {
     // tick where `@tick = state.tick + 1` (Logic.java:526-546).
     assert_eq!(state.executor.arena.get(t).num(), 30.0);
 }
+
+// ---- G06 T4 (PAR-0104): live world-processor bridge ----
+
+/// Installs a campaign session (the live rules/markers/wave source) on `sim`.
+fn install_campaign_session(sim: &mut Sim, rules: crate::game::rules::Rules) {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    let content = crate::world::harness::BuildHarness::load_content();
+    let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
+}
+
+/// Places a configurable world processor running `code`.
+fn place_world_processor(sim: &mut Sim, x: i16, y: i16, code: &str) {
+    let id = sim
+        .world_block_id("world-processor")
+        .expect("world-processor");
+    sim.command(SimCommand::Place {
+        x,
+        y,
+        block: id,
+        rotation: 0,
+        team: 1,
+        player: None,
+    })
+    .expect("placed");
+    let bytes = crate::logic::blocks::logic_block::compress(code, &[]);
+    configure(sim, x, y, crate::determinism::ConfigValue::Bytes(bytes));
+}
+
+fn test_rules() -> crate::game::rules::Rules {
+    crate::game::rules::Rules {
+        default_team: 1,
+        allow_edit_world_processors: true,
+        ..Default::default()
+    }
+}
+
+/// `setrule` writes the live campaign session rules (not a dead copy).
+#[test]
+fn setrule_writes_live_rules() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "setrule waveSending true 0 0 100 100\nsetrule unitCap 4 0 0 100 100\nstop\n",
+    );
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(runtime.session.rules.wave_sending);
+    assert_eq!(runtime.session.rules.unit_cap, 4);
+}
+
+/// Ground Zero block 2: the tutorial flag is consumed and waves enabled.
+#[test]
+fn flags_roundtrip_live() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    sim.ecs
+        .0
+        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .rules
+        .objective_flags
+        .insert("allowWaves".to_owned());
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "getflag waves \"allowWaves\"\njump 0 equal waves false\nsetflag \"allowWaves\" false\nsetrule waveSending true 0 0 100 100\nsetrule waveTimer true 0 0 100 100\nstop\n",
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(!runtime.session.rules.objective_flags.contains("allowWaves"));
+    assert!(runtime.session.rules.wave_sending);
+    assert!(runtime.session.rules.wave_timer);
+}
+
+/// `setrule mapArea` updates the session and, through G04 T5, `grid.limit_area`.
+#[test]
+fn map_area_rule_toggles_live_limit() {
+    let mut sim = Sim::new(3, 300, 300, BlockId::AIR, BlockId::AIR);
+    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+    sim.grid.fill(stone, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime");
+    install_campaign_session(&mut sim, test_rules());
+    // Java `SetRuleI`: the `value` slot is unused for `mapArea`; x/y/w/h come
+    // from p1..p4 (`setrule mapArea 10 0 0 256 256` -> x=0, w=256).
+    place_world_processor(&mut sim, 10, 10, "setrule mapArea 10 0 0 256 256\nstop\n");
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    {
+        let runtime = sim
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .expect("runtime");
+        assert!(runtime.session.rules.limit_map_area);
+        assert_eq!(runtime.session.rules.limit_width, 256);
+    }
+    assert_eq!(sim.grid.limit_area, Some((0, 0, 256, 256)));
+    // Selecting the whole map disables the limit again.
+    let bytes =
+        crate::logic::blocks::logic_block::compress("setrule mapArea 0 0 0 300 300\nstop\n", &[]);
+    configure(
+        &mut sim,
+        10,
+        10,
+        crate::determinism::ConfigValue::Bytes(bytes),
+    );
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(!runtime.session.rules.limit_map_area);
+    assert_eq!(sim.grid.limit_area, None);
+}
+
+/// `setrule wave` clamps to >= 1; `currentWaveTime` converts seconds to ticks.
+#[test]
+fn wave_rule_sets_wave_and_wavetime() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "setrule wave 0 0 0 100 100\nsetrule currentWaveTime 2.5 0 0 100 100\nstop\n",
+    );
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert_eq!(runtime.session.wave, 1);
+    assert_eq!(runtime.session.wavetime, 150.0);
+}
+
+/// The event log never grows: `Sim::tick` drains it every tick.
+#[test]
+fn logic_events_drain_each_tick() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::LogicWorldState::new());
+    place_world_processor(&mut sim, 10, 10, "setflag \"drained\" true\nstop\n");
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(runtime.session.rules.objective_flags.contains("drained"));
+    let state = sim
+        .ecs
+        .0
+        .get_resource::<crate::logic::world::LogicWorldState>()
+        .expect("state");
+    assert!(state.events.is_empty(), "{:?}", state.events);
+}
+
+/// `message announce 2 @wait` blocks until the announcement timer expires.
+#[test]
+fn message_wait_blocks_until_announcement_expires() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::LogicWorldState {
+            headless: false,
+            ..crate::logic::world::LogicWorldState::new()
+        });
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::MessageState::default());
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "message announce 2 0\nmessage announce 2 @wait\nset x 2\nstop\n",
+    );
+    let state_at = |sim: &Sim| {
+        let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+        sim.ecs
+            .0
+            .get::<crate::logic::blocks::LogicBlockState>(processor)
+            .expect("state")
+            .executor
+            .optional_var("x")
+            .map(|id| {
+                sim.ecs
+                    .0
+                    .get::<crate::logic::blocks::LogicBlockState>(processor)
+                    .expect("state")
+                    .executor
+                    .arena
+                    .get(id)
+                    .num()
+            })
+            .unwrap_or(0.0)
+    };
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    {
+        let messages = sim
+            .ecs
+            .0
+            .get_resource::<crate::logic::world::MessageState>()
+            .expect("messages");
+        let tick = sim
+            .ecs
+            .0
+            .get_resource::<crate::logic::world::LogicWorldState>()
+            .expect("state")
+            .tick;
+        assert!(
+            messages.announce_until > 0,
+            "first announce armed the timer (tick={tick})"
+        );
+        assert!(
+            tick < messages.announce_until,
+            "still inside the announcement window (tick={tick}, until={})",
+            messages.announce_until
+        );
+    }
+    assert_eq!(state_at(&sim), 0.0, "second announce is still blocked");
+    for _ in 0..140 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(state_at(&sim), 2.0, "wait released after the announcement");
+}
