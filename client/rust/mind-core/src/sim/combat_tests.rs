@@ -547,10 +547,13 @@ fn boosting_nova_lifts_off() {
 #[test]
 fn flare_circles_and_keeps_firing() {
     let mut sim = live_sim(64);
-    let wall = place(&mut sim, 30, 10, "copper-wall", 1);
+    // Inside the flare's 76 px range: `findMainTarget` (`{generator, null}`)
+    // only engages an in-range target when no flagged building exists (G01 T6b
+    // removed the nearest-building anchor).
+    let wall = place(&mut sim, 12, 10, "copper-wall", 1);
     let wall_start = health(&sim, wall).expect("wall health");
     let flare = sim
-        .spawn_live_unit("flare", 2, 6.0 * 8.0, 10.0 * 8.0, 0.0)
+        .spawn_live_unit("flare", 2, 11.0 * 8.0, 10.0 * 8.0, 0.0)
         .expect("flare");
     let shots = |sim: &Sim| {
         sim.ecs
@@ -559,10 +562,16 @@ fn flare_circles_and_keeps_firing() {
             .map(|weapons| weapons.mounts.iter().map(|m| m.total_shots).sum::<i32>())
             .unwrap_or(0)
     };
+    // The Java `circleAttack` orbit is a transient for non-omni units: the
+    // `diff > 70 && len < circleLength` straight-segment branch grows the loop
+    // until the target leaves `range`, after which `FlyingAI` idles (Java
+    // behaviour — the pre-T6b port kept moving via its nearest-building
+    // anchor). Sample the engagement window [120, 600]: still inside range.
     let mut shots_mid = 0;
     let mut moving_ticks = 0;
     let mut sampled = 0;
-    for tick in 0..1200 {
+    let mut engaged = 0;
+    for tick in 0..400 {
         sim.tick().expect("tick");
         let vel = sim
             .ecs
@@ -570,24 +579,36 @@ fn flare_circles_and_keeps_firing() {
             .get::<Vel>(flare)
             .map(|vel| (vel.x * vel.x + vel.y * vel.y).sqrt())
             .unwrap_or(0.0);
-        if tick > 120 {
+        if tick > 30 {
             sampled += 1;
             if vel > 0.01 {
                 moving_ticks += 1;
             }
         }
-        if tick == 300 {
+        if sim
+            .ecs
+            .0
+            .get::<crate::ai::types::flying::FlyingAiState>(flare)
+            .is_some_and(|state| state.target.is_some())
+        {
+            engaged += 1;
+        }
+        if tick == 120 {
             shots_mid = shots(&sim);
         }
     }
     let shots_end = shots(&sim);
+    assert!(
+        engaged > 100,
+        "the flare held its in-range target for a while: {engaged} ticks"
+    );
     assert!(
         sampled > 0 && moving_ticks * 10 >= sampled * 9,
         "flare keeps circling: {moving_ticks}/{sampled} sampled ticks with speed"
     );
     assert!(
         shots_end > shots_mid,
-        "flare keeps firing after tick 300 ({shots_mid} -> {shots_end})"
+        "flare keeps firing while engaged ({shots_mid} -> {shots_end})"
     );
     assert!(
         health(&sim, wall).is_none_or(|hp| hp < wall_start),
@@ -2558,4 +2579,115 @@ fn field_is_stable_across_units() {
         after - before <= 2,
         "one flowfield build per (team, cost) per tick: {before} -> {after}"
     );
+}
+
+/// G01 T6b: a wave `horizon` (targetFlags `{factory, null}`) bombs the closest
+/// active factory even though an enemy core is on the map
+/// (`FlyingAI.findMainTarget`, FlyingAI.java:40-72).
+#[test]
+fn horizon_prefers_factory() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    // Core 147 px from the horizon (out of its 140 px range) but still nearer
+    // than the factory at 170 px: the `{factory, null}` flag must win over the
+    // old nearest-building anchor.
+    place(&mut sim, 47, 47, "core-shard", 1);
+    let core = sim.grid.tiles.get(47, 47).build.expect("core entity");
+    let press = place(&mut sim, 75, 75, "graphite-press", 1);
+    // `targetFlagActive` needs `items.any()` in the port's model.
+    let coal = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("coal")
+        .expect("coal");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(press) {
+        items.add(coal, 1, 10);
+    }
+    let _horizon = sim
+        .spawn_live_unit("horizon", 2, 60.0 * 8.0, 60.0 * 8.0, 180.0)
+        .expect("horizon");
+    let core_max = sim
+        .ecs
+        .0
+        .get::<Health>(core)
+        .expect("core health")
+        .max_health;
+    let mut destroyed_at = None;
+    for tick in 0..900 {
+        sim.tick().expect("tick");
+        if sim.ecs.0.get_entity(press).is_err() {
+            destroyed_at = Some(tick);
+            break;
+        }
+    }
+    let core_now = health(&sim, core);
+    eprintln!("factory destroyed at {destroyed_at:?}, core {core_now:?}/{core_max}");
+    assert!(
+        destroyed_at.is_some(),
+        "the factory was bombed (core {core_now:?}/{core_max})"
+    );
+    assert_eq!(
+        core_now,
+        Some(core_max),
+        "the horizon never targeted the nearer core while the factory died"
+    );
+}
+
+/// G01 T6b: a `flare` (`targetFlags {generator, null}`) with no generators
+/// falls back to the enemy core (`FlyingAI.findMainTarget`'s final `return core`).
+#[test]
+fn flare_falls_back_to_core() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 60.0 * 8.0, 60.0 * 8.0, 180.0)
+        .expect("flare");
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+    }
+    let a = sim.ecs.0.get::<Pos>(flare).copied().expect("flare pos");
+    let b = sim.ecs.0.get::<Pos>(core).copied().expect("core pos");
+    let end = ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt();
+    eprintln!("flare-core distance {end}");
+    // The flare stops at `type.range * 0.8` = 60.8 px, circling.
+    assert!(end < 75.0, "the flare flew to the core: {end}");
 }

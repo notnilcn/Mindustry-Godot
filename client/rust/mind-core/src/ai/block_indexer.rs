@@ -164,6 +164,23 @@ impl BlockIndexer {
         }
     }
 
+    /// `BlockIndexer.getEnemy(team, flag)`: every building carrying `flag` that
+    /// does not belong to `team` (derelict skipped unless `coreCapture`), in
+    /// team-id then entity order (`BlockIndexer.java:getEnemy`).
+    pub fn enemy_flagged(&self, world: &World, team: u8, flag: BlockFlag) -> Vec<Entity> {
+        let mut out = Vec::new();
+        // The bucket vec is `FLAG_COUNT` team blocks of `TEAM_STRIDE` slots
+        // (`BlockIndexer.rs` sizing): never iterate past the allocated teams.
+        let team_slots = self.flags.len() / TEAM_STRIDE;
+        for other in 0..team_slots {
+            if other == team as usize || (other == 0 && is_derelict(world, 0)) {
+                continue;
+            }
+            out.extend_from_slice(&self.flags[other * TEAM_STRIDE + flag_index(flag)]);
+        }
+        out
+    }
+
     /// Marks/unmarks a building as damaged (`notifyHealthChanged`).
     pub fn notify_health_changed(&mut self, world: &World, entity: Entity) {
         let damaged = world

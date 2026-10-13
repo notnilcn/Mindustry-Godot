@@ -26,6 +26,29 @@ pub struct FlyingAi {
     pub target: Option<TilePos>,
 }
 
+/// `FlyingAI` per-unit timer/target state (`AIController.timer`/`target`).
+///
+/// Inserted lazily by the live unit loop; mirrors [`super::ground::GroundAiState`]
+/// without the stuck bookkeeping (FlyingAI has none).
+#[derive(Debug, Clone, Copy, bevy_ecs::component::Component)]
+pub struct FlyingAiState {
+    /// `AIController.timer.get(timerTarget, target == null ? 40 : 90)` countdown.
+    pub retarget: f32,
+    /// Main target (`AIController.target`), chosen by `FlyingAI.findMainTarget`.
+    pub target: Option<Entity>,
+}
+
+impl Default for FlyingAiState {
+    fn default() -> Self {
+        Self {
+            // Java `resetTimers` seeds `Mathf.random(40)`; the port takes the
+            // earliest draw so the first acquisition runs on the first tick.
+            retarget: 39.0,
+            target: None,
+        }
+    }
+}
+
 /// `AIController.turningAway` for `circleAttack` (`AIController.java:325`):
 /// set while peeling away from an overlapping same-layer unit.
 #[derive(bevy_ecs::component::Component, Debug, Default, Clone, Copy)]
@@ -203,10 +226,42 @@ pub fn move_to(
     target: Entity,
     circle_length: f32,
 ) {
-    let (Some(target_pos), Some(pos)) = (
-        world.get::<Pos>(target).copied(),
-        world.get::<Pos>(entity).copied(),
-    ) else {
+    let Some(target_pos) = world.get::<Pos>(target).copied() else {
+        return;
+    };
+    if world.get::<Pos>(entity).is_none() {
+        return;
+    }
+    move_to_point(
+        world,
+        grid,
+        content,
+        entity,
+        target_pos.x,
+        target_pos.y,
+        circle_length,
+        100.0,
+        true,
+    );
+}
+
+/// `AIController.moveTo(target, circleLength, smooth, keepDistance=flying)`
+/// (AIController.java:371-420) at an explicit point. `smooth` scales the
+/// approach length; `look_at` drives the trailing `unit.lookAt` (FlyingAI
+/// target-chasing only — the idle spawner shuttle does not look at its point).
+#[allow(clippy::too_many_arguments)]
+pub fn move_to_point(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &crate::content::ContentRegistry,
+    entity: Entity,
+    target_x: f32,
+    target_y: f32,
+    circle_length: f32,
+    smooth: f32,
+    look_at: bool,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
     let mut core = world
@@ -220,12 +275,12 @@ pub fn move_to(
     let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
     let (omni, rotate_speed, accel) = unit_control(world, content, entity);
 
-    let (mut vx, mut vy) = (target_pos.x - pos.x, target_pos.y - pos.y);
+    let (mut vx, mut vy) = (target_x - pos.x, target_y - pos.y);
     let dst = (vx * vx + vy * vy).sqrt();
     let length = if circle_length <= 0.001 {
         1.0
     } else {
-        ((dst - circle_length) / 100.0).clamp(-1.0, 1.0)
+        ((dst - circle_length) / smooth).clamp(-1.0, 1.0)
     };
     if dst > 0.0001 {
         vx = vx / dst * speed * length;
@@ -245,8 +300,20 @@ pub fn move_to(
     if vx.abs() > 0.0001 || vy.abs() > 0.0001 {
         move_pref(&mut core, &mut vel, omni, rotate_speed, accel, (vx, vy));
     }
-    // `unit.lookAt(target)`.
-    core.rotation = move_toward_angle(core.rotation, ang_to(&pos, target_pos), rotate_speed);
+    if look_at {
+        // `unit.lookAt(target)`.
+        core.rotation = move_toward_angle(
+            core.rotation,
+            ang_to(
+                &pos,
+                Pos {
+                    x: target_x,
+                    y: target_y,
+                },
+            ),
+            rotate_speed,
+        );
+    }
     write_back(world, entity, &pos, &vel, &core);
 }
 

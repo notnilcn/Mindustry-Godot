@@ -29,7 +29,9 @@ use std::collections::BTreeMap;
 
 use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::pathfinder::{Cost, Pathfinder};
-use crate::ai::types::flying::{circle_attack, move_to, update_flying};
+use crate::ai::types::flying::{
+    FlyingAiState, circle_attack, move_to, move_to_point, update_flying,
+};
 use crate::ai::types::ground::{GroundAiState, pathfind_field, update_ground};
 use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
@@ -2092,51 +2094,19 @@ pub fn unit_update_system(world: &mut World) {
                     .get::<PhysicsComp>(entity)
                     .is_some_and(|physics| physics.flying);
             if flying {
-                // `FlyingAI` (T6b rewrites the main-target half): anchor =
-                // nearest enemy building, mount target = closest in-range
-                // target, then circle/close/idle-shuttle.
-                let (anchor_tile, mount_target) =
-                    acquire_target(world, &runtime, &queries, entity, team);
-                set_mount_targets(world, &runtime.content, entity, mount_target, None);
-
-                let move_target = slot.target.or(anchor_tile);
-                if let Some(target) = move_target {
-                    // `FlyingAI.updateMovement` (FlyingAI.java:15-27): with a
-                    // live target, circle it (`circleTarget`) or close to
-                    // `range * 0.8` and look at it; with none, steer at the
-                    // anchor tile.
-                    let def = world
-                        .get::<UnitTypeComp>(entity)
-                        .and_then(|comp| runtime.content.unit(comp.type_id));
-                    let arrived = match (mount_target, def) {
-                        (Some(mount), Some(def)) if def.circle_target => {
-                            circle_attack(
-                                world,
-                                &runtime.grid,
-                                &runtime.content,
-                                entity,
-                                mount,
-                                def.circle_target_radius,
-                            );
-                            false
-                        }
-                        (Some(mount), Some(def)) if def.range > 0.0 => {
-                            move_to(
-                                world,
-                                &runtime.grid,
-                                &runtime.content,
-                                entity,
-                                mount,
-                                def.range * 0.8,
-                            );
-                            false
-                        }
-                        _ => update_flying(world, &runtime.grid, &runtime.content, entity, target),
-                    };
-                    if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
-                        stored.target = None;
-                    }
-                }
+                // `FlyingAI` (FlyingAI.java:16-72): main target via
+                // `findMainTarget` (core in range, else `targetFlags`, else the
+                // core), circle/close on it, shuttle to the spawner when idle
+                // on the default team.
+                update_flying_ai(
+                    world,
+                    &mut runtime,
+                    &queries,
+                    entity,
+                    team,
+                    slot,
+                    ground_rules,
+                );
             } else {
                 // `GroundAI.updateMovement` (GroundAI.java:21-85): field walk to
                 // the enemy-core set with the Java targeting cadence.
@@ -3401,6 +3371,262 @@ fn update_ground_ai(
     } else if world.get_entity(entity).is_ok() {
         world.entity_mut(entity).insert(state);
     }
+}
+
+/// `FlyingAI` (FlyingAI.java:16-72) with the flying half of
+/// `AIController.updateTargeting/updateWeapons` (the port's single-target mount
+/// model: the mount target is the Java `findTarget` result).
+#[allow(clippy::too_many_arguments)]
+fn update_flying_ai(
+    world: &mut World,
+    runtime: &mut UnitRuntime,
+    queries: &TargetQueries,
+    entity: Entity,
+    team: u8,
+    slot: ControllerSlot,
+    rules: GroundAiRules,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| runtime.content.unit(comp.type_id))
+    else {
+        return;
+    };
+    let (
+        max_range,
+        type_range,
+        target_air,
+        target_ground,
+        target_under_blocks,
+        circle_target,
+        circle_target_radius,
+        has_weapons,
+        target_flags,
+    ) = (
+        def.max_range,
+        def.range,
+        def.target_air,
+        def.target_ground,
+        def.target_under_blocks,
+        def.circle_target,
+        def.circle_target_radius,
+        !def.weapons.is_empty(),
+        def.target_flags.clone(),
+    );
+
+    let mut state = world
+        .get::<FlyingAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+    // `AIController.retarget()`: 40 ticks without a target, 90 with one.
+    state.retarget += 1.0;
+    if state.retarget >= if state.target.is_none() { 40.0 } else { 90.0 } {
+        state.retarget = 0.0;
+        state.target = flying_main_target(
+            world,
+            queries,
+            team,
+            pos.x,
+            pos.y,
+            max_range,
+            target_air,
+            target_ground,
+            target_under_blocks,
+            &target_flags,
+        );
+    }
+    if let Some(target) = state.target
+        && invalid_target(world, &runtime.content, team, target)
+    {
+        state.target = None;
+    }
+
+    // `FlyingAI.findTarget`: the main target in range is replaced by the
+    // closest in-range target, otherwise the out-of-range main target stands
+    // (`checkTarget(result, x, y, range) ? target(x, y, range, ..) : result`).
+    let mount_target = match state.target {
+        Some(target) if entity_pos_within(world, entity, target, max_range) => queries
+            .closest_target(
+                world,
+                team,
+                pos.x,
+                pos.y,
+                max_range,
+                target_air,
+                target_ground,
+                true,
+                target_under_blocks,
+            )
+            .or(state.target),
+        other => other,
+    };
+    set_mount_targets(world, &runtime.content, entity, mount_target, None);
+
+    // Movement (`FlyingAI.updateMovement`).
+    if let Some(target_tile) = slot.target {
+        // Commanded move order: keep the fly-to-tile path.
+        let arrived = update_flying(world, &runtime.grid, &runtime.content, entity, target_tile);
+        if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+            stored.target = None;
+        }
+    } else if let Some(target) = state.target {
+        if has_weapons {
+            if circle_target {
+                circle_attack(
+                    world,
+                    &runtime.grid,
+                    &runtime.content,
+                    entity,
+                    target,
+                    circle_target_radius,
+                );
+            } else {
+                move_to(
+                    world,
+                    &runtime.grid,
+                    &runtime.content,
+                    entity,
+                    target,
+                    type_range * 0.8,
+                );
+            }
+        }
+    } else if rules.waves && team == rules.default_team {
+        // `moveTo(getClosestSpawner(), dropZoneRadius + 130f)`.
+        if let Some(spawn) = closest_spawn_tile(runtime, pos.x, pos.y) {
+            move_to_point(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                entity,
+                (spawn.x() as f32 + 0.5) * TILE_SIZE,
+                (spawn.y() as f32 + 0.5) * TILE_SIZE,
+                rules.drop_zone_radius + 130.0,
+                100.0,
+                false,
+            );
+        }
+    }
+
+    if let Some(mut stored) = world.get_mut::<FlyingAiState>(entity) {
+        *stored = state;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `FlyingAI.findMainTarget` (FlyingAI.java:40-72): the closest enemy core when
+/// it is within `range`; otherwise the first `targetFlags` entry that yields a
+/// target (`null` = closest in-range target, a flag = closest active flagged
+/// building, any distance); finally the core (possibly out of range).
+#[allow(clippy::too_many_arguments)]
+fn flying_main_target(
+    world: &World,
+    queries: &TargetQueries,
+    team: u8,
+    x: f32,
+    y: f32,
+    range: f32,
+    target_air: bool,
+    target_ground: bool,
+    target_under_blocks: bool,
+    target_flags: &[Option<crate::content::BlockFlag>],
+) -> Option<Entity> {
+    let core = closest_enemy_core(world, team, x, y);
+    if let Some(core) = core {
+        let in_range = world.get::<Pos>(core).is_some_and(|pos| {
+            let dx = pos.x - x;
+            let dy = pos.y - y;
+            dx * dx + dy * dy <= range * range
+        });
+        if in_range {
+            return Some(core);
+        }
+    }
+    for flag in target_flags {
+        match flag {
+            None => {
+                if let Some(result) = queries.closest_target(
+                    world,
+                    team,
+                    x,
+                    y,
+                    range,
+                    target_air,
+                    target_ground,
+                    true,
+                    target_under_blocks,
+                ) {
+                    return Some(result);
+                }
+            }
+            Some(flag) if target_ground => {
+                if let Some(result) = target_flag_active(world, queries, team, x, y, *flag) {
+                    return Some(result);
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    core
+}
+
+/// `AIController.targetFlagActive(x, y, flag, enemy=true)`: the closest enemy
+/// building carrying `flag` that is active. Java's predicate is
+/// `((items != null && items.any()) || status() != BlockStatus.noInput) && block.targetable`
+/// (AIController.java:277-284); the port has no live per-building block status,
+/// so "active" is `items.any()` (documented deviation), and no vanilla flagged
+/// block sets `targetable = false` (only world logic blocks do).
+fn target_flag_active(
+    world: &World,
+    queries: &TargetQueries,
+    team: u8,
+    x: f32,
+    y: f32,
+    flag: crate::content::BlockFlag,
+) -> Option<Entity> {
+    let mut best: Option<(f32, Entity)> = None;
+    for entity in queries.indexer.enemy_flagged(world, team, flag) {
+        let active = world
+            .get::<crate::world::modules::ItemModule>(entity)
+            .is_some_and(|items| items.any());
+        if !active {
+            continue;
+        }
+        let Some(pos) = world.get::<Pos>(entity).copied() else {
+            continue;
+        };
+        let dx = pos.x - x;
+        let dy = pos.y - y;
+        let dist2 = dx * dx + dy * dy;
+        let id = entity;
+        let replace = match best {
+            None => true,
+            Some((best_dist, best_entity)) => {
+                dist2 < best_dist || (dist2 == best_dist && id.index() < best_entity.index())
+            }
+        };
+        if replace {
+            best = Some((dist2, id));
+        }
+    }
+    best.map(|(_, entity)| entity)
+}
+
+/// `unit.within(target, range)` on world positions.
+fn entity_pos_within(world: &World, entity: Entity, target: Entity, range: f32) -> bool {
+    let (Some(a), Some(b)) = (
+        world.get::<Pos>(entity).copied(),
+        world.get::<Pos>(target).copied(),
+    ) else {
+        return false;
+    };
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    dx * dx + dy * dy <= range * range
 }
 
 /// `UnitType.initPathType` (UnitType.java:891-898): the flowfield cost derived
