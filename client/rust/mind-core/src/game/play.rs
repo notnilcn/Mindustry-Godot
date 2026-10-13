@@ -130,6 +130,9 @@ pub struct PlaySession {
     pub sector: Option<SectorRef>,
     /// Campaign difficulty wave-time multiplier (1.0 outside campaign).
     pub difficulty_wave_time_multiplier: f32,
+    /// `planet.campaignRules.difficulty.enemySpawnMultiplier` (1.0 outside
+    /// campaign; `WaveSpawner.spawnEnemies` campaign count scaling).
+    pub difficulty_enemy_spawn_multiplier: f32,
     /// Whether the player core loadout is applied at launch.
     pub allow_launch_loadout: bool,
     /// Whether the sector preset adds starting items.
@@ -166,6 +169,7 @@ impl PlaySession {
             attack_after_waves: false,
             sector: None,
             difficulty_wave_time_multiplier: 1.0,
+            difficulty_enemy_spawn_multiplier: 1.0,
             allow_launch_loadout: false,
             add_starting_items: false,
             weather_reset_pending: false,
@@ -312,6 +316,10 @@ pub fn apply_sector_preset_rules(
         .campaign_rules
         .difficulty
         .wave_time_multiplier();
+    session.difficulty_enemy_spawn_multiplier = planet_record
+        .campaign_rules
+        .difficulty
+        .enemy_spawn_multiplier();
     applied
 }
 

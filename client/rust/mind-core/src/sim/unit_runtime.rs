@@ -35,7 +35,10 @@ use crate::ai::types::flying::{
 use crate::ai::types::ground::{GroundAiState, pathfind_field, update_ground};
 use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
-use crate::ai::wave_spawner::WaveSpawner;
+use crate::ai::wave_spawner::{
+    SPAWN_EFFECT_INVINCIBLE_TICKS, SPAWN_EFFECT_UNMOVING_TICKS, SpawnContext, WaveSpawner,
+    flyer_edge_position,
+};
 use crate::audio::AudioSinkRes;
 use crate::combat::bullet::{self, CombatCtx};
 use crate::combat::targeting::TargetQueries;
@@ -2433,11 +2436,51 @@ pub fn run_wave_system(world: &mut World) {
         .map(|tile| TilePos::new(tile.x, tile.y))
         .collect();
 
-    // `WaveSpawner.eachGroundSpawn` core branch (`WaveSpawner.java:134-173`):
-    // with `rules.wavesSpawnAtCores` in attack mode every wave-team core is
-    // also a spawn position, stepped toward the first player core until the
-    // 3x3 tile area is clear (PAR-0139 prerequisite: attack sectors author no
-    // spawn-overlay tiles, so enemy units only enter this way).
+    // `WaveSpawner.eachGroundSpawn`/`eachFlyerSpawn` context
+    // (WaveSpawner.java:122-200). Overlay ground spawns pass `worldx() = x*8`
+    // (corner) and take the drop-zone shockwave; attack-mode core spawns keep
+    // `shockwave = false`. Flyers spawn at the clamped map edge unless
+    // `rules.airUseSpawns`, plus the wave-team cores in attack mode.
+    //
+    // The core branch (`WaveSpawner.java:134-173`): with `rules.wavesSpawnAtCores`
+    // in attack mode every wave-team core is also a spawn position, stepped
+    // toward the first player core until the 3x3 tile area is clear (PAR-0139
+    // prerequisite: attack sectors author no spawn-overlay tiles).
+    let width = runtime.grid.width();
+    let height = runtime.grid.height();
+    let air_use_spawns = world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|campaign| campaign.session.rules.air_use_spawns);
+    let ts = TILE_SIZE;
+    let mut ctx = SpawnContext {
+        width_px: width as f32 * ts,
+        height_px: height as f32 * ts,
+        ground: Vec::new(),
+        flyer: Vec::new(),
+        campaign_mult: world
+            .get_resource::<CampaignRuntime>()
+            .and_then(|campaign| {
+                campaign
+                    .session
+                    .is_campaign()
+                    .then_some(campaign.session.difficulty_enemy_spawn_multiplier)
+            }),
+    };
+    for tile in &spawns {
+        ctx.ground.push((
+            tile.x() as f32 * ts,
+            tile.y() as f32 * ts,
+            tile.pack(),
+            true,
+        ));
+        if air_use_spawns {
+            ctx.flyer
+                .push((tile.x() as f32 * ts, tile.y() as f32 * ts, tile.pack()));
+        } else {
+            let (fx, fy) = flyer_edge_position(width, height, *tile);
+            ctx.flyer.push((fx, fy, tile.pack()));
+        }
+    }
     if let Some(campaign) = world.get_resource::<CampaignRuntime>() {
         let rules = campaign.session.rules.clone();
         if rules.waves_spawn_at_cores && rules.attack_mode {
@@ -2455,34 +2498,65 @@ pub fn run_wave_system(world: &mut World) {
                     .map(|data| data.cores.clone())
                     .unwrap_or_default();
                 for core in wave_cores {
-                    if let Some(pos) = world.get::<Pos>(core)
-                        && let Some(tile) = core_spawn_position(
-                            &runtime.grid,
-                            &runtime.content,
-                            pos.x,
-                            pos.y,
-                            px,
-                            py,
-                        )
+                    let Some(pos) = world.get::<Pos>(core).copied() else {
+                        continue;
+                    };
+                    let packed = world
+                        .get::<BuildingComp>(core)
+                        .map(|comp| comp.pos.pack())
+                        .unwrap_or(-1);
+                    // `cons.accept(core.x, core.y, false)` (flyer branch) uses
+                    // the raw core position; the ground branch steps toward the
+                    // player core (`core_spawn_position`).
+                    ctx.flyer.push((pos.x, pos.y, packed));
+                    if let Some(tile) =
+                        core_spawn_position(&runtime.grid, &runtime.content, pos.x, pos.y, px, py)
                     {
+                        ctx.ground.push((
+                            tile.x() as f32 * ts,
+                            tile.y() as f32 * ts,
+                            packed,
+                            false,
+                        ));
+                        // Keep the public spawn-tile list complete (T6a's
+                        // `closest_spawn_tile`, `playerNear`).
                         spawns.push(tile);
                     }
                 }
             }
         }
     }
-    log::info!(
-        "wave spawn: wave {wave} with {} group(s), {} spawn position(s), attack_mode {}, spawn_at_cores {}",
-        groups.len(),
-        spawns.len(),
-        world
-            .get_resource::<CampaignRuntime>()
-            .is_some_and(|campaign| campaign.session.rules.attack_mode),
-        world
-            .get_resource::<CampaignRuntime>()
-            .is_some_and(|campaign| campaign.session.rules.waves_spawn_at_cores),
-    );
+
+    // `doShockwave` (`WaveSpawner.java:104-106`): 99,999,999 damage over the
+    // drop-zone radius on every overlay spawn, before any unit is emitted.
+    let drop_zone_radius = world
+        .get_resource::<CampaignRuntime>()
+        .map(|campaign| campaign.session.rules.drop_zone_radius)
+        .unwrap_or(300.0);
+    let shock_targets: Vec<(f32, f32)> = ctx
+        .ground
+        .iter()
+        .filter_map(|&(x, y, _, shockwave)| shockwave.then_some((x, y)))
+        .collect();
+    for (x, y) in shock_targets {
+        crate::combat::damage::area::damage_area(
+            world,
+            &runtime.content,
+            Some(wave_team),
+            x,
+            y,
+            drop_zone_radius,
+            99_999_999.0,
+            crate::combat::damage::area::DamageOptions::default(),
+        );
+    }
     runtime.wave_spawner.set_spawns(spawns);
+    log::info!(
+        "wave spawn: wave {wave} with {} group(s), {} ground / {} flyer position(s)",
+        groups.len(),
+        ctx.ground.len(),
+        ctx.flyer.len(),
+    );
 
     let UnitRuntime {
         wave_spawner,
@@ -2490,20 +2564,48 @@ pub fn run_wave_system(world: &mut World) {
         seq,
         units,
         units_created,
+        rng,
         ..
     } = &mut runtime;
+    // `WaveSpawner.spawnEffect` (WaveSpawner.java:228-235): unmoving 30,
+    // invincible 60 on every spawned unit.
+    let unmoving = content.status_id("unmoving");
+    let invincible = content.status_id("invincible");
     let mut spawned: Vec<Entity> = Vec::new();
-    let emitted = wave_spawner.spawn_enemies(&groups, wave, |group, x, y, rotation| {
-        let team = group.team.unwrap_or(wave_team);
-        let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
-        let payloads = group
-            .payloads
-            .as_ref()
-            .map_or(0, |payloads| payloads.len() as u64);
-        *seq = seq.wrapping_add(1 + payloads);
-        spawned.push(entity);
-        Some(entity)
-    });
+    let emitted = wave_spawner.spawn_enemies(
+        &groups,
+        wave,
+        &ctx,
+        content,
+        rng,
+        |group, x, y, rotation| {
+            let team = group.team.unwrap_or(wave_team);
+            let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
+            if let Some(status) = unmoving {
+                crate::combat::damage::status::apply_status(
+                    world,
+                    entity,
+                    status,
+                    SPAWN_EFFECT_UNMOVING_TICKS,
+                );
+            }
+            if let Some(status) = invincible {
+                crate::combat::damage::status::apply_status(
+                    world,
+                    entity,
+                    status,
+                    SPAWN_EFFECT_INVINCIBLE_TICKS,
+                );
+            }
+            let payloads = group
+                .payloads
+                .as_ref()
+                .map_or(0, |payloads| payloads.len() as u64);
+            *seq = seq.wrapping_add(1 + payloads);
+            spawned.push(entity);
+            Some(entity)
+        },
+    );
     units.extend(spawned);
     *units_created += u64::from(emitted);
     log::info!("wave spawn: emitted {emitted} unit(s) for wave {wave}");
@@ -4123,7 +4225,10 @@ mod tests {
             .first()
             .and_then(|entity| sim.ecs.0.get::<Pos>(*entity).copied())
             .map(|pos| (pos.x, pos.y));
-        for _ in 0..900 {
+        // 1200 ticks: the spawn `unmoving` (30, disarmed) + `invincible` (60)
+        // effects and the 40/90-tick retarget cadence delay the first shots
+        // (G01 T7).
+        for _ in 0..1200 {
             sim.tick().expect("tick");
         }
         let runtime = sim.unit_runtime().expect("runtime");
@@ -4142,6 +4247,104 @@ mod tests {
                 })
             });
         assert!(moved, "spawned unit left its spawn tile");
+    }
+
+    /// G01 T7: `WaveSpawner.doShockwave` (WaveSpawner.java:104-106) kills every
+    /// unit and building of other teams inside `rules.dropZoneRadius` when the
+    /// wave spawns; far-away buildings survive.
+    #[test]
+    fn wave_shockwave_destroys_drop_zone_building() {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let campaign = {
+            let content = &sim.unit_runtime().expect("runtime").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let session = PlaySession::new(Rules {
+            default_team: 1,
+            waves: true,
+            ..Rules::default()
+        });
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        let spawn = block_id(&sim, "spawn");
+        let wall = block_id(&sim, "copper-wall");
+        let index = sim.grid.tiles.index(10, 10);
+        sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
+        // 2 tiles from the spawn corner (inside the 300 px drop zone) and far.
+        for (x, y) in [(12, 10), (60, 60)] {
+            assert!(
+                sim.command(SimCommand::Place {
+                    x,
+                    y,
+                    block: wall,
+                    rotation: 0,
+                    team: 1,
+                    player: None,
+                })
+                .is_ok(),
+                "wall placed at ({x},{y})"
+            );
+        }
+        sim.request_wave_spawn(0);
+        sim.tick().expect("tick");
+        assert!(
+            sim.grid.tiles.get(12, 10).build.is_none(),
+            "the drop-zone wall was destroyed by the shockwave"
+        );
+        assert!(
+            sim.grid.tiles.get(60, 60).build.is_some(),
+            "the far wall survived"
+        );
+    }
+
+    /// G01 T7: `WaveSpawner.spawnEffect` applies `unmoving` (30) and
+    /// `invincible` (60) to every spawned unit (WaveSpawner.java:228-235).
+    #[test]
+    fn spawned_wave_unit_is_invincible() {
+        use crate::entities::comp::unit::comp::StatusComp;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let spawn = block_id(&sim, "spawn");
+        let index = sim.grid.tiles.index(10, 10);
+        sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
+        sim.set_unit_wave_team(2);
+        sim.request_wave_spawn(0);
+        sim.tick().expect("tick");
+        let runtime = sim.unit_runtime().expect("rt");
+        let entity = *runtime.units.first().expect("wave unit spawned");
+        let unmoving = runtime.content.status_id("unmoving").expect("unmoving");
+        let invincible = runtime.content.status_id("invincible").expect("invincible");
+        let statuses = sim
+            .ecs
+            .0
+            .get::<StatusComp>(entity)
+            .expect("status component");
+        let duration = |status| {
+            statuses
+                .statuses
+                .iter()
+                .find(|entry| entry.effect == status)
+                .map(|entry| entry.duration)
+        };
+        let unmoving_time = duration(unmoving).expect("unmoving applied");
+        let invincible_time = duration(invincible).expect("invincible applied");
+        assert!(
+            (28.0..=30.0).contains(&unmoving_time),
+            "unmoving for 30 ticks, {unmoving_time} left"
+        );
+        assert!(
+            (58.0..=60.0).contains(&invincible_time),
+            "invincible for 60 ticks, {invincible_time} left"
+        );
     }
 
     /// Uninstalled runtime: the wave request and systems are inert (P0 spine).
