@@ -1681,6 +1681,16 @@ impl MindCampaign {
         dict
     }
 
+    /// The `index`-th loaded schematic (`list_schematics` order) for
+    /// `MindInput.use_schematic` (G08 T6b, consumed by G05 T10b).
+    pub fn schematic_at(&self, index: i32) -> Option<mind_core::game::schematic::Schematic> {
+        let registry = self.registry.as_ref()?;
+        self.load_schematics(registry)
+            .all
+            .get(index.max(0) as usize)
+            .cloned()
+    }
+
     /// Lists the decoded schematics (vanilla loadouts + `schematics/*.msch`).
     #[func]
     pub fn list_schematics(&self) -> Array<VarDictionary> {

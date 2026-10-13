@@ -1162,6 +1162,29 @@ mod tests {
     }
 
     #[test]
+    fn create_then_plans_for_copies_three_conveyors() {
+        let mut harness = crate::world::harness::BuildHarness::new(16, 16, 7);
+        let conveyor = harness.content.block_id("conveyor").unwrap();
+        for x in 10..=12 {
+            assert!(harness.place(x, 10, conveyor, 0, true));
+        }
+        let schematics = Schematics::new();
+        let world = EcsSchematicWorld {
+            grid: &harness.grid,
+            world: &harness.world,
+            content: &harness.content,
+            team: None,
+        };
+        let schem = schematics.create(&world, &harness.content, 10, 10, 12, 10, 64);
+        assert_eq!((schem.width, schem.height), (3, 1));
+        let plans = plans_for(&schem, 20, 20, true, &harness.content);
+        assert_eq!(plans.len(), 3);
+        assert_eq!((plans[0].x, plans[0].y, plans[0].rotation), (19, 20, 0));
+        assert_eq!((plans[1].x, plans[1].y), (20, 20));
+        assert_eq!((plans[2].x, plans[2].y), (21, 20));
+    }
+
+    #[test]
     fn place_schematic_through_world_ctx() {
         let mut harness = crate::world::harness::BuildHarness::new(16, 16, 7);
         let core = harness.content.block_id("core-shard").unwrap();

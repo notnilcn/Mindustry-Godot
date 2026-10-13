@@ -21,7 +21,8 @@ use mind_core::determinism::SimCommand;
 use mind_core::input::{
     BindingState, BindingValue, ClientPlan, DesktopController, InventoryKind, KeyBindTable,
     PayloadAction, PlaceMode, PlacementWorld, RawEvent, RemoteAction, SelectRect, SelectableUnit,
-    ids, line::LineBlock, line::LineParams, select_typed_units, select_unit_tap, select_units_rect,
+    ids, line::LineBlock, line::LineParams, line::PlanBlockInfo, line::flip_plans_about,
+    line::rotate_plans_about, select_typed_units, select_unit_tap, select_units_rect,
 };
 use mind_core::world::build::can_replace;
 use mind_core::world::{ConfigKind, TilePos, WorldGrid};
@@ -234,6 +235,12 @@ pub struct DesktopBridge {
     /// `Block.lastConfig` per block (`Block.java:827-832` `nextConfig`): the
     /// last submitted config, carried onto the next plan of that block.
     last_config: HashMap<u16, mind_core::world::config::ConfigValue>,
+    /// `schemX/schemY`: the start tile of an F/B selection drag
+    /// (`InputHandler.schemX`; `-1` cleared).
+    schem_start: Option<(i32, i32)>,
+    /// `schematicX/schematicY`: the copied plans' reference tile; plan shifts
+    /// are deltas from the raw cursor to it (`DesktopInput.pollInputPlayer`).
+    schematic_origin: (i32, i32),
     /// Last fired binding name (probe).
     pub last_action: String,
     /// Fired binding count (probe).
@@ -299,6 +306,8 @@ impl DesktopBridge {
             camera: None,
             selectable: Vec::new(),
             last_config: HashMap::new(),
+            schem_start: None,
+            schematic_origin: (0, 0),
             last_action: String::new(),
             action_count: 0,
             effects: Vec::new(),
@@ -467,6 +476,9 @@ impl DesktopBridge {
                 if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
                     command_edge = Some(false);
                 }
+                if self.in_game && !self.text_focus {
+                    self.key_up_event(bindings, &code);
+                }
             }
             RawEvent::MouseMove { x, y } => {
                 self.mouse = (x, y);
@@ -611,11 +623,34 @@ impl DesktopBridge {
             }
             "clear_building" => {
                 // `Binding.clearBuilding` (`DesktopInput.java:612`): the player's
-                // queue is cleared too (`player.unit().clearBuilding()`).
+                // queue is cleared too (`player.unit().clearBuilding()`), and
+                // `pollInputPlayer` L632 also drops the copied plans.
                 self.controller.state.select_block(None);
+                self.controller.state.select_plans.clear();
+                self.refresh_select_preview();
                 if let Some(mut host) = self.host.clone() {
                     host.bind_mut().clear_player_build_plans();
                 }
+                self.fire_hotkey(name);
+            }
+            "schematic_select" | "rebuild_select" => {
+                // `DesktopInput.java:616-618`: F/B latch the selection start
+                // (raw cursor); a break drag owns the tiles instead.
+                if !self
+                    .drag
+                    .as_ref()
+                    .is_some_and(|drag| drag.kind == DragKind::Break)
+                {
+                    self.schem_start = self.raw_cursor_tile();
+                }
+                self.fire_hotkey(name);
+            }
+            "schematic_flip_x" => {
+                self.flip_select_plans(true);
+                self.fire_hotkey(name);
+            }
+            "schematic_flip_y" => {
+                self.flip_select_plans(false);
                 self.fire_hotkey(name);
             }
             "pause_building" => {
@@ -756,6 +791,15 @@ impl DesktopBridge {
         self.fire_hotkey("command_mode");
     }
 
+    /// `pollInputPlayer` L632: selecting a block (`isPlacing()`) clears the
+    /// copied plans.
+    pub fn clear_select_plans(&mut self) {
+        if !self.controller.state.select_plans.is_empty() {
+            self.controller.state.select_plans.clear();
+            self.refresh_select_preview();
+        }
+    }
+
     /// Selects the Nth buildable block of the active catalogue category.
     pub fn select_catalog_block(&mut self, index: usize) {
         let Some(category) = self.catalog.get(self.catalog_category) else {
@@ -774,6 +818,7 @@ impl DesktopBridge {
             {
                 self.controller.state.select_block(Some(id));
             }
+            self.clear_select_plans();
             self.fire_hotkey("block_select");
         }
     }
@@ -975,6 +1020,10 @@ impl DesktopBridge {
             && drag.kind == DragKind::Place
         {
             self.update_place_line(bindings, drag.start, drag.last);
+        } else if !self.controller.state.select_plans.is_empty() {
+            // `pollInputPlayer` L843-858: the axis rotates copied plans when no
+            // placement line owns the wheel.
+            self.rotate_select_plans(step);
         }
         self.fire_hotkey("rotate");
     }
@@ -1035,6 +1084,7 @@ impl DesktopBridge {
             {
                 self.controller.state.select_block(Some(id));
             }
+            self.clear_select_plans();
             self.fire_hotkey("pick");
         }
     }
@@ -1146,6 +1196,139 @@ impl DesktopBridge {
             && !self.controller.state.command_mode
     }
 
+    /// Raw cursor tile (`InputHandler.rawTileX/rawTileY`), no block offset.
+    pub fn raw_cursor_tile(&self) -> Option<(i32, i32)> {
+        self.cursor_tile()
+    }
+
+    /// `PlanBlockInfo` resolver for [`rotate_plans_about`]/[`flip_plans_about`]
+    /// (G08 T6b): content size/offset, `Block.rotate` and the `electrolyzer`
+    /// `invertFlip` (`Blocks.java:1363`).
+    fn plan_info(host: &Gd<MindSimHost>) -> impl Fn(BlockId) -> PlanBlockInfo + '_ {
+        move |block| {
+            let guard = host.bind();
+            let def = guard
+                .content_registry()
+                .and_then(|content| content.block(block));
+            PlanBlockInfo {
+                size: def.map(|def| def.size).unwrap_or(1),
+                offset: def.map(|def| def.offset).unwrap_or(0.0),
+                rotate: guard.block_rotates(block),
+                invert_flip: def.is_some_and(|def| def.name == "electrolyzer"),
+            }
+        }
+    }
+
+    /// Select-plan preview (`[{x,y,rotation,block}]`, same shape as the
+    /// placement line).
+    fn refresh_select_preview(&mut self) {
+        self.preview_json = serde_json::Value::Array(
+            self.controller
+                .state
+                .select_plans
+                .iter()
+                .map(|plan| {
+                    serde_json::json!({
+                        "x": plan.x,
+                        "y": plan.y,
+                        "rotation": plan.rotation,
+                        "block": plan.block.raw(),
+                    })
+                })
+                .collect(),
+        )
+        .to_string();
+    }
+
+    /// Adopts copied plans (`useSchematic`: dialog or F-drag) at the cursor and
+    /// refreshes the preview; the block selection is cleared.
+    pub fn adopt_select_plans(&mut self, plans: Vec<ClientPlan>, origin: (i32, i32)) {
+        self.controller.state.select_block(None);
+        self.controller.state.select_plans = plans;
+        self.schematic_origin = origin;
+        self.refresh_select_preview();
+    }
+
+    /// `pollInputPlayer` L843-858: wheel/rotate over the copied plans.
+    fn rotate_select_plans(&mut self, step: i32) {
+        if self.controller.state.select_plans.is_empty() {
+            return;
+        }
+        let Some((ox, oy)) = self.raw_cursor_tile() else {
+            return;
+        };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let info = Self::plan_info(&host);
+        rotate_plans_about(&mut self.controller.state.select_plans, step, ox, oy, &info);
+        self.refresh_select_preview();
+    }
+
+    /// `pollInputPlayer` L641: Z/X flip the copied plans about the raw cursor.
+    fn flip_select_plans(&mut self, flip_x: bool) {
+        if self.controller.state.select_plans.is_empty() {
+            return;
+        }
+        let Some((ox, oy)) = self.raw_cursor_tile() else {
+            return;
+        };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let info = Self::plan_info(&host);
+        flip_plans_about(
+            &mut self.controller.state.select_plans,
+            flip_x,
+            ox,
+            oy,
+            &info,
+        );
+        self.refresh_select_preview();
+    }
+
+    /// `keyRelease(schematicSelect)` (`DesktopInput.java:633-640`):
+    /// `schematics.create` copies the F-selection into select plans, clears the
+    /// block selection and keeps the plans selected for a paste.
+    fn finish_schematic_copy(&mut self, bindings: &BindingState) {
+        let Some(start) = self.schem_start else {
+            return;
+        };
+        let Some(end) = self.raw_cursor_tile() else {
+            return;
+        };
+        let Some(mut host) = self.host.clone() else {
+            return;
+        };
+        let plans = {
+            let guard = host.bind();
+            guard.copy_schematic_plans(start, end, end)
+        };
+        self.controller.state.select_block(None);
+        self.controller.state.command_rect = None;
+        {
+            let mut guard = host.bind_mut();
+            guard.select_block(GString::from("air"));
+        }
+        self.adopt_select_plans(plans, end);
+        // `if(!keyDown(rebuildSelect)){ schemX = schemY = -1 }` (the B-release
+        // half is T7's).
+        if !self.key_down(bindings, ids::REBUILD_SELECT) {
+            self.schem_start = None;
+        }
+    }
+
+    /// Key-release bindings (`DesktopInput.pollInputPlayer` release half).
+    fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
+        if bindings.name(ids::SCHEMATIC_SELECT) == Some(code)
+            && self.schem_start.is_some()
+            && self.drag.is_none()
+        {
+            self.finish_schematic_copy(bindings);
+        }
+        // T7 adds the `rebuild_select` release here.
+    }
+
     /// `BuildingComp.configure` -> `Block.lastConfig` (`Block.java:827-832`):
     /// remembers the submitted config per saveConfig block for `nextConfig`.
     pub fn record_last_config(
@@ -1246,7 +1429,7 @@ impl DesktopBridge {
             ("left", true) => self.left_press(bindings),
             ("left", false) => self.left_release(),
             ("right", true) => self.right_press(bindings),
-            ("right", false) => self.right_release(),
+            ("right", false) => self.right_release(bindings),
             ("middle", true) => self.pick_block(),
             _ => {}
         }
@@ -1271,6 +1454,24 @@ impl DesktopBridge {
                 moved: false,
             });
             self.controller.state.command_rect = None;
+            return;
+        }
+        // `pollInputPlayer` select tap (`DesktopInput.java:704-705`): a click
+        // with copied plans flushes them to the player queue and keeps them
+        // selected for a repeat paste (`validPlace` filters inside).
+        if !self.controller.state.select_plans.is_empty() {
+            let plans = self.controller.state.select_plans.clone();
+            if let Some(mut host) = self.host.clone() {
+                for plan in plans {
+                    let _ = host.bind_mut().queue_player_place_config(
+                        plan.x as i16,
+                        plan.y as i16,
+                        plan.block,
+                        plan.rotation,
+                        plan.config,
+                    );
+                }
+            }
             return;
         }
         if self.controller.state.block.is_none() {
@@ -1534,10 +1735,20 @@ impl DesktopBridge {
             }
             return;
         }
+        // `DesktopInput.java:741-744`: the deselect tap clears copied plans
+        // (before entering breaking mode).
+        if !self.controller.state.select_plans.is_empty() {
+            self.controller.state.select_plans.clear();
+            self.refresh_select_preview();
+            return;
+        }
         // `Binding.breakBlock` (`DesktopInput.pollInputPlayer`): the right
         // button always enters breaking mode; config/inventory open on the
         // left tap.
         self.controller.state.begin_break();
+        // `DesktopInput.java:746-748`: the break drag latches the raw cursor for
+        // a potential F-cut.
+        self.schem_start = self.raw_cursor_tile();
         self.drag = Some(Drag {
             kind: DragKind::Break,
             start: (x, y),
@@ -1546,7 +1757,7 @@ impl DesktopBridge {
         });
     }
 
-    fn right_release(&mut self) {
+    fn right_release(&mut self, bindings: &BindingState) {
         // `DesktopInput.java:799`: the break release also resolves a pending
         // tap-unit gesture (`tryDropItems`).
         self.try_drop_items();
@@ -1555,6 +1766,19 @@ impl DesktopBridge {
         };
         let Some(host) = self.host.clone() else {
             return;
+        };
+        // Cut: `keyRelease(breakBlock) && keyDown(schematicSelect)` creates the
+        // schematic BEFORE `removeSelection` and pastes it after
+        // (`DesktopInput.java:765-790`).
+        let cut = if self.key_down(bindings, ids::SCHEMATIC_SELECT) {
+            match (self.schem_start, self.raw_cursor_tile()) {
+                (Some(start), Some(end)) => {
+                    Some((end, host.bind().copy_schematic_plans(start, end, end)))
+                }
+                _ => None,
+            }
+        } else {
+            None
         };
         let mut commands: Vec<SimCommand> = Vec::new();
         {
@@ -1588,12 +1812,28 @@ impl DesktopBridge {
         }
         self.enqueue_commands(&commands);
         self.controller.state.place_mode = PlaceMode::None;
+        if let Some((end, plans)) = cut {
+            self.adopt_select_plans(plans, end);
+        }
     }
 
     fn mouse_move(&mut self, bindings: &BindingState) {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
+        // `pollInputPlayer` L630: copied plans follow the raw cursor.
+        if !self.controller.state.select_plans.is_empty() {
+            let (sx, sy) = self.schematic_origin;
+            let (dx, dy) = (x - sx, y - sy);
+            if dx != 0 || dy != 0 {
+                for plan in &mut self.controller.state.select_plans {
+                    plan.x += dx;
+                    plan.y += dy;
+                }
+                self.schematic_origin = (x, y);
+                self.refresh_select_preview();
+            }
+        }
         // `tileX/tileY`: an active placement drag tracks the offset cursor tile.
         let position = if self
             .drag
@@ -1829,6 +2069,20 @@ impl DesktopBridge {
         }
         let rotate_on_scroll = Self::axis_is_scroll(bindings, ids::ROTATE);
         let zoom_on_scroll = Self::axis_is_scroll(bindings, ids::ZOOM);
+        // `pollInputPlayer` L843-858: copied plans own the wheel (no zoom; the
+        // diagonal-key override is T9's).
+        if rotate_on_scroll
+            && !self.controller.state.select_plans.is_empty()
+            && !self
+                .drag
+                .as_ref()
+                .is_some_and(|drag| drag.kind == DragKind::Place)
+            && !self.key_down(bindings, ids::DIAGONAL_PLACEMENT)
+        {
+            let step = if delta > 0.0 { 1 } else { -1 };
+            self.rotate_select_plans(step);
+            return;
+        }
         if rotate_on_scroll
             && self.controller.state.is_building
             && self.controller.state.block.is_some()

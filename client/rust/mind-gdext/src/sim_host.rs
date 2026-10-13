@@ -1983,6 +1983,47 @@ impl MindSimHost {
         self.sim.queue_player_place_config(x, y, block, rot, config)
     }
 
+    /// `Block.rotate` for a block id (G08 T6b plan rotation math).
+    pub fn block_rotates(&self, id: BlockId) -> bool {
+        mind_core::world::blocks::payloads::payload_block::block_rotates(&self.sim.ecs.0, id)
+    }
+
+    /// `Schematics.create` over the live world (F-drag / break-cut copy): the
+    /// selection rect plus the paste cursor resolve to select plans
+    /// (`Schematics.toPlans`, priority-sorted).
+    pub fn copy_schematic_plans(
+        &self,
+        start: (i32, i32),
+        end: (i32, i32),
+        cursor: (i32, i32),
+    ) -> Vec<mind_core::input::ClientPlan> {
+        let (x1, y1) = start;
+        let (x2, y2) = end;
+        let (cx, cy) = cursor;
+        let Some(content) = self.content_registry() else {
+            return Vec::new();
+        };
+        let world = mind_core::game::schematics::EcsSchematicWorld {
+            grid: &self.sim.grid,
+            world: &self.sim.ecs.0,
+            content,
+            team: Some(self.player_team()),
+        };
+        let schem = mind_core::game::schematics::Schematics::new().create(
+            &world,
+            content,
+            x1,
+            y1,
+            x2,
+            y2,
+            mind_core::game::rules::MAX_SCHEMATIC_SIZE,
+        );
+        mind_core::game::schematics::plans_for(&schem, cx, cy, true, content)
+            .iter()
+            .map(mind_core::input::ClientPlan::from_build_plan)
+            .collect()
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {

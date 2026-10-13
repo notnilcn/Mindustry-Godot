@@ -1024,8 +1024,52 @@ impl MindInput {
                 Some(id)
             };
             self.bridge.controller.state.select_block(selected);
+            // `isPlacing()` clears copied plans (`DesktopInput.java:632`).
+            self.bridge.clear_select_plans();
         }
         true
+    }
+
+    /// Uses a saved schematic in game (`SchematicsDialog` click ->
+    /// `control.input.useSchematic`; G08 T6b change 13 / G05 T10b): copies its
+    /// plans to the raw cursor tile, clears the block selection and returns
+    /// true when plans were adopted. False outside a game or for a bad index.
+    #[func]
+    pub fn use_schematic(&mut self, index: i32) -> bool {
+        if !self.bridge.in_game {
+            return false;
+        }
+        let Some(campaign) = self
+            .base()
+            .try_get_node_as::<crate::campaign::MindCampaign>("/root/Spine/MindCampaign")
+        else {
+            return false;
+        };
+        let Some(schem) = campaign.bind().schematic_at(index) else {
+            return false;
+        };
+        let Some((cx, cy)) = self.bridge.raw_cursor_tile() else {
+            return false;
+        };
+        let Some(mut host) = self.bridge.host.clone() else {
+            return false;
+        };
+        let plans = {
+            let guard = host.bind();
+            let Some(content) = guard.content_registry() else {
+                return false;
+            };
+            mind_core::game::schematics::plans_for(&schem, cx, cy, true, content)
+                .iter()
+                .map(mind_core::input::ClientPlan::from_build_plan)
+                .collect::<Vec<_>>()
+        };
+        {
+            let mut guard = host.bind_mut();
+            guard.select_block(GString::from("air"));
+        }
+        self.bridge.adopt_select_plans(plans, (cx, cy));
+        !self.bridge.controller.state.select_plans.is_empty()
     }
 
     /// Rotates the pending placement 90° (`Binding.rotate`).
