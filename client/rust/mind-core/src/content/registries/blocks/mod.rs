@@ -1332,6 +1332,14 @@ pub struct BlockSpec {
     pub shallow: Option<bool>,
     /// `Floor.drownTime` (ticks to drown; plan 11 `isDeep`/drown; plan 10).
     pub drown_time: Option<f32>,
+    /// `Floor.status` (status name; plan G01 T13).
+    pub floor_status: Option<&'static str>,
+    /// `Floor.statusDuration` (default 60; G01 T13).
+    pub floor_status_duration: Option<f32>,
+    /// `Floor.dragMultiplier` (default 1; G01 T13).
+    pub floor_drag_multiplier: Option<f32>,
+    /// `Floor.damageTaken` (default 0; G01 T13).
+    pub floor_damage_taken: Option<f32>,
     /// `Floor.liquidMultiplier` (deep-water pump yield; plan 10/11).
     pub liquid_multiplier: Option<f32>,
     /// `Block.crushFragile` (instantly destroyed by crushing tanks; plan 11).
@@ -1440,6 +1448,10 @@ impl Default for BlockSpec {
             is_liquid: None,
             shallow: None,
             drown_time: None,
+            floor_status: None,
+            floor_status_duration: None,
+            floor_drag_multiplier: None,
+            floor_damage_taken: None,
             liquid_multiplier: None,
             crush_fragile: None,
             crush_damage_multiplier: None,
@@ -2176,6 +2188,14 @@ pub struct BlockDef {
     pub is_deep: bool,
     /// `Floor.drownTime` (plan 10/11 drowning).
     pub drown_time: f32,
+    /// `Floor.status` (G01 T13 floor statuses).
+    pub floor_status: Option<crate::content::StatusId>,
+    /// `Floor.statusDuration` (Java default 60).
+    pub floor_status_duration: f32,
+    /// `Floor.dragMultiplier` (1 unless ice; G01 T13).
+    pub floor_drag_multiplier: f32,
+    /// `Floor.damageTaken` (0 for vanilla; G01 T13).
+    pub floor_damage_taken: f32,
     /// `Floor.liquidMultiplier` (plan 10 pump yield).
     pub liquid_multiplier: f32,
     /// `Block.crushFragile` (plan 11 tank crush).
@@ -2264,6 +2284,20 @@ impl BlockDef {
         // `Floor.isDeep()` = `drownTime > 0` (`Floor.java:339`).
         let drown_time = spec.drown_time.unwrap_or(0.0);
         let is_deep = drown_time > 0.0;
+        // `Floor.status`/`statusDuration`/`dragMultiplier`/`damageTaken`
+        // (G01 T13).
+        let floor_status = match spec.floor_status {
+            Some(name) => Some(
+                registry
+                    .status_by_name(name)
+                    .map(|record| record.id)
+                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
+            ),
+            None => None,
+        };
+        let floor_status_duration = spec.floor_status_duration.unwrap_or(60.0);
+        let floor_drag_multiplier = spec.floor_drag_multiplier.unwrap_or(1.0);
+        let floor_damage_taken = spec.floor_damage_taken.unwrap_or(0.0);
         let subclass = spec.subclass.unwrap_or(spec.kind);
         let mut unit_plans = Vec::with_capacity(spec.unit_plans.len());
         for plan in &spec.unit_plans {
@@ -2451,6 +2485,10 @@ impl BlockDef {
             shallow: spec.shallow.unwrap_or(false),
             is_deep,
             drown_time,
+            floor_status,
+            floor_status_duration,
+            floor_drag_multiplier,
+            floor_damage_taken,
             liquid_multiplier: spec.liquid_multiplier.unwrap_or(1.0),
             crush_fragile: spec.crush_fragile.unwrap_or(false),
             crush_damage_multiplier: spec.crush_damage_multiplier.unwrap_or(1.0),

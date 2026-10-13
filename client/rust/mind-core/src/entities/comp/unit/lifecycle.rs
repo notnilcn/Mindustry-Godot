@@ -208,9 +208,35 @@ fn spawn_single(
     ));
 
     insert_kind_components(world, entity, unit, x, y, rotation);
+    // `BuilderComp` plan queue (G01 T10c): every unit with `buildSpeed > 0`
+    // carries `BuilderPlans` (the player path re-inserts it through
+    // `with_player_plans`).
+    if unit.build_speed > 0.0 {
+        world
+            .entity_mut(entity)
+            .insert(crate::sim::builder::BuilderPlans::default());
+    }
     // `UnitType.setType`: copy the type's abilities (`Ability.created` runs
     // `ForceField`/`ShieldArc` max-shield initialization).
     crate::combat::abilities::init_unit_abilities(world, entity, unit);
+    // `UnitComp.add` cap death (G01 T12): `type.useUnitCap && count() > cap()
+    // && !spawnedByCore && !dead && !rules.editor` -> `unitCapDeath` (kill
+    // without explosion effects; the unit is marked dead here and
+    // `resolve_deaths` removes it).
+    if unit.use_unit_cap
+        && !world
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .is_some_and(|campaign| campaign.session.rules.editor)
+        && let Some(cap) = crate::entities::comp::unit::queries::unit_cap(world, team)
+    {
+        let count = crate::entities::comp::unit::queries::live_type_count(world, team, unit.id);
+        if count > cap as i32
+            && let Some(mut health) = world.get_mut::<crate::entities::comp::Health>(entity)
+        {
+            health.health = 0.0;
+            health.dead = true;
+        }
+    }
     entity
 }
 

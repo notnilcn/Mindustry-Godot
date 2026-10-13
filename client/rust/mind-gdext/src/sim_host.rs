@@ -797,6 +797,29 @@ impl MindSimHost {
                     y: fy as f32,
                 }
             }
+            // `InputHandler.setUnitStance` (G01 T11): `units` + `stance` id in
+            // `content_list("unitStance")` order, `enabled`.
+            "unit_stance" => {
+                let units: smallvec::SmallVec<[i32; 32]> = value
+                    .get("units")
+                    .and_then(|v| v.as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|row| row.as_i64().map(|id| id as i32))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let stance = value.get("stance").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let enabled = value
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                SimCommand::UnitStance {
+                    units,
+                    stance,
+                    enabled,
+                }
+            }
             // `InputHandler.unitControl`/`unitClear` (G01 T9).
             "unit_control" => SimCommand::UnitControl {
                 unit: value.get("unit").and_then(|v| v.as_i64()).map(|v| v as i32),
@@ -832,6 +855,47 @@ impl MindSimHost {
     #[func]
     pub fn unit_debug_json(&self) -> GString {
         GString::from(self.sim.unit_debug_json().as_str())
+    }
+
+    /// G01 T16: live command targets for the HUD reticle
+    /// (`[{"id":seq,"x":wx,"y":wy,"attack":bool}, ...]`).
+    #[func]
+    fn command_targets_json(&self) -> GString {
+        let rows: Vec<serde_json::Value> = self
+            .sim
+            .command_targets()
+            .into_iter()
+            .map(|(id, x, y, attack)| {
+                serde_json::json!({
+                    "id": id,
+                    "x": x,
+                    "y": y,
+                    "attack": attack,
+                })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
+    /// G01 T15: drains the per-tick building-damage log as
+    /// `[[tile_x, tile_y, team], ...]`; G03 filters by the player team and
+    /// forwards to `MindMinimap.add_indicator`.
+    #[func]
+    fn drain_build_damage_json(&mut self) -> GString {
+        let events = self.sim.drain_build_damage_events();
+        let rows: Vec<[f64; 3]> = events
+            .iter()
+            .map(|event| [event.x as f64, event.y as f64, event.team as f64])
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
     }
 
     /// `Teams.bosses`/`GameState.boss()` seam (G01 T19): G03's boss bar reads

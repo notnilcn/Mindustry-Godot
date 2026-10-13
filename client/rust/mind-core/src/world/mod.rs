@@ -77,9 +77,10 @@ pub use draw::{
 };
 pub use edges::Edges;
 pub use events::{
-    BlockBuildBeginEvent, BlockBuildEndEvent, BuildDamageEvent, BuildRotateEvent,
-    BuildTeamChangeEvent, TileChangeEvent, TileFloorChangeEvent, TileOverlayChangeEvent,
-    TilePreChangeEvent, WorldLoadBeginEvent, WorldLoadEndEvent, WorldLoadEvent,
+    BlockBuildBeginEvent, BlockBuildEndEvent, BuildDamageEvent, BuildDamageLog, BuildRotateEvent,
+    BuildTeamChangeEvent, MAX_BUILD_DAMAGE_LOG, TileChangeEvent, TileFloorChangeEvent,
+    TileOverlayChangeEvent, TilePreChangeEvent, WorldLoadBeginEvent, WorldLoadEndEvent,
+    WorldLoadEvent, push_build_damage,
 };
 pub use harness::{BuildEventRecord, BuildHarness};
 pub use hooks::{

@@ -133,9 +133,14 @@ impl Tile {
         false
     }
 
-    /// Whether legs can stand on the block (`Block.legSolid`).
-    pub fn leg_solid(&self, _content: &ContentRegistry) -> bool {
-        false
+    /// Whether legs can stand on the block (`Tile.legSolid`, Tile.java:600):
+    /// `staticDarkness() >= 2 || (floor.solid && block == air)`. The port's
+    /// boolean [`Self::static_darkness`] maps the integer data test (vanilla
+    /// walls carry health ≥ 2).
+    pub fn leg_solid(&self, content: &ContentRegistry) -> bool {
+        self.static_darkness(content)
+            || (content.block(self.floor).is_some_and(|def| def.solid)
+                && self.block == crate::content::BlockId::AIR)
     }
 
     /// Whether the block contributes static darkness (`Tile.staticDarkness`:

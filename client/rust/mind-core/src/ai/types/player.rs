@@ -17,20 +17,17 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::resource::Resource;
 use bevy_ecs::world::World;
 
-use crate::content::{ContentRegistry, ItemId};
+use crate::content::ContentRegistry;
 use crate::entities::comp::unit::comp::{
-    ItemsComp, MechComp, MinerComp, PhysicsComp, StatusComp, UnitCore, UnitTypeComp,
+    MechComp, MinerComp, PhysicsComp, StatusComp, UnitCore, UnitTypeComp,
 };
-use crate::entities::comp::{Building, Pos, TeamComp, Vel};
+use crate::entities::comp::{Pos, Vel};
 use crate::sim::builder::BuilderPlans;
 use crate::weapons::UnitWeapons;
-use crate::world::blocks::distribution::transfer::{
-    dispatch_get_maximum_accepted, dispatch_handle_stack, item_count,
-};
-use crate::world::blocks::storage::core_block::CoreBuild;
+
 use crate::world::{TilePos, WorldGrid};
 
-use super::ground::{normalize_angle, tile_center};
+use super::ground::normalize_angle;
 
 /// Host-uploaded player movement axis (`Core.input.axis(Binding.moveX/Y)`) plus
 /// the mining order state (`InputHandler.tryBeginMine` + `MinerComp.mineTimer`).
@@ -264,7 +261,8 @@ fn angle_deg(x: f32, y: f32) -> f32 {
 }
 
 /// `InputHandler.canMine`: the tile holds a drop the unit's tier can mine
-/// (`core/src/mindustry/input/InputHandler.java:2045`).
+/// (`core/src/mindustry/input/InputHandler.java:2045`), via the shared
+/// `MinerComp.getMineResult` helper.
 pub fn can_mine_tile(
     world: &World,
     grid: &WorldGrid,
@@ -278,32 +276,13 @@ pub fn can_mine_tile(
     else {
         return false;
     };
-    let (tx, ty) = (tile.x() as i32, tile.y() as i32);
-    if tx < 0 || ty < 0 || tx >= grid.width() || ty >= grid.height() {
-        return false;
-    }
-    // `getMineResult`: floor/overlay mining requires the tile block to be air
-    // (`tile.block() == Blocks.air`); a placed building covers the ore.
-    let cell = grid.tiles.get(tx, ty);
-    if cell.block != crate::content::BlockId::AIR {
-        return false;
-    }
-    let drop = cell
-        .drop(content)
-        .or_else(|| content.block(cell.overlay).and_then(|def| def.item_drop));
-    let Some(item) = drop else {
-        return false;
-    };
-    // Tier gate (`CanMine`: drop hardness <= mine tier).
-    content.item(item).map(|def| def.hardness).unwrap_or(0) <= def.mine_tier
+    crate::entities::comp::unit::miner::get_mine_result(content, def, grid, tile).is_some()
 }
 
-/// `MinerComp.update`: validate the ordered tile, advance the mine timer and
-/// add the ore drop to the unit's inventory.
-///
-/// Ports `core/src/mindustry/entities/comp/MinerComp.java:68-122` (core
-/// transfer/offload branches are plan-08/12 logistics; the tutorial's counter
-/// counts production, so the produced count is tracked here).
+/// `MinerComp.update` wrapper for the player unit (G01 T10a): the ordered tile
+/// (`PlayerInput.mine_tile`) is mirrored into the shared [`MinerComp`], the
+/// generic port in `entities/comp/unit/miner.rs` runs for every unit, and the
+/// produced count feeds the tutorial counter.
 fn update_mining(
     world: &mut World,
     grid: &WorldGrid,
@@ -311,178 +290,18 @@ fn update_mining(
     entity: Entity,
     input: &mut PlayerInput,
 ) {
-    let Some(tile) = input.mine_tile else {
-        set_mining(world, entity, None, false);
-        return;
-    };
-    if !can_mine_tile(world, grid, content, entity, tile) {
-        clear_mine_order(input);
-        set_mining(world, entity, None, false);
-        return;
+    if let Some(mut comp) = world.get_mut::<MinerComp>(entity) {
+        comp.mine_tile = input.mine_tile;
+        comp.mine_timer = input.mine_timer;
     }
-    let Some(def) = world
-        .get::<UnitTypeComp>(entity)
-        .and_then(|comp| content.unit(comp.type_id))
-    else {
-        return;
-    };
-    let (tx, ty) = (tile.x() as i32, tile.y() as i32);
-    let cell = grid.tiles.get(tx, ty);
-    let Some(item) = cell
-        .drop(content)
-        .or_else(|| content.block(cell.overlay).and_then(|def| def.item_drop))
-    else {
-        return;
-    };
-    let hardness = content.item(item).map(|def| def.hardness).unwrap_or(0);
-    let Some(pos) = world.get::<Pos>(entity).copied() else {
-        return;
-    };
-    let (cx, cy) = tile_center(tx, ty);
-    let range = def.mine_range.max(40.0);
-    if (cx - pos.x).powi(2) + (cy - pos.y).powi(2) > range * range {
-        // Keep the order; the unit is not in range yet.
-        set_mining(world, entity, Some(tile), false);
-        return;
-    }
-    // Single-stack inventory (`acceptsItem`): another item or a full stack
-    // cancels the order (upstream clears `mineTile`).
-    let items = world.get::<ItemsComp>(entity).copied().unwrap_or_default();
-    let capacity = def.item_capacity.max(1);
-    let accepted = match items.item {
-        None => true,
-        Some((held, amount)) => held == item && amount < capacity,
-    };
-    if !accepted {
-        clear_mine_order(input);
-        set_mining(world, entity, None, false);
-        return;
-    }
-    // `rate = Time.delta * mineSpeed * rules.unitMineSpeed(team)`; threshold
-    // `50 + hardness*15` or `50+15`.
-    let mine_speed_multiplier = {
-        let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
-        crate::game::runtime::rules_of(world).map_or(1.0, |rules| rules.unit_mine_speed(team))
-    };
-    input.mine_timer += def.mine_speed.max(0.0) * mine_speed_multiplier;
-    let threshold = 50.0
-        + if def.mine_hardness_scaling {
-            hardness as f32 * 15.0
-        } else {
-            15.0
-        };
-    if input.mine_timer >= threshold {
-        input.mine_timer = 0.0;
-        input.mined += 1;
-        // `MinerComp.update` -> `SectorInfo.handleProduction`: the campaign tick
-        // folds the delta into the played sector's stats (Java MinerComp:98).
-        if let Some(queues) = world.get_resource::<crate::game::runtime::CampaignCoreQueues>()
-            && let Ok(mut state) = queues.0.lock()
-        {
-            let team = world.get::<TeamComp>(entity).map(|t| t.team);
-            if state.is_campaign && team == Some(state.default_team) {
-                state.production_deltas.push((item, 1));
-            }
+    crate::entities::comp::unit::miner::update_miner_comp(world, grid, content, entity);
+    if let Some(comp) = world.get::<MinerComp>(entity).copied() {
+        input.mine_tile = comp.mine_tile;
+        input.mine_timer = comp.mine_timer;
+        let produced = comp.mined as i64;
+        if produced > input.mined {
+            input.mined = produced;
         }
-        // `MinerComp.update` offload branch: `offloadImmediately()` is true for
-        // the player, so the mined item transfers into `closestCore()` when it
-        // is within `Vars.mineTransferRange` and accepts the stack.
-        if !offload_into_core(world, entity, pos.x, pos.y, item)
-            && let Some(mut stored) = world.get_mut::<ItemsComp>(entity)
-        {
-            stored.add_item(item, 1);
-        }
-    }
-    set_mining(world, entity, Some(tile), true);
-}
-
-/// `Vars.mineTransferRange`: the core-transfer radius shared by all units.
-const MINE_TRANSFER_RANGE: f32 = 220.0;
-
-/// `MinerComp.update` core-transfer branch for the player unit
-/// (`offloadImmediately()` is true for players): the mined item goes into
-/// `closestCore()` when the core is within [`MINE_TRANSFER_RANGE`] and accepts
-/// one (`core.acceptStack(item, 1, this) == 1`). Returns `true` when the item
-/// left the unit.
-fn offload_into_core(world: &mut World, entity: Entity, x: f32, y: f32, item: ItemId) -> bool {
-    let Some(team) = world.get::<TeamComp>(entity).map(|t| t.team) else {
-        return false;
-    };
-    let Some((core, cx, cy)) = closest_core(world, x, y, team) else {
-        return false;
-    };
-    let dx = cx - x;
-    let dy = cy - y;
-    if dx * dx + dy * dy > MINE_TRANSFER_RANGE * MINE_TRANSFER_RANGE {
-        return false;
-    }
-    let cap = dispatch_get_maximum_accepted(world, core, item);
-    let cur = item_count(world, core, item);
-    if cap - cur < 1 {
-        return false;
-    }
-    // `Call.transferItemTo` reaches the core through `handleStack` (the offload
-    // does not count toward `stats.coreItemCount`).
-    dispatch_handle_stack(world, core, item, 1);
-    true
-}
-
-/// `Teams.closestCore(x, y, team)`: nearest team core with its world position;
-/// ties break by the stable entity index. The core's position is its anchor
-/// tile's corner (`Building.x`/`y`), the centre for the odd multiblocks the
-/// campaign fields.
-fn closest_core(world: &World, x: f32, y: f32, team: u8) -> Option<(Entity, f32, f32)> {
-    let mut best: Option<(f32, _, Entity)> = None;
-    for entity_ref in world.iter_entities() {
-        let id = entity_ref.id();
-        if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
-            continue;
-        }
-        if entity_ref.get::<CoreBuild>().is_none() {
-            continue;
-        }
-        let Some(building) = entity_ref.get::<Building>() else {
-            continue;
-        };
-        let unit = crate::config::TILESIZE as f32;
-        let (cx, cy) = (
-            building.tile.x() as f32 * unit,
-            building.tile.y() as f32 * unit,
-        );
-        let dx = cx - x;
-        let dy = cy - y;
-        let dist2 = dx * dx + dy * dy;
-        let better = match best {
-            None => true,
-            Some((best_dist, best_index, _)) => {
-                dist2 < best_dist || (dist2 == best_dist && id.index() < best_index)
-            }
-        };
-        if better {
-            best = Some((dist2, id.index(), id));
-        }
-    }
-    let (_, _, core) = best?;
-    let building = world.get::<Building>(core)?;
-    let unit = crate::config::TILESIZE as f32;
-    Some((
-        core,
-        building.tile.x() as f32 * unit,
-        building.tile.y() as f32 * unit,
-    ))
-}
-
-/// Clears the ordered tile and timer.
-fn clear_mine_order(input: &mut PlayerInput) {
-    input.mine_tile = None;
-    input.mine_timer = 0.0;
-}
-
-/// Writes the unit's `MinerComp` state (`mineTile`/`mining`).
-fn set_mining(world: &mut World, entity: Entity, tile: Option<TilePos>, mining: bool) {
-    if let Some(mut stored) = world.get_mut::<MinerComp>(entity) {
-        stored.mine_tile = tile;
-        stored.mining = mining;
     }
 }
 

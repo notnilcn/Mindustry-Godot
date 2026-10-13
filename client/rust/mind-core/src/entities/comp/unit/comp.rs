@@ -581,6 +581,10 @@ pub struct MinerComp {
     pub mine_tile: Option<TilePos>,
     /// Whether the unit is actively mining this tick (`mining`).
     pub mining: bool,
+    /// Mining progress in ticks (`mineTimer`; G01 T10a).
+    pub mine_timer: f32,
+    /// Items produced by this unit (G01 T10a evidence/tutorial counter).
+    pub mined: u64,
 }
 
 /// Build plan queue size (`BuilderComp`); plans are plan 11 M2/M5.

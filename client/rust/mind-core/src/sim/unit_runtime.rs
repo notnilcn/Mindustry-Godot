@@ -25,14 +25,20 @@
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
+use std::collections::BTreeMap;
 
 use crate::ai::controller::{AiKind, ControllerSlot};
-use crate::ai::pathfinder::Pathfinder;
-use crate::ai::types::flying::{circle_attack, move_to, update_flying};
-use crate::ai::types::ground::update_ground;
+use crate::ai::pathfinder::{Cost, Pathfinder};
+use crate::ai::types::flying::{
+    FlyingAiState, circle_attack, move_to, move_to_point, update_flying,
+};
+use crate::ai::types::ground::{GroundAiState, pathfind_field, update_ground};
 use crate::ai::types::missile::{MissileAi, MissileShooter, update_missile};
 use crate::ai::types::player::PlayerInput;
-use crate::ai::wave_spawner::WaveSpawner;
+use crate::ai::wave_spawner::{
+    SPAWN_EFFECT_INVINCIBLE_TICKS, SPAWN_EFFECT_UNMOVING_TICKS, SpawnContext, WaveSpawner,
+    flyer_edge_position,
+};
 use crate::audio::AudioSinkRes;
 use crate::combat::bullet::{self, CombatCtx};
 use crate::combat::targeting::TargetQueries;
@@ -41,7 +47,9 @@ use crate::content::ctype::Mappable;
 use crate::content::{BlockKind, ContentRegistry, UnitTypeId};
 use crate::determinism::{Checksum, Checksummer, SimRng};
 use crate::ecs::{BuildingComp, EntitySeq};
-use crate::entities::comp::unit::comp::{PhysicsComp, TimedKillComp, UnitCore, UnitTypeComp};
+use crate::entities::comp::unit::comp::{
+    HitboxComp, PhysicsComp, TimedKillComp, UnitCore, UnitTypeComp,
+};
 use crate::entities::comp::unit::lifecycle::{spawn_unit, spawn_unit_def, sync_weapon_state};
 use crate::entities::comp::unit::movement;
 use crate::entities::comp::{Building, Health, Pos, TeamComp, Vel};
@@ -49,6 +57,7 @@ use crate::game::runtime::CampaignRuntime;
 use crate::game::spawn_group::SpawnGroup;
 use crate::game::waves::Waves;
 use crate::weapons::UnitWeapons;
+use crate::world::blocks::storage::core_block::CoreBuild;
 use crate::world::{TilePos, WorldGrid};
 
 use super::Sim;
@@ -396,8 +405,63 @@ impl Sim {
                 })
                 .collect();
             for entity in dead {
-                // `UnitComp.destroy()` fires `shootOnDeath` mounts first
-                // (PAR-0088); spawned bullets join the live list.
+                // `UnitComp.destroy()` (UnitComp.java:885-891): a unit carrying
+                // an explosive item blows up (G01 T14).
+                {
+                    let stack = world
+                        .get::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+                        .and_then(|comp| comp.item);
+                    let core_spawned = world
+                        .get::<UnitCore>(entity)
+                        .is_some_and(|core| core.spawned_by_core);
+                    if let Some((item, amount)) = stack
+                        && let Some(item_def) = runtime.content.item(item)
+                        && !core_spawned
+                    {
+                        let pos = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y));
+                        let def = world
+                            .get::<UnitTypeComp>(entity)
+                            .and_then(|comp| runtime.content.unit(comp.type_id))
+                            .cloned();
+                        if let (Some((x, y)), Some(def)) = (pos, def) {
+                            let explosiveness = 2.0 + item_def.explosiveness * amount as f32 * 1.53;
+                            let flammability = item_def.flammability * amount as f32 / 1.9;
+                            let power = item_def.charge * (amount as f32).powf(1.11) * 160.0;
+                            let team = world
+                                .get::<TeamComp>(entity)
+                                .map(|team| team.team)
+                                .unwrap_or(0);
+                            let (damage, fire) = world
+                                .get_resource::<CampaignRuntime>()
+                                .map(|campaign| {
+                                    let rules = &campaign.session.rules;
+                                    (
+                                        rules.damage_explosions
+                                            && rules.unit_crash_damage(team) > 0.0,
+                                        item_def.flammability > 1.0,
+                                    )
+                                })
+                                .unwrap_or((true, item_def.flammability > 1.0));
+                            let radius = (def.hit_size * 2.0 + def.leg_length / 1.7) / 2.0;
+                            crate::combat::damage::explosion::dynamic_explosion(
+                                world,
+                                &runtime.content,
+                                &mut runtime.rng,
+                                x,
+                                y,
+                                flammability,
+                                explosiveness,
+                                power,
+                                radius,
+                                damage,
+                                fire,
+                                Some(team),
+                            );
+                        }
+                    }
+                }
+                // `UnitComp.destroy()` fires `shootOnDeath` mounts (PAR-0088);
+                // spawned bullets join the live list.
                 run_shoot_on_death(world, &mut runtime, entity);
                 // `UnitComp.destroy` crash damage (`UnitComp.java:921-928`): a
                 // flying unit with `createWreck`, not spawned by a core, crashes
@@ -421,16 +485,27 @@ impl Sim {
                             let damage =
                                 def.hit_size.powf(0.75) * def.crash_damage_multiplier * 2.5 * crash;
                             let radius = def.hit_size.powf(0.94) * 1.25;
-                            let _ = crate::combat::damage::area::damage_area(
+                            // `shields.isEmpty() || !shields.contains(s ->
+                            // s.absorbExplosion(x, y, crashDamage))`
+                            // (UnitComp.java:924-930; G01 T14).
+                            if !crate::combat::damage::explosion::explosion_absorbed(
                                 world,
-                                &runtime.content,
-                                Some(team),
                                 x,
                                 y,
-                                radius,
                                 damage,
-                                crate::combat::damage::area::DamageOptions::default(),
-                            );
+                                Some(team),
+                            ) {
+                                let _ = crate::combat::damage::area::damage_area(
+                                    world,
+                                    &runtime.content,
+                                    Some(team),
+                                    x,
+                                    y,
+                                    radius,
+                                    damage,
+                                    crate::combat::damage::area::DamageOptions::default(),
+                                );
+                            }
                         }
                     }
                 }
@@ -861,6 +936,10 @@ impl Sim {
         // apply a status (`StatusApplier` resource; NEW-1): install it while
         // the registry is still owned here, then move it into the runtime.
         crate::combat::damage::status::install_status_applier(&mut self.ecs.0, &content);
+        // `BuildDamageEvent` log (G01 T15): drained by the minimap seam.
+        self.ecs
+            .0
+            .insert_resource(crate::world::events::BuildDamageLog::default());
         let wave_team = crate::game::rules::Rules::default().wave_team;
         let runtime = UnitRuntime::new(content, &self.grid, wave_team);
         self.ecs.0.insert_non_send(runtime);
@@ -1829,6 +1908,16 @@ pub fn unit_physics_system(world: &mut World) {
 }
 
 pub fn unit_update_system(world: &mut World) {
+    // `CombatEnv` sync (G01 T14): `Rules.fire` and `Env.oxygen` gate
+    // `Fires.create`; `state.envAttrs` heat (0.0 until a live source lands).
+    if let Some(campaign) = world.get_resource::<CampaignRuntime>() {
+        let rules = &campaign.session.rules;
+        world.insert_resource(crate::combat::fires::CombatEnv {
+            fire: rules.fire,
+            oxygen: rules.env & (1 << 7) != 0,
+            heat: 0.0,
+        });
+    }
     let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
         return;
     };
@@ -1843,6 +1932,19 @@ pub fn unit_update_system(world: &mut World) {
     // One target index per tick (buildings by team + live units), reused by
     // every unit's acquisition pass. Bullets/fires/puddles never enter it.
     let queries = TargetQueries::build(world, &runtime.content);
+    // `state.rules` fields `GroundAI` reads, snapshotted once per tick so the
+    // unit loop can mutate the world freely.
+    let ground_rules = world
+        .get_resource::<CampaignRuntime>()
+        .map(|campaign| GroundAiRules {
+            waves: campaign.session.rules.waves,
+            default_team: campaign.session.rules.default_team,
+            drop_zone_radius: campaign.session.rules.drop_zone_radius,
+        })
+        .unwrap_or_default();
+    // `Pathfinder.EnemyCoreField.getPositions` target sets, one per team per
+    // tick (plan G01 §6.9: stable targets keep the `(team, cost)` field cache).
+    let mut core_target_cache: BTreeMap<u8, Vec<TilePos>> = BTreeMap::new();
     let entities = runtime.units.clone();
     for entity in entities {
         if world.get_entity(entity).is_err() {
@@ -1876,48 +1978,252 @@ pub fn unit_update_system(world: &mut World) {
             // (`DesktopInput.updateMovement`); no target acquisition or pathing.
             crate::ai::types::player::update_player(world, &runtime.grid, &runtime.content, entity);
         } else if slot.kind == AiKind::Command {
-            // `CommandAI.updateUnit` -> `defaultBehavior`: targeting runs for
-            // the weapons (`updateTargeting`, autoTarget), but movement only
-            // follows an explicit order (`targetPos`); with none the unit
-            // idles in place instead of walking to the core anchor.
-            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, &runtime.content, entity, mount_target);
-            match slot.target {
-                Some(target) => {
-                    let flying = world
-                        .get::<PhysicsComp>(entity)
-                        .is_some_and(|physics| physics.flying);
-                    // Refresh the lazy control path before borrowing fields.
-                    runtime.control_path();
+            // `CommandAI.updateUnit` -> `defaultBehavior`/`commandController`
+            // (T10a/T10b: MinerAI/RepairAI).
+            let command_kind = resolve_command_kind(world, &runtime.content, entity, &slot);
+            if command_kind == Some(crate::content::registries::commands::ControllerKind::Repair) {
+                // `RepairAI.updateTargeting` replaces the enemy targeting: the
+                // closest damaged friendly building, else `super` targeting.
+                let mut repair = world
+                    .get::<crate::ai::types::repair::RepairAiState>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                {
                     let UnitRuntime {
-                        grid,
                         content,
-                        control_path,
+                        grid,
+                        pathfinder,
                         ..
                     } = &mut runtime;
-                    let arrived = crate::ai::types::command::update_command_move(
+                    let mut ctx = crate::ai::ai_controller::AiCtx {
                         world,
                         grid,
                         content,
-                        control_path,
-                        entity,
-                        target,
-                        flying,
-                    );
-                    if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
-                        // `finishPath`: `targetPos = null`.
-                        stored.target = None;
+                        pathfinder,
+                        team,
+                    };
+                    crate::ai::types::repair::update_repair_ai(&mut ctx, entity, &mut repair);
+                }
+                if let Some(mut stored) =
+                    world.get_mut::<crate::ai::types::repair::RepairAiState>(entity)
+                {
+                    *stored = repair;
+                } else if world.get_entity(entity).is_ok() {
+                    world.entity_mut(entity).insert(repair);
+                }
+            } else if matches!(
+                command_kind,
+                Some(crate::content::registries::commands::ControllerKind::Builder)
+                    | Some(crate::content::registries::commands::ControllerKind::BuilderAssist)
+            ) {
+                // `UnitCommand.loadAll`: rebuild -> `BuilderAI()` (alwaysFlee
+                // false, fleeRange 370); assist -> `BuilderAI{onlyAssist=true}`
+                // (UnitCommand.java:73-116).
+                let only_assist = command_kind
+                    == Some(crate::content::registries::commands::ControllerKind::BuilderAssist);
+                let mut builder = world
+                    .get::<crate::ai::types::builder::BuilderAiState>(entity)
+                    .copied()
+                    .unwrap_or_else(|| {
+                        let mut state =
+                            crate::ai::types::builder::BuilderAiState::with_flee(false, 370.0);
+                        state.only_assist = only_assist;
+                        state
+                    });
+                {
+                    let UnitRuntime {
+                        content,
+                        grid,
+                        pathfinder,
+                        ..
+                    } = &mut runtime;
+                    let mut ctx = crate::ai::ai_controller::AiCtx {
+                        world,
+                        grid,
+                        content,
+                        pathfinder,
+                        team,
+                    };
+                    crate::ai::types::builder::update_builder_ai(&mut ctx, entity, &mut builder);
+                }
+                if let Some(mut stored) =
+                    world.get_mut::<crate::ai::types::builder::BuilderAiState>(entity)
+                {
+                    *stored = builder;
+                } else if world.get_entity(entity).is_ok() {
+                    world.entity_mut(entity).insert(builder);
+                }
+                let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+                set_mount_targets(world, &runtime.content, entity, mount_target, None);
+            } else {
+                // Targeting runs for the weapons (`updateTargeting`, autoTarget);
+                // movement only follows an explicit order (`targetPos`); with none
+                // the unit idles in place instead of walking to the core anchor.
+                let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+                set_mount_targets(world, &runtime.content, entity, mount_target, None);
+                // `CommandAI.updateUnit`'s stance handling (T11): boost and
+                // pursueTarget (edit `slot` before the movement match).
+                let mut slot = slot;
+                let stances = world
+                    .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                let def_range = world
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id))
+                    .map(|def| def.max_range)
+                    .unwrap_or(0.0);
+                if stances.has_name(&runtime.content, "boost") {
+                    // `shouldBoost()`: `updateBoosting(false)` while an attack
+                    // target is in range, else true (CommandAI.java:150-163).
+                    let in_range = mount_target
+                        .is_some_and(|target| entity_pos_within(world, entity, target, def_range));
+                    if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+                        core.boosting = !in_range;
                     }
                 }
-                None => {
-                    if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(entity) {
-                        vel.x = 0.0;
-                        vel.y = 0.0;
+                if slot.target.is_none()
+                    && stances.has_name(&runtime.content, "pursuetarget")
+                    && let Some(target) = mount_target
+                    && let Some(pos) = world.get::<Pos>(target).copied()
+                {
+                    // `pursueTarget(target, true)`: `commandTarget(target, false)`.
+                    slot.target = Some(TilePos::new(
+                        crate::world::WorldGrid::to_tile(pos.x) as i16,
+                        crate::world::WorldGrid::to_tile(pos.y) as i16,
+                    ));
+                }
+                // `CommandAI.defaultBehavior` attack tracking (G01 T16):
+                // `targetPos.set(attackTarget)` every tick, dead targets are
+                // cleared, and the unit stops within `range - 10`.
+                let mut move_target = slot.target;
+                if let Some(target) = world
+                    .get::<crate::ai::types::command::AttackTargetComp>(entity)
+                    .and_then(|comp| comp.0)
+                {
+                    let alive = world.get_entity(target).is_ok()
+                        && world
+                            .get::<Health>(target)
+                            .is_none_or(|health| !health.dead);
+                    if !alive {
+                        world
+                            .entity_mut(entity)
+                            .insert(crate::ai::types::command::AttackTargetComp(None));
+                        move_target = None;
+                        if let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+                            stored.target = None;
+                        }
+                    } else if let Some(target_pos) = world.get::<Pos>(target).copied() {
+                        let within = world.get::<Pos>(entity).copied().is_some_and(|pos| {
+                            let dx = target_pos.x - pos.x;
+                            let dy = target_pos.y - pos.y;
+                            dx * dx + dy * dy <= (def_range - 10.0).max(0.0).powi(2)
+                        });
+                        move_target = if within {
+                            None
+                        } else {
+                            Some(TilePos::new(
+                                crate::world::WorldGrid::to_tile(target_pos.x) as i16,
+                                crate::world::WorldGrid::to_tile(target_pos.y) as i16,
+                            ))
+                        };
                     }
                 }
+                if command_kind == Some(crate::content::registries::commands::ControllerKind::Miner)
+                {
+                    // `CommandAI.updateUnit`: the mine command auto-adds
+                    // `mineAuto` when no item stance is set (T11).
+                    let mut stances = world
+                        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+                        .copied()
+                        .unwrap_or_default();
+                    if !stances.has_name(&runtime.content, "mineauto")
+                        && !stances.any_item_stance(&runtime.content)
+                        && let Some(def) = runtime.content.unit_stance_by_name("mineauto")
+                    {
+                        crate::ai::unit_stance_runtime::apply_stance(&mut stances.0, def);
+                        world.entity_mut(entity).insert(stances);
+                    }
+                    let mut miner = world
+                        .get::<crate::ai::types::miner::MinerAiState>(entity)
+                        .copied()
+                        .unwrap_or_default();
+                    {
+                        let UnitRuntime {
+                            content,
+                            grid,
+                            pathfinder,
+                            ..
+                        } = &mut runtime;
+                        let mut ctx = crate::ai::ai_controller::AiCtx {
+                            world,
+                            grid,
+                            content,
+                            pathfinder,
+                            team,
+                        };
+                        crate::ai::types::miner::update_miner_ai(&mut ctx, entity, &mut miner);
+                    }
+                    if let Some(mut stored) =
+                        world.get_mut::<crate::ai::types::miner::MinerAiState>(entity)
+                    {
+                        *stored = miner;
+                    } else if world.get_entity(entity).is_ok() {
+                        world.entity_mut(entity).insert(miner);
+                    }
+                } else {
+                    if world
+                        .get::<crate::entities::comp::unit::comp::MinerComp>(entity)
+                        .is_some_and(|comp| comp.mine_tile.is_some())
+                    {
+                        // `CommandAI.command`: a non-mine command clears `mineTile`.
+                        crate::entities::comp::unit::miner::clear_mine_tile(world, entity);
+                    }
+                    // The default `defaultBehavior` movement runs for commands
+                    // without a controller (`None`: move/enterPayload/...) and for
+                    // the not-yet-dispatched Repair/Builder controllers.
+                    match move_target {
+                        Some(target) => {
+                            let flying = world
+                                .get::<PhysicsComp>(entity)
+                                .is_some_and(|physics| physics.flying);
+                            // Refresh the lazy control path before borrowing fields.
+                            runtime.control_path();
+                            let UnitRuntime {
+                                grid,
+                                content,
+                                control_path,
+                                ..
+                            } = &mut runtime;
+                            let arrived = crate::ai::types::command::update_command_move(
+                                world,
+                                grid,
+                                content,
+                                control_path,
+                                entity,
+                                target,
+                                flying,
+                            );
+                            if arrived
+                                && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity)
+                            {
+                                // `finishPath`: `targetPos = null`.
+                                stored.target = None;
+                            }
+                        }
+                        None => {
+                            if let Some(mut vel) =
+                                world.get_mut::<crate::entities::comp::Vel>(entity)
+                            {
+                                vel.x = 0.0;
+                                vel.y = 0.0;
+                            }
+                        }
+                    }
+                }
+                // `CommandAI` -> `faceTarget()` (CommandAI.java:400/420).
+                face_target(world, &runtime.content, entity, mount_target);
             }
-            // `CommandAI` -> `faceTarget()` (CommandAI.java:400/420).
-            face_target(world, &runtime.content, entity, mount_target);
         } else if slot.kind == AiKind::Missile {
             // `MissileAI.updateMovement` (live dispatch, PAR-0088): steer at
             // the shooter's aim, always move forward, die on enemy-building
@@ -1988,13 +2294,13 @@ pub fn unit_update_system(world: &mut World) {
                     )
                 })
             };
-            set_mount_targets(world, &runtime.content, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target, None);
         } else if slot.kind == AiKind::Suicide {
             // `SuicideAI.updateUnit` (`ai/types/suicide.rs`): ram the nearest
             // hostile in a straight line (terrain ignored) and fire the
             // close-range death weapon (`shootCone 180`).
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, &runtime.content, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target, None);
             let mut state = crate::ai::types::suicide::SuicideAi {
                 unit: Some(entity),
                 target: mount_target,
@@ -2016,17 +2322,28 @@ pub fn unit_update_system(world: &mut World) {
                 };
                 let _ = crate::ai::types::suicide::update_suicide(&mut ctx, entity, &mut state);
             }
-        } else if slot.kind == AiKind::Builder && slot.target.is_some() {
-            // `BuilderAI` (`ai/types/builder.rs`): walk to the assigned plan
-            // and repair it. Without a commanded tile the generic behavior
-            // below keeps the wave-unit approximation (the live build-plan
-            // machinery is not wired to `unit.plans` yet).
-            let mut state = crate::ai::types::builder::BuilderAi {
-                unit: Some(entity),
-                only_assist: false,
-                target: slot.target,
-                in_range: false,
-            };
+        } else if slot.kind == AiKind::Builder && !builder_falls_back(world, team) {
+            // `BuilderAI` (T10c): pull ghost plans from the team queue and
+            // move toward the active plan; `Sim::update_builders` executes it.
+            let mut state = world
+                .get::<crate::ai::types::builder::BuilderAiState>(entity)
+                .copied()
+                .unwrap_or_else(|| {
+                    // AI-team core builders construct with
+                    // `BuilderAI(true, coreFleeRange)` (`UnitTypes.java:2495`,
+                    // 4352; the def carries the range).
+                    let core_flee_range = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .and_then(|def| match def.controller {
+                            crate::content::registries::units::ControllerKind::Builder {
+                                core_flee_range,
+                            } => Some(core_flee_range),
+                            _ => None,
+                        })
+                        .unwrap_or(400.0);
+                    crate::ai::types::builder::BuilderAiState::with_flee(true, core_flee_range)
+                });
             {
                 let UnitRuntime {
                     content,
@@ -2041,10 +2358,17 @@ pub fn unit_update_system(world: &mut World) {
                     pathfinder,
                     team,
                 };
-                let _ = crate::ai::types::builder::update_builder(&mut ctx, entity, &mut state);
+                crate::ai::types::builder::update_builder_ai(&mut ctx, entity, &mut state);
+            }
+            if let Some(mut stored) =
+                world.get_mut::<crate::ai::types::builder::BuilderAiState>(entity)
+            {
+                *stored = state;
+            } else if world.get_entity(entity).is_ok() {
+                world.entity_mut(entity).insert(state);
             }
             let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, &runtime.content, entity, mount_target);
+            set_mount_targets(world, &runtime.content, entity, mount_target, None);
         } else if slot.kind == AiKind::Boost {
             // `BoostAI.defaultBehavior` (`ai/types/boost.rs`): enable boost
             // without issuing movement; the lift-off runs in `update_kinematics`
@@ -2070,71 +2394,37 @@ pub fn unit_update_system(world: &mut World) {
                 crate::ai::types::boost::update_boost(&mut ctx, entity, &mut state);
             }
         } else {
-            // `GroundAI.updateMovement`/`FlyingAI`: pick a core/building anchor
-            // and an in-range mount target. Spawned wave units have no command,
-            // so the anchor supplies their move target.
-            let (anchor_tile, mount_target) =
-                acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, &runtime.content, entity, mount_target);
-
-            let move_target = slot.target.or(anchor_tile);
-            if let Some(target) = move_target {
-                let flying = slot.kind == AiKind::Flying
-                    || world
-                        .get::<PhysicsComp>(entity)
-                        .is_some_and(|physics| physics.flying);
-                let arrived = if flying {
-                    // `FlyingAI.updateMovement` (FlyingAI.java:15-27): with a
-                    // live target, circle it (`circleTarget`) or close to
-                    // `range * 0.8` and look at it; with none, steer at the
-                    // anchor tile.
-                    let def = world
-                        .get::<UnitTypeComp>(entity)
-                        .and_then(|comp| runtime.content.unit(comp.type_id));
-                    match (mount_target, def) {
-                        (Some(mount), Some(def)) if def.circle_target => {
-                            circle_attack(
-                                world,
-                                &runtime.grid,
-                                &runtime.content,
-                                entity,
-                                mount,
-                                def.circle_target_radius,
-                            );
-                            false
-                        }
-                        (Some(mount), Some(def)) if def.range > 0.0 => {
-                            move_to(
-                                world,
-                                &runtime.grid,
-                                &runtime.content,
-                                entity,
-                                mount,
-                                def.range * 0.8,
-                            );
-                            false
-                        }
-                        _ => update_flying(world, &runtime.grid, &runtime.content, entity, target),
-                    }
-                } else {
-                    let UnitRuntime {
-                        grid,
-                        content,
-                        pathfinder,
-                        ..
-                    } = &mut runtime;
-                    update_ground(world, grid, content, pathfinder, team, entity, target)
-                };
-                if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
-                    stored.target = None;
-                }
-            }
-            // `GroundAI.updateMovement` ends with `faceTarget()` (GroundAI.java:61).
-            let flying = world
-                .get::<PhysicsComp>(entity)
-                .is_some_and(|physics| physics.flying);
-            if !flying {
-                face_target(world, &runtime.content, entity, mount_target);
+            let flying = slot.kind == AiKind::Flying
+                || world
+                    .get::<PhysicsComp>(entity)
+                    .is_some_and(|physics| physics.flying);
+            if flying {
+                // `FlyingAI` (FlyingAI.java:16-72): main target via
+                // `findMainTarget` (core in range, else `targetFlags`, else the
+                // core), circle/close on it, shuttle to the spawner when idle
+                // on the default team.
+                update_flying_ai(
+                    world,
+                    &mut runtime,
+                    &queries,
+                    entity,
+                    team,
+                    slot,
+                    ground_rules,
+                );
+            } else {
+                // `GroundAI.updateMovement` (GroundAI.java:21-85): field walk to
+                // the enemy-core set with the Java targeting cadence.
+                update_ground_ai(
+                    world,
+                    &mut runtime,
+                    &queries,
+                    entity,
+                    team,
+                    slot,
+                    ground_rules,
+                    &mut core_target_cache,
+                );
             }
         }
 
@@ -2147,6 +2437,24 @@ pub fn unit_update_system(world: &mut World) {
             };
             let _ =
                 movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
+
+            // `MinerComp.update` runs after the controller and the kind
+            // kinematics for every unit (G01 T10a).
+            crate::entities::comp::unit::miner::update_miner_comp(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                entity,
+            );
+            // `UnitComp.update` environment half (G01 T13): bounds/drowning/
+            // floor status/env death/drop-zone push/solid kill.
+            crate::entities::comp::unit::environment::update_unit_environment(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                runtime.wave_spawner.get_spawns(),
+                entity,
+            );
 
             // `TimedKillComp.update`: `time = min(time + delta, lifetime)`;
             // at the lifetime the unit is marked dead and `resolve_deaths`
@@ -2448,11 +2756,51 @@ pub fn run_wave_system(world: &mut World) {
         .map(|tile| TilePos::new(tile.x, tile.y))
         .collect();
 
-    // `WaveSpawner.eachGroundSpawn` core branch (`WaveSpawner.java:134-173`):
-    // with `rules.wavesSpawnAtCores` in attack mode every wave-team core is
-    // also a spawn position, stepped toward the first player core until the
-    // 3x3 tile area is clear (PAR-0139 prerequisite: attack sectors author no
-    // spawn-overlay tiles, so enemy units only enter this way).
+    // `WaveSpawner.eachGroundSpawn`/`eachFlyerSpawn` context
+    // (WaveSpawner.java:122-200). Overlay ground spawns pass `worldx() = x*8`
+    // (corner) and take the drop-zone shockwave; attack-mode core spawns keep
+    // `shockwave = false`. Flyers spawn at the clamped map edge unless
+    // `rules.airUseSpawns`, plus the wave-team cores in attack mode.
+    //
+    // The core branch (`WaveSpawner.java:134-173`): with `rules.wavesSpawnAtCores`
+    // in attack mode every wave-team core is also a spawn position, stepped
+    // toward the first player core until the 3x3 tile area is clear (PAR-0139
+    // prerequisite: attack sectors author no spawn-overlay tiles).
+    let width = runtime.grid.width();
+    let height = runtime.grid.height();
+    let air_use_spawns = world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|campaign| campaign.session.rules.air_use_spawns);
+    let ts = TILE_SIZE;
+    let mut ctx = SpawnContext {
+        width_px: width as f32 * ts,
+        height_px: height as f32 * ts,
+        ground: Vec::new(),
+        flyer: Vec::new(),
+        campaign_mult: world
+            .get_resource::<CampaignRuntime>()
+            .and_then(|campaign| {
+                campaign
+                    .session
+                    .is_campaign()
+                    .then_some(campaign.session.difficulty_enemy_spawn_multiplier)
+            }),
+    };
+    for tile in &spawns {
+        ctx.ground.push((
+            tile.x() as f32 * ts,
+            tile.y() as f32 * ts,
+            tile.pack(),
+            true,
+        ));
+        if air_use_spawns {
+            ctx.flyer
+                .push((tile.x() as f32 * ts, tile.y() as f32 * ts, tile.pack()));
+        } else {
+            let (fx, fy) = flyer_edge_position(width, height, *tile);
+            ctx.flyer.push((fx, fy, tile.pack()));
+        }
+    }
     if let Some(campaign) = world.get_resource::<CampaignRuntime>() {
         let rules = campaign.session.rules.clone();
         if rules.waves_spawn_at_cores && rules.attack_mode {
@@ -2470,34 +2818,65 @@ pub fn run_wave_system(world: &mut World) {
                     .map(|data| data.cores.clone())
                     .unwrap_or_default();
                 for core in wave_cores {
-                    if let Some(pos) = world.get::<Pos>(core)
-                        && let Some(tile) = core_spawn_position(
-                            &runtime.grid,
-                            &runtime.content,
-                            pos.x,
-                            pos.y,
-                            px,
-                            py,
-                        )
+                    let Some(pos) = world.get::<Pos>(core).copied() else {
+                        continue;
+                    };
+                    let packed = world
+                        .get::<BuildingComp>(core)
+                        .map(|comp| comp.pos.pack())
+                        .unwrap_or(-1);
+                    // `cons.accept(core.x, core.y, false)` (flyer branch) uses
+                    // the raw core position; the ground branch steps toward the
+                    // player core (`core_spawn_position`).
+                    ctx.flyer.push((pos.x, pos.y, packed));
+                    if let Some(tile) =
+                        core_spawn_position(&runtime.grid, &runtime.content, pos.x, pos.y, px, py)
                     {
+                        ctx.ground.push((
+                            tile.x() as f32 * ts,
+                            tile.y() as f32 * ts,
+                            packed,
+                            false,
+                        ));
+                        // Keep the public spawn-tile list complete (T6a's
+                        // `closest_spawn_tile`, `playerNear`).
                         spawns.push(tile);
                     }
                 }
             }
         }
     }
-    log::info!(
-        "wave spawn: wave {wave} with {} group(s), {} spawn position(s), attack_mode {}, spawn_at_cores {}",
-        groups.len(),
-        spawns.len(),
-        world
-            .get_resource::<CampaignRuntime>()
-            .is_some_and(|campaign| campaign.session.rules.attack_mode),
-        world
-            .get_resource::<CampaignRuntime>()
-            .is_some_and(|campaign| campaign.session.rules.waves_spawn_at_cores),
-    );
+
+    // `doShockwave` (`WaveSpawner.java:104-106`): 99,999,999 damage over the
+    // drop-zone radius on every overlay spawn, before any unit is emitted.
+    let drop_zone_radius = world
+        .get_resource::<CampaignRuntime>()
+        .map(|campaign| campaign.session.rules.drop_zone_radius)
+        .unwrap_or(300.0);
+    let shock_targets: Vec<(f32, f32)> = ctx
+        .ground
+        .iter()
+        .filter_map(|&(x, y, _, shockwave)| shockwave.then_some((x, y)))
+        .collect();
+    for (x, y) in shock_targets {
+        crate::combat::damage::area::damage_area(
+            world,
+            &runtime.content,
+            Some(wave_team),
+            x,
+            y,
+            drop_zone_radius,
+            99_999_999.0,
+            crate::combat::damage::area::DamageOptions::default(),
+        );
+    }
     runtime.wave_spawner.set_spawns(spawns);
+    log::info!(
+        "wave spawn: wave {wave} with {} group(s), {} ground / {} flyer position(s)",
+        groups.len(),
+        ctx.ground.len(),
+        ctx.flyer.len(),
+    );
 
     let UnitRuntime {
         wave_spawner,
@@ -2505,20 +2884,48 @@ pub fn run_wave_system(world: &mut World) {
         seq,
         units,
         units_created,
+        rng,
         ..
     } = &mut runtime;
+    // `WaveSpawner.spawnEffect` (WaveSpawner.java:228-235): unmoving 30,
+    // invincible 60 on every spawned unit.
+    let unmoving = content.status_id("unmoving");
+    let invincible = content.status_id("invincible");
     let mut spawned: Vec<Entity> = Vec::new();
-    let emitted = wave_spawner.spawn_enemies(&groups, wave, |group, x, y, rotation| {
-        let team = group.team.unwrap_or(wave_team);
-        let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
-        let payloads = group
-            .payloads
-            .as_ref()
-            .map_or(0, |payloads| payloads.len() as u64);
-        *seq = seq.wrapping_add(1 + payloads);
-        spawned.push(entity);
-        Some(entity)
-    });
+    let emitted = wave_spawner.spawn_enemies(
+        &groups,
+        wave,
+        &ctx,
+        content,
+        rng,
+        |group, x, y, rotation| {
+            let team = group.team.unwrap_or(wave_team);
+            let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
+            if let Some(status) = unmoving {
+                crate::combat::damage::status::apply_status(
+                    world,
+                    entity,
+                    status,
+                    SPAWN_EFFECT_UNMOVING_TICKS,
+                );
+            }
+            if let Some(status) = invincible {
+                crate::combat::damage::status::apply_status(
+                    world,
+                    entity,
+                    status,
+                    SPAWN_EFFECT_INVINCIBLE_TICKS,
+                );
+            }
+            let payloads = group
+                .payloads
+                .as_ref()
+                .map_or(0, |payloads| payloads.len() as u64);
+            *seq = seq.wrapping_add(1 + payloads);
+            spawned.push(entity);
+            Some(entity)
+        },
+    );
     units.extend(spawned);
     *units_created += u64::from(emitted);
     log::info!("wave spawn: emitted {emitted} unit(s) for wave {wave}");
@@ -3187,6 +3594,644 @@ pub fn enemy_count_system(world: &mut World) {
     world.insert_resource(campaign);
 }
 
+/// `BuilderAI.fallback`/`useFallback` (BuilderAI.java:264-278): wave-team
+/// builders without the `rtsAi` rule fight (GroundAI/FlyingAI) instead of
+/// building.
+fn builder_falls_back(world: &World, team: u8) -> bool {
+    let Some(campaign) = world.get_resource::<CampaignRuntime>() else {
+        return false;
+    };
+    let rules = &campaign.session.rules;
+    rules.waves && team == campaign.session.wave_team() && !rules.team_rule(team).rts_ai
+}
+
+/// The `CommandAI` command controller for `entity` (`CommandAI.init`:
+/// `command` or the type's `defaultCommand`, CommandAI.java:96-101).
+fn resolve_command_kind(
+    world: &World,
+    content: &ContentRegistry,
+    entity: Entity,
+    slot: &ControllerSlot,
+) -> Option<crate::content::registries::commands::ControllerKind> {
+    let command = slot.command.or_else(|| {
+        world
+            .get::<UnitTypeComp>(entity)
+            .and_then(|comp| content.unit(comp.type_id))
+            .and_then(|def| def.default_command)
+    })?;
+    content.unit_command(command).map(|def| def.controller)
+}
+
+/// The `state.rules` fields `GroundAI` reads (`Rules.waves`, `defaultTeam`,
+/// `dropZoneRadius`).
+#[derive(Debug, Clone, Copy)]
+struct GroundAiRules {
+    waves: bool,
+    default_team: u8,
+    drop_zone_radius: f32,
+}
+
+impl Default for GroundAiRules {
+    fn default() -> Self {
+        Self {
+            waves: false,
+            default_team: 1,
+            drop_zone_radius: 300.0,
+        }
+    }
+}
+
+/// `GroundAI.updateMovement` (GroundAI.java:21-85) plus the ground half of
+/// `AIController.updateTargeting/updateWeapons` (AIController.java:113-260).
+#[allow(clippy::too_many_arguments)]
+fn update_ground_ai(
+    world: &mut World,
+    runtime: &mut UnitRuntime,
+    queries: &TargetQueries,
+    entity: Entity,
+    team: u8,
+    slot: ControllerSlot,
+    rules: GroundAiRules,
+    core_targets: &mut BTreeMap<u8, Vec<TilePos>>,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| runtime.content.unit(comp.type_id))
+    else {
+        return;
+    };
+    // Copy out of the content borrow before touching the rest of the runtime.
+    let (max_range, type_range, target_air, target_ground, target_under_blocks, cost) = (
+        def.max_range,
+        def.range,
+        def.target_air,
+        def.target_ground,
+        def.target_under_blocks,
+        unit_flowfield_cost(def),
+    );
+
+    let mut state = world
+        .get::<GroundAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+
+    // `AIController.retarget()` (AIController.java:289): 40 ticks without a
+    // target, 90 with one.
+    state.retarget += 1.0;
+    if state.retarget >= if state.target.is_none() { 40.0 } else { 90.0 } {
+        state.retarget = 0.0;
+        state.target = queries.closest_target(
+            world,
+            team,
+            pos.x,
+            pos.y,
+            max_range,
+            target_air,
+            target_ground,
+            true,
+            target_under_blocks,
+        );
+    }
+    // `invalid(target)` (AIController.java:207-213) -> `Units.invalidateTarget`
+    // with `Float.MAX_VALUE` (no distance check): dead/despawned, own team, or
+    // a non-targetable unit.
+    if let Some(target) = state.target
+        && invalid_target(world, &runtime.content, team, target)
+    {
+        state.target = None;
+    }
+
+    // `GroundAI.updateMovement`: core override at
+    // `unit.range() / 1.3 + core.block.size * tilesize / 2`.
+    let core = closest_enemy_core(world, team, pos.x, pos.y);
+    let mut core_in_range = false;
+    if let Some(core_entity) = core
+        && let Some(core_pos) = world.get::<Pos>(core_entity).copied()
+    {
+        let size = world
+            .get::<BuildingComp>(core_entity)
+            .and_then(|comp| runtime.content.block(comp.block))
+            .map(|def| def.size as f32)
+            .unwrap_or(0.0);
+        let radius = max_range / 1.3 + size * TILE_SIZE / 2.0;
+        let dx = core_pos.x - pos.x;
+        let dy = core_pos.y - pos.y;
+        if dx * dx + dy * dy <= radius * radius {
+            state.target = Some(core_entity);
+            core_in_range = true;
+        }
+    }
+
+    // Movement.
+    let mut moved = false;
+    if let Some(target_tile) = slot.target {
+        // Commanded move order (`CommandAI.targetPos`): the explicit order wins
+        // over the field walk (plan G01 T6a change 2).
+        let arrived = {
+            let UnitRuntime {
+                grid,
+                content,
+                pathfinder,
+                ..
+            } = &mut *runtime;
+            update_ground(world, grid, content, pathfinder, team, entity, target_tile)
+        };
+        if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+            stored.target = None;
+        }
+    } else {
+        // `if(core == null || !unit.within(core, unit.type.range * 0.5f))`.
+        let within_half = core.is_some_and(|core_entity| {
+            world.get::<Pos>(core_entity).is_some_and(|core_pos| {
+                let dx = core_pos.x - pos.x;
+                let dy = core_pos.y - pos.y;
+                dx * dx + dy * dy <= (type_range * 0.5).powi(2)
+            })
+        });
+        if core.is_none() || !within_half {
+            let spawner = closest_spawn_tile(runtime, pos.x, pos.y);
+            let mut should_move = true;
+            if rules.waves && team == rules.default_team {
+                if spawner.is_some_and(|tile| {
+                    within_spawn(tile, pos.x, pos.y, rules.drop_zone_radius + 120.0)
+                }) {
+                    should_move = false;
+                }
+                if spawner.is_none() && core.is_none() {
+                    should_move = false;
+                }
+            }
+            // No reason to move if there's nothing there.
+            if core.is_none() && (!rules.waves || spawner.is_none()) {
+                should_move = false;
+            }
+            moved = should_move;
+            if should_move {
+                let targets = core_targets
+                    .entry(team)
+                    .or_insert_with(|| enemy_core_targets(world, runtime, team, Some(rules)));
+                let UnitRuntime {
+                    grid,
+                    content,
+                    pathfinder,
+                    ..
+                } = &mut *runtime;
+                let _ = pathfind_field(
+                    world, grid, content, pathfinder, team, entity, cost, targets, true,
+                );
+            }
+        }
+    }
+
+    // Stuck bookkeeping (`GroundAI.java:63-85`): a movement-less `stuckTime`
+    // used only for the flowfield avoidance flag, which the port does not
+    // consume yet, so no nearby-unit propagation is written.
+    if moved {
+        let stuck_range = TILE_SIZE * 1.5;
+        let dx = pos.x - state.stuck_x;
+        let dy = pos.y - state.stuck_y;
+        if dx * dx + dy * dy <= stuck_range * stuck_range {
+            state.stuck_time += 1.0;
+        } else {
+            state.stuck_x = pos.x;
+            state.stuck_y = pos.y;
+            state.stuck_time = 0.0;
+        }
+    } else {
+        state.stuck_time = 0.0;
+    }
+
+    // `AIController.updateWeapons`: mount targets and the ground core override
+    // (`GroundAI.java:38-44`: controllable ground weapons lock the core).
+    set_mount_targets(
+        world,
+        &runtime.content,
+        entity,
+        state.target,
+        core_in_range.then_some(core).flatten(),
+    );
+    // `GroundAI.updateMovement` ends with `faceTarget()` (GroundAI.java:61).
+    face_target(world, &runtime.content, entity, state.target);
+
+    if let Some(mut stored) = world.get_mut::<GroundAiState>(entity) {
+        *stored = state;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `FlyingAI` (FlyingAI.java:16-72) with the flying half of
+/// `AIController.updateTargeting/updateWeapons` (the port's single-target mount
+/// model: the mount target is the Java `findTarget` result).
+#[allow(clippy::too_many_arguments)]
+fn update_flying_ai(
+    world: &mut World,
+    runtime: &mut UnitRuntime,
+    queries: &TargetQueries,
+    entity: Entity,
+    team: u8,
+    slot: ControllerSlot,
+    rules: GroundAiRules,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let Some(def) = world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| runtime.content.unit(comp.type_id))
+    else {
+        return;
+    };
+    let (
+        max_range,
+        type_range,
+        target_air,
+        target_ground,
+        target_under_blocks,
+        circle_target,
+        circle_target_radius,
+        has_weapons,
+        target_flags,
+    ) = (
+        def.max_range,
+        def.range,
+        def.target_air,
+        def.target_ground,
+        def.target_under_blocks,
+        def.circle_target,
+        def.circle_target_radius,
+        !def.weapons.is_empty(),
+        def.target_flags.clone(),
+    );
+
+    let mut state = world
+        .get::<FlyingAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+    // `AIController.retarget()`: 40 ticks without a target, 90 with one.
+    state.retarget += 1.0;
+    if state.retarget >= if state.target.is_none() { 40.0 } else { 90.0 } {
+        state.retarget = 0.0;
+        state.target = flying_main_target(
+            world,
+            queries,
+            team,
+            pos.x,
+            pos.y,
+            max_range,
+            target_air,
+            target_ground,
+            target_under_blocks,
+            &target_flags,
+        );
+    }
+    if let Some(target) = state.target
+        && invalid_target(world, &runtime.content, team, target)
+    {
+        state.target = None;
+    }
+
+    // `FlyingAI.findTarget`: the main target in range is replaced by the
+    // closest in-range target, otherwise the out-of-range main target stands
+    // (`checkTarget(result, x, y, range) ? target(x, y, range, ..) : result`).
+    let mount_target = match state.target {
+        Some(target) if entity_pos_within(world, entity, target, max_range) => queries
+            .closest_target(
+                world,
+                team,
+                pos.x,
+                pos.y,
+                max_range,
+                target_air,
+                target_ground,
+                true,
+                target_under_blocks,
+            )
+            .or(state.target),
+        other => other,
+    };
+    set_mount_targets(world, &runtime.content, entity, mount_target, None);
+
+    // Movement (`FlyingAI.updateMovement`).
+    if let Some(target_tile) = slot.target {
+        // Commanded move order: keep the fly-to-tile path.
+        let arrived = update_flying(world, &runtime.grid, &runtime.content, entity, target_tile);
+        if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+            stored.target = None;
+        }
+    } else if let Some(target) = state.target {
+        if has_weapons {
+            if circle_target {
+                circle_attack(
+                    world,
+                    &runtime.grid,
+                    &runtime.content,
+                    entity,
+                    target,
+                    circle_target_radius,
+                );
+            } else {
+                move_to(
+                    world,
+                    &runtime.grid,
+                    &runtime.content,
+                    entity,
+                    target,
+                    type_range * 0.8,
+                );
+            }
+        }
+    } else if rules.waves && team == rules.default_team {
+        // `moveTo(getClosestSpawner(), dropZoneRadius + 130f)`.
+        if let Some(spawn) = closest_spawn_tile(runtime, pos.x, pos.y) {
+            move_to_point(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                entity,
+                (spawn.x() as f32 + 0.5) * TILE_SIZE,
+                (spawn.y() as f32 + 0.5) * TILE_SIZE,
+                rules.drop_zone_radius + 130.0,
+                100.0,
+                false,
+            );
+        }
+    }
+
+    if let Some(mut stored) = world.get_mut::<FlyingAiState>(entity) {
+        *stored = state;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `FlyingAI.findMainTarget` (FlyingAI.java:40-72): the closest enemy core when
+/// it is within `range`; otherwise the first `targetFlags` entry that yields a
+/// target (`null` = closest in-range target, a flag = closest active flagged
+/// building, any distance); finally the core (possibly out of range).
+#[allow(clippy::too_many_arguments)]
+fn flying_main_target(
+    world: &World,
+    queries: &TargetQueries,
+    team: u8,
+    x: f32,
+    y: f32,
+    range: f32,
+    target_air: bool,
+    target_ground: bool,
+    target_under_blocks: bool,
+    target_flags: &[Option<crate::content::BlockFlag>],
+) -> Option<Entity> {
+    let core = closest_enemy_core(world, team, x, y);
+    if let Some(core) = core {
+        let in_range = world.get::<Pos>(core).is_some_and(|pos| {
+            let dx = pos.x - x;
+            let dy = pos.y - y;
+            dx * dx + dy * dy <= range * range
+        });
+        if in_range {
+            return Some(core);
+        }
+    }
+    for flag in target_flags {
+        match flag {
+            None => {
+                if let Some(result) = queries.closest_target(
+                    world,
+                    team,
+                    x,
+                    y,
+                    range,
+                    target_air,
+                    target_ground,
+                    true,
+                    target_under_blocks,
+                ) {
+                    return Some(result);
+                }
+            }
+            Some(flag) if target_ground => {
+                if let Some(result) = target_flag_active(world, queries, team, x, y, *flag) {
+                    return Some(result);
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    core
+}
+
+/// `AIController.targetFlagActive(x, y, flag, enemy=true)`: the closest enemy
+/// building carrying `flag` that is active. Java's predicate is
+/// `((items != null && items.any()) || status() != BlockStatus.noInput) && block.targetable`
+/// (AIController.java:277-284); the port has no live per-building block status,
+/// so "active" is `items.any()` (documented deviation), and no vanilla flagged
+/// block sets `targetable = false` (only world logic blocks do).
+fn target_flag_active(
+    world: &World,
+    queries: &TargetQueries,
+    team: u8,
+    x: f32,
+    y: f32,
+    flag: crate::content::BlockFlag,
+) -> Option<Entity> {
+    let mut best: Option<(f32, Entity)> = None;
+    for entity in queries.indexer.enemy_flagged(world, team, flag) {
+        let active = world
+            .get::<crate::world::modules::ItemModule>(entity)
+            .is_some_and(|items| items.any());
+        if !active {
+            continue;
+        }
+        let Some(pos) = world.get::<Pos>(entity).copied() else {
+            continue;
+        };
+        let dx = pos.x - x;
+        let dy = pos.y - y;
+        let dist2 = dx * dx + dy * dy;
+        let id = entity;
+        let replace = match best {
+            None => true,
+            Some((best_dist, best_entity)) => {
+                dist2 < best_dist || (dist2 == best_dist && id.index() < best_entity.index())
+            }
+        };
+        if replace {
+            best = Some((dist2, id));
+        }
+    }
+    best.map(|(_, entity)| entity)
+}
+
+/// `unit.within(target, range)` on world positions.
+fn entity_pos_within(world: &World, entity: Entity, target: Entity, range: f32) -> bool {
+    let (Some(a), Some(b)) = (
+        world.get::<Pos>(entity).copied(),
+        world.get::<Pos>(target).copied(),
+    ) else {
+        return false;
+    };
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+    dx * dx + dy * dy <= range * range
+}
+
+/// `UnitType.initPathType` (UnitType.java:891-898): the flowfield cost derived
+/// from the movement kind when the spec leaves `flowfieldPathType` at -1.
+fn unit_flowfield_cost(def: &crate::content::registries::units::UnitTypeDef) -> Cost {
+    if def.flowfield_path_type >= 0 {
+        return Cost::from_id(def.flowfield_path_type as u8).unwrap_or(Cost::Ground);
+    }
+    if def.naval {
+        Cost::Naval
+    } else if def.allow_leg_step {
+        Cost::Legs
+    } else if def.flying {
+        Cost::None
+    } else if def.hovering {
+        Cost::Hover
+    } else {
+        Cost::Ground
+    }
+}
+
+/// `Pathfinder.EnemyCoreField.getPositions` (Pathfinder.java:555-588): enemy
+/// core tiles, plus the spawn tiles when `rules.waves && team == defaultTeam`.
+///
+/// Sorted by `(y, x)` so the `(team, cost)` field cache is stable across the
+/// units of a team within a tick (plan G01 §6.9).
+fn enemy_core_targets(
+    world: &World,
+    runtime: &UnitRuntime,
+    team: u8,
+    rules: Option<GroundAiRules>,
+) -> Vec<TilePos> {
+    let mut out: Vec<TilePos> = Vec::new();
+    for entity in world.iter_entities() {
+        let Some(comp) = entity.get::<BuildingComp>() else {
+            continue;
+        };
+        if comp.team.0 == team || crate::ai::block_indexer::is_derelict(world, comp.team.0) {
+            continue;
+        }
+        if entity.get::<CoreBuild>().is_none() {
+            continue;
+        }
+        // `Building.tile` is the footprint anchor; the port stores the cursor
+        // tile (`assign_footprint`'s `-(size-1)/2` offset, world/ops.rs:233).
+        let size = runtime
+            .content
+            .block(comp.block)
+            .map(|def| def.size)
+            .unwrap_or(1)
+            .max(1);
+        let offset = (-(size - 1) / 2) as i16;
+        out.push(TilePos::new(comp.pos.x() + offset, comp.pos.y() + offset));
+    }
+    out.sort_by_key(|tile| (tile.y(), tile.x()));
+    out.dedup();
+    if rules.is_some_and(|rules| rules.waves && rules.default_team == team) {
+        out.extend(runtime.wave_spawner.get_spawns().iter().copied());
+        out.dedup();
+    }
+    out
+}
+
+/// `AIController.targetFlag(x, y, BlockFlag.core, enemy=true)`: the closest
+/// enemy core entity; ties break by entity index.
+fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Option<Entity> {
+    let mut best: Option<(f32, Entity)> = None;
+    for entity in world.iter_entities() {
+        let Some(comp) = entity.get::<BuildingComp>() else {
+            continue;
+        };
+        if comp.team.0 == team || crate::ai::block_indexer::is_derelict(world, comp.team.0) {
+            continue;
+        }
+        if entity.get::<CoreBuild>().is_none() {
+            continue;
+        }
+        let Some(pos) = entity.get::<Pos>() else {
+            continue;
+        };
+        let dx = pos.x - x;
+        let dy = pos.y - y;
+        let dist2 = dx * dx + dy * dy;
+        let id = entity.id();
+        let replace = match best {
+            None => true,
+            Some((best_dist, best_entity)) => {
+                dist2 < best_dist || (dist2 == best_dist && id.index() < best_entity.index())
+            }
+        };
+        if replace {
+            best = Some((dist2, id));
+        }
+    }
+    best.map(|(_, entity)| entity)
+}
+
+/// `AIController.getClosestSpawner()`: nearest spawn tile (`Geometry.findClosest`;
+/// ties keep the first, i.e. the spawn order).
+fn closest_spawn_tile(runtime: &UnitRuntime, x: f32, y: f32) -> Option<TilePos> {
+    let mut best: Option<(f32, TilePos)> = None;
+    for &tile in runtime.wave_spawner.get_spawns() {
+        let cx = (tile.x() as f32 + 0.5) * TILE_SIZE;
+        let cy = (tile.y() as f32 + 0.5) * TILE_SIZE;
+        let dx = cx - x;
+        let dy = cy - y;
+        let dist2 = dx * dx + dy * dy;
+        if best.is_none_or(|(best_dist, _)| dist2 < best_dist) {
+            best = Some((dist2, tile));
+        }
+    }
+    best.map(|(_, tile)| tile)
+}
+
+/// `unit.within(Tile spawner, radius)`: distance to the spawn tile centre.
+fn within_spawn(tile: TilePos, x: f32, y: f32, radius: f32) -> bool {
+    let cx = (tile.x() as f32 + 0.5) * TILE_SIZE;
+    let cy = (tile.y() as f32 + 0.5) * TILE_SIZE;
+    let dx = cx - x;
+    let dy = cy - y;
+    dx * dx + dy * dy <= radius * radius
+}
+
+/// `Units.invalidateTarget(target, team, x, y)` (Units.java:1049-1056): dead or
+/// despawned, own team, or a non-targetable unit. No distance check — the
+/// 3-argument `AIController.invalid` passes `Float.MAX_VALUE`.
+fn invalid_target(world: &World, content: &ContentRegistry, team: u8, target: Entity) -> bool {
+    let Some(health) = world.get::<Health>(target) else {
+        return true;
+    };
+    if health.dead {
+        return true;
+    }
+    if world
+        .get::<TeamComp>(target)
+        .is_some_and(|comp| comp.team == team)
+    {
+        return true;
+    }
+    if let Some(comp) = world.get::<UnitTypeComp>(target) {
+        // `UnitType.targetable(unit, targeter)` (UnitType.java:637-639).
+        let targetable = content.unit(comp.type_id).is_some_and(|def| {
+            def.targetable
+                || (def.vulnerable_with_payloads
+                    && world
+                        .get::<crate::entities::comp::unit::comp::UnitPayloads>(target)
+                        .is_some_and(|payloads| payloads.has_payload()))
+        });
+        if !targetable {
+            return true;
+        }
+    }
+    false
+}
+
 /// Picks the unit's movement anchor (nearest enemy building) and its in-range
 /// mount target (nearest enemy unit/building within the unit's range).
 fn acquire_target(
@@ -3374,45 +4419,85 @@ fn face_target(
 ///
 /// The aim point is the `Predict.intercept(unit, target, weapon.bullet)` lead
 /// of the first weapon (`AIController.updateWeapons`, AIController.java:231).
-fn set_mount_targets(
+pub(crate) fn set_mount_targets(
     world: &mut World,
     content: &ContentRegistry,
     entity: Entity,
     target: Option<Entity>,
+    core_override: Option<Entity>,
 ) {
-    let aim = target.and_then(|target| {
-        let src = world.get::<Pos>(entity).copied()?;
-        let dst = world.get::<Pos>(target).copied()?;
-        let src_vel = world
-            .get::<Vel>(entity)
-            .copied()
-            .unwrap_or(Vel { x: 0.0, y: 0.0 });
-        let dst_vel = world
-            .get::<Vel>(target)
-            .copied()
-            .unwrap_or(Vel { x: 0.0, y: 0.0 });
-        let (bullet_speed, keep_velocity) = world
-            .get::<UnitWeapons>(entity)
-            .and_then(|weapons| weapons.weapons.first())
-            .and_then(|weapon| content.bullet(weapon.bullet.id))
-            .map(|bullet| (bullet.speed, bullet.keep_velocity))
-            .unwrap_or((0.0, true));
-        Some(crate::combat::targeting::intercept_positions(
-            (src.x, src.y),
-            (src_vel.x, src_vel.y),
-            (dst.x, dst.y),
-            (dst_vel.x, dst_vel.y),
-            keep_velocity,
-            bullet_speed,
-        ))
-    });
+    let Some(src) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let hit_size = world
+        .get::<HitboxComp>(entity)
+        .map(|hitbox| hitbox.hit_size)
+        .unwrap_or(0.0);
+    let src_vel = world
+        .get::<Vel>(entity)
+        .copied()
+        .unwrap_or(Vel { x: 0.0, y: 0.0 });
+    let target_pos = target.and_then(|target| world.get::<Pos>(target).copied());
+    let target_vel = target.and_then(|target| world.get::<Vel>(target).copied());
+    let core_pos = core_override.and_then(|core| world.get::<Pos>(core).copied());
+    let core_vel = core_override.and_then(|core| world.get::<Vel>(core).copied());
+    // `CommandAI.shouldFire()` (T11): `!hasStance(holdFire)`.
+    let hold_fire = world
+        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+        .is_some_and(|stances| stances.has_name(content, "holdfire"));
     let Some(mut weapons) = world.get_mut::<UnitWeapons>(entity) else {
         return;
     };
-    for mount in &mut weapons.mounts {
-        mount.target = target;
-        mount.shoot = target.is_some();
-        if let Some((x, y)) = aim {
+    let UnitWeapons {
+        weapons: defs,
+        mounts,
+        ..
+    } = &mut *weapons;
+    for (index, mount) in mounts.iter_mut().enumerate() {
+        let Some(weapon) = defs.get(index) else {
+            continue;
+        };
+        let bullet = content.bullet(weapon.bullet.id);
+        let collides_ground = bullet.is_some_and(|bullet| bullet.collides_ground);
+        // `GroundAI.updateMovement` core override (GroundAI.java:40-44): every
+        // controllable ground weapon locks the enemy core.
+        let override_here = core_override.is_some() && collides_ground;
+        let chosen = if override_here { core_override } else { target };
+        mount.target = chosen;
+        let (chosen_pos, chosen_vel) = if override_here {
+            (core_pos, core_vel)
+        } else {
+            (target_pos, target_vel)
+        };
+        // `mount.shoot = mount.target.within(mountX, mountY, wrange + hitSize/2)
+        // && shouldShoot()` (AIController.java:239). The port measures from the
+        // unit centre instead of the (≤ ~15 px away) mount position.
+        let range = weapon.range() + hit_size / 2.0;
+        mount.shoot = !hold_fire
+            && chosen.is_some_and(|_| {
+                chosen_pos.is_some_and(|pos| {
+                    let dx = pos.x - src.x;
+                    let dy = pos.y - src.y;
+                    dx * dx + dy * dy <= range * range
+                })
+            });
+        // `Predict.intercept(unit, mount.target, weapon.bullet)` per mount. A
+        // building target has no `Vel`; Java's intercept degenerates to the
+        // target position there (Predict.java:113-119).
+        if let (Some(_), Some(pos)) = (chosen, chosen_pos) {
+            let vel = chosen_vel.unwrap_or(Vel { x: 0.0, y: 0.0 });
+            let (bullet_speed, keep_velocity) = match bullet {
+                Some(bullet) => (bullet.speed, bullet.keep_velocity),
+                None => (0.0, true),
+            };
+            let (x, y) = crate::combat::targeting::intercept_positions(
+                (src.x, src.y),
+                (src_vel.x, src_vel.y),
+                (pos.x, pos.y),
+                (vel.x, vel.y),
+                keep_velocity,
+                bullet_speed,
+            );
             mount.aim_x = x;
             mount.aim_y = y;
         }
@@ -3493,7 +4578,10 @@ mod tests {
             .first()
             .and_then(|entity| sim.ecs.0.get::<Pos>(*entity).copied())
             .map(|pos| (pos.x, pos.y));
-        for _ in 0..900 {
+        // 1200 ticks: the spawn `unmoving` (30, disarmed) + `invincible` (60)
+        // effects and the 40/90-tick retarget cadence delay the first shots
+        // (G01 T7).
+        for _ in 0..1200 {
             sim.tick().expect("tick");
         }
         let runtime = sim.unit_runtime().expect("runtime");
@@ -3512,6 +4600,104 @@ mod tests {
                 })
             });
         assert!(moved, "spawned unit left its spawn tile");
+    }
+
+    /// G01 T7: `WaveSpawner.doShockwave` (WaveSpawner.java:104-106) kills every
+    /// unit and building of other teams inside `rules.dropZoneRadius` when the
+    /// wave spawns; far-away buildings survive.
+    #[test]
+    fn wave_shockwave_destroys_drop_zone_building() {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let campaign = {
+            let content = &sim.unit_runtime().expect("runtime").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let session = PlaySession::new(Rules {
+            default_team: 1,
+            waves: true,
+            ..Rules::default()
+        });
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        let spawn = block_id(&sim, "spawn");
+        let wall = block_id(&sim, "copper-wall");
+        let index = sim.grid.tiles.index(10, 10);
+        sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
+        // 2 tiles from the spawn corner (inside the 300 px drop zone) and far.
+        for (x, y) in [(12, 10), (60, 60)] {
+            assert!(
+                sim.command(SimCommand::Place {
+                    x,
+                    y,
+                    block: wall,
+                    rotation: 0,
+                    team: 1,
+                    player: None,
+                })
+                .is_ok(),
+                "wall placed at ({x},{y})"
+            );
+        }
+        sim.request_wave_spawn(0);
+        sim.tick().expect("tick");
+        assert!(
+            sim.grid.tiles.get(12, 10).build.is_none(),
+            "the drop-zone wall was destroyed by the shockwave"
+        );
+        assert!(
+            sim.grid.tiles.get(60, 60).build.is_some(),
+            "the far wall survived"
+        );
+    }
+
+    /// G01 T7: `WaveSpawner.spawnEffect` applies `unmoving` (30) and
+    /// `invincible` (60) to every spawned unit (WaveSpawner.java:228-235).
+    #[test]
+    fn spawned_wave_unit_is_invincible() {
+        use crate::entities::comp::unit::comp::StatusComp;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let spawn = block_id(&sim, "spawn");
+        let index = sim.grid.tiles.index(10, 10);
+        sim.grid.tiles.geti_mut(index).overlay = BlockId::new(spawn);
+        sim.set_unit_wave_team(2);
+        sim.request_wave_spawn(0);
+        sim.tick().expect("tick");
+        let runtime = sim.unit_runtime().expect("rt");
+        let entity = *runtime.units.first().expect("wave unit spawned");
+        let unmoving = runtime.content.status_id("unmoving").expect("unmoving");
+        let invincible = runtime.content.status_id("invincible").expect("invincible");
+        let statuses = sim
+            .ecs
+            .0
+            .get::<StatusComp>(entity)
+            .expect("status component");
+        let duration = |status| {
+            statuses
+                .statuses
+                .iter()
+                .find(|entry| entry.effect == status)
+                .map(|entry| entry.duration)
+        };
+        let unmoving_time = duration(unmoving).expect("unmoving applied");
+        let invincible_time = duration(invincible).expect("invincible applied");
+        assert!(
+            (28.0..=30.0).contains(&unmoving_time),
+            "unmoving for 30 ticks, {unmoving_time} left"
+        );
+        assert!(
+            (58.0..=60.0).contains(&invincible_time),
+            "invincible for 60 ticks, {invincible_time} left"
+        );
     }
 
     /// Uninstalled runtime: the wave request and systems are inert (P0 spine).

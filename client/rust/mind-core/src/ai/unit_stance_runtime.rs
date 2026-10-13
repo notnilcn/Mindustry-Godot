@@ -16,6 +16,37 @@ use crate::content::registries::stances::UnitStanceDef;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct StanceBits(pub [u64; 1]);
 
+/// A live unit's active stances (`CommandAI.stances`; G01 T11).
+#[derive(bevy_ecs::component::Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct UnitStancesComp(pub StanceBits);
+
+impl UnitStancesComp {
+    /// `CommandAI.hasStance(stance)` by name.
+    pub fn has_name(&self, content: &ContentRegistry, name: &str) -> bool {
+        content
+            .unit_stance_by_name(name)
+            .is_some_and(|def| self.0.get(def.id))
+    }
+
+    /// Whether any per-item stance is active (`ItemUnitStance.all()` checks).
+    pub fn any_item_stance(&self, content: &ContentRegistry) -> bool {
+        content
+            .items()
+            .iter()
+            .any(|item| self.item_stance(content, item.id))
+    }
+
+    /// `ItemUnitStance.getByItem(item)`: the per-item stance is active
+    /// (`item-<name>`, `UnitStanceDef::new_item`).
+    pub fn item_stance(&self, content: &ContentRegistry, item: crate::content::ItemId) -> bool {
+        content.item(item).is_some_and(|def| {
+            content
+                .unit_stance_by_name(&format!("item-{}", def.name))
+                .is_some_and(|stance| self.0.get(stance.id))
+        })
+    }
+}
+
 impl StanceBits {
     /// An empty mask.
     pub const fn new() -> Self {

@@ -1170,6 +1170,8 @@ mod tests {
         let mut session = PlaySession::new(Rules {
             default_team: 1,
             wave_team: 2,
+            unit_cap: 100,
+            unit_cap_variable: false,
             ..Rules::default()
         });
         session.wavetime = 1234.5;
@@ -1225,6 +1227,8 @@ mod tests {
         let session = PlaySession::new(Rules {
             default_team: 1,
             wave_team: 2,
+            unit_cap: 100,
+            unit_cap_variable: false,
             ..Rules::default()
         });
         let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
@@ -1259,6 +1263,8 @@ mod tests {
             PlaySession::new(Rules {
                 default_team: 1,
                 wave_team: 2,
+                unit_cap: 100,
+                unit_cap_variable: false,
                 ..Rules::default()
             }),
             Campaign::from_registry(&registry, &EmptyNeighborhood),

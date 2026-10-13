@@ -540,9 +540,29 @@ pub fn hit_building(ctx: &mut CombatCtx<'_>, bullet: Entity, target: Entity) -> 
         .block(building.block)
         .map(|def| def.armor * armor_mult * block_armor_mult)
         .unwrap_or(0.0);
+    let tile = building.tile;
+    let team = world_team(ctx.world, target);
     let applied = super::damage::armor::apply_armor_opt(damage, armor, pierce_armor);
     super::damage::area::apply_health(ctx.world, target, applied);
+    // `BuildingComp.damage(Bullet, ..)` -> `BuildDamageEvent` (G01 T15).
+    crate::world::events::push_build_damage(
+        ctx.world,
+        crate::world::events::BuildDamageEvent {
+            x: tile.x(),
+            y: tile.y(),
+            amount: applied,
+            team,
+        },
+    );
     applied
+}
+
+/// The entity's team id (0 without a `TeamComp`).
+fn world_team(world: &bevy_ecs::world::World, entity: Entity) -> u8 {
+    world
+        .get::<crate::entities::comp::TeamComp>(entity)
+        .map(|team| team.team)
+        .unwrap_or(0)
 }
 
 /// `BulletType.hitTile` (`BulletType.java:465-486`): create a fire on enemy
@@ -787,6 +807,7 @@ fn create_splash_damage(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32)
         pierce_armor: def.pierce_armor,
         armor_multiplier: def.armor_multiplier,
         scaled: def.scaled_splash_damage,
+        source_is_bullet: true,
     };
     let _ = super::damage::area::damage_area(
         ctx.world,
