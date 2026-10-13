@@ -11,10 +11,15 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
+use godot::classes::canvas_item_material::BlendMode;
 use godot::classes::mesh::PrimitiveType;
-use godot::classes::{ArrayMesh, Mesh, MeshInstance2D, Node2D, SurfaceTool, Texture2D, Time};
+use godot::classes::{
+    ArrayMesh, CanvasItemMaterial, Mesh, MeshInstance2D, Node2D, SurfaceTool, Texture2D, Time,
+};
 use godot::obj::{NewGd, Singleton};
 use godot::prelude::*;
+
+use mind_core::render::unit_draw::{self, UnitViewState};
 
 use crate::sim_host::MindSimHost;
 
@@ -58,6 +63,15 @@ pub struct UnitRenderer {
     bands: Vec<Option<Gd<Node2D>>>,
     /// One pooled `MeshInstance2D` per `(bucket, atlas page)`.
     nodes: HashMap<(usize, i32), Gd<MeshInstance2D>>,
+    /// Additive hit-flash nodes (`CanvasItemMaterial` BLEND_MODE_ADD), keyed
+    /// `(bucket, page)`; parented to the same band, after the normal nodes.
+    flash_nodes: HashMap<(usize, i32), Gd<MeshInstance2D>>,
+    /// Shared additive material for every flash node.
+    flash_material: Gd<CanvasItemMaterial>,
+    /// Per-unit view state (hit flash from health drops; T5).
+    view: HashMap<u64, UnitViewState>,
+    /// Tick clock of the last `update` (delta ticks for the view lerps).
+    last_tick: f32,
     stats: UnitStats,
 }
 
@@ -72,12 +86,18 @@ impl UnitRenderer {
         let mut resolver = RegionResolver::new(assets);
         let marker = resolver.resolve("scale_marker");
         let sprite_scale = marker.map(|region| 1.0 / region.w.max(1.0)).unwrap_or(1.0);
+        let mut flash_material = CanvasItemMaterial::new_gd();
+        flash_material.set_blend_mode(BlendMode::ADD);
         Self {
             host,
             resolver,
             sprite_scale,
             bands,
             nodes: HashMap::new(),
+            flash_nodes: HashMap::new(),
+            flash_material,
+            view: HashMap::new(),
+            last_tick: 0.0,
             stats: UnitStats::default(),
         }
     }
@@ -93,10 +113,21 @@ impl UnitRenderer {
     /// `drawMech` legs, outline, body, `drawCell`, `drawWeapons`.
     pub fn update(&mut self) {
         let draws = self.host.clone().bind().unit_draws_full();
-        let time = Time::singleton().get_ticks_msec() as f32 / 1000.0;
+        let ticks = Time::singleton().get_ticks_msec() as f32 * 0.06;
+        let delta_ticks = (ticks - self.last_tick).max(0.0);
+        self.last_tick = ticks;
+        let time = ticks / 60.0;
         let mut groups: BTreeMap<(usize, i32), UnitBucket> = BTreeMap::new();
+        let mut flash_groups: BTreeMap<(usize, i32), UnitBucket> = BTreeMap::new();
+        let mut live_units = HashSet::new();
         let mut sprites = 0i64;
         for unit in draws {
+            // `HealthComp` hit flash (`hitTime = 1` on a health drop, decay
+            // `delta / 9`; view-derived, the sim keeps no `hitTime`).
+            let view = self.view.entry(unit.id).or_default();
+            unit_draw::advance_view(view, unit.health, unit.item.is_some(), delta_ticks);
+            let hit_time = view.hit_time;
+            live_units.insert(unit.id);
             let bucket = if unit.low_altitude {
                 1
             } else if unit.flying {
@@ -252,10 +283,7 @@ impl UnitRenderer {
             // `drawBody` (`rotation - 90`; the port draws trimmed sizes, which
             // is what Arc's `Draw.rect(region, x, y)` does for centered trims).
             {
-                let entry = groups
-                    .entry((bucket, body.page))
-                    .or_insert((body.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
+                let quad = UnitQuad {
                     cx: unit.x,
                     cy: unit.y,
                     w: body.w * self.sprite_scale,
@@ -263,8 +291,24 @@ impl UnitRenderer {
                     rot: unit.rotation - 90.0,
                     uv: body.uv,
                     color: 0xffff_ffff,
-                });
+                };
+                let entry = groups
+                    .entry((bucket, body.page))
+                    .or_insert((body.texture.clone(), Vec::new()));
+                entry.1.push(quad);
                 sprites += 1;
+                // `UnitType.applyColor`: `Draw.mixcol(white, hitTime)` — the
+                // port draws the flash as an additive duplicate body quad.
+                if hit_time > 0.01 {
+                    let alpha = (hit_time.clamp(0.0, 1.0) * 255.0) as u32;
+                    let entry = flash_groups
+                        .entry((bucket, body.page))
+                        .or_insert((body.texture.clone(), Vec::new()));
+                    entry.1.push(UnitQuad {
+                        color: 0xffff_ff00 | alpha,
+                        ..quad
+                    });
+                }
             }
             // `drawCell`: `<name>-cell` else `power-cell`, tinted by
             // `UnitType.cellColor`.
@@ -328,9 +372,17 @@ impl UnitRenderer {
             }
         }
 
+        self.view.retain(|id, _| live_units.contains(id));
+
         let live: HashSet<(usize, i32)> = groups.keys().copied().collect();
         for (key, node) in self.nodes.iter_mut() {
             if !live.contains(key) {
+                node.set_visible(false);
+            }
+        }
+        let live_flash: HashSet<(usize, i32)> = flash_groups.keys().copied().collect();
+        for (key, node) in self.flash_nodes.iter_mut() {
+            if !live_flash.contains(key) {
                 node.set_visible(false);
             }
         }
@@ -350,6 +402,37 @@ impl UnitRenderer {
                 // page); the count is page-driven (plan 16 §6.6).
                 band.add_child(&node);
                 self.nodes.insert(key, node.clone());
+                node
+            };
+            let mut node = node;
+            node.set_mesh(&mesh.upcast::<Mesh>());
+            if let Some(texture) = texture {
+                node.set_texture(&texture);
+            }
+            node.set_visible(true);
+        }
+
+        for (key, (texture, quads)) in flash_groups {
+            let Some(mesh) = build_unit_mesh(&quads) else {
+                continue;
+            };
+            let node = if let Some(node) = self.flash_nodes.get(&key) {
+                node.clone()
+            } else {
+                let Some(mut band) = self.bands.get(key.0).and_then(|band| band.clone()) else {
+                    continue;
+                };
+                let mut node = MeshInstance2D::new_alloc();
+                node.set_material(
+                    &self
+                        .flash_material
+                        .clone()
+                        .upcast::<godot::classes::Material>(),
+                );
+                // code-instantiated: one pooled additive node per (unit layer,
+                // atlas page); the count is page-driven (G03 T5).
+                band.add_child(&node);
+                self.flash_nodes.insert(key, node.clone());
                 node
             };
             let mut node = node;

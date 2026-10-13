@@ -25,6 +25,8 @@
 //! Mathf.absin(Time.time, max(f*5, 1), 1-f))` with Arc's
 //! `absin(in, scl, mag) = (sin(in/(scl*2))*mag + mag)/2`.
 
+use crate::render::drawf;
+
 /// `MechComp.walkExtend` (`MechComp.java:75-88`).
 ///
 /// `raw = walkTime % (stride * 4)`; scaled divides by the stride, otherwise the
@@ -159,6 +161,102 @@ pub fn flying_shadow_offset(elevation: f32) -> (f32, f32) {
     (-12.0 * e, -13.0 * e)
 }
 
+/// One unit's view-only state (G03 T5; the port has no sim `hitTime`/`itemTime`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct UnitViewState {
+    /// `HealthComp.hitTime` view mirror (1 on a health drop, `-delta/9`/tick).
+    pub hit_time: f32,
+    /// `ItemsComp.itemTime` view mirror (`lerpDelta(.., 0.05)`).
+    pub item_time: f32,
+    /// Last health seen (drives the hit flash).
+    pub last_health: f32,
+    /// Whether `last_health` has been seeded (the first frame never flashes).
+    pub first: bool,
+}
+
+/// Per-frame view advance (`HealthComp.java:9,26,75`, `ItemsComp.java:18`):
+/// a health drop sets the 9-tick hit flash (`hitTime = 1`, decay
+/// `Time.delta / 9`); `itemTime` lerps toward `has_item` by `lerpDelta(.., 0.05)`.
+pub fn advance_view(state: &mut UnitViewState, health: f32, has_item: bool, delta_ticks: f32) {
+    state.hit_time = (state.hit_time - delta_ticks / 9.0).max(0.0);
+    if !state.first {
+        state.first = true;
+        state.last_health = health;
+    } else if health < state.last_health - 0.001 {
+        state.hit_time = 1.0;
+        state.last_health = health;
+    } else {
+        state.last_health = health;
+    }
+    let target = f32::from(u8::from(has_item));
+    let t = 1.0 - (1.0f32 - 0.05).powf(delta_ticks);
+    state.item_time += (target - state.item_time) * t;
+}
+
+/// `Angles.trnsx/trnsy(angle, x, y)` (rotate a 2D point).
+pub fn rotate_point(angle_deg: f32, x: f32, y: f32) -> (f32, f32) {
+    let r = angle_deg.to_radians();
+    (r.cos() * x - r.sin() * y, r.sin() * x + r.cos() * y)
+}
+
+/// `UnitEngine.draw` (`UnitType.java:2018-2050`): `((outer x, y, r),
+/// (inner x, y, r))`; `engine` is `(x, y, radius, rotation)`. `None` when the
+/// elevation scale is ~0.
+pub type EngineCircles = ((f32, f32, f32), (f32, f32, f32));
+
+pub fn engine_circles(
+    x: f32,
+    y: f32,
+    rotation: f32,
+    elevation: f32,
+    use_elev: bool,
+    engine: (f32, f32, f32, f32),
+    time: f32,
+) -> Option<EngineCircles> {
+    let scale = if use_elev { elevation } else { 1.0 };
+    if scale <= 0.0001 {
+        return None;
+    }
+    let rot = rotation - 90.0;
+    let (ex, ey) = rotate_point(rot, engine.0 * scale, engine.1 * scale);
+    let (ex, ey) = (x + ex, y + ey);
+    let rad = (engine.2 + drawf::absin(time, 2.0, engine.2 / 4.0)) * scale;
+    let (ix, iy) = rotate_point(rot + engine.3, rad / 4.0, 0.0);
+    Some(((ex, ey, rad), (ex - ix, ey - iy, rad / 2.0)))
+}
+
+/// `UnitType.drawMining` (`UnitType.java:1599-1631`): `(emitter, target)`
+/// world points with the `absin` swing and the tile shimmer.
+pub fn mine_beam_points(
+    x: f32,
+    y: f32,
+    rotation: f32,
+    offset: f32,
+    tile: (i16, i16),
+    time: f32,
+) -> ((f32, f32), (f32, f32)) {
+    let focus = offset + drawf::absin(time, 1.1, 0.5);
+    let (fx, fy) = drawf::trns(rotation, focus);
+    let (tx, ty) = (tile.0 as f32 * 8.0, tile.1 as f32 * 8.0);
+    (
+        (x + fx, y + fy),
+        (
+            tx + drawf::sin_scl(time + 48.0, 12.0, 1.0),
+            ty + drawf::sin_scl(time + 48.0, 14.0, 1.0),
+        ),
+    )
+}
+
+/// `UnitType.drawMining` beam colour: `lerp(lightGray, white, 0.7 +
+/// absin(time, 0.5, 0.3))` in `[f32; 4]`.
+pub fn mine_beam_color(time: f32) -> [f32; 4] {
+    drawf::lerp(
+        drawf::pal::LIGHT_GRAY,
+        [1.0, 1.0, 1.0, 1.0],
+        0.7 + drawf::absin(time, 0.5, 0.3),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +339,46 @@ mod tests {
         // f = 0 -> `t = absin(time, 1, 1)`: time 0 -> (sin(0) + 1)/2 = 0.5,
         // so a white team gives a half-intensity grey.
         assert_eq!(cell_color(0xffffffff, 0.0, 0.0), 0x808080ff);
+    }
+
+    #[test]
+    fn hit_flash_decays_in_nine_ticks() {
+        let mut state = UnitViewState::default();
+        advance_view(&mut state, 10.0, false, 1.0);
+        assert_eq!(state.hit_time, 0.0);
+        advance_view(&mut state, 8.0, false, 1.0);
+        assert!((state.hit_time - 1.0).abs() < 1e-4, "health drop flashes");
+        advance_view(&mut state, 8.0, false, 4.5);
+        assert!(
+            (state.hit_time - 0.5).abs() < 1e-4,
+            "half the flash after 4.5 ticks: {}",
+            state.hit_time
+        );
+        advance_view(&mut state, 8.0, false, 4.5);
+        assert_eq!(state.hit_time, 0.0);
+    }
+
+    #[test]
+    fn engine_circles_alpha_default() {
+        // `alpha` default `engineOffset 5`, `engineSize 2.5`; rotation 90 => rot 0.
+        let Some((outer, _inner)) =
+            engine_circles(10.0, 20.0, 90.0, 1.0, true, (0.0, -5.0, 2.5, -90.0), 0.0)
+        else {
+            panic!("engine circle");
+        };
+        assert!((outer.0 - 10.0).abs() < 1e-4);
+        assert!(
+            (outer.1 - 15.0).abs() < 1e-4,
+            "engine sits 5 down: {outer:?}"
+        );
+        assert!((outer.2 - 2.8125).abs() < 1e-4, "radius pulse: {outer:?}");
+    }
+
+    #[test]
+    fn mine_beam_target_swing() {
+        // time 0: ex = tx*8 + sin(48/12)*1.
+        let (_emitter, target) = mine_beam_points(0.0, 0.0, 0.0, 4.0, (130, 48), 0.0);
+        assert!((target.0 - (130.0 * 8.0 - 0.756_802_4)).abs() < 1e-3);
+        assert!((target.1 - (48.0 * 8.0 - 0.283_626_5)).abs() < 1e-3);
     }
 }

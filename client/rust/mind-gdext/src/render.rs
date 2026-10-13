@@ -59,6 +59,7 @@ mod shaders;
 mod shadow;
 mod shields;
 mod status;
+mod unit_overlays;
 mod units;
 
 pub use blocks::BlockRenderer;
@@ -247,6 +248,10 @@ pub struct MindWorldRenderer {
     build_beam: Option<Gd<build_beam::BuildBeamOverlay>>,
     /// Bullet pass (`Layer.bullet` band; G03 T4).
     bullets: Option<Gd<bullets::BulletRenderer>>,
+    /// Unit effects overlay (mining/items; `Layer.flyingUnit`; G03 T5).
+    unit_overlay: Option<Gd<unit_overlays::UnitOverlay>>,
+    /// Unit engines + trails (`Layer.flyingUnitLow`; G03 T5).
+    unit_engines: Option<Gd<unit_overlays::UnitOverlay>>,
     env: Option<EnvRenderer>,
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
@@ -290,6 +295,8 @@ impl INode2D for MindWorldRenderer {
             plan_overlay: None,
             build_beam: None,
             bullets: None,
+            unit_overlay: None,
+            unit_engines: None,
             env: None,
             fog: None,
             overlays: None,
@@ -576,6 +583,26 @@ impl MindWorldRenderer {
             // the pipeline, not by content.
             bullet_band.clone().add_child(&node);
             self.bullets = Some(node.clone());
+        }
+        // Mining beam + carried items at `Layer.flyingUnit` (G03 T5).
+        if let Some(unit_band) = self.band_node_at(BandKey::base(Layer::FlyingUnit)) {
+            let mut node = unit_overlays::UnitOverlay::new_alloc();
+            node.set_name("UnitOverlay");
+            node.bind_mut().mode = unit_overlays::OverlayMode::Effects;
+            // code-instantiated: one overlay pass; the node count is fixed by
+            // the pipeline, not by content.
+            unit_band.clone().add_child(&node);
+            self.unit_overlay = Some(node.clone());
+        }
+        // Engines + trails at `Layer.flyingUnitLow` (G03 T5).
+        if let Some(unit_band) = self.band_node_at(BandKey::base(Layer::FlyingUnitLow)) {
+            let mut node = unit_overlays::UnitOverlay::new_alloc();
+            node.set_name("UnitEngines");
+            node.bind_mut().mode = unit_overlays::OverlayMode::Engines;
+            // code-instantiated: one engine/trail pass; the node count is fixed
+            // by the pipeline, not by content.
+            unit_band.clone().add_child(&node);
+            self.unit_engines = Some(node.clone());
         }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.env = Some(EnvRenderer::new(light_band));

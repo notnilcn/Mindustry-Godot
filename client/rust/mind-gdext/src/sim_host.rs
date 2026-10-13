@@ -52,6 +52,16 @@ pub struct UnitDraw {
     pub mech: Option<MechDraw>,
     /// Live weapon mounts (`UnitWeapons`).
     pub weapons: Vec<WeaponDraw>,
+    /// `EntitySeq.0` (view-state key; entities are reused).
+    pub id: u64,
+    /// `MinerComp.mine_tile` when `MinerComp.mining` (world tile).
+    pub mine_tile: Option<(i16, i16)>,
+    /// `ItemsComp.item` as `(item name, amount)`.
+    pub item: Option<(String, i32)>,
+    /// Whether this is the local player's unit.
+    pub is_player: bool,
+    /// Absolute health (`Health.health`).
+    pub health: f32,
 }
 
 /// `MechComp` walk state resolved for drawing (`drawMech`).
@@ -2422,6 +2432,40 @@ impl MindSimHost {
                             .collect()
                     })
                     .unwrap_or_default();
+                let id = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::ecs::EntitySeq>(*entity)
+                    .map(|seq| seq.0)
+                    .unwrap_or(0);
+                let mine_tile = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::MinerComp>(*entity)
+                    .filter(|miner| miner.mining)
+                    .and_then(|miner| miner.mine_tile.map(|pos| (pos.x(), pos.y())));
+                let item = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::ItemsComp>(*entity)
+                    .and_then(|items| items.item)
+                    .and_then(|(item, amount)| {
+                        self.content_snapshot
+                            .as_ref()
+                            .and_then(|content| content.item(item))
+                            .map(|item| (item.name.clone(), amount))
+                    });
+                let is_player = self.sim.player_unit() == Some(*entity);
+                let health = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<Health>(*entity)
+                    .map(|health| health.health)
+                    .unwrap_or(0.0);
                 Some(UnitDraw {
                     x: pos.x,
                     y: pos.y,
@@ -2435,6 +2479,11 @@ impl MindSimHost {
                     hit_size: def.hit_size,
                     mech,
                     weapons,
+                    id,
+                    mine_tile,
+                    item,
+                    is_player,
+                    health,
                 })
             })
             .collect()
