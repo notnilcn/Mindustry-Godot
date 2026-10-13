@@ -1115,6 +1115,26 @@ impl MindAudio {
         let _ = self.play_oneshot(name, scaled, pitch, 0.0);
     }
 
+    /// T14: positional one-shot forced onto the UI pool
+    /// (`configureSound.at(build.x, build.y, 1, 1, control.sound.uiBus)`).
+    #[func]
+    pub fn play_at_ui(&mut self, name: GString, x: f64, y: f64, volume: f64, pitch: f64) {
+        let name = name.to_string();
+        let listener = self.listener();
+        let scaled =
+            calc_falloff(x as f32, y as f32, listener, 0.0) * self.sfx_scale() * volume as f32;
+        if scaled < MIN_PLAY_VOLUME {
+            return;
+        }
+        let Some(stream) = self.streams.sound(&name, false) else {
+            self.log_missing(&name);
+            return;
+        };
+        if let Some(pool) = self.pool.as_mut() {
+            let _ = pool.play_ui(stream, scaled, pitch as f32);
+        }
+    }
+
     /// Debug loop injection (plan 18 §7c step 7).
     #[func]
     pub fn debug_emit_loop(&mut self, sound: GString, x: f64, y: f64, volume: f64) {

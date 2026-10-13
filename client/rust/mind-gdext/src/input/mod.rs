@@ -524,7 +524,7 @@ impl MindInput {
                         node.set("visible", &(!visible).to_variant());
                     }
                 }
-                Effect::OpenBlockConfig { screen, spec, .. } => {
+                Effect::OpenBlockConfig { x, y, screen, spec } => {
                     let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH)
                     else {
                         continue;
@@ -536,6 +536,22 @@ impl MindInput {
                             GString::from(spec.as_str()).to_variant(),
                         ],
                     );
+                    // G07 T14: `InputHandler.java:1985-1993`
+                    // `build.block.configureSound.at(build.x, build.y, 1, 1,
+                    // control.sound.uiBus)`. Tile centre (size-1 blocks);
+                    // `block_offset` would refine multi-tile blocks.
+                    if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
+                        audio.call(
+                            "play_at_ui",
+                            &[
+                                GString::from("click").to_variant(),
+                                (f64::from(x) * 8.0 + 4.0).to_variant(),
+                                (f64::from(y) * 8.0 + 4.0).to_variant(),
+                                1.0.to_variant(),
+                                1.0.to_variant(),
+                            ],
+                        );
+                    }
                 }
                 Effect::OpenBlockInventory {
                     x,

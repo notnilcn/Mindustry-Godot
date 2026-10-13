@@ -2633,12 +2633,76 @@ impl Sim {
         let Some(carrier) = self.player_unit() else {
             return false;
         };
-        match kind {
+        // The drop sound needs the payload about to leave the stack
+        // (`PayloadComp.playPayloadDropSound`), read before the drop.
+        let dropped = if kind == 2 {
+            self.ecs
+                .0
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                .and_then(|payloads| payloads.stack.last().copied())
+        } else {
+            None
+        };
+        let carrier_pos = self.ecs.0.get::<Pos>(carrier).map(|pos| (pos.x, pos.y));
+        let changed = match kind {
             0 => self.payload_pickup_unit(carrier, x, y, target),
             1 => self.payload_pickup_build(carrier, x, y),
             2 => self.payload_drop(carrier, x, y),
             _ => false,
+        };
+        // G07 T14: `PayloadComp.pickup`/`playPayloadDropSound` sounds.
+        if changed && let Some(audio) = self.ecs.0.get_resource::<AudioSinkRes>().cloned() {
+            let (cx, cy) = carrier_pos.unwrap_or((x, y));
+            let fx = self
+                .rng_streams
+                .next_float(crate::determinism::RngStream::Fx);
+            let at = |sound: crate::audio::SoundId, pitch: f32| {
+                audio.emit(crate::audio::AudioEvent::at(
+                    sound, cx, cy, pitch, 1.0, true,
+                ));
+            };
+            match kind {
+                // `PayloadComp.pickup(Unit)` -> `payloadPickup.at(self, random(0.9, 1.1))`.
+                0 => at(crate::audio::SoundId::PAYLOAD_PICKUP, 0.9 + fx * 0.2),
+                // `PayloadComp.pickup(Building)` -> pitch 1 (`PayloadComp.java:117`).
+                1 => at(crate::audio::SoundId::PAYLOAD_PICKUP, 1.0),
+                2 => {
+                    // Size: unit `hitSize`, build `block.size * tilesize`
+                    // (`Payload.size()`). Deviation: the port cannot tell a
+                    // ground placement from an acceptor hand-off, so the
+                    // drop-size rule covers both.
+                    let size = match dropped {
+                        Some(crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                            type_id,
+                            ..
+                        }) => self
+                            .unit_runtime()
+                            .and_then(|runtime| runtime.content.unit(type_id))
+                            .map(|def| def.hit_size)
+                            .unwrap_or(0.0),
+                        Some(crate::entities::comp::unit::comp::CarriedPayload::Build {
+                            block,
+                            ..
+                        }) => self
+                            .unit_runtime()
+                            .and_then(|runtime| runtime.content.block(block))
+                            .map(|def| def.size as f32 * 8.0)
+                            .unwrap_or(0.0),
+                        None => 0.0,
+                    };
+                    let sound = if size <= 12.0 {
+                        crate::audio::SoundId::PAYLOAD_DROP1
+                    } else if size <= 20.0 {
+                        crate::audio::SoundId::PAYLOAD_DROP2
+                    } else {
+                        crate::audio::SoundId::PAYLOAD_DROP3
+                    };
+                    at(sound, 0.9 + fx * 0.2);
+                }
+                _ => {}
+            }
         }
+        changed
     }
 
     /// `InputHandler.requestUnitPayload` + `PayloadComp.canPickup(Unit)`.

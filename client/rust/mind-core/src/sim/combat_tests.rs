@@ -2315,3 +2315,55 @@ fn destroyed_wall_emits_destroy_sound() {
         "a destroyed wall must not play place/break sounds: {events:?}"
     );
 }
+
+/// G07 T14: payload pickup/drop sounds (`PayloadComp.java:107,117,145,203`).
+#[test]
+fn payload_commands_emit_sounds() {
+    use crate::audio::{AudioEvent, SharedAudioLog, SoundId};
+
+    let mut sim = live_sim(48);
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let _mega = sim
+        .spawn_player_unit("mega", 1, 100.0, 100.0, 0.0)
+        .expect("mega");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 110.0, 100.0, 0.0)
+        .expect("dagger");
+    let seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    assert!(
+        sim.apply_payload_command(0, 0.0, 0.0, Some(seq)),
+        "the dagger is picked up"
+    );
+    let events = log.events();
+    assert!(
+        events.iter().any(|ticked| matches!(
+            &ticked.event,
+            AudioEvent::At { sound, pitch, .. }
+                if *sound == SoundId::PAYLOAD_PICKUP && (0.9..=1.1).contains(pitch)
+        )),
+        "pickup sound: {events:?}"
+    );
+
+    log.clear();
+    assert!(
+        sim.apply_payload_command(2, 100.0, 100.0, None),
+        "the payload is dropped"
+    );
+    let events = log.events();
+    // Dagger hitSize 8 <= 12 -> payloadDrop1.
+    assert!(
+        events.iter().any(|ticked| matches!(
+            &ticked.event,
+            AudioEvent::At { sound, .. } if *sound == SoundId::PAYLOAD_DROP1
+        )),
+        "drop sound: {events:?}"
+    );
+}
