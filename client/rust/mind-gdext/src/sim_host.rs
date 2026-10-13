@@ -2024,6 +2024,77 @@ impl MindSimHost {
             .collect()
     }
 
+    /// `InputHandler.rebuildArea` (B drag): re-queues team ghost plans in the
+    /// rect. Returns the queued count.
+    pub fn queue_team_rebuild(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) -> usize {
+        self.sim.queue_team_rebuild(x1, y1, x2, y2)
+    }
+
+    /// `InputHandler.removeSelection` plan half (right drag): drops queued
+    /// player plans and team ghosts overlapping the clamped rect.
+    pub fn remove_plans_in(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, max_length: i32) {
+        self.sim.remove_plans_in(x1, y1, x2, y2, max_length);
+    }
+
+    /// Playtest seam: the player team's ghost rebuild plans
+    /// (`[{x,y,block,rotation}]`).
+    #[func]
+    pub fn team_ghost_plans_json(&self) -> GString {
+        let team = self.player_team();
+        let plans: Vec<serde_json::Value> = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .and_then(|campaign| {
+                campaign
+                    .session
+                    .teams
+                    .get_or_null(mind_core::ecs::TeamId(team))
+            })
+            .map(|data| {
+                data.plans
+                    .iter()
+                    .map(|plan| {
+                        serde_json::json!({
+                            "x": plan.x,
+                            "y": plan.y,
+                            "block": self.sim.block_name_of(plan.block),
+                            "rotation": plan.rotation,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        GString::from(serde_json::Value::Array(plans).to_string().as_str())
+    }
+
+    /// Playtest seam: kills a building (`Health.health = 0`); the next tick's
+    /// `resolve_deaths` destroys it and pushes the ghost plan.
+    #[func]
+    pub fn debug_kill_building(&mut self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(entity) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return false;
+        };
+        let Some(mut health) = self
+            .sim
+            .ecs
+            .0
+            .get_mut::<mind_core::entities::comp::Health>(entity)
+        else {
+            return false;
+        };
+        health.health = 0.0;
+        true
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {

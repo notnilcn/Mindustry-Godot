@@ -1320,13 +1320,37 @@ impl DesktopBridge {
 
     /// Key-release bindings (`DesktopInput.pollInputPlayer` release half).
     fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
-        if bindings.name(ids::SCHEMATIC_SELECT) == Some(code)
-            && self.schem_start.is_some()
-            && self.drag.is_none()
-        {
-            self.finish_schematic_copy(bindings);
+        let schematic = bindings.name(ids::SCHEMATIC_SELECT) == Some(code);
+        let rebuild = bindings.name(ids::REBUILD_SELECT) == Some(code);
+        if !(schematic || rebuild) || self.schem_start.is_none() || self.drag.is_some() {
+            return;
         }
-        // T7 adds the `rebuild_select` release here.
+        if schematic {
+            self.finish_schematic_copy(bindings);
+        } else {
+            self.finish_rebuild_select(bindings);
+        }
+    }
+
+    /// `keyRelease(rebuildSelect)` (`InputHandler.java:2318-2330`): queue the
+    /// team ghost plans overlapping the B-selection. (The `tryRepairDerelict`
+    /// scan, `InputHandler.java:2331-2341`, is deferred: G02 T8.)
+    fn finish_rebuild_select(&mut self, bindings: &BindingState) {
+        let Some(start) = self.schem_start else {
+            return;
+        };
+        let Some(end) = self.raw_cursor_tile() else {
+            return;
+        };
+        if let Some(mut host) = self.host.clone() {
+            let _ = host
+                .bind_mut()
+                .queue_team_rebuild(start.0, start.1, end.0, end.1);
+        }
+        // `if(!keyDown(schematicSelect)){ schemX = schemY = -1 }`.
+        if !self.key_down(bindings, ids::SCHEMATIC_SELECT) {
+            self.schem_start = None;
+        }
     }
 
     /// `BuildingComp.configure` -> `Block.lastConfig` (`Block.java:827-832`):
@@ -1781,16 +1805,30 @@ impl DesktopBridge {
             None
         };
         let mut commands: Vec<SimCommand> = Vec::new();
+        // `InputHandler.removeSelection` clamps the rect to `maxLength` (100;
+        // 64 with F held for the cut, `DesktopInput.java:789`).
+        let max_length = if self.key_down(bindings, ids::SCHEMATIC_SELECT) {
+            64
+        } else {
+            100
+        };
+        let r = mind_core::input::placement::normalize_area(
+            drag.start.0,
+            drag.start.1,
+            drag.last.0,
+            drag.last.1,
+            0,
+            false,
+            max_length,
+        );
         {
             let guard = host.bind();
             let world = HostWorld {
                 grid: guard.grid(),
                 content: guard.content_registry(),
             };
-            let (x1, x2) = (drag.start.0.min(drag.last.0), drag.start.0.max(drag.last.0));
-            let (y1, y2) = (drag.start.1.min(drag.last.1), drag.start.1.max(drag.last.1));
-            'outer: for y in y1..=y2 {
-                for x in x1..=x2 {
+            'outer: for y in r.y..=r.y2 {
+                for x in r.x..=r.x2 {
                     if commands.len() >= DRAG_TILE_CAP {
                         break 'outer;
                     }
@@ -1812,6 +1850,17 @@ impl DesktopBridge {
         }
         self.enqueue_commands(&commands);
         self.controller.state.place_mode = PlaceMode::None;
+        // `removeSelection` plan half (`InputHandler.java:1905-1935`): drop the
+        // player's queued plans and the team ghosts inside the rect.
+        if let Some(mut host) = self.host.clone() {
+            host.bind_mut().remove_plans_in(
+                drag.start.0,
+                drag.start.1,
+                drag.last.0,
+                drag.last.1,
+                max_length,
+            );
+        }
         if let Some((end, plans)) = cut {
             self.adopt_select_plans(plans, end);
         }
