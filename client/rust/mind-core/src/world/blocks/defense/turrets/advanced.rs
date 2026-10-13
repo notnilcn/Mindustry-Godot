@@ -22,9 +22,11 @@ use std::collections::BTreeMap;
 
 use bevy_ecs::entity::Entity;
 
+use crate::audio::math::AudioRng;
 use crate::combat::bullet::{Bullet, BulletSpawn, CombatCtx};
 use crate::combat::targeting::TargetQueries;
 use crate::content::registries::bullets::BulletDef;
+use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, LiquidId, StatusId};
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
@@ -1082,6 +1084,13 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         shoot_duration: 0.0,
         firing_move_fract: 1.0,
         build_speed: 1.0,
+        shoot_sound: SoundId::SHOOT_DUO,
+        shoot_sound_volume: 1.0,
+        charge_sound: SoundId::NONE,
+        loop_sound: SoundId::NONE,
+        loop_sound_volume: 0.5,
+        sound_pitch_min: 0.9,
+        sound_pitch_max: 1.1,
     }
 }
 
@@ -1761,6 +1770,15 @@ pub fn update_point_defense(
         } else if let Some(mut bullet) = ctx.world.get_mut::<Bullet>(target) {
             bullet.damage -= real;
         }
+        // `PointDefenseTurret.java:98`: `shootSound.at(x + Tmp.v1.trns(rotation,
+        // shootLength), y + .., Mathf.random(0.9f, 1.1f))`.
+        let sx = x + trnsx(state.rotation, config.shoot_length, 0.0);
+        let sy = y + trnsy(state.rotation, config.shoot_length, 0.0);
+        let pitch = {
+            let mut rng = crate::audio::sim::FxAudioRng { rng: &mut *ctx.rng };
+            0.9 + rng.next_f32() * 0.2
+        };
+        crate::audio::sim::emit_turret_shoot(ctx.audio, config.shoot_sound, sx, sy, 1.0, pitch);
         state.reload_counter = 0.0;
         state.total_shots += 1;
         state.any = true;
