@@ -95,6 +95,10 @@ pub struct ContentIndex {
     pub item_names: Vec<String>,
     /// Block name → dense id (`ContentRegistry::block_id`).
     pub block_ids: std::collections::HashMap<String, u16>,
+    /// Unit name → dense id (`ContentRegistry::unit_id`; `UnitCountObjective`).
+    pub unit_ids: std::collections::HashMap<String, u16>,
+    /// Dense unit id → name (id-indexed; `ContentRegistry::units` order).
+    pub unit_names: Vec<String>,
 }
 
 /// Spawns runtime buildings for [`WorldCtx`] tile ops.
@@ -1053,6 +1057,16 @@ impl Sim {
                 .block_ids
                 .insert(block.name.clone(), block.id.index() as u16);
         }
+        for unit in content.units() {
+            content_index
+                .unit_ids
+                .insert(unit.name.clone(), unit.id.index() as u16);
+        }
+        content_index.unit_names = content
+            .units()
+            .iter()
+            .map(|unit| unit.name.clone())
+            .collect();
         self.ecs.0.insert_resource(content_index);
         self.ecs.0.insert_resource(table);
         self.ecs.0.init_resource::<BuildRules>();

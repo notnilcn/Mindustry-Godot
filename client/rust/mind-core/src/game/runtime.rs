@@ -32,7 +32,7 @@ use crate::content::registries::blocks::BlockFlag;
 use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId};
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
-use crate::entities::comp::{Health, Pos, TeamComp};
+use crate::entities::comp::{Building, Health, Pos, TeamComp};
 use crate::game::State;
 use crate::math::ArcRand;
 use crate::render::g3d::grid::PlanetGrid;
@@ -536,6 +536,9 @@ pub fn objectives_tick_system(world: &mut World) {
         timer_multiplier: runtime.session.rules.objective_timer_multiplier,
     };
     let rules_snapshot = runtime.session.rules.clone();
+    let command_mode = world
+        .get_resource::<ObjectiveInputState>()
+        .is_some_and(|state| state.command_mode_satisfied);
     let completed = {
         let env = RuntimeObjectiveEnv {
             rules: &rules_snapshot,
@@ -544,19 +547,47 @@ pub fn objectives_tick_system(world: &mut World) {
             stats: &runtime.session.stats,
             world,
             index: world.get_resource::<ContentIndex>(),
+            command_mode_satisfied: command_mode,
         };
-        runtime
-            .session
-            .objectives
-            .update(&env, &params, 1.0 / TICKS_PER_SECOND)
+        // `Time.delta` is one per 60 Hz tick; `TimerObjective.duration` is in
+        // ticks (`MapObjectives.java:516-540`).
+        runtime.session.objectives.update(&env, &params, 1.0)
     };
+    let completed_any = !completed.is_empty();
     for index in completed {
         runtime
             .session
             .objectives
             .complete(index, &mut runtime.session.rules);
     }
+    // Persist the transient Timer `countup`/`completed` state back into the
+    // rules so saves carry it (Java serializes both). The full clone runs when
+    // something completed or once a second; a save between two copies loses
+    // <1 s of a timer.
+    runtime.session.objectives.sync_timers_into_data();
+    if completed_any || runtime.ticks % 60 == 0 {
+        runtime.session.rules.objectives = runtime.session.objectives.data().clone();
+    }
     world.insert_resource(runtime);
+}
+
+/// Input-side facts the objective executor needs (`CommandModeObjective`,
+/// `MapObjectives.java:671-687`: `control.input.selectedUnits.contains(u ->
+/// u.isCommandable() && u.command().hasCommand())`).
+#[derive(bevy_ecs::prelude::Resource, Debug, Clone, Copy, Default)]
+pub struct ObjectiveInputState {
+    /// Whether the current selection satisfies the command-mode objective.
+    pub command_mode_satisfied: bool,
+}
+
+impl crate::sim::Sim {
+    /// Setter for the input layer (G08): call every frame with the current
+    /// selection state; inserts/updates the [`ObjectiveInputState`] resource.
+    pub fn set_command_mode_satisfied(&mut self, value: bool) {
+        self.ecs.0.insert_resource(ObjectiveInputState {
+            command_mode_satisfied: value,
+        });
+    }
 }
 
 /// Live-world objective environment: rules flags/`researched`, the session
@@ -568,6 +599,8 @@ struct RuntimeObjectiveEnv<'a> {
     stats: &'a GameStats,
     world: &'a World,
     index: Option<&'a ContentIndex>,
+    /// `control.input.selectedUnits` command-mode fact (`ObjectiveInputState`).
+    command_mode_satisfied: bool,
 }
 
 impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
@@ -613,12 +646,39 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
             .unwrap_or(0)
     }
 
-    fn unit_count(&self, _team: u8, _unit: &str) -> i32 {
-        0
+    /// `state.rules.defaultTeam.data().countType(unit)` (`UnitCountObjective`,
+    /// `MapObjectives.java:470`): live units of `team` and `unit` whose
+    /// `UnitCore.dead` is false (`Teams.countType` counts live units).
+    fn unit_count(&self, team: u8, unit: &str) -> i32 {
+        let Some(index) = self.index else {
+            return 0;
+        };
+        let Some(&unit_id) = index.unit_ids.get(unit) else {
+            return 0;
+        };
+        let mut count = 0;
+        for entity_ref in self.world.iter_entities() {
+            if entity_ref
+                .get::<UnitTypeComp>()
+                .is_none_or(|comp| comp.type_id.raw() != unit_id)
+            {
+                continue;
+            }
+            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+                continue;
+            }
+            if entity_ref.get::<UnitCore>().is_some_and(|core| core.dead) {
+                continue;
+            }
+            count += 1;
+        }
+        count
     }
 
+    /// `state.stats.enemyUnitsDestroyed` (`Logic` `UnitDestroyEvent`,
+    /// `Logic.java:218-226`).
     fn enemy_units_destroyed(&self) -> i32 {
-        0
+        self.stats.enemy_units_destroyed
     }
 
     fn objective_flag(&self, flag: &str) -> bool {
@@ -631,7 +691,28 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
             .map_or(0, |data| data.cores.len())
     }
 
-    fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
+    /// `world.build(x, y)`: the building whose footprint covers the tile
+    /// (`MapObjectives.java:604`; `World.build`).
+    fn block_at(&self, x: i32, y: i32) -> Option<(String, u8)> {
+        let table = self.world.get_resource::<BlockTable>()?;
+        for entity_ref in self.world.iter_entities() {
+            let Some(building) = entity_ref.get::<Building>() else {
+                continue;
+            };
+            let Some(team) = entity_ref.get::<TeamComp>() else {
+                continue;
+            };
+            let Some(inst) = table.instance(building.block) else {
+                continue;
+            };
+            let size = inst.def.size.max(1);
+            let off = (size - 1) / 2;
+            let bx = i32::from(building.tile.x()) - off;
+            let by = i32::from(building.tile.y()) - off;
+            if x >= bx && x < bx + size && y >= by && y < by + size {
+                return Some((inst.name.clone(), team.team));
+            }
+        }
         None
     }
 
@@ -639,8 +720,10 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
         false
     }
 
+    /// The `MindInput` command-mode selection fact (`ObjectiveInputState`,
+    /// set by G08 through `Sim::set_command_mode_satisfied`).
     fn command_mode_satisfied(&self) -> bool {
-        false
+        self.command_mode_satisfied
     }
 }
 
@@ -1731,6 +1814,67 @@ mod tests {
         assert_eq!(
             runtime.session.wave, 1,
             "Java runs the wave regardless of timer"
+        );
+    }
+
+    /// T4: `RuntimeObjectiveEnv.block_at` resolves a live building through its
+    /// footprint; a `DestroyBlock` objective for a duo at (10,10) team 2 is not
+    /// complete while the duo stands and completes after the break.
+    #[test]
+    fn runtime_block_at_reports_building() {
+        use crate::command::Command;
+        use crate::content::BlockId;
+
+        let registry = content();
+        let campaign = campaign(&registry);
+        let objectives: crate::io::json::objectives::MapObjectives = serde_json::from_str(
+            r#"[{"class":"DestroyBlock","pos":{"x":10,"y":10},"team":2,"block":"duo"}]"#,
+        )
+        .expect("objectives json");
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            objectives,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.objectives =
+            crate::game::map_objectives::MapObjectivesRuntime::from_rules(&session.rules);
+
+        let mut sim = crate::sim::Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        let duo = sim.content().id("duo").expect("duo");
+        assert!(
+            sim.place_for_team(10, 10, duo, 0, 2),
+            "duo placed on team 2"
+        );
+        let _ = sim.set_phase(State::Playing);
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        sim.tick().expect("tick");
+        {
+            let runtime = sim
+                .ecs
+                .0
+                .get_resource::<CampaignRuntime>()
+                .expect("runtime");
+            assert!(
+                !runtime.session.objectives.is_completed(0),
+                "duo still stands"
+            );
+        }
+        sim.apply(Command::Break { x: 10, y: 10 }).expect("break");
+        sim.tick().expect("tick");
+        let runtime = sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .expect("runtime");
+        assert!(
+            runtime.session.objectives.is_completed(0),
+            "duo destroyed completes the objective"
         );
     }
 

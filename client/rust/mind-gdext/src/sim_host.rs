@@ -1307,6 +1307,13 @@ impl MindSimHost {
         self.emit_state();
     }
 
+    /// Input-side command-mode fact for `CommandModeObjective` (G08 calls this
+    /// from `MindInput` whenever the command-mode selection changes; T4).
+    #[func]
+    pub fn set_command_mode_satisfied(&mut self, value: bool) {
+        self.sim.set_command_mode_satisfied(value);
+    }
+
     /// Runs `ticks` sim steps synchronously and returns the new tick count.
     #[func]
     pub fn step(&mut self, ticks: i64) -> i64 {

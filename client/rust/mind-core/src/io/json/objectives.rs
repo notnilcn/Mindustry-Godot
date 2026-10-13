@@ -93,6 +93,9 @@ pub struct ObjectiveCommon {
     pub parents: Vec<usize>,
     /// Packed editor position (`Point2.pack(editorX, editorY)`).
     pub editor_pos: i32,
+    /// Whether the objective completed (`MapObjective.completed`, serialized
+    /// by Java `JsonIO`; omitted when false).
+    pub completed: bool,
 }
 
 impl Default for ObjectiveCommon {
@@ -106,6 +109,7 @@ impl Default for ObjectiveCommon {
             markers: Vec::new(),
             parents: Vec::new(),
             editor_pos: default_editor_pos(),
+            completed: false,
         }
     }
 }
@@ -324,6 +328,11 @@ fn serialize_common<M: SerializeMap>(
     map.serialize_entry("flagsAdded", &common.flags_added)?;
     map.serialize_entry("flagsRemoved", &common.flags_removed)?;
     map.serialize_entry("markers", &common.markers)?;
+    // Java `JsonIO` omits default-valued fields; a completed objective writes
+    // `"completed": true` (Ground Zero r03..r05 meta rules).
+    if common.completed {
+        map.serialize_entry("completed", &true)?;
+    }
     Ok(())
 }
 
@@ -606,6 +615,10 @@ fn common_from_value(value: &Value) -> ObjectiveCommon {
         markers: markers(value),
         parents: usize_vec(value, "parents"),
         editor_pos: i32_field(value, "editorPos", default_editor_pos()),
+        completed: value
+            .get("completed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 

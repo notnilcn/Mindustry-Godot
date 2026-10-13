@@ -118,7 +118,7 @@ pub trait ObjectiveEnv {
     /// `state.rules.waveTeam.cores().size` (DestroyCore).
     fn core_count(&self, team: u8) -> usize;
     /// `world.build(x, y)` as `(block name, team)` (DestroyBlock(s)).
-    fn block_at(&self, x: i32, y: i32) -> Option<(&str, u8)>;
+    fn block_at(&self, x: i32, y: i32) -> Option<(String, u8)>;
     /// `headless` global (CommandMode always completes headless).
     fn headless(&self) -> bool;
     /// `control.input.selectedUnits` has a commandable, commanded unit
@@ -166,14 +166,23 @@ impl MapObjectivesRuntime {
         Self::default()
     }
 
-    /// Wraps persisted objective data, allocating fresh transient state.
+    /// Wraps persisted objective data, allocating transient state from it:
+    /// `completed` and the Timer `countup` survive a save/load (T4).
     pub fn from_data(data: ObjectiveData) -> Self {
         let len = data.all.len();
+        let mut completed = vec![false; len];
+        let mut countup = vec![0.0; len];
+        for (index, objective) in data.all.iter().enumerate() {
+            completed[index] = objective.common().completed;
+            if let MapObjective::Timer(timer) = objective {
+                countup[index] = timer.countup;
+            }
+        }
         Self {
             data,
-            completed: vec![false; len],
+            completed,
             dep_finished: vec![false; len],
-            countup: vec![0.0; len],
+            countup,
         }
     }
 
@@ -296,7 +305,7 @@ impl MapObjectivesRuntime {
         &mut self,
         env: &dyn ObjectiveEnv,
         params: &ObjectiveRunParams,
-        delta_seconds: f32,
+        delta_ticks: f32,
     ) -> Vec<usize> {
         let mut completed = Vec::new();
         for index in 0..self.len() {
@@ -305,7 +314,7 @@ impl MapObjectivesRuntime {
             }
             let done = {
                 let timer = &mut self.countup[index];
-                objective_update(&self.data.all[index], timer, env, params, delta_seconds)
+                objective_update(&self.data.all[index], timer, env, params, delta_ticks)
             };
             if done {
                 completed.push(index);
@@ -334,11 +343,29 @@ impl MapObjectivesRuntime {
         }
         self.completed[index] = true;
         self.dep_finished[index] = true;
+        // The persisted `completed` flag (`MapObjective.done()`), so saves
+        // written later carry it (T4).
+        self.data.all[index].common_mut().completed = true;
 
         if let Some(code) = logic_code.as_deref() {
             let _ = run_logic_script(code, SCRIPT_DEFAULT_MAX_INSTRUCTIONS, false);
         }
         true
+    }
+
+    /// Copies the transient Timer `countup` into the persisted objective data
+    /// (`TimerObjective.countup` is serialized by Java `JsonIO`).
+    pub fn sync_timers_into_data(&mut self) {
+        for (index, objective) in self.data.all.iter_mut().enumerate() {
+            if let MapObjective::Timer(timer) = objective {
+                timer.countup = self.countup.get(index).copied().unwrap_or(0.0);
+            }
+        }
+    }
+
+    /// Whether any objective is completed (cheap write-back gate).
+    pub fn any_completed(&self) -> bool {
+        self.completed.iter().any(|done| *done)
     }
 
     /// `complete_objective { index, rules_epoch }` idempotent relay target.
@@ -413,13 +440,14 @@ pub enum ObjectiveRelayError {
     IndexOutOfRange(usize),
 }
 
-/// Evaluates one objective (`MapObjective.update()`).
+/// Evaluates one objective (`MapObjective.update()`); `delta_ticks` is
+/// `Time.delta` (one per 60 Hz tick).
 fn objective_update(
     objective: &MapObjective,
     timer: &mut f32,
     env: &dyn ObjectiveEnv,
     params: &ObjectiveRunParams,
-    delta_seconds: f32,
+    delta_ticks: f32,
 ) -> bool {
     match objective {
         MapObjective::Research(o) => o
@@ -435,7 +463,7 @@ fn objective_update(
         MapObjective::BuildCount(o) => build_count_objective(o, env),
         MapObjective::UnitCount(o) => unit_count_objective(o, env, params),
         MapObjective::DestroyUnits(o) => destroy_units_objective(o, env),
-        MapObjective::Timer(o) => timer_objective(o, timer, params, delta_seconds),
+        MapObjective::Timer(o) => timer_objective(o, timer, params, delta_ticks),
         MapObjective::DestroyBlock(o) => destroy_block_objective(o, env),
         MapObjective::DestroyBlocks(o) => destroy_blocks_objective(o, env),
         MapObjective::CommandMode(_) => env.headless() || env.command_mode_satisfied(),
@@ -484,20 +512,24 @@ fn destroy_units_objective(objective: &DestroyUnitsObjective, env: &dyn Objectiv
     env.enemy_units_destroyed() >= objective.count
 }
 
+/// `TimerObjective.update`: `(countup += Time.delta) >= duration *
+/// objectiveTimerMultiplier` with both in ticks (`MapObjectives.java:516-540`).
 fn timer_objective(
     objective: &TimerObjective,
     timer: &mut f32,
     params: &ObjectiveRunParams,
-    delta_seconds: f32,
+    delta_ticks: f32,
 ) -> bool {
-    *timer += delta_seconds;
+    *timer += delta_ticks;
     *timer >= objective.duration * params.timer_multiplier
 }
 
 fn destroy_block_objective(objective: &DestroyBlockObjective, env: &dyn ObjectiveEnv) -> bool {
     match env.block_at(objective.pos.x, objective.pos.y) {
         None => true,
-        Some((block, team)) => team != objective.team || Some(block) != objective.block.as_deref(),
+        Some((block, team)) => {
+            team != objective.team || Some(block.as_str()) != objective.block.as_deref()
+        }
     }
 }
 
@@ -513,7 +545,7 @@ pub fn destroy_blocks_progress(objective: &DestroyBlocksObjective, env: &dyn Obj
         .filter(|pos| match env.block_at(pos.x, pos.y) {
             None => true,
             Some((block, team)) => {
-                team != objective.team || Some(block) != objective.block.as_deref()
+                team != objective.team || Some(block.as_str()) != objective.block.as_deref()
             }
         })
         .count() as i32
@@ -732,10 +764,8 @@ mod tests {
         fn core_count(&self, _team: u8) -> usize {
             self.cores
         }
-        fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
-            self.block
-                .as_ref()
-                .map(|(name, team)| (name.as_str(), *team))
+        fn block_at(&self, _x: i32, _y: i32) -> Option<(String, u8)> {
+            self.block.clone()
         }
         fn headless(&self) -> bool {
             self.headless
@@ -827,6 +857,65 @@ mod tests {
             }
         }
         assert_eq!(done_at, 5, "10s * 0.5 = 5 updates of 1s");
+    }
+
+    /// T4: Timer `duration` is in ticks; `update(delta_ticks)` counts one tick
+    /// per call (`MapObjectives.java:516-540`).
+    #[test]
+    fn timer_objective_counts_ticks() {
+        let data = parse(r#"[{"class":"Timer","duration":300}]"#);
+        let mut runtime = MapObjectivesRuntime::from_data(data);
+        let env = FakeEnv::default();
+        for _ in 0..299 {
+            assert!(runtime.update(&env, &params(), 1.0).is_empty());
+        }
+        assert_eq!(
+            runtime.update(&env, &params(), 1.0),
+            vec![0],
+            "300 ticks complete"
+        );
+    }
+
+    /// T4: the persisted `completed` flag and Timer `countup` survive
+    /// `from_data` and serialization writes `completed:true`.
+    #[test]
+    fn completed_flag_round_trips() {
+        let mut runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"Item","item":"copper","amount":15,"completed":true},
+                {"class":"Timer","duration":300,"countup":120,"parents":[0]}]"#,
+        ));
+        assert!(runtime.is_completed(0), "completed flag parsed");
+        assert!(runtime.qualified(1), "parent already done");
+        let env = FakeEnv::default();
+        for _ in 0..179 {
+            assert!(runtime.update(&env, &params(), 1.0).is_empty());
+        }
+        assert_eq!(
+            runtime.update(&env, &params(), 1.0),
+            vec![1],
+            "120 + 180 ticks complete"
+        );
+        for index in [0, 1] {
+            runtime.complete(index, &mut Rules::default());
+        }
+        runtime.sync_timers_into_data();
+        let json = runtime.data.to_json().expect("serialize");
+        assert_eq!(json.matches("\"completed\":true").count(), 2, "{json}");
+        assert!(json.contains("\"countup\":300"), "{json}");
+    }
+
+    /// T4: `DestroyUnitsObjective` reads `stats.enemyUnitsDestroyed`
+    /// (`MapObjectives.java:501`); `Logic`'s `UnitDestroyEvent` increments it.
+    #[test]
+    fn destroy_units_counts_enemy_kills() {
+        let mut env = FakeEnv::default();
+        env.enemy_units_destroyed = 2;
+        let mut runtime =
+            MapObjectivesRuntime::from_data(parse(r#"[{"class":"DestroyUnits","count":2}]"#));
+        assert_eq!(runtime.update(&env, &params(), 0.0), vec![0]);
+        let mut runtime =
+            MapObjectivesRuntime::from_data(parse(r#"[{"class":"DestroyUnits","count":3}]"#));
+        assert!(runtime.update(&env, &params(), 0.0).is_empty());
     }
 
     #[test]

@@ -441,6 +441,8 @@ impl Sim {
                     ..
                 } = &mut runtime;
                 let before = *seq;
+                // Read the team before the kill despawns the entity.
+                let unit_team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
                 if crate::entities::comp::unit::lifecycle::kill_unit_with_abilities(
                     world,
                     content,
@@ -451,6 +453,15 @@ impl Sim {
                 ) {
                     killed_units += 1;
                     runtime.units_removed += 1;
+                    // `Logic` `UnitDestroyEvent` (`Logic.java:218-226`): a
+                    // killed unit of a non-default team counts as an enemy
+                    // kill (`stats.enemyUnitsDestroyed`; T4).
+                    if let Some(mut campaign) =
+                        world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                        && unit_team != campaign.session.rules.default_team
+                    {
+                        campaign.session.stats.enemy_units_destroyed += 1;
+                    }
                 }
                 // Death-ability spawns (`SpawnDeathAbility`) join the live list.
                 if runtime.seq != before {
