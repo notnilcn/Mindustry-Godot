@@ -495,7 +495,9 @@ impl BuildingBehavior for PayloadMassDriverBehavior {
         r: &mut crate::world::BuildingReader,
         revision: u8,
     ) {
-        super::payload_block::read_base(world, e, r);
+        if !super::payload_block::read_base(world, e, r) {
+            return;
+        }
         let link = r.i().unwrap_or(-1);
         let turret_rotation = r.f().unwrap_or(90.0);
         let state = match r.b().unwrap_or(0) {

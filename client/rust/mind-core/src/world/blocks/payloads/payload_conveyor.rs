@@ -275,20 +275,41 @@ impl BuildingBehavior for PayloadConveyorBehavior {
         r: &mut crate::world::BuildingReader,
         _revision: u8,
     ) {
-        let mut conveyor = world
-            .get::<PayloadConveyorBuild>(e)
-            .copied()
-            .unwrap_or_default();
-        if let Ok(progress) = r.f() {
-            conveyor.progress = progress;
+        let _ = read_payload_conveyor_base(world, e, r);
+    }
+}
+
+/// `PayloadConveyorBuild.read` (`PayloadConveyor.java:314-330`): `f progress,
+/// f itemRotation, Payload item`. `false` = a unit payload bailed the read (the
+/// caller stops before its own fields).
+pub fn read_payload_conveyor_base(
+    world: &mut World,
+    e: Entity,
+    r: &mut crate::world::BuildingReader,
+) -> bool {
+    let mut conveyor = world
+        .get::<PayloadConveyorBuild>(e)
+        .copied()
+        .unwrap_or_default();
+    if let Ok(progress) = r.f() {
+        conveyor.progress = progress;
+    }
+    if let Ok(rotation) = r.f() {
+        conveyor.item_rotation = rotation;
+    }
+    world.entity_mut(e).insert(conveyor);
+    if world.get::<PayloadHolder>(e).is_none() {
+        world.entity_mut(e).insert(PayloadHolder::default());
+    }
+    match super::payload_block::payload_read(world, r) {
+        super::payload_block::PayloadRead::Block(payload) => {
+            if let Some(mut holder) = world.get_mut::<PayloadHolder>(e) {
+                holder.payload = Some(payload);
+            }
+            true
         }
-        if let Ok(rotation) = r.f() {
-            conveyor.item_rotation = rotation;
-        }
-        world.entity_mut(e).insert(conveyor);
-        if world.get::<PayloadHolder>(e).is_none() {
-            world.entity_mut(e).insert(PayloadHolder::default());
-        }
+        super::payload_block::PayloadRead::None => true,
+        super::payload_block::PayloadRead::Unsupported => false,
     }
 }
 

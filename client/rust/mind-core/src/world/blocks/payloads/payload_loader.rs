@@ -442,7 +442,9 @@ impl BuildingBehavior for PayloadLoaderBehavior {
         r: &mut crate::world::BuildingReader,
         revision: u8,
     ) {
-        super::payload_block::read_base(world, e, r);
+        if !super::payload_block::read_base(world, e, r) {
+            return;
+        }
         if revision >= 1 {
             let exporting = r.bool().unwrap_or(false);
             if let Some(mut state) = world.get_mut::<PayloadLoaderBuild>(e) {

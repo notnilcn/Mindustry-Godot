@@ -324,7 +324,9 @@ impl BuildingBehavior for PayloadRouterBehavior {
         r: &mut crate::world::BuildingReader,
         revision: u8,
     ) {
-        self.conveyor.read(world, e, r, revision);
+        if !super::payload_conveyor::read_payload_conveyor_base(world, e, r) {
+            return;
+        }
         if revision >= 1 {
             let ctype = r.b().unwrap_or(-1);
             let id = r.s().unwrap_or(-1);

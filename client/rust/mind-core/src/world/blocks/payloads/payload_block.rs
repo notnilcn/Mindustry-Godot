@@ -425,12 +425,74 @@ pub fn write_base(world: &World, e: Entity, w: &mut crate::world::BuildingWriter
     super::payload_write(world, holder.payload, w);
 }
 
-/// Base `PayloadBlockBuild.read`.
-pub fn read_base(world: &mut World, e: Entity, r: &mut crate::world::BuildingReader) {
+/// `Payload.read` outcome (`Payload.java:87-118`): `bool exists`; a block
+/// payload carries `s block`, `b revision` and the nested `readAll` chunk, a
+/// unit payload the generated unit IO (not ported until T6/G01).
+pub enum PayloadRead {
+    /// No payload present.
+    None,
+    /// A decoded block payload.
+    Block(super::PayloadRef),
+    /// A unit payload was present but cannot be decoded yet: the caller must
+    /// stop reading its own body (the tile chunk is length-bounded, so the
+    /// next building stays aligned).
+    Unsupported,
+}
+
+pub fn payload_read(world: &mut World, r: &mut crate::world::BuildingReader) -> PayloadRead {
+    if !r.bool().unwrap_or(false) {
+        return PayloadRead::None;
+    }
+    let kind = r.b().unwrap_or(0);
+    if kind == 0 {
+        // Unit payload: generated unit IO is T6/G01; STOP the caller's read.
+        log::warn!("payload_read: unit payload skipped (unit IO not ported yet)");
+        return PayloadRead::Unsupported;
+    }
+    let block_raw = r.s().unwrap_or(-1);
+    let block = crate::content::BlockId::new(block_raw.max(0) as u16);
+    let revision = r.b().unwrap_or(0) as u8;
+    let Some(entity) = super::create_build_payload(world, block, 0) else {
+        return PayloadRead::None;
+    };
+    let mut decoded = crate::world::building_io::DecodedBase::default();
+    if crate::world::building_io::read_base_legacy(&mut decoded, r).is_err() {
+        return PayloadRead::None;
+    }
+    decoded.kind_revision = Some(revision);
+    let max_health = world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.instance(block))
+        .map(|inst| inst.def.health.max(0) as f32)
+        .unwrap_or(f32::MAX);
+    crate::world::building_io::apply_base(world, entity, &decoded, max_health);
+    if let Some(inst) = world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.instance(block))
+    {
+        // Nested `build.read(read, revision)`: no body buffer, the behavior
+        // consumes exactly its bytes from the parent stream.
+        inst.behavior.read(world, entity, r, revision);
+    }
+    PayloadRead::Block(super::PayloadRef {
+        entity: Some(entity),
+        content: block.raw(),
+        is_block: true,
+    })
+}
+
+/// Base `PayloadBlockBuild.read`; `false` = a unit payload bailed the read
+/// (the caller stops before its own fields).
+pub fn read_base(world: &mut World, e: Entity, r: &mut crate::world::BuildingReader) -> bool {
     let mut holder = world.get::<PayloadHolder>(e).copied().unwrap_or_default();
     holder.pay_vector = (r.f().unwrap_or(0.0), r.f().unwrap_or(0.0));
     holder.pay_rotation = r.f().unwrap_or(0.0);
+    let result = payload_read(world, r);
+    if let PayloadRead::Block(payload) = result {
+        holder.payload = Some(payload);
+    }
     world.entity_mut(e).insert(holder);
+    !matches!(result, PayloadRead::Unsupported)
 }
 
 /// Removes a swallowed payload entity (void/incineration).

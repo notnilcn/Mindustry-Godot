@@ -120,16 +120,32 @@ pub fn write_all_java(
     w: &mut EntityWriter,
     fog: bool,
 ) -> Result<(), IoError> {
-    // `Building.version()`; blocks without a behavior write revision 0.
-    let kind_version = behavior_instance(world, entity)
-        .map(|inst| inst.behavior.version(world, entity))
-        .unwrap_or(0);
-    w.ub(kind_version);
+    w.ub(behavior_version(world, entity));
+    write_all_body(world, entity, w, fog)
+}
+
+/// Writes `BuildingComp.writeAll` (base with the embedded base version byte +
+/// the per-kind body) without a leading revision byte — the nested
+/// `Payload.write` chunk writes the revision itself (`Payload.java:104-110`).
+pub fn write_all_body(
+    world: &World,
+    entity: Entity,
+    w: &mut EntityWriter,
+    fog: bool,
+) -> Result<(), IoError> {
     write_base_impl(world, entity, w, fog, true)?;
     if let Some(inst) = behavior_instance(world, entity) {
         inst.behavior.write(world, entity, w);
     }
     Ok(())
+}
+
+/// Per-kind revision of the building on `entity` (`Building.version()`);
+/// `0` when the entity has no behavior.
+pub fn behavior_version(world: &World, entity: Entity) -> u8 {
+    behavior_instance(world, entity)
+        .map(|inst| inst.behavior.version(world, entity))
+        .unwrap_or(0)
 }
 
 /// Shared `writeBase` body. `embed_version` selects the Java layout (version

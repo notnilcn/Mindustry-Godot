@@ -25,6 +25,10 @@ fn spawn_block(name: &str) -> (EcsWorld, Entity, Arc<BlockInstance>) {
         .clone();
     let mut world = EcsWorld::new();
     world.insert_resource(BuildRules::default());
+    world.insert_resource(crate::world::modules::ModuleDims {
+        items: content.items().len(),
+        liquids: content.liquids().len(),
+    });
     world.insert_resource(table);
     let entity = inst.spawn(
         &mut world,
@@ -309,6 +313,86 @@ fn cultivator_body_has_legacy_warmup() {
     let state = world.get::<CrafterState>(e).expect("state");
     assert_eq!(state.progress, 0.2);
     assert_eq!(state.warmup, 0.3);
+}
+
+/// T3b: a build payload on a payload conveyor survives the Java
+/// `Payload.write`/`read` round trip (`Payload.java:87-118`,
+/// `PayloadConveyor.java:314-330`).
+#[test]
+fn payload_conveyor_keeps_build_payload() {
+    use crate::entities::comp::Building;
+    use crate::world::blocks::payloads::{PayloadHolder, PayloadRef, create_build_payload};
+    use crate::world::building_io::{DecodedBase, apply_body, read_base_legacy, write_all_java};
+
+    let content = test_registry();
+    let wall = content.block_id("copper-wall").expect("copper-wall");
+    let (mut world, src, inst) = spawn_block("payload-conveyor");
+    let payload = create_build_payload(&mut world, wall, 0).expect("payload");
+    {
+        let mut holder = world.get_mut::<PayloadHolder>(src).expect("holder");
+        holder.payload = Some(PayloadRef {
+            entity: Some(payload),
+            content: wall.raw(),
+            is_block: true,
+        });
+    }
+    let mut bytes = Vec::new();
+    {
+        let mut w = WireWriter::new(&mut bytes);
+        write_all_java(&world, src, &mut w, false).expect("write");
+    }
+    // A fresh conveyor reads the chunk back.
+    let (items, liquids) = world
+        .get_resource::<crate::world::modules::ModuleDims>()
+        .map(|dims| (dims.items, dims.liquids))
+        .unwrap_or((0, 0));
+    let dst = inst.spawn(&mut world, 1, TilePos::new(4, 4), 0, 0, items, liquids);
+    inst.behavior.create_state(&mut world, dst);
+    let mut r = WireReader::new(&bytes);
+    let revision = r.ub().expect("kind revision");
+    let mut decoded = DecodedBase::default();
+    read_base_legacy(&mut decoded, &mut r).expect("read base");
+    decoded.kind_revision = Some(revision);
+    decoded.body = r.bytes(r.remaining()).expect("body").to_vec();
+    crate::world::building_io::apply_base(&mut world, dst, &decoded, 100.0);
+    apply_body(&mut world, dst, &decoded);
+
+    let holder = world.get::<PayloadHolder>(dst).expect("holder");
+    let payload = holder.payload.expect("payload restored");
+    assert!(payload.is_block);
+    let block = payload
+        .entity
+        .and_then(|entity| world.get::<Building>(entity))
+        .map(|building| building.block);
+    assert_eq!(block, Some(wall), "copper-wall payload restored");
+}
+
+/// T3b: the unit factory body starts with the PayloadBlock prefix
+/// (`UnitFactory.java:486-506`); the hand-built Java bytes decode fully.
+#[test]
+fn unit_factory_body_matches_java() {
+    use crate::world::blocks::units::UnitFactoryBuild;
+
+    let (mut world, e, inst) = spawn_block("ground-factory");
+    let mut bytes = Vec::new();
+    {
+        let mut w = WireWriter::new(&mut bytes);
+        // PayloadBlock prefix: payVector (0,0), payRotation 0, no payload.
+        w.f(0.0);
+        w.f(0.0);
+        w.f(0.0);
+        w.bool(false);
+        // UnitFactory body: progress 12.5, plan 0, vecNullable, command.
+        w.f(12.5);
+        w.s(0);
+        w.f(f32::NAN);
+        w.f(f32::NAN);
+        w.ub(255);
+    }
+    assert_body_roundtrip(&mut world, &inst, e, &bytes, 3);
+    let state = world.get::<UnitFactoryBuild>(e).expect("state");
+    assert_eq!(state.progress, 12.5);
+    assert_eq!(state.current_plan, 0);
 }
 
 /// The smoke helper also asserts the `WorldGrid` fixture compiles in this file.

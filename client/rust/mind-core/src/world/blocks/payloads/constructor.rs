@@ -168,7 +168,9 @@ impl BuildingBehavior for ConstructorBehavior {
         r: &mut crate::world::BuildingReader,
         _revision: u8,
     ) {
-        super::payload_block::read_base(world, e, r);
+        if !super::payload_block::read_base(world, e, r) {
+            return;
+        }
         let progress = r.f().unwrap_or(0.0);
         let recipe = r.s().unwrap_or(-1);
         if let Some(mut state) = world.get_mut::<BlockProducerBuild>(e) {
