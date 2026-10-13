@@ -58,6 +58,15 @@ func _selected_core() -> String:
 	return ""
 
 
+## The `SchematicView` row for a schematic index (`SchematicImage` tiles).
+func _schematic_row(index: int) -> Dictionary:
+	for row_variant in campaign_section("schematics"):
+		var row: Dictionary = row_variant
+		if int(row.get("index", -1)) == index:
+			return row
+	return {}
+
+
 ## `MindCampaign.launch_dialog_json` (`LaunchLoadoutDialog.update`); `{}` when
 ## the facade is absent.
 func _launch_plan() -> Dictionary:
@@ -114,19 +123,28 @@ func _rebuild() -> void:
 		_list.add(MindWidgets.label(_t("@none"))).pad(8)
 		_list.row()
 	else:
+		# `LaunchLoadoutDialog.java:160-190`: `cols = max(screenW / 230, 1)`
+		# image toggles (`Styles.togglet` + `SchematicImage`, 200 px, pad 4).
+		var cols := maxi(int(get_viewport_rect().size.x / 230.0), 1)
 		for index in loadouts.size():
 			var loadout: Dictionary = loadouts[index]
-			# code-instantiated: loadout rows come from plan-12 Schematics.getLoadouts.
-			var row := HBoxContainer.new()
-			row.add_theme_constant_override("separation", 6)
-			var button := MindWidgets.button(str(loadout.get("name", "")))
+			var schematic_index := int(loadout.get("index", -1))
+			# code-instantiated: one SchematicImage toggle per allowed loadout.
+			var button := Button.new()
+			button.theme_type_variation = "togglet"
 			button.toggle_mode = true
-			button.button_pressed = int(loadout.get("index", -1)) == _selected
-			button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			button.pressed.connect(_select.bind(int(loadout.get("index", -1))))
-			row.add_child(button)
-			_list.add(row).grow_x_axis().pad(2)
-			_list.row()
+			button.button_pressed = schematic_index == _selected
+			button.custom_minimum_size = Vector2(200.0, 200.0)
+			button.pressed.connect(_select.bind(schematic_index))
+			var image := MindSchematicImage.new()
+			image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			image.setup(_schematic_row(schematic_index))
+			button.add_child(image)
+			button.mouse_entered.connect(func() -> void: image.set_hovered(true))
+			button.mouse_exited.connect(func() -> void: image.set_hovered(false))
+			_list.add(button).pad(4)
+			if (index + 1) % cols == 0:
+				_list.row()
 	_rebuild_items()
 	clear_buttons()
 	# `LaunchLoadoutDialog.java:41`: `buttons.defaults().size(160f, 64f)`.

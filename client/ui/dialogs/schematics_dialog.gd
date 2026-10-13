@@ -101,7 +101,8 @@ func _rebuild_detail() -> void:
 	_detail.add(MindWidgets.styled_label(str(schematic.get("name", "")), "techLabel")).grow_x_axis().pad(6)
 	_detail.row()
 	_detail.add(MindWidgets.label("%dx%d  tiles: %d" % [
-		int(schematic.get("width", 0)), int(schematic.get("height", 0)), int(schematic.get("tiles", 0))
+		int(schematic.get("width", 0)), int(schematic.get("height", 0)),
+		(schematic.get("tiles", []) as Array).size()
 	])).pad(2)
 	_detail.row()
 	var requirements: Array = schematic.get("requirements", [])
