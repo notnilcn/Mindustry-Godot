@@ -293,6 +293,10 @@ pub struct DesktopBridge {
     payload_tap_ms: u64,
     /// Last cargo-key hold repeat (`DesktopInput.lastPayloadKeyHoldMillis`).
     payload_hold_ms: u64,
+    /// `HintsFragment` completion triggers collected since the last drain
+    /// (G05 T4b): `"shoot"`, `"boost_down"`, `"schematic_select_release"`,
+    /// `"pick_tap"`, `"diagonal_release"`, `"rebuild_selecting"`.
+    hint_keys: Vec<&'static str>,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -339,6 +343,7 @@ impl DesktopBridge {
             last_deposit_ms: 0,
             payload_tap_ms: 0,
             payload_hold_ms: 0,
+            hint_keys: Vec::new(),
             command_mode_hold: true,
         }
     }
@@ -729,6 +734,11 @@ impl DesktopBridge {
                 self.payload_tap_ms = Time::singleton().get_ticks_msec();
                 self.payload(PayloadAction::Drop);
             }
+            "boost" => {
+                // `HintsFragment.boost` = `keyDown(boost)`; the edge and the
+                // per-frame refresh both push the trigger.
+                self.push_hint("boost_down");
+            }
             "unit_stance_hold_fire" => self.set_stance(0, true),
             "unit_stance_pursue_target" => self.set_stance(1, true),
             "unit_stance_patrol" => self.set_stance(2, true),
@@ -1027,6 +1037,31 @@ impl DesktopBridge {
         }
     }
 
+    /// `HintsFragment` triggers that fire while a key is held (G05 T4b):
+    /// `boost` (`keyDown(boost)`) and `rebuildSelecting`
+    /// (`input.isRebuildSelecting()` = `keyDown(rebuildSelect)`).
+    pub fn refresh_hints(&mut self, bindings: &BindingState) {
+        if self.key_down(bindings, ids::BOOST) {
+            self.push_hint("boost_down");
+        }
+        if self.key_down(bindings, ids::REBUILD_SELECT) {
+            self.push_hint("rebuild_selecting");
+        }
+    }
+
+    /// Returns and clears the collected hint triggers (order of first
+    /// occurrence).
+    pub fn take_hint_keys(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.hint_keys)
+    }
+
+    /// Deduplicated hint trigger push.
+    fn push_hint(&mut self, key: &'static str) {
+        if !self.hint_keys.contains(&key) {
+            self.hint_keys.push(key);
+        }
+    }
+
     /// `tryDropItems`/`requestItem`: withdraw or deposit at a tile.
     pub fn transfer_item(&mut self, x: i32, y: i32, item: &str, amount: i32, deposit: bool) {
         let item = self.item_ids.get(item).copied();
@@ -1141,6 +1176,8 @@ impl DesktopBridge {
                 self.controller.state.select_block(Some(id));
             }
             self.clear_select_plans();
+            // `HintsFragment` `schematicSelect` includes `keyTap(pick)`.
+            self.push_hint("pick_tap");
             self.fire_hotkey("pick");
         }
     }
@@ -1376,6 +1413,14 @@ impl DesktopBridge {
 
     /// Key-release bindings (`DesktopInput.pollInputPlayer` release half).
     fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
+        if bindings.name(ids::DIAGONAL_PLACEMENT) == Some(code) {
+            // `HintsFragment.conveyorPathfind` = `keyRelease(diagonalPlacement)`.
+            self.push_hint("diagonal_release");
+        }
+        if bindings.name(ids::SCHEMATIC_SELECT) == Some(code) {
+            // `HintsFragment.schematicSelect` = `keyRelease(schematicSelect)`.
+            self.push_hint("schematic_select_release");
+        }
         let schematic = bindings.name(ids::SCHEMATIC_SELECT) == Some(code);
         let rebuild = bindings.name(ids::REBUILD_SELECT) == Some(code);
         if !(schematic || rebuild) || self.schem_start.is_none() || self.drag.is_some() {
@@ -1631,6 +1676,10 @@ impl DesktopBridge {
             // `shouldShoot = !scene.hasMouse() && !locked && !state.isEditor()`;
             // the UI gates ran in `MindInput::input`.
             self.shooting = !self.locked;
+            if self.shooting {
+                // `HintsFragment.desktopShoot` (`player.shooting`).
+                self.push_hint("shoot");
+            }
             return;
         }
         if !self.controller.state.is_building {
@@ -1718,7 +1767,11 @@ impl DesktopBridge {
         }
         let (tx, ty) = (WorldGrid::to_tile(wx), WorldGrid::to_tile(wy));
         let now_ms = Time::singleton().get_ticks_msec();
-        match host.bind().player_can_deposit_at(tx, ty) {
+        // Bind the probe to a local: a `match host.bind()...` scrutinee keeps
+        // the shared guard alive through the arms, and `transfer_item` needs
+        // `bind_mut`.
+        let accepts = host.bind().player_can_deposit_at(tx, ty);
+        match accepts {
             Some(true) => {
                 if now_ms.saturating_sub(self.last_deposit_ms) >= ITEM_DEPOSIT_COOLDOWN_MS {
                     self.transfer_item(tx, ty, &item_name, amount, true);
