@@ -236,6 +236,34 @@ pub struct BridgeLink {
 const POWER_GROW: f32 = 320.0;
 /// Bridge links reach `range 4` tiles (`Blocks.java`); 64 px covers it.
 const BRIDGE_GROW: f32 = 64.0;
+/// Light sources are stamped from outside the view too (`LightRenderer`
+/// quads), so grow the collection rect by the largest radius (G03 T12).
+const LIGHT_GROW: f32 = 200.0;
+
+/// One `LightRenderer.add` source (G03 T12): world centre, radius, RGBA
+/// colour and the per-source opacity the pass multiplies into the alpha.
+pub struct LightSource {
+    /// World x.
+    pub x: f32,
+    /// World y.
+    pub y: f32,
+    /// World-pixel radius.
+    pub radius: f32,
+    /// RGBA colour `[r, g, b, a]`.
+    pub color: [f32; 4],
+    /// Accumulated-alpha multiplier (`LightRenderer.add` opacity).
+    pub opacity: f32,
+}
+
+/// Unpacks a packed `rgba8888` into float RGBA.
+fn rgba_f32(packed: u32) -> [f32; 4] {
+    [
+        ((packed >> 24) & 0xff) as f32 / 255.0,
+        ((packed >> 16) & 0xff) as f32 / 255.0,
+        ((packed >> 8) & 0xff) as f32 / 255.0,
+        (packed & 0xff) as f32 / 255.0,
+    ]
+}
 
 /// Building sprite centre (`anchor * 8 + Block.offset`; Java `Building.x`).
 fn building_center(
@@ -2646,13 +2674,144 @@ impl MindSimHost {
     /// Live sector rules when available (campaign session first, then the last
     /// `load_sector` rules), else defaults.
     fn render_rules_or_default(&self) -> Rules {
+        self.live_rules().unwrap_or_default()
+    }
+
+    /// Live sector rules for the renderer's per-frame feed (G03 T12):
+    /// campaign session first, else the last `load_sector` rules.
+    pub fn live_rules(&self) -> Option<Rules> {
         self.sim
             .ecs
             .0
             .get_resource::<CampaignRuntime>()
             .map(|runtime| runtime.session.rules.clone())
             .or_else(|| self.sector_rules.clone())
-            .unwrap_or_default()
+    }
+
+    /// `LightRenderer` sources in the (grown) camera rect (G03 T12): cores
+    /// (`CoreBlock.java:158,739-741`), illuminators (`LightBlock.java:40,105,
+    /// 126-129`), static `emitLight` blocks (`Block.lightRadius` default 60),
+    /// units when `rules.unitLight` (`UnitType.java:954,1800-1804`) and bullets
+    /// (`BulletType.drawLight` defaults `max(18, hitSize*5)`,
+    /// `Pal.powerLight`, 0.3 — `BulletDef` has no light fields yet).
+    pub fn light_sources(&self, rect: (f32, f32, f32, f32)) -> Vec<LightSource> {
+        use mind_core::combat::bullet::Bullet;
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        use mind_core::render::draw_meta::BlockDrawMeta;
+        use mind_core::render::drawf::pal;
+        use mind_core::world::behavior::light::LightState;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let rules = self.render_rules_or_default();
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * LIGHT_GROW,
+            h: rect.3 + 2.0 * LIGHT_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            let (cx, cy) = building_center(tile.x, tile.y, def);
+            match def.kind {
+                BlockKind::CoreBlock => {
+                    // `CoreBlock.java:739-741`: `0.65 + absin(time, 20, 0.1)`.
+                    let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
+                    out.push(LightSource {
+                        x: cx,
+                        y: cy,
+                        radius: 30.0 + 20.0 * def.size as f32,
+                        color: pal::ACCENT,
+                        opacity: 0.65 + mind_core::render::drawf::absin(ticks, 20.0, 0.1),
+                    });
+                }
+                BlockKind::LightBlock => {
+                    let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                        continue;
+                    };
+                    let state = self.sim.ecs.0.get::<LightState>(entity);
+                    let color = state.map_or(0xffd3_7fff_u32, |s| s.color);
+                    let smooth = state.map_or(1.0, |s| s.smooth_time).min(2.0);
+                    out.push(LightSource {
+                        x: cx,
+                        y: cy,
+                        // `illuminator` radius 140 * 2.5 (per-block radius is
+                        // not in `BlockDef` yet; G03 T12 note).
+                        radius: 350.0 * smooth,
+                        color: rgba_f32(color),
+                        opacity: 0.75,
+                    });
+                }
+                _ if BlockDrawMeta::from_def(def).emit_light => out.push(LightSource {
+                    x: cx,
+                    y: cy,
+                    radius: 60.0,
+                    color: [1.0, 1.0, 1.0, 1.0],
+                    opacity: 1.0,
+                }),
+                _ => {}
+            }
+        }
+        if rules.unit_light
+            && let Some(runtime) = self.sim.unit_runtime()
+        {
+            for &entity in &runtime.units {
+                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                    continue;
+                };
+                let Some(type_comp) = self.sim.ecs.0.get::<UnitTypeComp>(entity) else {
+                    continue;
+                };
+                let Some(def) = content.unit(type_comp.type_id) else {
+                    continue;
+                };
+                let radius = if def.light_radius > 0.0 {
+                    def.light_radius
+                } else {
+                    60.0f32.max(def.hit_size * 2.3)
+                };
+                let opacity = if def.light_opacity > 0.0 {
+                    def.light_opacity
+                } else {
+                    0.6
+                };
+                let c = def.light_color;
+                out.push(LightSource {
+                    x: pos.x,
+                    y: pos.y,
+                    radius,
+                    color: [c.r, c.g, c.b, c.a],
+                    opacity,
+                });
+            }
+        }
+        if let Some(runtime) = self.sim.unit_runtime() {
+            for &entity in &runtime.bullets {
+                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                    continue;
+                };
+                let Some(bullet) = self.sim.ecs.0.get::<Bullet>(entity) else {
+                    continue;
+                };
+                if bullet.finished() {
+                    continue;
+                }
+                out.push(LightSource {
+                    x: pos.x,
+                    y: pos.y,
+                    radius: 18.0f32.max(bullet.hit_size * 5.0),
+                    color: pal::POWER_LIGHT,
+                    opacity: 0.3,
+                });
+            }
+        }
+        out
     }
 
     /// `rules.borderDarkness` for the darkness/minimap passes (G03 T11):

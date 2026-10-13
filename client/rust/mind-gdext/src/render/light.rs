@@ -2,25 +2,27 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! `LightRenderer` composite (`graphics/LightRenderer.java`, plan 16 §3.7 /
-//! M5). The upstream 4×-downscaled additive target becomes a world-sized
+//! M5). The upstream 4×-downscaled additive target becomes a camera-sized
 //! `Image` light map (deviation S16-4: a CPU map is deterministic and needs no
 //! `RenderingDevice` blend-equation workaround under the locked `mobile`
 //! renderer, `OD16-B`/`D16-3`). Circle accumulation lives in
-//! `mind_core::render::light`; this module owns the Godot texture + `light`
+//! `mind_core::render::light`; sources come from the G03 T12
+//! `MindSimHost::light_sources` seam (cores, illuminators, static `emitLight`
+//! blocks, units and bullets); this module owns the Godot texture + `light`
 //! shader composite.
 //!
-//! Deviation S16-5: the per-block `lightRadius`/`lightColor` fields are not yet
-//! in plan 02's `BlockDef`, so an `emit_light` block contributes a circle of
-//! radius `size * tilesize * 2` with a warm accent tint. Replace with the
-//! reconciled fields when plan 02 exposes them.
+//! Deviation S16-5: the per-block `lightRadius`/`lightColor` overrides and the
+//! illuminator `brightness`/efficiency factor are not yet in plan 02's
+//! `BlockDef`/`LightState`; the pass uses the Java defaults (`Block.lightRadius`
+//! 60, illuminator `radius * 2.5`, brightness 0.75). Per-block overrides found
+//! in `J/content/Blocks.java` are listed in the T12 commit.
 
 use godot::classes::{Image, ImageTexture, Material, Mesh, MeshInstance2D, Node2D, ShaderMaterial};
 use godot::obj::NewGd;
 use godot::prelude::*;
 
-use mind_core::config::TILESIZE;
-use mind_core::render::draw_meta::BlockDrawMeta;
-use mind_core::render::light::{LightAccumulator, enabled};
+use mind_core::render::light::{CircleLight, LightAccumulator, SCALING, enabled};
+use mind_core::render::rules::RulesRenderView;
 use mind_core::render::scan::CameraView;
 
 use crate::sim_host::MindSimHost;
@@ -39,13 +41,17 @@ pub struct LightStats {
     pub visible: bool,
 }
 
-/// `LightRenderer` — world light map + `Shaders.light` composite.
+/// `LightRenderer` — camera-sized light map + `Shaders.light` composite.
 pub struct LightRenderer {
     host: Gd<MindSimHost>,
     node: Gd<MeshInstance2D>,
     material: Option<Gd<ShaderMaterial>>,
     accumulator: LightAccumulator,
     last_revision: i64,
+    /// Camera centre of the last rebuild (motion forces one).
+    last_view: (f32, f32),
+    /// Frames since boot (the map rebuilds every 4 while lighting runs).
+    frames: u64,
     stats: LightStats,
 }
 
@@ -67,6 +73,8 @@ impl LightRenderer {
             material,
             accumulator: LightAccumulator::new(),
             last_revision: i64::MIN,
+            last_view: (f32::INFINITY, f32::INFINITY),
+            frames: 0,
             stats: LightStats::default(),
         }
     }
@@ -76,15 +84,11 @@ impl LightRenderer {
         self.stats
     }
 
-    /// Rebuilds the light map when the world changed, then composites.
-    pub fn update(
-        &mut self,
-        view: &CameraView,
-        lighting: bool,
-        ambient_alpha: f32,
-        draw_light: bool,
-    ) {
-        let active = enabled(lighting, ambient_alpha, draw_light) && self.material.is_some();
+    /// Rebuilds the camera-sized light map when the world, the camera or the
+    /// 4-frame cadence asks for it, then composites with `rules.ambient_light`.
+    pub fn update(&mut self, view: &CameraView, rules: &RulesRenderView, draw_light: bool) {
+        let active =
+            enabled(rules.lighting, rules.ambient_light[3], draw_light) && self.material.is_some();
         self.stats.visible = active;
         if !active {
             self.node.set_visible(false);
@@ -93,55 +97,34 @@ impl LightRenderer {
         self.node.set_visible(true);
 
         let revision = self.host.clone().bind().world_revision();
-        if revision == self.last_revision {
+        let moved =
+            (view.x - self.last_view.0).abs() > 1.0 || (view.y - self.last_view.1).abs() > 1.0;
+        self.frames = self.frames.wrapping_add(1);
+        if revision == self.last_revision && !moved && !self.frames.is_multiple_of(4) {
             return;
         }
         self.last_revision = revision;
+        self.last_view = (view.x, view.y);
 
         let (width, height, bytes, lights) = {
             let host = self.host.clone();
             let host = host.bind();
-            let world = host.grid();
-            let Some(content) = host.content_registry() else {
-                return;
-            };
-            let width = world.width();
-            let height = world.height();
-            if width <= 0 || height <= 0 {
-                return;
-            }
+            let rect = (view.x - view.w / 2.0, view.y - view.h / 2.0, view.w, view.h);
             self.accumulator.clear();
-            let size = TILESIZE as f32;
-            let x1 = ((view.x - view.w / 2.0) / size).floor() as i32;
-            let y1 = ((view.y - view.h / 2.0) / size).floor() as i32;
-            let x2 = ((view.x + view.w / 2.0) / size).ceil() as i32;
-            let y2 = ((view.y + view.h / 2.0) / size).ceil() as i32;
-            for ty in y1.max(0)..y2.min(height) {
-                for tx in x1.max(0)..x2.min(width) {
-                    let tile = world.tile(tx, ty);
-                    let Some(def) = content.block(tile.block) else {
-                        continue;
-                    };
-                    if !BlockDrawMeta::from_def(def).emit_light {
-                        continue;
-                    }
-                    self.accumulator.add(
-                        tx as f32 * size,
-                        ty as f32 * size,
-                        def.size.max(1) as f32 * size * 2.0,
-                        [1.0, 0.92, 0.75, 1.0],
-                        1.0,
-                    );
-                }
+            for source in host.light_sources(rect) {
+                self.accumulator.add(
+                    source.x,
+                    source.y,
+                    source.radius,
+                    source.color,
+                    source.opacity,
+                );
             }
-            let mut alpha = vec![0.0f32; (width * height) as usize];
+            let width = ((view.w / SCALING as f32).ceil() as i32).max(1);
+            let height = ((view.h / SCALING as f32).ceil() as i32).max(1);
+            let mut bytes = vec![0u8; (width * height * 4) as usize];
             for light in self.accumulator.circles() {
-                stamp_circle(&mut alpha, width, height, light.x, light.y, light.radius);
-            }
-            let mut bytes = Vec::with_capacity(alpha.len() * 4);
-            for a in &alpha {
-                let v = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
-                bytes.extend_from_slice(&[255, 255, 255, v]);
+                stamp_rgba(&mut bytes, width, height, view, light);
             }
             (width, height, bytes, self.accumulator.len() as i64)
         };
@@ -166,52 +149,72 @@ impl LightRenderer {
         material.set_shader_parameter("u_texture", &texture.to_variant());
         material.set_shader_parameter(
             "u_ambient",
-            &Color::from_rgba(0.01, 0.01, 0.04, 0.99).to_variant(),
+            &Color::from_rgba(
+                rules.ambient_light[0],
+                rules.ambient_light[1],
+                rules.ambient_light[2],
+                rules.ambient_light[3],
+            )
+            .to_variant(),
         );
-        if let Some(mesh) = build_mesh(&[world_quad(width, height)], 0.0, false) {
+        let quad = Quad {
+            cx: view.x,
+            cy: view.y,
+            w: view.w,
+            h: view.h,
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: 0xffff_ffff,
+        };
+        if let Some(mesh) = build_mesh(&[quad], 0.0, false) {
             self.node.set_mesh(&mesh.upcast::<Mesh>());
             self.node.set_material(&material.upcast::<Material>());
+            // The canvas item needs a texture even though the shader samples
+            // `u_texture`; without it the mesh item is skipped by the canvas
+            // renderer (found in-engine during G03 T12).
+            self.node.set_texture(&texture);
         }
         self.stats.rebuilds += 1;
         self.stats.lights = lights;
     }
 }
 
-/// Adds a radial falloff into a normalized `width`×`height` float map.
-fn stamp_circle(map: &mut [f32], width: i32, height: i32, cx: f32, cy: f32, radius: f32) {
-    if radius <= 0.0 {
+/// Stamps one light into the camera-sized RGBA map (1/4-scale texels,
+/// row-major top-first like the camera view). Java blends the circle buffer
+/// with `Gl.max`, so rgb and alpha both take the max over circles; the texel
+/// falloff approximates the `circle-shadow` radial profile.
+fn stamp_rgba(bytes: &mut [u8], width: i32, height: i32, view: &CameraView, light: &CircleLight) {
+    if light.radius <= 0.0 || width <= 0 || height <= 0 {
         return;
     }
-    let unit = TILESIZE as f32;
-    let x1 = ((cx - radius) / unit).floor() as i32;
-    let y1 = ((cy - radius) / unit).floor() as i32;
-    let x2 = ((cx + radius) / unit).ceil() as i32;
-    let y2 = ((cy + radius) / unit).ceil() as i32;
-    for y in y1.max(0)..y2.min(height) {
-        for x in x1.max(0)..x2.min(width) {
-            let dx = x as f32 * unit - cx;
-            let dy = y as f32 * unit - cy;
+    let scale = view.w.max(1.0) / width as f32;
+    let origin_x = view.x - view.w / 2.0;
+    let origin_y = view.y - view.h / 2.0;
+    let cx = (light.x - origin_x) / scale;
+    let cy = (light.y - origin_y) / scale;
+    let r = light.radius / scale;
+    let x1 = ((cx - r).floor() as i32).max(0);
+    let y1 = ((cy - r).floor() as i32).max(0);
+    let x2 = ((cx + r).ceil() as i32).min(width);
+    let y2 = ((cy + r).ceil() as i32).min(height);
+    for ty in y1..y2 {
+        for tx in x1..x2 {
+            let dx = tx as f32 + 0.5 - cx;
+            let dy = ty as f32 + 0.5 - cy;
             let d = (dx * dx + dy * dy).sqrt();
-            if d >= radius {
+            if d >= r {
                 continue;
             }
-            let falloff = 1.0 - d / radius;
-            let index = (x + y * width) as usize;
-            map[index] = (map[index] + falloff).clamp(0.0, 1.0);
+            let falloff = 1.0 - d / r;
+            let index = ((tx + ty * width) * 4) as usize;
+            let r8 = (light.color[0] * falloff * 255.0).clamp(0.0, 255.0) as u8;
+            let g8 = (light.color[1] * falloff * 255.0).clamp(0.0, 255.0) as u8;
+            let b8 = (light.color[2] * falloff * 255.0).clamp(0.0, 255.0) as u8;
+            let a8 = (light.color[3] * falloff * 255.0).clamp(0.0, 255.0) as u8;
+            bytes[index] = bytes[index].max(r8);
+            bytes[index + 1] = bytes[index + 1].max(g8);
+            bytes[index + 2] = bytes[index + 2].max(b8);
+            bytes[index + 3] = bytes[index + 3].max(a8);
         }
-    }
-}
-
-/// World-covering quad in world pixels.
-fn world_quad(width: i32, height: i32) -> Quad {
-    let size = TILESIZE as f32;
-    Quad {
-        cx: width as f32 * size / 2.0,
-        cy: height as f32 * size / 2.0,
-        w: width as f32 * size,
-        h: height as f32 * size,
-        uv: [0.0, 0.0, 1.0, 1.0],
-        color: 0xffff_ffff,
     }
 }
 
@@ -220,11 +223,31 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stamp_circle_is_brightest_at_tile_center() {
-        let mut map = vec![0.0f32; 16];
-        // Tile (1,1) centre is world (8,8) (Java `Tile.worldx()`); stamp there.
-        stamp_circle(&mut map, 4, 4, 8.0, 8.0, 16.0);
-        assert!((map[1 + 4] - 1.0).abs() < 1e-3);
-        assert!(map.iter().all(|v| (0.0..=1.0).contains(v)));
+    fn stamp_is_brightest_at_the_center() {
+        let view = CameraView {
+            x: 16.0,
+            y: 16.0,
+            w: 32.0,
+            h: 32.0,
+            zoom: 1.0,
+            team: 0,
+        };
+        let mut bytes = vec![0u8; 8 * 8 * 4];
+        let light = CircleLight {
+            x: 16.0,
+            y: 16.0,
+            color: [1.0, 0.5, 0.0, 1.0],
+            radius: 16.0,
+        };
+        stamp_rgba(&mut bytes, 8, 8, &view, &light);
+        // Texel (4,4) maps to world (18,18), ~1 px from the light centre.
+        let index = ((4 + 4 * 8) * 4) as usize;
+        assert!(
+            usize::from(bytes[index]) >= usize::from(bytes[0]),
+            "falloff"
+        );
+        assert!(bytes[index + 3] > 0, "alpha stamped");
+        // Outside the circle (world 32,32 is 22 px away) stays untouched.
+        assert_eq!(bytes[(7 + 7 * 8) * 4 + 3], 0);
     }
 }

@@ -28,6 +28,19 @@ pub fn enabled(lighting: bool, ambient_alpha: f32, draw_light: bool) -> bool {
     lighting && ambient_alpha > 0.0001 && draw_light
 }
 
+/// `light.frag` composite (`core/assets/shaders/light.frag`): the accumulated
+/// circle buffer is mixed into the ambient by its alpha and the result's alpha
+/// is `ambient.a - light.a` (the light *adds* brightness).
+pub fn light_composite(ambient: [f32; 4], light: [f32; 4]) -> [f32; 4] {
+    let mix = |a: f32, b: f32, t: f32| a + (b - a) * t;
+    [
+        mix(ambient[0], light[0], light[3]).clamp(0.0, 1.0),
+        mix(ambient[1], light[1], light[3]).clamp(0.0, 1.0),
+        mix(ambient[2], light[2], light[3]).clamp(0.0, 1.0),
+        (ambient[3] - light[3]).clamp(0.0, 1.0),
+    ]
+}
+
 /// `LightRenderer` circle pool: reuses slots instead of allocating per add.
 #[derive(Clone, Debug, Default)]
 pub struct LightAccumulator {
@@ -92,6 +105,15 @@ mod tests {
         assert!(!enabled(false, 0.01, true));
         assert!(!enabled(true, 0.0, true));
         assert!(!enabled(true, 0.01, false));
+    }
+
+    #[test]
+    fn ambient_mix_matches_shader() {
+        let out = light_composite([0.01, 0.01, 0.04, 0.99], [1.0, 0.83, 0.5, 0.6]);
+        assert!((out[0] - 0.604).abs() < 1e-5);
+        assert!((out[1] - 0.502).abs() < 1e-5);
+        assert!((out[2] - 0.316).abs() < 1e-5);
+        assert!((out[3] - 0.39).abs() < 1e-5);
     }
 
     #[test]

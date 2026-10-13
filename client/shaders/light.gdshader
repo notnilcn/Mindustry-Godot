@@ -3,7 +3,7 @@
 // Ported from: core/assets/shaders/light.frag + screenspace.vert (plan 16 §3.9).
 
 shader_type canvas_item;
-render_mode unshaded, blend_add;
+render_mode unshaded, blend_mix;
 
 uniform sampler2D u_texture;
 uniform vec4 u_ambient;

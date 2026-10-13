@@ -263,6 +263,10 @@ pub struct MindWorldRenderer {
     menu: MenuRenderer,
     load: LoadRenderer,
     rules: RulesRenderView,
+    /// Debug override: `set_rules_*` pinned `rules` (G03 T12).
+    rules_override: bool,
+    /// Frames since boot (the live-rules feed polls every 30).
+    rules_poll: u32,
     lod: Lod,
     draw_light: bool,
     draw_hitboxes: bool,
@@ -309,6 +313,8 @@ impl INode2D for MindWorldRenderer {
             menu: MenuRenderer::new(),
             load: LoadRenderer::new(),
             rules: RulesRenderView::default(),
+            rules_override: false,
+            rules_poll: 0,
             lod: Lod::default(),
             draw_light: true,
             draw_hitboxes: false,
@@ -697,6 +703,24 @@ impl MindWorldRenderer {
         self.stats.lod_l1 = self.lod.l1;
         self.stats.lod_l2 = self.lod.l2;
         self.stats.stage_trace.push(String::from("lod"));
+        // Live sector rules feed (`Rules` -> `RulesRenderView`, G03 T12):
+        // polled every 30 frames so a `load_sector`/rules edit reaches the
+        // lighting/fog/env/limit consumers; `set_rules_*` pins an override.
+        self.rules_poll = self.rules_poll.wrapping_add(1);
+        if !self.rules_override
+            && self.rules_poll.is_multiple_of(30)
+            && let Some(host) = self.host.clone()
+        {
+            let view = host
+                .bind()
+                .live_rules()
+                .map(|rules| RulesRenderView::from_rules(&rules));
+            if let Some(view) = view
+                && view != self.rules
+            {
+                self.rules = view;
+            }
+        }
         self.stats.stage_trace.push(String::from("process_blocks"));
         // `mesh_rebuilds` is cumulative per pass; each pass reports its own boot
         // total, so the frame total is the sum (never an accumulation).
@@ -754,12 +778,7 @@ impl MindWorldRenderer {
             // `Renderer.draw`: the light composite only runs when
             // `Rules.lighting` is set; the ambient alpha comes from the
             // `Rules` `ambientLight` alpha (never a hardcoded near-black).
-            light.update(
-                &view,
-                self.rules.lighting,
-                self.rules.ambient_light[3],
-                draw_light,
-            );
+            light.update(&view, &self.rules, draw_light);
             let light_stats = light.stats();
             self.stats.light_rebuilds = light_stats.rebuilds;
             self.stats.light_circles = light_stats.lights;
@@ -941,18 +960,21 @@ impl MindWorldRenderer {
     #[func]
     pub fn set_fog_enabled(&mut self, enabled: bool) {
         self.rules.fog = enabled;
+        self.rules_override = true;
     }
 
     /// Sets `Rules.staticFog`.
     #[func]
     pub fn set_static_fog(&mut self, enabled: bool) {
         self.rules.static_fog = enabled;
+        self.rules_override = true;
     }
 
     /// Sets the active `Rules.env` mask (plan 16 §3.12).
     #[func]
     pub fn set_rules_env(&mut self, mask: i64) {
         self.rules.env = mask as u32;
+        self.rules_override = true;
     }
 
     /// Sets `Rules.lighting` and `Rules.ambientLight` for the light composite
@@ -973,6 +995,14 @@ impl MindWorldRenderer {
             ambient_b as f32,
             ambient_a as f32,
         ];
+        self.rules_override = true;
+    }
+
+    /// Resumes the live `Rules` feed after a debug `set_rules_*` override
+    /// (G03 T12).
+    #[func]
+    pub fn clear_rules_override(&mut self) {
+        self.rules_override = false;
     }
 
     /// Queues a packed fog event (plan 12 `ClientHooks::fog_handle_event`).
