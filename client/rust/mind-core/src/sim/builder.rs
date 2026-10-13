@@ -996,6 +996,17 @@ impl Sim {
         self.block_runtime = Some(runtime);
         self.with_player_plans(unit, |slot| *slot = plans);
         for event in outcome.events {
+            // `HintsFragment.java:74-102`: placed/break events feed the hint
+            // sets before the event is dispatched.
+            match &event {
+                SimEvent::BlockPlacedEvent(placed) => {
+                    self.hint_events.placed_by_player.insert(placed.block);
+                }
+                SimEvent::BlockBrokenEvent(_) => {
+                    self.hint_events.events.insert("break");
+                }
+                _ => {}
+            }
             self.push_event(event);
         }
         if outcome.changed {
@@ -1404,6 +1415,54 @@ mod tests {
             .map(|bridge| bridge.link)
             .unwrap_or(-1);
         assert_eq!(second_link, -1, "the second waits for a later bridge");
+    }
+
+    /// `HintsFragment.java:74-102`: player placements and breaks feed the hint
+    /// sets (`placedBlocks` / `"break"`).
+    #[test]
+    fn hint_events_record_player_placements() {
+        // Player-queued placement (`BlockBuildEndEvent` with `!breaking`).
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        assert!(sim.queue_player_place(14, 10, wall, 0), "plan queued");
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+            if sim.hint_events.placed_by_player.contains(&wall) {
+                break;
+            }
+        }
+        assert!(
+            sim.hint_events.placed_by_player.contains(&wall),
+            "the player wall placement is recorded"
+        );
+
+        // Player-queued deconstruction of an instant-placed wall fires "break".
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("instant API place");
+        sim.command(SimCommand::Break {
+            x: 14,
+            y: 10,
+            player: Some(0),
+        })
+        .expect("queued break");
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+            if sim.hint_events.events.contains("break") {
+                break;
+            }
+        }
+        assert!(
+            sim.hint_events.events.contains("break"),
+            "the break event is recorded"
+        );
     }
 
     /// T18: a queued player placement keeps its rotation through the plan queue

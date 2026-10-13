@@ -2453,6 +2453,21 @@ impl MindSimHost {
         self.sim.clear_player_build_plans();
     }
 
+    /// `HintsFragment` poll (`HintsFragment.java:74-102`): event sets + the
+    /// per-frame predicate inputs for the hint driver (T4a/T4b).
+    #[func]
+    pub fn hint_state_json(&self) -> GString {
+        GString::from(
+            hint_state_value(
+                &self.sim,
+                self.content_snapshot.as_ref(),
+                self.player_team(),
+            )
+            .to_string()
+            .as_str(),
+        )
+    }
+
     /// `BuilderComp.updateBuilding` (`InputHandler.update`; PAR-0098 §2b).
     #[func]
     pub fn set_player_building_paused(&mut self, paused: bool) {
@@ -4000,6 +4015,177 @@ fn core_items_json(sim: &Sim, content: &ContentRegistry) -> String {
             .unwrap_or_else(|_| String::from("{}"));
     }
     String::from("{}")
+}
+
+/// `HintsFragment` poll data (`HintsFragment.java:74-102`; T4a/T4b inputs).
+/// Read-only and cheap: one building-entity pass plus one grid pass.
+fn hint_state_value(sim: &Sim, content: Option<&ContentRegistry>, team: u8) -> serde_json::Value {
+    use mind_core::content::BlockFlag;
+    use mind_core::entities::comp::TeamComp;
+    use mind_core::entities::comp::unit::comp::{ItemsComp, UnitCore, UnitPayloads, UnitTypeComp};
+
+    let block_name = |id: BlockId| {
+        content
+            .and_then(|content| content.block(id))
+            .map(|def| def.name.clone())
+            .unwrap_or_default()
+    };
+
+    // `Trigger.placedBlocks` / `events` sets.
+    let placed: Vec<String> = sim
+        .hint_events
+        .placed_by_player
+        .iter()
+        .map(|id| block_name(*id))
+        .collect();
+    let events: Vec<&str> = sim.hint_events.events.iter().copied().collect();
+
+    // Player unit inputs (`UnitCore`/`ItemsComp`/`UnitPayloads`).
+    let (player_dead, spawned_by_core, player_has_item, player_payload, player_can_boost) =
+        match sim.player_unit() {
+            Some(entity) => {
+                let core = sim.ecs.0.get::<UnitCore>(entity);
+                let items = sim.ecs.0.get::<ItemsComp>(entity);
+                let payloads = sim.ecs.0.get::<UnitPayloads>(entity);
+                let can_boost = sim
+                    .ecs
+                    .0
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| content.and_then(|content| content.unit(comp.type_id)))
+                    .is_some_and(|def| def.can_boost);
+                (
+                    core.map(|core| core.dead).unwrap_or(false),
+                    core.map(|core| core.spawned_by_core).unwrap_or(false),
+                    items.and_then(|items| items.item).is_some(),
+                    payloads
+                        .map(|payloads| payloads.stack.len() as i64)
+                        .unwrap_or(-1),
+                    can_boost,
+                )
+            }
+            None => (true, false, false, -1, false),
+        };
+
+    // Live session counters (`HintsFragment` reads `state.wave`/wave team AI).
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<mind_core::game::runtime::CampaignRuntime>();
+    let (enemies, wave) = runtime
+        .map(|runtime| (runtime.session.enemies as i64, runtime.session.wave as i64))
+        .unwrap_or((0, 0));
+
+    // Team unit count (`TeamData.units`).
+    let team_units = sim
+        .ecs
+        .0
+        .get_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
+        .map(|runtime| {
+            runtime
+                .units
+                .iter()
+                .filter(|entity| {
+                    sim.ecs
+                        .0
+                        .get::<TeamComp>(**entity)
+                        .is_some_and(|comp| comp.team == team)
+                })
+                .count() as i64
+        })
+        .unwrap_or(0);
+
+    // Building counters + the first core's identity (`state.teams.get(team)`).
+    let mut conveyors = 0i64;
+    let mut cores = 0i64;
+    let mut fabricators = 0i64;
+    let mut extinguishers = 0i64;
+    let mut core_block = String::new();
+    let mut core_capacity = 0i64;
+    let mut core_copper = 0i64;
+    let mut core_has_foundation_cost = false;
+    let copper_id = content.and_then(|content| content.item_id("copper"));
+    let foundation = content.and_then(|content| content.block_by_name("core-foundation"));
+    for (_seq, entity, comp) in sim.ecs.entities_by_seq() {
+        let Some(def) = content.and_then(|content| content.block(comp.block)) else {
+            continue;
+        };
+        if comp.team.0 == team
+            && matches!(
+                def.kind,
+                BlockKind::Conveyor | BlockKind::ArmoredConveyor | BlockKind::StackConveyor
+            )
+        {
+            conveyors += 1;
+        }
+        if def.name == "tank-fabricator" || def.name == "ground-factory" {
+            fabricators += 1;
+        }
+        if def.flags.contains(&BlockFlag::Extinguisher) {
+            extinguishers += 1;
+        }
+        if def.kind != BlockKind::CoreBlock || comp.team.0 != team {
+            continue;
+        }
+        cores += 1;
+        if !core_block.is_empty() {
+            continue;
+        }
+        core_block = def.name.clone();
+        core_capacity = def.item_capacity as i64;
+        if let Some(module) = sim.ecs.0.get::<ItemModule>(entity) {
+            if let Some(copper) = copper_id {
+                core_copper = module.get(copper) as i64;
+            }
+            core_has_foundation_cost = foundation.is_some_and(|def| {
+                def.requirements
+                    .iter()
+                    .all(|stack| module.get(stack.item) >= stack.amount)
+            });
+        }
+    }
+
+    // `Trigger.blockInfo`-style live plan count (the player's build queue).
+    let plans = sim.player_build_plans().len() as i64;
+
+    // `Indexer.isBlockPresent(Blocks.coreZone)`; the port models `core-zone` as
+    // a floor block, so the floor layer is the match.
+    let core_zone_present = content
+        .and_then(|content| content.block_id("core-zone"))
+        .is_some_and(|zone| {
+            sim.grid.iter_row_major().any(|(pos, _)| {
+                sim.grid.floor_at(pos) == Some(zone) || sim.grid.block_at(pos) == Some(zone)
+            })
+        });
+
+    // `state.stats.destroyed` cores: not tracked per core block yet (T4b).
+    let cores_destroyed = 0i64;
+    let boss: serde_json::Value =
+        serde_json::from_str(&sim.boss_json()).unwrap_or(serde_json::Value::Null);
+
+    serde_json::json!({
+        "placed": placed,
+        "events": events,
+        "player_dead": player_dead,
+        "player_has_item": player_has_item,
+        "player_can_boost": player_can_boost,
+        "player_spawned_by_core": spawned_by_core,
+        "player_payload": player_payload,
+        "team_units": team_units,
+        "enemies": enemies,
+        "wave": wave,
+        "conveyors": conveyors,
+        "plans": plans,
+        "core_block": core_block,
+        "core_copper": core_copper,
+        "core_capacity": core_capacity,
+        "core_has_foundation_cost": core_has_foundation_cost,
+        "cores": cores,
+        "fabricators": fabricators,
+        "extinguishers": extinguishers,
+        "core_zone_present": core_zone_present,
+        "cores_destroyed": cores_destroyed,
+        "boss": boss,
+    })
 }
 
 /// Item counts for the building at `(x, y)` as JSON; `None` when the tile has

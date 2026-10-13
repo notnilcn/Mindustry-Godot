@@ -82,6 +82,8 @@ impl super::Sim {
             }));
         }
         self.push_event(SimEvent::ResetEvent(ResetEvent));
+        // `HintsFragment` sets are session state (`ResetEvent` clears them).
+        self.hint_events.clear();
     }
 
     /// Pauses a running game; returns whether the phase changed.
