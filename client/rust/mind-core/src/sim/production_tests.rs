@@ -1877,7 +1877,7 @@ fn large_wall_place_sound_is_size_2() {
     };
     assert_eq!(*sound, crate::audio::SoundId::BLOCK_PLACE2);
     assert_eq!((*x, *y), (64.0 + offset, 64.0 + offset));
-    }
+}
 
 /// G06 T1 (PAR-0106): the live sim refreshes the logic globals every tick
 /// before entity updates, so `@tick` equals the tick the instruction runs in.

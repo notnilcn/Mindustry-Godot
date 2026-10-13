@@ -2429,7 +2429,7 @@ fn payload_commands_emit_sounds() {
         )),
         "drop sound: {events:?}"
     );
-    }
+}
 
 /// G06 T7: unit `@x/@y` are tiles (px/8) and `controlled` uses the Java
 /// constants (`ctrlProcessor = 1`, `ctrlPlayer = 2`, `ctrlCommand = 3`).
