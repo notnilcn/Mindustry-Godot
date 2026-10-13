@@ -148,8 +148,11 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
         }
     }
 
-    // `boolean hold = hasStance(UnitStance.holdPosition)` (T11; false today).
-    let hold = false;
+    // `boolean hold = hasStance(UnitStance.holdPosition)` (T11).
+    let hold = ctx
+        .world
+        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(unit)
+        .is_some_and(|stances| stances.has_name(ctx.content, "holdposition"));
 
     let has_plan = ctx
         .world

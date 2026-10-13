@@ -3019,3 +3019,216 @@ fn wave_alpha_falls_back_to_ground_ai() {
         "the wave alpha walked toward the enemy core ({start_x} -> {x})"
     );
 }
+
+/// G01 T11: the `holdfire` stance stops a commanded dagger from shooting
+/// (`CommandAI.shouldFire`, CommandAI.java:527).
+#[test]
+fn hold_fire_stops_shooting() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    let shooter = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("shooter");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 200.0, 100.0, 180.0)
+        .expect("target");
+    // Dummy target: the `Player` controller receives no input, so it never
+    // shoots back while the shooter's fire counts are measured.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(target) {
+        slot.kind = AiKind::Player;
+    }
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(shooter) {
+        slot.kind = AiKind::Command;
+    }
+    let shots = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(shooter)
+            .map(|weapons| weapons.mounts.iter().map(|m| m.total_shots).sum::<i32>())
+            .unwrap_or(0)
+    };
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let before = shots(&sim);
+    assert!(before > 0, "the dagger fired before the stance: {before}");
+    let id = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(shooter)
+        .expect("seq")
+        .0 as i32;
+    let hold_fire = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_stance_by_name("holdfire")
+        .expect("holdfire")
+        .id
+        .raw();
+    sim.command(SimCommand::UnitStance {
+        units: smallvec::smallvec![id],
+        stance: hold_fire,
+        enabled: true,
+    })
+    .expect("stance");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let after = shots(&sim);
+    assert_eq!(after, before, "holdFire stops firing ({before} -> {after})");
+}
+
+/// G01 T11: the `boost` stance lifts a `nova` (`CommandAI.shouldBoost` +
+/// `UnitComp.updateBoosting`).
+#[test]
+fn boost_stance_lifts_nova() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    let nova = sim
+        .spawn_live_unit("nova", 1, 100.0, 100.0, 0.0)
+        .expect("nova");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(nova) {
+        slot.kind = AiKind::Command;
+    }
+    let id = sim.ecs.0.get::<crate::ecs::EntitySeq>(nova).expect("seq").0 as i32;
+    let boost = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_stance_by_name("boost")
+        .expect("boost")
+        .id
+        .raw();
+    sim.command(SimCommand::UnitStance {
+        units: smallvec::smallvec![id],
+        stance: boost,
+        enabled: true,
+    })
+    .expect("stance");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let elevation = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::unit::comp::UnitCore>(nova)
+        .map(|core| core.elevation)
+        .unwrap_or(0.0);
+    assert!(
+        elevation > 0.5,
+        "the boost stance lifts the nova: {elevation}"
+    );
+}
+
+/// G01 T11: an item stance restricts the mono's target item
+/// (`MinerAI`'s `ItemUnitStance` branch): only copper is mined although lead
+/// ore is available.
+#[test]
+fn mono_item_stance_filters_item() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let (copper_ore, lead_ore) = {
+        let rt = sim.unit_runtime().expect("rt");
+        (
+            rt.content.block_id("ore-copper").expect("ore-copper"),
+            rt.content.block_id("ore-lead").expect("ore-lead"),
+        )
+    };
+    for i in 0..3 {
+        sim.grid.tiles.get_mut(20 + i, 10).overlay = copper_ore;
+        sim.grid.tiles.get_mut(20 + i, 14).overlay = lead_ore;
+    }
+    sim.refresh_unit_runtime();
+    let mono = sim
+        .spawn_live_unit("mono", 1, 10.5 * 8.0, 10.5 * 8.0, 0.0)
+        .expect("mono");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mono) {
+        slot.kind = AiKind::Command;
+    }
+    let id = sim.ecs.0.get::<crate::ecs::EntitySeq>(mono).expect("seq").0 as i32;
+    let copper_stance = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_stance_by_name("item-copper")
+        .expect("item-copper")
+        .id
+        .raw();
+    sim.command(SimCommand::UnitStance {
+        units: smallvec::smallvec![id],
+        stance: copper_stance,
+        enabled: true,
+    })
+    .expect("stance");
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+    }
+    let (copper, lead) = {
+        let rt = sim.unit_runtime().expect("rt");
+        let items = sim.ecs.0.get::<ItemModule>(core);
+        (
+            items.map_or(0, |i| i.get(rt.content.item_id("copper").expect("copper"))),
+            items.map_or(0, |i| i.get(rt.content.item_id("lead").expect("lead"))),
+        )
+    };
+    eprintln!("copper {copper}, lead {lead}");
+    assert!(copper > 0, "the mono mined copper: {copper}");
+    assert_eq!(lead, 0, "the item stance kept the miner off lead");
+}

@@ -59,12 +59,24 @@ pub fn get_unit_stances(
     out.extend_from_slice(&unit.stances);
     out.sort_unstable();
     out.dedup();
-    if unit.mine_tier > 0
-        && let Some(mine_auto) = content.unit_stance_by_name("mineauto")
-    {
-        let id = mine_auto.id;
-        if let Err(index) = out.binary_search(&id) {
-            out.insert(index, id);
+    if unit.mine_tier > 0 {
+        if let Some(mine_auto) = content.unit_stance_by_name("mineauto") {
+            let id = mine_auto.id;
+            if let Err(index) = out.binary_search(&id) {
+                out.insert(index, id);
+            }
+        }
+        // `UnitType.getUnitStances` adds an `ItemUnitStance` per item the tier
+        // can mine (the port skips Java's map-ore presence filter; T11).
+        for item in content.items() {
+            if item.hardness > unit.mine_tier {
+                continue;
+            }
+            if let Some(stance) = content.unit_stance_by_name(&format!("item-{}", item.name))
+                && let Err(index) = out.binary_search(&stance.id)
+            {
+                out.insert(index, stance.id);
+            }
         }
     }
 }

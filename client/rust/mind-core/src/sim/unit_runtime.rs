@@ -1981,8 +1981,53 @@ pub fn unit_update_system(world: &mut World) {
                 // the unit idles in place instead of walking to the core anchor.
                 let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
                 set_mount_targets(world, &runtime.content, entity, mount_target, None);
+                // `CommandAI.updateUnit`'s stance handling (T11): boost and
+                // pursueTarget (edit `slot` before the movement match).
+                let mut slot = slot;
+                let stances = world
+                    .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+                    .copied()
+                    .unwrap_or_default();
+                let def_range = world
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id))
+                    .map(|def| def.max_range)
+                    .unwrap_or(0.0);
+                if stances.has_name(&runtime.content, "boost") {
+                    // `shouldBoost()`: `updateBoosting(false)` while an attack
+                    // target is in range, else true (CommandAI.java:150-163).
+                    let in_range = mount_target
+                        .is_some_and(|target| entity_pos_within(world, entity, target, def_range));
+                    if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+                        core.boosting = !in_range;
+                    }
+                }
+                if slot.target.is_none()
+                    && stances.has_name(&runtime.content, "pursuetarget")
+                    && let Some(target) = mount_target
+                    && let Some(pos) = world.get::<Pos>(target).copied()
+                {
+                    // `pursueTarget(target, true)`: `commandTarget(target, false)`.
+                    slot.target = Some(TilePos::new(
+                        crate::world::WorldGrid::to_tile(pos.x) as i16,
+                        crate::world::WorldGrid::to_tile(pos.y) as i16,
+                    ));
+                }
                 if command_kind == Some(crate::content::registries::commands::ControllerKind::Miner)
                 {
+                    // `CommandAI.updateUnit`: the mine command auto-adds
+                    // `mineAuto` when no item stance is set (T11).
+                    let mut stances = world
+                        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+                        .copied()
+                        .unwrap_or_default();
+                    if !stances.has_name(&runtime.content, "mineauto")
+                        && !stances.any_item_stance(&runtime.content)
+                        && let Some(def) = runtime.content.unit_stance_by_name("mineauto")
+                    {
+                        crate::ai::unit_stance_runtime::apply_stance(&mut stances.0, def);
+                        world.entity_mut(entity).insert(stances);
+                    }
                     let mut miner = world
                         .get::<crate::ai::types::miner::MinerAiState>(entity)
                         .copied()
@@ -4271,6 +4316,10 @@ pub(crate) fn set_mount_targets(
     let target_vel = target.and_then(|target| world.get::<Vel>(target).copied());
     let core_pos = core_override.and_then(|core| world.get::<Pos>(core).copied());
     let core_vel = core_override.and_then(|core| world.get::<Vel>(core).copied());
+    // `CommandAI.shouldFire()` (T11): `!hasStance(holdFire)`.
+    let hold_fire = world
+        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+        .is_some_and(|stances| stances.has_name(content, "holdfire"));
     let Some(mut weapons) = world.get_mut::<UnitWeapons>(entity) else {
         return;
     };
@@ -4299,13 +4348,14 @@ pub(crate) fn set_mount_targets(
         // && shouldShoot()` (AIController.java:239). The port measures from the
         // unit centre instead of the (≤ ~15 px away) mount position.
         let range = weapon.range() + hit_size / 2.0;
-        mount.shoot = chosen.is_some_and(|_| {
-            chosen_pos.is_some_and(|pos| {
-                let dx = pos.x - src.x;
-                let dy = pos.y - src.y;
-                dx * dx + dy * dy <= range * range
-            })
-        });
+        mount.shoot = !hold_fire
+            && chosen.is_some_and(|_| {
+                chosen_pos.is_some_and(|pos| {
+                    let dx = pos.x - src.x;
+                    let dy = pos.y - src.y;
+                    dx * dx + dy * dy <= range * range
+                })
+            });
         // `Predict.intercept(unit, mount.target, weapon.bullet)` per mount. A
         // building target has no `Vel`; Java's intercept degenerates to the
         // target position there (Predict.java:113-119).

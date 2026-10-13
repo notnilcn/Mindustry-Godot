@@ -638,6 +638,89 @@ impl Sim {
         ordered
     }
 
+    /// Applies a wire `UnitStance` to **live** units (`id` = `EntitySeq`),
+    /// mirroring [`Self::apply_live_unit_command`]'s filters: default team,
+    /// `CommandAI` controller and a stance the unit type lists
+    /// (`UnitType.getUnitStances`). Returns the number of units whose live
+    /// stance mask was touched (`0` routes the command to the relay).
+    fn apply_live_unit_stance(&mut self, ids: &[i32], stance: u16, enabled: bool) -> usize {
+        let stance_id = crate::content::id::UnitStanceId::new(stance);
+        let Some(runtime) = self
+            .ecs
+            .0
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        else {
+            return 0;
+        };
+        if runtime.units.is_empty() || runtime.content.unit_stance(stance_id).is_none() {
+            return 0;
+        }
+        let default_team = self.live_default_team();
+        let mut accepted: Vec<Entity> = Vec::new();
+        for &id in ids {
+            let Some(&entity) = runtime.units.iter().find(|&&entity| {
+                self.ecs
+                    .0
+                    .get::<crate::ecs::EntitySeq>(entity)
+                    .is_some_and(|seq| seq.0 as i32 == id)
+            }) else {
+                continue;
+            };
+            let team = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::TeamComp>(entity)
+                .map(|team| team.team)
+                .unwrap_or(0);
+            let commandable = self
+                .ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(entity)
+                .is_some_and(|slot| slot.kind == crate::ai::controller::AiKind::Command);
+            if team != default_team || !commandable {
+                continue;
+            }
+            let allowed = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .is_some_and(|def| {
+                    let mut stances = Vec::new();
+                    crate::ai::unit_command_runtime::get_unit_stances(
+                        def,
+                        &runtime.content,
+                        &mut stances,
+                    );
+                    stances.contains(&stance_id)
+                });
+            if allowed {
+                accepted.push(entity);
+            }
+        }
+        let stance_def = runtime.content.unit_stance(stance_id).cloned();
+        let Some(stance_def) = stance_def else {
+            return 0;
+        };
+        let mut applied = 0usize;
+        for entity in accepted {
+            let mut comp = self
+                .ecs
+                .0
+                .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(entity)
+                .copied()
+                .unwrap_or_default();
+            if enabled {
+                crate::ai::unit_stance_runtime::apply_stance(&mut comp.0, &stance_def);
+            } else {
+                crate::ai::unit_stance_runtime::disable_stance(&mut comp.0, stance_id);
+            }
+            self.ecs.0.entity_mut(entity).insert(comp);
+            applied += 1;
+        }
+        applied
+    }
+
     fn runtime_place(&mut self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {
             return false;
@@ -1072,8 +1155,12 @@ impl Sim {
                 stance,
                 enabled,
             } => {
-                self.ensure_unit_commands()
-                    .set_unit_stance(units, *stance, *enabled);
+                // Live units first; `0` routes to the relay runtime (net id
+                // space), mirroring `UnitCommand` (G01 T11).
+                if self.apply_live_unit_stance(units, *stance, *enabled) == 0 {
+                    self.ensure_unit_commands()
+                        .set_unit_stance(units, *stance, *enabled);
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

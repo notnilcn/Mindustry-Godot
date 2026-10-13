@@ -797,6 +797,29 @@ impl MindSimHost {
                     y: fy as f32,
                 }
             }
+            // `InputHandler.setUnitStance` (G01 T11): `units` + `stance` id in
+            // `content_list("unitStance")` order, `enabled`.
+            "unit_stance" => {
+                let units: smallvec::SmallVec<[i32; 32]> = value
+                    .get("units")
+                    .and_then(|v| v.as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|row| row.as_i64().map(|id| id as i32))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let stance = value.get("stance").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+                let enabled = value
+                    .get("enabled")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(true);
+                SimCommand::UnitStance {
+                    units,
+                    stance,
+                    enabled,
+                }
+            }
             // `InputHandler.unitControl`/`unitClear` (G01 T9).
             "unit_control" => SimCommand::UnitControl {
                 unit: value.get("unit").and_then(|v| v.as_i64()).map(|v| v as i32),

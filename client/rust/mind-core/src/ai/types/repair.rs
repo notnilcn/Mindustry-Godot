@@ -138,8 +138,11 @@ pub fn update_repair_ai(ctx: &mut AiCtx, unit: Entity, state: &mut RepairAiState
         crate::sim::unit_runtime::set_mount_targets(ctx.world, ctx.content, unit, enemy, None);
     }
 
-    // `boolean hold = hasStance(UnitStance.holdPosition)` (T11; false today).
-    let hold = false;
+    // `boolean hold = hasStance(UnitStance.holdPosition)` (T11).
+    let hold = ctx
+        .world
+        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(unit)
+        .is_some_and(|stances| stances.has_name(ctx.content, "holdposition"));
 
     if let Some(target) = target_building {
         if !hold {

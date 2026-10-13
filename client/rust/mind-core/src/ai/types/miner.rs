@@ -266,14 +266,37 @@ pub fn update_miner_ai(ctx: &mut AiCtx, unit: Entity, state: &mut MinerAiState) 
     }
 
     let ts = crate::config::TILESIZE as f32;
+    // `MinerAI.updateMovement`'s stance reads (T11): with `mineAuto` off, only
+    // items with an active item stance are mined.
+    let stances = ctx
+        .world
+        .get::<crate::ai::unit_stance_runtime::UnitStancesComp>(unit)
+        .copied()
+        .unwrap_or_default();
+    let mine_auto = stances.has_name(ctx.content, "mineauto");
     if state.mining {
         // `timer.get(timerTarget2, 60 * 4) || targetItem == null`.
         state.timer2 -= 1.0;
         if state.timer2 <= 0.0 || state.target_item.is_none() {
             state.timer2 = 240.0;
+            let candidates: Vec<ItemId> = if mine_auto {
+                def.mine_items.clone()
+            } else {
+                let filtered: Vec<ItemId> = def
+                    .mine_items
+                    .iter()
+                    .copied()
+                    .filter(|item| stances.item_stance(ctx.content, *item))
+                    .collect();
+                if filtered.is_empty() {
+                    def.mine_items.clone()
+                } else {
+                    filtered
+                }
+            };
             state.target_item = select_target_item(
                 ctx,
-                &def.mine_items,
+                &candidates,
                 core.0,
                 def.mine_floor,
                 def.mine_walls,
