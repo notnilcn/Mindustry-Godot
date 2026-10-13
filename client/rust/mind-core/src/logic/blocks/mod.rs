@@ -195,15 +195,14 @@ impl LogicRulesApi for crate::io::json::rules::Rules {
     }
 }
 
-/// Borrows the live rules seam: campaign session rules, then `LogicWorldState`,
-/// then the installed seam resource, then upstream defaults.
+/// Borrows the live rules seam: the campaign session rules first (the live
+/// authority), then the host-installed seam resource, then upstream defaults
+/// (G06 T4; the standalone `LogicWorldState.rules` copy is the `with_rules`
+/// fallback for `setrule`, not the `accessible()`/gate source).
 pub fn rules_ref(world: &World) -> &dyn LogicRulesApi {
     static DEFAULT: DefaultLogicRules = DefaultLogicRules;
     if let Some(rt) = world.get_resource::<crate::game::runtime::CampaignRuntime>() {
         return &rt.session.rules;
-    }
-    if let Some(state) = world.get_resource::<crate::logic::world::LogicWorldState>() {
-        return &state.rules;
     }
     match world.get_resource::<LogicRulesRes>() {
         Some(rules) => rules.0.as_ref(),
