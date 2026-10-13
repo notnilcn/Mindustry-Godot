@@ -4400,6 +4400,16 @@ impl MindSimHost {
             .is_some_and(|(current, _, _)| current == block)
     }
 
+    /// Building footprint size at `(x, y)` (`Block.size`; G03 T13 inventory
+    /// anchoring). Read-only MCP/HUD probe; `1` without a building.
+    #[func]
+    pub fn block_size(&self, x: i32, y: i32) -> i32 {
+        self.tile_at(x, y)
+            .and_then(|tile| self.content_snapshot.as_ref()?.block(tile.block))
+            .map(|def| def.size.max(1))
+            .unwrap_or(1)
+    }
+
     /// Per-building state for the block pass (G03 T8): door open, switch
     /// enabled, sorter/unloader/source items, damage and team mark inputs.
     pub fn block_state_draw(&self, x: i32, y: i32) -> Option<BlockStateDraw> {

@@ -396,6 +396,13 @@ impl MindCamera2D {
         self.base().get_canvas_transform() * world
     }
 
+    /// World pixels → viewport position (`tile_to_screen` without the `*8`
+    /// tile-centre convention; used by the block-inventory popup, G03 T13).
+    #[func]
+    pub fn world_to_screen(&self, wx: f64, wy: f64) -> Vector2 {
+        self.base().get_canvas_transform() * Vector2::new(wx as f32, wy as f32)
+    }
+
     /// Centers the camera on tile `(x, y)` (`x * TILESIZE` center, Java
     /// `Tile.worldx()`).
     #[func]
