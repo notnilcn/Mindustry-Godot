@@ -1111,6 +1111,28 @@ impl DesktopBridge {
         Some((point.x, point.y))
     }
 
+    /// `InputHandler.tileX/tileY` (`InputHandler.java:2105-2120`): while a block
+    /// is selected (and not breaking), the cursor tile is shifted by the block's
+    /// `offset`, centring even-size blocks under the cursor.
+    fn placement_cursor_tile(&self) -> Option<(i32, i32)> {
+        let block = self.controller.state.block?;
+        if self.controller.state.place_mode == PlaceMode::Breaking {
+            return self.cursor_tile();
+        }
+        let offset = self
+            .host
+            .clone()
+            .and_then(|host| {
+                host.bind()
+                    .content_registry()
+                    .and_then(|content| content.block(block))
+                    .map(|def| def.offset)
+            })
+            .unwrap_or(0.0);
+        let (wx, wy) = self.aim_world()?;
+        Some(mind_core::input::cursor::placement_tile(wx, wy, offset))
+    }
+
     /// `player.shooting` after the input-side `canShoot` gates
     /// (`InputHandler.java:2269-2272`; the sim half re-checks building/mining).
     pub fn shooting_allowed(&self) -> bool {
@@ -1216,6 +1238,10 @@ impl DesktopBridge {
         if !self.controller.state.is_building {
             return;
         }
+        // `tileX/tileY`: even-size blocks are centred on the cursor.
+        let Some((x, y)) = self.placement_cursor_tile() else {
+            return;
+        };
         self.controller.state.begin_place();
         self.drag = Some(Drag {
             kind: DragKind::Place,
@@ -1502,16 +1528,26 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
+        // `tileX/tileY`: an active placement drag tracks the offset cursor tile.
+        let position = if self
+            .drag
+            .as_ref()
+            .is_some_and(|drag| drag.kind == DragKind::Place)
+        {
+            self.placement_cursor_tile().unwrap_or((x, y))
+        } else {
+            (x, y)
+        };
         let Some(drag) = self.drag.as_mut() else {
             return;
         };
-        if drag.last != (x, y) || (x, y) != drag.start {
-            drag.last = (x, y);
+        if drag.last != position || position != drag.start {
+            drag.last = position;
             drag.moved = true;
         }
         let drag = *drag;
         if drag.kind == DragKind::Place {
-            self.update_place_line(bindings, drag.start, (x, y));
+            self.update_place_line(bindings, drag.start, position);
         }
     }
 

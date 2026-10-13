@@ -94,9 +94,28 @@ pub fn resolve_cursor(context: &CursorContext) -> CursorKind {
     cursor
 }
 
+/// `InputHandler.tileX/tileY` (`InputHandler.java:2105-2120`): the selection
+/// tile for the world cursor. A selected block shifts the world point by its
+/// `offset` (4 for even sizes, 0 for odd) so the block is centred under the
+/// cursor; `World.toTile` rounds (`Math.round` = `floor(v + 0.5)`).
+pub fn placement_tile(world_x: f32, world_y: f32, block_offset: f32) -> (i32, i32) {
+    let to_tile = |value: f32| ((value - block_offset) / 8.0 + 0.5).floor() as i32;
+    (to_tile(world_x), to_tile(world_y))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn placement_tile_offsets_even_blocks() {
+        // `Block.offset = ((size + 1) % 2) * tilesize / 2`: 4 for even sizes.
+        assert_eq!(placement_tile(100.0, 100.0, 4.0), (12, 12));
+        assert_eq!(placement_tile(100.0, 100.0, 0.0), (13, 13));
+        assert_eq!(placement_tile(99.0, 99.0, 0.0), (12, 12));
+        assert_eq!(placement_tile(99.0, 99.0, 4.0), (12, 12));
+        assert_eq!(placement_tile(108.0, 92.0, 4.0), (13, 11));
+    }
 
     #[test]
     fn cursor_precedence_matches_upstream_order() {
