@@ -12,10 +12,8 @@
 
 use bevy_ecs::entity::Entity;
 
-use crate::combat::damage::line::collide_line;
-
 use super::super::behavior::BulletBehavior;
-use super::super::{Bullet, CombatCtx};
+use super::super::{Bullet, CombatCtx, collide_line_bullet};
 use super::motion;
 
 /// `ContinuousBulletType` behavior (shared by all continuous subclasses).
@@ -36,30 +34,19 @@ impl BulletBehavior for ContinuousBehavior {
             return;
         }
         let pierce_cap = def.pierce_cap;
-        let pierce_armor = def.pierce_armor;
-        let armor_multiplier = def.armor_multiplier;
         let large = def.large_hit;
-        let _ = large;
-        let damage = ctx.bullet(b).map(|bullet| bullet.damage).unwrap_or(0.0);
-        let team = ctx.team(b);
         let Some(((x, y), _vel, rotation)) = motion(ctx, b) else {
             return;
         };
         let length = self.current_length(ctx, b);
-        let _ = collide_line(
-            ctx.world,
-            ctx.content,
-            ctx.grid,
-            team,
-            x,
-            y,
-            rotation,
-            length,
-            pierce_cap,
-            damage,
-            pierce_armor,
-            armor_multiplier,
-        );
+        // `ContinuousBulletType.applyDamage` (`ContinuousBulletType.java:82-90`):
+        // the pierce falloff mutates `b.damage`, so save and restore it around
+        // the line collision.
+        let damage = ctx.bullet(b).map(|bullet| bullet.damage).unwrap_or(0.0);
+        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, large, pierce_cap);
+        if let Some(mut bullet) = ctx.world.get_mut::<Bullet>(b) {
+            bullet.damage = damage;
+        }
     }
 
     fn continuous_damage(&self, damage: f32, damage_interval: f32) -> f32 {

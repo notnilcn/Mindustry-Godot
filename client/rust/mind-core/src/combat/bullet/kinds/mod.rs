@@ -20,6 +20,7 @@ pub mod liquid;
 pub mod mass_driver;
 pub mod multi;
 pub mod point;
+pub mod rail;
 pub mod sap;
 pub mod shrapnel;
 

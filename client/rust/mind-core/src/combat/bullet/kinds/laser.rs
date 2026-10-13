@@ -8,10 +8,8 @@
 
 use bevy_ecs::entity::Entity;
 
-use crate::combat::damage::line::collide_line;
-
 use super::super::behavior::BulletBehavior;
-use super::super::{CombatCtx, HIT};
+use super::super::{CombatCtx, HIT, collide_line_bullet};
 use super::motion;
 
 /// `LaserBulletType` behavior.
@@ -33,27 +31,15 @@ impl BulletBehavior for LaserBehavior {
             def.speed * lifetime
         };
         let pierce_cap = def.pierce_cap;
-        let pierce_armor = def.pierce_armor;
-        let armor_multiplier = def.armor_multiplier;
+        let large = def.large_hit;
         let Some(((x, y), _vel, rotation)) = motion(ctx, b) else {
             return;
         };
-        let damage = ctx.bullet(b).map(|bullet| bullet.damage).unwrap_or(0.0);
-        let team = ctx.team(b);
-        let _ = collide_line(
-            ctx.world,
-            ctx.content,
-            ctx.grid,
-            team,
-            x,
-            y,
-            rotation,
-            length,
-            pierce_cap,
-            damage,
-            pierce_armor,
-            armor_multiplier,
-        );
+        // `LaserBulletType.init` -> `Damage.collideLaser(b, length, largeHit,
+        // laserAbsorb, pierceCap)` (`LaserBulletType.java:68`). The
+        // `findPierceLength`/`findLaserLength` length pre-pass is not ported
+        // (G01 T3 keeps the existing no-`findLength` behaviour).
+        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, large, pierce_cap);
         if let Some(mut bullet) = ctx.world.get_mut::<super::super::Bullet>(b) {
             bullet.fdata = length;
             bullet.set(HIT);

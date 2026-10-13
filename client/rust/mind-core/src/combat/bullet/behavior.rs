@@ -122,6 +122,7 @@ pub fn behavior_for(kind: BulletKind) -> &'static dyn BulletBehavior {
         K::Liquid | K::SpaceLiquid => &super::kinds::liquid::LIQUID,
         K::Fire => &super::kinds::fire::FIRE,
         K::Laser => &super::kinds::laser::LASER,
+        K::Rail => &super::kinds::rail::RAIL,
         _ => &BASE,
     }
 }

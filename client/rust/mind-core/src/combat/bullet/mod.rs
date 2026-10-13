@@ -12,6 +12,7 @@
 
 pub mod behavior;
 pub mod kinds;
+pub mod line_hit;
 pub mod raycast;
 pub mod spawn;
 
@@ -29,6 +30,7 @@ use crate::fx::TrailChannelId;
 use crate::world::WorldGrid;
 
 pub use behavior::{BulletBehavior, behavior_for};
+pub use line_hit::{collide_line_bullet, linecast_enemy};
 pub use spawn::{BulletSpawn, create};
 
 /// Bullet flag: `keepAlive` was requested (lifetime extension).
@@ -586,7 +588,13 @@ pub(crate) fn hit_bullet(
 }
 
 /// Calls the kind-specific `BulletType.hit` override (or the base pipeline).
-fn behavior_hit(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32, create_frags: bool) {
+pub(crate) fn behavior_hit(
+    ctx: &mut CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    create_frags: bool,
+) {
     let Some(kind) = ctx
         .bullet(bullet)
         .and_then(|state| ctx.content.bullet(state.def))
@@ -1048,7 +1056,7 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
 /// (`aimTile.build == build`), its def sets `hitUnder`, the building is
 /// friendly, a piercing bullet has already overshot its aim tile, or the bullet
 /// had no aim at all.
-fn passes_under_build(
+pub(crate) fn passes_under_build(
     ctx: &CombatCtx<'_>,
     state: &Bullet,
     bullet: Entity,
@@ -1552,7 +1560,10 @@ mod tests {
         for x in 12..=14 {
             assert!(harness.place(x, 8, wall, 0, true));
         }
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds, so spawn on the tile corner (`y = 8 * 8`) to
+        // keep the beam inside row 8; a tile-centre y (68) rounds up to row 9.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let _ = harness.spawn_bullet("rail", x, y, 0.0, 1).expect("spawn");
         for _ in 0..80 {
             harness.tick();
@@ -1607,7 +1618,9 @@ mod tests {
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(12, 8, wall, 0, true));
         let before = harness.building_health_at(12, 8);
-        let (x, y) = CombatHarness::tile_center(6, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(6, 8);
+        let y = 8.0 * 8.0;
         let e = harness.spawn_bullet("laser", x, y, 0.0, 1).expect("spawn");
         assert!(
             harness.building_health_at(12, 8) < before,
@@ -1736,7 +1749,9 @@ mod tests {
         let wall = wall(&harness);
         assert!(harness.place(10, 8, wall, 0, true));
         let before = harness.building_health_at(10, 8);
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let e = harness.spawn_bullet("sap", x, y, 0.0, 1).expect("spawn");
         assert!(harness.building_health_at(10, 8) < before, "sap damaged");
         assert!(!bullet_alive(&harness.build.world, e));
@@ -1748,7 +1763,9 @@ mod tests {
         let wall = wall(&harness);
         assert!(harness.place(8, 8, wall, 0, true));
         assert!(harness.place(10, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let _ = harness
             .spawn_bullet("shrapnel", x, y, 0.0, 1)
             .expect("spawn");
@@ -1790,7 +1807,9 @@ mod tests {
         let mut harness = CombatHarness::new(32, 16, 7);
         let wall = wall(&harness);
         assert!(harness.place(10, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds; spawn on the tile corner to stay in row 8.
+        let (x, _) = CombatHarness::tile_center(4, 8);
+        let y = 8.0 * 8.0;
         let _ = harness
             .spawn_bullet("continuous", x, y, 0.0, 1)
             .expect("spawn");
