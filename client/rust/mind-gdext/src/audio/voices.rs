@@ -12,6 +12,8 @@ use godot::prelude::*;
 pub const MAX_VOICES: usize = 128;
 /// UI one-shot voices (`MAX_UI_VOICES`).
 pub const MAX_UI_VOICES: usize = 16;
+/// Looping world voices (aggregated loops + `SoundLoop` instances).
+pub const MAX_LOOP_VOICES: usize = 32;
 
 /// Pooled non-positional + positional one-shot voices.
 pub struct VoicePool {
@@ -119,6 +121,127 @@ impl VoicePool {
         }
         for player in &self.ui {
             player.clone().stop();
+        }
+    }
+}
+
+/// Pooled looping positional voices (`LoopMixer`/`SoundLoop` outputs).
+///
+/// Voice ids encode `(generation << 8) | slot` so a stale id can never address
+/// a recycled slot; `0` is the "no voice" sentinel.
+pub struct LoopVoicePool {
+    players: Vec<Gd<AudioStreamPlayer2D>>,
+    generation: Vec<u32>,
+}
+
+impl LoopVoicePool {
+    /// Allocates the pool under a code-instantiated container.
+    pub fn new(base: &mut Gd<Node>, sound_bus: &str) -> Self {
+        // code-instantiated: fixed-count pooled loop voices (same rationale as
+        // `VoicePool`: high-churn, per-Play state, not .tscn-expressible).
+        let mut parent = Node2D::new_alloc();
+        parent.set_name("LoopVoices");
+        base.add_child(&parent);
+
+        let mut players = Vec::with_capacity(MAX_LOOP_VOICES);
+        for _ in 0..MAX_LOOP_VOICES {
+            let mut player = AudioStreamPlayer2D::new_alloc();
+            player.set_bus(&StringName::from(sound_bus));
+            player.set_attenuation(0.0);
+            player.set_max_distance(1.0e9);
+            player.set_panning_strength(1.0);
+            parent.add_child(&player);
+            players.push(player);
+        }
+        LoopVoicePool {
+            players,
+            generation: vec![1; MAX_LOOP_VOICES],
+        }
+    }
+
+    fn split_voice(voice: u64) -> (usize, u32) {
+        ((voice & 0xFF) as usize, (voice >> 8) as u32)
+    }
+
+    fn position_for(pan: f32, listener: (f32, f32), width: f32) -> Vector2 {
+        Vector2::new(listener.0 + pan * width / 2.0, listener.1)
+    }
+
+    /// Starts a loop voice in the first idle slot; `0` when the pool is full.
+    pub fn start(
+        &mut self,
+        stream: Gd<AudioStream>,
+        volume: f32,
+        pitch: f32,
+        pan: f32,
+        listener: (f32, f32),
+        width: f32,
+    ) -> u64 {
+        let Some(slot) = self.players.iter().position(|player| !player.is_playing()) else {
+            return 0;
+        };
+        let generation = self.generation[slot];
+        let player = &mut self.players[slot];
+        player.set_stream(&stream);
+        player.set_volume_linear(volume.clamp(0.0, 1.0));
+        player.set_pitch_scale(pitch.clamp(0.0001, 10.0));
+        player.set_position(Self::position_for(pan, listener, width));
+        player.play();
+        (u64::from(generation) << 8) | slot as u64
+    }
+
+    /// Updates a running loop voice (stale generations are ignored).
+    pub fn update(
+        &mut self,
+        voice: u64,
+        volume: f32,
+        pitch: f32,
+        pan: f32,
+        listener: (f32, f32),
+        width: f32,
+    ) {
+        let (slot, generation) = Self::split_voice(voice);
+        if slot >= self.players.len() || self.generation[slot] != generation {
+            return;
+        }
+        let player = &mut self.players[slot];
+        player.set_volume_linear(volume.clamp(0.0, 1.0));
+        player.set_pitch_scale(pitch.clamp(0.0001, 10.0));
+        player.set_position(Self::position_for(pan, listener, width));
+    }
+
+    /// Stops a loop voice and invalidates its id (bumps the generation).
+    pub fn stop(&mut self, voice: u64) {
+        let (slot, generation) = Self::split_voice(voice);
+        if slot >= self.players.len() || self.generation[slot] != generation {
+            return;
+        }
+        self.players[slot].stop();
+        self.generation[slot] = self.generation[slot].wrapping_add(1);
+    }
+
+    /// Whether the id still names a playing voice.
+    pub fn is_playing(&self, voice: u64) -> bool {
+        let (slot, generation) = Self::split_voice(voice);
+        self.generation.get(slot) == Some(&generation)
+            && self
+                .players
+                .get(slot)
+                .is_some_and(|player| player.is_playing())
+    }
+
+    /// Pauses/resumes every loop voice.
+    pub fn set_paused(&self, paused: bool) {
+        for player in &self.players {
+            player.clone().set_stream_paused(paused);
+        }
+    }
+
+    /// Stops every loop voice and invalidates every id.
+    pub fn stop_all(&mut self) {
+        for (slot, player) in self.players.iter_mut().enumerate() {
+            player.stop();
+            self.generation[slot] = self.generation[slot].wrapping_add(1);
         }
     }
 }

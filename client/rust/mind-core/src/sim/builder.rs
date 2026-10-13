@@ -797,6 +797,8 @@ fn update_builder(
                             x: anchor.x(),
                             y: anchor.y(),
                             block: state.current,
+                            // `deconstructFinish` (break sound).
+                            destroyed: false,
                         }));
                 }
             } else {

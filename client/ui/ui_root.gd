@@ -47,6 +47,28 @@ func _ready() -> void:
 	_apply_ui_scale()
 	_boot()
 	_check_uiscale_changed()
+	# G07 T13: `UI.java:146` hooks a global click sound on every clickable
+	# element; BaseButton covers Button/CheckBox/TextureButton.
+	get_tree().node_added.connect(_on_node_added)
+	for node in get_tree().root.find_children("*", "BaseButton", true, false):
+		_hook_button(node)
+
+
+func _on_node_added(node: Node) -> void:
+	if node is BaseButton:
+		_hook_button(node)
+
+
+func _hook_button(button: BaseButton) -> void:
+	if not button.pressed.is_connected(_on_any_button_pressed):
+		button.pressed.connect(_on_any_button_pressed)
+
+
+## `UI.java:146` `ClickListener.clicked = () -> Sounds.uiButton.play()`.
+func _on_any_button_pressed() -> void:
+	var ui := _ui()
+	if ui != null:
+		ui.call("play_ui_sound", "uiButton")
 
 
 ## `Control.java:640` boot confirmation for a changed UI scale: the prompt
@@ -363,6 +385,11 @@ func _on_show_info(text: String) -> void:
 
 
 func _on_toast(text: String, _icon: String) -> void:
+	# `HudFragment.showToast`: `if(state.isMenu()) return;` then uiNotify.
+	if not menu_group.visible:
+		var ui := _ui()
+		if ui != null:
+			ui.call("play_ui_sound", "uiNotify")
 	_toast_label(text, 3.5)
 
 

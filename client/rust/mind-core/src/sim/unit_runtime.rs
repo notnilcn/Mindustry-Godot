@@ -641,8 +641,18 @@ impl Sim {
                     destroyed += 1;
                     log::debug!("building destroyed at ({x}, {y}) block {}", block.raw());
                     self.push_event(crate::event::SimEvent::BlockBrokenEvent(
-                        crate::event::BlockBrokenEvent { x, y, block },
+                        crate::event::BlockBrokenEvent {
+                            x,
+                            y,
+                            block,
+                            // `BuildingComp.onDestroyed` (destroy sound path).
+                            destroyed: true,
+                        },
                     ));
+                    // `BuildingComp.onDestroyed` -> `playDestroySound` + the
+                    // explosion extras, with the CoreBlock game-over override
+                    // (`BuildingComp.java:1524-1543`, `CoreBlock.java:708-716`).
+                    self.emit_building_destroyed(block, x, y, team, explosion_terms);
                     if !spill.is_empty()
                         && let Some(mut unit_runtime) = self.ecs.0.remove_non_send::<UnitRuntime>()
                     {
@@ -710,6 +720,114 @@ impl Sim {
             }
         }
         (killed_units, destroyed)
+    }
+
+    /// `BuildingComp.playDestroySound` + the `onDestroyed` explosion extras
+    /// (`BuildingComp.java:1524-1543`). The `CoreBlock.playDestroySound`
+    /// override plays the last player core's death non-positionally at
+    /// `volume * sfxVolume` (`CoreBlock.java:708-716`; the sim stores the raw
+    /// volume — the client applies `sfxvol`).
+    pub(crate) fn emit_building_destroyed(
+        &mut self,
+        block: crate::content::BlockId,
+        x: i16,
+        y: i16,
+        team: u8,
+        explosion_terms: (f32, f32, f32),
+    ) {
+        let Some(audio) = self
+            .ecs
+            .0
+            .get_resource::<crate::audio::AudioSinkRes>()
+            .cloned()
+        else {
+            return;
+        };
+        let Some(content) = self.block_runtime.as_ref().map(|runtime| runtime.content()) else {
+            return;
+        };
+        let Some(def) = content.block(block) else {
+            return;
+        };
+        let (cx, cy) = crate::audio::blocks::world_center(def, x, y);
+        let (candidates, volume) = crate::audio::blocks::destroy_sound(def);
+        // `CoreBlock.java:712`: the player's last core with `canGameOver` plays
+        // `destroySound.play(volume * sfxVolume, random(pitch), 0)`.
+        let last_player_core = def.kind == BlockKind::CoreBlock
+            && self
+                .ecs
+                .0
+                .get_resource::<CampaignRuntime>()
+                .is_some_and(|campaign| {
+                    campaign.session.rules.can_game_over
+                        && campaign.session.rules.default_team == team
+                })
+            && !has_core_of_team(&self.ecs.0, content, team);
+        if last_player_core {
+            audio.emit(crate::audio::AudioEvent::play(
+                crate::audio::SoundId::EXPLOSION_CORE,
+                1.6,
+                1.0,
+                0.0,
+                false,
+                false,
+            ));
+        } else {
+            let sound = crate::audio::sim::pick_random_sound(
+                &mut crate::audio::sim::FxAudioRng {
+                    rng: &mut self.rng_streams,
+                },
+                candidates,
+            );
+            // `destroyPitchMin == destroyPitchMax == 1` for every vanilla block
+            // (`Block.java:340`).
+            audio.emit(crate::audio::AudioEvent::at(
+                sound, cx, cy, 1.0, volume, true,
+            ));
+        }
+        let (flammability, explosiveness, power) = explosion_terms;
+        if explosiveness > 40.0 {
+            let sound = if self
+                .rng_streams
+                .next_float(crate::determinism::RngStream::Fx)
+                < 0.5
+            {
+                crate::audio::SoundId::BLOCK_EXPLODE_EXPLOSIVE
+            } else {
+                crate::audio::SoundId::BLOCK_EXPLODE_EXPLOSIVE_ALT
+            };
+            audio.emit(crate::audio::AudioEvent::at(
+                sound, cx, cy, 1.0, volume, true,
+            ));
+        } else if flammability > 5.0 {
+            audio.emit(crate::audio::AudioEvent::at(
+                crate::audio::SoundId::BLOCK_EXPLODE_FLAMMABLE,
+                cx,
+                cy,
+                1.0,
+                volume,
+                true,
+            ));
+        }
+        if power > 30_000.0 {
+            audio.emit(crate::audio::AudioEvent::at(
+                crate::audio::SoundId::BLOCK_EXPLODE_ELECTRIC_BIG,
+                cx,
+                cy,
+                1.0,
+                volume,
+                true,
+            ));
+        } else if power > 2_000.0 {
+            audio.emit(crate::audio::AudioEvent::at(
+                crate::audio::SoundId::BLOCK_EXPLODE_ELECTRIC,
+                cx,
+                cy,
+                1.0,
+                volume,
+                true,
+            ));
+        }
     }
 
     /// Whether the opt-in live unit runtime is installed.
@@ -1497,6 +1615,18 @@ impl Sim {
 /// kind kinematics and the weapon pass (`Groups.unit.update()`).
 ///
 /// No-op unless the unit runtime is installed, so the P0 path is untouched.
+/// Any live building of `team` whose block kind is `CoreBlock`
+/// (`TeamData.cores`; used by the `CoreBlock.playDestroySound` override).
+fn has_core_of_team(world: &World, content: &ContentRegistry, team: u8) -> bool {
+    world.iter_entities().any(|entity| {
+        entity.get::<TeamComp>().map(|t| t.team) == Some(team)
+            && entity
+                .get::<crate::entities::comp::Building>()
+                .and_then(|building| content.block(building.block))
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+    })
+}
+
 /// `BuildingComp.onDestroyed` explosion terms (`BuildingComp.java:1491-1508`):
 /// `(flammability, explosiveness, power)` summed over the live item/liquid/power
 /// modules. `explosionItemCap` caps item amounts at `item_capacity`; liquids
@@ -2512,6 +2642,22 @@ impl Sim {
                         .collect()
                 })
                 .unwrap_or_default();
+            // Active status names (G07 T9 readback; append-only field).
+            let statuses: Vec<String> = entity_ref
+                .get::<crate::entities::comp::unit::comp::StatusComp>()
+                .map(|comp| {
+                    comp.statuses
+                        .iter()
+                        .map(|status| {
+                            runtime
+                                .content
+                                .status(status.effect)
+                                .map(|def| def.name.clone())
+                                .unwrap_or_default()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_name,
@@ -2524,6 +2670,8 @@ impl Sim {
                 "rotation": entity_ref.get::<UnitCore>().map(|core| core.rotation),
                 "health": entity_ref.get::<Health>().map(|health| health.health),
                 "can_shoot": entity_ref.get::<crate::weapons::UnitState>().map(|state| state.can_shoot),
+                "vel": entity_ref.get::<crate::entities::comp::Vel>().map(|vel| [vel.x, vel.y]),
+                "statuses": statuses,
                 "mounts": mounts,
             }));
         }
@@ -2542,12 +2690,76 @@ impl Sim {
         let Some(carrier) = self.player_unit() else {
             return false;
         };
-        match kind {
+        // The drop sound needs the payload about to leave the stack
+        // (`PayloadComp.playPayloadDropSound`), read before the drop.
+        let dropped = if kind == 2 {
+            self.ecs
+                .0
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(carrier)
+                .and_then(|payloads| payloads.stack.last().copied())
+        } else {
+            None
+        };
+        let carrier_pos = self.ecs.0.get::<Pos>(carrier).map(|pos| (pos.x, pos.y));
+        let changed = match kind {
             0 => self.payload_pickup_unit(carrier, x, y, target),
             1 => self.payload_pickup_build(carrier, x, y),
             2 => self.payload_drop(carrier, x, y),
             _ => false,
+        };
+        // G07 T14: `PayloadComp.pickup`/`playPayloadDropSound` sounds.
+        if changed && let Some(audio) = self.ecs.0.get_resource::<AudioSinkRes>().cloned() {
+            let (cx, cy) = carrier_pos.unwrap_or((x, y));
+            let fx = self
+                .rng_streams
+                .next_float(crate::determinism::RngStream::Fx);
+            let at = |sound: crate::audio::SoundId, pitch: f32| {
+                audio.emit(crate::audio::AudioEvent::at(
+                    sound, cx, cy, pitch, 1.0, true,
+                ));
+            };
+            match kind {
+                // `PayloadComp.pickup(Unit)` -> `payloadPickup.at(self, random(0.9, 1.1))`.
+                0 => at(crate::audio::SoundId::PAYLOAD_PICKUP, 0.9 + fx * 0.2),
+                // `PayloadComp.pickup(Building)` -> pitch 1 (`PayloadComp.java:117`).
+                1 => at(crate::audio::SoundId::PAYLOAD_PICKUP, 1.0),
+                2 => {
+                    // Size: unit `hitSize`, build `block.size * tilesize`
+                    // (`Payload.size()`). Deviation: the port cannot tell a
+                    // ground placement from an acceptor hand-off, so the
+                    // drop-size rule covers both.
+                    let size = match dropped {
+                        Some(crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                            type_id,
+                            ..
+                        }) => self
+                            .unit_runtime()
+                            .and_then(|runtime| runtime.content.unit(type_id))
+                            .map(|def| def.hit_size)
+                            .unwrap_or(0.0),
+                        Some(crate::entities::comp::unit::comp::CarriedPayload::Build {
+                            block,
+                            ..
+                        }) => self
+                            .unit_runtime()
+                            .and_then(|runtime| runtime.content.block(block))
+                            .map(|def| def.size as f32 * 8.0)
+                            .unwrap_or(0.0),
+                        None => 0.0,
+                    };
+                    let sound = if size <= 12.0 {
+                        crate::audio::SoundId::PAYLOAD_DROP1
+                    } else if size <= 20.0 {
+                        crate::audio::SoundId::PAYLOAD_DROP2
+                    } else {
+                        crate::audio::SoundId::PAYLOAD_DROP3
+                    };
+                    at(sound, 0.9 + fx * 0.2);
+                }
+                _ => {}
+            }
         }
+        changed
     }
 
     /// `InputHandler.requestUnitPayload` + `PayloadComp.canPickup(Unit)`.

@@ -33,7 +33,9 @@ pub enum AudioEvent {
         /// Whether the 16 ms same-frame intensification applies.
         check_frame: bool,
     },
-    /// `Sound.play(volume, pitch, pan, loop, checkFrame)`; volume already final.
+    /// `Sound.play(volume, pitch, pan, loop, checkFrame)`; volume is the raw
+    /// call-site volume (the client multiplies by `sfxvol`, matching Java's
+    /// `volume * Core.audio.sfxVolume` call sites).
     Play {
         /// Sound to play.
         sound: SoundId,
@@ -97,6 +99,22 @@ pub enum AudioEvent {
     KeepSilent,
     /// Stop all loop voices (`ResetEvent` teardown).
     StopLoops,
+    /// `ConstructBlock.constructFinish`/`deconstructFinish` sound
+    /// (`ConstructBlock.java:58-120`); the client applies `shouldPlay`
+    /// (32 ms gate) and `calcPitch` on the wall clock.
+    Construct {
+        /// Sound to play.
+        sound: SoundId,
+        /// World x (px).
+        x: f32,
+        /// World y (px).
+        y: f32,
+        /// `true` for `constructFinish` (place), `false` for
+        /// `deconstructFinish` (break).
+        place: bool,
+        /// `Block.placePitchChange`/`breakPitchChange` (`Block.java:328-330`).
+        pitch_change: bool,
+    },
 }
 
 impl AudioEvent {
@@ -179,7 +197,8 @@ impl AudioEvent {
             | AudioEvent::Play { sound, .. }
             | AudioEvent::LoopAdd { sound, .. }
             | AudioEvent::LoopInstance { sound, .. }
-            | AudioEvent::LoopCamera { sound, .. } => Some(*sound),
+            | AudioEvent::LoopCamera { sound, .. }
+            | AudioEvent::Construct { sound, .. } => Some(*sound),
             _ => None,
         }
     }

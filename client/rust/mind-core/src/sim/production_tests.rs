@@ -1763,3 +1763,118 @@ fn overdrive_does_not_boost_enemy() {
         "the enemy press is not boosted"
     );
 }
+
+/// PAR-0073/T3: `ConstructBlock.constructFinish` -> `block.placeSound.at(tile)`
+/// (`ConstructBlock.java:71-120`); size 1 wall centre 5*8 (offset 0).
+#[test]
+fn placing_emits_construct_place_sound() {
+    use crate::audio::{AudioEvent, SharedAudioLog};
+
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    place(&mut sim, "copper-wall", 5, 5);
+    sim.tick().expect("tick");
+    let events = log.events();
+    let placed: Vec<&AudioEvent> = events
+        .iter()
+        .filter_map(|ticked| match &ticked.event {
+            AudioEvent::Construct { place: true, .. } => Some(&ticked.event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(placed.len(), 1, "one place sound: {events:?}");
+    let AudioEvent::Construct {
+        sound,
+        x,
+        y,
+        place,
+        pitch_change,
+    } = placed[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!(*sound, crate::audio::SoundId::BLOCK_PLACE1);
+    assert_eq!((*x, *y), (40.0, 40.0));
+    assert!(*place && *pitch_change);
+}
+
+/// PAR-0073/T3: `ConstructBlock.deconstructFinish` -> `breakSound`, not the
+/// destroy path (`ConstructBlock.java:58-69`).
+#[test]
+fn breaking_emits_break_not_destroy() {
+    use crate::audio::{AudioEvent, SharedAudioLog};
+
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    place(&mut sim, "copper-wall", 5, 5);
+    sim.tick().expect("tick");
+    log.clear();
+    sim.command(SimCommand::Break {
+        x: 5,
+        y: 5,
+        player: None,
+    })
+    .expect("break");
+    sim.tick().expect("tick");
+    let events = log.events();
+    let constructs: Vec<&AudioEvent> = events
+        .iter()
+        .filter_map(|ticked| match &ticked.event {
+            AudioEvent::Construct { place: false, .. } => Some(&ticked.event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(constructs.len(), 1, "one break sound: {events:?}");
+    let AudioEvent::Construct { sound, .. } = constructs[0] else {
+        unreachable!()
+    };
+    assert_eq!(*sound, crate::audio::SoundId::BLOCK_BREAK1);
+    assert!(
+        !events
+            .iter()
+            .any(|ticked| matches!(ticked.event, AudioEvent::At { .. })),
+        "a deconstruct must not play destroy sounds: {events:?}"
+    );
+}
+
+/// PAR-0073/T3: size-2 walls use `blockBreak2`/`blockPlace2` and the block
+/// offset centre (`Block.java:1367-1379`).
+#[test]
+fn large_wall_place_sound_is_size_2() {
+    use crate::audio::{AudioEvent, SharedAudioLog};
+
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let offset = {
+        let content = sim.block_runtime().expect("runtime").content();
+        content
+            .block_id("copper-wall-large")
+            .and_then(|id| content.block(id))
+            .expect("copper-wall-large")
+            .offset
+    };
+    place(&mut sim, "copper-wall-large", 8, 8);
+    sim.tick().expect("tick");
+    let events = log.events();
+    let placed = events
+        .iter()
+        .find_map(|ticked| match &ticked.event {
+            AudioEvent::Construct { place: true, .. } => Some(&ticked.event),
+            _ => None,
+        })
+        .expect("place sound");
+    let AudioEvent::Construct { sound, x, y, .. } = placed else {
+        unreachable!()
+    };
+    assert_eq!(*sound, crate::audio::SoundId::BLOCK_PLACE2);
+    assert_eq!((*x, *y), (64.0 + offset, 64.0 + offset));
+}

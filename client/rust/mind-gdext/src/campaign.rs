@@ -894,6 +894,11 @@ impl MindCampaign {
                     core_block.to_variant(),
                 ],
             );
+            // G07 T7: `Trigger.newGame` audio — `coreLand.at(camera)` +
+            // `Musics.land` (`Control.java:198-222`).
+            if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
+                audio.call("play_landing", &[]);
+            }
         }
 
         self.registry = Some(registry);
@@ -972,6 +977,11 @@ impl MindCampaign {
                     core_block.to_variant(),
                 ],
             );
+            // G07 T7: `Trigger.newGame` audio — `coreLand.at(camera)` +
+            // `Musics.land` (`Control.java:198-222`).
+            if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
+                audio.call("play_landing", &[]);
+            }
         }
         started
     }

@@ -601,8 +601,8 @@ fn fire(
     mounts: &mut [WeaponMount],
     pending: &mut Vec<PendingShot>,
     index: usize,
-    _shoot_x: f32,
-    _shoot_y: f32,
+    shoot_x: f32,
+    shoot_y: f32,
     rotation: f32,
 ) {
     let weapon = &defs[index];
@@ -617,7 +617,14 @@ fn fire(
             weapon.sound_pitch_min,
             weapon.sound_pitch_max,
         );
-        ctx.fx.sound(weapon.charge_sound, 1.0, pitch);
+        crate::audio::sim::emit_weapon_sound(
+            ctx.audio,
+            weapon.charge_sound,
+            shoot_x,
+            shoot_y,
+            1.0,
+            pitch,
+        );
     }
     let mut buffer = ShotBuffer::default();
     let mut barrel = mounts[index].barrel_counter;
@@ -744,13 +751,22 @@ fn spawn_weapon_bullet(
         weapon.sound_pitch_min,
         weapon.sound_pitch_max,
     );
-    if weapon.continuous {
-        ctx.fx
-            .sound(weapon.initial_shoot_sound, weapon.shoot_sound_volume, pitch);
+    // `Weapon.bullet`: `shootSound.at(bulletX, bulletY, random(pitchMin,
+    // pitchMax), shootSoundVolume)`; `initialShootSound` for continuous mounts
+    // (`Weapon.java:515-517`).
+    let sound = if weapon.continuous {
+        weapon.initial_shoot_sound
     } else {
-        ctx.fx
-            .sound(weapon.shoot_sound, weapon.shoot_sound_volume, pitch);
-    }
+        weapon.shoot_sound
+    };
+    crate::audio::sim::emit_weapon_sound(
+        ctx.audio,
+        sound,
+        bullet_x,
+        bullet_y,
+        weapon.shoot_sound_volume,
+        pitch,
+    );
 
     if mount.allow_shoot_effects {
         ctx.fx.effect(
@@ -1019,6 +1035,47 @@ mod tests {
             .unwrap_or(0.0);
         // def lifetime 100 * clamp(30/60) = 50.
         assert!((lifetime - 50.0).abs() < 1.0, "lifetime={lifetime}");
+    }
+
+    #[test]
+    fn dagger_shot_emits_default_shoot_sound() {
+        // `Weapon.bullet` (`Weapon.java:515-517`): the dagger's `large-weapon`
+        // carries the defaults (`shootSound = Sounds.shoot`, pitch 0.8..1.0,
+        // volume 1, `Weapon.java:118-145`).
+        use crate::audio::{AudioEvent, SharedAudioLog};
+        use crate::content::registries::sound_meta::SoundId;
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let log = SharedAudioLog::new();
+        harness.build.set_audio_sink(log.clone());
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(12, 8, wall, 0, true));
+        let dagger = harness
+            .content()
+            .unit_id("dagger")
+            .and_then(|id| harness.content().unit(id))
+            .map(|def| def.weapons.clone())
+            .expect("dagger weapons");
+        let (ux, uy) = CombatHarness::tile_center(4, 8);
+        let unit = harness.spawn_test_unit(ux, uy, 1, dagger);
+        harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+        harness.set_unit_shoot(unit, 0, true);
+        for _ in 0..60 {
+            harness.tick();
+        }
+        assert!(
+            harness.unit_weapons(unit).unwrap().mounts[0].total_shots > 0,
+            "dagger fired"
+        );
+        let mut matched = 0;
+        for event in log.events() {
+            if let AudioEvent::At { sound, pitch, .. } = &event.event
+                && *sound == SoundId::SHOOT
+            {
+                assert!((0.8..=1.0).contains(pitch), "pitch {pitch}");
+                matched += 1;
+            }
+        }
+        assert!(matched > 0, "dagger weapon emitted Sounds.shoot");
     }
 }
 

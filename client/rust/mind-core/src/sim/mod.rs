@@ -345,6 +345,8 @@ impl Sim {
                             x,
                             y,
                             block: current,
+                            // `Command::Break` is a deconstruct/API break.
+                            destroyed: false,
                         }));
                     }
                 } else {
@@ -356,6 +358,8 @@ impl Sim {
                         x,
                         y,
                         block: current,
+                        // `Command::Break` is a deconstruct/API break.
+                        destroyed: false,
                     }));
                 }
             }
@@ -997,10 +1001,10 @@ impl Sim {
                     .and_then(|runtime| runtime.content().block(placed_block))
                 {
                     let (offset, size) = (def.offset, def.size);
+                    let cx = *x as f32 * 8.0 + offset;
+                    let cy = *y as f32 * 8.0 + offset;
                     if let Some(runtime) = self.unit_runtime() {
                         use crate::content::registries::fx_meta::EffectRef;
-                        let cx = *x as f32 * 8.0 + offset;
-                        let cy = *y as f32 * 8.0 + offset;
                         runtime.fx.effect(
                             &EffectRef::Named(crate::content::EffectId::ROTATE_BLOCK),
                             cx,
@@ -1008,6 +1012,26 @@ impl Sim {
                             size as f32,
                             crate::content::Rgba::WHITE,
                         );
+                    }
+                    // `Build.java:90`/`InputHandler.java:704`:
+                    // `Sounds.blockRotate.at(build, 1f + Mathf.range(0.1f), 1f)`.
+                    if let Some(audio) = self
+                        .ecs
+                        .0
+                        .get_resource::<crate::audio::AudioSinkRes>()
+                        .cloned()
+                    {
+                        let fx = self
+                            .rng_streams
+                            .next_float(crate::determinism::RngStream::Fx);
+                        audio.emit(crate::audio::AudioEvent::at(
+                            crate::audio::SoundId::BLOCK_ROTATE,
+                            cx,
+                            cy,
+                            1.0 + (fx * 0.2 - 0.1),
+                            1.0,
+                            true,
+                        ));
                     }
                 }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
@@ -1473,6 +1497,47 @@ impl Sim {
             let record = dump::block_event_record(self, &event);
             if let Some(record) = record {
                 self.event_log.push(record);
+            }
+            // G07 T3: live place/break sounds
+            // (`ConstructBlock.constructFinish`/`deconstructFinish`,
+            // `ConstructBlock.java:58-120`; `PAR-0073`). Fog gating
+            // (`fogControl.isVisibleTile`) is skipped (fog is G03).
+            if let Some(audio) = self
+                .ecs
+                .0
+                .get_resource::<crate::audio::AudioSinkRes>()
+                .cloned()
+                && let Some(content) = self.block_runtime.as_ref().map(|runtime| runtime.content())
+            {
+                match &event {
+                    SimEvent::BlockPlacedEvent(placed) => {
+                        if let Some(def) = content.block(placed.block) {
+                            let (x, y) =
+                                crate::audio::blocks::world_center(def, placed.x, placed.y);
+                            audio.emit(crate::audio::AudioEvent::Construct {
+                                sound: crate::audio::blocks::place_sound(def),
+                                x,
+                                y,
+                                place: true,
+                                pitch_change: true,
+                            });
+                        }
+                    }
+                    SimEvent::BlockBrokenEvent(broken) if !broken.destroyed => {
+                        if let Some(def) = content.block(broken.block) {
+                            let (x, y) =
+                                crate::audio::blocks::world_center(def, broken.x, broken.y);
+                            audio.emit(crate::audio::AudioEvent::Construct {
+                                sound: crate::audio::blocks::break_sound(def),
+                                x,
+                                y,
+                                place: false,
+                                pitch_change: true,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
             }
             self.events.dispatch(event);
         }

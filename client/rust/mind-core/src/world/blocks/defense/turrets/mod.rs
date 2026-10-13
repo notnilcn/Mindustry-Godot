@@ -31,9 +31,11 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
+use crate::audio::math::AudioRng;
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
 use crate::combat::targeting::TargetQueries;
 use crate::content::registries::bullets::BulletDef;
+use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, ItemId, LiquidId};
 use crate::entities::comp::{Health, Pos};
@@ -261,6 +263,20 @@ pub struct TurretConfig {
     pub firing_move_fract: f32,
     /// `BuildTurret.buildSpeed` (construction units per tick).
     pub build_speed: f32,
+    /// `Turret.shootSound` (default `Sounds.shootDuo`, `Turret.java:127-133`).
+    pub shoot_sound: SoundId,
+    /// `Turret.shootSoundVolume` (default 1).
+    pub shoot_sound_volume: f32,
+    /// `Turret.chargeSound` (default `Sounds.none`).
+    pub charge_sound: SoundId,
+    /// `Turret.loopSound` (default `Sounds.none`).
+    pub loop_sound: SoundId,
+    /// `Turret.loopSoundVolume` (default 0.5).
+    pub loop_sound_volume: f32,
+    /// `Turret.soundPitchMin` (default 0.9).
+    pub sound_pitch_min: f32,
+    /// `Turret.soundPitchMax` (default 1.1).
+    pub sound_pitch_max: f32,
 }
 
 impl TurretConfig {
@@ -521,6 +537,7 @@ pub fn config_for(
 ) -> Option<TurretConfig> {
     let mut config = config_for_inner(content, name, names)?;
     apply_block_coolant(content, name, &mut config);
+    apply_turret_sounds(name, &mut config);
     // Harness fixtures (`test-item`, ...) carry a coolant amount but no block
     // consumer: default to the `consumeCoolant` liquid filter.
     if config.uses_coolant() && config.coolant_liquids.is_empty() {
@@ -564,6 +581,58 @@ const COOLANT_MULTIPLIERS: &[(&str, f32)] = &[
     ("scathe", 15.0),
     ("smite", 15.0),
 ];
+
+/// `Blocks.java` turret sound fields (name, `shootSound`, `shootSoundVolume`,
+/// `chargeSound`, `loopSound`, `loopSoundVolume`). Absent names keep the
+/// `Turret` class defaults (`Turret.java:127-138`).
+const TURRET_SOUNDS: &[(&str, &str, f32, &str, &str, f32)] = &[
+    ("duo", "shootDuo", 1.0, "none", "none", 0.5),
+    ("scatter", "shootScatter", 1.0, "none", "none", 0.5),
+    ("scorch", "shootFlame", 1.0, "none", "none", 0.5),
+    ("hail", "shootArtillerySmall", 1.0, "none", "none", 0.5),
+    ("wave", "none", 1.0, "none", "loopSpray", 0.5),
+    ("tsunami", "none", 1.0, "none", "loopSpray", 0.5),
+    ("lancer", "shootLancer", 1.0, "chargeLancer", "none", 0.5),
+    ("arc", "shootArc", 1.0, "none", "none", 0.5),
+    ("swarmer", "shootMissile", 1.0, "none", "none", 0.5),
+    ("salvo", "shootSalvo", 1.0, "none", "none", 0.5),
+    ("fuse", "shootFuse", 0.9, "none", "none", 0.5),
+    ("ripple", "shootRipple", 1.0, "none", "none", 0.5),
+    ("cyclone", "shootCyclone", 1.0, "none", "none", 0.5),
+    ("foreshadow", "shootForeshadow", 1.0, "none", "none", 0.5),
+    ("spectre", "shootSpectre", 1.0, "none", "none", 0.5),
+    (
+        "meltdown",
+        "shootMeltdown",
+        1.0,
+        "none",
+        "beamMeltdown",
+        2.0,
+    ),
+    ("breach", "shootBreach", 1.0, "none", "none", 0.5),
+    ("diffuse", "shootDiffuse", 1.0, "none", "none", 0.5),
+    ("sublimate", "none", 1.0, "none", "shootSublimate", 1.0),
+    ("titan", "shootTank", 1.0, "none", "none", 0.5),
+    ("disperse", "shootDisperse", 1.0, "none", "none", 0.5),
+    ("lustre", "none", 1.0, "none", "beamLustre", 1.0),
+    ("scathe", "shootScathe", 1.0, "none", "none", 0.5),
+    ("smite", "shootSmite", 1.0, "none", "loopGlow", 0.8),
+    ("malign", "shootMalign", 1.0, "none", "loopMalign", 1.3),
+    ("segment", "shootSegment", 1.0, "none", "none", 0.5),
+];
+
+/// Applies the `Blocks.java` sound overrides for one turret name.
+fn apply_turret_sounds(name: &str, config: &mut TurretConfig) {
+    let Some(row) = TURRET_SOUNDS.iter().find(|row| row.0 == name) else {
+        return;
+    };
+    let id = |n: &str| SoundId::by_name(n).unwrap_or(SoundId::NONE);
+    config.shoot_sound = id(row.1);
+    config.shoot_sound_volume = row.2;
+    config.charge_sound = id(row.3);
+    config.loop_sound = id(row.4);
+    config.loop_sound_volume = row.5;
+}
 
 /// `BaseTurret.init`: the coolant consumer comes from the block's content
 /// spec (`coolant = consumeCoolant(x)` / `consume(new ConsumeLiquid(water,
@@ -699,6 +768,13 @@ fn config_for_inner(
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
                 build_speed: 1.0,
+                shoot_sound: SoundId::SHOOT_DUO,
+                shoot_sound_volume: 1.0,
+                charge_sound: SoundId::NONE,
+                loop_sound: SoundId::NONE,
+                loop_sound_volume: 0.5,
+                sound_pitch_min: 0.9,
+                sound_pitch_max: 1.1,
             })
         }
         "test-item" => {
@@ -758,6 +834,13 @@ fn config_for_inner(
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
                 build_speed: 1.0,
+                shoot_sound: SoundId::SHOOT_DUO,
+                shoot_sound_volume: 1.0,
+                charge_sound: SoundId::NONE,
+                loop_sound: SoundId::NONE,
+                loop_sound_volume: 0.5,
+                sound_pitch_min: 0.9,
+                sound_pitch_max: 1.1,
             })
         }
         "test-liquid" => {
@@ -817,6 +900,13 @@ fn config_for_inner(
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
                 build_speed: 1.0,
+                shoot_sound: SoundId::SHOOT_DUO,
+                shoot_sound_volume: 1.0,
+                charge_sound: SoundId::NONE,
+                loop_sound: SoundId::NONE,
+                loop_sound_volume: 0.5,
+                sound_pitch_min: 0.9,
+                sound_pitch_max: 1.1,
             })
         }
         "test-power" => {
@@ -876,6 +966,13 @@ fn config_for_inner(
                 shoot_duration: 0.0,
                 firing_move_fract: 1.0,
                 build_speed: 1.0,
+                shoot_sound: SoundId::SHOOT_DUO,
+                shoot_sound_volume: 1.0,
+                charge_sound: SoundId::NONE,
+                loop_sound: SoundId::NONE,
+                loop_sound_volume: 0.5,
+                sound_pitch_min: 0.9,
+                sound_pitch_max: 1.1,
             })
         }
         _ => advanced::config_for(content, name, names),
@@ -1557,6 +1654,19 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
     let team = ctx.team(e);
     let rotation = state.rotation;
 
+    // `Turret.shoot`: `chargeSound.at(bulletX, bulletY, random(pitch))` when
+    // `shoot.firstShotDelay > 0` (`Turret.java:756-758`).
+    if config.shoot.first_shot_delay > 0.0 {
+        let cx = x + trnsx(rotation - 90.0, config.shoot_x, config.shoot_y);
+        let cy = y + trnsy(rotation - 90.0, config.shoot_x, config.shoot_y);
+        let pitch = {
+            let mut rng = crate::audio::sim::FxAudioRng { rng: &mut *ctx.rng };
+            config.sound_pitch_min
+                + rng.next_f32() * (config.sound_pitch_max - config.sound_pitch_min)
+        };
+        crate::audio::sim::emit_turret_shoot(ctx.audio, config.charge_sound, cx, cy, 1.0, pitch);
+    }
+
     let mut buffer = ShotBuffer::default();
     let mut barrel = state.barrel_counter;
     pattern::emit(
@@ -1584,9 +1694,19 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
         .map(|def| def.range)
         .unwrap_or(0.0);
     // `Turret.bullet`: `(type.shootSound != none ? type.shootSound : shootSound)`
-    // played per spawned bullet (plan 18 §2.3). Pitch is fixed for determinism;
-    // the audio layer never consumes the sim RNG.
-    let shoot_sound = ctx.content.bullet(bullet).map(|def| def.shoot_sound);
+    // played per spawned bullet (`Turret.java:804`); the pitch is
+    // `Mathf.random(soundPitchMin, soundPitchMax)` drawn from the audio-only Fx
+    // stream, so the checksum is unaffected.
+    let bullet_sound = ctx
+        .content
+        .bullet(bullet)
+        .map(|def| def.shoot_sound)
+        .unwrap_or(SoundId::NONE);
+    let shoot_sound = if !bullet_sound.is_none_or_unset() {
+        bullet_sound
+    } else {
+        config.shoot_sound
+    };
 
     for shot in &buffer.shots {
         if !config.consume_ammo_once && !has_ammo_state(state, ctx.world, e) {
@@ -1647,9 +1767,19 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
             ..BulletSpawn::default()
         };
         let _ = ctx.spawn(&spawn);
-        if let Some(sound) = shoot_sound {
-            crate::audio::sim::emit_turret_shoot(ctx.audio, sound, bx, by, 1.0, 1.0);
-        }
+        let pitch = {
+            let mut rng = crate::audio::sim::FxAudioRng { rng: &mut *ctx.rng };
+            config.sound_pitch_min
+                + rng.next_f32() * (config.sound_pitch_max - config.sound_pitch_min)
+        };
+        crate::audio::sim::emit_turret_shoot(
+            ctx.audio,
+            shoot_sound,
+            bx,
+            by,
+            config.shoot_sound_volume,
+            pitch,
+        );
         state.total_shots += 1;
         if !config.consume_ammo_once {
             let _ = use_ammo(state, ctx.world, e);
@@ -1993,5 +2123,89 @@ mod tests {
         assert!(progress > 0.0, "build turret advanced the construct");
         let state = harness.build.world.get::<TurretState>(turret).unwrap();
         assert!(state.build_warmup > 0.0, "build warmup ramped");
+    }
+
+    #[test]
+    fn turret_sound_table_matches_blocks_java() {
+        let harness = CombatHarness::new(8, 8, 1);
+        let cfg = |name: &str| {
+            config_for(harness.content(), name, harness.names_map())
+                .unwrap_or_else(|| panic!("config `{name}`"))
+        };
+        // `Blocks.java:3540`: hail carries shootArtillerySmall at volume 1.
+        let hail = cfg("hail");
+        assert_eq!(hail.shoot_sound, SoundId::SHOOT_ARTILLERY_SMALL);
+        assert_eq!(hail.shoot_sound_volume, 1.0);
+        // `Blocks.java:3952-3953`: fuse volume 0.9.
+        assert_eq!(cfg("fuse").shoot_sound_volume, 0.9);
+        // `Blocks.java:3596-3598`: lancer chargeSound.
+        assert_eq!(cfg("lancer").charge_sound, SoundId::CHARGE_LANCER);
+        assert_eq!(cfg("lancer").shoot_sound, SoundId::SHOOT_LANCER);
+        // `Blocks.java`: wave/tsunami are shoot-soundless LiquidTurrets with a
+        // `loopSpray` loop.
+        let wave = cfg("wave");
+        assert!(wave.shoot_sound.is_none_or_unset());
+        assert_eq!(wave.loop_sound, SoundId::LOOP_SPRAY);
+        assert_eq!(wave.loop_sound_volume, 0.5);
+        // `Blocks.java:4352-4354`: meltdown loop volume 2.0.
+        assert_eq!(cfg("meltdown").loop_sound, SoundId::BEAM_MELTDOWN);
+        assert_eq!(cfg("meltdown").loop_sound_volume, 2.0);
+        // `Blocks.java:5222-5224`: lustre loops beamLustre at volume 1.0.
+        assert_eq!(cfg("lustre").loop_sound, SoundId::BEAM_LUSTRE);
+        assert_eq!(cfg("lustre").loop_sound_volume, 1.0);
+        // `PointDefenseTurret.java:30`: segment has its own intercept sound.
+        assert_eq!(cfg("segment").shoot_sound, SoundId::SHOOT_SEGMENT);
+        // `Turret.java:127-138` class defaults survive where Blocks.java does
+        // not override.
+        let duo = cfg("duo");
+        assert_eq!(duo.shoot_sound, SoundId::SHOOT_DUO);
+        assert_eq!(duo.shoot_sound_volume, 1.0);
+        assert!(duo.charge_sound.is_none_or_unset());
+        assert_eq!(
+            (duo.sound_pitch_min, duo.sound_pitch_max),
+            (0.9, 1.1),
+            "Turret.java:127-138 pitch window"
+        );
+    }
+
+    #[test]
+    fn hail_shot_emits_its_own_sound() {
+        use crate::audio::{AudioEvent, SharedAudioLog};
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let log = SharedAudioLog::new();
+        harness.build.set_audio_sink(log.clone());
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(10, 8, wall, 0, true));
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("hail", tx, ty, 1)
+            .unwrap_or_else(|| panic!("hail"));
+        let graphite = harness.content().item_id("graphite").expect("graphite");
+        for _ in 0..10 {
+            handle_item(&mut harness.build.world, turret, graphite);
+        }
+        for _ in 0..180 {
+            harness.tick();
+        }
+        assert!(
+            harness
+                .build
+                .world
+                .get::<TurretState>(turret)
+                .unwrap()
+                .total_shots
+                > 0,
+            "hail fired"
+        );
+        let mut matched = 0;
+        for event in log.events() {
+            if let AudioEvent::At { sound, pitch, .. } = &event.event
+                && *sound == SoundId::SHOOT_ARTILLERY_SMALL
+            {
+                assert!((0.9..=1.1).contains(pitch), "pitch {pitch}");
+                matched += 1;
+            }
+        }
+        assert!(matched > 0, "hail emitted its own shoot sound");
     }
 }

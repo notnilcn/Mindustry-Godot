@@ -455,7 +455,7 @@ func _set_value(key: String, value: Variant) -> void:
 	ui.call("settings_set", key, value)
 	if _selected == "sound":
 		# The audio mixer keeps its own live settings mirror; drive it directly.
-		var audio := get_node_or_null("/root/MindAudio")
+		var audio := get_node_or_null("/root/Spine/MindAudio")
 		if audio != null:
 			audio.call("set_setting", key, value)
 

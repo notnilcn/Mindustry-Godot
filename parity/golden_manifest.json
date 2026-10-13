@@ -42,7 +42,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/audio/events_sim.json",
       "owner_plan": "18",
-      "sha256": "0db9af07eb018976cea9da8499d3624859af84bfe87c64bd064b4ceb2cff2192"
+      "sha256": "469331a8ce08cf5f63be1e861a805709cb68513867f0b893dfdf2d64cb5ac549"
     },
     {
       "id": "harness_audio_loops_aggregate",

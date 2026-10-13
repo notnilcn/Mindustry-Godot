@@ -43,6 +43,12 @@ impl StreamCache {
         self.sounds.len()
     }
 
+    /// Registry file path for a sound (`Sounds` index `file`), for UI-bus
+    /// routing (`SoundControl.java:98-104`).
+    pub fn file_of(&self, name: &str) -> Option<&str> {
+        self.sounds.get(name)?.file.as_deref()
+    }
+
     /// Decodes a `sounds/*` stream (`looping` sets the loop flag), cached.
     pub fn sound(&mut self, name: &str, looping: bool) -> Option<Gd<AudioStream>> {
         if let Some(stream) = self.streams.get(&(name.to_owned(), looping)) {
@@ -65,10 +71,13 @@ impl StreamCache {
         // the raw name (plan 18 `findMusic` fallbacks).
         let candidates = [format!("music/{name}"), name.to_owned()];
         for candidate in candidates {
-            let path = format!("{}/{}", self.assets_dir, normalize(&candidate));
+            // Normalize once: the decision must be made on the extension-carrying
+            // path, and `decode_bytes` needs it too (T1/PAR-0074).
+            let file = normalize(&candidate);
+            let path = format!("{}/{}", self.assets_dir, file);
             if FileAccess::file_exists(&path) {
                 let bytes = FileAccess::get_file_as_bytes(&path);
-                let stream = decode_bytes(&candidate, &bytes, true);
+                let stream = decode_bytes(&file, &bytes, true);
                 if let Some(stream) = stream {
                     self.streams.insert(key, stream.clone());
                     return Some(stream);

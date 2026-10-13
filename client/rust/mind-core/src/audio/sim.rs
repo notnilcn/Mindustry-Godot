@@ -129,6 +129,20 @@ pub fn emit_turret_shoot(
     emit_at(audio, sound, x, y, volume, pitch, true);
 }
 
+/// `Weapon.shoot`/`Weapon.bullet` sounds (`Weapon.java:470,515-517`):
+/// `chargeSound.at(shootX, shootY, random(pitch))` and
+/// `shootSound.at(bulletX, bulletY, random(pitch), shootSoundVolume)`.
+pub fn emit_weapon_sound(
+    audio: &AudioSinkRes,
+    sound: SoundId,
+    x: f32,
+    y: f32,
+    volume: f32,
+    pitch: f32,
+) {
+    emit_at(audio, sound, x, y, volume, pitch, true);
+}
+
 /// Emits a bullet hit sound (`BulletType.hit`).
 pub fn emit_bullet_hit(
     audio: &AudioSinkRes,

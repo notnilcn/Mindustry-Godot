@@ -6,9 +6,9 @@
 //! Ports the gameplay half of `core/src/mindustry/type/Weather.java`: the
 //! per-tick `updateEffect` status application and the `WeatherStateComp.update`
 //! lifetime/opacity bookkeeping. Drawing (`drawOver`/`drawUnder`) stays in
-//! [`crate::fx::weather_fx`]. Weathers without a status (vanilla's `snowing`,
-//! `sandstorm`, `fog`, `suspend-particles`) have no sim effect; `rain` applies
-//! `wet` and `sporestorm` applies `spore-slowed` to air units only.
+//! [`crate::fx::weather_fx`]. `sandstorm`/`sporestorm` push units with their
+//! `ParticleWeather` wind force; `rain` applies `wet` and `sporestorm` applies
+//! `spore-slowed` to air units only.
 //!
 //! The weather scheduler (game layer) owns live [`WeatherRuntime`] entities:
 //! spawn one with the marker [`crate::entities::comp::WeatherState`] when the
@@ -21,8 +21,8 @@ use bevy_ecs::world::World;
 
 use crate::content::{ContentRegistry, StatusId, WeatherId};
 use crate::ecs::EntitySeq;
-use crate::entities::comp::unit::comp::PhysicsComp;
-use crate::entities::comp::{TeamComp, Unit};
+use crate::entities::comp::unit::comp::{PhysicsComp, UnitTypeComp};
+use crate::entities::comp::{TeamComp, Unit, Vel};
 
 /// `Weather.WeatherStateComp.fadeTime`: opacity fade-in window (ticks).
 pub const WEATHER_FADE_TIME: f32 = 60.0 * 4.0;
@@ -129,8 +129,47 @@ pub fn update_weather_state(world: &mut World, content: &ContentRegistry, entity
 
     runtime.life -= 1.0;
 
-    // `Weather.update` is a no-op for every vanilla weather; only the status
-    // half of `Weather.updateEffect` is simulated.
+    // `ParticleWeather.update` (`ParticleWeather.java:44-54`): the wind vector
+    // pushes every unit, `vel += wind * force * intensity / mass`
+    // (`PhysicsComp.impulse`, mass = hitSize^2 * PI). `Weather.update` runs
+    // before `updateEffect` in `WeatherStateComp.update`.
+    if let Some(def) = content.weather(runtime.weather)
+        && let Some(particle) = def.particle.as_ref()
+    {
+        let speed = particle.force * runtime.intensity;
+        if speed > 0.001 {
+            let (wx, wy) = (runtime.wind_x * speed, runtime.wind_y * speed);
+            let mut units: Vec<(u64, Entity)> = world
+                .iter_entities()
+                .filter(|entity_ref| entity_ref.get::<Unit>().is_some())
+                .map(|entity_ref| {
+                    let seq = entity_ref
+                        .get::<EntitySeq>()
+                        .map(|seq| seq.0)
+                        .unwrap_or(u64::MAX);
+                    (seq, entity_ref.id())
+                })
+                .collect();
+            units.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+            for (_, unit) in units {
+                let Some(hit_size) = world
+                    .get::<UnitTypeComp>(unit)
+                    .and_then(|comp| content.unit(comp.type_id))
+                    .map(|unit| unit.hit_size)
+                else {
+                    continue;
+                };
+                let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
+                if let Some(mut vel) = world.get_mut::<Vel>(unit) {
+                    vel.x += wx / mass;
+                    vel.y += wy / mass;
+                }
+            }
+        }
+    }
+
+    // `checkTarget` stays approximated by `PhysicsComp.flying` (hovering units
+    // between elevation 0.001 and 0.09 get both in the port, neither in Java).
     if let Some(def) = content.weather(runtime.weather)
         && def.status != StatusId::NONE
     {
@@ -284,5 +323,56 @@ mod tests {
             state
         ));
         assert!(harness.build.world.get_entity(state).is_err());
+    }
+
+    /// T9: `ParticleWeather.update` wind force (`ParticleWeather.java:44-54`).
+    #[test]
+    fn sandstorm_pushes_units() {
+        let mut harness = harness(21);
+        let dagger = harness.spawn("dagger", 0, 64.0, 64.0, 0.0).expect("dagger");
+        let storm = harness
+            .content()
+            .weather_by_name("sandstorm")
+            .expect("sandstorm")
+            .id;
+        let state = harness
+            .build
+            .world
+            .spawn(WeatherRuntime::new(storm, 1.0, 600.0))
+            .id();
+        harness
+            .build
+            .world
+            .get_mut::<WeatherRuntime>(state)
+            .expect("weather")
+            .wind_x = 1.0;
+        update_weather_state(&mut harness.build.world, &harness.build.content, state);
+        let vel = harness.build.world.get::<Vel>(dagger).expect("vel");
+        // force 0.1, dagger hitSize 8 -> 0.1 / (8^2 * PI) = 4.9736e-4.
+        let expected = 0.1 / (64.0 * std::f32::consts::PI);
+        assert!((vel.x - expected).abs() < 1.0e-9, "vx {}", vel.x);
+        assert_eq!(vel.y, 0.0, "no y push");
+    }
+
+    /// T9: weathers without a `ParticleWeather` force leave velocity alone.
+    #[test]
+    fn rain_has_no_force() {
+        let mut harness = harness(23);
+        let dagger = harness.spawn("dagger", 0, 64.0, 64.0, 0.0).expect("dagger");
+        let rain = harness.content().weather_by_name("rain").expect("rain").id;
+        let state = harness
+            .build
+            .world
+            .spawn(WeatherRuntime::new(rain, 1.0, 600.0))
+            .id();
+        harness
+            .build
+            .world
+            .get_mut::<WeatherRuntime>(state)
+            .expect("weather")
+            .wind_x = 1.0;
+        update_weather_state(&mut harness.build.world, &harness.build.content, state);
+        let vel = harness.build.world.get::<Vel>(dagger).expect("vel");
+        assert_eq!((vel.x, vel.y), (0.0, 0.0));
     }
 }
