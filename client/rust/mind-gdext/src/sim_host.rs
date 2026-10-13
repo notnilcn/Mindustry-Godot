@@ -558,12 +558,13 @@ impl MindSimHost {
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0)
                     .clamp(0, 3) as i8;
+                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
                 SimCommand::Place {
                     x,
                     y,
                     block,
                     rotation,
-                    team: 0,
+                    team,
                     player,
                 }
             }
@@ -801,6 +802,9 @@ impl MindSimHost {
             };
             put("block", Variant::from(i64::from(building.block.raw())));
             put("enabled", Variant::from(building.enabled));
+            if let Some(team) = world.get::<mind_core::entities::comp::TeamComp>(entity) {
+                put("team", Variant::from(i64::from(team.team)));
+            }
             put("efficiency", Variant::from(f64::from(building.efficiency)));
             put(
                 "potential_efficiency",

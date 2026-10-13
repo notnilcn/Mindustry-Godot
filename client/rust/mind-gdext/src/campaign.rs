@@ -986,6 +986,13 @@ impl MindCampaign {
                 let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
                 let ok = !events.is_empty();
                 for event in events {
+                    // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
+                    // the captured sector's wave team turns derelict on the next
+                    // tick (`Sim::apply_campaign_world_requests`). The debug
+                    // capture path must queue it like the game-state path.
+                    if matches!(event, mind_core::game::play::PlayEvent::SectorCapture { .. }) {
+                        runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
+                    }
                     runtime.events.push(event);
                 }
                 host.bind_mut().put_campaign_runtime(runtime);
@@ -1445,7 +1452,7 @@ impl MindCampaign {
             .complete(index as usize, &mut self.session.rules)
     }
 
-    /// Per-objective state rows (`index`, `type`, `completed`).
+    /// Per-objective state rows (`index`, `type`, `completed`, `countup`).
     #[func]
     pub fn get_objective_state(&self) -> Array<VarDictionary> {
         let mut out = Array::<VarDictionary>::new();
@@ -1459,9 +1466,37 @@ impl MindCampaign {
                 &GString::from("completed"),
                 &self.session.objectives.is_completed(index).to_variant(),
             );
+            row.set(
+                &GString::from("countup"),
+                &self.session.objectives.timer_countup(index).to_variant(),
+            );
             out.push(&row);
         }
         out
+    }
+
+    /// Debug seam: `{completed, countup}` straight from the live runtime
+    /// executor (the facade mirror is stale while the frame pump is paused).
+    #[func]
+    pub fn objective_runtime_debug(&mut self, index: i64) -> GString {
+        if index < 0 {
+            return GString::from("null");
+        }
+        let index = index as usize;
+        let Some(mut host) = self.host() else {
+            return GString::from("null");
+        };
+        let Some(runtime) = host.bind_mut().take_campaign_runtime() else {
+            return GString::from("null");
+        };
+        let completed = runtime.session.objectives.is_completed(index);
+        let countup = runtime.session.objectives.timer_countup(index);
+        host.bind_mut().put_campaign_runtime(runtime);
+        GString::from(
+            serde_json::json!({"completed": completed, "countup": countup})
+                .to_string()
+                .as_str(),
+        )
     }
 
     /// `MapObjectives` world-marker draw list for the running objectives

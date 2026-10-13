@@ -226,6 +226,12 @@ impl MapObjectivesRuntime {
         self.completed.get(index).copied().unwrap_or(false)
     }
 
+    /// Transient `TimerObjective.countup` of `index` (HUD/debug progress;
+    /// not part of the persisted data).
+    pub fn timer_countup(&self, index: usize) -> f32 {
+        self.countup.get(index).copied().unwrap_or(0.0)
+    }
+
     /// `MapObjective.qualified()`: not completed and all parents done.
     pub fn qualified(&self, index: usize) -> bool {
         !self.is_completed(index) && self.dependency_finished(index)
