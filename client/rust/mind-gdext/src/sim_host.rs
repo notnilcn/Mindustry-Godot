@@ -952,6 +952,7 @@ impl MindSimHost {
                 out.set(&GString::from(key), &value);
             };
             put("block", Variant::from(i64::from(building.block.raw())));
+            put("rotation", Variant::from(i64::from(building.rotation)));
             put("enabled", Variant::from(building.enabled));
             if let Some(team) = world.get::<mind_core::entities::comp::TeamComp>(entity) {
                 put("team", Variant::from(i64::from(team.team)));
