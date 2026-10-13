@@ -207,6 +207,9 @@ impl LogicBlockState {
 
         self.executor.build = Some(e);
         self.executor.build_ipt = ipt;
+        // `SetRateI` clamp ceiling: `maxInstructionsPerTick` for privileged
+        // world processors, `instructionsPerTick` otherwise (`LExecutor.java:1218`).
+        self.executor.ipt_max = if privileged { def.max_ipt } else { def.ipt };
         self.executor.load(asm);
 
         // `@unit` object survives a code reload (`executor.unit.objval = oldUnit`).
@@ -627,6 +630,10 @@ impl BuildingBehavior for LogicBlockBehavior {
             state
                 .executor
                 .run_budget(world, &mut state.accumulator, step, ipt);
+            // `setrate` writes the owning build's `ipt` (`SetRateI.run`).
+            if let Some(value) = state.executor.pending_ipt.take() {
+                state.ipt = value;
+            }
         }
 
         world.entity_mut(e).insert(state);

@@ -254,6 +254,32 @@ pub fn entity_team(world: &World, e: Entity) -> Option<u8> {
     world.get::<TeamComp>(e).map(|t| t.team)
 }
 
+/// `PrintI.toString` world-resolved names: contents (`LogicContentInfo`),
+/// building block names (`BlockTable`) and unit type names.
+///
+/// Java resolves these in one `instanceof` chain (`LExecutor.PrintI.toString`);
+/// the VM calls this for the object kinds it cannot resolve from the value
+/// alone. `None` lets the caller fall back (`Str`/`Enum`/`[object]`).
+pub fn name_of(world: &World, obj: &LogicObject) -> Option<String> {
+    match obj {
+        LogicObject::Content(c) => world
+            .get_resource::<crate::logic::globals::LogicContentInfo>()
+            .and_then(|info| info.name(c.type_, c.id))
+            .map(str::to_owned),
+        LogicObject::Building(e) => block_def(world, *e).map(|def| def.name.clone()),
+        LogicObject::Unit(e) => world
+            .get::<crate::entities::comp::unit::UnitTypeComp>(*e)
+            .and_then(|t| {
+                world
+                    .get_resource::<crate::logic::globals::LogicContentInfo>()
+                    .and_then(|info| info.name(ContentType::Unit, t.type_id.raw()))
+            })
+            .map(str::to_owned),
+        LogicObject::Team(id) => Some(crate::game::team::Team::get(*id).name.clone()),
+        _ => None,
+    }
+}
+
 /// Block definition for a building entity.
 fn block_def(world: &World, e: Entity) -> Option<std::sync::Arc<crate::content::BlockDef>> {
     let block = world.get::<Building>(e)?.block;
@@ -427,7 +453,8 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
         LAccess::Controlled => Sensed::Num(0.0),
         LAccess::Config => Sensed::Obj(None),
         LAccess::Name => Sensed::Obj(def.as_ref().map(|d| LogicObject::Str(d.name.clone()))),
-        _ => Sensed::Num(0.0),
+        // Java `BuildingComp.sense` default: `NaN` → null through `setnum`.
+        _ => Sensed::Obj(None),
     }
 }
 
@@ -493,7 +520,8 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
             )))),
             None => Sensed::Obj(None),
         },
-        _ => Sensed::Num(0.0),
+        // Java `UnitComp.senseObject` default: null.
+        _ => Sensed::Obj(None),
     }
 }
 

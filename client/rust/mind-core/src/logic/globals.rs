@@ -358,6 +358,9 @@ impl GlobalVars {
     pub fn install_world(world: &mut bevy_ecs::world::World, content: &ContentRegistry) -> Self {
         let globals = Self::with_content(content);
         world.insert_resource(globals.clone());
+        if world.get_resource::<LogicContentInfo>().is_none() {
+            world.insert_resource(LogicContentInfo::from_content(content));
+        }
         globals
     }
 
@@ -489,6 +492,56 @@ impl GlobalVars {
     /// `GlobalVars.remove(name)` (data-patch reset).
     pub fn remove(&mut self, name: &str) {
         self.cells.shift_remove(name);
+    }
+}
+
+/// Content names by type and dense id, for the executor's `print`/`format`
+/// (`PrintI.toString` needs content names and the VM has no registry access).
+///
+/// Built next to [`GlobalVars`] by [`GlobalVars::install_world`].
+#[derive(Clone, Debug, bevy_ecs::prelude::Resource)]
+pub struct LogicContentInfo {
+    /// `names[type as usize][dense id]`; empty string = no such record.
+    names: Vec<Vec<String>>,
+}
+
+impl Default for LogicContentInfo {
+    fn default() -> Self {
+        Self {
+            names: vec![Vec::new(); ContentType::ALL.len()],
+        }
+    }
+}
+
+impl LogicContentInfo {
+    /// Builds the name tables from the registry (`GlobalVars.init` content pass).
+    pub fn from_content(content: &ContentRegistry) -> Self {
+        let mut info = Self::default();
+        for type_ in ContentType::ALL {
+            let entries = content.entries(type_);
+            let len = entries
+                .iter()
+                .map(|entry| entry.id as usize + 1)
+                .max()
+                .unwrap_or(0);
+            let table = &mut info.names[type_ as usize];
+            table.resize(len, String::new());
+            for entry in entries {
+                if let Some(name) = entry.name {
+                    table[entry.id as usize] = name.to_owned();
+                }
+            }
+        }
+        info
+    }
+
+    /// Name for a content record (`Content.name`), when known.
+    pub fn name(&self, type_: ContentType, id: u16) -> Option<&str> {
+        self.names
+            .get(type_ as usize)?
+            .get(id as usize)
+            .map(String::as_str)
+            .filter(|name| !name.is_empty())
     }
 }
 

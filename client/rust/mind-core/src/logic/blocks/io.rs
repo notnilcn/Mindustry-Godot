@@ -225,15 +225,29 @@ pub fn read_target(
 
 /// Reads one cell from a building (`LogicBuild.read`/`MemoryBuild.read`).
 fn read_building(world: &World, exec: &Executor, e: Entity, position: &LVar) -> CellValue {
-    if !readable(world, exec, e) {
+    let kind = block_kind_of(world, e);
+    // `MessageBlock.readable` is `isValid()` only (no team check).
+    let can_read = if kind == Some(BlockKind::MessageBlock) {
+        is_valid_building(world, e)
+    } else {
+        readable(world, exec, e)
+    };
+    if !can_read {
         return CellValue::Obj(None);
     }
-    match block_kind_of(world, e) {
+    match kind {
         Some(BlockKind::MemoryBlock) => {
             let Some(state) = world.get::<MemoryBlockState>(e) else {
                 return CellValue::Obj(None);
             };
             super::memory::read_slot(state, position.numi())
+        }
+        Some(BlockKind::MessageBlock) => {
+            // `MessageBuild.read`: char code or NaN out of range.
+            let Some(state) = world.get::<MessageBlockState>(e) else {
+                return CellValue::Obj(None);
+            };
+            CellValue::Num(state.read_char(position.numi()))
         }
         Some(BlockKind::LogicBlock) => {
             let Some(state) = world.get::<LogicBlockState>(e) else {
@@ -341,5 +355,32 @@ pub fn flush_print(world: &mut World, exec: &Executor, target: Option<&LogicObje
         .unwrap_or(400);
     if let Some(mut state) = world.get_mut::<MessageBlockState>(e) {
         state.print(&exec.text_buffer, max_text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::logic::value::LVar;
+    use crate::world::harness::BuildHarness;
+
+    #[test]
+    fn message_read_ignores_team_gate() {
+        // `MessageBlock.readable` is `isValid()` only (MessageBlock.java:172-181):
+        // a non-privileged executor on another team still reads chars; printing
+        // keeps the team gate (`printable`).
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let message = harness.content().block_id("message").expect("message");
+        assert!(harness.place(5, 4, message, 0, true));
+        let me = harness.build_at(5, 4).expect("message");
+        if let Some(mut team) = harness.world.get_mut::<crate::entities::comp::TeamComp>(me) {
+            team.team = 2;
+        }
+        assert!(harness.configure(5, 4, crate::world::ConfigValue::String("hi".to_owned())));
+        let exec = Executor::new();
+        let value = read_building(&harness.world, &exec, me, &LVar::num_const("p", 0.0));
+        assert_eq!(value, CellValue::Num('h' as u32 as f64));
+        let value = read_building(&harness.world, &exec, me, &LVar::num_const("p", 9.0));
+        assert!(matches!(value, CellValue::Num(n) if n.is_nan()));
     }
 }

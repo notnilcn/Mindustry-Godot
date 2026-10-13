@@ -215,7 +215,8 @@ impl LogicOp {
             Log10 => av.log10(),
             Floor => av.floor(),
             Ceil => av.ceil(),
-            Round => av.round(),
+            // Java `Math.round(double)` == `floor(x + 0.5)` (half up toward +inf).
+            Round => (av + 0.5).floor(),
             Sqrt => av.sqrt(),
             Rand => rng.next_double() * av,
             Sin => (av * DEG_RAD).sin(),

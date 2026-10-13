@@ -739,4 +739,147 @@ mod integration_tests {
         let x = state.executor.arena.get_id("@thisx").expect("@thisx");
         assert_eq!(state.executor.arena.get(x).num, 8.0);
     }
+
+    #[test]
+    fn print_resolves_content_building_team_names() {
+        // `PrintI.toString`: building -> block name, content -> content name,
+        // team -> team name (needs the `LogicContentInfo` resource).
+        let mut harness = BuildHarness::new(16, 16, 1);
+        harness.install_logic_globals();
+        let processor = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        assert!(harness.place(4, 4, processor, 0, true));
+        let pe = harness.build_at(4, 4).expect("processor");
+        let code = "sensor b @this @type\nprint b\nprint @copper\nprint @sharded\nstop\n";
+        assert!(harness.configure(
+            4,
+            4,
+            ConfigValue::Bytes(logic_block::compress(code, &[]).into())
+        ));
+        for _ in 0..8 {
+            harness.tick();
+        }
+        let state = harness.world.get::<LogicBlockState>(pe).expect("state");
+        assert_eq!(state.executor.text_buffer, "micro-processorcoppersharded");
+    }
+
+    #[test]
+    fn setrate_clamps_to_block_limits() {
+        // `SetRateI.run`: clamp(amount, 1, privileged ? maxIpt : ipt). A world
+        // processor's byte config is gated behind `accessible()`, so the harness
+        // needs an editor-like rules seam to accept it.
+        #[derive(Clone, Copy)]
+        struct EditorRules;
+        impl crate::logic::blocks::LogicRulesApi for EditorRules {
+            fn editor(&self) -> bool {
+                true
+            }
+            fn allow_edit_world_processors(&self) -> bool {
+                false
+            }
+            fn disable_world_processors(&self) -> bool {
+                false
+            }
+        }
+        let mut harness = BuildHarness::new(16, 16, 1);
+        harness
+            .world
+            .insert_resource(crate::logic::blocks::LogicRulesRes(Box::new(EditorRules)));
+        let world = harness
+            .content()
+            .block_id("world-processor")
+            .expect("world-processor");
+        let micro = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        assert!(harness.place(4, 4, world, 0, true));
+        assert!(harness.place(8, 8, micro, 0, true));
+        let we = harness.build_at(4, 4).expect("world processor");
+        let me = harness.build_at(8, 8).expect("micro processor");
+        assert!(harness.configure(
+            4,
+            4,
+            ConfigValue::Bytes(logic_block::compress("setrate 1\nstop\n", &[]).into())
+        ));
+        assert!(harness.configure(
+            8,
+            8,
+            ConfigValue::Bytes(logic_block::compress("setrate 50\nstop\n", &[]).into())
+        ));
+        for _ in 0..4 {
+            harness.tick();
+        }
+        let state = harness.world.get::<LogicBlockState>(we).expect("state");
+        assert_eq!(state.ipt, 1);
+        let state = harness.world.get::<LogicBlockState>(me).expect("state");
+        assert_eq!(state.ipt, 2, "micro clamps to instructionsPerTick");
+    }
+
+    #[test]
+    fn read_message_returns_char_and_ignores_team() {
+        // `MessageBuild.readable` = `isValid()` only; `read` returns the char
+        // code at the address (NaN -> null out of range). The team gate itself
+        // is covered by `io::tests::message_read_ignores_team_gate`.
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let processor = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        let message = harness.content().block_id("message").expect("message");
+        assert!(harness.place(4, 4, processor, 0, true));
+        assert!(harness.place(5, 4, message, 0, true));
+        let pe = harness.build_at(4, 4).expect("processor");
+        assert!(harness.configure(5, 4, ConfigValue::String("hello".to_owned())));
+        let code = "read r message1 0\nread s message1 4\nread t message1 9\nstop\n";
+        assert!(harness.configure(
+            4,
+            4,
+            ConfigValue::Bytes(logic_block::compress(code, &[]).into())
+        ));
+        assert!(harness.configure(4, 4, ConfigValue::Point2(5, 4)));
+        for _ in 0..4 {
+            harness.tick();
+        }
+        let state = harness.world.get::<LogicBlockState>(pe).expect("state");
+        let r = state.executor.optional_var("r").expect("r");
+        assert_eq!(state.executor.arena.get(r).num(), 'h' as u32 as f64);
+        let s = state.executor.optional_var("s").expect("s");
+        assert_eq!(state.executor.arena.get(s).num(), 'o' as u32 as f64);
+        let t = state.executor.optional_var("t").expect("t");
+        assert!(state.executor.arena.get(t).is_obj, "out of range is null");
+        assert!(state.executor.arena.get(t).obj.is_none());
+    }
+
+    #[test]
+    fn sensor_null_dead_and_string_size() {
+        // `SenseI.run`: null target + `@dead` -> 1; string + `@size` -> length;
+        // unknown accessors are null (`sense` default).
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let processor = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        assert!(harness.place(4, 4, processor, 0, true));
+        let pe = harness.build_at(4, 4).expect("processor");
+        let code = "sensor s \"abc\" @size\nsensor d null @dead\nsensor h @this @ammo\nstop\n";
+        assert!(harness.configure(
+            4,
+            4,
+            ConfigValue::Bytes(logic_block::compress(code, &[]).into())
+        ));
+        for _ in 0..4 {
+            harness.tick();
+        }
+        let state = harness.world.get::<LogicBlockState>(pe).expect("state");
+        let s = state.executor.optional_var("s").expect("s");
+        assert_eq!(state.executor.arena.get(s).num(), 3.0);
+        let d = state.executor.optional_var("d").expect("d");
+        assert_eq!(state.executor.arena.get(d).num(), 1.0);
+        let h = state.executor.optional_var("h").expect("h");
+        assert!(state.executor.arena.get(h).is_obj, "unknown sense is null");
+        assert!(state.executor.arena.get(h).obj.is_none());
+    }
 }
