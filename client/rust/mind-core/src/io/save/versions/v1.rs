@@ -306,17 +306,11 @@ pub(crate) fn read_legacy_regions(
         read_legacy_entities(wire, state, version)
     })?;
     if version >= 8 {
-        // Upstream markers are a JSON document filling the region; without a
-        // sink the payload is skipped by length (the native stub's count
-        // prefix is native-only framing).
-        if state.markers.is_some() {
-            read_legacy_region(&mut wire, REGION_MARKERS, |wire| match &mut state.markers {
-                Some(sink) => sink.read_markers(wire),
-                None => Ok(()),
-            })?;
-        } else {
-            skip_legacy_region(&mut wire, REGION_MARKERS)?;
-        }
+        // Upstream markers are UBJson `IntMap` bytes (`JsonIO.writeBytes`;
+        // deviation 5: UBJson is not ported), so the region is skipped even
+        // when a sink is present — the native binary sink would mis-parse it
+        // and fail the whole load (e.g. the groundZero preset map reload).
+        skip_legacy_region(&mut wire, REGION_MARKERS)?;
     }
     if version >= 7 {
         // `LegacyRegionSaveVersion` (<= 6) has no custom-chunk region.
