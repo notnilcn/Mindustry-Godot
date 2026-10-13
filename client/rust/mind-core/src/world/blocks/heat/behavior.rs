@@ -20,9 +20,10 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
+use crate::content::{ItemId, LiquidId};
 use crate::entities::comp::Building;
 use crate::util::IdSet;
-use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
+use crate::world::behavior::{BehaviorRegistry, BuildingBehavior, BuildingReader, BuildingWriter};
 use crate::world::update::build_time;
 
 use super::{
@@ -74,6 +75,69 @@ impl BuildingBehavior for HeatProducerBehavior {
             );
         }
     }
+
+    // `HeatProducerBuild` extends `GenericCrafterBuild`: every consumer/IO hook
+    // Java inherits is delegated to the crafter behavior (T1). Java
+    // `HeatProducer.java:71-79`: `write`: `super.write(write); write.f(heat);`,
+    // `read`: `super.read(read, revision); heat = read.f();`.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        crate::world::behavior::production::CrafterBehavior.should_consume(world, e)
+    }
+
+    fn accept_item(&self, world: &World, e: Entity, src: Entity, item: ItemId) -> bool {
+        crate::world::behavior::production::CrafterBehavior.accept_item(world, e, src, item)
+    }
+
+    fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        crate::world::behavior::production::CrafterBehavior.get_maximum_accepted(world, e, item)
+    }
+
+    fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
+        crate::world::behavior::production::CrafterBehavior.handle_item(world, e, src, item);
+    }
+
+    fn accept_liquid(&self, world: &World, e: Entity, src: Entity, liquid: LiquidId) -> bool {
+        crate::world::behavior::production::CrafterBehavior.accept_liquid(world, e, src, liquid)
+    }
+
+    fn handle_liquid(
+        &self,
+        world: &mut World,
+        e: Entity,
+        src: Entity,
+        liquid: LiquidId,
+        amount: f32,
+    ) {
+        crate::world::behavior::production::CrafterBehavior
+            .handle_liquid(world, e, src, liquid, amount);
+    }
+
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        source: Option<Entity>,
+    ) -> i32 {
+        crate::world::behavior::production::CrafterBehavior
+            .accept_stack(world, e, item, amount, source)
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        crate::world::behavior::production::CrafterBehavior.write(world, e, w);
+        if let Some(state) = world.get::<HeatState>(e) {
+            w.f(state.heat);
+        }
+    }
+
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        crate::world::behavior::production::CrafterBehavior.read(world, e, r, revision);
+        let heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<HeatState>(e) {
+            state.heat = heat;
+        }
+    }
 }
 
 /// `HeatCrafter` behavior (`HeatCrafterBuild.updateTile`/`efficiencyScale`).
@@ -119,6 +183,60 @@ impl BuildingBehavior for HeatCrafterBehavior {
 
     fn update_tile(&self, world: &mut World, e: Entity) {
         crate::world::behavior::production::CrafterBehavior.update_tile(world, e);
+    }
+
+    // `HeatCrafterBuild` extends `GenericCrafterBuild`: delegate every
+    // consumer hook (T1); Java adds no extra write/read over `GenericCrafter`.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        crate::world::behavior::production::CrafterBehavior.should_consume(world, e)
+    }
+
+    fn accept_item(&self, world: &World, e: Entity, src: Entity, item: ItemId) -> bool {
+        crate::world::behavior::production::CrafterBehavior.accept_item(world, e, src, item)
+    }
+
+    fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        crate::world::behavior::production::CrafterBehavior.get_maximum_accepted(world, e, item)
+    }
+
+    fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
+        crate::world::behavior::production::CrafterBehavior.handle_item(world, e, src, item);
+    }
+
+    fn accept_liquid(&self, world: &World, e: Entity, src: Entity, liquid: LiquidId) -> bool {
+        crate::world::behavior::production::CrafterBehavior.accept_liquid(world, e, src, liquid)
+    }
+
+    fn handle_liquid(
+        &self,
+        world: &mut World,
+        e: Entity,
+        src: Entity,
+        liquid: LiquidId,
+        amount: f32,
+    ) {
+        crate::world::behavior::production::CrafterBehavior
+            .handle_liquid(world, e, src, liquid, amount);
+    }
+
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        source: Option<Entity>,
+    ) -> i32 {
+        crate::world::behavior::production::CrafterBehavior
+            .accept_stack(world, e, item, amount, source)
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        crate::world::behavior::production::CrafterBehavior.write(world, e, w);
+    }
+
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        crate::world::behavior::production::CrafterBehavior.read(world, e, r, revision);
     }
 }
 

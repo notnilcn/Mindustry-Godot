@@ -582,7 +582,10 @@ impl BlockKindData {
             BlockKind::Radar => BlockKindData::Radar(RadarDef::default()),
             BlockKind::Thruster => BlockKindData::Thruster(ThrusterDef::default()),
             BlockKind::TargetDummy => BlockKindData::TargetDummy(TargetDummyDef::default()),
-            BlockKind::GenericCrafter | BlockKind::HeatCrafter => {
+            BlockKind::GenericCrafter | BlockKind::HeatCrafter | BlockKind::HeatProducer => {
+                // `HeatProducer` extends `GenericCrafter` (`HeatProducer.java:1`);
+                // the kind data carries its craft loop exactly like a heat
+                // crafter (T1: oxidation-chamber's oxide output).
                 BlockKindData::Crafter(CrafterDef {
                     craft_time: def.craft_time,
                     ..CrafterDef::default()
@@ -746,6 +749,11 @@ impl BlockKindData {
                 80.0,
                 false,
             )),
+            // `Blocks.java:1429 oxidation-chamber` (HeatProducer, which extends
+            // GenericCrafter) — oxide x1, craftTime 60 * 2, liquidCapacity 30.
+            "oxidation-chamber" => {
+                self.set_crafter(craft_t(vec![(item("oxide"), 1)], vec![], 60.0 * 2.0, false))
+            }
             // `Blocks.java:1537 carbide-crucible` (HeatCrafter) — carbide x1,
             // craftTime 60 * 2.25/4 = 33.75.
             "carbide-crucible" => self.set_crafter(craft_t(

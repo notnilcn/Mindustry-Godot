@@ -27,7 +27,7 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "e54e4be3749fd621f276819e5429cc91a402b9c1d76bd5ae79712df716823394",
+      "sha256": "62a530c5370fcfa9682573232fe87ebf4e97e78fc6b5365a57db0f1d832aae7e",
       "regen": "cargo run -p mind-headless -- content dump"
     },
     {

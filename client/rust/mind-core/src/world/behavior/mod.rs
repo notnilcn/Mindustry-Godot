@@ -269,18 +269,26 @@ pub trait BuildingBehavior: Send + Sync {
         Stats::new()
     }
 
-    /// Item acceptance hook (08 overrides).
+    /// Item acceptance hook (`BuildingComp.acceptItem`,
+    /// `BuildingComp.java:869-871`: `block.consumesItem(item) && items.get(item)
+    /// < getMaximumAccepted(item)`; T1 made this the trait default).
     fn accept_item(&self, world: &World, e: Entity, src: Entity, item: ItemId) -> bool {
-        let _ = (world, e, src, item);
-        false
+        let _ = src;
+        helpers::consumer_accept_item(world, e, item)
     }
 
-    /// Item handling hook (08 overrides).
+    /// Item handling hook (`BuildingComp.handleItem` default: `items.add(item, 1)`).
     fn handle_item(&self, world: &mut World, e: Entity, src: Entity, item: ItemId) {
-        let _ = (world, e, src, item);
+        crate::world::blocks::distribution::transfer::default_handle_item(world, e, src, item);
     }
 
     /// Stack acceptance hook (`BuildingComp.acceptStack`; 08 overrides).
+    ///
+    /// Java (`BuildingComp.java:779-785`): `if(acceptItem(self(), item) &&
+    /// block.hasItems && (source == null || source.team() == team)) return
+    /// Math.min(getMaximumAccepted(item) - items.get(item), amount); else
+    /// return 0;`. Written inline so it dispatches through `self`'s overrides
+    /// (`default_accept_stack` calls the free default).
     fn accept_stack(
         &self,
         world: &World,
@@ -289,31 +297,51 @@ pub trait BuildingBehavior: Send + Sync {
         amount: i32,
         source: Option<Entity>,
     ) -> i32 {
-        let _ = (world, e, item, amount, source);
-        0
+        let source_ok = match source {
+            Some(src) => world
+                .get::<crate::entities::comp::TeamComp>(src)
+                .zip(world.get::<crate::entities::comp::TeamComp>(e))
+                .is_some_and(|(a, b)| a.team == b.team),
+            None => true,
+        };
+        if world.get::<crate::world::modules::ItemModule>(e).is_some()
+            && self.accept_item(world, e, source.unwrap_or(e), item)
+            && source_ok
+        {
+            (self.get_maximum_accepted(world, e, item)
+                - crate::world::blocks::distribution::transfer::item_count(world, e, item))
+            .min(amount)
+        } else {
+            0
+        }
     }
 
     /// Stack handling hook (`BuildingComp.handleStack`; 08 overrides).
     fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
-        let _ = (world, e, item, amount);
+        crate::world::blocks::distribution::transfer::default_handle_stack(world, e, item, amount);
     }
 
-    /// Stack removal hook (`BuildingComp.removeStack`; 08 overrides).
+    /// Stack removal hook (`BuildingComp.removeStack`,
+    /// `BuildingComp.java:792-798`: remove `min(amount, items.get(item))` from
+    /// the module and return the removed count; 08 overrides).
+    ///
+    /// Java's default is a real removal (unlike `acceptItem`'s rejecting
+    /// default), so the trait default mirrors it; the G08 T2a Core/Turret
+    /// overrides still own their special semantics.
     fn remove_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) -> i32 {
-        let _ = (world, e, item, amount);
-        0
+        crate::world::blocks::distribution::transfer::default_remove_stack(world, e, item, amount)
     }
 
-    /// Maximum accepted amount (`BuildingComp.getMaximumAccepted`; 08 overrides).
+    /// Maximum accepted amount (`BuildingComp.getMaximumAccepted`, `:787-789`
+    /// `block.itemCapacity`; 08 overrides).
     fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
-        let _ = (world, e, item);
-        0
+        crate::world::blocks::distribution::transfer::get_maximum_accepted(world, e, item)
     }
 
-    /// Unload hook (`BuildingComp.canUnload`; 08 overrides).
+    /// Unload hook (`BuildingComp.canUnload`, `:727-729` `block.unloadable`;
+    /// 08 overrides).
     fn can_unload(&self, world: &World, e: Entity) -> bool {
-        let _ = (world, e);
-        false
+        helpers::default_can_unload(world, e)
     }
 
     /// Item-taken notification (`BuildingComp.itemTaken`; 08/12 overrides).
@@ -326,13 +354,16 @@ pub trait BuildingBehavior: Send + Sync {
         let _ = (world, e, item, amount);
     }
 
-    /// Liquid acceptance hook (08/09 override).
+    /// Liquid acceptance hook (`BuildingComp.acceptLiquid`,
+    /// `BuildingComp.java:873-875`: `block.hasLiquids && block.consumesLiquid(liquid)`;
+    /// T1 made this the trait default).
     fn accept_liquid(&self, world: &World, e: Entity, src: Entity, liquid: LiquidId) -> bool {
-        let _ = (world, e, src, liquid);
-        false
+        let _ = src;
+        helpers::consumer_accept_liquid(world, e, liquid)
     }
 
-    /// Liquid handling hook (08/09 override).
+    /// Liquid handling hook (`BuildingComp.handleLiquid` default:
+    /// `liquids.add(liquid, amount)`).
     fn handle_liquid(
         &self,
         world: &mut World,
@@ -341,7 +372,8 @@ pub trait BuildingBehavior: Send + Sync {
         liquid: LiquidId,
         amount: f32,
     ) {
-        let _ = (world, e, src, liquid, amount);
+        let _ = src;
+        helpers::default_handle_liquid(world, e, liquid, amount);
     }
 
     /// Liquid destination hook (08 override).

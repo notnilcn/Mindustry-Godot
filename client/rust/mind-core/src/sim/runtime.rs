@@ -39,7 +39,7 @@ use crate::world::blocks::power::{
 use crate::world::building_io::{self, DecodedBase};
 use crate::world::config::ConfigValue as WorldConfigValue;
 use crate::world::limits::{BlockCounter, BuildRules};
-use crate::world::modules::{ItemModule, LiquidModule, ModuleDims, PowerModule};
+use crate::world::modules::{ItemModule, LiquidModule, LiquidTraits, ModuleDims, PowerModule};
 use crate::world::ops::{WorldCtx, WorldEventLog};
 use crate::world::proximity::{remove_from_proximity, update_proximity};
 use crate::world::update::BuildClock;
@@ -1058,6 +1058,12 @@ impl Sim {
             items: item_count,
             liquids: liquid_count,
         });
+        // T1: coolant/incinerable/heat-capacity vectors for behaviors that run
+        // without a content-registry borrow (`ConsumeCoolant`, `Incinerator`,
+        // mixing reactions, force-projector coolant).
+        self.ecs
+            .0
+            .insert_resource(LiquidTraits::from_content(&content));
         self.ecs.0.insert_resource(PowerGrids::new());
         // The live per-team block counter (`Build.validPlace` limits + the
         // runtime checksum) is a world resource so scheduled systems (the

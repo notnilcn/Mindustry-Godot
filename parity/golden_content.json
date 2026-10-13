@@ -7473,7 +7473,7 @@
             "build_cost_multiplier": 1.0,
             "build_time": 366.0,
             "item_capacity": 10,
-            "liquid_capacity": 10.0,
+            "liquid_capacity": 15.0,
             "solid": true,
             "update": true,
             "configurable": false,

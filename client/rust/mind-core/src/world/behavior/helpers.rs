@@ -100,9 +100,55 @@ pub fn block_consumes_liquid(world: &World, e: Entity, liquid: crate::content::L
                 ConsumeInstanceKind::Liquids(stacks) => {
                     stacks.iter().any(|stack| stack.liquid == liquid)
                 }
+                // `ConsumeCoolant`'s stat filter needs per-liquid traits
+                // (`ConsumeCoolant.java:9`); without the resource nothing is
+                // coolant-eligible.
+                ConsumeInstanceKind::Coolant {
+                    allow_liquid,
+                    allow_gas,
+                    ..
+                } => world
+                    .get_resource::<crate::world::modules::LiquidTraits>()
+                    .is_some_and(|traits| {
+                        traits.coolant_accepts(liquid, *allow_liquid, *allow_gas)
+                    }),
                 _ => false,
             })
     })
+}
+
+/// `BuildingComp.canUnload` default: `block.unloadable` (`Block.java:108`,
+/// `unloadable = true` upstream).
+///
+/// False for the logistics classes that set `unloadable = false` in their
+/// constructor (T1): Unloader, Junction, OverflowDuct, Duct, Sorter,
+/// DuctJunction (no port kind yet), Router, ItemBridge (+BufferedItemBridge,
+/// +LiquidBridge, which extends ItemBridge), DuctRouter, DirectionalUnloader,
+/// Conveyor (+ArmoredConveyor), OverflowGate.
+pub fn default_can_unload(world: &World, e: Entity) -> bool {
+    if world.get::<crate::world::modules::ItemModule>(e).is_none() {
+        return false;
+    }
+    let Some(inst) = instance(world, e) else {
+        return false;
+    };
+    !matches!(
+        inst.def.kind,
+        crate::content::BlockKind::Unloader
+            | crate::content::BlockKind::Junction
+            | crate::content::BlockKind::OverflowDuct
+            | crate::content::BlockKind::Duct
+            | crate::content::BlockKind::Sorter
+            | crate::content::BlockKind::Router
+            | crate::content::BlockKind::ItemBridge
+            | crate::content::BlockKind::BufferedItemBridge
+            | crate::content::BlockKind::LiquidBridge
+            | crate::content::BlockKind::DuctRouter
+            | crate::content::BlockKind::DirectionalUnloader
+            | crate::content::BlockKind::Conveyor
+            | crate::content::BlockKind::ArmoredConveyor
+            | crate::content::BlockKind::OverflowGate
+    )
 }
 
 /// `Block.liquidCapacity` for a building (0 when unknown).

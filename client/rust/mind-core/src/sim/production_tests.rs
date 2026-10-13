@@ -1191,3 +1191,151 @@ fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
             == Some(unit)
     })
 }
+
+/// T1: the mechanical drill accepts the optional water consumer through the
+/// trait default (`BuildingComp.acceptLiquid`,
+/// `BuildingComp.java:873-875`), so a fed drill ramps past warmup 1.0
+/// (`speed = lerp(1, 1.6, optionalEfficiency)`, `Drill.java:301-304`).
+#[test]
+fn drill_accepts_water_boost() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let water = liquid(&sim, "water");
+    let _source = place(&mut sim, "liquid-source", 4, 5);
+    configure(
+        &mut sim,
+        4,
+        5,
+        crate::determinism::ConfigValue::Content("water".to_owned()),
+    );
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, drill, water) > 0.0,
+        "the drill accepted the water from the source"
+    );
+    let building = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .expect("building");
+    assert_eq!(
+        building.optional_efficiency, 1.0,
+        "optional (booster) consumer satisfied"
+    );
+    let warmup = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(drill)
+        .map(|state| state.warmup)
+        .expect("drill state");
+    assert!(warmup > 1.0, "water boost ramps warmup past 1.0: {warmup}");
+}
+
+/// T1: consumers declare items via `consumeItem`; the trait default accepts
+/// exactly those (`BuildingComp.acceptItem`, `BuildingComp.java:869-871`), and
+/// the reactor's cryofluid via `consumeLiquid`.
+#[test]
+fn mender_accepts_silicon_and_reactor_accepts_thorium() {
+    let mut sim = runtime_sim();
+    let mender = place(&mut sim, "mender", 5, 5);
+    let reactor = place(&mut sim, "thorium-reactor", 8, 8);
+    let silicon = item(&sim, "silicon");
+    let copper = item(&sim, "copper");
+    let thorium = item(&sim, "thorium");
+    let cryofluid = liquid(&sim, "cryofluid");
+    let water = liquid(&sim, "water");
+    let world = &mut sim.ecs.0;
+    assert!(
+        transfer::dispatch_accept_item(world, mender, mender, silicon),
+        "mender accepts silicon (consumeItem boost)"
+    );
+    assert!(
+        !transfer::dispatch_accept_item(world, mender, mender, copper),
+        "mender rejects copper"
+    );
+    assert!(
+        transfer::dispatch_accept_item(world, reactor, reactor, thorium),
+        "thorium reactor accepts thorium"
+    );
+    assert!(
+        !transfer::dispatch_accept_item(world, reactor, reactor, copper),
+        "thorium reactor rejects copper"
+    );
+    assert!(
+        crate::world::blocks::liquid::movement::accept_liquid(world, reactor, reactor, cryofluid),
+        "thorium reactor accepts cryofluid"
+    );
+    assert!(
+        !crate::world::blocks::liquid::movement::accept_liquid(world, reactor, reactor, water),
+        "thorium reactor rejects water"
+    );
+}
+
+/// T1: `BuildingComp.canUnload` default (`Block.unloadable`, `Block.java:108`)
+/// lets an unloader pull from a crafter that only produces into its own module.
+///
+/// The receiver must be a non-storage building: Java
+/// `UnloaderBuild.isPossibleItem` requires `canLoad = notStorage && acceptItem`
+/// (`Unloader.java:118`), so a bare container next to the unloader cannot be a
+/// load target (the plan sketch's `container` receiver would fail in Java too);
+/// use a belt, exactly like `unloader_drains_storage_into_a_lane`.
+#[test]
+fn unloader_pulls_from_crafter() {
+    let mut sim = runtime_sim();
+    let press = place(&mut sim, "graphite-press", 5, 5);
+    let graphite = item(&sim, "graphite");
+    {
+        let world = &mut sim.ecs.0;
+        transfer::dispatch_handle_stack(world, press, graphite, 5);
+    }
+    assert_eq!(
+        stored_item(&sim, press, graphite),
+        5,
+        "press holds graphite"
+    );
+    let _unloader = place(&mut sim, "unloader", 7, 5);
+    configure(
+        &mut sim,
+        7,
+        5,
+        crate::determinism::ConfigValue::Content("graphite".to_owned()),
+    );
+    let belt = place(&mut sim, "conveyor", 8, 5);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, press, graphite) < 5,
+        "unloader pulled graphite from the press (Java canUnload = block.unloadable)"
+    );
+    assert!(
+        stored_item(&sim, belt, graphite) >= 1,
+        "the receiving belt holds the pulled graphite"
+    );
+}
+
+/// T1: Erekir heat crafters (which delegate to `CrafterBehavior`) accept their
+/// consumers' inputs (`HeatCrafterBuild` extends `GenericCrafterBuild`).
+#[test]
+fn heat_crafter_accepts_inputs() {
+    let mut sim = runtime_sim();
+    let crucible = place(&mut sim, "carbide-crucible", 5, 5);
+    let tungsten = item(&sim, "tungsten");
+    let graphite = item(&sim, "graphite");
+    let copper = item(&sim, "copper");
+    let world = &mut sim.ecs.0;
+    assert!(transfer::dispatch_accept_item(
+        world, crucible, crucible, tungsten
+    ));
+    assert!(transfer::dispatch_accept_item(
+        world, crucible, crucible, graphite
+    ));
+    assert!(!transfer::dispatch_accept_item(
+        world, crucible, crucible, copper
+    ));
+}
