@@ -10,6 +10,7 @@
 pub mod comp;
 pub mod crawl;
 pub mod defs;
+pub mod environment;
 pub mod inverse_kinematics;
 pub mod legs;
 pub mod lifecycle;

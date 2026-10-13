@@ -202,6 +202,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         is_liquid: Some(true),
         drown_time: Some(200.0),
         liquid_multiplier: Some(1.5),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(120.0),
         ..spec("deep-water", BlockKind::Floor)
     })?;
 
@@ -209,6 +211,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_drop: Some("water"),
         speed_multiplier: Some(0.5),
         is_liquid: Some(true),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(90.0),
         ..spec("shallow-water", BlockKind::Floor)
     })?;
 
@@ -216,6 +220,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_drop: Some("water"),
         speed_multiplier: Some(0.5),
         is_liquid: Some(true),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(90.0),
         ..spec("tainted-water", BlockKind::Floor)
     })?;
 
@@ -225,6 +231,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         is_liquid: Some(true),
         drown_time: Some(200.0),
         liquid_multiplier: Some(1.5),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(140.0),
         ..spec("deep-tainted-water", BlockKind::Floor)
     })?;
 
@@ -234,6 +242,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_drop: Some("water"),
         speed_multiplier: Some(0.75),
         is_liquid: Some(true),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(60.0),
         ..spec("darksand-tainted-water", BlockKind::ShallowLiquid)
     })?;
 
@@ -241,6 +251,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_drop: Some("water"),
         speed_multiplier: Some(0.8),
         is_liquid: Some(true),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(50.0),
         ..spec("sand-water", BlockKind::ShallowLiquid)
     })?;
 
@@ -248,6 +260,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_drop: Some("water"),
         speed_multiplier: Some(0.8),
         is_liquid: Some(true),
+        floor_status: Some("wet"),
+        floor_status_duration: Some(50.0),
         ..spec("darksand-water", BlockKind::ShallowLiquid)
     })?;
 
@@ -256,6 +270,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         speed_multiplier: Some(0.19),
         is_liquid: Some(true),
         drown_time: Some(230.0),
+        floor_status: Some("tarred"),
+        floor_status_duration: Some(240.0),
         ..spec("tar", BlockKind::Floor)
     })?;
 
@@ -265,6 +281,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         is_liquid: Some(true),
         drown_time: Some(150.0),
         liquid_multiplier: Some(0.5),
+        floor_status: Some("freezing"),
+        floor_status_duration: Some(240.0),
         ..spec("pooled-cryofluid", BlockKind::Floor)
     })?;
 
@@ -273,6 +291,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         speed_multiplier: Some(0.19),
         is_liquid: Some(true),
         drown_time: Some(230.0),
+        floor_status: Some("melting"),
+        floor_status_duration: Some(240.0),
         ..spec("molten-slag", BlockKind::Floor)
     })?;
 
@@ -336,6 +356,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         speed_multiplier: Some(0.6),
+        floor_status: Some("muddy"),
+        floor_status_duration: Some(30.0),
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", 1.0f32)],
         ..spec("mud", BlockKind::Floor)
@@ -413,6 +435,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         speed_multiplier: Some(0.9),
+        floor_drag_multiplier: Some(0.4),
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", 0.4f32)],
         ..spec("red-ice", BlockKind::Floor)
@@ -500,12 +523,14 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(BlockSpec {
         speed_multiplier: Some(0.9),
+        floor_drag_multiplier: Some(0.35),
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", 0.4f32)],
         ..spec("ice", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
+        floor_drag_multiplier: Some(0.6),
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", 0.3f32)],
         ..spec("ice-snow", BlockKind::Floor)

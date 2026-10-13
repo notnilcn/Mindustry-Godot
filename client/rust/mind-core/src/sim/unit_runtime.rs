@@ -2330,6 +2330,15 @@ pub fn unit_update_system(world: &mut World) {
                 &runtime.content,
                 entity,
             );
+            // `UnitComp.update` environment half (G01 T13): bounds/drowning/
+            // floor status/env death/drop-zone push/solid kill.
+            crate::entities::comp::unit::environment::update_unit_environment(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                runtime.wave_spawner.get_spawns(),
+                entity,
+            );
 
             // `TimedKillComp.update`: `time = min(time + delta, lifetime)`;
             // at the lifetime the unit is marked dead and `resolve_deaths`
