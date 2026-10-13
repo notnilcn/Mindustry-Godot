@@ -2196,3 +2196,42 @@ fn cannot_possess_enemy_or_dead_unit() {
     let own_seq = sim.ecs.0.get::<crate::ecs::EntitySeq>(own).expect("seq").0 as i32;
     assert!(!sim.possess_unit(own_seq), "dead unit is not possessable");
 }
+
+/// G01 T19: `Teams.bosses` lists wave-team units carrying the `boss` status.
+#[test]
+fn boss_list_tracks_wave_boss() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.wave_team = 2;
+    });
+    let boss = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("wave dagger");
+    let own = sim
+        .spawn_live_unit("dagger", 1, 130.0, 100.0, 0.0)
+        .expect("own dagger");
+    let boss_status = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .status_id("boss")
+        .expect("boss status");
+    for entity in [boss, own] {
+        crate::combat::damage::status::apply_status(&mut sim.ecs.0, entity, boss_status, 999_999.0);
+    }
+    assert_eq!(sim.bosses(), vec![boss], "only the wave-team boss listed");
+    let json: serde_json::Value = serde_json::from_str(&sim.boss_json()).expect("boss json parses");
+    assert_eq!(json["count"], 1);
+    assert_eq!(json["names"][0], "dagger");
+    let first = &json["first"];
+    assert_eq!(first["type"], "dagger");
+    assert_eq!(first["flying"], false);
+    // After the boss dies the list is empty.
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(boss) {
+        health.health = 0.0;
+        health.dead = true;
+    }
+    assert!(sim.bosses().is_empty(), "dead boss is dropped");
+    let json: serde_json::Value = serde_json::from_str(&sim.boss_json()).expect("boss json parses");
+    assert_eq!(json["count"], 0);
+    assert!(json["first"].is_null());
+}

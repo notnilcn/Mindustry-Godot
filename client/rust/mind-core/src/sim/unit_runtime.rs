@@ -1285,6 +1285,136 @@ impl Sim {
         self.player_unit
     }
 
+    /// Debug seam (G01 T19): apply a status by name to a unit selected by
+    /// `EntitySeq`; returns false for unknown id/status/entity.
+    pub fn debug_apply_status(&mut self, seq: i64, status: &str, ticks: f32) -> bool {
+        let Some(status_id) = self
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.status_id(status))
+        else {
+            return false;
+        };
+        let target = self
+            .ecs
+            .0
+            .iter_entities()
+            .find(|entity| {
+                entity
+                    .get::<crate::ecs::EntitySeq>()
+                    .is_some_and(|s| s.0 == seq as u64)
+            })
+            .map(|entity| entity.id());
+        let Some(target) = target else {
+            return false;
+        };
+        crate::combat::damage::status::apply_status(&mut self.ecs.0, target, status_id, ticks);
+        true
+    }
+
+    /// `boss_json` seam (G01 T19): `Teams.bosses`/`GameState.boss()` for the
+    /// HUD boss bar (G03 T9) and the `guardian` hint (G05).
+    pub fn boss_json(&self) -> String {
+        use crate::content::ctype::Mappable;
+        use crate::entities::comp::unit::comp::{StatusComp, UnitTypeComp};
+        let bosses = self.bosses();
+        let runtime = self.unit_runtime();
+        let mut names: Vec<String> = Vec::new();
+        let mut health_sum = 0.0f32;
+        let mut max_sum = 0.0f32;
+        let mut first: Option<serde_json::Value> = None;
+        for (index, &entity) in bosses.iter().enumerate() {
+            let def = runtime.and_then(|runtime| {
+                self.ecs
+                    .0
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id))
+            });
+            let name = def.map(|def| def.name().to_string()).unwrap_or_default();
+            if index < 6 {
+                names.push(name.clone());
+            }
+            let health = self.ecs.0.get::<Health>(entity).copied();
+            health_sum += health.map_or(0.0, |h| h.health.max(0.0));
+            max_sum += health.map_or(0.0, |h| h.max_health);
+            if index == 0 {
+                let armor_override = self
+                    .ecs
+                    .0
+                    .get::<StatusComp>(entity)
+                    .map(|status| status.armor_override);
+                let armor = armor_override
+                    .filter(|value| *value >= 0.0)
+                    .unwrap_or_else(|| def.map_or(0.0, |def| def.armor));
+                first = Some(serde_json::json!({
+                    "id": self.ecs.0.get::<crate::ecs::EntitySeq>(entity).map_or(0, |seq| seq.0),
+                    "type": name,
+                    "armor": armor,
+                    "flying": crate::combat::bullet::unit_is_flying(&self.ecs.0, entity),
+                    "health": health.map_or(0.0, |h| h.health),
+                    "max_health": health.map_or(0.0, |h| h.max_health),
+                }));
+            }
+        }
+        let value = if max_sum > 0.0 {
+            health_sum / max_sum
+        } else {
+            0.0
+        };
+        serde_json::json!({
+            "count": bosses.len(),
+            "names": names,
+            "value": value,
+            "first": first,
+        })
+        .to_string()
+    }
+
+    /// `Teams.bosses` (`Teams.java:213-223`): live wave-team units with the
+    /// `boss` status, in `EntitySeq` order.
+    pub fn bosses(&self) -> Vec<Entity> {
+        let Some(runtime) = self.unit_runtime() else {
+            return Vec::new();
+        };
+        let Some(boss) = runtime.content.status_id("boss") else {
+            return Vec::new();
+        };
+        let wave_team = crate::game::runtime::rules_of(&self.ecs.0)
+            .map_or(runtime.wave_team, |rules| rules.wave_team);
+        let mut bosses: Vec<(u64, Entity)> = Vec::new();
+        for &entity in &runtime.units {
+            if self.ecs.0.get_entity(entity).is_err() {
+                continue;
+            }
+            if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(wave_team) {
+                continue;
+            }
+            if self
+                .ecs
+                .0
+                .get::<Health>(entity)
+                .is_none_or(|health| health.dead)
+            {
+                continue;
+            }
+            let has_boss = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+                .is_some_and(|statuses| statuses.statuses.iter().any(|entry| entry.effect == boss));
+            if !has_boss {
+                continue;
+            }
+            let seq = self
+                .ecs
+                .0
+                .get::<crate::ecs::EntitySeq>(entity)
+                .map_or(u64::MAX, |seq| seq.0);
+            bosses.push((seq, entity));
+        }
+        bosses.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+        bosses.into_iter().map(|(_, entity)| entity).collect()
+    }
+
     /// World-pixel position of the player unit (`Player.x/y` mirror).
     pub fn player_unit_position(&self) -> Option<(f32, f32)> {
         let entity = self.player_unit?;

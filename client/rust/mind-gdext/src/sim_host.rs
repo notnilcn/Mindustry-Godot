@@ -649,6 +649,21 @@ impl MindSimHost {
         GString::from(self.sim.unit_debug_json().as_str())
     }
 
+    /// `Teams.bosses`/`GameState.boss()` seam (G01 T19): G03's boss bar reads
+    /// count/names/value, G05's guardian hint reads `first`.
+    #[func]
+    pub fn boss_json(&self) -> GString {
+        GString::from(self.sim.boss_json().as_str())
+    }
+
+    /// Debug seam (G01 T19): apply a status by name to a unit by `EntitySeq`
+    /// (`apply_sim_command_json` has no status op).
+    #[func]
+    pub fn debug_apply_status(&mut self, seq: i64, status: GString, ticks: f64) -> bool {
+        self.sim
+            .debug_apply_status(seq, &status.to_string(), ticks as f32)
+    }
+
     /// Per-type content counts for the inspector `Content` tab (plan 02 §3.7).
     /// Read-only; plan 05 moves this to the sim-owned `Content` resource.
     #[func]
