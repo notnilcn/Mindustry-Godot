@@ -2585,6 +2585,22 @@ impl Sim {
                         .collect()
                 })
                 .unwrap_or_default();
+            // Active status names (G07 T9 readback; append-only field).
+            let statuses: Vec<String> = entity_ref
+                .get::<crate::entities::comp::unit::comp::StatusComp>()
+                .map(|comp| {
+                    comp.statuses
+                        .iter()
+                        .map(|status| {
+                            runtime
+                                .content
+                                .status(status.effect)
+                                .map(|def| def.name.clone())
+                                .unwrap_or_default()
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_name,
@@ -2597,6 +2613,8 @@ impl Sim {
                 "rotation": entity_ref.get::<UnitCore>().map(|core| core.rotation),
                 "health": entity_ref.get::<Health>().map(|health| health.health),
                 "can_shoot": entity_ref.get::<crate::weapons::UnitState>().map(|state| state.can_shoot),
+                "vel": entity_ref.get::<crate::entities::comp::Vel>().map(|vel| [vel.x, vel.y]),
+                "statuses": statuses,
                 "mounts": mounts,
             }));
         }

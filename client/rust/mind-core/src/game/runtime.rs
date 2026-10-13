@@ -1084,6 +1084,38 @@ pub fn weather_system(world: &mut World) {
         update_weather_state(world, &runtime.content, entity);
     }
 
+    // `Logic.java:603-606`: `state.envAttrs` = rules attributes + Σ weather
+    // attrs × opacity; consumers (solar/thermal/steam/heat) read `GeneratorEnv`,
+    // which nothing else inserts in live play (T9). Java computes envAttrs
+    // after `updateWeather` and before `updateEntities`; generators run in the
+    // next tick's `update_buildings` (one-tick lag, accepted).
+    {
+        use crate::content::registries::weathers::Attribute;
+        use crate::world::blocks::power::behavior::GeneratorEnv;
+        let rules = &campaign.session.rules;
+        let env = |attribute: Attribute| {
+            let mut total = rules.attributes.get(attribute);
+            for entity in world.iter_entities() {
+                let Some(weather) = entity.get::<WeatherRuntime>() else {
+                    continue;
+                };
+                if let Some(def) = runtime.content.weather(weather.weather) {
+                    total += def.attr(attribute) * weather.opacity;
+                }
+            }
+            total
+        };
+        world.insert_resource(GeneratorEnv {
+            solar_multiplier: rules.solar_multiplier,
+            lighting: rules.lighting,
+            ambient_light_alpha: rules.ambient_light.0.a,
+            light_env: env(Attribute::Light),
+            heat_env: env(Attribute::Heat),
+            steam_env: env(Attribute::Steam),
+            reactor_explosions: rules.reactor_explosions,
+        });
+    }
+
     world.insert_non_send(runtime);
     world.insert_resource(campaign);
 }
@@ -1093,7 +1125,11 @@ pub fn weather_system(world: &mut World) {
 /// extinguish speed and unit wetness in the view/sim.
 pub fn weather_water_attr(world: &World, content: &ContentRegistry) -> f32 {
     use crate::content::registries::weathers::Attribute;
-    let mut total = 0.0f32;
+    // Java's envAttrs starts from `rules.attributes` (T9).
+    let mut total = world
+        .get_resource::<CampaignRuntime>()
+        .map(|runtime| runtime.session.rules.attributes.get(Attribute::Water))
+        .unwrap_or(0.0);
     for entity in world.iter_entities() {
         let Some(runtime) = entity.get::<crate::entities::comp::weather::WeatherRuntime>() else {
             continue;
@@ -1632,6 +1668,57 @@ mod tests {
             );
         }
         world.insert_resource(runtime);
+    }
+
+    /// T9: `Logic.java:603-606` envAttrs -> `GeneratorEnv` (rain light -0.2).
+    #[test]
+    fn weather_env_feeds_generator_env() {
+        use crate::entities::comp::WeatherState;
+        use crate::entities::comp::weather::WeatherRuntime;
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+
+        let registry = {
+            let mut registry = content();
+            registry.init().expect("init");
+            registry
+        };
+        let grid = WorldGrid::new(32, 32);
+        let runtime_content = {
+            let mut content = content();
+            content.init().expect("init");
+            content
+        };
+        let mut world = World::new();
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            solar_multiplier: 1.0,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        // One active rain at full opacity (`Weathers.java` light = -0.2).
+        let rain = registry.weather_by_name("rain").expect("rain").id;
+        world.spawn((
+            WeatherRuntime {
+                opacity: 1.0,
+                ..WeatherRuntime::new(rain, 1.0, 600.0)
+            },
+            WeatherState,
+            crate::ecs::EntitySeq(0),
+        ));
+        weather_system(&mut world);
+        let env = world
+            .get_resource::<crate::world::blocks::power::behavior::GeneratorEnv>()
+            .expect("generator env inserted");
+        assert!(
+            (env.light_env - (-0.2)).abs() < 1.0e-6,
+            "rain light env {}",
+            env.light_env
+        );
+        assert_eq!(env.solar_multiplier, 1.0);
     }
 
     #[test]

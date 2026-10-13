@@ -2693,6 +2693,121 @@ impl MindSimHost {
         mind_core::audio::frame::read_game_state(&self.sim.ecs.0, content)
     }
 
+    /// T9: weather rules entries + active runtime state (playtest readback).
+    #[func]
+    pub fn weather_json(&self) -> GString {
+        let content = self.sim.block_runtime().map(|runtime| runtime.content());
+        let entries: Vec<serde_json::Value> = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+            .map(|campaign| {
+                campaign
+                    .session
+                    .rules
+                    .weather
+                    .iter()
+                    .map(|entry| {
+                        serde_json::json!({
+                            "weather": entry.weather,
+                            "cooldown": entry.cooldown,
+                            "minFrequency": entry.min_frequency,
+                            "maxFrequency": entry.max_frequency,
+                            "minDuration": entry.min_duration,
+                            "maxDuration": entry.max_duration,
+                            "always": entry.always,
+                            "intensity": entry.intensity,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut active: Vec<(u64, serde_json::Value)> = self
+            .sim
+            .ecs
+            .0
+            .iter_entities()
+            .filter_map(|entity| {
+                let state = entity.get::<mind_core::entities::comp::weather::WeatherRuntime>()?;
+                let name = content
+                    .and_then(|content| content.weather(state.weather))
+                    .map(|def| def.name.clone())
+                    .unwrap_or_default();
+                let seq = entity
+                    .get::<mind_core::ecs::EntitySeq>()
+                    .map_or(u64::MAX, |seq| seq.0);
+                Some((
+                    seq,
+                    serde_json::json!({
+                        "weather": name,
+                        "intensity": state.intensity,
+                        "opacity": state.opacity,
+                        "life": state.life,
+                        "windX": state.wind_x,
+                        "windY": state.wind_y,
+                    }),
+                ))
+            })
+            .collect();
+        active.sort_by_key(|(seq, _)| *seq);
+        let active: Vec<serde_json::Value> = active.into_iter().map(|(_, value)| value).collect();
+        let value = serde_json::json!({
+            "entries": entries,
+            "active": active,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// T9 test seam: force a weather (`Call.createWeather`), same shape as
+    /// `weather_system`'s spawn. `false` when the name is unknown or a weather
+    /// of that type is already active.
+    #[func]
+    pub fn debug_create_weather(&mut self, name: GString, intensity: f32, duration: f32) -> bool {
+        let Some(weather) = self
+            .sim
+            .block_runtime()
+            .map(|runtime| runtime.content())
+            .and_then(|content| content.weather_by_name(&name.to_string()))
+            .map(|def| def.id)
+        else {
+            log::warn!("debug_create_weather: unknown weather `{name}`");
+            return false;
+        };
+        if self.sim.ecs.0.iter_entities().any(|entity| {
+            entity
+                .get::<mind_core::entities::comp::weather::WeatherRuntime>()
+                .is_some_and(|state| state.weather == weather)
+        }) {
+            return false;
+        }
+        let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
+        else {
+            return false;
+        };
+        let angle = runtime
+            .rng
+            .range(mind_core::determinism::RngStream::Fx, 0.0, 360.0)
+            .to_radians();
+        let seq = runtime.seq;
+        runtime.seq = seq.wrapping_add(1);
+        let mut state =
+            mind_core::entities::comp::weather::WeatherRuntime::new(weather, intensity, duration);
+        state.wind_x = angle.cos();
+        state.wind_y = angle.sin();
+        self.sim.ecs.0.spawn((
+            state,
+            mind_core::entities::comp::WeatherState,
+            mind_core::ecs::EntitySeq(seq),
+        ));
+        self.sim.ecs.0.insert_non_send(runtime);
+        true
+    }
+
     /// Read-only content registry snapshot for block draw metadata.
     pub fn content_registry(&self) -> Option<&ContentRegistry> {
         self.content_snapshot.as_ref()
