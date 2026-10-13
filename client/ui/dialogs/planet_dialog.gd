@@ -603,6 +603,12 @@ func _maybe_show_remap_notice() -> void:
 
 # --- Planet view --------------------------------------------------------------
 
+## `ResearchDialog.hidden(ui.planet::setup)`: re-runs the planet page for the
+## selected planet (without re-selecting a default sector).
+func refresh_page() -> void:
+	_show_planet(_selected_planet, false)
+
+
 ## `PlanetDialog.setup`: globe + left planet/difficulty rail + bottom sector
 ## panel (`@sectors` readout with the in-panel action button).
 func _show_planet(planet_name: String, select_default := true) -> void:
@@ -984,13 +990,40 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(divider)
 
-	# `updateSelected` order: threat (base-less only), the state line, the
-	# `@sectors.resources` icon row, then the `@stats` button (`showStats`).
+	# `updateSelected` order: locked objectives / threat (base-less only), the
+	# state line, the `@sectors.resources` icon row, then the `@stats` button.
 	var has_base := bool(sector.get("has_base", false))
-	if not has_base:
+	if bool(sector.get("objectives_locked", false)):
+		# `isLocked` presets list the incomplete tech-node objectives instead of
+		# the threat line (`updateSelected`, PlanetDialog.java:1286-1299).
+		var complete_label := MindWidgets.label(_tm("@complete"))
+		complete_label.custom_minimum_size = Vector2(0.0, 26.0)
+		complete_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		column.add_child(complete_label)
+		for objective_variant in (sector.get("objectives", []) as Array):
+			var objective: Array = objective_variant
+			var kind := str(objective[0]) if objective.size() > 0 else ""
+			var argument := str(objective[1]) if objective.size() > 1 else ""
+			# code-instantiated: one row per incomplete objective.
+			var objective_row := HBoxContainer.new()
+			objective_row.add_theme_constant_override("separation", 3)
+			var objective_label := MindWidgets.label(
+				"> %s" % MindWidgets.markup_format(
+					"@requirement.%s" % kind, [_localized_objective_arg(kind, argument)]
+				)
+			)
+			objective_label.add_theme_color_override("default_color", Color(0.75, 0.75, 0.75))
+			objective_row.add_child(objective_label)
+			objective_row.add_child(
+				MindWidgets.glyph("cancel", 18, Color(1.0, 0.204, 0.11))
+			)
+			column.add_child(objective_row)
+	elif not has_base:
 		var threat := str(sector.get("threat_band", "low"))
+		# `displayThreat`: the hex colour replaces the accent prefix.
+		var color := str(sector.get("threat_color", "ffffffff")).left(6)
 		var threat_label := MindWidgets.label(
-			"%s %s" % [_t("@sectors.threat"), _t("@threat.%s" % threat)]
+			"%s [color=#%s]%s[/color]" % [_t("@sectors.threat"), color, _t("@threat.%s" % threat)]
 		)
 		threat_label.custom_minimum_size = Vector2(0.0, 26.0)
 		threat_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
@@ -1034,27 +1067,65 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 		column.add_child(stats_button)
 
 	var action := _sector_action(sector)
-	var launch := MindWidgets.button("")
-	launch.custom_minimum_size = Vector2(230.0, 53.0)
-	launch.add_theme_stylebox_override("normal", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
-	launch.add_theme_stylebox_override("hover", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
-	launch.add_theme_stylebox_override("pressed", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
-	launch.add_theme_stylebox_override("disabled", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
-	build_button_content(
-		launch,
-		MindWidgets.glyph(str(action.get("icon", "play")), 20),
-		_t(str(action.get("label", "@sectors.launch")))
-	)
-	launch.disabled = bool(action.get("disabled", false))
-	var state_tooltip := PackedStringArray()
-	for state_key in _sector_state_labels(sector):
-		state_tooltip.append(_t(state_key))
-	launch.tooltip_text = " ".join(state_tooltip)
-	launch.pressed.connect(
-		func() -> void: _sector_action_pressed(_selected_planet, _selected_sector, str(action.get("mode", "launch")))
-	)
-	column.add_child(launch)
+	# `updateSelected`: the action button exists only when `(hasBase && look) ||
+	# canSelect || preset.alwaysUnlocked` (`show_action`).
+	if bool(sector.get("show_action", true)):
+		var launch := MindWidgets.button("")
+		launch.custom_minimum_size = Vector2(230.0, 53.0)
+		launch.add_theme_stylebox_override("normal", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+		launch.add_theme_stylebox_override("hover", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+		launch.add_theme_stylebox_override("pressed", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+		launch.add_theme_stylebox_override("disabled", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
+		build_button_content(
+			launch,
+			MindWidgets.glyph(str(action.get("icon", "play")), 20),
+			_t(str(action.get("label", "@sectors.launch")))
+		)
+		launch.disabled = bool(action.get("disabled", false))
+		var state_tooltip := PackedStringArray()
+		for state_key in _sector_state_labels(sector):
+			state_tooltip.append(_t(state_key))
+		launch.tooltip_text = " ".join(state_tooltip)
+		launch.pressed.connect(
+			func() -> void: _sector_action_pressed(_selected_planet, _selected_sector, str(action.get("mode", "launch")))
+		)
+		column.add_child(launch)
 	return panel
+
+
+## `requirement.<kind>` argument localization: `sector.<name>.name` for
+## capture/onsector, `planet.<name>.name` for onplanet, content name lookup for
+## research/produce (`updateSelected` prints the name; the locked-parent `???`
+## case needs the tech parent, not available here — accepted).
+func _localized_objective_arg(kind: String, argument: String) -> String:
+	if argument.is_empty():
+		return "???"
+	match kind:
+		"capture", "onsector":
+			return _bundle_or_name("sector.%s.name" % argument, argument)
+		"onplanet":
+			return _bundle_or_name("planet.%s.name" % argument, argument)
+		_:
+			for type_name in ["block", "item", "unit", "liquid", "status"]:
+				var value := _bundle_value("%s.%s.name" % [type_name, argument])
+				if not value.is_empty():
+					return value
+			return argument
+
+
+## Bundle value or "" when the key is missing.
+func _bundle_value(key: String) -> String:
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return ""
+	var value := str(assets.call("bundle_get", key))
+	return "" if value == key else value
+
+
+## Bundle value with the raw name as fallback.
+func _bundle_or_name(key: String, fallback: String) -> String:
+	var value := _bundle_value(key)
+	return value if not value.is_empty() else fallback
 
 
 ## Visible state lines in `PlanetDialog.updateSelected` order; only states with
@@ -1063,7 +1134,7 @@ func _sector_state_labels(sector: Dictionary) -> PackedStringArray:
 	var out := PackedStringArray()
 	if bool(sector.get("attacked", false)):
 		out.append("@sectors.underattack")
-	elif bool(sector.get("has_base", false)) and bool(sector.get("has_enemy_base", false)):
+	elif bool(sector.get("vulnerable", false)):
 		out.append("@sectors.vulnerable")
 	elif not bool(sector.get("has_base", false)) and bool(sector.get("has_enemy_base", false)):
 		out.append("@sectors.enemybase")
@@ -1123,16 +1194,22 @@ func _stat_line(label_key: String, values: Array) -> String:
 	return "%s %s" % [_t(label_key), ", ".join(parts)]
 
 
-## `PlanetDialog` action label/icon/behavior for the selected sector:
-## `@sectors.resume` (being played), `@sectors.go` (has a base), `@locked` or
-## `@sectors.launch`.
+## `PlanetDialog` action label/icon/behavior for the selected sector
+## (`updateSelected`): `@sectors.resume` (being played), `@sectors.go` (has a
+## base), `@locked` (isLocked preset), `@sectors.nolaunchcandidate`, else
+## `@sectors.launch`; disabled when locked or without a candidate.
 func _sector_action(sector: Dictionary) -> Dictionary:
+	var locked := bool(sector.get("objectives_locked", false))
+	var no_candidate := bool(sector.get("no_candidate", false))
+	var disabled := locked or no_candidate
 	if _is_being_played(sector):
-		return {"label": "@sectors.resume", "icon": "play", "mode": "resume", "disabled": false}
+		return {"label": "@sectors.resume", "icon": "play", "mode": "resume", "disabled": disabled}
 	if bool(sector.get("has_base", false)) or bool(sector.get("captured", false)):
-		return {"label": "@sectors.go", "icon": "play", "mode": "go", "disabled": false}
-	if bool(sector.get("locked", false)):
+		return {"label": "@sectors.go", "icon": "play", "mode": "go", "disabled": disabled}
+	if locked:
 		return {"label": "@locked", "icon": "lock", "mode": "launch", "disabled": true}
+	if no_candidate:
+		return {"label": "@sectors.nolaunchcandidate", "icon": "play", "mode": "launch", "disabled": true}
 	return {"label": "@sectors.launch", "icon": "play", "mode": "launch", "disabled": false}
 
 
@@ -1153,27 +1230,30 @@ func _sector_action_pressed(planet_name: String, sector_id: int, mode: String) -
 	if mode == "resume" or mode == "go":
 		_launch(planet_name, sector_id, -1, true)
 		return
-	# `PlanetDialog.playSelected` look mode: a launch with no base and no launch
-	# candidate is a FREE launch - `universe.clearLoadoutInfo()` +
-	# `control.playSector(sector)`, no dialog (PlanetDialog.java:1394-1403). The
-	# loadout dialog only appears when a launcher sector exists.
-	if _find_launcher(planet_name).is_empty():
+	_launch_via_launcher(planet_name, sector_id)
+
+
+## `PlanetDialog.playSelected` look mode: the Java `findLauncher` sector (from
+## the view's `launch_from`) opens the Configure Loadout dialog; a destination
+## without one is a free launch - `universe.clearLoadoutInfo()` +
+## `control.playSector(sector)`, no dialog (PlanetDialog.java:1394-1403).
+func _launch_via_launcher(planet_name: String, sector_id: int) -> void:
+	var launcher := _sector_launch_from(planet_name, sector_id)
+	if launcher < 0:
 		_launch(planet_name, sector_id)
 		return
-	_open_launch_loadout(planet_name, sector_id)
+	_open_launch_loadout(planet_name, sector_id, launcher)
 
 
-## `PlanetDialog.findLauncher` stand-in: the sector a launch would originate
-## from, when one exists. Java's `PlanetGenerator.findLaunchCandidate` also
-## requires range and loadout items; the port's campaign model has neither yet
-## (PAR-0082/0083), so a has-base, non-attacked sector on the same planet is
-## the approximation this item records.
-func _find_launcher(planet_name: String) -> Dictionary:
+## The view's `launch_from` for a destination (`-1` = free launch).
+func _sector_launch_from(planet_name: String, sector_id: int) -> int:
 	for sector_variant in _planet_sectors(planet_name):
 		var sector: Dictionary = sector_variant
-		if bool(sector.get("has_base", false)) and not bool(sector.get("attacked", false)):
-			return sector
-	return {}
+		if int(sector.get("id", -1)) != sector_id:
+			continue
+		var value: Variant = sector.get("launch_from")
+		return -1 if value == null else int(value)
+	return -1
 
 
 # --- Planet view glue ---------------------------------------------------------
@@ -1283,7 +1363,8 @@ func _select_view_tile(tile: int) -> void:
 		var sector: Dictionary = sector_variant
 		if view.view_tile(sector) != tile:
 			continue
-		if bool(sector.get("locked", false)):
+		# `PlanetDialog.tap`: only `canSelect` sectors become the selection.
+		if not bool(sector.get("selectable", false)):
 			return
 		_selected_sector = int(sector.get("id", -1))
 		_show_planet(_selected_planet)
@@ -1291,9 +1372,12 @@ func _select_view_tile(tile: int) -> void:
 
 
 ## Empty-screen left clicks pick the sector under the cursor while the globe is
-## up; UI regions (rail, bottom bar) are excluded.
+## up; UI regions (rail, bottom bar) are excluded. Covered by another dialog
+## (not the stack top), events are ignored like an Arc modal (`Dialog.hit`).
 func _input(event: InputEvent) -> void:
 	if not visible:
+		return
+	if not is_top():
 		return
 	if event is InputEventMouseMotion:
 		var view := _planet_view()
@@ -1417,9 +1501,10 @@ func _find_sector(planet_name: String, sector_id: int) -> Dictionary:
 # --- Actions ------------------------------------------------------------------
 
 ## Asks for a launch loadout before entering a fresh sector
-## (`PlanetDialog.playSelected` -> `LaunchLoadoutDialog`). Falls through to a
-## direct launch when the dialog (or its signal) is unavailable.
-func _open_launch_loadout(planet_name: String, sector_id: int) -> void:
+## (`PlanetDialog.playSelected` -> `LaunchLoadoutDialog`), sourced from the
+## Java `findLauncher` sector. Falls through to a direct launch when the dialog
+## (or its signal) is unavailable.
+func _open_launch_loadout(planet_name: String, sector_id: int, launcher_id: int) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui == null or root == null or not root.has_method("dialog"):
@@ -1431,11 +1516,10 @@ func _open_launch_loadout(planet_name: String, sector_id: int) -> void:
 		return
 	if not dialog.loadout_chosen.is_connected(_on_loadout_chosen):
 		dialog.loadout_chosen.connect(_on_loadout_chosen)
-	var launcher := _find_launcher(planet_name)
 	ui.call("open_dialog", "launch_loadout", JSON.stringify({
 		"planet": planet_name,
 		"sector": sector_id,
-		"launcher": int(launcher.get("id", -1)),
+		"launcher": launcher_id,
 	}))
 
 
@@ -1464,7 +1548,7 @@ func _on_sector_select_chosen(sector_id: int) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
 		ui.call("close_dialog", "sector_select")
-	_open_launch_loadout(_selected_planet, sector_id)
+	_launch_via_launcher(_selected_planet, sector_id)
 
 
 ## The loadout row for a `Schematics.all` index, or `{}`.
@@ -1543,8 +1627,7 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 			# the launcher sector and stocked into the new core. The staged
 			# resources come from `LaunchLoadoutDialog.update` (`launch_plan`)
 			# so the Max computation and capacity clamp apply.
-			var launcher := _find_launcher(planet_name)
-			var launcher_id := int(launcher.get("id", -1))
+			var launcher_id := _sector_launch_from(planet_name, sector_id)
 			var plan := _launch_plan(planet_name, launcher_id, sector_id, loadout)
 			var resources: Dictionary = plan.get("resources", {})
 			if resources.is_empty():

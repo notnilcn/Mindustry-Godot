@@ -20,8 +20,10 @@
 use serde::Serialize;
 
 use crate::content::registries::sectors::SectorPresetDef;
+use crate::content::tech::ObjectiveSpec;
 use crate::content::{ContentRegistry, PlanetId, UnlockStore};
 use crate::game::campaign_rules::{ALL_DIFFICULTIES, CampaignRules, Difficulty};
+use crate::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
 use crate::game::planet::Planet;
 use crate::game::schematics::Schematics;
 use crate::game::sector::Sector;
@@ -167,6 +169,23 @@ pub struct SectorView {
     pub capture_wave: i32,
     /// `PlanetDialog.showStats` data block (production/export/import/stored).
     pub stats: SectorStatsView,
+    /// `PlanetDialog.findLauncher` result (look mode), sector id.
+    pub launch_from: Option<u16>,
+    /// `PlanetDialog.hasNoCandidate`: a non-start, baseless sector with no
+    /// launch candidate.
+    pub no_candidate: bool,
+    /// `updateSelected` action-button gate: `(hasBase && look) || canSelect ||
+    /// preset.alwaysUnlocked`.
+    pub show_action: bool,
+    /// `isLocked(sector)`: preset locked, no base and the preset has a tech
+    /// node.
+    pub objectives_locked: bool,
+    /// Incomplete objectives of the preset's tech node: `(kind, argument)`.
+    pub objectives: Vec<(String, String)>,
+    /// `sectors.vulnerable` rule (sectorInvasion + enemy-base neighbour).
+    pub vulnerable: bool,
+    /// `displayThreat` colour, 8 hex digits (`ff998dff`).
+    pub threat_color: String,
 }
 
 /// `PlanetDialog.showStats` data: per-minute rate rows for `production`,
@@ -651,7 +670,34 @@ fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
         is_last: sector_is_last(&planet.name, sector),
         capture_wave: sector.preset_capture_wave,
         stats: sector_stats_view(sector),
+        launch_from: None,
+        no_candidate: false,
+        show_action: false,
+        objectives_locked: false,
+        objectives: Vec::new(),
+        vulnerable: false,
+        threat_color: threat_color(sector.threat),
     }
+}
+
+/// `Sector.displayThreat` colour (Sector.java:80-85): white lerps to scarlet by
+/// `Mathf.round(threat, 0.25)` (a truncating round), emitted like Arc's
+/// `Color.toString` (8 hex digits of `(int)(255*c)`).
+pub fn threat_color(threat: f32) -> String {
+    const STEP: f32 = 0.25;
+    // Arc `Color.scarlet` (0xff341cff).
+    const SCARLET_G: f32 = 52.0 / 255.0;
+    const SCARLET_B: f32 = 28.0 / 255.0;
+    // `Mathf.round(v, step) = (int)(v / step) * step` (truncation).
+    let t = ((threat / STEP) as i32) as f32 * STEP;
+    let lerp = |scarlet: f32| 1.0 + (scarlet - 1.0) * t;
+    let byte = |channel: f32| (channel * 255.0) as u32;
+    format!(
+        "{:02x}{:02x}{:02x}ff",
+        byte(lerp(1.0)),
+        byte(lerp(SCARLET_G)),
+        byte(lerp(SCARLET_B)),
+    )
 }
 
 /// `PlanetDialog.showStats` rows from the stored sector record: rate rows pass
@@ -704,15 +750,25 @@ fn sector_is_last(planet_name: &str, sector: &Sector) -> bool {
 }
 
 /// `PlanetDialog.renderSectors/renderProjections` inputs that need the
-/// registry: `canSelect` (look mode), the preset unlock bit and the padlock.
-/// Neighbours come from the planet's `PlanetGrid` (`Sector.near()`).
+/// registry plus the look-mode `updateSelected` rules: `canSelect`, preset
+/// unlock, padlock, locked objectives, the vulnerable flag, the threat colour,
+/// `findLauncher` and the action-button gates.
+///
+/// Neighbours come from `planet.neighbors` (`Ptile.tiles` order, same as Java
+/// `Sector.near()`); the `PlanetGrid` is kept only for `tile.v` distances.
+/// Deterministic: sectors in id order, neighbours in grid order.
+#[allow(clippy::too_many_arguments)]
 pub fn annotate_globe(
     mut views: Vec<SectorView>,
     registry: &ContentRegistry,
     planet: &Planet,
+    ctx: &dyn ObjectiveContext,
+    launch_sector: Option<u16>,
+    played_core_size: i32,
+    loadout_of: &dyn Fn(u16) -> Vec<(String, i32)>,
 ) -> Vec<SectorView> {
     use crate::content::registries::planets::GeneratorKind;
-    use crate::content::{ContentRef, ContentType};
+    use crate::content::{ContentRef, ContentType, SectorId};
 
     let Some(def) = registry.planet(planet.id) else {
         return views;
@@ -722,29 +778,167 @@ pub fn annotate_globe(
         |content: ContentRef| tech.nodes.iter().find(|node| node.content == Some(content));
     let grid = (def.sector_tiles > 0)
         .then(|| crate::render::g3d::grid::PlanetGrid::create(def.sector_tiles as usize));
-    let near = |id: u16| -> Vec<usize> {
+    let tile_v = |id: u16| -> Option<[f32; 3]> {
         grid.as_ref()
             .and_then(|grid| grid.tiles.get(id as usize))
-            .map(|tile| tile.tiles.clone())
+            .map(|tile| tile.v)
+    };
+    let near = |id: u16| -> Vec<u16> {
+        planet
+            .neighbors
+            .get(id as usize)
+            .cloned()
             .unwrap_or_default()
     };
-    // `SerpuloPlanetGenerator.allowNumberedLaunch`: a based, unattacked sector
-    // with a size >= 4 core; other generators only need a based neighbour.
+    let is_based = |id: u16| {
+        planet
+            .sectors
+            .get(id as usize)
+            .is_some_and(Sector::has_base)
+    };
+    let is_calm = |id: u16| {
+        planet
+            .sectors
+            .get(id as usize)
+            .is_some_and(|s| !s.is_attacked(None))
+    };
+    let has_items = |id: u16, stacks: &[(String, i32)]| -> bool {
+        planet.sectors.get(id as usize).is_some_and(|sector| {
+            stacks.iter().all(|(name, amount)| {
+                sector.info.info.items.get(name).copied().unwrap_or(0) >= *amount
+            })
+        })
+    };
     let core_size = |name: &str| {
         registry
             .block_by_name(name)
             .map(|block| block.size)
             .unwrap_or(0)
     };
-    let numbered_launcher = |sector: &Sector| -> bool {
-        if def.generator == GeneratorKind::Serpulo {
-            sector.has_base()
-                && !sector.is_attacked(None)
-                && core_size(&sector.info.info.best_core_type) >= 4
+    // `SerpuloPlanetGenerator.allowNumberedLaunch` (Serpulo only): based,
+    // unattacked and a size >= 4 core; the being-played clause uses
+    // `played_core_size` (`0` when the caller cannot supply it).
+    let allow_numbered_launch = |id: u16| -> bool {
+        let Some(sector) = planet.sectors.get(id as usize) else {
+            return false;
+        };
+        if !sector.has_base() || sector.is_attacked(None) {
+            return false;
+        }
+        core_size(&sector.info.info.best_core_type) >= 4
+            || (sector.is_being_played() && played_core_size >= 4)
+    };
+    let content_name =
+        |content: ContentRef| tech_tree::content_name(registry, content).unwrap_or_default();
+    let sector_name = |id: SectorId| {
+        registry
+            .sector(id)
+            .map(|preset| preset.name.clone())
+            .unwrap_or_default()
+    };
+    let planet_name = |id: PlanetId| {
+        registry
+            .planet(id)
+            .map(|planet| planet.name.clone())
+            .unwrap_or_default()
+    };
+    // `Seq.min(pred, f)`: first minimum in id order (strict `<`).
+    let min_sector = |dest: u16, pred: &dyn Fn(u16) -> bool, squared: bool| -> Option<u16> {
+        let dest_v = tile_v(dest)?;
+        let mut best: Option<u16> = None;
+        let mut best_distance = f32::MAX;
+        for id in 0..planet.sectors.len() as u16 {
+            if !pred(id) {
+                continue;
+            }
+            let Some(v) = tile_v(id) else {
+                continue;
+            };
+            let dx = v[0] - dest_v[0];
+            let dy = v[1] - dest_v[1];
+            let dz = v[2] - dest_v[2];
+            let distance = dx * dx + dy * dy + dz * dz;
+            let distance = if squared { distance } else { distance.sqrt() };
+            if distance < best_distance {
+                best_distance = distance;
+                best = Some(id);
+            }
+        }
+        best
+    };
+    // `PlanetGenerator.findLaunchCandidate` (base generator,
+    // PlanetGenerator.java:59-97).
+    let base_candidate = |dest: u16, sel: Option<u16>| -> Option<u16> {
+        let dest_sector = planet.sectors.get(dest as usize)?;
+        let dest_preset = dest_sector.preset.and_then(|id| registry.sector(id));
+        let allow_loadout = dest_preset
+            .map(|preset| {
+                if preset.override_launch_defaults {
+                    preset.allow_launch_loadout
+                } else {
+                    def.allow_launch_loadout
+                }
+            })
+            .unwrap_or(def.allow_launch_loadout);
+        if !allow_loadout && dest_preset.is_some() {
+            let tmp = loadout_of(dest);
+            if let Some(selected) =
+                sel.filter(|id| is_based(*id) && is_calm(*id) && has_items(*id, &tmp))
+            {
+                return Some(selected);
+            }
+            return min_sector(
+                dest,
+                &|id| is_based(id) && is_calm(id) && has_items(id, &tmp),
+                false,
+            );
+        }
+        let launch_sel = sel.filter(|id| is_based(*id) && is_calm(*id));
+        let near_dest = near(dest);
+        if launch_sel.is_some_and(|selected| near_dest.contains(&selected)) {
+            return launch_sel;
+        }
+        let mut launch_from = launch_sel;
+        if launch_from.is_none() || dest_preset.is_none() {
+            launch_from = near_dest
+                .iter()
+                .copied()
+                .find(|id| is_based(*id) && is_calm(*id));
+            if launch_from.is_none() && dest_preset.is_some() {
+                if launch_sel.is_some() {
+                    return launch_sel;
+                }
+                launch_from = min_sector(dest, &|id| is_based(id) && is_calm(id), true);
+            }
+        }
+        launch_from
+    };
+    // `PlanetDialog.findLauncher` (PlanetDialog.java:437-444): the generator's
+    // candidate, else the actual launch sector when it is unattacked.
+    let actual = launch_sector.filter(|id| (*id as usize) < planet.sectors.len());
+    let find_launcher = |dest: u16| -> Option<u16> {
+        let dest_sector = planet.sectors.get(dest as usize)?;
+        let dest_require_unlock = dest_sector
+            .preset
+            .and_then(|id| registry.sector(id))
+            .is_some_and(|preset| preset.require_unlock);
+        let candidate = if def.generator == GeneratorKind::Serpulo
+            && (dest_sector.preset.is_none() || !dest_require_unlock)
+        {
+            // `SerpuloPlanetGenerator.findLaunchCandidate` (:90-112).
+            let near_dest = near(dest);
+            actual
+                .filter(|id| near_dest.contains(id) && allow_numbered_launch(*id))
+                .or_else(|| near_dest.into_iter().find(|id| allow_numbered_launch(*id)))
         } else {
-            sector.has_base()
+            base_candidate(dest, actual)
+        };
+        match candidate {
+            None => actual.filter(|id| is_calm(*id)),
+            Some(found) => Some(found),
         }
     };
+
     for view in &mut views {
         let Some(sector) = planet.sectors.get(view.id as usize) else {
             continue;
@@ -792,8 +986,51 @@ pub fn annotate_globe(
             def.allow_launch_to_numbered
                 && near(sector.id)
                     .iter()
-                    .any(|&other| planet.sectors.get(other).is_some_and(&numbered_launcher))
+                    .any(|&other| allow_numbered_launch(other))
         };
+        // `updateSelected`: `isLocked(sector)` = preset locked, no base, node.
+        view.objectives_locked =
+            preset.is_some() && !preset_unlocked && !sector.has_base() && node.is_some();
+        view.objectives.clear();
+        if view.objectives_locked
+            && let Some(node) = node
+        {
+            for spec in &node.objectives {
+                if Objective::from_spec(*spec).complete(ctx) {
+                    continue;
+                }
+                let (kind, argument) = match *spec {
+                    ObjectiveSpec::SectorComplete(id) => ("capture", sector_name(id)),
+                    ObjectiveSpec::OnSector(id) => ("onsector", sector_name(id)),
+                    ObjectiveSpec::OnPlanet(id) => ("onplanet", planet_name(id)),
+                    ObjectiveSpec::Research(content) => ("research", content_name(content)),
+                    ObjectiveSpec::Produce(content) => ("produce", content_name(content)),
+                };
+                view.objectives.push((kind.to_owned(), argument));
+            }
+        }
+        // `sectors.vulnerable`: sectorInvasion + a neighbour with an enemy
+        // base whose preset is unlocked (or unassigned).
+        view.vulnerable = sector.has_base()
+            && planet.campaign_rules.sector_invasion
+            && near(sector.id).iter().any(|&other| {
+                planet.sectors.get(other as usize).is_some_and(|other| {
+                    other.has_enemy_base()
+                        && other
+                            .preset
+                            .and_then(|id| registry.sector(id))
+                            .is_none_or(|preset| !preset.require_unlock)
+                })
+            });
+        view.threat_color = threat_color(sector.threat);
+        // `updateSelected` (PlanetDialog.java:1286-1354).
+        view.launch_from = find_launcher(sector.id);
+        view.no_candidate = sector.id != def.start_sector as u16
+            && !sector.has_base()
+            && view.launch_from.is_none();
+        view.show_action = sector.has_base()
+            || view.selectable
+            || preset.is_some_and(|preset| preset.unlock.always_unlocked);
     }
     views
 }
@@ -1061,11 +1298,21 @@ pub fn default_map_entries() -> Vec<MapEntryView> {
 
 impl CampaignViews {
     /// Projects the complete campaign state into the M5 dialog read models.
+    ///
+    /// `played` is the sector currently being played (filtered by `game_over`
+    /// by the caller; the `findLauncher` "actual launch sector"), `played_core_size`
+    /// its live core block size (`0` when unknown — the being-played
+    /// `allowNumberedLaunch` clause) and `loadout_of` the preset map loadout for
+    /// a destination (items already filtered to the planet; empty for the
+    /// headless fixture).
     pub fn from_campaign(
         campaign: &Campaign,
         registry: &ContentRegistry,
         schematics: &Schematics,
         active: PlanetId,
+        played: Option<(PlanetId, u16)>,
+        played_core_size: i32,
+        loadout_of: &dyn Fn(u16) -> Vec<(String, i32)>,
     ) -> Self {
         let planet = campaign
             .planet(active)
@@ -1075,6 +1322,10 @@ impl CampaignViews {
             .planet(active)
             .and_then(|def| def.default_core.clone())
             .unwrap_or_else(|| "core-shard".to_owned());
+        let ctx = CampaignObjectiveContext::new(registry, campaign);
+        let launch_sector = played
+            .filter(|(planet, _)| *planet == active)
+            .map(|(_, sector)| sector);
         Self {
             planet: planet.name.clone(),
             planets: campaign
@@ -1083,7 +1334,15 @@ impl CampaignViews {
                 .filter_map(|id| campaign.planets.get(id))
                 .map(|planet| planet_view(registry, planet))
                 .collect(),
-            sectors: annotate_globe(sector_views(planet, presets), registry, planet),
+            sectors: annotate_globe(
+                sector_views(planet, presets),
+                registry,
+                planet,
+                &ctx,
+                launch_sector,
+                played_core_size,
+                loadout_of,
+            ),
             research: research_views(registry, Some(active)),
             schematics: schematic_views(schematics, registry),
             loadouts: loadout_views(schematics, registry, &core_name),
@@ -1153,7 +1412,9 @@ impl CampaignViews {
 
         let mut schematics = Schematics::new();
         schematics.load_loadouts(&registry);
-        Self::from_campaign(&campaign, &registry, &schematics, active)
+        Self::from_campaign(&campaign, &registry, &schematics, active, None, 0, &|_| {
+            Vec::new()
+        })
     }
 
     /// Empty projection (content boot failure; never panics in a `#[func]`).
@@ -1223,6 +1484,161 @@ mod tests {
             .find(|sector| sector.preset.as_deref() == Some("saltFlats"))
             .expect("saltFlats sector");
         assert!(salt.captured, "seeded captured");
+    }
+
+    #[test]
+    fn threat_color_matches_java() {
+        // `Sector.displayThreat`: truncating `Mathf.round(threat, 0.25)`.
+        assert_eq!(threat_color(0.3), "ffccc6ff");
+        assert_eq!(threat_color(0.5), "ff998dff");
+        assert_eq!(threat_color(0.74), "ff998dff");
+        assert_eq!(threat_color(0.0), "ffffffff");
+    }
+
+    /// Serpulo's numbered launch needs a based, calm neighbour with a size >= 4
+    /// core (`SerpuloPlanetGenerator.allowNumberedLaunch`).
+    #[test]
+    fn serpulo_numbered_launch_needs_size4_neighbour() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let serpulo = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        // A non-preset destination next to a based sector.
+        let (based, dest) = {
+            let planet = campaign.planet(serpulo).expect("serpulo");
+            (0..planet.sectors.len() as u16)
+                .find_map(|id| {
+                    let sector = planet.sectors.get(id as usize)?;
+                    if sector.preset.is_some() {
+                        return None;
+                    }
+                    let neighbour = *planet.neighbors.get(id as usize)?.first()?;
+                    Some((neighbour, id))
+                })
+                .expect("a non-preset sector with a neighbour")
+        };
+        {
+            let planet = campaign.planet_mut(serpulo).expect("serpulo");
+            let sector = planet
+                .sectors
+                .get_mut(based as usize)
+                .expect("based sector");
+            sector.save = Some(format!("sector-serpulo-{based}"));
+            sector.info.info.has_core = true;
+            // A calm base (`waves`/`attack` off; `SectorInfo.waves` defaults on).
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+            sector.info.info.best_core_type = "core-shard".to_owned();
+        }
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let views = annotate_globe(
+            sector_views(planet, registry.sectors()),
+            &registry,
+            planet,
+            &ctx,
+            None,
+            0,
+            &|_| Vec::new(),
+        );
+        let dest_view = views
+            .iter()
+            .find(|view| view.id == dest)
+            .expect("dest view");
+        assert_eq!(
+            dest_view.launch_from, None,
+            "core-shard (size 3) is no launcher"
+        );
+        assert!(dest_view.no_candidate);
+
+        // Upgrade the neighbour to a size 4 core (`core-foundation`).
+        campaign.planet_mut(serpulo).expect("serpulo").sectors[based as usize]
+            .info
+            .info
+            .best_core_type = "core-foundation".to_owned();
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let views = annotate_globe(
+            sector_views(planet, registry.sectors()),
+            &registry,
+            planet,
+            &ctx,
+            None,
+            0,
+            &|_| Vec::new(),
+        );
+        let dest_view = views
+            .iter()
+            .find(|view| view.id == dest)
+            .expect("dest view");
+        assert_eq!(dest_view.launch_from, Some(based));
+    }
+
+    /// A require-unlock preset prefers the played (actual) launch sector even
+    /// when it is not adjacent (`PlanetGenerator.findLaunchCandidate`).
+    #[test]
+    fn preset_launch_prefers_played_sector() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let serpulo = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let dest = {
+            let planet = campaign.planet(serpulo).expect("serpulo");
+            (0..planet.sectors.len() as u16)
+                .find(|id| {
+                    planet
+                        .sectors
+                        .get(*id as usize)
+                        .and_then(|sector| sector.preset)
+                        .and_then(|preset| registry.sector(preset))
+                        .is_some_and(|preset| preset.require_unlock)
+                })
+                .expect("a require-unlock preset sector")
+        };
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let near_dest = planet
+            .neighbors
+            .get(dest as usize)
+            .cloned()
+            .unwrap_or_default();
+        let actual = (0..planet.sectors.len() as u16)
+            .find(|id| *id != dest && !near_dest.contains(id))
+            .expect("a non-adjacent sector");
+        {
+            let planet = campaign.planet_mut(serpulo).expect("serpulo");
+            let sector = planet
+                .sectors
+                .get_mut(actual as usize)
+                .expect("actual sector");
+            sector.save = Some(format!("sector-serpulo-{actual}"));
+            sector.info.info.has_core = true;
+            // A calm base (`waves`/`attack` off; `SectorInfo.waves` defaults on).
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+            sector.info.info.best_core_type = "core-foundation".to_owned();
+        }
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let views = annotate_globe(
+            sector_views(planet, registry.sectors()),
+            &registry,
+            planet,
+            &ctx,
+            Some(actual),
+            0,
+            &|_| Vec::new(),
+        );
+        let dest_view = views
+            .iter()
+            .find(|view| view.id == dest)
+            .expect("dest view");
+        assert_eq!(dest_view.launch_from, Some(actual));
     }
 
     #[test]
@@ -1504,6 +1920,9 @@ mod tests {
             &registry,
             &schematics,
             active,
+            None,
+            0,
+            &|_| Vec::new(),
         ));
         assert!(
             !before.has_base && !before.captured,
@@ -1525,6 +1944,9 @@ mod tests {
             &registry,
             &schematics,
             active,
+            None,
+            0,
+            &|_| Vec::new(),
         ));
         assert!(after.has_base, "the launched base is projected");
         assert!(after.captured, "the capture is projected");

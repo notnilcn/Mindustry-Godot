@@ -1,28 +1,27 @@
 ## SPDX-License-Identifier: GPL-3.0-only
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-## Source: core/src/mindustry/ui/fragments/HintsFragment.java (42-160, 118-137).
+## Source: core/src/mindustry/ui/fragments/HintsFragment.java (45-160, 169-304).
 ##
-## Hint catalogue + display driver. The full upstream trigger model (placed
-## blocks / input events / playtime save) is not ported; this driver shows the
-## first unfinished hint whose `shown` predicate holds (only the predicates the
-## port can evaluate; the rest stay hidden), with a timed auto-advance and the
-## upstream `@hint.skip` button. Completion persists
-## as `<name>-hint-done` (`DefaultHint.finished/finish`) through `MindUi`, so an
-## imported Java profile's finished hints stay hidden.
+## Hint catalogue + display driver. Hints never time out: they complete on their
+## upstream predicate or the Skip button (which persists `<name>-hint-done`), a
+## hint whose `shown` predicate turns false is hidden without persisting, and
+## the display gate is `saves.getTotalPlaytime() > 8000` (total, not session,
+## and only when not in a cutscene). The T4a slice ports the `desktopMove`/`zoom`/
+## `desktopPause`/`launch`/`presetLaunch` predicates; T4b adds the rest.
 
 extends Control
 
-## Upstream `DefaultHint` declaration order (bundle keys `hint.<name>`).
+## Upstream `DefaultHint` declaration order (`HintsFragment.java:169-304`;
+## `respawn` is mobile-only and dropped on desktop).
 const HINTS := [
 	"desktopMove",
 	"zoom",
-	"desktopShoot",
 	"breaking",
+	"desktopShoot",
 	"depositItems",
 	"desktopPause",
 	"unitControl",
 	"unitSelectControl",
-	"respawn",
 	"launch",
 	"schematicSelect",
 	"conveyorPathfind",
@@ -43,24 +42,18 @@ const HINTS := [
 	"coreIncinerate",
 ]
 
-## `HintsFragment` gate: total playtime must exceed 8000 ms before a hint shows.
-const PLAYTIME_GATE := 8.0
-## Camera-movement threshold that counts as "the player moved" for the
-## `desktopMove`/`zoom` trigger hints (the port has no player entity yet, so the
-## shared WASD/scroll bindings drive the camera).
-const MOVE_EPSILON := 0.5
-## Timed auto-advance fallback for hints whose upstream trigger is not ported yet.
-const HINT_DURATION := 15.0
+## `HintsFragment` display gate: `saves.getTotalPlaytime() > 8000` ms.
+const PLAYTIME_GATE_MS := 8000
 
 var _current := ""
-## Hints completed this session (`hints.remove(current)`).
+## Hints persisted as finished (`DefaultHint.finish`; Skip/complete paths).
 var _done := {}
-var _playtime := 0.0
-var _elapsed := 0.0
+## Hints removed for this session (`hints.remove(hint)`; never persisted).
+var _finished := {}
 var _ui: Node = null
-var _last_camera := Vector2.ZERO
 var _last_zoom := 0.0
 
+@onready var _panel: Control = get_node_or_null("Panel")
 @onready var _label: RichTextLabel = get_node_or_null("Panel/Layout/Box/Label")
 @onready var _skip: Button = get_node_or_null("Panel/Layout/Skip")
 
@@ -74,125 +67,80 @@ func _ready() -> void:
 		_skip.text = _t("@hint.skip")
 		if not _skip.pressed.is_connected(complete_hint):
 			_skip.pressed.connect(complete_hint)
-	_snapshot_camera()
+	_snapshot_zoom()
 	set_process(true)
 
 
-func _process(delta: float) -> void:
-	var active := _in_game()
-	visible = active and not _current.is_empty()
-	if not active:
-		return
-	# `HintsFragment.java:59,112`: no hints while `renderer.isCutscene()` (the
-	# landing cutscene must not trigger or advance a hint).
-	var camera := get_node_or_null("/root/Spine/World/Camera2D")
-	if camera != null and camera.has_method("is_cutscene") and bool(camera.call("is_cutscene")):
+func _process(_delta: float) -> void:
+	# `HintsFragment.java:45`: the fragment shows only with the `hints` setting
+	# on and the HUD up.
+	if not _hints_enabled() or not _in_game():
 		visible = false
 		return
-	if _is_paused():
-		# `desktopPause` completes on the pause key (`Binding.pause`).
-		if _current == "desktopPause":
-			complete_hint()
-		return
-	_check_trigger()
+	# `HintsFragment.java:46-68` driver (the current hint first).
 	if not _current.is_empty():
-		if _current != "desktopMove" and _current != "zoom":
-			_elapsed += delta
-			if _elapsed >= HINT_DURATION:
-				complete_hint()
-		return
-	_playtime += delta
-	if _playtime >= PLAYTIME_GATE:
-		_show_next()
-
-
-## Upstream hints complete on their trigger, not a timer (`DesktopHint`
-## predicate). `desktopMove` completes on the first non-zero move axis
-## (HintsFragment.java:170) — the player unit via SimHost when present (the
-## authoritative hook); the camera-delta fallback only applies to hosts without
-## it (a launch camera pan must not complete the hint); `zoom` completes when
-## the scroll changes the zoom.
-func _check_trigger() -> void:
-	if _current.is_empty():
-		return
-	if _current == "desktopMove":
-		var host := get_node_or_null("/root/Spine/SimHost")
-		if host != null and host.has_method("player_unit_moved"):
-			if bool(host.call("player_unit_moved")):
-				complete_hint()
-			return
-		if _camera_moved():
+		visible = not _is_cutscene()
+		if _hint_complete(_current):
 			complete_hint()
+		elif not _hint_shown(_current, _sector_state()):
+			# `hide()`: not persisted; the hint stays in the list.
+			_hide_current()
 		return
-	var camera := get_node_or_null("/root/Spine/World/Camera2D")
-	if camera == null:
-		return
-	var position: Vector2 = camera.get("position")
-	var zoom := float(camera.get("zoom").x)
-	_last_camera = position
-	var zoomed := absf(zoom - _last_zoom) > 0.01
-	_last_zoom = zoom
-	if _current == "zoom" and zoomed:
-		complete_hint()
-
-
-## Camera-delta fallback for hosts without the player-unit hook.
-func _camera_moved() -> bool:
-	var camera := get_node_or_null("/root/Spine/World/Camera2D")
-	if camera == null:
-		return false
-	var position: Vector2 = camera.get("position")
-	var moved := position.distance_to(_last_camera) > MOVE_EPSILON
-	_last_camera = position
-	return moved
-
-
-func _snapshot_camera() -> void:
-	var camera := get_node_or_null("/root/Spine/World/Camera2D")
-	if camera != null:
-		_last_camera = camera.get("position")
-		_last_zoom = float(camera.get("zoom").x)
-
-
-## Upstream `HintsFragment.desktopMove`: the hint completes on the first
-## non-zero move axis (`Core.input.axis(Binding.moveX/moveY)`).
-func _player_unit_moved() -> bool:
-	var host := get_node_or_null("/root/Spine/SimHost")
-	return host != null and host.has_method("player_unit_moved") and bool(host.call("player_unit_moved"))
-
-
-## The hint overlay shows only during a live (non-menu) game and when the HUD
-## is enabled (`hints` setting defaults to true; `MindUi.hud_visible`).
-func _in_game() -> bool:
-	if _ui != null and not bool(_ui.call("hud_visible")):
-		return false
-	var host := get_node_or_null("/root/Spine/SimHost")
-	if host == null or not host.has_method("get_state"):
-		return false
-	return str(host.call("get_state")) == "playing"
-
-
-func _is_paused() -> bool:
-	var host := get_node_or_null("/root/Spine/SimHost")
-	return host != null and host.has_method("is_paused") and bool(host.call("is_paused"))
-
-
-func _show_next() -> void:
-	# `checkNext`: finished hints are dropped, then the first hint (declaration
-	# order) whose `shown` predicate holds is displayed.
+	visible = false
+	# `else if(!hints.isEmpty())`: first hint in ordinal order whose `show()`
+	# holds. A hint already complete is removed silently (never persisted).
 	var state := _sector_state()
 	for hint_name in HINTS:
-		if _done.has(hint_name) or _hint_finished(hint_name):
+		if _done.has(hint_name) or _finished.has(hint_name) or _hint_finished(hint_name):
 			continue
-		if _hint_shown(hint_name, state):
-			show_hint(hint_name)
+		if not _hint_shown(hint_name, state):
+			continue
+		if _hint_complete(hint_name):
+			_finished[hint_name] = true
+			continue
+		# `renderer.isCutscene() || !state.isGame()`: wait (no display, no
+		# derelict-mouse fallback in this slice).
+		if _is_cutscene():
 			return
+		if _total_playtime_ms() <= PLAYTIME_GATE_MS:
+			return
+		show_hint(hint_name)
+		return
 
 
-## `DefaultHint.show()` predicates the port can evaluate. Hints whose upstream
-## predicate reads state the port does not expose yet (enemy counts, unit
-## payloads, placed-block events, ...) stay hidden rather than firing out of
-## context.
+## `HintsFragment.java:169-304` per-hint `complete()` predicates ported in T4a
+## (the remaining 22 land with T4b; their input-key completions need the G08
+## `MindInput.take_hint_keys()` seam).
+func _hint_complete(hint_name: String) -> bool:
+	match hint_name:
+		"desktopMove":
+			return _player_unit_moved()
+		"zoom":
+			# `Binding.zoom`: the camera zoom changed since the last poll.
+			var camera := _camera()
+			if camera == null:
+				return false
+			var zoom := float(camera.get("zoom").x)
+			var zoomed := absf(zoom - _last_zoom) > 0.01
+			_last_zoom = zoom
+			return zoomed
+		"desktopPause":
+			return _is_paused()
+		"launch":
+			# `ui.planet.isShown()`.
+			return _ui != null and _ui.has_method("is_dialog_shown") \
+				and bool(_ui.call("is_dialog_shown", "planet"))
+		"presetLaunch":
+			var state := _sector_state()
+			return bool(state.get("campaign", false)) \
+				and str(state.get("preset", "")) == "frozenForest"
+		_:
+			return false
+
+
+## `DefaultHint.show()` predicates the port can evaluate (T4a set; T4b adds the
+## rest). Hints whose predicate needs state the port does not expose yet stay
+## hidden rather than firing out of context.
 func _hint_shown(hint_name: String, state: Dictionary) -> bool:
 	var preset := str(state.get("preset", ""))
 	var campaign := bool(state.get("campaign", false))
@@ -210,6 +158,50 @@ func _hint_shown(hint_name: String, state: Dictionary) -> bool:
 			return false
 
 
+## `HintsFragment.complete()`: persists the hint and removes it.
+func complete_hint() -> void:
+	if not _current.is_empty():
+		_done[_current] = true
+		if _ui != null and _ui.has_method("hint_finish"):
+			_ui.call("hint_finish", _current)
+	_current = ""
+	visible = false
+	if _panel != null:
+		_panel.modulate.a = 1.0
+
+
+## `HintsFragment.hide()` (fade 0.6 s + translate y -200; not persisted).
+func _hide_current() -> void:
+	var name_done := _current
+	_current = ""
+	visible = false
+	if _panel == null:
+		return
+	var tween := _panel.create_tween()
+	tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tween.tween_property(_panel, "modulate:a", 0.0, 0.6)
+	tween.parallel().tween_property(_panel, "position:y", _panel.position.y + 200.0, 0.6)
+	tween.tween_callback(func() -> void:
+		if _current != name_done:
+			_panel.position.y -= 200.0
+			_panel.modulate.a = 1.0)
+
+
+## `HintsFragment.display()`: fade the panel in over 1 s.
+func show_hint(hint_name: String) -> void:
+	_current = hint_name
+	_finished.erase(hint_name)
+	if _panel != null:
+		var tween := _panel.create_tween()
+		tween.tween_property(_panel, "modulate:a", 1.0, 1.0).from(0.0)
+	if _label != null:
+		# `HintsFragment.java:349-355`: desktop replaces tap -> click.
+		var text := MindWidgets.markup("@hint.%s" % hint_name)
+		_label.text = text.replace("tap", "click").replace("Tap", "Click")
+	visible = true
+	_snapshot_zoom()
+
+
 func _sector_state() -> Dictionary:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign == null or not campaign.has_method("get_sector_state"):
@@ -223,27 +215,59 @@ func _hint_finished(hint_name: String) -> bool:
 	return _ui != null and _ui.has_method("hint_finished") and bool(_ui.call("hint_finished", hint_name))
 
 
-## Shows the hint by catalogue name (bundle `hint.<name>`).
-func show_hint(hint_name: String) -> void:
-	if _label != null:
-		_label.text = MindWidgets.markup("@hint.%s" % hint_name)
-	_current = hint_name
-	_elapsed = 0.0
-	_snapshot_camera()
-	visible = true
+## `saves.getTotalPlaytime() > 8000` (total, not session time).
+func _total_playtime_ms() -> int:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign == null or not campaign.has_method("get_total_playtime"):
+		return 0
+	return int(campaign.call("get_total_playtime"))
 
 
-## Completes/hides the current hint and arms the next one.
-func complete_hint() -> void:
-	# `HintsFragment.complete` -> `current.finish()` persists the flag.
-	if not _current.is_empty():
-		_done[_current] = true
-		if _ui != null and _ui.has_method("hint_finish"):
-			_ui.call("hint_finish", _current)
-	_current = ""
-	_elapsed = 0.0
-	_snapshot_camera()
-	visible = false
+## `settings.getBool("hints", true)`.
+func _hints_enabled() -> bool:
+	if _ui == null:
+		return true
+	if not _ui.has_method("settings_get_flag_default"):
+		return true
+	return bool(_ui.call("settings_get_flag_default", "hints", true))
+
+
+## The hint overlay shows only during a live (non-menu) game and when the HUD
+## is up (`ui.hudfrag.shown()`).
+func _in_game() -> bool:
+	if _ui != null and not bool(_ui.call("hud_visible")):
+		return false
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("get_state"):
+		return false
+	return str(host.call("get_state")) == "playing"
+
+
+func _is_paused() -> bool:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	return host != null and host.has_method("is_paused") and bool(host.call("is_paused"))
+
+
+## `renderer.isCutscene()`: no hint triggers or advances during a cutscene.
+func _is_cutscene() -> bool:
+	var camera := _camera()
+	return camera != null and camera.has_method("is_cutscene") and bool(camera.call("is_cutscene"))
+
+
+func _camera() -> Node:
+	return get_node_or_null("/root/Spine/World/Camera2D")
+
+
+## `DesktopHint.complete`: the player unit's move axis is non-zero.
+func _player_unit_moved() -> bool:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	return host != null and host.has_method("player_unit_moved") and bool(host.call("player_unit_moved"))
+
+
+func _snapshot_zoom() -> void:
+	var camera := _camera()
+	if camera != null:
+		_last_zoom = float(camera.get("zoom").x)
 
 
 func _t(key: String) -> String:

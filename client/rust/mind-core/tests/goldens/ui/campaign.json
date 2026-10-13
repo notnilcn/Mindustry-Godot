@@ -231,7 +231,14 @@
       "import": [],
       "stored": [],
       "resources": []
-    }
+    },
+    "launch_from": 170,
+    "no_candidate": false,
+    "show_action": true,
+    "objectives_locked": false,
+    "objectives": [],
+    "vulnerable": false,
+    "threat_color": "ffffffff"
   },
   "sample_research": {
     "index": 0,
@@ -275,5 +282,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "1160c4562864ad29"
+  "checksum": "014e2a82c9bfa3ae"
 }

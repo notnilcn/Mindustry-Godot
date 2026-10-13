@@ -30,6 +30,10 @@ var _theme_applied := false
 var _uiscale_prompt: Dictionary = {}
 var _uiscale_countdown := 0.0
 var _uiscale_shown_seconds := -1
+## The active transient prompt root (`showConfirm`/`showTextInput`/`showText`).
+var _active_prompt: Control = null
+## Its cancel path (Esc); invalid when no prompt is up.
+var _prompt_cancel: Callable = Callable()
 
 
 func _enter_tree() -> void:
@@ -82,11 +86,11 @@ func _check_uiscale_changed() -> void:
 		return
 	_uiscale_countdown = UISCALE_REVERT_SECONDS
 	_uiscale_prompt = _build_prompt(
-		"", MindWidgets.markup_format("@uiscale.reset", [UISCALE_REVERT_SECONDS]), false
+		"", MindWidgets.markup_format("@uiscale.reset", [UISCALE_REVERT_SECONDS]), false, 400.0
 	)
-	_add_prompt_button(_uiscale_prompt.buttons, MindWidgets.markup("@ok"), func() -> void:
+	_add_prompt_button(_uiscale_prompt.buttons, "@ok", "", Vector2(120.0, 54.0), func() -> void:
 		_finish_uiscale(true))
-	_add_prompt_button(_uiscale_prompt.buttons, MindWidgets.markup("@uiscale.cancel"), func() -> void:
+	_add_prompt_button(_uiscale_prompt.buttons, "@uiscale.cancel", "", Vector2(120.0, 54.0), func() -> void:
 		_finish_uiscale(false))
 	set_process(true)
 
@@ -101,6 +105,21 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		return
 	if key.keycode == KEY_ESCAPE and _on_escape():
 		get_viewport().set_input_as_handled()
+
+
+## Transient prompts take Esc before the GUI (a focused `LineEdit` would
+## otherwise consume the first press); `closeOnBack` on the prompt dialogs.
+func _input(event: InputEvent) -> void:
+	if _active_prompt == null:
+		return
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or key.keycode != KEY_ESCAPE:
+		return
+	var cancel := _prompt_cancel
+	_clear_prompt()
+	if cancel.is_valid():
+		cancel.call()
+	get_viewport().set_input_as_handled()
 
 
 func _on_escape() -> bool:
@@ -409,41 +428,65 @@ func _toast_label(text: String, duration: float) -> void:
 
 
 func _on_show_text(title: String, text: String) -> void:
-	var prompt := _build_prompt(title, text, false)
-	_add_prompt_button(prompt.buttons, "OK", func() -> void: prompt.root.queue_free())
+	# `UI.showText`: Dialog(title) + text (400 wrap) + `@ok` 110x50
+	# (UI.java:466-474 showInfo shape).
+	var prompt := _build_prompt(title, text, false, 400.0)
+	var close := func() -> void:
+		prompt.root.queue_free()
+		_clear_prompt()
+	prompt.cancel = close
+	_prompt_cancel = close
+	_add_prompt_button(prompt.buttons, "@ok", "", Vector2(110.0, 50.0), close)
 
 
 func _on_show_confirm(text: String) -> void:
-	var prompt := _build_prompt("", text, false)
-	_add_prompt_button(prompt.buttons, "Yes", func() -> void:
-		var ui := _ui()
-		if ui != null:
-			ui.call("resolve_confirm", true)
-		prompt.root.queue_free())
-	_add_prompt_button(prompt.buttons, "No", func() -> void:
+	# `UI.java:582-606 showConfirm(text, cb)`: `@confirm` title, 500 px wrapped
+	# body, `@cancel`/`@ok` 200x54 with icons, Enter = OK, Esc = cancel.
+	var prompt := _build_prompt(_t("@confirm"), text, false, 500.0)
+	var cancel := func() -> void:
 		var ui := _ui()
 		if ui != null:
 			ui.call("resolve_confirm", false)
-		prompt.root.queue_free())
+		prompt.root.queue_free()
+		_clear_prompt()
+	var confirm := func() -> void:
+		var ui := _ui()
+		if ui != null:
+			ui.call("resolve_confirm", true)
+		prompt.root.queue_free()
+		_clear_prompt()
+	prompt.cancel = cancel
+	_prompt_cancel = cancel
+	_add_prompt_button(prompt.buttons, "@cancel", "cancel", Vector2(200.0, 54.0), cancel)
+	var ok := _add_prompt_button(prompt.buttons, "@ok", "ok", Vector2(200.0, 54.0), confirm)
+	ok.grab_focus()
 
 
 func _on_text_input_request(title: String, message: String, max_length: int, default_text: String, numeric: bool, allow_empty: bool) -> void:
-	var prompt := _build_prompt(title, message, true)
+	# `UI.java:309-355 showTextInput` (desktop): accent rule, message, 400x50
+	# field, `@cancel`/`@ok` 120x54; Enter = OK, Esc = cancel.
+	var prompt := _build_prompt(title, message, true, 400.0)
 	var field: LineEdit = prompt.field
 	field.text = default_text
 	if max_length > 0:
 		field.max_length = max_length
-	var ok_button := _add_prompt_button(prompt.buttons, "OK", func() -> void:
-		var ui := _ui()
-		if ui != null:
-			ui.call("resolve_text_input", field.text)
-		prompt.root.queue_free())
-	_add_prompt_button(prompt.buttons, "Cancel", func() -> void:
+	var cancel := func() -> void:
 		var ui := _ui()
 		if ui != null:
 			ui.call("resolve_text_input", "")
-		prompt.root.queue_free())
-	ok_button.disabled = not allow_empty and default_text.is_empty()
+		prompt.root.queue_free()
+		_clear_prompt()
+	var approve := func() -> void:
+		var ui := _ui()
+		if ui != null:
+			ui.call("resolve_text_input", field.text)
+		prompt.root.queue_free()
+		_clear_prompt()
+	prompt.cancel = cancel
+	_prompt_cancel = cancel
+	_add_prompt_button(prompt.buttons, "@cancel", "", Vector2(120.0, 54.0), cancel)
+	var ok := _add_prompt_button(prompt.buttons, "@ok", "", Vector2(120.0, 54.0), approve)
+	ok.disabled = not allow_empty and field.text.is_empty()
 	if numeric:
 		field.text_changed.connect(func(value: String) -> void:
 			var filtered := ""
@@ -454,51 +497,97 @@ func _on_text_input_request(title: String, message: String, max_length: int, def
 				field.text = filtered
 				field.caret_column = filtered.length())
 	field.text_changed.connect(func(value: String) -> void:
-		ok_button.disabled = not allow_empty and value.is_empty())
+		ok.disabled = not allow_empty and value.is_empty())
+	# `UI.java:342-348`: Enter in the field confirms (when non-empty unless
+	# `allowEmpty`).
+	field.text_submitted.connect(func(_value: String) -> void:
+		if allow_empty or not field.text.is_empty():
+			approve.call())
 	field.grab_focus()
+
+
+## Clears the active-prompt bookkeeping (used by every prompt exit path).
+func _clear_prompt() -> void:
+	_active_prompt = null
+	_prompt_cancel = Callable()
+
+
+## Bundle lookup with the key echoed when assets are absent (prompts).
+func _t(key: String) -> String:
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return key.trim_prefix("@")
+	return str(assets.call("bundle_get", key.trim_prefix("@")))
+
+
+## Prompt title row: accent label + 3 px rule (`BaseDialog.java:24-25`, the same
+## shape as `mind_dialog.gd _ensure_title_underline`).
+func _add_prompt_title(layout: VBoxContainer, title_text: String) -> void:
+	if title_text.is_empty():
+		return
+	# code-instantiated: prompt titles are transient and parameterized.
+	var title := MindWidgets.label("[center]%s[/center]" % title_text)
+	title.add_theme_color_override("default_color", MindStyles.ACCENT)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.add_child(title)
+	var rule := ColorRect.new()
+	rule.color = MindStyles.ACCENT
+	rule.custom_minimum_size = Vector2(0.0, 3.0)
+	layout.add_child(rule)
 
 
 ## Builds a transient prompt panel (`showTextInput`/`showConfirm`/`showText`).
 ## code-instantiated: prompts are one-off transient overlays; their structure is
-## parameterized by the request (field/no-field) and has no static scene.
-func _build_prompt(title_text: String, message: String, with_field: bool) -> Dictionary:
+## parameterized by the request (field/no-field, body width) and has no static
+## scene.
+func _build_prompt(
+	title_text: String, message: String, with_field: bool, body_width: float
+) -> Dictionary:
 	var root := ColorRect.new()
-	root.color = Color(0.0, 0.0, 0.0, 0.55)
+	root.color = MindStyles.BLACK_9
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
 	overlay_layer.add_child(root)
+	_active_prompt = root
 	var center := CenterContainer.new()
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(center)
 	var panel := PanelContainer.new()
 	panel.theme_type_variation = "defaultDialog"
-	panel.custom_minimum_size = Vector2(420, 0)
 	center.add_child(panel)
 	var layout := VBoxContainer.new()
+	layout.add_theme_constant_override("separation", 6)
 	panel.add_child(layout)
-	if not title_text.is_empty():
-		var title := Label.new()
-		title.text = title_text
-		title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		layout.add_child(title)
-	var body := MindWidgets.label(message)
+	_add_prompt_title(layout, title_text)
+	if with_field:
+		# `UI.java:325`: the 400x4 accent rule above the text-input message.
+		var rule := ColorRect.new()
+		rule.color = MindStyles.ACCENT
+		rule.custom_minimum_size = Vector2(400.0, 4.0)
+		layout.add_child(rule)
+	var body := MindWidgets.label("[center]%s[/center]" % message)
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.custom_minimum_size.x = body_width
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.add_child(body)
 	var field := LineEdit.new()
+	field.custom_minimum_size = Vector2(400.0, 50.0)
 	if with_field:
 		layout.add_child(field)
 	var buttons := HBoxContainer.new()
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
+	buttons.add_theme_constant_override("separation", 4)
 	layout.add_child(buttons)
 	return {"root": root, "field": field, "buttons": buttons, "body": body}
 
 
-func _add_prompt_button(container: Container, text: String, callback: Callable) -> Button:
-	var button := Button.new()
-	button.text = text
-	button.theme_type_variation = "defaultt"
+## Prompt action button (`buttons.defaults().size(...)` + `button("@key", Icon)`).
+func _add_prompt_button(
+	container: Container, label_key: String, glyph: String, size: Vector2, callback: Callable
+) -> Button:
+	var button := MindWidgets.icon_button(glyph, _t(label_key))
+	button.custom_minimum_size = size
 	button.pressed.connect(callback)
 	container.add_child(button)
 	return button

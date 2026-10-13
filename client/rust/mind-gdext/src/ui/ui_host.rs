@@ -176,7 +176,13 @@ impl MindUi {
         self.dialogs.insert(key, node);
     }
 
-    /// Opens a registered dialog, hiding any currently active one first.
+    /// Opens a registered dialog and makes it the top of the stack.
+    ///
+    /// Java `Dialog.show` never hides the lower dialog (Dialog.java:288-317):
+    /// every shown dialog draws its own `stageBackground` over the stage and
+    /// the lower one stays in the scene, dimmed. The `keep_previous` context
+    /// key is still parsed for backward compatibility but no longer changes
+    /// behaviour.
     ///
     /// The GDScript `show_dialog`/`hide_dialog` calls run **deferred**: their
     /// `shown()` builds are heavy and may re-enter `MindUi` (or an external
@@ -190,10 +196,8 @@ impl MindUi {
             log::warn!("[ui] open_dialog: unknown dialog '{key}'");
             return false;
         };
-        // `PlanetDialog.showChangesNotice` overlays the still-visible planet
-        // page (Java `BaseDialog` does not hide its parent): a `keep_previous`
-        // context key suppresses the auto-hide of the current top dialog.
-        let keep_previous = serde_json::from_str::<serde_json::Value>(&ctx_json.to_string())
+        // Parsed for backward compatibility only (see the doc comment).
+        let _keep_previous = serde_json::from_str::<serde_json::Value>(&ctx_json.to_string())
             .ok()
             .and_then(|value| {
                 value
@@ -201,14 +205,6 @@ impl MindUi {
                     .and_then(serde_json::Value::as_bool)
             })
             .unwrap_or(false);
-        if !keep_previous
-            && let Some(top) = self.stack.last().cloned()
-            && top != key
-            && let Some(mut previous) = self.dialogs.get(&top).cloned()
-            && previous.has_method("hide_dialog")
-        {
-            let _ = previous.call_deferred("hide_dialog", &[]);
-        }
         if node.has_method("set_context_json") && !ctx_json.is_empty() {
             let _ = node.call("set_context_json", &[ctx_json.to_variant()]);
         }
@@ -252,6 +248,10 @@ impl MindUi {
 
     /// Re-shows the current top of the stack after a close (`BaseDialog`
     /// restoration; the parent was hidden when the child opened).
+    ///
+    /// Only re-shows when the dialog is not already visible: with stacked
+    /// dialogs the lower one normally stayed `visible` all along
+    /// (`Dialog.java:288-317`), and re-running `show_dialog` would rebuild it.
     fn reveal_top(&mut self) {
         let Some(top) = self.stack.last().cloned() else {
             return;
@@ -259,7 +259,10 @@ impl MindUi {
         if let Some(mut node) = self.dialogs.get(&top).cloned()
             && node.has_method("show_dialog")
         {
-            let _ = node.call_deferred("show_dialog", &[]);
+            let shown = node.call("is_shown", &[]).try_to::<bool>().unwrap_or(false);
+            if !shown {
+                let _ = node.call_deferred("show_dialog", &[]);
+            }
         }
     }
 

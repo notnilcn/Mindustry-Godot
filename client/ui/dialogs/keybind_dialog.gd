@@ -257,6 +257,8 @@ func _on_capture_gui_input(event: InputEvent) -> void:
 func _unhandled_input(event: InputEvent) -> void:
 	if _capture == null:
 		return
+	if not is_top():
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		_apply_capture(OS.get_keycode_string(event.keycode), true)
 

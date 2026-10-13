@@ -39,6 +39,29 @@ use crate::time::Time;
 use crate::world::{TilePos, WorldError, WorldGrid};
 
 pub use boot::{BootError, SimBuilder, TickReport};
+
+/// `HintsFragment` tick inputs (`HintsFragment.java:38-102`): the player's
+/// placed block set and the fired one-shot event names.
+///
+/// `placed_by_player` mirrors `HintsFragment.placedBlocks` (`BlockBuildEndEvent`
+/// with `!breaking` and `unit == player.unit`); `events` mirrors its
+/// `events` set (`"break"`, `"cannotupgrade"`, `"fire"`, `"factorycontrol"`,
+/// `"derelictbreak"`, `"derelictmouse"`).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct HintEvents {
+    /// Blocks the player has completed placing (`placedBlocks`).
+    pub placed_by_player: std::collections::BTreeSet<BlockId>,
+    /// One-shot hint events, by name.
+    pub events: std::collections::BTreeSet<&'static str>,
+}
+
+impl HintEvents {
+    /// `ResetEvent`: clears both sets.
+    pub fn clear(&mut self) {
+        self.placed_by_player.clear();
+        self.events.clear();
+    }
+}
 pub use clock::SimClock;
 pub use command::{MOVE_COMMAND, UnitCommandRuntime, resolve_wire_target};
 pub use config::SimConfig;
@@ -192,6 +215,8 @@ pub struct Sim {
     player_last_pos: Option<(f32, f32)>,
     /// Currently selected controllable building (`buildingControlSelect`).
     control_building: Option<TilePos>,
+    /// `HintsFragment` tick inputs (placed blocks + fired events).
+    pub hint_events: HintEvents,
 
     seed: u64,
     selected_block: BlockId,
@@ -230,6 +255,7 @@ impl Sim {
             player_death_timer: 0.0,
             player_last_pos: None,
             control_building: None,
+            hint_events: HintEvents::default(),
             seed,
             // Upstream `player.block == null` at boot: no placement block is
             // selected until the player picks one (the command-mode gate

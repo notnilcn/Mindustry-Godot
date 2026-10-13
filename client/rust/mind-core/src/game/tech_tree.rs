@@ -111,8 +111,14 @@ pub fn effective_requirements(registry: &ContentRegistry, node_ref: TechNodeRef)
     out
 }
 
-/// `ResearchDialog.canSpend`: dependencies and objectives satisfied and not
-/// already unlocked.
+/// `ResearchDialog.View.canSpend` (ResearchDialog.java:551-565): the node can
+/// take a payment right now.
+///
+/// Java accepts a **partial** payment: `true` as soon as one unfinished
+/// requirement has any items available, and `true` (spending nothing) when the
+/// content is still locked (`node.content.locked()`), even with an empty pool.
+/// The dependency check is kept here even though Java relies on visibility (an
+/// invisible node cannot be clicked).
 pub fn can_spend(
     registry: &ContentRegistry,
     node_ref: TechNodeRef,
@@ -131,20 +137,72 @@ pub fn can_spend(
     if !dependencies_unlocked(registry, node_ref) {
         return false;
     }
+    // `selectable(node)`: unlocked or every objective complete. The unlock
+    // half was rejected above, so only the objective half remains here.
     if !objectives_complete(registry, &node.objectives, ctx) {
         return false;
     }
     // Requirements come from the node's materialized list, or the content's
     // `researchRequirements()` when the generated tree left it empty.
     let requirements = effective_requirements(registry, node_ref);
-    requirements.iter().enumerate().all(|(index, requirement)| {
+    if requirements.is_empty() {
+        return true;
+    }
+    if requirements.iter().enumerate().any(|(index, requirement)| {
         let finished = node
             .finished_requirements
             .get(index)
             .map(|stack| stack.amount)
             .unwrap_or(0);
-        finished >= requirement.amount || items.get(requirement.item) > 0
-    })
+        finished < requirement.amount && items.get(requirement.item) > 0
+    }) {
+        return true;
+    }
+    // `node.content.locked()`: a locked node can always be "spent" — the
+    // click spends nothing and only re-renders (`ResearchDialog.spend`).
+    true
+}
+
+/// `ResearchDialog.rebuildItems` removal (`ItemSeq.add(item, -amount)`):
+/// distribute the removal over every non-current based sector by percentage,
+/// then take the remainder from the current sector last.
+///
+/// `others` are the per-sector amounts of the item for the other sectors (in
+/// caller order); `current` is the current sector's amount when it is cached
+/// (`None` when not a campaign sector / no base). Returns the per-other
+/// removals in the same order plus the current-sector removal.
+///
+/// Java iterates its `ObjectMap` sector cache in hash order; callers pass a
+/// deterministic order (planet content order, then sector id) instead.
+pub fn distribute_removal(amount: i32, current: Option<i32>, others: &[i32]) -> (Vec<i32>, i32) {
+    // `percentage = amount / max(get(item) - cur, 1)`: `get(item)` is the
+    // whole pool, so the denominator is the non-current total.
+    let total: i32 = others.iter().sum::<i32>() + current.unwrap_or(0);
+    let percentage = amount as f64 / (total - current.unwrap_or(0)).max(1) as f64;
+
+    let mut counter = amount;
+    let mut removals = vec![0; others.len()];
+    for (index, &available) in others.iter().enumerate() {
+        if counter == 0 {
+            break;
+        }
+        if available <= 0 {
+            continue;
+        }
+        // `min(counter, min(ceil(percentage * available), available))`
+        let to_remove = counter.min(((percentage * available as f64).ceil() as i32).min(available));
+        removals[index] = to_remove;
+        counter -= to_remove;
+    }
+
+    // Only consume from the active sector last.
+    let mut current_removal = 0;
+    if counter > 0
+        && let Some(current) = current
+    {
+        current_removal = current.max(0).min(counter);
+    }
+    (removals, current_removal)
 }
 
 /// `ResearchDialog.selectable`: all parents unlocked.
@@ -628,10 +686,20 @@ mod tests {
 
         let _ = unlock(&mut registry, parent_ref, &mut store);
         let mut items = ItemModule::with_items(registry.items().len());
-        assert!(
-            !can_spend(&registry, node_ref, &items, &AllowAll),
-            "an empty inventory cannot research a costed node"
-        );
+        // `View.canSpend` accepts the click with an empty pool — a locked node
+        // can always be "spent" (ResearchDialog.java:563-564); the call spends
+        // nothing and does not complete.
+        assert!(can_spend(&registry, node_ref, &items, &AllowAll));
+        let no_payment = spend(
+            &mut registry,
+            node_ref,
+            &mut items,
+            &mut store,
+            &AllowAll,
+            false,
+        )
+        .unwrap();
+        assert!(no_payment.spent.is_empty() && !no_payment.complete);
 
         for stack in &effective {
             items.add(stack.item, stack.amount + 5, 1_000_000);
@@ -687,6 +755,83 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(err, SpendError::ClientReadOnly);
+    }
+
+    /// `View.canSpend` accepts a **partial** payment: one missing item does not
+    /// block a spend that covers the other requirement (ResearchDialog.java:556-561).
+    #[test]
+    fn can_spend_allows_partial_when_an_item_is_missing() {
+        let (mut registry, mut store) = registry();
+        let copper = registry.item_id("copper").unwrap();
+        let lead = registry.item_id("lead").unwrap();
+        let parent_content =
+            ContentRef::of(ContentType::Block, registry.block_id("router").unwrap());
+        let parent_ref = push_node(
+            &mut registry,
+            0,
+            None,
+            Some(parent_content),
+            "router",
+            Vec::new(),
+        );
+        let child_content = ContentRef::of(ContentType::Block, registry.block_id("duo").unwrap());
+        let child_ref = push_node(
+            &mut registry,
+            1,
+            Some(parent_ref),
+            Some(child_content),
+            "duo",
+            vec![ItemStack::new(copper, 10), ItemStack::new(lead, 10)],
+        );
+        let _ = unlock(&mut registry, parent_ref, &mut store);
+
+        let mut items = ItemModule::with_items(registry.items().len());
+        items.add(copper, 5, 1_000);
+        assert!(can_spend(&registry, child_ref, &items, &AllowAll));
+        let result = spend(
+            &mut registry,
+            child_ref,
+            &mut items,
+            &mut store,
+            &AllowAll,
+            false,
+        )
+        .unwrap();
+        assert!(!result.complete, "one requirement is still open");
+        let node = registry.tech().node(child_ref).unwrap();
+        assert_eq!(node.finished_requirements[0].amount, 5);
+        assert_eq!(node.finished_requirements[1].amount, 0);
+    }
+
+    /// A locked node with an empty pool still `canSpend` (Java
+    /// `node.content.locked()`); the spend takes nothing.
+    #[test]
+    fn can_spend_locked_node_with_empty_pool_is_true() {
+        let (mut registry, mut store) = registry();
+        let (parent_ref, child_ref, _, _) = synthetic_pair(&mut registry);
+        let _ = unlock(&mut registry, parent_ref, &mut store);
+        let mut items = ItemModule::with_items(registry.items().len());
+        assert!(can_spend(&registry, child_ref, &items, &AllowAll));
+        let result = spend(
+            &mut registry,
+            child_ref,
+            &mut items,
+            &mut store,
+            &AllowAll,
+            false,
+        )
+        .unwrap();
+        assert!(result.spent.is_empty());
+        assert!(!result.complete);
+    }
+
+    /// `rebuildItems` percentage removal (ResearchDialog.java:248-292).
+    #[test]
+    fn distribute_removal_matches_java() {
+        // amount 10, others [30, 10], current 20: pct = 10/40 -> A 8, B 2, current 0.
+        assert_eq!(distribute_removal(10, Some(20), &[30, 10]), (vec![8, 2], 0));
+        // amount 50, others [10], current 100: pct = 5 -> A 10, current 40.
+        assert_eq!(distribute_removal(50, Some(100), &[10]), (vec![10], 40));
     }
 
     #[test]
