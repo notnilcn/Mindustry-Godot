@@ -2830,6 +2830,13 @@ impl MindSimHost {
             .unwrap_or(true)
     }
 
+    /// Player-team colour as packed `rgba8888` (landing flame circles,
+    /// `CoreBlock.java:505-512`; G03 T18).
+    #[func]
+    pub fn player_team_color(&self) -> i64 {
+        i64::from(crate::render::overlays::team_color(self.player_team()))
+    }
+
     // ---- G03 T7 power/bridge link seams (Rust-only) ----
 
     /// Power-node laser links in the (grown) visible rect (`PowerNode.draw`,

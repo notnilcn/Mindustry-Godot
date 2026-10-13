@@ -53,7 +53,7 @@ mod load;
 mod menu;
 mod minimap;
 mod objective_markers;
-mod overlays;
+pub(crate) mod overlays;
 mod pixelate;
 mod plans;
 mod shaders;
@@ -451,6 +451,18 @@ impl MindWorldRenderer {
             .and_then(|node| node.try_cast::<Node2D>().ok())
         {
             fx.set_z_index(self.band_plan.band(BandKey::base(Layer::Effect)));
+        }
+
+        // The landing core (`CoreBlock.drawLaunch`) runs at `Layer.space`
+        // (160) in Java — above every world layer — so the dropping core
+        // covers the real building until touchdown (G03 T18).
+        if let Some(mut landing) = self
+            .base()
+            .get_node_or_null("/root/Spine/World/LandingCore")
+            .and_then(|node| node.try_cast::<Node2D>().ok())
+        {
+            landing.set_z_index(self.band_plan.band(BandKey::base(Layer::Space)));
+            landing.set_z_as_relative(false);
         }
     }
 
