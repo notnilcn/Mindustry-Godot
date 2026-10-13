@@ -197,6 +197,15 @@ pub struct CampaignRuntime {
     /// Upstream draws from the global `Mathf.random`; the live port keeps a
     /// dedicated stream so a scenario replays byte-for-byte (PAR-0139).
     pub ai_rng: ArcRand,
+    /// Sector capture converted the wave team to derelict on the next
+    /// `Sim::tick` (`TeamData.destroyToDerelict`, Teams.java:331-362): a
+    /// system cannot mutate the world mid-schedule, so
+    /// `game_state_tick_system` queues the team here.
+    pub pending_derelict_team: Option<u8>,
+    /// `coreDestroyClear` posts (`Logic` `BlockDestroyEvent`,
+    /// Logic.java:182-186): `(team, x, y, range)` drained by
+    /// `Sim::apply_campaign_world_requests` into `TeamData.timeDestroy`.
+    pub pending_time_destroy: Vec<(u8, f32, f32, f32)>,
 }
 
 impl CampaignRuntime {
@@ -211,6 +220,8 @@ impl CampaignRuntime {
             is_client: false,
             unlocked_content: std::collections::HashSet::new(),
             ai_rng: ArcRand::new(0x5EED_0139),
+            pending_derelict_team: None,
+            pending_time_destroy: Vec::new(),
         }
     }
 
@@ -291,6 +302,11 @@ pub fn sync_session_with_sim(
         session
             .teams
             .register_core(*entity, TeamId(*team), &session.rules);
+        // `Logic.play` heals every active team's cores on a fresh play
+        // (`Logic.java:286-291` `entity.heal()`); a resume keeps saved health.
+        if apply_loadout && let Some(mut health) = world.get_mut::<Health>(*entity) {
+            health.health = health.max_health;
+        }
         if *team == default_team {
             sync.player_cores += 1;
         }
@@ -729,11 +745,18 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
 
 /// `TickSet::GameStateCheck`: `Logic.checkGameState` + campaign loss
 /// bookkeeping.
+///
+/// `Logic.update` runs the check only when `state.rules.canGameOver`
+/// (`Logic.java:521`).
 pub fn game_state_tick_system(world: &mut World) {
     let Some(mut runtime) = world.remove_resource::<CampaignRuntime>() else {
         return;
     };
     if runtime.session.phase != State::Playing || runtime.is_client {
+        world.insert_resource(runtime);
+        return;
+    }
+    if !runtime.session.rules.can_game_over {
         world.insert_resource(runtime);
         return;
     }
@@ -750,10 +773,28 @@ pub fn game_state_tick_system(world: &mut World) {
                 winner,
             ));
         } else {
+            // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
+            // the captured sector's wave team turns derelict on the next tick.
+            if matches!(event, PlayEvent::SectorCapture { .. }) {
+                runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
+            }
             runtime.events.push(event);
         }
     }
     world.insert_resource(runtime);
+}
+
+/// `state.isCampaign() && state.getSector().isCaptured()` for the currently
+/// played sector (`Sector.isCaptured`, `Sector.java:181-184`: the played sector
+/// has waves and attack mode off).
+pub fn current_sector_captured(world: &World) -> bool {
+    world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|runtime| {
+            runtime.session.is_campaign()
+                && !runtime.session.rules.waves
+                && !runtime.session.rules.attack_mode
+        })
 }
 
 /// `RtsAI.flags`: candidate target priority order.
@@ -1362,6 +1403,64 @@ mod tests {
         game_state_tick_system(&mut world);
         team_ai_system(&mut world);
         assert!(world.get_resource::<CampaignRuntime>().is_none());
+    }
+
+    /// T7: `Logic.update` runs `checkGameState` only when
+    /// `state.rules.canGameOver` (`Logic.java:521`).
+    #[test]
+    fn game_state_check_respects_can_game_over() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            can_game_over: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        // No player core: `checkGameState` would emit GameOver if it ran.
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+        game_state_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert!(
+            !runtime
+                .events
+                .iter()
+                .any(|event| matches!(event, PlayEvent::GameOver { .. })),
+            "canGameOver=false suppresses the check: {:?}",
+            runtime.events
+        );
+    }
+
+    /// T7: `current_sector_captured` follows `Sector.isCaptured`
+    /// (`Sector.java:181-184`): a played campaign sector with waves and attack
+    /// mode off; no runtime means not captured.
+    #[test]
+    fn captured_flag_follows_rules() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            attack_mode: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+        assert!(current_sector_captured(&world));
+        world
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("runtime")
+            .session
+            .rules
+            .waves = true;
+        assert!(!current_sector_captured(&world));
+        assert!(!current_sector_captured(&World::new()), "no runtime");
     }
 
     #[test]

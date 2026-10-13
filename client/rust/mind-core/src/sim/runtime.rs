@@ -32,6 +32,7 @@ use crate::content::{
 };
 use crate::determinism::{Checksum, Checksummer, CommandError};
 use crate::ecs::{BuildingComp, TeamId};
+use crate::game::runtime::CampaignRuntime;
 use crate::world::block::{BlockError, BlockTable};
 use crate::world::blocks::power::{
     PowerGrids, PowerNodeConfig, power_graph_removed, read_power_info, update_power_graph,
@@ -1105,6 +1106,264 @@ impl Sim {
             Some(runtime) => runtime.checksum(&self.ecs.0),
             None => Checksummer::new().finish(),
         }
+    }
+
+    /// `BuildingComp.changeTeam` for `Call.setTeams` (`BuildingComp.java`):
+    /// sets the ECS team comps, moves the block in the team counter and
+    /// re-merges the power graph.
+    pub fn set_building_team(&mut self, entity: Entity, team: u8) {
+        let Some(block) = self
+            .ecs
+            .0
+            .get::<crate::entities::comp::Building>(entity)
+            .map(|building| building.block)
+        else {
+            return;
+        };
+        let old_team = self
+            .ecs
+            .0
+            .get::<crate::entities::comp::TeamComp>(entity)
+            .map(|comp| comp.team)
+            .unwrap_or(0);
+        if old_team == team {
+            return;
+        }
+        if let Some(mut comp) = self
+            .ecs
+            .0
+            .get_mut::<crate::entities::comp::TeamComp>(entity)
+        {
+            comp.team = team;
+        }
+        if let Some(mut comp) = self.ecs.0.get_mut::<BuildingComp>(entity) {
+            comp.team = TeamId(team);
+        }
+        if let Some(mut counter) = self.ecs.0.get_resource_mut::<BlockCounter>() {
+            counter.remove(old_team, block, 1);
+            counter.add(team, block, 1);
+        }
+        let Sim {
+            ecs,
+            grid,
+            block_runtime,
+            ..
+        } = self;
+        if let Some(runtime) = block_runtime.as_mut() {
+            runtime.remove_power_graph(&mut ecs.0, grid, entity);
+            runtime.merge_power_graph(&mut ecs.0, grid, entity);
+        }
+    }
+
+    /// `TeamData.destroyToDerelict` (`Teams.java:331-362`): a captured team's
+    /// cores die, its other buildings convert to derelict (team 0) except a
+    /// 20% `rng` roll that is destroyed, its units die and its plans clear.
+    pub fn destroy_team_to_derelict(&mut self, team: u8, rng: &mut crate::determinism::SimRng) {
+        let team_id = crate::ecs::TeamId(team);
+        // Plans clear first (`TeamData.destroyToDerelict` `plans.clear()`).
+        if let Some(mut campaign) = self.ecs.0.get_resource_mut::<CampaignRuntime>() {
+            campaign.session.teams.get(team_id).plans.clear();
+        }
+        for entity in self.live_buildings_by_seq() {
+            let entity_team = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::TeamComp>(entity)
+                .map(|comp| comp.team)
+                .unwrap_or(0);
+            if entity_team != team {
+                continue;
+            }
+            let privileged = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Building>(entity)
+                .and_then(|building| {
+                    self.ecs
+                        .0
+                        .get_resource::<BlockTable>()
+                        .and_then(|table| table.instance(building.block))
+                        .map(|inst| inst.def.privileged)
+                })
+                .unwrap_or(false);
+            if privileged {
+                continue;
+            }
+            if self
+                .ecs
+                .0
+                .get::<crate::world::blocks::storage::core_block::CoreBuild>(entity)
+                .is_some()
+            {
+                self.kill_building(entity);
+                continue;
+            }
+            if rng.chance(crate::determinism::RngStream::Sim, 0.2) {
+                self.kill_building(entity);
+            } else {
+                self.set_building_team(entity, 0);
+            }
+        }
+        // Units of the team die (Java runs the kill after a random delay).
+        let doomed_units: Vec<Entity> = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity_ref| {
+                entity_ref
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>()
+                    .is_some()
+                    && entity_ref
+                        .get::<crate::entities::comp::TeamComp>()
+                        .map(|comp| comp.team)
+                        == Some(team)
+            })
+            .map(|entity_ref| entity_ref.id())
+            .collect();
+        for entity in doomed_units {
+            self.kill_building(entity);
+        }
+    }
+
+    /// `TeamData.timeDestroy` (`Teams.java:365-397`): every non-privileged
+    /// building of `team` within `range` of `(x, y)` that is not within
+    /// `range` of another remaining core converts to derelict (20% die).
+    pub fn time_destroy(
+        &mut self,
+        team: u8,
+        x: f32,
+        y: f32,
+        range: f32,
+        rng: &mut crate::determinism::SimRng,
+    ) {
+        let cores = self.team_core_positions(team);
+        for entity in self.live_buildings_by_seq() {
+            let entity_team = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::TeamComp>(entity)
+                .map(|comp| comp.team)
+                .unwrap_or(0);
+            if entity_team != team {
+                continue;
+            }
+            let Some(building) = self.ecs.0.get::<crate::entities::comp::Building>(entity) else {
+                continue;
+            };
+            let privileged = self
+                .ecs
+                .0
+                .get_resource::<BlockTable>()
+                .and_then(|table| table.instance(building.block))
+                .map(|inst| inst.def.privileged)
+                .unwrap_or(false);
+            if privileged {
+                continue;
+            }
+            let (px, py) = crate::world::BuildHarness::tile_center(
+                i32::from(building.tile.x()),
+                i32::from(building.tile.y()),
+            );
+            // `build.within(x, y, range)`: circle test in world pixels.
+            if (px - x).powi(2) + (py - y).powi(2) > range * range {
+                continue;
+            }
+            // `!cores.contains(c -> c.within(build, range))`.
+            let near_core = cores
+                .iter()
+                .any(|(cx, cy)| (px - cx).powi(2) + (py - cy).powi(2) <= range * range);
+            if near_core {
+                continue;
+            }
+            if rng.chance(crate::determinism::RngStream::Sim, 0.2) {
+                self.kill_building(entity);
+            } else {
+                self.set_building_team(entity, 0);
+            }
+        }
+    }
+
+    /// World-pixel centers of every live core of `team`.
+    fn team_core_positions(&self, team: u8) -> Vec<(f32, f32)> {
+        let mut cores = Vec::new();
+        for entity_ref in self.ecs.0.iter_entities() {
+            if entity_ref
+                .get::<crate::world::blocks::storage::core_block::CoreBuild>()
+                .is_none()
+            {
+                continue;
+            }
+            if entity_ref
+                .get::<crate::entities::comp::TeamComp>()
+                .map(|comp| comp.team)
+                != Some(team)
+            {
+                continue;
+            }
+            let Some(building) = entity_ref.get::<crate::entities::comp::Building>() else {
+                continue;
+            };
+            cores.push(crate::world::BuildHarness::tile_center(
+                i32::from(building.tile.x()),
+                i32::from(building.tile.y()),
+            ));
+        }
+        cores
+    }
+
+    /// Live plan-07 buildings in `(EntitySeq, entity.index())` order.
+    fn live_buildings_by_seq(&self) -> Vec<Entity> {
+        let mut buildings: Vec<(u64, Entity)> = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter_map(|entity_ref| {
+                entity_ref.get::<crate::entities::comp::Building>()?;
+                let seq = entity_ref
+                    .get::<crate::ecs::EntitySeq>()
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX);
+                Some((seq, entity_ref.id()))
+            })
+            .collect();
+        buildings.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+        buildings.into_iter().map(|(_, entity)| entity).collect()
+    }
+
+    /// Marks a building or unit dead; the next `resolve_deaths` pass destroys
+    /// it (Java `Building.kill()`/`Unit.kill()`).
+    fn kill_building(&mut self, entity: Entity) {
+        if let Some(mut health) = self.ecs.0.get_mut::<crate::entities::comp::Health>(entity) {
+            health.dead = true;
+            health.health = 0.0;
+        }
+    }
+
+    /// Drains `CampaignRuntime` world-request queues that cannot mutate the
+    /// world from inside a system: the capture → derelict conversion (T7) and
+    /// `coreDestroyClear` `timeDestroy` posts.
+    pub(crate) fn apply_campaign_world_requests(&mut self) {
+        let (derelict_team, time_destroys) = {
+            let Some(mut runtime) = self.ecs.0.get_resource_mut::<CampaignRuntime>() else {
+                return;
+            };
+            (
+                runtime.pending_derelict_team.take(),
+                std::mem::take(&mut runtime.pending_time_destroy),
+            )
+        };
+        if derelict_team.is_none() && time_destroys.is_empty() {
+            return;
+        }
+        // Pass the sim's stream through a swap: the methods borrow `self`.
+        let mut rng = std::mem::replace(&mut self.rng_streams, crate::determinism::SimRng::new(0));
+        if let Some(team) = derelict_team {
+            self.destroy_team_to_derelict(team, &mut rng);
+        }
+        for (team, x, y, range) in time_destroys {
+            self.time_destroy(team, x, y, range, &mut rng);
+        }
+        self.rng_streams = rng;
     }
 
     /// Materializes the ECS buildings for a loaded grid (map/save reader's

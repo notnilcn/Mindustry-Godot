@@ -1055,3 +1055,118 @@ fn block_runtime_placement_gate_rejects_locked_and_special_visibility() {
         Some(BlockId::new(shown.raw()))
     );
 }
+
+/// T7: `TeamData.destroyToDerelict` (`Teams.java:331-362`) — a captured team's
+/// cores die, its other buildings convert to derelict except a 20% `rng` roll,
+/// and its units die.
+#[test]
+fn capture_converts_wave_team_to_derelict() {
+    use crate::determinism::{RngStream, SimRng};
+    use crate::entities::comp::Health;
+    use crate::entities::comp::TeamComp;
+    use crate::entities::comp::unit::comp::UnitTypeComp;
+
+    let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime installs");
+    sim.install_unit_runtime().expect("unit runtime");
+    let core = sim.content().id("core-shard").expect("core-shard");
+    let wall = sim.content().id("copper-wall").expect("copper-wall");
+    assert!(sim.place_for_team(10, 10, core, 0, 2));
+    for x in 20..30 {
+        assert!(sim.place_for_team(x, 20, wall, 0, 2), "wall at {x}");
+    }
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 160.0, 160.0, 0.0)
+        .expect("dagger");
+
+    // The expected kill count is the same stream replay the implementation
+    // uses (10 draws in EntitySeq order: the walls).
+    let expected_kills = {
+        let mut rng = SimRng::new(7);
+        (0..10).filter(|_| rng.chance(RngStream::Sim, 0.2)).count()
+    };
+    let mut rng = SimRng::new(7);
+    sim.destroy_team_to_derelict(2, &mut rng);
+    // Death pass removes the killed entities.
+    sim.tick().expect("tick");
+    sim.tick().expect("tick");
+
+    let mut walls = 0usize;
+    for entity_ref in sim.ecs.0.iter_entities() {
+        let Some(team) = entity_ref.get::<TeamComp>() else {
+            continue;
+        };
+        if entity_ref.get::<UnitTypeComp>().is_some() {
+            continue;
+        }
+        if entity_ref
+            .get::<crate::entities::comp::Building>()
+            .is_none()
+        {
+            continue;
+        }
+        assert_ne!(team.team, 2, "no team-2 building remains");
+        walls += 1;
+    }
+    assert_eq!(walls, 10 - expected_kills, "20% roll destroyed the rest");
+    assert!(
+        sim.grid.entity_at(TilePos::new(10, 10)).is_none(),
+        "core destroyed"
+    );
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err()
+            || sim.ecs.0.get::<Health>(dagger).is_some_and(|h| h.dead),
+        "wave-team dagger killed"
+    );
+}
+
+/// T7: `TeamData.timeDestroy` (`Teams.java:365-397`) — only buildings within
+/// range of the destroyed core AND outside range of the remaining core convert.
+#[test]
+fn time_destroy_spares_buildings_near_another_core() {
+    use crate::determinism::{RngStream, SimRng};
+    use crate::entities::comp::Health;
+    use crate::entities::comp::TeamComp;
+
+    let mut sim = Sim::new(7, 256, 256, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime installs");
+    let core = sim.content().id("core-shard").expect("core-shard");
+    let wall = sim.content().id("copper-wall").expect("copper-wall");
+    // Core A at (10,10) (destroyed), core B 100 tiles away.
+    assert!(sim.place_for_team(10, 10, core, 0, 2));
+    assert!(sim.place_for_team(110, 10, core, 0, 2));
+    assert!(sim.place_for_team(20, 10, wall, 0, 2));
+    assert!(sim.place_for_team(105, 10, wall, 0, 2));
+    sim.apply(Command::Break { x: 10, y: 10 })
+        .expect("core A destroyed");
+    assert!(sim.grid.entity_at(TilePos::new(10, 10)).is_none());
+
+    let expected_a_wall_dies = {
+        let mut rng = SimRng::new(11);
+        rng.chance(RngStream::Sim, 0.2)
+    };
+    let mut rng = SimRng::new(11);
+    // Core A's world-pixel center: tile (10,10) -> (84, 84).
+    sim.time_destroy(2, 84.0, 84.0, 400.0, &mut rng);
+
+    let a_wall = sim.grid.entity_at(TilePos::new(20, 10)).expect("A wall");
+    let a_team = sim.ecs.0.get::<TeamComp>(a_wall).map(|t| t.team);
+    if expected_a_wall_dies {
+        assert!(
+            sim.ecs.0.get::<Health>(a_wall).is_some_and(|h| h.dead),
+            "A wall died on the 20% roll"
+        );
+    } else {
+        assert_eq!(a_team, Some(0), "A wall converted to derelict");
+    }
+    let b_wall = sim.grid.entity_at(TilePos::new(105, 10)).expect("B wall");
+    assert_eq!(
+        sim.ecs.0.get::<TeamComp>(b_wall).map(|t| t.team),
+        Some(2),
+        "wall near the remaining core untouched"
+    );
+    assert!(
+        sim.grid.entity_at(TilePos::new(110, 10)).is_some(),
+        "core B survives"
+    );
+}

@@ -590,6 +590,30 @@ impl Sim {
                     .get::<TeamComp>(entity)
                     .map(|team| team.team)
                     .unwrap_or(0);
+                // `Logic` `BlockDestroyEvent` (`Logic.java:182-186`): a dead AI
+                // core with `coreDestroyClear` queues `TeamData.timeDestroy`
+                // around it; `Sim::apply_campaign_world_requests` applies it
+                // after this tick's schedule (`Core.app.post`).
+                if self
+                    .ecs
+                    .0
+                    .get::<crate::world::blocks::storage::core_block::CoreBuild>(entity)
+                    .is_some()
+                    && let Some(mut campaign) = self.ecs.0.get_resource_mut::<CampaignRuntime>()
+                {
+                    let rules = campaign.session.rules.clone();
+                    if rules.core_destroy_clear
+                        && team != rules.default_team
+                        && rules.team_is_ai(team, campaign.session.is_campaign())
+                    {
+                        campaign.pending_time_destroy.push((
+                            team,
+                            center.0,
+                            center.1,
+                            rules.enemy_core_build_radius,
+                        ));
+                    }
+                }
                 let Some(runtime) = self.block_runtime.as_mut() else {
                     break;
                 };

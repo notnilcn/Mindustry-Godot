@@ -601,6 +601,9 @@ impl Sim {
         self.update_builders();
         // Zero-health units/buildings die (`HealthComp.damage` -> `kill`).
         let _ = self.resolve_deaths();
+        // Capture-derived world requests (T7) apply after the death pass and
+        // before the events flush, mirroring Java's next-frame `Core.app.post`.
+        self.apply_campaign_world_requests();
         self.flush_events();
         self.time.update();
         self.clock.update(&mut self.ecs.0);

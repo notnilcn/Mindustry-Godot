@@ -479,6 +479,16 @@ impl MindCampaign {
                 mind_core::game::play::PlayEvent::SectorCapture { .. } => {
                     self.apply_capture_bookkeeping(&mut runtime, registry.as_mut());
                     dirty = true;
+                    // `Logic.sectorCapture` (`Logic.java:398-401`):
+                    // `control.saves.saveSector(state.rules.sector)` — the
+                    // captured world is saved immediately, like the GameOver arm.
+                    if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        host.bind_mut()
+                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+                        self.saving_finish_tick = Some(tick.saturating_add(3));
+                        log::info!("capture save queued (`{}`)", file.display());
+                    }
+                    self.persist_sector_record();
                 }
                 mind_core::game::play::PlayEvent::CampaignComplete { .. } => {
                     self.campaign_complete = true;
