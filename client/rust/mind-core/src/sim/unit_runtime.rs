@@ -1898,18 +1898,14 @@ pub fn unit_update_system(world: &mut World) {
             // (`DesktopInput.updateMovement`); no target acquisition or pathing.
             crate::ai::types::player::update_player(world, &runtime.grid, &runtime.content, entity);
         } else if slot.kind == AiKind::Command {
-            // `CommandAI.updateUnit` -> `defaultBehavior`: targeting runs for
-            // the weapons (`updateTargeting`, autoTarget), but movement only
-            // follows an explicit order (`targetPos`); with none the unit
-            // idles in place instead of walking to the core anchor.
-            let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
-            set_mount_targets(world, &runtime.content, entity, mount_target, None);
-            // `CommandAI.updateUnit`'s `commandController` (mine/repair/rebuild/
-            // assist) replaces the default movement (T10a: MinerAI).
+            // `CommandAI.updateUnit` -> `defaultBehavior`/`commandController`
+            // (T10a/T10b: MinerAI/RepairAI).
             let command_kind = resolve_command_kind(world, &runtime.content, entity, &slot);
-            if command_kind == Some(crate::content::registries::commands::ControllerKind::Miner) {
-                let mut miner = world
-                    .get::<crate::ai::types::miner::MinerAiState>(entity)
+            if command_kind == Some(crate::content::registries::commands::ControllerKind::Repair) {
+                // `RepairAI.updateTargeting` replaces the enemy targeting: the
+                // closest damaged friendly building, else `super` targeting.
+                let mut repair = world
+                    .get::<crate::ai::types::repair::RepairAiState>(entity)
                     .copied()
                     .unwrap_or_default();
                 {
@@ -1926,64 +1922,103 @@ pub fn unit_update_system(world: &mut World) {
                         pathfinder,
                         team,
                     };
-                    crate::ai::types::miner::update_miner_ai(&mut ctx, entity, &mut miner);
+                    crate::ai::types::repair::update_repair_ai(&mut ctx, entity, &mut repair);
                 }
                 if let Some(mut stored) =
-                    world.get_mut::<crate::ai::types::miner::MinerAiState>(entity)
+                    world.get_mut::<crate::ai::types::repair::RepairAiState>(entity)
                 {
-                    *stored = miner;
+                    *stored = repair;
                 } else if world.get_entity(entity).is_ok() {
-                    world.entity_mut(entity).insert(miner);
+                    world.entity_mut(entity).insert(repair);
                 }
             } else {
-                if world
-                    .get::<crate::entities::comp::unit::comp::MinerComp>(entity)
-                    .is_some_and(|comp| comp.mine_tile.is_some())
+                // Targeting runs for the weapons (`updateTargeting`, autoTarget);
+                // movement only follows an explicit order (`targetPos`); with none
+                // the unit idles in place instead of walking to the core anchor.
+                let (_, mount_target) = acquire_target(world, &runtime, &queries, entity, team);
+                set_mount_targets(world, &runtime.content, entity, mount_target, None);
+                if command_kind == Some(crate::content::registries::commands::ControllerKind::Miner)
                 {
-                    // `CommandAI.command`: a non-mine command clears `mineTile`.
-                    crate::entities::comp::unit::miner::clear_mine_tile(world, entity);
-                }
-                // The default `defaultBehavior` movement runs for commands
-                // without a controller (`None`: move/enterPayload/...) and for
-                // the not-yet-dispatched Repair/Builder controllers.
-                match slot.target {
-                    Some(target) => {
-                        let flying = world
-                            .get::<PhysicsComp>(entity)
-                            .is_some_and(|physics| physics.flying);
-                        // Refresh the lazy control path before borrowing fields.
-                        runtime.control_path();
+                    let mut miner = world
+                        .get::<crate::ai::types::miner::MinerAiState>(entity)
+                        .copied()
+                        .unwrap_or_default();
+                    {
                         let UnitRuntime {
-                            grid,
                             content,
-                            control_path,
+                            grid,
+                            pathfinder,
                             ..
                         } = &mut runtime;
-                        let arrived = crate::ai::types::command::update_command_move(
+                        let mut ctx = crate::ai::ai_controller::AiCtx {
                             world,
                             grid,
                             content,
-                            control_path,
-                            entity,
-                            target,
-                            flying,
-                        );
-                        if arrived && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity)
-                        {
-                            // `finishPath`: `targetPos = null`.
-                            stored.target = None;
-                        }
+                            pathfinder,
+                            team,
+                        };
+                        crate::ai::types::miner::update_miner_ai(&mut ctx, entity, &mut miner);
                     }
-                    None => {
-                        if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(entity) {
-                            vel.x = 0.0;
-                            vel.y = 0.0;
+                    if let Some(mut stored) =
+                        world.get_mut::<crate::ai::types::miner::MinerAiState>(entity)
+                    {
+                        *stored = miner;
+                    } else if world.get_entity(entity).is_ok() {
+                        world.entity_mut(entity).insert(miner);
+                    }
+                } else {
+                    if world
+                        .get::<crate::entities::comp::unit::comp::MinerComp>(entity)
+                        .is_some_and(|comp| comp.mine_tile.is_some())
+                    {
+                        // `CommandAI.command`: a non-mine command clears `mineTile`.
+                        crate::entities::comp::unit::miner::clear_mine_tile(world, entity);
+                    }
+                    // The default `defaultBehavior` movement runs for commands
+                    // without a controller (`None`: move/enterPayload/...) and for
+                    // the not-yet-dispatched Repair/Builder controllers.
+                    match slot.target {
+                        Some(target) => {
+                            let flying = world
+                                .get::<PhysicsComp>(entity)
+                                .is_some_and(|physics| physics.flying);
+                            // Refresh the lazy control path before borrowing fields.
+                            runtime.control_path();
+                            let UnitRuntime {
+                                grid,
+                                content,
+                                control_path,
+                                ..
+                            } = &mut runtime;
+                            let arrived = crate::ai::types::command::update_command_move(
+                                world,
+                                grid,
+                                content,
+                                control_path,
+                                entity,
+                                target,
+                                flying,
+                            );
+                            if arrived
+                                && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity)
+                            {
+                                // `finishPath`: `targetPos = null`.
+                                stored.target = None;
+                            }
+                        }
+                        None => {
+                            if let Some(mut vel) =
+                                world.get_mut::<crate::entities::comp::Vel>(entity)
+                            {
+                                vel.x = 0.0;
+                                vel.y = 0.0;
+                            }
                         }
                     }
                 }
+                // `CommandAI` -> `faceTarget()` (CommandAI.java:400/420).
+                face_target(world, &runtime.content, entity, mount_target);
             }
-            // `CommandAI` -> `faceTarget()` (CommandAI.java:400/420).
-            face_target(world, &runtime.content, entity, mount_target);
         } else if slot.kind == AiKind::Missile {
             // `MissileAI.updateMovement` (live dispatch, PAR-0088): steer at
             // the shooter's aim, always move forward, die on enemy-building
@@ -4141,7 +4176,7 @@ fn face_target(
 ///
 /// The aim point is the `Predict.intercept(unit, target, weapon.bullet)` lead
 /// of the first weapon (`AIController.updateWeapons`, AIController.java:231).
-fn set_mount_targets(
+pub(crate) fn set_mount_targets(
     world: &mut World,
     content: &ContentRegistry,
     entity: Entity,

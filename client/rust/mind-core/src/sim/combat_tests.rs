@@ -2819,3 +2819,55 @@ fn miner_comp_respects_tier() {
     assert_eq!(mined, 0, "titanium is above the mono's tier");
     assert_eq!(delivered, 0, "nothing reaches the core");
 }
+
+/// G01 T10b: a team-1 `mega` (default command `repair`) flies to a damaged
+/// friendly wall, aims its heal bolts at it and restores its health
+/// (`RepairAI.updateTargeting/updateMovement`, RepairAI.java:19-80 + T4's
+/// `hitTile` heals).
+#[test]
+fn mega_repairs_damaged_wall() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    place(&mut sim, 10, 10, "core-shard", 1);
+    let wall = place(&mut sim, 30, 10, "copper-wall", 1);
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
+        health.health = 100.0;
+    }
+    let mega = sim
+        .spawn_live_unit("mega", 1, 10.0 * 8.0, 14.0 * 8.0, 0.0)
+        .expect("mega");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(mega) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+    }
+    let healed = health(&sim, wall).unwrap_or(0.0);
+    let (mp, wp) = (
+        sim.ecs.0.get::<Pos>(mega).copied().expect("mega pos"),
+        sim.ecs.0.get::<Pos>(wall).copied().expect("wall pos"),
+    );
+    let dist = ((mp.x - wp.x).powi(2) + (mp.y - wp.y).powi(2)).sqrt();
+    eprintln!("wall {healed} hp, mega {dist} px away");
+    assert!(healed > 100.0, "the mega healed the wall: {healed}");
+    assert!(dist < 178.0, "the mega stays within range: {dist}");
+}
