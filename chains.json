@@ -1,6 +1,6 @@
 {
 "schema":"mindustry-godot/chains@1",
-"updated":"2026-10-13T09:00:00+10:00",
+"updated":"2026-10-13T20:00:00+10:00",
 "sources":{"chains":"chains/*.md (49)","ledger":"parity-ledger.json (166 items)"},
 "guide":{"summary":"Lightweight chain library. Query with jq; never read the whole file. 'chains' = curated recipes from chains/*.md (steps inline; notes/failure_modes/variants in the maps below). 'ledger' = one compact record per parity item; exact call sequences are joinable via 'calls'/'seqs' refs. Notes/failure_modes/fixes are kept out of the records so a default query stays small. Keys of notes/failure_modes/variants/fixes are chain ids (kebab-case) or ledger item ids (PAR-####).","list_chains":"jq -r '.chains[] | [.id, .status, .title] | @tsv' chains.json","chain":"jq '.chains[] | select(.id==\"ground-zero-conveyor-line\")' chains.json","chain_steps":"jq -r '.chains[] | select(.id==\"<id>\") | .steps[]' chains.json","chain_notes":"jq -r '(.notes[\"<id>\"] // [])[]' chains.json","chain_failure_modes":"jq -r '(.failure_modes[\"<id>\"] // [])[]' chains.json","chain_variants":"jq -r '(.variants[\"<id>\"] // [])[]' chains.json","chains_for_item":"jq -r '.chains[] | select(.par | index(\"PAR-0049\")) | .id' chains.json","ledger_item":"jq '.ledger[\"PAR-0049\"]' chains.json  # t=title s=surface st=status par=parent item u=updated run=last run to=fork state path/rep=sequence refs conf=confirm ref","ledger_item_steps":"jq -r '(.ledger[\"PAR-0049\"].steps // [])[] | .a' chains.json","ledger_calls":"jq -r '. as $root | (.ledger[\"PAR-0049\"].rep // {}) | .[] as $s | $root.seqs[$s][] as $c | $root.calls[$c]' chains.json","ledger_notes":"jq -r '(.notes[\"PAR-0049\"] // [])[]' chains.json","ledger_failure_modes":"jq -r '(.failure_modes[\"PAR-0049\"] // [])[]' chains.json","ledger_fixes":"jq -r '(.fixes[\"PAR-0049\"] // [])[]' chains.json","find_by_title":"jq -r '.ledger | to_entries[] | select(.value.t|test(\"loadout\";\"i\")) | .key' chains.json","fields":{"ledger":"t title, s surface, st status, par parent, u updated, run run dir, chain md chain id, to fork state, path {java,godot}->seq ids, conf->pool id, rep {java,godot,compare}->seq ids, steps [{a action, v verdict}].","calls":"exact call object/string as stored in parity-ledger.json.","seqs":"ordered arrays of calls[] ids."}},
 "chains":[
@@ -1523,9 +1523,9 @@
 "PAR-0052":{"t":"Campaign world: player mech spawns on sector launch (Ground Zero)","s":"world","st":"verified","par":"PAR-0028","u":"2026-10-11","run":"runs/20261011-123501-PAR-0045-fix/","to":"sector launch (Ground Zero), fresh or resumed","path":{"godot":"s126"},"conf":"k29","rep":{"java":"s127","godot":"s128","compare":"s129"},"steps":[{"a":"launch/resume GZ"},{"a":""}]},
 "PAR-0053":{"t":"Render: live units are not drawn (no unit view pass)","s":"world","st":"verified","par":"PAR-0028","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client (sector 15, campaign:true, hasCore:true)","conf":"k30"},
 "PAR-0054":{"t":"Launch: loadout dialog calls a non-existent 3-arg start_sector (arity error + break-on-error pause)","s":"campaign","st":"verified","par":"PAR-0024","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launch via the launch_loadout dialog Launch button","conf":"k31","steps":[{"a":"launch with the fixed call site","v":"pass (no arity error; sector live)"}],"chain":"ground-zero-wasd-movement"},
-"PAR-0055":{"t":"Unit render: sprites draw at raw atlas pixels (4x) — missing Draw.scl = 1/scale_marker.width","s":"world","st":"blocked","par":"PAR-0053","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client","conf":"k32","steps":[{"a":"fork capture after the unit-scale fix","v":"pass (sprite scale matches)"}]},
+"PAR-0055":{"t":"Unit render: sprites draw at raw atlas pixels (4x) — missing Draw.scl = 1/scale_marker.width","s":"world","st":"blocked","par":"PAR-0053","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client","conf":"k32","steps":[{"a":"fork capture after the unit-scale fix","v":"pass (sprite scale matches)"}]},
 "PAR-0056":{"t":"Fresh Ground Zero launch stocks the core with 100 copper (Java: empty core)","s":"world","st":"verified","par":"PAR-0045","u":"2026-10-09","run":"runs/20261009-132040-PAR-0037/","to":"fresh Ground Zero launch (core items readback)","path":{"godot":"s130"},"conf":"k33","rep":{"java":"s131","godot":"s132"},"steps":[{"a":"fresh launch core readback after the fix","v":"signals pass: core_items_json == '{}', rules.loadout == [] (was {\"copper\":100} / [copper x100])"}],"chain":"ground-zero-fresh-launch"},
-"PAR-0057":{"t":"HUD minimap: widget shows the whole map with fallback-grey terrain colours","s":"hud","st":"reference","par":"PAR-0037","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero resumed world, HUD minimap at (992,10) 140x140","path":{"godot":"s133"},"conf":"k34","rep":{"java":"s134","godot":"s135","compare":"s136"}},
+"PAR-0057":{"t":"HUD minimap: widget shows the whole map with fallback-grey terrain colours","s":"hud","st":"reference","par":"PAR-0037","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero resumed world, HUD minimap at (992,10) 140x140","path":{"godot":"s133"},"conf":"k34","rep":{"java":"s134","godot":"s135","compare":"s136"}},
 "PAR-0058":{"t":"Tutorial: the player unit offloads mined ore into the nearest core within mineTransferRange (MinerComp offload branch)","s":"world","st":"verified","par":"PAR-0046","u":"2026-10-11","run":"runs/20261011-123501-PAR-0045-fix/","to":"in-game Ground Zero (mining + core offload)","path":{"godot":"s137"},"conf":"k35","rep":{"java":"s138","godot":"s139","compare":"s140"},"steps":[{"a":"mine the ore (PAR-0045 chain)"},{"a":""}]},
 "PAR-0059":{"t":"Campaign: sector preset rules apply on launch (captureWave -> winWave, noLighting)","s":"campaign","st":"verified","par":"PAR-0012","u":"2026-10-10","run":"runs/20261010-085150-sector-preset-rules/","to":"launched serpulo:15 (groundZero) via the MindCampaign facade, rules readable","path":{"godot":"s141"},"conf":"k36","rep":{"godot":"s141"}},
 "PAR-0060":{"t":"HUD wave pane: wave/enemy/status text tracks the campaign; skip button and capture toast","s":"hud","st":"verified","par":"PAR-0028","u":"2026-10-10","run":"runs/20261010-085220-hud-wave-enemies-skip/","to":"fresh Ground Zero launch (500/500) with the HUD visible and the sim parked","path":{"godot":"s142"},"conf":"k37","rep":{"godot":"s143"},"steps":[{"a":"real skip-button click","v":"match"},{"a":"capture_sector toast edge","v":"match"}]},
@@ -1543,16 +1543,16 @@
 "PAR-0072":{"t":"Main menu never plays menu.ogg - it stays silent or starts a random in-game track","s":"menu","st":"reference","u":"2026-10-11","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"boot the client to the main menu and read MindAudio.current_track()/current_track_playing() while the menu is shown","path":{"java":"s172","godot":"s173"},"conf":"k49","rep":{"java":"s174","godot":"s175"}},
 "PAR-0073":{"t":"Placing, breaking and destroying blocks makes no sound in live play","s":"world","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"in-game: place and break a wall/drill in a live sector and check MindAudio.events_applied/pending_events plus the audible cue","path":{"java":"s176","godot":"s177"},"conf":"k50","rep":{"java":"s178","godot":"s179"}},
 "PAR-0074":{"t":"Settings sound sliders (music/sfx/ambient volume) never change what the client plays","s":"settings","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"open Settings -> Sound, drag Music volume to 0, then read MindAudio.stats() and listen to music/effects","path":{"java":"s180","godot":"s181"},"conf":"k51","rep":{"java":"s182","godot":"s183","compare":"s184"}},
-"PAR-0075":{"t":"Fuel generators produce no power: conveyors cannot insert coal/radioactive fuel","s":"world","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client: place a combustion-generator, run a coal conveyor into it, and watch the power graph/battery.","rep":{"java":"s185","godot":"s186"}},
+"PAR-0075":{"t":"Fuel generators produce no power: conveyors cannot insert coal/radioactive fuel","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client: place a combustion-generator, run a coal conveyor into it, and watch the power graph/battery.","rep":{"java":"s185","godot":"s186"}},
 "PAR-0076":{"t":"Reconstructors cannot be supplied with items and upgrade units without the item/power cost","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client: place an additive-reconstructor and run a silicon+graphite belt into it.","rep":{"java":"s187","godot":"s188"}},
 "PAR-0077":{"t":"Sandbox sources/voids do nothing: sources never output and voids never drain","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client (sandbox custom game): item-source -> conveyor, item-void at the belt end, liquid-source -> conduit, power-source -> battery.","rep":{"java":"s189","godot":"s190"}},
-"PAR-0078":{"t":"Pumps produce water on any ground and ignore the floor liquid (oil/slag/cryofluid)","s":"world","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client: place a mechanical-pump on plain stone, then a rotary-pump on tar, then a water-extractor on a ground-water tile.","rep":{"java":"s191","godot":"s192"}},
+"PAR-0078":{"t":"Pumps produce water on any ground and ignore the floor liquid (oil/slag/cryofluid)","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client: place a mechanical-pump on plain stone, then a rotary-pump on tar, then a water-extractor on a ground-water tile.","rep":{"java":"s191","godot":"s192"}},
 "PAR-0079":{"t":"Erekir beam drills and cliff crushers never produce (plasma-bore/cliff-crusher inert)","s":"world","st":"verified","u":"2026-10-12T22:00:00+10:00","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client (Erekir custom game): plasma-bore facing a tungsten/beryllium wall; cliff-crusher next to a sand wall.","rep":{"java":"s193","godot":"s194","compare":"s195"}},
 "PAR-0080":{"t":"Researching any tech node (or capturing any sector) free-unlocks the objective-free early tech tree","s":"campaign","st":"verified","u":"2026-10-11","run":"runs/20261011-161200-PAR-0080-fix/","to":"Campaign -> Serpulo -> Ground Zero -> HUD tech tree -> 'techtree.<null>' rail -> Mechanical Drill row","path":{"java":"s196","godot":"s197"},"conf":"k52","rep":{"java":"s198","godot":"s199","compare":"s200"},"steps":[{"a":"fork: fresh research profile (clear campaign saves + research) -> fresh Ground Zero launch -> click the ore tile (129,49) -> mine to core copper 15 (objective 0 complete)","v":"fork ok (tutorial world with a live core; Java twin forked at obj0 done, core stocked)"},{"a":"action: open the tech tree (HUD tree button) -> rail 'techtree.<null>' -> click the Mechanical Drill row","v":"MISMATCH (pre-fix): 60 extra nodes swept in"},{"a":"re-run the same chain on the fixed build (0b2f0aa)","v":"match (behavior + log): unlocked 6 = baseline + drill; 'auto-unlocked 0 content'"}]},
 "PAR-0081":{"t":"Campaign sector progression is forgotten after a client restart (captures, attempts, stored items, import/export routes reset)","s":"campaign","st":"verified","u":"2026-10-11","run":"runs/20261011-161201-PAR-0081/","to":"Campaign -> launch Ground Zero -> capture / run a wave -> quit -> restart -> planet page sector panel + resume","path":{"java":"s201","godot":"s202"},"conf":"k53","rep":{"java":"s203","godot":"s204","compare":"s205"},"steps":[{"a":"capture sector 15 on a launched Ground Zero (live runtime)","v":"fork ok (capture bookkeeping {captured:true}, sectors_captured 1)"},{"a":"client restart (stop+play) then read the sector record + planet page","v":"MISMATCH pre-fix (captured:false) -> match post-fix (captured:true, page action 'Go')"}]},
 "PAR-0082":{"t":"Sectors never report or accumulate production while you play them (offline production, exports and the sector panel stay empty)","s":"campaign","st":"verified","u":"2026-10-11","run":"runs/20261011-162705-PAR-0082/","to":"Campaign -> resume a base sector -> produce (mine/feed the core) -> Save & Quit -> sector record + planet page sector panel","path":{"java":"s206","godot":"s207"},"conf":"k54","rep":{"java":"s208","godot":"s209","compare":"s210"},"steps":[{"a":"resume the captured Ground Zero, mine copper into the core, step past a 60 s SectorInfo refresh, Save & Quit","v":"pre-fix MISMATCH: record items/production empty after 24 copper produced"},{"a":"same chain on the fixed build (f150143): mine to core copper 974, refresh, exit-save, reopen the planet page","v":"match: record items.copper 974 + production.copper.mean 4.92; panel 'Production: copper 295.0' / 'Stored: copper 974.0'"}]},
 "PAR-0083":{"t":"Campaign attack/submission sectors are absent: those planet cells never load their authored maps and never count as enemy bases","s":"campaign","st":"verified","u":"2026-10-11","run":"runs/20261011-164851-PAR-0083/","to":"Campaign -> Serpulo planet page -> submission/attack cells (e.g. 76, 264) and their authored maps","path":{"java":"s211","godot":"s212"},"conf":"k55","rep":{"java":"s213","godot":"s214","compare":"s215"},"steps":[{"a":"read the submission cells; register the 49 presets; apply the planet-data remap; make requireUnlock=false cells selectable","v":"match (structural): 95 presets, ids golden-aligned; 76 = sector-serpulo-76 enemy base landable; 170 = groundZero; 15 plain"},{"a":"load a submission map: SimHost.load_sector('serpulo', 264) + MindCampaign.start_sector('serpulo', 264)","v":"authored map imported + launched with the player core; residuals itemized (PAR-0154 globe grid, PAR-0155 MSAV subset)"}]},
-"PAR-0084":{"t":"Losing a sector and re-attacking it restores your base instead of applying the loss damage","s":"campaign","st":"verified","u":"2026-10-11","run":"runs/20261011-172322-PAR-0084/","to":"Campaign -> launch a base sector -> lose it (the core destroyed) -> planet page -> re-launch","path":{"java":"s216","godot":"s217"},"conf":"k56","rep":{"java":"s218","godot":"s219","compare":"s220"},"steps":[{"a":"fresh Ground Zero -> exit-save -> destroy the core","v":"loss fires + saves (prerequisites, commit 78a94b5)"},{"a":"re-attack the lost sector (load_sector + start_sector)","v":"replay: 2 survivors restored as derelicts, the core back at the spawn, the sector playable"}]},
+"PAR-0084":{"t":"Losing a sector and re-attacking it restores your base instead of applying the loss damage","s":"campaign","st":"verified","u":"2026-10-13","run":"runs/20261011-172322-PAR-0084/","to":"Campaign -> launch a base sector -> lose it (the core destroyed) -> planet page -> re-launch","path":{"java":"s216","godot":"s217"},"conf":"k56","rep":{"java":"s218","godot":"s219","compare":"s220"},"steps":[{"a":"fresh Ground Zero -> exit-save -> destroy the core","v":"loss fires + saves (prerequisites, commit 78a94b5)"},{"a":"re-attack the lost sector (load_sector + start_sector)","v":"replay: 2 survivors restored as derelicts, the core back at the spawn, the sector playable"}]},
 "PAR-0085":{"t":"The launch loadout picked in Configure Loadout is ignored - every campaign launch uses the empty/default loadout","s":"ui","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Campaign -> planet page -> Launch -> Configure Loadout -> pick a non-default schematic -> Launch","path":{"java":"s221","godot":"s222"},"rep":{"java":"s223","godot":"s224","compare":"s225"}},
 "PAR-0086":{"t":"Placed turrets never acquire targets, rotate or fire: no turret behavior is registered and no turret update pass runs in the shipped client","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"in-engine: campaign Ground Zero -> research/build `duo`, feed copper ammo, spawn an enemy in range, step 600 ticks","path":{"java":"s226","godot":"s227"},"conf":"k57","rep":{"java":"s228","godot":"s229"}},
 "PAR-0087":{"t":"Turret coolant cannot be supplied: water/cryofluid is rejected by item/power turrets and 19 turret blocks report has_liquids=false","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"in-engine (after the turret-behavior fix): place `duo`, run a water conduit into it, compare the liquid bar and reload time","path":{"java":"s230","godot":"s231"},"conf":"k58","rep":{"java":"s232","godot":"s233"}},
@@ -1607,7 +1607,7 @@
 "PAR-0136":{"t":"Join Game forgets added servers and the Remote server list is always empty","s":"multiplayer","st":"reference","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Menu -> Join Game -> @server.add -> type an address -> OK -> restart the client -> Join Game again","path":{"java":"s436","godot":"s437"},"rep":{"java":"s438","godot":"s439"}},
 "PAR-0137":{"t":"Ground units move at full speed across slow terrain (floor speed multipliers ignored)","s":"world","st":"fixing","u":"2026-10-13","run":"runs/20261009-065416-ref-ground-zero/","to":"campaign/in-engine: control a ground mech (player unit or Dagger) over stone vs deep water and measure per-tick displacement","rep":{"java":"s440","godot":"s441","compare":"s442"}},
 "PAR-0138":{"t":"Carrier units cannot pick up or drop blocks/units (payload pickup/drop is a no-op)","s":"world","st":"fixing","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Erekir (or Serpulo `mega`) payload-capable unit: press [ near a ground unit or block, then ] to drop","rep":{"java":"s443","godot":"s444","compare":"s445"}},
-"PAR-0139":{"t":"Enemy attack/base AI never runs: no RTS squads and no BaseBuilderAI construction in the live sim","s":"campaign","st":"verified","u":"2026-10-12","run":"runs/20261011-203001-PAR-0139-r2/","to":"Serpulo attack-mode sector with its map rules carrying the wave-team AI flags (hidden/225: rtsAi:true) and buildAi staged on the wave team (offline save patch)","path":{"java":"s446","godot":"s447"},"conf":"k69","rep":{"java":"s448","godot":"s449","compare":"s450"},"steps":[{"a":"clear saves, load hidden/225, launch as attack sector; assert rules","v":"match: attackMode true + teams[2].rtsAi true (pre-fix the launch merge dropped the map teams: rtsAi false, rtsMaxSquad 15)"},{"a":"run_wave() -> wave spawner","v":"match: `wave spawn: emitted 12 unit(s) for wave 0` (pre-fix: emitted 0 - the inverted TilePos::pack never matched the authored pins `spawn:6226238` = Point2.pack(95,318))"},{"a":"let the live team-AI tick; read the log + counts","v":"match: `team ai: team 2 squad of 12 -> tile (156, 167) (attack)`; unit 13"}]},
+"PAR-0139":{"t":"Enemy attack/base AI never runs: no RTS squads and no BaseBuilderAI construction in the live sim","s":"campaign","st":"verified","u":"2026-10-13","run":"runs/20261011-203001-PAR-0139-r2/","to":"Serpulo attack-mode sector with its map rules carrying the wave-team AI flags (hidden/225: rtsAi:true) and buildAi staged on the wave team (offline save patch)","path":{"java":"s446","godot":"s447"},"conf":"k69","rep":{"java":"s448","godot":"s449","compare":"s450"},"steps":[{"a":"clear saves, load hidden/225, launch as attack sector; assert rules","v":"match: attackMode true + teams[2].rtsAi true (pre-fix the launch merge dropped the map teams: rtsAi false, rtsMaxSquad 15)"},{"a":"run_wave() -> wave spawner","v":"match: `wave spawn: emitted 12 unit(s) for wave 0` (pre-fix: emitted 0 - the inverted TilePos::pack never matched the authored pins `spawn:6226238` = Point2.pack(95,318))"},{"a":"let the live team-AI tick; read the log + counts","v":"match: `team ai: team 2 squad of 12 -> tile (156, 167) (attack)`; unit 13"}]},
 "PAR-0140":{"t":"RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units","s":"input","st":"verified","u":"2026-10-13","run":"runs/20261011-225200-PAR-0140-r2/","to":"campaign/in-game command mode (Shift) drag-select units, then right-click a move target","path":{"java":"s451","godot":"s452"},"conf":"k70","rep":{"java":"s453","godot":"s454"},"steps":[{"a":"Shift held (push_event KeyDown shiftLeft) + drag-select a spawned friendly dagger","v":"partial: selection_json=[1000000002] OK; no selection overlay (Java drawCommanded) drawn"},{"a":"right-click a move target (world 960,400)","v":"mismatch: dagger ignores the order and keeps walking +y under GroundAI (y 470.5->500->529.5 per 60 ticks); a direct unit_command op is ignored too"}]},
 "PAR-0141":{"t":"Direct bullet hits pass through units: only splash/EMP/ability damage can kill them","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero wave defense: let a wave Dagger stand next to a Duo or another Dagger and fire","rep":{"java":"s455","godot":"s456","compare":"s457"}},
 "PAR-0142":{"t":"Planet globe surface renders flat: Java sphere surface shader (term/gloss/shadow) + bloom pass missing (atmosphere halo ported)","s":"campaign","st":"seeded","par":"PAR-0015","u":"2026-10-10","run":"runs/20261011-091537-PAR-0015","to":"planet page (Play > Campaign > chooser Serpulo + OK)","path":{"godot":"s458"},"conf":"k71","rep":{"godot":"s459","compare":"s460"}},
@@ -1624,19 +1624,20 @@
 "PAR-0153":{"t":"Campaign sector autosave never runs: resuming a sector loses the played progress (objectives, mined totals, core items)","s":"campaign","st":"verified","par":"PAR-0051","u":"2026-10-12","run":"runs/20261011-124243-PAR-0051/","to":"play a sector, quit/restart, resume","conf":"k82","rep":{"java":"s489","godot":"s490","compare":"s491"}},
 "PAR-0154":{"t":"Planet globe draws no sector grid: owned/enemy-base/padlock cells and their icons are absent (only the selected hex renders)","s":"campaign","st":"verified","par":"PAR-0015","u":"2026-10-12T22:00:00+10:00","run":"runs/20261011-164851-PAR-0083/","to":"Campaign planet page globe (sector grid layer)","path":{"java":"s492","godot":"s493"},"rep":{"java":"s494","godot":"s495","compare":"s496"}},
 "PAR-0155":{"t":"MSAV import fails for a subset of authored maps: cruxscape.msav and the hidden submission maps error with 'JSON error: expected value' while others import","s":"campaign","st":"verified","u":"2026-10-11","run":"runs/20261011-175400-PAR-0155/","to":"SimHost.load_sector + MindCampaign.start_sector on a submission/attack sector whose authored map carries Infinity rules","path":{"java":"s497","godot":"s498"},"conf":"k83","rep":{"java":"s499","godot":"s500","compare":"s501"},"steps":[{"a":"export/reproduce: load_sector('serpulo', 76) on the authored map","v":"pre-fix MISMATCH: `JSON error: expected value at line 1 column 4016`; the generator fallback world loaded"},{"a":"fix the normalizer; re-run the load + launch","v":"match: `loaded preset map `serpulo/hidden/76` (430x430)`; attack sector with 6208 buildings + core"}]},
-"PAR-0156":{"t":"Enemy AI residuals: prebuildAi core defenders never spawn and estimateStats ignores turret DPS","s":"campaign","st":"seeded","par":"PAR-0139","u":"2026-10-11","to":"Attack-mode sector with a wave-team core (serpulo:225) after PAR-0139's rounds landed","path":{"java":"s502","godot":"s503"},"rep":{"java":"s504","godot":"s505"}},
+"PAR-0156":{"t":"Enemy AI residuals: prebuildAi core defenders never spawn and estimateStats ignores turret DPS","s":"campaign","st":"seeded","par":"PAR-0139","u":"2026-10-13","to":"Attack-mode sector with a wave-team core (serpulo:225) after PAR-0139's rounds landed","path":{"java":"s502","godot":"s503"},"rep":{"java":"s504","godot":"s505"}},
 "PAR-0157":{"t":"Command mode draws no selection overlay: selected units get no hexagon ring, target line or move-square (InputHandler.drawCommanded)","s":"world","st":"fixing","par":"PAR-0140","u":"2026-10-13","to":"Ground Zero, command mode (Shift held), a friendly dagger drag-selected","path":{"godot":"s506"},"conf":"k84","rep":{"java":"s507","godot":"s508"},"steps":[{"a":"drag-select a dagger in command mode","v":"godot draws nothing around the selected unit"}]},
 "PAR-0158":{"t":"The Select Starting Campaign chooser reappears on every boot even after a planet was chosen and a sector has a base","s":"campaign","st":"verified","par":"PAR-0010","u":"2026-10-12","to":"fresh Godot boot with an existing Ground Zero save > Play > Campaign","path":{"godot":"s509"},"conf":"k85","rep":{"java":"s510","godot":"s511"}},
 "PAR-0159":{"t":"Live unit status effects and abilities never update: applied statuses deal no damage and support abilities never tick","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261012-session2/","to":"spawn a dagger next to a damaging status/repair field and watch health over ticks"},
 "PAR-0160":{"t":"Research dialog cannot show node costs or partial progress: the read model never materializes node requirements","s":"ui","st":"verified","par":"PAR-0047","u":"2026-10-13","to":"Research dialog on the imported profile: lancer shows no cost rows (Java req-lancer-silicon = 1900)"},
-"PAR-0161":{"t":"Saves drop every per-kind building body on load: EditorContext::read_building decodes only the base record","s":"world","st":"seeded","par":"PAR-0098","u":"2026-10-12","to":"pause a construct block at progress 0.0417, run_exit_save, reload: ConstructState is gone"},
+"PAR-0161":{"t":"Saves drop every per-kind building body on load: EditorContext::read_building decodes only the base record","s":"world","st":"verified","par":"PAR-0098","u":"2026-10-13","to":"pause a construct block at progress 0.0417, run_exit_save, reload: ConstructState is gone"},
 "PAR-0162":{"t":"Imported user schematics never appear in the campaign read model: only vanilla loadouts load and load_file re-sorts `all` with stale loadout indices","s":"ui","st":"verified","par":"PAR-0085","u":"2026-10-13","to":"Configure Loadout after importing .msch schematics: no imported rows"},
 "PAR-0163":{"t":"Launch dialogs show capacity 0: launch_capacity is absent from the campaign read model","s":"ui","st":"verified","par":"PAR-0085","u":"2026-10-13","to":"Configure Loadout on a launcher sector: capacity reads 0"},
 "PAR-0164":{"t":"Settings store fan-out: MindUi.settings_put_flag does not reset MindCampaign in-memory copy","s":"ui","st":"seeded","u":"2026-10-12","to":"flip campaignselect through the Settings dialog and read MindCampaign in the same session"},
-"PAR-0165":{"t":"place_block/apply_sim_command_json report true for rejected placements (occupied or out-of-bounds tiles)","s":"world","st":"seeded","par":"PAR-0098","u":"2026-10-12","to":"call place_block on an occupied tile: returns true, nothing is placed"},
+"PAR-0165":{"t":"place_block/apply_sim_command_json report true for rejected placements (occupied or out-of-bounds tiles)","s":"world","st":"verified","par":"PAR-0098","u":"2026-10-13","to":"call place_block on an occupied tile: returns true, nothing is placed"},
 "PAR-0166":{"t":"Java's one-time Campaign Changes Notice after a Serpulo remap is missing","s":"campaign","st":"verified","u":"2026-10-12","run":"runs/20261012-session5/","to":"boot after a Serpulo remap: the Campaign Changes Notice shows once, never again"},
 "PAR-0167":{"t":"Research dialog listed only the root row: ResearchView rows carried no tree name","s":"campaign","st":"verified","u":"2026-10-13","run":"runs/20261012-session5-campaign-import/"},
-"PAR-0168":{"t":"Enemy base-builder AI queues no plans (units_base_build golden: 0 of 28)","s":"campaign","st":"seeded","par":"PAR-0139","u":"2026-10-13"}
+"PAR-0168":{"t":"Enemy base-builder AI queues no plans (units_base_build golden: 0 of 28)","s":"campaign","st":"seeded","par":"PAR-0139","u":"2026-10-13"},"PAR-0169":{"t":"BaseBuilderAI scatter regression (units_base_build golden: 0 of 28)","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0170":{"t":"Units with laser/rail/sap weapons have range -4 versus the JVM","s":"world","st":"verified","u":"2026-10-13"},"PAR-0171":{"t":"Line weapons (laser, continuous, shrapnel, rail, sap) never damage units","s":"world","st":"verified","u":"2026-10-13"},"PAR-0172":{"t":"Heal bullets damage the player's own buildings","s":"world","st":"verified","u":"2026-10-13"},"PAR-0173":{"t":"Team rule multipliers ignored by combat","s":"world","st":"verified","u":"2026-10-13"},"PAR-0174":{"t":"Player unit never respawns after death; core unit type ignored","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0175":{"t":"Unit possession / unit clear do nothing","s":"world","st":"verified","u":"2026-10-13"},"PAR-0176":{"t":"No boss list (state.boss()/teams.bosses): no boss bar can be fed","s":"world","st":"verified","u":"2026-10-13"},"PAR-0177":{"t":"Blocks without a consumer override reject all items and liquids","s":"world","st":"verified","u":"2026-10-13"},"PAR-0178":{"t":"Power-node knobs reset to defaults; Configure link toggle and diodes dead","s":"world","st":"verified","u":"2026-10-13"},"PAR-0179":{"t":"Incinerators accept and destroy nothing","s":"world","st":"verified","u":"2026-10-13"},"PAR-0180":{"t":"Drill period ignores hardness; burst drills never burst","s":"world","st":"verified","u":"2026-10-13"},"PAR-0181":{"t":"Menders/overdrive affect enemy buildings and never consume boost items","s":"world","st":"verified","u":"2026-10-13"},"PAR-0182":{"t":"Repair point never heals friendly units","s":"world","st":"verified","u":"2026-10-13"},"PAR-0183":{"t":"Placed blocks show no placement ghost, rotation arrow or range circle","s":"world","st":"verified","u":"2026-10-13"},"PAR-0184":{"t":"Queued build plans and the build beam are invisible","s":"world","st":"verified","u":"2026-10-13"},"PAR-0185":{"t":"Bullets are not drawn at all","s":"world","st":"verified","u":"2026-10-13"},"PAR-0186":{"t":"Mining beam, carried items and engine glows are not drawn","s":"world","st":"verified","u":"2026-10-13"},"PAR-0187":{"t":"Hovered buildings show no health/items/power bars","s":"hud","st":"verified","u":"2026-10-13"},"PAR-0188":{"t":"Doors/switches/sorters show no state sprites; no damage cracks","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0189":{"t":"Plans: queued-plan ghost staging impossible (plans build in ~2 ticks or are dropped)","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0190":{"t":"Configure may not reach BuildingBehavior::configured() (sorter/door state did not change)","s":"world","st":"seeded","u":"2026-10-13"},"PAR-0191":{"t":"No place/break/rotate block effects","s":"world","st":"fixing","u":"2026-10-13"},"PAR-0192":{"t":"Sector resume drops units/fires/puddles/markers/wavetime/stats","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0193":{"t":"Wave countdown runs 60x too slowly; isWaitingWave missing","s":"campaign","st":"fixing","u":"2026-10-13"},"PAR-0194":{"t":"Objectives: completion not saved; Timer 60x slow; DestroyUnits never completes; DestroyBlock instant","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0195":{"t":"Capture leaves the enemy base active; coreDestroyClear missing","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0196":{"t":"Sector map/save rules dropped (limitMapArea, weather, ...); planet ruleSetter + campaign load overrides missing","s":"campaign","st":"verified","u":"2026-10-13"},"PAR-0197":{"t":"T2 regression: the legacy UBJson markers region broke preset reloads","s":"campaign","st":"verified","u":"2026-10-13"},
+"PAR-0198":{"t":"Launch pads never launch; landing pads never land","s":"campaign","st":"seeded","u":"2026-10-13"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -3398,6 +3399,99 @@
 "k85":{"godot":"chooser shown (Select Starting Campaign)"}
 },
 "notes":{
+"PAR-0169":[
+"2026-10-13: 7fa485e: AI scatters in tiles like Java; units_base_build golden 28 -> 27 (item-source tile is SandboxOnly so the part is one wall); also fixed the latent units_factory_output scenario."
+],
+"PAR-0170":[
+"2026-10-13: e2e2cd2: bullet calculateRange kind overrides + special-weapon defaults; JVM compare prints only MISSING turret-unit-build-tower."
+],
+"PAR-0171":[
+"2026-10-13: da2da9a/95fdb73: Damage.collideLine/linecast ported (rail added, sap rewritten); live Ground Zero JSON evidence (runs/20261013-s2-G01-t3)."
+],
+"PAR-0172":[
+"2026-10-13: b7d104a: BulletType.hitTile + both collide_bullet sites; heal_bolt fixture, 2 tests."
+],
+"PAR-0173":[
+"2026-10-13: 2e6bfb1: spawn/apply_health/crush/energy-field/mining multipliers from rules; 3 tests."
+],
+"PAR-0174":[
+"2026-10-13: 78d2d1c: PlayerComp respawn implemented and headless tests pass; live acceptance blocked because the session rules.env is 31 (scorching) while Java Ground Zero runs env=233 - owner G04/G02 rules env."
+],
+"PAR-0175":[
+"2026-10-13: 2433a69: DockedType, possess_unit/clear_unit, SimCommand routes, unit-update despawn rule, gdext unit_control/unit_clear; 3 tests."
+],
+"PAR-0176":[
+"2026-10-13: 245857b: Sim::bosses + boss_json + debug_apply_status; live Ground Zero check passed."
+],
+"PAR-0177":[
+"2026-10-13: G02 T1 390b1bc: Java trait-default accept_stack/accept_item/handle_item/remove_stack + LiquidTraits + heat delegation; in-engine mender evidence runs/20261013-s4-G02-T1."
+],
+"PAR-0178":[
+"2026-10-13: G02 T2 85e8378: node knobs kept, Configure link toggle, DiodeBehavior; in-engine graph 7=7, split/merge evidence runs/20261013-s4-G02-T2."
+],
+"PAR-0179":[
+"2026-10-13: G02 T5 edac3ac: IncineratorState + heat ramp, item/liquid accept+destroy; in-engine 1279 emitted, source drained."
+],
+"PAR-0180":[
+"2026-10-13: G02 T6 11fe3b3: hardness drill time + BurstDrillDef.inverted_time (default 200); in-engine 9 copper at 1625 ticks."
+],
+"PAR-0181":[
+"2026-10-13: G02 T4 1daf494: team-filtered projector scans + boost item consumption; headless only (no damage seam); OverdriveProjector.canOverdrive is not a ported BlockDef field."
+],
+"PAR-0182":[
+"2026-10-13: G02 T12 257aace: repair point heals; repair-turret coolant consumer + capacity 96; headless tests."
+],
+"PAR-0183":[
+"2026-10-13: G03 T2 2c4219d: placement ghosts, arrow, line plans, break rect, range circles; in-engine runs/20261013-s3-G03-T2."
+],
+"PAR-0184":[
+"2026-10-13: G03 T3 8f3a80d: queued build plans, build beam, rebuild ghosts; in-engine beam/rebuild evidence."
+],
+"PAR-0185":[
+"2026-10-13: G03 T4 db1e8e6: bullet sprites, lasers, shrapnel, liquid orbs, trails; live duo-bullets evidence runs/20261013-s3-G03-T4."
+],
+"PAR-0186":[
+"2026-10-13: G03 T5 33b95ce: mining beam, carried items, engines, trails, hit flash; mining evidence runs/20261013-s3-G03-T5 (items/engines occluded by the paused banner in the PNGs)."
+],
+"PAR-0187":[
+"2026-10-13: G03 T6 8ff98f7: hover bars for health/power/items/liquid; core Health bar evidence runs/20261013-s3-G03-T6/core-hover.png."
+],
+"PAR-0188":[
+"2026-10-13: G03 T8 af283f8: code+tests landed but in-engine unconfirmed (configured sorter rendered identically; suspect Configure never reaches configured())."
+],
+"PAR-0189":[
+"2026-10-13: G03 informational finding from T3/T4; see the G03 summary."
+],
+"PAR-0190":[
+"2026-10-13: G03 T8 cross-area finding for G02/G08; related to the state-sprite item."
+],
+"PAR-0191":[
+"2026-10-13: G03 T22 ffa6be0: sim emission + headless test; in-engine FX not isolated."
+],
+"PAR-0192":[
+"2026-10-13: G04 c9cd517 + 1779b98: GZ resume restores 2 units and wavetime 21600; markers round-trip; in-engine evidence runs/20261013-s5-G04-batch."
+],
+"PAR-0193":[
+"2026-10-13: G04 b64177e: tick-based timer + isWaitingWave hold + runWave gate; headless tests only (no reachable in-engine fixture with waveTimer:true + live core)."
+],
+"PAR-0194":[
+"2026-10-13: G04 d75c051 + cf26107: in-engine Timer countup 106 -> 300 ticks and completions persisted across resume."
+],
+"PAR-0195":[
+"2026-10-13: G04 f1e93a9 + cf26107: in-engine team 2 -> 0 derelict conversion, captured:true, save on capture."
+],
+"PAR-0196":[
+"2026-10-13: G04 b1e2f54: in-engine limit_area [90,20,70,60] on GZ; sector golden rules_checksum regenerated for the serpulo ruleSetter."
+],
+"PAR-0197":[
+"2026-10-13: G04 1779b98 (may be merged with the sector-resume item): skip legacy marker regions on decode; groundZero.msav reloads."
+],
+"PAR-0198":[
+"2026-10-13: G04 T10/T11 not started (budget); G03 T20 depends on them."
+],
+"PAR-0057":[
+"2026-10-13 wave-1: G03: T11 not run (limit/darkness half waits for G04 T5; now landed, so unblocked for wave 2)."
+],
 "PAR-0167":[
 "2026-10-13 G00: verified via 2fe5800 (research requirements materialised); rows carry tree names and costs."
 ],
@@ -3783,7 +3877,8 @@
 "2026-10-12 (session 3 §3.4): the unit view pass now draws live units (composed body/legs/weapons/team cell/shadow, `8ce2941`); alpha verified in-engine (`runs/20261012-session3/par0126-offcore.png`); dagger framing blocked by inert waves + camera re-centering (PAR-0156/PAR-0139); scale re-verified indirectly (composition, not scale, was the gap)."
 ],
 "PAR-0055":[
-"Corrected finding: the camera zoom matches the reference (port Camera2D.zoom 4; Java's tutorial frames are ~32 px/tile; the 1-tile tutorial diamond measures ~40 px in r02-00). The real divergence is sprite scale: the port's atlas is the 4x sprite set (`scale_marker` region 4x4 in assets/sprites/sprites.atlas.json), and Java compensates with `Draw.scl = 1f / Core.atlas.find(\"scale_marker\").width` (Control.java:330) while the port's unit pass drew the 46px alpha region at 46 world px. Reference mech ~40-50 px on screen; port blob ~184 px. Fix: divide region pixel size by the scale_marker width."
+"Corrected finding: the camera zoom matches the reference (port Camera2D.zoom 4; Java's tutorial frames are ~32 px/tile; the 1-tile tutorial diamond measures ~40 px in r02-00). The real divergence is sprite scale: the port's atlas is the 4x sprite set (`scale_marker` region 4x4 in assets/sprites/sprites.atlas.json), and Java compensates with `Draw.scl = 1f / Core.atlas.find(\"scale_marker\").width` (Control.java:330) while the port's unit pass drew the 46px alpha region at 46 world px. Reference mech ~40-50 px on screen; port blob ~184 px. Fix: divide region pixel size by the scale_marker width.",
+"2026-10-13 wave-1: G03: T19 sweep not run; sprite scale unchanged (still blocked)."
 ],
 "PAR-0056":[
 "Discovered during PAR-0037 round 10b: after a fresh start_sector('serpulo',15) the live core reports {\"copper\":100}; Java's fresh Ground Zero core is empty (the tutorial's first objective is Obtain 0/15 Copper) and Logic.play clears the core before adding rules.loadout. Likely seam: MindCampaign.apply_launch_loadout (play.rs:316) runs before/against the campaign-side team inventory while the sim core's ItemModule keeps the map-materialized stock, so the clear never reaches the live core. Consequence: the HUD objective text shows 'Obtain: 100/15' and the tutorial Item objective is instantly complete (100 >= 15), diverging from Java's progression.",
@@ -3828,7 +3923,8 @@
 ],
 "PAR-0070":[
 "Code-scan 2026-10-10 (audio-fx): S2/high confidence. Every sim-side fx.effect/fx.shake call (bullet hit/despawn, turret fire, fires, unit death/wreck) lands on the no-op handle because nothing installs the plan-17 FxBus into the live UnitRuntime, and the MindFx node exists and ticks but its queue has no producer; players never see an explosion, impact spark, smoke, spawn effect or screen shake. The separate 'no live batch executor' lead was rejected: MindFx::draw (fx.rs:100-125) does consume the compiled DrawProgram. In-engine verification pending.",
-"2026-10-13 G00: FX producer + regions + polyline 11ce662 (in-engine runs/20261012-s3-t12/); shake wiring structural only."
+"2026-10-13 G00: FX producer + regions + polyline 11ce662 (in-engine runs/20261012-s3-t12/); shake wiring structural only.",
+"2026-10-13 wave-1: G03 T4 db1e8e6: bullets are now drawn live; full FX verification still wants the T19 sweep."
 ],
 "PAR-0071":[
 "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Lead 4 confirmed: the LoopMixer only accumulates and is never updated to voices, no LoopAdd is emitted by live buildings, and the AmbientPoller is unwired, so conveyor/drill/factory hums and ambient loops are silent. In-engine verification pending."
@@ -3843,20 +3939,23 @@
 "Code-scan 2026-10-10 (audio-fx): S3/high confidence. Extra finding from reading the settings-to-audio path: the sound page's mirror lookup points at /root/MindAudio (the node is /root/Spine/MindAudio) and MindAudio has no store load at ready, so volume sliders can never affect playback. In-engine verification pending."
 ],
 "PAR-0075":[
-"Code-scan 2026-10-10 (blocks-behavior): S2 high. Combustion/steam/RTG/neoplasia generators register ConsumeGeneratorBehavior (power/behavior.rs:819-826, 829-840, 851-858, 898-917) which never overrides accept_item/handle_item, so the trait defaults reject every item (world/behavior/mod.rs:256-264) and belts feeding a generator stall (transfer.rs:109-120, 454-465). Upstream items enter via BuildingComp.acceptItem (entities/comp/BuildingComp.java:869-871) and ConsumeItemFilter sets hasItems=true (consumers/ConsumeItemFilter.java:26) - which is why the JVM golden shows has_items=true while the port specs omit it (content/registries/blocks/power.rs:116-127). The generator filter gate also stays 0 with an empty module and generate_time 0 (power/generator.rs:458-476), so a fresh generator can never bootstrap. Player impact: no early power from coal/oil chains; power-gated blocks stay dead. In-engine verification pending."
+"Code-scan 2026-10-10 (blocks-behavior): S2 high. Combustion/steam/RTG/neoplasia generators register ConsumeGeneratorBehavior (power/behavior.rs:819-826, 829-840, 851-858, 898-917) which never overrides accept_item/handle_item, so the trait defaults reject every item (world/behavior/mod.rs:256-264) and belts feeding a generator stall (transfer.rs:109-120, 454-465). Upstream items enter via BuildingComp.acceptItem (entities/comp/BuildingComp.java:869-871) and ConsumeItemFilter sets hasItems=true (consumers/ConsumeItemFilter.java:26) - which is why the JVM golden shows has_items=true while the port specs omit it (content/registries/blocks/power.rs:116-127). The generator filter gate also stays 0 with an empty module and generate_time 0 (power/generator.rs:458-476), so a fresh generator can never bootstrap. Player impact: no early power from coal/oil chains; power-gated blocks stay dead. In-engine verification pending.",
+"2026-10-13 wave-1: G02 T1 390b1bc: combustion-generator intake is the new trait default; the belt check is satisfied by the T1 in-engine run (item-source -> mender, runs/20261013-s4-G02-T1)."
 ],
 "PAR-0076":[
 "Code-scan 2026-10-10 (blocks-behavior): S2 high. Every Reconstructor spec omits has_items (content/registries/blocks/units.rs:121-147; units_erekir.rs:95-115 etc.), so no ItemModule is created (world/update.rs:109-111) and the generic Consume::Items gate is permanently 0 (world/update.rs:517-527); ReconstructorBehavior also never overrides accept_item/handle_item (world/blocks/units/behavior.rs:218-233), so belts cannot fill it. Upstream ConsumeItems sets hasItems=true (ConsumeItems.java:24) and the generic BuildingComp.acceptItem admits the items (BuildingComp.java:869). The port progression also ignores efficiency/timeScale and hardcodes construct_time 120 (units/behavior.rs:227-230, units/mod.rs:206) while upstream gates progress on efficiency and per-block constructTime. Player impact: the Serpulo upgrade chain cannot be supplied and upgrades cost nothing where a payload lands; unit factories keep working only because UnitFactoryBehavior computes per-item capacities itself (units/behavior.rs:149-188). The golden diff also shows item_capacity 10 vs 60-2000 for factories/reconstructors. In-engine verification pending.",
 "2026-10-12 (session 4): fixed — `de8ef16`; waits without items, then 40/40 items + power upgrades to mace in the 600-700 tick window; in-engine accepts silicon to exactly 80 and rejects copper.",
 "2026-10-12 audit (fixing): building-production: power drawn while idle; command never applied to the upgraded unit (audit-building-production.md).",
-"2026-10-13 G00: power gate/unitBuildSpeed c94c27c, command + move-in 955c9f0, command panel 5e9545d (in-engine)."
+"2026-10-13 G00: power gate/unitBuildSpeed c94c27c, command + move-in 955c9f0, command panel 5e9545d (in-engine).",
+"2026-10-13 wave-1: G02 T1/T2 (390b1bc, 85e8378): reconstructor intake plumbing and power-gate fixes; tests in T1."
 ],
 "PAR-0077":[
 "Code-scan 2026-10-10 (blocks-behavior): S3 high. SandboxBehavior only rounds itemsPerSecond into the item-source module (world/behavior/sandbox.rs:32-56) and never dumps; item-void/liquid-void/power-source/power-void fall through to the same behavior via the family match (world/behavior/mod.rs:599-604) and do not override accept_item/accept_liquid, so the defaults reject everything (world/behavior/mod.rs:256-264, 313-316). The port already has the correct tick helpers in world/blocks/power/sandbox.rs:31-62 (update_power_source/update_power_void/update_liquid_source/update_liquid_void) but a workspace grep finds no caller outside their own test, and power::register (power/behavior.rs:803) registers no power-source/power-void. Upstream: ItemSource.updateTile dumps (ItemSource.java:90-103), ItemVoid.acceptItem returns enabled (ItemVoid.java:33), LiquidSource fills+dumps (LiquidSource.java:62), LiquidVoid accepts (LiquidVoid.java:34), PowerSource produces powerProduction (PowerSource.java:7,30). Player impact: sandbox/custom games cannot be set up (no infinite items/liquids/power; voids back up belts/conduits). In-engine verification pending.",
 "2026-10-12 (session 4): fixed — `c72b7f6`; 1000 items / 600 ticks into the core, an adjacent item-void halves it, liquid 9986 -> conduit, power satisfaction 1.0; evidence `runs/20261012-session4/`."
 ],
 "PAR-0078":[
-"Code-scan 2026-10-10 (blocks-behavior): S2 high. PumpBehavior adds LiquidId::WATER every tick whenever efficiency > 0 with no floor read (world/behavior/production.rs:571-594), and SolidPumpBehavior/Fracker likewise emit their result (water/oil) regardless of tile (production.rs:608-641; attribute forced to -1 in block_kind_data.rs:850-863). Upstream derives liquidDrop/amount from the footprint via canPump (floor().liquidDrop != null, Pump.java:150-193) and canPlaceOn rejects dry tiles (Pump.java:83-97); tar yields oil (Blocks.java:292; the port content has the data at environment.rs:255) and water floors yield water. Placement is also wrong: can_place_on is hardcoded true (world/build.rs:41) and valid_place_at only checks EnvFlag::Terrestrial (world/build.rs:154), so water-extractor's env_required=[GroundWater] (production.rs:117) makes it unplaceable everywhere while mechanical-pump places on dry sand. Oil-extractor's sand consumer is also unsatisfiable through belts (same accept_item root as the generator/reconstructor findings). Player impact: infinite water anywhere, no oil pumping on tar, no water extractor. In-engine verification pending."
+"Code-scan 2026-10-10 (blocks-behavior): S2 high. PumpBehavior adds LiquidId::WATER every tick whenever efficiency > 0 with no floor read (world/behavior/production.rs:571-594), and SolidPumpBehavior/Fracker likewise emit their result (water/oil) regardless of tile (production.rs:608-641; attribute forced to -1 in block_kind_data.rs:850-863). Upstream derives liquidDrop/amount from the footprint via canPump (floor().liquidDrop != null, Pump.java:150-193) and canPlaceOn rejects dry tiles (Pump.java:83-97); tar yields oil (Blocks.java:292; the port content has the data at environment.rs:255) and water floors yield water. Placement is also wrong: can_place_on is hardcoded true (world/build.rs:41) and valid_place_at only checks EnvFlag::Terrestrial (world/build.rs:154), so water-extractor's env_required=[GroundWater] (production.rs:117) makes it unplaceable everywhere while mechanical-pump places on dry sand. Oil-extractor's sand consumer is also unsatisfiable through belts (same accept_item root as the generator/reconstructor findings). Player impact: infinite water anywhere, no oil pumping on tar, no water extractor. In-engine verification pending.",
+"2026-10-13 wave-1: G02 T7: mechanical-pump placement is now honest via place_block on dry ground; the pump in-engine check itself was not re-run."
 ],
 "PAR-0079":[
 "Reference soak: staging blocked — no launchable Erekir sector in the imported campaign; needs a fresh-profile Erekir branch.",
@@ -3881,7 +3980,8 @@
 ],
 "PAR-0084":[
 "Reference soak: staging blocked — a live sector loss must not run on the imported profile; needs a throwaway profile copy (checkpoint 20261010-seeded).",
-"verified(reference): Godot-only walk (no Java boot; the item's own reference documents the staging blocker: a live loss must not run on the imported campaign, so no Java frames exist). Verified end-to-end in-engine: fresh Ground Zero -> exit-save (record prepare: spawnPosition (129,55)) -> the core destroyed -> the loss fires (gameOver true; 'game-over save queued'; the record persisted) -> re-attack -> 'start_sector: lost-sector replay for `serpulo:170` restored 2 survivor(s)'; the sector is playable again (gameOver false / hasCore true) and the 2 distant copper-walls read team 0 (derelict) at their tiles. The captured survivor/restore mechanics are unit-proven (sim::tests::lost_sector_capture_and_derelict_restore)."
+"verified(reference): Godot-only walk (no Java boot; the item's own reference documents the staging blocker: a live loss must not run on the imported campaign, so no Java frames exist). Verified end-to-end in-engine: fresh Ground Zero -> exit-save (record prepare: spawnPosition (129,55)) -> the core destroyed -> the loss fires (gameOver true; 'game-over save queued'; the record persisted) -> re-attack -> 'start_sector: lost-sector replay for `serpulo:170` restored 2 survivor(s)'; the sector is playable again (gameOver false / hasCore true) and the 2 distant copper-walls read team 0 (derelict) at their tiles. The captured survivor/restore mechanics are unit-proven (sim::tests::lost_sector_capture_and_derelict_restore).",
+"2026-10-13 wave-1: G04: re-verify after T5 when convenient; lost-sector replay path untouched."
 ],
 "PAR-0085":[
 "Code-scan 2026-10-10 (campaign): S3/high. `_launch(planet, sector, loadout, resume)` receives the chosen schematic index (planet_dialog.gd:732/753, launch_loadout_dialog.gd:14-15) but never uses it; `start_sector_with_loadout` is only called from `start_sector` with an empty string (campaign.rs:473-474, 533-534). Adjacent ledger item: PAR-0054 recorded the earlier 3-arg arity error/break-on-error pause in this same flow; this is the residual silent no-op now that the 2-arg call works, so it is filed as a distinct symptom. Also note PAR-0024 (the dialog appearing on a free launch) is a separate mismatch. In-engine verification pending.",
@@ -3905,7 +4005,8 @@
 ],
 "PAR-0089":[
 "Reference soak: staging blocked (Erekir content unavailable); evidence refs recorded.",
-"2026-10-13 G00: sublimate latch + drain 75e8595 (headless only; needs an Erekir sector to see in-engine)."
+"2026-10-13 G00: sublimate latch + drain 75e8595 (headless only; needs an Erekir sector to see in-engine).",
+"2026-10-13 wave-1: G02: sublimate latch + drain fixed headless (unchanged from the G00 note); needs an Erekir sector for the in-engine half."
 ],
 "PAR-0090":[
 "Reference soak: captured context only (the burn decal/context frame); the save/load round-trip needs a destruction-made puddle - re-stage note recorded.",
@@ -3915,7 +4016,8 @@
 "Code-scan 2026-10-10 (combat): S2 high. The puddle half is live-reachable today: atrax fires a Liquid bullet (units/standard.rs:817) whose hit calls `puddles::deposit`, and the resulting puddle never updates. The fire half is currently unreachable because no live content creates fires (BulletType.createIncend/makeFire are unported, BulletType.java:591-593 vs the explicit TODO at combat/bullet/mod.rs:593) — the same scheduling gap would leave any fire inert once one is created, e.g. through `react_puddle` (puddles.rs:180). In-engine verification pending.",
 "2026-10-12 (session 2 §8): fixed — `1e74c4d` (tick hook + puddle effects/status + container splash), docs `5c43acb`; 4 tests incl. `live_puddle_evaporates`.",
 "2026-10-12 audit (fixing): combat-units: live update works; puddle/splash gates fixed in 8841d62; destroyed buildings do not explode (audit-combat-units.md).",
-"2026-10-13 G00: afaeebb building dynamicExplosion; unit-death explosion, ExplosionShield, rules.fire gating remain (G01)."
+"2026-10-13 G00: afaeebb building dynamicExplosion; unit-death explosion, ExplosionShield, rules.fire gating remain (G01).",
+"2026-10-13 wave-1: G01: T14 (explosions) not executed this session."
 ],
 "PAR-0092":[
 "Code-scan 2026-10-10 (hud-world-ui): S2 high confidence - the unit/production side of the game is unconfigurable, so a factory can only ever build its default plan and a reconstructor cannot be given a command; payload rout/source selection (Erekir) is equally unreachable. This is the per-block-config half of BlockConfigFragment; the item/liquid pickers for sorters/unloaders/duct-routers do work. Distinct from the logic-scan switch/message items. In-engine verification pending.",
@@ -3930,7 +4032,8 @@
 "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the whole upper half of the placement fragment is missing, so block costs/unlock state and the database shortcut are invisible. PAR-0048 verifies only the category button + block grid; PAR-0065 covers the custom-game grid rows, not this pane. In-engine verification pending.",
 "2026-10-12 (session 3 §3.3): fixed — `9e450a1` (`hover_info` + `block_requirements_json`, requirement colour tests, TopTable); conveyor -> Key [3,1] + Copper 0/1 (`par0094-d-selected.png`), ore hover -> Copper icon (`par0094-c4-hover.png`).",
 "2026-10-12 audit (fixing): rendering-hud: top table broke the palette layout and never refreshed; fixed in 8067a5a/ded4e48. Remaining: hotkey line clipped, selected cell highlight (audit-rendering-hud.md).",
-"2026-10-13 G00: key-combo line 52b4d42, palette accent 8bf1b7f, cursor hover aade84d (all in-engine, session 3)."
+"2026-10-13 G00: key-combo line 52b4d42, palette accent 8bf1b7f, cursor hover aade84d (all in-engine, session 3).",
+"2026-10-13 wave-1: G03 T6 8ff98f7: hovered buildings show health/power/item/liquid bars; evidence runs/20261013-s3-G03-T6/core-hover.png."
 ],
 "PAR-0095":[
 "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the command-mode HUD half is entirely absent, so command mode currently has no on-screen affordance. Shares the fix surface with the units-ai item 'RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units' (that item covers selection/order behavior; this one covers the missing panel). In-engine verification pending."
@@ -3941,12 +4044,14 @@
 ],
 "PAR-0097":[
 "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - the concrete F6 control is dead and the in-world block status readout (power/liquid/items) never renders; core-items HUD (CoreItemsDisplay) and wave pane do work, so this is the missing per-building status half of lead 8. Bars default off in Java, so the repro must enable F6. In-engine verification pending.",
-"2026-10-13 G00: F6 block status markers d5adb63 (in-engine)."
+"2026-10-13 G00: F6 block status markers d5adb63 (in-engine).",
+"2026-10-13 wave-1: G03: not re-checked (T19 sweep not run)."
 ],
 "PAR-0098":[
 "Code-scan 2026-10-10 (input-controls): S2 high confidence. Player impact: construction economy and builder-unit gameplay are absent - any block can be dropped anywhere for free the instant the mouse is released, so distance, build speed and the build queue never matter. Context: plan 24 sec 7 input residual 'Real plan-11 BuilderComp call-through (the input::queue::BuildQueue seam stands in)'; the live gdext path never calls InputState::flush_plans (grep: only the doc comment at desktop.rs:178). In-engine verification pending.",
 "2026-10-12 (session 4 §2): §2a+2b `cca8826` (q clears queued plans; e holds a plan at progress 0), §2c `26f6918` (a unit on the footprint holds the plan), §2d `c8f1ffa` (ConstructBlock behavior IO round-trip; the load path still drops per-kind bodies -> PAR-0161). Remain: §2e plan/queue/beam drawing (rendering agent), §2f rebuild ghosts, §2g schematic-through-plans (needs PAR-0099).",
-"2026-10-13 G00: schematics through plans d1ef222; remaining: plan/beam drawing (G03), rebuild select (G08)."
+"2026-10-13 G00: schematics through plans d1ef222; remaining: plan/beam drawing (G03), rebuild select (G08).",
+"2026-10-13 wave-1: G02 T8/T9 still pending (validPlace completeness + core upgrade) after the wave-1 budget."
 ],
 "PAR-0099":[
 "Code-scan 2026-10-10 (input-controls): S3 high confidence. Player impact: the blueprint copy/paste workflow is unavailable - the copy half (F drag -> select plans) and the place half (click to commit, flip Z/X, wheel rotate) both have no live entry point, so saved schematics can only exist as data. Distinct from the payload and RTS-unit findings (PAR ledger / code-scan units-ai); this is the build-plan select mode. The Schematics dialog surface itself is another agent's domain. In-engine verification pending."
@@ -4036,7 +4141,8 @@
 "Code-scan 2026-10-10 (render): S3, confidence high. The live unit pass draws one rotated quad per unit from a 6-field tuple; upstream UnitType.draw composes shadow/legs/treads/outline/body/cell/weapons/engines/parts (UnitType.java:1471-1591). Player impact: the player mech and every wave enemy read as static cut-outs with no walk animation, aim-able weapons or health cell. Related but distinct ledger items: PAR-0053 (units drawn at all) and PAR-0055 (sprite scale). In-engine verification pending.",
 "2026-10-12 (session 3 §3.4): fixed — `8ce2941` (`unit_draw.rs`, 16 tests; composed pass: body/legs/weapon mounts/team cell/shadow); alpha verified in-engine (`par0126-offcore.png`); dagger framing blocked by inert waves + camera re-centering; step-3 outlines skipped (no `-outline` regions ship).",
 "2026-10-12 audit (fixing): rendering-hud: math matches Java but no ground shadow/outline on the alpha; dagger legs/weapons unverified in-engine (audit-rendering-hud.md).",
-"2026-10-13 G00: flying shadow + soft shadow 100ac50, outlines 5dcd208 (in-engine vs Java crop)."
+"2026-10-13 G00: flying shadow + soft shadow 100ac50, outlines 5dcd208 (in-engine vs Java crop).",
+"2026-10-13 wave-1: G03 T5 33b95ce: engines/trails/mining beam/item stack/hit flash added; in-engine partially staged."
 ],
 "PAR-0127":[
 "Reference soak: staging blocker: the imported campaign's Frozen Forest save exists but its sector is not launchable (no owned/launchable hex in the visible planet state; no weather frames stored elsewhere). Needs a fresh-profile campaign branch to a weather sector.",
@@ -4046,23 +4152,27 @@
 ],
 "PAR-0128":[
 "Code-scan 2026-10-10 (render): S3, confidence high. The plan-17 draw program already emits region/noise/shader prims, but the executor draws PrimKind::Region as a flat filled rect and drops NoiseLayer/ShaderBlit/Polyline, so every effect sprite, decal, trail region, weather particle/rain and underwater ray/caustic executes wrong the moment the FX path is exercised (dev probes today; live once the FX sink lands, see the sim_host/noop-fx chain at client/rust/mind-core/src/sim/unit_runtime.rs:127). In-engine verification pending. Merged with the sibling scan item (adds weather/decal prims and turret-part regions); evidence combined.",
-"2026-10-13 G00: same commit as PAR-0070 (regions drawn)."
+"2026-10-13 G00: same commit as PAR-0070 (regions drawn).",
+"2026-10-13 wave-1: G03 T4: bullet/effect regions now drawn via the shared world-canvas helpers (T1/T4); T19 sweep not run."
 ],
 "PAR-0129":[
 "Code-scan 2026-10-10 (render): S3, confidence high (code), medium on early-campaign reachability (ForceProjector is a mid-game block). Java composites unit/projector shields through the effect buffer + Shaders.shield (Renderer.java:403-414); the port loads shield.gdshader, exposes shield_available(), and has both view-state builders, but nothing consumes them and the frame has no shield pass. Build beams (the sibling half of the same upstream bracket, Renderer.java:410-413) are likewise undrawn. In-engine verification pending.",
-"2026-10-13 G00: domes/bubbles 4b160e3 (code); force projector stays at efficiency 0 in-engine (G02) and the animated shader needs the effect buffer (G03)."
+"2026-10-13 G00: domes/bubbles 4b160e3 (code); force projector stays at efficiency 0 in-engine (G02) and the animated shader needs the effect buffer (G03).",
+"2026-10-13 wave-1: G03: T17 (animated composites / effect buffer) not run."
 ],
 "PAR-0130":[
 "Code-scan 2026-10-10 (render): S3, confidence high. Conveyors are the first logistics block the tutorial teaches (PAR-0049 verified the item flow) and Java draws every belt item (Conveyor.java:144-177); the port's block pass draws only the static block region, so belts look idle while the core fills up. Only ground truth is left out here: chest/duct item visuals. In-engine verification pending.",
 "2026-10-12 (session 3 §3.2): fixed — `4c813b0` (`belt_item_positions` Java formula, 5 tests; `conveyor_items` seam); `par0130-n1.png` vs `n3.png` show copper travelling east.",
 "2026-10-12 audit (verified): rendering-hud: items were not drawn with a still camera; fixed in 1a0f758 (belt-items-fixed-1.png). Belt corner pieces/animation tracked in audit-rendering-hud.md.",
-"2026-10-13 G00: belt autotile/animation e031438, item order 5aeb51f."
+"2026-10-13 G00: belt autotile/animation e031438, item order 5aeb51f.",
+"2026-10-13 wave-1: G03: regression-ok; belts render in every T2-T8 screenshot."
 ],
 "PAR-0131":[
 "Code-scan 2026-10-10 (render): S3, confidence high on the missing wiring (Cutscene/LaunchAnimator have no caller outside tests; Control.java:205-222 plays the landing on every core sector). Player impact: launching any campaign sector jumps straight to the static world instead of Java's core-drop/camera-zoom cutscene; the ledger's launch-flow items (PAR-0019/0024/0025) cover the dialogs, not the animation. In-engine verification pending.",
 "2026-10-12 (session 5 §E, partial): `bdc29ec` wires the core landing camera zoom (0.02 -> 4) to launch (`cutscene-t1..t3.png`); remain: scaled core sprite, white fade, announce, hide-real-core.",
 "2026-10-12 audit (fixing): campaign-import: zoom curve correct; landing no longer plays on resume, input lock + smooth handoff added in 09ba3d0. Remaining: core drop sprite, white fade, announce (audit-campaign-import.md T3, audit-rendering-hud.md).",
-"2026-10-13 G00: landing sprite/fade/announce/timing/locks landed 659146d; remaining: thruster flames + hiding the real core under the landing sprite (G03)."
+"2026-10-13 G00: landing sprite/fade/announce/timing/locks landed 659146d; remaining: thruster flames + hiding the real core under the landing sprite (G03).",
+"2026-10-13 wave-1: G03: T18 (landing) not run this session."
 ],
 "PAR-0132":[
 "Code-scan 2026-10-10 (ui-dialogs): S2, high confidence. Player impact: the entire custom-rules editing surface is absent - Customize is an empty shell and the pause menu has no rule-edit entry, so custom game and sandbox rule changes are impossible. PAR-0066 only blocks the Custom Game window for the repro; the dialog can be opened directly. Related dialogs but distinct symptoms: PAR-0023 (campaign difficulty), PAR-0024 (launch loadout)."
@@ -4094,7 +4204,8 @@
 "PAR-0139":[
 "Code-scan 2026-10-10 (units-ai): S3 high confidence for the dead wiring (visible whenever rules.rtsAi/buildAi is on, which makes it S2 for those configurations). Player impact: Serpulo attack sectors with the campaign RTS-AI option (default off) have no enemy squad commander, so enemies never defend or launch coordinated attacks; custom games with buildAi never see the enemy base expand or rebuild; prebuildAi core defenders never spawn. The port's own ai/rts_ai.rs header says the TeamData wiring is plan 12. In-engine verification pending. 2026-10-11 (round 1, parity-hunt-s1): the live RtsAI now runs (TickSet::WeatherAndAi team_ai_system) and ordered a 12-unit wave squad at tile (156,167) in attack sector hidden/225; prerequisites landed: map `teams` merge at launch (rtsAi reaches the session), attack-mode core spawn positions, and the Arc Point2.pack order (the authored spawn pins matched). BaseBuilderAI/prebuildAi halves + turret DPS in estimateStats stay open (see fix.plan). NOTE (operator data): the Arc pack-order fix changes how already-written Godot sector saves decode `spawnPosition` (the port previously packed y-high); `clear_planet_campaign_saves('<planet>')` before replaying a sector whose save predates the fix, or the lost-sector replay uses a transposed spawn tile. Round 2 (2026-10-11): the live BaseBuilderAI runs and places (staged buildAi + seeded plans via the offline save patch); save/rules blockers fixed along the way (TeamRule compact serialization vs the u16 meta cap, carried-plan preservation, BlockCounter world resource, world-pixel scatter). Remaining AI residuals (prebuildAi core defenders, estimateStats turret term, flags/unreachable set) are seeded as PAR-0156.",
 "verified(reference): Godot-only two-round walk. The Java reference block for this item covers the wave half (wave units spawn, path to the core, attack - frames runs/20261010-234250-ref-PAR-0070-combat-fx/) and its own limitation says the RTS-squad/base-builder halves had no capture (they need an enemy base). Those halves are judged by structured state + logs: full wave spawn (12 units) -> live RtsAI squad order (`team ai: team 2 squad of 14 -> tile (156, 167) (attack)`) -> live BaseBuilderAI (`base builder enabled`, `queued 3 placement(s)`) -> host placement (`campaign ai: placed team 2 block at (95, 318)`, build 11837 -> 11838).",
-"2026-10-12 (session 2 §7 wave verification): `4e71098` fixed unit bullets stuck to their aim target (they now damage buildings; Java `BulletType.aimTile` :759 is a target hint, `sticky` :201 is separate); test `ground_zero_wave_destroys_undefended_core` (core gone tick 18, game_over); `runs/20261012-session2/PAR-0139-wave-ingame.txt`; the stale harness golden was regenerated on main in `85e30a6` (`combat_turret_ammo` now deals 27 damage)."
+"2026-10-12 (session 2 §7 wave verification): `4e71098` fixed unit bullets stuck to their aim target (they now damage buildings; Java `BulletType.aimTile` :759 is a target hint, `sticky` :201 is separate); test `ground_zero_wave_destroys_undefended_core` (core gone tick 18, game_over); `runs/20261012-session2/PAR-0139-wave-ingame.txt`; the stale harness golden was regenerated on main in `85e30a6` (`combat_turret_ammo` now deals 27 damage).",
+"2026-10-13 wave-1: G01 T1 7fa485e: the round-2 'pixel scatter' note was wrong vs BaseBuilderAI.java:159-160 (it scatters in tiles)."
 ],
 "PAR-0140":[
 "Code-scan 2026-10-10 (units-ai): S2, high confidence (code reading). Player impact: the RTS control layer is completely inert - no unit can be box-selected or tap-selected, and move/attack/stance orders are no-ops. This subsumes the dead unit_command_runtime/unit_stance_runtime reachability: both are only reached through the relay path that has no live units. Distinct from PAR-0063 (that item verified the keyboard input-state JSON, not unit selection or command application). In-engine verification pending. 2026-10-11 (round 1, stopped by operator): live selectable feed + live UnitCommand application + team/no-block input gates landed with unit tests; the in-engine drag-select -> order chain is staged in path.godot but was blocked on the command-mode gate (input state still selects a 'duo' block with action_count 0 - the gate requires no block; boot fixes landed for the default and set_catalog_category, residual writer to find). Resume from fix.plan.next.",
@@ -4136,7 +4247,8 @@
 "Revealed by PAR-0050 (also noted in chains/ground-zero-conveyor-line.md:130). The placed block's world sprite = the 'Wrong texture folder' placeholder while the picker cell for the same conveyor renders its atlas region - the world block-sprite lookup/build path differs. Check the world renderer's region resolution for placed blocks (rotation variants like conveyor-0 / the build-plan sprite path).",
 "2026-10-12 (session 3 §3.1): fixed — `3a25763` (the team-overlay lookup no longer falls back to the error placeholder; air floor fixed); Ground Zero 5 place_blocks -> `missing_regions: 0` (`par0152-after-final.png`); worktrees need packed assets (README correction 2).",
 "2026-10-12 audit (verified): rendering-hud: correct (missing_regions 0). Drill rotator / turret aim / belt corners still static — audit-rendering-hud.md.",
-"2026-10-13 G00: blockbuild shader 5075b87, per-part drill/turret 0bd9e5d."
+"2026-10-13 G00: blockbuild shader 5075b87, per-part drill/turret 0bd9e5d.",
+"2026-10-13 wave-1: G03: regression-ok; turrets/drills render in every T2-T8 screenshot."
 ],
 "PAR-0153":[
 "Revealed by PAR-0051: after mining 170 + completing objective 0 (12:35-12:42), the resume at 12:42 showed obj0 incomplete, mined 0, core {} while the sector save's mtime stayed at 11:44 (the launch/bookkeeping write). Java saves the campaign sector on the saveinterval cadence (Settings default; the soak's mtimes move every ~2-4 min) and on sector launch/quits. Next: find the port's autosave driver (the `saveinterval` setting exists on the settings page) and wire the periodic flush (campaign.rs persist / the save slot bookkeeping).",
@@ -4151,11 +4263,13 @@
 "verified(reference): Godot-only walk; no Java boot. The reference for this item is the authored MSAV artifact itself (produced by the Java reference; its own header/meta carries the map identity) plus the expected behavior: the port must import it. Pre-fix: `load_sector('serpulo', 76)` failed with `JSON error: expected value at line 1 column 4016` and fell back to the generator. Post-fix (09b5009): `loaded preset map `serpulo/hidden/76` (430x430)` and `start_sector` materializes the authored attack sector (6208 buildings, attack true, hasCore true)."
 ],
 "PAR-0156":[
-"Seeded from the PAR-0139 round-2 verification: the RTS/base halves run, but `prebuildAi` core defenders and the estimateStats turret term remain unimplemented (both are small, self-contained)."
+"Seeded from the PAR-0139 round-2 verification: the RTS/base halves run, but `prebuildAi` core defenders and the estimateStats turret term remain unimplemented (both are small, self-contained).",
+"2026-10-13 wave-1: G01: T17 (prebuildAi/estimateStats) not executed this session."
 ],
 "PAR-0157":[
 "Seeded by the PAR-0140 round-2 walk (presentation half of RTS selection).",
-"2026-10-13 G00: selection overlay 6be52fd (in-engine); attack reticle needs an entity-id resolver (G01/G03)."
+"2026-10-13 G00: selection overlay 6be52fd (in-engine); attack reticle needs an entity-id resolver (G01/G03).",
+"2026-10-13 wave-1: G03: T10 (command panel / attack reticle) not run; still waiting for G01 T16."
 ],
 "PAR-0158":[
 "Seen on every fresh Godot boot during the PAR-0147 walk while sector-serpulo-170.msav existed.",
@@ -4172,21 +4286,25 @@
 "2026-10-13 G00: research requirements materialised 2fe5800; [223,174] rows with costs; dialog lists all nodes."
 ],
 "PAR-0161":[
-"2026-10-12 (session 4 §2d, high impact): `EditorContext::read_building` decodes only `DecodedBase` and never calls the behavior `read`; the length-prefixed per-kind chunk is silently skipped. Repro: a construct block paused at progress 0.0417 + `run_exit_save()` + reload -> `ConstructState` gone; same for turret ammo, crafter warmup, drill state, factory plan. Evidence `runs/20261012-session4/section2d-evidence.json`."
+"2026-10-12 (session 4 §2d, high impact): `EditorContext::read_building` decodes only `DecodedBase` and never calls the behavior `read`; the length-prefixed per-kind chunk is silently skipped. Repro: a construct block paused at progress 0.0417 + `run_exit_save()` + reload -> `ConstructState` gone; same for turret ammo, crafter warmup, drill state, factory plan. Evidence `runs/20261012-session4/section2d-evidence.json`.",
+"2026-10-13 wave-1: G04 a78cd06 + 14b9da7 + 834f0a7: port v2 native format = Java tile chunk layout (v1 still loads), per-kind bodies restored for drills/conveyors/core + the T3a codec table, payload prefix/payload read; fixture test + in-engine sorter check (runs/20261013-s5-G04-batch)."
 ],
 "PAR-0162":[
 "2026-10-12 (session 5 §D/§H2): `campaign_views_json` loads only vanilla loadouts (`Schematics.load_loadouts`), so imported `user://schematics/*.msch` never appear; `Schematics::load_file` also re-sorts `all` while `loadouts` holds indices, so index maps go stale.",
-"2026-10-13 G00: Schematics.load of schematics/*.msch + post-sort reindex landed in 44b0f7b."
+"2026-10-13 G00: Schematics.load of schematics/*.msch + post-sort reindex landed in 44b0f7b.",
+"2026-10-13 wave-1: G04: V1 not run."
 ],
 "PAR-0163":[
 "2026-10-12 (session 5 §H3): `launch_capacity` is absent from the campaign read model, so launch dialogs show capacity 0.",
-"2026-10-13 G00: launch capacity in the plan JSON (2000 shard / 4500 foundation) 44b0f7b."
+"2026-10-13 G00: launch capacity in the plan JSON (2000 shard / 4500 foundation) 44b0f7b.",
+"2026-10-13 wave-1: G04: V1 not run."
 ],
 "PAR-0164":[
 "2026-10-12 (session 5 §H4): a `MindUi.settings_put_flag` does not reset MindCampaign's in-memory copy (settings stores merge only changed keys on save, e0b6089); it bit the §C/§D verification."
 ],
 "PAR-0165":[
-"2026-10-12 (session 4 findings): `place_block`/`apply_sim_command_json` return true for rejected placements (occupied/out-of-bounds tiles), costing debugging time during §2c/§2d."
+"2026-10-12 (session 4 findings): `place_block`/`apply_sim_command_json` return true for rejected placements (occupied/out-of-bounds tiles), costing debugging time during §2c/§2d.",
+"2026-10-13 wave-1: G02 T7 c05be6b: place_block/place_block_rot read the tile back and apply_sim_command_json pre-checks validPlace; in-engine rejections confirmed (runs/20261013-s4-G02-T7)."
 ],
 "PAR-0166":[
 "2026-10-12 (session 5 A2): fixed — `fcc5c12` (`take_serpulo_remaps_notice` + the planet dialog call; Java `PlanetDialog.java:216-222` with `Settings.getBoolOnce`); the notice shows once after a real remap boot and never again (evidence `runs/20261012-session5/remap-notice.png`)."
