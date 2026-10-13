@@ -185,6 +185,54 @@ impl Sim {
         }
     }
 
+    /// `InputHandler.tryDropItems` (`InputHandler.java:2286-2308`) deposit
+    /// check without mutation: the held stack amount the building at `pos`
+    /// would accept, `0` when none can. Java gates the deposit on
+    /// `acceptStack(...) > 0 && build.interactable(team) && block.hasItems`.
+    pub fn player_deposit_accepted(&self, pos: TilePos) -> i32 {
+        let Some(unit) = self.player_unit else {
+            return 0;
+        };
+        let Some((held, held_amount)) = self.player_unit_stack() else {
+            return 0;
+        };
+        if held_amount <= 0 {
+            return 0;
+        }
+        let Some(entity) = self.grid.entity_at(pos) else {
+            return 0;
+        };
+        let unit_team = self
+            .ecs
+            .0
+            .get::<TeamComp>(unit)
+            .map(|team| team.team)
+            .unwrap_or(0);
+        let building_team = self
+            .ecs
+            .0
+            .get::<TeamComp>(entity)
+            .map(|team| team.team)
+            .unwrap_or(0);
+        if !(building_team == unit_team || building_team == 0) {
+            return 0;
+        }
+        let has_items = self
+            .ecs
+            .0
+            .get::<Building>(entity)
+            .and_then(|building| {
+                self.block_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.content().block(building.block))
+            })
+            .is_some_and(|def| def.has_items);
+        if !has_items {
+            return 0;
+        }
+        dispatch_accept_stack(&self.ecs.0, entity, held, held_amount, Some(unit))
+    }
+
     /// The player unit's `itemCapacity` (`UnitType.itemCapacity`).
     fn player_item_capacity(&self, unit: Entity) -> i32 {
         self.ecs
@@ -352,6 +400,25 @@ mod tests {
                 .get(copper),
             10
         );
+    }
+
+    #[test]
+    fn deposit_accepted_matches_apply() {
+        let (mut sim, unit, copper) = sim_with_player();
+        let duo = sim.world_block_id("duo").expect("duo");
+        sim.command(SimCommand::Place {
+            x: 13,
+            y: 10,
+            block: duo,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("duo placed");
+        set_player_stack(&mut sim, unit, copper, 30);
+        // 30 copper / ammoMultiplier 2 = 15 ammo room -> 15 items.
+        assert_eq!(sim.player_deposit_accepted(TilePos::new(13, 10)), 15);
+        assert_eq!(sim.player_deposit_accepted(TilePos::new(20, 20)), 0);
     }
 
     #[test]

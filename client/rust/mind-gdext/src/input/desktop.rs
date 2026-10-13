@@ -24,7 +24,7 @@ use mind_core::input::{
     ids, line::LineBlock, line::LineParams, select_typed_units, select_unit_tap, select_units_rect,
 };
 use mind_core::world::build::can_replace;
-use mind_core::world::{ConfigKind, TilePos};
+use mind_core::world::{ConfigKind, TilePos, WorldGrid};
 
 use crate::camera::MindCamera2D;
 use crate::sim_host::MindSimHost;
@@ -166,6 +166,14 @@ impl PlacementWorld for HostWorld<'_> {
     }
 }
 
+/// How close a cursor must be to the carrying player unit to start a drop
+/// gesture (`Vars.playerSelectRange`, `InputHandler.java:2032-2043`).
+const PLAYER_SELECT_RANGE: f32 = 11.0;
+
+/// `rules.itemDepositCooldown` default 0.5 s (`Rules.java`), the minimum gap
+/// between two tap-unit deposits.
+const ITEM_DEPOSIT_COOLDOWN_MS: u64 = 500;
+
 /// Parses a selectable-unit snapshot (`[{id,type,x,y,team,commandable}]`).
 fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -237,6 +245,11 @@ pub struct DesktopBridge {
     /// `player.shooting`: left button held on a free tile
     /// (`DesktopInput.java:701-721`); uploaded through `MindInput::player_control`.
     pub shooting: bool,
+    /// `droppingItem`: a left press landed on the carrying player unit
+    /// (`InputHandler.tryTapPlayer`); the release deposits or drops.
+    dropping_item: bool,
+    /// Last successful deposit (`Time.millis`) for `itemDepositCooldown`.
+    last_deposit_ms: u64,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -273,6 +286,8 @@ impl DesktopBridge {
             ui_dialog: false,
             locked: false,
             shooting: false,
+            dropping_item: false,
+            last_deposit_ms: 0,
             command_mode_hold: true,
         }
     }
@@ -1039,6 +1054,7 @@ impl DesktopBridge {
     /// (`InputHandler.java:2269-2272`; the sim half re-checks building/mining).
     pub fn shooting_allowed(&self) -> bool {
         self.shooting
+            && !self.dropping_item
             && self.controller.state.block.is_none()
             && !self.controller.state.command_mode
     }
@@ -1109,9 +1125,15 @@ impl DesktopBridge {
             return;
         }
         if self.controller.state.block.is_none() {
-            // `DesktopInput.java:701-721` order: `tileTapped`, the active build
-            // plan, then `tryStopMine`/`tryBeginMine`; anything consumed keeps
-            // `player.shooting` false. (T2b inserts `tryTapPlayer` first.)
+            // `DesktopInput.java:701-721` order: `tryTapPlayer`, `tileTapped`,
+            // the active build plan, then `tryStopMine`/`tryBeginMine`;
+            // anything consumed keeps `player.shooting` false.
+            if let Some((wx, wy)) = self.aim_world()
+                && self.can_tap_player(wx, wy)
+            {
+                self.dropping_item = true;
+                return;
+            }
             if self.tile_tapped(x, y) {
                 return;
             }
@@ -1144,8 +1166,10 @@ impl DesktopBridge {
     }
 
     fn left_release(&mut self) {
-        // `DesktopInput.java:507-509`: releasing select stops shooting.
+        // `DesktopInput.java:507-509`: releasing select stops shooting; the
+        // release also resolves a pending tap-unit gesture (`tryDropItems`).
         self.shooting = false;
+        self.try_drop_items();
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -1153,6 +1177,84 @@ impl DesktopBridge {
             DragKind::Place => self.commit_place(drag),
             DragKind::SelectRect => self.commit_select(drag),
             DragKind::Break => {}
+        }
+    }
+
+    /// `InputHandler.canTapPlayer` (`InputHandler.java:2032-2043`): no block
+    /// selected, the cursor is within `playerSelectRange` (11) of the player
+    /// unit and the unit carries items.
+    fn can_tap_player(&self, wx: f32, wy: f32) -> bool {
+        if self.controller.state.block.is_some() {
+            return false;
+        }
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let Some((px, py)) = guard.player_unit_position() else {
+            return false;
+        };
+        let dx = px - wx;
+        let dy = py - wy;
+        if dx * dx + dy * dy > PLAYER_SELECT_RANGE * PLAYER_SELECT_RANGE {
+            return false;
+        }
+        guard
+            .player_unit_stack()
+            .is_some_and(|(_, amount)| amount > 0)
+    }
+
+    /// `InputHandler.tryDropItems` (`InputHandler.java:2286-2308`): a pending
+    /// tap-unit gesture on release deposits into an accepting building or drops
+    /// the stack (`Call.dropItem`).
+    fn try_drop_items(&mut self) {
+        if !self.dropping_item {
+            return;
+        }
+        self.dropping_item = false;
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        if host.bind().is_paused() {
+            return;
+        }
+        let Some((item_name, amount)) = host.bind().player_unit_stack() else {
+            return;
+        };
+        if amount <= 0 {
+            return;
+        }
+        let Some((wx, wy)) = self.aim_world() else {
+            return;
+        };
+        // Released back on the unit: `canTapPlayer` -> no action.
+        if self.can_tap_player(wx, wy) {
+            return;
+        }
+        let (tx, ty) = (WorldGrid::to_tile(wx), WorldGrid::to_tile(wy));
+        let now_ms = Time::singleton().get_ticks_msec();
+        match host.bind().player_can_deposit_at(tx, ty) {
+            Some(true) => {
+                if now_ms.saturating_sub(self.last_deposit_ms) >= ITEM_DEPOSIT_COOLDOWN_MS {
+                    self.transfer_item(tx, ty, &item_name, amount, true);
+                    self.last_deposit_ms = now_ms;
+                }
+            }
+            // Accepting building on cooldown: Java neither deposits nor drops.
+            Some(_) => {}
+            None => {
+                let (Ok(x), Ok(y)) = (i16::try_from(tx), i16::try_from(ty)) else {
+                    return;
+                };
+                self.emit_action(RemoteAction::Inventory {
+                    kind: InventoryKind::DropItem,
+                    x,
+                    y,
+                    item: None,
+                    amount: 0,
+                    angle: 0.0,
+                });
+            }
         }
     }
 
@@ -1292,6 +1394,9 @@ impl DesktopBridge {
     }
 
     fn right_release(&mut self) {
+        // `DesktopInput.java:799`: the break release also resolves a pending
+        // tap-unit gesture (`tryDropItems`).
+        self.try_drop_items();
         let Some(drag) = self.drag.take() else {
             return;
         };

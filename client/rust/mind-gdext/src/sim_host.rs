@@ -2111,6 +2111,20 @@ impl MindSimHost {
         self.sim.player_actively_building()
     }
 
+    /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
+    /// `Some(true)` when the building at the tile accepts the held stack,
+    /// `None` when Java takes the `Call.dropItem` branch.
+    pub fn player_can_deposit_at(&self, x: i32, y: i32) -> Option<bool> {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        (self
+            .sim
+            .player_deposit_accepted(mind_core::world::TilePos::new(x, y))
+            > 0)
+        .then_some(true)
+    }
+
     /// Team a local placement carries (`state.rules.defaultTeam`; the live
     /// campaign session wins over the build-guard fallback).
     pub fn player_team(&self) -> u8 {
