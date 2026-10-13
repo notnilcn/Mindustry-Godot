@@ -9,7 +9,7 @@
 //! [`BlockCounter`] providers (plan 12 overrides).
 
 use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry, EnvFlag};
-use crate::world::darkness::get_wall_darkness;
+use crate::world::darkness::{border_darkness, get_wall_darkness};
 
 use super::WorldGrid;
 use super::block::{BlockTable, BlockView};
@@ -191,8 +191,18 @@ pub fn valid_place_at(
     if !supports_env_bits(def, rules.env) {
         return false;
     }
-    // Darkness >= 3 blocks placement.
-    if get_wall_darkness(grid, content, x, y) >= 3 {
+    // Darkness >= 3 blocks placement (`Build.java:229`): the static-wall
+    // darkness plus the map-area border term (`World.getDarkness`,
+    // `World.java:483-503`). `BlockDef` has no `ignoreBuildDarkness` field, so
+    // the check stays unconditional (T5 note).
+    let dark = (get_wall_darkness(grid, content, x, y) as f32).max(border_darkness(
+        grid,
+        grid.border_darkness,
+        grid.limit_area,
+        x,
+        y,
+    ));
+    if dark >= 3.0 {
         return false;
     }
     if check_units {
@@ -547,5 +557,39 @@ mod tests {
         assert!(!valid_place_at(
             &content, &table, &rules, &counter, &grid, wall, 0, 0, 4, 4, true
         ));
+    }
+
+    /// T5: the map-area limit rect + border darkness block placement
+    /// (`World.isInMapArea`/`getDarkness`, `World.java:483-503`;
+    /// `Build.validPlace` `Build.java:229`). Derivation: `dark = (2 - edgeDst)
+    /// * (4 / 2)`; edgeDst 0 → 4 (blocked), 1 → 2 (allowed).
+    #[test]
+    fn limit_area_blocks_placement_outside() {
+        let content = crate::content::test_support::test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let rules = BuildRules::default();
+        let counter = BlockCounter::new();
+        let mut grid = WorldGrid::new(64, 64);
+        grid.fill(BlockId::AIR, BlockId::AIR);
+        grid.limit_area = Some((10, 10, 20, 20));
+        let wall = content.block_id("copper-wall").expect("copper-wall");
+        assert!(valid_place_at(
+            &content, &table, &rules, &counter, &grid, wall, 0, 0, 15, 15, true
+        ));
+        assert!(!valid_place_at(
+            &content, &table, &rules, &counter, &grid, wall, 0, 0, 5, 15, true
+        ));
+        assert!(
+            !valid_place_at(
+                &content, &table, &rules, &counter, &grid, wall, 0, 0, 10, 15, true
+            ),
+            "edge tile: edgeDst 0 -> dark 4"
+        );
+        assert!(
+            valid_place_at(
+                &content, &table, &rules, &counter, &grid, wall, 0, 0, 11, 15, true
+            ),
+            "one inside: edgeDst 1 -> dark 2"
+        );
     }
 }

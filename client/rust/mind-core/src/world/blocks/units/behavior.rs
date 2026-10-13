@@ -236,9 +236,12 @@ impl BuildingBehavior for UnitFactoryBehavior {
     }
 
     fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
-        // `UnitFactoryBuild.write`: progress (f32), currentPlan (short),
-        // commandPos (nullable vec), command (TypeIO command). The port has no
-        // command/commandPos state on factories, so both are written unset.
+        // `UnitFactoryBuild.write`: PayloadBlock body first
+        // (`UnitFactory.java:486-506` extends `PayloadBlock.java:276-292`).
+        crate::world::blocks::payloads::payload_block::write_base(world, e, w);
+        // progress (f32), currentPlan (short), commandPos (nullable vec),
+        // command (TypeIO command). The port has no command/commandPos state on
+        // factories, so both are written unset.
         if let Some(state) = world.get::<UnitFactoryBuild>(e) {
             w.f(state.progress);
             w.s(state.current_plan as i16);
@@ -248,6 +251,9 @@ impl BuildingBehavior for UnitFactoryBehavior {
     }
 
     fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        if !crate::world::blocks::payloads::payload_block::read_base(world, e, r) {
+            return;
+        }
         let progress = r.f().unwrap_or(0.0);
         let current_plan = r.s().unwrap_or(-1) as i32;
         if revision >= 2 {
@@ -507,8 +513,11 @@ impl BuildingBehavior for ReconstructorBehavior {
     }
 
     fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
-        // `ReconstructorBuild.write`: progress (f32), commandPos (nullable vec),
-        // command (TypeIO command). The port has no commandPos.
+        // `ReconstructorBuild.write`: PayloadBlock body first
+        // (`Reconstructor.java:413-436` extends `PayloadBlock.java:276-292`).
+        crate::world::blocks::payloads::payload_block::write_base(world, e, w);
+        // progress (f32), commandPos (nullable vec), command (TypeIO command).
+        // The port has no commandPos.
         let (progress, command) = world
             .get::<ReconstructorBuild>(e)
             .map(|state| (state.progress, state.command))
@@ -522,6 +531,9 @@ impl BuildingBehavior for ReconstructorBehavior {
     }
 
     fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        if !crate::world::blocks::payloads::payload_block::read_base(world, e, r) {
+            return;
+        }
         if revision < 1 {
             return;
         }

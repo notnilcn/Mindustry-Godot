@@ -325,11 +325,19 @@ impl BuildingBehavior for CrafterBehavior {
             w.f(state.progress);
             w.f(state.warmup);
         }
+        // `GenericCrafter.legacyReadWarmup` (`cultivator`, Blocks.java:2969):
+        // the Java body appends a zero float.
+        if crate::world::building_io::legacy_read_warmup(world, e) {
+            w.f(0.0);
+        }
     }
 
     fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, _revision: u8) {
         let progress = r.f().unwrap_or(0.0);
         let warmup = r.f().unwrap_or(0.0);
+        if crate::world::building_io::legacy_read_warmup(world, e) {
+            let _ = r.f();
+        }
         if let Some(mut state) = world.get_mut::<CrafterState>(e) {
             state.progress = progress;
             state.warmup = warmup;
@@ -1189,6 +1197,37 @@ impl BuildingBehavior for BeamDrillBehavior {
             }
         }
     }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        // The port models Java's `BeamDrillBuild.time/warmup` as
+        // `DrillState.progress/warmup` (the live update path uses them).
+        let (progress, warmup) = world
+            .get::<DrillState>(e)
+            .map(|state| (state.progress, state.warmup))
+            .unwrap_or((0.0, 0.0));
+        w.f(progress);
+        w.f(warmup);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        if revision >= 1 {
+            let progress = r.f().unwrap_or(0.0);
+            let warmup = r.f().unwrap_or(0.0);
+            if let Some(mut state) = world.get_mut::<DrillState>(e) {
+                state.progress = progress;
+                state.warmup = warmup;
+            }
+        }
+    }
 }
 
 /// `WallCrafter` behavior (`WallCrafter$WallCrafterBuild.updateTile`): progress
@@ -1547,6 +1586,10 @@ impl BuildingBehavior for ItemIncineratorBehavior {
     /// `ItemIncineratorBuild.handleItem`: effect only — the item vanishes.
     fn handle_item(&self, _world: &mut World, _e: Entity, _src: Entity, _item: ItemId) {}
 }
+
+// --- G04 T3a: per-kind save IO -------------------------------------------------
+// Java body: BeamDrill.java:414-433 — `f time, f warmup` gated on
+// revision >= 1 (`BeamDrillState.progress` is Java `time`).
 
 #[cfg(test)]
 mod tests {

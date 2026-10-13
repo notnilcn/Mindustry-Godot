@@ -153,7 +153,8 @@ mod tests {
         assert_eq!(header.width, 32);
         assert_eq!(header.height, 24);
         assert!(header.custom);
-        assert_eq!(header.version, 1);
+        // Native writer v2 (Java tile-entity chunk layout).
+        assert_eq!(header.version, 2);
         assert_eq!(header.tag("mapname"), "fixture");
     }
 

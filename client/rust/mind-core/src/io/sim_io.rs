@@ -39,7 +39,7 @@ use crate::io::{IoError, IoResult, StringMap};
 use crate::sim::unit_runtime::UnitRuntime;
 use crate::sim::{IoHandler, IoRequest, IoResponse, IoStatus, Sim};
 use crate::world::config::{ConfigValue, config_to_type_value, type_value_to_config};
-use crate::world::{Context, EcsMapSource, WorldGrid};
+use crate::world::{EcsMapSource, WorldGrid};
 
 /// Reserved class id for the native live-sim unit chunk.
 ///
@@ -465,6 +465,187 @@ pub fn apply_team_plans(teams: &mut Teams, plans: Vec<(i32, Vec<TeamPlan>)>) {
     }
 }
 
+/// One decoded save (`SaveIO.load` output before it touches the world).
+pub struct DecodedSave {
+    /// The decoded tile grid.
+    pub grid: WorldGrid,
+    /// Decoded building payloads awaiting ECS spawn.
+    pub pending: Vec<(usize, crate::world::building_io::DecodedBase)>,
+    /// Team build plans read from the `entities` region.
+    pub plans: Vec<(i32, Vec<TeamPlan>)>,
+    /// Meta tags as read (`SaveReadState.tags`).
+    pub tags: StringMap,
+    /// Parsed rules (`SaveVersion.readRules`).
+    pub rules: Option<crate::io::json::Rules>,
+    /// Per-game stats from the `meta` region.
+    pub stats: Option<crate::io::json::GameStats>,
+    /// Map markers (`MapMarkers::read`).
+    pub markers: MapMarkers,
+    /// Decoded world entities (units/fires/puddles).
+    entities: LiveEntitySink,
+}
+
+/// Decodes one save/map container into [`DecodedSave`] without touching the
+/// live sim (`SaveIO.load`'s world half + `World.endMapLoad`).
+///
+/// Used by both the Load-Game path and the sector-resume path so a resumed
+/// sector restores exactly what a loaded save does (`readMeta`, `readMap`,
+/// `readEntities`, `readMarkers`).
+pub fn decode_save_bytes(
+    bytes: &[u8],
+    registry: &mut ContentRegistry,
+) -> Result<DecodedSave, IoError> {
+    let mut grid = WorldGrid::new(0, 0);
+    grid.begin_map_load();
+    let mut entities = LiveEntitySink::default();
+    let mut markers = MapMarkers::new();
+    let (result, tags, rules, stats, plans, pending) = {
+        let mut context = crate::editor::context::EditorContext::new(&mut grid, registry);
+        let mut state = SaveReadState {
+            context: Some(&mut context),
+            content: Some(registry),
+            entities: Some(&mut entities),
+            markers: Some(&mut markers),
+            ..SaveReadState::default()
+        };
+        let result = SaveIo::load_bytes(bytes, &mut state);
+        (
+            result,
+            state.tags.clone(),
+            state.rules.take(),
+            state.stats.take(),
+            std::mem::take(&mut state.team_plans),
+            context.take_pending_buildings(),
+        )
+    };
+    result?;
+    grid.end_map_load(registry);
+    Ok(DecodedSave {
+        grid,
+        pending,
+        plans,
+        tags,
+        rules,
+        stats,
+        markers,
+        entities,
+    })
+}
+
+/// `SaveVersion.readMeta` tick: Java writes `state.tick` as a float
+/// (`SaveVersion.java:135`; e.g. `74802.1339981854` in the r05 fixture), so
+/// parse as `f64` and floor to ticks.
+pub fn meta_tick(tags: &StringMap) -> Option<u64> {
+    tags.get("tick")
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|tick| tick.is_finite())
+        .map(|tick| tick.max(0.0).floor() as u64)
+}
+
+/// Resume metadata a sector load hands to the campaign facade after
+/// `play_sector` (the `readMeta` fields the rules do not carry).
+#[derive(Debug, Clone, Default)]
+pub struct SectorResumeMeta {
+    /// `wavetime` meta tag (ticks).
+    pub wavetime: Option<f32>,
+    /// `tick` meta tag (Java float text).
+    pub tick: Option<u64>,
+    /// Saved `GameStats`.
+    pub stats: Option<crate::io::json::GameStats>,
+    /// Saved map markers.
+    pub markers: MapMarkers,
+}
+
+impl Sim {
+    /// Respawns the decoded world entities (units, fires, puddles) into the
+    /// live runtime (`SaveVersion.readWorldEntities` application half).
+    pub fn apply_decoded_entities(&mut self, save: &DecodedSave) {
+        let default_team = self
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.default_team)
+            .unwrap_or_else(|| crate::game::rules::Rules::default().default_team);
+        for unit in &save.entities.units {
+            // `UnitComp.java:868-871` despawns a `spawnedByCore` unit that is
+            // not the player's, and the host spawns a fresh player unit
+            // (`spawn_player_unit`). Until revision 3 carries the flag (T9),
+            // the core unit types on the default team are skipped by name
+            // (`Blocks.java` `coreShard..coreAcropolis` `unitType`).
+            const CORE_UNITS: [&str; 6] = ["alpha", "beta", "gamma", "evoke", "incite", "emanate"];
+            if unit.team == default_team && CORE_UNITS.contains(&unit.name.as_str()) {
+                continue;
+            }
+            if let Some(entity) =
+                self.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
+            {
+                if unit.health > 0.0
+                    && let Some(mut health) = self.ecs.0.get_mut::<Health>(entity)
+                {
+                    health.health = unit.health;
+                }
+                // Revision 2: restore the carried payload stack.
+                if !unit.payloads.is_empty() {
+                    let stack = unit.payloads.clone();
+                    if let Some(mut payloads) =
+                        self.ecs
+                            .0
+                            .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
+                    {
+                        payloads.stack = stack;
+                    } else {
+                        self.ecs
+                            .0
+                            .entity_mut(entity)
+                            .insert(crate::entities::comp::unit::comp::UnitPayloads { stack });
+                    }
+                }
+            }
+        }
+        // Fires and puddles (`Groups.fires`/`Groups.puddles` recreate from
+        // their chunks; the tile-slot caches re-register on the next update
+        // pass). Accumulator fields are transient upstream and start zeroed.
+        let tile_size = crate::config::TILESIZE as f32;
+        for fire in &save.entities.fires {
+            self.ecs.0.spawn((
+                Pos {
+                    x: (fire.tile.0 as f32 + 0.5) * tile_size,
+                    y: (fire.tile.1 as f32 + 0.5) * tile_size,
+                },
+                TeamComp { team: 0 },
+                crate::combat::fires::FireState {
+                    tile: fire.tile,
+                    time: fire.time,
+                    lifetime: fire.lifetime,
+                    puddle_flammability: 0.0,
+                    spread_timer: 0.0,
+                    fireball_timer: 0.0,
+                    damage_timer: 0.0,
+                    warmup: 0.0,
+                    animation: 0.0,
+                },
+            ));
+        }
+        for puddle in &save.entities.puddles {
+            self.ecs.0.spawn((
+                Pos {
+                    x: (puddle.tile.0 as f32 + 0.5) * tile_size,
+                    y: (puddle.tile.1 as f32 + 0.5) * tile_size,
+                },
+                crate::combat::puddles::PuddleState {
+                    tile: puddle.tile,
+                    liquid: puddle.liquid,
+                    amount: puddle.amount,
+                    accepting: 0.0,
+                    update_time: 0.0,
+                    last_ripple: 0.0,
+                    effect_time: 0.0,
+                },
+            ));
+        }
+    }
+}
+
 /// The live `meta` tag set (`SaveVersion.writeMeta`, `SaveVersion.java:114-151`).
 fn live_meta_tags(
     sim: &Sim,
@@ -669,147 +850,59 @@ impl SimIoHandler {
     /// rules/wave/stats/markers/plans are applied to the installed campaign
     /// session (`SaveSlot.load`, `Saves.java:314-328`).
     fn load(&mut self, sim: &mut Sim, path: &Path) -> IoStatus {
-        let content = match boot_registry() {
+        let mut content = match boot_registry() {
             Ok(content) => content,
-            Err(error) => return IoStatus::Failed(error.to_string()),
-        };
-        let mut mapper = match boot_registry() {
-            Ok(mapper) => mapper,
             Err(error) => return IoStatus::Failed(error.to_string()),
         };
         let bytes = match NativeFs.read(path) {
             Ok(bytes) => bytes,
             Err(error) => return IoStatus::Failed(error.to_string()),
         };
-        let mut loaded = WorldGrid::new(0, 0);
-        let mut entities = LiveEntitySink::default();
-        let mut markers = MapMarkers::new();
-        let plans;
-        let pending;
-        let tags;
-        let rules;
-        let stats;
-        {
-            let mut context = Context::new(&mut loaded, &content);
-            let mut read = SaveReadState {
-                context: Some(&mut context),
-                content: Some(&mut mapper),
-                entities: Some(&mut entities),
-                markers: Some(&mut markers),
-                ..SaveReadState::default()
-            };
-            if let Err(error) = SaveIo::load_bytes(&bytes, &mut read) {
-                return IoStatus::Failed(error.to_string());
-            }
-            plans = std::mem::take(&mut read.team_plans);
-            tags = read.tags.clone();
-            rules = read.rules.take();
-            stats = read.stats.take();
-            drop(read);
-            pending = context.take_pending_buildings();
-        }
-        // The loaded header tick resumes the fixed-step counter (`readMeta`).
-        if let Some(tick) = tags.get("tick").and_then(|value| value.parse::<u64>().ok()) {
+        let save = match decode_save_bytes(&bytes, &mut content) {
+            Ok(save) => save,
+            Err(error) => return IoStatus::Failed(error.to_string()),
+        };
+        // The loaded header tick resumes the fixed-step counter (`readMeta`);
+        // Java writes it as a float.
+        if let Some(tick) = meta_tick(&save.tags) {
             sim.state.tick = tick;
         }
         // Replace the live world: drop the previous entities/bookkeeping, swap
         // the grid, then rebuild the ECS the tile model points at.
         sim.clear_world_for_load();
-        sim.grid = loaded;
+        sim.grid = save.grid.clone();
         let grid = sim.grid.clone();
         if let Some(mut unit_runtime) = sim.ecs.0.get_non_send_mut::<UnitRuntime>() {
             unit_runtime.reset(&grid);
         }
-        let materialized = sim.materialize_map_buildings(&pending);
+        let materialized = sim.materialize_map_buildings(&save.pending);
         if materialized > 0 {
             log::info!("sim_io load: materialized {materialized} building(s) from `{path:?}`");
         }
-        for unit in &entities.units {
-            if let Some(entity) =
-                sim.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
-            {
-                if unit.health > 0.0
-                    && let Some(mut health) = sim.ecs.0.get_mut::<Health>(entity)
-                {
-                    health.health = unit.health;
-                }
-                // Revision 2: restore the carried payload stack.
-                if !unit.payloads.is_empty() {
-                    let stack = unit.payloads.clone();
-                    if let Some(mut payloads) =
-                        sim.ecs
-                            .0
-                            .get_mut::<crate::entities::comp::unit::comp::UnitPayloads>(entity)
-                    {
-                        payloads.stack = stack;
-                    } else {
-                        sim.ecs
-                            .0
-                            .entity_mut(entity)
-                            .insert(crate::entities::comp::unit::comp::UnitPayloads { stack });
-                    }
-                }
-            }
-        }
-        // Fires and puddles (`Groups.fires`/`Groups.puddles` recreate from
-        // their chunks; the tile-slot caches re-register on the next update
-        // pass). Accumulator fields are transient upstream and start zeroed.
-        let tile_size = crate::config::TILESIZE as f32;
-        for fire in &entities.fires {
-            sim.ecs.0.spawn((
-                Pos {
-                    x: (fire.tile.0 as f32 + 0.5) * tile_size,
-                    y: (fire.tile.1 as f32 + 0.5) * tile_size,
-                },
-                TeamComp { team: 0 },
-                crate::combat::fires::FireState {
-                    tile: fire.tile,
-                    time: fire.time,
-                    lifetime: fire.lifetime,
-                    puddle_flammability: 0.0,
-                    spread_timer: 0.0,
-                    fireball_timer: 0.0,
-                    damage_timer: 0.0,
-                    warmup: 0.0,
-                    animation: 0.0,
-                },
-            ));
-        }
-        for puddle in &entities.puddles {
-            sim.ecs.0.spawn((
-                Pos {
-                    x: (puddle.tile.0 as f32 + 0.5) * tile_size,
-                    y: (puddle.tile.1 as f32 + 0.5) * tile_size,
-                },
-                crate::combat::puddles::PuddleState {
-                    tile: puddle.tile,
-                    liquid: puddle.liquid,
-                    amount: puddle.amount,
-                    accepting: 0.0,
-                    update_time: 0.0,
-                    last_ripple: 0.0,
-                    effect_time: 0.0,
-                },
-            ));
-        }
+        sim.apply_decoded_entities(&save);
         if let Some(mut runtime) = sim.ecs.0.remove_resource::<CampaignRuntime>() {
-            if let Some(rules) = rules {
+            if let Some(rules) = save.rules.clone() {
                 runtime.session.rules = rules;
             }
-            if let Some(stats) = stats {
+            if let Some(stats) = save.stats.clone() {
                 runtime.session.stats = stats;
             }
-            if let Some(wave) = tags.get("wave").and_then(|value| value.parse::<i32>().ok()) {
+            if let Some(wave) = save
+                .tags
+                .get("wave")
+                .and_then(|value| value.parse::<i32>().ok())
+            {
                 runtime.session.wave = wave;
             }
-            if let Some(wavetime) = tags
+            if let Some(wavetime) = save
+                .tags
                 .get("wavetime")
                 .and_then(|value| value.parse::<f32>().ok())
             {
                 runtime.session.wavetime = wavetime;
             }
-            runtime.session.markers = markers;
-            apply_team_plans(&mut runtime.session.teams, plans);
+            runtime.session.markers = save.markers.clone();
+            apply_team_plans(&mut runtime.session.teams, save.plans.clone());
             runtime.session.phase = crate::game::State::Playing;
             sim.ecs.0.insert_resource(runtime);
         }
@@ -942,6 +1035,97 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// PAR-0161: a live save round-trips the per-kind bodies — the drill keeps
+    /// its progress/warmup and the sorter keeps its configured item. Before the
+    /// fix both were dropped by the v1 `read_building` (progress 0, config None).
+    #[test]
+    fn live_save_restores_drill_and_sorter_bodies() {
+        fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
+            sim.command(crate::determinism::SimCommand::Configure { x, y, value })
+                .expect("configure");
+        }
+
+        let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        let drill = sim
+            .content()
+            .id("mechanical-drill")
+            .expect("mechanical-drill");
+        let sorter = sim.content().id("sorter").expect("sorter");
+        sim.apply(Command::Place {
+            x: 4,
+            y: 4,
+            block: drill,
+        })
+        .expect("place drill");
+        sim.apply(Command::Place {
+            x: 8,
+            y: 8,
+            block: sorter,
+        })
+        .expect("place sorter");
+        let drill_entity = sim.grid.tile(4, 4).build.expect("drill entity");
+        {
+            let mut state = sim
+                .ecs
+                .0
+                .get_mut::<crate::entities::comp::DrillState>(drill_entity)
+                .expect("drill state");
+            state.progress = 123.5;
+            state.warmup = 0.75;
+        }
+        configure(
+            &mut sim,
+            8,
+            8,
+            crate::determinism::ConfigValue::Content("copper".to_owned()),
+        );
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("drill-sorter-bodies");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load must rebuild the per-kind bodies.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let drill_entity = sim.grid.tile(4, 4).build.expect("drill respawned");
+        let state = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::DrillState>(drill_entity)
+            .expect("drill state");
+        assert!(
+            (state.progress - 123.5).abs() < 1e-6,
+            "drill progress {}",
+            state.progress
+        );
+        assert!(
+            (state.warmup - 0.75).abs() < 1e-6,
+            "drill warmup {}",
+            state.warmup
+        );
+
+        let sorter_entity = sim.grid.tile(8, 8).build.expect("sorter respawned");
+        match crate::world::config::read_config(&sim.ecs.0, sorter_entity) {
+            crate::world::config::ConfigValue::Item(item) => {
+                assert_eq!(item, crate::content::ItemId::COPPER, "sorter keeps copper");
+            }
+            other => panic!("sorter config lost: {other:?}"),
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn load_of_a_missing_file_is_a_failed_response() {
         let mut sim = Sim::new(1, 4, 4, BlockId::AIR, BlockId::AIR);
@@ -953,6 +1137,145 @@ mod tests {
         let responses = sim.take_io_responses();
         assert_eq!(responses.len(), 1);
         assert!(matches!(responses[0].status, IoStatus::Failed(_)));
+    }
+
+    /// T2: Java writes `tick` as a float (`SaveVersion.java:135`); the parser
+    /// must floor it instead of silently keeping the old tick.
+    #[test]
+    fn meta_tick_parses_java_float() {
+        let mut tags = StringMap::new();
+        tags.insert("tick".to_owned(), "74802.1339981854".to_owned());
+        assert_eq!(meta_tick(&tags), Some(74802));
+        tags.insert("tick".to_owned(), "12".to_owned());
+        assert_eq!(meta_tick(&tags), Some(12));
+        tags.insert("tick".to_owned(), "x".to_owned());
+        assert_eq!(meta_tick(&tags), None);
+    }
+
+    /// T2: the shared decoder carries the saved units and meta tags without
+    /// touching the live sim (`SaveIO.load`'s world half) — the sector-resume
+    /// path uses it to restore what the old `load_grid_file` dropped.
+    #[test]
+    fn decode_save_bytes_carries_units_tags_and_markers() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.wavetime = 1234.5;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        sim.spawn_live_unit("dagger", 1, 40.0, 40.0, 0.0)
+            .expect("spawn 1");
+        sim.spawn_live_unit("dagger", 1, 48.0, 40.0, 0.0)
+            .expect("spawn 2");
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("decode-units");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        let bytes = std::fs::read(&path).expect("save bytes");
+        let mut content = boot_registry().expect("content");
+        let save = decode_save_bytes(&bytes, &mut content).expect("decode");
+        assert_eq!(save.entities.units.len(), 2, "two units decoded");
+        assert_eq!(
+            save.tags.get("wavetime").map(String::as_str),
+            Some("1234.5"),
+            "wavetime tag carried"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// T2: a core unit (`spawnedByCore`, until T9's flag lands matched by type
+    /// name) is skipped on respawn — the host spawns the player unit itself;
+    /// the other unit survives.
+    #[test]
+    fn apply_decoded_entities_skips_core_units() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+        sim.spawn_live_unit("alpha", 1, 100.0, 100.0, 0.0)
+            .expect("alpha");
+        sim.spawn_live_unit("dagger", 1, 120.0, 100.0, 0.0)
+            .expect("dagger");
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("decode-core-unit");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        let bytes = std::fs::read(&path).expect("save bytes");
+        let mut content = boot_registry().expect("content");
+        let save = decode_save_bytes(&bytes, &mut content).expect("decode");
+        assert_eq!(save.entities.units.len(), 2, "both units decoded");
+
+        // Apply to a fresh sim: only the dagger respawns.
+        let mut dst = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        dst.install_block_runtime().expect("block runtime");
+        dst.install_unit_runtime().expect("unit runtime");
+        dst.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                wave_team: 2,
+                ..Rules::default()
+            }),
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        dst.apply_decoded_entities(&save);
+        let runtime = dst.unit_runtime().expect("runtime");
+        let mut names = Vec::new();
+        for entity in runtime.units.iter().copied() {
+            if let Some(comp) = dst.ecs.0.get::<UnitTypeComp>(entity)
+                && let Some(def) = runtime.content.unit(comp.type_id)
+            {
+                names.push(def.name.clone());
+            }
+        }
+        assert_eq!(names, vec!["dagger".to_owned()], "core unit skipped");
+
+        let _ = std::fs::remove_file(&path);
     }
 
     /// The live unit/fire/puddle chunk class ids must stay clear of the

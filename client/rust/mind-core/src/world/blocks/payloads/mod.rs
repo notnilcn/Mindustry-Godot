@@ -257,7 +257,7 @@ pub fn create_build_payload(world: &mut World, block: BlockId, team: u8) -> Opti
     Some(entity)
 }
 
-/// `Payload.write` (M6 shape: `bool` presence + `kind:u8` + block/unit tag).
+/// `Payload.write` (`Payload.java:87-118`).
 pub fn payload_write(
     world: &World,
     payload: Option<PayloadRef>,
@@ -273,7 +273,14 @@ pub fn payload_write(
         w.s(build_payload_block(world, payload)
             .map(|b| b.raw() as i16)
             .unwrap_or(-1));
-        w.b(0);
+        // `b build.version(); build.writeAll(write)` — the nested building
+        // chunk (base with the embedded version + per-kind body).
+        let Some(entity) = payload.entity else {
+            w.b(0);
+            return;
+        };
+        w.b(crate::world::building_io::behavior_version(world, entity) as i8);
+        let _ = crate::world::building_io::write_all_body(world, entity, w, false);
     } else {
         w.b(payload.content as i8);
     }

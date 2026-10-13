@@ -98,7 +98,8 @@ impl BuildingBehavior for PayloadVoidBehavior {
         r: &mut crate::world::BuildingReader,
         _revision: u8,
     ) {
-        super::payload_block::read_base(world, e, r);
+        // A unit payload bails; the void block has no further fields.
+        let _ = super::payload_block::read_base(world, e, r);
     }
 }
 

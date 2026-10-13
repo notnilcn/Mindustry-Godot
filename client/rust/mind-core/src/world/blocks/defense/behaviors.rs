@@ -72,6 +72,46 @@ impl BuildingBehavior for ForceProjectorBehavior {
         update_force_projector_state(world, e, &mut state, eff, false, 0.0);
         world.entity_mut(e).insert(state);
     }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let (broken, buildup, radscl, warmup, phase_heat) = world
+            .get::<ForceProjectorState>(e)
+            .map(|state| {
+                (
+                    state.broken,
+                    state.buildup,
+                    state.radscl,
+                    state.warmup,
+                    state.phase_heat,
+                )
+            })
+            .unwrap_or((false, 0.0, 0.0, 0.0, 0.0));
+        w.bool(broken);
+        w.f(buildup);
+        w.f(radscl);
+        w.f(warmup);
+        w.f(phase_heat);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let broken = r.bool().unwrap_or(false);
+        let buildup = r.f().unwrap_or(0.0);
+        let radscl = r.f().unwrap_or(0.0);
+        let warmup = r.f().unwrap_or(0.0);
+        let phase_heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<ForceProjectorState>(e) {
+            state.broken = broken;
+            state.buildup = buildup;
+            state.radscl = radscl;
+            state.warmup = warmup;
+            state.phase_heat = phase_heat;
+        }
+    }
 }
 
 /// `MendProjector` behavior (`MendBuild` construction + state tick).
@@ -94,6 +134,29 @@ impl BuildingBehavior for MendProjectorBehavior {
         let optional = optional_efficiency(world, e);
         update_mend_projector_world(world, e, &mut state, eff, true, optional);
         world.entity_mut(e).insert(state);
+    }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let (heat, phase_heat) = world
+            .get::<MendProjectorState>(e)
+            .map(|state| (state.heat, state.phase_heat))
+            .unwrap_or((0.0, 0.0));
+        w.f(heat);
+        w.f(phase_heat);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let heat = r.f().unwrap_or(0.0);
+        let phase_heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<MendProjectorState>(e) {
+            state.heat = heat;
+            state.phase_heat = phase_heat;
+        }
     }
 }
 
@@ -119,6 +182,29 @@ impl BuildingBehavior for ShieldWallBehavior {
             .is_some_and(|module| module.status > 0.0);
         update_shield_wall(&mut state, eff, powered);
         world.entity_mut(e).insert(state);
+    }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let shield = world
+            .get::<ShieldWallState>(e)
+            .map(|state| state.shield)
+            .unwrap_or_default();
+        w.f(shield);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let shield = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<ShieldWallState>(e) {
+            state.shield = shield;
+            if shield > 0.0 {
+                state.shield_radius = 1.0;
+            }
+        }
     }
 }
 
@@ -179,6 +265,29 @@ impl BuildingBehavior for OverdriveProjectorBehavior {
         let optional = optional_efficiency(world, e);
         update_overdrive_projector(world, e, &mut state, eff, optional);
         world.entity_mut(e).insert(state);
+    }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let (heat, phase_heat) = world
+            .get::<OverdriveProjectorState>(e)
+            .map(|state| (state.heat, state.phase_heat))
+            .unwrap_or((0.0, 0.0));
+        w.f(heat);
+        w.f(phase_heat);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let heat = r.f().unwrap_or(0.0);
+        let phase_heat = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<OverdriveProjectorState>(e) {
+            state.heat = heat;
+            state.phase_heat = phase_heat;
+        }
     }
 }
 
@@ -246,6 +355,35 @@ impl BuildingBehavior for BaseShieldBehavior {
         let eff = efficiency(world, e);
         update_base_shield(world, e, &mut state, eff);
         world.entity_mut(e).insert(state);
+    }
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let (smooth_radius, broken) = world
+            .get::<BaseShieldState>(e)
+            .map(|state| (state.smooth_radius, state.broken))
+            .unwrap_or((0.0, false));
+        w.f(smooth_radius);
+        w.bool(broken);
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        if revision >= 1 {
+            let smooth_radius = r.f().unwrap_or(0.0);
+            let broken = r.bool().unwrap_or(false);
+            if let Some(mut state) = world.get_mut::<BaseShieldState>(e) {
+                state.smooth_radius = smooth_radius;
+                state.broken = broken;
+            }
+        }
     }
 }
 
@@ -569,3 +707,8 @@ mod tests {
         );
     }
 }
+
+// --- G04 T3a: per-kind save IO (`Building.write`/`read`) ---------------------
+// Java bodies: ForceProjector.java:342-359, MendProjector.java:167-178,
+// OverdriveProjector.java:162-173, BaseShield.java:149-169 (version 1),
+// ShieldWall.java:120-130.

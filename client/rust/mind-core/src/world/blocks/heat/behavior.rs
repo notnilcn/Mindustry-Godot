@@ -361,6 +361,10 @@ pub fn register(registry: &mut BehaviorRegistry, _content: &ContentRegistry) {
     );
 }
 
+// --- G04 T3a: per-kind save IO -------------------------------------------------
+// Java body: HeatProducer.java:71-80 — GenericCrafter (`f progress, f warmup`)
+// then `f heat`.
+
 #[cfg(test)]
 mod tests {
     use super::*;

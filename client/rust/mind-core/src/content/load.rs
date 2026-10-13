@@ -263,6 +263,12 @@ impl ContentRegistry {
         self.temporary_mapper = mapper;
     }
 
+    /// The installed save temporary mapper (`SaveReadState::last_mapper`
+    /// snapshot source; plan G04 T1).
+    pub fn temporary_mapper(&self) -> Option<&TemporaryMapper> {
+        self.temporary_mapper.as_ref()
+    }
+
     /// Number of records of `type_` (0 for types without a vector in this build).
     pub fn type_len(&self, type_: ContentType) -> usize {
         match type_ {

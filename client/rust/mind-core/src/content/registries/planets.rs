@@ -309,6 +309,8 @@ pub struct PlanetDef {
     pub enemy_build_speed_multiplier: f32,
     /// Enemy factory activation delay.
     pub enemy_factory_activation_delay: f32,
+    /// `Planet.enemyInfiniteItems` (default true; `Planet.java:125-133`).
+    pub enemy_infinite_items: bool,
     /// Core capacity multiplier when launching.
     pub launch_capacity_multiplier: f32,
     /// Atmosphere inner radius adjustment.
@@ -401,6 +403,7 @@ impl PlanetDef {
             preset_remap: Vec::new(),
             enemy_build_speed_multiplier: 1.0,
             enemy_factory_activation_delay: 0.0,
+            enemy_infinite_items: true,
             launch_capacity_multiplier: 0.25,
             atmosphere_rad_in: 0.0,
             atmosphere_rad_out: 0.3,

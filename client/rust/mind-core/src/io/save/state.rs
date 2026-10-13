@@ -60,6 +60,10 @@ pub struct SaveReadState<'a> {
     /// feeds these to `DataAssets::load`; `None` means the region was absent or
     /// had no sink.
     pub patches: Option<Vec<crate::mods::assets::DataAsset>>,
+    /// Snapshot of the save's temporary content mapper taken right before the
+    /// `SaveIo::load` epilogue clears it (`SaveVersion.readContentHeader`
+    /// result; plan G04 T1 content-order guard).
+    pub last_mapper: Option<crate::content::load::TemporaryMapper>,
 }
 
 /// One unresolved entity reference recorded during load (plan 04 §3.4).
@@ -82,6 +86,7 @@ impl SaveReadState<'_> {
         self.team_plans.clear();
         self.pending_entity_refs.clear();
         self.patches = None;
+        self.last_mapper = None;
     }
 }
 
@@ -103,6 +108,7 @@ impl Default for SaveReadState<'_> {
             team_plans: Vec::new(),
             pending_entity_refs: Vec::new(),
             patches: None,
+            last_mapper: None,
         }
     }
 }

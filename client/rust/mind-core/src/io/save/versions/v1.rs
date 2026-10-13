@@ -48,172 +48,11 @@ impl SaveVersion for SaveV1 {
     }
 
     fn write(&self, w: &mut SaveWriter, options: &SaveOptions) -> Result<(), IoError> {
-        // `SaveVersion.write`: region order meta/patches/content/map/entities/
-        // markers/custom. Extra tags merge under the standard set
-        // (`StringMap.merge` overwrites).
-        let mut tags = options.extra_tags.clone().unwrap_or_default();
-        for (key, value) in &w.ctx.tags {
-            tags.insert(key.clone(), value.clone());
-        }
-        // `SaveVersion.writeDataPatches`: the meta tag reflects the patch set's
-        // external assets (plan 20 §6.8).
-        if let Some(patches) = w.ctx.patches {
-            tags.insert(
-                "hasExternalAssets".to_owned(),
-                patches.has_external_assets().to_string(),
-            );
-        }
-        w.write_region(REGION_META, |wire, _scratch| wire.string_map(&tags))?;
-
-        let patches = w.ctx.patches;
-        let embed = options.embed_assets;
-        w.write_region(REGION_PATCHES, |wire, _scratch| {
-            wire.i(PATCH_FORMAT_VERSION);
-            match patches {
-                Some(set) => {
-                    wire.i(set.patch_count() as i32);
-                    set.write_patches(wire, embed)?;
-                }
-                None => wire.i(0),
-            }
-            Ok(())
-        })?;
-
-        let content = w.ctx.content;
-        w.write_region(REGION_CONTENT, |wire, _scratch| {
-            write_content_header(wire, content)
-        })?;
-
-        let map = w.ctx.map;
-        w.write_region(REGION_MAP, |wire, scratch| match map {
-            Some(map) => write_map(wire, scratch, map),
-            None => {
-                // Empty world (meta-only saves).
-                wire.us(0);
-                wire.us(0);
-                Ok(())
-            }
-        })?;
-
-        let entities = w.ctx.entities;
-        w.write_region(REGION_ENTITIES, |wire, scratch| match entities {
-            Some(entities) => write_entities(wire, scratch, entities),
-            None => {
-                wire.us(0); // entity ID mapping
-                wire.i(0); // team build plans
-                wire.i(0); // world entities
-                Ok(())
-            }
-        })?;
-
-        let markers = w.ctx.markers;
-        w.write_region(REGION_MARKERS, |wire, _scratch| match markers {
-            Some(markers) => markers.write_markers(wire),
-            None => {
-                wire.i(0);
-                Ok(())
-            }
-        })?;
-
-        let custom = w.ctx.custom_chunks;
-        w.write_region(REGION_CUSTOM, |wire, scratch| {
-            let chunks: Vec<(
-                &String,
-                &std::sync::Arc<dyn super::super::state::CustomChunk>,
-            )> = match custom {
-                Some(registry) => registry
-                    .iter()
-                    .filter(|(_, chunk)| chunk.should_write())
-                    .collect(),
-                None => Vec::new(),
-            };
-            wire.i(chunks.len() as i32);
-            for (name, chunk) in chunks {
-                wire.str(name)?;
-                scratch.write_chunk(wire, |chunk_writer| chunk.write(chunk_writer))?;
-            }
-            Ok(())
-        })?;
-
-        Ok(())
+        write_regions(w, options)
     }
 
     fn read(&self, r: &mut SaveReader, state: &mut SaveReadState) -> Result<(), IoError> {
-        state.reset();
-        let mut saw_meta = false;
-        while let Some(name) = r.next_region()? {
-            match name.as_str() {
-                REGION_META => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    read_meta(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
-                    require_consumed(&name, expected, wire.pos())?;
-                    saw_meta = true;
-                }
-                REGION_PATCHES => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    read_data_patches(&mut wire, state)
-                        .map_err(|e| IoError::region_read(&name, e))?;
-                    require_consumed(&name, expected, wire.pos())?;
-                }
-                REGION_CONTENT => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    let mapper = read_content_header(&mut wire, state.content.as_deref())
-                        .map_err(|e| IoError::region_read(&name, e))?;
-                    require_consumed(&name, expected, wire.pos())?;
-                    if let (Some(mapper), Some(content)) = (mapper, state.content.as_deref_mut()) {
-                        // Upstream `content.setTemporaryMapper(map)`; cleared by
-                        // the `SaveIo::load` epilogue (`finally`).
-                        content.set_temporary_mapper(Some(mapper));
-                    }
-                }
-                REGION_MAP => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    read_map(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
-                    require_consumed(&name, expected, wire.pos())?;
-                }
-                REGION_ENTITIES => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    read_entities(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
-                    require_consumed(&name, expected, wire.pos())?;
-                }
-                REGION_MARKERS => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    match &mut state.markers {
-                        Some(sink) => sink
-                            .read_markers(&mut wire)
-                            .map_err(|e| IoError::region_read(&name, e))?,
-                        None => read_markers_stub(&mut wire)
-                            .map_err(|e| IoError::region_read(&name, e))?,
-                    }
-                    require_consumed(&name, expected, wire.pos())?;
-                }
-                REGION_CUSTOM => {
-                    let expected = r.payload().len();
-                    let mut wire = r.wire();
-                    read_custom_chunks(&mut wire, state)
-                        .map_err(|e| IoError::region_read(&name, e))?;
-                    require_consumed(&name, expected, wire.pos())?;
-                }
-                other => {
-                    // Forward growth: unknown regions are skipped by length,
-                    // never fatal (plan 04 §3.12.4).
-                    log::warn!("skipping unknown save region `{other}`");
-                }
-            }
-        }
-        if !saw_meta {
-            return Err(IoError::corrupt("save is missing the \"meta\" region"));
-        }
-        // `SaveVersion.readRules`: native v1 follows upstream v13+ and parses
-        // the rules JSON after patches/content/map landed.
-        read_rules(state)?;
-        Ok(())
+        read_regions(r, state)
     }
 
     fn get_meta(&self, r: &mut SaveReader) -> Result<SaveMeta, IoError> {
@@ -230,6 +69,179 @@ impl SaveVersion for SaveV1 {
         let tags = wire.string_map()?;
         SaveMeta::from_tags(self.version() as i32, tags)
     }
+}
+
+/// Writes all regions in canonical order (`SaveVersion.write`); shared by
+/// [`SaveV1`] and [`SaveV2`](super::v2::SaveV2) — the v2 difference is the
+/// tile-entity chunk layout (`BuildingComp.writeAll` + per-kind revision),
+/// which is produced by [`crate::world::map_source`].
+pub(super) fn write_regions(w: &mut SaveWriter, options: &SaveOptions) -> Result<(), IoError> {
+    // `SaveVersion.write`: region order meta/patches/content/map/entities/
+    // markers/custom. Extra tags merge under the standard set
+    // (`StringMap.merge` overwrites).
+    let mut tags = options.extra_tags.clone().unwrap_or_default();
+    for (key, value) in &w.ctx.tags {
+        tags.insert(key.clone(), value.clone());
+    }
+    // `SaveVersion.writeDataPatches`: the meta tag reflects the patch set's
+    // external assets (plan 20 §6.8).
+    if let Some(patches) = w.ctx.patches {
+        tags.insert(
+            "hasExternalAssets".to_owned(),
+            patches.has_external_assets().to_string(),
+        );
+    }
+    w.write_region(REGION_META, |wire, _scratch| wire.string_map(&tags))?;
+
+    let patches = w.ctx.patches;
+    let embed = options.embed_assets;
+    w.write_region(REGION_PATCHES, |wire, _scratch| {
+        wire.i(PATCH_FORMAT_VERSION);
+        match patches {
+            Some(set) => {
+                wire.i(set.patch_count() as i32);
+                set.write_patches(wire, embed)?;
+            }
+            None => wire.i(0),
+        }
+        Ok(())
+    })?;
+
+    let content = w.ctx.content;
+    w.write_region(REGION_CONTENT, |wire, _scratch| {
+        write_content_header(wire, content)
+    })?;
+
+    let map = w.ctx.map;
+    w.write_region(REGION_MAP, |wire, scratch| match map {
+        Some(map) => write_map(wire, scratch, map),
+        None => {
+            // Empty world (meta-only saves).
+            wire.us(0);
+            wire.us(0);
+            Ok(())
+        }
+    })?;
+
+    let entities = w.ctx.entities;
+    w.write_region(REGION_ENTITIES, |wire, scratch| match entities {
+        Some(entities) => write_entities(wire, scratch, entities),
+        None => {
+            wire.us(0); // entity ID mapping
+            wire.i(0); // team build plans
+            wire.i(0); // world entities
+            Ok(())
+        }
+    })?;
+
+    let markers = w.ctx.markers;
+    w.write_region(REGION_MARKERS, |wire, _scratch| match markers {
+        Some(markers) => markers.write_markers(wire),
+        None => {
+            wire.i(0);
+            Ok(())
+        }
+    })?;
+
+    let custom = w.ctx.custom_chunks;
+    w.write_region(REGION_CUSTOM, |wire, scratch| {
+        let chunks: Vec<(
+            &String,
+            &std::sync::Arc<dyn super::super::state::CustomChunk>,
+        )> = match custom {
+            Some(registry) => registry
+                .iter()
+                .filter(|(_, chunk)| chunk.should_write())
+                .collect(),
+            None => Vec::new(),
+        };
+        wire.i(chunks.len() as i32);
+        for (name, chunk) in chunks {
+            wire.str(name)?;
+            scratch.write_chunk(wire, |chunk_writer| chunk.write(chunk_writer))?;
+        }
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Reads one native region stream in stream order (`SaveVersion.read`);
+/// shared by [`SaveV1`] and [`SaveV2`](super::v2::SaveV2).
+pub(super) fn read_regions(r: &mut SaveReader, state: &mut SaveReadState) -> Result<(), IoError> {
+    state.reset();
+    let mut saw_meta = false;
+    while let Some(name) = r.next_region()? {
+        match name.as_str() {
+            REGION_META => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                read_meta(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
+                require_consumed(&name, expected, wire.pos())?;
+                saw_meta = true;
+            }
+            REGION_PATCHES => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                read_data_patches(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
+                require_consumed(&name, expected, wire.pos())?;
+            }
+            REGION_CONTENT => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                let mapper = read_content_header(&mut wire, state.content.as_deref())
+                    .map_err(|e| IoError::region_read(&name, e))?;
+                require_consumed(&name, expected, wire.pos())?;
+                if let (Some(mapper), Some(content)) = (mapper, state.content.as_deref_mut()) {
+                    // Upstream `content.setTemporaryMapper(map)`; cleared by
+                    // the `SaveIo::load` epilogue (`finally`).
+                    content.set_temporary_mapper(Some(mapper));
+                }
+            }
+            REGION_MAP => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                read_map(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
+                require_consumed(&name, expected, wire.pos())?;
+            }
+            REGION_ENTITIES => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                read_entities(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
+                require_consumed(&name, expected, wire.pos())?;
+            }
+            REGION_MARKERS => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                match &mut state.markers {
+                    Some(sink) => sink
+                        .read_markers(&mut wire)
+                        .map_err(|e| IoError::region_read(&name, e))?,
+                    None => {
+                        read_markers_stub(&mut wire).map_err(|e| IoError::region_read(&name, e))?
+                    }
+                }
+                require_consumed(&name, expected, wire.pos())?;
+            }
+            REGION_CUSTOM => {
+                let expected = r.payload().len();
+                let mut wire = r.wire();
+                read_custom_chunks(&mut wire, state).map_err(|e| IoError::region_read(&name, e))?;
+                require_consumed(&name, expected, wire.pos())?;
+            }
+            other => {
+                // Forward growth: unknown regions are skipped by length,
+                // never fatal (plan 04 §3.12.4).
+                log::warn!("skipping unknown save region `{other}`");
+            }
+        }
+    }
+    if !saw_meta {
+        return Err(IoError::corrupt("save is missing the \"meta\" region"));
+    }
+    // `SaveVersion.readRules`: native v1 follows upstream v13+ and parses
+    // the rules JSON after patches/content/map landed.
+    read_rules(state)?;
+    Ok(())
 }
 
 /// Meta-only read of one legacy `MSAV` region stream (`SaveIO.getMeta`): the
@@ -294,17 +306,11 @@ pub(crate) fn read_legacy_regions(
         read_legacy_entities(wire, state, version)
     })?;
     if version >= 8 {
-        // Upstream markers are a JSON document filling the region; without a
-        // sink the payload is skipped by length (the native stub's count
-        // prefix is native-only framing).
-        if state.markers.is_some() {
-            read_legacy_region(&mut wire, REGION_MARKERS, |wire| match &mut state.markers {
-                Some(sink) => sink.read_markers(wire),
-                None => Ok(()),
-            })?;
-        } else {
-            skip_legacy_region(&mut wire, REGION_MARKERS)?;
-        }
+        // Upstream markers are UBJson `IntMap` bytes (`JsonIO.writeBytes`;
+        // deviation 5: UBJson is not ported), so the region is skipped even
+        // when a sink is present — the native binary sink would mis-parse it
+        // and fail the whole load (e.g. the groundZero preset map reload).
+        skip_legacy_region(&mut wire, REGION_MARKERS)?;
     }
     if version >= 7 {
         // `LegacyRegionSaveVersion` (<= 6) has no custom-chunk region.
@@ -804,13 +810,18 @@ fn read_map_body(
                 };
                 if context.block_has_building_io(i) {
                     let payload = wire.bytes(chunk_len)?;
-                    let mut chunk = WireReader::new(payload);
-                    let version = chunk.ub()?;
-                    context.read_building(i, &mut chunk, version).map_err(|e| {
-                        IoError::corrupt(format!(
-                            "Failed to read tile entity of block: {block}: {e}"
-                        ))
-                    })?;
+                    // P0 entities without `Building` are written as empty
+                    // chunks (`EcsMapSource::write_building`); skip them
+                    // instead of failing on the missing version byte.
+                    if chunk_len > 0 {
+                        let mut chunk = WireReader::new(payload);
+                        let version = chunk.ub()?;
+                        context.read_building(i, &mut chunk, version).map_err(|e| {
+                            IoError::corrupt(format!(
+                                "Failed to read tile entity of block: {block}: {e}"
+                            ))
+                        })?;
+                    }
                 } else {
                     // The block lost its building IO (removed/changed): skip.
                     wire.skip(chunk_len)?;
@@ -1191,7 +1202,8 @@ mod tests {
         let ctx = WriteContext::meta_only(tags.clone());
         let bytes = SaveIo::write_to_vec(&ctx, &SaveOptions::new()).unwrap();
         let meta = SaveIo::get_meta_bytes(&bytes).unwrap();
-        assert_eq!(meta.version, 1);
+        // The current native writer is v2 (Java tile-entity chunk layout).
+        assert_eq!(meta.version, 2);
         assert_eq!(meta.map_name, "groundZero");
         assert_eq!(meta.wave, 9);
         assert_eq!(meta.width(), 16);

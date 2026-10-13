@@ -112,7 +112,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/campaign/sector_cycle.json",
       "owner_plan": "12",
-      "sha256": "937a4f9bd85a06ed4d2572ae028b2875f3651a76c6af79d571e4663a9168109f"
+      "sha256": "468f6adbbb17e3ccffd5acaf6a06309105d2612ae49d8b197a4aa4af9bda5ea1"
     },
     {
       "id": "harness_campaign_tech_unlock_gating",

@@ -702,6 +702,12 @@ impl Sim {
         let _ = self.resolve_deaths();
         // `PlayerComp.update`: respawn at the best core after `deathDelay`.
         self.update_player_respawn();
+        // Capture-derived world requests (T7) apply after the death pass and
+        // before the events flush, mirroring Java's next-frame `Core.app.post`.
+        self.apply_campaign_world_requests();
+        // A mid-match rules change (G06 `setrule`, relay `setRules`, invasion)
+        // re-derives the world from the session rules (T5).
+        self.apply_dirty_rules_to_world();
         self.flush_events();
         self.time.update();
         self.clock.update(&mut self.ecs.0);
@@ -1231,6 +1237,27 @@ impl Sim {
     /// Scenario seed.
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// Re-derives the world state that mirrors `Rules`: the map-area limit rect
+    /// and border darkness (`World.isInMapArea`/`getDarkness`,
+    /// `World.java:337-339, 483-503`), plus the build guard (G02 T8's
+    /// `sync_build_rules`, called from here once it exists). Call after any
+    /// rules change: sector start (`MindCampaign`), or mid-match through
+    /// `CampaignRuntime.rules_world_dirty` (G06 `setrule`) / the gdext
+    /// `apply_world_rules` wrapper.
+    pub fn apply_rules_to_world(&mut self, rules: &crate::game::rules::Rules) {
+        self.grid.limit_area = rules.limit_map_area.then_some((
+            rules.limit_x,
+            rules.limit_y,
+            rules.limit_width,
+            rules.limit_height,
+        ));
+        self.grid.border_darkness = rules.border_darkness;
+        // G02 T8's `sync_build_rules(&mut World, &Rules)`; call it here once it
+        // exists — until then the place gate reads the live `BuildRules`
+        // resource only.
+        self.refresh_unit_runtime();
     }
 
     /// Current phase.

@@ -442,6 +442,8 @@ impl Sim {
                     ..
                 } = &mut runtime;
                 let before = *seq;
+                // Read the team before the kill despawns the entity.
+                let unit_team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
                 if crate::entities::comp::unit::lifecycle::kill_unit_with_abilities(
                     world,
                     content,
@@ -452,6 +454,15 @@ impl Sim {
                 ) {
                     killed_units += 1;
                     runtime.units_removed += 1;
+                    // `Logic` `UnitDestroyEvent` (`Logic.java:218-226`): a
+                    // killed unit of a non-default team counts as an enemy
+                    // kill (`stats.enemyUnitsDestroyed`; T4).
+                    if let Some(mut campaign) =
+                        world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                        && unit_team != campaign.session.rules.default_team
+                    {
+                        campaign.session.stats.enemy_units_destroyed += 1;
+                    }
                 }
                 // Death-ability spawns (`SpawnDeathAbility`) join the live list.
                 if runtime.seq != before {
@@ -580,6 +591,30 @@ impl Sim {
                     .get::<TeamComp>(entity)
                     .map(|team| team.team)
                     .unwrap_or(0);
+                // `Logic` `BlockDestroyEvent` (`Logic.java:182-186`): a dead AI
+                // core with `coreDestroyClear` queues `TeamData.timeDestroy`
+                // around it; `Sim::apply_campaign_world_requests` applies it
+                // after this tick's schedule (`Core.app.post`).
+                if self
+                    .ecs
+                    .0
+                    .get::<crate::world::blocks::storage::core_block::CoreBuild>(entity)
+                    .is_some()
+                    && let Some(mut campaign) = self.ecs.0.get_resource_mut::<CampaignRuntime>()
+                {
+                    let rules = campaign.session.rules.clone();
+                    if rules.core_destroy_clear
+                        && team != rules.default_team
+                        && rules.team_is_ai(team, campaign.session.is_campaign())
+                    {
+                        campaign.pending_time_destroy.push((
+                            team,
+                            center.0,
+                            center.1,
+                            rules.enemy_core_build_radius,
+                        ));
+                    }
+                }
                 let Some(runtime) = self.block_runtime.as_mut() else {
                     break;
                 };

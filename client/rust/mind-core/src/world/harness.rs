@@ -137,6 +137,10 @@ impl BuildHarness {
         });
         let mut grid = WorldGrid::new(width, height);
         grid.fill(BlockId::AIR, BlockId::AIR);
+        // The harness models a scaffold/sandbox world, not a campaign map:
+        // Java's `Rules.borderDarkness` defaults true and blocks the outermost
+        // tile ring, but behavior tests place at (0,0) intentionally.
+        grid.border_darkness = false;
         Self {
             world,
             grid,

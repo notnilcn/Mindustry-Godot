@@ -83,6 +83,20 @@ impl Rules {
         self.teams.0.entry(team).or_default()
     }
 
+    /// `Team.isAI()` (`Team.java:112-114`): `(rules.waves || rules.attackMode
+    /// || state.isCampaign()) && team != rules.defaultTeam && !rules.pvp`.
+    pub fn team_is_ai(&self, team: u8, is_campaign: bool) -> bool {
+        (self.waves || self.attack_mode || is_campaign) && team != self.default_team && !self.pvp
+    }
+
+    /// `Team.isOnlyAI()` (`Team.java:117-119`): `isAI() &&
+    /// data().players.size == 0`. The port is single-player and the player is
+    /// always on `default_team`, which `isAI` already excludes, so this equals
+    /// [`Self::team_is_ai`].
+    pub fn team_is_only_ai(&self, team: u8, is_campaign: bool) -> bool {
+        self.team_is_ai(team, is_campaign)
+    }
+
     /// `Rules.retainContentFields(source)`.
     ///
     /// The three content-defining fields are always overwritten; banned

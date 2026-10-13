@@ -30,8 +30,8 @@ use mind_core::game::map_objectives::MapObjectivesRuntime;
 use mind_core::game::objectives::CampaignObjectiveContext;
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
-    PlaySession, SectorRef, play_map, play_new_sector, play_sector, run_wave_campaign,
-    sector_capture,
+    PlaySession, SectorRef, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
+    play_map, play_new_sector, play_sector, run_wave_campaign, sector_capture,
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
@@ -479,6 +479,16 @@ impl MindCampaign {
                 mind_core::game::play::PlayEvent::SectorCapture { .. } => {
                     self.apply_capture_bookkeeping(&mut runtime, registry.as_mut());
                     dirty = true;
+                    // `Logic.sectorCapture` (`Logic.java:398-401`):
+                    // `control.saves.saveSector(state.rules.sector)` — the
+                    // captured world is saved immediately, like the GameOver arm.
+                    if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        host.bind_mut()
+                            .request_save(GString::from(file.to_string_lossy().as_ref()), false);
+                        self.saving_finish_tick = Some(tick.saturating_add(3));
+                        log::info!("capture save queued (`{}`)", file.display());
+                    }
+                    self.persist_sector_record();
                 }
                 mind_core::game::play::PlayEvent::CampaignComplete { .. } => {
                     self.campaign_complete = true;
@@ -733,12 +743,45 @@ impl MindCampaign {
                 &mut self.reloader,
             )
         };
-        // Merge the loaded map/generator rules (waves/spawns) captured by
-        // `MindSimHost.load_sector` so the session and the world agree.
-        if let Some(host) = self.host()
-            && let Some(map_rules) = host.bind().last_sector_rules().cloned()
+        // T2: `readMeta`'s resume fields — `wavetime`/`stats`/markers — from the
+        // save `MindSimHost.load_sector` just decoded. Java restores them inside
+        // `SaveIO.load` (`SaveVersion.readMeta`) before the `SaveLoadEvent`
+        // rule merge; the host also resumed the saved `tick`.
+        if has_save
+            && !lost_replay
+            && let Some(meta) = self
+                .host()
+                .and_then(|mut host| host.bind_mut().take_sector_resume())
         {
-            merge_map_rules(&mut self.session.rules, &map_rules, preset_id.is_some());
+            self.session.wavetime = meta.wavetime.unwrap_or(self.session.rules.wave_spacing);
+            if let Some(stats) = meta.stats {
+                self.session.stats = stats;
+            }
+            self.session.markers = meta.markers;
+        }
+        // Adopt the loaded map/save rules wholesale (T5:
+        // `SaveVersion.readRules` + `World.setSectorRules`) and re-derive the
+        // world-side state (map-area limit rect + border darkness).
+        if let Some(map_rules) = self
+            .host()
+            .and_then(|host| host.bind().last_sector_rules().cloned())
+            && let Some(planet) = campaign.planet(planet_id)
+        {
+            let preset_no_lighting = campaign
+                .sector(planet_id, sector_id)
+                .is_some_and(|sector| sector.preset_no_lighting);
+            adopt_map_rules(
+                &mut self.session,
+                &map_rules,
+                planet,
+                &registry,
+                preset_id.is_some(),
+                preset_no_lighting,
+                has_save && !lost_replay,
+            );
+            if let Some(mut host) = self.host() {
+                host.bind_mut().apply_world_rules(&self.session.rules);
+            }
         }
         // `Logic.play` installs the map objective executor from the final rules;
         // the play-flow events ran before the map merge above, so rebuild the
@@ -943,6 +986,13 @@ impl MindCampaign {
                 let events = sector_capture(&mut runtime.session, &mut runtime.campaign);
                 let ok = !events.is_empty();
                 for event in events {
+                    // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
+                    // the captured sector's wave team turns derelict on the next
+                    // tick (`Sim::apply_campaign_world_requests`). The debug
+                    // capture path must queue it like the game-state path.
+                    if matches!(event, mind_core::game::play::PlayEvent::SectorCapture { .. }) {
+                        runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
+                    }
                     runtime.events.push(event);
                 }
                 host.bind_mut().put_campaign_runtime(runtime);
@@ -1402,7 +1452,7 @@ impl MindCampaign {
             .complete(index as usize, &mut self.session.rules)
     }
 
-    /// Per-objective state rows (`index`, `type`, `completed`).
+    /// Per-objective state rows (`index`, `type`, `completed`, `countup`).
     #[func]
     pub fn get_objective_state(&self) -> Array<VarDictionary> {
         let mut out = Array::<VarDictionary>::new();
@@ -1416,9 +1466,37 @@ impl MindCampaign {
                 &GString::from("completed"),
                 &self.session.objectives.is_completed(index).to_variant(),
             );
+            row.set(
+                &GString::from("countup"),
+                &self.session.objectives.timer_countup(index).to_variant(),
+            );
             out.push(&row);
         }
         out
+    }
+
+    /// Debug seam: `{completed, countup}` straight from the live runtime
+    /// executor (the facade mirror is stale while the frame pump is paused).
+    #[func]
+    pub fn objective_runtime_debug(&mut self, index: i64) -> GString {
+        if index < 0 {
+            return GString::from("null");
+        }
+        let index = index as usize;
+        let Some(mut host) = self.host() else {
+            return GString::from("null");
+        };
+        let Some(runtime) = host.bind_mut().take_campaign_runtime() else {
+            return GString::from("null");
+        };
+        let completed = runtime.session.objectives.is_completed(index);
+        let countup = runtime.session.objectives.timer_countup(index);
+        host.bind_mut().put_campaign_runtime(runtime);
+        GString::from(
+            serde_json::json!({"completed": completed, "countup": countup})
+                .to_string()
+                .as_str(),
+        )
     }
 
     /// `MapObjectives` world-marker draw list for the running objectives
@@ -2816,6 +2894,12 @@ impl MindCampaign {
             &key("waitEnemies"),
             &self.session.rules.wait_enemies.to_variant(),
         );
+        // `Logic.isWaitingWave` (`Logic.java:621-624`); G03 reads it for
+        // `wave.waveInProgress`.
+        dict.set(
+            &key("waitingWave"),
+            &mind_core::game::play::is_waiting_wave(&self.session).to_variant(),
+        );
         dict.set(&key("gameOver"), &self.session.game_over.to_variant());
         dict.set(
             &key("afterGameOver"),
@@ -2861,45 +2945,53 @@ impl MindCampaign {
     }
 }
 
-/// Merges the loaded map/generator's wave rules into the session rules without/// clobbering the preset/campaign fold (`World.loadSector` ordering). For a
-/// preset-launched sector the preset wins; a planet-generated sector adopts the
-/// generator's `generate_rules` wave/win settings.
-/// `SaveVersion.readRules` + `World.setSectorRules` map half: the loaded map
-/// rules feed the session. A preset map replaces `state.rules` wholesale in
-/// Java (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`), so its wave
-/// gating and in-map objective graph must survive the merge; a generated
-/// sector only inherits the wave settings.
-fn merge_map_rules(session: &mut Rules, map: &Rules, has_preset: bool) {
-    if !map.spawns.is_empty() {
-        session.spawns = map.spawns.clone();
+/// `SaveVersion.readRules` + `World.setSectorRules` (T5): the loaded
+/// preset/generated map (or sector save) rules replace the session rules
+/// wholesale, then the planet `ruleSetter`, the preset overlays and the
+/// campaign load overrides are re-applied.
+///
+/// `has_preset` restores the preset's capture win wave on a fresh launch
+/// (`SectorPreset.rules` = `winWave = captureWave`); `resumed` keeps the wave
+/// record `SectorInfo.write` copied in `play_sector` and re-applies the
+/// `SaveLoadEvent` overrides (`Logic.java:73-91`).
+fn adopt_map_rules(
+    session: &mut PlaySession,
+    map: &Rules,
+    planet: &mind_core::game::planet::Planet,
+    registry: &ContentRegistry,
+    has_preset: bool,
+    preset_no_lighting: bool,
+    resumed: bool,
+) {
+    let kept = session.rules.clone();
+    let mut rules = map.clone();
+    // Empty spawns fall back to the generated/default waves.
+    if rules.spawns.is_empty() {
+        rules.spawns = kept.spawns.clone();
     }
-    // The Ground Zero tutorial lives in the map's rules: `waveTimer:false`
-    // holds the auto-wave off until an objective adds `spawnWave`, and the
-    // 17-objective graph drives the objective HUD (`gz.*`). Dropping these
-    // launched the tutorial sector as an always-wave sector (PAR-0028/PAR-0037).
-    session.wave_timer = map.wave_timer;
-    // `waveSending:false` (the tutorial map) disables the HUD's skip-wave
-    // button (`canSkipWave`) - PAR-0030.
-    session.wave_sending = map.wave_sending;
-    session.objectives = map.objectives.clone();
-    session.objective_flags = map.objective_flags.clone();
-    // The map's own team rules carry the attack-sector AI flags (`rtsAi`/
-    // `buildAi`/`fillItems` on the wave team; the hidden campaign maps set
-    // them in the map's `teams` block). Upstream `SaveVersion.readRules`
-    // replaces the whole `Rules` with the map's before the preset
-    // `rules.get` overlay, so fold the map's per-team entries through
-    // (PAR-0139: without this the enemy AI flags never reach the live
-    // session).
-    for (team, rule) in &map.teams.0 {
-        *session.team_rule_mut(*team) = rule.clone();
+    rules.sector = kept.sector.clone();
+    rules.loadout = kept.loadout.clone();
+    planet.apply_rules(registry, &mut rules, false, true);
+    if has_preset && !resumed {
+        rules.win_wave = kept.win_wave;
+        rules.waves = kept.waves;
+        rules.attack_mode = kept.attack_mode;
     }
-    if has_preset {
-        return;
+    if resumed {
+        rules.waves = kept.waves;
+        rules.wave_spacing = kept.wave_spacing;
+        rules.win_wave = kept.win_wave;
+        rules.attack_mode = kept.attack_mode;
     }
-    session.waves = map.waves;
-    session.win_wave = map.win_wave;
-    session.attack_mode = map.attack_mode;
-    session.wave_spacing = map.wave_spacing;
+    // Preset `noLighting` (PAR-0059) survives the wholesale copy.
+    if !kept.lighting && preset_no_lighting {
+        rules.lighting = false;
+    }
+    apply_world_load_campaign_rules(&mut rules, planet);
+    if resumed {
+        apply_save_load_campaign_rules(&mut rules);
+    }
+    session.rules = rules;
 }
 
 /// Unlocked content names of the registry (map objective `Research`/`Produce`).
@@ -3042,12 +3134,18 @@ mod tests {
         );
     }
 
-    /// PAR-0037: a preset map's rules replace `state.rules` in Java
-    /// (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`), so the merge
-    /// must carry the objective graph, its flags and the `waveTimer` gate into
-    /// the session or the tutorial launches as a wave sector.
+    /// PAR-0037/PAR-0030 + T5: a preset map's rules replace `state.rules`
+    /// wholesale in Java (`FileMapGenerator.generate` -> `SaveIO.load(map.file)`
+    /// -> `SaveVersion.readRules`), so the adopted rules must carry the
+    /// objective graph, its flags and the `waveTimer` gate into the session or
+    /// the tutorial launches as a wave sector.
     #[test]
     fn preset_map_rules_carry_objectives_and_wave_timer() {
+        let registry =
+            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+                Ok(registry) => registry,
+                Err(error) => panic!("base content: {error}"),
+            };
         let objectives = match mind_core::io::json::objectives::MapObjectives::from_json(
             r#"[{"class":"Item","amount":15,"markers":[{"class":"Text","text":"@gz.mine"}]}]"#,
         ) {
@@ -3061,16 +3159,24 @@ mod tests {
             objective_flags: std::iter::once("spawnWave".to_owned()).collect(),
             ..Rules::default()
         };
+        let planet_def = match registry.planet_by_name("serpulo") {
+            Some(planet) => planet,
+            None => panic!("serpulo planet missing"),
+        };
+        let planet = mind_core::game::planet::Planet::from_def(&registry, planet_def, 0.0);
 
-        let mut session = Rules::default();
-        merge_map_rules(&mut session, &map, true);
+        let mut session = PlaySession::new(Rules::default());
+        adopt_map_rules(&mut session, &map, &planet, &registry, true, false, false);
 
-        assert!(!session.wave_timer, "map waveTimer:false must win");
+        assert!(!session.rules.wave_timer, "map waveTimer:false must win");
         assert!(
-            !session.wave_sending,
+            !session.rules.wave_sending,
             "map waveSending:false must win (canSkipWave gate - PAR-0030)"
         );
-        assert_eq!(session.objectives.len(), 1);
-        assert!(session.objective_flags.contains("spawnWave"));
+        assert_eq!(session.rules.objectives.len(), 1);
+        assert!(session.rules.objective_flags.contains("spawnWave"));
+        // The serpulo ruleSetter re-applied after the wholesale copy.
+        assert_eq!(session.rules.wave_team, 2);
+        assert!(session.rules.core_destroy_clear);
     }
 }

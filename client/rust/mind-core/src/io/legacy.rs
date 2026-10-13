@@ -45,10 +45,14 @@ pub(crate) fn load_legacy(
 ) -> Result<(), IoError> {
     let (version, body) = inflate_legacy(bytes)?;
     let result = super::save::versions::v1::read_legacy_regions(&body, version, state);
-    // Upstream `finally { content.setTemporaryMapper(null) }`.
-    if let Some(content) = state.content.as_deref_mut() {
+    // Upstream `finally { content.setTemporaryMapper(null) }`; snapshot the
+    // mapper first for the content-order guard test (plan G04 T1).
+    let last_mapper = state.content.as_deref_mut().and_then(|content| {
+        let mapper = content.temporary_mapper().cloned();
         content.set_temporary_mapper(None);
-    }
+        mapper
+    });
+    state.last_mapper = last_mapper;
     result
 }
 

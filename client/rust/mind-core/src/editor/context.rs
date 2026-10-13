@@ -246,9 +246,15 @@ impl WorldContext for EditorContext<'_> {
         let mut decoded = crate::world::building_io::DecodedBase::default();
         if self.legacy_entities {
             crate::world::building_io::read_base_legacy(&mut decoded, reader)?;
+            // The legacy chunk header byte is the per-kind revision
+            // (`out.b(tile.build.version())`).
+            decoded.kind_revision = Some(version);
         } else {
             crate::world::building_io::read_base(&mut decoded, reader, version)?;
         }
+        // Everything after the base is the per-kind body (`Building.read`);
+        // it is applied by `building_io::apply_body` after materialization.
+        decoded.body = reader.bytes(reader.remaining())?.to_vec();
         self.pending_buildings.push((index, decoded));
         Ok(())
     }

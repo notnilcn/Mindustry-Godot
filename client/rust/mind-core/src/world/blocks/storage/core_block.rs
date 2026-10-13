@@ -358,15 +358,10 @@ impl BuildingBehavior for CoreBehavior {
     }
 
     fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        // `CoreBlock.write`: `TypeIO.writeVecNullable(write, commandPos)`
+        // (`CoreBlock.java:916-931`).
         let command = world.get::<CoreBuild>(e).and_then(|c| c.command_pos);
-        match command {
-            Some((x, y)) => {
-                w.bool(true);
-                w.f(x);
-                w.f(y);
-            }
-            None => w.bool(false),
-        }
+        crate::io::typeio::codecs::write_vec_nullable(w, command);
     }
 
     fn read(
@@ -376,14 +371,13 @@ impl BuildingBehavior for CoreBehavior {
         r: &mut crate::world::BuildingReader,
         revision: u8,
     ) {
+        // `CoreBlock.read`: `if(revision >= 1) commandPos =
+        // TypeIO.readVecNullable(read)`.
         let mut core = world.get::<CoreBuild>(e).cloned().unwrap_or_default();
         if revision >= 1
-            && let Ok(present) = r.bool()
-            && present
+            && let Ok(command) = crate::io::typeio::codecs::read_vec_nullable(r)
         {
-            let x = r.f().unwrap_or(0.0);
-            let y = r.f().unwrap_or(0.0);
-            core.command_pos = Some((x, y));
+            core.command_pos = command;
         }
         world.entity_mut(e).insert(core);
     }

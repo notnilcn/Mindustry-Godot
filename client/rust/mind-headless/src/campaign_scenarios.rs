@@ -758,7 +758,7 @@ fn objectives_completion() -> Result<(Value, Value)> {
         fn core_count(&self, _team: u8) -> usize {
             0
         }
-        fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
+        fn block_at(&self, _x: i32, _y: i32) -> Option<(String, u8)> {
             None
         }
         fn headless(&self) -> bool {
@@ -1284,7 +1284,7 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
             fn core_count(&self, _team: u8) -> usize {
                 1
             }
-            fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
+            fn block_at(&self, _x: i32, _y: i32) -> Option<(String, u8)> {
                 None
             }
             fn headless(&self) -> bool {

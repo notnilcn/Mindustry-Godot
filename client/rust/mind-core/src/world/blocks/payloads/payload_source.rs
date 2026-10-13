@@ -202,7 +202,9 @@ impl BuildingBehavior for PayloadSourceBehavior {
         r: &mut crate::world::BuildingReader,
         revision: u8,
     ) {
-        super::payload_block::read_base(world, e, r);
+        if !super::payload_block::read_base(world, e, r) {
+            return;
+        }
         let unit = r.s().unwrap_or(-1);
         let block = r.s().unwrap_or(-1);
         let command_pos = if revision >= 1 && r.bool().unwrap_or(false) {

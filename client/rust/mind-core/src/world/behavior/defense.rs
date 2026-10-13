@@ -355,6 +355,25 @@ impl BuildingBehavior for RadarBehavior {
         // `progress += edelta() / discoveryTime` and fog indexing are plan 11's
         // (`FogControl`). The progress field is carried so that plan can resume.
     }
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        w.f(world
+            .get::<RadarState>(e)
+            .map(|s| s.progress)
+            .unwrap_or_default());
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let progress = r.f().unwrap_or(0.0);
+        if let Some(mut state) = world.get_mut::<RadarState>(e) {
+            state.progress = progress;
+        }
+    }
 }
 
 /// `Thruster` behavior (`Thruster.ThrusterBuild`): entity force is plan 11.
@@ -372,6 +391,9 @@ impl BuildingBehavior for ThrusterBehavior {
 pub struct TargetDummyBehavior;
 
 impl BuildingBehavior for TargetDummyBehavior {}
+
+// --- G04 T3a: per-kind save IO -------------------------------------------------
+// Java body: Radar.java:98-109 (`f progress`).
 
 #[cfg(test)]
 mod tests {

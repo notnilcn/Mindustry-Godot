@@ -18,7 +18,9 @@ use bevy_ecs::world::World;
 use std::sync::{Arc, Mutex};
 
 use super::map_objectives::{ObjectiveEnv, ObjectiveRunParams};
-use super::play::{PlayEvent, PlaySession, apply_sector_loss, check_game_state, run_wave_campaign};
+use super::play::{
+    PlayEvent, PlaySession, apply_sector_loss, check_game_state, is_waiting_wave, run_wave_campaign,
+};
 use super::rules::Rules;
 use super::stats::GameStats;
 use super::teams::Teams;
@@ -30,7 +32,7 @@ use crate::content::registries::blocks::BlockFlag;
 use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId};
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
-use crate::entities::comp::{Health, Pos, TeamComp};
+use crate::entities::comp::{Building, Health, Pos, TeamComp};
 use crate::game::State;
 use crate::math::ArcRand;
 use crate::render::g3d::grid::PlanetGrid;
@@ -195,6 +197,19 @@ pub struct CampaignRuntime {
     /// Upstream draws from the global `Mathf.random`; the live port keeps a
     /// dedicated stream so a scenario replays byte-for-byte (PAR-0139).
     pub ai_rng: ArcRand,
+    /// Sector capture converted the wave team to derelict on the next
+    /// `Sim::tick` (`TeamData.destroyToDerelict`, Teams.java:331-362): a
+    /// system cannot mutate the world mid-schedule, so
+    /// `game_state_tick_system` queues the team here.
+    pub pending_derelict_team: Option<u8>,
+    /// `coreDestroyClear` posts (`Logic` `BlockDestroyEvent`,
+    /// Logic.java:182-186): `(team, x, y, range)` drained by
+    /// `Sim::apply_campaign_world_requests` into `TeamData.timeDestroy`.
+    pub pending_time_destroy: Vec<(u8, f32, f32, f32)>,
+    /// A mid-match rules change must re-derive the world (limit area, build
+    /// rules): set by G06's `setrule`, the `Call.setRules` relay and the
+    /// universe invasion; `Sim::tick` drains it (T5).
+    pub rules_world_dirty: bool,
 }
 
 impl CampaignRuntime {
@@ -209,6 +224,9 @@ impl CampaignRuntime {
             is_client: false,
             unlocked_content: std::collections::HashSet::new(),
             ai_rng: ArcRand::new(0x5EED_0139),
+            pending_derelict_team: None,
+            pending_time_destroy: Vec::new(),
+            rules_world_dirty: false,
         }
     }
 
@@ -297,6 +315,11 @@ pub fn sync_session_with_sim(
         session
             .teams
             .register_core(*entity, TeamId(*team), &session.rules);
+        // `Logic.play` heals every active team's cores on a fresh play
+        // (`Logic.java:286-291` `entity.heal()`); a resume keeps saved health.
+        if apply_loadout && let Some(mut health) = world.get_mut::<Health>(*entity) {
+            health.health = health.max_health;
+        }
         if *team == default_team {
             sync.player_cores += 1;
         }
@@ -359,27 +382,30 @@ pub fn campaign_tick_system(world: &mut World) {
             apply_sector_lighting(&mut runtime, seconds);
         }
 
-        // `Logic.update` wave timer (`!net.client()`, waves enabled).
-        if runtime.session.rules.waves
-            && runtime.session.rules.wave_timer
-            && !runtime.session.game_over
+        // `Logic.update` wave timer (`!net.client()`, `Logic.java:560-569`):
+        // `state.wavetime = Math.max(state.wavetime - Time.delta, 0)` while not
+        // waiting for enemies (Time.delta is 1 per 60 Hz tick), then an
+        // unconditional `runWave` gate on `state.wavetime <= 0 && rules.waves`.
         {
-            runtime.session.wavetime = (runtime.session.wavetime - 1.0 / TICKS_PER_SECOND).max(0.0);
-            if runtime.session.wavetime <= 0.0 {
-                runtime.events.push(run_wave_campaign(&mut runtime.session));
-                // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
-                // runtime spawns the pre-increment wave in `TickSet::RunWave`.
-                if let Some(mut unit_runtime) =
-                    world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
-                {
-                    unit_runtime.pending_wave = Some(runtime.session.wave - 1);
-                }
-                // `WaveEvent` listener: `stats.wavesLasted++`.
-                if let Some((planet, _)) = runtime.session.sector
-                    && let Some(stats) = runtime.campaign.stats_for_mut(planet)
-                {
-                    stats.waves_lasted += 1;
-                }
+            let s = &mut runtime.session;
+            if s.rules.waves && s.rules.wave_timer && !s.game_over && !is_waiting_wave(s) {
+                s.wavetime = (s.wavetime - 1.0).max(0.0);
+            }
+        }
+        if runtime.session.wavetime <= 0.0 && runtime.session.rules.waves {
+            runtime.events.push(run_wave_campaign(&mut runtime.session));
+            // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
+            // runtime spawns the pre-increment wave in `TickSet::RunWave`.
+            if let Some(mut unit_runtime) =
+                world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
+            {
+                unit_runtime.pending_wave = Some(runtime.session.wave - 1);
+            }
+            // `WaveEvent` listener: `stats.wavesLasted++`.
+            if let Some((planet, _)) = runtime.session.sector
+                && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+            {
+                stats.waves_lasted += 1;
             }
         }
 
@@ -539,6 +565,9 @@ pub fn objectives_tick_system(world: &mut World) {
         timer_multiplier: runtime.session.rules.objective_timer_multiplier,
     };
     let rules_snapshot = runtime.session.rules.clone();
+    let command_mode = world
+        .get_resource::<ObjectiveInputState>()
+        .is_some_and(|state| state.command_mode_satisfied);
     let completed = {
         let env = RuntimeObjectiveEnv {
             rules: &rules_snapshot,
@@ -547,19 +576,47 @@ pub fn objectives_tick_system(world: &mut World) {
             stats: &runtime.session.stats,
             world,
             index: world.get_resource::<ContentIndex>(),
+            command_mode_satisfied: command_mode,
         };
-        runtime
-            .session
-            .objectives
-            .update(&env, &params, 1.0 / TICKS_PER_SECOND)
+        // `Time.delta` is one per 60 Hz tick; `TimerObjective.duration` is in
+        // ticks (`MapObjectives.java:516-540`).
+        runtime.session.objectives.update(&env, &params, 1.0)
     };
+    let completed_any = !completed.is_empty();
     for index in completed {
         runtime
             .session
             .objectives
             .complete(index, &mut runtime.session.rules);
     }
+    // Persist the transient Timer `countup`/`completed` state back into the
+    // rules so saves carry it (Java serializes both). The full clone runs when
+    // something completed or once a second; a save between two copies loses
+    // <1 s of a timer.
+    runtime.session.objectives.sync_timers_into_data();
+    if completed_any || runtime.ticks % 60 == 0 {
+        runtime.session.rules.objectives = runtime.session.objectives.data().clone();
+    }
     world.insert_resource(runtime);
+}
+
+/// Input-side facts the objective executor needs (`CommandModeObjective`,
+/// `MapObjectives.java:671-687`: `control.input.selectedUnits.contains(u ->
+/// u.isCommandable() && u.command().hasCommand())`).
+#[derive(bevy_ecs::prelude::Resource, Debug, Clone, Copy, Default)]
+pub struct ObjectiveInputState {
+    /// Whether the current selection satisfies the command-mode objective.
+    pub command_mode_satisfied: bool,
+}
+
+impl crate::sim::Sim {
+    /// Setter for the input layer (G08): call every frame with the current
+    /// selection state; inserts/updates the [`ObjectiveInputState`] resource.
+    pub fn set_command_mode_satisfied(&mut self, value: bool) {
+        self.ecs.0.insert_resource(ObjectiveInputState {
+            command_mode_satisfied: value,
+        });
+    }
 }
 
 /// Live-world objective environment: rules flags/`researched`, the session
@@ -571,6 +628,8 @@ struct RuntimeObjectiveEnv<'a> {
     stats: &'a GameStats,
     world: &'a World,
     index: Option<&'a ContentIndex>,
+    /// `control.input.selectedUnits` command-mode fact (`ObjectiveInputState`).
+    command_mode_satisfied: bool,
 }
 
 impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
@@ -616,12 +675,39 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
             .unwrap_or(0)
     }
 
-    fn unit_count(&self, _team: u8, _unit: &str) -> i32 {
-        0
+    /// `state.rules.defaultTeam.data().countType(unit)` (`UnitCountObjective`,
+    /// `MapObjectives.java:470`): live units of `team` and `unit` whose
+    /// `UnitCore.dead` is false (`Teams.countType` counts live units).
+    fn unit_count(&self, team: u8, unit: &str) -> i32 {
+        let Some(index) = self.index else {
+            return 0;
+        };
+        let Some(&unit_id) = index.unit_ids.get(unit) else {
+            return 0;
+        };
+        let mut count = 0;
+        for entity_ref in self.world.iter_entities() {
+            if entity_ref
+                .get::<UnitTypeComp>()
+                .is_none_or(|comp| comp.type_id.raw() != unit_id)
+            {
+                continue;
+            }
+            if entity_ref.get::<TeamComp>().map(|t| t.team) != Some(team) {
+                continue;
+            }
+            if entity_ref.get::<UnitCore>().is_some_and(|core| core.dead) {
+                continue;
+            }
+            count += 1;
+        }
+        count
     }
 
+    /// `state.stats.enemyUnitsDestroyed` (`Logic` `UnitDestroyEvent`,
+    /// `Logic.java:218-226`).
     fn enemy_units_destroyed(&self) -> i32 {
-        0
+        self.stats.enemy_units_destroyed
     }
 
     fn objective_flag(&self, flag: &str) -> bool {
@@ -634,7 +720,28 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
             .map_or(0, |data| data.cores.len())
     }
 
-    fn block_at(&self, _x: i32, _y: i32) -> Option<(&str, u8)> {
+    /// `world.build(x, y)`: the building whose footprint covers the tile
+    /// (`MapObjectives.java:604`; `World.build`).
+    fn block_at(&self, x: i32, y: i32) -> Option<(String, u8)> {
+        let table = self.world.get_resource::<BlockTable>()?;
+        for entity_ref in self.world.iter_entities() {
+            let Some(building) = entity_ref.get::<Building>() else {
+                continue;
+            };
+            let Some(team) = entity_ref.get::<TeamComp>() else {
+                continue;
+            };
+            let Some(inst) = table.instance(building.block) else {
+                continue;
+            };
+            let size = inst.def.size.max(1);
+            let off = (size - 1) / 2;
+            let bx = i32::from(building.tile.x()) - off;
+            let by = i32::from(building.tile.y()) - off;
+            if x >= bx && x < bx + size && y >= by && y < by + size {
+                return Some((inst.name.clone(), team.team));
+            }
+        }
         None
     }
 
@@ -642,18 +749,27 @@ impl ObjectiveEnv for RuntimeObjectiveEnv<'_> {
         false
     }
 
+    /// The `MindInput` command-mode selection fact (`ObjectiveInputState`,
+    /// set by G08 through `Sim::set_command_mode_satisfied`).
     fn command_mode_satisfied(&self) -> bool {
-        false
+        self.command_mode_satisfied
     }
 }
 
 /// `TickSet::GameStateCheck`: `Logic.checkGameState` + campaign loss
 /// bookkeeping.
+///
+/// `Logic.update` runs the check only when `state.rules.canGameOver`
+/// (`Logic.java:521`).
 pub fn game_state_tick_system(world: &mut World) {
     let Some(mut runtime) = world.remove_resource::<CampaignRuntime>() else {
         return;
     };
     if runtime.session.phase != State::Playing || runtime.is_client {
+        world.insert_resource(runtime);
+        return;
+    }
+    if !runtime.session.rules.can_game_over {
         world.insert_resource(runtime);
         return;
     }
@@ -670,10 +786,28 @@ pub fn game_state_tick_system(world: &mut World) {
                 winner,
             ));
         } else {
+            // `Logic`'s `SectorCaptureEvent` listener (`Logic.java:117-121`):
+            // the captured sector's wave team turns derelict on the next tick.
+            if matches!(event, PlayEvent::SectorCapture { .. }) {
+                runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
+            }
             runtime.events.push(event);
         }
     }
     world.insert_resource(runtime);
+}
+
+/// `state.isCampaign() && state.getSector().isCaptured()` for the currently
+/// played sector (`Sector.isCaptured`, `Sector.java:181-184`: the played sector
+/// has waves and attack mode off).
+pub fn current_sector_captured(world: &World) -> bool {
+    world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|runtime| {
+            runtime.session.is_campaign()
+                && !runtime.session.rules.waves
+                && !runtime.session.rules.attack_mode
+        })
 }
 
 /// `RtsAI.flags`: candidate target priority order.
@@ -1284,6 +1418,64 @@ mod tests {
         assert!(world.get_resource::<CampaignRuntime>().is_none());
     }
 
+    /// T7: `Logic.update` runs `checkGameState` only when
+    /// `state.rules.canGameOver` (`Logic.java:521`).
+    #[test]
+    fn game_state_check_respects_can_game_over() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            can_game_over: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        // No player core: `checkGameState` would emit GameOver if it ran.
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+        game_state_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert!(
+            !runtime
+                .events
+                .iter()
+                .any(|event| matches!(event, PlayEvent::GameOver { .. })),
+            "canGameOver=false suppresses the check: {:?}",
+            runtime.events
+        );
+    }
+
+    /// T7: `current_sector_captured` follows `Sector.isCaptured`
+    /// (`Sector.java:181-184`): a played campaign sector with waves and attack
+    /// mode off; no runtime means not captured.
+    #[test]
+    fn captured_flag_follows_rules() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules {
+            waves: false,
+            attack_mode: false,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.sector = Some((planet, sector_id));
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+        assert!(current_sector_captured(&world));
+        world
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("runtime")
+            .session
+            .rules
+            .waves = true;
+        assert!(!current_sector_captured(&world));
+        assert!(!current_sector_captured(&World::new()), "no runtime");
+    }
+
     #[test]
     fn team_ai_orders_idle_wave_units_at_an_enemy_core() {
         use crate::ai::ControllerSlot;
@@ -1636,6 +1828,165 @@ mod tests {
                 .campaign
                 .sector(planet, sector_id)
                 .is_some_and(|sector| sector.info.info.was_captured)
+        );
+    }
+
+    #[test]
+    fn wave_timer_counts_ticks() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: true,
+            wave_spacing: 7200.0,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        // No sector: the non-campaign multiplier is 1.0.
+        session.phase = State::Playing;
+        session.wavetime = 120.0;
+        session.spawn_count = 1;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        for _ in 0..119 {
+            campaign_tick_system(&mut world);
+        }
+        {
+            let runtime = world.get_resource::<CampaignRuntime>().expect("runtime");
+            assert_eq!(runtime.session.wave, 0, "wave not due yet");
+            assert_eq!(runtime.session.wavetime, 1.0, "one tick per tick");
+        }
+        campaign_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert_eq!(runtime.session.wave, 1, "wave fired at zero");
+        assert_eq!(runtime.session.wavetime, 7200.0, "spacing re-armed");
+    }
+
+    #[test]
+    fn waiting_wave_holds_timer() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: true,
+            wave_spacing: 7200.0,
+            wait_enemies: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.wavetime = 50.0;
+        session.enemies = 3;
+        session.spawn_count = 1;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        for _ in 0..10 {
+            campaign_tick_system(&mut world);
+        }
+        {
+            let runtime = world.get_resource::<CampaignRuntime>().expect("runtime");
+            assert_eq!(runtime.session.wavetime, 50.0, "held while enemies alive");
+        }
+        world
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("runtime")
+            .session
+            .enemies = 0;
+        for _ in 0..10 {
+            campaign_tick_system(&mut world);
+        }
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert_eq!(runtime.session.wavetime, 40.0, "countdown resumes");
+    }
+
+    #[test]
+    fn wave_runs_without_timer_when_due() {
+        let registry = content();
+        let campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: false,
+            wave_spacing: 7200.0,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.wavetime = 0.0;
+        session.spawn_count = 1;
+        let mut world = World::new();
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+
+        campaign_tick_system(&mut world);
+        let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        assert_eq!(
+            runtime.session.wave, 1,
+            "Java runs the wave regardless of timer"
+        );
+    }
+
+    /// T4: `RuntimeObjectiveEnv.block_at` resolves a live building through its
+    /// footprint; a `DestroyBlock` objective for a duo at (10,10) team 2 is not
+    /// complete while the duo stands and completes after the break.
+    #[test]
+    fn runtime_block_at_reports_building() {
+        use crate::command::Command;
+        use crate::content::BlockId;
+
+        let registry = content();
+        let campaign = campaign(&registry);
+        let objectives: crate::io::json::objectives::MapObjectives = serde_json::from_str(
+            r#"[{"class":"DestroyBlock","pos":{"x":10,"y":10},"team":2,"block":"duo"}]"#,
+        )
+        .expect("objectives json");
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            objectives,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.objectives =
+            crate::game::map_objectives::MapObjectivesRuntime::from_rules(&session.rules);
+
+        let mut sim = crate::sim::Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        let duo = sim.content().id("duo").expect("duo");
+        assert!(
+            sim.place_for_team(10, 10, duo, 0, 2),
+            "duo placed on team 2"
+        );
+        let _ = sim.set_phase(State::Playing);
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        sim.tick().expect("tick");
+        {
+            let runtime = sim
+                .ecs
+                .0
+                .get_resource::<CampaignRuntime>()
+                .expect("runtime");
+            assert!(
+                !runtime.session.objectives.is_completed(0),
+                "duo still stands"
+            );
+        }
+        sim.apply(Command::Break { x: 10, y: 10 }).expect("break");
+        sim.tick().expect("tick");
+        let runtime = sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .expect("runtime");
+        assert!(
+            runtime.session.objectives.is_completed(0),
+            "duo destroyed completes the objective"
         );
     }
 

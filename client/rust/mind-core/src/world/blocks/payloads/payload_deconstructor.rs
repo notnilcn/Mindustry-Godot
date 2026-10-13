@@ -294,7 +294,9 @@ impl BuildingBehavior for PayloadDeconstructorBehavior {
         r: &mut crate::world::BuildingReader,
         _revision: u8,
     ) {
-        super::payload_block::read_base(world, e, r);
+        if !super::payload_block::read_base(world, e, r) {
+            return;
+        }
         let mut state = world
             .get::<PayloadDeconstructorBuild>(e)
             .cloned()

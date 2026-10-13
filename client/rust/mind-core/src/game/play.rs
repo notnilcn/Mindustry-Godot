@@ -18,6 +18,7 @@
 
 use super::map_markers::MapMarkers;
 use super::map_objectives::MapObjectivesRuntime;
+use super::planet::Planet;
 use super::rules::Rules;
 use super::rules_event::{RulesEpoch, apply_rules_load};
 use super::sector::Sector;
@@ -481,6 +482,10 @@ pub fn play_sector(
 }
 
 /// `Logic.play()` campaign half: wave timing, stats reset, loadout, `PlayEvent`.
+///
+/// Called on every new play (`playMap`/`playNewSector`), never on a save load;
+/// save loads keep the saved weather cooldowns (`rules.weather` is in the
+/// saved rules) and the saved `wavetime`/`tick`/`stats` (T2).
 pub fn logic_play(session: &mut PlaySession) -> Vec<PlayEvent> {
     session.phase = State::Playing;
     let base = if session.rules.initial_wave_spacing <= 0.0 {
@@ -513,6 +518,46 @@ pub fn run_wave_campaign(session: &mut PlaySession) -> PlayEvent {
     };
     session.wavetime = session.rules.wave_spacing * multiplier;
     PlayEvent::Wave
+}
+
+/// `Logic.isWaitingWave` (`Logic.java:621-624`): the countdown is held while
+/// enemies are alive and either `waitEnemies` is set or the win wave has been
+/// reached.
+pub fn is_waiting_wave(session: &PlaySession) -> bool {
+    (session.rules.wait_enemies
+        || (session.wave >= session.rules.win_wave && session.rules.win_wave > 0))
+        && session.enemies > 0
+}
+
+/// `Logic` WorldLoadEvent campaign half (`Logic.java:105-125`): core
+/// incineration on, no infinite player resources, locked editor rules, and the
+/// wave team's infinite items / build speed / factory activation delay derived
+/// from the planet (`Planet.java:125-133`).
+pub fn apply_world_load_campaign_rules(rules: &mut Rules, planet: &Planet) {
+    rules.core_incinerates = true;
+    rules.infinite_resources = false;
+    rules.allow_edit_rules = false;
+    rules.allow_edit_world_processors = false;
+    rules.world_processor_player_link = false;
+    let wave_team = rules.wave_team;
+    if planet.enemy_infinite_items {
+        let team = rules.team_rule_mut(wave_team);
+        team.infinite_resources = true;
+        team.fill_items = true;
+    }
+    let team = rules.team_rule_mut(wave_team);
+    team.build_speed_multiplier *= planet.enemy_build_speed_multiplier;
+    if planet.enemy_factory_activation_delay > 0.0 && team.unit_factory_activation_delay == 0.0 {
+        team.unit_factory_activation_delay = planet.enemy_factory_activation_delay;
+    }
+}
+
+/// `Logic` SaveLoadEvent rule half (`Logic.java:73-91`): core incineration,
+/// game-over checks and locked editor rules on every save load.
+pub fn apply_save_load_campaign_rules(rules: &mut Rules) {
+    rules.core_incinerates = true;
+    rules.can_game_over = true;
+    rules.allow_edit_rules = false;
 }
 
 /// `Logic.checkGameState()` (campaign + non-campaign branches).
@@ -762,6 +807,34 @@ mod tests {
 
     fn campaign(registry: &ContentRegistry) -> Campaign {
         Campaign::from_registry(registry, &EmptyNeighborhood)
+    }
+
+    /// T5: `apply_world_load_campaign_rules` transcribes the campaign half of
+    /// `Logic`'s WorldLoadEvent (`Logic.java:105-125`): the wave team gets
+    /// `infiniteResources`/`fillItems` (`Planet.enemyInfiniteItems` default
+    /// true), Serpulo factories wait 7200 ticks, Erekir builds at 0.4x.
+    #[test]
+    fn world_load_rules_give_wave_team_infinite_items() {
+        let registry = content();
+        let serpulo_def = registry.planet_by_name("serpulo").unwrap();
+        let serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
+        let mut rules = Rules {
+            wave_team: 2,
+            ..Rules::default()
+        };
+        apply_world_load_campaign_rules(&mut rules, &serpulo);
+        let team = rules.team_rule(2);
+        assert!(team.infinite_resources && team.fill_items);
+        assert_eq!(team.unit_factory_activation_delay, 7200.0);
+
+        let erekir_def = registry.planet_by_name("erekir").unwrap();
+        let erekir = Planet::from_def(&registry, erekir_def, 0.0);
+        let mut rules = Rules {
+            wave_team: 3,
+            ..Rules::default()
+        };
+        apply_world_load_campaign_rules(&mut rules, &erekir);
+        assert_eq!(rules.team_rule(3).build_speed_multiplier, 0.4);
     }
 
     #[test]

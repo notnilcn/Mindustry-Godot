@@ -107,10 +107,8 @@ use mind_core::content::{
     content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
-use mind_core::editor::context::EditorContext;
 use mind_core::game::rules::Rules;
 use mind_core::game::runtime::{CampaignRuntime, SessionSync, sync_session_with_sim};
-use mind_core::io::save::{SaveIo, SaveReadState};
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
 use mind_core::world::WorldGrid;
@@ -257,6 +255,13 @@ pub struct MindSimHost {
     /// Turret `BaseTurret.range` cache for `block_place_range` (`config_for`
     /// rebuilds the whole config each call; the ghost asks per frame).
     place_range_cache: std::cell::RefCell<std::collections::HashMap<BlockId, Option<f32>>>,
+    /// Resume metadata (`wavetime`/`tick`/`stats`/markers) of the last
+    /// `load_sector` when it resumed from a save; `MindCampaign.start_sector`
+    /// takes it right after `play_sector` (T2).
+    sector_resume: Option<mind_core::io::sim_io::SectorResumeMeta>,
+    /// Last `grid.limit_area` seen by the pump; a change (rules adoption,
+    /// G06 `setrule`) sets `world_dirty` so the renderer rebuilds (T5).
+    last_limit_area: Option<(i32, i32, i32, i32)>,
 }
 
 #[godot_api]
@@ -286,6 +291,8 @@ impl INode for MindSimHost {
             input: None,
             sector_spawns: 0,
             place_range_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
+            sector_resume: None,
+            last_limit_area: None,
         }
     }
 
@@ -680,12 +687,13 @@ impl MindSimHost {
                     log::warn!("apply_sim_command_json: place rejected at ({x}, {y})");
                     return false;
                 }
+                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
                 SimCommand::Place {
                     x,
                     y,
                     block,
                     rotation,
-                    team: 0,
+                    team,
                     player,
                 }
             }
@@ -943,6 +951,9 @@ impl MindSimHost {
             };
             put("block", Variant::from(i64::from(building.block.raw())));
             put("enabled", Variant::from(building.enabled));
+            if let Some(team) = world.get::<mind_core::entities::comp::TeamComp>(entity) {
+                put("team", Variant::from(i64::from(team.team)));
+            }
             put("efficiency", Variant::from(f64::from(building.efficiency)));
             put(
                 "potential_efficiency",
@@ -953,6 +964,21 @@ impl MindSimHost {
                 Variant::from(f64::from(building.optional_efficiency)),
             );
             put("time_scale", Variant::from(f64::from(building.time_scale)));
+            // Per-kind body readback after a load (PAR-0161): drill progress,
+            // crafter progress and turret ammo.
+            if let Some(state) = world.get::<mind_core::entities::comp::DrillState>(entity) {
+                put("drill_progress", Variant::from(f64::from(state.progress)));
+                put("drill_warmup", Variant::from(f64::from(state.warmup)));
+            }
+            if let Some(state) = world.get::<mind_core::entities::comp::CrafterState>(entity) {
+                put("crafter_progress", Variant::from(f64::from(state.progress)));
+                put("crafter_warmup", Variant::from(f64::from(state.warmup)));
+            }
+            if let Some(state) =
+                world.get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)
+            {
+                put("turret_total_ammo", Variant::from(state.total_ammo));
+            }
             // In-progress construction (`ConstructBuild`; PAR-0098 §2d).
             if let Some(state) = world.get::<mind_core::world::construct::ConstructState>(entity) {
                 put(
@@ -1438,6 +1464,13 @@ impl MindSimHost {
         self.emit_state();
     }
 
+    /// Input-side command-mode fact for `CommandModeObjective` (G08 calls this
+    /// from `MindInput` whenever the command-mode selection changes; T4).
+    #[func]
+    pub fn set_command_mode_satisfied(&mut self, value: bool) {
+        self.sim.set_command_mode_satisfied(value);
+    }
+
     /// Runs `ticks` sim steps synchronously and returns the new tick count.
     #[func]
     pub fn step(&mut self, ticks: i64) -> i64 {
@@ -1516,6 +1549,8 @@ impl MindSimHost {
         }
         // A new world invalidates the previous campaign runtime.
         self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+        // Resume metadata is per load; clear before this load decides.
+        self.sector_resume = None;
         // Take the registry out so the generator can borrow it while the sim is
         // rebuilt, then hand it back (content boot is expensive; never drop it).
         let Some(mut registry) = self.content_snapshot.take() else {
@@ -1525,7 +1560,8 @@ impl MindSimHost {
         const SECTOR_SIZE: i32 = 128;
         // `Control.playSector`: an existing sector save is the resume source.
         let save_path = sector_save_path(planet_name, sector as u16);
-        let loaded = if use_save && std::path::Path::new(&save_path).is_file() {
+        let resume_file = use_save && std::path::Path::new(&save_path).is_file();
+        let loaded = if resume_file {
             log::info!("load_sector: resuming `{planet_name}:{sector}` from `{save_path}`");
             load_grid_file(&save_path, &mut registry)
         } else {
@@ -1546,12 +1582,13 @@ impl MindSimHost {
         } else {
             None
         };
-        let (grid, rules, pending_buildings, plans) = match loaded {
+        let (grid, rules, pending_buildings, plans, save) = match loaded {
             Some(loaded) => (
                 loaded.grid,
                 loaded.rules,
                 loaded.pending_buildings,
                 loaded.plans,
+                loaded.save,
             ),
             None => match generated {
                 Some(generated) => (
@@ -1559,6 +1596,7 @@ impl MindSimHost {
                     Some(generated.rules),
                     Vec::new(),
                     Vec::new(),
+                    None,
                 ),
                 None => {
                     self.content_snapshot = Some(registry);
@@ -1567,6 +1605,10 @@ impl MindSimHost {
                 }
             },
         };
+        // A resume save only counts when the save file supplied the world (a
+        // failed decode falls back to the generator; a preset map is not a
+        // resume).
+        let resume_from_save = resume_file && save.is_some();
         self.sector_spawns = count_spawns(&grid, &registry);
         self.sector_rules = rules;
         self.sector_plans = plans;
@@ -1604,6 +1646,26 @@ impl MindSimHost {
         if materialized > 0 {
             log::info!("load_sector: materialized {materialized} map building(s)");
         }
+        // T2: the save's world entities (units/fires/puddles) restore into the
+        // live runtime; the resume metadata (wavetime/tick/stats/markers) is
+        // handed to `MindCampaign` after `play_sector`.
+        if let Some(save) = save.as_ref() {
+            self.sim.apply_decoded_entities(save);
+        }
+        if resume_from_save && let Some(save) = save.as_ref() {
+            if let Some(tick) = mind_core::io::sim_io::meta_tick(&save.tags) {
+                self.sim.state.tick = tick;
+            }
+            self.sector_resume = Some(mind_core::io::sim_io::SectorResumeMeta {
+                wavetime: save
+                    .tags
+                    .get("wavetime")
+                    .and_then(|v| v.parse::<f32>().ok()),
+                tick: mind_core::io::sim_io::meta_tick(&save.tags),
+                stats: save.stats.clone(),
+                markers: save.markers.clone(),
+            });
+        }
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
@@ -1630,6 +1692,22 @@ impl MindSimHost {
     /// input); clears the stash.
     pub fn take_sector_plans(&mut self) -> Vec<(i32, Vec<mind_core::io::save::state::TeamPlan>)> {
         std::mem::take(&mut self.sector_plans)
+    }
+
+    /// Takes the last `load_sector`'s resume metadata (`wavetime`/`tick`/
+    /// `stats`/markers) when it resumed from a save; `None` for fresh loads,
+    /// generated worlds and failed decodes (T2).
+    pub fn take_sector_resume(&mut self) -> Option<mind_core::io::sim_io::SectorResumeMeta> {
+        self.sector_resume.take()
+    }
+
+    /// Re-derives the world-side state from `rules` (map-area limit rect +
+    /// border darkness, `World.isInMapArea`/`getDarkness`) and marks the world
+    /// dirty (T5; G06's `setrule` path goes through
+    /// `CampaignRuntime.rules_world_dirty` instead).
+    pub fn apply_world_rules(&mut self, rules: &Rules) {
+        self.sim.apply_rules_to_world(rules);
+        self.world_dirty = true;
     }
 
     /// Default-team core count in the live world (the lost-sector probe; the
@@ -2764,6 +2842,12 @@ impl MindSimHost {
             self.tick_fx_view();
         }
         self.publish_selectable_units();
+        // A rules adoption or mid-match `setrule` changed the map-area rect
+        // (T5): mark the world dirty so the renderer rebuilds.
+        if self.sim.grid.limit_area != self.last_limit_area {
+            self.last_limit_area = self.sim.grid.limit_area;
+            self.world_dirty = true;
+        }
     }
 
     /// Advances the plan-17 `MindFx` view by one fixed tick (sim→view hook).
@@ -3995,6 +4079,10 @@ struct LoadedGrid {
     /// Team build plans carried by the save (`SaveReadState.team_plans`); the
     /// campaign runtime applies them (`apply_team_plans`).
     plans: Vec<(i32, Vec<mind_core::io::save::state::TeamPlan>)>,
+    /// Resume half of the decoded save (units/fires/puddles, markers, stats,
+    /// meta tags); `None` for generated worlds. The world half above was moved
+    /// out (T2).
+    save: Option<mind_core::io::sim_io::DecodedSave>,
 }
 
 /// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
@@ -4087,43 +4175,29 @@ fn load_preset_map_grid(
 }
 
 /// Reads an `.msav`/`MGRS` file into a fresh [`WorldGrid`] through the save
-/// reader, preserving the container's rules.
+/// reader, preserving the container's rules and the resume payload (units,
+/// fires, puddles, markers, stats, meta tags).
 fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGrid> {
     let bytes = FileAccess::get_file_as_bytes(path);
-    let mut grid = WorldGrid::new(0, 0);
-    grid.begin_map_load();
-    let (result, rules, pending_buildings, plans) = {
-        let mut context = EditorContext::new(&mut grid, registry);
-        let (result, rules, plans) = {
-            let mut state = SaveReadState {
-                context: Some(&mut context),
-                content: Some(registry),
-                ..SaveReadState::default()
-            };
-            let result = SaveIo::load_bytes(bytes.as_slice(), &mut state);
-            (
-                result,
-                state.rules.clone(),
-                std::mem::take(&mut state.team_plans),
-            )
-        };
-        (
-            result,
-            rules,
-            std::mem::take(&mut context.pending_buildings),
-            plans,
-        )
+    let mut save = match mind_core::io::sim_io::decode_save_bytes(bytes.as_slice(), registry) {
+        Ok(save) => save,
+        Err(error) => {
+            log::warn!("load_sector: `{path}` failed: {error}");
+            return None;
+        }
     };
-    if let Err(error) = result {
-        log::warn!("load_sector: `{path}` failed: {error}");
-        return None;
-    }
-    grid.end_map_load(registry);
+    // Move the world half out (callers keep their current shape); the resume
+    // half stays in `save` for the sector-resume path.
+    let grid = std::mem::take(&mut save.grid);
+    let pending_buildings = std::mem::take(&mut save.pending);
+    let plans = std::mem::take(&mut save.plans);
+    let rules = save.rules.take();
     Some(LoadedGrid {
         grid,
         rules,
         pending_buildings,
         plans,
+        save: Some(save),
     })
 }
 
