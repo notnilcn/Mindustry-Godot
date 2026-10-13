@@ -169,9 +169,17 @@ pub fn create(
                 vel.y = rad.sin() * udef.speed;
             }
         }
-        // `if(spawned.controller() instanceof MissileAI ai) ai.shooter = shooter`.
+        // `if(spawned.controller() instanceof MissileAI ai) ai.shooter = ...`:
+        // upstream assigns only a Unit shooter (or a `ControlBlock`'s unit, the
+        // logic-controlled turret case; not ported). A plain turret leaves
+        // `ai.shooter` null, so the missile keeps its launch angle
+        // (BulletType.java:943-949).
         if udef.controller == crate::content::registries::units::ControllerKind::Missile {
-            let shooter = spawn.shooter.or(spawn.owner);
+            let shooter = spawn.shooter.or(spawn.owner).filter(|entity| {
+                world
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(*entity)
+                    .is_some()
+            });
             world
                 .entity_mut(entity)
                 .insert(crate::ai::types::missile::MissileShooter(shooter));

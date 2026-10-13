@@ -168,6 +168,13 @@ impl Flowfield {
 
     /// The next tile to step to from `node` (upstream `getTargetTile`), or `None`
     /// when the field has no targets / the node is already there.
+    ///
+    /// A node outside the solved region (`INF` weight — e.g. the unit's rounded
+    /// tile is a solid wall) still descends to the cheapest passable neighbour,
+    /// exactly like Java (`cost < value` with `value == impassable`,
+    /// Pathfinder.java:407-436). Diagonals through a wall corner are skipped
+    /// (`!(point.x != 0 && point.y != 0 && (!passable(ax) || !passable(ay)))`);
+    /// the port's passability proxy is a finite weight (or a target).
     pub fn get_target_tile(
         &self,
         node: usize,
@@ -182,11 +189,15 @@ impl Flowfield {
             return None;
         }
         let current = self.complete_weights[node];
-        if !current.is_finite() {
-            return None;
-        }
         let x = (node as i32) % width;
         let y = (node as i32) / width;
+        let passable = |nx: i32, ny: i32| -> bool {
+            if nx < 0 || ny < 0 || nx >= width || ny >= height {
+                return false;
+            }
+            let index = (nx + ny * width) as usize;
+            self.is_target(index) || self.complete_weights[index].is_finite()
+        };
         let mut best: Option<(usize, f32)> = None;
         for (dx, dy) in DIRS {
             let diagonal = dx != 0 && dy != 0;
@@ -195,12 +206,16 @@ impl Flowfield {
             }
             let nx = x + dx;
             let ny = y + dy;
-            if nx < 0 || ny < 0 || nx >= width || ny >= height {
+            if !passable(nx, ny) {
                 continue;
             }
             let next = (nx + ny * width) as usize;
             let weight = self.complete_weights[next];
-            if !weight.is_finite() || weight >= current {
+            if !weight.is_finite() || (current.is_finite() && weight >= current) {
+                continue;
+            }
+            // Diagonal corner trap (Pathfinder.java:429-431).
+            if diagonal && (!passable(x + dx, y) || !passable(x, y + dy)) {
                 continue;
             }
             match best {

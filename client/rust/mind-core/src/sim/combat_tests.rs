@@ -107,9 +107,10 @@ fn shots_in(sim_setup: impl Fn(&mut Sim, Entity), ticks: usize) -> (i32, f32) {
     let duo = place(&mut sim, 20, 20, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     sim_setup(&mut sim, duo);
-    let _ = sim
-        .spawn_live_unit("fortress", 2, 20.0 * 8.0 + 90.0, 20.0 * 8.0, 180.0)
-        .expect("fortress");
+    // Hostile wall dummy inside the duo's 150 px range: a unit target would
+    // return fire (G01 T6a gives it the Java targeting cadence), which kills
+    // the duo before the coolant window ends.
+    let _wall = place(&mut sim, 31, 20, "copper-wall", 2);
     let start = sim
         .ecs
         .0
@@ -2455,4 +2456,106 @@ fn unit_xy_tiles_and_controlled() {
         panic!("velocity is numeric");
     };
     assert!((vy - 0.0).abs() < 1e-4, "stationary dagger: {vy}");
+}
+
+/// G01 T6a: a wave ground unit walks the enemy-core flowfield
+/// (`Pathfinder.fieldCore`, GroundAI.java:46-60) instead of detouring to the
+/// nearest player building, and stops at `type.range * 0.5`.
+#[test]
+fn ground_wave_paths_to_core_not_nearest_building() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    place(&mut sim, 10, 48, "core-shard", 1);
+    // Decoy: much closer to the dagger than the core, but on another axis.
+    let wall = place(&mut sim, 80, 10, "copper-wall", 1);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 85.0 * 8.0, 48.0 * 8.0, 180.0)
+        .expect("dagger");
+    let start_x = sim.ecs.0.get::<Pos>(dagger).expect("pos").x;
+    for _ in 0..3000 {
+        sim.tick().expect("tick");
+    }
+    let x = sim
+        .ecs
+        .0
+        .get::<Pos>(dagger)
+        .map(|pos| pos.x)
+        .unwrap_or(f32::MAX);
+    eprintln!(
+        "dagger x {x} (start {start_x}), wall health {:?}",
+        health(&sim, wall)
+    );
+    assert!(
+        start_x - x > 300.0,
+        "the dagger walked toward the enemy core (start x {start_x}, now {x})"
+    );
+    let wall_max = sim
+        .ecs
+        .0
+        .get::<Health>(wall)
+        .expect("wall health")
+        .max_health;
+    assert_eq!(
+        health(&sim, wall),
+        Some(wall_max),
+        "the decoy wall was never attacked"
+    );
+}
+
+/// G01 T6a: every unit of a team shares one `(team, cost)` flowfield per tick
+/// (plan §6.9): two daggers must not rebuild it per unit.
+#[test]
+fn field_is_stable_across_units() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(96);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    place(&mut sim, 10, 48, "core-shard", 1);
+    sim.spawn_live_unit("dagger", 2, 85.0 * 8.0, 48.0 * 8.0, 180.0)
+        .expect("dagger a");
+    sim.spawn_live_unit("dagger", 2, 85.0 * 8.0, 44.0 * 8.0, 180.0)
+        .expect("dagger b");
+
+    let before = sim.unit_runtime().expect("rt").pathfinder.updates;
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    let after = sim.unit_runtime().expect("rt").pathfinder.updates;
+    assert!(
+        after - before <= 2,
+        "one flowfield build per (team, cost) per tick: {before} -> {after}"
+    );
 }
