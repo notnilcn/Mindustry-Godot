@@ -1791,6 +1791,20 @@ impl MindCampaign {
         }
     }
 
+    /// `UnlockableContent.unlockedHost()` by content name (G05 T4b hint gates);
+    /// `false` for unknown names or before content boot.
+    #[func]
+    pub fn content_unlocked(&self, name: GString) -> bool {
+        let Some(registry) = self.registry.as_ref() else {
+            return false;
+        };
+        let name = name.to_string();
+        let Some(content) = registry.by_name(&name) else {
+            return false;
+        };
+        tech_tree::content_unlocked(registry, content)
+    }
+
     /// Tech-tree summary (`nodes`, `unlocked`, error).
     #[func]
     pub fn get_tech_state(&self) -> VarDictionary {

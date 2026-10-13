@@ -416,6 +416,9 @@ struct BuilderOutcome {
     /// The grid changed (construct begun/finished/removed or rotated).
     changed: bool,
     events: Vec<SimEvent>,
+    /// `Trigger.derelictBreak` (G05 T4b): the player deconstructed a team-0
+    /// (derelict) building.
+    derelict_break: bool,
 }
 
 /// `ItemBridge.playerPlaced` (`ItemBridge.java:224-233`; T11): the previously
@@ -781,10 +784,19 @@ fn update_builder(
         if finished {
             if current.breaking {
                 // `ConstructBlock.deconstructFinish` -> `tile.remove()`.
+                // `Trigger.derelictBreak` (G05 T4b): the removed building's
+                // team, read before removal.
+                let removed_team = grid
+                    .entity_at(anchor)
+                    .and_then(|entity| world.get::<BuildingComp>(entity))
+                    .map(|comp| comp.team.0);
                 if runtime
                     .remove_block_raw(world, grid, anchor.x(), anchor.y())
                     .is_some()
                 {
+                    if removed_team == Some(DERELICT) {
+                        out.derelict_break = true;
+                    }
                     emit_construct_fx(
                         world,
                         runtime,
@@ -1287,6 +1299,11 @@ impl Sim {
                     }
                 }
                 self.push_event(event);
+            }
+            // `Trigger.derelictBreak` (G05 T4b): the player finished
+            // deconstructing a team-0 (derelict) building.
+            if outcome.derelict_break {
+                self.hint_events.events.insert("derelictbreak");
             }
             if outcome.changed {
                 self.refresh_unit_runtime();
@@ -1966,6 +1983,17 @@ mod tests {
             sim.hint_events.events.contains("break"),
             "the break event is recorded"
         );
+    }
+
+    /// `Trigger.fireCreate` (G05 T4b): a fire born during a tick arms the
+    /// `waveFire` hint event.
+    #[test]
+    fn fire_creation_records_hint_event() {
+        let (mut sim, _unit, _core, _wall) = sim_with_player();
+        let mut rng = crate::determinism::SimRng::new(3);
+        assert!(crate::combat::fires::create(&mut sim.ecs.0, 5, 5, &mut rng).is_some());
+        sim.tick().expect("tick");
+        assert!(sim.hint_events.events.contains("fire"));
     }
 
     /// T18: a queued player placement keeps its rotation through the plan queue

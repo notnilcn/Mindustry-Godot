@@ -904,6 +904,16 @@ impl Sim {
         // `BuilderComp.update` (PAR-0098): player build plans drive the
         // construct blocks after the entity update pass.
         self.update_builders();
+        // `Trigger.fireCreate` (G05 T4b): any fire born this tick (bullets,
+        // puddles, explosions) arms the `waveFire` hint.
+        if self
+            .ecs
+            .0
+            .remove_resource::<crate::combat::fires::FireCreated>()
+            .is_some()
+        {
+            self.hint_events.events.insert("fire");
+        }
         // World-processor UI events (announce/toast/cutscene) are drained here so
         // the log never grows unbounded (T4; T5/T6 extend the match).
         self.drain_logic_events();

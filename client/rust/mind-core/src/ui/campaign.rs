@@ -241,6 +241,23 @@ pub struct ResearchView {
     pub children: usize,
 }
 
+/// One placed tile of a schematic (`Schematic.Stile`) for the preview widget.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SchematicTileView {
+    /// Block content name (`block-<name>-full` region).
+    pub block: String,
+    /// Local tile x (relative to the schematic origin).
+    pub x: i32,
+    /// Local tile y.
+    pub y: i32,
+    /// Rotation 0-3.
+    pub rotation: u8,
+    /// Block footprint size (1/2/3/4).
+    pub size: i32,
+    /// `kind_rotates(def.kind)`: draw the plan region rotated.
+    pub rotate: bool,
+}
+
 /// One schematic library entry (`SchematicsDialog`).
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SchematicView {
@@ -254,8 +271,8 @@ pub struct SchematicView {
     pub width: i32,
     /// Height in tiles.
     pub height: i32,
-    /// Tile count.
-    pub tiles: usize,
+    /// Placed tiles (`SchematicImage` preview inputs; `Schematic.tiles`).
+    pub tiles: Vec<SchematicTileView>,
     /// Contains a core block.
     pub has_core: bool,
     /// User labels/tags.
@@ -1157,7 +1174,21 @@ pub fn schematic_views(schematics: &Schematics, registry: &ContentRegistry) -> V
             description: schematic.description(),
             width: schematic.width,
             height: schematic.height,
-            tiles: schematic.tiles.len(),
+            tiles: schematic
+                .tiles
+                .iter()
+                .filter_map(|tile| {
+                    let def = registry.block(tile.block)?;
+                    Some(SchematicTileView {
+                        block: def.name.clone(),
+                        x: tile.x as i32,
+                        y: tile.y as i32,
+                        rotation: tile.rotation.max(0) as u8,
+                        size: def.size,
+                        rotate: crate::world::block::kind_rotates(def.kind),
+                    })
+                })
+                .collect(),
             has_core: schematic.has_core(registry),
             labels: schematic.labels.clone(),
             file: schematic.file.clone(),

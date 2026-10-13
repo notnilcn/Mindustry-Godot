@@ -15,6 +15,9 @@ signal schematic_action(index: int, action: String)
 var _field: LineEdit = null
 var _list: MindTable = null
 var _detail: MindTable = null
+var _tags_row: HBoxContainer = null
+var _tags: Array = []
+var _selected_tags: Array = []
 var _selected := 0
 var _pending_delete := -1
 var _pending_rename := -1
@@ -38,8 +41,22 @@ func _ready() -> void:
 
 func shown() -> void:
 	refresh_campaign_views()
+	_load_tags()
 	_rebuild_list()
 	_rebuild_detail()
+
+
+## `SchematicsDialog` tags (`Core.settings` JSON `schematic-tags`).
+func _load_tags() -> void:
+	_tags.clear()
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_text"):
+		return
+	var parsed: Variant = JSON.parse_string(str(ui.call("settings_get_text", "schematic-tags", "[]")))
+	if parsed is Array:
+		for tag in parsed:
+			if not str(tag).is_empty() and not _tags.has(str(tag)):
+				_tags.append(str(tag))
 
 
 func _build() -> void:
@@ -55,35 +72,136 @@ func _build() -> void:
 	search_row.add_child(import)
 	root.add(search_row).grow_x_axis().pad(4)
 	root.row()
-	var columns := HBoxContainer.new()
-	columns.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# `SchematicsDialog`: `@schematic.tags` label + one toggle per tag.
+	_tags_row = HBoxContainer.new()
+	_tags_row.add_theme_constant_override("separation", 2)
+	root.add(_tags_row).grow_x_axis().pad(2)
+	root.row()
+	# Full-width card pane (`cols = max(screenW / 230, 1)`), then the detail
+	# panel with the per-schematic actions.
 	_list = MindTable.new()
-	_list.custom_minimum_size.x = 260
-	columns.add_child(_list)
+	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.add(_list).grow_x_axis().grow_y_axis()
+	root.row()
 	_detail = MindTable.new()
 	_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	columns.add_child(_detail)
-	root.add(columns).grow_x_axis().grow_y_axis()
+	root.add(_detail).grow_x_axis()
+	_rebuild_tags()
 	_rebuild_list()
 	_rebuild_detail()
+
+
+## Tags row (`@schematic.tags` + toggles; `showAllTags` editor deferred).
+func _rebuild_tags() -> void:
+	if _tags_row == null:
+		return
+	for child in _tags_row.get_children():
+		child.queue_free()
+	if _tags.is_empty():
+		return
+	# code-instantiated: the tag label/toggles follow the settings tag list.
+	_tags_row.add_child(MindWidgets.label(_t("@schematic.tags")))
+	for tag in _tags:
+		var button := MindWidgets.button(str(tag))
+		button.theme_type_variation = "togglet"
+		button.toggle_mode = true
+		button.button_pressed = _selected_tags.has(tag)
+		button.pressed.connect(_toggle_tag.bind(str(tag)))
+		_tags_row.add_child(button)
+
+
+func _toggle_tag(tag: String) -> void:
+	if _selected_tags.has(tag):
+		_selected_tags.erase(tag)
+	else:
+		_selected_tags.append(tag)
+	_rebuild_tags()
+	_rebuild_list()
 
 
 func _rebuild_list() -> void:
 	_list.clear_children()
 	var needle := _field.text.to_lower() if _field != null else ""
 	var schematics := campaign_section("schematics")
+	# `cols = max((int)(screenW / 230), 1)` (SchematicsDialog.java:129-150).
+	var cols := maxi(int(get_viewport_rect().size.x / 230.0), 1)
+	var shown := 0
 	for index in schematics.size():
 		var schematic: Dictionary = schematics[index]
 		var name := str(schematic.get("name", ""))
 		if not needle.is_empty() and not name.to_lower().contains(needle):
 			continue
-		# code-instantiated: schematic rows are the plan-12 Schematics registry.
-		var button := MindWidgets.button(name)
-		button.toggle_mode = true
-		button.button_pressed = index == _selected
-		button.pressed.connect(_select.bind(index))
-		_list.add(button).grow_x_axis().pad(2)
+		var labels: Array = schematic.get("labels", [])
+		var tagged := true
+		for tag in _selected_tags:
+			if not labels.has(tag):
+				tagged = false
+				break
+		if not tagged:
+			continue
+		# code-instantiated: one SchematicImage card per library entry.
+		var button := Button.new()
+		button.theme_type_variation = "togglet"
+		button.custom_minimum_size = Vector2(200.0, 200.0)
+		button.pressed.connect(_on_card_pressed.bind(index))
+		var image := MindSchematicImage.new()
+		image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		image.setup(schematic)
+		button.add_child(image)
+		button.mouse_entered.connect(func() -> void: image.set_hovered(true))
+		button.mouse_exited.connect(func() -> void: image.set_hovered(false))
+		# code-instantiated: name badge (`Styles.black3` label over the image).
+		var badge := PanelContainer.new()
+		var box := StyleBoxFlat.new()
+		box.bg_color = MindStyles.BLACK_3
+		badge.add_theme_stylebox_override("panel", box)
+		badge.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		badge.offset_top = -26.0
+		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var label := MindWidgets.label("[center]%s[/center]" % name)
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		badge.add_child(label)
+		button.add_child(badge)
+		_list.add(button).pad(4)
+		shown += 1
+		if shown % cols == 0:
+			_list.row()
+	if shown == 0:
+		var key := "@none.found" if (not needle.is_empty() or not _selected_tags.is_empty()) else "@none"
+		_list.add(MindWidgets.label(_t(key))).pad(8)
 		_list.row()
+	_list.call_deferred("sort_now")
+
+
+## Card click: in game `control.input.useSchematic(s)` + hide (Java
+## `SchematicsDialog.java:190-205`); in the menu it selects the detail panel.
+func _on_card_pressed(index: int) -> void:
+	_selected = index
+	if _in_game() and _use_schematic(index):
+		var ui := get_node_or_null("/root/MindUi")
+		if ui != null:
+			ui.call("close_dialog", "schematics")
+		return
+	_rebuild_list()
+	_rebuild_detail()
+
+
+## `state.isGame()` (the dialog is open in the running match).
+func _in_game() -> bool:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	return host != null and host.has_method("get_state") and str(host.call("get_state")) == "playing"
+
+
+## `control.input.useSchematic(s)` (G08 T6b); toasts `@schematic.disabled` when
+## the rules/placement state refuses (`!rules.schematicsAllowed`).
+func _use_schematic(index: int) -> bool:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null or not input.has_method("use_schematic"):
+		return false
+	var used := bool(input.call("use_schematic", index))
+	if not used:
+		show_toast(_t("@schematic.disabled"))
+	return used
 
 
 func _select(index: int) -> void:
@@ -101,7 +219,8 @@ func _rebuild_detail() -> void:
 	_detail.add(MindWidgets.styled_label(str(schematic.get("name", "")), "techLabel")).grow_x_axis().pad(6)
 	_detail.row()
 	_detail.add(MindWidgets.label("%dx%d  tiles: %d" % [
-		int(schematic.get("width", 0)), int(schematic.get("height", 0)), int(schematic.get("tiles", 0))
+		int(schematic.get("width", 0)), int(schematic.get("height", 0)),
+		(schematic.get("tiles", []) as Array).size()
 	])).pad(2)
 	_detail.row()
 	var requirements: Array = schematic.get("requirements", [])

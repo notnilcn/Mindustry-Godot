@@ -32,6 +32,11 @@ pub const TILE_DAMAGE: f32 = 1.8;
 /// `FireComp.unitDamage`.
 pub const UNIT_DAMAGE: f32 = 3.0;
 
+/// Marker resource set by [`create`] when a new fire is born (G05 T4b
+/// `Trigger.fireCreate` hint event); drained by `Sim::tick`.
+#[derive(Debug, Clone, Copy, Default, bevy_ecs::resource::Resource)]
+pub struct FireCreated;
+
 /// Fire state (`FireComp` sim fields; draw/animation are plan 16/17).
 #[derive(Debug, Clone, Copy, Component)]
 pub struct FireState {
@@ -119,6 +124,8 @@ pub fn create(world: &mut World, tx: i16, ty: i16, rng: &mut SimRng) -> Option<E
             },
         ))
         .id();
+    // G05 T4b: `Trigger.fireCreate` marker for the hint driver.
+    world.insert_resource(FireCreated);
     Some(entity)
 }
 
