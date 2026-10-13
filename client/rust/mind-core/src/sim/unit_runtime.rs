@@ -405,8 +405,63 @@ impl Sim {
                 })
                 .collect();
             for entity in dead {
-                // `UnitComp.destroy()` fires `shootOnDeath` mounts first
-                // (PAR-0088); spawned bullets join the live list.
+                // `UnitComp.destroy()` (UnitComp.java:885-891): a unit carrying
+                // an explosive item blows up (G01 T14).
+                {
+                    let stack = world
+                        .get::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+                        .and_then(|comp| comp.item);
+                    let core_spawned = world
+                        .get::<UnitCore>(entity)
+                        .is_some_and(|core| core.spawned_by_core);
+                    if let Some((item, amount)) = stack
+                        && let Some(item_def) = runtime.content.item(item)
+                        && !core_spawned
+                    {
+                        let pos = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y));
+                        let def = world
+                            .get::<UnitTypeComp>(entity)
+                            .and_then(|comp| runtime.content.unit(comp.type_id))
+                            .cloned();
+                        if let (Some((x, y)), Some(def)) = (pos, def) {
+                            let explosiveness = 2.0 + item_def.explosiveness * amount as f32 * 1.53;
+                            let flammability = item_def.flammability * amount as f32 / 1.9;
+                            let power = item_def.charge * (amount as f32).powf(1.11) * 160.0;
+                            let team = world
+                                .get::<TeamComp>(entity)
+                                .map(|team| team.team)
+                                .unwrap_or(0);
+                            let (damage, fire) = world
+                                .get_resource::<CampaignRuntime>()
+                                .map(|campaign| {
+                                    let rules = &campaign.session.rules;
+                                    (
+                                        rules.damage_explosions
+                                            && rules.unit_crash_damage(team) > 0.0,
+                                        item_def.flammability > 1.0,
+                                    )
+                                })
+                                .unwrap_or((true, item_def.flammability > 1.0));
+                            let radius = (def.hit_size * 2.0 + def.leg_length / 1.7) / 2.0;
+                            crate::combat::damage::explosion::dynamic_explosion(
+                                world,
+                                &runtime.content,
+                                &mut runtime.rng,
+                                x,
+                                y,
+                                flammability,
+                                explosiveness,
+                                power,
+                                radius,
+                                damage,
+                                fire,
+                                Some(team),
+                            );
+                        }
+                    }
+                }
+                // `UnitComp.destroy()` fires `shootOnDeath` mounts (PAR-0088);
+                // spawned bullets join the live list.
                 run_shoot_on_death(world, &mut runtime, entity);
                 // `UnitComp.destroy` crash damage (`UnitComp.java:921-928`): a
                 // flying unit with `createWreck`, not spawned by a core, crashes
@@ -430,16 +485,27 @@ impl Sim {
                             let damage =
                                 def.hit_size.powf(0.75) * def.crash_damage_multiplier * 2.5 * crash;
                             let radius = def.hit_size.powf(0.94) * 1.25;
-                            let _ = crate::combat::damage::area::damage_area(
+                            // `shields.isEmpty() || !shields.contains(s ->
+                            // s.absorbExplosion(x, y, crashDamage))`
+                            // (UnitComp.java:924-930; G01 T14).
+                            if !crate::combat::damage::explosion::explosion_absorbed(
                                 world,
-                                &runtime.content,
-                                Some(team),
                                 x,
                                 y,
-                                radius,
                                 damage,
-                                crate::combat::damage::area::DamageOptions::default(),
-                            );
+                                Some(team),
+                            ) {
+                                let _ = crate::combat::damage::area::damage_area(
+                                    world,
+                                    &runtime.content,
+                                    Some(team),
+                                    x,
+                                    y,
+                                    radius,
+                                    damage,
+                                    crate::combat::damage::area::DamageOptions::default(),
+                                );
+                            }
                         }
                     }
                 }
@@ -1842,6 +1908,16 @@ pub fn unit_physics_system(world: &mut World) {
 }
 
 pub fn unit_update_system(world: &mut World) {
+    // `CombatEnv` sync (G01 T14): `Rules.fire` and `Env.oxygen` gate
+    // `Fires.create`; `state.envAttrs` heat (0.0 until a live source lands).
+    if let Some(campaign) = world.get_resource::<CampaignRuntime>() {
+        let rules = &campaign.session.rules;
+        world.insert_resource(crate::combat::fires::CombatEnv {
+            fire: rules.fire,
+            oxygen: rules.env & (1 << 7) != 0,
+            heat: 0.0,
+        });
+    }
     let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
         return;
     };

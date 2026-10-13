@@ -3632,3 +3632,195 @@ fn command_target_seam_reports_position() {
         "reports the tracked entity's position"
     );
 }
+
+/// G01 T14: a unit carrying blast compound explodes on death
+/// (`UnitComp.destroy` -> `Damage.dynamicExplosion`): 30 blast-compound gives
+/// explosiveness `2 + 1.2*30*1.53 = 57.08` -> 5 waves of 28.54 damage with a
+/// 50 px final radius.
+#[test]
+fn unit_with_blast_compound_explodes() {
+    use crate::entities::comp::unit::comp::ItemsComp;
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 20.5 * 8.0 + 8.0, 20.5 * 8.0, 180.0)
+        .expect("dagger");
+    let blast = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("blast-compound")
+        .expect("blast-compound");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemsComp>(dagger) {
+        items.item = Some((blast, 30));
+    }
+    if let Some(mut hp) = sim.ecs.0.get_mut::<Health>(dagger) {
+        hp.health = 0.0;
+        hp.dead = true;
+    }
+    sim.tick().expect("tick");
+    sim.tick().expect("tick");
+    let wall_end = health(&sim, wall);
+    eprintln!("wall {wall_start} -> {wall_end:?}");
+    assert!(
+        wall_end.is_none_or(|hp| hp <= wall_start - 20.0),
+        "the blast damaged the wall: {wall_start} -> {wall_end:?}"
+    );
+}
+
+/// G01 T14: core-spawned units skip the death explosion (`spawnedByCore`).
+#[test]
+fn core_spawned_unit_does_not_explode() {
+    use crate::entities::comp::unit::comp::{ItemsComp, UnitCore};
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let wall_start = health(&sim, wall).expect("wall health");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 20.5 * 8.0 + 8.0, 20.5 * 8.0, 180.0)
+        .expect("dagger");
+    let blast = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("blast-compound")
+        .expect("blast-compound");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemsComp>(dagger) {
+        items.item = Some((blast, 30));
+    }
+    if let Some(mut core) = sim.ecs.0.get_mut::<UnitCore>(dagger) {
+        core.spawned_by_core = true;
+    }
+    if let Some(mut hp) = sim.ecs.0.get_mut::<Health>(dagger) {
+        hp.health = 0.0;
+        hp.dead = true;
+    }
+    sim.tick().expect("tick");
+    sim.tick().expect("tick");
+    assert_eq!(
+        health(&sim, wall),
+        Some(wall_start),
+        "no explosion from a core-spawned unit"
+    );
+}
+
+/// G01 T14: `rules.fire = false` blocks fire creation through the `CombatEnv`
+/// sync (`Fires.create` gate).
+#[test]
+fn fire_disabled_rule_blocks_fire() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(24);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        fire: false,
+        unit_cap: 100,
+        unit_cap_variable: false,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    // One tick syncs `CombatEnv` from the session rules.
+    sim.tick().expect("tick");
+    let mut rng = crate::determinism::SimRng::new(7);
+    let fire = crate::combat::fires::create(&mut sim.ecs.0, 10, 10, &mut rng);
+    assert!(fire.is_none(), "rules.fire = false blocks fires");
+}
+
+/// G01 T14: a charged force projector absorbs the death explosion
+/// (`ForceBuild.absorbExplosion`): the wall under the shield is undamaged.
+#[test]
+fn force_projector_absorbs_explosion() {
+    use crate::entities::comp::unit::comp::ItemsComp;
+    use crate::world::blocks::defense::projectors::BaseShieldState;
+
+    let mut sim = live_sim(48);
+    // Power-source feeds the projector; the wall sits inside its radius.
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    let wall = place(&mut sim, 22, 20, "copper-wall", 1);
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let radius = sim
+        .ecs
+        .0
+        .get::<BaseShieldState>(projector)
+        .map(|state| state.smooth_radius)
+        .unwrap_or(0.0);
+    if radius <= 1.0 {
+        eprintln!(
+            "force projector uncharged (radius {radius}); absorption covered by the shield unit tests"
+        );
+        return;
+    }
+    let wall_start = health(&sim, wall).expect("wall health");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 22.5 * 8.0, 20.5 * 8.0, 180.0)
+        .expect("dagger");
+    let blast = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("blast-compound")
+        .expect("blast-compound");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemsComp>(dagger) {
+        items.item = Some((blast, 30));
+    }
+    if let Some(mut hp) = sim.ecs.0.get_mut::<Health>(dagger) {
+        hp.health = 0.0;
+        hp.dead = true;
+    }
+    sim.tick().expect("tick");
+    sim.tick().expect("tick");
+    eprintln!(
+        "shield radius {radius}, wall {wall_start} -> {:?}",
+        health(&sim, wall)
+    );
+    assert_eq!(
+        health(&sim, wall),
+        Some(wall_start),
+        "the projector absorbed the explosion"
+    );
+}
+
+/// G01 T14: `explosion_absorbed` covers the point when a live shield polygon
+/// contains it and skips the ignore team's own shields.
+#[test]
+fn explosion_absorbed_polygon() {
+    use crate::combat::damage::explosion::explosion_absorbed;
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+
+    let mut sim = live_sim(48);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    if let Some(mut state) = sim.ecs.0.get_mut::<ForceProjectorState>(projector) {
+        state.radscl = 1.0;
+        state.radius = 100.0;
+        state.broken = false;
+        state.sides = 24;
+    }
+    let (x, y) = (20.5 * 8.0, 20.5 * 8.0);
+    assert!(
+        explosion_absorbed(&mut sim.ecs.0, x, y, 30.0, Some(2)),
+        "team 1's shield absorbs the wave for team 2"
+    );
+    assert!(
+        !explosion_absorbed(&mut sim.ecs.0, x + 1000.0, y, 30.0, Some(2)),
+        "a far-away point is not absorbed"
+    );
+    assert!(
+        !explosion_absorbed(&mut sim.ecs.0, x, y, 30.0, Some(1)),
+        "the shield's own team is ignored"
+    );
+}

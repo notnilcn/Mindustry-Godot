@@ -10,11 +10,16 @@
 //! `Bullets.fireball` fire spread is replaced by a single `fires::create` at
 //! the explosion tile.
 
+use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
 use crate::determinism::SimRng;
+use crate::entities::comp::{Pos, TeamComp};
 use crate::world::WorldGrid;
+use crate::world::blocks::defense::projectors::{BaseShieldState, base_shield_radius};
+use crate::world::blocks::defense::shields::ForceProjectorState;
+use crate::world::blocks::defense::shields::is_in_regular_polygon;
 
 use super::area::{DamageOptions, complete_damage, damage_area};
 
@@ -61,6 +66,12 @@ pub fn dynamic_explosion(
     };
     let damage_per_wave = explosiveness / 2.0;
     for i in 0..waves {
+        // `if(shields empty || !shields.contains(s -> s instanceof
+        // ExplosionShield e && e.absorbExplosion(x, y, damagePerWave)))`
+        // (Damage.java:120-127): any absorbing shield skips the whole wave.
+        if explosion_absorbed(world, x, y, damage_per_wave, ignore_team) {
+            continue;
+        }
         // `clamp(radius + explosiveness, 0, 50f) * ((i + 1f) / waves)`.
         let wave_radius =
             (radius + explosiveness).clamp(0.0, 50.0) * ((i as f32 + 1.0) / waves as f32);
@@ -75,6 +86,63 @@ pub fn dynamic_explosion(
             DamageOptions::default(),
         );
     }
+}
+
+/// `ForceBuild.absorbExplosion(ex, ey, damage)` (ForceProjector.java:270-278)
+/// over the live shields: `ForceProjectorState` uses its polygon and buildup
+/// (`absorb_explosion`), `BaseShieldState` the simplified latch. Any absorbing
+/// enemy shield skips the whole wave.
+pub fn explosion_absorbed(
+    world: &mut World,
+    x: f32,
+    y: f32,
+    damage: f32,
+    ignore_team: Option<u8>,
+) -> bool {
+    let mut projectors: Vec<Entity> = Vec::new();
+    let mut base_shields: Vec<Entity> = Vec::new();
+    for entity_ref in world.iter_entities() {
+        if entity_ref.get::<TeamComp>().map(|team| team.team) == ignore_team {
+            continue;
+        }
+        if entity_ref.get::<ForceProjectorState>().is_some() {
+            projectors.push(entity_ref.id());
+        } else if entity_ref.get::<BaseShieldState>().is_some() {
+            base_shields.push(entity_ref.id());
+        }
+    }
+    let mut absorbed = false;
+    for entity in projectors {
+        let pos = world.get::<Pos>(entity).copied();
+        if let (Some(pos), Some(mut state)) = (pos, world.get_mut::<ForceProjectorState>(entity))
+            && state.absorb_explosion(pos.x, pos.y, x, y, damage)
+        {
+            absorbed = true;
+        }
+    }
+    let mut hit: Vec<Entity> = Vec::new();
+    for entity in base_shields {
+        let Some(state) = world.get::<BaseShieldState>(entity) else {
+            continue;
+        };
+        if state.broken {
+            continue;
+        }
+        let Some(pos) = world.get::<Pos>(entity) else {
+            continue;
+        };
+        let radius = base_shield_radius(state);
+        if radius > 0.0 && is_in_regular_polygon(state.sides, pos.x, pos.y, radius, 0.0, x, y) {
+            hit.push(entity);
+        }
+    }
+    for entity in hit {
+        if let Some(mut state) = world.get_mut::<BaseShieldState>(entity) {
+            state.hit = 1.0;
+        }
+        absorbed = true;
+    }
+    absorbed
 }
 
 /// `Damage.tileDamage`: square-radius building damage from an explosion.
