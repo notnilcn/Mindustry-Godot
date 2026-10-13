@@ -650,7 +650,7 @@ impl CombatHarness {
             }
             for entity in mends {
                 if let Some(mut state) = ctx.world.entity_mut(entity).take::<MendProjectorState>() {
-                    update_mend_projector(&mut ctx, entity, &mut state, 1.0, true, false);
+                    update_mend_projector(&mut ctx, entity, &mut state, 1.0, true, 0.0);
                     ctx.world.entity_mut(entity).insert(state);
                 }
             }

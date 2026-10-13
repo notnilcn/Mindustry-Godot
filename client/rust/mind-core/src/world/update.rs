@@ -644,6 +644,41 @@ pub fn get_progress_increase(world: &World, entity: Entity, base_time: f32) -> f
     }
 }
 
+/// `BuildingComp.consume()`'s `ConsumeItems.trigger` half: removes every item
+/// consumer's stacks from the building's module (optional consumers included).
+///
+/// Java `ConsumeItems.trigger` runs for every consumer in `consume()`; the
+/// port's per-tick consumption only updates the module through
+/// `update_consumption`, so blocks with an explicit `useTime` cycle (mender,
+/// overdrive) call this instead (T4).
+pub fn trigger_consumers(world: &mut World, entity: Entity) {
+    let stacks: Vec<(ItemId, i32)> = world
+        .get::<Building>(entity)
+        .and_then(|building| {
+            world
+                .get_resource::<BlockTable>()
+                .and_then(|table| table.get(building.block))
+        })
+        .map(|inst| {
+            inst.consumers
+                .all
+                .iter()
+                .filter_map(|consumer| match &consumer.kind {
+                    crate::world::consumers::ConsumeInstanceKind::Items(stacks) => Some(stacks),
+                    _ => None,
+                })
+                .flatten()
+                .map(|stack| (stack.item, stack.amount))
+                .collect()
+        })
+        .unwrap_or_default();
+    if let Some(mut items) = world.get_mut::<ItemModule>(entity) {
+        for (item, amount) in stacks {
+            items.remove(item, amount);
+        }
+    }
+}
+
 /// `Building.timer(index, interval)`: returns `true` when the interval elapsed
 /// and resets it (`Timer`/`Interval`). Timers tick once per fixed-step update.
 pub fn run_timer(world: &mut World, entity: Entity, index: usize, interval: f32) -> bool {

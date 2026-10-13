@@ -1620,3 +1620,146 @@ fn diode_moves_power_forward() {
     );
     assert!(a_status < 1.0, "the full battery drained: {a_status}");
 }
+
+/// T4: a mender only heals its own team's buildings
+/// (`BlockIndexer.eachBlock` is team-filtered, `BlockIndexer.java:328-361`;
+/// `MendProjector.java:107-116`).
+#[test]
+fn mender_heals_only_own_team() {
+    let mut sim = runtime_sim();
+    let _mender = place(&mut sim, "mender", 5, 5);
+    let _power = place(&mut sim, "power-source", 5, 6);
+    let own = place(&mut sim, "copper-wall", 6, 5);
+    let wall = sim.world_block_id("copper-wall").expect("wall");
+    sim.command(SimCommand::Place {
+        x: 5,
+        y: 4,
+        block: wall,
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("enemy wall placed");
+    let enemy = sim
+        .grid
+        .entity_at(TilePos::new(5, 4))
+        .expect("enemy wall entity");
+    {
+        let world = &mut sim.ecs.0;
+        for entity in [own, enemy] {
+            world
+                .get_mut::<crate::entities::comp::Health>(entity)
+                .expect("health")
+                .health = 10.0;
+        }
+    }
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let health_of = |sim: &Sim, entity: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Health>(entity)
+            .map(|health| health.health)
+            .unwrap_or(0.0)
+    };
+    let own_health = health_of(&sim, own);
+    assert!(
+        (own_health - 22.8).abs() < 0.01,
+        "own wall healed by 4% of 320: {own_health}"
+    );
+    assert_eq!(health_of(&sim, enemy), 10.0, "the enemy wall is not healed");
+}
+
+/// T4: the mender's silicon boost is consumed on its `useTime` cycle
+/// (`MendProjector.java:95-104`: `timer(timerUse, useTime / timeScale)` ->
+/// `consume()`), and `phaseHeat` follows `optionalEfficiency`
+/// (`MendProjector.java:100`).
+#[test]
+fn mender_silicon_boost_consumed() {
+    let mut sim = runtime_sim();
+    let mender = place(&mut sim, "mender", 5, 5);
+    let _power = place(&mut sim, "power-source", 5, 6);
+    let silicon = item(&sim, "silicon");
+    {
+        let world = &mut sim.ecs.0;
+        transfer::dispatch_handle_stack(world, mender, silicon, 2);
+    }
+    assert_eq!(stored_item(&sim, mender, silicon), 2);
+    // The power graph settles a few ticks in; `optionalEfficiency` is capped by
+    // the required (power) efficiency, so `consume()` starts once powered.
+    // `timer()`'s first call is true: that first useTime tick consumes one.
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, mender, silicon),
+        1,
+        "one silicon consumed on the first powered useTime tick"
+    );
+    for _ in 0..51 {
+        sim.tick().expect("tick");
+    }
+    let phase_heat = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::shields::MendProjectorState>(mender)
+        .map(|state| state.phase_heat)
+        .unwrap_or(0.0);
+    assert!(phase_heat > 0.9, "phaseHeat warmed up: {phase_heat}");
+    for _ in 0..349 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, mender, silicon),
+        0,
+        "the second useTime tick (400 ticks later) consumed the last silicon"
+    );
+}
+
+/// T4: the overdrive projector boosts only its own team
+/// (`OverdriveProjector.java:105-113` -> team-filtered `eachBlock`) and
+/// consumes its boost items on the `useTime` cycle.
+#[test]
+fn overdrive_does_not_boost_enemy() {
+    let mut sim = runtime_sim();
+    // The overdrive is 2x2 at (5,5) (footprint 5..6, 5..6); the source sits
+    // outside the footprint at (4,5).
+    let _overdrive = place(&mut sim, "overdrive-projector", 5, 5);
+    let _power = place(&mut sim, "power-source", 4, 5);
+    let own = place(&mut sim, "graphite-press", 8, 5);
+    let press = sim.world_block_id("graphite-press").expect("press");
+    sim.command(SimCommand::Place {
+        x: 5,
+        y: 9,
+        block: press,
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("enemy press placed");
+    let enemy = sim
+        .grid
+        .entity_at(TilePos::new(5, 9))
+        .expect("enemy press entity");
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let time_scale = |sim: &Sim, entity: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Building>(entity)
+            .map(|building| building.time_scale)
+            .unwrap_or(1.0)
+    };
+    let own_scale = time_scale(&sim, own);
+    assert!(
+        (own_scale - 1.5).abs() < 0.001,
+        "own press is boosted to 1.5: {own_scale}"
+    );
+    assert_eq!(
+        time_scale(&sim, enemy),
+        1.0,
+        "the enemy press is not boosted"
+    );
+}
