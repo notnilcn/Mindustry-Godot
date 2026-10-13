@@ -624,7 +624,11 @@ impl DesktopBridge {
                 self.emit_action(RemoteAction::UnitClear);
                 self.fire_hotkey(name);
             }
-            "rotateplaced" => self.rotate_under_cursor(bindings),
+            "rotateplaced" => {
+                // T9: `rotateplaced` is a wheel modifier now (`cursor.build !=
+                // null && ... && keyDown(rotatePlaced) && axisTap(rotate) != 0`,
+                // DesktopInput.java:924-926); the key edge alone does nothing.
+            }
             "rotate" => {
                 // Axis edges (`rotate` defaults to the wheel).
                 let step = if self.axis_negative(bindings, ids::ROTATE) {
@@ -2221,38 +2225,99 @@ impl DesktopBridge {
         }
         let rotate_on_scroll = Self::axis_is_scroll(bindings, ids::ROTATE);
         let zoom_on_scroll = Self::axis_is_scroll(bindings, ids::ZOOM);
-        // `pollInputPlayer` L843-858: copied plans own the wheel (no zoom; the
-        // diagonal-key override is T9's).
-        if rotate_on_scroll
-            && !self.controller.state.select_plans.is_empty()
-            && !self
-                .drag
-                .as_ref()
-                .is_some_and(|drag| drag.kind == DragKind::Place)
-            && !self.key_down(bindings, ids::DIAGONAL_PLACEMENT)
-        {
-            let step = if delta > 0.0 { 1 } else { -1 };
-            self.rotate_select_plans(step);
+        if !rotate_on_scroll && !zoom_on_scroll {
             return;
         }
-        if rotate_on_scroll
-            && self.controller.state.is_building
-            && self.controller.state.block.is_some()
-        {
-            let step = if delta > 0.0 { 1 } else { -1 };
+        let diagonal_held = self.key_down(bindings, ids::DIAGONAL_PLACEMENT);
+        let block = self.controller.state.block;
+        let placing = self.controller.state.is_building && block.is_some();
+        let ctx = mind_core::input::desktop::ScrollCtx {
+            diagonal_held,
+            rotate_placed_held: self.key_down(bindings, ids::ROTATE_PLACED),
+            zoom_is_rotate: bindings.value(ids::ROTATE) == bindings.value(ids::ZOOM),
+            placing,
+            block_rotates: block.is_some_and(|block| self.block_rotates(block)),
+            select_plans: !self.controller.state.select_plans.is_empty(),
+            cursor_build_quick_rotates: self.cursor_build_quick_rotates(),
+        };
+        let route = mind_core::input::desktop::route_scroll(&ctx);
+        let step = if delta > 0.0 { 1 } else { -1 };
+        if route.rotate_selection {
+            // `rotation = mod(rotation + axisTap(rotate), 4)`.
             self.controller.state.rotation =
                 (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
-            self.controller.state.override_line_rotation = true;
-            if let Some(drag) = self.drag
-                && drag.kind == DragKind::Place
-            {
-                self.update_place_line(bindings, drag.start, drag.last);
+            if placing {
+                if let Some(drag) = self.drag
+                    && drag.kind == DragKind::Place
+                {
+                    // `pollInputPlayer` L766-773: while no override is latched,
+                    // align to the drag angle before the wheel step.
+                    if !self.controller.state.override_line_rotation
+                        && !diagonal_held
+                        && drag.start != drag.last
+                    {
+                        let dx = (drag.last.0 - drag.start.0) as f32;
+                        let dy = (drag.last.1 - drag.start.1) as f32;
+                        let angle = dy.atan2(dx).to_degrees();
+                        self.controller.state.rotation =
+                            (((angle + 45.0) / 90.0) as i32).rem_euclid(4) as u8;
+                    }
+                    self.controller.state.override_line_rotation = true;
+                    self.update_place_line(bindings, drag.start, drag.last);
+                }
+            } else if !self.controller.state.select_plans.is_empty() {
+                self.rotate_select_plans(step);
             }
-            return;
         }
-        if zoom_on_scroll && let Some(mut camera) = self.camera.clone() {
-            camera.bind_mut().zoom_by(delta as f64);
+        if route.rotate_placed
+            && let Some((x, y)) = self.cursor_tile()
+        {
+            // `Call.rotateBlock(player, cursor.build, axisTap(rotate) > 0)`.
+            self.emit_action(RemoteAction::Rotate {
+                x: x as i16,
+                y: y as i16,
+                direction: delta > 0.0,
+            });
         }
+        if route.zoom {
+            self.zoom(delta);
+        }
+    }
+
+    /// `Block.rotate` for a block id.
+    fn block_rotates(&self, block: BlockId) -> bool {
+        self.host
+            .clone()
+            .is_some_and(|host| host.bind().block_rotates(block))
+    }
+
+    /// The building under the cursor is interactable and
+    /// `block.rotate && block.quickRotate` (`DesktopInput.java:924-926`).
+    fn cursor_build_quick_rotates(&self) -> bool {
+        let Some((x, y)) = self.cursor_tile() else {
+            return false;
+        };
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let team = self.player_team();
+        let interactive = guard
+            .building_team(x, y)
+            .is_some_and(|building_team| building_team == team || building_team == 0);
+        if !interactive {
+            return false;
+        }
+        let Some(content) = guard.content_registry() else {
+            return false;
+        };
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(block) = guard.grid().block_at(TilePos::new(tx, ty)) else {
+            return false;
+        };
+        content.block(block).is_some_and(|def| def.quick_rotate) && guard.block_rotates(block)
     }
 
     // ---- world queries ----

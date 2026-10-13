@@ -1097,6 +1097,8 @@ impl MindInput {
     }
 
     /// Rotates the placed building under the cursor or the pending placement.
+    /// Test seam: the `rotateplaced` binding is wheel-only as of T9
+    /// (`DesktopInput.java:924-926`).
     #[func]
     pub fn rotate_placed(&mut self) {
         self.bridge.rotate_under_cursor(&self.bindings);
