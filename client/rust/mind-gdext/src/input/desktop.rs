@@ -37,6 +37,11 @@ const UNIT_TAP_RADIUS: f32 = 11.0;
 /// Double-tap window for `selectTypedUnits` (`Time.timeSinceMillis < 300`).
 const UNIT_TAP_INTERVAL_MS: u64 = 300;
 
+/// `Units.closest` search radius for `selectedUnit()` (`InputHandler.java:2152`).
+const CONTROL_RADIUS: f32 = 40.0;
+/// `selectedUnit()`'s hitbox grow per side (`InputHandler.java:2156`).
+const CONTROL_HITBOX_GROW: f32 = 6.0;
+
 /// One world interaction in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragKind {
@@ -207,6 +212,10 @@ fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
                     .get("commandable")
                     .and_then(|value| value.as_bool())
                     .unwrap_or(true),
+                hit_size: entry
+                    .get("hit_size")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0) as f32,
             })
         })
         .collect()
@@ -280,6 +289,10 @@ pub struct DesktopBridge {
     dropping_item: bool,
     /// Last successful deposit (`Time.millis`) for `itemDepositCooldown`.
     last_deposit_ms: u64,
+    /// Last cargo-key tap (`DesktopInput.lastPayloadKeyTapMillis`).
+    payload_tap_ms: u64,
+    /// Last cargo-key hold repeat (`DesktopInput.lastPayloadKeyHoldMillis`).
+    payload_hold_ms: u64,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -324,6 +337,8 @@ impl DesktopBridge {
             shooting: false,
             dropping_item: false,
             last_deposit_ms: 0,
+            payload_tap_ms: 0,
+            payload_hold_ms: 0,
             command_mode_hold: true,
         }
     }
@@ -601,7 +616,14 @@ impl DesktopBridge {
     /// Runs one named binding (`Binding.name`).
     fn dispatch_action(&mut self, bindings: &BindingState, name: &'static str) {
         match name {
-            "respawn" => self.recenter_camera(),
+            "respawn" => {
+                // `DesktopInput.java:423-431`: V clears the possession and
+                // returns to the core unit (`Call.unitClear`); the camera
+                // recentering follows the new player unit.
+                self.dropping_item = false;
+                self.emit_action(RemoteAction::UnitClear);
+                self.fire_hotkey(name);
+            }
             "rotateplaced" => self.rotate_under_cursor(bindings),
             "rotate" => {
                 // Axis edges (`rotate` defaults to the wheel).
@@ -694,8 +716,15 @@ impl DesktopBridge {
                 self.controller.state.command_buildings.clear();
                 self.emit_selection();
             }
-            "pickupCargo" => self.payload(PayloadAction::PickupUnit),
-            "dropCargo" => self.payload(PayloadAction::Drop),
+            "pickupCargo" => {
+                // `DesktopInput.java:1012-1040`: a tap sets the hold timer.
+                self.payload_tap_ms = Time::singleton().get_ticks_msec();
+                self.payload(PayloadAction::PickupUnit);
+            }
+            "dropCargo" => {
+                self.payload_tap_ms = Time::singleton().get_ticks_msec();
+                self.payload(PayloadAction::Drop);
+            }
             "unit_stance_hold_fire" => self.set_stance(0, true),
             "unit_stance_pursue_target" => self.set_stance(1, true),
             "unit_stance_patrol" => self.set_stance(2, true),
@@ -969,6 +998,29 @@ impl DesktopBridge {
     /// Payload drop at the cursor (`dropCargo`).
     pub fn drop_payload(&mut self) {
         self.payload(PayloadAction::Drop);
+    }
+
+    /// `DesktopInput.updateMovement` payload hold-repeat
+    /// (`DesktopInput.java:1012-1040`): after a tap, holding the cargo key
+    /// repeats the action every >20 ms once the tap is >200 ms old.
+    pub fn update_payload_hold(&mut self, bindings: &BindingState) {
+        let held = if self.key_down(bindings, ids::PICKUP_CARGO) {
+            Some(PayloadAction::PickupUnit)
+        } else if self.key_down(bindings, ids::DROP_CARGO) {
+            Some(PayloadAction::Drop)
+        } else {
+            None
+        };
+        let Some(action) = held else {
+            return;
+        };
+        let now = Time::singleton().get_ticks_msec();
+        if now.saturating_sub(self.payload_tap_ms) > 200
+            && now.saturating_sub(self.payload_hold_ms) > 20
+        {
+            self.payload(action);
+            self.payload_hold_ms = now;
+        }
     }
 
     /// `tryDropItems`/`requestItem`: withdraw or deposit at a tile.
@@ -1442,10 +1494,53 @@ impl DesktopBridge {
         Some((x as f32 * unit, y as f32 * unit))
     }
 
-    /// Closest commandable unit under the cursor (`tapCommandUnit`).
-    fn tap_unit_at_cursor(&self) -> Option<i32> {
-        let (x, y) = self.cursor_world()?;
-        select_unit_tap(&self.selectable, self.player_team(), x, y, UNIT_TAP_RADIUS)
+    /// `InputHandler.selectedUnit()` (`InputHandler.java:2148-2163`):
+    /// `Units.closest(player.team(), mouseX, mouseY, 40, u -> u.isAI() &&
+    /// u.playerControllable)`, accepted only when the hitbox grown by 6 on each
+    /// side contains the cursor.
+    fn selected_unit_for_control(&self) -> Option<i32> {
+        let (wx, wy) = self.aim_world()?;
+        let team = self.player_team();
+        let best = self
+            .selectable
+            .iter()
+            .filter(|unit| unit.team == team && unit.commandable)
+            .filter_map(|unit| {
+                let dx = unit.x - wx;
+                let dy = unit.y - wy;
+                let dst2 = dx * dx + dy * dy;
+                (dst2 <= CONTROL_RADIUS * CONTROL_RADIUS).then_some((dst2, unit))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))?;
+        let unit = best.1;
+        let half = unit.hit_size / 2.0 + CONTROL_HITBOX_GROW;
+        ((unit.x - wx).abs() <= half && (unit.y - wy).abs() <= half).then_some(unit.id)
+    }
+
+    /// `InputHandler.selectedControlBuild()` (`InputHandler.java:2165-2171`):
+    /// a same-team controllable building (turret `ControlBlock`) under the
+    /// cursor.
+    fn selected_control_build(&self) -> Option<(i32, i32)> {
+        let (x, y) = self.cursor_tile()?;
+        let kind = self.block_kind_at(x, y)?;
+        if !matches!(
+            kind,
+            BlockKind::ItemTurret
+                | BlockKind::LiquidTurret
+                | BlockKind::PowerTurret
+                | BlockKind::TractorBeamTurret
+                | BlockKind::PointDefenseTurret
+                | BlockKind::LaserTurret
+                | BlockKind::ContinuousLiquidTurret
+                | BlockKind::ContinuousTurret
+                | BlockKind::RepairTurret
+                | BlockKind::BuildTurret
+        ) {
+            return None;
+        }
+        let host = self.host.clone()?;
+        let team = host.bind().building_team(x, y)?;
+        (team == self.player_team()).then_some((x, y))
     }
 
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
@@ -1463,14 +1558,22 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
-        if self.controller.state.command_mode {
-            // `Binding.control` + `Binding.select`: possess the unit under the
-            // cursor (`Call.unitControl`).
-            if self.key_down(bindings, ids::CONTROL)
-                && let Some(id) = self.tap_unit_at_cursor()
-            {
+        // `DesktopInput.update` L408-421: Ctrl+select possesses an own AI unit
+        // (`Call.unitControl`) or a controllable building
+        // (`Call.buildingControlSelect`). Java does not return here, so the
+        // press still runs its normal select/place handling.
+        if self.key_down(bindings, ids::CONTROL) {
+            if let Some(id) = self.selected_unit_for_control() {
                 self.emit_action(RemoteAction::UnitControl { unit: Some(id) });
+                self.shooting = false;
+            } else if let Some((bx, by)) = self.selected_control_build() {
+                self.emit_action(RemoteAction::BuildingControlSelect {
+                    x: bx as i16,
+                    y: by as i16,
+                });
             }
+        }
+        if self.controller.state.command_mode {
             self.drag = Some(Drag {
                 kind: DragKind::SelectRect,
                 start: (x, y),
@@ -2361,16 +2464,6 @@ impl DesktopBridge {
         for command in commands {
             guard.enqueue_sim_command(command.clone());
         }
-    }
-
-    /// Camera recenter on the player core (`Binding.respawn`); also clears any
-    /// possessed unit (`Call.unitClear`).
-    pub fn recenter_camera(&mut self) {
-        self.emit_action(RemoteAction::UnitClear);
-        if let Some(mut camera) = self.camera.clone() {
-            camera.bind_mut().recenter_player();
-        }
-        self.fire_hotkey("respawn");
     }
 }
 

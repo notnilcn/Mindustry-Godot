@@ -1341,6 +1341,7 @@ mod tests {
                 y: 30.0,
                 team: 1,
                 commandable: true,
+                hit_size: 8.0,
             },
             SelectableUnit {
                 id: 6,
@@ -1349,6 +1350,7 @@ mod tests {
                 y: 30.0,
                 team: 0,
                 commandable: true,
+                hit_size: 8.0,
             },
         ];
         // Closest enemy within 20 px is targeted; own units are ignored.

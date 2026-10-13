@@ -216,6 +216,8 @@ impl INode for MindInput {
         // state changes that arrive without a key edge (block selection from a
         // fragment, focus changes) still close the gate.
         self.bridge.update_command_mode(&self.bindings, None);
+        // Cargo keys repeat while held (`DesktopInput.updateMovement`).
+        self.bridge.update_payload_hold(&self.bindings);
         self.drain_effects();
         // M3: drive the mobile gesture detector's long-press timer. The touch
         // stream itself is folded in by the `mobile_*` callbacks (plan 14).

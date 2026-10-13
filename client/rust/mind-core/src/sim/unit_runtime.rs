@@ -2430,6 +2430,10 @@ impl Sim {
                 && entity_ref
                     .get::<ControllerSlot>()
                     .is_some_and(|slot| slot.kind == AiKind::Command);
+            let hit_size = runtime
+                .content
+                .unit(type_comp.type_id)
+                .map_or(0.0, |def| def.hit_size);
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_comp.type_id.get() as i32,
@@ -2437,6 +2441,7 @@ impl Sim {
                 "y": pos.y,
                 "team": team.team,
                 "commandable": commandable,
+                "hit_size": hit_size,
             }));
         }
         serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
