@@ -160,6 +160,10 @@ pub struct DrillState {
     pub facing_item: Option<ItemId>,
     /// Per-edge facing drops (`BeamDrill.facing`; `u16::MAX` = no wall).
     pub facing_drops: smallvec::SmallVec<[u16; 9]>,
+    /// `BurstDrillBuild.smoothProgress` (lights ramp; not serialized).
+    pub smooth_progress: f32,
+    /// `BurstDrillBuild.invertTime` (`1` after a burst, decayed by the loop).
+    pub invert_time: f32,
 }
 
 /// `BeamDrill` build state.

@@ -85,6 +85,8 @@ pub struct DrillDef {
     pub tier: i32,
     /// `hardnessDrillMultiplier`.
     pub hardness_drill_multiplier: f32,
+    /// `drillMultipliers` per item id (`(item, multiplier)`).
+    pub drill_multipliers: Vec<(u16, f32)>,
     /// Blocked items (`blockedItems`).
     pub blocked_items: Vec<u16>,
     /// Whether this is a wall drill (`Drill.wallDrill`).
@@ -840,8 +842,12 @@ impl BlockKindData {
                     def.drill.drill_time = 720.0;
                     def.drill.tier = 6;
                     def.drill.blocked_items = vec![item("thorium")];
+                    // `drillMultipliers.put(Items.beryllium, 2f)` (Blocks.java:3102).
+                    def.drill.drill_multipliers = vec![(item("beryllium"), 2.0)];
                     def.drill_multiplier = 1.0;
                     def.burst_time = 60.0 * 5.0;
+                    // `BurstDrill.invertedTime` default 200 (BurstDrill.java:27).
+                    def.inverted_time = 200.0;
                 }
             }
             // `Blocks.java:3112 eruption-drill` — `drillTime = 281.25`, tier 7,
@@ -850,6 +856,8 @@ impl BlockKindData {
                 if let BlockKindData::BurstDrill(def) = self {
                     def.drill.drill_time = 281.25;
                     def.drill.tier = 7;
+                    // `drillMultipliers.put(Items.beryllium, 2f)` (Blocks.java:3133).
+                    def.drill.drill_multipliers = vec![(item("beryllium"), 2.0)];
                     def.drill_multiplier = 1.0;
                     def.inverted_time = 200.0;
                 }
@@ -970,8 +978,16 @@ impl BlockKindData {
             }
         };
         match self {
-            BlockKindData::Drill(def) => apply(def),
-            BlockKindData::BurstDrill(def) => apply(&mut def.drill),
+            BlockKindData::Drill(def) => {
+                // `Drill.hardnessDrillMultiplier = 50f` (`Drill.java:28`).
+                def.hardness_drill_multiplier = 50.0;
+                apply(def);
+            }
+            BlockKindData::BurstDrill(def) => {
+                // `hardnessDrillMultiplier = 0f` (`BurstDrill.java:35-44`).
+                def.drill.hardness_drill_multiplier = 0.0;
+                apply(&mut def.drill);
+            }
             _ => {}
         }
     }

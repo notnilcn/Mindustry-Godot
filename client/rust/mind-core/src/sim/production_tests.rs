@@ -1424,3 +1424,84 @@ fn item_incinerator_needs_power() {
     }
     assert_eq!(stored_item(&sim, slag, copper), 0, "destroyed on intake");
 }
+
+/// T6: the drill period includes the item-hardness term
+/// (`Drill.getDrillTime`, `Drill.java:170-172`): mechanical drill (drillTime
+/// 600, hardnessDrillMultiplier 50, `Blocks.java:2884-2888`) on 4 copper
+/// (hardness 1) tiles -> `(600 + 50*1)/4 = 162.5` ticks per item; the old
+/// code used `delay = drill_time` -> 150 ticks per item.
+#[test]
+fn mechanical_drill_period_includes_hardness() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let _drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    let container = place(&mut sim, "container", 7, 5);
+    for _ in 0..3000 {
+        sim.tick().expect("tick");
+    }
+    let offloaded = stored_item(&sim, container, copper);
+    assert!(
+        (17..=19).contains(&offloaded),
+        "expected ~18 items at 162.5 ticks/item over 3000 ticks, got {offloaded}"
+    );
+}
+
+/// T6: burst drills emit one burst of `dominantItems` per `drillTime`
+/// (`BurstDrillBuild.updateTile`, `BurstDrill.java:76-120`) instead of a
+/// continuous trickle; impact-drill drillTime 720, 16 ore tiles -> 16 items at
+/// once (`Blocks.java:3089-3110`).
+#[test]
+fn impact_drill_bursts() {
+    let mut sim = runtime_sim();
+    // Impact-drill is 4x4 at (5,5): footprint (4..7, 4..7) = 16 ore tiles
+    // (`(-(size-1)/2) = -1` offset, the `valid_place_at` footprint rule).
+    for y in 4..=7 {
+        for x in 4..=7 {
+            set_floor(&mut sim, x, y, "ore-copper");
+        }
+    }
+    let drill = place(&mut sim, "impact-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    let _power = place(&mut sim, "power-source", 8, 5);
+    let _water = place(&mut sim, "liquid-source", 5, 8);
+    configure(
+        &mut sim,
+        5,
+        8,
+        crate::determinism::ConfigValue::Content("water".to_owned()),
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::DrillState>(drill)
+            .map(|state| state.dominant_items),
+        Some(16),
+        "all 16 footprint tiles are ore"
+    );
+    for _ in 0..710 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, drill, copper),
+        0,
+        "no trickle before the first burst"
+    );
+    for _ in 0..15 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, drill, copper),
+        16,
+        "one burst of dominantItems items at drillTime"
+    );
+    let invert = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(drill)
+        .map(|state| state.invert_time)
+        .unwrap_or(0.0);
+    assert!(invert > 0.0, "the burst latched invertTime: {invert}");
+}
