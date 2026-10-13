@@ -129,9 +129,16 @@ impl WorldHooks for SimHooks {
             team: TeamId(request.team),
             rot: request.rot,
         });
-        // K-3: `PowerNodeConfig` is never inserted by the block behaviors; the
-        // live placement path is the natural insertion point (`PowerNode`).
-        if matches!(inst.def.kind, BlockKind::PowerNode) {
+        // K-3/T2: `PowerNodeBehavior::create_state` already inserts the
+        // behavior's real `PowerNodeConfig`; only fall back to the default when
+        // the kind has no registered behavior (mod nodes). The old
+        // unconditional insert overwrote the knobs after `spawn` (PAR: node
+        // large/surge tower dropped to 3 links / range 6).
+        if matches!(
+            inst.def.kind,
+            BlockKind::PowerNode | BlockKind::LongPowerNode
+        ) && world.get::<PowerNodeConfig>(entity).is_none()
+        {
             world.entity_mut(entity).insert(PowerNodeConfig::default());
         }
         Some(entity)
