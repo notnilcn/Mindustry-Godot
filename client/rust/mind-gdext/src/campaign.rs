@@ -990,7 +990,10 @@ impl MindCampaign {
                     // the captured sector's wave team turns derelict on the next
                     // tick (`Sim::apply_campaign_world_requests`). The debug
                     // capture path must queue it like the game-state path.
-                    if matches!(event, mind_core::game::play::PlayEvent::SectorCapture { .. }) {
+                    if matches!(
+                        event,
+                        mind_core::game::play::PlayEvent::SectorCapture { .. }
+                    ) {
                         runtime.pending_derelict_team = Some(runtime.session.rules.wave_team);
                     }
                     runtime.events.push(event);

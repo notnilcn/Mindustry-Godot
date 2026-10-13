@@ -2234,7 +2234,7 @@ fn boss_list_tracks_wave_boss() {
     let json: serde_json::Value = serde_json::from_str(&sim.boss_json()).expect("boss json parses");
     assert_eq!(json["count"], 0);
     assert!(json["first"].is_null());
-    }
+}
 
 /// T12: a powered repair point heals a damaged friendly unit once its aim is
 /// within 30 degrees (`RepairTurret.java:186-223`); the plan's expected
