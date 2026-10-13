@@ -23,3 +23,4 @@ pub mod prompts;
 pub mod settings;
 pub mod stat_display;
 pub mod text;
+pub mod tree_layout;

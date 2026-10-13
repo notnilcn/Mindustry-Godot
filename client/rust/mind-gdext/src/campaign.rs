@@ -20,6 +20,7 @@ use godot::prelude::*;
 
 use mind_core::assets::bundle::Bundle;
 use mind_core::content::registries::planets::GeneratorKind;
+use mind_core::content::tech::{ObjectiveSpec, TechNodeRef};
 use mind_core::content::{
     ContentRef, ContentRegistry, ContentType, ItemId, MemoryBundle, PlanetId, SectorId,
     create_base_content,
@@ -27,7 +28,7 @@ use mind_core::content::{
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
 use mind_core::game::map_objectives::MapObjectivesRuntime;
-use mind_core::game::objectives::CampaignObjectiveContext;
+use mind_core::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
 use mind_core::game::planet::EmptyNeighborhood;
 use mind_core::game::play::{
     PlaySession, SectorRef, apply_save_load_campaign_rules, apply_world_load_campaign_rules,
@@ -59,6 +60,10 @@ use crate::sim_host::MindSimHost;
 
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.
 const OUTLINE_RAD: f32 = 1.17;
+
+/// Off-play-sector inventory rows of `ResearchDialog.rebuildItems`
+/// (`Vec<(sector, rows)>`).
+type SectorInventory = Vec<(SectorRef, Vec<(String, i32)>)>;
 
 /// `MindCampaign` — campaign/sector/rules/tech/schematic facade for MCP + UI.
 #[derive(GodotClass)]
@@ -1149,25 +1154,152 @@ impl MindCampaign {
             return false;
         };
 
-        // Real inventory: the stored items of every owned, non-frozen sector
-        // (`ResearchDialog.rebuildItems` aggregates `sector.items()`). The
-        // sector being played reads its live core module instead (`Sector.items`
-        // -> `state.rules.defaultTeam.items()`), so it is not double-counted.
+        // Real inventory: `ResearchDialog.rebuildItems` aggregates the stored
+        // items of the tree root's planets; the sector being played reads its
+        // live core module instead (`Sector.items` -> default-team items), so
+        // it is not double-counted.
         let default_team = self.session.default_team();
-        let mut items = ItemModule::with_items(registry.items().len());
-        if self.session.is_campaign()
-            && let Some(host) = self.host()
-        {
-            for (name, amount) in host.bind().player_core_items(default_team) {
-                if let Some(id) = registry.item_id(&name) {
-                    items.add(id, amount.max(0), i32::MAX);
+        let root_ref = registry
+            .tech()
+            .node(node_ref)
+            .and_then(|node| node.root_node)
+            .unwrap_or(node_ref);
+        let planets = root_planets(&registry, root_ref);
+        let (mut items, mut sector_entries, mut played_items) =
+            self.research_inventory(&registry, &planets);
+
+        let campaign_snapshot = self.campaign.clone();
+        let Some(campaign_ref) = campaign_snapshot.as_ref() else {
+            self.registry = Some(registry);
+            return false;
+        };
+        let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
+        if !tech_tree::can_spend(&registry, node_ref, &items, &ctx) {
+            self.registry = Some(registry);
+            return false;
+        }
+        let mut store = SettingsUnlockStore::new(&mut self.settings);
+        let outcome =
+            tech_tree::spend(&mut registry, node_ref, &mut items, &mut store, &ctx, false);
+        let Ok(result) = outcome else {
+            self.registry = Some(registry);
+            return false;
+        };
+        let changed = result.complete || !result.spent.is_empty();
+
+        // Deduct the spent stacks exactly like `ResearchDialog.rebuildItems`'s
+        // `ItemSeq.add(item, -amount)`: percentage removal from the other
+        // sectors in order, then the remainder from the active sector last
+        // (its live core module while playing; `Sector.removeItem`).
+        let campaign_sector_active = self.session.is_campaign() && self.session.sector.is_some();
+        for spent in &result.spent {
+            let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
+                continue;
+            };
+            let others: Vec<i32> = sector_entries
+                .iter()
+                .map(|(_, entry)| {
+                    entry
+                        .iter()
+                        .find(|(entry_name, _)| entry_name == &name)
+                        .map(|(_, amount)| *amount)
+                        .unwrap_or(0)
+                })
+                .collect();
+            let current = campaign_sector_active.then(|| {
+                played_items
+                    .iter()
+                    .find(|(entry_name, _)| entry_name == &name)
+                    .map(|(_, amount)| *amount)
+                    .unwrap_or(0)
+            });
+            let (removals, current_removal) =
+                tech_tree::distribute_removal(spent.amount, current, &others);
+            for (index, to_remove) in removals.iter().enumerate() {
+                if *to_remove <= 0 {
+                    continue;
+                }
+                let ((planet, sector), entry) = &mut sector_entries[index];
+                let (planet, sector) = (*planet, *sector);
+                if let Some((_, amount)) =
+                    entry.iter_mut().find(|(entry_name, _)| entry_name == &name)
+                {
+                    *amount -= *to_remove;
+                }
+                let updated = entry
+                    .iter()
+                    .find(|(entry_name, _)| entry_name == &name)
+                    .map(|(_, amount)| *amount)
+                    .unwrap_or(0);
+                if let Some(record) = self
+                    .campaign
+                    .as_mut()
+                    .and_then(|campaign| campaign.sector_mut(planet, sector))
+                {
+                    record.info.info.items.insert(name.clone(), updated);
+                }
+            }
+            if current_removal > 0
+                && let Some(mut host) = self.host()
+            {
+                host.bind_mut()
+                    .remove_player_core_items(default_team, &name, current_removal);
+                if let Some((_, amount)) = played_items
+                    .iter_mut()
+                    .find(|(entry_name, _)| entry_name == &name)
+                {
+                    *amount -= current_removal;
                 }
             }
         }
+        // Newly unlocked content may auto-unlock dependent zero-cost nodes.
+        if !result.unlocked.is_empty()
+            && let Some(campaign_ref) = self.campaign.as_ref()
+        {
+            let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
+            let mut store = SettingsUnlockStore::new(&mut self.settings);
+            let unlocked = tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx);
+            log::info!("research auto-unlocked {} content", unlocked.len());
+        }
+        self.registry = Some(registry);
+        // Keep the runtime copy's campaign in sync with the spent inventory.
+        self.push_campaign_to_runtime();
+        if changed {
+            self.persist();
+            self.invalidate_ui_block_catalog();
+        }
+        changed
+    }
+
+    /// `ResearchDialog.rebuildItems` inventory for `planets` (Java
+    /// `rootPlanets`): the stored items of every based, non-frozen sector plus
+    /// the active sector's live core module. Returns the pool, the per-other-
+    /// sector rows (planet order, then sector id) and the active sector's core
+    /// rows.
+    fn research_inventory(
+        &self,
+        registry: &ContentRegistry,
+        planets: &[PlanetId],
+    ) -> (ItemModule, SectorInventory, Vec<(String, i32)>) {
+        let mut items = ItemModule::with_items(registry.items().len());
+        let mut played_items: Vec<(String, i32)> = Vec::new();
+        if self.session.is_campaign()
+            && let Some(host) = self.host()
+        {
+            for (name, amount) in host.bind().player_core_items(self.session.default_team()) {
+                if let Some(id) = registry.item_id(&name) {
+                    items.add(id, amount.max(0), i32::MAX);
+                }
+                played_items.push((name, amount.max(0)));
+            }
+        }
         let played_sector = self.session.sector;
-        let mut sector_entries: Vec<(SectorRef, Vec<(String, i32)>)> = Vec::new();
+        let mut sector_entries: SectorInventory = Vec::new();
         if let Some(campaign) = self.campaign.as_ref() {
             for planet in campaign.planets.values() {
+                if !planets.contains(&planet.id) {
+                    continue;
+                }
                 for sector in &planet.sectors {
                     if !sector.has_base() || sector.is_frozen(None) {
                         continue;
@@ -1191,81 +1323,441 @@ impl MindCampaign {
                 }
             }
         }
+        (items, sector_entries, played_items)
+    }
 
-        let campaign_snapshot = self.campaign.clone();
-        let Some(campaign_ref) = campaign_snapshot.as_ref() else {
-            self.registry = Some(registry);
-            return false;
+    /// `ResearchDialog` tree data (`treeLayout` positions + `checkNodes` state
+    /// + the hover popup rows): the selected tree's nodes in depth-first order
+    /// with Java y-up positions, lock/selectable state, requirement rows, the
+    /// incomplete objectives and the global item pool.
+    ///
+    /// `root` selects the tree by name; empty picks the played sector's tree,
+    /// else serpulo. Cheap: no world access (`campaign_views_json` is the
+    /// heavy one).
+    #[func]
+    pub fn research_tree_json(&self, root: GString) -> GString {
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
         };
-        let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
-        if !tech_tree::can_spend(&registry, node_ref, &items, &ctx) {
-            self.registry = Some(registry);
-            return false;
+        let Some(campaign) = self.campaign.as_ref() else {
+            return GString::from("{}");
+        };
+        let tech = registry.tech();
+        let requested = root.to_string();
+        let tree = if requested.is_empty() {
+            self.session
+                .sector
+                .map(|(planet, _)| planet)
+                .or_else(|| registry.planet_id("serpulo"))
+                .and_then(|id| registry.planet(id))
+                .and_then(|def| def.tech_tree)
+                .and_then(|tree_id| tech.tree(tree_id))
+        } else {
+            tech.trees.iter().find(|tree| tree.name == requested)
+        };
+        let Some(tree) = tree else {
+            return GString::from("{}");
+        };
+
+        let ctx = CampaignObjectiveContext::new(registry, campaign);
+        let unlocked_with_rules = |content: ContentRef| {
+            tech_tree::content_unlocked_with_rules(registry, content, &self.session.rules)
+        };
+
+        // Depth-first pre-order from the tree root (`TechNode.each`); indices
+        // in this array are the JSON `index`/`parent`/`children` values.
+        let mut order: Vec<TechNodeRef> = Vec::new();
+        tech.each(tree.root, &mut |node_ref| order.push(node_ref));
+        if order.is_empty() {
+            return GString::from("{}");
         }
-        let mut store = SettingsUnlockStore::new(&mut self.settings);
-        let outcome =
-            tech_tree::spend(&mut registry, node_ref, &mut items, &mut store, &ctx, false);
-        let Ok(result) = outcome else {
-            self.registry = Some(registry);
-            return false;
-        };
-        let changed = result.complete || !result.spent.is_empty();
+        let mut indices: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+        for (index, node_ref) in order.iter().enumerate() {
+            indices.insert(node_ref.0, index);
+        }
 
-        // Deduct the spent stacks: other sectors in order, then the active
-        // sector last from its live core module (`ResearchDialog` removal
-        // order; `Sector.removeItem` writes the core while playing).
-        for spent in &result.spent {
-            let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
+        // `checkNodes` (ResearchDialog.java:391-401): `visible` starts true for
+        // every node; a locked parent hides its subtree, an unlocked parent
+        // shows its direct children even when they are locked.
+        let mut visible = vec![true; order.len()];
+        let mut selectable = vec![false; order.len()];
+        for (index, node_ref) in order.iter().enumerate() {
+            let Some(node) = tech.node(*node_ref) else {
                 continue;
             };
-            let mut remaining = spent.amount;
-            for ((planet, sector), entry) in &mut sector_entries {
-                if remaining <= 0 {
-                    break;
+            let node_locked = node
+                .content
+                .is_none_or(|content| !unlocked_with_rules(content));
+            let parent_visible = node
+                .parent
+                .and_then(|parent| indices.get(&parent.0).copied())
+                .map(|parent_index| visible[parent_index])
+                .unwrap_or(true);
+            if !node_locked && (node.parent.is_none() || parent_visible) {
+                visible[index] = true;
+            }
+            selectable[index] = node
+                .content
+                .is_some_and(|content| tech_tree::content_unlocked(registry, content))
+                || tech_tree::objectives_complete(registry, &node.objectives, &ctx);
+            for child in &node.children {
+                if let Some(child_index) = indices.get(&child.0).copied() {
+                    visible[child_index] = !node_locked && visible[index];
                 }
-                let Some((_, amount)) =
-                    entry.iter_mut().find(|(entry_name, _)| entry_name == &name)
-                else {
+            }
+        }
+
+        // `treeLayout`: positions come from the Java BranchTreeLayout walk.
+        let children_lists: Vec<Vec<usize>> = order
+            .iter()
+            .map(|node_ref| {
+                tech.node(*node_ref)
+                    .map(|node| {
+                        node.children
+                            .iter()
+                            .filter_map(|child| indices.get(&child.0).copied())
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .collect();
+        let positions = mind_core::ui::tree_layout::research_tree_layout(&children_lists, 0, 60.0);
+
+        // Bounds over visible nodes (ResearchDialog.java:360-371): node width
+        // goes into x, +`nodeSize * 1.5` into y.
+        const NODE_SIZE: f32 = 60.0;
+        let (mut minx, mut miny, mut maxx, mut maxy) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+        for (index, &(x, y)) in positions.iter().enumerate() {
+            if !visible.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            minx = minx.min(x - NODE_SIZE / 2.0);
+            maxx = maxx.max(x + NODE_SIZE / 2.0);
+            miny = miny.min(y - NODE_SIZE / 2.0);
+            maxy = maxy.max(y + NODE_SIZE / 2.0);
+        }
+        let bounds = [minx, miny + NODE_SIZE * 1.5, maxx - minx, maxy - miny];
+
+        // The global item pool (`rebuildItems` + `ItemsDisplay`).
+        let planets = root_planets(registry, tree.root);
+        let (items, _, _) = self.research_inventory(registry, &planets);
+        let mut items_json: Vec<serde_json::Value> = Vec::new();
+        for index in 0..registry.items().len() {
+            let id = ItemId::new(index as u16);
+            let amount = items.get(id);
+            if amount <= 0 {
+                continue;
+            }
+            let item_name = registry
+                .item(id)
+                .map(|item| item.name.clone())
+                .unwrap_or_default();
+            items_json.push(serde_json::json!({
+                "item": item_name,
+                "amount": amount,
+                "text": mind_core::ui::text::format_amount_default(amount as i64),
+                "name": self.localized_content_name("item", &item_name),
+            }));
+        }
+
+        // Root selector rows (`TechTree.roots` minus locked non-preferred ones).
+        let mut roots_json: Vec<serde_json::Value> = Vec::new();
+        for root_ref in &tech.roots {
+            let Some(node) = tech.node(*root_ref) else {
+                continue;
+            };
+            let selected = *root_ref == tree.root;
+            let unlocked = node
+                .content
+                .is_some_and(|content| tech_tree::content_unlocked(registry, content));
+            if node.requires_unlock && !unlocked && !selected {
+                continue;
+            }
+            let name = node.name.clone().unwrap_or_default();
+            roots_json.push(serde_json::json!({
+                "name": name,
+                "title": self.tree_title(&name),
+                "icon": node
+                    .content
+                    .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
+                    .unwrap_or_default(),
+                "selected": selected,
+            }));
+        }
+        let root_node = tech.node(tree.root);
+        let root_name = root_node
+            .and_then(|node| node.name.clone())
+            .unwrap_or_else(|| tree.name.clone());
+        let root_icon = root_node
+            .map(|node| {
+                node.content
+                    .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+
+        // Node rows (`View.rebuildAll` buttons + the hover popup table).
+        let mut nodes_json: Vec<serde_json::Value> = Vec::with_capacity(order.len());
+        for (index, node_ref) in order.iter().enumerate() {
+            let Some(node) = tech.node(*node_ref) else {
+                continue;
+            };
+            let content = node.content;
+            let type_name = content.map(|content| content.type_.name()).unwrap_or("");
+            let icon = content
+                .map(|_| format!("{type_name}-{}-ui", node.content_name))
+                .unwrap_or_default();
+            let name = content
+                .map(|_| self.localized_content_name(type_name, &node.content_name))
+                .unwrap_or_default();
+            let description = content
+                .map(|_| self.localized_content_description(type_name, &node.content_name))
+                .unwrap_or_default();
+            let inline_description = content
+                .and_then(|content| tech_tree::unlock_fields(registry, content))
+                .is_some_and(|fields| fields.inline_description);
+
+            // Progress line (`ResearchDialog.java:685-705`).
+            let requirements = tech_tree::effective_requirements(registry, *node_ref);
+            let (mut sum, mut used) = (0.0f32, 0.0f32);
+            let mut has_progress = false;
+            for (requirement_index, requirement) in requirements.iter().enumerate() {
+                let finished = node
+                    .finished_requirements
+                    .get(requirement_index)
+                    .map(|stack| stack.amount)
+                    .unwrap_or(0);
+                if finished > 0 {
+                    has_progress = true;
+                }
+                let cost = registry
+                    .item(requirement.item)
+                    .map(|item| item.cost)
+                    .unwrap_or(0.0);
+                sum += cost * requirement.amount as f32;
+                used += cost * finished as f32;
+            }
+            let progress = if has_progress {
+                ((used / sum * 100.0) as i32).min(99)
+            } else {
+                -1
+            };
+
+            // Unfinished requirement rows (`ResearchDialog.java:707-736`).
+            let mut reqs_json: Vec<serde_json::Value> = Vec::new();
+            for (requirement_index, requirement) in requirements.iter().enumerate() {
+                let finished = node
+                    .finished_requirements
+                    .get(requirement_index)
+                    .map(|stack| stack.amount)
+                    .unwrap_or(0);
+                if requirement.amount <= finished {
                     continue;
-                };
-                let used = remaining.min((*amount).max(0));
-                *amount -= used;
-                remaining -= used;
-                if let Some(record) = self
-                    .campaign
-                    .as_mut()
-                    .and_then(|campaign| campaign.sector_mut(*planet, *sector))
-                {
-                    record.info.info.items.insert(name.clone(), *amount);
+                }
+                let remaining = requirement.amount - finished;
+                let pool = items.get(requirement.item);
+                let item_name = registry
+                    .item(requirement.item)
+                    .map(|item| item.name.clone())
+                    .unwrap_or_default();
+                reqs_json.push(serde_json::json!({
+                    "item": item_name,
+                    "name": self.localized_content_name("item", &item_name),
+                    "have": mind_core::ui::text::format_amount_default(pool.min(remaining) as i64),
+                    "need": mind_core::ui::text::format_amount_default(remaining as i64),
+                    "has": pool > 0,
+                }));
+            }
+
+            // Incomplete objectives (`ResearchDialog.java:737-749`).
+            let mut objectives_json: Vec<String> = Vec::new();
+            for spec in &node.objectives {
+                let (complete, text) = self.objective_display(registry, &ctx, *spec);
+                if !complete {
+                    objectives_json.push(text);
                 }
             }
-            if remaining > 0
-                && self.session.is_campaign()
-                && let Some(mut host) = self.host()
-            {
-                remaining -=
-                    host.bind_mut()
-                        .remove_player_core_items(default_team, &name, remaining);
+
+            nodes_json.push(serde_json::json!({
+                "index": index,
+                "parent": node
+                    .parent
+                    .and_then(|parent| indices.get(&parent.0).copied())
+                    .map(|parent_index| parent_index as i64)
+                    .unwrap_or(-1),
+                "children": node
+                    .children
+                    .iter()
+                    .filter_map(|child| indices.get(&child.0).copied())
+                    .collect::<Vec<usize>>(),
+                "content": node.content_name,
+                "type": type_name,
+                "icon": icon,
+                "name": name,
+                "x": positions[index].0,
+                "y": positions[index].1,
+                "visible": visible[index],
+                "locked": content.is_none_or(|content| !unlocked_with_rules(content)),
+                "selectable": selectable[index],
+                "can_spend": tech_tree::can_spend(registry, *node_ref, &items, &ctx),
+                "description": description,
+                "inline_description": inline_description,
+                "progress": progress,
+                "reqs": reqs_json,
+                "objectives": objectives_json,
+            }));
+        }
+
+        let view = serde_json::json!({
+            "root": tree.name,
+            "root_title": self.tree_title(&root_name),
+            "root_icon": root_icon,
+            "roots": roots_json,
+            "items": items_json,
+            "bounds": bounds,
+            "nodes": nodes_json,
+        });
+        GString::from(view.to_string().as_str())
+    }
+
+    /// `bundle("techtree." + name, name)` for a tree/root name.
+    fn tree_title(&self, name: &str) -> String {
+        let key = format!("techtree.{name}");
+        let value = self.bundle.get(&key);
+        if value == key {
+            name.to_owned()
+        } else {
+            value.to_owned()
+        }
+    }
+
+    /// `<type>.<name>.name` through the live bundle, falling back to `name`.
+    fn localized_content_name(&self, type_name: &str, name: &str) -> String {
+        let key = format!("{type_name}.{name}.name");
+        let value = self.bundle.get(&key);
+        if value == key {
+            name.to_owned()
+        } else {
+            value.to_owned()
+        }
+    }
+
+    /// `<type>.<name>.description` (empty when the bundle has no entry).
+    fn localized_content_description(&self, type_name: &str, name: &str) -> String {
+        let key = format!("{type_name}.{name}.description");
+        let value = self.bundle.get(&key);
+        if value == key {
+            String::new()
+        } else {
+            value.to_owned()
+        }
+    }
+
+    /// `UnlockableContent.emoji()` through the `MindAssets` `Iconc` table
+    /// (`Fonts.getUnicodeStr`); empty when the content has no icon.
+    fn content_emoji(&self, name: &str) -> String {
+        let Some(mut assets) = self.base().get_node_or_null("/root/MindAssets") else {
+            return String::new();
+        };
+        assets
+            .call("unicode_str", &[GString::from(name).to_variant()])
+            .try_to::<GString>()
+            .map(|value| value.to_string())
+            .unwrap_or_default()
+    }
+
+    /// `Objectives.Research.display()` half: `content.techNode == null ||
+    /// parent == null || parent.content.unlockedHost()`.
+    fn research_parent_unlocked(&self, registry: &ContentRegistry, content: ContentRef) -> bool {
+        let Some(node) = registry
+            .tech()
+            .nodes
+            .iter()
+            .find(|node| node.content == Some(content))
+        else {
+            return true;
+        };
+        let Some(parent_ref) = node.parent else {
+            return true;
+        };
+        registry
+            .tech()
+            .node(parent_ref)
+            .and_then(|parent| parent.content)
+            .is_none_or(|parent_content| tech_tree::content_unlocked(registry, parent_content))
+    }
+
+    /// `Content.emoji() + " " + Content.localizedName` (no leading space when
+    /// the emoji is unknown).
+    fn emoji_content_name(&self, registry: &ContentRegistry, content: ContentRef) -> String {
+        let name = tech_tree::content_name(registry, content).unwrap_or_default();
+        let emoji = self.content_emoji(&name);
+        let localized = self.localized_content_name(content.type_.name(), &name);
+        if emoji.is_empty() {
+            localized
+        } else {
+            format!("{emoji} {localized}")
+        }
+    }
+
+    /// `SectorPreset.localizedName`.
+    fn sector_localized_name(&self, registry: &ContentRegistry, id: SectorId) -> String {
+        let name = registry
+            .sector(id)
+            .map(|record| record.name.clone())
+            .unwrap_or_default();
+        self.localized_content_name("sector", &name)
+    }
+
+    /// `Planet.localizedName`.
+    fn planet_localized_name(&self, registry: &ContentRegistry, id: PlanetId) -> String {
+        let name = registry
+            .planet(id)
+            .map(|record| record.name.clone())
+            .unwrap_or_default();
+        self.localized_content_name("planet", &name)
+    }
+
+    /// `Objective.display()` and `complete()` for the hover popup
+    /// (Objectives.java:26-131).
+    fn objective_display(
+        &self,
+        registry: &ContentRegistry,
+        ctx: &dyn ObjectiveContext,
+        spec: ObjectiveSpec,
+    ) -> (bool, String) {
+        let complete = Objective::from_spec(spec).complete(ctx);
+        let (key, argument) = match spec {
+            ObjectiveSpec::SectorComplete(sector) => (
+                "requirement.capture",
+                self.sector_localized_name(registry, sector),
+            ),
+            ObjectiveSpec::Research(content) => {
+                let value = if self.research_parent_unlocked(registry, content) {
+                    self.emoji_content_name(registry, content)
+                } else {
+                    String::from("???")
+                };
+                ("requirement.research", value)
             }
-            let _ = remaining;
-        }
-        // Newly unlocked content may auto-unlock dependent zero-cost nodes.
-        if !result.unlocked.is_empty()
-            && let Some(campaign_ref) = self.campaign.as_ref()
-        {
-            let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
-            let mut store = SettingsUnlockStore::new(&mut self.settings);
-            let unlocked = tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx);
-            log::info!("research auto-unlocked {} content", unlocked.len());
-        }
-        self.registry = Some(registry);
-        // Keep the runtime copy's campaign in sync with the spent inventory.
-        self.push_campaign_to_runtime();
-        if changed {
-            self.persist();
-            self.invalidate_ui_block_catalog();
-        }
-        changed
+            ObjectiveSpec::Produce(content) => {
+                let value = if tech_tree::content_unlocked(registry, content) {
+                    self.emoji_content_name(registry, content)
+                } else {
+                    String::from("???")
+                };
+                ("requirement.produce", value)
+            }
+            ObjectiveSpec::OnSector(sector) => (
+                "requirement.onsector",
+                self.sector_localized_name(registry, sector),
+            ),
+            ObjectiveSpec::OnPlanet(planet) => (
+                "requirement.onplanet",
+                self.planet_localized_name(registry, planet),
+            ),
+        };
+        (complete, self.bundle.format(key, &[argument.as_str()]))
     }
 
     /// Copies the facade campaign into the installed runtime (post-research /
@@ -3007,6 +3499,24 @@ fn collect_unlocked(registry: &ContentRegistry) -> Vec<String> {
         .filter(|content| tech_tree::content_unlocked(registry, *content))
         .filter_map(|content| tech_tree::content_name(registry, content))
         .collect()
+}
+
+/// Java `rootPlanets` for a tree root (`ResearchDialog.rebuildItems`): planets
+/// whose `techTree == lastNode` or `lastNode.planet == planet`; vanilla trees
+/// carry the planet on the root, fallback serpulo.
+fn root_planets(registry: &ContentRegistry, root_ref: TechNodeRef) -> Vec<PlanetId> {
+    let mut planets: Vec<PlanetId> = registry
+        .tech()
+        .node(root_ref)
+        .and_then(|node| node.planet)
+        .into_iter()
+        .collect();
+    if planets.is_empty()
+        && let Some(serpulo) = registry.planet_id("serpulo")
+    {
+        planets.push(serpulo);
+    }
+    planets
 }
 
 /// `SaveSlot.load` meta half (`Saves.java:314-328`): the saved rules/wave,
