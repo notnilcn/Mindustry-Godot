@@ -1170,3 +1170,51 @@ fn time_destroy_spares_buildings_near_another_core() {
         "core B survives"
     );
 }
+
+/// T5: a mid-match rules change (`CampaignRuntime.rules_world_dirty`, e.g. G06's
+/// `setrule mapArea`) re-derives `grid.limit_area` from the session rules on
+/// the next tick and clears the flag.
+#[test]
+fn rules_world_dirty_rederives_limit_area() {
+    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+        .expect("content");
+    let campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime installs");
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    {
+        let mut runtime = sim
+            .ecs
+            .0
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("runtime");
+        runtime.session.rules.limit_map_area = true;
+        runtime.session.rules.limit_x = 2;
+        runtime.session.rules.limit_y = 2;
+        runtime.session.rules.limit_width = 4;
+        runtime.session.rules.limit_height = 4;
+        runtime.rules_world_dirty = true;
+    }
+    sim.tick().expect("tick");
+    assert_eq!(sim.grid.limit_area, Some((2, 2, 4, 4)));
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<CampaignRuntime>()
+        .expect("runtime");
+    assert!(!runtime.rules_world_dirty, "flag cleared");
+}

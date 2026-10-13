@@ -1366,6 +1366,23 @@ impl Sim {
         self.rng_streams = rng;
     }
 
+    /// Drains `CampaignRuntime.rules_world_dirty` into
+    /// [`Self::apply_rules_to_world`] (T5: G06 `setrule`, relay `setRules`,
+    /// universe invasion of the played sector).
+    pub(crate) fn apply_dirty_rules_to_world(&mut self) {
+        let rules = {
+            let Some(mut runtime) = self.ecs.0.get_resource_mut::<CampaignRuntime>() else {
+                return;
+            };
+            if !runtime.rules_world_dirty {
+                return;
+            }
+            runtime.rules_world_dirty = false;
+            runtime.session.rules.clone()
+        };
+        self.apply_rules_to_world(&rules);
+    }
+
     /// Materializes the ECS buildings for a loaded grid (map/save reader's
     /// decoded payload queue). No-op without the live block runtime; returns the
     /// number of entities spawned.

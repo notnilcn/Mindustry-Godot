@@ -150,6 +150,9 @@ pub struct WorldGrid {
     pub generator_seed: u64,
     /// Optional map-area limit `(x, y, w, h)` (`Rules.limitMapArea`, plan 12).
     pub limit_area: Option<(i32, i32, i32, i32)>,
+    /// `Rules.borderDarkness`: whether the map-area border darkens and blocks
+    /// placement (`World.getDarkness` border term, `World.java:483-503`).
+    pub border_darkness: bool,
 }
 
 impl Default for WorldGrid {
@@ -169,6 +172,7 @@ impl WorldGrid {
             floor_changes: 1,
             generator_seed: 0,
             limit_area: None,
+            border_darkness: true,
         }
     }
 

@@ -105,6 +105,15 @@ pub struct Planet {
     pub start_sector: u16,
     /// Simulate sector invasions.
     pub allow_sector_invasion: bool,
+    /// `Planet.ruleSetter` kind (`Planet.applyRules`, `Planets.java:74-88`).
+    pub rule_setter: crate::content::registries::planets::RuleSetterKind,
+    /// `Planet.enemyInfiniteItems` (default true; drives the wave team's
+    /// `infiniteResources`/`fillItems` on the world-load event).
+    pub enemy_infinite_items: bool,
+    /// `Planet.enemyBuildSpeedMultiplier` (Erekir 0.4).
+    pub enemy_build_speed_multiplier: f32,
+    /// `Planet.enemyFactoryActivationDelay` (Serpulo 7200).
+    pub enemy_factory_activation_delay: f32,
     /// Environment bitmask (`Env`).
     pub default_env: i32,
     /// Default environment attributes.
@@ -219,6 +228,10 @@ impl Planet {
             allow_launch_schematics: def.allow_launch_schematics,
             start_sector: def.start_sector as u16,
             allow_sector_invasion: def.allow_sector_invasion,
+            rule_setter: def.rule_setter,
+            enemy_infinite_items: def.enemy_infinite_items,
+            enemy_build_speed_multiplier: def.enemy_build_speed_multiplier,
+            enemy_factory_activation_delay: def.enemy_factory_activation_delay,
             default_env: env_mask(&def.default_env),
             default_attributes: def.default_attributes.clone(),
             sectors,
@@ -368,10 +381,32 @@ impl Planet {
         custom_game: bool,
         is_game: bool,
     ) -> super::campaign_rules::CampaignApply {
-        // ruleSetter is a content callback (plan 02); vanilla rule setters set
-        // fog/hideSpawns/randomWaveAI through campaign defaults, so nothing is
-        // invoked here beyond the campaign fold below.
         let _ = registry;
+        // `Planet.applyRules` (`Planet.java:295-306`): the planet's
+        // `ruleSetter` runs first (`Planets.java:74-88`).
+        match self.rule_setter {
+            crate::content::registries::planets::RuleSetterKind::Serpulo => {
+                rules.wave_team = 2;
+                rules.place_range_check = false;
+                rules.hide_spawns = true;
+                rules.derelict_repair = true;
+                rules.core_destroy_clear = true;
+            }
+            crate::content::registries::planets::RuleSetterKind::Erekir => {
+                rules.wave_team = 3;
+                rules.place_range_check = false;
+                rules.hide_spawns = false;
+                rules.fog = true;
+                rules.static_fog = true;
+                rules.lighting = false;
+                rules.core_destroy_clear = true;
+                rules.only_deposit_core = true;
+            }
+            // Tantros is an empty lambda upstream; planets without a setter
+            // keep the map/save rules as-is.
+            crate::content::registries::planets::RuleSetterKind::None
+            | crate::content::registries::planets::RuleSetterKind::Tantros => {}
+        }
         rules.attributes.0.clear();
         for (attribute, value) in &self.default_attributes {
             rules.attributes.set(*attribute, *value);
@@ -545,5 +580,21 @@ mod tests {
         assert_eq!(rules.attributes.get(crate::content::Attribute::Heat), 0.8);
         // campaign defaults applied (erekir fog/rtsAi true).
         assert!(rules.fog);
+    }
+
+    /// T5: `Planet.applyRules` runs the planet's `ruleSetter`
+    /// (`Planets.java:82-88` for serpulo, `74-83` for erekir).
+    #[test]
+    fn serpulo_rule_setter_applies() {
+        let registry = registry();
+        let serpulo_def = registry.planet_by_name("serpulo").unwrap();
+        let serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
+        let mut rules = Rules::default();
+        serpulo.apply_rules(&registry, &mut rules, true, false);
+        assert_eq!(rules.wave_team, 2, "crux");
+        assert!(!rules.place_range_check);
+        assert!(rules.hide_spawns);
+        assert!(rules.derelict_repair);
+        assert!(rules.core_destroy_clear);
     }
 }

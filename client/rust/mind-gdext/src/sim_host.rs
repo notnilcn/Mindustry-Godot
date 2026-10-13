@@ -168,6 +168,9 @@ pub struct MindSimHost {
     /// `load_sector` when it resumed from a save; `MindCampaign.start_sector`
     /// takes it right after `play_sector` (T2).
     sector_resume: Option<mind_core::io::sim_io::SectorResumeMeta>,
+    /// Last `grid.limit_area` seen by the pump; a change (rules adoption,
+    /// G06 `setrule`) sets `world_dirty` so the renderer rebuilds (T5).
+    last_limit_area: Option<(i32, i32, i32, i32)>,
 }
 
 #[godot_api]
@@ -197,6 +200,7 @@ impl INode for MindSimHost {
             input: None,
             sector_spawns: 0,
             sector_resume: None,
+            last_limit_area: None,
         }
     }
 
@@ -1544,6 +1548,15 @@ impl MindSimHost {
         self.sector_resume.take()
     }
 
+    /// Re-derives the world-side state from `rules` (map-area limit rect +
+    /// border darkness, `World.isInMapArea`/`getDarkness`) and marks the world
+    /// dirty (T5; G06's `setrule` path goes through
+    /// `CampaignRuntime.rules_world_dirty` instead).
+    pub fn apply_world_rules(&mut self, rules: &Rules) {
+        self.sim.apply_rules_to_world(rules);
+        self.world_dirty = true;
+    }
+
     /// Default-team core count in the live world (the lost-sector probe; the
     /// session's `Teams.cores` is not installed on a fresh load).
     pub fn player_core_blocks(&self, team: u8) -> usize {
@@ -2641,6 +2654,12 @@ impl MindSimHost {
             self.tick_fx_view();
         }
         self.publish_selectable_units();
+        // A rules adoption or mid-match `setrule` changed the map-area rect
+        // (T5): mark the world dirty so the renderer rebuilds.
+        if self.sim.grid.limit_area != self.last_limit_area {
+            self.last_limit_area = self.sim.grid.limit_area;
+            self.world_dirty = true;
+        }
     }
 
     /// Advances the plan-17 `MindFx` view by one fixed tick (sim→view hook).

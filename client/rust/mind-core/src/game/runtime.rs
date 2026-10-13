@@ -206,6 +206,10 @@ pub struct CampaignRuntime {
     /// Logic.java:182-186): `(team, x, y, range)` drained by
     /// `Sim::apply_campaign_world_requests` into `TeamData.timeDestroy`.
     pub pending_time_destroy: Vec<(u8, f32, f32, f32)>,
+    /// A mid-match rules change must re-derive the world (limit area, build
+    /// rules): set by G06's `setrule`, the `Call.setRules` relay and the
+    /// universe invasion; `Sim::tick` drains it (T5).
+    pub rules_world_dirty: bool,
 }
 
 impl CampaignRuntime {
@@ -222,6 +226,7 @@ impl CampaignRuntime {
             ai_rng: ArcRand::new(0x5EED_0139),
             pending_derelict_team: None,
             pending_time_destroy: Vec::new(),
+            rules_world_dirty: false,
         }
     }
 
