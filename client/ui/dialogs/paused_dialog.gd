@@ -29,12 +29,9 @@ func _ready() -> void:
 	should_pause = true
 	full_dialog = true
 	super._ready()
-	# `Styles.defaultDialog` background (`Tex.windowEmpty`): the pause dims the
-	# world to ~10% (measured r01-00: an undimmed 255-lum ore reads 26), far
-	# darker than the shared `MindDialog` 0.55 dim.
-	var dim := get_node_or_null("Dim") as ColorRect
-	if dim != null:
-		dim.color = Color(0.0, 0.0, 0.0, 0.9)
+	# `Styles.defaultDialog` background (`Tex.windowEmpty`): the shared
+	# `MindDialog` dim is already black 0.9 (`Styles.java:458-469`,
+	# `defaultDialog.stageBackground = black9`), so no local override.
 	_build()
 	_connect_confirm()
 

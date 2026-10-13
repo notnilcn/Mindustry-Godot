@@ -17,11 +17,8 @@ func _ready() -> void:
 	# style like the Java frame (r00-05).
 	full_dialog = true
 	super._ready()
-	# `Styles.defaultDialog` (windowEmpty) dims ~0.9; the shared MindDialog dim
-	# is 0.55 (same mapping as the pause dialog, PAR-0038/PAR-0148).
-	var dim := get_node_or_null("Dim") as ColorRect
-	if dim != null:
-		dim.color = Color(0.0, 0.0, 0.0, 0.9)
+	# `Styles.defaultDialog` (windowEmpty) dims ~0.9; the shared `MindDialog`
+	# dim already is black 0.9 (`Styles.java:458-469`), so no local override.
 	add_close_button()
 
 

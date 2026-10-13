@@ -116,6 +116,9 @@ func show_dialog() -> void:
 	visible = true
 	move_to_front()
 	shown()
+	# `UI.java:132-133`: showing fades in over 0.1 s (hide stays instant; the
+	# Java hide fade is deferred to a later pass).
+	MindWidgets.fade_in(self, 0.1)
 	# `MindTable` layout is manual: place now (min sizes) and again next frame
 	# once the containers have assigned their final size, so grow cells fill.
 	_resort_tables()
@@ -136,11 +139,26 @@ func hide_dialog() -> void:
 		return
 	visible = false
 	hidden()
+	# `BaseDialog.java:31`: hiding plays `Sounds.uiBack` (emit-only; G07 owns
+	# the playback wiring).
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("play_ui_sound"):
+		ui.call("play_ui_sound", "uiBack")
 
 
-## Whether the dialog is currently visible.
+## `is_shown` for `MindUi.reveal_top` / `is_dialog_shown`.
 func is_shown() -> bool:
 	return visible
+
+
+## True when this dialog is the top of the MindUi stack (Arc modal focus):
+## `_input`/`_unhandled_input` handlers of covered dialogs must ignore events.
+func is_top() -> bool:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return visible
+	var stack: PackedStringArray = ui.call("dialog_stack")
+	return not stack.is_empty() and stack[stack.size() - 1] == String(name)
 
 
 ## Adds an `@back` close button to the button row (`addCloseButton`).

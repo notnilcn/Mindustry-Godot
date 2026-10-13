@@ -1297,9 +1297,12 @@ func _select_view_tile(tile: int) -> void:
 
 
 ## Empty-screen left clicks pick the sector under the cursor while the globe is
-## up; UI regions (rail, bottom bar) are excluded.
+## up; UI regions (rail, bottom bar) are excluded. Covered by another dialog
+## (not the stack top), events are ignored like an Arc modal (`Dialog.hit`).
 func _input(event: InputEvent) -> void:
 	if not visible:
+		return
+	if not is_top():
 		return
 	if event is InputEventMouseMotion:
 		var view := _planet_view()
