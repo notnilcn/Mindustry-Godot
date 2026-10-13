@@ -164,6 +164,10 @@ func _on_research_requested(content: String) -> void:
 		return
 	if not bool(campaign.call("research", content)):
 		return
+	# `ResearchDialog.java:618-624`: after a successful unlock.
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("play_ui_sound", "uiUnlock")
 	refresh_campaign_views(str(_context.get("planet", "")))
 	_rebuild_nodes()
 	show_toast(_t("@unlocked"))

@@ -136,6 +136,10 @@ func hide_dialog() -> void:
 		return
 	visible = false
 	hidden()
+	# `BaseDialog.java:27-32`: every dialog hide plays uiBack.
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("play_ui_sound", "uiBack")
 
 
 ## Whether the dialog is currently visible.

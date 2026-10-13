@@ -207,6 +207,12 @@ impl INode for MindAudio {
             self.streams.sound_count(),
             assets_dir
         );
+        // G07 T13: `UI.java:146`/`BaseDialog`/`HudFragment` UI sounds — the
+        // `MindUi.play_ui_sound` signal had no listener.
+        if let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") {
+            let callable = self.base().callable("on_ui_sound");
+            let _ = ui.connect("play_ui_sound", &callable);
+        }
         // `Core.settings` is one global store; pull the sound keys once so the
         // sliders are live before the first frame (PAR-0074).
         self.refresh_settings();
@@ -1091,6 +1097,22 @@ impl MindAudio {
                 1.0,
             )
         }
+    }
+
+    /// T13: `MindUi.play_ui_sound` listener (`UI.java:146` — every button
+    /// click; dialog back/notify/unlock call sites route through it).
+    #[func]
+    pub fn on_ui_sound(&mut self, name: GString) {
+        let volume = self.sfx_scale() as f64;
+        let _ = self.play_oneshot(name, volume, 1.0, 0.0);
+    }
+
+    /// T13: UI sound with an explicit volume/pitch (`HudFragment` favourite:
+    /// `uiFavorite.play(0.35, 0.67, 0)` / `play(0.6, 2.0, 0)`).
+    #[func]
+    pub fn on_ui_sound_ex(&mut self, name: GString, volume: f64, pitch: f64) {
+        let scaled = volume * self.sfx_scale() as f64;
+        let _ = self.play_oneshot(name, scaled, pitch, 0.0);
     }
 
     /// Debug loop injection (plan 18 §7c step 7).
