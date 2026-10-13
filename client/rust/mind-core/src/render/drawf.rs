@@ -288,8 +288,7 @@ pub fn selected_corners(x: i32, y: i32, size: i32, offset: f32) -> [(f32, f32, f
     out
 }
 
-/// `Drawf.buildBeam(x, y, tx, ty, radius)` (`Drawf.java:131-157`): the fan
-/// triangles from the emitter to the target square's corner pair. `animate`
+/// `Drawf.buildBeam(x, y, tx, ty, radius)` (`Drawf.java:131-157`): the fan/// triangles from the emitter to the target square's corner pair. `animate`
 /// is Java's `renderer.animateShields` (the port always draws the filled
 /// branch, `settings animatedshields` row pending in T17).
 pub fn build_beam_tris(x: f32, y: f32, tx: f32, ty: f32, radius: f32) -> Vec<[(f32, f32); 3]> {
@@ -332,6 +331,41 @@ pub fn build_beam_tris(x: f32, y: f32, tx: f32, ty: f32, radius: f32) -> Vec<[(f
     } else {
         vec![[(x, y), (x1, y1), (x3, y3)]]
     }
+}
+
+/// `PowerNode.drawLaser` (`PowerNode.java:186-197`): the laser endpoints
+/// trimmed toward each node centre by `size * 4 - 1.5` along the axis.
+pub fn laser_endpoints(
+    x1: f32,
+    y1: f32,
+    size1: i32,
+    x2: f32,
+    y2: f32,
+    size2: i32,
+) -> (f32, f32, f32, f32) {
+    let rot = (y2 - y1).atan2(x2 - x1).to_degrees();
+    let (vx, vy) = trns(rot, 1.0);
+    let len1 = size1 as f32 * 4.0 - 1.5;
+    let len2 = size2 as f32 * 4.0 - 1.5;
+    (
+        x1 + vx * len1,
+        y1 + vy * len1,
+        x2 - vx * len2,
+        y2 - vy * len2,
+    )
+}
+
+/// `ItemBridge.draw` arrow count (`ItemBridge.java:384-432`): `dist =
+/// max(|dx|,|dy|) - 1` tiles, `arrows = (int)(dist * 8 / arrowSpacing(4))`.
+pub fn bridge_arrow_count(x1: i32, y1: i32, x2: i32, y2: i32) -> i32 {
+    let dist = ((x2 - x1).abs().max((y2 - y1).abs()) - 1).max(0);
+    dist * 8 / 4
+}
+
+/// `ItemBridge.draw` arrow centre: `x + dx * (4 + a * 4 + arrowOffset(2))`.
+pub fn bridge_arrow_pos(x: f32, y: f32, dx: f32, dy: f32, a: i32) -> (f32, f32) {
+    let along = 4.0 + a as f32 * 4.0 + 2.0;
+    (x + dx * along, y + dy * along)
 }
 
 #[cfg(test)]
@@ -433,5 +467,21 @@ mod tests {
         assert!((tri[2].0 - 16.0).abs() < 1e-4);
         assert!((tri[1].1 + 4.0).abs() < 1e-4);
         assert!((tri[2].1 - 4.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn laser_endpoints_trim_by_size() {
+        // Node (0,0) size 1 -> other (48,0) size 2: 2.5 px in, 6.5 px back.
+        let (x1, y1, x2, y2) = laser_endpoints(0.0, 0.0, 1, 48.0, 0.0, 2);
+        assert!((x1 - 2.5).abs() < 1e-4 && y1.abs() < 1e-4);
+        assert!((x2 - 41.5).abs() < 1e-4 && y2.abs() < 1e-4);
+    }
+
+    #[test]
+    fn bridge_arrow_count_and_pos() {
+        // (10,10) -> (13,10): dist 2 tiles -> 4 arrows; first at x 80 + 6 = 86.
+        assert_eq!(bridge_arrow_count(10, 10, 13, 10), 4);
+        let (x, y) = bridge_arrow_pos(80.0, 80.0, 1.0, 0.0, 0);
+        assert!((x - 86.0).abs() < 1e-4 && (y - 80.0).abs() < 1e-4);
     }
 }

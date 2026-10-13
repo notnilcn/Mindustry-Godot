@@ -107,14 +107,18 @@ use mind_core::content::{
     content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
+use mind_core::ecs::BuildingComp;
 use mind_core::game::rules::Rules;
 use mind_core::game::runtime::{CampaignRuntime, SessionSync, sync_session_with_sim};
+use mind_core::render::scan::{CameraView, visible_blocks};
 use mind_core::scenario::{Scenario, ScenarioPlayer};
 use mind_core::sim::{FixedStepRunner, Sim};
+use mind_core::world::TilePos;
 use mind_core::world::WorldGrid;
 use mind_core::world::blocks::heat::HeatState;
 use mind_core::world::blocks::power::PowerGrids;
 use mind_core::world::modules::{ItemModule, LiquidModule, PowerModule};
+use mind_core::world::pos::unpack;
 
 /// Maximum ticks accepted by one `step()` call (defensive; UI/MCP only).
 const MAX_STEP_TICKS: i64 = 1_000_000;
@@ -185,6 +189,63 @@ pub struct BulletDraw {
     pub def: mind_core::content::BulletId,
     /// Owning team (bullets are teamless in the port; kept for parity).
     pub team: u8,
+}
+
+/// One power-node laser link (`PowerNode.drawLaser`, G03 T7).
+pub struct LaserLink {
+    /// Source building centre (world px).
+    pub x1: f32,
+    /// Source building centre (world px).
+    pub y1: f32,
+    /// Source `Block.size`.
+    pub size1: i32,
+    /// Target building centre (world px).
+    pub x2: f32,
+    /// Target building centre (world px).
+    pub y2: f32,
+    /// Target `Block.size`.
+    pub size2: i32,
+    /// Owning graph satisfaction (`setupColor`).
+    pub satisfaction: f32,
+    /// Source block id (region fallbacks).
+    pub block: BlockId,
+}
+
+/// One item-bridge link (`ItemBridge.draw`, G03 T7).
+pub struct BridgeLink {
+    /// Source tile.
+    pub x: i32,
+    /// Source tile.
+    pub y: i32,
+    /// Linked tile.
+    pub ox: i32,
+    /// Linked tile.
+    pub oy: i32,
+    /// `ItemBridgeBuild.warmup`.
+    pub warmup: f32,
+    /// `ItemBridgeBuild.time`.
+    pub time: f32,
+    /// `Block.hasPower` (fade-in only for phase conveyors).
+    pub has_power: bool,
+    /// Source block id (region names).
+    pub block: BlockId,
+}
+
+/// Laser/bridge visible-rect growth: the longest link is a surge tower's
+/// 40 tiles = 320 px (`Blocks.java:2502`; G03 T7 pitfall).
+const POWER_GROW: f32 = 320.0;
+/// Bridge links reach `range 4` tiles (`Blocks.java`); 64 px covers it.
+const BRIDGE_GROW: f32 = 64.0;
+
+/// Building sprite centre (`anchor * 8 + Block.offset`; Java `Building.x`).
+fn building_center(
+    x: i32,
+    y: i32,
+    def: &mind_core::content::registries::blocks::BlockDef,
+) -> (f32, f32) {
+    let anchor_x = (x + (def.size - 1) / 2) as f32 * 8.0 + def.offset;
+    let anchor_y = (y + (def.size - 1) / 2) as f32 * 8.0 + def.offset;
+    (anchor_x, anchor_y)
 }
 
 /// Per-building draw state (`Door`/`SwitchBlock`/`Sorter`/`ItemSource`/
@@ -2504,8 +2565,7 @@ impl MindSimHost {
 
     // ---- G03 T9 HUD seams ----
 
-    /// Player-team cores `[{x, y, health, max}]` in row-major order (G03 T9):
-    /// the core-attack banner sums the healths and pans to the core whose
+    /// Player-team cores `[{x, y, health, max}]` in row-major order (G03 T9):    /// the core-attack banner sums the healths and pans to the core whose
     /// health dropped last. Java fires `Trigger.teamCoreDamage` on
     /// `CoreBuild.damage` (`CoreBlock.java:842-848`); the port diffs these
     /// values between 5 Hz refreshes (documented deviation).
@@ -2609,6 +2669,154 @@ impl MindSimHost {
                     .map(|rules| rules.border_darkness)
             })
             .unwrap_or(true)
+    }
+
+    // ---- G03 T7 power/bridge link seams (Rust-only) ----
+
+    /// Power-node laser links in the (grown) visible rect (`PowerNode.draw`,
+    /// `PowerNode.java:496-512`): each node pair once (the other node's entity
+    /// index must be below ours), derelicts skipped.
+    pub fn power_lasers(&self, rect: (f32, f32, f32, f32)) -> Vec<LaserLink> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * POWER_GROW,
+            h: rect.3 + 2.0 * POWER_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if def.kind != BlockKind::PowerNode {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                continue;
+            };
+            let Some(module) = self.sim.ecs.0.get::<PowerModule>(entity) else {
+                continue;
+            };
+            let satisfaction = self
+                .sim
+                .ecs
+                .0
+                .get_resource::<PowerGrids>()
+                .and_then(|grids| grids.graph(module.graph))
+                .map(|graph| graph.get_satisfaction())
+                .unwrap_or(1.0);
+            let (x1, y1) = building_center(tile.x, tile.y, def);
+            for packed in &module.links {
+                let (lx, ly) = unpack(*packed);
+                if !self.sim.grid.tiles.in_bounds(lx as i32, ly as i32) {
+                    continue;
+                }
+                let Some(other) = self.sim.grid.entity_at(TilePos::new(lx, ly)) else {
+                    continue;
+                };
+                if other == entity {
+                    continue;
+                }
+                if self.building_team(lx as i32, ly as i32) == Some(0) {
+                    continue;
+                }
+                let Some(other_def) = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<BuildingComp>(other)
+                    .and_then(|comp| content.block(comp.block))
+                else {
+                    continue;
+                };
+                // Each node pair once (`link.id >= id` skip on the other node).
+                if other_def.kind == BlockKind::PowerNode && other.index() >= entity.index() {
+                    continue;
+                }
+                let (x2, y2) = building_center(lx as i32, ly as i32, other_def);
+                out.push(LaserLink {
+                    x1,
+                    y1,
+                    size1: def.size,
+                    x2,
+                    y2,
+                    size2: other_def.size,
+                    satisfaction,
+                    block: tile.block,
+                });
+            }
+        }
+        out
+    }
+
+    /// Item-bridge links in the (grown) visible rect (`ItemBridge.draw`,
+    /// `ItemBridge.java:384-432`).
+    pub fn bridge_links(&self, rect: (f32, f32, f32, f32)) -> Vec<BridgeLink> {
+        use mind_core::world::blocks::distribution::item_bridge::ItemBridgeBuild;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * BRIDGE_GROW,
+            h: rect.3 + 2.0 * BRIDGE_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if !matches!(
+                def.kind,
+                BlockKind::ItemBridge | BlockKind::BufferedItemBridge
+            ) {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                continue;
+            };
+            let Some(bridge) = self.sim.ecs.0.get::<ItemBridgeBuild>(entity) else {
+                continue;
+            };
+            if bridge.link < 0 {
+                continue;
+            }
+            let (lx, ly) = unpack(bridge.link);
+            if !self.sim.grid.tiles.in_bounds(lx as i32, ly as i32) {
+                continue;
+            }
+            let Some(other) = self.sim.grid.entity_at(TilePos::new(lx, ly)) else {
+                continue;
+            };
+            let linked_same = self
+                .sim
+                .ecs
+                .0
+                .get::<BuildingComp>(other)
+                .is_some_and(|comp| comp.block == tile.block);
+            if !linked_same {
+                continue;
+            }
+            out.push(BridgeLink {
+                x: tile.x,
+                y: tile.y,
+                ox: lx as i32,
+                oy: ly as i32,
+                warmup: bridge.warmup,
+                time: bridge.time,
+                has_power: def.has_power,
+                block: tile.block,
+            });
+        }
+        out
     }
 
     /// Debug probe: `{name, x, y, team}` rows for every live unit (render

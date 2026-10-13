@@ -48,6 +48,7 @@ mod floor;
 mod fog;
 mod g3d;
 mod light;
+mod links;
 mod load;
 mod menu;
 mod minimap;
@@ -248,6 +249,8 @@ pub struct MindWorldRenderer {
     build_beam: Option<Gd<build_beam::BuildBeamOverlay>>,
     /// Bullet pass (`Layer.bullet` band; G03 T4).
     bullets: Option<Gd<bullets::BulletRenderer>>,
+    /// Power lasers + bridge links (`Layer.power` band; G03 T7).
+    links: Option<Gd<links::LinkOverlay>>,
     /// Unit effects overlay (mining/items; `Layer.flyingUnit`; G03 T5).
     unit_overlay: Option<Gd<unit_overlays::UnitOverlay>>,
     /// Unit engines + trails (`Layer.flyingUnitLow`; G03 T5).
@@ -295,6 +298,7 @@ impl INode2D for MindWorldRenderer {
             plan_overlay: None,
             build_beam: None,
             bullets: None,
+            links: None,
             unit_overlay: None,
             unit_engines: None,
             env: None,
@@ -574,6 +578,16 @@ impl MindWorldRenderer {
             // pipeline, not by content.
             beam_band.clone().add_child(&node);
             self.build_beam = Some(node.clone());
+        }
+        // Power lasers + bridge links at `Layer.power` (`PowerNode.draw` /
+        // `ItemBridge.draw`; G03 T7).
+        if let Some(power_band) = self.band_node_at(BandKey::base(Layer::Power)) {
+            let mut node = links::LinkOverlay::new_alloc();
+            node.set_name("LinkOverlay");
+            // code-instantiated: one link pass; the node count is fixed by the
+            // pipeline, not by content.
+            power_band.clone().add_child(&node);
+            self.links = Some(node.clone());
         }
         // Bullets at `Layer.bullet` (`BulletType.draw`; G03 T4).
         if let Some(bullet_band) = self.band_node_at(BandKey::base(Layer::Bullet)) {
@@ -865,6 +879,13 @@ impl MindWorldRenderer {
     #[func]
     pub fn stats_lod_l2(&self) -> bool {
         self.stats.lod_l2
+    }
+
+    /// `Lod.l1` from the last frame (`ItemBridge` gates its arrows on it,
+    /// `ItemBridge.java:384-432`; G03 T7).
+    #[func]
+    pub fn stats_lod_l1(&self) -> bool {
+        self.stats.lod_l1
     }
 
     /// Whether the nullable `shield` shader resolved (plan 16 §3.9,
