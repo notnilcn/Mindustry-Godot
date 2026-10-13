@@ -166,6 +166,11 @@ pub struct Sim {
     /// Save/load boundary queue (plan 05 M9; plan 04 §3.10).
     pub io: IoQueue,
 
+    /// World-processor UI events drained from `LogicWorldState` each tick
+    /// (announce/toast/cutscene/spawnwave/setblock); the host pops them
+    /// (G06 T4; T5/T6 extend the handling).
+    pub logic_ui_events: Vec<crate::logic::world::LogicWorldEvent>,
+
     /// Relay-side unit-command apply state (plan 15 M4). Built lazily on the
     /// first unit command so P0 worlds never pay for content boot.
     unit_commands: Option<command::UnitCommandRuntime>,
@@ -232,6 +237,7 @@ impl Sim {
             selected_block: BlockId::AIR,
             entity_seq: EntitySequencer::default(),
             commands_applied: 0,
+            logic_ui_events: Vec::new(),
             pending_events: Vec::new(),
             event_log: Vec::new(),
         }
@@ -692,6 +698,9 @@ impl Sim {
         // mutate the world mid-tick.
         self.pump_io(IoSet::Apply);
         self.triggers.fire(Trigger::Update, &mut self.ecs.0);
+        // `Logic.update` -> `logicVars.update()` (Logic.java:546) runs before
+        // the entity update pass so processors observe the incremented tick.
+        self.update_logic_globals();
         self.schedule.run(&mut self.ecs.0);
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.
@@ -703,6 +712,9 @@ impl Sim {
         // `BuilderComp.update` (PAR-0098): player build plans drive the
         // construct blocks after the entity update pass.
         self.update_builders();
+        // World-processor UI events (announce/toast/cutscene) are drained here so
+        // the log never grows unbounded (T4; T5/T6 extend the match).
+        self.drain_logic_events();
         // Zero-health units/buildings die (`HealthComp.damage` -> `kill`).
         let _ = self.resolve_deaths();
         // `PlayerComp.update`: respawn at the best core after `deathDelay`.
@@ -722,6 +734,92 @@ impl Sim {
         // `IoSet::Capture` is the post-update boundary.
         self.pump_io(IoSet::Capture);
         Ok(())
+    }
+
+    /// `Logic.update` -> `logicVars.update()` (Logic.java:546), before entity
+    /// updates: processors observe the already-incremented tick.
+    fn update_logic_globals(&mut self) {
+        // Keep the standalone logic clock/map size current even without a
+        // `GlobalVars` resource (message timers, `run_sync`).
+        if let Some(mut state) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+        {
+            state.tick = self.state.tick + 1;
+            state.map_width = self.grid.width();
+            state.map_height = self.grid.height();
+        }
+        if self
+            .ecs
+            .0
+            .get_resource::<crate::logic::globals::GlobalVars>()
+            .is_none()
+        {
+            return;
+        }
+        let (wave, wavetime) = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|rt| (rt.session.wave, rt.session.wavetime))
+            .unwrap_or((1, 0.0));
+        // Same chain as `gdext/sim_host.rs` `player_team`.
+        let client_team = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|rt| rt.session.rules.default_team)
+            .or_else(|| {
+                self.ecs
+                    .0
+                    .get_resource::<crate::world::limits::BuildRules>()
+                    .map(|rules| rules.default_team)
+            })
+            .unwrap_or(crate::ecs::TeamId::SHARDED.0);
+        let update = crate::logic::globals::GlobalUpdate {
+            // Java increments `state.tick` before `logicVars.update()`
+            // (Logic.java:526-546), so processors see tick N during tick N.
+            tick: self.state.tick + 1,
+            wave,
+            wavetime,
+            map_width: self.grid.width(),
+            map_height: self.grid.height(),
+            server: true,
+            client: false,
+            // The port has no player-name/locale settings in core; Java reads
+            // `player.locale()` / `player.name()` (GlobalVars.java:211-216).
+            client_locale: Some("en".to_owned()),
+            client_name: Some("player".to_owned()),
+            client_team,
+            client_mobile: false,
+            client_music_playing: false,
+            client_current_music: None,
+            client_unit: self.player_unit(),
+        };
+        crate::logic::globals::GlobalVars::update_world(&mut self.ecs.0, &update);
+    }
+
+    /// Drains the world-processor side-effect log once per tick
+    /// (`LogicWorldState.events`; the T5/T6 half of `LExecutor`'s host sinks).
+    fn drain_logic_events(&mut self) {
+        let events = match self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+        {
+            Some(mut state) => std::mem::take(&mut state.events),
+            None => return,
+        };
+        for event in events {
+            // T5 adds SetBlock / SpawnWave handling here.
+            if let e @ (crate::logic::world::LogicWorldEvent::Message { .. }
+            | crate::logic::world::LogicWorldEvent::Cutscene { .. }) = event
+                && self.logic_ui_events.len() < 256
+            {
+                self.logic_ui_events.push(e);
+            }
+        }
     }
 
     /// Monotonic update counter (`GameState.updateId`).

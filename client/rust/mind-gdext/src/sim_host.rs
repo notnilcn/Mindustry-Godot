@@ -468,6 +468,52 @@ impl MindSimHost {
     fn install_sim_seams(&mut self) {
         if let Some(registry) = self.content_snapshot.take() {
             mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, &registry);
+            // Live world-processor sinks (G06 T4): rules/markers/wave live in
+            // the campaign session; the event log + message timers are sim
+            // resources (headless=false so messages/cutscenes reach the host).
+            match self
+                .sim
+                .ecs
+                .0
+                .get_resource_mut::<mind_core::logic::world::LogicWorldState>()
+            {
+                Some(mut state) => {
+                    state.headless = false;
+                    state.is_host = true;
+                }
+                None => {
+                    self.sim
+                        .ecs
+                        .0
+                        .insert_resource(mind_core::logic::world::LogicWorldState {
+                            headless: false,
+                            ..mind_core::logic::world::LogicWorldState::new()
+                        });
+                }
+            }
+            if self
+                .sim
+                .ecs
+                .0
+                .get_resource::<mind_core::logic::world::MessageState>()
+                .is_none()
+            {
+                self.sim
+                    .ecs
+                    .0
+                    .insert_resource(mind_core::logic::world::MessageState::default());
+            }
+            if self
+                .sim
+                .ecs
+                .0
+                .get_resource::<mind_core::logic::world::LogicContentIndex>()
+                .is_none()
+            {
+                self.sim.ecs.0.insert_resource(
+                    mind_core::logic::world::LogicContentIndex::from_content(&registry),
+                );
+            }
             self.content_snapshot = Some(registry);
         }
 
@@ -1313,6 +1359,57 @@ impl MindSimHost {
     pub fn logic_set_rule(&self, name: GString, _value: Variant) -> bool {
         log::warn!("logic_set_rule(`{name}`): timeline/sim rule state is a plan-12 hook");
         false
+    }
+
+    /// G06 T4 verification seam: live campaign rules relevant to world
+    /// processors (`waveSending`/`waveTimer`/`mapArea`/flags/wave).
+    #[func]
+    pub fn logic_rules_probe(&self) -> GString {
+        let Some(runtime) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+        else {
+            return GString::from("{}");
+        };
+        let rules = &runtime.session.rules;
+        let value = serde_json::json!({
+            "waveSending": rules.wave_sending,
+            "waveTimer": rules.wave_timer,
+            "waves": rules.waves,
+            "wave": runtime.session.wave,
+            "wavetime": runtime.session.wavetime,
+            "limitMapArea": rules.limit_map_area,
+            "limitX": rules.limit_x,
+            "limitY": rules.limit_y,
+            "limitWidth": rules.limit_width,
+            "limitHeight": rules.limit_height,
+            "unitCap": rules.unit_cap,
+            "flags": rules.objective_flags.iter().cloned().collect::<Vec<_>>(),
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// G06 T4 verification-only seam: set/clear an objective flag (what the
+    /// Ground Zero tutorial objectives raise).
+    #[func]
+    pub fn logic_set_flag(&mut self, name: GString, on: bool) -> bool {
+        let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
+        else {
+            return false;
+        };
+        let name = name.to_string();
+        if on {
+            runtime.session.rules.objective_flags.insert(name);
+        } else {
+            runtime.session.rules.objective_flags.shift_remove(&name);
+        }
+        true
     }
 
     // ---- IoSet seam (plan 05 M9 / plan 04 §3.10; SimIoHandler wired in ready) ----

@@ -2429,4 +2429,30 @@ fn payload_commands_emit_sounds() {
         )),
         "drop sound: {events:?}"
     );
+    }
+
+/// G06 T7: unit `@x/@y` are tiles (px/8) and `controlled` uses the Java
+/// constants (`ctrlProcessor = 1`, `ctrlPlayer = 2`, `ctrlCommand = 3`).
+#[test]
+fn unit_xy_tiles_and_controlled() {
+    let mut sim = live_sim(16);
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 80.0, 160.0, 0.0)
+        .expect("dagger");
+    use crate::logic::LAccess;
+    use crate::logic::access::{Sensed, sense};
+    use crate::logic::value::LogicObject;
+    let target = LogicObject::Unit(dagger);
+    assert_eq!(sense(&sim.ecs.0, &target, LAccess::X), Sensed::Num(10.0));
+    assert_eq!(sense(&sim.ecs.0, &target, LAccess::Y), Sensed::Num(20.0));
+    assert_eq!(
+        sense(&sim.ecs.0, &target, LAccess::Controlled),
+        Sensed::Num(0.0)
+    );
+    // Velocity is tiles/sec (`vel * 60 / 8`).
+    let vel = sense(&sim.ecs.0, &target, LAccess::VelocityY);
+    let Sensed::Num(vy) = vel else {
+        panic!("velocity is numeric");
+    };
+    assert!((vy - 0.0).abs() < 1e-4, "stationary dagger: {vy}");
 }

@@ -3,13 +3,11 @@
 
 //! Global logic variables and constants.
 //!
-//! Ported from `core/src/mindustry/logic/GlobalVars.java`. This milestone
-//! registers the state-independent constants (math, team control ids, `LAccess`
-//! names, align names, named colors); the content/`@sfx-*`/time-client constants
-//! and the per-tick `update()` land with the M7 content integration.
-//!
-//! `logicids.dat` is intentionally absent (HLP §9): `lookup` returns null,
-//! `lookup_logic_id` returns `-1`, and no `@<type>Count` constants exist.
+//! Ported from `core/src/mindustry/logic/GlobalVars.java`. Registers the
+//! state-independent constants (math, team control ids, `LAccess` names, align
+//! names, named colors), the content/`@sfx-*`/time-client constants, the
+//! `logicids.dat` lookup tables (shipped asset copied into
+//! `mind-core/assets/logicids.dat`) and the per-tick `update()`.
 
 use indexmap::{IndexMap, IndexSet};
 
@@ -75,6 +73,10 @@ pub struct GlobalUpdate {
     pub client: bool,
     /// `player.locale()`.
     pub client_locale: Option<String>,
+    /// `player.unit()`.
+    pub client_unit: Option<bevy_ecs::entity::Entity>,
+    /// `player.name()`.
+    pub client_name: Option<String>,
     /// `player.team().id`.
     pub client_team: u8,
     /// `mobile`.
@@ -96,6 +98,39 @@ pub struct GlobalVars {
     pub entries: Vec<VarEntry>,
     /// Global random stream (`GlobalVars.rand`).
     pub rand: ArcRand,
+    /// `logicIdToContent` per `writableLookableContent`
+    /// (`0 block, 1 unit, 2 item, 3 liquid`; `None` = unknown name).
+    pub logic_to_content: [Vec<Option<u16>>; 4],
+    /// `contentIdToLogicId` per type (`-1` = absent).
+    pub content_to_logic: [Vec<i32>; 4],
+}
+
+/// The shipped `logicids.dat` (copied from the Java assets; `GlobalVars.init`).
+const LOGIC_IDS: &[u8] = include_bytes!("../../assets/logicids.dat");
+
+/// Parses `logicids.dat`: for each of `writableLookableContent` a big-endian
+/// `short` count then `count` `DataInputStream.readUTF` strings.
+pub fn parse_logic_ids(bytes: &[u8]) -> Option<[Vec<String>; 4]> {
+    let mut out: [Vec<String>; 4] = std::array::from_fn(|_| Vec::new());
+    let mut offset = 0usize;
+    for table in out.iter_mut() {
+        let amount = i16::from_be_bytes([*bytes.get(offset)?, *bytes.get(offset + 1)?]);
+        offset += 2;
+        if amount < 0 {
+            return None;
+        }
+        for _ in 0..amount {
+            let len = u16::from_be_bytes([*bytes.get(offset)?, *bytes.get(offset + 1)?]) as usize;
+            offset += 2;
+            let name = std::str::from_utf8(bytes.get(offset..offset + len)?).ok()?;
+            offset += len;
+            table.push(name.to_owned());
+        }
+    }
+    if offset != bytes.len() {
+        return None;
+    }
+    Some(out)
 }
 
 impl Default for GlobalVars {
@@ -112,6 +147,8 @@ impl GlobalVars {
             privileged_names: IndexSet::new(),
             entries: Vec::new(),
             rand: ArcRand::new(0),
+            logic_to_content: std::array::from_fn(|_| Vec::new()),
+            content_to_logic: std::array::from_fn(|_| Vec::new()),
         };
         globals.init_static();
         // Plan 18 seeds the full `Sounds` table unconditionally, so `@sfx-*`
@@ -193,7 +230,6 @@ impl GlobalVars {
         self.put_num("@second", 0.0, false);
         self.put_num("@minute", 0.0, false);
         self.put_num("@waveNumber", 0.0, false);
-        self.put_num("@wave", 0.0, false);
         self.put_num("@waveTime", 0.0, false);
         self.put_num("@mapw", 0.0, false);
         self.put_num("@maph", 0.0, false);
@@ -273,8 +309,26 @@ impl GlobalVars {
         ] {
             for entry in content.entries(type_) {
                 let Some(name) = entry.name else { continue };
-                if type_ == ContentType::Block
-                    && content.get_by_name(ContentType::Item, name).is_some()
+                if type_ == ContentType::Block {
+                    if content.get_by_name(ContentType::Item, name).is_some() {
+                        continue;
+                    }
+                    // `GlobalVars.init` skips `LegacyBlock`s (the three legacy
+                    // block kinds registered in `blocks/legacy.rs`).
+                    if content.block_by_name(name).is_some_and(|def| {
+                        matches!(
+                            def.kind,
+                            crate::content::registries::blocks::BlockKind::LegacyMechPad
+                                | crate::content::registries::blocks::BlockKind::LegacyUnitFactory
+                                | crate::content::registries::blocks::BlockKind::LegacyCommandCenter
+                        )
+                    }) {
+                        continue;
+                    }
+                }
+                // `GlobalVars.init` skips `type.internal` units.
+                if type_ == ContentType::Unit
+                    && content.unit_by_name(name).is_some_and(|def| def.internal)
                 {
                     continue;
                 }
@@ -287,8 +341,42 @@ impl GlobalVars {
             let key = format!("@status-{name}");
             self.put_content(&key, ContentType::Status, entry.id, false);
         }
+        self.init_logic_ids(content);
         self.init_sfx();
         self.reindex();
+    }
+
+    /// `GlobalVars.init` logic-id pass: parse the shipped `logicids.dat`, map
+    /// each name to the content records and register `@<type>Count`.
+    fn init_logic_ids(&mut self, content: &ContentRegistry) {
+        let Some(tables) = parse_logic_ids(LOGIC_IDS) else {
+            return;
+        };
+        for (index, type_) in WRITABLE_LOOKABLE_CONTENT.iter().enumerate() {
+            let type_name = match type_ {
+                ContentType::Block => "block",
+                ContentType::Unit => "unit",
+                ContentType::Item => "item",
+                ContentType::Liquid => "liquid",
+                _ => continue,
+            };
+            let names = &tables[index];
+            let mut to_content = vec![None; names.len()];
+            for (logic_id, name) in names.iter().enumerate() {
+                if let Some(record) = content.get_by_name(*type_, name) {
+                    to_content[logic_id] = Some(record.id);
+                }
+            }
+            let mut to_logic = vec![-1i32; content.type_len(*type_)];
+            for (logic_id, record) in to_content.iter().enumerate() {
+                if let Some(id) = record {
+                    to_logic[*id as usize] = logic_id as i32;
+                }
+            }
+            self.logic_to_content[index] = to_content;
+            self.content_to_logic[index] = to_logic;
+            self.put_num(&format!("@{type_name}Count"), names.len() as f64, false);
+        }
     }
 
     /// Registers `@sfx-<file>` sound-id constants (`GlobalVars.init` audio block).
@@ -337,6 +425,9 @@ impl GlobalVars {
     pub fn install_world(world: &mut bevy_ecs::world::World, content: &ContentRegistry) -> Self {
         let globals = Self::with_content(content);
         world.insert_resource(globals.clone());
+        if world.get_resource::<LogicContentInfo>().is_none() {
+            world.insert_resource(LogicContentInfo::from_content(content));
+        }
         globals
     }
 
@@ -358,7 +449,8 @@ impl GlobalVars {
         self.set_num_raw("@second", update.tick as f64 / 60.0);
         self.set_num_raw("@minute", update.tick as f64 / 3600.0);
         self.set_num_raw("@waveNumber", update.wave as f64);
-        self.set_num_raw("@wave", update.wave as f64);
+        // `@wave` is not a Java constant (only `@waveNumber` is; GlobalVars.java
+        // has no `put("@wave", ...)` call).
         self.set_num_raw("@waveTime", update.wavetime as f64 / 60.0);
         self.set_num_raw("@mapw", update.map_width as f64);
         self.set_num_raw("@maph", update.map_height as f64);
@@ -367,6 +459,11 @@ impl GlobalVars {
         self.set_obj_raw(
             "@clientLocale",
             update.client_locale.clone().map(LogicObject::Str),
+        );
+        self.set_obj_raw("@clientUnit", update.client_unit.map(LogicObject::Unit));
+        self.set_obj_raw(
+            "@clientName",
+            update.client_name.clone().map(LogicObject::Str),
         );
         self.set_num_raw("@clientTeam", update.client_team as f64);
         self.set_num_raw(
@@ -443,7 +540,8 @@ impl GlobalVars {
         self.cells.get("@wait")
     }
 
-    /// `GlobalVars.lookupContent`: teams by index (0..255), otherwise `None`.
+    /// `GlobalVars.lookupContent`: teams by index (0..255), writable-lookable
+    /// content through the `logicids.dat` tables, otherwise `None`.
     pub fn lookup_content(&self, type_: ContentType, id: i32) -> Option<LogicObject> {
         if type_ == ContentType::Team {
             if (0..256).contains(&id) {
@@ -451,17 +549,82 @@ impl GlobalVars {
             }
             return None;
         }
-        None
+        let index = WRITABLE_LOOKABLE_CONTENT
+            .iter()
+            .position(|candidate| *candidate == type_)?;
+        let logic_id = usize::try_from(id).ok()?;
+        let content_id = *self.logic_to_content[index].get(logic_id)?;
+        content_id.map(|id| LogicObject::Content(ContentRef::new(type_, id)))
     }
 
-    /// `GlobalVars.lookupLogicId`: always `-1` without `logicids.dat`.
-    pub fn lookup_logic_id(&self, _content: ContentRef) -> i32 {
-        -1
+    /// `GlobalVars.lookupLogicId`: the logic id of a content record, `-1` when
+    /// absent (`Block/Item/Liquid/UnitType.getLogicId`).
+    pub fn lookup_logic_id(&self, content: ContentRef) -> i32 {
+        let Some(index) = WRITABLE_LOOKABLE_CONTENT
+            .iter()
+            .position(|candidate| *candidate == content.type_)
+        else {
+            return -1;
+        };
+        self.content_to_logic[index]
+            .get(content.id as usize)
+            .copied()
+            .unwrap_or(-1)
     }
 
     /// `GlobalVars.remove(name)` (data-patch reset).
     pub fn remove(&mut self, name: &str) {
         self.cells.shift_remove(name);
+    }
+}
+
+/// Content names by type and dense id, for the executor's `print`/`format`
+/// (`PrintI.toString` needs content names and the VM has no registry access).
+///
+/// Built next to [`GlobalVars`] by [`GlobalVars::install_world`].
+#[derive(Clone, Debug, bevy_ecs::prelude::Resource)]
+pub struct LogicContentInfo {
+    /// `names[type as usize][dense id]`; empty string = no such record.
+    names: Vec<Vec<String>>,
+}
+
+impl Default for LogicContentInfo {
+    fn default() -> Self {
+        Self {
+            names: vec![Vec::new(); ContentType::ALL.len()],
+        }
+    }
+}
+
+impl LogicContentInfo {
+    /// Builds the name tables from the registry (`GlobalVars.init` content pass).
+    pub fn from_content(content: &ContentRegistry) -> Self {
+        let mut info = Self::default();
+        for type_ in ContentType::ALL {
+            let entries = content.entries(type_);
+            let len = entries
+                .iter()
+                .map(|entry| entry.id as usize + 1)
+                .max()
+                .unwrap_or(0);
+            let table = &mut info.names[type_ as usize];
+            table.resize(len, String::new());
+            for entry in entries {
+                if let Some(name) = entry.name {
+                    table[entry.id as usize] = name.to_owned();
+                }
+            }
+        }
+        info
+    }
+
+    /// Name for a content record (`Content.name`), when known.
+    pub fn name(&self, type_: ContentType, id: u16) -> Option<&str> {
+        self.names
+            .get(type_ as usize)?
+            .get(id as usize)
+            .map(String::as_str)
+            .filter(|name| !name.is_empty())
     }
 }
 
@@ -585,8 +748,12 @@ mod tests {
         assert!(g.get("@rain", false).is_some());
         assert!(g.get("@status-wet", false).is_some());
         assert!(g.get("@sharded", false).is_some());
-        // Deviation 9: no `@<type>Count` constants without `logicids.dat`.
-        assert!(g.get("@itemCount", false).is_none());
+        // `GlobalVars.init`: legacy blocks and internal units do not register.
+        assert!(g.get("@legacy-mech-pad", false).is_none());
+        assert!(g.get("@block", false).is_none());
+        assert!(g.get("@dummy", false).is_none());
+        // `@<type>Count` constants come from the shipped `logicids.dat`.
+        assert_eq!(g.get("@itemCount", false).unwrap().num, 20.0);
     }
 
     #[test]
@@ -607,7 +774,8 @@ mod tests {
         assert_eq!(g.get("@second", false).unwrap().num, 3.0);
         assert_eq!(g.get("@minute", false).unwrap().num, 0.05);
         assert_eq!(g.get("@waveNumber", false).unwrap().num, 4.0);
-        assert_eq!(g.get("@wave", false).unwrap().num, 4.0);
+        // `@wave` is not a Java global (only `@waveNumber`).
+        assert!(g.get("@wave", false).is_none());
         assert_eq!(g.get("@waveTime", false).unwrap().num, 5.0);
         assert_eq!(g.get("@mapw", false).unwrap().num, 16.0);
         assert_eq!(g.get("@maph", false).unwrap().num, 24.0);
@@ -668,13 +836,51 @@ mod tests {
     }
 
     #[test]
-    fn lookup_is_absent_file_behavior() {
-        let g = GlobalVars::new();
-        assert_eq!(g.lookup_logic_id(ContentRef::new(ContentType::Item, 0)), -1);
-        assert_eq!(g.lookup_content(ContentType::Item, 0), None);
+    fn lookup_maps_logic_ids() {
+        use crate::world::harness::BuildHarness;
+        let content = BuildHarness::load_content();
+        let g = GlobalVars::with_content(&content);
+        // File-derived counts (`logicids.dat`): 262 blocks / 56 units /
+        // 20 items / 11 liquids.
+        assert_eq!(g.get("@blockCount", false).unwrap().num, 262.0);
+        assert_eq!(g.get("@unitCount", false).unwrap().num, 56.0);
+        assert_eq!(g.get("@itemCount", false).unwrap().num, 20.0);
+        assert_eq!(g.get("@liquidCount", false).unwrap().num, 11.0);
+        // `lookup item 0` -> copper; `sensor @copper @id` -> 0.
+        let copper = content.item_id("copper").expect("copper");
+        let copper_ref = ContentRef::new(ContentType::Item, copper.raw());
+        assert_eq!(
+            g.lookup_content(ContentType::Item, 0),
+            Some(LogicObject::Content(copper_ref))
+        );
+        assert_eq!(g.lookup_logic_id(copper_ref), 0);
+        // First/last block entries.
+        let press = content.block_id("graphite-press").expect("graphite-press");
+        assert_eq!(
+            g.lookup_content(ContentType::Block, 0),
+            Some(LogicObject::Content(ContentRef::new(
+                ContentType::Block,
+                press.raw()
+            )))
+        );
+        let dummy = content.block_id("target-dummy").expect("target-dummy");
+        let dummy_ref = ContentRef::new(ContentType::Block, dummy.raw());
+        assert_eq!(
+            g.lookup_content(ContentType::Block, 261),
+            Some(LogicObject::Content(dummy_ref))
+        );
+        assert_eq!(g.lookup_logic_id(dummy_ref), 261);
+        // Teams stay index-based.
         assert_eq!(
             g.lookup_content(ContentType::Team, 3),
             Some(LogicObject::Team(3))
+        );
+        // `GlobalVars::new()` (no content) keeps empty tables.
+        let empty = GlobalVars::new();
+        assert_eq!(empty.lookup_content(ContentType::Item, 0), None);
+        assert_eq!(
+            empty.lookup_logic_id(ContentRef::new(ContentType::Item, 0)),
+            -1
         );
     }
 }

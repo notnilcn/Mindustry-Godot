@@ -242,16 +242,45 @@ pub enum Sensed {
 
 use bevy_ecs::world::World;
 
-use crate::content::ContentType;
+use crate::content::{BlockId, ContentType, ItemId, LiquidId, UnitTypeId};
 use crate::entities::comp::{Building, Health, Pos, TeamComp, Unit};
-use crate::logic::blocks::{LogicBlockState, build_at, display_def_of, memory_def_of};
-use crate::logic::value::{LVar, conv};
+use crate::logic::blocks::{
+    LogicBlockState, build_at, display_def_of, logic_def_of, memory_def_of,
+};
+use crate::logic::value::LVar;
 use crate::world::block::BlockTable;
+use crate::world::config::{ConfigKind, ConfigValue};
 use crate::world::modules::{ItemModule, LiquidModule, PowerModule};
 
 /// Team of an entity (`team.id`).
 pub fn entity_team(world: &World, e: Entity) -> Option<u8> {
     world.get::<TeamComp>(e).map(|t| t.team)
+}
+
+/// `PrintI.toString` world-resolved names: contents (`LogicContentInfo`),
+/// building block names (`BlockTable`) and unit type names.
+///
+/// Java resolves these in one `instanceof` chain (`LExecutor.PrintI.toString`);
+/// the VM calls this for the object kinds it cannot resolve from the value
+/// alone. `None` lets the caller fall back (`Str`/`Enum`/`[object]`).
+pub fn name_of(world: &World, obj: &LogicObject) -> Option<String> {
+    match obj {
+        LogicObject::Content(c) => world
+            .get_resource::<crate::logic::globals::LogicContentInfo>()
+            .and_then(|info| info.name(c.type_, c.id))
+            .map(str::to_owned),
+        LogicObject::Building(e) => block_def(world, *e).map(|def| def.name.clone()),
+        LogicObject::Unit(e) => world
+            .get::<crate::entities::comp::unit::UnitTypeComp>(*e)
+            .and_then(|t| {
+                world
+                    .get_resource::<crate::logic::globals::LogicContentInfo>()
+                    .and_then(|info| info.name(ContentType::Unit, t.type_id.raw()))
+            })
+            .map(str::to_owned),
+        LogicObject::Team(id) => Some(crate::game::team::Team::get(*id).name.clone()),
+        _ => None,
+    }
 }
 
 /// Block definition for a building entity.
@@ -275,7 +304,13 @@ pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
         LogicObject::Building(e) => sense_building(world, *e, a),
         LogicObject::Unit(e) => sense_unit(world, *e, a),
         LogicObject::Content(c) => match a {
-            LAccess::Id => Sensed::Num(c.id as f64),
+            // `Block/Item/Liquid/UnitType.sense(@id)` = `getLogicId()`.
+            LAccess::Id => Sensed::Num(
+                world
+                    .get_resource::<crate::logic::globals::GlobalVars>()
+                    .map(|globals| globals.lookup_logic_id(*c) as f64)
+                    .unwrap_or(-1.0),
+            ),
             _ => Sensed::Num(1.0),
         },
         _ => Sensed::Obj(None),
@@ -318,6 +353,16 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
     let building = world.get::<Building>(e);
     let health = world.get::<Health>(e);
     let def = block_def(world, e);
+    // Family override first (`Building.sense`/`senseObject` overrides; G06 T7):
+    // turrets, crafters, producers, ... implement `logic_sense`.
+    if let Some(block) = building.map(|b| b.block)
+        && let Some(inst) = world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.get(block))
+        && let Some(sensed) = inst.behavior.logic_sense(world, e, a)
+    {
+        return sensed;
+    }
     match a {
         LAccess::Dead => Sensed::Num(if health.is_some_and(|h| h.dead || h.health <= 0.0) {
             1.0
@@ -328,15 +373,16 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
         LAccess::MaxHealth => Sensed::Num(health.map(|h| h.max_health as f64).unwrap_or(0.0)),
         LAccess::Team => Sensed::Num(entity_team(world, e).unwrap_or(0) as f64),
         LAccess::X | LAccess::Y => {
-            let Some(building) = building else {
-                return Sensed::Num(0.0);
-            };
+            // Java `Building.x = tile*8 + ((size+1)%2)*4` (Block.java:774); the
+            // port's `Pos` is the anchor-tile centre, so re-derive the Java
+            // value: 1x1/3x3 -> tile, 2x2 -> tile + 0.5.
             let size = def.as_ref().map(|d| d.size).unwrap_or(1);
-            // `Building.x` is the multiblock center in tile coordinates.
-            let tile = building.tile;
-            let coord = if a == LAccess::X { tile.x() } else { tile.y() };
-            let half = (size - 1) as f32 / 2.0;
-            Sensed::Num(conv(coord as f32 + half) as f64)
+            let java_offset = ((size + 1) % 2) as f32 * 4.0;
+            let value = world.get::<Pos>(e).map(|p| {
+                let centre = if a == LAccess::X { p.x } else { p.y };
+                f64::from((centre - 4.0 + java_offset) / 8.0)
+            });
+            Sensed::Num(value.unwrap_or(0.0))
         }
         LAccess::Rotation => Sensed::Num(building.map(|b| b.rotation as f64).unwrap_or(0.0)),
         LAccess::Enabled => Sensed::Num(if building.is_some_and(|b| b.enabled) {
@@ -347,7 +393,11 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
         LAccess::Efficiency => Sensed::Num(building.map(|b| b.efficiency as f64).unwrap_or(0.0)),
         LAccess::Timescale => Sensed::Num(building.map(|b| b.time_scale as f64).unwrap_or(0.0)),
         LAccess::Size => Sensed::Num(def.as_ref().map(|d| d.size as f64).unwrap_or(1.0)),
-        LAccess::Solid => Sensed::Num(0.0),
+        LAccess::Solid => Sensed::Num(if def.as_ref().is_some_and(|d| d.solid) {
+            1.0
+        } else {
+            0.0
+        }),
         LAccess::Armor => Sensed::Num(def.as_ref().map(|d| d.armor as f64).unwrap_or(0.0)),
         LAccess::TotalItems => Sensed::Num(
             world
@@ -369,13 +419,61 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|d| d.liquid_capacity.max(0.0) as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::TotalPower | LAccess::PowerNetStored => Sensed::Num(
-            world
-                .get::<PowerModule>(e)
-                .map(|m| m.stored as f64)
+        LAccess::TotalPower => {
+            // `power == null || consPower == null ? 0 : power.status *
+            // (consPower.buffered ? consPower.capacity : 1)`.
+            let Some(module) = world.get::<PowerModule>(e) else {
+                return Sensed::Num(0.0);
+            };
+            let buffered = def
+                .as_ref()
+                .and_then(|d| {
+                    d.consumes.iter().find_map(|c| match &c.consume {
+                        crate::content::registries::blocks::Consume::Power { buffered, .. } => {
+                            Some(*buffered)
+                        }
+                        _ => None,
+                    })
+                })
+                .unwrap_or(0.0);
+            Sensed::Num((module.status * if buffered > 0.0 { buffered } else { 1.0 }) as f64)
+        }
+        LAccess::PowerNetIn
+        | LAccess::PowerNetOut
+        | LAccess::PowerNetStored
+        | LAccess::PowerNetCapacity => {
+            // `graph.getLastScaledPowerIn()*60` etc. (0 without power).
+            let Some(module) = world.get::<PowerModule>(e) else {
+                return Sensed::Num(0.0);
+            };
+            let graph = world
+                .get_resource::<crate::world::blocks::power::graph::PowerGrids>()
+                .and_then(|grids| grids.graph(module.graph));
+            let Some(graph) = graph else {
+                return Sensed::Num(0.0);
+            };
+            Sensed::Num(match a {
+                LAccess::PowerNetIn => graph.last_scaled_power_in() as f64 * 60.0,
+                LAccess::PowerNetOut => graph.last_scaled_power_out() as f64 * 60.0,
+                LAccess::PowerNetStored => graph.last_power_stored() as f64,
+                _ => graph.last_capacity() as f64,
+            })
+        }
+        LAccess::Range => Sensed::Num(
+            logic_def_of(world, e)
+                .map(|d| (d.range / 8.0) as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::PowerNetCapacity => Sensed::Num(0.0),
+        LAccess::Color => {
+            let id = entity_team(world, e).unwrap_or(0);
+            let color = crate::game::team::Team::get(id).color;
+            Sensed::Num(crate::logic::globals::rgba_u8_to_double_bits(
+                (color.r * 255.0).round() as i32,
+                (color.g * 255.0).round() as i32,
+                (color.b * 255.0).round() as i32,
+                255,
+            ))
+        }
         LAccess::DisplayWidth => Sensed::Num(
             display_def_of(world, e)
                 .map(|d| d.display_size as f64)
@@ -403,8 +501,7 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|d| d.capacity as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::Range
-        | LAccess::CameraX
+        LAccess::CameraX
         | LAccess::CameraY
         | LAccess::CameraWidth
         | LAccess::CameraHeight
@@ -427,7 +524,8 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
         LAccess::Controlled => Sensed::Num(0.0),
         LAccess::Config => Sensed::Obj(None),
         LAccess::Name => Sensed::Obj(def.as_ref().map(|d| LogicObject::Str(d.name.clone()))),
-        _ => Sensed::Num(0.0),
+        // Java `BuildingComp.sense` default: `NaN` → null through `setnum`.
+        _ => Sensed::Obj(None),
     }
 }
 
@@ -447,12 +545,23 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
         LAccess::Health => Sensed::Num(health.map(|h| h.health as f64).unwrap_or(0.0)),
         LAccess::MaxHealth => Sensed::Num(health.map(|h| h.max_health as f64).unwrap_or(0.0)),
         LAccess::Team => Sensed::Num(entity_team(world, e).unwrap_or(0) as f64),
-        LAccess::X => Sensed::Num(pos.map(|p| p.x as f64).unwrap_or(0.0)),
-        LAccess::Y => Sensed::Num(pos.map(|p| p.y as f64).unwrap_or(0.0)),
-        LAccess::VelocityX => Sensed::Num(vel.map(|v| v.x as f64).unwrap_or(0.0)),
-        LAccess::VelocityY => Sensed::Num(vel.map(|v| v.y as f64).unwrap_or(0.0)),
+        LAccess::X => Sensed::Num(pos.map(|p| (p.x / 8.0) as f64).unwrap_or(0.0)),
+        LAccess::Y => Sensed::Num(pos.map(|p| (p.y / 8.0) as f64).unwrap_or(0.0)),
+        // `vel * 60 / 8`: world px/tick -> tiles/sec.
+        LAccess::VelocityX => Sensed::Num(vel.map(|v| (v.x * 60.0 / 8.0) as f64).unwrap_or(0.0)),
+        LAccess::VelocityY => Sensed::Num(vel.map(|v| (v.y * 60.0 / 8.0) as f64).unwrap_or(0.0)),
         LAccess::Rotation => Sensed::Num(core.map(|c| c.rotation as f64).unwrap_or(0.0)),
-        LAccess::Speed => Sensed::Num(phys.map(|p| p.speed as f64).unwrap_or(0.0)),
+        // `type.speed * 60 / 8 * speedMultiplier`.
+        LAccess::Speed => {
+            let multiplier = world
+                .get::<crate::entities::comp::unit::StatusComp>(e)
+                .map(|s| s.speed_multiplier)
+                .unwrap_or(1.0);
+            Sensed::Num(
+                phys.map(|p| (p.speed * 60.0 / 8.0 * multiplier) as f64)
+                    .unwrap_or(0.0),
+            )
+        }
         LAccess::Flying => Sensed::Num(if phys.is_some_and(|p| p.flying) {
             1.0
         } else {
@@ -476,14 +585,68 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|m| m.items.len() as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::Shield | LAccess::Armor | LAccess::Range | LAccess::Shooting => Sensed::Num(0.0),
+        LAccess::Shield => Sensed::Num(
+            world
+                .get::<crate::entities::comp::unit::ShieldComp>(e)
+                .map(|s| s.shield as f64)
+                .unwrap_or(0.0),
+        ),
+        LAccess::Armor => {
+            // `armorOverride >= 0 ? armorOverride : armor`; the base type armor
+            // is not projected onto the unit (remaining T7 row in the summary).
+            let value = world
+                .get::<crate::entities::comp::unit::StatusComp>(e)
+                .filter(|s| s.armor_override >= 0.0)
+                .map(|s| s.armor_override as f64)
+                .unwrap_or(0.0);
+            Sensed::Num(value)
+        }
+        LAccess::Range | LAccess::Shooting => Sensed::Num(0.0),
+        // `controlled`: `ctrlProcessor = 1`, `ctrlPlayer = 2`, `ctrlCommand = 3`
+        // (GlobalVars.java:21-24), command only while a command is set.
         LAccess::Controlled => {
-            Sensed::Num(match crate::entities::comp::unit::ai_kind_of(world, e) {
-                Some(crate::ai::AiKind::Logic) => 2.0,
-                Some(crate::ai::AiKind::Command) => 3.0,
-                Some(crate::ai::AiKind::Player) => 1.0,
+            let value = match crate::entities::comp::unit::ai_kind_of(world, e) {
+                Some(crate::ai::AiKind::Logic) => crate::logic::globals::CTRL_PROCESSOR as f64,
+                Some(crate::ai::AiKind::Player) => crate::logic::globals::CTRL_PLAYER as f64,
+                Some(crate::ai::AiKind::Command) => {
+                    let has_command = world
+                        .get::<crate::ai::controller::ControllerSlot>(e)
+                        .and_then(|slot| slot.target)
+                        .is_some();
+                    if has_command {
+                        crate::logic::globals::CTRL_COMMAND as f64
+                    } else {
+                        0.0
+                    }
+                }
                 _ => 0.0,
-            })
+            };
+            Sensed::Num(value)
+        }
+        LAccess::Mining => Sensed::Num(
+            if world
+                .get::<crate::entities::comp::unit::MinerComp>(e)
+                .is_some_and(|m| m.mining)
+            {
+                1.0
+            } else {
+                0.0
+            },
+        ),
+        LAccess::MineX | LAccess::MineY => {
+            let value = world
+                .get::<crate::entities::comp::unit::MinerComp>(e)
+                .and_then(|m| m.mine_tile)
+                .map(|tile| {
+                    if a == LAccess::MineX {
+                        tile.x()
+                    } else {
+                        tile.y()
+                    }
+                })
+                .map(|coord| coord as f64)
+                .unwrap_or(-1.0);
+            Sensed::Num(value)
         }
         LAccess::Id => Sensed::Num(e.index().index() as f64),
         LAccess::Type => match crate::entities::comp::unit::unit_type_of(world, e) {
@@ -493,7 +656,16 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
             )))),
             None => Sensed::Obj(None),
         },
-        _ => Sensed::Num(0.0),
+        // `firstItem -> stack.amount == 0 ? null : item`.
+        LAccess::FirstItem => Sensed::Obj(
+            world
+                .get::<ItemModule>(e)
+                .filter(|m| m.total > 0)
+                .and_then(|m| m.first())
+                .map(|i| LogicObject::Content(crate::content::ContentRef::item(i))),
+        ),
+        // Java `UnitComp.senseObject` default: null.
+        _ => Sensed::Obj(None),
     }
 }
 
@@ -523,8 +695,28 @@ fn set_prop_building_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bo
             false
         }
         LAccess::TotalPower => {
+            // `buffered ? status = clamp(v / capacity) : ignore`.
+            let Some(block) = world.get::<Building>(e).map(|b| b.block) else {
+                return false;
+            };
+            let capacity = world
+                .get_resource::<BlockTable>()
+                .and_then(|table| table.get(block))
+                .and_then(|inst| {
+                    inst.def.consumes.iter().find_map(|c| match &c.consume {
+                        crate::content::registries::blocks::Consume::Power { buffered, .. } => {
+                            Some(*buffered)
+                        }
+                        _ => None,
+                    })
+                })
+                .unwrap_or(0.0);
+            if capacity <= 0.0 {
+                // Non-buffered consumer: the set is ignored (still "handled").
+                return true;
+            }
             if let Some(mut p) = world.get_mut::<PowerModule>(e) {
-                p.stored = v as f32;
+                p.status = (v as f32 / capacity).clamp(0.0, 1.0);
                 return true;
             }
             false
@@ -550,15 +742,29 @@ fn set_prop_unit_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
             false
         }
         LAccess::X => {
+            // `unconv(x)`: tiles -> world px.
             if let Some(mut p) = world.get_mut::<Pos>(e) {
-                p.x = v as f32;
+                p.x = (v * 8.0) as f32;
                 return true;
             }
             false
         }
         LAccess::Y => {
             if let Some(mut p) = world.get_mut::<Pos>(e) {
-                p.y = v as f32;
+                p.y = (v * 8.0) as f32;
+                return true;
+            }
+            false
+        }
+        LAccess::VelocityX | LAccess::VelocityY => {
+            // `v * 8 / 60`: tiles/sec -> world px/tick.
+            if let Some(mut vel) = world.get_mut::<crate::entities::comp::Vel>(e) {
+                let value = (v * 8.0 / 60.0) as f32;
+                if a == LAccess::VelocityX {
+                    vel.x = value;
+                } else {
+                    vel.y = value;
+                }
                 return true;
             }
             false
@@ -570,7 +776,22 @@ fn set_prop_unit_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
             }
             false
         }
-        LAccess::VelocityX | LAccess::VelocityY | LAccess::Speed | LAccess::Armor => true,
+        LAccess::Shield => {
+            if let Some(mut shield) = world.get_mut::<crate::entities::comp::unit::ShieldComp>(e) {
+                shield.shield = (v as f32).max(0.0);
+                return true;
+            }
+            false
+        }
+        LAccess::Armor => {
+            if let Some(mut status) = world.get_mut::<crate::entities::comp::unit::StatusComp>(e) {
+                status.armor_override = (v as f32).max(0.0);
+                return true;
+            }
+            false
+        }
+        // `speed` (status speed) and `flag` remain unwired (T7 summary rows).
+        LAccess::Speed => true,
         _ => false,
     }
 }
@@ -646,31 +867,104 @@ pub fn set_prop_content(
 /// `Controllable.control` dispatch; returns whether the accessor was applied.
 ///
 /// `enabled` and object `config` target buildings; unit control is handled by
-/// the VM's `ucontrol` path (`logic/executor/unit_control.rs`).
-pub fn control(world: &mut World, target: &LogicObject, a: LAccess, params: &[&LVar]) -> bool {
+/// the VM's `ucontrol` path (`logic/executor/unit_control.rs`). `exec_build`/
+/// `exec_privileged` implement `ControlI`'s link gate
+/// (`LExecutor.java:558-594`).
+pub fn control(
+    world: &mut World,
+    target: &LogicObject,
+    a: LAccess,
+    params: &[&LVar],
+    exec_build: Option<Entity>,
+    exec_privileged: bool,
+) -> bool {
     let LogicObject::Building(e) = target else {
         return false;
     };
     let e = *e;
+    // `ControlI.run`: a building is only controllable by its own processor
+    // (valid link) unless the executor is privileged.
+    let allowed = exec_privileged
+        || exec_build.is_some_and(|build| {
+            let build_privileged = crate::logic::blocks::privileged_of(world, build);
+            crate::logic::blocks::logic_block::valid_link(world, build, build_privileged, Some(e))
+        });
+    if !allowed {
+        return false;
+    }
     match a {
         LAccess::Enabled => {
             let enabled = params.first().map(|p| p.as_bool()).unwrap_or(false);
-            if enabled {
-                if let Some(mut b) = world.get_mut::<Building>(e) {
+            if let Some(mut b) = world.get_mut::<Building>(e) {
+                if enabled {
+                    // `b.noSleep()`; the port has no sleep state to clear.
                     b.enabled = true;
-                    b.last_disabler = None;
-                    return true;
+                } else {
+                    // `b.lastDisabler = exec.build` (`BuildingComp.control`).
+                    b.enabled = false;
+                    b.last_disabler = exec_build;
                 }
-            } else if let Some(mut b) = world.get_mut::<Building>(e) {
-                b.enabled = false;
-                b.last_disabler = None;
                 return true;
             }
             false
         }
-        LAccess::Config => true,
+        LAccess::Config => {
+            // `config(p1)`: `block.logicConfigurable && !(p1 instanceof
+            // LogicBuild)` -> `configured(null, p1)`.
+            let Some(value) = params.first().and_then(|p| p.value_obj()).cloned() else {
+                // Numeric/absent config values are accepted as a controlled
+                // no-op (Java only routes objects here).
+                return true;
+            };
+            if is_logic_processor(world, e) {
+                return false;
+            }
+            let Some(block) = world.get::<Building>(e).map(|b| b.block) else {
+                return false;
+            };
+            let Some(inst) = world
+                .get_resource::<BlockTable>()
+                .and_then(|table| table.get(block))
+                .cloned()
+            else {
+                return false;
+            };
+            // `Block.logicConfigurable`: any `UnlockableContent`-typed config.
+            let configurable = inst.behavior.config_kinds().iter().any(|kind| {
+                matches!(
+                    kind,
+                    ConfigKind::Item
+                        | ConfigKind::Liquid
+                        | ConfigKind::Block
+                        | ConfigKind::Unit
+                        | ConfigKind::Content
+                )
+            });
+            if !configurable {
+                return false;
+            }
+            let Some(value) = content_config_value(&value) else {
+                return false;
+            };
+            inst.behavior.configured(world, e, None, value);
+            true
+        }
         _ => false,
     }
+}
+
+/// Maps a content logic object to the `ConfigValue` a build would configure.
+fn content_config_value(obj: &LogicObject) -> Option<ConfigValue> {
+    let LogicObject::Content(c) = obj else {
+        return None;
+    };
+    Some(match c.type_ {
+        ContentType::Item => ConfigValue::Item(ItemId::new(c.id)),
+        ContentType::Liquid => ConfigValue::Liquid(LiquidId::new(c.id)),
+        ContentType::Block => ConfigValue::Block(BlockId::new(c.id)),
+        ContentType::Unit => ConfigValue::Unit(UnitTypeId::new(c.id)),
+        other => ConfigValue::Content(other, c.id),
+    })
 }
 
 /// Reads the building at a logic link/name (`optionalLink`).
@@ -726,14 +1020,17 @@ mod tests {
             Sensed::Num(0.0)
         );
 
-        // `control enabled switch1 0` clears the enabled flag.
+        // `control enabled switch1 0` clears the enabled flag; the switch has no
+        // processor link, so the gate is bypassed with `privileged = true`.
         let mut off = LVar::new("p");
         off.set_num(0.0);
         assert!(control(
             &mut harness.world,
             &target,
             LAccess::Enabled,
-            &[&off]
+            &[&off],
+            None,
+            true,
         ));
         assert_eq!(
             sense(&harness.world, &target, LAccess::Enabled),
@@ -751,6 +1048,59 @@ mod tests {
         assert_eq!(
             sense(&harness.world, &target, LAccess::Health),
             Sensed::Num(health)
+        );
+    }
+
+    #[test]
+    fn control_requires_link_or_privilege() {
+        use crate::world::harness::BuildHarness;
+        // `ControlI.run`: `exec.privileged || exec.build.validLink(b)`; a
+        // processor far outside its own range cannot control the switch.
+        let mut harness = BuildHarness::new(16, 16, 1);
+        let switch = harness.content().block_id("switch").expect("switch");
+        let processor = harness
+            .content()
+            .block_id("micro-processor")
+            .expect("micro-processor");
+        assert!(harness.place(0, 0, processor, 0, true));
+        assert!(harness.place(15, 15, switch, 0, true));
+        let pe = harness.build_at(0, 0).expect("processor");
+        let se = harness.build_at(15, 15).expect("switch");
+        let target = LogicObject::Building(se);
+        let mut off = LVar::new("p");
+        off.set_num(0.0);
+        assert!(
+            !control(
+                &mut harness.world,
+                &target,
+                LAccess::Enabled,
+                &[&off],
+                Some(pe),
+                false,
+            ),
+            "out-of-range link is refused"
+        );
+        assert_eq!(
+            sense(&harness.world, &target, LAccess::Enabled),
+            Sensed::Num(1.0),
+            "switch stays enabled"
+        );
+        // The disabling processor is remembered (`b.lastDisabler = exec.build`)
+        // when the gate passes.
+        assert!(control(
+            &mut harness.world,
+            &target,
+            LAccess::Enabled,
+            &[&off],
+            Some(pe),
+            true,
+        ));
+        assert_eq!(
+            harness
+                .world
+                .get::<Building>(se)
+                .and_then(|b| b.last_disabler),
+            Some(pe)
         );
     }
 }

@@ -114,12 +114,14 @@ pub enum Instruction {
         /// Format string.
         value: VarRef,
     },
-    /// `LookupI` (always null without `logicids.dat`).
+    /// `LookupI` (`GlobalVars.lookupContent` via `logicids.dat`).
     Lookup {
         /// Result.
         result: VarRef,
         /// Logic id.
         id: VarRef,
+        /// `writableLookableContent` type.
+        type_: crate::content::ContentType,
     },
     /// `PackColorI`.
     PackColor {
@@ -578,6 +580,11 @@ pub enum Instruction {
         /// Reliable toggle.
         reliable: VarRef,
     },
+    /// `SetRateI` (`setrate`; writes the owning build's `ipt`).
+    SetRate {
+        /// Instructions-per-tick amount.
+        amount: VarRef,
+    },
 }
 
 impl Instruction {
@@ -616,7 +623,7 @@ impl Instruction {
             | Instruction::Print { value }
             | Instruction::PrintChar { value }
             | Instruction::Format { value } => f(value),
-            Instruction::Lookup { result, id } => {
+            Instruction::Lookup { result, id, .. } => {
                 f(result);
                 f(id);
             }
@@ -960,6 +967,7 @@ impl Instruction {
                 f(value);
                 f(reliable);
             }
+            Instruction::SetRate { amount } => f(amount),
         }
     }
 
@@ -996,7 +1004,17 @@ impl Instruction {
                 }
                 let a = exec.arena.get(a.id()).clone();
                 let b = exec.arena.get(b.id()).clone();
-                let value = op.eval(&a, &b, &mut exec.rng).num();
+                // `OpI.run` special-cases `strictEqual` (`Structs.eq` semantics);
+                // `LogicOp::eval` leaves it at 0.
+                let value = if *op == LogicOp::StrictEqual {
+                    if ConditionOp::StrictEqual.test(&a, &b) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                } else {
+                    op.eval(&a, &b, &mut exec.rng).num()
+                };
                 exec.set_num(dest.id(), value);
             }
             Instruction::Select {
@@ -1033,10 +1051,8 @@ impl Instruction {
             Instruction::Wait { value, cur_time } => {
                 let wait_for = exec.arena.get(value.id()).num();
                 if wait_for <= 0.0 {
-                    // Just yield without executing the wait again.
-                    let counter = exec.counter;
-                    let cur = exec.arena.get(counter).num;
-                    exec.set_num(counter, cur - 1.0);
+                    // Just yield without executing the wait again (Java `WaitI`:
+                    // no counter decrement, so the next tick continues).
                     exec.yielded = true;
                     *cur_time = 0.0;
                 } else if *cur_time >= wait_for {
@@ -1053,7 +1069,8 @@ impl Instruction {
             }
             Instruction::Print { value } => {
                 let value = exec.arena.get(value.id()).clone();
-                exec.append_print(&value);
+                let text = format_value_world(world, &value);
+                push_text(&mut exec.text_buffer, &text);
             }
             Instruction::PrintChar { value } => {
                 let value = exec.arena.get(value.id()).clone();
@@ -1061,12 +1078,20 @@ impl Instruction {
             }
             Instruction::Format { value } => {
                 let value = exec.arena.get(value.id()).clone();
-                exec.append_format(&value);
+                let names = |obj: &LogicObject| crate::logic::access::name_of(world, obj);
+                exec.append_format(&value, &names);
             }
-            Instruction::Lookup { result, .. } => {
+            Instruction::Lookup { result, id, type_ } => {
+                // `LookupI.run`: `dest.setobj(lookupContent(type, from.numi()))`;
+                // the live resource wins over the load-time globals copy.
+                let logic_id = exec.arena.get(id.id()).numi();
+                let value = world
+                    .get_resource::<crate::logic::globals::GlobalVars>()
+                    .map(|globals| globals.lookup_content(*type_, logic_id))
+                    .unwrap_or_else(|| exec.globals.lookup_content(*type_, logic_id));
                 let result = result.id();
                 if !exec.is_constant(result) {
-                    exec.arena.get_mut(result).set_obj(None);
+                    exec.arena.get_mut(result).set_obj(value);
                 }
             }
             Instruction::PackColor { result, r, g, b, a } => {
@@ -1150,14 +1175,51 @@ impl Instruction {
             Instruction::Sensor { to, from, type_ } => {
                 let target = exec.arena.get(from.id()).value_obj().cloned();
                 let selector = exec.arena.get(type_.id()).clone();
-                let sensed = match (&target, selector.value_obj()) {
-                    (Some(t), Some(LogicObject::Enum(name))) => LAccess::from_name(name)
-                        .map(|a| crate::logic::access::sense(world, t, a))
-                        .unwrap_or(crate::logic::access::Sensed::Obj(None)),
-                    (Some(t), Some(LogicObject::Content(c))) => crate::logic::access::Sensed::Num(
-                        crate::logic::access::sense_content(world, t, *c),
-                    ),
-                    _ => crate::logic::access::Sensed::Obj(None),
+                let selector_obj = selector.value_obj().cloned();
+                let privileged = exec.privileged;
+                // `SenseI.run`: a null target still answers `@dead` with 1.
+                let sensed = if target.is_none()
+                    && matches!(
+                        &selector_obj,
+                        Some(LogicObject::Enum(name)) if *name == LAccess::Dead.name()
+                    ) {
+                    crate::logic::access::Sensed::Num(1.0)
+                } else if let Some(
+                    t @ (LogicObject::Building(_) | LogicObject::Unit(_) | LogicObject::Content(_)),
+                ) = &target
+                {
+                    match &selector_obj {
+                        Some(LogicObject::Content(c)) => crate::logic::access::Sensed::Num(
+                            crate::logic::access::sense_content(world, t, *c),
+                        ),
+                        Some(LogicObject::Enum(name)) => match LAccess::from_name(name) {
+                            // Privileged accessors are hidden from non-privileged
+                            // executors (`SenseI.run`).
+                            Some(a) if !a.privileged() || privileged => {
+                                crate::logic::access::sense(world, t, a)
+                            }
+                            _ => crate::logic::access::Sensed::Obj(None),
+                        },
+                        _ => crate::logic::access::Sensed::Obj(None),
+                    }
+                } else {
+                    // Non-`Senseable` targets: a string/`Seq` answers `@size`.
+                    let name = match &selector_obj {
+                        Some(LogicObject::Enum(name)) => Some(*name),
+                        _ => None,
+                    };
+                    let is_size = name == Some(LAccess::Size.name())
+                        || name == Some(LAccess::BufferSize.name());
+                    match (&target, is_size) {
+                        (Some(LogicObject::Str(s)), true) => {
+                            crate::logic::access::Sensed::Num(s.chars().count() as f64)
+                        }
+                        (Some(LogicObject::Query(id)), true) => crate::logic::access::Sensed::Num(
+                            exec.queries.get(*id as usize).map(Vec::len).unwrap_or(0) as f64,
+                        ),
+                        // Unrecognized or unhandled property.
+                        _ => crate::logic::access::Sensed::Obj(None),
+                    }
                 };
                 let to = to.id();
                 if exec.is_constant(to) {
@@ -1185,7 +1247,14 @@ impl Instruction {
                     exec.arena.get(p4.id()).clone(),
                 ];
                 let refs: Vec<&LVar> = params.iter().collect();
-                crate::logic::access::control(world, &target_obj, *type_, &refs);
+                crate::logic::access::control(
+                    world,
+                    &target_obj,
+                    *type_,
+                    &refs,
+                    exec.build,
+                    exec.privileged,
+                );
             }
             Instruction::SetProp { type_, of, value } => {
                 let target = exec.arena.get(of.id()).value_obj().cloned();
@@ -1529,6 +1598,21 @@ impl Instruction {
             } => {
                 crate::logic::world::run_client_data(exec, world, *channel, *value, *reliable);
             }
+            Instruction::SetRate { amount } => {
+                // `SetRateI.run`: clamp(amount.numi(), 1, max) and write it to
+                // the owning build's `ipt` (applied by `update_tile`).
+                if exec.build.is_none() {
+                    return;
+                }
+                let clamped = exec
+                    .arena
+                    .get(amount.id())
+                    .numi()
+                    .clamp(1, exec.ipt_max.max(1));
+                let ipt = exec.ipt;
+                exec.arena.get_mut(ipt).num = clamped as f64;
+                exec.pending_ipt = Some(clamped);
+            }
         }
     }
 }
@@ -1635,6 +1719,11 @@ pub struct Executor {
     pub build: Option<Entity>,
     /// Owning build's instructions-per-tick (`build.ipt`).
     pub build_ipt: i32,
+    /// Owning build's `setrate` clamp ceiling (`LogicBlock.maxInstructionsPerTick`
+    /// for privileged builds, `instructionsPerTick` otherwise).
+    pub ipt_max: i32,
+    /// `setrate` result to apply to [`LogicBlockState::ipt`] after the run.
+    pub pending_ipt: Option<i32>,
     /// Team of the owning build (`LogicBuild.team`).
     pub team: u8,
     /// Links (valid only), in link declaration order.
@@ -1678,6 +1767,8 @@ impl Executor {
             rng: ArcRand::new(0),
             build: None,
             build_ipt: 0,
+            ipt_max: 0,
+            pending_ipt: None,
             team: 0,
             links: Vec::new(),
             link_ids: IndexSet::new(),
@@ -1892,32 +1983,43 @@ impl Executor {
         *accumulator += edelta * ipt;
     }
 
-    fn append_print(&mut self, value: &LVar) {
-        let text = format_value(value);
-        push_text(&mut self.text_buffer, &text);
-    }
-
     fn append_print_char(&mut self, value: &LVar) {
-        let code = value.numi();
+        // `PrintCharI.run`: content appends `(char)cont.emojiChar()`; the port
+        // has no emoji table, so the content branch appends nothing (deviation).
         let text = if value.is_obj {
-            match value.value_obj() {
-                Some(LogicObject::Content(content)) => format!("content:{}", content.id),
-                _ => String::new(),
-            }
-        } else if let Some(ch) = char::from_u32(code as u32) {
-            ch.to_string()
-        } else {
             String::new()
+        } else {
+            // Java casts `(char)Math.floor(value.numval)`.
+            match char::from_u32(value.num().floor() as u32) {
+                Some(ch) => ch.to_string(),
+                None => String::new(),
+            }
         };
         push_text(&mut self.text_buffer, &text);
     }
 
-    fn append_format(&mut self, value: &LVar) {
-        let text = format_value(value);
-        // Replace the lowest `{N}` placeholder with the current buffer; upstream
-        // `FormatI` substitutes into the text buffer.
-        let replacement = self.text_buffer.clone();
-        self.text_buffer = substitute_format(&text, &replacement);
+    /// `FormatI.run`: replace the **lowest** `{N}` placeholder of the text
+    /// buffer with the value (integer rendering when within 1e-5).
+    fn append_format(&mut self, value: &LVar, names: &dyn Fn(&LogicObject) -> Option<String>) {
+        let buf: Vec<char> = self.text_buffer.chars().collect();
+        let (mut idx, mut best) = (None, 10u32);
+        for i in 0..buf.len() {
+            if buf[i] == '{'
+                && buf.len() - i > 2
+                && let Some(d) = buf[i + 1].to_digit(10)
+                && buf[i + 2] == '}'
+                && d < best
+            {
+                best = d;
+                idx = Some(i);
+            }
+        }
+        let Some(i) = idx else { return };
+        let s = format_value_with(value, names);
+        let mut out: String = buf[..i].iter().collect();
+        out.push_str(&s);
+        out.extend(buf[i + 3..].iter());
+        self.text_buffer = out;
         truncate_text(&mut self.text_buffer);
     }
 
@@ -1930,8 +2032,14 @@ impl Executor {
     }
 }
 
-/// `PrintI` value → string (`null`, string, content name, `[object]`).
+/// `PrintI.toString` without world resolution (`content:<id>` fallback).
 pub fn format_value(value: &LVar) -> String {
+    format_value_with(value, &|_| None)
+}
+
+/// `PrintI.toString` with a name resolver for world-resolved objects
+/// (contents, buildings, units, teams).
+pub fn format_value_with(value: &LVar, names: &dyn Fn(&LogicObject) -> Option<String>) -> String {
     if !value.is_obj {
         let n = value.num();
         // integer rendering when within 1e-5 of an integer
@@ -1944,11 +2052,22 @@ pub fn format_value(value: &LVar) -> String {
     match &value.obj {
         None => "null".to_owned(),
         Some(LogicObject::Str(s)) => s.clone(),
-        Some(LogicObject::Content(c)) => format!("content:{}", c.id),
         Some(LogicObject::Enum(name)) => (*name).to_owned(),
-        Some(LogicObject::Team(id)) => format!("team:{id}"),
-        Some(_) => "[object]".to_owned(),
+        Some(LogicObject::Team(id)) => crate::game::team::Team::get(*id).name.clone(),
+        Some(obj) => names(obj).unwrap_or_else(|| {
+            // Java `PrintI.toString`: non-mappable `Content` prints this.
+            if matches!(obj, LogicObject::Content(_)) {
+                "[content]".to_owned()
+            } else {
+                "[object]".to_owned()
+            }
+        }),
     }
+}
+
+/// `PrintI.toString` against the live world (`print`/`format` instructions).
+pub fn format_value_world(world: &World, value: &LVar) -> String {
+    format_value_with(value, &|obj| crate::logic::access::name_of(world, obj))
 }
 
 /// Appends text honoring the 400-char cap (`maxTextBuffer`).
@@ -1962,19 +2081,6 @@ fn truncate_text(buffer: &mut String) {
         let truncated: String = buffer.chars().take(MAX_TEXT_BUFFER).collect();
         *buffer = truncated;
     }
-}
-
-/// `FormatI`: replaces the lowest `{N}` placeholder with `replacement`.
-fn substitute_format(text: &str, replacement: &str) -> String {
-    let mut result = text.to_owned();
-    for n in 0..10 {
-        let token = format!("{{{n}}}");
-        if let Some(pos) = result.find(&token) {
-            result.replace_range(pos..pos + token.len(), replacement);
-            break;
-        }
-    }
-    result
 }
 
 /// Builds one instruction from a statement (`LStatement.build`).
@@ -2052,10 +2158,14 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
         Statement::Format { value } => Instruction::Format {
             value: asm.var(value),
         },
-        Statement::Lookup { result, id, .. } => {
+        Statement::Lookup { result, id, type_ } => {
             let result = asm.var(result);
             let id = asm.var(id);
-            Instruction::Lookup { result, id }
+            Instruction::Lookup {
+                result,
+                id,
+                type_: *type_,
+            }
         }
         Statement::PackColor { result, r, g, b, a } => {
             let result = asm.var(result);
@@ -2482,6 +2592,9 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
         Statement::LocalePrint { value } => Instruction::LocalePrint {
             name: asm.var(value),
         },
+        Statement::SetRate { amount } => Instruction::SetRate {
+            amount: asm.var(amount),
+        },
         Statement::Sync { variable } => Instruction::Sync {
             variable: asm.var(variable),
         },
@@ -2494,9 +2607,6 @@ pub fn build_statement(statement: &Statement, asm: &mut Assembler) -> Option<Ins
             value: asm.var(value),
             reliable: asm.var(reliable),
         },
-        // Remaining unregistered/unbuilt statements compile to a no-op so
-        // program structure (indices/jumps) is preserved.
-        _ => Instruction::Noop,
     })
 }
 
@@ -2567,5 +2677,43 @@ mod tests {
         let mut e = exec("print 5\nprint \"x\"\n");
         run(&mut e, 10);
         assert_eq!(e.text_buffer, "5x");
+    }
+
+    #[test]
+    fn wait_zero_yields_once() {
+        // `wait 0` yields once without re-running (Java `WaitI`); the program
+        // continues on the next tick (the old port decremented @counter and
+        // hung forever).
+        let mut e = exec("wait 0\nset x 1\nstop\n");
+        let mut world = World::new();
+        let mut acc = 0.0f32;
+        e.run_budget(&mut world, &mut acc, 1.0, 8.0);
+        assert_eq!(var_num(&e, "x"), 0.0);
+        e.run_budget(&mut world, &mut acc, 1.0, 8.0);
+        assert_eq!(var_num(&e, "x"), 0.0, "the wait yields this tick");
+        e.run_budget(&mut world, &mut acc, 1.0, 8.0);
+        assert_eq!(var_num(&e, "x"), 1.0);
+        assert!(e.stopped);
+    }
+
+    #[test]
+    fn strict_equal_and_round_match_java() {
+        let mut e = exec(
+            "op strictEqual r 1 1\nop strictEqual s null 0\nop equal e null 0\nop round a -2.5\nop round b 2.5\n",
+        );
+        run(&mut e, 20);
+        assert_eq!(var_num(&e, "r"), 1.0);
+        assert_eq!(var_num(&e, "s"), 0.0);
+        assert_eq!(var_num(&e, "e"), 1.0);
+        // Java `Math.round` = floor(x + 0.5) (half toward +inf, not away from 0).
+        assert_eq!(var_num(&e, "a"), -2.0);
+        assert_eq!(var_num(&e, "b"), 3.0);
+    }
+
+    #[test]
+    fn format_uses_lowest_placeholder() {
+        let mut e = exec("print \"a {1} b {0}\"\nformat 7\nformat \"x\"\n");
+        run(&mut e, 10);
+        assert_eq!(e.text_buffer, "a x b 7");
     }
 }

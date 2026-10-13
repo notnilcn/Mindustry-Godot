@@ -22,7 +22,7 @@ use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::io::entity::{EntityReader, EntityWriter};
 use crate::logic::assembler::Assembler;
 use crate::logic::executor::{Executor, Instruction};
-use crate::logic::value::{LogicObject, VarRef, conv};
+use crate::logic::value::{LogicObject, VarRef};
 use crate::world::behavior::BuildingBehavior;
 use crate::world::config::ConfigValue;
 use crate::world::update::edelta;
@@ -194,14 +194,22 @@ impl LogicBlockState {
                 .set_const(Some(LogicObject::Building(e)));
         }
         if let Some(building) = world.get::<Building>(e) {
-            let tx = building.tile.x() as f32;
-            let ty = building.tile.y() as f32;
-            asm.put_num_const("@thisx", conv(tx) as f64);
-            asm.put_num_const("@thisy", conv(ty) as f64);
+            let tx = building.tile.x();
+            let ty = building.tile.y();
+            // Java `LogicBuild.updateCode`: `asm.putConst("@thisx", World.conv(x))`
+            // with the building centre `x = tile.x * tilesize + block.offset`,
+            // `offset = ((size + 1) % 2) * tilesize / 2` (Block.java:774).
+            let size = block_size_of(world, e).unwrap_or(1);
+            let offset = ((size + 1) % 2) as f64 * 4.0;
+            asm.put_num_const("@thisx", tx as f64 + offset / 8.0);
+            asm.put_num_const("@thisy", ty as f64 + offset / 8.0);
         }
 
         self.executor.build = Some(e);
         self.executor.build_ipt = ipt;
+        // `SetRateI` clamp ceiling: `maxInstructionsPerTick` for privileged
+        // world processors, `instructionsPerTick` otherwise (`LExecutor.java:1218`).
+        self.executor.ipt_max = if privileged { def.max_ipt } else { def.ipt };
         self.executor.load(asm);
 
         // `@unit` object survives a code reload (`executor.unit.objval = oldUnit`).
@@ -453,8 +461,16 @@ pub fn valid_link(world: &World, this: Entity, privileged: bool, other: Option<E
         return false;
     }
     if privileged {
-        // `!(privileged && !worldProcessorPlayerLink && other.team == defaultTeam)`;
-        // `worldProcessorPlayerLink` defaults to true (plan 12).
+        // `!(privileged && !worldProcessorPlayerLink && other.team == defaultTeam)`
+        // (LogicBlock.java:727-729): a world processor cannot link the default
+        // team's buildings when `worldProcessorPlayerLink` is off.
+        let rules = super::rules_ref(world);
+        if !rules.world_processor_player_link() {
+            let other_team = world.get::<TeamComp>(other).map(|t| t.team);
+            if other_team == Some(rules.default_team().0) {
+                return false;
+            }
+        }
         return true;
     }
     if privileged_of(world, other) {
@@ -606,10 +622,7 @@ impl BuildingBehavior for LogicBlockBehavior {
         }
 
         // `state.rules.disableWorldProcessors && privileged` gate (plan 12).
-        let disabled_world_processors = world
-            .get_resource::<super::LogicRulesRes>()
-            .map(|rules| rules.0.disable_world_processors())
-            .unwrap_or(false);
+        let disabled_world_processors = super::rules_ref(world).disable_world_processors();
         if disabled_world_processors && def.privileged {
             world.entity_mut(e).insert(state);
             return;
@@ -622,6 +635,10 @@ impl BuildingBehavior for LogicBlockBehavior {
             state
                 .executor
                 .run_budget(world, &mut state.accumulator, step, ipt);
+            // `setrate` writes the owning build's `ipt` (`SetRateI.run`).
+            if let Some(value) = state.executor.pending_ipt.take() {
+                state.ipt = value;
+            }
         }
 
         world.entity_mut(e).insert(state);
