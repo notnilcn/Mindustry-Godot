@@ -1908,11 +1908,36 @@ impl MindCampaign {
             return GString::from("{}");
         };
         let schematics = self.load_schematics(registry);
+        // The `findLauncher` actual launch sector: the played sector, cleared
+        // after game over (`PlanetDialog`: `gameOver ? null : state.getSector()`).
+        let played = if self.session.game_over {
+            None
+        } else {
+            self.session.sector
+        };
+        // `loadout_of` reads the preset map header for the disallowed-loadout
+        // branch, filtered to the destination planet's items.
+        let loadout_of = |sector_id: u16| -> Vec<(String, i32)> {
+            let Some(sector) = campaign.sector(active, sector_id) else {
+                return Vec::new();
+            };
+            let Some(preset_id) = sector.preset else {
+                return Vec::new();
+            };
+            Self::preset_launch_loadout(registry, active, preset_id)
+                .into_iter()
+                .collect()
+        };
         let mut views = mind_core::ui::campaign::CampaignViews::from_campaign(
             campaign,
             registry,
             &schematics,
             active,
+            played,
+            // No cheap core-size seam for the being-played `allowNumberedLaunch`
+            // clause (G05 T3 deviation; `0` = unknown).
+            0,
+            &loadout_of,
         );
         // The map-registry dialogs read `maps` from the same endpoint; keep the
         // built-in rows the fixture path feeds them.
