@@ -380,6 +380,96 @@ impl Sim {
             .unwrap_or(TeamId::SHARDED.0)
     }
 
+    /// `Build.validPlace` for an explicit team against the live block runtime
+    /// (`SimRuntime::can_place`).
+    ///
+    /// `false` when the runtime is absent or the placement is invalid. The API
+    /// placement seams (`place_block`, `apply_sim_command_json`) use it to
+    /// report rejections honestly instead of the old `Ok`-means-placed
+    /// behavior (T7, PAR-0165).
+    pub fn can_place_for_team(&self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
+        self.block_runtime.as_ref().is_some_and(|runtime| {
+            runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rot, team)
+        })
+    }
+
+    /// T2: applies a `PowerNode` link config (`PowerNode.java:419-441`,
+    /// `config(Integer.class)` = toggle link, `config(Point2[].class)` = replace
+    /// all links) through the `PowerGrids` arena.
+    ///
+    /// Returns `false` when `entity` is not a power node or the value is not a
+    /// link config, so the caller falls through to the normal behavior config
+    /// path.
+    fn configure_power_node(
+        &mut self,
+        entity: Entity,
+        value: &crate::world::config::ConfigValue,
+    ) -> bool {
+        use crate::world::blocks::power::nodes;
+        use crate::world::config::ConfigValue as V;
+        if self
+            .ecs
+            .0
+            .get::<crate::world::blocks::power::PowerNodeConfig>(entity)
+            .is_none()
+        {
+            return false;
+        }
+        match value {
+            V::Number(number) => {
+                let packed = *number as i32;
+                self.with_power_graphs(|graphs, world, grid| {
+                    nodes::configure_link(graphs, world, grid, entity, packed);
+                });
+                true
+            }
+            V::Point2(dx, dy) => {
+                let Some(building) = self.ecs.0.get::<crate::entities::comp::Building>(entity)
+                else {
+                    return false;
+                };
+                let packed = TilePos::new(
+                    building.tile.x() + *dx as i16,
+                    building.tile.y() + *dy as i16,
+                )
+                .pack();
+                self.with_power_graphs(|graphs, world, grid| {
+                    nodes::configure_link(graphs, world, grid, entity, packed);
+                });
+                true
+            }
+            V::Point2Array(points) => {
+                let packed: Vec<i32> = points.iter().copied().collect();
+                self.with_power_graphs(|graphs, world, grid| {
+                    nodes::configure_links(graphs, world, grid, entity, &packed);
+                });
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Takes `PowerGrids` out of the ECS for `f` and always re-inserts it (the
+    /// `SimRuntime::merge_power_graph` pattern).
+    fn with_power_graphs(
+        &mut self,
+        f: impl FnOnce(
+            &mut crate::world::blocks::power::PowerGrids,
+            &mut bevy_ecs::world::World,
+            &WorldGrid,
+        ),
+    ) {
+        let Some(mut graphs) = self
+            .ecs
+            .0
+            .remove_resource::<crate::world::blocks::power::PowerGrids>()
+        else {
+            return;
+        };
+        f(&mut graphs, &mut self.ecs.0, &self.grid);
+        self.ecs.0.insert_resource(graphs);
+    }
+
     /// Applies a wire `UnitCommand` to **live** units (`id` = `EntitySeq`).
     ///
     /// Returns the number of units ordered; `0` routes the command to the
@@ -1079,6 +1169,13 @@ impl Sim {
                     Some(runtime) => runtime.resolve_config(value)?,
                     None => return Err(CommandError::Unsupported("configure")),
                 };
+                // T2: power nodes take link configs (`PowerNode.java`
+                // `config(Integer.class)` / `config(Point2[].class)`) through the
+                // `PowerGrids` arena, not the behavior config path.
+                if self.configure_power_node(entity, &world_value) {
+                    self.commands_applied = self.commands_applied.wrapping_add(1);
+                    return Ok(());
+                }
                 if !crate::world::config::configure(&mut self.ecs.0, entity, None, world_value) {
                     return Err(CommandError::InvalidTarget);
                 }

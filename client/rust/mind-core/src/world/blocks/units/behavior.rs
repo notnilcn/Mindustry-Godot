@@ -818,9 +818,18 @@ impl BuildingBehavior for RepairTurretBehavior {
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
-        if let Some(mut turret) = world.get_mut::<RepairTurret>(e) {
-            let _ = turret.update_target();
-        }
+        let Some(mut turret) = world.entity_mut(e).take::<RepairTurret>() else {
+            return;
+        };
+        crate::world::blocks::units::update_repair_turret(world, e, &mut turret);
+        world.entity_mut(e).insert(turret);
+    }
+
+    /// `RepairTurret.shouldConsume`: `target != null && enabled`.
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<RepairTurret>(e)
+            .is_some_and(|turret| turret.target.is_some())
     }
 }
 
@@ -917,9 +926,25 @@ pub fn register(
             BlockKind::RepairTower => Some(Arc::new(RepairTowerBehavior {
                 tower: RepairTower::default(),
             })),
-            BlockKind::RepairTurret => Some(Arc::new(RepairTurretBehavior {
-                turret: RepairTurret::default(),
-            })),
+            // `Blocks.java:6420-6443`: repair-point repairSpeed 0.45 /
+            // repairRadius 60 (no coolant); repair-turret size 2, repairSpeed 3,
+            // repairRadius 145, acceptCoolant with coolantMultiplier 1.6 (T12).
+            BlockKind::RepairTurret => {
+                let (repair_speed, repair_radius, accept_coolant, coolant_multiplier) =
+                    match def.name.as_str() {
+                        "repair-turret" => (3.0, 145.0, true, 1.6),
+                        _ => (0.45, 60.0, false, 0.0),
+                    };
+                Some(Arc::new(RepairTurretBehavior {
+                    turret: RepairTurret {
+                        repair_speed,
+                        repair_radius,
+                        accept_coolant,
+                        coolant_multiplier,
+                        ..RepairTurret::default()
+                    },
+                }))
+            }
             BlockKind::UnitCargoLoader => {
                 // `Blocks.java unit-cargo-loader` spawns `UnitTypes.manifold`.
                 let unit_type = content.unit_id("manifold").unwrap_or(UnitTypeId::new(0));

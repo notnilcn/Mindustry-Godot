@@ -1191,3 +1191,575 @@ fn spawned_unit(sim: &Sim, unit: crate::content::UnitTypeId) -> bool {
             == Some(unit)
     })
 }
+
+/// T1: the mechanical drill accepts the optional water consumer through the
+/// trait default (`BuildingComp.acceptLiquid`,
+/// `BuildingComp.java:873-875`), so a fed drill ramps past warmup 1.0
+/// (`speed = lerp(1, 1.6, optionalEfficiency)`, `Drill.java:301-304`).
+#[test]
+fn drill_accepts_water_boost() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let water = liquid(&sim, "water");
+    let _source = place(&mut sim, "liquid-source", 4, 5);
+    configure(
+        &mut sim,
+        4,
+        5,
+        crate::determinism::ConfigValue::Content("water".to_owned()),
+    );
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, drill, water) > 0.0,
+        "the drill accepted the water from the source"
+    );
+    let building = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .expect("building");
+    assert_eq!(
+        building.optional_efficiency, 1.0,
+        "optional (booster) consumer satisfied"
+    );
+    let warmup = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(drill)
+        .map(|state| state.warmup)
+        .expect("drill state");
+    assert!(warmup > 1.0, "water boost ramps warmup past 1.0: {warmup}");
+}
+
+/// T1: consumers declare items via `consumeItem`; the trait default accepts
+/// exactly those (`BuildingComp.acceptItem`, `BuildingComp.java:869-871`), and
+/// the reactor's cryofluid via `consumeLiquid`.
+#[test]
+fn mender_accepts_silicon_and_reactor_accepts_thorium() {
+    let mut sim = runtime_sim();
+    let mender = place(&mut sim, "mender", 5, 5);
+    let reactor = place(&mut sim, "thorium-reactor", 8, 8);
+    let silicon = item(&sim, "silicon");
+    let copper = item(&sim, "copper");
+    let thorium = item(&sim, "thorium");
+    let cryofluid = liquid(&sim, "cryofluid");
+    let water = liquid(&sim, "water");
+    let world = &mut sim.ecs.0;
+    assert!(
+        transfer::dispatch_accept_item(world, mender, mender, silicon),
+        "mender accepts silicon (consumeItem boost)"
+    );
+    assert!(
+        !transfer::dispatch_accept_item(world, mender, mender, copper),
+        "mender rejects copper"
+    );
+    assert!(
+        transfer::dispatch_accept_item(world, reactor, reactor, thorium),
+        "thorium reactor accepts thorium"
+    );
+    assert!(
+        !transfer::dispatch_accept_item(world, reactor, reactor, copper),
+        "thorium reactor rejects copper"
+    );
+    assert!(
+        crate::world::blocks::liquid::movement::accept_liquid(world, reactor, reactor, cryofluid),
+        "thorium reactor accepts cryofluid"
+    );
+    assert!(
+        !crate::world::blocks::liquid::movement::accept_liquid(world, reactor, reactor, water),
+        "thorium reactor rejects water"
+    );
+}
+
+/// T1: `BuildingComp.canUnload` default (`Block.unloadable`, `Block.java:108`)
+/// lets an unloader pull from a crafter that only produces into its own module.
+///
+/// The receiver must be a non-storage building: Java
+/// `UnloaderBuild.isPossibleItem` requires `canLoad = notStorage && acceptItem`
+/// (`Unloader.java:118`), so a bare container next to the unloader cannot be a
+/// load target (the plan sketch's `container` receiver would fail in Java too);
+/// use a belt, exactly like `unloader_drains_storage_into_a_lane`.
+#[test]
+fn unloader_pulls_from_crafter() {
+    let mut sim = runtime_sim();
+    let press = place(&mut sim, "graphite-press", 5, 5);
+    let graphite = item(&sim, "graphite");
+    {
+        let world = &mut sim.ecs.0;
+        transfer::dispatch_handle_stack(world, press, graphite, 5);
+    }
+    assert_eq!(
+        stored_item(&sim, press, graphite),
+        5,
+        "press holds graphite"
+    );
+    let _unloader = place(&mut sim, "unloader", 7, 5);
+    configure(
+        &mut sim,
+        7,
+        5,
+        crate::determinism::ConfigValue::Content("graphite".to_owned()),
+    );
+    let belt = place(&mut sim, "conveyor", 8, 5);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, press, graphite) < 5,
+        "unloader pulled graphite from the press (Java canUnload = block.unloadable)"
+    );
+    assert!(
+        stored_item(&sim, belt, graphite) >= 1,
+        "the receiving belt holds the pulled graphite"
+    );
+}
+
+/// T1: Erekir heat crafters (which delegate to `CrafterBehavior`) accept their
+/// consumers' inputs (`HeatCrafterBuild` extends `GenericCrafterBuild`).
+#[test]
+fn heat_crafter_accepts_inputs() {
+    let mut sim = runtime_sim();
+    let crucible = place(&mut sim, "carbide-crucible", 5, 5);
+    let tungsten = item(&sim, "tungsten");
+    let graphite = item(&sim, "graphite");
+    let copper = item(&sim, "copper");
+    let world = &mut sim.ecs.0;
+    assert!(transfer::dispatch_accept_item(
+        world, crucible, crucible, tungsten
+    ));
+    assert!(transfer::dispatch_accept_item(
+        world, crucible, crucible, graphite
+    ));
+    assert!(!transfer::dispatch_accept_item(
+        world, crucible, crucible, copper
+    ));
+}
+
+/// T5: a powered incinerator heats up (`Incinerator.java:30-81`:
+/// `heat = approachDelta(heat, efficiency, 0.04)`), then accepts and destroys
+/// belt items; before `heat > 0.5` it rejects them (`acceptItem`).
+#[test]
+fn incinerator_burns_belt_items() {
+    let mut sim = runtime_sim();
+    let _source = place(&mut sim, "power-source", 4, 5);
+    let incinerator = place(&mut sim, "incinerator", 5, 5);
+    let item_source = place(&mut sim, "item-source", 6, 5);
+    let copper = item(&sim, "copper");
+    configure(
+        &mut sim,
+        6,
+        5,
+        crate::determinism::ConfigValue::Content("copper".to_owned()),
+    );
+    for _ in 0..12 {
+        sim.tick().expect("tick");
+    }
+    let heat = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::IncineratorState>(incinerator)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    assert!(
+        heat < 0.5,
+        "heat still below the acceptance threshold: {heat}"
+    );
+    assert!(
+        !transfer::dispatch_accept_item(&sim.ecs.0, incinerator, item_source, copper),
+        "cold incinerator rejects items"
+    );
+    for _ in 0..18 {
+        sim.tick().expect("tick");
+    }
+    let heat = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::IncineratorState>(incinerator)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    assert_eq!(heat, 1.0, "heat clamped at efficiency after ~25 ticks");
+    assert!(
+        transfer::dispatch_accept_item(&sim.ecs.0, incinerator, item_source, copper),
+        "hot incinerator accepts any item"
+    );
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        emitted(&sim, item_source) > 0,
+        "the item source ran and fed the incinerator"
+    );
+    assert_eq!(
+        stored_item(&sim, incinerator, copper),
+        0,
+        "the incinerator stores nothing"
+    );
+}
+
+/// T5: the item incinerator accepts while powered (`ItemIncinerator.java:36-66`)
+/// and stores nothing; the slag incinerator is its behavior, not a crafter.
+#[test]
+fn item_incinerator_needs_power() {
+    let mut sim = runtime_sim();
+    let slag = place(&mut sim, "slag-incinerator", 5, 5);
+    let copper = item(&sim, "copper");
+    {
+        let world = &mut sim.ecs.0;
+        world
+            .get_mut::<crate::entities::comp::Building>(slag)
+            .expect("building")
+            .efficiency = 0.0;
+        assert!(!transfer::dispatch_accept_item(world, slag, slag, copper));
+        world
+            .get_mut::<crate::entities::comp::Building>(slag)
+            .expect("building")
+            .efficiency = 1.0;
+        assert!(transfer::dispatch_accept_item(world, slag, slag, copper));
+        transfer::dispatch_handle_item(world, slag, slag, copper);
+    }
+    assert_eq!(stored_item(&sim, slag, copper), 0, "destroyed on intake");
+}
+
+/// T6: the drill period includes the item-hardness term
+/// (`Drill.getDrillTime`, `Drill.java:170-172`): mechanical drill (drillTime
+/// 600, hardnessDrillMultiplier 50, `Blocks.java:2884-2888`) on 4 copper
+/// (hardness 1) tiles -> `(600 + 50*1)/4 = 162.5` ticks per item; the old
+/// code used `delay = drill_time` -> 150 ticks per item.
+#[test]
+fn mechanical_drill_period_includes_hardness() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let _drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    let container = place(&mut sim, "container", 7, 5);
+    for _ in 0..3000 {
+        sim.tick().expect("tick");
+    }
+    let offloaded = stored_item(&sim, container, copper);
+    assert!(
+        (17..=19).contains(&offloaded),
+        "expected ~18 items at 162.5 ticks/item over 3000 ticks, got {offloaded}"
+    );
+}
+
+/// T6: burst drills emit one burst of `dominantItems` per `drillTime`
+/// (`BurstDrillBuild.updateTile`, `BurstDrill.java:76-120`) instead of a
+/// continuous trickle; impact-drill drillTime 720, 16 ore tiles -> 16 items at
+/// once (`Blocks.java:3089-3110`).
+#[test]
+fn impact_drill_bursts() {
+    let mut sim = runtime_sim();
+    // Impact-drill is 4x4 at (5,5): footprint (4..7, 4..7) = 16 ore tiles
+    // (`(-(size-1)/2) = -1` offset, the `valid_place_at` footprint rule).
+    for y in 4..=7 {
+        for x in 4..=7 {
+            set_floor(&mut sim, x, y, "ore-copper");
+        }
+    }
+    let drill = place(&mut sim, "impact-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    let _power = place(&mut sim, "power-source", 8, 5);
+    let _water = place(&mut sim, "liquid-source", 5, 8);
+    configure(
+        &mut sim,
+        5,
+        8,
+        crate::determinism::ConfigValue::Content("water".to_owned()),
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::DrillState>(drill)
+            .map(|state| state.dominant_items),
+        Some(16),
+        "all 16 footprint tiles are ore"
+    );
+    for _ in 0..710 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, drill, copper),
+        0,
+        "no trickle before the first burst"
+    );
+    for _ in 0..15 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, drill, copper),
+        16,
+        "one burst of dominantItems items at drillTime"
+    );
+    let invert = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::DrillState>(drill)
+        .map(|state| state.invert_time)
+        .unwrap_or(0.0);
+    assert!(invert > 0.0, "the burst latched invertTime: {invert}");
+}
+
+/// T2: a live-placed power node keeps its behavior knobs
+/// (`Blocks.java:2483-2505`): power-node-large 15/15, surge-tower 2/40.
+/// Before the fix `SimHooks::new_building` overwrote the config with the
+/// default (3, 6.0) right after `create_state`.
+#[test]
+fn large_node_keeps_knobs_on_live_place() {
+    use crate::world::blocks::power::PowerNodeConfig;
+    let mut sim = runtime_sim();
+    let large = place(&mut sim, "power-node-large", 5, 5);
+    let surge = place(&mut sim, "surge-tower", 10, 5);
+    let large_config = sim
+        .ecs
+        .0
+        .get::<PowerNodeConfig>(large)
+        .cloned()
+        .expect("large node config");
+    assert_eq!(
+        (large_config.max_nodes, large_config.laser_range),
+        (15, 15.0)
+    );
+    let surge_config = sim
+        .ecs
+        .0
+        .get::<PowerNodeConfig>(surge)
+        .cloned()
+        .expect("surge tower config");
+    assert_eq!(
+        (surge_config.max_nodes, surge_config.laser_range),
+        (2, 40.0)
+    );
+}
+
+/// T2: a Configure with a packed target toggles a node link
+/// (`PowerNode.java:419-441`): link -> both ends share a graph; toggling again
+/// unlinks and the graphs split.
+#[test]
+fn node_configure_toggles_link() {
+    use crate::world::blocks::power::PowerNodeConfig;
+    let mut sim = runtime_sim();
+    let _battery = place(&mut sim, "battery", 10, 5);
+    let node = place(&mut sim, "power-node", 5, 5);
+    assert!(sim.ecs.0.get::<PowerNodeConfig>(node).is_some());
+    let pack = TilePos::new(10, 5).pack();
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let linked = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::world::modules::PowerModule>(node)
+            .is_some_and(|module| module.links.contains(&pack))
+    };
+    let graph_of = |sim: &Sim, pos: (i16, i16)| {
+        sim.grid
+            .entity_at(TilePos::new(pos.0, pos.1))
+            .and_then(|e| sim.ecs.0.get::<crate::world::modules::PowerModule>(e))
+            .map(|module| module.graph)
+    };
+    // Reach the linked state deterministically: the node's `placed()` autolink
+    // may or may not have linked the battery first.
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Int(pack));
+    if !linked(&sim) {
+        configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Int(pack));
+    }
+    assert!(linked(&sim), "configure links the battery");
+    assert_eq!(
+        graph_of(&sim, (5, 5)),
+        graph_of(&sim, (10, 5)),
+        "linked ends share a graph"
+    );
+    // Toggle again: unlink and reflow both ends.
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Int(pack));
+    assert!(!linked(&sim), "second configure unlinks");
+    assert_ne!(
+        graph_of(&sim, (5, 5)),
+        graph_of(&sim, (10, 5)),
+        "unlinked ends split graphs"
+    );
+}
+
+/// T2: a diode between a charged battery graph and an empty one transfers
+/// power (`PowerDiode.java:47-80`); the diode is wired for the first time here.
+#[test]
+fn diode_moves_power_forward() {
+    let mut sim = runtime_sim();
+    let a = place(&mut sim, "battery", 2, 5);
+    let diode = place(&mut sim, "diode", 3, 5);
+    let b = place(&mut sim, "battery", 4, 5);
+    let _ = diode;
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    sim.ecs
+        .0
+        .get_mut::<crate::world::modules::PowerModule>(a)
+        .expect("battery a module")
+        .status = 1.0;
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    let status = |sim: &Sim, e: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::world::modules::PowerModule>(e)
+            .map(|module| module.status)
+            .unwrap_or(0.0)
+    };
+    let (a_status, b_status) = (status(&sim, a), status(&sim, b));
+    assert!(
+        b_status > 0.0,
+        "the empty battery received power: {b_status}"
+    );
+    assert!(a_status < 1.0, "the full battery drained: {a_status}");
+}
+
+/// T4: a mender only heals its own team's buildings
+/// (`BlockIndexer.eachBlock` is team-filtered, `BlockIndexer.java:328-361`;
+/// `MendProjector.java:107-116`).
+#[test]
+fn mender_heals_only_own_team() {
+    let mut sim = runtime_sim();
+    let _mender = place(&mut sim, "mender", 5, 5);
+    let _power = place(&mut sim, "power-source", 5, 6);
+    let own = place(&mut sim, "copper-wall", 6, 5);
+    let wall = sim.world_block_id("copper-wall").expect("wall");
+    sim.command(SimCommand::Place {
+        x: 5,
+        y: 4,
+        block: wall,
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("enemy wall placed");
+    let enemy = sim
+        .grid
+        .entity_at(TilePos::new(5, 4))
+        .expect("enemy wall entity");
+    {
+        let world = &mut sim.ecs.0;
+        for entity in [own, enemy] {
+            world
+                .get_mut::<crate::entities::comp::Health>(entity)
+                .expect("health")
+                .health = 10.0;
+        }
+    }
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let health_of = |sim: &Sim, entity: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Health>(entity)
+            .map(|health| health.health)
+            .unwrap_or(0.0)
+    };
+    let own_health = health_of(&sim, own);
+    assert!(
+        (own_health - 22.8).abs() < 0.01,
+        "own wall healed by 4% of 320: {own_health}"
+    );
+    assert_eq!(health_of(&sim, enemy), 10.0, "the enemy wall is not healed");
+}
+
+/// T4: the mender's silicon boost is consumed on its `useTime` cycle
+/// (`MendProjector.java:95-104`: `timer(timerUse, useTime / timeScale)` ->
+/// `consume()`), and `phaseHeat` follows `optionalEfficiency`
+/// (`MendProjector.java:100`).
+#[test]
+fn mender_silicon_boost_consumed() {
+    let mut sim = runtime_sim();
+    let mender = place(&mut sim, "mender", 5, 5);
+    let _power = place(&mut sim, "power-source", 5, 6);
+    let silicon = item(&sim, "silicon");
+    {
+        let world = &mut sim.ecs.0;
+        transfer::dispatch_handle_stack(world, mender, silicon, 2);
+    }
+    assert_eq!(stored_item(&sim, mender, silicon), 2);
+    // The power graph settles a few ticks in; `optionalEfficiency` is capped by
+    // the required (power) efficiency, so `consume()` starts once powered.
+    // `timer()`'s first call is true: that first useTime tick consumes one.
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, mender, silicon),
+        1,
+        "one silicon consumed on the first powered useTime tick"
+    );
+    for _ in 0..51 {
+        sim.tick().expect("tick");
+    }
+    let phase_heat = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::shields::MendProjectorState>(mender)
+        .map(|state| state.phase_heat)
+        .unwrap_or(0.0);
+    assert!(phase_heat > 0.9, "phaseHeat warmed up: {phase_heat}");
+    for _ in 0..349 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, mender, silicon),
+        0,
+        "the second useTime tick (400 ticks later) consumed the last silicon"
+    );
+}
+
+/// T4: the overdrive projector boosts only its own team
+/// (`OverdriveProjector.java:105-113` -> team-filtered `eachBlock`) and
+/// consumes its boost items on the `useTime` cycle.
+#[test]
+fn overdrive_does_not_boost_enemy() {
+    let mut sim = runtime_sim();
+    // The overdrive is 2x2 at (5,5) (footprint 5..6, 5..6); the source sits
+    // outside the footprint at (4,5).
+    let _overdrive = place(&mut sim, "overdrive-projector", 5, 5);
+    let _power = place(&mut sim, "power-source", 4, 5);
+    let own = place(&mut sim, "graphite-press", 8, 5);
+    let press = sim.world_block_id("graphite-press").expect("press");
+    sim.command(SimCommand::Place {
+        x: 5,
+        y: 9,
+        block: press,
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("enemy press placed");
+    let enemy = sim
+        .grid
+        .entity_at(TilePos::new(5, 9))
+        .expect("enemy press entity");
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let time_scale = |sim: &Sim, entity: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Building>(entity)
+            .map(|building| building.time_scale)
+            .unwrap_or(1.0)
+    };
+    let own_scale = time_scale(&sim, own);
+    assert!(
+        (own_scale - 1.5).abs() < 0.001,
+        "own press is boosted to 1.5: {own_scale}"
+    );
+    assert_eq!(
+        time_scale(&sim, enemy),
+        1.0,
+        "the enemy press is not boosted"
+    );
+}

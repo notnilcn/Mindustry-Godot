@@ -286,6 +286,63 @@ pub struct ModuleDims {
     pub liquids: usize,
 }
 
+/// Per-liquid trait vectors for rules that run without content-registry access
+/// (T1): `ConsumeCoolant` eligibility, incinerability, mixing reactions.
+///
+/// Built once by `Sim::install_block_runtime_from` from `content.liquids()`; a
+/// missing resource makes every lookup return the rejecting default.
+#[derive(bevy_ecs::prelude::Resource, Debug, Default, Clone, PartialEq)]
+pub struct LiquidTraits {
+    /// `Liquid.coolant` — candidate for a `ConsumeCoolant` filter.
+    pub coolant: Vec<bool>,
+    /// `Liquid.gas` — gases are excluded from the default (liquid) coolant.
+    pub gas: Vec<bool>,
+    /// `Liquid.temperature` (0.5 = room temperature).
+    pub temperature: Vec<f32>,
+    /// `Liquid.flammability`.
+    pub flammability: Vec<f32>,
+    /// `Liquid.incinerable` (`Incinerator.acceptLiquid`).
+    pub incinerable: Vec<bool>,
+    /// `Liquid.heatCapacity` (`ForceProjector` coolant scaling).
+    pub heat_capacity: Vec<f32>,
+}
+
+impl LiquidTraits {
+    /// Builds the per-liquid vectors from the content registry order.
+    pub fn from_content(content: &crate::content::ContentRegistry) -> Self {
+        let mut traits = Self::default();
+        for liquid in content.liquids() {
+            traits.coolant.push(liquid.coolant);
+            traits.gas.push(liquid.gas);
+            traits.temperature.push(liquid.temperature);
+            traits.flammability.push(liquid.flammability);
+            traits.incinerable.push(liquid.incinerable);
+            traits.heat_capacity.push(liquid.heat_capacity);
+        }
+        traits
+    }
+
+    /// `ConsumeCoolant`'s filter (`ConsumeCoolant.java:9`): `liquid.coolant &&
+    /// (allowLiquid && !liquid.gas || allowGas && liquid.gas) &&
+    /// liquid.temperature <= 0.5 && liquid.flammability < 0.1`.
+    pub fn coolant_accepts(
+        &self,
+        liquid: crate::content::LiquidId,
+        allow_liquid: bool,
+        allow_gas: bool,
+    ) -> bool {
+        let index = liquid.index();
+        let coolant = self.coolant.get(index).copied().unwrap_or(false);
+        let gas = self.gas.get(index).copied().unwrap_or(false);
+        let temperature = self.temperature.get(index).copied().unwrap_or(1.0);
+        let flammability = self.flammability.get(index).copied().unwrap_or(1.0);
+        coolant
+            && ((allow_liquid && !gas) || (allow_gas && gas))
+            && temperature <= 0.5
+            && flammability < 0.1
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -16,7 +16,11 @@
 //! recorded as deferred-with-owner (plan 07/08/11 reconciliation) in the plan
 //! Changelog.
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+
 use crate::content::{ItemId, UnitTypeId};
+use crate::entities::comp::{Building, Health, Pos};
 use crate::world::modules::ItemModule;
 
 pub mod behavior;
@@ -536,8 +540,16 @@ pub struct RepairTurret {
     pub repair_radius: f32,
     /// Repair per second (`repairSpeed`).
     pub repair_speed: f32,
-    /// Target acquisition interval (`60` ticks upstream).
-    pub target_interval: f32,
+    /// Current target unit (`target`).
+    pub target: Option<Entity>,
+    /// Turret rotation in degrees (`rotation`; init 90).
+    pub rotation: f32,
+    /// `RepairTurretBuild.strength`.
+    pub strength: f32,
+    /// `acceptCoolant` (repair-turret only).
+    pub accept_coolant: bool,
+    /// `coolantMultiplier`.
+    pub coolant_multiplier: f32,
 }
 
 impl Default for RepairTurret {
@@ -545,22 +557,152 @@ impl Default for RepairTurret {
         Self {
             repair_radius: 60.0,
             repair_speed: 0.5,
-            target_interval: 60.0,
+            target: None,
+            rotation: 90.0,
+            strength: 0.0,
+            accept_coolant: false,
+            coolant_multiplier: 0.0,
         }
     }
 }
 
-impl RepairTurret {
-    /// `RepairPointBuild.updateTile`: acquire a target every 60 ticks.
-    pub fn update_target(&mut self) -> bool {
-        self.target_interval -= 1.0;
-        if self.target_interval <= 0.0 {
-            self.target_interval = 60.0;
-            true
-        } else {
-            false
+/// `RepairTurretBuild.updateTile` (`RepairTurret.java:186-223`, T12).
+///
+/// `Units.closest(team, x, y, repairRadius, Unit::damaged)` runs on the 20-tick
+/// `timerTarget`; the target is dropped when dead/out of range/full; healing
+/// happens while the aim is within 30 degrees and scales with `strength`,
+/// `edelta` and the coolant multiplier (repair-turret).
+pub fn update_repair_turret(world: &mut World, e: Entity, turret: &mut RepairTurret) {
+    let (efficiency, optional_efficiency, time_scale) = world
+        .get::<Building>(e)
+        .map(|building| {
+            (
+                building.efficiency,
+                building.optional_efficiency,
+                building.time_scale,
+            )
+        })
+        .unwrap_or((0.0, 0.0, 1.0));
+
+    let multiplier = if turret.accept_coolant {
+        let heat_capacity = world
+            .get::<crate::world::modules::LiquidModule>(e)
+            .and_then(|module| {
+                module
+                    .liquids
+                    .iter()
+                    .enumerate()
+                    .find(|(_, amount)| **amount > 0.0)
+                    .map(|(index, _)| crate::content::LiquidId::new(index as u16))
+            })
+            .and_then(|liquid| {
+                world
+                    .get_resource::<crate::world::modules::LiquidTraits>()
+                    .and_then(|traits| traits.heat_capacity.get(liquid.index()).copied())
+            })
+            .unwrap_or(0.0);
+        1.0 + heat_capacity * turret.coolant_multiplier * optional_efficiency
+    } else {
+        1.0
+    };
+
+    // Drop a dead/out-of-range/full target.
+    if let Some(target) = turret.target {
+        let pos = world.get::<Pos>(e).copied();
+        let target_pos = world.get::<Pos>(target).copied();
+        let hit_size = world
+            .get::<crate::entities::comp::unit::comp::HitboxComp>(target)
+            .map(|hitbox| hitbox.hit_size)
+            .unwrap_or(0.0);
+        let dead = world
+            .get::<crate::entities::comp::unit::comp::UnitCore>(target)
+            .is_some_and(|core| core.dead);
+        let full = world
+            .get::<Health>(target)
+            .is_some_and(|health| health.health >= health.max_health);
+        let dst = match (pos, target_pos) {
+            (Some(a), Some(b)) => ((a.x - b.x).powi(2) + (a.y - b.y).powi(2)).sqrt(),
+            _ => f32::MAX,
+        };
+        if dead || full || dst - hit_size / 2.0 > turret.repair_radius {
+            turret.target = None;
         }
     }
+
+    let mut healed = false;
+    if let Some(target) = turret.target
+        && efficiency > 0.0
+    {
+        let (Some(from), Some(to)) = (
+            world.get::<Pos>(e).copied(),
+            world.get::<Pos>(target).copied(),
+        ) else {
+            return;
+        };
+        let angle = (to.y - from.y).atan2(to.x - from.x).to_degrees();
+        if crate::weapons::angle_dist(angle, turret.rotation) < 30.0 {
+            healed = true;
+            crate::combat::damage::area::heal_health(
+                world,
+                target,
+                turret.repair_speed * turret.strength * efficiency * time_scale * multiplier,
+            );
+        }
+        turret.rotation = slerp_delta(turret.rotation, angle, 0.5 * efficiency * time_scale);
+    }
+
+    turret.strength += ((if healed { 1.0 } else { 0.0 }) - turret.strength) * 0.08;
+
+    if crate::world::update::run_timer(world, e, 0, 20.0) {
+        let Some(pos) = world.get::<Pos>(e).copied() else {
+            return;
+        };
+        let team = world
+            .get::<crate::entities::comp::TeamComp>(e)
+            .map(|team| team.team);
+        let mut best: Option<(f32, Entity)> = None;
+        for entity_ref in world.iter_entities() {
+            let Some(core) = entity_ref.get::<crate::entities::comp::unit::comp::UnitCore>() else {
+                continue;
+            };
+            if core.dead {
+                continue;
+            }
+            if entity_ref
+                .get::<crate::entities::comp::TeamComp>()
+                .map(|target_team| target_team.team)
+                != team
+            {
+                continue;
+            }
+            let Some(health) = entity_ref.get::<Health>() else {
+                continue;
+            };
+            if !health.damaged() {
+                continue;
+            }
+            let Some(target_pos) = entity_ref.get::<Pos>() else {
+                continue;
+            };
+            let hit_size = entity_ref
+                .get::<crate::entities::comp::unit::comp::HitboxComp>()
+                .map(|hitbox| hitbox.hit_size)
+                .unwrap_or(0.0);
+            let dst2 = (target_pos.x - pos.x).powi(2) + (target_pos.y - pos.y).powi(2);
+            let reach = turret.repair_radius + hit_size / 2.0;
+            if dst2 <= reach * reach && best.is_none_or(|(best_dst2, _)| dst2 < best_dst2) {
+                best = Some((dst2, entity_ref.id()));
+            }
+        }
+        turret.target = best.map(|(_, entity)| entity);
+    }
+}
+
+/// `Mathf.slerpDelta` for degrees (`delta == 1`).
+fn slerp_delta(from: f32, to: f32, progress: f32) -> f32 {
+    let progress = progress.clamp(0.0, 1.0);
+    let delta = ((to - from + 360.0 + 180.0) % 360.0) - 180.0;
+    (from + delta * progress + 360.0) % 360.0
 }
 
 /// `UnitCargoLoader` configuration.
@@ -740,11 +882,10 @@ mod tests {
             assert!(!tower.update_refresh());
         }
         assert!(tower.update_refresh(), "tower refreshes every 6 ticks");
-        let mut turret = RepairTurret::default();
-        for _ in 0..59 {
-            assert!(!turret.update_target());
-        }
-        assert!(turret.update_target(), "turret reacquires every 60 ticks");
+        // The repair turret's target timer is now the Java `timer(timerTarget,
+        // 20)` inside `update_repair_turret` (T12); the default state keeps the
+        // Java initial rotation.
+        assert_eq!(RepairTurret::default().rotation, 90.0);
     }
 
     #[test]

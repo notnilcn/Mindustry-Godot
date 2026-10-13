@@ -2234,4 +2234,41 @@ fn boss_list_tracks_wave_boss() {
     let json: serde_json::Value = serde_json::from_str(&sim.boss_json()).expect("boss json parses");
     assert_eq!(json["count"], 0);
     assert!(json["first"].is_null());
+    }
+
+/// T12: a powered repair point heals a damaged friendly unit once its aim is
+/// within 30 degrees (`RepairTurret.java:186-223`); the plan's expected
+/// +`repairSpeed * strength * edelta` per aligned tick.
+#[test]
+fn repair_point_heals_damaged_dagger() {
+    let mut sim = live_sim(48);
+    let _repair = place(&mut sim, 20, 20, "repair-point", 1);
+    let _power = place(&mut sim, 21, 20, "power-source", 1);
+    let tx = 20.0 * 8.0 + 4.0;
+    let ty = 20.0 * 8.0 + 4.0;
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, tx + 30.0, ty, 180.0)
+        .expect("friendly dagger");
+    sim.ecs
+        .0
+        .get_mut::<Health>(dagger)
+        .expect("dagger health")
+        .health = 50.0;
+    let max = sim
+        .ecs
+        .0
+        .get::<Health>(dagger)
+        .map(|health| health.max_health)
+        .unwrap_or(0.0);
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let healed = health(&sim, dagger).expect("dagger alive");
+    assert!(healed > 50.0, "repair point healed the dagger: {healed}");
+    assert!(
+        healed <= max,
+        "heal clamped to max health: {healed} <= {max}"
+    );
+    // `UnitTypes.java:104`: dagger `health = 150`.
+    assert_eq!(max, 150.0, "dagger max health");
 }

@@ -423,8 +423,107 @@ fn craft(world: &mut World, e: Entity, crafter: &CrafterDef, item_capacity: i32)
 }
 
 /// `Drill`/`BurstDrill`/`WallCrafter` behavior.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DrillBehavior;
+///
+/// `hardness` is the content `Item.hardness` table the Java `getDrillTime`
+/// reads (`Drill.java:170-172`); `blocks::production::register` supplies it for
+/// the vanilla drills, a mod drill registered through `default_behavior` gets
+/// an empty table (no hardness term, like a zero table).
+#[derive(Debug, Clone)]
+pub struct DrillBehavior {
+    /// `Item.hardness` per item index.
+    pub hardness: Arc<[i32]>,
+}
+
+impl Default for DrillBehavior {
+    fn default() -> Self {
+        Self {
+            hardness: Arc::from([]),
+        }
+    }
+}
+
+impl DrillBehavior {
+    /// Builds the behavior with the content item-hardness table.
+    pub fn from_content(content: &ContentRegistry) -> Self {
+        Self {
+            hardness: content
+                .items()
+                .iter()
+                .map(|item| item.hardness)
+                .collect::<Vec<_>>()
+                .into(),
+        }
+    }
+
+    /// `Drill.getDrillTime` (`Drill.java:170-172`): `(drillTime +
+    /// hardnessDrillMultiplier * item.hardness) / drillMultipliers.get(item, 1)`.
+    /// `BurstDrill` sets `hardnessDrillMultiplier = 0` and overrides to
+    /// `drillTime / multiplier` (`BurstDrill.java:35-44,53-55`), which the same
+    /// formula reproduces.
+    fn drill_time(&self, def: &DrillDef, item: ItemId) -> f32 {
+        let hardness = self.hardness.get(item.index()).copied().unwrap_or(0) as f32;
+        let multiplier = def
+            .drill_multipliers
+            .iter()
+            .find(|(id, _)| *id == item.raw())
+            .map(|(_, multiplier)| *multiplier)
+            .unwrap_or(1.0);
+        ((def.drill_time + def.hardness_drill_multiplier * hardness) / multiplier).max(0.0001)
+    }
+
+    /// `BurstDrillBuild.updateTile` (`BurstDrill.java:76-120`): `smoothProgress`
+    /// light latch, `pow2In(progress/drillTime)` time-drilled, warmup tracking
+    /// `progress/drillTime`, and one burst of `dominantItems` items per cycle.
+    #[allow(clippy::too_many_arguments)]
+    fn update_burst(
+        &self,
+        world: &mut World,
+        e: Entity,
+        burst: &crate::world::block_kind_data::BurstDrillDef,
+        item: ItemId,
+        count: u16,
+        item_capacity: i32,
+        efficiency: f32,
+        speed: f32,
+        delta: f32,
+        total: i32,
+        drill_time: f32,
+    ) {
+        let (progress, ready) = {
+            let Some(mut state) = world.get_mut::<DrillState>(e) else {
+                return;
+            };
+            if state.invert_time > 0.0 {
+                state.invert_time -= delta / burst.inverted_time.max(0.0001);
+            }
+            let ratio_now = state.progress / drill_time;
+            let smooth_target = state.progress / (drill_time - 20.0).max(0.0001);
+            state.smooth_progress += (smooth_target - state.smooth_progress) * 0.1;
+            if total <= item_capacity - count as i32 && count > 0 && efficiency > 0.0 {
+                state.warmup = approach(state.warmup, ratio_now, 0.01);
+                // `timeDrilled += speedCurve.apply(progress / drillTime) * speed`
+                // (`pow2In = x²`; no delta factor upstream).
+                state.time_drilled += ratio_now * ratio_now * speed;
+                state.last_drill_speed = speed * count as f32 / drill_time;
+                state.progress += delta * speed;
+            } else {
+                state.warmup = approach(state.warmup, 0.0, 0.01);
+                state.last_drill_speed = 0.0;
+                return;
+            }
+            (state.progress, total < item_capacity)
+        };
+        if count > 0 && ready && progress >= drill_time {
+            for _ in 0..count {
+                transfer::offload(world, e, item);
+            }
+            if let Some(mut state) = world.get_mut::<DrillState>(e) {
+                state.invert_time = 1.0;
+                state.progress %= drill_time;
+            }
+        }
+    }
+}
 
 impl BuildingBehavior for DrillBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
@@ -437,13 +536,16 @@ impl BuildingBehavior for DrillBehavior {
         let Some(inst) = instance(world, e) else {
             return;
         };
-        let def = match &inst.kind_data {
-            BlockKindData::Drill(def) => def.clone(),
-            BlockKindData::BurstDrill(def) => def.drill.clone(),
-            BlockKindData::WallCrafter(def) => DrillDef {
-                drill_time: def.drill_time,
-                ..Default::default()
-            },
+        let (def, burst) = match &inst.kind_data {
+            BlockKindData::Drill(def) => (def.clone(), None),
+            BlockKindData::BurstDrill(def) => (def.drill.clone(), Some(def.clone())),
+            BlockKindData::WallCrafter(def) => (
+                DrillDef {
+                    drill_time: def.drill_time,
+                    ..Default::default()
+                },
+                None,
+            ),
             _ => return,
         };
         // `if(timer(timerDump, dumpTime / timeScale)) dump(dominantItem != null
@@ -482,7 +584,24 @@ impl BuildingBehavior for DrillBehavior {
             .map(ItemModule::total)
             .unwrap_or(0);
         let speed = (1.0 + 0.6 * optional) * efficiency;
-        let delay = def.drill_time.max(0.0001);
+        let delay = self.drill_time(&def, item);
+
+        if let Some(burst) = burst {
+            self.update_burst(
+                world,
+                e,
+                &burst,
+                item,
+                count,
+                item_capacity,
+                efficiency,
+                speed,
+                delta,
+                total,
+                delay,
+            );
+            return;
+        }
 
         let (progress, ready) = {
             let Some(mut state) = world.get_mut::<DrillState>(e) else {
@@ -977,7 +1096,7 @@ impl BeamDrillBehavior {
 
 impl BuildingBehavior for BeamDrillBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
-        DrillBehavior.create_state(world, e);
+        DrillBehavior::default().create_state(world, e);
     }
 
     /// `BeamDrill.shouldConsume` (`BeamDrill.java:269-271`): full buffer or no
@@ -1337,38 +1456,96 @@ impl BuildingBehavior for SolidPumpBehavior {
     }
 }
 
-/// `Incinerator` behavior (power-gated burn).
+/// `Incinerator` behavior (`Incinerator.java:30-81`): the block heats up with
+/// power (`heat = approachDelta(heat, efficiency, 0.04)`), then accepts and
+/// destroys any item and every incinerable liquid while `heat > 0.5`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IncineratorBehavior;
 
 impl BuildingBehavior for IncineratorBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        if world
+            .get::<crate::entities::comp::IncineratorState>(e)
+            .is_none()
+        {
+            world
+                .entity_mut(e)
+                .insert(crate::entities::comp::IncineratorState::default());
+        }
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let efficiency = world
             .get::<Building>(e)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
-        if efficiency <= 0.0 {
-            return;
-        }
-        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
-            let stacks: Vec<ItemId> = items.stacks().map(|(item, _)| item).collect();
-            for item in stacks {
-                items.remove(item, i32::MAX);
-            }
-        }
-        if let Some(mut liquids) = world.get_mut::<LiquidModule>(e) {
-            let present: Vec<LiquidId> = liquids
-                .liquids
-                .iter()
-                .enumerate()
-                .filter(|(_, amount)| **amount > 0.0)
-                .map(|(index, _)| LiquidId::new(index as u16))
-                .collect();
-            for liquid in present {
-                liquids.remove(liquid, f32::MAX);
-            }
+        if let Some(mut state) = world.get_mut::<crate::entities::comp::IncineratorState>(e) {
+            state.heat = approach(state.heat, efficiency, 0.04);
         }
     }
+
+    /// `IncineratorBuild.acceptItem`: `heat > 0.5f && enabled`.
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, _item: ItemId) -> bool {
+        burning(world, e)
+    }
+
+    /// `IncineratorBuild.handleItem`: effect only — the item vanishes.
+    fn handle_item(&self, _world: &mut World, _e: Entity, _src: Entity, _item: ItemId) {}
+
+    /// `IncineratorBuild.acceptLiquid`: `heat > 0.5f && liquid.incinerable &&
+    /// enabled`.
+    fn accept_liquid(&self, world: &World, e: Entity, _src: Entity, liquid: LiquidId) -> bool {
+        let incinerable = world
+            .get_resource::<crate::world::modules::LiquidTraits>()
+            .is_some_and(|traits| {
+                traits
+                    .incinerable
+                    .get(liquid.index())
+                    .copied()
+                    .unwrap_or(false)
+            });
+        incinerable && burning(world, e)
+    }
+
+    /// `IncineratorBuild.handleLiquid`: effect only — nothing is stored.
+    fn handle_liquid(
+        &self,
+        _world: &mut World,
+        _e: Entity,
+        _src: Entity,
+        _liquid: LiquidId,
+        _amount: f32,
+    ) {
+    }
+}
+
+/// Whether an incinerator is up to temperature and enabled.
+fn burning(world: &World, e: Entity) -> bool {
+    let heat = world
+        .get::<crate::entities::comp::IncineratorState>(e)
+        .map(|state| state.heat)
+        .unwrap_or(0.0);
+    heat > 0.5
+        && world
+            .get::<Building>(e)
+            .is_some_and(|building| building.enabled)
+}
+
+/// `ItemIncinerator` behavior (`ItemIncinerator.java:36-66`): accepts any item
+/// while powered and destroys it; no per-tick update.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ItemIncineratorBehavior;
+
+impl BuildingBehavior for ItemIncineratorBehavior {
+    /// `ItemIncineratorBuild.acceptItem`: `efficiency > 0`.
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, _item: ItemId) -> bool {
+        world
+            .get::<Building>(e)
+            .is_some_and(|building| building.efficiency > 0.0)
+    }
+
+    /// `ItemIncineratorBuild.handleItem`: effect only — the item vanishes.
+    fn handle_item(&self, _world: &mut World, _e: Entity, _src: Entity, _item: ItemId) {}
 }
 
 #[cfg(test)]

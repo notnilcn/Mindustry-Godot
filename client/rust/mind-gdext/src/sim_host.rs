@@ -513,11 +513,34 @@ impl MindSimHost {
             return false;
         };
         let applied = self.apply_command(Command::Place { x, y, block: id });
-        if applied {
+        // PAR-0165 (T7): `apply_command` returns `Ok` even when the live
+        // runtime rejected the placement, so read the tile back and only
+        // report success when the block really sits anchored at `(x, y)`.
+        let placed = applied && self.tile_holds_block(x, y, id);
+        if placed {
             self.emit_state();
             self.emit_world_changed();
         }
-        applied
+        placed
+    }
+
+    /// Whether `(x, y)` now holds `block` anchored there: the tile's block id
+    /// matches and the building entity's center tile is `(x, y)` (`T7`, the
+    /// `place_block` readback; PAR-0165).
+    fn tile_holds_block(&self, x: i16, y: i16, block: BlockId) -> bool {
+        let pos = mind_core::world::TilePos::new(x, y);
+        self.sim.grid.block_at(pos) == Some(block)
+            && self
+                .sim
+                .grid
+                .entity_at(pos)
+                .and_then(|entity| {
+                    self.sim
+                        .ecs
+                        .0
+                        .get::<mind_core::entities::comp::Building>(entity)
+                })
+                .is_some_and(|building| building.tile == pos)
     }
 
     /// Breaks the block at `(x, y)` immediately (API path; MCP §7c step 5).
@@ -557,11 +580,12 @@ impl MindSimHost {
         let applied = self
             .sim
             .place_for_team(x, y, id, rot.clamp(0, 3) as u8, team);
-        if applied {
+        let placed = applied && self.tile_holds_block(x, y, id);
+        if placed {
             self.emit_state();
             self.emit_world_changed();
         }
-        applied
+        placed
     }
 
     /// Canonical sparse state dump as pretty JSON (same schema as `mind-headless`).
@@ -643,6 +667,19 @@ impl MindSimHost {
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0)
                     .clamp(0, 3) as i8;
+                // PAR-0165 (T7): reject invalid placements at enqueue time so
+                // callers get an honest `false` instead of a silently dropped
+                // command (`Sim::command` logs rejections at debug level).
+                if !self.sim.can_place_for_team(
+                    x,
+                    y,
+                    BlockId::new(block),
+                    rotation as u8,
+                    self.sim.live_default_team(),
+                ) {
+                    log::warn!("apply_sim_command_json: place rejected at ({x}, {y})");
+                    return false;
+                }
                 SimCommand::Place {
                     x,
                     y,

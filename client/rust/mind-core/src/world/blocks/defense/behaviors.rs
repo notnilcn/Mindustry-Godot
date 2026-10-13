@@ -91,7 +91,8 @@ impl BuildingBehavior for MendProjectorBehavior {
             return;
         };
         let eff = efficiency(world, e);
-        update_mend_projector_world(world, e, &mut state, eff, true, false);
+        let optional = optional_efficiency(world, e);
+        update_mend_projector_world(world, e, &mut state, eff, true, optional);
         world.entity_mut(e).insert(state);
     }
 }

@@ -1055,3 +1055,29 @@ fn block_runtime_placement_gate_rejects_locked_and_special_visibility() {
         Some(BlockId::new(shown.raw()))
     );
 }
+
+/// T7 (PAR-0165): the API placement seams can ask `Build.validPlace` for an
+/// explicit team before enqueueing; an occupied tile is rejected.
+#[test]
+fn can_place_for_team_rejects_occupied() {
+    let mut sim = Sim::new(7, 16, 16, BlockId::AIR, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime installs");
+    let wall = sim.content().id("copper-wall").expect("copper-wall");
+    let core = sim.content().id("core-shard").expect("core-shard");
+    let team = sim.live_default_team();
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: core,
+    })
+    .expect("place");
+    assert_eq!(sim.block_at(TilePos::new(3, 3)), Some(core));
+    assert!(
+        !sim.can_place_for_team(3, 3, wall, 0, team),
+        "a wall cannot replace an occupied core tile"
+    );
+    assert!(
+        sim.can_place_for_team(6, 6, wall, 0, team),
+        "free tile is placeable"
+    );
+}

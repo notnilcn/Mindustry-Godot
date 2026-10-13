@@ -111,30 +111,53 @@ pub fn update_overdrive_projector(
         state.use_progress += 1.0;
     }
     if state.use_progress >= state.use_time {
+        // `OverdriveProjector.java:118-121`: `consume(); useProgress %= useTime`.
+        crate::world::update::trigger_consumers(world, e);
         state.use_progress %= state.use_time;
     }
 }
 
-/// Buildings (excluding `origin`) within `range` world units of `origin`.
+/// Buildings of the origin's team within `range` world units of `origin`
+/// (`BlockIndexer.eachBlock(team, wx, wy, range, ...)`,
+/// `BlockIndexer.java:328-361`): same team only, `b.within(wx, wy, range +
+/// b.hitSize()/2f)`, `privileged` blocks excluded. `range` is world units;
+/// `hitSize = size * 8` (T4).
 pub fn buildings_in_range(world: &World, origin: Entity, range: f32) -> Vec<Entity> {
     let Some(pos) = world.get::<Pos>(origin).copied() else {
         return Vec::new();
     };
-    let range2 = range.max(0.0).powi(2);
+    let Some(team) = world.get::<TeamComp>(origin).map(|team| team.team) else {
+        return Vec::new();
+    };
+    let table = world.get_resource::<crate::world::block::BlockTable>();
     let mut out = Vec::new();
     for entity_ref in world.iter_entities() {
-        if entity_ref.get::<Building>().is_none() {
+        let Some(building) = entity_ref.get::<Building>() else {
             continue;
-        }
+        };
         if entity_ref.id() == origin {
             continue;
         }
         let Some(target_pos) = entity_ref.get::<Pos>() else {
             continue;
         };
+        let same_team = entity_ref
+            .get::<TeamComp>()
+            .is_some_and(|target_team| target_team.team == team);
+        if !same_team {
+            continue;
+        }
+        let Some(inst) = table.and_then(|table| table.get(building.block)) else {
+            continue;
+        };
+        if inst.def.privileged {
+            continue;
+        }
+        let hit_size = inst.def.size.max(1) as f32 * 8.0;
+        let reach = range.max(0.0) + hit_size / 2.0;
         let dx = target_pos.x - pos.x;
         let dy = target_pos.y - pos.y;
-        if dx * dx + dy * dy <= range2 {
+        if dx * dx + dy * dy <= reach * reach {
             out.push(entity_ref.id());
         }
     }

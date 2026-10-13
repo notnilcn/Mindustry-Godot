@@ -18,7 +18,8 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::combat::bullet::CombatCtx;
-use crate::entities::comp::{Health, Pos, TeamComp};
+use crate::entities::comp::{Building, Health, Pos, TeamComp};
+use crate::world::update::run_timer;
 
 /// `Intersector.isInRegularPolygon(sides, x, y, radius, rotation, px, py)`.
 ///
@@ -386,6 +387,8 @@ pub struct MendProjectorState {
     pub phase_boost: f32,
     /// `MendProjector.phaseRangeBoost`.
     pub phase_range_boost: f32,
+    /// `MendProjector.useTime` (`MendProjector.java:31`).
+    pub use_time: f32,
     /// `MendBuild.heat`.
     pub heat: f32,
     /// `MendBuild.charge`.
@@ -404,6 +407,7 @@ impl Default for MendProjectorState {
             heal_percent: 12.0,
             phase_boost: 12.0,
             phase_range_boost: 50.0,
+            use_time: 400.0,
             heat: 0.0,
             charge: 0.0,
             phase_heat: 0.0,
@@ -419,9 +423,9 @@ pub fn update_mend_projector(
     state: &mut MendProjectorState,
     eff: f32,
     can_heal: bool,
-    phase_valid: bool,
+    optional_efficiency: f32,
 ) {
-    update_mend_projector_world(ctx.world, e, state, eff, can_heal, phase_valid);
+    update_mend_projector_world(ctx.world, e, state, eff, can_heal, optional_efficiency);
 }
 
 /// [`update_mend_projector`] over a plain `&mut World` (normal behavior tick).
@@ -431,11 +435,8 @@ pub fn update_mend_projector_world(
     state: &mut MendProjectorState,
     eff: f32,
     can_heal: bool,
-    phase_valid: bool,
+    optional_efficiency: f32,
 ) {
-    let Some((x, y)) = position(world, e) else {
-        return;
-    };
     state.smooth_efficiency = lerp_delta(state.smooth_efficiency, eff, 0.08);
     state.heat = lerp_delta(
         state.heat,
@@ -443,36 +444,38 @@ pub fn update_mend_projector_world(
         0.08,
     );
     state.charge += state.heat;
-    state.phase_heat = lerp_delta(state.phase_heat, if phase_valid { 1.0 } else { 0.0 }, 0.1);
+    state.phase_heat = lerp_delta(state.phase_heat, optional_efficiency, 0.1);
+
+    // `MendProjector.java:95-104`: `optionalEfficiency > 0 && timer(timerUse,
+    // useTime / timeScale) && canHeal` -> `consume()`.
+    let time_scale = world
+        .get::<Building>(e)
+        .map(|building| building.time_scale)
+        .unwrap_or(1.0);
+    if optional_efficiency > 0.0
+        && can_heal
+        && run_timer(world, e, 1, state.use_time / time_scale.max(0.0001))
+    {
+        crate::world::update::trigger_consumers(world, e);
+    }
 
     if state.charge < state.reload || !can_heal {
         return;
     }
     state.charge = 0.0;
     let real_range = state.range + state.phase_heat * state.phase_range_boost;
-    let range2 = real_range * real_range;
     let amount_percent = (state.heal_percent + state.phase_heat * state.phase_boost) / 100.0;
-    let targets: Vec<Entity> = world
-        .iter_entities()
-        .filter_map(|entity_ref| {
-            let health = entity_ref.get::<Health>()?;
-            entity_ref.get::<crate::entities::comp::Building>()?;
-            if !health.damaged() {
-                return None;
-            }
-            let pos = entity_ref.get::<Pos>()?;
-            let dst2 = (pos.x - x).powi(2) + (pos.y - y).powi(2);
-            if dst2 > range2 {
-                return None;
-            }
-            Some(entity_ref.id())
-        })
-        .collect();
+    let targets =
+        crate::world::blocks::defense::projectors::buildings_in_range(world, e, real_range);
     for target in targets {
-        if let Some(mut health) = world.get_mut::<Health>(target) {
-            let heal = health.max_health * amount_percent * eff;
-            health.health = (health.health + heal).min(health.max_health);
+        let Some(mut health) = world.get_mut::<Health>(target) else {
+            continue;
+        };
+        if !health.damaged() {
+            continue;
         }
+        let heal = health.max_health * amount_percent * eff;
+        health.health = (health.health + heal).min(health.max_health);
     }
 }
 
@@ -761,6 +764,9 @@ mod tests {
     fn mend_projector_heals_damaged_building() {
         let mut harness = CombatHarness::new(32, 32, 7);
         let wall = harness.content().block_id("copper-wall").expect("wall");
+        // `BlockIndexer.eachBlock` heals the caster's team only (T4): the wall
+        // must be on the mender's team.
+        harness.build.rules.default_team = 1;
         assert!(harness.place(10, 10, wall, 0, true));
         let target = harness.build_at(10, 10).expect("building");
         harness

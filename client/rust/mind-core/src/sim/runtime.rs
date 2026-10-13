@@ -39,7 +39,7 @@ use crate::world::blocks::power::{
 use crate::world::building_io::{self, DecodedBase};
 use crate::world::config::ConfigValue as WorldConfigValue;
 use crate::world::limits::{BlockCounter, BuildRules};
-use crate::world::modules::{ItemModule, LiquidModule, ModuleDims, PowerModule};
+use crate::world::modules::{ItemModule, LiquidModule, LiquidTraits, ModuleDims, PowerModule};
 use crate::world::ops::{WorldCtx, WorldEventLog};
 use crate::world::proximity::{remove_from_proximity, update_proximity};
 use crate::world::update::BuildClock;
@@ -129,9 +129,16 @@ impl WorldHooks for SimHooks {
             team: TeamId(request.team),
             rot: request.rot,
         });
-        // K-3: `PowerNodeConfig` is never inserted by the block behaviors; the
-        // live placement path is the natural insertion point (`PowerNode`).
-        if matches!(inst.def.kind, BlockKind::PowerNode) {
+        // K-3/T2: `PowerNodeBehavior::create_state` already inserts the
+        // behavior's real `PowerNodeConfig`; only fall back to the default when
+        // the kind has no registered behavior (mod nodes). The old
+        // unconditional insert overwrote the knobs after `spawn` (PAR: node
+        // large/surge tower dropped to 3 links / range 6).
+        if matches!(
+            inst.def.kind,
+            BlockKind::PowerNode | BlockKind::LongPowerNode
+        ) && world.get::<PowerNodeConfig>(entity).is_none()
+        {
             world.entity_mut(entity).insert(PowerNodeConfig::default());
         }
         Some(entity)
@@ -1058,6 +1065,12 @@ impl Sim {
             items: item_count,
             liquids: liquid_count,
         });
+        // T1: coolant/incinerable/heat-capacity vectors for behaviors that run
+        // without a content-registry borrow (`ConsumeCoolant`, `Incinerator`,
+        // mixing reactions, force-projector coolant).
+        self.ecs
+            .0
+            .insert_resource(LiquidTraits::from_content(&content));
         self.ecs.0.insert_resource(PowerGrids::new());
         // The live per-team block counter (`Build.validPlace` limits + the
         // runtime checksum) is a world resource so scheduled systems (the

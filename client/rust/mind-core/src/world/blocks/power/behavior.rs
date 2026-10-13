@@ -951,6 +951,23 @@ pub fn refresh_thermal_sum(world: &mut World, e: Entity, attribute: Attribute) {
     }
 }
 
+/// `PowerDiode` behavior (`PowerDiode.java:47-80`): each tick moves half the
+/// stored battery-fraction difference from the back graph to the front graph.
+/// The teammate/power/link guards live in
+/// [`crate::world::blocks::power::nodes::update_diode`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct DiodeBehavior;
+
+impl BuildingBehavior for DiodeBehavior {
+    fn update_tile(&self, world: &mut World, e: Entity) {
+        let (Some(front), Some(back)) = (transfer::front(world, e), transfer::back(world, e))
+        else {
+            return;
+        };
+        crate::world::blocks::power::nodes::update_diode(world, front, back);
+    }
+}
+
 /// Registers the vanilla generator/reactor blocks with exact knobs.
 pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
     let item_flammability: Arc<[f32]> = item_flammabilities(content).into();
@@ -1168,6 +1185,9 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             liquid_count,
         }),
     );
+
+    // `diode` (`PowerDiode`; T2): back graph -> front graph transfer.
+    registry.register_named("diode", Arc::new(DiodeBehavior));
 
     // Power distribution nodes (`Blocks.java` power region; gap5 K-3): the
     // behavior inserts the `PowerNodeConfig` the linker reads at construction.

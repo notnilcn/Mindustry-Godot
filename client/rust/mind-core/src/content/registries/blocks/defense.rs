@@ -618,7 +618,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ],
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_liquids(vec![]), consume_power(1.6666666f32)],
+        consumes: vec![
+            consume_liquids(vec![liquid_stack("cyanogen", 1.5 / 60.0)]),
+            consume_power(1.6666666f32),
+        ],
         ..spec("shockwave-tower", BlockKind::ShockwaveTower)
     })?;
 
