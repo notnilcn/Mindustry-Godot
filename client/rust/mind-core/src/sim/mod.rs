@@ -15,6 +15,7 @@ pub mod events;
 pub mod fixed;
 pub mod io_set;
 pub mod logic;
+pub mod player_items;
 pub mod reset;
 pub mod runtime;
 pub mod schedule;
@@ -1033,10 +1034,16 @@ impl Sim {
                 if self.grid.index(pos).is_err() {
                     return Err(CommandError::InvalidTarget);
                 }
-                if self.block_runtime.is_some()
+                if self.player_unit.is_some() {
+                    // Live player unit: the transfer operates on the unit's own
+                    // stack with Java's range/`interactable`/`acceptStack`
+                    // checks (G08 T2a). The relay `player_item` stays for
+                    // headless/relay callers.
+                    self.apply_player_inventory(*kind, pos, *item, *amount);
+                } else if self.block_runtime.is_some()
                     && let Some(entity) = self.grid.entity_at(pos)
                 {
-                    // Live runtime: the real `ItemModule` is the storage the
+                    // Relay runtime: the real `ItemModule` is the storage the
                     // block behaviors read, so mutate that instead of the relay
                     // mirror.
                     let world_apply = self

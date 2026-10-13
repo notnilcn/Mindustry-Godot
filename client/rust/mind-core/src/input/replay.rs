@@ -278,6 +278,7 @@ mod tests {
                 y: 10.0,
                 team: 0,
                 commandable: true,
+                hit_size: 8.0,
             })
             .collect()
     }

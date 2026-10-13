@@ -29,6 +29,8 @@ pub struct SelectableUnit {
     pub team: u8,
     /// `isCommandable`/`allowCommand`.
     pub commandable: bool,
+    /// Hitbox side (`UnitType.hitSize`; `selectedUnit()`'s grown-box check).
+    pub hit_size: f32,
 }
 
 /// Selection box (`command_rect`) in world pixels.
@@ -251,6 +253,7 @@ mod tests {
             y,
             team,
             commandable,
+            hit_size: 8.0,
         }
     }
 

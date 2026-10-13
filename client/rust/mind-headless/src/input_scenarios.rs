@@ -610,6 +610,7 @@ fn input_mobile_parity(json: bool, out: Option<&Path>, golden: Option<&Path>) ->
             y: 30.0,
             team: 1,
             commandable: true,
+            hit_size: 8.0,
         },
         SelectableUnit {
             id: 12,
@@ -618,6 +619,7 @@ fn input_mobile_parity(json: bool, out: Option<&Path>, golden: Option<&Path>) ->
             y: 30.0,
             team: 0,
             commandable: true,
+            hit_size: 8.0,
         },
     ];
     controller.state.select_plans.clear();
@@ -694,6 +696,7 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 10.0,
             team: 0,
             commandable: true,
+            hit_size: 8.0,
         },
         SelectableUnit {
             id: 2,
@@ -702,6 +705,7 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 10.0,
             team: 0,
             commandable: true,
+            hit_size: 8.0,
         },
         SelectableUnit {
             id: 3,
@@ -710,6 +714,7 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 11.0,
             team: 0,
             commandable: true,
+            hit_size: 8.0,
         },
         SelectableUnit {
             id: 9,
@@ -718,6 +723,7 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 10.0,
             team: 1,
             commandable: true,
+            hit_size: 8.0,
         },
     ];
     let mut controller = DesktopController::new(1);
@@ -1302,6 +1308,7 @@ fn bench(
                     y: (i / 40) as f32 * 16.0,
                     team: 0,
                     commandable: true,
+                    hit_size: 8.0,
                 })
                 .collect();
             let rect = SelectRect {

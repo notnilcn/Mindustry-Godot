@@ -43,6 +43,60 @@ use super::runtime::SimRuntime;
 /// Team id of `Team.derelict`.
 const DERELICT: u8 = 0;
 
+/// `Block.bounds(x, y)` (`Block.java:1023-1025`): the world rect a block
+/// footprint covers, centered on `(x, y) * tilesize + offset`.
+fn block_bounds(
+    content: Option<&crate::content::ContentRegistry>,
+    x: i32,
+    y: i32,
+    block: BlockId,
+) -> (f32, f32, f32, f32) {
+    let (size, offset) = content
+        .and_then(|content| content.block(block))
+        .map(|def| (def.size, def.offset))
+        .unwrap_or((1, 0.0));
+    let unit = crate::config::TILESIZE as f32;
+    let s = size as f32 * unit;
+    (
+        x as f32 * unit + offset - s / 2.0,
+        y as f32 * unit + offset - s / 2.0,
+        s,
+        s,
+    )
+}
+
+/// ARC `Rect.overlaps`: strict edge comparison (`Rect.java`).
+fn rects_overlap(a: (f32, f32, f32, f32), b: (f32, f32, f32, f32)) -> bool {
+    a.0 < b.0 + b.2 && a.0 + a.2 > b.0 && a.1 < b.1 + b.3 && a.1 + a.3 > b.1
+}
+
+/// `Logic.checkOverlappingPlans` (`Logic.java:255-266`): a finished non-breaking
+/// placement removes team ghost plans whose bounds overlap its own.
+fn check_overlapping_ghosts(
+    world: &mut World,
+    content: &crate::content::ContentRegistry,
+    team: u8,
+    x: i32,
+    y: i32,
+    block: BlockId,
+) {
+    let Some(mut campaign) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    else {
+        return;
+    };
+    let bounds = block_bounds(Some(content), x, y, block);
+    let data = campaign.session.teams.get(crate::ecs::TeamId(team));
+    for plan in data.plans.iter_mut() {
+        if rects_overlap(
+            bounds,
+            block_bounds(Some(content), plan.x as i32, plan.y as i32, plan.block),
+        ) {
+            plan.removed = true;
+        }
+    }
+    data.plans.retain(|plan| !plan.removed);
+}
+
 /// One queued build plan (`BuildPlan` with its transient builder fields).
 #[derive(Debug, Clone, PartialEq)]
 pub struct UnitBuildPlan {
@@ -54,6 +108,9 @@ pub struct UnitBuildPlan {
     pub rotation: u8,
     /// Block to place (`AIR` for a deconstruction).
     pub block: BlockId,
+    /// `BuildPlan.config`; applied on finish
+    /// (`ConstructBlock.constructFinish`, `ConstructBlock.java:72-118`).
+    pub config: crate::world::config::ConfigValue,
     /// Whether this is a deconstruction order.
     pub breaking: bool,
     /// `BuildPlan.initialized`: the construct block was begun.
@@ -72,6 +129,7 @@ impl UnitBuildPlan {
             y,
             rotation,
             block,
+            config: crate::world::config::ConfigValue::None,
             breaking: false,
             initialized: false,
             stuck: false,
@@ -593,6 +651,16 @@ fn update_builder(
                             team,
                             rules.economy.cost_multiplier,
                         ) {
+                            // `BuilderComp` passes `current.config` into the
+                            // construct (`Call.beginPlace` L173 / `construct`
+                            // L217); `ConstructBuild.construct` stores it as
+                            // `lastConfig` (`ConstructBlock.java:278-288`).
+                            if !current.breaking
+                                && let Some(construct) = grid.entity_at(pos)
+                                && let Some(mut state) = world.get_mut::<ConstructState>(construct)
+                            {
+                                state.last_config = current.config.clone();
+                            }
                             out.changed = true;
                         }
                     } else {
@@ -699,6 +767,12 @@ fn update_builder(
             .get::<Building>(entity)
             .map(|b| b.rotation)
             .unwrap_or(current.rotation);
+        if !current.breaking {
+            // `BuilderComp.java:217`: the builder passes its plan config on
+            // every `construct` step; `ConstructBuild.construct` stores it as
+            // `lastConfig` (`ConstructBlock.java:288`).
+            state.last_config = current.config.clone();
+        }
         world.entity_mut(entity).insert(state.clone());
         if let Some(head) = plans.plans.front_mut() {
             *head = current.clone();
@@ -740,6 +814,16 @@ fn update_builder(
                 if let Some(placed) = grid.entity_at(anchor) {
                     let grid_ref: &WorldGrid = grid;
                     runtime.placed_hooks(world, grid_ref, placed);
+                    // `ConstructBlock.constructFinish` (`ConstructBlock.java:72-118`):
+                    // after `tile.setBlock`, a non-null config is applied.
+                    if !matches!(current.config, crate::world::config::ConfigValue::None) {
+                        let _ = crate::world::config::configure(
+                            world,
+                            placed,
+                            Some(unit),
+                            current.config.clone(),
+                        );
+                    }
                     chain_bridge(
                         world,
                         grid_ref,
@@ -764,6 +848,16 @@ fn update_builder(
                         block: state.current,
                         team,
                     }));
+                // `Logic` `BlockBuildEndEvent` -> `checkOverlappingPlans`
+                // (`Logic.java:53-58`, `255-266`).
+                check_overlapping_ghosts(
+                    world,
+                    runtime.content(),
+                    team,
+                    anchor.x() as i32,
+                    anchor.y() as i32,
+                    state.current,
+                );
             }
             out.changed = true;
         }
@@ -789,6 +883,26 @@ impl Sim {
     /// Queues a placement on the player unit (`InputHandler.flushPlans` ->
     /// `player.unit().addBuild(plan)`); invalid placements are dropped.
     pub fn queue_player_place(&mut self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
+        self.queue_player_place_config(
+            x,
+            y,
+            block,
+            rotation,
+            crate::world::config::ConfigValue::None,
+        )
+    }
+
+    /// Queues a placement carrying a config (`InputHandler.updateLine` plan
+    /// configs, schematic copies, rebuild ghosts; the value is applied when the
+    /// construct completes).
+    pub fn queue_player_place_config(
+        &mut self,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rotation: u8,
+        config: crate::world::config::ConfigValue,
+    ) -> bool {
         let Some(unit) = self.player_unit else {
             return false;
         };
@@ -800,6 +914,7 @@ impl Sim {
             return false;
         }
         let mut plan = UnitBuildPlan::place(x, y, rotation, block);
+        plan.config = config;
         // `addBuild`: carry the progress of an in-flight construct block.
         if let Some(entity) = self.grid.entity_at(TilePos::new(x, y))
             && let Some(state) = self.ecs.0.get::<ConstructState>(entity)
@@ -808,6 +923,135 @@ impl Sim {
         }
         self.with_player_plans(unit, |plans| plans.add_build(plan, true));
         true
+    }
+
+    /// `InputHandler.rebuildArea` (`InputHandler.java:2318-2330`): re-queues
+    /// every live team ghost plan whose block bounds overlap the selection
+    /// rect. Returns the queued count. (`tryRepairDerelict` over the rect,
+    /// `InputHandler.java:2331-2341`, is deferred: it needs the G02 T8
+    /// derelict-repair branches in `Build.validPlace`.)
+    pub fn queue_team_rebuild(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) -> usize {
+        let team = self.live_default_team();
+        let r = crate::input::placement::normalize_area(x1, y1, x2, y2, 0, false, 999_999_999);
+        let rect = (
+            (r.x * 8) as f32,
+            (r.y * 8) as f32,
+            ((r.x2 - r.x) * 8) as f32,
+            ((r.y2 - r.y) * 8) as f32,
+        );
+        let content = self.block_runtime.as_ref().map(|runtime| runtime.content());
+        // `for(BlockPlan plan : player.team().data().plans)` (front to back).
+        let ghosts: Vec<crate::game::teams::BlockPlan> = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .and_then(|campaign| campaign.session.teams.get_or_null(crate::ecs::TeamId(team)))
+            .map(|data| {
+                data.plans
+                    .iter()
+                    .filter(|plan| {
+                        rects_overlap(
+                            block_bounds(content, plan.x as i32, plan.y as i32, plan.block),
+                            rect,
+                        )
+                    })
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut queued = 0usize;
+        for plan in ghosts {
+            let rotation = plan.rotation.rem_euclid(4) as u8;
+            if self.queue_player_place_config(
+                plan.x,
+                plan.y,
+                plan.block,
+                rotation,
+                plan.config.clone().unwrap_or_default(),
+            ) {
+                queued += 1;
+            }
+        }
+        queued
+    }
+
+    /// `InputHandler.removeSelection`'s plan half (`InputHandler.java:1905-1935`):
+    /// remove non-breaking player plans whose bounds overlap the clamped rect,
+    /// and drop team ghost plans overlapping it (`plan.removed = true`).
+    /// Runs even when no building sits in the rect.
+    pub fn remove_plans_in(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, max_length: i32) {
+        let r = crate::input::placement::normalize_area(x1, y1, x2, y2, 0, false, max_length);
+        let rect = (
+            (r.x * 8) as f32,
+            (r.y * 8) as f32,
+            ((r.x2 - r.x) * 8) as f32,
+            ((r.y2 - r.y) * 8) as f32,
+        );
+        // Collect first (content borrows), then mutate the queue.
+        let plan_positions: Vec<(i16, i16)> = if let Some(unit) = self.player_unit {
+            let content = self.block_runtime.as_ref().map(|runtime| runtime.content());
+            self.ecs
+                .0
+                .get::<BuilderPlans>(unit)
+                .map(|plans| {
+                    plans
+                        .plans
+                        .iter()
+                        .filter(|plan| !plan.breaking)
+                        .filter(|plan| {
+                            rects_overlap(
+                                block_bounds(content, plan.x as i32, plan.y as i32, plan.block),
+                                rect,
+                            )
+                        })
+                        .map(|plan| (plan.x, plan.y))
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        if let Some(unit) = self.player_unit {
+            self.with_player_plans(unit, |plans| {
+                plans
+                    .plans
+                    .retain(|plan| !plan_positions.contains(&(plan.x, plan.y)));
+            });
+        }
+        if let Some(mut campaign) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+        {
+            let content = self.block_runtime.as_ref().map(|runtime| runtime.content());
+            let team = campaign.session.rules.default_team;
+            let data = campaign.session.teams.get(crate::ecs::TeamId(team));
+            for plan in data.plans.iter_mut() {
+                if rects_overlap(
+                    block_bounds(content, plan.x as i32, plan.y as i32, plan.block),
+                    rect,
+                ) {
+                    plan.removed = true;
+                }
+            }
+            data.plans.retain(|plan| !plan.removed);
+        }
+    }
+
+    /// `BuilderComp.activelyBuilding` for the live player unit
+    /// (`BuilderComp.java:301-309`): the `canShoot` gate for left presses.
+    pub fn player_actively_building(&self) -> bool {
+        let Some(unit) = self.player_unit else {
+            return false;
+        };
+        let Some(pos) = self.ecs.0.get::<Pos>(unit).map(|pos| (pos.x, pos.y)) else {
+            return false;
+        };
+        let Some(runtime) = self.unit_runtime() else {
+            return false;
+        };
+        crate::ai::types::player::player_actively_building(&self.ecs.0, &runtime.content, unit, pos)
+            .is_some()
     }
 
     /// `InputHandler.validPlace(x, y, block, rot)` for the local team: the
@@ -1089,6 +1333,79 @@ mod tests {
         module.add(copper, amount, 100_000);
     }
 
+    fn set_core_item(sim: &mut Sim, name: &str, amount: i32) {
+        let item = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id(name)
+            .expect("item");
+        let core = team_core(&sim.ecs.0, 1).expect("core");
+        let mut module = sim.ecs.0.get_mut::<ItemModule>(core).expect("items");
+        let have = module.get(item);
+        module.remove(item, have);
+        module.add(item, amount, 100_000);
+    }
+
+    /// Inserts a live `CampaignRuntime` with `default_team = 1` in `Playing`
+    /// (`sim::combat_tests::destroyed_building_leaves_rebuild_plan` shape).
+    fn with_campaign(sim: &mut Sim) {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let campaign = {
+            let content = &sim.unit_runtime().expect("runtime").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            ..Rules::default()
+        });
+        session.phase = crate::game::State::Playing;
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+    }
+
+    /// Team ghost rebuild plans (queue order).
+    fn team_ghosts(sim: &Sim, team: u8) -> Vec<crate::game::teams::BlockPlan> {
+        sim.ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .and_then(|campaign| campaign.session.teams.get_or_null(crate::ecs::TeamId(team)))
+            .map(|data| data.plans.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Builds a team-1 wall at `(x, y)` through the player plan queue (so the
+    /// finish branch runs) and returns its entity.
+    fn build_wall(sim: &mut Sim, x: i16, y: i16, wall: BlockId) -> Entity {
+        assert!(sim.queue_player_place(x, y, wall, 0));
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(x, y)),
+            Some(wall),
+            "wall finished at ({x}, {y})"
+        );
+        sim.grid.entity_at(TilePos::new(x, y)).expect("wall entity")
+    }
+
+    /// Kills a building (`Health.health = 0`); the next tick's `resolve_deaths`
+    /// destroys it and pushes its team ghost plan.
+    fn kill_building(sim: &mut Sim, entity: Entity) {
+        sim.ecs
+            .0
+            .get_mut::<crate::entities::comp::Health>(entity)
+            .expect("health")
+            .health = 0.0;
+        sim.tick().expect("tick");
+    }
+
     #[test]
     fn player_place_builds_over_time_and_spends_core_items() {
         let (mut sim, _unit, _core, wall) = sim_with_player();
@@ -1122,6 +1439,156 @@ mod tests {
         );
         assert!(sim.player_build_plans().is_empty());
         assert_eq!(core_copper(&sim), 94, "requirements drawn from the core");
+    }
+
+    #[test]
+    fn player_plan_config_applies_on_finish() {
+        use crate::world::config::{ConfigValue, read_config};
+
+        let (mut sim, _unit, _core, _wall) = sim_with_player();
+        // sorter = 2 lead + 2 copper (build_cost_multiplier 3).
+        set_core_item(&mut sim, "copper", 500);
+        set_core_item(&mut sim, "lead", 500);
+        let sorter = BlockId::new(sim.world_block_id("sorter").expect("sorter"));
+        let copper = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("copper")
+            .expect("copper");
+        assert!(sim.queue_player_place_config(14, 10, sorter, 0, ConfigValue::Item(copper)));
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(sorter),
+            "sorter finished"
+        );
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(14, 10))
+            .expect("sorter entity");
+        assert_eq!(
+            read_config(&sim.ecs.0, entity),
+            ConfigValue::Item(copper),
+            "plan config applied on finish"
+        );
+    }
+
+    #[test]
+    fn plan_without_config_keeps_default() {
+        use crate::world::config::{ConfigValue, read_config};
+
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        set_core_copper(&mut sim, 100);
+        assert!(sim.queue_player_place(14, 10, wall, 0));
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(14, 10))
+            .expect("wall entity");
+        assert_eq!(read_config(&sim.ecs.0, entity), ConfigValue::None);
+    }
+
+    #[test]
+    fn rebuild_select_queues_ghost() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        with_campaign(&mut sim);
+        set_core_copper(&mut sim, 100);
+        let entity = build_wall(&mut sim, 14, 10, wall);
+        kill_building(&mut sim, entity);
+        assert!(
+            team_ghosts(&sim, 1)
+                .iter()
+                .any(|plan| plan.x == 14 && plan.y == 10),
+            "ghost queued"
+        );
+
+        assert_eq!(sim.queue_team_rebuild(13, 9, 15, 11), 1);
+        let plans = sim.player_build_plans();
+        assert_eq!(plans.len(), 1);
+        assert_eq!((plans[0].x, plans[0].y, plans[0].block), (14, 10, wall));
+
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(14, 10)),
+            Some(wall),
+            "rebuilt"
+        );
+        assert!(
+            !team_ghosts(&sim, 1)
+                .iter()
+                .any(|plan| plan.x == 14 && plan.y == 10),
+            "ghost cleared by the rebuild (checkOverlappingPlans)"
+        );
+    }
+
+    #[test]
+    fn rebuild_select_single_tile_rect() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        with_campaign(&mut sim);
+        set_core_copper(&mut sim, 100);
+        let entity = build_wall(&mut sim, 14, 10, wall);
+        kill_building(&mut sim, entity);
+        // Zero-width rect still overlaps the block bounds (strict inequalities).
+        assert_eq!(sim.queue_team_rebuild(14, 10, 14, 10), 1);
+    }
+
+    #[test]
+    fn remove_plans_in_cancels_queued_and_ghosts() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        with_campaign(&mut sim);
+        // Empty core: the queued plan at (20,20) stays queued.
+        assert!(sim.queue_player_place(20, 20, wall, 0));
+        assert_eq!(sim.player_build_plans().len(), 1);
+        // Ghost at (22,20) from a killed API-placed wall.
+        sim.command(SimCommand::Place {
+            x: 22,
+            y: 20,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("api wall");
+        let entity = sim.grid.entity_at(TilePos::new(22, 20)).expect("wall");
+        kill_building(&mut sim, entity);
+        assert!(
+            team_ghosts(&sim, 1)
+                .iter()
+                .any(|plan| plan.x == 22 && plan.y == 20)
+        );
+
+        sim.remove_plans_in(19, 19, 23, 21, 100);
+        assert!(sim.player_build_plans().is_empty(), "queued plan removed");
+        assert!(
+            team_ghosts(&sim, 1).is_empty(),
+            "ghost removed from the team queue"
+        );
+    }
+
+    #[test]
+    fn adjacent_block_does_not_clear_ghost() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        with_campaign(&mut sim);
+        set_core_copper(&mut sim, 100);
+        let entity = build_wall(&mut sim, 14, 10, wall);
+        kill_building(&mut sim, entity);
+        // A neighbour finishes right next to the ghost: strict bounds do not
+        // overlap, so the ghost stays.
+        let _ = build_wall(&mut sim, 15, 10, wall);
+        assert!(
+            team_ghosts(&sim, 1)
+                .iter()
+                .any(|plan| plan.x == 14 && plan.y == 10),
+            "adjacent block leaves the ghost"
+        );
     }
 
     #[test]

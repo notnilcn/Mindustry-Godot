@@ -854,6 +854,33 @@ impl Sim {
         self.ecs.0.insert_resource(input);
     }
 
+    /// Uploads the full desktop control state (`DesktopInput.updateMovement`):
+    /// movement axis, `player.shooting`, the cursor aim point and the boost
+    /// key. Read by [`crate::ai::types::player::update_player`].
+    pub fn set_player_control(
+        &mut self,
+        axis_x: f32,
+        axis_y: f32,
+        shooting: bool,
+        aim_x: f32,
+        aim_y: f32,
+        boosting: bool,
+    ) {
+        let mut input = self
+            .ecs
+            .0
+            .get_resource::<PlayerInput>()
+            .copied()
+            .unwrap_or_default();
+        input.axis_x = axis_x;
+        input.axis_y = axis_y;
+        input.shooting = shooting;
+        input.aim_x = aim_x;
+        input.aim_y = aim_y;
+        input.boosting = boosting;
+        self.ecs.0.insert_resource(input);
+    }
+
     /// Sets or clears the player unit's mine order
     /// (`InputHandler.tryBeginMine`/`tryStopMine` set `player.unit().mineTile`).
     pub fn set_player_mine_tile(&mut self, tile: Option<TilePos>) {
@@ -2403,6 +2430,10 @@ impl Sim {
                 && entity_ref
                     .get::<ControllerSlot>()
                     .is_some_and(|slot| slot.kind == AiKind::Command);
+            let hit_size = runtime
+                .content
+                .unit(type_comp.type_id)
+                .map_or(0.0, |def| def.hit_size);
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_comp.type_id.get() as i32,
@@ -2410,9 +2441,35 @@ impl Sim {
                 "y": pos.y,
                 "team": team.team,
                 "commandable": commandable,
+                "hit_size": hit_size,
             }));
         }
         serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
+    }
+
+    /// `MapObjectives.CommandModeObjective.update` (`MapObjectives.java:671-675`):
+    /// any live unit whose `EntitySeq` is in `ids`, on `live_default_team()`,
+    /// has a `Command` controller with a live order target
+    /// (`CommandAI.hasCommand()` = `targetPos != null`).
+    pub fn any_unit_has_command(&self, ids: &[i32]) -> bool {
+        if ids.is_empty() {
+            return false;
+        }
+        let team = self.live_default_team();
+        self.ecs.0.iter_entities().any(|entity_ref| {
+            let Some(seq) = entity_ref.get::<EntitySeq>() else {
+                return false;
+            };
+            if !ids.contains(&(seq.0 as i32)) {
+                return false;
+            }
+            if entity_ref.get::<TeamComp>().map(|team_comp| team_comp.team) != Some(team) {
+                return false;
+            }
+            entity_ref
+                .get::<ControllerSlot>()
+                .is_some_and(|slot| slot.kind == AiKind::Command && slot.target.is_some())
+        })
     }
 
     /// Debug-only live unit dump (`id`, `type`, `team`, `kind`, position,

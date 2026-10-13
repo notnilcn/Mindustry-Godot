@@ -24,6 +24,9 @@ var _list: MindTable = null
 var _search_field: LineEdit = null
 var _capture: Control = null
 var _capture_name := ""
+var _capture_axis := false
+var _capture_prompt: MindLabel = null
+var _axis_min := ""
 
 
 func _ready() -> void:
@@ -147,12 +150,13 @@ func _add_reset_all() -> void:
 	_list.row()
 
 
-## Upstream key cell: single key, or `min [red]/[] max` for a two-key axis.
+## Upstream key cell: single key, or `min [red]/[] max` for a two-key axis
+## (`KeybindDialog.java:118-124`; `MindLabel` is a BBCode RichTextLabel).
 func _key_text(entry: Dictionary) -> String:
 	var negative: Variant = entry.get("negativeDisplay")
 	var positive: Variant = entry.get("display")
 	if bool(entry.get("axis", false)) and negative != null:
-		return "%s / %s" % [str(negative), str(positive) if positive != null else UNSET_TEXT]
+		return "%s [red]/[] %s" % [str(negative), str(positive) if positive != null else UNSET_TEXT]
 	return str(positive) if positive != null else UNSET_TEXT
 
 
@@ -175,9 +179,12 @@ func _reset_all() -> void:
 
 
 ## Opens the capture prompt (`KeybindDialog.openDialog`): the next key or mouse
-## button rebinds; Back cancels and Unbind clears the binding.
+## button rebinds; Back cancels and Unbind clears the binding. Axis rows ask
+## twice (`keybind.press.axis` then `keybind.press`, KeybindDialog.java:96-145).
 func _start_capture(name: String) -> void:
 	_capture_name = name
+	_capture_axis = _entry_axis(name)
+	_axis_min = ""
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus != null:
 		focus.release_focus()
@@ -200,9 +207,11 @@ func _start_capture(name: String) -> void:
 	var box := VBoxContainer.new()
 	box.add_theme_constant_override("separation", 12)
 	panel.add_child(box)
-	var prompt := MindWidgets.styled_label(_t("@keybind.press"), "techLabel")
+	var prompt_text := "@keybind.press.axis" if _capture_axis else "@keybind.press"
+	var prompt := MindWidgets.styled_label(_t(prompt_text), "techLabel")
 	prompt.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	box.add_child(prompt)
+	_capture_prompt = prompt
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_child(row)
@@ -216,8 +225,22 @@ func _start_capture(name: String) -> void:
 	row.add_child(unbind)
 
 
+## Registry `axis` flag for a binding row (`KeyKind.Axis`).
+func _entry_axis(name: String) -> bool:
+	for entry in _entries:
+		if str(entry.get("name", "")) == name:
+			return bool(entry.get("axis", false))
+	return false
+
+
 func _on_capture_gui_input(event: InputEvent) -> void:
 	if not (event is InputEventMouseButton) or not event.pressed:
+		return
+	# An axis row captures the wheel as `scroll` in one step
+	# (`KeybindDialog.scrolled`, KeybindDialog.java:139-145).
+	if _capture_axis and (event.button_index == MOUSE_BUTTON_WHEEL_UP
+			or event.button_index == MOUSE_BUTTON_WHEEL_DOWN):
+		_apply_axis_capture("", "scroll")
 		return
 	var code := ""
 	match event.button_index:
@@ -239,12 +262,29 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _apply_capture(code: String, from_godot: bool) -> void:
+	if _capture_axis:
+		# First key = negative, second = positive (`axis.key` / `rebindMin`).
+		if _axis_min.is_empty():
+			_axis_min = code
+			if _capture_prompt != null:
+				_capture_prompt.text = _t("@keybind.press")
+			return
+		_apply_axis_capture(_axis_min, code)
+		return
 	var input := _mind_input()
 	if input != null:
 		if from_godot:
 			input.call("rebind_key", _capture_name, code)
 		else:
 			input.call("rebind", _capture_name, code)
+	_end_capture()
+	_rebuild()
+
+
+func _apply_axis_capture(negative: String, positive: String) -> void:
+	var input := _mind_input()
+	if input != null:
+		input.call("rebind_axis", _capture_name, negative, positive)
 	_end_capture()
 	_rebuild()
 

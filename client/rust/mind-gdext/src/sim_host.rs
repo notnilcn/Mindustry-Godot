@@ -319,11 +319,13 @@ impl INode for MindSimHost {
         if steps == 0 {
             return;
         }
-        // `DesktopInput.updateMovement`: the axis reaches the player unit each
-        // tick; the same axis no longer pans the camera while a player exists
+        // `DesktopInput.updateMovement`: the full control state (axis, shooting,
+        // cursor aim, boost) reaches the player unit each tick; the same axis no
+        // longer pans the camera while a player exists
         // (`MindCamera2D::process`).
-        let (axis_x, axis_y) = self.player_axis();
-        self.sim.set_player_input(axis_x, axis_y);
+        let (axis_x, axis_y, shooting, aim_x, aim_y, boosting) = self.player_control();
+        self.sim
+            .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting);
         self.advance_steps(steps);
         self.emit_state();
         self.emit_world_changed();
@@ -950,6 +952,7 @@ impl MindSimHost {
                 out.set(&GString::from(key), &value);
             };
             put("block", Variant::from(i64::from(building.block.raw())));
+            put("rotation", Variant::from(i64::from(building.rotation)));
             put("enabled", Variant::from(building.enabled));
             if let Some(team) = world.get::<mind_core::entities::comp::TeamComp>(entity) {
                 put("team", Variant::from(i64::from(team.team)));
@@ -1968,6 +1971,163 @@ impl MindSimHost {
         self.sim.queue_player_place(x, y, block, rotation)
     }
 
+    /// Queues a player construction plan carrying a config (G08 T5: schematic
+    /// copies, rebuild ghosts, line plan configs, `nextConfig`).
+    pub fn queue_player_place_config(
+        &mut self,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rot: u8,
+        config: mind_core::world::config::ConfigValue,
+    ) -> bool {
+        self.sim.queue_player_place_config(x, y, block, rot, config)
+    }
+
+    /// `Block.rotate` for a block id (G08 T6b plan rotation math).
+    pub fn block_rotates(&self, id: BlockId) -> bool {
+        mind_core::world::blocks::payloads::payload_block::block_rotates(&self.sim.ecs.0, id)
+    }
+
+    /// `Schematics.create` over the live world (F-drag / break-cut copy): the
+    /// selection rect plus the paste cursor resolve to select plans
+    /// (`Schematics.toPlans`, priority-sorted).
+    pub fn copy_schematic_plans(
+        &self,
+        start: (i32, i32),
+        end: (i32, i32),
+        cursor: (i32, i32),
+    ) -> Vec<mind_core::input::ClientPlan> {
+        let (x1, y1) = start;
+        let (x2, y2) = end;
+        let (cx, cy) = cursor;
+        let Some(content) = self.content_registry() else {
+            return Vec::new();
+        };
+        let world = mind_core::game::schematics::EcsSchematicWorld {
+            grid: &self.sim.grid,
+            world: &self.sim.ecs.0,
+            content,
+            team: Some(self.player_team()),
+        };
+        let schem = mind_core::game::schematics::Schematics::new().create(
+            &world,
+            content,
+            x1,
+            y1,
+            x2,
+            y2,
+            mind_core::game::rules::MAX_SCHEMATIC_SIZE,
+        );
+        mind_core::game::schematics::plans_for(&schem, cx, cy, true, content)
+            .iter()
+            .map(mind_core::input::ClientPlan::from_build_plan)
+            .collect()
+    }
+
+    /// `InputHandler.rebuildArea` (B drag): re-queues team ghost plans in the
+    /// rect. Returns the queued count.
+    pub fn queue_team_rebuild(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) -> usize {
+        self.sim.queue_team_rebuild(x1, y1, x2, y2)
+    }
+
+    /// `InputHandler.removeSelection` plan half (right drag): drops queued
+    /// player plans and team ghosts overlapping the clamped rect.
+    pub fn remove_plans_in(&mut self, x1: i32, y1: i32, x2: i32, y2: i32, max_length: i32) {
+        self.sim.remove_plans_in(x1, y1, x2, y2, max_length);
+    }
+
+    /// Playtest seam: the player team's ghost rebuild plans
+    /// (`[{x,y,block,rotation}]`).
+    #[func]
+    pub fn team_ghost_plans_json(&self) -> GString {
+        let team = self.player_team();
+        let plans: Vec<serde_json::Value> = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .and_then(|campaign| {
+                campaign
+                    .session
+                    .teams
+                    .get_or_null(mind_core::ecs::TeamId(team))
+            })
+            .map(|data| {
+                data.plans
+                    .iter()
+                    .map(|plan| {
+                        serde_json::json!({
+                            "x": plan.x,
+                            "y": plan.y,
+                            "block": self.sim.block_name_of(plan.block),
+                            "rotation": plan.rotation,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        GString::from(serde_json::Value::Array(plans).to_string().as_str())
+    }
+
+    /// Playtest seam: kills a building (`Health.health = 0`); the next tick's
+    /// `resolve_deaths` destroys it and pushes the ghost plan.
+    #[func]
+    pub fn debug_kill_building(&mut self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(entity) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return false;
+        };
+        let Some(mut health) = self
+            .sim
+            .ecs
+            .0
+            .get_mut::<mind_core::entities::comp::Health>(entity)
+        else {
+            return false;
+        };
+        health.health = 0.0;
+        true
+    }
+
+    /// Playtest seam: force-spawns the player unit without the sector env gate
+    /// (`CoreBlock.requestSpawn` refuses alpha when `rules.env` wrongly carries
+    /// scorching — G01's recorded divergence). Lets input-path probes run on
+    /// Ground Zero; the real spawn stays `spawn_player_unit()`.
+    #[func]
+    pub fn debug_spawn_player(&mut self, name: GString, team: i64, x: f32, y: f32) -> bool {
+        self.sim
+            .spawn_player_unit(&name.to_string(), team.max(0) as u8, x, y, 90.0)
+            .is_some()
+    }
+
+    /// `MapObjectives.CommandModeObjective` input read (G08 T15): whether any
+    /// selected unit holds a command order (`CommandAI.hasCommand()`).
+    pub fn any_unit_has_command(&self, ids: &[i32]) -> bool {
+        self.sim.any_unit_has_command(ids)
+    }
+
+    /// `ObjectiveInputState.command_mode_satisfied` (G04 T4/G08 T15).
+    pub fn command_mode_satisfied(&self) -> bool {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::ObjectiveInputState>()
+            .is_some_and(|state| state.command_mode_satisfied)
+    }
+
+    /// Verify seam: the `ObjectiveInputState.command_mode_satisfied` flag.
+    #[func]
+    pub fn command_mode_objective(&self) -> bool {
+        self.command_mode_satisfied()
+    }
+
     /// Name of the currently selected block.
     #[func]
     pub fn selected_block(&self) -> GString {
@@ -2070,19 +2230,21 @@ impl MindSimHost {
             .unwrap_or_default()
     }
 
-    /// Binding-driven move axis from the sibling `Input`. `MindInput.pan_axis`
-    /// is the shared `move_x`/`move_y` axis; with a player unit it drives the
-    /// unit instead of the camera (`DesktopInput.updateMovement`).
-    fn player_axis(&self) -> (f32, f32) {
+    /// Binding-driven control state from the sibling `Input`:
+    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`.
+    /// `MindInput.player_control` shares the `move_x`/`move_y` axis; with a
+    /// player unit it drives the unit instead of the camera
+    /// (`DesktopInput.updateMovement`).
+    fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
         if self.input_locked {
-            // `InputHandler.locked()`: movement is gated off (PAR-0100).
-            return (0.0, 0.0);
+            // `InputHandler.locked()`: movement and firing are gated off
+            // (PAR-0100).
+            return (0.0, 0.0, false, 0.0, 0.0, false);
         }
         let Some(input) = self.input.clone() else {
-            return (0.0, 0.0);
+            return (0.0, 0.0, false, 0.0, 0.0, false);
         };
-        let axis = input.bind().pan_axis();
-        (axis.x, axis.y)
+        input.bind().player_control()
     }
 
     /// `InputHandler.locked()` push from `MindInput` (PAR-0100): while set, the
@@ -2091,13 +2253,34 @@ impl MindSimHost {
     pub fn set_input_locked(&mut self, locked: bool) {
         self.input_locked = locked;
         if locked {
-            self.sim.set_player_input(0.0, 0.0);
+            self.sim
+                .set_player_control(0.0, 0.0, false, 0.0, 0.0, false);
         }
     }
 
     /// Player unit world position (`Player` mirror) for the camera follow.
     pub fn player_unit_position(&self) -> Option<(f32, f32)> {
         self.sim.player_unit_position()
+    }
+
+    /// `BuilderComp.activelyBuilding` for the player unit: the `canShoot` gate
+    /// the world input checks before latching `player.shooting`.
+    pub fn player_actively_building(&self) -> bool {
+        self.sim.player_actively_building()
+    }
+
+    /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
+    /// `Some(true)` when the building at the tile accepts the held stack,
+    /// `None` when Java takes the `Call.dropItem` branch.
+    pub fn player_can_deposit_at(&self, x: i32, y: i32) -> Option<bool> {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        (self
+            .sim
+            .player_deposit_accepted(mind_core::world::TilePos::new(x, y))
+            > 0)
+        .then_some(true)
     }
 
     /// Team a local placement carries (`state.rules.defaultTeam`; the live
@@ -2241,6 +2424,34 @@ impl MindSimHost {
     #[func]
     pub fn player_mined_count(&self) -> i64 {
         self.sim.player_mined_count()
+    }
+
+    /// The player unit's carried stack as `(item name, amount)` (`unit.stack`).
+    pub fn player_unit_stack(&self) -> Option<(String, i32)> {
+        let (item, amount) = self.sim.player_unit_stack()?;
+        let name = self
+            .sim
+            .unit_runtime()
+            .and_then(|runtime| runtime.content.item(item))
+            .map(|def| def.name.clone())?;
+        Some((name, amount))
+    }
+
+    /// Playtest seam: the player unit's stack as `{"item":..,"amount":..}` or
+    /// `{}` when empty.
+    #[func]
+    pub fn player_stack_json(&self) -> GString {
+        match self.player_unit_stack() {
+            Some((item, amount)) => GString::from(
+                serde_json::json!({
+                    "item": item,
+                    "amount": amount,
+                })
+                .to_string()
+                .as_str(),
+            ),
+            None => GString::from("{}"),
+        }
     }
 
     /// Debug/playtest seam: adds `amount` of `item` to the player team's first

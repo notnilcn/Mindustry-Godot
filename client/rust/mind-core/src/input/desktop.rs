@@ -194,12 +194,109 @@ impl DesktopController {
     }
 }
 
+/// `DesktopInput` wheel context for [`route_scroll`]
+/// (`DesktopInput.java:475-480`, `843-858`, `924-926`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScrollCtx {
+    /// `Binding.diagonalPlacement` held (zoom override, rotation gate).
+    pub diagonal_held: bool,
+    /// `Binding.rotateplaced` held (rotates the building under the cursor).
+    pub rotate_placed_held: bool,
+    /// `Binding.zoom.value.equals(Binding.rotate.value)` (both default to the
+    /// wheel).
+    pub zoom_is_rotate: bool,
+    /// `player.isBuilder() && isPlacing()`.
+    pub placing: bool,
+    /// The selected block rotates (`block.rotate`).
+    pub block_rotates: bool,
+    /// `!selectPlans.isEmpty()`.
+    pub select_plans: bool,
+    /// The building under the cursor is interactable and
+    /// `block.rotate && block.quickRotate`.
+    pub cursor_build_quick_rotates: bool,
+}
+
+/// Which wheel behaviours run for one step.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScrollRoute {
+    /// `renderer.scaleCamera(axisTap(zoom))`.
+    pub zoom: bool,
+    /// Rotate the pending placement or the copied select plans.
+    pub rotate_selection: bool,
+    /// `Call.rotateBlock` on the building under the cursor.
+    pub rotate_placed: bool,
+}
+
+/// Routes one wheel step exactly like `DesktopInput.update`/`pollInputPlayer`
+/// (Java: zoom needs `!keyDown(rotatePlaced)` and either the diagonal key, a
+/// distinct zoom binding, or a non-rotatable/non-placing cursor with no select
+/// plans; rotation is gated only on the diagonal key).
+pub fn route_scroll(ctx: &ScrollCtx) -> ScrollRoute {
+    ScrollRoute {
+        zoom: !ctx.rotate_placed_held
+            && (ctx.diagonal_held
+                || !ctx.zoom_is_rotate
+                || ((!ctx.placing || !ctx.block_rotates) && !ctx.select_plans)),
+        rotate_selection: !ctx.diagonal_held,
+        rotate_placed: !ctx.placing && ctx.rotate_placed_held && ctx.cursor_build_quick_rotates,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::content::BlockId;
     use crate::input::caps::TestCaps;
     use crate::input::focus::FocusState;
+
+    #[test]
+    fn scroll_routing_matches_java() {
+        // (a) placing a rotatable block: rotate, no zoom.
+        let conveyor = ScrollCtx {
+            zoom_is_rotate: true,
+            placing: true,
+            block_rotates: true,
+            ..ScrollCtx::default()
+        };
+        let route = route_scroll(&conveyor);
+        assert!(route.rotate_selection);
+        assert!(!route.zoom);
+
+        // (b) placing a non-rotating block (drill): zoom + rotate.
+        let drill = ScrollCtx {
+            block_rotates: false,
+            ..conveyor
+        };
+        let route = route_scroll(&drill);
+        assert!(route.rotate_selection);
+        assert!(route.zoom, "non-rotating placement does not block zoom");
+
+        // (c) diagonal held while placing: zoom only.
+        let diagonal = ScrollCtx {
+            diagonal_held: true,
+            ..conveyor
+        };
+        let route = route_scroll(&diagonal);
+        assert!(route.zoom);
+        assert!(!route.rotate_selection);
+
+        // (d) R held over a quick-rotatable build, nothing selected: rotate the
+        // placed block and suppress zoom.
+        let placed = ScrollCtx {
+            rotate_placed_held: true,
+            cursor_build_quick_rotates: true,
+            ..ScrollCtx::default()
+        };
+        let route = route_scroll(&placed);
+        assert!(route.rotate_placed);
+        assert!(!route.zoom);
+
+        // (e) nothing selected: zoom.
+        let route = route_scroll(&ScrollCtx::default());
+        assert!(route.zoom);
+        assert!(route.rotate_selection);
+        assert!(!route.rotate_placed);
+    }
 
     #[test]
     fn deposit_cooldown_gate() {

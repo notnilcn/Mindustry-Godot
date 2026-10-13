@@ -120,6 +120,8 @@ impl INode for MindInput {
         if needs_state {
             self.bridge.text_focus = self.text_field_focused();
             self.bridge.ui_dialog = dialog_open;
+            self.refresh_game_state();
+            self.refresh_top_dialog();
             let locked = self.locks.any();
             if self.bridge.locked != locked {
                 self.bridge.locked = locked;
@@ -173,6 +175,12 @@ impl INode for MindInput {
                     self.mark_input_handled();
                     continue;
                 }
+                // `state.isGame()` (`Control.java:690`): the menu has no world;
+                // the click must not reach `MindSimHost::unhandled_input`.
+                if !self.bridge.in_game {
+                    self.mark_input_handled();
+                    continue;
+                }
             }
             self.bridge.handle(&self.bindings, raw);
             if is_press {
@@ -189,6 +197,8 @@ impl INode for MindInput {
         self.last_event_count = pending.len();
         self.bridge.text_focus = self.text_field_focused();
         self.bridge.ui_dialog = self.dialog_open();
+        self.refresh_game_state();
+        self.refresh_top_dialog();
         // `InputHandler.locked()`: the host zeroes the player axis while any
         // lock is active (PAR-0100).
         let locked = self.locks.any();
@@ -206,6 +216,28 @@ impl INode for MindInput {
         // state changes that arrive without a key edge (block selection from a
         // fragment, focus changes) still close the gate.
         self.bridge.update_command_mode(&self.bindings, None);
+        // Cargo keys repeat while held (`DesktopInput.updateMovement`).
+        self.bridge.update_payload_hold(&self.bindings);
+        // G05 T4b hint triggers while a key is held (`boost`,
+        // `rebuild_selecting`).
+        self.bridge.refresh_hints(&self.bindings);
+        // G04 T4 `CommandModeObjective`: a selected unit with a live order
+        // satisfies the objective each frame (`MapObjectives.java:671-675`).
+        let selected: Vec<i32> = self
+            .bridge
+            .controller
+            .state
+            .selected_units
+            .iter()
+            .copied()
+            .collect();
+        if let Some(mut host) = self.bridge.host.clone() {
+            let sat = host.bind().any_unit_has_command(&selected);
+            let current = host.bind().command_mode_satisfied();
+            if current != sat {
+                host.bind_mut().set_command_mode_satisfied(sat);
+            }
+        }
         self.drain_effects();
         // M3: drive the mobile gesture detector's long-press timer. The touch
         // stream itself is folded in by the `mobile_*` callbacks (plan 14).
@@ -438,6 +470,47 @@ impl MindInput {
             .unwrap_or(false)
     }
 
+    /// `state.isGame()` / `state.isCampaign()` mirrors for the binding gates
+    /// (`Control.java:690-760`): a hidden `MenuGroup` means in game; a live
+    /// campaign session means campaign. Missing nodes default to in game so
+    /// headless/partial scenes keep working.
+    fn refresh_game_state(&mut self) {
+        self.bridge.in_game = self
+            .base()
+            .try_get_node_as::<Control>("../Ui/UiRoot/MenuGroup")
+            .is_none_or(|menu| !menu.is_visible_in_tree());
+        self.bridge.campaign_active = self
+            .base()
+            .try_get_node_as::<Node>("/root/Spine/MindCampaign")
+            .is_some_and(|mut campaign| {
+                campaign
+                    .call("campaign_active", &[])
+                    .try_to::<bool>()
+                    .unwrap_or(false)
+            });
+    }
+
+    /// Top of `MindUi.dialog_stack()` (the research/planet close keys read it).
+    fn refresh_top_dialog(&mut self) {
+        let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") else {
+            self.bridge.top_dialog.clear();
+            return;
+        };
+        let stack = ui
+            .call("dialog_stack", &[])
+            .try_to::<PackedStringArray>()
+            .unwrap_or_default();
+        let top = if stack.is_empty() {
+            String::new()
+        } else {
+            stack
+                .get(stack.len() - 1)
+                .map(|name| name.to_string())
+                .unwrap_or_default()
+        };
+        self.bridge.top_dialog = top;
+    }
+
     /// Folds a Godot touch event into the mobile gesture bridge and applies the
     /// resulting camera pan/zoom. Returns whether the event was a touch event.
     fn route_touch(&mut self, raw: &RawEvent) -> bool {
@@ -562,6 +635,11 @@ impl MindInput {
                             "capture",
                             &[GString::from("user://screenshot.png").to_variant()],
                         );
+                    }
+                }
+                Effect::CloseTopDialog => {
+                    if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
+                        let _ = ui.call("close_top_dialog", &[]);
                     }
                 }
                 Effect::Hotkey(action) => {
@@ -701,6 +779,22 @@ impl MindInput {
     pub fn rebind_key(&mut self, name: GString, godot_text: GString) -> bool {
         let code = events::normalize_key_name(&godot_text.to_string());
         if bindings::rebind(&mut self.bindings, &name.to_string(), &code) {
+            bindings::save(&self.bindings);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Rebinds an axis binding to a negative/positive key pair (PAR-0102,
+    /// `KeybindDialog.rebind`): both halves are Godot key display strings
+    /// (empty clears a direction) and a wheel capture passes `scroll`. Persists
+    /// on success.
+    #[func]
+    pub fn rebind_axis(&mut self, name: GString, negative: GString, positive: GString) -> bool {
+        let negative = events::normalize_key_name(&negative.to_string());
+        let positive = events::normalize_key_name(&positive.to_string());
+        if bindings::rebind_axis(&mut self.bindings, &name.to_string(), &negative, &positive) {
             bindings::save(&self.bindings);
             true
         } else {
@@ -849,6 +943,43 @@ impl MindInput {
         Vector2::new(x, y)
     }
 
+    /// `DesktopInput.updateMovement` inputs for the sim host:
+    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`. Only `bind`s the
+    /// camera (the caller may hold the host) — never touches `MindSimHost`.
+    pub fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
+        let (axis_x, axis_y) = self.bridge.pan_axis(&self.bindings);
+        let (aim_x, aim_y) = self.bridge.aim_world().unwrap_or((0.0, 0.0));
+        let boosting =
+            self.bridge.key_down(&self.bindings, ids::BOOST) && self.gameplay_input_active();
+        (
+            axis_x,
+            axis_y,
+            self.bridge.shooting_allowed(),
+            aim_x,
+            aim_y,
+            boosting,
+        )
+    }
+
+    /// `player.shooting` probe (left button held on a free tile).
+    #[func]
+    pub fn is_shooting(&self) -> bool {
+        self.bridge.shooting
+    }
+
+    /// G05 T4b hint completions (`HintsFragment`): returns and clears the hint
+    /// trigger keys collected since the last call
+    /// (`shoot`, `boost_down`, `schematic_select_release`, `pick_tap`,
+    /// `diagonal_release`, `rebuild_selecting`).
+    #[func]
+    pub fn take_hint_keys(&mut self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for key in self.bridge.take_hint_keys() {
+            out.push(&GString::from(key));
+        }
+        out
+    }
+
     /// Whether a placement block is selected (`state.block`); `false` after the
     /// deselect key clears it (`InputHandler.tryBeginMine` gate).
     pub fn block_selected(&self) -> bool {
@@ -944,8 +1075,52 @@ impl MindInput {
                 Some(id)
             };
             self.bridge.controller.state.select_block(selected);
+            // `isPlacing()` clears copied plans (`DesktopInput.java:632`).
+            self.bridge.clear_select_plans();
         }
         true
+    }
+
+    /// Uses a saved schematic in game (`SchematicsDialog` click ->
+    /// `control.input.useSchematic`; G08 T6b change 13 / G05 T10b): copies its
+    /// plans to the raw cursor tile, clears the block selection and returns
+    /// true when plans were adopted. False outside a game or for a bad index.
+    #[func]
+    pub fn use_schematic(&mut self, index: i32) -> bool {
+        if !self.bridge.in_game {
+            return false;
+        }
+        let Some(campaign) = self
+            .base()
+            .try_get_node_as::<crate::campaign::MindCampaign>("/root/Spine/MindCampaign")
+        else {
+            return false;
+        };
+        let Some(schem) = campaign.bind().schematic_at(index) else {
+            return false;
+        };
+        let Some((cx, cy)) = self.bridge.raw_cursor_tile() else {
+            return false;
+        };
+        let Some(mut host) = self.bridge.host.clone() else {
+            return false;
+        };
+        let plans = {
+            let guard = host.bind();
+            let Some(content) = guard.content_registry() else {
+                return false;
+            };
+            mind_core::game::schematics::plans_for(&schem, cx, cy, true, content)
+                .iter()
+                .map(mind_core::input::ClientPlan::from_build_plan)
+                .collect::<Vec<_>>()
+        };
+        {
+            let mut guard = host.bind_mut();
+            guard.select_block(GString::from("air"));
+        }
+        self.bridge.adopt_select_plans(plans, (cx, cy));
+        !self.bridge.controller.state.select_plans.is_empty()
     }
 
     /// Rotates the pending placement 90° (`Binding.rotate`).
@@ -955,6 +1130,8 @@ impl MindInput {
     }
 
     /// Rotates the placed building under the cursor or the pending placement.
+    /// Test seam: the `rotateplaced` binding is wheel-only as of T9
+    /// (`DesktopInput.java:924-926`).
     #[func]
     pub fn rotate_placed(&mut self) {
         self.bridge.rotate_under_cursor(&self.bindings);
@@ -1026,6 +1203,10 @@ impl MindInput {
             "bool" => ConfigValue::Bool(value == "true" || value == "1"),
             _ => ConfigValue::String(value),
         };
+        // `BuildingComp.configure` -> `Block.lastConfig`: the next plan of this
+        // block carries the value (`nextConfig`, T5).
+        self.bridge
+            .record_last_config(i32::from(x), i32::from(y), config.clone());
         self.bridge
             .emit_action(mind_core::input::RemoteAction::Configure {
                 x,

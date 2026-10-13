@@ -23,7 +23,7 @@ use crate::world::behavior::{BuildingBehavior, PayloadRef};
 use crate::world::{BuildingReader, BuildingWriter};
 
 use super::{
-    TurretConfig, TurretState, accept_item, accept_liquid, accept_payload, handle_item,
+    TurretAmmo, TurretConfig, TurretState, accept_item, accept_liquid, accept_payload, handle_item,
     handle_liquid, handle_payload, save,
 };
 
@@ -51,6 +51,46 @@ impl BuildingBehavior for TurretBehavior {
 
     fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
         accept_item(world, e, item)
+    }
+
+    /// `ItemTurretBuild.acceptStack` (`ItemTurret.java:133-139`):
+    /// `min((int)((maxAmmo - totalAmmo) / ammoMultiplier), amount)` for a known
+    /// ammo entry, else 0.
+    fn accept_stack(
+        &self,
+        world: &World,
+        e: Entity,
+        item: ItemId,
+        amount: i32,
+        _source: Option<Entity>,
+    ) -> i32 {
+        let Some(state) = world.get::<TurretState>(e) else {
+            return 0;
+        };
+        let TurretAmmo::Item(ammo) = &state.config.ammo else {
+            return 0;
+        };
+        let Some(entry) = ammo.iter().find(|entry| entry.item == item) else {
+            return 0;
+        };
+        let room = (state.config.max_ammo - state.total_ammo).max(0) as f32;
+        ((room / entry.ammo_multiplier.max(1) as f32) as i32)
+            .min(amount)
+            .max(0)
+    }
+
+    /// `ItemTurretBuild.handleStack` (`ItemTurret.java:142-146`): `handleItem`
+    /// once per unit of ammo.
+    fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        for _ in 0..amount.max(0) {
+            handle_item(world, e, item);
+        }
+    }
+
+    /// `ItemTurretBuild.removeStack` (`ItemTurret.java:149-152`): turrets cannot
+    /// be drained.
+    fn remove_stack(&self, _world: &mut World, _e: Entity, _item: ItemId, _amount: i32) -> i32 {
+        0
     }
 
     fn handle_item(&self, world: &mut World, e: Entity, _src: Entity, item: ItemId) {

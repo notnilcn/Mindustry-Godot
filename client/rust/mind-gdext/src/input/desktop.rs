@@ -21,10 +21,11 @@ use mind_core::determinism::SimCommand;
 use mind_core::input::{
     BindingState, BindingValue, ClientPlan, DesktopController, InventoryKind, KeyBindTable,
     PayloadAction, PlaceMode, PlacementWorld, RawEvent, RemoteAction, SelectRect, SelectableUnit,
-    ids, line::LineBlock, line::LineParams, select_typed_units, select_unit_tap, select_units_rect,
+    ids, line::LineBlock, line::LineParams, line::PlanBlockInfo, line::flip_plans_about,
+    line::rotate_plans_about, select_typed_units, select_unit_tap, select_units_rect,
 };
 use mind_core::world::build::can_replace;
-use mind_core::world::{ConfigKind, TilePos};
+use mind_core::world::{ConfigKind, TilePos, WorldGrid};
 
 use crate::camera::MindCamera2D;
 use crate::sim_host::MindSimHost;
@@ -35,6 +36,11 @@ const DRAG_TILE_CAP: usize = 256;
 const UNIT_TAP_RADIUS: f32 = 11.0;
 /// Double-tap window for `selectTypedUnits` (`Time.timeSinceMillis < 300`).
 const UNIT_TAP_INTERVAL_MS: u64 = 300;
+
+/// `Units.closest` search radius for `selectedUnit()` (`InputHandler.java:2152`).
+const CONTROL_RADIUS: f32 = 40.0;
+/// `selectedUnit()`'s hitbox grow per side (`InputHandler.java:2156`).
+const CONTROL_HITBOX_GROW: f32 = 6.0;
 
 /// One world interaction in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +117,8 @@ pub enum Effect {
     },
     /// Capture the running viewport.
     Screenshot,
+    /// `MindUi.close_top_dialog()` (research/planet toggle keys).
+    CloseTopDialog,
     /// A binding fired (probe/UI signal).
     Hotkey(String),
     /// The RTS selection changed; payload is a JSON id array.
@@ -166,6 +174,24 @@ impl PlacementWorld for HostWorld<'_> {
     }
 }
 
+/// How close a cursor must be to the carrying player unit to start a drop
+/// gesture (`Vars.playerSelectRange`, `InputHandler.java:2032-2043`).
+const PLAYER_SELECT_RANGE: f32 = 11.0;
+
+/// `rules.itemDepositCooldown` default 0.5 s (`Rules.java`), the minimum gap
+/// between two tap-unit deposits.
+const ITEM_DEPOSIT_COOLDOWN_MS: u64 = 500;
+
+/// `settings.getBool("console")` (default false, `SettingsMenuDialog.java:566`):
+/// the F8 console toggle is gated on it (`ConsoleFragment.java:43`).
+fn console_setting_enabled() -> bool {
+    let store = mind_core::io::SettingsStore::load(
+        &mind_core::io::NativeFs,
+        &mind_core::io::Paths::resolve(None),
+    );
+    store.get_bool("console", false)
+}
+
 /// Parses a selectable-unit snapshot (`[{id,type,x,y,team,commandable}]`).
 fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -186,6 +212,10 @@ fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
                     .get("commandable")
                     .and_then(|value| value.as_bool())
                     .unwrap_or(true),
+                hit_size: entry
+                    .get("hit_size")
+                    .and_then(|value| value.as_f64())
+                    .unwrap_or(0.0) as f32,
             })
         })
         .collect()
@@ -211,6 +241,15 @@ pub struct DesktopBridge {
     pub camera: Option<Gd<MindCamera2D>>,
     /// Selectable units fed by the sim/GDScript (`set_selectable_units_json`).
     pub selectable: Vec<SelectableUnit>,
+    /// `Block.lastConfig` per block (`Block.java:827-832` `nextConfig`): the
+    /// last submitted config, carried onto the next plan of that block.
+    last_config: HashMap<u16, mind_core::world::config::ConfigValue>,
+    /// `schemX/schemY`: the start tile of an F/B selection drag
+    /// (`InputHandler.schemX`; `-1` cleared).
+    schem_start: Option<(i32, i32)>,
+    /// `schematicX/schematicY`: the copied plans' reference tile; plan shifts
+    /// are deltas from the raw cursor to it (`DesktopInput.pollInputPlayer`).
+    schematic_origin: (i32, i32),
     /// Last fired binding name (probe).
     pub last_action: String,
     /// Fired binding count (probe).
@@ -231,9 +270,33 @@ pub struct DesktopBridge {
     /// A dialog is open (`scene.hasDialog()`): key edges fire no bindings and
     /// the camera does not pan/zoom.
     pub ui_dialog: bool,
+    /// Top of `MindUi.dialog_stack()` (refreshed with `ui_dialog`); the
+    /// research/planet dialogs close on their own binding key.
+    pub top_dialog: String,
+    /// `state.isGame()` mirror (`Control.java:690-760`): gameplay bindings fire
+    /// only while the in-game HUD is up (no menu group).
+    pub in_game: bool,
+    /// `state.isCampaign()` mirror: J/N open research/planet only in a campaign.
+    pub campaign_active: bool,
     /// `InputHandler.locked()` mirror (PAR-0100): world clicks and scroll are
     /// ignored while set.
     pub locked: bool,
+    /// `player.shooting`: left button held on a free tile
+    /// (`DesktopInput.java:701-721`); uploaded through `MindInput::player_control`.
+    pub shooting: bool,
+    /// `droppingItem`: a left press landed on the carrying player unit
+    /// (`InputHandler.tryTapPlayer`); the release deposits or drops.
+    dropping_item: bool,
+    /// Last successful deposit (`Time.millis`) for `itemDepositCooldown`.
+    last_deposit_ms: u64,
+    /// Last cargo-key tap (`DesktopInput.lastPayloadKeyTapMillis`).
+    payload_tap_ms: u64,
+    /// Last cargo-key hold repeat (`DesktopInput.lastPayloadKeyHoldMillis`).
+    payload_hold_ms: u64,
+    /// `HintsFragment` completion triggers collected since the last drain
+    /// (G05 T4b): `"shoot"`, `"boost_down"`, `"schematic_select_release"`,
+    /// `"pick_tap"`, `"diagonal_release"`, `"rebuild_selecting"`.
+    hint_keys: Vec<&'static str>,
     /// `settings.getBool("commandmodehold", true)`: command mode follows the
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
@@ -259,6 +322,9 @@ impl DesktopBridge {
             host: None,
             camera: None,
             selectable: Vec::new(),
+            last_config: HashMap::new(),
+            schem_start: None,
+            schematic_origin: (0, 0),
             last_action: String::new(),
             action_count: 0,
             effects: Vec::new(),
@@ -268,7 +334,16 @@ impl DesktopBridge {
             last_tap_type: None,
             text_focus: false,
             ui_dialog: false,
+            top_dialog: String::new(),
+            in_game: false,
+            campaign_active: false,
             locked: false,
+            shooting: false,
+            dropping_item: false,
+            last_deposit_ms: 0,
+            payload_tap_ms: 0,
+            payload_hold_ms: 0,
+            hint_keys: Vec::new(),
             command_mode_hold: true,
         }
     }
@@ -388,6 +463,11 @@ impl DesktopBridge {
 
     /// Consumes one raw event (bindings are only read).
     pub fn handle(&mut self, bindings: &BindingState, event: RawEvent) {
+        // `DesktopInput.java:465-469`: while a dialog owns input, the held
+        // select button no longer keeps `player.shooting` latched.
+        if self.ui_dialog && !matches!(event, RawEvent::MouseMove { .. }) {
+            self.shooting = false;
+        }
         let mut command_edge: Option<bool> = None;
         match event {
             RawEvent::KeyDown { code } => {
@@ -395,14 +475,29 @@ impl DesktopBridge {
                 if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
                     command_edge = Some(true);
                 }
-                if fresh && !self.text_focus && !self.ui_dialog {
-                    self.key_down_event(bindings, &code);
+                if fresh && !self.text_focus {
+                    if self.ui_dialog {
+                        // ResearchDialog.java:145-149 / PlanetDialog.java:92:
+                        // the dialog's own key closes it (J/N toggle).
+                        self.close_dialog_key(bindings, &code);
+                    } else if self.in_game {
+                        // `Control.java:690-760`: gameplay binds run only while
+                        // `state.isGame()`.
+                        self.key_down_event(bindings, &code);
+                    } else if bindings.name(ids::FULLSCREEN) == Some(code.as_str()) {
+                        // `fullscreen` is a `Control` bind handled before the
+                        // `state.isGame()` gate and works on the menu.
+                        self.dispatch_action(bindings, "fullscreen");
+                    }
                 }
             }
             RawEvent::KeyUp { code } => {
                 self.pressed.remove(&code);
                 if bindings.name(ids::COMMAND_MODE) == Some(code.as_str()) {
                     command_edge = Some(false);
+                }
+                if self.in_game && !self.text_focus {
+                    self.key_up_event(bindings, &code);
                 }
             }
             RawEvent::MouseMove { x, y } => {
@@ -433,6 +528,21 @@ impl DesktopBridge {
         // `DesktopInput.update` runs once per frame; applying it per edge keeps
         // hold mode in step with the event stream.
         self.update_command_mode(bindings, command_edge);
+    }
+
+    /// `ResearchDialog.java:145-149` / `PlanetDialog.java:92`: while the dialog
+    /// is topmost, its own binding key closes it (`J`/`N` toggle).
+    fn close_dialog_key(&mut self, bindings: &BindingState, code: &str) {
+        let closes = if self.top_dialog == "research" {
+            bindings.name(ids::RESEARCH) == Some(code)
+        } else if self.top_dialog == "planet" {
+            bindings.name(ids::PLANET_MAP) == Some(code)
+        } else {
+            false
+        };
+        if closes {
+            self.effects.push(Effect::CloseTopDialog);
+        }
     }
 
     /// Dispatches every binding whose current key matches a down edge.
@@ -511,8 +621,19 @@ impl DesktopBridge {
     /// Runs one named binding (`Binding.name`).
     fn dispatch_action(&mut self, bindings: &BindingState, name: &'static str) {
         match name {
-            "respawn" => self.recenter_camera(),
-            "rotateplaced" => self.rotate_under_cursor(bindings),
+            "respawn" => {
+                // `DesktopInput.java:423-431`: V clears the possession and
+                // returns to the core unit (`Call.unitClear`); the camera
+                // recentering follows the new player unit.
+                self.dropping_item = false;
+                self.emit_action(RemoteAction::UnitClear);
+                self.fire_hotkey(name);
+            }
+            "rotateplaced" => {
+                // T9: `rotateplaced` is a wheel modifier now (`cursor.build !=
+                // null && ... && keyDown(rotatePlaced) && axisTap(rotate) != 0`,
+                // DesktopInput.java:924-926); the key edge alone does nothing.
+            }
             "rotate" => {
                 // Axis edges (`rotate` defaults to the wheel).
                 let step = if self.axis_negative(bindings, ids::ROTATE) {
@@ -533,11 +654,34 @@ impl DesktopBridge {
             }
             "clear_building" => {
                 // `Binding.clearBuilding` (`DesktopInput.java:612`): the player's
-                // queue is cleared too (`player.unit().clearBuilding()`).
+                // queue is cleared too (`player.unit().clearBuilding()`), and
+                // `pollInputPlayer` L632 also drops the copied plans.
                 self.controller.state.select_block(None);
+                self.controller.state.select_plans.clear();
+                self.refresh_select_preview();
                 if let Some(mut host) = self.host.clone() {
                     host.bind_mut().clear_player_build_plans();
                 }
+                self.fire_hotkey(name);
+            }
+            "schematic_select" | "rebuild_select" => {
+                // `DesktopInput.java:616-618`: F/B latch the selection start
+                // (raw cursor); a break drag owns the tiles instead.
+                if !self
+                    .drag
+                    .as_ref()
+                    .is_some_and(|drag| drag.kind == DragKind::Break)
+                {
+                    self.schem_start = self.raw_cursor_tile();
+                }
+                self.fire_hotkey(name);
+            }
+            "schematic_flip_x" => {
+                self.flip_select_plans(true);
+                self.fire_hotkey(name);
+            }
+            "schematic_flip_y" => {
+                self.flip_select_plans(false);
                 self.fire_hotkey(name);
             }
             "pause_building" => {
@@ -581,8 +725,20 @@ impl DesktopBridge {
                 self.controller.state.command_buildings.clear();
                 self.emit_selection();
             }
-            "pickupCargo" => self.payload(PayloadAction::PickupUnit),
-            "dropCargo" => self.payload(PayloadAction::Drop),
+            "pickupCargo" => {
+                // `DesktopInput.java:1012-1040`: a tap sets the hold timer.
+                self.payload_tap_ms = Time::singleton().get_ticks_msec();
+                self.payload(PayloadAction::PickupUnit);
+            }
+            "dropCargo" => {
+                self.payload_tap_ms = Time::singleton().get_ticks_msec();
+                self.payload(PayloadAction::Drop);
+            }
+            "boost" => {
+                // `HintsFragment.boost` = `keyDown(boost)`; the edge and the
+                // per-frame refresh both push the trigger.
+                self.push_hint("boost_down");
+            }
             "unit_stance_hold_fire" => self.set_stance(0, true),
             "unit_stance_pursue_target" => self.set_stance(1, true),
             "unit_stance_patrol" => self.set_stance(2, true),
@@ -600,16 +756,27 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "console" => {
-                self.effects
-                    .push(Effect::ToggleFragment(String::from("console")));
+                // `ConsoleFragment.java:43`: the console key only acts when the
+                // `console` client setting is on (default false,
+                // SettingsMenuDialog.java:566).
+                if console_setting_enabled() {
+                    self.effects
+                        .push(Effect::ToggleFragment(String::from("console")));
+                }
                 self.fire_hotkey(name);
             }
             "research" => {
-                self.open_dialog("research", "");
+                // `DesktopInput.java:446-461`: J/N toggle campaign screens only
+                // while a campaign sector is live.
+                if self.campaign_active {
+                    self.open_dialog("research", "");
+                }
                 self.fire_hotkey(name);
             }
             "planet_map" => {
-                self.open_dialog("planet", "");
+                if self.campaign_active {
+                    self.open_dialog("planet", "");
+                }
                 self.fire_hotkey(name);
             }
             "schematic_menu" => {
@@ -667,6 +834,15 @@ impl DesktopBridge {
         self.fire_hotkey("command_mode");
     }
 
+    /// `pollInputPlayer` L632: selecting a block (`isPlacing()`) clears the
+    /// copied plans.
+    pub fn clear_select_plans(&mut self) {
+        if !self.controller.state.select_plans.is_empty() {
+            self.controller.state.select_plans.clear();
+            self.refresh_select_preview();
+        }
+    }
+
     /// Selects the Nth buildable block of the active catalogue category.
     pub fn select_catalog_block(&mut self, index: usize) {
         let Some(category) = self.catalog.get(self.catalog_category) else {
@@ -685,6 +861,7 @@ impl DesktopBridge {
             {
                 self.controller.state.select_block(Some(id));
             }
+            self.clear_select_plans();
             self.fire_hotkey("block_select");
         }
     }
@@ -837,6 +1014,54 @@ impl DesktopBridge {
         self.payload(PayloadAction::Drop);
     }
 
+    /// `DesktopInput.updateMovement` payload hold-repeat
+    /// (`DesktopInput.java:1012-1040`): after a tap, holding the cargo key
+    /// repeats the action every >20 ms once the tap is >200 ms old.
+    pub fn update_payload_hold(&mut self, bindings: &BindingState) {
+        let held = if self.key_down(bindings, ids::PICKUP_CARGO) {
+            Some(PayloadAction::PickupUnit)
+        } else if self.key_down(bindings, ids::DROP_CARGO) {
+            Some(PayloadAction::Drop)
+        } else {
+            None
+        };
+        let Some(action) = held else {
+            return;
+        };
+        let now = Time::singleton().get_ticks_msec();
+        if now.saturating_sub(self.payload_tap_ms) > 200
+            && now.saturating_sub(self.payload_hold_ms) > 20
+        {
+            self.payload(action);
+            self.payload_hold_ms = now;
+        }
+    }
+
+    /// `HintsFragment` triggers that fire while a key is held (G05 T4b):
+    /// `boost` (`keyDown(boost)`) and `rebuildSelecting`
+    /// (`input.isRebuildSelecting()` = `keyDown(rebuildSelect)`).
+    pub fn refresh_hints(&mut self, bindings: &BindingState) {
+        if self.key_down(bindings, ids::BOOST) {
+            self.push_hint("boost_down");
+        }
+        if self.key_down(bindings, ids::REBUILD_SELECT) {
+            self.push_hint("rebuild_selecting");
+        }
+    }
+
+    /// Returns and clears the collected hint triggers (order of first
+    /// occurrence).
+    pub fn take_hint_keys(&mut self) -> Vec<&'static str> {
+        std::mem::take(&mut self.hint_keys)
+    }
+
+    /// Deduplicated hint trigger push.
+    fn push_hint(&mut self, key: &'static str) {
+        if !self.hint_keys.contains(&key) {
+            self.hint_keys.push(key);
+        }
+    }
+
     /// `tryDropItems`/`requestItem`: withdraw or deposit at a tile.
     pub fn transfer_item(&mut self, x: i32, y: i32, item: &str, amount: i32, deposit: bool) {
         let item = self.item_ids.get(item).copied();
@@ -886,6 +1111,10 @@ impl DesktopBridge {
             && drag.kind == DragKind::Place
         {
             self.update_place_line(bindings, drag.start, drag.last);
+        } else if !self.controller.state.select_plans.is_empty() {
+            // `pollInputPlayer` L843-858: the axis rotates copied plans when no
+            // placement line owns the wheel.
+            self.rotate_select_plans(step);
         }
         self.fire_hotkey("rotate");
     }
@@ -946,6 +1175,9 @@ impl DesktopBridge {
             {
                 self.controller.state.select_block(Some(id));
             }
+            self.clear_select_plans();
+            // `HintsFragment` `schematicSelect` includes `keyTap(pick)`.
+            self.push_hint("pick_tap");
             self.fire_hotkey("pick");
         }
     }
@@ -1017,6 +1249,273 @@ impl DesktopBridge {
         Some((tile.x, tile.y))
     }
 
+    /// Exact cursor world position (`input.mouseWorldX/Y`), not tile-snapped.
+    pub fn aim_world(&self) -> Option<(f32, f32)> {
+        let camera = self.camera.clone()?;
+        let point = camera
+            .bind()
+            .screen_to_world(self.mouse.0 as f64, self.mouse.1 as f64);
+        Some((point.x, point.y))
+    }
+
+    /// `InputHandler.tileX/tileY` (`InputHandler.java:2105-2120`): while a block
+    /// is selected (and not breaking), the cursor tile is shifted by the block's
+    /// `offset`, centring even-size blocks under the cursor.
+    fn placement_cursor_tile(&self) -> Option<(i32, i32)> {
+        let block = self.controller.state.block?;
+        if self.controller.state.place_mode == PlaceMode::Breaking {
+            return self.cursor_tile();
+        }
+        let offset = self
+            .host
+            .clone()
+            .and_then(|host| {
+                host.bind()
+                    .content_registry()
+                    .and_then(|content| content.block(block))
+                    .map(|def| def.offset)
+            })
+            .unwrap_or(0.0);
+        let (wx, wy) = self.aim_world()?;
+        Some(mind_core::input::cursor::placement_tile(wx, wy, offset))
+    }
+
+    /// `player.shooting` after the input-side `canShoot` gates
+    /// (`InputHandler.java:2269-2272`; the sim half re-checks building/mining).
+    pub fn shooting_allowed(&self) -> bool {
+        self.shooting
+            && !self.dropping_item
+            && self.controller.state.block.is_none()
+            && !self.controller.state.command_mode
+    }
+
+    /// Raw cursor tile (`InputHandler.rawTileX/rawTileY`), no block offset.
+    pub fn raw_cursor_tile(&self) -> Option<(i32, i32)> {
+        self.cursor_tile()
+    }
+
+    /// `PlanBlockInfo` resolver for [`rotate_plans_about`]/[`flip_plans_about`]
+    /// (G08 T6b): content size/offset, `Block.rotate` and the `electrolyzer`
+    /// `invertFlip` (`Blocks.java:1363`).
+    fn plan_info(host: &Gd<MindSimHost>) -> impl Fn(BlockId) -> PlanBlockInfo + '_ {
+        move |block| {
+            let guard = host.bind();
+            let def = guard
+                .content_registry()
+                .and_then(|content| content.block(block));
+            PlanBlockInfo {
+                size: def.map(|def| def.size).unwrap_or(1),
+                offset: def.map(|def| def.offset).unwrap_or(0.0),
+                rotate: guard.block_rotates(block),
+                invert_flip: def.is_some_and(|def| def.name == "electrolyzer"),
+            }
+        }
+    }
+
+    /// Select-plan preview (`[{x,y,rotation,block}]`, same shape as the
+    /// placement line).
+    fn refresh_select_preview(&mut self) {
+        self.preview_json = serde_json::Value::Array(
+            self.controller
+                .state
+                .select_plans
+                .iter()
+                .map(|plan| {
+                    serde_json::json!({
+                        "x": plan.x,
+                        "y": plan.y,
+                        "rotation": plan.rotation,
+                        "block": plan.block.raw(),
+                    })
+                })
+                .collect(),
+        )
+        .to_string();
+    }
+
+    /// Adopts copied plans (`useSchematic`: dialog or F-drag) at the cursor and
+    /// refreshes the preview; the block selection is cleared.
+    pub fn adopt_select_plans(&mut self, plans: Vec<ClientPlan>, origin: (i32, i32)) {
+        self.controller.state.select_block(None);
+        self.controller.state.select_plans = plans;
+        self.schematic_origin = origin;
+        self.refresh_select_preview();
+    }
+
+    /// `pollInputPlayer` L843-858: wheel/rotate over the copied plans.
+    fn rotate_select_plans(&mut self, step: i32) {
+        if self.controller.state.select_plans.is_empty() {
+            return;
+        }
+        let Some((ox, oy)) = self.raw_cursor_tile() else {
+            return;
+        };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let info = Self::plan_info(&host);
+        rotate_plans_about(&mut self.controller.state.select_plans, step, ox, oy, &info);
+        self.refresh_select_preview();
+    }
+
+    /// `pollInputPlayer` L641: Z/X flip the copied plans about the raw cursor.
+    fn flip_select_plans(&mut self, flip_x: bool) {
+        if self.controller.state.select_plans.is_empty() {
+            return;
+        }
+        let Some((ox, oy)) = self.raw_cursor_tile() else {
+            return;
+        };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let info = Self::plan_info(&host);
+        flip_plans_about(
+            &mut self.controller.state.select_plans,
+            flip_x,
+            ox,
+            oy,
+            &info,
+        );
+        self.refresh_select_preview();
+    }
+
+    /// `keyRelease(schematicSelect)` (`DesktopInput.java:633-640`):
+    /// `schematics.create` copies the F-selection into select plans, clears the
+    /// block selection and keeps the plans selected for a paste.
+    fn finish_schematic_copy(&mut self, bindings: &BindingState) {
+        let Some(start) = self.schem_start else {
+            return;
+        };
+        let Some(end) = self.raw_cursor_tile() else {
+            return;
+        };
+        let Some(mut host) = self.host.clone() else {
+            return;
+        };
+        let plans = {
+            let guard = host.bind();
+            guard.copy_schematic_plans(start, end, end)
+        };
+        self.controller.state.select_block(None);
+        self.controller.state.command_rect = None;
+        {
+            let mut guard = host.bind_mut();
+            guard.select_block(GString::from("air"));
+        }
+        self.adopt_select_plans(plans, end);
+        // `if(!keyDown(rebuildSelect)){ schemX = schemY = -1 }` (the B-release
+        // half is T7's).
+        if !self.key_down(bindings, ids::REBUILD_SELECT) {
+            self.schem_start = None;
+        }
+    }
+
+    /// Key-release bindings (`DesktopInput.pollInputPlayer` release half).
+    fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
+        if bindings.name(ids::DIAGONAL_PLACEMENT) == Some(code) {
+            // `HintsFragment.conveyorPathfind` = `keyRelease(diagonalPlacement)`.
+            self.push_hint("diagonal_release");
+        }
+        if bindings.name(ids::SCHEMATIC_SELECT) == Some(code) {
+            // `HintsFragment.schematicSelect` = `keyRelease(schematicSelect)`.
+            self.push_hint("schematic_select_release");
+        }
+        let schematic = bindings.name(ids::SCHEMATIC_SELECT) == Some(code);
+        let rebuild = bindings.name(ids::REBUILD_SELECT) == Some(code);
+        if !(schematic || rebuild) || self.schem_start.is_none() || self.drag.is_some() {
+            return;
+        }
+        if schematic {
+            self.finish_schematic_copy(bindings);
+        } else {
+            self.finish_rebuild_select(bindings);
+        }
+    }
+
+    /// `keyRelease(rebuildSelect)` (`InputHandler.java:2318-2330`): queue the
+    /// team ghost plans overlapping the B-selection. (The `tryRepairDerelict`
+    /// scan, `InputHandler.java:2331-2341`, is deferred: G02 T8.)
+    fn finish_rebuild_select(&mut self, bindings: &BindingState) {
+        let Some(start) = self.schem_start else {
+            return;
+        };
+        let Some(end) = self.raw_cursor_tile() else {
+            return;
+        };
+        if let Some(mut host) = self.host.clone() {
+            let _ = host
+                .bind_mut()
+                .queue_team_rebuild(start.0, start.1, end.0, end.1);
+        }
+        // `if(!keyDown(schematicSelect)){ schemX = schemY = -1 }`.
+        if !self.key_down(bindings, ids::SCHEMATIC_SELECT) {
+            self.schem_start = None;
+        }
+    }
+
+    /// `BuildingComp.configure` -> `Block.lastConfig` (`Block.java:827-832`):
+    /// remembers the submitted config per saveConfig block for `nextConfig`.
+    pub fn record_last_config(
+        &mut self,
+        x: i32,
+        y: i32,
+        value: mind_core::world::config::ConfigValue,
+    ) {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return;
+        };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let guard = host.bind();
+        let Some(content) = guard.content_registry() else {
+            return;
+        };
+        let Some(block) = guard.grid().block_at(TilePos::new(tx, ty)) else {
+            return;
+        };
+        let Some(def) = content.block(block) else {
+            return;
+        };
+        if !def.save_config {
+            return;
+        }
+        // The wire carries content names (`to_sim_config`); resolve them like
+        // the sim's `Configure` arm so `nextConfig` stores the typed value.
+        use mind_core::world::config::ConfigValue;
+        let value = match value {
+            ConfigValue::String(name) => {
+                if let Some(item) = content.item_by_name(&name) {
+                    ConfigValue::Item(item.id)
+                } else if let Some(block) = content.block_by_name(&name) {
+                    ConfigValue::Block(block.id)
+                } else if let Some(unit) = content.unit_by_name(&name) {
+                    ConfigValue::Unit(unit.id)
+                } else if let Some(liquid) = content.liquid_by_name(&name) {
+                    ConfigValue::Liquid(liquid.id)
+                } else {
+                    ConfigValue::String(name)
+                }
+            }
+            other => other,
+        };
+        self.last_config.insert(block.raw(), value);
+    }
+
+    /// `Block.saveConfig` for `block` (`nextConfig` gate, `Block.java:827-832`).
+    fn block_save_config(&self, block: BlockId) -> bool {
+        self.host
+            .clone()
+            .and_then(|host| {
+                host.bind()
+                    .content_registry()
+                    .and_then(|content| content.block(block))
+                    .map(|def| def.save_config)
+            })
+            .unwrap_or(false)
+    }
+
     /// Snapshot for the placement overlay pass (G03 T2).
     pub fn placement_view(&self) -> PlacementView {
         let mode = self.controller.state.place_mode;
@@ -1044,10 +1543,53 @@ impl DesktopBridge {
         Some((x as f32 * unit, y as f32 * unit))
     }
 
-    /// Closest commandable unit under the cursor (`tapCommandUnit`).
-    fn tap_unit_at_cursor(&self) -> Option<i32> {
-        let (x, y) = self.cursor_world()?;
-        select_unit_tap(&self.selectable, self.player_team(), x, y, UNIT_TAP_RADIUS)
+    /// `InputHandler.selectedUnit()` (`InputHandler.java:2148-2163`):
+    /// `Units.closest(player.team(), mouseX, mouseY, 40, u -> u.isAI() &&
+    /// u.playerControllable)`, accepted only when the hitbox grown by 6 on each
+    /// side contains the cursor.
+    fn selected_unit_for_control(&self) -> Option<i32> {
+        let (wx, wy) = self.aim_world()?;
+        let team = self.player_team();
+        let best = self
+            .selectable
+            .iter()
+            .filter(|unit| unit.team == team && unit.commandable)
+            .filter_map(|unit| {
+                let dx = unit.x - wx;
+                let dy = unit.y - wy;
+                let dst2 = dx * dx + dy * dy;
+                (dst2 <= CONTROL_RADIUS * CONTROL_RADIUS).then_some((dst2, unit))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))?;
+        let unit = best.1;
+        let half = unit.hit_size / 2.0 + CONTROL_HITBOX_GROW;
+        ((unit.x - wx).abs() <= half && (unit.y - wy).abs() <= half).then_some(unit.id)
+    }
+
+    /// `InputHandler.selectedControlBuild()` (`InputHandler.java:2165-2171`):
+    /// a same-team controllable building (turret `ControlBlock`) under the
+    /// cursor.
+    fn selected_control_build(&self) -> Option<(i32, i32)> {
+        let (x, y) = self.cursor_tile()?;
+        let kind = self.block_kind_at(x, y)?;
+        if !matches!(
+            kind,
+            BlockKind::ItemTurret
+                | BlockKind::LiquidTurret
+                | BlockKind::PowerTurret
+                | BlockKind::TractorBeamTurret
+                | BlockKind::PointDefenseTurret
+                | BlockKind::LaserTurret
+                | BlockKind::ContinuousLiquidTurret
+                | BlockKind::ContinuousTurret
+                | BlockKind::RepairTurret
+                | BlockKind::BuildTurret
+        ) {
+            return None;
+        }
+        let host = self.host.clone()?;
+        let team = host.bind().building_team(x, y)?;
+        (team == self.player_team()).then_some((x, y))
     }
 
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
@@ -1055,7 +1597,7 @@ impl DesktopBridge {
             ("left", true) => self.left_press(bindings),
             ("left", false) => self.left_release(),
             ("right", true) => self.right_press(bindings),
-            ("right", false) => self.right_release(),
+            ("right", false) => self.right_release(bindings),
             ("middle", true) => self.pick_block(),
             _ => {}
         }
@@ -1065,14 +1607,22 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
-        if self.controller.state.command_mode {
-            // `Binding.control` + `Binding.select`: possess the unit under the
-            // cursor (`Call.unitControl`).
-            if self.key_down(bindings, ids::CONTROL)
-                && let Some(id) = self.tap_unit_at_cursor()
-            {
+        // `DesktopInput.update` L408-421: Ctrl+select possesses an own AI unit
+        // (`Call.unitControl`) or a controllable building
+        // (`Call.buildingControlSelect`). Java does not return here, so the
+        // press still runs its normal select/place handling.
+        if self.key_down(bindings, ids::CONTROL) {
+            if let Some(id) = self.selected_unit_for_control() {
                 self.emit_action(RemoteAction::UnitControl { unit: Some(id) });
+                self.shooting = false;
+            } else if let Some((bx, by)) = self.selected_control_build() {
+                self.emit_action(RemoteAction::BuildingControlSelect {
+                    x: bx as i16,
+                    y: by as i16,
+                });
             }
+        }
+        if self.controller.state.command_mode {
             self.drag = Some(Drag {
                 kind: DragKind::SelectRect,
                 start: (x, y),
@@ -1082,21 +1632,63 @@ impl DesktopBridge {
             self.controller.state.command_rect = None;
             return;
         }
+        // `pollInputPlayer` select tap (`DesktopInput.java:704-705`): a click
+        // with copied plans flushes them to the player queue and keeps them
+        // selected for a repeat paste (`validPlace` filters inside).
+        if !self.controller.state.select_plans.is_empty() {
+            let plans = self.controller.state.select_plans.clone();
+            if let Some(mut host) = self.host.clone() {
+                for plan in plans {
+                    let _ = host.bind_mut().queue_player_place_config(
+                        plan.x as i16,
+                        plan.y as i16,
+                        plan.block,
+                        plan.rotation,
+                        plan.config,
+                    );
+                }
+            }
+            return;
+        }
         if self.controller.state.block.is_none() {
-            // `InputHandler.tryStopMine`/`tryBeginMine`: a no-selection left
-            // press on a mineable tile orders the player unit to mine it (and a
-            // press on the active tile stops mining).
+            // `DesktopInput.java:701-721` order: `tryTapPlayer`, `tileTapped`,
+            // the active build plan, then `tryStopMine`/`tryBeginMine`;
+            // anything consumed keeps `player.shooting` false.
+            if let Some((wx, wy)) = self.aim_world()
+                && self.can_tap_player(wx, wy)
+            {
+                self.dropping_item = true;
+                return;
+            }
+            if self.tile_tapped(x, y) {
+                return;
+            }
+            if self
+                .host
+                .as_ref()
+                .is_some_and(|host| host.bind().player_actively_building())
+            {
+                return;
+            }
             if self.try_mine_at(x, y) {
                 return;
             }
-            // No placement selected: a left tap is `tileTapped`
-            // (`InputHandler.java:1973`), which owns config/inventory.
-            self.tile_tapped(x, y);
+            // `shouldShoot = !scene.hasMouse() && !locked && !state.isEditor()`;
+            // the UI gates ran in `MindInput::input`.
+            self.shooting = !self.locked;
+            if self.shooting {
+                // `HintsFragment.desktopShoot` (`player.shooting`).
+                self.push_hint("shoot");
+            }
             return;
         }
         if !self.controller.state.is_building {
             return;
         }
+        // `tileX/tileY`: even-size blocks are centred on the cursor.
+        let Some((x, y)) = self.placement_cursor_tile() else {
+            return;
+        };
         self.controller.state.begin_place();
         self.drag = Some(Drag {
             kind: DragKind::Place,
@@ -1108,6 +1700,10 @@ impl DesktopBridge {
     }
 
     fn left_release(&mut self) {
+        // `DesktopInput.java:507-509`: releasing select stops shooting; the
+        // release also resolves a pending tap-unit gesture (`tryDropItems`).
+        self.shooting = false;
+        self.try_drop_items();
         let Some(drag) = self.drag.take() else {
             return;
         };
@@ -1115,6 +1711,88 @@ impl DesktopBridge {
             DragKind::Place => self.commit_place(drag),
             DragKind::SelectRect => self.commit_select(drag),
             DragKind::Break => {}
+        }
+    }
+
+    /// `InputHandler.canTapPlayer` (`InputHandler.java:2032-2043`): no block
+    /// selected, the cursor is within `playerSelectRange` (11) of the player
+    /// unit and the unit carries items.
+    fn can_tap_player(&self, wx: f32, wy: f32) -> bool {
+        if self.controller.state.block.is_some() {
+            return false;
+        }
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let Some((px, py)) = guard.player_unit_position() else {
+            return false;
+        };
+        let dx = px - wx;
+        let dy = py - wy;
+        if dx * dx + dy * dy > PLAYER_SELECT_RANGE * PLAYER_SELECT_RANGE {
+            return false;
+        }
+        guard
+            .player_unit_stack()
+            .is_some_and(|(_, amount)| amount > 0)
+    }
+
+    /// `InputHandler.tryDropItems` (`InputHandler.java:2286-2308`): a pending
+    /// tap-unit gesture on release deposits into an accepting building or drops
+    /// the stack (`Call.dropItem`).
+    fn try_drop_items(&mut self) {
+        if !self.dropping_item {
+            return;
+        }
+        self.dropping_item = false;
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        if host.bind().is_paused() {
+            return;
+        }
+        let Some((item_name, amount)) = host.bind().player_unit_stack() else {
+            return;
+        };
+        if amount <= 0 {
+            return;
+        }
+        let Some((wx, wy)) = self.aim_world() else {
+            return;
+        };
+        // Released back on the unit: `canTapPlayer` -> no action.
+        if self.can_tap_player(wx, wy) {
+            return;
+        }
+        let (tx, ty) = (WorldGrid::to_tile(wx), WorldGrid::to_tile(wy));
+        let now_ms = Time::singleton().get_ticks_msec();
+        // Bind the probe to a local: a `match host.bind()...` scrutinee keeps
+        // the shared guard alive through the arms, and `transfer_item` needs
+        // `bind_mut`.
+        let accepts = host.bind().player_can_deposit_at(tx, ty);
+        match accepts {
+            Some(true) => {
+                if now_ms.saturating_sub(self.last_deposit_ms) >= ITEM_DEPOSIT_COOLDOWN_MS {
+                    self.transfer_item(tx, ty, &item_name, amount, true);
+                    self.last_deposit_ms = now_ms;
+                }
+            }
+            // Accepting building on cooldown: Java neither deposits nor drops.
+            Some(_) => {}
+            None => {
+                let (Ok(x), Ok(y)) = (i16::try_from(tx), i16::try_from(ty)) else {
+                    return;
+                };
+                self.emit_action(RemoteAction::Inventory {
+                    kind: InventoryKind::DropItem,
+                    x,
+                    y,
+                    item: None,
+                    amount: 0,
+                    angle: 0.0,
+                });
+            }
         }
     }
 
@@ -1139,21 +1817,23 @@ impl DesktopBridge {
         true
     }
 
-    /// `tileTapped` (`InputHandler.java:1973`): a left tap on a placed building
-    /// opens its config UI, or its inventory when it stores items.
-    fn tile_tapped(&mut self, x: i32, y: i32) {
+    /// `tileTapped` (`InputHandler.java:1973-2029`): a left tap on a placed
+    /// building opens its config UI, or its inventory when it stores items.
+    /// Returns `true` when the tap was consumed (`InputHandler.tileTapped`
+    /// returns `consumed`; `DesktopInput.java:701` gates shooting on it).
+    fn tile_tapped(&mut self, x: i32, y: i32) -> bool {
         // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
         // returns false, so no panel opens (PAR-0108).
         if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
             let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-                return;
+                return false;
             };
             let Some(host) = self.host.clone() else {
-                return;
+                return false;
             };
             let enabled = match host.bind().building_enabled(x, y).try_to::<bool>() {
                 Ok(enabled) => enabled,
-                Err(_) => return,
+                Err(_) => return false,
             };
             // `SwitchBlock.SwitchBuild.clickSound.at(this)`
             // (`SwitchBlock.java:58-62`; T9): the UI click goes through the
@@ -1167,7 +1847,7 @@ impl DesktopBridge {
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!enabled),
             });
-            return;
+            return true;
         }
         // `Door.tapped` (`Door.java:148-154`, T13): a tap toggles unless a unit
         // stands in an open door; `Door.configurable` is false upstream, so no
@@ -1177,21 +1857,22 @@ impl DesktopBridge {
             Some(BlockKind::Door | BlockKind::AutoDoor)
         ) {
             let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-                return;
+                return false;
             };
             let Some(host) = self.host.clone() else {
-                return;
+                return false;
             };
             let open = host.bind().building_config_json(x, y) == "true";
             if open && host.bind().building_has_unit_overlap(x, y) {
-                return;
+                // `Door.tapped` returns without toggling: the tap is not consumed.
+                return false;
             }
             self.emit_action(RemoteAction::Configure {
                 x: tx,
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!open),
             });
-            return;
+            return true;
         }
         if let Some(spec) = self.config_spec(x, y) {
             self.effects.push(Effect::OpenBlockConfig {
@@ -1200,10 +1881,10 @@ impl DesktopBridge {
                 screen: self.mouse,
                 spec,
             });
-            return;
+            return true;
         }
         let Some(host) = self.host.clone() else {
-            return;
+            return false;
         };
         let items = host.bind().block_items_json(x, y);
         if let Some(items) = items {
@@ -1213,7 +1894,9 @@ impl DesktopBridge {
                 screen: self.mouse,
                 items,
             });
+            return true;
         }
+        false
     }
 
     fn right_press(&mut self, bindings: &BindingState) {
@@ -1236,10 +1919,20 @@ impl DesktopBridge {
             }
             return;
         }
+        // `DesktopInput.java:741-744`: the deselect tap clears copied plans
+        // (before entering breaking mode).
+        if !self.controller.state.select_plans.is_empty() {
+            self.controller.state.select_plans.clear();
+            self.refresh_select_preview();
+            return;
+        }
         // `Binding.breakBlock` (`DesktopInput.pollInputPlayer`): the right
         // button always enters breaking mode; config/inventory open on the
         // left tap.
         self.controller.state.begin_break();
+        // `DesktopInput.java:746-748`: the break drag latches the raw cursor for
+        // a potential F-cut.
+        self.schem_start = self.raw_cursor_tile();
         self.drag = Some(Drag {
             kind: DragKind::Break,
             start: (x, y),
@@ -1248,24 +1941,54 @@ impl DesktopBridge {
         });
     }
 
-    fn right_release(&mut self) {
+    fn right_release(&mut self, bindings: &BindingState) {
+        // `DesktopInput.java:799`: the break release also resolves a pending
+        // tap-unit gesture (`tryDropItems`).
+        self.try_drop_items();
         let Some(drag) = self.drag.take() else {
             return;
         };
         let Some(host) = self.host.clone() else {
             return;
         };
+        // Cut: `keyRelease(breakBlock) && keyDown(schematicSelect)` creates the
+        // schematic BEFORE `removeSelection` and pastes it after
+        // (`DesktopInput.java:765-790`).
+        let cut = if self.key_down(bindings, ids::SCHEMATIC_SELECT) {
+            match (self.schem_start, self.raw_cursor_tile()) {
+                (Some(start), Some(end)) => {
+                    Some((end, host.bind().copy_schematic_plans(start, end, end)))
+                }
+                _ => None,
+            }
+        } else {
+            None
+        };
         let mut commands: Vec<SimCommand> = Vec::new();
+        // `InputHandler.removeSelection` clamps the rect to `maxLength` (100;
+        // 64 with F held for the cut, `DesktopInput.java:789`).
+        let max_length = if self.key_down(bindings, ids::SCHEMATIC_SELECT) {
+            64
+        } else {
+            100
+        };
+        let r = mind_core::input::placement::normalize_area(
+            drag.start.0,
+            drag.start.1,
+            drag.last.0,
+            drag.last.1,
+            0,
+            false,
+            max_length,
+        );
         {
             let guard = host.bind();
             let world = HostWorld {
                 grid: guard.grid(),
                 content: guard.content_registry(),
             };
-            let (x1, x2) = (drag.start.0.min(drag.last.0), drag.start.0.max(drag.last.0));
-            let (y1, y2) = (drag.start.1.min(drag.last.1), drag.start.1.max(drag.last.1));
-            'outer: for y in y1..=y2 {
-                for x in x1..=x2 {
+            'outer: for y in r.y..=r.y2 {
+                for x in r.x..=r.x2 {
                     if commands.len() >= DRAG_TILE_CAP {
                         break 'outer;
                     }
@@ -1287,22 +2010,59 @@ impl DesktopBridge {
         }
         self.enqueue_commands(&commands);
         self.controller.state.place_mode = PlaceMode::None;
+        // `removeSelection` plan half (`InputHandler.java:1905-1935`): drop the
+        // player's queued plans and the team ghosts inside the rect.
+        if let Some(mut host) = self.host.clone() {
+            host.bind_mut().remove_plans_in(
+                drag.start.0,
+                drag.start.1,
+                drag.last.0,
+                drag.last.1,
+                max_length,
+            );
+        }
+        if let Some((end, plans)) = cut {
+            self.adopt_select_plans(plans, end);
+        }
     }
 
     fn mouse_move(&mut self, bindings: &BindingState) {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
+        // `pollInputPlayer` L630: copied plans follow the raw cursor.
+        if !self.controller.state.select_plans.is_empty() {
+            let (sx, sy) = self.schematic_origin;
+            let (dx, dy) = (x - sx, y - sy);
+            if dx != 0 || dy != 0 {
+                for plan in &mut self.controller.state.select_plans {
+                    plan.x += dx;
+                    plan.y += dy;
+                }
+                self.schematic_origin = (x, y);
+                self.refresh_select_preview();
+            }
+        }
+        // `tileX/tileY`: an active placement drag tracks the offset cursor tile.
+        let position = if self
+            .drag
+            .as_ref()
+            .is_some_and(|drag| drag.kind == DragKind::Place)
+        {
+            self.placement_cursor_tile().unwrap_or((x, y))
+        } else {
+            (x, y)
+        };
         let Some(drag) = self.drag.as_mut() else {
             return;
         };
-        if drag.last != (x, y) || (x, y) != drag.start {
-            drag.last = (x, y);
+        if drag.last != position || position != drag.start {
+            drag.last = position;
             drag.moved = true;
         }
         let drag = *drag;
         if drag.kind == DragKind::Place {
-            self.update_place_line(bindings, drag.start, (x, y));
+            self.update_place_line(bindings, drag.start, position);
         }
     }
 
@@ -1393,21 +2153,58 @@ impl DesktopBridge {
             .clone()
             .map(|host| host.bind().player_team())
             .unwrap_or(0);
-        let commands: Vec<SimCommand> = plans
-            .iter()
-            .take(DRAG_TILE_CAP)
-            .filter(|plan| !plan.breaking && plan.block != BlockId::AIR)
-            .map(|plan| SimCommand::Place {
-                x: plan.x as i16,
-                y: plan.y as i16,
-                block: plan.block.raw(),
-                rotation: plan.rotation as i8,
-                team,
-                // Player input queues on the player unit (`flushPlans` ->
-                // `BuilderComp.addBuild`); the builder constructs it (PAR-0098).
-                player: Some(0),
-            })
-            .collect();
+        // `Block.nextConfig` (`Block.java:827-832`): a block with a remembered
+        // config (`saveConfig`) queues through the config-carrying path; line
+        // plans may carry their own config (T6b/T8).
+        let remembered = self
+            .last_config
+            .get(&block.raw())
+            .cloned()
+            .filter(|_| self.block_save_config(block));
+        let mut commands: Vec<SimCommand> = Vec::new();
+        let mut configured: Vec<(i16, i16, BlockId, u8, mind_core::world::config::ConfigValue)> =
+            Vec::new();
+        for plan in plans.iter().take(DRAG_TILE_CAP) {
+            if plan.breaking || plan.block == BlockId::AIR {
+                continue;
+            }
+            let config = if !matches!(plan.config, mind_core::world::config::ConfigValue::None) {
+                plan.config.clone()
+            } else if plan.block == block {
+                remembered
+                    .clone()
+                    .unwrap_or(mind_core::world::config::ConfigValue::None)
+            } else {
+                mind_core::world::config::ConfigValue::None
+            };
+            if matches!(config, mind_core::world::config::ConfigValue::None) {
+                commands.push(SimCommand::Place {
+                    x: plan.x as i16,
+                    y: plan.y as i16,
+                    block: plan.block.raw(),
+                    rotation: plan.rotation as i8,
+                    team,
+                    // Player input queues on the player unit (`flushPlans` ->
+                    // `BuilderComp.addBuild`); the builder constructs it (PAR-0098).
+                    player: Some(0),
+                });
+            } else {
+                configured.push((
+                    plan.x as i16,
+                    plan.y as i16,
+                    plan.block,
+                    plan.rotation,
+                    config,
+                ));
+            }
+        }
+        if let Some(mut host) = self.host.clone() {
+            for (x, y, plan_block, rotation, config) in configured {
+                let _ = host
+                    .bind_mut()
+                    .queue_player_place_config(x, y, plan_block, rotation, config);
+            }
+        }
         self.enqueue_commands(&commands);
         self.controller.state.line_plans.clear();
         self.controller.state.line.clear();
@@ -1481,24 +2278,99 @@ impl DesktopBridge {
         }
         let rotate_on_scroll = Self::axis_is_scroll(bindings, ids::ROTATE);
         let zoom_on_scroll = Self::axis_is_scroll(bindings, ids::ZOOM);
-        if rotate_on_scroll
-            && self.controller.state.is_building
-            && self.controller.state.block.is_some()
-        {
-            let step = if delta > 0.0 { 1 } else { -1 };
-            self.controller.state.rotation =
-                (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
-            self.controller.state.override_line_rotation = true;
-            if let Some(drag) = self.drag
-                && drag.kind == DragKind::Place
-            {
-                self.update_place_line(bindings, drag.start, drag.last);
-            }
+        if !rotate_on_scroll && !zoom_on_scroll {
             return;
         }
-        if zoom_on_scroll && let Some(mut camera) = self.camera.clone() {
-            camera.bind_mut().zoom_by(delta as f64);
+        let diagonal_held = self.key_down(bindings, ids::DIAGONAL_PLACEMENT);
+        let block = self.controller.state.block;
+        let placing = self.controller.state.is_building && block.is_some();
+        let ctx = mind_core::input::desktop::ScrollCtx {
+            diagonal_held,
+            rotate_placed_held: self.key_down(bindings, ids::ROTATE_PLACED),
+            zoom_is_rotate: bindings.value(ids::ROTATE) == bindings.value(ids::ZOOM),
+            placing,
+            block_rotates: block.is_some_and(|block| self.block_rotates(block)),
+            select_plans: !self.controller.state.select_plans.is_empty(),
+            cursor_build_quick_rotates: self.cursor_build_quick_rotates(),
+        };
+        let route = mind_core::input::desktop::route_scroll(&ctx);
+        let step = if delta > 0.0 { 1 } else { -1 };
+        if route.rotate_selection {
+            // `rotation = mod(rotation + axisTap(rotate), 4)`.
+            self.controller.state.rotation =
+                (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
+            if placing {
+                if let Some(drag) = self.drag
+                    && drag.kind == DragKind::Place
+                {
+                    // `pollInputPlayer` L766-773: while no override is latched,
+                    // align to the drag angle before the wheel step.
+                    if !self.controller.state.override_line_rotation
+                        && !diagonal_held
+                        && drag.start != drag.last
+                    {
+                        let dx = (drag.last.0 - drag.start.0) as f32;
+                        let dy = (drag.last.1 - drag.start.1) as f32;
+                        let angle = dy.atan2(dx).to_degrees();
+                        self.controller.state.rotation =
+                            (((angle + 45.0) / 90.0) as i32).rem_euclid(4) as u8;
+                    }
+                    self.controller.state.override_line_rotation = true;
+                    self.update_place_line(bindings, drag.start, drag.last);
+                }
+            } else if !self.controller.state.select_plans.is_empty() {
+                self.rotate_select_plans(step);
+            }
         }
+        if route.rotate_placed
+            && let Some((x, y)) = self.cursor_tile()
+        {
+            // `Call.rotateBlock(player, cursor.build, axisTap(rotate) > 0)`.
+            self.emit_action(RemoteAction::Rotate {
+                x: x as i16,
+                y: y as i16,
+                direction: delta > 0.0,
+            });
+        }
+        if route.zoom {
+            self.zoom(delta);
+        }
+    }
+
+    /// `Block.rotate` for a block id.
+    fn block_rotates(&self, block: BlockId) -> bool {
+        self.host
+            .clone()
+            .is_some_and(|host| host.bind().block_rotates(block))
+    }
+
+    /// The building under the cursor is interactable and
+    /// `block.rotate && block.quickRotate` (`DesktopInput.java:924-926`).
+    fn cursor_build_quick_rotates(&self) -> bool {
+        let Some((x, y)) = self.cursor_tile() else {
+            return false;
+        };
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let team = self.player_team();
+        let interactive = guard
+            .building_team(x, y)
+            .is_some_and(|building_team| building_team == team || building_team == 0);
+        if !interactive {
+            return false;
+        }
+        let Some(content) = guard.content_registry() else {
+            return false;
+        };
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(block) = guard.grid().block_at(TilePos::new(tx, ty)) else {
+            return false;
+        };
+        content.block(block).is_some_and(|def| def.quick_rotate) && guard.block_rotates(block)
     }
 
     // ---- world queries ----
@@ -1711,16 +2583,6 @@ impl DesktopBridge {
             guard.enqueue_sim_command(command.clone());
         }
     }
-
-    /// Camera recenter on the player core (`Binding.respawn`); also clears any
-    /// possessed unit (`Call.unitClear`).
-    pub fn recenter_camera(&mut self) {
-        self.emit_action(RemoteAction::UnitClear);
-        if let Some(mut camera) = self.camera.clone() {
-            camera.bind_mut().recenter_player();
-        }
-        self.fire_hotkey("respawn");
-    }
 }
 
 /// Camera world coordinate for a viewport point (screen→tile center;
@@ -1756,6 +2618,8 @@ mod tests {
         // `commandmodehold=false`: `input.keyTap` toggles on the press edge.
         let mut bridge = DesktopBridge::new();
         bridge.set_command_mode_hold(false);
+        // The tap path runs through the gameplay binding gate (`state.isGame()`).
+        bridge.in_game = true;
         let bindings = BindingState::new();
 
         bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
@@ -1815,6 +2679,55 @@ mod tests {
             .select_block(Some(BlockId::STONE_WALL));
         bridge.update_command_mode(&bindings, None);
         assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn bindings_do_not_fire_outside_game() {
+        // `Control.java:690-760`: gameplay binds are gated on `state.isGame()`;
+        // the menu renders no world and the HUD fragments stay closed.
+        let bindings = BindingState::new();
+        assert_eq!(bindings.name(ids::SCHEMATIC_MENU), Some("t"));
+        let mut bridge = DesktopBridge::new();
+        bridge.handle(&bindings, RawEvent::key_down("t"));
+        assert!(bridge.take_effects().is_empty(), "menu T is inert");
+        bridge.handle(&bindings, RawEvent::key_up("t"));
+
+        bridge.in_game = true;
+        bridge.handle(&bindings, RawEvent::key_down("t"));
+        let effects = bridge.take_effects();
+        assert!(
+            effects.iter().any(|effect| matches!(
+                effect,
+                Effect::OpenDialog { name, .. } if name == "schematics"
+            )),
+            "in game T opens schematics"
+        );
+    }
+
+    #[test]
+    fn campaign_keys_need_an_active_campaign() {
+        // `DesktopInput.java:446-461`: research/planet open only in a campaign.
+        let bindings = BindingState::new();
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        bridge.campaign_active = false;
+        bridge.handle(&bindings, RawEvent::key_down("j"));
+        assert!(
+            !bridge
+                .take_effects()
+                .iter()
+                .any(|effect| matches!(effect, Effect::OpenDialog { .. })),
+            "J outside a campaign opens nothing"
+        );
+        bridge.campaign_active = true;
+        bridge.handle(&bindings, RawEvent::key_down("n"));
+        assert!(
+            bridge.take_effects().iter().any(|effect| matches!(
+                effect,
+                Effect::OpenDialog { name, .. } if name == "planet"
+            )),
+            "N in a campaign opens the planet map"
+        );
     }
 
     #[test]
