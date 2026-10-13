@@ -199,6 +199,7 @@ pub fn iterate_line(
     }
 }
 
+/// Mobile legacy; desktop uses [`rotate_plans_about`] with the cursor origin.
 /// `Schematics.rotatePlans`: rotate coordinates and rotations around the origin.
 ///
 /// `direction` is 1 for clockwise, 3 (`-1`) for counter-clockwise; other values
@@ -215,6 +216,7 @@ pub fn rotate_plans(plans: &mut [super::plan::ClientPlan], direction: i32) {
     }
 }
 
+/// Mobile legacy; desktop uses [`flip_plans_about`] with the cursor origin.
 /// `Schematics.flipPlans`: mirror coordinates across the origin (`x = -x - 1`).
 pub fn flip_plans(plans: &mut [super::plan::ClientPlan], flip_x: bool, flip_y: bool) {
     for plan in plans.iter_mut() {
@@ -225,6 +227,143 @@ pub fn flip_plans(plans: &mut [super::plan::ClientPlan], flip_x: bool, flip_y: b
         if flip_y {
             plan.y = -plan.y - 1;
             plan.rotation = ((4 - plan.rotation as i32).rem_euclid(4)) as u8;
+        }
+    }
+}
+
+/// Per-block knobs `InputHandler.rotatePlans`/`flipPlans` read
+/// (`Block.java:1653-1660`): size/offset position the multiblock centre and
+/// `rotate`/`invert_flip` drive the rotation transforms.
+#[derive(Debug, Clone, Copy)]
+pub struct PlanBlockInfo {
+    /// `Block.size`.
+    pub size: i32,
+    /// `Block.offset`.
+    pub offset: f32,
+    /// `Block.rotate`.
+    pub rotate: bool,
+    /// `Block.invertFlip` (`electrolyzer` only, `Blocks.java:1363`).
+    pub invert_flip: bool,
+}
+
+/// `Block.planRotation`: `!rotate && lockRotation ? 0 : rot`; `lockRotation`
+/// defaults true and no ported block flips it (`Block.java:1653-1655`).
+fn plan_rotation(rotation: u8, info: &PlanBlockInfo) -> u8 {
+    if info.rotate { rotation } else { 0 }
+}
+
+/// Applies a `Point2` transform to the plan config (`BuildPlan.pointConfig`,
+/// `BuildPlan.java:88-109`), covering single points and packed point arrays.
+fn transform_point_config(
+    config: &mut crate::world::config::ConfigValue,
+    transform: impl Fn(i32, i32) -> (i32, i32),
+) {
+    use crate::io::typeio::{pack_point2, unpack_point2_x, unpack_point2_y};
+    use crate::world::config::ConfigValue;
+    match config {
+        ConfigValue::Point2(x, y) => {
+            let (nx, ny) = transform(*x, *y);
+            *x = nx;
+            *y = ny;
+        }
+        ConfigValue::Point2Array(points) => {
+            for packed in points.iter_mut() {
+                let (nx, ny) = transform(unpack_point2_x(*packed), unpack_point2_y(*packed));
+                *packed = pack_point2(nx, ny);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `InputHandler.rotatePlans` (`InputHandler.java:1558-1587`) about the raw
+/// cursor origin `(ox, oy)`: clockwise for `direction >= 0`, counter-clockwise
+/// otherwise. `info` resolves each plan's [`PlanBlockInfo`].
+pub fn rotate_plans_about(
+    plans: &mut [super::plan::ClientPlan],
+    direction: i32,
+    ox: i32,
+    oy: i32,
+    info: &dyn Fn(BlockId) -> PlanBlockInfo,
+) {
+    // `World.toTile` = `Math.round(v / tilesize)` (`World.java:174`).
+    let to_tile = |value: f32| (value / 8.0 + 0.5).floor() as i32;
+    for plan in plans.iter_mut() {
+        if plan.breaking {
+            continue;
+        }
+        let meta = info(plan.block);
+        let off = if meta.size % 2 == 0 { -0.5 } else { 0.0 };
+        transform_point_config(&mut plan.config, |x, y| {
+            let (mut cx, mut cy) = (x as f32 + off, y as f32 + off);
+            let lx = cx;
+            if direction >= 0 {
+                cx = -cy;
+                cy = lx;
+            } else {
+                cx = cy;
+                cy = -lx;
+            }
+            ((cx - off).floor() as i32, (cy - off).floor() as i32)
+        });
+
+        // `World.toTile` and the multiblock centre offset.
+        let wx = (plan.x - ox) as f32 * 8.0 + meta.offset;
+        let wy = (plan.y - oy) as f32 * 8.0 + meta.offset;
+        let (wx, wy) = if direction >= 0 { (-wy, wx) } else { (wy, -wx) };
+        plan.x = to_tile(wx - meta.offset) + ox;
+        plan.y = to_tile(wy - meta.offset) + oy;
+        plan.rotation = plan_rotation(
+            (plan.rotation as i32 + direction).rem_euclid(4) as u8,
+            &meta,
+        );
+    }
+}
+
+/// `InputHandler.flipPlans` (`InputHandler.java:1596-1620`): mirror across the
+/// horizontal (`flip_x`) or vertical axis through the origin. The coordinate
+/// cast truncates toward zero like Java's `(int)`.
+pub fn flip_plans_about(
+    plans: &mut [super::plan::ClientPlan],
+    flip_x: bool,
+    ox: i32,
+    oy: i32,
+    info: &dyn Fn(BlockId) -> PlanBlockInfo,
+) {
+    let origin = (if flip_x { ox } else { oy }) as f32 * 8.0;
+    for plan in plans.iter_mut() {
+        if plan.breaking {
+            continue;
+        }
+        let meta = info(plan.block);
+        let value = -(((if flip_x { plan.x } else { plan.y }) as f32) * 8.0 - origin + meta.offset)
+            + origin;
+        if flip_x {
+            plan.x = ((value - meta.offset) / 8.0) as i32;
+        } else {
+            plan.y = ((value - meta.offset) / 8.0) as i32;
+        }
+
+        transform_point_config(&mut plan.config, |x, y| {
+            if flip_x {
+                let mut px = x;
+                if meta.size % 2 == 0 {
+                    px -= 1;
+                }
+                (-px, y)
+            } else {
+                let mut py = y;
+                if meta.size % 2 == 0 {
+                    py -= 1;
+                }
+                (x, -py)
+            }
+        });
+
+        // `Block.flipRotation` (`Block.java:1657-1660`).
+        let even = plan.rotation.is_multiple_of(2);
+        if (flip_x == even) != meta.invert_flip {
+            plan.rotation = plan_rotation((plan.rotation as i32 + 2).rem_euclid(4) as u8, &meta);
         }
     }
 }
@@ -354,5 +493,99 @@ mod tests {
         flip_plans(&mut plans, true, false);
         assert_eq!((plans[0].x, plans[0].y), (2, 3));
         assert_eq!(plans[0].rotation, 0);
+    }
+
+    /// Flat 1x1 `PlanBlockInfo` (rotating, no flip inversion).
+    fn flat_info(_block: BlockId) -> PlanBlockInfo {
+        PlanBlockInfo {
+            size: 1,
+            offset: 0.0,
+            rotate: true,
+            invert_flip: false,
+        }
+    }
+
+    #[test]
+    fn rotate_about_quarter_turn() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![ClientPlan::place(6, 5, 0, BlockId::STONE_WALL)];
+        rotate_plans_about(&mut plans, 1, 5, 5, &flat_info);
+        assert_eq!((plans[0].x, plans[0].y, plans[0].rotation), (5, 6, 1));
+    }
+
+    #[test]
+    fn rotate_about_four_times_identity() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![ClientPlan::place(7, 3, 2, BlockId::STONE_WALL)];
+        for _ in 0..4 {
+            rotate_plans_about(&mut plans, 1, 5, 5, &flat_info);
+        }
+        assert_eq!((plans[0].x, plans[0].y, plans[0].rotation), (7, 3, 2));
+    }
+
+    #[test]
+    fn rotate_about_2x2() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![ClientPlan::place(6, 5, 0, BlockId::STONE_WALL)];
+        let info = |_block: BlockId| PlanBlockInfo {
+            size: 2,
+            offset: 4.0,
+            rotate: true,
+            invert_flip: false,
+        };
+        rotate_plans_about(&mut plans, 1, 5, 5, &info);
+        // wx=12, wy=4 -> (-4, 12) -> round(-8/8)+5=4, round(8/8)+5=6.
+        assert_eq!((plans[0].x, plans[0].y, plans[0].rotation), (4, 6, 1));
+    }
+
+    #[test]
+    fn rotate_nonrotating_block_resets_rotation() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![ClientPlan::place(6, 5, 3, BlockId::STONE_WALL)];
+        let info = |_block: BlockId| PlanBlockInfo {
+            size: 1,
+            offset: 0.0,
+            rotate: false,
+            invert_flip: false,
+        };
+        rotate_plans_about(&mut plans, 1, 5, 5, &info);
+        assert_eq!(plans[0].rotation, 0, "planRotation resets");
+    }
+
+    #[test]
+    fn flip_x_about() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![
+            ClientPlan::place(6, 5, 0, BlockId::STONE_WALL),
+            ClientPlan::place(6, 5, 1, BlockId::STONE_WALL),
+        ];
+        flip_plans_about(&mut plans, true, 5, 5, &flat_info);
+        // value = -(48-40)+40 = 32 -> x 4; rot%2==0 flips, odd stays.
+        assert_eq!((plans[0].x, plans[0].rotation), (4, 2));
+        assert_eq!((plans[1].x, plans[1].rotation), (4, 1));
+    }
+
+    #[test]
+    fn flip_y_about() {
+        use crate::input::plan::ClientPlan;
+        let mut plans = vec![ClientPlan::place(5, 7, 1, BlockId::STONE_WALL)];
+        flip_plans_about(&mut plans, false, 5, 5, &flat_info);
+        // value = -(56-40)+40 = 24 -> y 3; rot 1 flips to 3.
+        assert_eq!((plans[0].x, plans[0].y, plans[0].rotation), (5, 3, 3));
+    }
+
+    #[test]
+    fn flip_point_config() {
+        use crate::input::plan::ClientPlan;
+        use crate::world::config::ConfigValue;
+        let mut plans = vec![ClientPlan::place(3, 3, 0, BlockId::STONE_WALL)];
+        plans[0].config = ConfigValue::Point2(3, 0);
+        flip_plans_about(&mut plans, true, 3, 3, &flat_info);
+        assert_eq!(plans[0].config, ConfigValue::Point2(-3, 0));
+
+        let mut rotated = vec![ClientPlan::place(3, 3, 0, BlockId::STONE_WALL)];
+        rotated[0].config = ConfigValue::Point2(3, 0);
+        rotate_plans_about(&mut rotated, 1, 3, 3, &flat_info);
+        assert_eq!(rotated[0].config, ConfigValue::Point2(0, 3));
     }
 }

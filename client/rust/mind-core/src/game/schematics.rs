@@ -657,29 +657,7 @@ impl Schematics {
         let Some(schem) = self.all.get(index) else {
             return Vec::new();
         };
-        let mut plans: Vec<BuildPlan> = schem
-            .tiles
-            .iter()
-            .filter(|tile| {
-                if !check_hidden {
-                    return true;
-                }
-                registry.block(tile.block).is_some_and(|block| {
-                    !block.is_hidden()
-                        || block.kind == crate::content::registries::blocks::BlockKind::CoreBlock
-                })
-            })
-            .map(|tile| BuildPlan {
-                x: tile.x as i32 + x - schem.width / 2,
-                y: tile.y as i32 + y - schem.height / 2,
-                rotation: tile.rotation as u8,
-                block: tile.block,
-                config: tile.config.clone(),
-                breaking: false,
-            })
-            .collect();
-        plans.sort_by_key(|plan| plan.block.raw());
-        plans
+        plans_for(schem, x, y, check_hidden, registry)
     }
 
     /// `Schematics.add`: appends and validates, returning the new index.
@@ -868,6 +846,60 @@ impl Schematics {
     }
 }
 
+/// `Block.schematicPriority` overrides (`Schematics.java:301` sorts by
+/// `-schematicPriority`): surge-tower -15 (`Blocks.java:2503`), plastanium
+/// walls 10 (`Blocks.java:1736,1745`), `PowerNode`/`LongPowerNode` -10
+/// (`PowerNode.java:50`), `LogicBlock` 5 (`LogicBlock.java:57`),
+/// `NuclearReactor` -5 (`NuclearReactor.java:63`), `PowerDiode` 10
+/// (`PowerDiode.java:25`), else 0 (`Block.java:299`).
+pub fn schematic_priority(def: &crate::content::registries::blocks::BlockDef) -> i32 {
+    match def.name.as_str() {
+        "surge-tower" => -15,
+        "plastanium-wall" | "plastanium-wall-large" => 10,
+        _ => match def.kind {
+            BlockKind::PowerNode | BlockKind::LongPowerNode => -10,
+            BlockKind::LogicBlock => 5,
+            BlockKind::NuclearReactor => -5,
+            BlockKind::PowerDiode => 10,
+            _ => 0,
+        },
+    }
+}
+
+/// `Schematics.toPlans` (`Schematics.java:299-302`): centers the schematic at
+/// `(x, y)`, filters hidden blocks, then stable-sorts by `-schematicPriority`
+/// (`Vec::sort_by_key` is stable, matching `Structs.comparingInt`).
+pub fn plans_for(
+    schem: &Schematic,
+    x: i32,
+    y: i32,
+    check_hidden: bool,
+    registry: &ContentRegistry,
+) -> Vec<BuildPlan> {
+    let mut plans: Vec<BuildPlan> = schem
+        .tiles
+        .iter()
+        .filter(|tile| {
+            if !check_hidden {
+                return true;
+            }
+            registry
+                .block(tile.block)
+                .is_some_and(|block| !block.is_hidden() || block.kind == BlockKind::CoreBlock)
+        })
+        .map(|tile| BuildPlan {
+            x: tile.x as i32 + x - schem.width / 2,
+            y: tile.y as i32 + y - schem.height / 2,
+            rotation: tile.rotation as u8,
+            block: tile.block,
+            config: tile.config.clone(),
+            breaking: false,
+        })
+        .collect();
+    plans.sort_by_key(|plan| -registry.block(plan.block).map_or(0, schematic_priority));
+    plans
+}
+
 /// `getMaxLaunchSize` (`core.size + 2 * maxLoadoutSchematicPad`).
 pub fn get_max_launch_size(core_size: i32) -> i32 {
     core_size + MAX_LOADOUT_SCHEMATIC_PAD * 2
@@ -942,6 +974,26 @@ mod tests {
         );
         schem.tags.insert("name".to_owned(), "test-base".to_owned());
         schem
+    }
+
+    #[test]
+    fn plans_for_sorts_by_priority() {
+        let registry = registry();
+        let node = registry.block_id("power-node").unwrap();
+        let wall = registry.block_id("copper-wall").unwrap();
+        let schem = Schematic::from_tiles(
+            vec![
+                Stile::new(node, 0, 0, ConfigValue::None, 0),
+                Stile::new(wall, 1, 0, ConfigValue::None, 0),
+            ],
+            IndexMap::new(),
+            2,
+            1,
+        );
+        let plans = plans_for(&schem, 0, 0, true, &registry);
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].block, wall, "priority 0 sorts first");
+        assert_eq!(plans[1].block, node, "power-node priority -10 sorts last");
     }
 
     #[test]
