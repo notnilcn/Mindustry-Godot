@@ -780,8 +780,9 @@ impl Sim {
                 .or_else(|| {
                     move_tile.map(|tile| {
                         (
-                            (tile.x() as f32 + 0.5) * crate::config::TILESIZE as f32,
-                            (tile.y() as f32 + 0.5) * crate::config::TILESIZE as f32,
+                            // `Tile.worldx()/worldy()` (Tile.java:166-171).
+                            tile.x() as f32 * crate::config::TILESIZE as f32,
+                            tile.y() as f32 * crate::config::TILESIZE as f32,
                         )
                     })
                 })

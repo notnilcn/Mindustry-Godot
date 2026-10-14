@@ -39,11 +39,13 @@ pub(crate) fn nearest_enemy_building(
     y: f32,
     range: f32,
 ) -> Option<Entity> {
+    // Scan box widened by one tile (the building tile lookup is a `round` in
+    // Java); the per-tile distance uses the building `Pos` (`drawx`/`drawy`).
     let ts = crate::config::TILESIZE as f32;
-    let min_tx = ((x - range) / ts).floor() as i32;
-    let max_tx = ((x + range) / ts).ceil() as i32;
-    let min_ty = ((y - range) / ts).floor() as i32;
-    let max_ty = ((y + range) / ts).ceil() as i32;
+    let min_tx = ((x - range) / ts).floor() as i32 - 1;
+    let max_tx = ((x + range) / ts).ceil() as i32 + 1;
+    let min_ty = ((y - range) / ts).floor() as i32 - 1;
+    let max_ty = ((y + range) / ts).ceil() as i32 + 1;
     let mut best: Option<(f32, Entity)> = None;
     for ty in min_ty..=max_ty {
         for tx in min_tx..=max_tx {
@@ -56,8 +58,10 @@ pub(crate) fn nearest_enemy_building(
             if ctx.world.get::<TeamComp>(build).map(|t| t.team) == Some(team) {
                 continue;
             }
-            let bx = (tx as f32 + 0.5) * ts;
-            let by = (ty as f32 + 0.5) * ts;
+            let Some(bpos) = ctx.world.get::<crate::entities::comp::Pos>(build) else {
+                continue;
+            };
+            let (bx, by) = (bpos.x, bpos.y);
             let d2 = (bx - x) * (bx - x) + (by - y) * (by - y);
             if d2 <= range * range && best.is_none_or(|(bd, _)| d2 < bd) {
                 best = Some((d2, build));

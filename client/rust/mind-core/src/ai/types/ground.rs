@@ -79,10 +79,10 @@ impl UnitController for GroundAi {
     }
 }
 
-/// World-pixel center of a tile (`(x + 0.5) * TILESIZE`).
+/// World-pixel of a tile's `worldx`/`worldy` (`Tile.worldx()`, Tile.java:166-171).
 pub fn tile_center(x: i32, y: i32) -> (f32, f32) {
     let ts = crate::config::TILESIZE as f32;
-    ((x as f32 + 0.5) * ts, (y as f32 + 0.5) * ts)
+    (x as f32 * ts, y as f32 * ts)
 }
 
 /// Normalizes degrees into `[0, 360)`.

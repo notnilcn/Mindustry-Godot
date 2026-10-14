@@ -381,13 +381,13 @@ fn bullets_pass_over_enemy_conveyor() {
     let conveyor_start = health(&sim, conveyor).expect("conveyor health");
     // Immobile enemy unit behind the wall: the dagger's primary target.
     let decoy = sim
-        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0 + 4.0, 180.0)
+        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0, 180.0)
         .expect("decoy");
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(decoy) {
         slot.kind = AiKind::Player;
     }
     let _ = sim
-        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0 + 4.0, 0.0)
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0, 0.0)
         .expect("dagger");
     for _ in 0..600 {
         sim.tick().expect("tick");
@@ -3823,4 +3823,28 @@ fn explosion_absorbed_polygon() {
         !explosion_absorbed(&mut sim.ecs.0, x, y, 30.0, Some(1)),
         "the shield's own team is ignored"
     );
+}
+
+/// T1: `Building.set(tile.drawx(), tile.drawy())` (BuildingComp.java:126) with
+/// `drawx = tile.worldx() + block.offset` (Tile.java:166-177); the offset is
+/// `((size + 1) % 2) * tilesize / 2` (Block.java:774), so odd sizes (and 1x1)
+/// sit on the tile's `worldx` and even sizes shift `+4`.
+#[test]
+fn building_pos_uses_block_offset() {
+    let mut sim = live_sim(64);
+    let cases = [
+        ("duo", 10, 80.0),               // 1x1, offset 0
+        ("core-shard", 20, 160.0),       // 3x3, offset 0
+        ("mechanical-drill", 30, 244.0), // 2x2, offset 4
+        ("core-foundation", 40, 324.0),  // 4x4, offset 4
+    ];
+    for (name, tile, expected) in cases {
+        let entity = place(&mut sim, tile, tile, name, 1);
+        let pos = sim.ecs.0.get::<Pos>(entity).expect("pos");
+        assert_eq!(
+            (pos.x, pos.y),
+            (expected, expected),
+            "{name} at tile {tile} must sit at drawx/drawy"
+        );
+    }
 }

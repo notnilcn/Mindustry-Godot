@@ -275,11 +275,11 @@ fn weapon_fire() -> Result<ScenarioOutput> {
         .ok_or_else(|| anyhow::anyhow!("copper-wall missing from content"))?;
     harness.build.rules.default_team = 1;
     assert!(harness.build.place(12, 8, wall, 0, true), "wall placed");
-    let (ux, uy) = tile_center(4, 8);
+    let (ux, uy) = tile_world(4, 8);
     let unit = harness
         .spawn("dagger", 0, ux, uy, 0.0)
         .ok_or_else(|| anyhow::anyhow!("dagger missing from content"))?;
-    let aim = tile_center(12, 8);
+    let aim = tile_world(12, 8);
     let mount_count = harness
         .unit_weapons(unit)
         .map(|w| w.mounts.len())
@@ -324,7 +324,7 @@ fn spawn_path_arrive() -> Result<ScenarioOutput> {
     let snap = harness
         .snapshot(entity)
         .ok_or_else(|| anyhow::anyhow!("unit despawned"))?;
-    let (tx, ty) = tile_center(60, 60);
+    let (tx, ty) = tile_world(60, 60);
     let distance = ((snap.x - tx).powi(2) + (snap.y - ty).powi(2)).sqrt();
     let arrived = distance <= snap.hit_size.max(4.0);
     let checksum = harness.checksum_hex();
@@ -349,9 +349,11 @@ fn spawn_path_arrive() -> Result<ScenarioOutput> {
     Ok(ScenarioOutput { report, dump })
 }
 
-fn tile_center(x: i32, y: i32) -> (f32, f32) {
+fn tile_world(x: i32, y: i32) -> (f32, f32) {
     let ts = mind_core::config::TILESIZE as f32;
-    ((x as f32 + 0.5) * ts, (y as f32 + 0.5) * ts)
+    // `Tile.worldx()` (Tile.java:166-171); the sim's building `Pos` and the
+    // AI's arrival points use the same convention.
+    (x as f32 * ts, y as f32 * ts)
 }
 
 /// `units_formation`: deterministic `UnitGroup` packing for a 10-unit squad.
@@ -746,7 +748,7 @@ fn rts_command_queue() -> Result<ScenarioOutput> {
     let arrived = mover
         .snapshot(unit)
         .map(|snap| {
-            let (tx, ty) = tile_center(60, 60);
+            let (tx, ty) = tile_world(60, 60);
             ((snap.x - tx).powi(2) + (snap.y - ty).powi(2)).sqrt() <= snap.hit_size.max(4.0)
         })
         .unwrap_or(false);
@@ -1081,7 +1083,7 @@ fn path_report(unit: &str, tx: i32, ty: i32, ticks: u64, json: bool) -> Result<i
                 "y": round3(snap.y),
             }));
             if arrived_at.is_none() {
-                let (cx, cy) = tile_center(tx, ty);
+                let (cx, cy) = tile_world(tx, ty);
                 let dist = ((snap.x - cx).powi(2) + (snap.y - cy).powi(2)).sqrt();
                 if dist <= snap.hit_size.max(4.0) {
                     arrived_at = Some(tick);

@@ -373,15 +373,11 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
         LAccess::MaxHealth => Sensed::Num(health.map(|h| h.max_health as f64).unwrap_or(0.0)),
         LAccess::Team => Sensed::Num(entity_team(world, e).unwrap_or(0) as f64),
         LAccess::X | LAccess::Y => {
-            // Java `Building.x = tile*8 + ((size+1)%2)*4` (Block.java:774); the
-            // port's `Pos` is the anchor-tile centre, so re-derive the Java
-            // value: 1x1/3x3 -> tile, 2x2 -> tile + 0.5.
-            let size = def.as_ref().map(|d| d.size).unwrap_or(1);
-            let java_offset = ((size + 1) % 2) as f32 * 4.0;
-            let value = world.get::<Pos>(e).map(|p| {
-                let centre = if a == LAccess::X { p.x } else { p.y };
-                f64::from((centre - 4.0 + java_offset) / 8.0)
-            });
+            // Java `Building.x = tile.drawx()` (BuildingComp.java:126), and
+            // `World.conv(x) = x / tilesize` (World.java:170).
+            let value = world
+                .get::<Pos>(e)
+                .map(|p| if a == LAccess::X { p.x } else { p.y } as f64 / 8.0);
             Sensed::Num(value.unwrap_or(0.0))
         }
         LAccess::Rotation => Sensed::Num(building.map(|b| b.rotation as f64).unwrap_or(0.0)),

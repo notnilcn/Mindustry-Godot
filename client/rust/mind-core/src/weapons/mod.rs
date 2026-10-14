@@ -917,11 +917,12 @@ mod tests {
         let mut harness = CombatHarness::new(32, 16, 7);
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(12, 8, wall, 0, true));
-        let (ux, uy) = CombatHarness::tile_center(4, 8);
+        // Java tile `worldx` (row 8): a tile-centre y rounds into the next row.
+        let (ux, uy) = CombatHarness::tile_origin(4, 8);
         let weapon =
             weapon_with_bullet(&harness, 5.0, ShootPatternSpec::plain(1, 0.0, 0.0), "fuse");
         let unit = harness.spawn_test_unit(ux, uy, 1, vec![weapon]);
-        harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+        harness.set_unit_aim(unit, 0, CombatHarness::tile_origin(12, 8));
         harness.set_unit_shoot(unit, 0, true);
         let before = harness.building_health_at(12, 8);
         for _ in 0..40 {

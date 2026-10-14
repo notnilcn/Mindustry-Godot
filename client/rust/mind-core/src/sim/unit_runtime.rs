@@ -3954,8 +3954,9 @@ fn update_flying_ai(
                 &runtime.grid,
                 &runtime.content,
                 entity,
-                (spawn.x() as f32 + 0.5) * TILE_SIZE,
-                (spawn.y() as f32 + 0.5) * TILE_SIZE,
+                // `Tile.worldx()/worldy()` (Tile.java:166-171).
+                spawn.x() as f32 * TILE_SIZE,
+                spawn.y() as f32 * TILE_SIZE,
                 rules.drop_zone_radius + 130.0,
                 100.0,
                 false,
@@ -4181,8 +4182,9 @@ fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Option<Entity>
 fn closest_spawn_tile(runtime: &UnitRuntime, x: f32, y: f32) -> Option<TilePos> {
     let mut best: Option<(f32, TilePos)> = None;
     for &tile in runtime.wave_spawner.get_spawns() {
-        let cx = (tile.x() as f32 + 0.5) * TILE_SIZE;
-        let cy = (tile.y() as f32 + 0.5) * TILE_SIZE;
+        // `Tile.worldx()/worldy()` (Tile.java:166-171).
+        let cx = tile.x() as f32 * TILE_SIZE;
+        let cy = tile.y() as f32 * TILE_SIZE;
         let dx = cx - x;
         let dy = cy - y;
         let dist2 = dx * dx + dy * dy;
@@ -4193,10 +4195,11 @@ fn closest_spawn_tile(runtime: &UnitRuntime, x: f32, y: f32) -> Option<TilePos> 
     best.map(|(_, tile)| tile)
 }
 
-/// `unit.within(Tile spawner, radius)`: distance to the spawn tile centre.
+/// `unit.within(Tile spawner, radius)`: distance to the spawn tile's `worldx`.
 fn within_spawn(tile: TilePos, x: f32, y: f32, radius: f32) -> bool {
-    let cx = (tile.x() as f32 + 0.5) * TILE_SIZE;
-    let cy = (tile.y() as f32 + 0.5) * TILE_SIZE;
+    // `Tile.worldx()/worldy()` (Tile.java:166-171).
+    let cx = tile.x() as f32 * TILE_SIZE;
+    let cy = tile.y() as f32 * TILE_SIZE;
     let dx = cx - x;
     let dy = cy - y;
     dx * dx + dy * dy <= radius * radius
@@ -4316,18 +4319,18 @@ fn nearest_enemy_building(world: &World, team: u8, x: f32, y: f32) -> Option<Ent
     best.map(|(_, entity)| entity)
 }
 
-/// World-pixel center of a live building (`Pos`, else the center tile).
+/// World-pixel center of a live building (`Pos`, else the tile's `worldx`).
 fn building_center(world: &World, entity: Entity) -> Option<(f32, f32)> {
     if let Some(pos) = world.get::<Pos>(entity) {
         return Some((pos.x, pos.y));
     }
     world
         .get::<BuildingComp>(entity)
-        .map(|comp| tile_center(comp.pos))
+        .map(|comp| tile_world(comp.pos))
         .or_else(|| {
             world
                 .get::<Building>(entity)
-                .map(|building| tile_center(building.tile))
+                .map(|building| tile_world(building.tile))
         })
 }
 
@@ -4340,11 +4343,11 @@ fn building_tile(world: &World, entity: Entity) -> Option<TilePos> {
 }
 
 /// World-pixel center of a tile.
-fn tile_center(tile: TilePos) -> (f32, f32) {
-    (
-        (tile.x() as f32 + 0.5) * TILE_SIZE,
-        (tile.y() as f32 + 0.5) * TILE_SIZE,
-    )
+/// `Tile.worldx()`/`worldy()` (Tile.java:166-171): the tile's corner-based
+/// world coordinate, `x * tilesize`. The tile spans `[x*8 - 4, x*8 + 4)` and a
+/// building on it sits at `drawx = worldx + block.offset`.
+fn tile_world(tile: TilePos) -> (f32, f32) {
+    (tile.x() as f32 * TILE_SIZE, tile.y() as f32 * TILE_SIZE)
 }
 
 /// `AIController.faceTarget` (AIController.java:121-128): omni-movement
