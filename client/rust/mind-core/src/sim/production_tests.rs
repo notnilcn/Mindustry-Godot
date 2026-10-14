@@ -2299,3 +2299,72 @@ fn lookup_resolves_content_from_logic_ids() {
     let t = state.executor.optional_var("t").expect("t");
     assert_eq!(state.executor.arena.get(t).num(), 1.0, "team 1 = sharded");
 }
+
+/// H02 T1: a full campaign core keeps accepting items (Java
+/// `Rules.coreIncinerates`, `CoreBlock.java:744-751,886-913`) and incinerates
+/// the overflow instead of rejecting it.
+#[test]
+fn full_core_incinerates_and_counts() {
+    let mut sim = runtime_sim();
+    let core = place(&mut sim, "core-shard", 10, 10);
+    let copper = item(&sim, "copper");
+    let cap = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::storage::CoreBuild>(core)
+        .map(|c| c.storage_capacity)
+        .expect("core build");
+    assert_eq!(cap, 4000, "core-shard itemCapacity (Blocks.java:3152)");
+    {
+        let mut items = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(core)
+            .expect("items");
+        items.add(copper, cap, cap);
+    }
+    // Default hooks (no resource) incinerate, so the full core accepts and the
+    // overflow handle is dropped instead of stored.
+    assert!(transfer::dispatch_accept_item(
+        &sim.ecs.0, core, core, copper
+    ));
+    transfer::dispatch_handle_item(&mut sim.ecs.0, core, core, copper);
+    assert_eq!(stored_item(&sim, core, copper), cap, "overflow incinerated");
+}
+
+/// H02 T1: `Rules.coreIncinerates = false` restores the rejecting behavior.
+#[test]
+fn core_rejects_when_not_incinerating() {
+    #[derive(Debug)]
+    struct NotIncinerating;
+    impl crate::world::blocks::storage::CoreCampaignHooks for NotIncinerating {
+        fn core_incinerates(&self) -> bool {
+            false
+        }
+    }
+    let mut sim = runtime_sim();
+    let core = place(&mut sim, "core-shard", 10, 10);
+    let copper = item(&sim, "copper");
+    let cap = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::storage::CoreBuild>(core)
+        .map(|c| c.storage_capacity)
+        .expect("core build");
+    {
+        let mut items = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(core)
+            .expect("items");
+        items.add(copper, cap, cap);
+    }
+    sim.ecs
+        .0
+        .insert_resource(crate::world::blocks::storage::CoreHooks(
+            std::sync::Arc::new(NotIncinerating),
+        ));
+    assert!(!transfer::dispatch_accept_item(
+        &sim.ecs.0, core, core, copper
+    ));
+}

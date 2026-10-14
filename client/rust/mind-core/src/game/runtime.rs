@@ -62,16 +62,35 @@ pub struct SessionSync {
 /// Shared campaign hook state: the live session snapshot plus the deferred
 /// `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the core and
 /// miner paths (consumed by [`campaign_tick_system`]).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CampaignHookQueues {
     /// `state.isCampaign()` snapshot (refreshed by the campaign tick).
     pub is_campaign: bool,
     /// `state.rules.defaultTeam` snapshot.
     pub default_team: u8,
+    /// `Rules.coreIncinerates` snapshot.
+    pub core_incinerates: bool,
+    /// `Rules.allowCoreUnloaders` snapshot.
+    pub allow_core_unloaders: bool,
     /// Pending `handleCoreItem` deltas `(item, amount)`.
     pub core_deltas: Vec<(ItemId, i32)>,
     /// Pending `handleProduction` deltas `(item, amount)`.
     pub production_deltas: Vec<(ItemId, i32)>,
+}
+
+impl Default for CampaignHookQueues {
+    fn default() -> Self {
+        // Java `Rules.java:225` (`coreIncinerates = true`) and `:135`
+        // (`allowCoreUnloaders = true`) are the field defaults.
+        Self {
+            is_campaign: false,
+            default_team: 0,
+            core_incinerates: true,
+            allow_core_unloaders: true,
+            core_deltas: Vec::new(),
+            production_deltas: Vec::new(),
+        }
+    }
 }
 
 /// `CoreCampaignHooks` impl for a live campaign session: queues the deltas the
@@ -95,6 +114,20 @@ impl crate::world::blocks::storage::CoreCampaignHooks for CampaignCoreHooks {
             .lock()
             .map(|queues| queues.default_team)
             .unwrap_or(0)
+    }
+
+    fn core_incinerates(&self) -> bool {
+        self.queues
+            .lock()
+            .map(|queues| queues.core_incinerates)
+            .unwrap_or(true)
+    }
+
+    fn allow_core_unloaders(&self) -> bool {
+        self.queues
+            .lock()
+            .map(|queues| queues.allow_core_unloaders)
+            .unwrap_or(true)
     }
 
     fn handle_core_item(&self, item: ItemId, amount: i32) {
@@ -133,6 +166,8 @@ pub fn reset_campaign_core_hooks(world: &mut World) {
         && let Ok(mut state) = queues.0.lock()
     {
         state.is_campaign = false;
+        state.core_incinerates = true;
+        state.allow_core_unloaders = true;
         state.core_deltas.clear();
         state.production_deltas.clear();
     }
@@ -444,6 +479,8 @@ pub fn campaign_tick_system(world: &mut World) {
         {
             state.is_campaign = runtime.session.is_campaign();
             state.default_team = runtime.session.rules.default_team;
+            state.core_incinerates = runtime.session.rules.core_incinerates;
+            state.allow_core_unloaders = runtime.session.rules.allow_core_unloaders;
             let core_deltas = std::mem::take(&mut state.core_deltas);
             let production_deltas = std::mem::take(&mut state.production_deltas);
             drop(state);
