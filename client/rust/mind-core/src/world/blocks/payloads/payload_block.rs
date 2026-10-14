@@ -325,19 +325,27 @@ fn place_on_tile_index(world: &mut World, entity: Entity) -> bool {
     let Some(pos) = world.get::<Pos>(entity).map(|p| (p.x, p.y)) else {
         return false;
     };
-    let tile_x = (pos.0 / TILE_SIZE).floor() as i32;
-    let tile_y = (pos.1 / TILE_SIZE).floor() as i32;
     let Some(block) = world.get::<Building>(entity).map(|b| b.block) else {
         return false;
     };
+    let offset = world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.get(block))
+        .map(|instance| instance.def.offset)
+        .unwrap_or(0.0);
+    // Java `PayloadComp.dropBlock` (`PayloadComp.java:211`): the drop tile is
+    // `World.toTile(x - block.offset)`; `Tile.setBlock` then re-centres the
+    // building at `tile*8 + block.offset` (`Tile.drawx`, `Tile.java:175-181`).
+    let tile_x = crate::world::WorldGrid::to_tile(pos.0 - offset);
+    let tile_y = crate::world::WorldGrid::to_tile(pos.1 - offset);
     let size = block_size(world, block);
     if let Some(mut building) = world.get_mut::<Building>(entity) {
         building.tile = crate::world::TilePos::new(tile_x as i16, tile_y as i16);
         building.rotation = 0;
     }
     if let Some(mut pos) = world.get_mut::<Pos>(entity) {
-        pos.x = (tile_x as f32 + 0.5) * TILE_SIZE;
-        pos.y = (tile_y as f32 + 0.5) * TILE_SIZE;
+        pos.x = tile_x as f32 * TILE_SIZE + offset;
+        pos.y = tile_y as f32 * TILE_SIZE + offset;
     }
     if let Some(mut index) = world.get_resource_mut::<TileBuilds>() {
         let width = index.width;

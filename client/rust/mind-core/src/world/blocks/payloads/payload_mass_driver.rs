@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 use crate::combat::bullet::kinds::mass_driver::{MassDriverPayload, MassDriverSink};
 use crate::combat::{Bullet, BulletData};
 use crate::entities::comp::{Building, Pos};
-use crate::world::behavior::{BuildingBehavior, PayloadRef};
+use crate::world::behavior::{BuildingBehavior, ConfigTapResult, PayloadRef};
 use crate::world::config::ConfigValue;
 use crate::world::update::{delta, edelta};
 use crate::world::{TileBuilds, TilePos};
@@ -493,6 +493,49 @@ impl BuildingBehavior for PayloadMassDriverBehavior {
         if let Some(mut build) = world.get_mut::<PayloadDriverBuild>(e) {
             build.link = link;
         }
+    }
+
+    /// `PayloadMassDriver.onConfigureBuildTapped`
+    /// (`PayloadMassDriver.java:448-464`): same shape as `MassDriver`, but any
+    /// `PayloadMassDriver` block is a valid target.
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        _grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> ConfigTapResult {
+        let (Some(_a), Some(b)) = (world.get::<Building>(e), world.get::<Building>(other)) else {
+            return ConfigTapResult::SwitchAfter(Vec::new());
+        };
+        let link = world
+            .get::<PayloadDriverBuild>(e)
+            .map(|driver| driver.link)
+            .unwrap_or(-1);
+        if e == other {
+            let value = vec![(e, ConfigValue::Number(-1.0))];
+            return if link == -1 {
+                ConfigTapResult::ConsumeAndDeselect(value)
+            } else {
+                ConfigTapResult::Consume(value)
+            };
+        }
+        let other_pos = b.tile.pack();
+        if link == other_pos {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(-1.0))]);
+        }
+        let is_payload_driver = world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| table.get(b.block))
+            .is_some_and(|inst| inst.def.kind == crate::content::BlockKind::PayloadMassDriver);
+        let same_team = world
+            .get::<crate::entities::comp::TeamComp>(e)
+            .zip(world.get::<crate::entities::comp::TeamComp>(other))
+            .is_some_and(|(x, y)| x.team == y.team);
+        if is_payload_driver && same_team && world_dst(world, other, e) <= self.range {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(f64::from(other_pos)))]);
+        }
+        ConfigTapResult::SwitchAfter(Vec::new())
     }
 
     fn version(&self, _world: &World, _e: Entity) -> u8 {

@@ -221,6 +221,27 @@ impl SimRuntime {
             Wire::Float(value) => WorldConfigValue::Number(f64::from(*value)),
             Wire::Bytes(bytes) => WorldConfigValue::Bytes(bytes.iter().copied().collect()),
             Wire::Text(text) => WorldConfigValue::String(text.clone()),
+            Wire::Point2(x, y) => WorldConfigValue::Point2(*x, *y),
+            Wire::Point2Array(points) => {
+                WorldConfigValue::Point2Array(points.iter().copied().collect())
+            }
+            Wire::ContentId { kind, id } => {
+                let content_type = ContentType::ALL
+                    .iter()
+                    .copied()
+                    .find(|type_| *type_ as u8 == *kind)
+                    .ok_or(CommandError::UnknownContent(*id))?;
+                let Some(reference) = self.content.get_by_id(content_type, i32::from(*id)) else {
+                    return Err(CommandError::UnknownContent(*id));
+                };
+                match reference.type_ {
+                    ContentType::Item => WorldConfigValue::Item(ItemId::new(reference.id)),
+                    ContentType::Liquid => WorldConfigValue::Liquid(LiquidId::new(reference.id)),
+                    ContentType::Block => WorldConfigValue::Block(BlockId::new(reference.id)),
+                    ContentType::Unit => WorldConfigValue::Unit(UnitTypeId::new(reference.id)),
+                    other => WorldConfigValue::Content(other, reference.id),
+                }
+            }
             Wire::Content(name) => match self.content.by_name(name) {
                 Some(reference) => match reference.type_ {
                     ContentType::Item => WorldConfigValue::Item(ItemId::new(reference.id)),
