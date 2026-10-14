@@ -143,7 +143,7 @@ pub fn underwater_prims(
     };
     let weather_z = Layer::Weather.z();
     let start = out.len();
-    particles.build_particles(&state, view, view, view_tick, out);
+    particles.build_particles(&state, view, view, view_tick, (windx, windy), out);
     for prim in &mut out[start..] {
         prim.z = weather_z;
     }

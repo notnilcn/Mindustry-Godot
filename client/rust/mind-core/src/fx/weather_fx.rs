@@ -8,6 +8,7 @@
 //! opacity, wind, status application) stays in plan 12; this module owns only
 //! the draw math. `Time.time` is the fixed view tick (deviation #7).
 
+use crate::content::registries::weathers::WeatherDef;
 use crate::content::{Rgba, WeatherId};
 use crate::math::{ArcRand, curve};
 use crate::render::draw::{DrawPrim, PrimKind, RegionKey};
@@ -140,6 +141,72 @@ impl Default for WeatherFx {
     }
 }
 
+/// Arc `Rectangle.overlaps` for a centered rect (`Tmp.r3.setCentered`).
+///
+/// `cam` is the bottom-left camera rect (`Core.camera.bounds`).
+fn overlaps_centered(x: f32, y: f32, size: f32, cam: WeatherView) -> bool {
+    let h = size / 2.0;
+    x - h < cam.x + cam.w && x + h > cam.x && y - h < cam.y + cam.h && y + h > cam.y
+}
+
+/// `Mathf.mod(f, n) = ((f % n) + n) % n`.
+fn arc_mod(f: f32, n: f32) -> f32 {
+    ((f % n) + n) % n
+}
+
+/// Maps a `ParticleWeather` region name to the port's static region key.
+fn particle_region(name: &str, weather: &str) -> RegionKey {
+    match name {
+        "particle" | "circle-small" | "circle-shadow" => RegionKey(match name {
+            "circle-small" => "circle-small",
+            "circle-shadow" => "circle-shadow",
+            _ => "particle",
+        }),
+        other => {
+            log::warn!("weather `{weather}`: unknown particle region `{other}`; using `particle`");
+            RegionKey("particle")
+        }
+    }
+}
+
+/// `WeatherFx` for a weather def (`ParticleWeather`/`RainWeather` draw halves,
+/// T6): `None` for `fog` (no particles) and non-drawing weathers.
+pub fn weather_fx_for(def: &WeatherDef) -> Option<WeatherFx> {
+    if let Some(rain) = &def.rain {
+        return Some(WeatherFx {
+            kind: WeatherKind::Rain,
+            xspeed: rain.xspeed,
+            yspeed: rain.yspeed,
+            stroke: rain.stroke,
+            size_min: rain.size_min,
+            size_max: rain.size_max,
+            density: rain.density,
+            color: rain.color,
+            ..WeatherFx::default()
+        });
+    }
+    let particle = def.particle.as_ref()?;
+    if !particle.draw_particles {
+        return None;
+    }
+    Some(WeatherFx {
+        kind: WeatherKind::Particle,
+        region: particle_region(&particle.particle_region, &def.name),
+        color: particle.color,
+        size_min: particle.size_min,
+        size_max: particle.size_max,
+        density: particle.density,
+        min_alpha: particle.min_alpha,
+        max_alpha: particle.max_alpha,
+        sin_scl_min: particle.sin_scl_min,
+        sin_scl_max: particle.sin_scl_max,
+        sin_mag_min: particle.sin_mag_min,
+        sin_mag_max: particle.sin_mag_max,
+        random_particle_rotation: particle.random_particle_rotation,
+        ..WeatherFx::default()
+    })
+}
+
 impl WeatherFx {
     /// `(int)(area / density * intensity)` for `drawParticles`/`drawRain`.
     pub fn particle_count(&self, view: WeatherView, intensity: f32) -> i32 {
@@ -149,49 +216,44 @@ impl WeatherFx {
     /// Builds the wrapped particle field (ported from `Weather.drawParticles`).
     ///
     /// `view_tick` replaces `Time.time`; `view` is the grown camera rect and
-    /// `cam` the camera bounds used for the overlap test.
+    /// `cam` the bottom-left camera bounds used for the overlap test. `wind` is
+    /// the caller-resolved `(windx, windy)` (`useWindVector` rule lives in
+    /// `ParticleWeather.drawOver`). The RNG draw order matches Java exactly:
+    /// `scl, scl2, size, x, y, alpha, [rotation], sinScl, sinMag` per particle.
     pub fn build_particles(
         &self,
         state: &WeatherStateView,
         view: WeatherView,
         cam: WeatherView,
         view_tick: f32,
+        wind: (f32, f32),
         out: &mut Vec<DrawPrim>,
     ) {
         if state.opacity <= 0.0 || state.intensity <= 0.0 {
             return;
         }
-        let (windx, windy) = state.wind_vector;
         let mut rand = ArcRand::new(WEATHER_SEED);
         let total = self.particle_count(view, state.intensity);
         for _ in 0..total {
-            let _scl = rand.random_range_float(0.5, 1.0);
+            let scl = rand.random_range_float(0.5, 1.0);
             let scl2 = rand.random_range_float(0.5, 1.0);
-            let _scl3 = rand.random_range_float(0.5, 1.0);
             let size = rand.random_range_float(self.size_min, self.size_max);
-            let mut x = rand.random_float(BOUND_MAX) + view_tick * windx * scl2;
-            let mut y = rand.random_float(BOUND_MAX) + view_tick * windy * scl2;
+            let mut x = rand.random_float(BOUND_MAX) + view_tick * wind.0 * scl2;
+            let mut y = rand.random_float(BOUND_MAX) + view_tick * wind.1 * scl;
             let alpha = rand.random_range_float(self.min_alpha, self.max_alpha);
-            let sc = rand.random_range_float(self.sin_scl_min, self.sin_scl_max);
-            let mag = rand.random_range_float(self.sin_mag_min, self.sin_mag_max);
-            x += (y / sc).sin() * mag;
+            let rotation = if self.random_particle_rotation {
+                rand.random_float(360.0)
+            } else {
+                0.0
+            };
+            let sin_scl = rand.random_range_float(self.sin_scl_min, self.sin_scl_max);
+            let sin_mag = rand.random_range_float(self.sin_mag_min, self.sin_mag_max);
+            x += (y / sin_scl).sin() * sin_mag;
 
-            x -= view.x;
-            y -= view.y;
-            x = x.rem_euclid(view.w.max(1.0));
-            y = y.rem_euclid(view.h.max(1.0));
-            x += view.x;
-            y += view.y;
+            x = arc_mod(x - view.x, view.w.max(1.0)) + view.x;
+            y = arc_mod(y - view.y, view.h.max(1.0)) + view.y;
 
-            // Overlap test with camera bounds.
-            if (x - cam.x - cam.w / 2.0).abs() <= cam.w / 2.0 + size / 2.0
-                && (y - cam.y - cam.h / 2.0).abs() <= cam.h / 2.0 + size / 2.0
-            {
-                let rotation = if self.random_particle_rotation {
-                    rand.random_float(360.0)
-                } else {
-                    0.0
-                };
+            if overlaps_centered(x, y, size, cam) {
                 out.push(DrawPrim::at(
                     crate::render::layer::Layer::Weather.z(),
                     PrimKind::Region {
@@ -211,13 +273,16 @@ impl WeatherFx {
         }
     }
 
-    /// `Weather.drawRain`.
+    /// `Weather.drawRain`: per-drop tint drawn from the string alpha passed by
+    /// the caller (`Draw.getColorAlpha()` = `weatherAlpha * opacity *
+    /// opacityMultiplier`). RNG order: `scl, scl2, size, x, y, tint`.
     pub fn build_rain(
         &self,
         state: &WeatherStateView,
         view: WeatherView,
         cam: WeatherView,
         view_tick: f32,
+        alpha: f32,
         out: &mut Vec<DrawPrim>,
     ) {
         let mut rand = ArcRand::new(WEATHER_SEED);
@@ -228,13 +293,12 @@ impl WeatherFx {
             let size = rand.random_range_float(self.size_min, self.size_max);
             let mut x = rand.random_float(BOUND_MAX) + view_tick * self.xspeed * scl2;
             let mut y = rand.random_float(BOUND_MAX) - view_tick * self.yspeed * scl;
-            x -= view.x;
-            y -= view.y;
-            x = x.rem_euclid(view.w.max(1.0));
-            y = y.rem_euclid(view.h.max(1.0));
-            x += view.x;
-            y += view.y;
-            if (x - cam.x).abs() <= cam.w / 2.0 && (y - cam.y).abs() <= cam.h / 2.0 {
+            let tint = rand.random_float(1.0) * alpha;
+
+            x = arc_mod(x - view.x, view.w.max(1.0)) + view.x;
+            y = arc_mod(y - view.y, view.h.max(1.0)) + view.y;
+
+            if overlaps_centered(x, y, size, cam) {
                 let ang = crate::fx::angles::angle(self.xspeed * scl2, -self.yspeed * scl);
                 out.push(DrawPrim::at(
                     crate::render::layer::Layer::Weather.z(),
@@ -244,7 +308,7 @@ impl WeatherFx {
                         x2: x + trnsx(ang, size / 2.0),
                         y2: y + crate::fx::angles::trnsy(ang, size / 2.0),
                         stroke: self.stroke,
-                        color: self.color.with_alpha(state.opacity),
+                        color: self.color.with_alpha(tint),
                         cap: false,
                     },
                 ));
@@ -299,7 +363,8 @@ impl WeatherFx {
         let total = (view.w * view.h / density * state.intensity) as i32 / 2;
         let t = view_tick / time_scale.max(1e-6);
         let mut rand = ArcRand::new(WEATHER_SEED);
-        let layer = crate::render::layer::Layer::Weather.z();
+        // `WeatherStateComp.draw`: `drawUnder` renders at `Layer.debris`.
+        let layer = crate::render::layer::Layer::Debris.z();
         for _ in 0..total {
             let offset = rand.random_float(1.0);
             let time = t + offset;
@@ -315,8 +380,7 @@ impl WeatherFx {
             y += view.y;
 
             // `Tmp.r3.setCentered(x, y, life * 4).overlaps(cam)`.
-            let r3 = life * 4.0;
-            if (x - cam.x).abs() > (r3 + cam.w) / 2.0 || (y - cam.y).abs() > (r3 + cam.h) / 2.0 {
+            if !overlaps_centered(x, y, life * 4.0, cam) {
                 continue;
             }
             match ground(x, y) {
@@ -443,13 +507,251 @@ mod tests {
         let view = WeatherView::centered(500.0, 500.0, 100.0, 100.0, 10.0);
         let cam = WeatherView::centered(500.0, 500.0, 100.0, 100.0, 0.0);
         let mut out = Vec::new();
-        fx.build_particles(&state, view, cam, 3.0, &mut out);
+        fx.build_particles(&state, view, cam, 3.0, state.wind_vector, &mut out);
         for prim in &out {
             if let PrimKind::Region { x, y, .. } = &prim.kind {
                 assert!((400.0..=600.0).contains(x));
                 assert!((400.0..=600.0).contains(y));
             }
         }
+    }
+
+    /// H07 T6: the particle RNG sequence matches `Weather.drawParticles`
+    /// (`scl, scl2, size, x, y, alpha, sinScl, sinMag`; +rotation after alpha
+    /// when `randomParticleRotation`).
+    #[test]
+    fn particles_rng_sequence_matches_java() {
+        let fx = WeatherFx {
+            kind: WeatherKind::Particle,
+            density: 80_000.0 * 80_000.0,
+            size_min: 5.0,
+            size_max: 5.0,
+            min_alpha: 0.3,
+            max_alpha: 0.3,
+            sin_scl_min: 40.0,
+            sin_scl_max: 40.0,
+            sin_mag_min: 2.0,
+            sin_mag_max: 2.0,
+            ..WeatherFx::default()
+        };
+        let view = WeatherView {
+            x: 0.0,
+            y: 0.0,
+            w: 80_000.0,
+            h: 80_000.0,
+        };
+        let state = WeatherStateView {
+            intensity: 1.0,
+            opacity: 1.0,
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        fx.build_particles(&state, view, view, 0.0, (0.0, 0.0), &mut out);
+        assert_eq!(out.len(), 1, "total = area/density = 1");
+
+        // Independent recomputation in the Java draw order.
+        let mut rand = ArcRand::new(WEATHER_SEED);
+        let _scl = rand.random_range_float(0.5, 1.0);
+        let _scl2 = rand.random_range_float(0.5, 1.0);
+        let size = rand.random_range_float(fx.size_min, fx.size_max);
+        let mut x = rand.random_float(BOUND_MAX);
+        let y = rand.random_float(BOUND_MAX);
+        let alpha = rand.random_range_float(fx.min_alpha, fx.max_alpha);
+        let sin_scl = rand.random_range_float(fx.sin_scl_min, fx.sin_scl_max);
+        let sin_mag = rand.random_range_float(fx.sin_mag_min, fx.sin_mag_max);
+        x += (y / sin_scl).sin() * sin_mag;
+        let x = ((x % view.w) + view.w) % view.w;
+        let PrimKind::Region {
+            x: px,
+            y: py,
+            w,
+            color,
+            rotation_deg,
+            ..
+        } = &out[0].kind
+        else {
+            unreachable!()
+        };
+        assert!((px - x).abs() < 0.1, "{px} vs {x}");
+        assert!((py - y).abs() < 0.1, "{py} vs {y}");
+        assert!((w - size).abs() < 1.0e-6);
+        assert!((color.a - alpha).abs() < 1.0e-6);
+        assert_eq!(*rotation_deg, 0.0);
+
+        // `randomParticleRotation = true` inserts the 360 draw after alpha.
+        let rotated = WeatherFx {
+            random_particle_rotation: true,
+            ..fx
+        };
+        let mut out = Vec::new();
+        rotated.build_particles(&state, view, view, 0.0, (0.0, 0.0), &mut out);
+        let mut rand = ArcRand::new(WEATHER_SEED);
+        let _ = rand.random_range_float(0.5, 1.0);
+        let _ = rand.random_range_float(0.5, 1.0);
+        let _ = rand.random_range_float(rotated.size_min, rotated.size_max);
+        let _ = rand.random_float(BOUND_MAX);
+        let _ = rand.random_float(BOUND_MAX);
+        let _ = rand.random_range_float(rotated.min_alpha, rotated.max_alpha);
+        let rotation = rand.random_float(360.0);
+        assert!(matches!(
+            &out[0].kind,
+            PrimKind::Region { rotation_deg, .. } if (*rotation_deg - rotation).abs() < 0.1
+        ));
+    }
+
+    /// H07 T6: rain draws its per-drop `tint` (sixth draw) and the line colour
+    /// alpha is `tint * alpha`.
+    #[test]
+    fn rain_tint_is_drawn() {
+        let fx = WeatherFx {
+            kind: WeatherKind::Rain,
+            density: 80_000.0 * 80_000.0 / 2.0,
+            size_min: 8.0,
+            size_max: 8.0,
+            xspeed: 1.5,
+            yspeed: 5.0,
+            stroke: 0.75,
+            color: Rgba::from_hex("7a95eaff").unwrap_or(Rgba::WHITE),
+            ..WeatherFx::default()
+        };
+        let view = WeatherView {
+            x: 0.0,
+            y: 0.0,
+            w: 80_000.0,
+            h: 80_000.0,
+        };
+        let state = WeatherStateView {
+            intensity: 1.0,
+            opacity: 1.0,
+            ..Default::default()
+        };
+        let mut out = Vec::new();
+        fx.build_rain(&state, view, view, 0.0, 0.5, &mut out);
+        assert_eq!(out.len(), 2, "total = 2");
+
+        let mut rand = ArcRand::new(WEATHER_SEED);
+        let _ = rand.random_range_float(0.5, 1.0);
+        let _ = rand.random_range_float(0.5, 1.0);
+        let _ = rand.random_range_float(fx.size_min, fx.size_max);
+        let _ = rand.random_float(BOUND_MAX);
+        let _ = rand.random_float(BOUND_MAX);
+        let tint = rand.random_float(1.0) * 0.5;
+        let PrimKind::Line { color, .. } = &out[0].kind else {
+            unreachable!()
+        };
+        assert!((color.a - tint).abs() < 1.0e-6, "first tint {tint}");
+
+        // Second drop's `x` is its fourth draw.
+        let _ = rand.random_range_float(0.5, 1.0);
+        let _ = rand.random_range_float(0.5, 1.0);
+        let _ = rand.random_range_float(fx.size_min, fx.size_max);
+        let x2 = rand.random_float(BOUND_MAX);
+        let PrimKind::Line { x1, .. } = &out[1].kind else {
+            unreachable!()
+        };
+        assert!((x1 - x2).abs() < 0.1, "second drop x {x1} vs {x2}");
+        assert_eq!(out[1].z, crate::render::layer::Layer::Weather.z());
+    }
+
+    /// H07 T6: splashes render at the debris band (`WeatherStateComp.draw`).
+    #[test]
+    fn splashes_on_debris_layer() {
+        let fx = WeatherFx::default();
+        let state = WeatherStateView {
+            intensity: 1.0,
+            opacity: 1.0,
+            ..Default::default()
+        };
+        let view = WeatherView {
+            x: 0.0,
+            y: 0.0,
+            w: 1000.0,
+            h: 1000.0,
+        };
+        let cam = view;
+        let splashes = [RegionKey("splash-0"), RegionKey("splash-1")];
+        let mut out = Vec::new();
+        fx.build_splashes(
+            &state,
+            view,
+            cam,
+            0.0,
+            1000.0,
+            1.0,
+            0.75,
+            &splashes,
+            8.0,
+            |_, _| SplashGround::Clear,
+            &mut out,
+        );
+        assert!(!out.is_empty());
+        assert!(
+            out.iter()
+                .all(|prim| prim.z == crate::render::layer::Layer::Debris.z())
+        );
+    }
+
+    /// H07 T6: the overlap test is Arc `Rectangle.overlaps` against the
+    /// bottom-left camera rect.
+    #[test]
+    fn overlap_uses_bottom_left_rect() {
+        let cam = WeatherView {
+            x: 100.0,
+            y: 100.0,
+            w: 50.0,
+            h: 50.0,
+        };
+        assert!(overlaps_centered(101.0, 101.0, 1.0, cam));
+        assert!(!overlaps_centered(95.0, 101.0, 1.0, cam));
+        assert!(!overlaps_centered(101.0, 95.0, 1.0, cam));
+        assert!(overlaps_centered(149.5, 149.5, 1.0, cam));
+    }
+
+    /// H07 T6: `weather_fx_for` matches `Weathers.java` values.
+    #[test]
+    fn weather_fx_for_matches_weathers_java() {
+        let content = crate::content::test_support::test_registry();
+        let snow = weather_fx_for(content.weather_by_name("snowing").expect("snowing")).unwrap();
+        assert_eq!(snow.kind, WeatherKind::Particle);
+        assert_eq!(snow.region, RegionKey("particle"));
+        assert_eq!(snow.size_min, 2.6);
+        assert_eq!(snow.size_max, 13.0);
+        assert_eq!(snow.density, 1200.0);
+        assert_eq!((snow.min_alpha, snow.max_alpha), (1.0, 1.0));
+        assert_eq!((snow.sin_scl_min, snow.sin_scl_max), (30.0, 80.0));
+        assert_eq!((snow.sin_mag_min, snow.sin_mag_max), (1.0, 7.0));
+
+        let rain = weather_fx_for(content.weather_by_name("rain").expect("rain")).unwrap();
+        assert_eq!(rain.kind, WeatherKind::Rain);
+        assert_eq!(rain.stroke, 0.75);
+        assert_eq!((rain.size_min, rain.size_max), (8.0, 40.0));
+        assert_eq!((rain.xspeed, rain.yspeed), (1.5, 5.0));
+        assert_eq!(rain.density, 1200.0);
+        assert_eq!(
+            rain.color,
+            Rgba::from_hex("7a95eaff").unwrap_or(Rgba::WHITE)
+        );
+
+        let sand =
+            weather_fx_for(content.weather_by_name("sandstorm").expect("sandstorm")).unwrap();
+        assert_eq!((sand.size_min, sand.size_max), (70.0, 140.0));
+        assert_eq!((sand.min_alpha, sand.max_alpha), (0.0, 0.2));
+        assert_eq!(sand.density, 1500.0);
+        assert_eq!(sand.color, Rgba::from_hex("f7cba4").unwrap_or(Rgba::WHITE));
+
+        let spores =
+            weather_fx_for(content.weather_by_name("sporestorm").expect("sporestorm")).unwrap();
+        assert_eq!(spores.region, RegionKey("circle-small"));
+        assert_eq!((spores.size_min, spores.size_max), (2.5, 5.0));
+        assert_eq!((spores.min_alpha, spores.max_alpha), (0.1, 0.8));
+        assert_eq!(spores.density, 2000.0);
+        assert_eq!(
+            spores.color,
+            Rgba::from_hex("7457ce").unwrap_or(Rgba::WHITE)
+        );
+
+        // `fog` has `drawParticles = false`.
+        assert!(weather_fx_for(content.weather_by_name("fog").expect("fog")).is_none());
     }
 
     #[test]

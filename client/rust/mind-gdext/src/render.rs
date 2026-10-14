@@ -62,6 +62,7 @@ mod shields;
 mod status;
 mod unit_overlays;
 mod units;
+mod weather;
 
 pub use blocks::BlockRenderer;
 pub use building_cache::BuildingCacheRenderer;
@@ -241,6 +242,8 @@ pub struct MindWorldRenderer {
     status: Option<Gd<status::StatusRenderer>>,
     /// Shield domes/bubbles (`Layer.shields` band; T13/PAR-0129).
     shields: Option<Gd<shields::ShieldRenderer>>,
+    /// Weather particle/rain/splash passes (H07 T6).
+    weather_nodes: Vec<Gd<weather::WeatherRenderer>>,
     /// Command-mode selection overlay (`Layer.plans` band; T16/PAR-0157).
     command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
     /// Placement preview (`Layer.plans` band; G03 T2).
@@ -298,6 +301,7 @@ impl INode2D for MindWorldRenderer {
             debug: None,
             status: None,
             shields: None,
+            weather_nodes: Vec::new(),
             command_overlay: None,
             plan_overlay: None,
             build_beam: None,
@@ -569,6 +573,28 @@ impl MindWorldRenderer {
             // the pipeline, not by content.
             shield_band.clone().add_child(&node);
             self.shields = Some(node.clone());
+        }
+        // Weather (`WeatherStateComp.draw`, `Weather.java:326-341`): `drawOver`
+        // at `Layer.weather` (noise layers first, then particles/rain),
+        // `drawUnder` (rain splashes) at `Layer.debris`.
+        self.weather_nodes.clear();
+        if let Some(weather_band) = self.band_node_at(BandKey::base(Layer::Weather)) {
+            for pass in [weather::WeatherPass::Noise, weather::WeatherPass::Over] {
+                let mut node = weather::WeatherRenderer::new_alloc();
+                // code-instantiated: fixed weather passes; the node count is
+                // fixed by the pipeline, not by content.
+                node.bind_mut().set_pass(pass);
+                weather_band.clone().add_child(&node);
+                self.weather_nodes.push(node);
+            }
+        }
+        if let Some(debris_band) = self.band_node_at(BandKey::base(Layer::Debris)) {
+            let mut node = weather::WeatherRenderer::new_alloc();
+            // code-instantiated: the single splash pass; the node count is
+            // fixed by the pipeline, not by content.
+            node.bind_mut().set_pass(weather::WeatherPass::Under);
+            debris_band.clone().add_child(&node);
+            self.weather_nodes.push(node);
         }
         // Command-mode selection overlay at `Layer.plans`
         // (`InputHandler.drawCommanded`).
