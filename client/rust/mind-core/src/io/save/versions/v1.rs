@@ -1005,8 +1005,11 @@ fn read_entity_chunk(
         .unwrap_or(false);
     if supported {
         let id = chunk.i()?;
+        // The live content registry (with the save's temporary mapper) is
+        // required by upstream (Java) unit/fire/puddle chunks (H04 T10).
+        let content = state.content.as_deref();
         if let Some(sink) = state.entities.as_deref_mut() {
-            sink.read_entity(class_id, custom_name, id, &mut chunk)?;
+            sink.read_entity(class_id, custom_name, id, content, &mut chunk)?;
         }
     }
     Ok(())

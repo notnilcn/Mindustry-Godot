@@ -42,6 +42,22 @@ const CONTROL_RADIUS: f32 = 40.0;
 /// `selectedUnit()`'s hitbox grow per side (`InputHandler.java:2156`).
 const CONTROL_HITBOX_GROW: f32 = 6.0;
 
+/// Bindings whose world gesture runs directly from a pointer edge (T9); every
+/// other binding sharing the same mouse key keeps its normal key-down edge.
+const POINTER_BINDS: [&str; 5] = ["select", "deselect", "break_block", "pick", "command_queue"];
+
+/// Arc mouse key name for a raw button (`MouseButton.getName`).
+fn mouse_key_name(button: &str) -> Option<&'static str> {
+    match button {
+        "left" => Some("mouseLeft"),
+        "right" => Some("mouseRight"),
+        "middle" => Some("mouseMiddle"),
+        "back" => Some("mouseBack"),
+        "forward" => Some("mouseForward"),
+        _ => None,
+    }
+}
+
 /// One world interaction in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragKind {
@@ -138,6 +154,9 @@ pub enum Effect {
     CloseTopDialog,
     /// A binding fired (probe/UI signal).
     Hotkey(String),
+    /// Call a `#[func]` on the `/root/MindUi` autoload by name
+    /// (`toggle_power_lines` F5 / `toggle_fullscreen` F11).
+    UiCall(String),
     /// The RTS selection changed; payload is a JSON id array.
     SelectionChanged(String),
 }
@@ -665,7 +684,37 @@ impl DesktopBridge {
             }
         }
         for name in fired {
-            self.dispatch_action(bindings, name);
+            if POINTER_BINDS.contains(&name) {
+                self.pointer_action(bindings, name, true);
+            } else {
+                self.dispatch_action(bindings, name);
+            }
+        }
+    }
+
+    /// A pointer binding edge from the keyboard path (T9: rebinding `select` to
+    /// a key routes the same world handlers; the mouse path calls them from
+    /// `mouse_button`).
+    fn pointer_action(&mut self, bindings: &BindingState, name: &str, down: bool) {
+        if down {
+            match name {
+                "select" => self.left_press(bindings),
+                "break_block" | "deselect" => self.right_press(bindings),
+                "pick" | "command_queue" => {
+                    if self.controller.state.command_mode {
+                        self.command_tap_queued();
+                    } else {
+                        self.pick_block();
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            match name {
+                "select" => self.left_release(),
+                "break_block" | "deselect" => self.right_release(bindings),
+                _ => {}
+            }
         }
     }
 
@@ -673,8 +722,23 @@ impl DesktopBridge {
     /// selected and no UI field/dialog owns input. The upstream boost-conflict
     /// guard (a live player unit that can boost sharing the key) needs the
     /// possessed-unit feed, which the bridge does not have yet.
-    fn command_mode_allowed(&self) -> bool {
-        self.controller.state.block.is_none() && !self.text_focus && !self.ui_dialog
+    /// `DesktopInput.java:300-311`: command mode needs an active game, an
+    /// unlocked input, no selected block and no text focus/dialog. It is
+    /// disabled while the player's unit can boost and `commandMode` shares one
+    /// key with `boost` (the default `shiftLeft`).
+    fn command_mode_allowed(&self, bindings: &BindingState) -> bool {
+        let shared = bindings.value(ids::COMMAND_MODE) == bindings.value(ids::BOOST);
+        let boost_guard = shared
+            && self
+                .host
+                .as_ref()
+                .is_some_and(|host| host.bind().player_unit_can_boost());
+        self.in_game
+            && !self.locked
+            && self.controller.state.block.is_none()
+            && !self.text_focus
+            && !self.ui_dialog
+            && !boost_guard
     }
 
     /// Re-applies the `DesktopInput.update` command-mode branch after one event.
@@ -686,7 +750,7 @@ impl DesktopBridge {
     /// `toggle_command_mode` (the MCP/test entry point), so that probe stays
     /// usable without holding the key.
     pub fn update_command_mode(&mut self, bindings: &BindingState, command_edge: Option<bool>) {
-        if !self.command_mode_allowed() {
+        if !self.command_mode_allowed(bindings) {
             self.set_command_mode(false);
             return;
         }
@@ -854,7 +918,7 @@ impl DesktopBridge {
             "command_mode" => {
                 // `input.keyTap` is the press edge (`justPressed`); hold mode is
                 // applied per frame by `update_command_mode`.
-                if !self.command_mode_hold && self.command_mode_allowed() {
+                if !self.command_mode_hold && self.command_mode_allowed(bindings) {
                     self.toggle_command_mode();
                 }
             }
@@ -977,6 +1041,19 @@ impl DesktopBridge {
                 // the HUD fragment owns the setting write and the marker pass
                 // reads it (`Renderer.drawStatus`).
                 self.fire_hotkey(name);
+            }
+            "toggle_power_lines" => {
+                // `DesktopInput.java:459-466`: F5 swaps `lasersopacity` with
+                // `preferredlaseropacity` (the node owns the setting write).
+                self.effects
+                    .push(Effect::UiCall("toggle_power_lines".to_owned()));
+                self.fire_hotkey(name);
+            }
+            "fullscreen" => {
+                // `Control.java:690-694`: F11 (and the menu) flips the
+                // persisted `fullscreen` setting and the window mode.
+                self.effects
+                    .push(Effect::UiCall("toggle_fullscreen".to_owned()));
             }
             "toggle_menus" => {
                 // `HudFragment.java:455-461`: the HUD fragment flips its tables.
@@ -1505,14 +1582,33 @@ impl DesktopBridge {
 
     /// `command_tap` on the world (right click in command mode).
     fn command_tap(&mut self, bindings: &BindingState) {
+        let queue = self.key_down(bindings, ids::COMMAND_QUEUE);
+        self.command_tap_with_queue(queue);
+    }
+
+    /// `DesktopInput.touchDown` (DI:924-934): the middle click
+    /// (`Binding.commandQueue`) issues a queued order in command mode.
+    fn command_tap_queued(&mut self) {
+        self.command_tap_with_queue(true);
+    }
+
+    fn command_tap_with_queue(&mut self, queue: bool) {
         let Some((x, y)) = self.cursor_world() else {
             return;
         };
-        let queue = self.key_down(bindings, ids::COMMAND_QUEUE);
-        let action = self
-            .controller
-            .command_tap(&self.selectable, self.player_team(), x, y, queue);
-        if let Some(action) = action {
+        // `InputHandler.commandTap` IH:1166-1168: the building under the
+        // cursor is the attack target when its team is not the player's
+        // (derelict counts as an enemy target, as in Java).
+        let player_team = self.player_team();
+        let enemy_building = self.cursor_tile().and_then(|(tx, ty)| {
+            let host = self.host.clone()?;
+            let team = host.bind().building_team(tx, ty)?;
+            (team != player_team).then_some(mind_core::world::TilePos::new(tx as i16, ty as i16))
+        });
+        let actions =
+            self.controller
+                .command_tap(&self.selectable, player_team, x, y, queue, enemy_building);
+        for action in actions {
             self.emit_action(action);
         }
     }
@@ -1712,6 +1808,17 @@ impl DesktopBridge {
 
     /// Key-release bindings (`DesktopInput.pollInputPlayer` release half).
     fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
+        // T9: a pointer binding rebound to a key releases through the same
+        // handlers (`select` -> left release, `break_block`/`deselect` ->
+        // right release).
+        if bindings.name(ids::SELECT) == Some(code) {
+            self.left_release();
+        }
+        if bindings.name(ids::BREAK_BLOCK) == Some(code)
+            || bindings.name(ids::DESELECT) == Some(code)
+        {
+            self.right_release(bindings);
+        }
         if bindings.name(ids::DIAGONAL_PLACEMENT) == Some(code) {
             // `HintsFragment.conveyorPathfind` = `keyRelease(diagonalPlacement)`.
             self.push_hint("diagonal_release");
@@ -1866,39 +1973,93 @@ impl DesktopBridge {
     }
 
     /// `InputHandler.selectedControlBuild()` (`InputHandler.java:2165-2171`):
-    /// a same-team controllable building (turret `ControlBlock`) under the
-    /// cursor.
+    /// a same-team building with `canControlSelect(player.unit())` under the
+    /// cursor — `CoreBlock` (core respawn) and the `PayloadConveyor`/
+    /// `PayloadRouter` family (enter payload).
+    ///
+    /// Turrets are `ControlBlock`s, NOT `canControlSelect`; the port routes
+    /// them through `selected_unit_for_control`'s ControlBlock branch, which
+    /// needs H01's block-unit model (skipped, recorded).
     fn selected_control_build(&self) -> Option<(i32, i32)> {
         let (x, y) = self.cursor_tile()?;
         let kind = self.block_kind_at(x, y)?;
-        if !matches!(
-            kind,
-            BlockKind::ItemTurret
-                | BlockKind::LiquidTurret
-                | BlockKind::PowerTurret
-                | BlockKind::TractorBeamTurret
-                | BlockKind::PointDefenseTurret
-                | BlockKind::LaserTurret
-                | BlockKind::ContinuousLiquidTurret
-                | BlockKind::ContinuousTurret
-                | BlockKind::RepairTurret
-                | BlockKind::BuildTurret
-        ) {
+        let payload_build = matches!(kind, BlockKind::PayloadConveyor | BlockKind::PayloadRouter);
+        if kind != BlockKind::CoreBlock && !payload_build {
             return None;
         }
         let host = self.host.clone()?;
         let team = host.bind().building_team(x, y)?;
-        (team == self.player_team()).then_some((x, y))
+        if team != self.player_team() {
+            return None;
+        }
+        if !payload_build {
+            // `CoreBlock.canControlSelect(unit)` = `player.isPlayer()`.
+            return Some((x, y));
+        }
+        // `PayloadConveyor.canControlSelect` (PayloadConveyor.java:85-87):
+        // `unit.tileOn().build == this` (the `spawnedByCore`/payload gate is
+        // approximated by the tile condition; the sim half of
+        // `BuildingControlSelect` is H01's).
+        let (px, py) = host.bind().player_unit_position()?;
+        let (tx, ty) = (WorldGrid::to_tile(px), WorldGrid::to_tile(py));
+        (tx == x && ty == y).then_some((x, y))
     }
 
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
-        match (button, down) {
-            ("left", true) => self.left_press(bindings),
-            ("left", false) => self.left_release(),
-            ("right", true) => self.right_press(bindings),
-            ("right", false) => self.right_release(bindings),
-            ("middle", true) => self.pick_block(),
-            _ => {}
+        let Some(key) = mouse_key_name(button) else {
+            return;
+        };
+        if down {
+            self.pressed.insert(key.to_owned());
+        } else {
+            self.pressed.remove(key);
+        }
+        // `Binding.select`/`deselect`/`break_block`/`pick`/`command_queue` own
+        // the pointer gestures (T9); the raw button is only their default key
+        // (`DesktopInput` reads the bindings, not the button).
+        let uses = |id: u16| matches!(bindings.value(id), BindingValue::Key(name) if name == key);
+        let select = uses(ids::SELECT);
+        let right = uses(ids::BREAK_BLOCK) || uses(ids::DESELECT);
+        let middle = uses(ids::PICK) || uses(ids::COMMAND_QUEUE);
+        if down {
+            if select {
+                self.left_press(bindings);
+            }
+            if right {
+                self.right_press(bindings);
+            }
+            if middle {
+                if self.controller.state.command_mode {
+                    // DI:924-934: command mode queues the order on the middle
+                    // click (`Binding.commandQueue`); outside it, pick (T5).
+                    self.command_tap_queued();
+                } else {
+                    self.pick_block();
+                }
+            }
+        } else {
+            if select {
+                self.left_release();
+            }
+            if right {
+                self.right_release(bindings);
+            }
+        }
+        // Every other binding sharing the button still gets its key-down edge
+        // (`pan` = mouseForward, `mouseMove` = mouseBack, user rebinds).
+        let mut fired: Vec<&'static str> = Vec::new();
+        for (index, bind) in KeyBindTable::all().iter().enumerate() {
+            if POINTER_BINDS.contains(&bind.name) {
+                continue;
+            }
+            if uses(index as u16) {
+                fired.push(bind.name);
+            }
+        }
+        for name in fired {
+            if down {
+                self.dispatch_action(bindings, name);
+            }
         }
     }
 
@@ -1950,6 +2111,15 @@ impl DesktopBridge {
             return;
         }
         if self.controller.state.block.is_none() {
+            // `InputHandler.java:726` (`!checkConfigTap() && selected != null &&
+            // !tryRepairDerelict(selected)`; H08 T11): a derelict building
+            // under the cursor queues its repair before the
+            // tap-player/tile-tap chain.
+            if let Some(mut host) = self.host.clone()
+                && host.bind_mut().try_repair_derelict(x, y)
+            {
+                return;
+            }
             // `DesktopInput.java:701-721` order: `tryTapPlayer`, `tileTapped`,
             // the active build plan, then `tryStopMine`/`tryBeginMine`;
             // anything consumed keeps `player.shooting` false.
@@ -3121,6 +3291,8 @@ mod tests {
         // `DesktopInput.update` + `commandmodehold` default true: command mode
         // follows the held command key (`boost` shares `shiftLeft`).
         let mut bridge = DesktopBridge::new();
+        // The whole `update` runs only in game (`Control.java:690-760`).
+        bridge.in_game = true;
         let bindings = BindingState::new();
         assert_eq!(bindings.name(ids::COMMAND_MODE), Some("shiftLeft"));
         assert_eq!(bindings.name(ids::BOOST), Some("shiftLeft"));
@@ -3130,6 +3302,63 @@ mod tests {
         assert_eq!(bridge.last_action, "command_mode");
         bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
         assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn mouse_back_sets_pressed() {
+        // T9: `pan` (mouseForward) and `mouseMove` (mouseBack) are binding keys;
+        // the raw mouse press latches their key name in `pressed`, so
+        // `MindInput.pan_pressed`/`mouse_move_pressed` and the player pull see
+        // the held state.
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        let bindings = BindingState::new();
+        assert_eq!(bindings.name(ids::MOUSE_MOVE), Some("mouseBack"));
+        assert_eq!(bindings.name(ids::PAN), Some("mouseForward"));
+        bridge.handle(
+            &bindings,
+            RawEvent::MouseButton {
+                button: "back".to_owned(),
+                down: true,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        assert!(bridge.key_down(&bindings, ids::MOUSE_MOVE));
+        assert!(!bridge.key_down(&bindings, ids::PAN));
+        bridge.handle(
+            &bindings,
+            RawEvent::MouseButton {
+                button: "back".to_owned(),
+                down: false,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        assert!(!bridge.key_down(&bindings, ids::MOUSE_MOVE));
+
+        bridge.handle(
+            &bindings,
+            RawEvent::MouseButton {
+                button: "forward".to_owned(),
+                down: true,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        assert!(bridge.key_down(&bindings, ids::PAN));
+    }
+
+    #[test]
+    fn command_mode_off_on_menu() {
+        // `Control.java:690-760`: `DesktopInput.update` only runs in game, so
+        // the command key is inert on the menu.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        assert!(!bridge.in_game);
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+        assert!(!bridge.command_mode_allowed(&bindings));
     }
 
     #[test]
@@ -3154,6 +3383,7 @@ mod tests {
     fn command_mode_ignored_while_placing() {
         // `DesktopInput.update` requires `block == null`.
         let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
         let bindings = BindingState::new();
         bridge
             .controller
@@ -3169,6 +3399,7 @@ mod tests {
         // `MindInput.toggle_command_mode()` (MCP/test) latches command mode;
         // hold mode must not clear it while the command key is up.
         let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
         let bindings = BindingState::new();
         bridge.toggle_command_mode();
         assert!(bridge.controller.state.command_mode);
@@ -3188,6 +3419,7 @@ mod tests {
         // `DesktopInput.update` assigns `commandMode = false` in the else
         // branch, so selecting a block while holding the key drops it.
         let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
         let bindings = BindingState::new();
         bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
         assert!(bridge.controller.state.command_mode);

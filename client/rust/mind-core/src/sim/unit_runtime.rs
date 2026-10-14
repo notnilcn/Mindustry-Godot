@@ -1386,8 +1386,9 @@ impl Sim {
     }
 
     /// Uploads the full desktop control state (`DesktopInput.updateMovement`):
-    /// movement axis, `player.shooting`, the cursor aim point and the boost
-    /// key. Read by [`crate::ai::types::player::update_player`].
+    /// movement axis, `player.shooting`, the cursor aim point, the boost key
+    /// and `mouseMove`. Read by [`crate::ai::types::player::update_player`].
+    #[allow(clippy::too_many_arguments)] // one atomic `Player`-state upload
     pub fn set_player_control(
         &mut self,
         axis_x: f32,
@@ -1396,6 +1397,7 @@ impl Sim {
         aim_x: f32,
         aim_y: f32,
         boosting: bool,
+        mouse_move: bool,
     ) {
         let mut input = self
             .ecs
@@ -1409,6 +1411,7 @@ impl Sim {
         input.aim_x = aim_x;
         input.aim_y = aim_y;
         input.boosting = boosting;
+        input.mouse_move = mouse_move;
         self.ecs.0.insert_resource(input);
     }
 
@@ -1790,7 +1793,8 @@ impl Sim {
     /// Releases a possessed unit back to its team AI
     /// (`InputHandler.unitClear` standard branch / `Unit.resetController`):
     /// drop the `Player` marker and hand the unit to the team controller.
-    fn release_unit_to_ai(&mut self, entity: Entity, team: u8) {
+    /// Also the controller-switch half of `UnitComp.afterRead` (H04 T13).
+    pub(crate) fn release_unit_to_ai(&mut self, entity: Entity, team: u8) {
         use crate::entities::comp::Player;
         let def = {
             let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
@@ -3047,6 +3051,11 @@ pub fn unit_update_system(world: &mut World) {
     let audio = world
         .remove_resource::<AudioSinkRes>()
         .unwrap_or_else(AudioSinkRes::noop);
+    // H02 T11: shock mines queued by `unitOn` fire their tendrils in push
+    // order (Java creates them inside the unit pass).
+    let pending = world
+        .remove_resource::<crate::world::behavior::PendingShockMineTriggers>()
+        .unwrap_or_default();
     let mut spawned: Vec<Entity> = Vec::new();
     {
         let UnitRuntime {
@@ -3067,6 +3076,17 @@ pub fn unit_update_system(world: &mut World) {
             seq,
             spawned: &mut spawned,
         };
+        for (mine, team) in pending.0 {
+            let state = ctx
+                .world
+                .get::<crate::world::blocks::defense::shields::ShockMineState>(mine)
+                .cloned();
+            if let Some(state) = state {
+                crate::world::blocks::defense::shields::shock_mine_trigger(
+                    &mut ctx, mine, &state, team,
+                );
+            }
+        }
         crate::weapons::update_weapons(&mut ctx);
     }
     world.insert_resource(audio);
@@ -3688,6 +3708,8 @@ impl Sim {
                     .unwrap_or("?"),
                 "pos": entity_ref.get::<Pos>().map(|pos| [pos.x, pos.y]),
                 "rotation": entity_ref.get::<UnitCore>().map(|core| core.rotation),
+                // `UnitCore.elevation` (H08 T7 / PAR-0137 evidence).
+                "elevation": entity_ref.get::<UnitCore>().map(|core| core.elevation),
                 "health": entity_ref.get::<Health>().map(|health| health.health),
                 "can_shoot": entity_ref.get::<crate::weapons::UnitState>().map(|state| state.can_shoot),
                 "vel": entity_ref.get::<crate::entities::comp::Vel>().map(|vel| [vel.x, vel.y]),

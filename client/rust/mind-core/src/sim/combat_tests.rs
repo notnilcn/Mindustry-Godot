@@ -1402,6 +1402,86 @@ fn commanded_dagger_reaches_target() {
     );
 }
 
+/// H08 T6b: `setUnitCommand` carries the `(0, 0)` wire pair
+/// (`command_emit.rs`); switching to the move command must clear the target,
+/// not create a move order to world (0, 0) (`InputHandler.setUnitCommand`,
+/// InputHandler.java:411-444).
+#[test]
+fn set_move_command_does_not_move_units() {
+    use crate::game::State;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::{BlockTable, TilePos};
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let registry = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(registry, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        waves: false,
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    session.phase = State::Playing;
+    let table: BlockTable = sim
+        .ecs
+        .0
+        .get_resource::<BlockTable>()
+        .expect("table")
+        .clone();
+    let core_block = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .block_id("core-shard")
+        .expect("core-shard");
+    let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+    let core = core_inst.spawn(&mut sim.ecs.0, 10, TilePos::new(12, 32), 1, 0, 0, 0);
+    sim.ecs.0.entity_mut(core).insert(crate::ecs::BuildingComp {
+        pos: TilePos::new(12, 32),
+        block: core_block,
+        team: crate::ecs::TeamId(1),
+        rot: 0,
+    });
+    session
+        .teams
+        .register_core(core, crate::ecs::TeamId(1), &session.rules);
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let id = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    sim.command(SimCommand::UnitCommand {
+        units: smallvec::smallvec![id],
+        command: 0,
+        x: 0.0,
+        y: 0.0,
+    })
+    .expect("command switch applies");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let pos = sim.ecs.0.get::<Pos>(dagger).expect("dagger alive");
+    let dist = ((pos.x - 100.0).powi(2) + (pos.y - 100.0).powi(2)).sqrt();
+    assert!(
+        dist < 1.0,
+        "command switch did not move the unit ({dist} px)"
+    );
+}
+
 /// G08 T15: a unit counts as having a command only with a live order target
 /// (`CommandAI.hasCommand()` = `targetPos != null`), and
 /// `set_command_mode_satisfied` flips the objective resource (G04 T4).
@@ -3867,7 +3947,7 @@ fn fire_damage_respects_block_health_multiplier() {
 #[test]
 fn force_projector_absorbs_explosion() {
     use crate::entities::comp::unit::comp::ItemsComp;
-    use crate::world::blocks::defense::projectors::BaseShieldState;
+    use crate::world::blocks::defense::shields::ForceProjectorState;
 
     let mut sim = live_sim(48);
     // Power-source feeds the projector; the wall sits inside its radius.
@@ -3877,18 +3957,14 @@ fn force_projector_absorbs_explosion() {
     for _ in 0..600 {
         sim.tick().expect("tick");
     }
-    let radius = sim
+    let (broken, radius) = sim
         .ecs
         .0
-        .get::<BaseShieldState>(projector)
-        .map(|state| state.smooth_radius)
-        .unwrap_or(0.0);
-    if radius <= 1.0 {
-        eprintln!(
-            "force projector uncharged (radius {radius}); absorption covered by the shield unit tests"
-        );
-        return;
-    }
+        .get::<ForceProjectorState>(projector)
+        .map(|state| (state.broken, state.real_radius()))
+        .expect("force projector state");
+    assert!(!broken, "a powered projector is charged");
+    assert!(radius > 90.0, "charged shield radius {radius}");
     let wall_start = health(&sim, wall).expect("wall health");
     let dagger = sim
         .spawn_live_unit("dagger", 2, 22.5 * 8.0, 20.5 * 8.0, 180.0)
@@ -3908,14 +3984,217 @@ fn force_projector_absorbs_explosion() {
     }
     sim.tick().expect("tick");
     sim.tick().expect("tick");
-    eprintln!(
-        "shield radius {radius}, wall {wall_start} -> {:?}",
-        health(&sim, wall)
-    );
     assert_eq!(
         health(&sim, wall),
         Some(wall_start),
         "the projector absorbed the explosion"
+    );
+}
+
+/// H02 T7 (PAR-0129): a force projector next to a power source charges to
+/// efficiency 1 and draws its dome (`ForceBuild.updateTile`, warmup/radscl).
+#[test]
+fn force_projector_powered_by_adjacent_source() {
+    use crate::entities::comp::Building;
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let efficiency = sim.ecs.0.get::<Building>(projector).map(|b| b.efficiency);
+    assert!(
+        efficiency.is_some_and(|e| e > 0.99),
+        "powered projector efficiency {efficiency:?}"
+    );
+    let (warmup, radscl) = sim
+        .ecs
+        .0
+        .get::<ForceProjectorState>(projector)
+        .map(|state| (state.warmup, state.radscl))
+        .expect("force projector state");
+    assert!(warmup > 0.99, "warmup {warmup}");
+    assert!(radscl > 0.9, "radscl {radscl}");
+}
+
+/// H02 T7: enemy bullets inside the live dome are absorbed and add buildup
+/// (`ForceBuild.deflectBullets` over `Groups.bullet`).
+#[test]
+fn force_projector_absorbs_enemy_bullet() {
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    // Inside the ~101.7 px dome, 60 px east of the projector centre
+    // (tile centre (20,20) = world (160,160)), facing it.
+    sim.spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0 + 4.0, 180.0)
+        .expect("dagger");
+    let mut absorbed = false;
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+        if let Some(state) = sim.ecs.0.get::<ForceProjectorState>(projector)
+            && (state.buildup > 0.0 || state.hit > 0.0)
+        {
+            absorbed = true;
+            break;
+        }
+    }
+    assert!(absorbed, "dagger bullets are absorbed by the shield");
+}
+
+/// H02 T7: phase fabric raises `phaseHeat` and is consumed every
+/// `phaseUseTime / timeScale` ticks (`ForceProjector.java:207-215`).
+#[test]
+fn force_projector_phase_boost() {
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    let phase = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("phase-fabric")
+        .expect("phase-fabric");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(projector) {
+        items.add(phase, 2, 10);
+    }
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let phase_heat = sim
+        .ecs
+        .0
+        .get::<ForceProjectorState>(projector)
+        .map(|state| state.phase_heat)
+        .expect("force projector state");
+    let count = sim
+        .ecs
+        .0
+        .get::<ItemModule>(projector)
+        .map(|items| items.get(phase))
+        .unwrap_or(0);
+    assert!(phase_heat > 0.9, "phase heat {phase_heat}");
+    assert_eq!(count, 1, "one fabric consumed after the first timer cycle");
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    let count = sim
+        .ecs
+        .0
+        .get::<ItemModule>(projector)
+        .map(|items| items.get(phase))
+        .unwrap_or(0);
+    assert_eq!(count, 0, "the second fabric is consumed on the next cycle");
+}
+
+/// H02 T11: a dagger standing on an enemy shock mine triggers the tendrils
+/// (`ShockMineBuild.unitOn`); the mine pays `tileDamage` and cannot re-trigger
+/// before `cooldown` ticks.
+#[test]
+fn shock_mine_zaps_enemy_dagger() {
+    use crate::world::blocks::defense::shields::ShockMineState;
+
+    let mut sim = live_sim(48);
+    let mine = place(&mut sim, 20, 20, "shock-mine", 1);
+    let mine_start = health(&sim, mine).expect("mine health");
+    assert_eq!(mine_start, 50.0, "vanilla shock-mine health");
+    // Tile centre: `WorldGrid::to_tile` rounds, so only `tile * 8` lands on
+    // tile (20, 20) (the plan's (164,164) is the corner between tiles).
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 160.0, 160.0, 0.0)
+        .expect("dagger");
+    let dagger_start = health(&sim, dagger).expect("dagger health");
+    let hold = |sim: &mut Sim, dagger| {
+        if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(dagger) {
+            vel.x = 0.0;
+            vel.y = 0.0;
+        }
+        sim.tick().expect("tick");
+    };
+    for _ in 0..2 {
+        hold(&mut sim, dagger);
+    }
+    let first = sim
+        .ecs
+        .0
+        .get::<ShockMineState>(mine)
+        .and_then(|state| state.last_trigger);
+    assert!(first.is_some(), "mine triggered on the unit");
+    assert!(
+        health(&sim, dagger).is_some_and(|hp| hp < dagger_start),
+        "dagger zapped by the mine"
+    );
+    assert!(
+        health(&sim, mine).is_some_and(|hp| hp <= mine_start - 7.0 + 0.001),
+        "mine paid tileDamage: {:?}",
+        health(&sim, mine)
+    );
+    // No re-trigger inside the 80-tick cooldown.
+    for _ in 0..40 {
+        hold(&mut sim, dagger);
+    }
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ShockMineState>(mine)
+            .and_then(|state| state.last_trigger),
+        first,
+        "cooldown blocks the re-trigger"
+    );
+    // Past the cooldown the mine fires again.
+    let mut refreshed = false;
+    for _ in 0..60 {
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+        hold(&mut sim, dagger);
+        if sim
+            .ecs
+            .0
+            .get::<ShockMineState>(mine)
+            .and_then(|state| state.last_trigger)
+            != first
+        {
+            refreshed = true;
+            break;
+        }
+    }
+    assert!(refreshed, "second trigger after the cooldown");
+}
+
+/// H02 T11: a running conveyor pushes a grounded friendly unit along its
+/// rotation (`ConveyorBuild.unitOn`).
+#[test]
+fn conveyor_carries_dagger() {
+    let mut sim = live_sim(48);
+    for x in 10..=20 {
+        place(&mut sim, x, 20, "titanium-conveyor", 1);
+    }
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 96.0, 160.0, 0.0)
+        .expect("dagger");
+    let start_x = sim.ecs.0.get::<Pos>(dagger).map(|p| p.x).unwrap_or(0.0);
+    for i in 0..60 {
+        sim.tick().expect("tick");
+        if i % 10 == 0 {
+            let p = sim.ecs.0.get::<Pos>(dagger).map(|p| (p.x, p.y));
+            let v = sim.ecs.0.get::<Vel>(dagger).map(|v| (v.x, v.y));
+            eprintln!("CONV i={i} pos={p:?} vel={v:?}");
+        }
+    }
+    let end_x = sim.ecs.0.get::<Pos>(dagger).map(|p| p.x).unwrap_or(0.0);
+    assert!(
+        end_x > start_x + 8.0,
+        "belt carried the dagger east: {start_x} -> {end_x}"
     );
 }
 

@@ -506,7 +506,7 @@ impl MindCampaign {
             // `SaveVersion.writeMeta` -> `state.rules.sector.saveInfo()`: the
             // live sector record (core snapshot, items, production, wave) lands
             // in settings next to the autosave (PAR-0153).
-            self.persist_sector_record();
+            self.persist_sector_record_in(Some(&mut runtime));
             host.bind_mut()
                 .request_save(GString::from(file.to_string_lossy().as_ref()), false);
             self.saving_finish_tick = Some(tick.saturating_add(3));
@@ -552,7 +552,7 @@ impl MindCampaign {
                         self.saving_finish_tick = Some(tick.saturating_add(3));
                         log::info!("capture save queued (`{}`)", file.display());
                     }
-                    self.persist_sector_record();
+                    self.persist_sector_record_in(Some(&mut runtime));
                 }
                 mind_core::game::play::PlayEvent::CampaignComplete { .. } => {
                     self.campaign_complete = true;
@@ -580,7 +580,7 @@ impl MindCampaign {
                     // `SaveVersion.writeMeta` persists the sector record next to
                     // the save (spawn position + prepared core state), which the
                     // lost-sector replay reads on the re-attack.
-                    self.persist_sector_record();
+                    self.persist_sector_record_in(Some(&mut runtime));
                     dirty = true;
                 }
                 _ => {}
@@ -1167,6 +1167,13 @@ impl MindCampaign {
                         .refresh_sector_import_rates(&registry, planet_id, sector_id);
                     self.session = runtime.session.clone();
                     host.bind_mut().put_campaign_runtime(runtime);
+                    // H04 T13: `UnitComp.afterRead` (`UnitComp.java:585-593`).
+                    // The world load spawned the saved units before the session
+                    // rules existed, so a player-team unit came back as
+                    // `GroundAI`; re-derive the controllers now that the
+                    // runtime is installed. A fresh launch has no restored
+                    // units, so the call is a no-op there.
+                    host.bind_mut().reset_loaded_unit_controllers();
                 }
                 if let Some(items) = core_items
                     && let Some(mut host) = self.host()
@@ -3020,6 +3027,21 @@ impl MindCampaign {
     /// progress, item pools and the production windows survive a client restart
     /// (PAR-0081/PAR-0082).
     fn persist_sector_record(&mut self) {
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                self.persist_sector_record_in(Some(&mut runtime));
+                host.bind_mut().put_campaign_runtime(runtime);
+                return;
+            }
+        }
+        self.persist_sector_record_in(None);
+    }
+
+    /// `persist_sector_record` body. `runtime` is the already-taken live
+    /// runtime when the caller holds it (`pump_runtime` events); with `None`
+    /// the host runtime (when installed) is taken for the read and put back.
+    fn persist_sector_record_in(&mut self, mut runtime: Option<&mut CampaignRuntime>) {
         let Some((planet, sector_id)) = self.session.sector else {
             return;
         };
@@ -3041,8 +3063,16 @@ impl MindCampaign {
             .and_then(|host| host.bind().campaign_core_snapshot(default_team));
         // The live runtime owns the authoritative record (the campaign tick
         // folds the core/production deltas into it); the facade clone only
-        // mirrors on events, so read the runtime's copy when a host is up.
-        let Some(mut record) = self.runtime_or_facade_record(planet, sector_id) else {
+        // mirrors on events, so read the runtime's copy when the caller holds
+        // it (or the host does).
+        let source = match &runtime {
+            Some(live) => live
+                .campaign
+                .sector(planet, sector_id)
+                .map(|sector| sector.info.info.clone()),
+            None => self.runtime_or_facade_record(planet, sector_id),
+        };
+        let Some(mut record) = source else {
             return;
         };
         if let Some(snapshot) = snapshot {
@@ -3070,6 +3100,16 @@ impl MindCampaign {
         record.wave_spacing = rules.wave_spacing;
         record.win_wave = rules.win_wave;
         record.attack = rules.attack_mode;
+        // Java has one object graph (`Vars.universe`): the prepared record is
+        // THE live record. Without writing it back, the next runtime->facade
+        // mirror overwrites the facade with the unprepared copy and the
+        // lost-sector replay's `sectorDataMatches` (`SectorInfo.java:98-103`)
+        // fails on an in-process re-attack (H04 V1).
+        if let Some(live) = &mut runtime
+            && let Some(sector) = live.campaign.sector_mut(planet, sector_id)
+        {
+            sector.info.info = record.clone();
+        }
         // Keep the facade copy's record in step for the dialog views.
         if let Some(campaign) = self.campaign.as_mut()
             && let Some(sector) = campaign.sector_mut(planet, sector_id)

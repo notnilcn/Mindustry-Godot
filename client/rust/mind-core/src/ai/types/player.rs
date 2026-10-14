@@ -55,6 +55,9 @@ pub struct PlayerInput {
     pub aim_y: f32,
     /// `player.boosting = keyDown(Binding.boost)` (`DesktopInput.java:1010`).
     pub boosting: bool,
+    /// `keyDown(Binding.mouseMove)` (`DesktopInput.java:994-996`): the unit is
+    /// pulled toward the cursor at `speed / 25` px/tick, limited to `speed`.
+    pub mouse_move: bool,
 }
 
 /// Runs one player-controller tick for `entity`; returns `true` when a non-zero
@@ -155,7 +158,22 @@ pub fn update_player(
         let rad = core.rotation.to_radians();
         (rad.cos(), rad.sin())
     };
-    let target = (dir_x * target_len, dir_y * target_len);
+    let mut target = (dir_x * target_len, dir_y * target_len);
+
+    // `DesktopInput.updateMovement` (`DesktopInput.java:994-996`): holding
+    // `mouseMove` adds the cursor pull `(mouseWorld - player) * speed / 25`
+    // and limits the whole movement vector to `speed`.
+    if input.mouse_move {
+        target.0 += (input.aim_x - pos.x) * (speed / 25.0);
+        target.1 += (input.aim_y - pos.y) * (speed / 25.0);
+        let len = (target.0 * target.0 + target.1 * target.1).sqrt();
+        if len > speed && len > 0.0 {
+            let scale = speed / len;
+            target.0 *= scale;
+            target.1 *= scale;
+        }
+    }
+    let target_len = (target.0 * target.0 + target.1 * target.1).sqrt();
 
     // `UnitComp.moveAt`: `vel += (target - vel).limit(accel * target.len())`.
     let accel_limit = accel * target_len;
@@ -351,7 +369,7 @@ mod tests {
         sim.install_unit_runtime().expect("unit runtime");
         sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 90.0)
             .expect("player spawns");
-        sim.set_player_control(0.0, 0.0, true, 150.0, 100.0, false);
+        sim.set_player_control(0.0, 0.0, true, 150.0, 100.0, false, false);
         sim.tick().expect("tick");
         assert!(
             (player_rotation(&sim) - 75.0).abs() < 0.01,
@@ -374,7 +392,7 @@ mod tests {
         sim.install_unit_runtime().expect("unit runtime");
         sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0)
             .expect("player spawns");
-        sim.set_player_control(0.0, 0.0, true, 150.0, 100.0, false);
+        sim.set_player_control(0.0, 0.0, true, 150.0, 100.0, false, false);
         for _ in 0..40 {
             sim.tick().expect("tick");
         }
@@ -388,11 +406,47 @@ mod tests {
         idle.install_unit_runtime().expect("unit runtime");
         idle.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0)
             .expect("player spawns");
-        idle.set_player_control(0.0, 0.0, false, 150.0, 100.0, false);
+        idle.set_player_control(0.0, 0.0, false, 150.0, 100.0, false, false);
         for _ in 0..40 {
             idle.tick().expect("tick");
         }
         assert_eq!(bullets_created(&idle), 0, "no shooting without the button");
+    }
+
+    #[test]
+    fn mouse_move_pulls_toward_cursor() {
+        // `DesktopInput.java:994-996`: with no movement axis, `mouseMove`
+        // pulls the player unit toward the cursor at `speed / 25` px/tick
+        // (the alpha's speed is ~0.5 => tiny but monotone steps east).
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0)
+            .expect("player spawns");
+        let before = sim.player_unit_position().expect("player position").0;
+        sim.set_player_control(0.0, 0.0, false, 200.0, 100.0, false, true);
+        for _ in 0..30 {
+            sim.tick().expect("tick");
+        }
+        let after = sim.player_unit_position().expect("player position").0;
+        assert!(
+            after > before + 0.5,
+            "mouseMove pulled the unit east ({before} -> {after})"
+        );
+
+        // Without the binding the unit stays put.
+        let mut idle = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        idle.install_unit_runtime().expect("unit runtime");
+        idle.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0)
+            .expect("player spawns");
+        idle.set_player_control(0.0, 0.0, false, 200.0, 100.0, false, false);
+        for _ in 0..30 {
+            idle.tick().expect("tick");
+        }
+        let idle_x = idle.player_unit_position().expect("player position").0;
+        assert!(
+            (idle_x - 100.0).abs() < 0.01,
+            "no pull without the binding ({idle_x})"
+        );
     }
 
     #[test]
@@ -401,7 +455,7 @@ mod tests {
         sim.install_unit_runtime().expect("unit runtime");
         sim.spawn_player_unit("alpha", 0, 100.0, 100.0, 0.0)
             .expect("player spawns");
-        sim.set_player_control(0.0, 1.0, false, 0.0, 0.0, false);
+        sim.set_player_control(0.0, 1.0, false, 0.0, 0.0, false, false);
         for _ in 0..30 {
             sim.tick().expect("tick");
         }
@@ -418,7 +472,7 @@ mod tests {
         sim.install_unit_runtime().expect("unit runtime");
         sim.spawn_player_unit("nova", 0, 100.0, 100.0, 0.0)
             .expect("player spawns");
-        sim.set_player_control(0.0, 0.0, true, 150.0, 100.0, true);
+        sim.set_player_control(0.0, 0.0, true, 150.0, 100.0, true, false);
         for _ in 0..30 {
             sim.tick().expect("tick");
         }
@@ -463,7 +517,7 @@ mod tests {
 
         // Empty core: the plan stays queued, so the unit is actively building.
         assert!(sim.queue_player_place(14, 10, BlockId::new(wall), 0));
-        sim.set_player_control(0.0, 0.0, true, 150.0, 80.0, false);
+        sim.set_player_control(0.0, 0.0, true, 150.0, 80.0, false, false);
         for _ in 0..30 {
             sim.tick().expect("tick");
         }

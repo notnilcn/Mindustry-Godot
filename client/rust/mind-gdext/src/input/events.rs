@@ -119,6 +119,9 @@ fn mouse_button_name(button: MouseButton) -> &'static str {
         MouseButton::LEFT => "left",
         MouseButton::RIGHT => "right",
         MouseButton::MIDDLE => "middle",
+        // Arc key codes `mouseBack`/`mouseForward` (T9: `pan`/`mouse_move`).
+        MouseButton::XBUTTON1 => "back",
+        MouseButton::XBUTTON2 => "forward",
         MouseButton::WHEEL_UP | MouseButton::WHEEL_DOWN => "wheel",
         _ => "other",
     }

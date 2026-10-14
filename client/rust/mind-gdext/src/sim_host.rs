@@ -461,9 +461,9 @@ impl INode for MindSimHost {
         // cursor aim, boost) reaches the player unit each tick; the same axis no
         // longer pans the camera while a player exists
         // (`MindCamera2D::process`).
-        let (axis_x, axis_y, shooting, aim_x, aim_y, boosting) = self.player_control();
+        let (axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move) = self.player_control();
         self.sim
-            .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting);
+            .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move);
         self.advance_steps(steps);
         self.emit_state();
         self.emit_world_changed();
@@ -998,14 +998,26 @@ impl MindSimHost {
                     return false;
                 }
                 let command = value.get("command").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                // `unit_command` targets are world pixels (floats), not tiles.
+                // `unit_command` targets: `x`/`y` are the raw wire pair (world
+                // pixels for a move, or the lossless `pack_wire_target` pair);
+                // the optional `target_unit` key packs an EntitySeq attack
+                // target for recipes (H03 blocker #2: ids do not fit an f32).
                 let fx = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let fy = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let (x, y) = value
+                    .get("target_unit")
+                    .and_then(|v| v.as_i64())
+                    .map(|id| {
+                        mind_core::sim::pack_wire_target(
+                            &mind_core::input::action::CommandTarget::Unit(id as i32),
+                        )
+                    })
+                    .unwrap_or((fx as f32, fy as f32));
                 SimCommand::UnitCommand {
                     units,
                     command,
-                    x: fx as f32,
-                    y: fy as f32,
+                    x,
+                    y,
                 }
             }
             // `InputHandler.setUnitStance` (G01 T11): `units` + `stance` id in
@@ -1349,6 +1361,18 @@ impl MindSimHost {
                 );
                 put("accumulator", Variant::from(f64::from(state.accumulator)));
                 put("emitted", Variant::from(i64::from(state.emitted)));
+            }
+            // Force projector state (`ForceProjector.java:166-167`; H02 T7).
+            if let Some(state) =
+                world.get::<mind_core::world::blocks::defense::shields::ForceProjectorState>(entity)
+            {
+                put("force_radscl", Variant::from(f64::from(state.radscl)));
+                put("force_buildup", Variant::from(f64::from(state.buildup)));
+                put("force_broken", Variant::from(state.broken));
+                put(
+                    "force_phase_heat",
+                    Variant::from(f64::from(state.phase_heat)),
+                );
             }
         }
         out
@@ -2727,6 +2751,14 @@ impl MindSimHost {
         Some(sync)
     }
 
+    /// `UnitComp.afterRead` (`UnitComp.java:585-593`): re-derives the
+    /// controllers of the units the last world load restored, now that the
+    /// session rules are installed (H04 T13). Rust-only seam for
+    /// `MindCampaign.start_sector`'s resume path.
+    pub fn reset_loaded_unit_controllers(&mut self) {
+        self.sim.reset_loaded_controllers();
+    }
+
     /// Queues the spawn of `wave` (0-based) on the live unit runtime; the
     /// `TickSet::RunWave` system emits it on the next tick. No-op without the
     /// runtime. Rust-only seam for `MindCampaign.run_wave`.
@@ -3164,18 +3196,18 @@ impl MindSimHost {
     }
 
     /// Binding-driven control state from the sibling `Input`:
-    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`.
+    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move)`.
     /// `MindInput.player_control` shares the `move_x`/`move_y` axis; with a
     /// player unit it drives the unit instead of the camera
     /// (`DesktopInput.updateMovement`).
-    fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
+    fn player_control(&self) -> (f32, f32, bool, f32, f32, bool, bool) {
         if self.input_locked {
             // `InputHandler.locked()`: movement and firing are gated off
             // (PAR-0100).
-            return (0.0, 0.0, false, 0.0, 0.0, false);
+            return (0.0, 0.0, false, 0.0, 0.0, false, false);
         }
         let Some(input) = self.input.clone() else {
-            return (0.0, 0.0, false, 0.0, 0.0, false);
+            return (0.0, 0.0, false, 0.0, 0.0, false, false);
         };
         input.bind().player_control()
     }
@@ -3187,7 +3219,7 @@ impl MindSimHost {
         self.input_locked = locked;
         if locked {
             self.sim
-                .set_player_control(0.0, 0.0, false, 0.0, 0.0, false);
+                .set_player_control(0.0, 0.0, false, 0.0, 0.0, false, false);
         }
     }
 
@@ -3208,9 +3240,43 @@ impl MindSimHost {
         self.sim.player_plan_count()
     }
 
+    /// `player.unit().type.canBoost` and the unit is alive
+    /// (`DesktopInput.java:300-311`): the command-mode gate when `commandMode`
+    /// and `boost` share one key.
+    pub fn player_unit_can_boost(&self) -> bool {
+        use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+        let Some(entity) = self.sim.player_unit() else {
+            return false;
+        };
+        if self
+            .sim
+            .ecs
+            .0
+            .get::<UnitCore>(entity)
+            .is_some_and(|core| core.dead)
+        {
+            return false;
+        }
+        self.sim
+            .ecs
+            .0
+            .get::<UnitTypeComp>(entity)
+            .and_then(|comp| {
+                self.content_registry()
+                    .and_then(|content| content.unit(comp.type_id))
+            })
+            .is_some_and(|def| def.can_boost)
+    }
+
     /// `build.isCommandable()` own commandable buildings (`DI:346-357`).
     pub fn commandable_buildings(&self) -> Vec<(i16, i16)> {
         self.sim.commandable_buildings(self.sim.live_default_team())
+    }
+
+    /// `InputHandler.tryRepairDerelict` (H08 T11): queue a team-0 building in
+    /// the rect/cursor for repair (the click and rebuild-select paths).
+    pub fn try_repair_derelict(&mut self, x: i32, y: i32) -> bool {
+        self.sim.try_repair_derelict(x, y)
     }
 
     /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):

@@ -186,15 +186,10 @@ impl LiquidFlowCache {
     }
 }
 
-/// First stored liquid in ascending id order (`LiquidModule.current` fallback;
-/// plan 07's module does not yet track the last-received liquid).
+/// `LiquidModule.current()` when any of it is stored (`LiquidModule.java:89-91`;
+/// the module tracks the last added/removed/loaded liquid since H02 T10).
 pub fn current_liquid(module: &crate::world::modules::LiquidModule) -> Option<LiquidId> {
-    module
-        .liquids
-        .iter()
-        .enumerate()
-        .find(|(_, amount)| **amount > 0.0)
-        .map(|(index, _)| LiquidId::new(index as u16))
+    (module.current_liquid_amount() > 0.0).then(|| module.current_liquid())
 }
 
 /// `LiquidRouterBuild.updateTile`: dump the current liquid.

@@ -694,6 +694,38 @@ impl MindUi {
         true
     }
 
+    /// `DesktopInput.java:459-466` (F5): swap the live `lasersopacity` with
+    /// the remembered `preferredlaseropacity` (default 100) and persist.
+    #[func]
+    pub fn toggle_power_lines(&mut self) {
+        let current = self.settings.get_i32("lasersopacity", 100);
+        if current == 0 {
+            let preferred = self.settings.get_i32("preferredlaseropacity", 100);
+            self.settings.put_i32("lasersopacity", preferred);
+        } else {
+            self.settings.put_i32("preferredlaseropacity", current);
+            self.settings.put_i32("lasersopacity", 0);
+        }
+        self.persist_settings();
+    }
+
+    /// `Control.java:690-694` (F11, also on the menu): flip the persisted
+    /// `fullscreen` setting and apply the window mode.
+    #[func]
+    pub fn toggle_fullscreen(&mut self) {
+        use godot::classes::DisplayServer;
+        use godot::classes::display_server::WindowMode;
+        let full = self.settings.get_bool("fullscreen", false);
+        self.settings.put_bool("fullscreen", !full);
+        self.persist_settings();
+        let mut display = DisplayServer::singleton();
+        display.window_set_mode(if full {
+            WindowMode::WINDOWED
+        } else {
+            WindowMode::FULLSCREEN
+        });
+    }
+
     /// `HintsFragment.DefaultHint.finished`: the persisted
     /// `<name>-hint-done` flag (an imported Java profile carries its own).
     #[func]

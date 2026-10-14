@@ -102,6 +102,22 @@ pub fn accept_liquid(world: &World, entity: Entity, source: Entity, liquid: Liqu
     if !node.accepts {
         return false;
     }
+    // One liquid per block (`Conduit.java:241-245`, `LiquidRouter.java:41-43`,
+    // `ItemBridge.java:447-452`). Junctions pass through and take anything.
+    if !node.junction
+        && let Some(module) = world.get::<LiquidModule>(entity)
+    {
+        let room = if node.router || node.reject_from_output {
+            // `liquids.currentAmount() < 0.2f`
+            module.current_amount < 0.2
+        } else {
+            // `ItemBridge`: `liquids.get(liquids.current()) < 0.2f`
+            module.current_liquid_amount() < 0.2
+        };
+        if module.current_liquid() != liquid && !room {
+            return false;
+        }
+    }
     if node.reject_from_output
         && let (Some(building), Some(_)) =
             (world.get::<Building>(entity), world.get::<Building>(source))
@@ -419,8 +435,69 @@ fn move_liquid_impl(
             }
             return flow;
         }
+        // Java else-branch (`BuildingComp.java:947-966`): two different liquids
+        // in contact react.
+        react_liquids(world, entity, next, liquid, fract, next_capacity);
     }
     0.0
+}
+
+/// `BuildingComp.moveLiquid` reaction branch (`BuildingComp.java:947-966`):
+/// hot + flammable damages both blocks, hot + cold evaporates the incoming
+/// liquid. FX (`Fx.fire`/`Fx.steam`) are H03's; the sim effects are not.
+fn react_liquids(
+    world: &mut World,
+    entity: Entity,
+    next: Entity,
+    liquid: LiquidId,
+    fract: f32,
+    next_capacity: f32,
+) {
+    if crate::world::behavior::helpers::block_consumes_liquid(world, next, liquid) {
+        return;
+    }
+    let Some((other, next_amount)) = world
+        .get::<LiquidModule>(next)
+        .map(|module| (module.current_liquid(), module.current_amount))
+    else {
+        return;
+    };
+    if next_amount / next_capacity <= 0.1 || fract <= 0.1 {
+        return;
+    }
+    let Some(traits) = world.get_resource::<crate::world::modules::LiquidTraits>() else {
+        return;
+    };
+    let index = liquid.index();
+    let other_index = other.index();
+    if !traits.block_reactive.get(index).copied().unwrap_or(false)
+        || !traits
+            .block_reactive
+            .get(other_index)
+            .copied()
+            .unwrap_or(false)
+    {
+        return;
+    }
+    let temperature = traits.temperature.get(index).copied().unwrap_or(1.0);
+    let flammability = traits.flammability.get(index).copied().unwrap_or(1.0);
+    let other_temperature = traits.temperature.get(other_index).copied().unwrap_or(1.0);
+    let other_flammability = traits.flammability.get(other_index).copied().unwrap_or(1.0);
+    // `Time.delta` is the fixed step (1), not the building delta.
+    if (other_flammability > 0.3 && temperature > 0.7)
+        || (flammability > 0.3 && other_temperature > 0.7)
+    {
+        crate::combat::damage::area::apply_health(world, entity, 1.0);
+        crate::combat::damage::area::apply_health(world, next, 1.0);
+        // `Fx.fire.at(fx, fy)` chance 0.1 — H03.
+    } else if ((temperature > 0.7 && other_temperature < 0.55)
+        || (other_temperature > 0.7 && temperature < 0.55))
+        && let Some(mut module) = world.get_mut::<LiquidModule>(entity)
+    {
+        let amount = module.get(liquid).min(0.7);
+        module.remove(liquid, amount);
+        // `Fx.steam.at(fx, fy)` chance 0.2 — H03.
+    }
 }
 
 /// `Building.moveLiquidForward(leaks, liquid)`; returns `(moved, leaked)`.

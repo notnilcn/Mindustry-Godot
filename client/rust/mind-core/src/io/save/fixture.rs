@@ -555,6 +555,7 @@ impl EntitySink for FixtureSink<'_, '_> {
         class_id: u8,
         _custom_name: Option<&str>,
         id: i32,
+        _content: Option<&ContentRegistry>,
         r: &mut WireReader,
     ) -> IoResult<()> {
         debug_assert_eq!(class_id, BuildingComp::CLASS_ID);

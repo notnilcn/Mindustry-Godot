@@ -44,15 +44,13 @@ pub fn update_power_void(world: &mut World, entity: Entity) {
     }
 }
 
-/// `LiquidSource.updateTile`: fill to capacity with the configured liquid.
+/// `LiquidSource.updateTile`: fill to capacity with the configured liquid
+/// (`LiquidSourceBuild.updateTile` → `liquids.set(source, liquidCapacity)`).
 pub fn update_liquid_source(world: &mut World, entity: Entity, liquid: LiquidId, capacity: f32) {
     let Some(mut module) = world.get_mut::<LiquidModule>(entity) else {
         return;
     };
-    if liquid.index() < module.liquids.len() {
-        module.liquids[liquid.index()] = capacity;
-        module.current_amount = module.liquids.iter().copied().sum();
-    }
+    module.set(liquid, capacity);
 }
 
 /// `LiquidVoid.updateTile`: empty the module.
