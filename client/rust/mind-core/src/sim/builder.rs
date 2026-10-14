@@ -423,10 +423,12 @@ struct BuilderOutcome {
 
 /// `ItemBridge.playerPlaced` (`ItemBridge.java:224-233`; T11): the previously
 /// placed bridge of the same block links itself to the newly built bridge
-/// (`findLink` requires the old bridge to be still unlinked and in range).
+/// (`findLink` requires the old bridge to be still unlinked, in range and not
+/// already in the new bridge's proximity).
 ///
-/// Only `ItemBridge`/`BufferedItemBridge` chain; Java's `LiquidBridge` has no
-/// `playerPlaced`/`findLink`.
+/// `LiquidBridge extends ItemBridge` (`LiquidBridge.java:7,19`) and inherits
+/// `playerPlaced`/`findLink`; the port's liquid bridge behavior provides the
+/// matching `link_valid_between`/`configured`.
 fn chain_bridge(
     world: &mut World,
     grid: &WorldGrid,
@@ -441,7 +443,7 @@ fn chain_bridge(
     };
     if !matches!(
         def.kind,
-        BlockKind::ItemBridge | BlockKind::BufferedItemBridge
+        BlockKind::ItemBridge | BlockKind::BufferedItemBridge | BlockKind::LiquidBridge
     ) {
         return;
     }
@@ -459,6 +461,9 @@ fn chain_bridge(
         && let Some(table) = world.get_resource::<BlockTable>()
         && let Some(inst) = table.instance(block)
         && inst.behavior.link_valid_between(world, placed, last_entity)
+        && !world
+            .get::<Building>(placed)
+            .is_some_and(|building| building.proximity.contains(&last_entity))
     {
         // `link.build.configure(tile.pos())`: the old bridge points at the new
         // one (packed absolute position, the `Number` config path).
@@ -2477,5 +2482,94 @@ mod tests {
             !sim.valid_place_player(10, 10, wall, 0),
             "core tile rejects a copper wall"
         );
+    }
+
+    /// H02 T6: `ItemBridge.playerPlaced` chaining (`chain_bridge`) links the
+    /// previously placed same-block bridge, skips one already in the new
+    /// bridge's proximity, and covers `LiquidBridge` (the pre-T6 comment
+    /// claimed Java's liquid bridge does not chain; `LiquidBridge.java:7,19`
+    /// inherits `playerPlaced`).
+    #[test]
+    fn player_bridge_chaining_links_and_skips_proximity() {
+        fn bridge_link(sim: &Sim, e: Entity) -> i32 {
+            sim.ecs
+                .0
+                .get::<ItemBridgeBuild>(e)
+                .map(|bridge| bridge.link)
+                .unwrap_or(-2)
+        }
+
+        let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let place = |sim: &mut Sim, name: &str, x: i16, y: i16| -> (Entity, BlockId) {
+            let block = BlockId::new(sim.world_block_id(name).expect("block"));
+            sim.command(SimCommand::Place {
+                x,
+                y,
+                block: block.raw(),
+                rotation: 0,
+                team: 1,
+                player: None,
+            })
+            .expect("placed");
+            (
+                sim.grid.entity_at(TilePos::new(x, y)).expect("entity"),
+                block,
+            )
+        };
+
+        // Far apart: the second bridge links back to the first.
+        let (a, block) = place(&mut sim, "bridge-conveyor", 5, 5);
+        let (b, _) = place(&mut sim, "bridge-conveyor", 8, 5);
+        let mut plans = BuilderPlans {
+            last_bridge: Some((block, TilePos::new(5, 5))),
+            ..BuilderPlans::default()
+        };
+        let runtime = sim.block_runtime.take().expect("runtime");
+        chain_bridge(
+            &mut sim.ecs.0,
+            &sim.grid,
+            &runtime,
+            b,
+            &mut plans,
+            block,
+            TilePos::new(8, 5),
+        );
+        sim.block_runtime = Some(runtime);
+        assert_eq!(bridge_link(&sim, a), TilePos::new(8, 5).pack());
+
+        // Adjacent (`!proximity.contains(link.build)`): no link.
+        let (c, block) = place(&mut sim, "bridge-conveyor", 12, 5);
+        let (d, _) = place(&mut sim, "bridge-conveyor", 13, 5);
+        plans.last_bridge = Some((block, TilePos::new(12, 5)));
+        let runtime = sim.block_runtime.take().expect("runtime");
+        chain_bridge(
+            &mut sim.ecs.0,
+            &sim.grid,
+            &runtime,
+            d,
+            &mut plans,
+            block,
+            TilePos::new(13, 5),
+        );
+        sim.block_runtime = Some(runtime);
+        assert_eq!(bridge_link(&sim, c), -1, "proximity blocks chaining");
+
+        // `LiquidBridge extends ItemBridge` and chains like a bridge.
+        let (e, block) = place(&mut sim, "bridge-conduit", 5, 9);
+        let (f, _) = place(&mut sim, "bridge-conduit", 8, 9);
+        plans.last_bridge = Some((block, TilePos::new(5, 9)));
+        let runtime = sim.block_runtime.take().expect("runtime");
+        chain_bridge(
+            &mut sim.ecs.0,
+            &sim.grid,
+            &runtime,
+            f,
+            &mut plans,
+            block,
+            TilePos::new(8, 9),
+        );
+        sim.block_runtime = Some(runtime);
+        assert_eq!(bridge_link(&sim, e), TilePos::new(8, 9).pack());
     }
 }

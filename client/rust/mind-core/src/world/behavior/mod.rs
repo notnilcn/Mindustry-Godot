@@ -129,6 +129,21 @@ impl BuildingKind {
     }
 }
 
+/// Result of `Building.onConfigureBuildTapped(other)`
+/// (`BuildingComp.java:1696-1706`; H02 T6, PAR-0220).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ConfigTapResult {
+    /// Java `return false`: the tap is consumed, the panel stays on the
+    /// selected building; apply these `(building, value)` configs in order.
+    Consume(Vec<(Entity, ConfigValue)>),
+    /// Java `deselect(); return false`: apply the configs, then close the
+    /// panel (the selected building itself deselects).
+    ConsumeAndDeselect(Vec<(Entity, ConfigValue)>),
+    /// Java `return true` with configs to apply first (the `ItemBridge`
+    /// reverse-link case): the panel switches to the tapped building.
+    SwitchAfter(Vec<(Entity, ConfigValue)>),
+}
+
 /// Per-block behavior surface (frozen by plan 08 §3.2).
 pub trait BuildingBehavior: Send + Sync {
     /// Per-tick update (`Building.updateTile`).
@@ -193,6 +208,32 @@ pub trait BuildingBehavior: Send + Sync {
     fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
         let _ = (world, e, other);
         false
+    }
+
+    /// `Building.onConfigureBuildTapped(other)` (`BuildingComp.java:1696-1706`):
+    /// the selected building's reaction to a second tap. Read-only; the values
+    /// returned are applied by the caller (H02 T6, PAR-0220).
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> ConfigTapResult {
+        let _ = grid;
+        // `if(block.clearOnDoubleTap){ if(self() == other){ deselect(); configure(null); return false; } return true; }`
+        if crate::world::config_tap::clear_on_double_tap(world, e) {
+            if e == other {
+                return ConfigTapResult::ConsumeAndDeselect(vec![(e, ConfigValue::None)]);
+            }
+            return ConfigTapResult::SwitchAfter(Vec::new());
+        }
+        // `return self() != other;`
+        if e != other {
+            ConfigTapResult::SwitchAfter(Vec::new())
+        } else {
+            ConfigTapResult::Consume(Vec::new())
+        }
     }
 
     /// Inserts family state components at spawn.

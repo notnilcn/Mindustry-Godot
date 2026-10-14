@@ -732,6 +732,9 @@ impl MindInput {
                     if let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH) {
                         node.set("visible", &false.to_variant());
                     }
+                    // The tap dispatch only reacts while a panel is open (H02 T6).
+                    self.config_tile = None;
+                    self.bridge.config_selected = None;
                 }
                 Effect::Hotkey(action) => {
                     let _ = self
@@ -1235,6 +1238,15 @@ impl MindInput {
         visible.then_some((x, y))
     }
 
+    /// Clears the config-panel selection (`config.hideConfig()`): the close
+    /// button calls this so the tap dispatch stops treating the panel as open
+    /// (H02 T6, PAR-0220).
+    #[func]
+    pub fn close_block_config(&mut self) {
+        self.config_tile = None;
+        self.bridge.config_selected = None;
+    }
+
     /// [`Self::config_selected`] as `"[x,y]"` or `"null"`.
     #[func]
     pub fn config_selected_json(&self) -> GString {
@@ -1370,10 +1382,12 @@ impl MindInput {
 
     /// Submits a building config (`tileConfig`) through the sim command queue.
     ///
-    /// `kind` is `none`/`string`/`int`/`content`/`item`/`number`/`bool`;
-    /// content-ish kinds carry the content name in `value`. `string` and `int`
-    /// bypass `RemoteAction` (its `to_sim_config` collapses `String` to the
-    /// content wire) and enqueue the wire `Text`/`Int` value directly.
+    /// `kind` is `none`/`string`/`int`/`content`/`item`/`liquid`/`block`/`unit`/
+    /// `number`/`bool`/`point`; content-ish kinds carry the content name in
+    /// `value`; `point` carries a relative `"dx,dy"` offset (`ItemBridge.java:66-69`).
+    /// `string` and `int` bypass `RemoteAction` (its `to_sim_config` collapses
+    /// `String` to the content wire) and enqueue the wire `Text`/`Int` value
+    /// directly.
     #[func]
     pub fn configure_building(&mut self, x: i32, y: i32, kind: GString, value: GString) -> bool {
         let kind = kind.to_string();
@@ -1410,6 +1424,18 @@ impl MindInput {
                 Err(_) => return false,
             },
             "bool" => ConfigValue::Bool(value == "true" || value == "1"),
+            "point" => {
+                // Relative packed offset (`ItemBridge.config(Point2.class, ..)`).
+                let Some((dx, dy)) = value.split_once(',') else {
+                    return false;
+                };
+                match (dx.trim().parse::<i32>(), dy.trim().parse::<i32>()) {
+                    (Ok(dx), Ok(dy)) => ConfigValue::Point2(dx, dy),
+                    _ => return false,
+                }
+            }
+            // `content`/`item`/`liquid`/`block`/`unit`: by-name lookup on the
+            // sim side (`resolve_config`).
             _ => ConfigValue::String(value),
         };
         // `BuildingComp.configure` -> `Block.lastConfig`: the next plan of this

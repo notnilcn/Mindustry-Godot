@@ -373,7 +373,89 @@ pub struct LiquidBridgeBehavior {
     pub range: i32,
 }
 
+impl LiquidBridgeBehavior {
+    /// The inherited `ItemBridge` IO/config body (`LiquidBridge extends
+    /// ItemBridge`, `LiquidBridge.java:7`); the liquid bridge is never
+    /// buffered, so the `ItemBuffer` half stays empty.
+    fn item_bridge(&self) -> crate::world::blocks::distribution::ItemBridgeBehavior {
+        crate::world::blocks::distribution::ItemBridgeBehavior {
+            range: self.range,
+            transport_time: 0.0,
+            link_same_type: true,
+            buffered: false,
+            buffer_capacity: 0,
+            speed: 0.0,
+            no_accept_disabled: false,
+        }
+    }
+}
+
 impl BuildingBehavior for LiquidBridgeBehavior {
+    /// `ItemBridge.config()` (inherited): relative `Point2` link readback.
+    fn config(&self, world: &World, e: Entity) -> crate::world::config::ConfigValue {
+        self.item_bridge().config(world, e)
+    }
+
+    /// `ItemBridge.config(Point2.class/Integer.class)` (inherited).
+    fn configured(
+        &self,
+        world: &mut World,
+        e: Entity,
+        player: Option<Entity>,
+        value: crate::world::config::ConfigValue,
+    ) {
+        self.item_bridge().configured(world, e, player, value);
+    }
+
+    /// `ItemBridge.linkValid(tile, other, true)` for liquid bridges
+    /// (`bridge::link_valid_world` + the checkDouble clause).
+    fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
+        if !super::bridge::link_valid_world(world, e, other, self.range) {
+            return false;
+        }
+        let e_pos = world.get::<Building>(e).map(|b| b.tile.pack());
+        world
+            .get::<crate::world::blocks::distribution::ItemBridgeBuild>(other)
+            .map(|bridge| bridge.link)
+            != e_pos
+    }
+
+    /// `ItemBridge.onConfigureBuildTapped` (inherited via `LiquidBridge`).
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        _grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> crate::world::behavior::ConfigTapResult {
+        crate::world::blocks::distribution::item_bridge::item_bridge_tapped(
+            world,
+            e,
+            other,
+            |a, b| super::bridge::link_valid_world(world, a, b, self.range),
+        )
+    }
+
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    /// `ItemBridge.write` (inherited; no `ItemBuffer`).
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        self.item_bridge().write(world, e, w);
+    }
+
+    /// `ItemBridge.read` (inherited; no `ItemBuffer`).
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        revision: u8,
+    ) {
+        self.item_bridge().read(world, e, r, revision);
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         ensure_node(
             world,
