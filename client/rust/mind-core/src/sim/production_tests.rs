@@ -2550,3 +2550,291 @@ fn last_core_unbreakable() {
         "two cores with coreBuildAndConfig are breakable"
     );
 }
+
+/// H02 T3: a placement query with the full flag set for the live world.
+#[cfg(test)]
+fn place_query(
+    sim: &Sim,
+    x: i16,
+    y: i16,
+    block: &str,
+    rot: u8,
+    team: u8,
+    flags: crate::world::build::PlaceFlags,
+) -> bool {
+    let runtime = sim.block_runtime().expect("runtime");
+    let rules = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::limits::BuildRules>()
+        .cloned()
+        .unwrap_or_default();
+    let table = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::BlockTable>()
+        .expect("table");
+    let counter = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::limits::BlockCounter>()
+        .expect("counter");
+    let id = runtime.content().block_id(block).expect("block");
+    crate::world::build::valid_place_query(
+        runtime.content(),
+        table,
+        &rules,
+        counter,
+        &sim.grid,
+        Some(&sim.ecs.0),
+        id,
+        team,
+        rot,
+        i32::from(x),
+        i32::from(y),
+        flags,
+    )
+}
+
+fn place_team(sim: &mut Sim, x: i16, y: i16, block: &str, rot: i8, team: u8) -> Entity {
+    let id = sim.world_block_id(block).expect("block");
+    sim.command(SimCommand::Place {
+        x,
+        y,
+        block: id,
+        rotation: rot,
+        team,
+        player: None,
+    })
+    .expect("place");
+    sim.grid
+        .tiles
+        .get(i32::from(x), i32::from(y))
+        .build
+        .expect("built")
+}
+
+/// H02 T3: enemy buildings cannot be replaced (`Build.java:250-262`); own
+/// conveyor upgrades pass.
+#[test]
+fn cannot_replace_enemy_conveyor() {
+    use crate::world::build::PlaceFlags;
+
+    let mut sim = runtime_sim();
+    place_team(&mut sim, 5, 5, "conveyor", 0, 2);
+    assert!(
+        !place_query(&sim, 5, 5, "titanium-conveyor", 0, 1, PlaceFlags::PLAYER),
+        "enemy conveyor cannot be replaced"
+    );
+    place_team(&mut sim, 7, 5, "conveyor", 0, 1);
+    assert!(
+        place_query(&sim, 7, 5, "titanium-conveyor", 0, 1, PlaceFlags::PLAYER),
+        "own conveyor upgrades"
+    );
+}
+
+/// H02 T3: deep water rejects non-floating blocks and pumps-without-contact
+/// (`Build.java:249,258`); a conduit at the deep-water edge passes via
+/// `contactsShallows` (`Build.java:294-314`).
+#[test]
+fn cannot_build_on_deep_water() {
+    use crate::world::build::PlaceFlags;
+
+    let mut sim = runtime_sim();
+    for x in 7..=9 {
+        for y in 7..=9 {
+            set_floor(&mut sim, x, y, "deep-water");
+        }
+    }
+    assert!(
+        !place_query(&sim, 8, 8, "copper-wall", 0, 1, PlaceFlags::PLAYER),
+        "wall on deep water"
+    );
+    assert!(
+        !place_query(&sim, 8, 8, "conduit", 0, 1, PlaceFlags::PLAYER),
+        "conduit in the middle of deep water has no shallows contact"
+    );
+    assert!(
+        place_query(&sim, 7, 8, "conduit", 0, 1, PlaceFlags::PLAYER),
+        "conduit at the deep-water edge touches the stone neighbour"
+    );
+}
+
+/// H02 T3: same block + same rotation is rejected (`Build.java:244`); a
+/// different rotation passes; non-rotating blocks reject same over same.
+#[test]
+fn same_block_same_rotation_rejected() {
+    use crate::world::build::PlaceFlags;
+
+    let mut sim = runtime_sim();
+    place_team(&mut sim, 5, 5, "conveyor", 0, 1);
+    assert!(
+        !place_query(&sim, 5, 5, "conveyor", 0, 1, PlaceFlags::PLAYER),
+        "same rotation rejected"
+    );
+    assert!(
+        place_query(&sim, 5, 5, "conveyor", 1, 1, PlaceFlags::PLAYER),
+        "different rotation replaces"
+    );
+    place_team(&mut sim, 9, 5, "router", 0, 1);
+    assert!(
+        !place_query(&sim, 9, 5, "router", 0, 1, PlaceFlags::PLAYER),
+        "a router does not rotate, so router-over-router is rejected"
+    );
+}
+
+/// H02 T3: derelict same-block repair (`Build.java:251`);
+/// `allowDerelictRepair = false` rejects it.
+#[test]
+fn derelict_same_block_repair() {
+    use crate::world::build::PlaceFlags;
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    place_team(&mut sim, 5, 5, "copper-wall", 0, 0);
+    assert!(
+        place_query(&sim, 5, 5, "copper-wall", 0, 1, PlaceFlags::PLAYER),
+        "derelict same-block repair passes"
+    );
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("rules")
+        .allow_derelict_repair = false;
+    assert!(
+        !place_query(&sim, 5, 5, "copper-wall", 0, 1, PlaceFlags::PLAYER),
+        "derelict repair disabled"
+    );
+}
+
+/// H02 T3: the enemy-core no-build radius (`Build.java:195-208`,
+/// `Rules.buildRadius` `Rules.java:294-296`) gates player placement but not
+/// the API form.
+#[test]
+fn enemy_core_radius_blocks_placement() {
+    use crate::content::BlockId;
+    use crate::world::build::PlaceFlags;
+    use crate::world::limits::BuildRules;
+
+    let mut sim = Sim::new(3, 128, 128, BlockId::AIR, BlockId::AIR);
+    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+    sim.grid.fill(stone, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime");
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("rules")
+        .enemy_core_build_radius = 400.0;
+    place_team(&mut sim, 40, 40, "core-shard", 0, 2);
+    place_team(&mut sim, 40, 90, "copper-wall", 0, 1);
+    // Core center (324, 324); wall center (324, 724): distance 400 < 400+8.
+    assert!(
+        !place_query(&sim, 40, 90, "titanium-wall", 0, 1, PlaceFlags::PLAYER),
+        "inside the enemy core radius"
+    );
+    // (40, 92) center (324, 740): distance 416 > 408.
+    assert!(
+        place_query(&sim, 40, 92, "copper-wall", 0, 1, PlaceFlags::PLAYER),
+        "outside the enemy core radius"
+    );
+    assert!(
+        place_query(&sim, 40, 90, "titanium-wall", 0, 1, PlaceFlags::API),
+        "API skips the core radius"
+    );
+    assert!(
+        place_query(&sim, 40, 92, "copper-wall", 0, 1, PlaceFlags::API),
+        "API outside the radius"
+    );
+}
+
+/// H02 T3: bans/whitelist only gate the visible (player) form
+/// (`Block.isPlaceable` `Block.java:1031-1037`).
+#[test]
+fn banned_block_rejected_for_player_only() {
+    use crate::world::build::PlaceFlags;
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("rules")
+        .banned_blocks = vec![
+        sim.block_runtime()
+            .expect("runtime")
+            .content()
+            .block_id("copper-wall")
+            .expect("copper-wall"),
+    ];
+    assert!(
+        !place_query(&sim, 5, 5, "copper-wall", 0, 1, PlaceFlags::PLAYER),
+        "banned for player placement"
+    );
+    assert!(
+        place_query(&sim, 5, 5, "copper-wall", 0, 1, PlaceFlags::API),
+        "API skips bans"
+    );
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("rules")
+        .block_whitelist = true;
+    assert!(
+        place_query(&sim, 5, 5, "copper-wall", 0, 1, PlaceFlags::PLAYER),
+        "whitelist inverts the ban"
+    );
+}
+
+/// H02 T3: `kind_rotates` matches the Java `rotate = true` set
+/// (`grep -rn "rotate = true\|rotate = false" J/world/blocks`).
+#[test]
+fn kind_rotates_matches_java() {
+    use crate::content::BlockKind as K;
+    use crate::world::block::kind_rotates;
+
+    for kind in [
+        K::Conveyor,
+        K::Duct,
+        K::Conduit,
+        K::ItemTurret,
+        K::UnitFactory,
+        K::Reconstructor,
+        K::HeatProducer,
+        K::BeamDrill,
+        K::PowerDiode,
+        K::PayloadSource,
+        K::ArmoredConveyor,
+        K::ArmoredConduit,
+        K::DuctBridge,
+        K::StackRouter,
+        K::Constructor,
+        K::PayloadRouter,
+        K::PayloadUnloader,
+        K::RepairTurret,
+        K::UnitAssemblerModule,
+        K::WallCrafter,
+    ] {
+        assert!(kind_rotates(kind), "{kind:?} rotates");
+    }
+    for kind in [
+        K::Junction,
+        K::ItemBridge,
+        K::Sorter,
+        K::Router,
+        K::OverflowGate,
+        K::MassDriver,
+        K::LiquidRouter,
+        K::LiquidJunction,
+        K::Drill,
+        K::BurstDrill,
+        K::Door,
+        K::AutoDoor,
+        K::PowerNode,
+        K::BeamNode,
+        K::PayloadDeconstructor,
+        K::LiquidBridge,
+        K::BufferedItemBridge,
+    ] {
+        assert!(!kind_rotates(kind), "{kind:?} does not rotate");
+    }
+}

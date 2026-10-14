@@ -1086,6 +1086,7 @@ fn can_place_for_team_rejects_occupied() {
 /// and its units die.
 #[test]
 fn capture_converts_wave_team_to_derelict() {
+    use crate::determinism::SimCommand;
     use crate::determinism::{RngStream, SimRng};
     use crate::entities::comp::Health;
     use crate::entities::comp::TeamComp;
@@ -1096,9 +1097,33 @@ fn capture_converts_wave_team_to_derelict() {
     sim.install_unit_runtime().expect("unit runtime");
     let core = sim.content().id("core-shard").expect("core-shard");
     let wall = sim.content().id("copper-wall").expect("copper-wall");
-    assert!(sim.place_for_team(10, 10, core, 0, 2));
+    // Stage through the API form (`player: None`, `Control.java:505,521`): a
+    // `core-shard` is `BuildVisibility.coreZoneOnly` and this synthetic map has
+    // no core-zone floor.
+    assert!(
+        sim.command(SimCommand::Place {
+            x: 10,
+            y: 10,
+            block: core.raw(),
+            rotation: 0,
+            team: 2,
+            player: None,
+        })
+        .is_ok()
+    );
     for x in 20..30 {
-        assert!(sim.place_for_team(x, 20, wall, 0, 2), "wall at {x}");
+        assert!(
+            sim.command(SimCommand::Place {
+                x,
+                y: 20,
+                block: wall.raw(),
+                rotation: 0,
+                team: 2,
+                player: None,
+            })
+            .is_ok(),
+            "wall at {x}"
+        );
     }
     let dagger = sim
         .spawn_live_unit("dagger", 2, 160.0, 160.0, 0.0)
@@ -1149,6 +1174,7 @@ fn capture_converts_wave_team_to_derelict() {
 /// range of the destroyed core AND outside range of the remaining core convert.
 #[test]
 fn time_destroy_spares_buildings_near_another_core() {
+    use crate::determinism::SimCommand;
     use crate::determinism::{RngStream, SimRng};
     use crate::entities::comp::Health;
     use crate::entities::comp::TeamComp;
@@ -1158,10 +1184,25 @@ fn time_destroy_spares_buildings_near_another_core() {
     let core = sim.content().id("core-shard").expect("core-shard");
     let wall = sim.content().id("copper-wall").expect("copper-wall");
     // Core A at (10,10) (destroyed), core B 100 tiles away.
-    assert!(sim.place_for_team(10, 10, core, 0, 2));
-    assert!(sim.place_for_team(110, 10, core, 0, 2));
-    assert!(sim.place_for_team(20, 10, wall, 0, 2));
-    assert!(sim.place_for_team(105, 10, wall, 0, 2));
+    // API staging: `core-shard` is `coreZoneOnly` and this map has no core-zone.
+    for (x, y, block) in [
+        (10, 10, core),
+        (110, 10, core),
+        (20, 10, wall),
+        (105, 10, wall),
+    ] {
+        assert!(
+            sim.command(SimCommand::Place {
+                x,
+                y,
+                block: block.raw(),
+                rotation: 0,
+                team: 2,
+                player: None,
+            })
+            .is_ok()
+        );
+    }
     // Deconstructing a core requires `coreBuildAndConfig` (`CoreBlock.java:173
     // -177`); this test drives `timeDestroy`, not the break guard.
     sim.ecs

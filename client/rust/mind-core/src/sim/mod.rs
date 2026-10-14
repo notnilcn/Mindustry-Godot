@@ -326,7 +326,16 @@ impl Sim {
                                 .map(|rules| rules.default_team)
                         })
                         .unwrap_or(TeamId::SHARDED.0);
-                    if self.runtime_place(x, y, block, 0, team) {
+                    // `Control.input` dev placement uses the API form
+                    // (`Control.java:505,521`).
+                    if self.runtime_place(
+                        x,
+                        y,
+                        block,
+                        0,
+                        team,
+                        crate::world::build::PlaceFlags::API,
+                    ) {
                         self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                             x,
                             y,
@@ -426,7 +435,34 @@ impl Sim {
     /// behavior (T7, PAR-0165).
     pub fn can_place_for_team(&self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
         self.block_runtime.as_ref().is_some_and(|runtime| {
-            runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rot, team)
+            runtime.can_place(
+                &self.ecs.0,
+                &self.grid,
+                x,
+                y,
+                block,
+                rot,
+                team,
+                crate::world::build::PlaceFlags::API,
+            )
+        })
+    }
+
+    /// `Build.validPlace(type, player.team(), x, y, rot)` for the placement
+    /// ghost (`InputHandler.java:1455`); H08 consumes it.
+    pub fn valid_place_player(&self, x: i16, y: i16, block: BlockId, rot: u8) -> bool {
+        let team = self.live_default_team();
+        self.block_runtime.as_ref().is_some_and(|runtime| {
+            runtime.can_place(
+                &self.ecs.0,
+                &self.grid,
+                x,
+                y,
+                block,
+                rot,
+                team,
+                crate::world::build::PlaceFlags::PLAYER,
+            )
         })
     }
 
@@ -801,11 +837,28 @@ impl Sim {
             .unwrap_or_default()
     }
 
-    fn runtime_place(&mut self, x: i16, y: i16, block: BlockId, rot: u8, team: u8) -> bool {
+    fn runtime_place(
+        &mut self,
+        x: i16,
+        y: i16,
+        block: BlockId,
+        rot: u8,
+        team: u8,
+        flags: crate::world::build::PlaceFlags,
+    ) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {
             return false;
         };
-        let placed = runtime.place(&mut self.ecs.0, &mut self.grid, x, y, block, rot, team);
+        let placed = runtime.place(
+            &mut self.ecs.0,
+            &mut self.grid,
+            x,
+            y,
+            block,
+            rot,
+            team,
+            flags,
+        );
         if placed {
             self.refresh_unit_runtime();
         }
@@ -828,7 +881,15 @@ impl Sim {
         if self.block_runtime.is_none() || self.content.name(block).is_err() {
             return false;
         }
-        if self.runtime_place(x, y, block, rot, team) {
+        // AI/base placements use the 5-arg player form (`BaseBuilderAI.java:211`).
+        if self.runtime_place(
+            x,
+            y,
+            block,
+            rot,
+            team,
+            crate::world::build::PlaceFlags::PLAYER,
+        ) {
             self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                 x,
                 y,
@@ -1470,7 +1531,14 @@ impl Sim {
                         self.commands_applied = self.commands_applied.wrapping_add(1);
                         return Ok(());
                     }
-                    if self.runtime_place(*x, *y, id, rot, *team) {
+                    if self.runtime_place(
+                        *x,
+                        *y,
+                        id,
+                        rot,
+                        *team,
+                        crate::world::build::PlaceFlags::API,
+                    ) {
                         self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                             x: *x,
                             y: *y,

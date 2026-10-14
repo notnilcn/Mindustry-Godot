@@ -257,8 +257,9 @@ impl SimRuntime {
         block: BlockId,
         rot: u8,
         team: u8,
+        flags: crate::world::build::PlaceFlags,
     ) -> bool {
-        if !self.can_place(world, grid, x, y, block, rot, team) {
+        if !self.can_place(world, grid, x, y, block, rot, team, flags) {
             return false;
         }
         self.set_block_raw(world, grid, x, y, block, rot, team);
@@ -364,6 +365,7 @@ impl SimRuntime {
         block: BlockId,
         rot: u8,
         team: u8,
+        flags: crate::world::build::PlaceFlags,
     ) -> bool {
         if !self.placement_allowed(block) {
             return false;
@@ -378,17 +380,19 @@ impl SimRuntime {
         let Some(counter) = world.get_resource::<BlockCounter>() else {
             return false;
         };
-        crate::world::build::valid_place(
+        crate::world::build::valid_place_query(
             &self.content,
             table,
             &rules,
             counter,
             grid,
+            Some(world),
             block,
             team,
             rot,
             i32::from(x),
             i32::from(y),
+            flags,
         )
     }
 
@@ -503,9 +507,10 @@ impl SimRuntime {
         block: BlockId,
         rot: u8,
         team: u8,
+        flags: crate::world::build::PlaceFlags,
         cost_multiplier: f32,
     ) -> bool {
-        if !self.can_place(world, grid, x, y, block, rot, team) {
+        if !self.can_place(world, grid, x, y, block, rot, team, flags) {
             return false;
         }
         let Some(def) = self.content.block(block) else {

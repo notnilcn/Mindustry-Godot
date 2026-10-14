@@ -622,6 +622,7 @@ fn update_builder(
                         current.block,
                         current.rotation,
                         team,
+                        crate::world::build::PlaceFlags::PLAYER,
                     ) {
                         plans.plans.pop_front();
                         continue;
@@ -652,6 +653,7 @@ fn update_builder(
                             current.block,
                             current.rotation,
                             team,
+                            crate::world::build::PlaceFlags::PLAYER,
                             rules.economy.cost_multiplier,
                         ) {
                             // `BuilderComp` passes `current.config` into the
@@ -939,7 +941,16 @@ impl Sim {
         let Some(runtime) = self.block_runtime.as_ref() else {
             return false;
         };
-        if !runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rotation, team) {
+        if !runtime.can_place(
+            &self.ecs.0,
+            &self.grid,
+            x,
+            y,
+            block,
+            rotation,
+            team,
+            crate::world::build::PlaceFlags::PLAYER,
+        ) {
             return false;
         }
         let mut plan = UnitBuildPlan::place(x, y, rotation, block);
@@ -1087,10 +1098,7 @@ impl Sim {
     /// placement-preview validity check, no side effects and nothing queued
     /// (`InputHandler.java:2029-2032` calls `Build.validPlace`).
     pub fn preview_can_place(&self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
-        let team = self.live_default_team();
-        self.block_runtime.as_ref().is_some_and(|runtime| {
-            runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rotation, team)
-        })
+        self.valid_place_player(x, y, block, rotation)
     }
 
     /// Queues a deconstruction on the player unit
@@ -1385,6 +1393,14 @@ mod tests {
         let unit = sim
             .spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
             .expect("player unit");
+        // The local player is team 1 (`sharded`); sync the placement guard like
+        // a campaign load does (`sync_build_rules`), so PLAYER-flag queries use
+        // the real player team.
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         (sim, unit, core_id, wall)
     }
 
