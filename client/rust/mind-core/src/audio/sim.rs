@@ -19,6 +19,12 @@ use super::ids::SoundId;
 use super::math::AudioRng;
 use crate::determinism::{RngStream, SimRng};
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
+
+use crate::entities::comp::Building;
+use crate::world::block::BlockTable;
+
 /// Deterministic [`AudioRng`] over the isolated sim `Fx` stream (plan 18 §2.4
 /// deviation 9). `RandomSound` alternate selection is reproducible per sim seed
 /// but never consumes the gameplay `RngStream::Sim`.
@@ -245,6 +251,53 @@ pub fn at(sink: &mut dyn AudioSink, sound: SoundId, x: f32, y: f32, pitch: f32, 
         return;
     }
     sink.emit(AudioEvent::at(sound, x, y, pitch, volume, true));
+}
+
+/// View-only RNG for block/ability one-shot pitches (T2). Java draws these
+/// from the unseeded global `Mathf.rand`; the port keeps them off the gameplay
+/// stream (`RngStream::Fx`, never in the checksum).
+#[derive(bevy_ecs::resource::Resource)]
+pub struct AudioViewRng(pub SimRng);
+
+/// `sound.at(x, y, base + Mathf.range(range), volume)` from a `&mut World`
+/// site (blocks, abilities). No-op without an installed [`AudioSinkRes`].
+pub fn emit_world_sound(
+    world: &mut World,
+    sound: SoundId,
+    x: f32,
+    y: f32,
+    volume: f32,
+    pitch_base: f32,
+    pitch_range: f32,
+) {
+    let Some(sink) = world.get_resource::<AudioSinkRes>().cloned() else {
+        return;
+    };
+    if sound.is_none_or_unset() {
+        return;
+    }
+    let pitch = if pitch_range > 0.0 {
+        let mut rng = world.get_resource_or_insert_with(|| AudioViewRng(SimRng::new(0)));
+        pitch_base + (rng.0.next_float(RngStream::Fx) * 2.0 - 1.0) * pitch_range
+    } else {
+        pitch_base
+    };
+    emit_at(&sink, sound, x, y, volume, pitch, true);
+}
+
+/// Building centre in world pixels (`tile * 8 + block.offset`; H01 T1 position
+/// convention). Reads the live [`BlockTable`] so it works from any behavior
+/// without a content handle.
+pub fn building_centre_of(world: &World, e: Entity) -> Option<(f32, f32)> {
+    let building = world.get::<Building>(e)?;
+    let instance = world
+        .get_resource::<BlockTable>()?
+        .instance(building.block)?;
+    let offset = instance.def.offset;
+    Some((
+        f32::from(building.tile.x()) * 8.0 + offset,
+        f32::from(building.tile.y()) * 8.0 + offset,
+    ))
 }
 
 #[cfg(test)]

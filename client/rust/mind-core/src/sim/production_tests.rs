@@ -876,6 +876,127 @@ fn unit_factory_needs_power() {
     assert_eq!(stored_item(&sim, factory, lead), 0, "lead consumed");
 }
 
+/// H07 T2 (`UnitFactory.java:440`): producing a unit plays `unitCreate` once
+/// at the factory centre, volume 1, `pitch = 1 + range(0.06)`.
+#[test]
+fn ground_factory_plays_unit_create() {
+    use crate::audio::{AudioEvent, SharedAudioLog, SoundId};
+
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 10, 60);
+            items.add(lead, 10, 60);
+        }
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, dagger) {
+            break;
+        }
+    }
+    assert!(spawned_unit(&sim, dagger), "factory produced a dagger");
+    let events = log.events();
+    let creates: Vec<&AudioEvent> = events
+        .iter()
+        .filter_map(|ticked| match &ticked.event {
+            AudioEvent::At { sound, .. } if *sound == SoundId::UNIT_CREATE => Some(&ticked.event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(creates.len(), 1, "exactly one unitCreate: {events:?}");
+    let AudioEvent::At {
+        x,
+        y,
+        pitch,
+        volume,
+        ..
+    } = creates[0]
+    else {
+        unreachable!()
+    };
+    // Size-3 factory at (5,5): centre tile 5*8, offset 0.
+    assert_eq!((*x, *y), (40.0, 40.0), "factory centre");
+    assert_eq!(*volume, 1.0);
+    assert!((0.94..=1.06).contains(pitch), "unitCreate pitch {pitch}");
+}
+
+/// H07 T2 (`MendProjector.java:120`): a mender pulse that heals at least one
+/// damaged building plays `healWave` (volume 0.5, `pitch = 1 + range(0.1)`)
+/// at the mender centre; a pulse with nothing to heal is silent.
+#[test]
+fn mender_pulse_plays_heal_wave() {
+    use crate::audio::{AudioEvent, SharedAudioLog, SoundId};
+
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let _mender = place(&mut sim, "mender", 5, 5);
+    let _power = place(&mut sim, "power-source", 5, 6);
+    let wall = place(&mut sim, "copper-wall", 6, 5);
+    if let Some(mut health) = sim.ecs.0.get_mut::<crate::entities::comp::Health>(wall) {
+        health.health = 10.0;
+    }
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let events = log.events();
+    let heals: Vec<&AudioEvent> = events
+        .iter()
+        .filter_map(|ticked| match &ticked.event {
+            AudioEvent::At { sound, .. } if *sound == SoundId::HEAL_WAVE => Some(&ticked.event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(heals.len(), 1, "one healWave in 300 ticks: {events:?}");
+    let AudioEvent::At {
+        x,
+        y,
+        pitch,
+        volume,
+        ..
+    } = heals[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!((*x, *y), (40.0, 40.0), "mender centre");
+    assert_eq!(*volume, 0.5);
+    assert!((0.9..=1.1).contains(pitch), "healWave pitch {pitch}");
+
+    // Same fixture with nothing damaged -> no sound.
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let _mender = place(&mut sim, "mender", 5, 5);
+    let _power = place(&mut sim, "power-source", 5, 6);
+    let _wall = place(&mut sim, "copper-wall", 6, 5);
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let heals = log.events().iter().filter(|ticked| {
+        matches!(&ticked.event, AudioEvent::At { sound, .. } if *sound == SoundId::HEAL_WAVE)
+    }).count();
+    assert_eq!(heals, 0, "undamaged targets -> silent");
+}
+
 /// T3 (`Reconstructor.java:346-352`): the command configured on a
 /// reconstructor is given to the upgraded unit's command state; without one the
 /// unit falls back to its type's `defaultCommand`.
@@ -1180,6 +1301,43 @@ fn door_toggles_and_throttles() {
     }
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
     assert!(!is_open(&sim), "closed after the throttle");
+}
+
+/// H07 T2 (`Door.java:40`): a live door config plays `door` once at the door
+/// centre (volume 1, pitch 1).
+#[test]
+fn door_toggle_plays_door() {
+    use crate::audio::{AudioEvent, SharedAudioLog, SoundId};
+
+    let mut sim = runtime_sim();
+    let log = SharedAudioLog::new();
+    sim.ecs
+        .0
+        .insert_resource(crate::audio::AudioSinkRes::new(log.clone()));
+    let _door = place(&mut sim, "door", 5, 5);
+    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(true));
+    let events = log.events();
+    let doors: Vec<&AudioEvent> = events
+        .iter()
+        .filter_map(|ticked| match &ticked.event {
+            AudioEvent::At { sound, .. } if *sound == SoundId::DOOR => Some(&ticked.event),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(doors.len(), 1, "one door sound: {events:?}");
+    let AudioEvent::At {
+        x,
+        y,
+        pitch,
+        volume,
+        ..
+    } = doors[0]
+    else {
+        unreachable!()
+    };
+    assert_eq!((*x, *y), (40.0, 40.0), "door centre");
+    assert_eq!(*volume, 1.0);
+    assert_eq!(*pitch, 1.0);
 }
 
 /// Whether a unit of type `unit` exists in the sim.

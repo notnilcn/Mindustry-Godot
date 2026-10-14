@@ -84,6 +84,18 @@ impl BuildingBehavior for PayloadVoidBehavior {
             if let Some(mut holder) = world.get_mut::<PayloadHolder>(e) {
                 holder.payload = None;
             }
+            // `PayloadVoid.java:62`: `incinerateSound.at(this)` (unitExplode1).
+            if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+                crate::audio::sim::emit_world_sound(
+                    world,
+                    crate::audio::SoundId::UNIT_EXPLODE1,
+                    x,
+                    y,
+                    1.0,
+                    1.0,
+                    0.0,
+                );
+            }
         }
     }
 

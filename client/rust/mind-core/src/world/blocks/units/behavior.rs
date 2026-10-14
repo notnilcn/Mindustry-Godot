@@ -315,6 +315,18 @@ impl BuildingBehavior for UnitFactoryBehavior {
                 // The port has no factory command config, so the spawn applies
                 // the type's `defaultCommand` (`UnitFactory.java:425-433`).
                 spawn_output_unit_with_command(world, e, def, None);
+                // `UnitFactory.java:440`: `createSound.at(this, 1 + range(0.06), 1)`.
+                if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+                    crate::audio::sim::emit_world_sound(
+                        world,
+                        crate::audio::SoundId::UNIT_CREATE,
+                        x,
+                        y,
+                        1.0,
+                        1.0,
+                        0.06,
+                    );
+                }
             }
         }
         world.entity_mut(e).insert(state);
@@ -470,6 +482,18 @@ impl BuildingBehavior for ReconstructorBehavior {
                     def,
                     state.command.map(UnitCommandId::new),
                 );
+                // `Reconstructor.java:354`: `createSound.at(this, 1 + range(0.06), 1)`.
+                if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+                    crate::audio::sim::emit_world_sound(
+                        world,
+                        crate::audio::SoundId::UNIT_CREATE,
+                        x,
+                        y,
+                        1.0,
+                        1.0,
+                        0.06,
+                    );
+                }
             }
         }
         world.entity_mut(e).insert(state);
@@ -728,6 +752,16 @@ impl BuildingBehavior for AssemblerBehavior {
             let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
             let seq = next_unit_seq(world);
             let _ = spawn_unit_def(world, seq, def, team, x, y, 90.0);
+            // `UnitAssembler.java:568`: `createSound.at(spawn.x, spawn.y, 1 + range(0.06), 1)`.
+            crate::audio::sim::emit_world_sound(
+                world,
+                crate::audio::SoundId::UNIT_CREATE_BIG,
+                x,
+                y,
+                1.0,
+                1.0,
+                0.06,
+            );
         }
         world.entity_mut(e).insert(assembler);
     }
