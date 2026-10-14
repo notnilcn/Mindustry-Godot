@@ -4596,9 +4596,10 @@ fn flying_main_target(
 /// `AIController.targetFlagActive(x, y, flag, enemy=true)`: the closest enemy
 /// building carrying `flag` that is active. Java's predicate is
 /// `((items != null && items.any()) || status() != BlockStatus.noInput) && block.targetable`
-/// (AIController.java:277-284); the port has no live per-building block status,
-/// so "active" is `items.any()` (documented deviation), and no vanilla flagged
-/// block sets `targetable = false` (only world logic blocks do).
+/// (AIController.java:277-284); `status()` is
+/// [`crate::world::status::java_block_status`] (`BuildingComp.java:638-652`).
+/// `block.targetable` has no port field, so that term is omitted (no vanilla
+/// flagged block sets it false; only world logic blocks do).
 fn target_flag_active(
     world: &World,
     queries: &TargetQueries,
@@ -4607,11 +4608,18 @@ fn target_flag_active(
     y: f32,
     flag: crate::content::BlockFlag,
 ) -> Option<Entity> {
+    // `state.tick` for the `status()` pulse (`LogicWorldState` is refreshed
+    // every tick by `Sim::update_logic_globals`).
+    let tick = world
+        .get_resource::<crate::logic::world::LogicWorldState>()
+        .map_or(0, |state| state.tick);
     let mut best: Option<(f32, Entity)> = None;
     for entity in queries.indexer.enemy_flagged(world, team, flag) {
         let active = world
             .get::<crate::world::modules::ItemModule>(entity)
-            .is_some_and(|items| items.any());
+            .is_some_and(|items| items.any())
+            || crate::world::status::java_block_status(world, entity, tick)
+                != crate::world::status::BlockStatus::NoInput;
         if !active {
             continue;
         }
@@ -6181,6 +6189,55 @@ mod tests {
             runtime.units.len(),
             spawned_near_core
         );
+    }
+
+    /// H01 T8: `AIController.targetFlagActive` accepts a building whose Java
+    /// `status()` is not `noInput` even with no items
+    /// (`((items != null && items.any()) || status() != noInput)`,
+    /// `AIController.java:277-284`; `BuildingComp.java:638-652`): an empty
+    /// `vault` (storage flag, efficiency 1.0 -> active pulse) is a target, an
+    /// unpowered one (efficiency 0 -> noInput) is not.
+    #[test]
+    fn target_flag_active_uses_java_block_status() {
+        use crate::entities::comp::Building;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        let vault = block_id(&sim, "vault");
+        assert!(
+            sim.command(SimCommand::Place {
+                x: 20,
+                y: 20,
+                block: vault,
+                rotation: 0,
+                team: 1,
+                player: None,
+            })
+            .is_ok(),
+            "vault placed"
+        );
+        let entity = sim.grid.tiles.get(20, 20).build.expect("vault built");
+        let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("runtime");
+        let queries = TargetQueries::build(&mut sim.ecs.0, &runtime.content);
+        let (x, y) = (20.5 * TILE_SIZE, 20.5 * TILE_SIZE);
+        let flag = crate::content::BlockFlag::Storage;
+        assert_eq!(
+            target_flag_active(&sim.ecs.0, &queries, 2, x, y, flag),
+            Some(entity),
+            "an empty vault with efficiency 1.0 is active (status != noInput)"
+        );
+        // Blocked/unpowered: efficiency 0 -> noInput, not a target.
+        sim.ecs
+            .0
+            .get_mut::<Building>(entity)
+            .expect("building")
+            .efficiency = 0.0;
+        assert_eq!(
+            target_flag_active(&sim.ecs.0, &queries, 2, x, y, flag),
+            None,
+            "efficiency 0 is noInput (not a target)"
+        );
+        sim.ecs.0.insert_non_send(runtime);
     }
 }
 
