@@ -5727,6 +5727,71 @@ impl MindSimHost {
         })
     }
 
+    /// Cheap per-building hash of the state that changes a `drawCached` bake
+    /// (`BuildingCacheRenderer` chunk state sums; H03 T18). `0` without a
+    /// building. Mirrors `BuildingComp.recache()` being called on config
+    /// changes that never bump the world revision.
+    pub fn cached_state_key(&self, x: i32, y: i32) -> u64 {
+        use mind_core::render::block_sprite::{CachedBlockState, cached_state_hash, crack_index};
+        let Some(state) = self.block_state_draw(x, y) else {
+            return 0;
+        };
+        cached_state_hash(&CachedBlockState {
+            door_open: state.door_open,
+            enabled: state.enabled,
+            item: state
+                .sort_item
+                .or(state.unloader_item)
+                .or(state.source_item),
+            damaged: state.damaged,
+            crack: crack_index(state.healthf),
+        })
+    }
+
+    /// `BlockRenderer` crack-overlay rows (`BlockRenderer.java:801-821`):
+    /// every damaged building whose block is `!draw_dynamic` (exactly the
+    /// buildings the dynamic pass skips and the static cache bakes; the port
+    /// counterpart of Java's `tileExtraCachedView`). `(world x, world y,
+    /// tile y, size, healthf)`.
+    pub fn cached_crack_draws(&self) -> Vec<(f32, f32, i32, i32, f32)> {
+        use mind_core::entities::comp::health::Health;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
+                continue;
+            };
+            let Some(def) = content.block(building.block) else {
+                continue;
+            };
+            // `drawCracks` guards (`BuildingComp.java:1234`): `drawDynamic`
+            // blocks draw their own cracks in the dynamic pass, and
+            // `BlockRenderer.maxCrackSize` is 7.
+            if def.draw_dynamic || def.size > 7 {
+                continue;
+            }
+            let Some(health) = entity.get::<Health>() else {
+                continue;
+            };
+            if !health.damaged() {
+                continue;
+            }
+            let size = def.size.max(1);
+            // `Building.x = tile.drawx() + Block.offset` (same anchor as the
+            // dynamic pass and the cache bake).
+            out.push((
+                f32::from(building.tile.x()) * 8.0 + def.offset,
+                f32::from(building.tile.y()) * 8.0 + def.offset,
+                i32::from(building.tile.y()),
+                size,
+                health.fraction(),
+            ));
+        }
+        out
+    }
+
     /// The player team's rebuild ghosts (`TeamData.plans`, pushed by
     /// `Sim::resolve_deaths`): `(x, y, rotation, block)` in insertion order.
     pub fn team_block_plans(&self) -> Vec<(i16, i16, i8, BlockId)> {

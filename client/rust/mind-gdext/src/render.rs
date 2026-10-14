@@ -40,6 +40,7 @@ mod blocks;
 mod build_beam;
 mod building_cache;
 mod bullets;
+mod cached_cracks;
 mod canvas;
 mod command_overlay;
 mod debug;
@@ -236,6 +237,9 @@ pub struct MindWorldRenderer {
     blocks: Option<BlockRenderer>,
     units: Option<UnitRenderer>,
     building_cache: Option<BuildingCacheRenderer>,
+    /// Cracks for `!drawDynamic` cached buildings (`Layer.blockCracks` band;
+    /// H03 T18).
+    cached_cracks: Option<Gd<cached_cracks::CachedCrackRenderer>>,
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
@@ -301,6 +305,7 @@ impl INode2D for MindWorldRenderer {
             blocks: None,
             units: None,
             building_cache: None,
+            cached_cracks: None,
             shadow: None,
             light: None,
             debug: None,
@@ -537,6 +542,15 @@ impl MindWorldRenderer {
                 under_band,
                 block_band,
             ));
+        }
+        // Cracks for `!drawDynamic` cached buildings at `Layer.blockCracks`
+        // (`BlockRenderer.java:801-821`; H03 T18).
+        if let Some(cracks_band) = self.band_node_at(BandKey::base(Layer::BlockCracks)) {
+            let node = cached_cracks::CachedCrackRenderer::new_alloc();
+            // code-instantiated: one crack overlay pass; the node count is
+            // fixed by the pipeline, not by content.
+            cracks_band.clone().add_child(&node);
+            self.cached_cracks = Some(node.clone());
         }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
             && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))

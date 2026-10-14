@@ -19,6 +19,7 @@ use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
 use mind_core::render::block_cache::{BUILDING_CACHE_LAYERS, BuildingCacheGrid, CHUNK_SIZE};
+use mind_core::render::block_sprite::{CachedBlockState, cached_bake_sprites, crack_index};
 use mind_core::render::draw_meta::BlockDrawMeta;
 use mind_core::render::layer::BuildingCacheLayer;
 use mind_core::render::scan::CameraView;
@@ -53,6 +54,10 @@ pub struct BuildingCacheRenderer {
     /// loaded sector/map) rebuilds the grid and drops stale cached meshes.
     dims: (i32, i32),
     revision: i64,
+    /// Chunk linear index → folded `cached_state_key` sum of its cached
+    /// buildings (H03 T18). Config/damage changes never bump
+    /// `world_revision`, so a changed sum marks the chunk dirty.
+    state_sums: BTreeMap<usize, u64>,
     /// Chunk linear index → `[under, normal]` pooled nodes.
     chunks: BTreeMap<usize, [Vec<Gd<MeshInstance2D>>; BUILDING_CACHE_LAYERS]>,
     stats: BuildingCacheStats,
@@ -85,6 +90,7 @@ impl BuildingCacheRenderer {
             grid: BuildingCacheGrid::new(width, height),
             dims: (width, height),
             revision: i64::MIN,
+            state_sums: BTreeMap::new(),
             chunks: BTreeMap::new(),
             stats: BuildingCacheStats::default(),
         }
@@ -121,6 +127,18 @@ impl BuildingCacheRenderer {
                 if !view.overlaps(aabb) {
                     continue;
                 }
+                // H03 T18: config/damage state does not bump the world
+                // revision, so re-bake a visible chunk when its state fold
+                // changes — the port counterpart of `BuildingComp.recache()`
+                // (`BuildingComp.java:1290-1292`).
+                let index = chunk_index(cx, cy, self.grid.chunks_x());
+                let sum = self.chunk_state_sum(cx, cy);
+                if self.state_sums.insert(index, sum) != Some(sum) {
+                    for layer in 0..BUILDING_CACHE_LAYERS {
+                        self.grid
+                            .recache_building(layer, cx * CHUNK_SIZE, cy * CHUNK_SIZE);
+                    }
+                }
                 for layer in 0..BUILDING_CACHE_LAYERS {
                     if self.grid.is_dirty(layer, cx, cy) {
                         sprites += self.bake_chunk(layer, cx, cy);
@@ -146,8 +164,40 @@ impl BuildingCacheRenderer {
         }
         self.dims = (width, height);
         self.grid = BuildingCacheGrid::new(width, height);
+        self.state_sums.clear();
         // Force the revision branch to recache every new chunk next frame.
         self.revision = i64::MIN;
+    }
+
+    /// Folded `cached_state_key` over the `drawCached` center tiles of one
+    /// chunk (H03 T18); order-stable thanks to the row-major scan.
+    fn chunk_state_sum(&self, cx: i32, cy: i32) -> u64 {
+        let host = self.host.clone();
+        let host = host.bind();
+        let world = host.grid();
+        let Some(content) = host.content_registry() else {
+            return 0;
+        };
+        let mut sum = 0u64;
+        for ty in cy * CHUNK_SIZE..cy * CHUNK_SIZE + CHUNK_SIZE {
+            for tx in cx * CHUNK_SIZE..cx * CHUNK_SIZE + CHUNK_SIZE {
+                if tx < 0 || ty < 0 || tx >= world.width() || ty >= world.height() {
+                    continue;
+                }
+                let tile = world.tile(tx, ty);
+                if !tile.is_center_with(tile.pos()) {
+                    continue;
+                }
+                let Some(def) = content.block(tile.block) else {
+                    continue;
+                };
+                if !BlockDrawMeta::from_def(def).draw_cached {
+                    continue;
+                }
+                sum = sum.rotate_left(7) ^ host.cached_state_key(tx, ty);
+            }
+        }
+        sum
     }
 
     /// Bakes one `(chunk, layer)` and returns the cached sprite count.
@@ -194,32 +244,68 @@ impl BuildingCacheRenderer {
                     if !meta.draw_cached || layer_of(meta.building_cache_layer) != layer {
                         continue;
                     }
-                    // Same candidate chain as the dynamic pass: `drawCached`
-                    // blocks may also lack their bare `Block.region` (PAR-0152).
-                    let resolved =
-                        mind_core::render::block_region_candidates(&def.name, &def.region)
-                            .into_iter()
-                            .find_map(|name| self.resolver.find(&name))
-                            .or_else(|| self.resolver.resolve(&def.region));
-                    let page = resolved.as_ref().map(|r| r.page).unwrap_or(-1);
-                    let uv = resolved
-                        .as_ref()
-                        .map(|r| r.uv)
-                        .unwrap_or([0.0, 0.0, 1.0, 1.0]);
-                    let texture = resolved.and_then(|r| r.texture);
-                    let entry = groups.entry(page).or_insert((texture, Vec::new()));
-                    let w = def.size.max(1) as f32 * size;
+                    // H03 T18: a bake is one or more sprites (`cached_bake_sprites`):
+                    // the base region chain plus the per-kind state sprites
+                    // (`Door.draw`, `Sorter.draw`, `SwitchBlock.draw`,
+                    // `Unloader.draw`).
+                    let state = host.block_state_draw(tx, ty);
+                    let cached = CachedBlockState {
+                        door_open: state.as_ref().is_some_and(|state| state.door_open),
+                        enabled: state.as_ref().is_none_or(|state| state.enabled),
+                        item: state.as_ref().and_then(|state| {
+                            state
+                                .sort_item
+                                .or(state.unloader_item)
+                                .or(state.source_item)
+                        }),
+                        damaged: state.as_ref().is_some_and(|state| state.damaged),
+                        crack: state.as_ref().map_or(0, |state| crack_index(state.healthf)),
+                    };
                     let anchor_x = (tx + (def.size - 1) / 2) as f32 * size + def.offset;
                     let anchor_y = (ty + (def.size - 1) / 2) as f32 * size + def.offset;
-                    entry.1.push(Quad {
-                        cx: anchor_x,
-                        cy: anchor_y,
-                        w,
-                        h: w,
-                        uv,
-                        color: 0xffff_ffff,
-                    });
-                    count += 1;
+                    for sprite in
+                        cached_bake_sprites(def.kind, &def.name, &def.region, def.size, &cached)
+                    {
+                        // Same candidate chain as the dynamic pass: `drawCached`
+                        // blocks may also lack their bare `Block.region`
+                        // (PAR-0152).
+                        let resolved = sprite
+                            .candidates
+                            .iter()
+                            .find_map(|name| self.resolver.find(name))
+                            .or_else(|| self.resolver.resolve(&def.region));
+                        let page = resolved.as_ref().map(|r| r.page).unwrap_or(-1);
+                        let uv = resolved
+                            .as_ref()
+                            .map(|r| r.uv)
+                            .unwrap_or([0.0, 0.0, 1.0, 1.0]);
+                        // `None` = Java's natural region size (world sprites
+                        // pack at 4 px per world unit; H03 T18).
+                        let (edge_w, edge_h) = match sprite.size {
+                            Some(edge) => (edge, edge),
+                            None => resolved
+                                .as_ref()
+                                .map(|r| (r.w * 0.25, r.h * 0.25))
+                                .unwrap_or((TILESIZE as f32, TILESIZE as f32)),
+                        };
+                        let texture = resolved.and_then(|r| r.texture);
+                        // `Draw.color(item.color)` (Sorter/Unloader item square).
+                        let color = sprite
+                            .item_tint
+                            .and_then(|item| content.item(item))
+                            .map(|item| item.color.to_rgba8888())
+                            .unwrap_or(0xffff_ffff);
+                        let entry = groups.entry(page).or_insert((texture, Vec::new()));
+                        entry.1.push(Quad {
+                            cx: anchor_x,
+                            cy: anchor_y,
+                            w: edge_w.max(1.0),
+                            h: edge_h.max(1.0),
+                            uv,
+                            color,
+                        });
+                        count += 1;
+                    }
                 }
             }
         }
