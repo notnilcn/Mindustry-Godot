@@ -12,7 +12,7 @@ extends MindDialog
 
 var _view: MindResearchView = null
 var _title_button: Button = null
-var _title_icon: TextureRect = null
+var _title_icon_holder: Control = null
 var _title_label: MindLabel = null
 var _items_display: MindResearchItemsDisplay = null
 var _popup: PanelContainer = null
@@ -124,15 +124,12 @@ func _build_title_row() -> void:
 	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_button.add_child(row)
-	# code-instantiated: root icon follows the tree data.
-	_title_icon = TextureRect.new()
-	_title_icon.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
-	# A `TextureRect`'s minimum size is its texture size; ignore the source size
-	# so the 32 px cell wins (`b.imageDraw(...).size(iconMed)`).
-	_title_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_title_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_title_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(_title_icon)
+	# code-instantiated: root icon follows the tree data (atlas region or the
+	# `terrain` glyph for a sector root).
+	_title_icon_holder = Control.new()
+	_title_icon_holder.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
+	_title_icon_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_title_icon_holder)
 	row.add_child(_title_spacer(8.0))
 	row.add_child(_title_spacer(-1.0))
 	_title_label = MindWidgets.label("")
@@ -145,11 +142,17 @@ func _build_title_row() -> void:
 
 ## Retargets the title button on the displayed tree.
 func _update_title_button() -> void:
-	if _title_icon == null or _title_label == null:
+	if _title_icon_holder == null or _title_label == null:
 		return
-	_title_icon.texture = MindWidgets.content_icon_texture(
-		str(_tree.get("root_icon", "")), str(_tree.get("root_type", ""))
+	for child in _title_icon_holder.get_children():
+		child.queue_free()
+	var icon := MindWidgets.content_icon(
+		str(_tree.get("root_icon", "")), str(_tree.get("root_type", "")), ICON_SIZE
 	)
+	if icon != null:
+		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_title_icon_holder.add_child(icon)
 	_title_label.text = str(_tree.get("root_title", ""))
 
 

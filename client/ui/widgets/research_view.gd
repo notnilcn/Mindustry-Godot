@@ -102,21 +102,22 @@ func node_at(index: int) -> Dictionary:
 
 func _build_button_content(button: Button, node: Dictionary) -> void:
 	if bool(node.get("selectable", false)):
-		# code-instantiated: node icon follows the tree data.
-		var image := TextureRect.new()
-		image.texture = MindWidgets.content_icon_texture(
-			str(node.get("icon", "")), str(node.get("type", ""))
+		var icon := MindWidgets.content_icon(
+			str(node.get("icon", "")), str(node.get("type", "")), IMAGE_SIZE
 		)
-		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		image.set_anchors_preset(Control.PRESET_CENTER)
-		image.offset_left = -IMAGE_SIZE / 2.0
-		image.offset_top = -IMAGE_SIZE / 2.0
-		image.offset_right = IMAGE_SIZE / 2.0
-		image.offset_bottom = IMAGE_SIZE / 2.0
-		image.modulate = _image_color(node)
-		button.add_child(image)
+		if icon != null:
+			icon.modulate = _image_color(node)
+			icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			icon.set_anchors_preset(Control.PRESET_CENTER)
+			icon.offset_left = -IMAGE_SIZE / 2.0
+			icon.offset_top = -IMAGE_SIZE / 2.0
+			icon.offset_right = IMAGE_SIZE / 2.0
+			icon.offset_bottom = IMAGE_SIZE / 2.0
+			button.add_child(icon)
+		else:
+			# Missing non-sector region: Java draws `Icon.lock` only when the
+			# node is not selectable (handled above); keep the button empty.
+			push_warning("[ui] missing icon region `%s`" % str(node.get("icon", "")))
 	else:
 		var glyph := MindWidgets.glyph("lock", 32, _image_color(node))
 		glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)

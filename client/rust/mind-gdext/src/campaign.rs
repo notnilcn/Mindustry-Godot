@@ -24,8 +24,8 @@ use mind_core::assets::bundle::Bundle;
 use mind_core::content::registries::planets::GeneratorKind;
 use mind_core::content::tech::{ObjectiveSpec, TechNodeRef};
 use mind_core::content::{
-    ContentRef, ContentRegistry, ContentType, ItemId, MemoryBundle, PlanetId, SectorId,
-    create_base_content,
+    BlockId, ContentRef, ContentRegistry, ContentType, ItemId, LiquidId, MemoryBundle, PlanetId,
+    SectorId, create_base_content,
 };
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
@@ -56,6 +56,7 @@ use mind_core::io::{SaveIo, SaveMeta};
 use mind_core::random::JavaRandom;
 use mind_core::render::g3d::grid::PlanetGrid;
 use mind_core::render::g3d::mesh_data::build_planet_grid;
+use mind_core::ui::content_stats::{Cell, StatCtx, content_stats as compute_content_stats};
 use mind_core::world::modules::ItemModule;
 
 use crate::sim_host::MindSimHost;
@@ -2202,7 +2203,12 @@ impl MindCampaign {
 
     /// `<type>.<name>.description` (empty when the bundle has no entry).
     fn localized_content_description(&self, type_name: &str, name: &str) -> String {
-        let key = format!("{type_name}.{name}.description");
+        self.localized_content_field(type_name, name, "description")
+    }
+
+    /// `<type>.<name>.<field>` through the live bundle (empty when missing).
+    fn localized_content_field(&self, type_name: &str, name: &str, field: &str) -> String {
+        let key = format!("{type_name}.{name}.{field}");
         let value = self.bundle.get(&key);
         if value == key {
             String::new()
@@ -2362,6 +2368,85 @@ impl MindCampaign {
             out.push(&GString::from(name.as_str()));
         }
         out
+    }
+
+    /// `ContentInfoDialog.show(content)`: name/description/details plus the
+    /// computed stat categories for the `?` dialog (`UnlockableContent
+    /// .computeStats` -> `world/meta/Stats`). Unknown names return `{}` so the
+    /// caller can keep its bundle-only fallback.
+    #[func]
+    pub fn content_info_json(&self, name: GString) -> GString {
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::from("{}");
+        };
+        let name = name.to_string();
+        let Some(content) = registry.by_name(&name) else {
+            return GString::from("{}");
+        };
+        let type_name = content.type_.name();
+        let ctx = StatCtx {
+            registry,
+            bundle: &self.bundle,
+        };
+        let stats = compute_content_stats(&ctx, content);
+        let categories: Vec<serde_json::Value> = stats
+            .to_map()
+            .into_iter()
+            .filter_map(|(cat, rows)| {
+                let stat_rows: Vec<serde_json::Value> = rows
+                    .into_iter()
+                    .map(|(stat, values)| {
+                        let rendered: Vec<serde_json::Value> = values
+                            .iter()
+                            .map(|cells| render_stat_cells(cells))
+                            .collect();
+                        serde_json::json!({
+                            "name": stat.name(),
+                            "label": ctx.stat_label(stat),
+                            "tooltip": ctx.stat_tooltip(stat),
+                            "values": rendered,
+                        })
+                    })
+                    .collect();
+                (!stat_rows.is_empty()).then(|| {
+                    serde_json::json!({
+                        "name": cat.name(),
+                        "label": ctx.category_label(cat),
+                        "stats": stat_rows,
+                    })
+                })
+            })
+            .collect();
+        let hide_details = match content.type_ {
+            ContentType::Block => registry
+                .block(BlockId::new(content.id))
+                .is_some_and(|def| def.unlock.hide_details),
+            ContentType::Item => registry
+                .item(ItemId::new(content.id))
+                .is_some_and(|def| def.unlock.hide_details),
+            ContentType::Liquid => registry
+                .liquid(LiquidId::new(content.id))
+                .is_some_and(|def| def.unlock.hide_details),
+            _ => false,
+        };
+        let view = serde_json::json!({
+            "content": name,
+            "type": type_name,
+            "localized": self.localized_content_name(type_name, &name),
+            "icon": format!("{type_name}-{name}-ui"),
+            "description": self.localized_content_description(type_name, &name),
+            "details": self.localized_content_field(type_name, &name, "details"),
+            "credit": self.localized_content_field(type_name, &name, "credit"),
+            "use_categories": stats.use_categories,
+            "locked": !tech_tree::content_unlocked_with_rules(
+                registry,
+                content,
+                &self.session.rules
+            ),
+            "hide_details": hide_details,
+            "categories": categories,
+        });
+        GString::from(view.to_string().as_str())
     }
 
     /// Tech-tree summary (`nodes`, `unlocked`, error).
@@ -4253,6 +4338,20 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// Renders one stat value's cells for the `content_info_json` payload: Text
+/// cells pass through `UI.formatIcons` (`render_markup`), every other cell
+/// serializes as its tagged JSON form (`Cell::k`).
+fn render_stat_cells(cells: &[Cell]) -> serde_json::Value {
+    let rendered: Vec<serde_json::Value> = cells
+        .iter()
+        .map(|cell| match cell {
+            Cell::Text { t } => serde_json::json!({ "k": "text", "t": t }),
+            other => serde_json::to_value(other).unwrap_or(serde_json::Value::Null),
+        })
+        .collect();
+    serde_json::Value::Array(rendered)
 }
 
 /// `Sector.name()` (`Sector.java:243-245`): the stored display name, else the

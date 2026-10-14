@@ -57,14 +57,15 @@ func _rebuild() -> void:
 		margin.custom_minimum_size = Vector2(12.0, 0.0)
 		margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		content.add_child(margin)
-		# code-instantiated: root icon follows the tree data.
-		var icon := TextureRect.new()
-		icon.texture = MindWidgets.content_icon_texture(
-			str(entry.get("icon", "")), str(entry.get("type", ""))
+		# code-instantiated: root icon follows the tree data (atlas region or the
+		# `terrain` glyph for a sector root).
+		var icon := MindWidgets.content_icon(
+			str(entry.get("icon", "")), str(entry.get("type", "")), ICON_SIZE
 		)
+		if icon == null:
+			icon = Control.new()
 		icon.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		content.add_child(icon)
 		var label := MindWidgets.label(str(entry.get("title", "")))

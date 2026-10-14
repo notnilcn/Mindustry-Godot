@@ -460,6 +460,13 @@ impl MindAssets {
         GString::from(mind_core::ui::text::render_markup(&raw, &self.iconc).as_str())
     }
 
+    /// `UI.formatIcons` (`render_markup`) for a raw markup string that is not a
+    /// bundle key (H05 T10a content-stat cells / descriptions).
+    #[func]
+    pub fn markup_text(&self, raw: GString) -> GString {
+        GString::from(mind_core::ui::text::render_markup(&raw.to_string(), &self.iconc).as_str())
+    }
+
     /// Selectable locales (`assets/locales`).
     #[func]
     pub fn locales(&self) -> PackedStringArray {

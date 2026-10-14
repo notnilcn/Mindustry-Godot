@@ -12,6 +12,7 @@ pub mod builder;
 pub mod campaign;
 pub mod chat;
 pub mod console;
+pub mod content_stats;
 pub mod database;
 pub mod display;
 pub mod file_chooser;
