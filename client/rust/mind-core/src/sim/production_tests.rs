@@ -13,7 +13,7 @@ use super::Sim;
 use crate::determinism::SimCommand;
 use crate::world::blocks::distribution::transfer;
 
-fn place(sim: &mut Sim, name: &str, x: i16, y: i16) -> Entity {
+pub(super) fn place(sim: &mut Sim, name: &str, x: i16, y: i16) -> Entity {
     let id = sim.world_block_id(name).expect("block");
     sim.command(SimCommand::Place {
         x,
@@ -27,7 +27,7 @@ fn place(sim: &mut Sim, name: &str, x: i16, y: i16) -> Entity {
     sim.grid.entity_at(TilePos::new(x, y)).expect("entity")
 }
 
-fn item(sim: &Sim, name: &str) -> crate::content::ItemId {
+pub(super) fn item(sim: &Sim, name: &str) -> crate::content::ItemId {
     sim.block_runtime()
         .expect("runtime")
         .content()
@@ -85,7 +85,7 @@ fn stored_liquid(sim: &Sim, e: Entity, liquid: crate::content::LiquidId) -> f32 
         .unwrap_or(0.0)
 }
 
-fn runtime_sim() -> Sim {
+pub(super) fn runtime_sim() -> Sim {
     let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
     let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
     sim.grid.fill(stone, BlockId::AIR);
@@ -147,7 +147,7 @@ fn conduit_feeds_a_liquid_consumer() {
     );
 }
 
-fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
+pub(super) fn configure(sim: &mut Sim, x: i16, y: i16, value: crate::determinism::ConfigValue) {
     sim.command(SimCommand::Configure { x, y, value })
         .expect("configure");
 }
@@ -2233,7 +2233,7 @@ fn live_tick_global_advances() {
 // ---- G06 T4 (PAR-0104): live world-processor bridge ----
 
 /// Installs a campaign session (the live rules/markers/wave source) on `sim`.
-fn install_campaign_session(sim: &mut Sim, rules: crate::game::rules::Rules) {
+pub(super) fn install_campaign_session(sim: &mut Sim, rules: crate::game::rules::Rules) {
     use crate::game::planet::EmptyNeighborhood;
     use crate::game::play::PlaySession;
     use crate::game::runtime::CampaignRuntime;
@@ -2246,7 +2246,7 @@ fn install_campaign_session(sim: &mut Sim, rules: crate::game::rules::Rules) {
 }
 
 /// Live-client logic resources (what `gdext` `install_sim_seams` inserts).
-fn install_logic_world(sim: &mut Sim) {
+pub(super) fn install_logic_world(sim: &mut Sim) {
     sim.ecs
         .0
         .insert_resource(crate::logic::world::LogicWorldState {
@@ -2259,7 +2259,7 @@ fn install_logic_world(sim: &mut Sim) {
 }
 
 /// Places a configurable world processor running `code`.
-fn place_world_processor(sim: &mut Sim, x: i16, y: i16, code: &str) {
+pub(super) fn place_world_processor(sim: &mut Sim, x: i16, y: i16, code: &str) {
     let id = sim
         .world_block_id("world-processor")
         .expect("world-processor");
@@ -2276,7 +2276,7 @@ fn place_world_processor(sim: &mut Sim, x: i16, y: i16, code: &str) {
     configure(sim, x, y, crate::determinism::ConfigValue::Bytes(bytes));
 }
 
-fn test_rules() -> crate::game::rules::Rules {
+pub(super) fn test_rules() -> crate::game::rules::Rules {
     crate::game::rules::Rules {
         default_team: 1,
         allow_edit_world_processors: true,
