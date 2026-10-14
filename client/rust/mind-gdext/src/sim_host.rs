@@ -3760,15 +3760,14 @@ impl MindSimHost {
             .to_radians();
         let seq = runtime.seq;
         runtime.seq = seq.wrapping_add(1);
-        let mut state =
-            mind_core::entities::comp::weather::WeatherRuntime::new(weather, intensity, duration);
-        state.wind_x = angle.cos();
-        state.wind_y = angle.sin();
-        self.sim.ecs.0.spawn((
-            state,
-            mind_core::entities::comp::WeatherState,
-            mind_core::ecs::EntitySeq(seq),
-        ));
+        mind_core::entities::comp::weather::create_weather(
+            &mut self.sim.ecs.0,
+            seq,
+            weather,
+            intensity,
+            duration,
+            (angle.cos(), angle.sin()),
+        );
         self.sim.ecs.0.insert_non_send(runtime);
         true
     }

@@ -976,6 +976,23 @@ impl MindCampaign {
                 host.bind_mut().apply_world_rules(&self.session.rules);
             }
         }
+        // `World.loadSector` -> `setSectorRules` -> `planet.generator.addWeather`
+        // (World.java:292,303): fresh generations get terrain weather, replacing
+        // the preset map's entries; resumed saves keep theirs.
+        let fresh = !resume;
+        if fresh
+            && mind_core::maps::generators::planet::planet_adds_weather(&planet_name)
+            && let Some(host) = self.host()
+        {
+            let host = host.bind();
+            if let Some(content) = host.content_registry() {
+                self.session.rules.weather = mind_core::maps::generators::planet::add_weather(
+                    host.grid(),
+                    content,
+                    &self.session.rules,
+                );
+            }
+        }
         // `Logic.play` installs the map objective executor from the final rules;
         // the play-flow events ran before the map merge above, so rebuild the
         // runtime here or the tutorial's first objective never qualifies

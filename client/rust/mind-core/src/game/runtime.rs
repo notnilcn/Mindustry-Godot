@@ -1229,14 +1229,14 @@ pub fn weather_system(world: &mut World) {
                 .to_radians();
             let seq = runtime.seq;
             runtime.seq = seq.wrapping_add(1);
-            let mut state = WeatherRuntime::new(weather, intensity, duration);
-            state.wind_x = angle.cos();
-            state.wind_y = angle.sin();
-            world.spawn((
-                state,
-                crate::entities::comp::WeatherState,
-                crate::ecs::EntitySeq(seq),
-            ));
+            crate::entities::comp::weather::create_weather(
+                world,
+                seq,
+                weather,
+                intensity,
+                duration,
+                (angle.cos(), angle.sin()),
+            );
         }
     }
 
