@@ -602,6 +602,10 @@ impl Sim {
             return 0;
         }
         let is_move = command == MOVE_COMMAND.raw();
+        // `setUnitCommand` carries the `(0, 0)` wire pair (`command_emit.rs`):
+        // a command switch must not create a move target. A real move to world
+        // (0, 0) is indistinguishable on this wire — accepted deviation.
+        let set_only = is_move && x == 0.0 && y == 0.0;
         let default_team = self.live_default_team();
         let target = resolve_wire_target(x, y);
         // `CommandAI.commandTarget` (G01 T16): Unit/Building wire targets keep
@@ -687,8 +691,9 @@ impl Sim {
                 continue;
             }
             // Move orders need a resolvable target; other commands only switch
-            // the active command.
-            let order = if is_move {
+            // the active command. A `(0, 0)` wire pair is a pure command
+            // switch (`setUnitCommand`), not a move to world (0, 0).
+            let order = if is_move && !set_only {
                 let Some(tile) = tile else {
                     continue;
                 };

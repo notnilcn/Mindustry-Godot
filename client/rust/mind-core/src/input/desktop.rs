@@ -168,7 +168,12 @@ impl DesktopController {
         self.state.tapped_one = self.state.selected_units.len() == 1;
     }
 
-    /// `commandTap`: resolves target and builds the `commandUnits` action.
+    /// `commandTap` (`InputHandler.java:1165-1201`): resolves the target and
+    /// builds the `commandUnits` / `commandBuilding` actions.
+    ///
+    /// `enemy_building` is the tile under the cursor when it holds another
+    /// team's building (`attack instanceof Building`); Java keeps a derelict
+    /// building (`team == derelict != player.team()`) as the target too.
     pub fn command_tap(
         &mut self,
         units: &[SelectableUnit],
@@ -176,21 +181,37 @@ impl DesktopController {
         x: f32,
         y: f32,
         queue: bool,
-    ) -> Option<RemoteAction> {
-        if self.state.selected_units.is_empty() {
-            return None;
+        enemy_building: Option<TilePos>,
+    ) -> SmallVec<[RemoteAction; 2]> {
+        let mut actions: SmallVec<[RemoteAction; 2]> = SmallVec::new();
+        if !self.state.selected_units.is_empty() {
+            let target = if let Some(pos) = enemy_building {
+                CommandTarget::Building(pos)
+            } else if let Some(enemy) = enemy_unit_at(units, player_team, x, y, 11.0) {
+                CommandTarget::Unit(enemy)
+            } else {
+                CommandTarget::Position { x, y }
+            };
+            actions.push(RemoteAction::CommandUnits {
+                units: self.state.selected_units.iter().copied().collect(),
+                target,
+                queue,
+                final_batch: true,
+            });
         }
-        let target = if let Some(enemy) = enemy_unit_at(units, player_team, x, y, 11.0) {
-            CommandTarget::Unit(enemy)
-        } else {
-            CommandTarget::Position { x, y }
-        };
-        Some(RemoteAction::CommandUnits {
-            units: self.state.selected_units.iter().copied().collect(),
-            target,
-            queue,
-            final_batch: true,
-        })
+        if !self.state.command_buildings.is_empty() {
+            actions.push(RemoteAction::CommandBuilding {
+                positions: self
+                    .state
+                    .command_buildings
+                    .iter()
+                    .map(|pos| pos.pack())
+                    .collect(),
+                x,
+                y,
+            });
+        }
+        actions
     }
 }
 
@@ -346,5 +367,57 @@ mod tests {
         assert!(!deselect_stops_mining(true, false, 0), "block selected");
         assert!(!deselect_stops_mining(false, true, 0), "command mode");
         assert!(!deselect_stops_mining(false, false, 1), "queued plans");
+    }
+
+    fn selectable(id: i32, team: u8, x: f32, y: f32) -> SelectableUnit {
+        SelectableUnit {
+            id,
+            type_id: 0,
+            x,
+            y,
+            team,
+            commandable: false,
+            hit_size: 8.0,
+            select_global: true,
+            payload: false,
+        }
+    }
+
+    #[test]
+    fn command_tap_targets_enemy_building() {
+        // `InputHandler.java:1165-1171`: the building under the cursor wins
+        // when its team is not the player's, even over an enemy unit.
+        let mut controller = DesktopController::new(1);
+        controller.state.selected_units.push(7);
+        let units = [selectable(9, 2, 100.0, 100.0)];
+        let actions =
+            controller.command_tap(&units, 1, 100.0, 100.0, false, Some(TilePos::new(140, 62)));
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            RemoteAction::CommandUnits { target, .. } => {
+                assert_eq!(*target, CommandTarget::Building(TilePos::new(140, 62)));
+            }
+            other => panic!("expected CommandUnits, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn command_tap_commands_buildings() {
+        // `InputHandler.java:1200-1201`: selected commandable buildings get a
+        // `commandBuilding` rally point even with no unit selection.
+        let mut controller = DesktopController::new(1);
+        controller
+            .state
+            .command_buildings
+            .push(TilePos::new(10, 12));
+        let actions = controller.command_tap(&[], 1, 50.0, 60.0, false, None);
+        assert_eq!(actions.len(), 1);
+        match &actions[0] {
+            RemoteAction::CommandBuilding { positions, x, y } => {
+                assert_eq!(positions.as_slice(), &[TilePos::new(10, 12).pack()]);
+                assert_eq!((*x, *y), (50.0, 60.0));
+            }
+            other => panic!("expected CommandBuilding, got {other:?}"),
+        }
     }
 }

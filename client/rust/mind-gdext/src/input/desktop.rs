@@ -1500,14 +1500,33 @@ impl DesktopBridge {
 
     /// `command_tap` on the world (right click in command mode).
     fn command_tap(&mut self, bindings: &BindingState) {
+        let queue = self.key_down(bindings, ids::COMMAND_QUEUE);
+        self.command_tap_with_queue(queue);
+    }
+
+    /// `DesktopInput.touchDown` (DI:924-934): the middle click
+    /// (`Binding.commandQueue`) issues a queued order in command mode.
+    fn command_tap_queued(&mut self) {
+        self.command_tap_with_queue(true);
+    }
+
+    fn command_tap_with_queue(&mut self, queue: bool) {
         let Some((x, y)) = self.cursor_world() else {
             return;
         };
-        let queue = self.key_down(bindings, ids::COMMAND_QUEUE);
-        let action = self
-            .controller
-            .command_tap(&self.selectable, self.player_team(), x, y, queue);
-        if let Some(action) = action {
+        // `InputHandler.commandTap` IH:1166-1168: the building under the
+        // cursor is the attack target when its team is not the player's
+        // (derelict counts as an enemy target, as in Java).
+        let player_team = self.player_team();
+        let enemy_building = self.cursor_tile().and_then(|(tx, ty)| {
+            let host = self.host.clone()?;
+            let team = host.bind().building_team(tx, ty)?;
+            (team != player_team).then_some(mind_core::world::TilePos::new(tx as i16, ty as i16))
+        });
+        let actions =
+            self.controller
+                .command_tap(&self.selectable, player_team, x, y, queue, enemy_building);
+        for action in actions {
             self.emit_action(action);
         }
     }
@@ -1892,7 +1911,13 @@ impl DesktopBridge {
             ("left", false) => self.left_release(),
             ("right", true) => self.right_press(bindings),
             ("right", false) => self.right_release(bindings),
-            ("middle", true) => self.pick_block(),
+            ("middle", true) => {
+                if self.controller.state.command_mode {
+                    self.command_tap_queued();
+                } else {
+                    self.pick_block();
+                }
+            }
             _ => {}
         }
     }
