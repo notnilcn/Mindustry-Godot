@@ -159,6 +159,9 @@ pub struct BulletDef {
     pub speed: f32,
     /// Direct damage on hit.
     pub damage: f32,
+    /// `BulletType.estimateDPS()` (computed bottom-up by the post-`init`
+    /// [`super::units::link`] pass; `0` until then).
+    pub estimate_dps: f32,
     /// Hitbox size.
     pub hit_size: f32,
     /// Clipping hitbox (derived with trail length).
@@ -606,6 +609,7 @@ impl BulletDef {
             lifetime: 40.0,
             speed: 1.0,
             damage: 1.0,
+            estimate_dps: 0.0,
             hit_size: 4.0,
             draw_size: 40.0,
             angle_offset: 0.0,

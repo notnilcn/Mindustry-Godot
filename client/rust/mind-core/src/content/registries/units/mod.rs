@@ -2380,6 +2380,80 @@ pub(crate) fn load_into(
     load(&mut sink)
 }
 
+/// `UnitType.estimateDps` (`type/UnitType.java:1129-1142`): the summed
+/// `Weapon.dps()` over the weapons, scaled down for suicide units.
+pub(crate) fn unit_estimate_dps(unit: &UnitTypeDef, bullet_dps: &[f32]) -> f32 {
+    let mut sum = 0.0;
+    for weapon in &unit.weapons {
+        sum += (bullet_dps
+            .get(weapon.bullet.id.index())
+            .copied()
+            .unwrap_or(0.0)
+            / weapon.reload)
+            * weapon.shoot.shots as f32
+            * 60.0;
+    }
+    if unit.weapons.iter().any(|weapon| weapon.bullet.kill_shooter) {
+        sum /= 15.0;
+    }
+    sum
+}
+
+/// Computes and patches `BulletType.estimateDPS()` for every bullet,
+/// bottom-up in id order, and returns the values by bullet index.
+///
+/// Frag and spawn bullets always precede their parents in vanilla construction
+/// order. `spawnUnit`/`despawnUnit` bullets take the spawned unit's estimate
+/// (`BulletType.java:424-441`); the units' weapons fire earlier bullets, so the
+/// values are already in `dps` (documented deviation: a forward reference reads
+/// 0 instead of recursing like Java's cached `cachedDps`).
+///
+/// Called by [`link`] and again by `turrets::install_turret_ammo` after the
+/// anonymous `Blocks.java` `ammo(...)` bullets join the registry (they are
+/// appended after the `link` pass); re-running is idempotent.
+pub(crate) fn compute_bullet_dps(registry: &mut ContentRegistry) -> Vec<f32> {
+    let mut dps: Vec<f32> = Vec::with_capacity(registry.bullets().len());
+    for bullet in registry.bullets() {
+        let sum = if let Some(unit_id) = bullet.spawn_unit {
+            registry
+                .unit(unit_id)
+                .map_or(0.0, |unit| unit_estimate_dps(unit, &dps))
+        } else if let Some(unit_id) = bullet.despawn_unit {
+            registry
+                .unit(unit_id)
+                .map_or(0.0, |unit| unit_estimate_dps(unit, &dps))
+        } else {
+            let mut sum = (bullet.damage + bullet.splash_damage * 0.75)
+                * if bullet.pierce {
+                    if bullet.pierce_cap == -1 {
+                        2.0
+                    } else {
+                        bullet.pierce_cap.clamp(1, 2) as f32
+                    }
+                } else {
+                    1.0
+                };
+            if let Some(frag) = bullet.frag_bullet
+                && frag != bullet.id
+            {
+                sum += dps.get(frag.index()).copied().unwrap_or(0.0) * bullet.frag_bullets as f32
+                    / 2.0;
+            }
+            for spawn in &bullet.spawn_bullets {
+                sum += dps.get(spawn.index()).copied().unwrap_or(0.0);
+            }
+            sum
+        };
+        dps.push(sum);
+    }
+    for (index, value) in dps.iter().enumerate() {
+        if let Some(bullet) = registry.bullets.get_mut(index) {
+            bullet.estimate_dps = *value;
+        }
+    }
+    dps
+}
+
 /// Post-`init()` link pass (`UnitType.init()` cross-content pieces):
 ///
 /// * computes `BulletType.estimateDPS()` bottom-up (frag/interval/spawn
@@ -2390,29 +2464,7 @@ pub(crate) fn load_into(
 /// * fills naval `wet` immunities and the default command/stance lists
 ///   (`type/UnitType.java:1067-1121`).
 pub(crate) fn link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
-    // Bullet DPS bottom-up in id order.
-    let mut dps: Vec<f32> = Vec::with_capacity(registry.bullets().len());
-    for bullet in registry.bullets() {
-        let mut sum = (bullet.damage + bullet.splash_damage * 0.75)
-            * if bullet.pierce {
-                if bullet.pierce_cap == -1 {
-                    2.0
-                } else {
-                    bullet.pierce_cap.clamp(1, 2) as f32
-                }
-            } else {
-                1.0
-            };
-        if let Some(frag) = bullet.frag_bullet
-            && frag != bullet.id
-        {
-            sum += dps.get(frag.index()).copied().unwrap_or(0.0) * bullet.frag_bullets as f32 / 2.0;
-        }
-        for spawn in &bullet.spawn_bullets {
-            sum += dps.get(spawn.index()).copied().unwrap_or(0.0);
-        }
-        dps.push(sum);
-    }
+    let dps = compute_bullet_dps(registry);
 
     let wet = registry.status_id("wet");
     let command_id = |name: &str| {
@@ -2439,16 +2491,7 @@ pub(crate) fn link(registry: &mut ContentRegistry) -> Result<(), ContentError> {
 
     let mut updates: Vec<UnitUpdate> = Vec::new();
     for unit in registry.units() {
-        let mut dps_estimate = 0.0;
-        for weapon in &unit.weapons {
-            dps_estimate += (dps.get(weapon.bullet.id.index()).copied().unwrap_or(0.0)
-                / weapon.reload)
-                * weapon.shoot.shots as f32
-                * 60.0;
-        }
-        if unit.weapons.iter().any(|weapon| weapon.bullet.kill_shooter) {
-            dps_estimate /= 15.0;
-        }
+        let dps_estimate = unit_estimate_dps(unit, &dps);
 
         // Default commands (`UnitType.java:1067-1103`).
         let mut commands = unit.commands.clone();

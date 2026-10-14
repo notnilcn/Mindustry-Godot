@@ -28,6 +28,10 @@ pub struct UnitCore {
     pub boosting: bool,
     /// Rail/boost flag mirror (`wasPlayer`-adjacent; transient).
     pub spawned_by_core: bool,
+    /// `UnitComp.flag` (`UnitComp.java:55`): an arbitrary per-unit marker used
+    /// by `prebuildAi` (packed core tile position via Arc `Point2.pack`) and
+    /// later RTS mobilization (`unit.flag`).
+    pub flag: f64,
 }
 
 impl UnitCore {
@@ -39,6 +43,7 @@ impl UnitCore {
             elevation: 0.0,
             boosting: false,
             spawned_by_core: false,
+            flag: 0.0,
         }
     }
 }
