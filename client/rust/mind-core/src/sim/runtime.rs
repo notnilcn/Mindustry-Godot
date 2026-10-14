@@ -170,6 +170,9 @@ pub struct SimRuntime {
     /// every tick (the behavior hook cannot see `Sim`'s grid). Stale entries are
     /// dropped by the refresh pass.
     thermal_generators: Vec<Entity>,
+    /// Live `BeamNode` buildings whose directional links are rebuilt whenever
+    /// `WorldGrid.tile_changes` moves (H02 T15). Stale entries drop out.
+    beam_nodes: Vec<Entity>,
 }
 
 impl SimRuntime {
@@ -537,6 +540,11 @@ impl SimRuntime {
                 && !self.thermal_generators.contains(&entity)
             {
                 self.thermal_generators.push(entity);
+            }
+            // Beam nodes rebuild their four directional links when the tile
+            // change counter moves (`BeamNode.updateTile`; T15).
+            if self.is_beam_node(world, entity) && !self.beam_nodes.contains(&entity) {
+                self.beam_nodes.push(entity);
             }
         }
         if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
@@ -948,6 +956,14 @@ impl SimRuntime {
             })
     }
 
+    /// Whether this building is a `BeamNode` (registered by the power family;
+    /// `BeamNodeBehavior::create_state` installs the state marker).
+    fn is_beam_node(&self, world: &World, entity: Entity) -> bool {
+        world
+            .get::<crate::world::blocks::power::nodes::BeamNodeState>(entity)
+            .is_some()
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn remove_building(
         &mut self,
@@ -964,6 +980,7 @@ impl SimRuntime {
         self.facing_drills.retain(|drill| *drill != entity);
         self.thermal_generators
             .retain(|generator| *generator != entity);
+        self.beam_nodes.retain(|node| *node != entity);
         {
             let mut ctx = WorldCtx {
                 grid: &mut *grid,
@@ -1082,6 +1099,12 @@ impl SimRuntime {
                 && !self.thermal_generators.contains(entity)
             {
                 self.thermal_generators.push(*entity);
+            }
+        }
+        // Materialized beam nodes join the tile-change rescan (T15).
+        for entity in &spawned {
+            if self.is_beam_node(ecs, *entity) && !self.beam_nodes.contains(entity) {
+                self.beam_nodes.push(*entity);
             }
         }
         spawned.len()
@@ -1288,6 +1311,45 @@ impl Sim {
         }
     }
 
+    /// `BeamNode.updateTile` -> `updateDirections` (T15): rebuilds the four
+    /// directional links of every registered beam node whose
+    /// `WorldGrid.tile_changes` view is stale.
+    pub(crate) fn refresh_beam_nodes(&mut self) {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return;
+        };
+        if runtime.beam_nodes.is_empty() {
+            return;
+        }
+        let changes = self.grid.tile_changes;
+        let nodes = std::mem::take(&mut runtime.beam_nodes);
+        for entity in nodes {
+            if self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Building>(entity)
+                .is_none()
+            {
+                continue;
+            }
+            let stale = self
+                .ecs
+                .0
+                .get::<crate::world::blocks::power::nodes::BeamNodeState>(entity)
+                .is_some_and(|state| state.last_change != changes);
+            if stale && let Some(mut graphs) = self.ecs.0.remove_resource::<PowerGrids>() {
+                crate::world::blocks::power::nodes::update_beam_directions(
+                    &mut graphs,
+                    &mut self.ecs.0,
+                    &self.grid,
+                    entity,
+                );
+                self.ecs.0.insert_resource(graphs);
+            }
+            runtime.beam_nodes.push(entity);
+        }
+    }
+
     /// Installs the live building runtime with default configuration (no
     /// placement gate). Content is booted from the vanilla registry.
     pub fn install_block_runtime(&mut self) -> Result<(), RuntimeError> {
@@ -1380,6 +1442,7 @@ impl Sim {
             render: NoopRenderHooks,
             facing_drills: Vec::new(),
             thermal_generators: Vec::new(),
+            beam_nodes: Vec::new(),
         });
         // A host may install the runtime after loading a grid with pre-placed
         // power buildings (`World.endMapLoad` rebuild).

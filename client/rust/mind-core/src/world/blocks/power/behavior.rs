@@ -30,7 +30,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
-use crate::content::{Attribute, ContentRegistry, ItemId, LiquidId};
+use crate::content::{Attribute, BlockKind, ContentRegistry, ItemId, LiquidId};
 use crate::entities::comp::Building;
 use crate::world::behavior::helpers::{
     block_consumes_item, block_consumes_liquid, default_handle_liquid,
@@ -1424,6 +1424,17 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 same_block_connection,
             }),
         );
+    }
+
+    // Beam nodes (`Blocks.java:2667-2688`): `range` is the only knob; the
+    // directional link update runs in `Sim::refresh_beam_nodes` (needs the
+    // grid).
+    for def in content.blocks() {
+        if def.kind != BlockKind::BeamNode {
+            continue;
+        }
+        let range = if def.name == "beam-tower" { 23 } else { 10 };
+        registry.register(def.id, Arc::new(super::nodes::BeamNodeBehavior { range }));
     }
 }
 

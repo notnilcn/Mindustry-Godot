@@ -5120,3 +5120,52 @@ fn bridge_conveyor_throughput() {
         "bridge moved {arrived} items in the 400-tick window (Java: 80)"
     );
 }
+
+/// H02 T15: `BeamNode.BeamNodeBuild.updateDirections` (`BeamNode.java:241-293`)
+/// — a beam node links the first same-team powered, `connectedPower`,
+/// non-`PowerNode` building in each direction within `range` and stops at
+/// insulated blocks. `beam-node` range 10 (`Blocks.java:2671`);
+/// `plastanium-wall` is insulated (`Blocks.java`).
+#[test]
+fn beam_node_links_battery_in_line() {
+    let mut sim = runtime_sim();
+    let node = place(&mut sim, "beam-node", 5, 5);
+    let battery = place(&mut sim, "battery", 12, 5);
+    let graph = |sim: &Sim, e: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::world::modules::PowerModule>(e)
+            .map(|module| module.graph)
+    };
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        graph(&sim, node),
+        graph(&sim, battery),
+        "the beam node linked the battery 7 tiles in line"
+    );
+
+    // A power node is not a link target (`!(other.block instanceof PowerNode)`)
+    // but it does not stop the scan: the beam still reaches the battery.
+    let _power_node = place(&mut sim, "power-node", 8, 5);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        graph(&sim, node),
+        graph(&sim, battery),
+        "the power node is skipped, not treated as insulation"
+    );
+
+    // An insulated plastanium wall severs the line (`BeamNode.java:266`).
+    let _wall = place(&mut sim, "plastanium-wall", 9, 5);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    assert_ne!(
+        graph(&sim, node),
+        graph(&sim, battery),
+        "the insulated wall broke the beam link"
+    );
+}

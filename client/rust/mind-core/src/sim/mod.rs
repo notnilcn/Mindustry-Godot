@@ -1075,6 +1075,9 @@ impl Sim {
         // `ThermalGeneratorBuild.onProximityAdded` (T14): the floor-attribute
         // sum also needs the grid.
         self.refresh_thermal_generators();
+        // `BeamNode.updateTile` -> `updateDirections` (T15): the directional
+        // scan needs the grid and the power graph arena.
+        self.refresh_beam_nodes();
         // `Groups.fires`/`Groups.puddles.update()` (`Logic.updateEntities`):
         // fires burn/spread and puddles evaporate/apply statuses every tick
         // (PAR-0091). Damage they deal is picked up by `resolve_deaths` below.
