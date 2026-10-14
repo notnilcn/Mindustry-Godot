@@ -2324,6 +2324,8 @@ pub fn unit_update_system(world: &mut World) {
             waves: campaign.session.rules.waves,
             default_team: campaign.session.rules.default_team,
             drop_zone_radius: campaign.session.rules.drop_zone_radius,
+            wave_team: campaign.session.rules.wave_team,
+            pvp: campaign.session.rules.pvp,
         })
         .unwrap_or_default();
     // `Pathfinder.EnemyCoreField.getPositions` target sets, one per team per
@@ -2886,6 +2888,37 @@ pub fn unit_update_system(world: &mut World) {
                 };
                 crate::ai::types::boost::update_boost(&mut ctx, entity, &mut state);
             }
+        } else if slot.kind == AiKind::Defender {
+            // `DefenderAI` (`DefenderAI.java:12-45`): escort the healthiest
+            // player-controllable ally; no weapons pass of its own.
+            update_defender_ai(world, &mut runtime, entity, team, ground_rules);
+        } else if slot.kind == AiKind::FlyingFollow {
+            // `FlyingFollowAI` (`FlyingFollowAI.java:11-60`): follow an allied
+            // leader on wave teams, else the `FlyingAI` fallback.
+            update_flying_follow_ai(
+                world,
+                &mut runtime,
+                &queries,
+                entity,
+                team,
+                slot,
+                ground_rules,
+            );
+        } else if slot.kind == AiKind::Hug {
+            // `HugAI` (`HugAI.java:16-61`): ray-checked approach, contact
+            // circle and the enemy-core override.
+            update_hug_ai(
+                world,
+                &mut runtime,
+                &queries,
+                entity,
+                team,
+                ground_rules,
+                &mut core_target_cache,
+            );
+        } else if slot.kind == AiKind::NoAi {
+            // `NoAI.updateUnit(){}`: the dummy never runs a controller (the
+            // kinematics/environment tail still runs, as in Java `Unit.update`).
         } else {
             let flying = slot.kind == AiKind::Flying
                 || world
@@ -4183,12 +4216,15 @@ fn resolve_command_kind(
 }
 
 /// The `state.rules` fields `GroundAI` reads (`Rules.waves`, `defaultTeam`,
-/// `dropZoneRadius`).
+/// `dropZoneRadius`); `wave_team`/`pvp` serve T9's `FlyingFollowAI.useFallback`
+/// and `DefenderAI`'s enemy-core fallback.
 #[derive(Debug, Clone, Copy)]
 struct GroundAiRules {
     waves: bool,
     default_team: u8,
     drop_zone_radius: f32,
+    wave_team: u8,
+    pvp: bool,
 }
 
 impl Default for GroundAiRules {
@@ -4197,6 +4233,8 @@ impl Default for GroundAiRules {
             waves: false,
             default_team: 1,
             drop_zone_radius: 300.0,
+            wave_team: 2,
+            pvp: false,
         }
     }
 }
@@ -4537,6 +4575,472 @@ fn update_flying_ai(
     }
 }
 
+/// `DefenderAI` (`DefenderAI.java:12-45`; H01 T9): retarget the healthiest
+/// player-controllable ally, keep `targetHitSize/2 * 1.1 + ownHitSize/2 + 15`
+/// px away (smooth 50), look at it. No weapons pass (Java has none).
+fn update_defender_ai(
+    world: &mut World,
+    runtime: &mut UnitRuntime,
+    entity: Entity,
+    team: u8,
+    rules: GroundAiRules,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let Some(type_id) = world.get::<UnitTypeComp>(entity).map(|comp| comp.type_id) else {
+        return;
+    };
+    let Some((max_range, hit_size)) = runtime
+        .content
+        .unit(type_id)
+        .map(|def| (def.max_range, def.hit_size))
+    else {
+        return;
+    };
+    let mut state = world
+        .get::<crate::ai::types::defender::DefenderAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+    // `DefenderAI.updateTargeting`: `if(retarget()) target = findTarget(...)`.
+    state.retarget += 1.0;
+    if state.retarget >= if state.target.is_none() { 40.0 } else { 90.0 } {
+        state.retarget = 0.0;
+        state.target = crate::ai::types::defender::defender_find_target(
+            world,
+            &runtime.content,
+            team,
+            pos.x,
+            pos.y,
+            max_range,
+            type_id,
+            rules.waves,
+            rules.wave_team,
+        );
+    }
+    // `DefenderAI.updateMovement`: `moveTo(target, keepDistance, 50f)` and
+    // `unit.lookAt(target)`.
+    if let Some(target) = state.target
+        && let Some(tpos) = world.get::<Pos>(target).copied()
+    {
+        let target_hit = target_hit_size_of(world, &runtime.content, target);
+        move_to_point(
+            world,
+            &runtime.grid,
+            &runtime.content,
+            entity,
+            tpos.x,
+            tpos.y,
+            target_hit / 2.0 * 1.1 + hit_size / 2.0 + 15.0,
+            50.0,
+            true,
+        );
+    }
+    // `DefenderAI.updateTargeting` sets `target` directly — Java never runs
+    // `AIController.updateWeapons`'s `invalid(target)` clear for this
+    // controller (the target is a same-team ally, which that check would drop).
+    if let Some(mut stored) = world.get_mut::<crate::ai::types::defender::DefenderAiState>(entity) {
+        *stored = state;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `FlyingFollowAI` (`FlyingFollowAI.java:11-60`; H01 T9): wave-team flyers
+/// follow the healthiest allied non-follower (30-tick re-pick) with the
+/// inherited `FlyingAI` targeting/weapons; all other teams run `FlyingAI`
+/// (`useFallback()` = `rules.pvp || rules.waveTeam != unit.team`).
+#[allow(clippy::too_many_arguments)]
+fn update_flying_follow_ai(
+    world: &mut World,
+    runtime: &mut UnitRuntime,
+    queries: &TargetQueries,
+    entity: Entity,
+    team: u8,
+    slot: ControllerSlot,
+    rules: GroundAiRules,
+) {
+    // `if(useFallback() && fallback() != null){ fallback.updateUnit(); return; }`
+    if rules.pvp || rules.wave_team != team {
+        update_flying_ai(world, runtime, queries, entity, team, slot, rules);
+        return;
+    }
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let Some(type_id) = world.get::<UnitTypeComp>(entity).map(|comp| comp.type_id) else {
+        return;
+    };
+    let Some((
+        max_range,
+        type_range,
+        target_air,
+        target_ground,
+        target_under_blocks,
+        target_flags,
+        has_weapons,
+        hit_size,
+    )) = runtime.content.unit(type_id).map(|def| {
+        (
+            def.max_range,
+            def.range,
+            def.target_air,
+            def.target_ground,
+            def.target_under_blocks,
+            def.target_flags.clone(),
+            !def.weapons.is_empty(),
+            def.hit_size,
+        )
+    })
+    else {
+        return;
+    };
+
+    // Inherited `FlyingAI` targeting (`findMainTarget` + 40/90 retarget).
+    let mut fly = world
+        .get::<FlyingAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+    fly.retarget += 1.0;
+    let mut retargeted = false;
+    if fly.retarget >= if fly.target.is_none() { 40.0 } else { 90.0 } {
+        fly.retarget = 0.0;
+        retargeted = true;
+        fly.target = flying_main_target(
+            world,
+            queries,
+            team,
+            pos.x,
+            pos.y,
+            max_range,
+            target_air,
+            target_ground,
+            target_under_blocks,
+            &target_flags,
+        );
+    }
+    if let Some(target) = fly.target
+        && invalid_target(world, &runtime.content, team, target)
+    {
+        fly.target = None;
+    }
+    // `AIController.updateWeapons` with `FlyingAI.findTarget` per mount.
+    update_ai_weapons(
+        world,
+        &runtime.content,
+        queries,
+        entity,
+        team,
+        AiWeaponCtx {
+            main_target: fly.target,
+            retarget: retargeted,
+            flying_find: true,
+            core_override: None,
+            should_shoot: true,
+        },
+    );
+    if let Some(mut stored) = world.get_mut::<FlyingAiState>(entity) {
+        *stored = fly;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(fly);
+    }
+
+    // `timer.get(timerTarget3, 30f)` -> re-pick `following`, then movement.
+    let mut state = world
+        .get::<crate::ai::types::flying_follow::FlyingFollowAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+    state.follow_timer += 1.0;
+    if state.follow_timer >= 30.0 {
+        state.follow_timer = 0.0;
+        state.following = crate::ai::types::flying_follow::flying_follow_closest(
+            world, team, pos.x, pos.y, type_range, type_id,
+        );
+    }
+    if let Some(following) = state.following
+        && world.get_entity(following).is_err()
+    {
+        state.following = None;
+    }
+    let mut look: Option<(f32, f32)> = None;
+    if let Some(following) = state.following {
+        if let Some(fpos) = world.get::<Pos>(following).copied() {
+            let target_hit = target_hit_size_of(world, &runtime.content, following);
+            move_to_point(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                entity,
+                fpos.x,
+                fpos.y,
+                target_hit / 2.0 * 1.1 + hit_size / 2.0 + 15.0,
+                50.0,
+                false,
+            );
+            look = Some((fpos.x, fpos.y));
+        }
+    } else if let Some(target) = fly.target
+        && has_weapons
+        && let Some(tpos) = world.get::<Pos>(target).copied()
+    {
+        // `else if(target != null && unit.hasWeapons()){ moveTo(target, 80f); }`
+        move_to_point(
+            world,
+            &runtime.grid,
+            &runtime.content,
+            entity,
+            tpos.x,
+            tpos.y,
+            80.0,
+            100.0,
+            false,
+        );
+    }
+    // `shouldFaceTarget()`: `target != null && (following == null ||
+    // unit.within(target, unit.range()))`.
+    let face = fly.target.is_some_and(|target| {
+        state.following.is_none() || entity_pos_within(world, entity, target, max_range)
+    });
+    if face {
+        if let Some(target) = fly.target
+            && let Some(tpos) = world.get::<Pos>(target).copied()
+        {
+            look_at_world(world, entity, tpos.x, tpos.y);
+        }
+    } else if let Some((lx, ly)) = look {
+        look_at_world(world, entity, lx, ly);
+    }
+    if let Some(mut stored) =
+        world.get_mut::<crate::ai::types::flying_follow::FlyingFollowAiState>(entity)
+    {
+        *stored = state;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `HugAI` (`HugAI.java:16-61`; H01 T9): `AIController` targeting + the enemy
+/// core override, a `Geometry.d4c` `canPass` ray-check of the approach,
+/// straight/rotated `movePref` and the `fieldCore` pathfall.
+#[allow(clippy::too_many_arguments)]
+fn update_hug_ai(
+    world: &mut World,
+    runtime: &mut UnitRuntime,
+    queries: &TargetQueries,
+    entity: Entity,
+    team: u8,
+    rules: GroundAiRules,
+    core_targets: &mut BTreeMap<u8, Vec<TilePos>>,
+) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let Some(type_id) = world.get::<UnitTypeComp>(entity).map(|comp| comp.type_id) else {
+        return;
+    };
+    let Some((
+        max_range,
+        type_range,
+        target_air,
+        target_ground,
+        target_under_blocks,
+        hit_size,
+        cost,
+    )) = runtime.content.unit(type_id).map(|def| {
+        (
+            def.max_range,
+            def.range,
+            def.target_air,
+            def.target_ground,
+            def.target_under_blocks,
+            def.hit_size,
+            unit_flowfield_cost(def),
+        )
+    })
+    else {
+        return;
+    };
+
+    // `AIController.updateWeapons`'s main-target half (`findMainTarget` =
+    // `target()` = `Units.closestTarget`).
+    let mut state = world
+        .get::<crate::ai::types::hug::HugAiState>(entity)
+        .copied()
+        .unwrap_or_default();
+    state.retarget += 1.0;
+    let mut retargeted = false;
+    if state.retarget >= if state.target.is_none() { 40.0 } else { 90.0 } {
+        state.retarget = 0.0;
+        retargeted = true;
+        state.target = queries.closest_target(
+            world,
+            team,
+            pos.x,
+            pos.y,
+            max_range,
+            target_air,
+            target_ground,
+            true,
+            target_under_blocks,
+        );
+    }
+    if let Some(target) = state.target
+        && invalid_target(world, &runtime.content, team, target)
+    {
+        state.target = None;
+    }
+
+    // `Building core = unit.closestEnemyCore();` — in
+    // `unit.range() / 1.1f + core.block.size * tilesize / 2f` the unit locks it.
+    let core = closest_enemy_core(world, team, pos.x, pos.y);
+    let mut core_in_range = false;
+    if let Some(core_entity) = core
+        && let Some(cpos) = world.get::<Pos>(core_entity).copied()
+    {
+        let size = world
+            .get::<BuildingComp>(core_entity)
+            .and_then(|comp| runtime.content.block(comp.block))
+            .map(|def| def.size as f32)
+            .unwrap_or(0.0);
+        let radius = max_range / 1.1 + size * TILE_SIZE / 2.0;
+        let dx = cpos.x - pos.x;
+        let dy = cpos.y - pos.y;
+        if dx * dx + dy * dy <= radius * radius {
+            state.target = Some(core_entity);
+            core_in_range = true;
+        }
+    }
+
+    // `boolean move = true;` + the default-team drop-zone stop.
+    let mut move_toward = true;
+    if rules.waves
+        && team == rules.default_team
+        && let Some(spawner) = closest_spawn_tile(runtime, pos.x, pos.y)
+        && within_spawn(spawner, pos.x, pos.y, rules.drop_zone_radius + 120.0)
+    {
+        move_toward = false;
+    }
+
+    // Ray-checked approach (`World.raycast(.., p -> d4c canPass)`): with a
+    // clear line, circle at contact or steer straight; otherwise path the core
+    // field.
+    let mut direct = false;
+    if let Some(target) = state.target
+        && let Some(tpos) = world.get::<Pos>(target).copied()
+    {
+        let dx = tpos.x - pos.x;
+        let dy = tpos.y - pos.y;
+        let dist2 = dx * dx + dy * dy;
+        if dist2 <= type_range * type_range {
+            let (ux, uy) = (WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
+            let (tx, ty) = (WorldGrid::to_tile(tpos.x), WorldGrid::to_tile(tpos.y));
+            let mut blocked = false;
+            crate::world::raycast::raycast_each(ux, uy, tx, ty, |x, y| {
+                for (ox, oy) in [(1, 0), (0, 1), (-1, 0), (0, -1), (0, 0)] {
+                    if !crate::ai::types::ground::unit_can_pass(
+                        world,
+                        &runtime.grid,
+                        &runtime.content,
+                        entity,
+                        x + ox,
+                        y + oy,
+                    ) {
+                        blocked = true;
+                        return true;
+                    }
+                }
+                false
+            });
+            if !blocked {
+                direct = true;
+                let speed = crate::entities::comp::unit::movement::unit_speed(
+                    world,
+                    &runtime.grid,
+                    &runtime.content,
+                    entity,
+                );
+                let dst = dist2.sqrt();
+                let (nx, ny) = if dst > 0.0001 {
+                    (dx / dst, dy / dst)
+                } else {
+                    (0.0, 0.0)
+                };
+                let target_hit = target_hit_size_of(world, &runtime.content, target);
+                if dist2 <= ((hit_size + target_hit) * 0.5).powi(2) {
+                    // `unit.movePref(vec.set(target).sub(unit).rotate(90f).setLength(unit.speed()))`.
+                    crate::entities::comp::unit::velocity::move_pref(
+                        world,
+                        &runtime.content,
+                        entity,
+                        -ny * speed,
+                        nx * speed,
+                    );
+                } else {
+                    // `unit.movePref(vec.set(target).sub(unit).limit(unit.speed()))`.
+                    let limit = speed.min(dst);
+                    crate::entities::comp::unit::velocity::move_pref(
+                        world,
+                        &runtime.content,
+                        entity,
+                        nx * limit,
+                        ny * limit,
+                    );
+                }
+            }
+        }
+    }
+    if !direct && move_toward {
+        // `pathfind(Pathfinder.fieldCore)` (`stopAtTarget = true`).
+        let targets = core_targets
+            .entry(team)
+            .or_insert_with(|| enemy_core_targets(world, runtime, team, Some(rules)));
+        let UnitRuntime {
+            grid,
+            content,
+            pathfinder,
+            ..
+        } = &mut *runtime;
+        let _ = pathfind_field(
+            world, grid, content, pathfinder, team, entity, cost, targets, true,
+        );
+    }
+
+    // `AIController.updateWeapons`: mounts; hugging weapons lock the core.
+    update_ai_weapons(
+        world,
+        &runtime.content,
+        queries,
+        entity,
+        team,
+        AiWeaponCtx {
+            main_target: state.target,
+            retarget: retargeted,
+            flying_find: false,
+            core_override: core_in_range.then_some(core).flatten(),
+            should_shoot: true,
+        },
+    );
+    // `faceTarget()`.
+    face_target(world, &runtime.content, entity, state.target);
+
+    if let Some(mut stored) = world.get_mut::<crate::ai::types::hug::HugAiState>(entity) {
+        *stored = state;
+    } else if world.get_entity(entity).is_ok() {
+        world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `unit.lookAt(x, y)` (`Angles.angle(x, y, unit.x, unit.y)`).
+fn look_at_world(world: &mut World, entity: Entity, x: f32, y: f32) {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return;
+    };
+    let angle = (y - pos.y).atan2(x - pos.x).to_degrees();
+    if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+        core.rotation = angle;
+    }
+}
+
 /// `FlyingAI.findMainTarget` (FlyingAI.java:40-72): the closest enemy core when
 /// it is within `range`; otherwise the first `targetFlags` entry that yields a
 /// target (`null` = closest in-range target, a flag = closest active flagged
@@ -4717,9 +5221,10 @@ fn enemy_core_targets(
     out
 }
 
-/// `AIController.targetFlag(x, y, BlockFlag.core, enemy=true)`: the closest
-/// enemy core entity; ties break by entity index.
-fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Option<Entity> {
+/// `AIController.targetFlag(x, y, BlockFlag.core, enemy=true)` /
+/// `closestEnemyCore`: the closest enemy core entity; ties break by entity
+/// index.
+pub(crate) fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Option<Entity> {
     let mut best: Option<(f32, Entity)> = None;
     for entity in world.iter_entities() {
         let Some(comp) = entity.get::<BuildingComp>() else {
@@ -4738,6 +5243,37 @@ fn closest_enemy_core(world: &World, team: u8, x: f32, y: f32) -> Option<Entity>
         let dy = pos.y - y;
         let dist2 = dx * dx + dy * dy;
         let id = entity.id();
+        let replace = match best {
+            None => true,
+            Some((best_dist, best_entity)) => {
+                dist2 < best_dist || (dist2 == best_dist && id.index() < best_entity.index())
+            }
+        };
+        if replace {
+            best = Some((dist2, id));
+        }
+    }
+    best.map(|(_, entity)| entity)
+}
+
+/// `unit.closestCore()` (`TeamData.closestCore`): the own-team core closest to
+/// `(x, y)`; ties break by entity index.
+pub(crate) fn closest_core_of_team(world: &World, team: u8, x: f32, y: f32) -> Option<Entity> {
+    let mut best: Option<(f32, Entity)> = None;
+    for entity_ref in world.iter_entities() {
+        if entity_ref.get::<CoreBuild>().is_none() {
+            continue;
+        }
+        if entity_ref.get::<TeamComp>().map(|comp| comp.team) != Some(team) {
+            continue;
+        }
+        let Some(pos) = entity_ref.get::<Pos>() else {
+            continue;
+        };
+        let dx = pos.x - x;
+        let dy = pos.y - y;
+        let dist2 = dx * dx + dy * dy;
+        let id = entity_ref.id();
         let replace = match best {
             None => true,
             Some((best_dist, best_entity)) => {
