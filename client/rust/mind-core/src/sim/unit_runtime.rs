@@ -3047,6 +3047,11 @@ pub fn unit_update_system(world: &mut World) {
     let audio = world
         .remove_resource::<AudioSinkRes>()
         .unwrap_or_else(AudioSinkRes::noop);
+    // H02 T11: shock mines queued by `unitOn` fire their tendrils in push
+    // order (Java creates them inside the unit pass).
+    let pending = world
+        .remove_resource::<crate::world::behavior::PendingShockMineTriggers>()
+        .unwrap_or_default();
     let mut spawned: Vec<Entity> = Vec::new();
     {
         let UnitRuntime {
@@ -3067,6 +3072,17 @@ pub fn unit_update_system(world: &mut World) {
             seq,
             spawned: &mut spawned,
         };
+        for (mine, team) in pending.0 {
+            let state = ctx
+                .world
+                .get::<crate::world::blocks::defense::shields::ShockMineState>(mine)
+                .cloned();
+            if let Some(state) = state {
+                crate::world::blocks::defense::shields::shock_mine_trigger(
+                    &mut ctx, mine, &state, team,
+                );
+            }
+        }
         crate::weapons::update_weapons(&mut ctx);
     }
     world.insert_resource(audio);

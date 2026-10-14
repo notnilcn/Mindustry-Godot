@@ -585,16 +585,11 @@ pub fn update_repair_turret(world: &mut World, e: Entity, turret: &mut RepairTur
         .unwrap_or((0.0, 0.0, 1.0));
 
     let multiplier = if turret.accept_coolant {
+        // `RepairTurret.java:186-188`: `liquids.current().heatCapacity`
+        // (with no coolant `optionalEfficiency` is 0, so the multiplier is 1).
         let heat_capacity = world
             .get::<crate::world::modules::LiquidModule>(e)
-            .and_then(|module| {
-                module
-                    .liquids
-                    .iter()
-                    .enumerate()
-                    .find(|(_, amount)| **amount > 0.0)
-                    .map(|(index, _)| crate::content::LiquidId::new(index as u16))
-            })
+            .map(|module| module.current_liquid())
             .and_then(|liquid| {
                 world
                     .get_resource::<crate::world::modules::LiquidTraits>()
