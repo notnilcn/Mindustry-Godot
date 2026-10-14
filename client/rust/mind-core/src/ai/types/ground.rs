@@ -175,7 +175,7 @@ pub fn update_ground(
         let dest = {
             let width = pathfinder.width;
             let index = current.x() as usize + current.y() as usize * width as usize;
-            let next = pathfinder.target_tile(Cost::Ground, team, &[target], index, true);
+            let next = pathfinder.target_tile(Cost::Ground, team, &[target], index, true, None);
             match next {
                 Some(next) => tile_center((next as i32) % width, (next as i32) / width),
                 None => tile_center(target.x() as i32, target.y() as i32),
@@ -205,6 +205,10 @@ pub fn pathfind_field(
     cost: Cost,
     targets: &[TilePos],
     stop_at_target_tile: bool,
+    // `getTargetTile(.., avoidanceId)` (`Pathfinder.java:383`): `(grid, id)`
+    // when the caller passed `stuckTime >= stuckThreshold` and the unit is on
+    // the ground layer (`AIController.java:155`).
+    avoid: Option<(&[i32], i32)>,
 ) -> bool {
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return false;
@@ -219,10 +223,10 @@ pub fn pathfind_field(
     }
     let width = pathfinder.width;
     let index = current.x() as usize + current.y() as usize * width as usize;
-    // `Flowfield.getNextTile(tile, avoidance ? unit.id : 0)`: the port's
-    // flowfield has no per-unit avoidance flag, so the avoid id is unused.
+    // `Flowfield.getNextTile(tile, avoidance ? unit.id : 0)`: a tile claimed
+    // by a lower-id ground AI unit is skipped (`Pathfinder.java:417`).
     let next = pathfinder
-        .target_tile(cost, team, targets, index, true)
+        .target_tile(cost, team, targets, index, true, avoid)
         .map(|next| ((next as i32) % width, (next as i32) / width));
     let Some((nx, ny)) = next else {
         return false;

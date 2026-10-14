@@ -270,7 +270,7 @@ impl AiCtx<'_> {
         let index = current.x() as usize + current.y() as usize * width as usize;
         let next = self
             .pathfinder
-            .target_tile(Cost::Ground, self.team, &[dest], index, true);
+            .target_tile(Cost::Ground, self.team, &[dest], index, true, None);
         match next {
             Some(next) => {
                 let (nx, ny) = ground::tile_center((next as i32) % width, (next as i32) / width);

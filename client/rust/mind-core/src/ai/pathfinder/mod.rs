@@ -221,12 +221,21 @@ impl Pathfinder {
         targets: &[TilePos],
         node: usize,
         diagonals: bool,
+        avoid: Option<(&[i32], i32)>,
     ) -> Option<usize> {
         let key = self.ensure_field(cost, team, targets);
         let width = self.width;
         let height = self.height;
         let field = self.fields.get(&key)?;
-        field.get_target_tile(&self.tiles, &self.dangerous, node, width, height, diagonals)
+        field.get_target_tile(
+            &self.tiles,
+            &self.dangerous,
+            avoid,
+            node,
+            width,
+            height,
+            diagonals,
+        )
     }
 
     /// Number of cached fields (debug/tests).

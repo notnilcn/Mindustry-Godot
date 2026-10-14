@@ -183,10 +183,12 @@ impl Flowfield {
     ///
     /// `dangerous` is `Tile.dangerous()` per flat index (built with the packed
     /// tiles); `diagonals` selects `Geometry.d8` over `d4`.
+    #[allow(clippy::too_many_arguments)]
     pub fn get_target_tile(
         &self,
         tiles: &[PathTile],
         dangerous: &[bool],
+        avoid: Option<(&[i32], i32)>,
         node: usize,
         width: i32,
         height: i32,
@@ -218,6 +220,18 @@ impl Flowfield {
                 continue;
             }
             let packed = (nx + ny * width) as usize;
+            // `int avoidance = avoid == null ? 0 : avoid[packed] >
+            //  Integer.MAX_VALUE - avoidanceId ? 1 : 0;` (`Pathfinder.java:417`):
+            // a tile claimed by a lower-id ground AI unit is skipped, and the
+            // `avoidance == 0` gate in the selection condition means the flag
+            // never contributes to the chosen cost.
+            if let Some((avoid_grid, id)) = avoid
+                && avoid_grid
+                    .get(packed)
+                    .is_some_and(|value| *value > i32::MAX - id)
+            {
+                continue;
+            }
             let cost = self.complete_weights[packed];
             if cost >= value
                 || !self.passable(tiles, packed)
@@ -277,7 +291,8 @@ mod tests {
         // Steps strictly decrease until the target is reached.
         let mut node = 0usize;
         let mut steps = 0;
-        while let Some(next) = field.get_target_tile(&tiles, &dangerous, node, width, height, false)
+        while let Some(next) =
+            field.get_target_tile(&tiles, &dangerous, None, node, width, height, false)
         {
             assert!(field.complete_weights[next] < field.complete_weights[node]);
             node = next;
@@ -305,7 +320,7 @@ mod tests {
         // No diagonal cut through the wall corner.
         assert!(
             field
-                .get_target_tile(&tiles, &dangerous, 0, width, height, true)
+                .get_target_tile(&tiles, &dangerous, None, 0, width, height, true)
                 .is_none()
         );
     }
@@ -333,7 +348,8 @@ mod tests {
         // Walk the downhill path from (0,2) and never enter a deep tile.
         let mut node = (2 * width) as usize;
         let mut steps = 0;
-        while let Some(next) = field.get_target_tile(&tiles, &dangerous, node, width, height, true)
+        while let Some(next) =
+            field.get_target_tile(&tiles, &dangerous, None, node, width, height, true)
         {
             assert!(!tiles[next].deep(), "path entered a deep tile at {next}");
             node = next;
@@ -361,14 +377,62 @@ mod tests {
         field.update(&tiles, width, height, Cost::Ground, 0);
         // From tile 1 (safe) the only downhill neighbour is the damaging tile.
         assert_eq!(
-            field.get_target_tile(&tiles, &dangerous, 1, width, height, true),
+            field.get_target_tile(&tiles, &dangerous, None, 1, width, height, true),
             None,
             "staying is better than walking into a damaging floor"
         );
         // Standing on the dangerous tile itself, the unit keeps moving.
         assert_eq!(
-            field.get_target_tile(&tiles, &dangerous, 2, width, height, true),
+            field.get_target_tile(&tiles, &dangerous, None, 2, width, height, true),
             Some(3)
+        );
+    }
+
+    /// T11 (`Pathfinder.java:417`): a neighbour claimed by a lower-id ground AI
+    /// unit (`avoid[packed] > Integer.MAX_VALUE - avoidanceId`) is skipped.
+    #[test]
+    fn get_target_tile_skips_avoided_neighbour() {
+        let width = 3;
+        let height = 1;
+        let tiles = tiles_flat(width, height);
+        let dangerous = vec![false; tiles.len()];
+        let mut field = Flowfield::new(width, height);
+        field.targets = vec![2];
+        field.update(&tiles, width, height, Cost::Ground, 0);
+        // The best step from tile 0 is tile 1 (weight 1 vs 2).
+        assert_eq!(
+            field.get_target_tile(&tiles, &dangerous, None, 0, width, height, false),
+            Some(1)
+        );
+        // Tile 1 claimed by unit id 7 (`MAX - 7`): unit 9 must avoid it.
+        let mut avoid = vec![0i32; tiles.len()];
+        avoid[1] = i32::MAX - 7;
+        assert_eq!(
+            field.get_target_tile(
+                &tiles,
+                &dangerous,
+                Some((&avoid, 9)),
+                0,
+                width,
+                height,
+                false
+            ),
+            None,
+            "the only downhill neighbour is claimed by a lower id"
+        );
+        // Unit 3 has priority over unit 7 and never avoids its tile.
+        assert_eq!(
+            field.get_target_tile(
+                &tiles,
+                &dangerous,
+                Some((&avoid, 3)),
+                0,
+                width,
+                height,
+                false
+            ),
+            Some(1),
+            "a lower id keeps the tile"
         );
     }
 }
