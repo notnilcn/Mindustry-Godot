@@ -1614,6 +1614,11 @@ impl Sim {
                 .0
                 .insert_resource(crate::world::blocks::power::PowerGrids::new());
         }
+        // `ResetEvent` fog half (`FogControl.java:42-44`): the previous world's
+        // fog is dropped; the rebuild happens once the new grid + rules are in
+        // (`WorldLoadEvent`).
+        self.last_fog_flags = None;
+        self.reset_fog();
     }
 
     /// Rebuilds every power graph from proximity (`World.endMapLoad` path).

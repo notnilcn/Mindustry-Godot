@@ -13,6 +13,7 @@ pub mod config;
 pub mod dump;
 pub mod events;
 pub mod fixed;
+pub mod fog;
 pub mod io_set;
 pub mod logic;
 pub mod player_items;
@@ -213,6 +214,9 @@ pub struct Sim {
     player_death_timer: f32,
     /// Last known player position (`Player.x/y`); `bestCore` distance key.
     player_last_pos: Option<(f32, f32)>,
+    /// Last `(rules.fog, rules.staticFog)` applied to the world
+    /// (`FogControl` reset gate; `None` before the first world load).
+    last_fog_flags: Option<(bool, bool)>,
     /// Currently selected controllable building (`buildingControlSelect`).
     control_building: Option<TilePos>,
     /// `HintsFragment` tick inputs (placed blocks + fired events).
@@ -254,6 +258,7 @@ impl Sim {
             player_team: None,
             player_death_timer: 0.0,
             player_last_pos: None,
+            last_fog_flags: None,
             control_building: None,
             hint_events: HintEvents::default(),
             seed,
@@ -893,6 +898,9 @@ impl Sim {
         // `Logic.update` -> `logicVars.update()` (Logic.java:546) runs before
         // the entity update pass so processors observe the incremented tick.
         self.update_logic_globals();
+        // `Logic.java:533-535`: `fogControl.update()` when `rules.fog`, after
+        // `updateTeamStats()` and before the entity pass.
+        self.update_fog();
         self.schedule.run(&mut self.ecs.0);
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.
@@ -1614,6 +1622,20 @@ impl Sim {
         // exists — until then the place gate reads the live `BuildRules`
         // resource only.
         self.refresh_unit_runtime();
+        // `WorldLoadEvent` fog half (`FogControl.java:46-62`): (re)size the fog
+        // whenever the flags change or the resource is missing. Serpulo
+        // (`!rules.fog`) removes the resource and pays nothing per tick.
+        let flags = (rules.fog, rules.static_fog);
+        let missing = flags.0
+            && self
+                .ecs
+                .0
+                .get_resource::<crate::game::fog::FogControl>()
+                .is_none();
+        if self.last_fog_flags != Some(flags) || missing {
+            self.last_fog_flags = Some(flags);
+            self.reset_fog();
+        }
     }
 
     /// Current phase.
@@ -1807,6 +1829,9 @@ impl Sim {
         }
         let pending = std::mem::take(&mut self.pending_events);
         for event in pending {
+            // H09 T1 fog listeners (`FogControl.java:64-95`): placed/broken
+            // fog-radius buildings mark the dynamic flush pending.
+            self.handle_fog_block_event(&event);
             // `Logic`'s `BlockBuildEndEvent` listener: a player-team placement
             // bumps the live match's `stats.placedBlockCount`.
             if let SimEvent::BlockPlacedEvent(placed) = &event

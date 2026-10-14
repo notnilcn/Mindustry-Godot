@@ -5067,6 +5067,70 @@ impl MindSimHost {
             .collect();
         GString::from(serde_json::Value::Array(json).to_string().as_str())
     }
+
+    /// Discovered (static) fog bits for `team`, one byte per tile (`0`/`255`,
+    /// row-major, y up), or `None` when fog is off (H03 T12 render seam).
+    pub fn fog_static_bytes(&self, team: u8) -> Option<(i32, i32, Vec<u8>)> {
+        self.sim.fog_static_bytes(team)
+    }
+
+    /// Dynamic vision sources for `team`: `(world x, world y, radius px)`
+    /// (H03 T12 render seam; radius = fog radius in tiles * 8).
+    pub fn fog_sources(&self, team: u8) -> Vec<(f32, f32, f32)> {
+        self.sim.fog_sources(team)
+    }
+
+    /// Fog probe (`FogControl.isVisibleTile`/`isDiscovered`) for playtests and
+    /// the H03 fog renderer: `{fog, staticFog, visible, discovered, teams:[id]}`.
+    /// Reports `{"fog":false}` without a `CampaignRuntime`.
+    #[func]
+    pub fn fog_debug_json(&self, team: i32, x: i32, y: i32) -> GString {
+        let Some(rules) = mind_core::game::runtime::rules_of(&self.sim.ecs.0) else {
+            return GString::from("{\"fog\":false}");
+        };
+        let team = (team & 0xFF) as u8;
+        let mut teams: Vec<u8> = Vec::new();
+        if let Some(fog) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::fog::FogControl>()
+        {
+            for (id, data) in fog.fog.iter().enumerate() {
+                if data.is_some() {
+                    teams.push(id as u8);
+                }
+            }
+        }
+        let value = serde_json::json!({
+            "fog": rules.fog,
+            "staticFog": rules.static_fog,
+            "visible": self.sim.fog_visible_tile(team, x, y),
+            "discovered": self.sim.fog_discovered(team, x, y),
+            "teams": teams,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Debug: forces `rules.fog`/`rules.staticFog` on the live session and
+    /// re-initialises fog. `false` without a `CampaignRuntime`.
+    #[func]
+    pub fn debug_set_fog(&mut self, fog: bool, static_fog: bool) -> bool {
+        {
+            let Some(mut runtime) = self
+                .sim
+                .ecs
+                .0
+                .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
+            else {
+                return false;
+            };
+            runtime.session.rules.fog = fog;
+            runtime.session.rules.static_fog = static_fog;
+        }
+        self.sim.reset_fog();
+        true
+    }
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core

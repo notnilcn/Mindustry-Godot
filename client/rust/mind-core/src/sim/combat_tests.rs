@@ -3824,3 +3824,110 @@ fn explosion_absorbed_polygon() {
         "the shield's own team is ignored"
     );
 }
+
+/// H09 T1: `Logic.java:533-535` fog update — a player-team unit reveals its
+/// radius, discovers tiles permanently and does not distinguish hidden tiles.
+#[test]
+fn fog_unit_reveals_and_discovers() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        // Team 1 has no core in this fixture; without the cap exception the
+        // spawned dagger is unit-cap-killed at spawn (`spawn_unit_def`).
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    // Dagger fog radius 174/8 = 21.75 -> event radius 21, drawn +1.
+    assert!(
+        sim.fog_visible_tile(1, 30, 20),
+        "tile 10 tiles away is visible"
+    );
+    assert!(
+        !sim.fog_visible_tile(1, 50, 20),
+        "tile 30 tiles away is not visible"
+    );
+    assert!(sim.fog_discovered(1, 30, 20), "seen tile is discovered");
+    assert!(
+        !sim.fog_discovered(1, 50, 20),
+        "unseen tile is not discovered"
+    );
+    // Only-AI teams ignore fog (`FogControl.isVisibleTile`).
+    assert!(
+        sim.fog_visible_tile(2, 60, 60),
+        "the wave team is AI and sees everything"
+    );
+
+    // Moving away keeps the explored tile discovered but not visible.
+    let mut pos = sim.ecs.0.get_mut::<Pos>(dagger).expect("dagger pos");
+    pos.x = 50.0 * 8.0 + 4.0;
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        !sim.fog_visible_tile(1, 20, 20),
+        "the left-behind tile is no longer visible"
+    );
+    assert!(
+        sim.fog_discovered(1, 20, 20),
+        "the left-behind tile stays discovered"
+    );
+}
+
+/// H09 T1: with `rules.fog` off there is no `FogControl` and every probe is
+/// true (Serpulo pays nothing).
+#[test]
+fn fog_off_everything_visible() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+    });
+    sim.reset_fog();
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::game::fog::FogControl>()
+            .is_none(),
+        "no fog resource without rules.fog"
+    );
+    assert!(sim.fog_visible_tile(1, 60, 60));
+    assert!(sim.fog_discovered(1, 60, 60));
+    assert!(sim.fog_visible_tile(2, 60, 60));
+    assert!(sim.fog_discovered(2, 60, 60));
+}
+
+/// H09 T1: the sector-start path applies the world rules before the campaign
+/// runtime exists, so no `FogControl` resource was created; the first tick must
+/// create and size it (`FogControl.update`: `fog == null` -> new array).
+#[test]
+fn fog_update_creates_the_resource_when_missing() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::game::fog::FogControl>()
+            .is_none()
+    );
+    sim.spawn_live_unit("dagger", 1, 20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::game::fog::FogControl>()
+            .is_some(),
+        "the first tick creates the fog resource"
+    );
+    assert!(sim.fog_visible_tile(1, 25, 20));
+    assert!(sim.fog_discovered(1, 25, 20));
+}

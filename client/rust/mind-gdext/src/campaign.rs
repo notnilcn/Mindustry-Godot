@@ -2205,7 +2205,8 @@ impl MindCampaign {
     }
 
     /// Fog query placeholder (fog state is plan 12 M7 `FogControl`, not yet
-    /// bound to this facade); reports the rules fog flags.
+    /// bound to this facade); reports the rules fog flags. The live probe is
+    /// `MindSimHost.fog_debug_json` (this facade does not own the `Sim`).
     #[func]
     pub fn fog_query(&self, team: i64, x: i32, y: i32) -> VarDictionary {
         let mut dict = VarDictionary::new();

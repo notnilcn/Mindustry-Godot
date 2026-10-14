@@ -538,6 +538,12 @@ impl Sim {
                     {
                         campaign.session.stats.enemy_units_destroyed += 1;
                     }
+                    // `FogControl.UnitDestroyEvent` (`FogControl.java:91-95`):
+                    // a dead unit's team needs a dynamic redraw.
+                    if let Some(mut fog) = world.get_resource_mut::<crate::game::fog::FogControl>()
+                    {
+                        fog.mark_dynamic(unit_team);
+                    }
                 }
                 // Death-ability spawns (`SpawnDeathAbility`) join the live list.
                 if runtime.seq != before {
