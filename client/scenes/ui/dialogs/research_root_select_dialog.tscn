@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://cq4v1m7bnpx2e"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" path="res://ui/dialogs/research_root_select_dialog.gd" id="2_script"]
+
+[node name="ResearchRootSelectDialog" unique_id=1738886774 instance=ExtResource("1_base")]
+script = ExtResource("2_script")

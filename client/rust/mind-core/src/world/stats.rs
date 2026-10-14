@@ -6,7 +6,8 @@
 //!
 //! Plan 02 owns the stat *data* (`StatSpec`); plan 14 owns display formatting.
 //! This module owns the runtime accumulation order and the bar fraction math the
-//! renderer/inspector consumes.
+//! renderer/inspector consumes. The content-info (`?`) model is
+//! [`crate::ui::content_stats`] (H05 T10a).
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;

@@ -166,6 +166,15 @@ static func markup_format(key: String, args: Array) -> String:
 	return str(assets.call("bundle_markup_format", key.trim_prefix("@"), args))
 
 
+## `render_markup` for a raw markup string that is not a bundle key (H05 T10a
+## content-stat cells and content descriptions).
+static func markup_text(raw: String) -> String:
+	var assets := assets()
+	if assets == null:
+		return raw
+	return str(assets.call("markup_text", raw))
+
+
 static func image(region_name: String) -> TextureRect:
 	var result := TextureRect.new()
 	result.texture = icon_texture(region_name)
@@ -268,6 +277,28 @@ static func icon_texture(region_name: String) -> Texture2D:
 		return null
 	var texture: Variant = assets.call("find_region", region_name)
 	return texture as Texture2D
+
+
+## Content icon control (`content.uiIcon`): the packed `sector-<name>-ui` /
+## `item-<name>-ui` region, else the `terrain` icon-font glyph for sector
+## presets (`SectorPreset.java:132-134`: `Core.atlas.find("sector-" + name,
+## Icon.terrain.getRegion())`), else `null` (callers draw `Icon.lock`).
+static func content_icon(icon_region: String, type_name: String, size: float) -> Control:
+	var texture := icon_texture(icon_region)
+	if texture != null:
+		# code-instantiated: content icons are data-driven (atlas region lookup).
+		var image := TextureRect.new()
+		image.texture = texture
+		image.custom_minimum_size = Vector2(size, size)
+		# A `TextureRect`'s minimum size is its texture size; ignore the source
+		# size so the requested cell wins (`b.imageDraw(...).size(iconMed)`).
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		return image
+	if type_name == "sector":
+		# code-instantiated: the sector fallback glyph is data-driven.
+		return glyph("terrain", int(size), Color.WHITE)
+	return null
 
 
 ## The `MindAssets` autoload (plan 03 M5), or null in a bare test host.

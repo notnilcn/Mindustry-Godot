@@ -29,6 +29,7 @@
     {"name": "traces", "scene": "res://scenes/ui/dialogs/trace_dialog.tscn", "pause": false, "menu_openable": false, "args": ["player:Str"]},
     {"name": "planet", "scene": "res://scenes/ui/dialogs/planet_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
     {"name": "research", "scene": "res://scenes/ui/dialogs/research_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
+    {"name": "research_root_select", "scene": "res://scenes/ui/dialogs/research_root_select_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "schematics", "scene": "res://scenes/ui/dialogs/schematics_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
     {"name": "sector_select", "scene": "res://scenes/ui/dialogs/sector_select_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "launch_loadout", "scene": "res://scenes/ui/dialogs/launch_loadout_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
