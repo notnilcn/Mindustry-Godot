@@ -5135,6 +5135,13 @@ impl MindSimHost {
         self.sim.reset_fog();
         true
     }
+
+    /// Debug: `Tile.setTeam` for the building at `(x, y)` (`BuildingComp.changeTeam`
+    /// -> `checkAllowUpdate`); `false` when the tile has no building.
+    #[func]
+    pub fn debug_set_building_team(&mut self, x: i32, y: i32, team: i32) -> bool {
+        self.sim.debug_set_building_team(x, y, (team & 0xFF) as u8)
+    }
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core

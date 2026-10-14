@@ -4230,3 +4230,37 @@ fn core_fog_radius_values() {
     assert_eq!(radius("core-bastion"), Some(54), "size 4");
     assert_eq!(radius("core-acropolis"), Some(69), "size 6");
 }
+
+/// H09 T4: `Building.update()` skips `updateTile` for a disabled turret
+/// (`Turret` has the default `noUpdateDisabled = false`): a disabled, fed duo
+/// never fires at an enemy in range.
+#[test]
+fn disabled_duo_does_not_fire() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    let enemy = sim
+        .spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0 + 20.0, 180.0)
+        .expect("enemy dagger");
+    let start = health(&sim, enemy).expect("health");
+    if let Some(mut building) = sim.ecs.0.get_mut::<crate::entities::comp::Building>(duo) {
+        building.enabled = false;
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let shots = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .map(|state| state.total_shots)
+        .unwrap_or(-1);
+    assert_eq!(shots, 0, "a disabled duo never fires");
+    assert_eq!(
+        health(&sim, enemy),
+        Some(start),
+        "the enemy takes no duo damage"
+    );
+}

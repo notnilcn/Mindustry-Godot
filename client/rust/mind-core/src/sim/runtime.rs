@@ -483,6 +483,34 @@ impl SimRuntime {
         if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
             counter.add(team, block, 1);
         }
+        // `BuildingComp.create()` -> `checkAllowUpdate` (`BuildingComp.java:136`):
+        // a freshly created building starts disabled when it may not update.
+        if let Some(entity) = grid.entity_at(pos) {
+            let (env, limit_area, disable_outside_area, editor) =
+                match crate::game::runtime::rules_of(world) {
+                    Some(rules) => (
+                        rules.env,
+                        rules.limit_map_area.then_some((
+                            rules.limit_x,
+                            rules.limit_y,
+                            rules.limit_width,
+                            rules.limit_height,
+                        )),
+                        rules.disable_outside_area,
+                        rules.editor,
+                    ),
+                    None => (crate::game::rules::DEFAULT_ENV, None, true, false),
+                };
+            if !editor {
+                crate::world::allow_update::check_allow_update(
+                    world,
+                    entity,
+                    env,
+                    limit_area,
+                    disable_outside_area,
+                );
+            }
+        }
     }
 
     /// `ConstructBlock.get(size)`: the `build<size>` singleton.
@@ -1834,7 +1862,6 @@ mod tests {
     #[cfg(feature = "msav-import")]
     #[test]
     fn ground_zero_drill_feeds_the_materialized_core() {
-        use crate::command::Command;
         use crate::editor::context::EditorContext;
         use crate::io::save::{SaveIo, SaveReadState};
         use crate::world::modules::ItemModule;
@@ -1904,18 +1931,10 @@ mod tests {
         sim.grid = grid;
         sim.install_block_runtime().expect("runtime");
         assert!(sim.materialize_map_buildings(&pending) > 0);
-        sim.apply(Command::Place {
-            x: (x + 3) as i16,
-            y: y as i16,
-            block: core_block,
-        })
-        .expect("core command");
-        sim.apply(Command::Place {
-            x: x as i16,
-            y: y as i16,
-            block: drill,
-        })
-        .expect("drill command");
+        // Team 1: a `Command::Place` without a session carries team 0
+        // (derelict), and derelict buildings no longer update (H09 T4).
+        sim.place_for_team((x + 3) as i16, y as i16, core_block, 0, 1);
+        sim.place_for_team(x as i16, y as i16, drill, 0, 1);
         let core_entity = sim
             .grid
             .entity_at(TilePos::new((x + 3) as i16, y as i16))

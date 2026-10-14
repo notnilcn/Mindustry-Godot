@@ -1366,6 +1366,17 @@ pub fn update_turrets(ctx: &mut CombatCtx<'_>) {
         if ctx.world.get::<TurretState>(turret).is_none() {
             continue;
         }
+        // `Building.update()`: `if(enabled || !block.noUpdateDisabled)
+        // updateTile();` — `Turret` keeps the default `noUpdateDisabled =
+        // false`, so a disabled turret does nothing (H09 T4). Fixture entities
+        // without a `Building` component (harness turrets) still update.
+        if ctx
+            .world
+            .get::<crate::entities::comp::Building>(turret)
+            .is_some_and(|building| !building.enabled)
+        {
+            continue;
+        }
         let Some(mut state) = ctx.world.entity_mut(turret).take::<TurretState>() else {
             continue;
         };

@@ -2299,3 +2299,126 @@ fn lookup_resolves_content_from_logic_ids() {
     let t = state.executor.optional_var("t").expect("t");
     assert_eq!(state.executor.arena.get(t).num(), 1.0, "team 1 = sharded");
 }
+
+/// H09 T4: a derelict building stops updating (`BuildingComp.allowUpdate`,
+/// `BuildingComp.java:627-632`): a team-0 drill mines nothing.
+#[test]
+fn derelict_drill_does_not_mine() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    let container = place(&mut sim, "container", 7, 5);
+    assert!(
+        sim.debug_set_building_team(5, 5, 0),
+        "team switch to derelict"
+    );
+    let enabled = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| building.enabled);
+    assert_eq!(enabled, Some(false), "derelict drill is disabled");
+    for _ in 0..1625 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, container, copper),
+        0,
+        "a derelict drill never mines"
+    );
+
+    // Control: the same drill on team 1 mines (G02 T6 rate).
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    place(&mut sim, "mechanical-drill", 5, 5);
+    let container = place(&mut sim, "container", 7, 5);
+    for _ in 0..1625 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, container, copper) >= 9,
+        "a team-1 drill mines ~10 copper in 1625 ticks"
+    );
+}
+
+/// H09 T4: buildings outside a limited map area are disabled; growing the area
+/// re-enables the auto-reset ones (`World.checkMapArea`,
+/// `World.java:469-481`).
+#[test]
+fn outside_map_area_disabled_and_reset() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+
+    let mut sim = runtime_sim();
+    let drill = place(&mut sim, "mechanical-drill", 20, 20);
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.limit_map_area = true;
+    rules.limit_width = 16;
+    rules.limit_height = 16;
+    rules.disable_outside_area = true;
+    install_campaign_session(&mut sim, rules.clone());
+    sim.apply_rules_to_world(&rules);
+    assert_eq!(
+        sim.ecs.0.get::<Building>(drill).map(|b| b.enabled),
+        Some(false),
+        "a drill outside the 16x16 area is disabled"
+    );
+
+    rules.limit_width = 32;
+    rules.limit_height = 32;
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.rules = rules.clone();
+    }
+    sim.apply_rules_to_world(&rules);
+    assert_eq!(
+        sim.ecs.0.get::<Building>(drill).map(|b| b.enabled),
+        Some(true),
+        "growing the area re-enables the auto-reset drill"
+    );
+}
+
+/// H09 T4: a block whose env flags do not support the planet's env stops
+/// updating (`Block.supportsEnv`, `BuildingComp.allowUpdate`).
+#[test]
+fn env_unsupported_block_disabled() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::world::build::supports_env_bits;
+
+    let mut sim = runtime_sim();
+    let name = "cultivator";
+    let def = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_by_name(name)
+        .expect("def")
+        .clone();
+    // Erekir env (17 = space | scorching).
+    assert!(
+        !supports_env_bits(&def, 17),
+        "{name} (requires spores) is not supported on Erekir"
+    );
+    let generator = place(&mut sim, name, 5, 5);
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.env = 17;
+    install_campaign_session(&mut sim, rules.clone());
+    sim.apply_rules_to_world(&rules);
+    assert_eq!(
+        sim.ecs.0.get::<Building>(generator).map(|b| b.enabled),
+        Some(false),
+        "{name} is disabled under env 17"
+    );
+}

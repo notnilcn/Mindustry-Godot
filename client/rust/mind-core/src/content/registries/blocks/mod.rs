@@ -2208,6 +2208,10 @@ pub struct BlockDef {
     pub always_replace: bool,
     /// `Block.privileged` (plan 07/13 world processors).
     pub privileged: bool,
+    /// `Block.autoResetEnabled` (`Block.java:170`; false for switches,
+    /// `SwitchBlock.java:23`): re-enabled by `World.checkMapArea` when a map
+    /// area shrinks (`World.java:469-481`).
+    pub auto_reset_enabled: bool,
     /// `Block.replaceable` (plan 07 `can_replace`).
     pub replaceable: bool,
     /// `Block.quickRotate` (plan 07 `can_replace` self-replacement).
@@ -2495,6 +2499,9 @@ impl BlockDef {
             unit_move_breakable: spec.unit_move_breakable.unwrap_or(false),
             always_replace: spec.always_replace.unwrap_or(false),
             privileged: spec.privileged.unwrap_or(false),
+            // `SwitchBlock.java:23`: `autoResetEnabled = false` (switch and
+            // world-switch are the only vanilla overrides).
+            auto_reset_enabled: spec.kind != BlockKind::SwitchBlock,
             replaceable: spec.replaceable.unwrap_or(true),
             quick_rotate: spec.quick_rotate.unwrap_or(true),
             subclass,
