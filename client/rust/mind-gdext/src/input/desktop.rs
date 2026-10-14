@@ -962,7 +962,7 @@ impl DesktopBridge {
     }
 
     /// `commandUnits` with an explicit command id over the current selection.
-    fn command_units(&mut self, command: u16) {
+    pub(crate) fn command_units(&mut self, command: u16) {
         if self.controller.state.selected_units.is_empty() {
             return;
         }
@@ -974,6 +974,31 @@ impl DesktopBridge {
             .copied()
             .collect();
         self.emit_action(RemoteAction::SetUnitCommand { units, command });
+    }
+
+    /// `PlacementFragment` unit-type filter (`PlacementFragment.java:537-548`):
+    /// left click keeps only units of `keep`, right click drops `drop`;
+    /// `type_of` maps a selected id to its unit type id. Returns whether the
+    /// selection changed (emits `selection_changed` like `select_rect`).
+    pub(crate) fn retain_selection_types(
+        &mut self,
+        type_of: &dyn Fn(i32) -> Option<i32>,
+        keep: Option<i32>,
+        drop: Option<i32>,
+    ) -> bool {
+        let before = self.controller.state.selected_units.len();
+        self.controller.state.selected_units.retain(|id| {
+            let Some(type_id) = type_of(*id) else {
+                return false;
+            };
+            keep.is_none_or(|keep| type_id == keep) && drop != Some(type_id)
+        });
+        let changed = self.controller.state.selected_units.len() != before;
+        if changed {
+            self.controller.state.command_buildings.clear();
+            self.emit_selection();
+        }
+        changed
     }
 
     /// `setUnitStance` over the current selection.

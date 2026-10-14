@@ -243,6 +243,8 @@ pub struct MindWorldRenderer {
     shields: Option<Gd<shields::ShieldRenderer>>,
     /// Command-mode selection overlay (`Layer.plans` band; T16/PAR-0157).
     command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
+    /// Command-mode attack reticle (`Layer.overlayUI` band; H03 T3).
+    command_reticle: Option<Gd<command_overlay::CommandOverlay>>,
     /// Placement preview (`Layer.plans` band; G03 T2).
     plan_overlay: Option<Gd<plans::PlanOverlay>>,
     /// Build-beam fan (`Layer.buildBeam` band; G03 T3).
@@ -299,6 +301,7 @@ impl INode2D for MindWorldRenderer {
             status: None,
             shields: None,
             command_overlay: None,
+            command_reticle: None,
             plan_overlay: None,
             build_beam: None,
             bullets: None,
@@ -578,6 +581,16 @@ impl MindWorldRenderer {
             // the pipeline, not by content.
             plans_band.clone().add_child(&node);
             self.command_overlay = Some(node.clone());
+        }
+        // Command-mode attack reticle at `Layer.overlayUI`
+        // (`InputHandler.drawCommandedTargets`; H03 T3).
+        if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
+            let mut node = command_overlay::CommandOverlay::new_alloc();
+            node.bind_mut().reticle_only = true;
+            // code-instantiated: one reticle pass; the node count is fixed by
+            // the pipeline, not by content.
+            overlay_band.clone().add_child(&node);
+            self.command_reticle = Some(node.clone());
         }
         // Placement preview at `Layer.plans` (`DesktopInput.drawBottom`; G03 T2).
         if let Some(plans_band) = self.band_node_at(BandKey::base(Layer::Plans)) {

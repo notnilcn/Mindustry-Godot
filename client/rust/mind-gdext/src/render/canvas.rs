@@ -120,6 +120,63 @@ pub(crate) fn circles(canvas: &mut Node2D, x: f32, y: f32, r: f32, color: Color)
     canvas.draw_polyline_ex(&packed, color).width(1.0).done();
 }
 
+/// `Drawf.target` (`Drawf.java:279-289`): a `Lines.poly` square at radius
+/// `rad` rotated `rot` plus 4 `Lines.spikes` from `3/7 rad` to `9/7 rad`, each
+/// drawn twice — stroke 3 grey (`Pal.gray`, alpha `alpha`) then stroke 1
+/// `color` (alpha `alpha`).
+pub(crate) fn target(
+    canvas: &mut Node2D,
+    x: f32,
+    y: f32,
+    rad: f32,
+    rot: f32,
+    alpha: f32,
+    color: Color,
+) {
+    let mut gray = color_f4(pal::GRAY);
+    gray.a = alpha;
+    let mut color = color;
+    color.a = alpha;
+    let mut ring = drawf::poly_ring(x, y, 4, rad, rot);
+    if let Some(first) = ring.first().copied() {
+        ring.push(first);
+    }
+    let packed = pack_points(&ring);
+    let spikes = target_spikes(x, y, rad, rot);
+    canvas.draw_polyline_ex(&packed, gray).width(3.0).done();
+    for (x1, y1, x2, y2) in spikes {
+        canvas
+            .draw_line_ex(Vector2::new(x1, y1), Vector2::new(x2, y2), gray)
+            .width(3.0)
+            .done();
+    }
+    canvas.draw_polyline_ex(&packed, color).width(1.0).done();
+    for (x1, y1, x2, y2) in spikes {
+        canvas
+            .draw_line_ex(Vector2::new(x1, y1), Vector2::new(x2, y2), color)
+            .width(1.0)
+            .done();
+    }
+}
+
+/// `Lines.spikes(x, y, radius, length, 4, rot)` (`Lines.java:372-383`): the 4
+/// spike segments of [`target`] as `(x1, y1, x2, y2)`; spike `i` starts at
+/// `trns(i*90 + rot, 3/7*rad)` and ends at `trns(i*90 + rot, 9/7*rad)`.
+pub(crate) fn target_spikes(x: f32, y: f32, rad: f32, rot: f32) -> [(f32, f32, f32, f32); 4] {
+    let radius = 3.0 / 7.0 * rad;
+    let length = 6.0 / 7.0 * rad;
+    std::array::from_fn(|i| {
+        let angle = (i as f32 * 90.0 + rot).to_radians();
+        let (sin, cos) = angle.sin_cos();
+        (
+            x + cos * radius,
+            y + sin * radius,
+            x + cos * (radius + length),
+            y + sin * (radius + length),
+        )
+    })
+}
+
 /// `Lines.poly` outline: a polyline through `pts` with the given `stroke`.
 pub(crate) fn poly_line(canvas: &mut Node2D, pts: &[(f32, f32)], stroke: f32, color: Color) {
     if pts.len() < 2 {
@@ -240,4 +297,25 @@ fn pack_points(pts: &[(f32, f32)]) -> PackedVector2Array {
         .collect::<Vec<_>>()
         .into_iter()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::target_spikes;
+
+    #[test]
+    fn target_spike_geometry_matches_lines() {
+        // rad 7, rot 0: radius 3/7*7 = 3, length 6/7*7 = 6; the first spike
+        // runs from (x+3, y) to (x+9, y) (`Lines.spikes`).
+        let spikes = target_spikes(0.0, 0.0, 7.0, 0.0);
+        assert!((spikes[0].0 - 3.0).abs() < 1e-5);
+        assert!((spikes[0].1 - 0.0).abs() < 1e-5);
+        assert!((spikes[0].2 - 9.0).abs() < 1e-5);
+        assert!((spikes[0].3 - 0.0).abs() < 1e-5);
+        // Second spike at 90 degrees: (x, y+3)..(x, y+9) in Java (CCW).
+        assert!((spikes[1].0 - 0.0).abs() < 1e-5);
+        assert!((spikes[1].1 - 3.0).abs() < 1e-5);
+        assert!((spikes[1].2 - 0.0).abs() < 1e-5);
+        assert!((spikes[1].3 - 9.0).abs() < 1e-5);
+    }
 }
