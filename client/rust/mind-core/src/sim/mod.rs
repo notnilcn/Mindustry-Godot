@@ -13,6 +13,7 @@ pub mod config;
 pub mod dump;
 pub mod events;
 pub mod fixed;
+pub mod fog;
 pub mod io_set;
 pub mod logic;
 pub mod player_items;
@@ -213,6 +214,9 @@ pub struct Sim {
     player_death_timer: f32,
     /// Last known player position (`Player.x/y`); `bestCore` distance key.
     player_last_pos: Option<(f32, f32)>,
+    /// Last `(rules.fog, rules.staticFog)` applied to the world
+    /// (`FogControl` reset gate; `None` before the first world load).
+    last_fog_flags: Option<(bool, bool)>,
     /// Currently selected controllable building (`buildingControlSelect`).
     control_building: Option<TilePos>,
     /// `HintsFragment` tick inputs (placed blocks + fired events).
@@ -254,6 +258,7 @@ impl Sim {
             player_team: None,
             player_death_timer: 0.0,
             player_last_pos: None,
+            last_fog_flags: None,
             control_building: None,
             hint_events: HintEvents::default(),
             seed,
@@ -381,6 +386,14 @@ impl Sim {
                 if current == BlockId::AIR {
                     log::debug!("break command rejected at ({x}, {y}): tile is empty");
                 } else if self.block_runtime.is_some() {
+                    let team = self
+                        .grid
+                        .entity_at(pos)
+                        .and_then(|entity| {
+                            self.ecs.0.get::<crate::entities::comp::TeamComp>(entity)
+                        })
+                        .map(|team| team.team)
+                        .unwrap_or(0);
                     if self.runtime_break(x, y) {
                         self.push_event(SimEvent::BlockBrokenEvent(BlockBrokenEvent {
                             x,
@@ -388,9 +401,18 @@ impl Sim {
                             block: current,
                             // `Command::Break` is a deconstruct/API break.
                             destroyed: false,
+                            team,
                         }));
                     }
                 } else {
+                    let team = self
+                        .grid
+                        .entity_at(pos)
+                        .and_then(|entity| {
+                            self.ecs.0.get::<crate::entities::comp::TeamComp>(entity)
+                        })
+                        .map(|team| team.team)
+                        .unwrap_or(0);
                     if let Some(entity) = self.grid.entity_at(pos) {
                         self.ecs.despawn(entity);
                     }
@@ -401,6 +423,7 @@ impl Sim {
                         block: current,
                         // `Command::Break` is a deconstruct/API break.
                         destroyed: false,
+                        team,
                     }));
                 }
             }
@@ -954,6 +977,9 @@ impl Sim {
         // `Logic.update` -> `logicVars.update()` (Logic.java:546) runs before
         // the entity update pass so processors observe the incremented tick.
         self.update_logic_globals();
+        // `Logic.java:533-535`: `fogControl.update()` when `rules.fog`, after
+        // `updateTeamStats()` and before the entity pass.
+        self.update_fog();
         self.schedule.run(&mut self.ecs.0);
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.
@@ -1671,12 +1697,22 @@ impl Sim {
     /// `CampaignRuntime.rules_world_dirty` (G06 `setrule`) / the gdext
     /// `apply_world_rules` wrapper.
     pub fn apply_rules_to_world(&mut self, rules: &crate::game::rules::Rules) {
-        self.grid.limit_area = rules.limit_map_area.then_some((
+        let new_limit = rules.limit_map_area.then_some((
             rules.limit_x,
             rules.limit_y,
             rules.limit_width,
             rules.limit_height,
         ));
+        // `World.checkMapArea(prev)` (`World.java:469-481`): a shrunken area
+        // re-enables disabled `autoResetEnabled` buildings outside the previous
+        // rect before the new one is checked.
+        let prev = self.grid.limit_area;
+        if let Some(prev) = prev
+            && Some(prev) != new_limit
+        {
+            self.reset_map_area(prev);
+        }
+        self.grid.limit_area = new_limit;
         self.grid.border_darkness = rules.border_darkness;
         // `World.setRules` + every `Build.validPlace` read of `state.rules`
         // (H02 T2 `sync_build_rules`); `is_campaign` comes from the live
@@ -1689,6 +1725,150 @@ impl Sim {
             .unwrap_or(false);
         crate::world::limits::sync_build_rules(&mut self.ecs.0, rules, is_campaign);
         self.refresh_unit_runtime();
+        // `WorldLoadEvent` half (`World.java:44-52`): every building re-checks
+        // `allowUpdate` against the new rules.
+        self.check_all_allow_update();
+        // `WorldLoadEvent` fog half (`FogControl.java:46-62`): (re)size the fog
+        // whenever the flags change or the resource is missing. Serpulo
+        // (`!rules.fog`) removes the resource and pays nothing per tick.
+        let flags = (rules.fog, rules.static_fog);
+        let missing = flags.0
+            && self
+                .ecs
+                .0
+                .get_resource::<crate::game::fog::FogControl>()
+                .is_none();
+        if self.last_fog_flags != Some(flags) || missing {
+            self.last_fog_flags = Some(flags);
+            self.reset_fog();
+        }
+    }
+
+    /// `World.checkAllowUpdate` for every live building (`World.java:44-52`).
+    /// Editor worlds skip it (`EditorTile` is always allowed).
+    pub fn check_all_allow_update(&mut self) {
+        let (env, limit_area, disable_outside_area, editor) =
+            match crate::game::runtime::rules_of(&self.ecs.0) {
+                Some(rules) => (
+                    rules.env,
+                    rules.limit_map_area.then_some((
+                        rules.limit_x,
+                        rules.limit_y,
+                        rules.limit_width,
+                        rules.limit_height,
+                    )),
+                    rules.disable_outside_area,
+                    rules.editor,
+                ),
+                None => (crate::game::rules::DEFAULT_ENV, None, true, false),
+            };
+        if editor {
+            return;
+        }
+        let mut buildings: Vec<bevy_ecs::entity::Entity> = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| entity.contains::<crate::entities::comp::Building>())
+            .map(|entity| entity.id())
+            .collect();
+        buildings.sort_by_key(|entity| entity.index());
+        for entity in buildings {
+            crate::world::allow_update::check_allow_update(
+                &mut self.ecs.0,
+                entity,
+                env,
+                limit_area,
+                disable_outside_area,
+            );
+        }
+    }
+
+    /// `Tile.setTeam` for the building at `(x, y)` (`BuildingComp.changeTeam`
+    /// -> `checkAllowUpdate`, `BuildingComp.java:1842`).
+    pub fn debug_set_building_team(&mut self, x: i32, y: i32, team: u8) -> bool {
+        let Some(entity) = self
+            .grid
+            .tiles
+            .in_bounds(x, y)
+            .then(|| self.grid.tile(x, y).build)
+            .flatten()
+        else {
+            return false;
+        };
+        let Some(mut comp) = self
+            .ecs
+            .0
+            .get_mut::<crate::entities::comp::TeamComp>(entity)
+        else {
+            return false;
+        };
+        comp.team = team;
+        let (env, limit_area, disable_outside_area) =
+            match crate::game::runtime::rules_of(&self.ecs.0) {
+                Some(rules) => (
+                    rules.env,
+                    rules.limit_map_area.then_some((
+                        rules.limit_x,
+                        rules.limit_y,
+                        rules.limit_width,
+                        rules.limit_height,
+                    )),
+                    rules.disable_outside_area,
+                ),
+                None => (crate::game::rules::DEFAULT_ENV, None, true),
+            };
+        crate::world::allow_update::check_allow_update(
+            &mut self.ecs.0,
+            entity,
+            env,
+            limit_area,
+            disable_outside_area,
+        );
+        true
+    }
+
+    /// `World.checkMapArea(prevX, prevY, prevW, prevH)`'s re-enable half
+    /// (`World.java:472-476`).
+    fn reset_map_area(&mut self, prev: (i32, i32, i32, i32)) {
+        let mut buildings: Vec<bevy_ecs::entity::Entity> = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| entity.contains::<crate::entities::comp::Building>())
+            .map(|entity| entity.id())
+            .collect();
+        buildings.sort_by_key(|entity| entity.index());
+        let (x, y, w, h) = prev;
+        for entity in buildings {
+            let (tile, auto_reset, enabled) = {
+                let Some(building) = self.ecs.0.get::<crate::entities::comp::Building>(entity)
+                else {
+                    continue;
+                };
+                let Some(auto_reset) = self
+                    .ecs
+                    .0
+                    .get_resource::<crate::world::BlockTable>()
+                    .and_then(|table| table.instance(building.block))
+                    .map(|instance| instance.def.auto_reset_enabled)
+                else {
+                    continue;
+                };
+                (building.tile, auto_reset, building.enabled)
+            };
+            let (tx, ty) = (tile.x() as i32, tile.y() as i32);
+            if !enabled
+                && auto_reset
+                && !(tx >= x && ty >= y && tx < x + w && ty < y + h)
+                && let Some(mut building) = self
+                    .ecs
+                    .0
+                    .get_mut::<crate::entities::comp::Building>(entity)
+            {
+                building.enabled = true;
+            }
+        }
     }
 
     /// Current phase.
@@ -1882,17 +2062,69 @@ impl Sim {
         }
         let pending = std::mem::take(&mut self.pending_events);
         for event in pending {
-            // `Logic`'s `BlockBuildEndEvent` listener: a player-team placement
-            // bumps the live match's `stats.placedBlockCount`.
-            if let SimEvent::BlockPlacedEvent(placed) = &event
-                && let Ok(name) = self.content.name(placed.block)
-                && let Some(mut runtime) = self
-                    .ecs
-                    .0
-                    .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-                && runtime.session.rules.default_team == placed.team
-            {
-                runtime.session.stats.add_placed(name, 1);
+            // H09 T1 fog listeners (`FogControl.java:64-95`): placed/broken
+            // fog-radius buildings mark the dynamic flush pending.
+            self.handle_fog_block_event(&event);
+            // `Logic`'s `BlockBuildEndEvent`/`BlockDestroyEvent` listeners
+            // (`Logic.java:186-216`; H09 T10): placed/deconstructed/destroyed
+            // counts plus the campaign planet maps, keyed by block name.
+            match &event {
+                SimEvent::BlockPlacedEvent(placed) => {
+                    if let Ok(name) = self.content.name(placed.block)
+                        && let Some(mut runtime) = self
+                            .ecs
+                            .0
+                            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                        && runtime.session.rules.default_team == placed.team
+                    {
+                        runtime.session.stats.add_placed(name, 1);
+                        runtime.session.stats.buildings_built += 1;
+                        if runtime.session.is_campaign()
+                            && let Some((planet, _)) = runtime.session.sector
+                            && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                        {
+                            stats.add_building_built(name, 1);
+                        }
+                    }
+                }
+                SimEvent::BlockBrokenEvent(broken) => {
+                    if let Ok(name) = self.content.name(broken.block)
+                        && let Some(mut runtime) = self
+                            .ecs
+                            .0
+                            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                    {
+                        let default_team = runtime.session.rules.default_team;
+                        if broken.destroyed {
+                            if broken.team == default_team {
+                                runtime.session.stats.buildings_destroyed += 1;
+                                if runtime.session.is_campaign()
+                                    && let Some((planet, _)) = runtime.session.sector
+                                    && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                                {
+                                    stats.add_building_destroyed(name, 1);
+                                }
+                            } else {
+                                runtime.session.stats.add_destroyed(name, 1);
+                                if runtime.session.is_campaign()
+                                    && let Some((planet, _)) = runtime.session.sector
+                                    && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                                {
+                                    stats.add_enemy_building_destroyed(name, 1);
+                                }
+                            }
+                        } else if broken.team == default_team {
+                            runtime.session.stats.buildings_deconstructed += 1;
+                            if runtime.session.is_campaign()
+                                && let Some((planet, _)) = runtime.session.sector
+                                && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                            {
+                                stats.add_building_deconstructed(name, 1);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
             let record = dump::block_event_record(self, &event);
             if let Some(record) = record {

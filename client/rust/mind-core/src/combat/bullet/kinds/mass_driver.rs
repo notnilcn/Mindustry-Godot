@@ -311,9 +311,7 @@ impl BulletBehavior for MassDriverBehavior {
         // `Damage.dynamicExplosion(x, y, flammability, explosiveness, power,
         // radius, damage, fire, team)` with the payload's summed item stats.
         crate::combat::damage::explosion::dynamic_explosion(
-            ctx.world,
-            ctx.content,
-            ctx.rng,
+            ctx,
             x,
             y,
             flammability,

@@ -443,20 +443,40 @@ impl Sim {
                                 })
                                 .unwrap_or((true, item_def.flammability > 1.0));
                             let radius = (def.hit_size * 2.0 + def.leg_length / 1.7) / 2.0;
-                            crate::combat::damage::explosion::dynamic_explosion(
-                                world,
-                                &runtime.content,
-                                &mut runtime.rng,
-                                x,
-                                y,
-                                flammability,
-                                explosiveness,
-                                power,
-                                radius,
-                                damage,
-                                fire,
-                                Some(team),
-                            );
+                            // `UnitComp.destroy` -> `Damage.dynamicExplosion`
+                            // with a live `CombatCtx` (spawned fireballs/bolts
+                            // join the runtime's bullet list).
+                            let audio = world
+                                .remove_resource::<crate::audio::AudioSinkRes>()
+                                .unwrap_or_else(crate::audio::AudioSinkRes::noop);
+                            let mut spawned: Vec<Entity> = Vec::new();
+                            {
+                                let mut ctx = crate::combat::bullet::CombatCtx {
+                                    world: &mut *world,
+                                    content: &runtime.content,
+                                    grid: &runtime.grid,
+                                    rng: &mut runtime.rng,
+                                    fx: runtime.fx.as_ref(),
+                                    audio: &audio,
+                                    seq: &mut runtime.seq,
+                                    spawned: &mut spawned,
+                                };
+                                crate::combat::damage::explosion::dynamic_explosion(
+                                    &mut ctx,
+                                    x,
+                                    y,
+                                    flammability,
+                                    explosiveness,
+                                    power,
+                                    radius,
+                                    damage,
+                                    fire,
+                                    Some(team),
+                                );
+                            }
+                            runtime.bullets_created += spawned.len() as u64;
+                            runtime.bullets.extend(spawned);
+                            world.insert_resource(audio);
                         }
                     }
                 }
@@ -517,8 +537,13 @@ impl Sim {
                     ..
                 } = &mut runtime;
                 let before = *seq;
-                // Read the team before the kill despawns the entity.
+                // Read the team and type name before the kill despawns the
+                // entity (`Logic.java:218-226` needs both for stats).
                 let unit_team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+                let unit_name = world
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+                    .and_then(|comp| content.unit(comp.type_id))
+                    .map(|def| def.name.clone());
                 if crate::entities::comp::unit::lifecycle::kill_unit_with_abilities(
                     world,
                     content,
@@ -531,12 +556,32 @@ impl Sim {
                     runtime.units_removed += 1;
                     // `Logic` `UnitDestroyEvent` (`Logic.java:218-226`): a
                     // killed unit of a non-default team counts as an enemy
-                    // kill (`stats.enemyUnitsDestroyed`; T4).
+                    // kill; the campaign planet maps count every death by type
+                    // name (H09 T10).
                     if let Some(mut campaign) =
                         world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-                        && unit_team != campaign.session.rules.default_team
                     {
-                        campaign.session.stats.enemy_units_destroyed += 1;
+                        let default_team = campaign.session.rules.default_team;
+                        if unit_team != default_team {
+                            campaign.session.stats.enemy_units_destroyed += 1;
+                        }
+                        if campaign.session.is_campaign()
+                            && let Some((planet, _)) = campaign.session.sector
+                            && let Some(name) = unit_name.as_deref()
+                            && let Some(stats) = campaign.campaign.stats_for_mut(planet)
+                        {
+                            if unit_team != default_team {
+                                stats.add_enemy_unit_destroyed(name, 1);
+                            } else {
+                                stats.add_unit_destroyed(name, 1);
+                            }
+                        }
+                    }
+                    // `FogControl.UnitDestroyEvent` (`FogControl.java:91-95`):
+                    // a dead unit's team needs a dynamic redraw.
+                    if let Some(mut fog) = world.get_resource_mut::<crate::game::fog::FogControl>()
+                    {
+                        fog.mark_dynamic(unit_team);
                     }
                 }
                 // Death-ability spawns (`SpawnDeathAbility`) join the live list.
@@ -722,6 +767,7 @@ impl Sim {
                             block,
                             // `BuildingComp.onDestroyed` (destroy sound path).
                             destroyed: true,
+                            team,
                         },
                     ));
                     // `BuildingComp.onDestroyed` -> `playDestroySound` + the
@@ -766,15 +812,25 @@ impl Sim {
                     }
                     // `BuildingComp.onDestroyed` -> `Damage.dynamicExplosion`
                     // (BuildingComp.java:1518; fire comes from the 8-arg
-                    // overload, Damage.java:78-82).
+                    // overload, Damage.java:78-82). The scales apply only here
+                    // (`flammability * block.flammabilityScale`,
+                    // `explosiveness * 3.5f * block.explosivenessScale`); the
+                    // destroy sounds above use the raw terms.
                     if damage_explosions {
                         let (flammability, explosiveness, power) = explosion_terms;
-                        if let Some(mut unit_runtime) = self.ecs.0.remove_non_send::<UnitRuntime>()
-                        {
+                        let (flammability, explosiveness) = plan
+                            .and_then(|(_, _, block)| {
+                                let content = &self.unit_runtime()?.content;
+                                let def = content.block(block)?;
+                                Some((
+                                    flammability * def.flammability_scale,
+                                    explosiveness * 3.5 * def.explosiveness_scale,
+                                ))
+                            })
+                            .unwrap_or((flammability, explosiveness * 3.5));
+                        self.with_combat_ctx(|ctx| {
                             crate::combat::damage::explosion::dynamic_explosion(
-                                &mut self.ecs.0,
-                                &unit_runtime.content,
-                                &mut unit_runtime.rng,
+                                ctx,
                                 center.0,
                                 center.1,
                                 flammability,
@@ -785,8 +841,7 @@ impl Sim {
                                 true,
                                 None,
                             );
-                            self.ecs.0.insert_non_send(unit_runtime);
-                        }
+                        });
                     }
                 }
             }
@@ -1009,6 +1064,81 @@ impl Sim {
             fx.as_ref(),
         );
         self.ecs.0.insert_non_send(runtime);
+        // H09 T7: due `Damage.dynamicExplosion` delayed actions (lightning,
+        // fireballs, staggered waves).
+        self.drain_delayed_explosions();
+    }
+
+    /// Runs `f` with a live [`crate::combat::bullet::CombatCtx`] (unit runtime
+    /// + audio sink).
+    ///
+    /// Bullets spawned through the context join `UnitRuntime.bullets`; `None`
+    /// without a unit runtime.
+    pub(crate) fn with_combat_ctx<R>(
+        &mut self,
+        f: impl FnOnce(&mut crate::combat::bullet::CombatCtx<'_>) -> R,
+    ) -> Option<R> {
+        let mut runtime = self.ecs.0.remove_non_send::<UnitRuntime>()?;
+        let audio = self
+            .ecs
+            .0
+            .remove_resource::<crate::audio::AudioSinkRes>()
+            .unwrap_or_else(crate::audio::AudioSinkRes::noop);
+        let mut spawned: Vec<Entity> = Vec::new();
+        let result = {
+            let UnitRuntime {
+                content,
+                grid,
+                rng,
+                fx,
+                seq,
+                ..
+            } = &mut runtime;
+            let mut ctx = crate::combat::bullet::CombatCtx {
+                world: &mut self.ecs.0,
+                content,
+                grid,
+                rng,
+                fx: fx.as_ref(),
+                audio: &audio,
+                seq,
+                spawned: &mut spawned,
+            };
+            f(&mut ctx)
+        };
+        self.ecs.0.insert_resource(audio);
+        runtime.bullets_created += spawned.len() as u64;
+        runtime.bullets.extend(spawned);
+        self.ecs.0.insert_non_send(runtime);
+        Some(result)
+    }
+
+    /// Drains due `DelayedExplosionActions` (the `Time.run` delays of
+    /// `Damage.dynamicExplosion`; H09 T7). Entries count down one per tick and
+    /// run in insertion order.
+    fn drain_delayed_explosions(&mut self) {
+        use crate::combat::damage::explosion::{DelayedAction, DelayedExplosionActions};
+        let due = {
+            let Some(mut actions) = self.ecs.0.get_resource_mut::<DelayedExplosionActions>() else {
+                return;
+            };
+            let mut due: Vec<DelayedAction> = Vec::new();
+            let mut index = 0;
+            while index < actions.0.len() {
+                actions.0[index].0 -= 1.0;
+                if actions.0[index].0 <= 0.0 {
+                    due.push(actions.0.remove(index).1);
+                } else {
+                    index += 1;
+                }
+            }
+            due
+        };
+        for action in due {
+            self.with_combat_ctx(|ctx| {
+                crate::combat::damage::explosion::run_delayed_action(ctx, &action);
+            });
+        }
     }
 
     /// Deterministic digest of the live unit runtime; empty when not installed.
@@ -1707,24 +1837,42 @@ fn has_core_of_team(world: &World, content: &ContentRegistry, team: u8) -> bool 
 }
 
 /// `BuildingComp.onDestroyed` explosion terms (`BuildingComp.java:1491-1508`):
-/// `(flammability, explosiveness, power)` summed over the live item/liquid/power
-/// modules. `explosionItemCap` caps item amounts at `item_capacity`; liquids
-/// count half; buffered power uses `power.status * capacity`. The per-block
-/// `baseExplosiveness`/`flammabilityScale`/`explosivenessScale` fields are not
-/// modelled by `BlockDef` yet (defaults 0/1 would apply).
-fn building_explosion_terms(
+/// `BuildingComp.explosionItemCap()` (`BuildingComp.java:1463-1465`): a
+/// storage block linked to a core caps at `min(itemCapacity / 60, 6)`
+/// (`StorageBlock.java:99-103`).
+fn explosion_item_cap(
+    world: &World,
+    entity: Entity,
+    def: &crate::content::registries::blocks::BlockDef,
+) -> i32 {
+    if world
+        .get::<crate::world::blocks::storage::storage_block::StorageBuild>(entity)
+        .is_some_and(|storage| storage.linked_core.is_some())
+    {
+        return (def.item_capacity / 60).min(6);
+    }
+    def.item_capacity
+}
+
+/// `BuildingComp.onDestroyed` explosion inputs
+/// (`BuildingComp.java:1490-1518`): `(flammability, explosiveness, power)`
+/// summed over the live item/liquid/power modules plus the block's
+/// `baseExplosiveness`. Liquids count half; buffered power uses
+/// `power.status * capacity`. The caller applies `3.5 * explosivenessScale`
+/// and `flammabilityScale`.
+pub(crate) fn building_explosion_terms(
     world: &World,
     content: &ContentRegistry,
     entity: Entity,
     def: &crate::content::registries::blocks::BlockDef,
 ) -> (f32, f32, f32) {
-    let mut explosiveness = 0.0f32;
+    let mut explosiveness = def.base_explosiveness;
     let mut flammability = 0.0f32;
     let mut power = 0.0f32;
     if def.has_items
         && let Some(module) = world.get::<crate::world::modules::ItemModule>(entity)
     {
-        let cap = def.item_capacity.max(0);
+        let cap = explosion_item_cap(world, entity, def).max(0);
         for (index, amount) in module.items.iter().enumerate() {
             // `Math.min(items.get(item), explosionItemCap())`.
             let amount = (*amount).min(cap) as f32;
@@ -2528,6 +2676,14 @@ fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) {
         .collect();
     found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
     for (_, entity) in found {
+        // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`) for payload/
+        // ability spawns (H09 T10); the runtime is out of the world here, so
+        // the type name comes from the local one.
+        let name = world
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+            .and_then(|comp| runtime.content.unit(comp.type_id))
+            .map(|def| def.name.clone());
+        crate::game::stats::notify_unit_created(world, entity, name.as_deref());
         world
             .entity_mut(entity)
             .remove::<crate::combat::bullet::spawn::SpawnedByBullet>();

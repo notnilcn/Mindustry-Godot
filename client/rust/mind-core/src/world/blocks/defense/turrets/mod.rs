@@ -286,6 +286,9 @@ pub struct TurretConfig {
     pub sound_pitch_min: f32,
     /// `Turret.soundPitchMax` (default 1.1).
     pub sound_pitch_max: f32,
+    /// `Turret.fogRadiusMultiplier` (default 1; scathe 0.4,
+    /// `Blocks.java:5661`).
+    pub fog_radius_multiplier: f32,
 }
 
 impl TurretConfig {
@@ -787,6 +790,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         "test-item" => {
@@ -856,6 +860,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         "test-liquid" => {
@@ -925,6 +930,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         "test-power" => {
@@ -994,6 +1000,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         _ => advanced::config_for(content, name, names),
@@ -1378,6 +1385,17 @@ pub fn update_turrets(ctx: &mut CombatCtx<'_>) {
         .collect();
     for turret in turrets {
         if ctx.world.get::<TurretState>(turret).is_none() {
+            continue;
+        }
+        // `Building.update()`: `if(enabled || !block.noUpdateDisabled)
+        // updateTile();` — `Turret` keeps the default `noUpdateDisabled =
+        // false`, so a disabled turret does nothing (H09 T4). Fixture entities
+        // without a `Building` component (harness turrets) still update.
+        if ctx
+            .world
+            .get::<crate::entities::comp::Building>(turret)
+            .is_some_and(|building| !building.enabled)
+        {
             continue;
         }
         let Some(mut state) = ctx.world.entity_mut(turret).take::<TurretState>() else {

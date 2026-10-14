@@ -1194,6 +1194,9 @@ impl SimIoHandler {
             runtime.session.phase = crate::game::State::Playing;
             sim.ecs.0.insert_resource(runtime);
         }
+        // `WorldLoadEvent` fog half (FogControl.java:46-62): size the fog to
+        // the just-swapped grid with the loaded rules.
+        sim.reset_fog();
         IoStatus::Ok
     }
 }

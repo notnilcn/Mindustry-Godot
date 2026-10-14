@@ -740,6 +740,12 @@ impl BlockKindData {
             ignore_liquid_fullness: ignore,
         };
         match name {
+            // `Radar.java:18`: `discoveryTime = 60f * 10f` (10 s at 60 Hz).
+            "radar" => {
+                if let BlockKindData::Radar(def) = self {
+                    def.discovery_time = 600.0;
+                }
+            }
             "silicon-smelter" => self.set_crafter(craft(vec![(item("silicon"), 1)], vec![], false)),
             // `Blocks.java:1041 graphite-press` — graphite x1, craftTime 90.
             "graphite-press" => {

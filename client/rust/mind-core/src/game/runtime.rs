@@ -1015,6 +1015,56 @@ pub fn team_ai_system(world: &mut World) {
         return;
     }
     let rules = runtime.session.rules.clone();
+    // `Logic.java:552-561` (before the buildAi/rtsAi block): every active team
+    // with `fillItems` refills `getMaximumAccepted` of each on-planet, visible
+    // item into its first core. Not PvP-gated; skipped in the editor.
+    if !rules.editor {
+        let mut fill_plan: Vec<(Entity, Vec<(crate::content::ItemId, i32)>)> = Vec::new();
+        if let Some(unit_runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() {
+            let content = &unit_runtime.content;
+            let table = world.get_resource::<crate::world::BlockTable>();
+            let planet = runtime.session.sector.map(|(planet, _)| planet);
+            fill_plan = runtime
+                .session
+                .teams
+                .active
+                .iter()
+                .filter_map(|team| {
+                    let data = runtime.session.teams.get_or_null(*team)?;
+                    let core = data.core()?;
+                    let building = world.get::<crate::entities::comp::Building>(core)?;
+                    let instance = table.and_then(|table| table.instance(building.block))?;
+                    // `UnlockableContent.isOnPlanet` (`UnlockableContent.java:132-134`).
+                    let amounts: Vec<(crate::content::ItemId, i32)> = content
+                        .items()
+                        .iter()
+                        .filter(|item| {
+                            !item.is_hidden()
+                                && (planet.is_none()
+                                    || item.unlock.shown_planets.is_empty()
+                                    || planet.is_some_and(|planet| {
+                                        item.unlock.shown_planets.contains(&planet)
+                                    }))
+                        })
+                        .map(|item| {
+                            (
+                                item.id,
+                                instance.behavior.get_maximum_accepted(world, core, item.id),
+                            )
+                        })
+                        .collect();
+                    Some((core, amounts))
+                })
+                .collect();
+        }
+        for (core, amounts) in fill_plan {
+            if let Some(mut module) = world.get_mut::<crate::world::modules::ItemModule>(core) {
+                for (item, amount) in amounts {
+                    module.set(item, amount);
+                }
+            }
+        }
+    }
     // `if(rules.buildAi && !state.rules.pvp)` and the RTS guard share the
     // PvP exclusion upstream; the whole per-team block is host-only.
     if !rules.pvp {
