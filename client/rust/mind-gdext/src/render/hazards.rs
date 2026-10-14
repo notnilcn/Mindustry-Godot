@@ -31,23 +31,6 @@ use crate::sim_host::MindSimHost;
 
 use super::canvas::{self, RegionCache};
 
-/// `Fill.circle(x, y, radius)`: a filled `Lines.circleVertices` polygon
-/// (Arc `Fill.poly`; `Lines.java:24-26`, `Lines.circleVertices`).
-fn fill_circle(canvas: &mut Node2D, x: f32, y: f32, r: f32, color: Color) {
-    if r <= 0.0 {
-        return;
-    }
-    let sides = (11 + (r * 0.4) as u32).max(3);
-    let ring = drawf::poly_ring(x, y, sides, r, 0.0);
-    let packed: PackedVector2Array = ring
-        .iter()
-        .map(|(px, py)| Vector2::new(*px, *py))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .collect();
-    canvas.draw_colored_polygon(&packed, color);
-}
-
 /// Arc `Rand` approximation for the puddle satellites: a 64-bit LCG re-seeded
 /// per draw from `Puddle.id` (Java `rand.setSeed(id); rand.random(max)`).
 struct ViewRng {
@@ -120,7 +103,7 @@ impl INode2D for PuddleRenderer {
             let sscl = 25.0;
             let color = canvas::color_f4(row.color);
             let id = row.id as f32;
-            fill_circle(
+            canvas::fill_circle(
                 &mut base,
                 row.x + drawf::sin_scl(t + id * 532.0, sscl, smag),
                 row.y + drawf::sin_scl(t + id * 53.0, sscl, smag),
@@ -132,7 +115,7 @@ impl INode2D for PuddleRenderer {
             let mut rng = ViewRng::new(row.id as i64);
             for i in 0..3 {
                 let (vx, vy) = drawf::trns(rng.unit() * 360.0, rng.unit() * length);
-                fill_circle(
+                canvas::fill_circle(
                     &mut base,
                     row.x + vx + drawf::sin_scl(t + i as f32 * 532.0, sscl, smag),
                     row.y + vy + drawf::sin_scl(t + i as f32 * 53.0, sscl, smag),

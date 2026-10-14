@@ -5984,6 +5984,76 @@ impl MindSimHost {
         rows.into_iter().map(|(_, draw)| draw).collect()
     }
 
+    /// `DrawState` for a block's `DrawBlock` chain (`world/draw/*`; H03 T8).
+    /// `None` without a building, a content def, or the content snapshot.
+    pub fn block_draw_state(
+        &self,
+        x: i32,
+        y: i32,
+    ) -> Option<mind_core::render::draw_desc::DrawState> {
+        use mind_core::content::LiquidId;
+        use mind_core::entities::comp::building::CrafterState;
+        use mind_core::world::blocks::heat::HeatState;
+        use mind_core::world::blocks::power::generator::GeneratorState;
+        use mind_core::world::modules::{LiquidModule, PowerModule};
+        let tile = self.tile_at(x, y)?;
+        let entity = tile.build?;
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(tile.block)?;
+        let ecs = &self.sim.ecs.0;
+        let size = def.size.max(1);
+        let rotation = self.building_rotation(x, y);
+        let cx = (x + (size - 1) / 2) as f32 * 8.0 + def.offset;
+        let cy = (y + (size - 1) / 2) as f32 * 8.0 + def.offset;
+        let crafter = ecs.get::<CrafterState>(entity);
+        // `GenericCrafter` carries `warmup` on `CrafterState`; generators drive
+        // their drawer from `productionEfficiency` (`ConsumeGenerator` /
+        // reactors), which the port keeps on `GeneratorState`.
+        let warmup = ecs
+            .get::<GeneratorState>(entity)
+            .map(|state| state.production_efficiency)
+            .or_else(|| crafter.map(|state| state.warmup))
+            .unwrap_or(0.0);
+        // Dominant liquid entry (for `liquidColor`/`liquidAmount` consumers).
+        let (liquid_amount, liquid_color) = ecs
+            .get::<LiquidModule>(entity)
+            .map(|module| {
+                let (id, amount) = module
+                    .liquids
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.total_cmp(b.1))
+                    .map(|(id, amount)| (id as u16, *amount))
+                    .unwrap_or((0, 0.0));
+                let color = content
+                    .liquid(LiquidId::new(id))
+                    .map(|liquid| liquid.color.to_rgba8888())
+                    .unwrap_or(0xffff_ffff);
+                (amount, color)
+            })
+            .unwrap_or((0.0, 0xffff_ffff));
+        Some(mind_core::render::draw_desc::DrawState {
+            warmup,
+            progress: crafter.map(|state| state.progress).unwrap_or(0.0),
+            total_progress: crafter.map(|state| state.total_progress).unwrap_or(0.0),
+            // `Time.time` view clock (the same 60 Hz ticks the other passes use).
+            time: godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06,
+            id: entity.index_u32() as i32,
+            power_status: ecs
+                .get::<PowerModule>(entity)
+                .map(|module| module.status)
+                .unwrap_or(0.0),
+            liquid_capacity: def.liquid_capacity,
+            liquid_amount,
+            liquid_color,
+            heat: ecs
+                .get::<HeatState>(entity)
+                .map(|state| state.heat)
+                .unwrap_or(0.0),
+            ..mind_core::render::draw_desc::DrawState::new(cx, cy, i32::from(rotation), size)
+        })
+    }
+
     /// The player team's rebuild ghosts (`TeamData.plans`, pushed by
     /// `Sim::resolve_deaths`): `(x, y, rotation, block)` in insertion order.
     pub fn team_block_plans(&self) -> Vec<(i16, i16, i8, BlockId)> {

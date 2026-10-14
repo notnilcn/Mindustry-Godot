@@ -38,6 +38,26 @@ const HEAT_COLOR: u32 = 0xab34_00ff;
 /// `Vars.itemSize` — belt item icons draw at 5 world px (`Conveyor.draw`).
 const ITEM_SIZE: f32 = 5.0;
 
+/// Blocks whose `DrawBlock` chain (H03 T8, `render/block_extras.rs`) animates
+/// parts that the composed `block-<name>-full` icon already bakes at rest:
+/// draw the plain `Block.region` as the base so the part is not doubled.
+/// Decided by diffing each chain block's `-full` icon against its region
+/// (identical or absent icons keep the current chain; listed blocks differ in
+/// the animated area). One comment per entry names the part.
+const ANIMATED_CHAIN_BASE: &[&str] = &[
+    // `DrawWeave` weaves over the icon's baked centre.
+    "phase-weaver",
+    // `DrawLiquidTile` re-draws the icon's baked liquid centre.
+    "cryofluid-mixer",
+    "melter",
+    "separator",
+    "disassembler",
+    // `DrawPistons` pumps over the icon's baked pistons.
+    "spore-press",
+    // `DrawCultivator` plants over the icon's baked plants.
+    "cultivator",
+];
+
 /// Block-renderer counters mirrored into `MindWorldRenderer`'s stats.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct BlockStats {
@@ -374,7 +394,7 @@ impl BlockRenderer {
                             let (v0, v1) = if scly < 0.0 { (v1, v0) } else { (v0, v1) };
                             (region, [u0, v0, u1, v1])
                         }),
-                    None => self.block_region(def).map(|region| {
+                    None => self.base_region(def).map(|region| {
                         let uv = region.uv;
                         (region, uv)
                     }),
@@ -563,6 +583,19 @@ impl BlockRenderer {
         mind_core::render::block_region_candidates(&def.name, &def.region)
             .into_iter()
             .find_map(|name| self.resolver.find(&name))
+    }
+
+    /// The base sprite actually drawn by the dynamic pass: for
+    /// [`ANIMATED_CHAIN_BASE`] blocks the plain `Block.region` wins (their
+    /// `DrawBlock` extras animate the part the composed icon bakes), else the
+    /// usual [`Self::block_region`] chain.
+    fn base_region(&mut self, def: &BlockDef) -> Option<ResolvedRegion> {
+        if ANIMATED_CHAIN_BASE.contains(&def.name.as_str()) {
+            self.resolver.find(&def.region)
+        } else {
+            None
+        }
+        .or_else(|| self.block_region(def))
     }
 
     /// Draws each visible construct site through its own `blockbuild` node
