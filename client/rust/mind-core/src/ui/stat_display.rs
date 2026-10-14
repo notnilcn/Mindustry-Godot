@@ -21,27 +21,68 @@ pub fn fix_value(value: f32) -> String {
     auto_fixed(value, 3)
 }
 
-/// Arc `Strings.autoFixed`: round to `decimals` (Java half-up), trim zeros.
-pub fn auto_fixed(value: f32, decimals: usize) -> String {
-    let factor = 10f64.powi(decimals as i32);
-    let rounded = java_round(value as f64 * factor) / factor;
-    if (rounded - rounded.trunc()).abs() < f64::EPSILON {
-        return format!("{}", rounded as i64);
-    }
-    let mut text = format!("{rounded:.decimals$}");
-    while text.ends_with('0') {
-        text.pop();
-    }
-    if text.ends_with('.') {
-        text.pop();
-    }
-    text
+/// Arc `Strings.autoFixed` (`Strings.java:761-773`): truncates the extra
+/// digits past `max` (adds `0.001` before the floor), picks the smallest
+/// precision with an exact representation, then formats through [`fixed`].
+pub fn auto_fixed(value: f32, max: usize) -> String {
+    // `Mathf.pow(10, max)` is `(float)Math.pow(10, max)`.
+    let pow10 = 10f64.powi(max as i32) as f32;
+    // `(float)Mathf.floor(value * pow10 + 0.001f) / pow10` (f32 division).
+    let truncated = floor_int(value * pow10 + 0.001) as f32 / pow10;
+
+    let precision = if (floor_int(truncated) as f32 - truncated).abs() < 0.0001 {
+        0
+    } else if (floor_int(truncated * 10.0) as f32 - truncated * 10.0).abs() < 0.0001 {
+        1
+    } else if (floor_int(truncated * 100.0) as f32 - truncated * 100.0).abs() < 0.0001 {
+        2
+    } else if (floor_int(truncated * 1000.0) as f32 - truncated * 1000.0).abs() < 0.0001 {
+        3
+    } else {
+        4
+    };
+    fixed(truncated, max.min(precision))
 }
 
-/// Java `Math.round` (`floor(x + 0.5)`), which differs from Rust on negative
-/// halves (`Math.round(-0.5) == 0`).
-fn java_round(value: f64) -> f64 {
-    (value + 0.5).floor()
+/// Arc `Strings.fixed` (`Strings.java:775-777` + `fixedBuilder`): fixed-point
+/// formatting with `places` digits (`(int)(float)(|d| * 10^places + 0.0001f)`
+/// digits, dot inserted from the right, leading zeroes padded).
+pub fn fixed(d: f32, places: usize) -> String {
+    let negative = d < 0.0;
+    let abs = d.abs();
+    let scaled = (abs as f64 * 10f64.powi(places as i32) + 0.0001f32 as f64) as f32 as i32;
+    let mut dec = scaled.to_string();
+    let len = dec.len() as i32;
+    let decimal_position = len - places as i32;
+    let mut result = String::new();
+    if negative {
+        result.push('-');
+    }
+    if places == 0 {
+        if negative {
+            dec.insert(0, '-');
+        }
+        return dec;
+    } else if decimal_position > 0 {
+        let (head, tail) = dec.split_at(decimal_position as usize);
+        result.push_str(head);
+        result.push('.');
+        result.push_str(tail);
+    } else {
+        result.push_str("0.");
+        let mut position = decimal_position;
+        while position < 0 {
+            result.push('0');
+            position += 1;
+        }
+        result.push_str(&dec);
+    }
+    result
+}
+
+/// Java `Mathf.floor(float)` returns `int` (`(int)Math.floor`).
+fn floor_int(value: f32) -> i32 {
+    (value as f64).floor() as i32
 }
 
 /// `StatValues.ammoStat`: `[stat]+`/`[negstat]` prefix + 1 decimal.
@@ -223,9 +264,23 @@ mod tests {
         assert_eq!(fix_value(0.0), "0");
         assert_eq!(fix_value(3.0), "3");
         assert_eq!(fix_value(3.5), "3.5");
-        assert_eq!(fix_value(1.2345), "1.235");
+        // H05 T9: Arc truncates; 1.2345 -> 1.234 (was "1.235" with rounding).
+        assert_eq!(fix_value(1.2345), "1.234");
         assert_eq!(auto_fixed(1.20, 3), "1.2");
         assert_eq!(auto_fixed(1000.0, 2), "1000");
+    }
+
+    /// Oracle run against the Arc jar (2026-10-14, H05 T9).
+    #[test]
+    fn auto_fixed_matches_arc() {
+        assert_eq!(auto_fixed(0.291666, 3), "0.291");
+        assert_eq!(auto_fixed(0.6666667, 3), "0.666");
+        assert_eq!(auto_fixed(1.3333334, 3), "1.333");
+        assert_eq!(auto_fixed(1.5, 3), "1.5");
+        assert_eq!(auto_fixed(2.0, 3), "2");
+        assert_eq!(auto_fixed(0.4, 3), "0.4");
+        assert_eq!(auto_fixed(-1.25, 1), "-1.3");
+        assert_eq!(auto_fixed(60.0 / 7.0, 2), "8.57");
     }
 
     #[test]
