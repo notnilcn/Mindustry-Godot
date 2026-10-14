@@ -399,7 +399,10 @@ pub fn apply_base(world: &mut World, entity: Entity, decoded: &DecodedBase, max_
         for (id, amount) in &decoded.items {
             if let Some(slot) = items.items.get_mut(*id as usize) {
                 *slot = *amount;
-                items.total += *amount;
+                // `ItemModule.read` (`ItemModule.java:319-334`): `total` is a
+                // plain Java `int`, so oversized stacks (`fillItems` writes
+                // `i32::MAX / 2`) wrap instead of panicking.
+                items.total = items.total.wrapping_add(*amount);
             }
         }
     }

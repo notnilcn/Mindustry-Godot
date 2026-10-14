@@ -206,14 +206,23 @@ impl BuildingBehavior for CoreBehavior {
             }
         }
 
-        // Clamp items to the new capacity (not while generating).
-        for core in &cores {
-            if let Some(mut module) = world.get_mut::<ItemModule>(*core) {
-                module.items.iter_mut().for_each(|amount| {
-                    *amount = (*amount).min(total);
-                });
-                module.total = module.items.iter().sum();
+        // Clamp items to the new capacity (Java `CoreBlock.java:773-778` skips
+        // this while the world is generating, i.e. inside a map/save load, so a
+        // loaded core keeps its saved stacks).
+        if !world
+            .get_resource::<crate::world::WorldGenerating>()
+            .is_some_and(|flag| flag.0)
+        {
+            for core in &cores {
+                if let Some(mut module) = world.get_mut::<ItemModule>(*core) {
+                    module.items.iter_mut().for_each(|amount| {
+                        *amount = (*amount).min(total);
+                    });
+                    module.total = module.items.iter().sum();
+                }
             }
+        }
+        for core in &cores {
             if let Some(mut core_build) = world.get_mut::<CoreBuild>(*core) {
                 core_build.storage_capacity = total;
             }

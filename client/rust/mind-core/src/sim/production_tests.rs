@@ -3200,6 +3200,78 @@ fn fill_items_fills_ai_core() {
     );
 }
 
+/// PAR-0249 regression (found by the H03 session): only teams whose rule sets
+/// `fillItems` may be refilled (`Logic.java:554`
+/// `if(rules.fillItems && data.cores.size > 0)`). The campaign sets it on the
+/// wave team alone (`apply_world_load_campaign_rules`), so the PLAYER core must
+/// stay empty — filling it wrote `i32::MAX / 2` per item (`coreIncinerates`)
+/// into every exit save.
+#[test]
+fn fill_items_does_not_fill_player_core() {
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{
+        CampaignRuntime, install_campaign_core_hooks, sync_session_with_sim,
+    };
+    use crate::world::TilePos;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    // Campaign shape: only the wave team's rule gets `fillItems`.
+    rules.team_rule_mut(1).fill_items = false;
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = true;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    for (x, y, team) in [(5, 5, 1u8), (15, 15, 2u8)] {
+        sim.command(crate::determinism::SimCommand::Place {
+            x,
+            y,
+            block: core.raw(),
+            rotation: 0,
+            team,
+            player: None,
+        })
+        .expect("core placed");
+    }
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let copper = item(&sim, "copper");
+    let player_core = sim.grid.entity_at(TilePos::new(5, 5)).expect("player core");
+    let enemy_core = sim
+        .grid
+        .entity_at(TilePos::new(15, 15))
+        .expect("enemy core");
+    assert_eq!(
+        stored_item(&sim, player_core, copper),
+        0,
+        "the player core (fillItems=false) is never refilled"
+    );
+    assert_eq!(
+        stored_item(&sim, enemy_core, copper),
+        i32::MAX / 2,
+        "the wave team's core is still filled (fillItems=true)"
+    );
+}
+
 /// H09 T10: the `Logic` event counters (`Logic.java:186-216`) follow player
 /// builds, deconstructs and losses.
 #[test]

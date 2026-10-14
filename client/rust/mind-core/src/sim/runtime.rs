@@ -912,10 +912,17 @@ impl SimRuntime {
             building_io::apply_body(ecs, entity, decoded);
             spawned.push(entity);
         }
-        grid.generating = generating;
+        // Java `World.endMapLoad` (`World.java:220-236`) rebuilds every
+        // building's proximity while `generating` is still set, and only then
+        // clears it. Behaviors that only see the ECS world read the flag from
+        // `WorldGenerating`; `CoreBlock` skips its item clamp during the pass
+        // (`CoreBlock.java:773-778`), so a loaded save keeps its item stacks.
+        ecs.insert_resource(crate::world::WorldGenerating(true));
         for entity in &spawned {
             let _ = update_proximity(ecs, grid, &self.content, *entity);
         }
+        grid.generating = generating;
+        ecs.insert_resource(crate::world::WorldGenerating(generating));
         // `Drill.countOre` is grid-derived state the tile reader cannot carry:
         // without it a materialized drill has no `dominantItem` and never mines
         // (`SimRuntime::place` does the same after `Tile.setBlock`).

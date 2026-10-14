@@ -1915,6 +1915,85 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// PAR-0249: a core holding `i32::MAX / 2` item stacks (the `fillItems`
+    /// value under `coreIncinerates`, `CoreBlock.java:749-751`) saves and
+    /// reloads without panicking; `ItemModule.total` wraps like Java's `int`
+    /// (`ItemModule.java:319-334`).
+    #[test]
+    fn live_sim_save_then_load_keeps_oversized_item_stacks() {
+        use crate::world::modules::ItemModule;
+
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let core = sim.content().id("core-shard").expect("core-shard");
+        sim.apply(Command::Place {
+            x: 5,
+            y: 5,
+            block: core,
+        })
+        .expect("place core");
+        for _ in 0..5 {
+            sim.tick().expect("tick");
+        }
+        let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+        let content = boot_registry().expect("content");
+        let copper = content.item_id("copper").expect("copper");
+        let lead = content.item_id("lead").expect("lead");
+        let graphite = content.item_id("graphite").expect("graphite");
+        let silicon = content.item_id("silicon").expect("silicon");
+        let huge = i32::MAX / 2;
+        // Four `i32::MAX / 2` stacks sum past `i32::MAX`: the plain `+=` the
+        // decoder used panicked here in debug builds (the H03 crash report).
+        let expected_total = huge
+            .wrapping_add(huge)
+            .wrapping_add(huge)
+            .wrapping_add(huge);
+        {
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
+            items.set(copper, huge);
+            items.set(lead, huge);
+            items.set(graphite, huge);
+            items.set(silicon, huge);
+            assert_eq!(items.total(), expected_total, "Java int wrap (set)");
+        }
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("live-oversized-items-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load rebuilds the core and must not panic
+        // on the overflow the sum of the two stacks produces in `apply_base`.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(5, 5))
+            .expect("core reloaded");
+        let items = sim.ecs.0.get::<ItemModule>(entity).expect("items");
+        assert_eq!(items.get(copper), huge, "stack round-trips");
+        assert_eq!(items.get(lead), huge, "stack round-trips");
+        assert_eq!(items.get(graphite), huge, "stack round-trips");
+        assert_eq!(items.get(silicon), huge, "stack round-trips");
+        assert_eq!(items.total(), expected_total, "wrapped total round-trips");
+        // The live module keeps working after the oversized load.
+        let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
+        assert_eq!(items.remove(copper, 1), 1);
+        assert_eq!(items.total(), expected_total.wrapping_sub(1));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// PAR-0138: a live save round-trips the carried payload stack (revision 2
     /// unit chunk); a v1 save without payloads still loads.
     #[test]
