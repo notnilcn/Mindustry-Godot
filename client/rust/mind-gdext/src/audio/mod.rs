@@ -22,11 +22,12 @@ use godot::prelude::*;
 use indexmap::IndexMap;
 
 use mind_core::audio::frame::{AudioGameState, LoopPos, LoopSource, TurretLoopSource};
-use mind_core::audio::math::{Listener, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
+use mind_core::audio::math::{Listener, MIN_INTERVAL_MS, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
-    AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput, MusicContext,
-    MusicOutput, MusicPlayer, MusicRef, SeededAudioRng, SharedAudioLog, SoundId, SoundLoopAction,
-    SoundLoopState, SoundPriorityTable, TickedAudioEvent, bus_for_sound, settings_keys,
+    ActiveVoice, AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput,
+    MusicContext, MusicOutput, MusicPlayer, MusicRef, OneShotPlan, SeededAudioRng, SharedAudioLog,
+    SoundId, SoundLoopAction, SoundLoopState, SoundPlayState, SoundPriorityTable, TickedAudioEvent,
+    bus_for_sound, plan_one_shot, settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
@@ -90,6 +91,13 @@ pub struct MindAudio {
     construct_last_time_ms: f64,
     /// `calcPitch` sequence counter.
     construct_pitch_seq: i32,
+    /// Per-sound `Sound.lastTimePlayed`/`lastVoice`/`lastVolume` (`checkFrame`).
+    /// Lookup-only map (never iterated; audio is view-only).
+    play_state: std::collections::HashMap<SoundId, SoundPlayState>,
+    /// Scratch for `VoicePool::active_voices`.
+    active_scratch: Vec<ActiveVoice>,
+    /// Wall clock captured at the top of `process()` (ms).
+    now_ms: f64,
     log: Vec<String>,
     missing: Vec<String>,
 }
@@ -152,6 +160,9 @@ impl INode for MindAudio {
             construct_last_played_ms: 0.0,
             construct_last_time_ms: 0.0,
             construct_pitch_seq: 0,
+            play_state: std::collections::HashMap::new(),
+            active_scratch: Vec::with_capacity(64),
+            now_ms: 0.0,
             log: Vec::new(),
             missing: Vec::new(),
         }
@@ -236,6 +247,7 @@ impl INode for MindAudio {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as f64)
             .unwrap_or(0.0);
+        self.now_ms = now_ms;
         let delta_frames = (delta * 60.0) as f32;
 
         // Lowpass tween (0.4 s, plan 18 §3.5).
@@ -309,7 +321,7 @@ impl INode for MindAudio {
                 && wave > last
             {
                 self.music.on_wave_event(now_ms, &mut self.rng);
-                self.play_sound("waveSpawn", self.sfx_scale(), 1.0, 0.0);
+                self.play_sound("waveSpawn", self.sfx_scale(), 1.0, 0.0, true);
             }
             self.last_wave = Some(wave);
         }
@@ -619,25 +631,42 @@ impl MindAudio {
                     y,
                     pitch,
                     volume,
-                    ..
+                    check_frame,
                 } => {
-                    let scaled = calc_falloff(*x, *y, listener, 0.0) * self.sfx_scale() * *volume;
+                    // `Sound.falloffOffset` (`explosionCore` 100 px, T1).
+                    let spec = self.table.spec(*sound);
+                    let scaled = calc_falloff(*x, *y, listener, spec.falloff_offset)
+                        * self.sfx_scale()
+                        * *volume;
                     if scaled < MIN_PLAY_VOLUME {
                         continue;
                     }
-                    self.play_sound(sound.name(), scaled, *pitch, calc_pan(*x, listener));
+                    self.play_sound(
+                        sound.name(),
+                        scaled,
+                        *pitch,
+                        calc_pan(*x, listener),
+                        *check_frame,
+                    );
                 }
                 AudioEvent::Play {
                     sound,
                     volume,
                     pitch,
                     pan,
+                    check_frame,
                     ..
                 } => {
                     // `Sound.play` call sites pass `volume * sfxVolume`
                     // (`CoreBlock.java:712`, `LExecutor.java:2256`); the sim
                     // stores the raw volume (T3).
-                    self.play_sound(sound.name(), *volume * self.sfx_scale(), *pitch, *pan);
+                    self.play_sound(
+                        sound.name(),
+                        *volume * self.sfx_scale(),
+                        *pitch,
+                        *pan,
+                        *check_frame,
+                    );
                 }
                 AudioEvent::LoopAdd {
                     sound,
@@ -718,9 +747,11 @@ impl MindAudio {
                         self.construct_last_time_ms = now_ms;
                         0.7 + self.rng.next_f32() * 0.6
                     };
-                    let scaled = calc_falloff(*x, *y, listener, 0.0) * self.sfx_scale();
+                    let scaled =
+                        calc_falloff(*x, *y, listener, self.table.spec(*sound).falloff_offset)
+                            * self.sfx_scale();
                     if scaled >= MIN_PLAY_VOLUME {
-                        self.play_sound(sound.name(), scaled, pitch, calc_pan(*x, listener));
+                        self.play_sound(sound.name(), scaled, pitch, calc_pan(*x, listener), true);
                     }
                 }
             }
@@ -728,28 +759,100 @@ impl MindAudio {
     }
 
     /// Plays one one-shot through the UI or world voice pool.
-    fn play_sound(&mut self, name: &str, volume: f32, pitch: f32, pan: f32) {
+    ///
+    /// World voices run Arc `Sound.play` `checkFrame` intensification plus
+    /// SoLoud admission (`OneShotPlan`); the UI pool keeps its 16 voices
+    /// round-robin and only the 16 ms replay window applies (no intensify
+    /// slot bookkeeping there).
+    fn play_sound(&mut self, name: &str, volume: f32, pitch: f32, pan: f32, check_frame: bool) {
         let file = self.streams.file_of(name).map(str::to_owned);
         let Some(stream) = self.streams.sound(name, false) else {
             self.log_missing(name);
             return;
         };
-        let ui = bus_for_sound(name, file.as_deref()) == mind_core::audio::BusKind::Ui;
-        let listener = self.listener();
-        let Some(pool) = self.pool.as_mut() else {
+        let Some(id) = SoundId::by_name(name) else {
+            self.log_missing(name);
             return;
         };
-        if ui {
-            let _ = pool.play_ui(stream, volume, pitch);
+        let now = self.now_ms;
+        if bus_for_sound(name, file.as_deref()) == mind_core::audio::BusKind::Ui {
+            let state = self.play_state.entry(id).or_default();
+            if check_frame && state.within_min_interval(now, MIN_INTERVAL_MS) {
+                return;
+            }
+            let Some(pool) = self.pool.as_mut() else {
+                return;
+            };
+            let voice = pool.play_ui(stream, volume, pitch);
+            state.record(voice as u64, volume, now);
+            return;
+        }
+
+        let spec = self.table.spec(id);
+        let length = stream.get_length() as f32;
+        if let Some(pool) = self.pool.as_ref() {
+            pool.active_voices(&mut self.active_scratch);
         } else {
-            let _ = pool.play_world(
-                stream,
+            self.active_scratch.clear();
+        }
+        let plan = {
+            let state = self.play_state.entry(id).or_default();
+            plan_one_shot(
+                state,
+                &self.active_scratch,
+                &spec,
+                id,
                 volume,
-                pitch,
-                pan,
-                (listener.x, listener.y),
-                listener.width,
-            );
+                length,
+                now,
+                check_frame,
+            )
+        };
+        match plan {
+            OneShotPlan::Skip | OneShotPlan::Deny => {}
+            OneShotPlan::Intensify { voice, volume } => {
+                // `Core.audio.set(lastVoice, pan, lastVolume)`.
+                let listener = self.listener();
+                if let Some(pool) = self.pool.as_mut() {
+                    pool.set_voice_volume(
+                        voice,
+                        volume,
+                        pan,
+                        (listener.x, listener.y),
+                        listener.width,
+                    );
+                }
+            }
+            OneShotPlan::Play | OneShotPlan::Replace { .. } => {
+                let replace = match plan {
+                    OneShotPlan::Replace { voice } => Some(voice),
+                    _ => None,
+                };
+                let listener = self.listener();
+                if let Some(pool) = self.pool.as_mut()
+                    && let Some(new_id) = pool.play_world_meta(
+                        replace,
+                        stream,
+                        volume,
+                        pitch,
+                        pan,
+                        (listener.x, listener.y),
+                        listener.width,
+                        (
+                            id,
+                            now,
+                            spec.priority,
+                            spec.group,
+                            spec.min_interrupt(length),
+                        ),
+                    )
+                {
+                    self.play_state
+                        .entry(id)
+                        .or_default()
+                        .record(new_id, volume, now);
+                }
+            }
         }
     }
 
@@ -961,7 +1064,7 @@ impl MindAudio {
     /// `Musics.land` at `musicvol / 100`.
     #[func]
     pub fn play_landing(&mut self) {
-        self.play_sound("coreLand", self.sfx_scale(), 1.0, 0.0);
+        self.play_sound("coreLand", self.sfx_scale(), 1.0, 0.0, true);
         if self.settings.musicvol > 0
             && let Some(player) = self.land_player.as_mut()
             && let Some(stream) = self.streams.music("land")
@@ -1034,6 +1137,24 @@ impl MindAudio {
     #[func]
     pub fn voice_count(&self) -> i64 {
         self.pool.as_ref().map_or(0, |pool| pool.active() as i64)
+    }
+
+    /// T1: sound name -> number of playing world voices (policy-visible only).
+    #[func]
+    pub fn active_voice_counts(&self) -> VarDictionary {
+        let mut counts: std::collections::BTreeMap<String, i64> = std::collections::BTreeMap::new();
+        if let Some(pool) = self.pool.as_ref() {
+            let mut voices = Vec::with_capacity(64);
+            pool.active_voices(&mut voices);
+            for voice in &voices {
+                *counts.entry(voice.sound.name().to_owned()).or_insert(0) += 1;
+            }
+        }
+        let mut dict = VarDictionary::new();
+        for (name, count) in counts {
+            dict.set(&GString::from(name.as_str()), &count.to_variant());
+        }
+        dict
     }
 
     /// Aggregated loop volume for a sound name.
@@ -1121,8 +1242,12 @@ impl MindAudio {
     pub fn play_at_ui(&mut self, name: GString, x: f64, y: f64, volume: f64, pitch: f64) {
         let name = name.to_string();
         let listener = self.listener();
+        // `Sound.at` with the per-sound `falloffOffset` (T1).
+        let offset = SoundId::by_name(&name)
+            .map(|id| self.table.spec(id).falloff_offset)
+            .unwrap_or(0.0);
         let scaled =
-            calc_falloff(x as f32, y as f32, listener, 0.0) * self.sfx_scale() * volume as f32;
+            calc_falloff(x as f32, y as f32, listener, offset) * self.sfx_scale() * volume as f32;
         if scaled < MIN_PLAY_VOLUME {
             return;
         }

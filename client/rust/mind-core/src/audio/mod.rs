@@ -42,8 +42,8 @@ pub use math::{
 };
 pub use music::{MusicContext, MusicOutput, MusicPlayer, MusicRules, PlanetMusic};
 pub use priority::{
-    ActiveVoice, Admission, PlayRequest, SoundPlayState, SoundPrioritySpec, SoundPriorityTable,
-    admit,
+    ActiveVoice, Admission, OneShotPlan, PlayRequest, SoundPlayState, SoundPrioritySpec,
+    SoundPriorityTable, admit, plan_one_shot,
 };
 
 /// Bevy resource holding the active [`AudioSink`] behind a shared `Mutex` (the
