@@ -243,6 +243,7 @@ pub const GRAPHICS_ROWS: &[SettingRow] = &[
     SettingRow::check("indicators", true),
     SettingRow::check("showweather", true),
     SettingRow::check("animatedwater", true),
+    SettingRow::check("animatedshields", true),
     SettingRow::check("bloom", true),
     SettingRow::check("pixelate", false),
     SettingRow::check("linear", true),
@@ -322,10 +323,10 @@ mod tests {
     #[test]
     fn row_order_and_count_match_upstream() {
         assert_eq!(GAME_ROWS.len(), 11);
-        assert_eq!(GRAPHICS_ROWS.len(), 39);
+        assert_eq!(GRAPHICS_ROWS.len(), 40);
         assert_eq!(SOUND_ROWS.len(), 4);
         assert_eq!(DEV_ROWS.len(), 4);
-        assert_eq!(all_rows().count(), 58);
+        assert_eq!(all_rows().count(), 59);
 
         let game_keys: Vec<_> = GAME_ROWS.iter().map(|row| row.key).collect();
         assert_eq!(
@@ -382,6 +383,7 @@ mod tests {
                 "indicators",
                 "showweather",
                 "animatedwater",
+                "animatedshields",
                 "bloom",
                 "pixelate",
                 "linear",
@@ -407,6 +409,19 @@ mod tests {
                 "modcrashdisable"
             ]
         );
+    }
+
+    /// H03 T11 (`SettingsMenuDialog` `graphics.checkPref("animatedshields",
+    /// !mobile)`): the animated shield/build-beam composite row exists with
+    /// default true (desktop).
+    #[test]
+    fn animated_shields_row_defaults_true() {
+        let row = GRAPHICS_ROWS
+            .iter()
+            .find(|row| row.key == "animatedshields")
+            .expect("animatedshields row");
+        assert_eq!(row.kind, SettingKind::Check);
+        assert!(row.default_bool());
     }
 
     #[test]

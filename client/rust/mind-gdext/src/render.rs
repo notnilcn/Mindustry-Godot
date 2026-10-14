@@ -16,9 +16,10 @@ use godot::builtin::{
 };
 use godot::classes::notify::{CanvasItemNotification, NodeNotification};
 use godot::classes::{
-    Camera2D, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport,
+    Camera2D, CanvasGroup, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D,
+    ShaderMaterial, Viewport,
 };
-use godot::obj::{Base, WithBaseField};
+use godot::obj::{Base, NewGd, WithBaseField};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
@@ -509,6 +510,30 @@ impl MindWorldRenderer {
             .cloned()
     }
 
+    /// A `CanvasGroup` under `band` for the animated-shield/build-beam
+    /// effect-buffer composite (`Renderer.java:403-414`; H03 T11). The pass
+    /// inside toggles the group's material from the `animatedshields` setting.
+    fn canvas_group(&self, mut band: Gd<Node2D>, name: &str) -> Gd<Node2D> {
+        let mut group = CanvasGroup::new_alloc();
+        group.set_name(name);
+        group.set_fit_margin(0.0);
+        group.set_clear_margin(0.0);
+        // code-instantiated: effect-buffer composite for the animated-shield
+        // look; one per pass, fixed by the pipeline.
+        band.add_child(&group);
+        group.upcast::<Node2D>()
+    }
+
+    /// The group-composite material for a `res://shaders/<name>.gdshader`
+    /// (H03 T11); `None` when the shader is missing, which leaves the flat
+    /// branch in place.
+    fn group_material(&self, shader_name: &str) -> Option<Gd<ShaderMaterial>> {
+        let shader = self.shaders.get(shader_name)?;
+        let mut material = ShaderMaterial::new_gd();
+        material.set_shader(&shader);
+        Some(material)
+    }
+
     /// Constructs the plan-16 floor + dynamic block passes.
     fn build_floor(&mut self) {
         let Some(host) = self.host.clone() else {
@@ -660,10 +685,16 @@ impl MindWorldRenderer {
         }
         // Shield domes/bubbles at `Layer.shields` (`ForceProjector.drawShield`).
         if let Some(shield_band) = self.band_node_at(BandKey::base(Layer::Shields)) {
-            let node = shields::ShieldRenderer::new_alloc();
+            // H03 T11: the pass lives inside a `CanvasGroup`; with
+            // `animatedshields` on it stamps opaque fills and the group's
+            // `shield_group` material composites them (`Renderer.java:403-414`).
+            let mut group = self.canvas_group(shield_band, "ShieldGroup");
+            let mut node = shields::ShieldRenderer::new_alloc();
+            node.bind_mut()
+                .set_group_material(self.group_material("shield_group"));
             // code-instantiated: one shield pass; the node count is fixed by
             // the pipeline, not by content.
-            shield_band.clone().add_child(&node);
+            group.add_child(&node);
             self.shields = Some(node.clone());
         }
         // Weather (`WeatherStateComp.draw`, `Weather.java:326-341`): `drawOver`
@@ -727,11 +758,16 @@ impl MindWorldRenderer {
         }
         // Build-beam fan at `Layer.buildBeam` (`BuilderComp.drawBuilding`; G03 T3).
         if let Some(beam_band) = self.band_node_at(BandKey::base(Layer::BuildBeam)) {
+            // H03 T11: same `CanvasGroup` composite as the shields, with
+            // `buildbeam_group` (`Renderer.java:409-414`).
+            let mut group = self.canvas_group(beam_band, "BuildBeamGroup");
             let mut node = build_beam::BuildBeamOverlay::new_alloc();
             node.set_name("BuildBeamOverlay");
+            node.bind_mut()
+                .set_group_material(self.group_material("buildbeam_group"));
             // code-instantiated: one beam pass; the node count is fixed by the
             // pipeline, not by content.
-            beam_band.clone().add_child(&node);
+            group.add_child(&node);
             self.build_beam = Some(node.clone());
         }
         // Power lasers + bridge links at `Layer.power` (`PowerNode.draw` /
