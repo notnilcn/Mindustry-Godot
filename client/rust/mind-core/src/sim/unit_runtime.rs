@@ -3282,6 +3282,15 @@ impl Sim {
                 .content
                 .unit(type_comp.type_id)
                 .map_or(0.0, |def| def.hit_size);
+            // `instanceof Payloadc` (transport select) and
+            // `UnitType.controlSelectGlobal` (H08 T6a consumers).
+            let payload = entity_ref
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>()
+                .is_some();
+            let select_global = runtime
+                .content
+                .unit(type_comp.type_id)
+                .is_none_or(|def| def.control_select_global);
             rows.push(serde_json::json!({
                 "id": seq.0 as i32,
                 "type": type_comp.type_id.get() as i32,
@@ -3290,6 +3299,8 @@ impl Sim {
                 "team": team.team,
                 "commandable": commandable,
                 "hit_size": hit_size,
+                "payload": payload,
+                "select_global": select_global,
             }));
         }
         serde_json::to_string(&rows).unwrap_or_else(|_| String::from("[]"))
@@ -5528,6 +5539,53 @@ mod tests {
                 .any(|row| row["commandable"].as_bool() == Some(false)),
             "the enemy unit is listed but not commandable"
         );
+    }
+
+    /// H08 T6a: selectable rows carry `payload` (`instanceof Payloadc`) and
+    /// `select_global` (`UnitType.controlSelectGlobal`, false only for mono).
+    #[test]
+    fn selectable_rows_carry_payload_and_select_global() {
+        let (mut sim, dagger) = player_team_world(32);
+        let type_id = |sim: &Sim, name: &str| {
+            sim.unit_runtime()
+                .expect("runtime")
+                .content
+                .unit_by_name(name)
+                .expect(name)
+                .id
+                .get()
+        };
+        let mega = type_id(&sim, "mega");
+        let mono = type_id(&sim, "mono");
+        for unit in [dagger, mega, mono] {
+            sim.command(SimCommand::SpawnUnit {
+                unit,
+                x: 32.0,
+                y: 32.0,
+                team: 1,
+            })
+            .expect("spawn");
+        }
+        let rows: serde_json::Value =
+            serde_json::from_str(&sim.selectable_units_json()).expect("json");
+        let rows = rows.as_array().expect("array");
+        let row = |type_id: u16| {
+            rows.iter()
+                .find(|row| row["type"].as_i64() == Some(i64::from(type_id)))
+                .unwrap_or_else(|| panic!("row for {type_id}"))
+        };
+        assert_eq!(row(mega)["payload"].as_bool(), Some(true), "mega payload");
+        assert_eq!(
+            row(dagger)["payload"].as_bool(),
+            Some(false),
+            "dagger has no payload module"
+        );
+        assert_eq!(
+            row(mono)["select_global"].as_bool(),
+            Some(false),
+            "mono excluded from select-all"
+        );
+        assert_eq!(row(dagger)["select_global"].as_bool(), Some(true));
     }
 
     /// Live world with a block runtime and `defaultTeam = 1`; returns the

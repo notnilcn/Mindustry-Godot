@@ -227,6 +227,13 @@ pub struct ScrollRoute {
     pub rotate_placed: bool,
 }
 
+/// `DesktopInput.java:608-610`: `keyTap(deselect) && !ui.minimapfrag.shown() &&
+/// !isPlacing() && player.unit().plans.isEmpty() && !commandMode` clears
+/// `player.unit().mineTile`.
+pub fn deselect_stops_mining(block_selected: bool, command_mode: bool, plans: usize) -> bool {
+    !block_selected && !command_mode && plans == 0
+}
+
 /// Routes one wheel step exactly like `DesktopInput.update`/`pollInputPlayer`
 /// (Java: zoom needs `!keyDown(rotatePlaced)` and either the diagonal key, a
 /// distinct zoom binding, or a non-rotatable/non-placing cursor with no select
@@ -329,5 +336,15 @@ mod tests {
         // No placement selected -> zoom.
         controller.state.select_block(None);
         assert_eq!(controller.handle_scroll(1, &caps), ScrollOutcome::Zoom);
+    }
+
+    #[test]
+    fn deselect_stops_mining_cases() {
+        // `DesktopInput.java:608-610`: the deselect tap clears `mineTile` only
+        // with no selected block, no command mode and no queued unit plans.
+        assert!(deselect_stops_mining(false, false, 0));
+        assert!(!deselect_stops_mining(true, false, 0), "block selected");
+        assert!(!deselect_stops_mining(false, true, 0), "command mode");
+        assert!(!deselect_stops_mining(false, false, 1), "queued plans");
     }
 }

@@ -2562,6 +2562,17 @@ impl MindSimHost {
         self.sim.player_actively_building()
     }
 
+    /// `player.unit().plans.size` (`BuilderComp.plans`; the `buildautopause`
+    /// auto-pause/resume and the deselect-mining gate).
+    pub fn player_plan_count(&self) -> usize {
+        self.sim.player_plan_count()
+    }
+
+    /// `build.isCommandable()` own commandable buildings (`DI:346-357`).
+    pub fn commandable_buildings(&self) -> Vec<(i16, i16)> {
+        self.sim.commandable_buildings(self.sim.live_default_team())
+    }
+
     /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.
@@ -4714,6 +4725,17 @@ impl MindSimHost {
         self.building_team(x, y)
             .map(|team| team as i64)
             .unwrap_or(-1)
+    }
+
+    /// Rust-only: `Build.validPlace` for the player team without mutating the
+    /// sim ([`Sim::valid_place_player`], the exact check
+    /// `queue_player_place_config` runs; the placement preview's
+    /// `HostWorld.valid_place`).
+    pub fn can_place_player(&self, x: i32, y: i32, block: BlockId, rotation: u8) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.sim.valid_place_player(x, y, block, rotation)
     }
 
     /// `Team.items().remove(item, amount)` on the first core of `team`; returns

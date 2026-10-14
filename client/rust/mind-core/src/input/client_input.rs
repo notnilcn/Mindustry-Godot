@@ -11,6 +11,7 @@ use smallvec::SmallVec;
 
 use crate::content::BlockId;
 use crate::world::TilePos;
+use crate::world::config::ConfigValue;
 
 use super::line::{LineBlock, LineParams, PlaceLine, iterate_line};
 use super::place_mode::PlaceMode;
@@ -187,15 +188,40 @@ impl InputState {
         end: TilePos,
         params: &LineParams,
     ) {
-        iterate_line(
+        self.update_line_with(
             world,
             block_meta,
-            params,
             start,
             end,
+            params,
             &super::line::NoLineHooks,
-            &mut self.line,
+            None,
         );
+    }
+
+    /// `InputHandler.updateLine` with the block's line rules
+    /// (`InputHandler.java:1943-1961`): `iterateLine` (including
+    /// `changePlacementPath` through `hooks`), then — when `rules` is `Some`
+    /// (`settings.blockreplace`) — `Block.getReplacement` per plan and
+    /// `Block.handlePlacementLine` (junction/bridge placement and the bridge
+    /// link configs).
+    #[allow(clippy::too_many_arguments)]
+    pub fn update_line_with(
+        &mut self,
+        world: &dyn PlacementWorld,
+        block_meta: Option<&LineBlock>,
+        start: TilePos,
+        end: TilePos,
+        params: &LineParams,
+        hooks: &dyn super::line::LineHooks,
+        rules: Option<&super::line_rules::LineRules>,
+    ) {
+        iterate_line(world, block_meta, params, start, end, hooks, &mut self.line);
+        // `InputHandler.updateLine` (IH:1943-1950) writes `rotation = l.rotation`
+        // for every step; the input rotation ends as the last step's.
+        if let Some(last) = self.line.last() {
+            self.rotation = last.rotation;
+        }
         let block = self.block.unwrap_or(BlockId::AIR);
         self.line_plans.clear();
         self.line_plans.extend(
@@ -203,6 +229,74 @@ impl InputState {
                 .iter()
                 .map(|step| ClientPlan::place(step.x, step.y, step.rotation, block)),
         );
+        if let Some(rules) = rules
+            && block != BlockId::AIR
+            && !self.line_plans.is_empty()
+        {
+            // `linePlans.each(plan -> { getReplacement ... })` mutates in order:
+            // earlier junction replacements are visible to later checks.
+            if let Some(junction) = rules.junction {
+                for index in 0..self.line_plans.len() {
+                    if super::line_rules::junction_replaces(world, &self.line_plans, index, rules) {
+                        self.line_plans[index].block = junction;
+                    }
+                }
+            }
+            // `block.handlePlacementLine(linePlans)`: the DP bridge pass.
+            if let Some((bridge_block, range, direction)) = rules.bridge {
+                let mut plans: SmallVec<[super::plan::PlanCopy; 128]> =
+                    self.line_plans.iter().cloned().collect();
+                let avoid = |block: BlockId| {
+                    world
+                        .block_kind(block)
+                        .is_some_and(|kind| rules.avoid_kinds.contains(&kind))
+                };
+                if direction {
+                    let placer = super::placement::DirectionBridgePlacer {
+                        block: bridge_block,
+                        unlocked: true,
+                        range,
+                    };
+                    super::placement::calculate_bridges(
+                        world,
+                        &mut plans,
+                        &placer,
+                        rules.junction.is_some(),
+                        avoid,
+                    );
+                } else {
+                    let placer = super::placement::RelativeBridgePlacer {
+                        block: bridge_block,
+                        unlocked: true,
+                        range,
+                        use_extra: false,
+                    };
+                    super::placement::calculate_bridges(
+                        world,
+                        &mut plans,
+                        &placer,
+                        rules.junction.is_some(),
+                        avoid,
+                    );
+                }
+                self.line_plans.clear();
+                self.line_plans.extend(plans);
+            }
+            // `ItemBridge.handlePlacementLine` (`ItemBridge.java:195-203`): a
+            // directly-selected bridge block links each plan to the next.
+            if let Some(range) = rules.link_bridge_range {
+                for index in 0..self.line_plans.len().saturating_sub(1) {
+                    let cur = self.line_plans[index].clone();
+                    let next = self.line_plans[index + 1].clone();
+                    if super::line_rules::bridge_positions_valid(
+                        cur.x, cur.y, next.x, next.y, range,
+                    ) {
+                        self.line_plans[index].config =
+                            ConfigValue::Point2(next.x - cur.x, next.y - cur.y);
+                    }
+                }
+            }
+        }
         self.place_mode = PlaceMode::Placing;
         self.preview.block = self.block;
         self.preview.rotation = params.rotation;
@@ -328,6 +422,26 @@ mod tests {
         assert!(state.is_building);
         assert_eq!(state.control_groups.len(), CONTROL_GROUPS);
         assert!(!state.is_placing());
+    }
+
+    #[test]
+    fn update_line_carries_last_rotation() {
+        // `InputHandler.updateLine` (IH:1943-1950) writes `rotation` for every
+        // step; after an upward drag the input rotation is the last step's.
+        let world = FlatWorld;
+        let mut state = InputState::new();
+        state.select_block(Some(BlockId::STONE_WALL));
+        state.update_line(
+            &world,
+            None,
+            TilePos::new(5, 5),
+            TilePos::new(5, 8),
+            &LineParams {
+                rotation: 0,
+                ..LineParams::default()
+            },
+        );
+        assert_eq!(state.rotation, 1);
     }
 
     #[test]

@@ -618,6 +618,8 @@ fn input_mobile_parity(json: bool, out: Option<&Path>, golden: Option<&Path>) ->
             y: 30.0,
             team: 1,
             commandable: true,
+            select_global: true,
+            payload: false,
             hit_size: 8.0,
         },
         SelectableUnit {
@@ -627,6 +629,8 @@ fn input_mobile_parity(json: bool, out: Option<&Path>, golden: Option<&Path>) ->
             y: 30.0,
             team: 0,
             commandable: true,
+            select_global: true,
+            payload: false,
             hit_size: 8.0,
         },
     ];
@@ -704,6 +708,8 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 10.0,
             team: 0,
             commandable: true,
+            select_global: true,
+            payload: false,
             hit_size: 8.0,
         },
         SelectableUnit {
@@ -713,6 +719,8 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 10.0,
             team: 0,
             commandable: true,
+            select_global: true,
+            payload: false,
             hit_size: 8.0,
         },
         SelectableUnit {
@@ -722,6 +730,8 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 11.0,
             team: 0,
             commandable: true,
+            select_global: true,
+            payload: false,
             hit_size: 8.0,
         },
         SelectableUnit {
@@ -731,6 +741,8 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
             y: 10.0,
             team: 1,
             commandable: true,
+            select_global: true,
+            payload: false,
             hit_size: 8.0,
         },
     ];
@@ -1316,6 +1328,8 @@ fn bench(
                     y: (i / 40) as f32 * 16.0,
                     team: 0,
                     commandable: true,
+                    select_global: true,
+                    payload: false,
                     hit_size: 8.0,
                 })
                 .collect();
