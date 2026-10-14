@@ -812,6 +812,16 @@ fn crashing_flare_damages_neighbours() {
         health.dead = true;
     }
     sim.tick().expect("tick");
+    // H01 T6: the flare sinks as a `Falling` wreck for `ceil(1 / 0.018) = 56`
+    // ticks before `Call.unitDestroy` runs the destroy body
+    // (`UnitComp.killed`, UnitComp.java:980-991; `UnitComp.update`,
+    // UnitComp.java:803-830).
+    for _ in 0..120 {
+        if sim.ecs.0.get_entity(flare).is_err() {
+            break;
+        }
+        sim.tick().expect("tick");
+    }
     assert!(
         sim.ecs.0.get_entity(flare).is_err(),
         "the crashed flare was removed"
@@ -5558,9 +5568,14 @@ fn enemy_dies_on_captured_sector() {
 /// attack mode with a wave-team core (`wavesSpawnAtCores` supplies the spawn
 /// position) pushes non-wave-team units out of the drop zone
 /// (`UnitComp.java:734-744,793`).
+///
+/// T9 note: the unit runs `NoAI` so the only velocity source is the drop-zone
+/// push (the pre-T9 form let the ground controller's own walk obscure the
+/// assertion).
 #[test]
 fn attack_map_pushes_from_drop_zone() {
     use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::ecs::TeamId;
     use crate::game::State;
     use crate::game::planet::EmptyNeighborhood;
     use crate::game::play::PlaySession;
@@ -5573,9 +5588,12 @@ fn attack_map_pushes_from_drop_zone() {
         let content = &sim.unit_runtime().expect("rt").content;
         Campaign::from_registry(content, &EmptyNeighborhood)
     };
-    // Wave-team core: the attack-mode half of `hasSpawns` and, with
-    // `wavesSpawnAtCores`, the drop-zone spawn position for the wave request.
-    let _enemy_core = place(&mut sim, 40, 40, "core-shard", 2);
+    // Wave-team core: the attack-mode half of `hasSpawns()` and, with
+    // `wavesSpawnAtCores`, a spawn position stepped toward the player core.
+    let enemy_core = place(&mut sim, 40, 40, "core-shard", 2);
+    // A player core is required for the wave spawner's core step
+    // (`WaveSpawner.eachGroundSpawn` steps toward `playerCore()`).
+    let player_core = place(&mut sim, 30, 40, "core-shard", 1);
     let mut session = PlaySession::new(Rules {
         default_team: 1,
         wave_team: 2,
@@ -5586,6 +5604,12 @@ fn attack_map_pushes_from_drop_zone() {
         ..Rules::default()
     });
     session.phase = State::Playing;
+    session
+        .teams
+        .register_core(player_core, TeamId(1), &session.rules);
+    session
+        .teams
+        .register_core(enemy_core, TeamId(2), &session.rules);
     sim.ecs
         .0
         .insert_resource(CampaignRuntime::new(session, campaign));
@@ -5601,12 +5625,285 @@ fn attack_map_pushes_from_drop_zone() {
         vel.y = 0.0;
     }
     sim.request_wave_spawn(0);
-    sim.tick().expect("tick");
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
     let vel = *sim.ecs.0.get::<Vel>(unit).expect("vel");
+    let pos = *sim.ecs.0.get::<Pos>(unit).expect("pos");
+    let spawn = sim
+        .unit_runtime()
+        .and_then(|runtime| runtime.wave_spawner.get_spawns().first().copied())
+        .expect("core spawn position");
+    let (sx, sy) = (spawn.x() as f32 * 8.0, spawn.y() as f32 * 8.0);
     assert!(
         vel.x * vel.x + vel.y * vel.y > 0.0,
         "the unit is pushed out of the drop zone: {vel:?}"
     );
-    // The push is away from the wave-team core: the velocity points west.
-    assert!(vel.x < 0.0, "pushed away from the core: {vel:?}");
+    // The push points away from the spawn tile (the unit sits east of the
+    // wave-team core, so the velocity has a positive x component).
+    assert!(
+        vel.x * (pos.x - sx) + vel.y * (pos.y - sy) > 0.0,
+        "pushed away from the spawn tile ({sx}, {sy}): {vel:?} from {pos:?}"
+    );
+}
+
+/// H01 T6: `UnitComp.killed` (`UnitComp.java:980-991`) — a dead flying unit
+/// with `createWreck` keeps existing as a falling wreck (`Falling`) and only
+/// runs the destroy body once grounded (`UnitComp.update`,
+/// `UnitComp.java:803-830`, `fallSpeed = 0.018`, `wreckHealthMultiplier = 0.25`).
+#[test]
+fn dead_flare_falls_then_crashes() {
+    let mut sim = live_sim(64);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 100.0, 100.0, 0.0)
+        .expect("flare");
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(flare) {
+        vel.x = 2.0;
+    }
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(flare).expect("health");
+        health.health = 0.0;
+        health.dead = true;
+    }
+    let x0 = sim.ecs.0.get::<Pos>(flare).expect("pos").x;
+    // Tick 1: `resolve_deaths` starts the fall (`Falling`) instead of
+    // destroying the unit.
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(flare).is_ok(),
+        "the wreck exists after death"
+    );
+    assert!(
+        sim.ecs.0.get::<Health>(flare).is_some_and(|h| h.dead),
+        "the wreck is dead"
+    );
+    // `elevation 1 / fallSpeed 0.018` = 56 ticks of fall (ceil(1/0.018)).
+    let mut ticks = 1usize;
+    let mut last_x = x0;
+    while sim.ecs.0.get_entity(flare).is_ok() && ticks < 120 {
+        if let Some(pos) = sim.ecs.0.get::<Pos>(flare) {
+            last_x = pos.x;
+        }
+        sim.tick().expect("tick");
+        ticks += 1;
+        if let Some(pos) = sim.ecs.0.get::<Pos>(flare) {
+            last_x = pos.x;
+        }
+    }
+    assert!(
+        sim.ecs.0.get_entity(flare).is_err(),
+        "the wreck is destroyed after landing"
+    );
+    assert!(
+        (55..=58).contains(&ticks),
+        "landed after ~56 fall ticks (got {ticks})"
+    );
+    assert!(
+        last_x - x0 > 2.0,
+        "the wreck kept moving while falling ({x0} -> {last_x})"
+    );
+}
+
+/// H01 T6: a grounded unit without `createWreck` still dies through the
+/// destroy body on the death tick (`UnitComp.killed`: `!type.flying` ->
+/// `destroy()`).
+#[test]
+fn ground_unit_dies_instantly() {
+    let mut sim = live_sim(64);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(dagger).expect("health");
+        health.health = 0.0;
+        health.dead = true;
+    }
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "the ground unit is destroyed on the death tick"
+    );
+}
+
+/// H01 T6: `UnitComp.update`: `health <= -maxHealth * wreckHealthMultiplier`
+/// destroys the falling wreck immediately (`UnitComp.java:827`).
+#[test]
+fn wreck_destroyed_by_overkill() {
+    let mut sim = live_sim(64);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 100.0, 100.0, 0.0)
+        .expect("flare");
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(flare).expect("health");
+        health.health = 0.0;
+        health.dead = true;
+    }
+    // Tick 1 starts the fall.
+    sim.tick().expect("tick");
+    assert!(sim.ecs.0.get_entity(flare).is_ok(), "falling");
+    let max_health = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let type_id = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(flare)
+            .expect("type")
+            .type_id;
+        runtime.content.unit(type_id).expect("flare def").health
+    };
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(flare).expect("health");
+        health.health = -max_health * 0.25 - 1.0;
+    }
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(flare).is_err(),
+        "overkill destroys the wreck mid-fall"
+    );
+}
+
+/// H01 T9: `DefenderAI.findTarget` (`DefenderAI.java:26-38`) — an oct follows
+/// the healthiest player-controllable ally in `max(range, 400)` (key
+/// `-maxHealth + dst2 / 6400`), keeping `targetHit/2*1.1 + ownHit/2 + 15` px.
+#[test]
+fn oct_follows_healthiest_ally() {
+    use crate::entities::comp::unit::comp::HitboxComp;
+    let mut sim = live_sim(64);
+    let oct = sim
+        .spawn_live_unit("oct", 2, 100.0, 100.0, 0.0)
+        .expect("oct");
+    let _dagger = sim
+        .spawn_live_unit("dagger", 2, 150.0, 100.0, 0.0)
+        .expect("dagger");
+    let mace = sim
+        .spawn_live_unit("mace", 2, 300.0, 100.0, 0.0)
+        .expect("mace");
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+    }
+    let hit = |sim: &Sim, e| {
+        sim.ecs
+            .0
+            .get::<HitboxComp>(e)
+            .map_or(0.0, |hitbox| hitbox.hit_size)
+    };
+    let opos = *sim.ecs.0.get::<Pos>(oct).expect("oct alive");
+    let mpos = *sim.ecs.0.get::<Pos>(mace).expect("mace alive");
+    let keep = hit(&sim, mace) / 2.0 * 1.1 + hit(&sim, oct) / 2.0 + 15.0;
+    let dst = ((mpos.x - opos.x).powi(2) + (mpos.y - opos.y).powi(2)).sqrt();
+    assert!(
+        dst <= keep + 10.0,
+        "oct within keep {keep} + 10 of the mace (dist {dst}, oct {opos:?}, mace {mpos:?})"
+    );
+}
+
+/// H01 T9: `FlyingFollowAI` (`FlyingFollowAI.java:26-29`) — a wave-team quell
+/// follows the healthiest allied non-follower.
+#[test]
+fn quell_follows_ally_on_wave_team() {
+    use crate::entities::comp::unit::comp::HitboxComp;
+    let mut sim = live_sim(64);
+    let quell = sim
+        .spawn_live_unit("quell", 2, 60.0, 100.0, 0.0)
+        .expect("quell");
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 200.0, 100.0, 0.0)
+        .expect("dagger");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let hit = |sim: &Sim, e| {
+        sim.ecs
+            .0
+            .get::<HitboxComp>(e)
+            .map_or(0.0, |hitbox| hitbox.hit_size)
+    };
+    let qpos = *sim.ecs.0.get::<Pos>(quell).expect("quell alive");
+    let dpos = *sim.ecs.0.get::<Pos>(dagger).expect("dagger alive");
+    let keep = hit(&sim, dagger) / 2.0 * 1.1 + hit(&sim, quell) / 2.0 + 15.0;
+    let dst = ((dpos.x - qpos.x).powi(2) + (dpos.y - qpos.y).powi(2)).sqrt();
+    assert!(
+        dst <= keep + 10.0,
+        "quell within keep {keep} + 10 of the dagger (dist {dst})"
+    );
+}
+
+/// H01 T9: `FlyingFollowAI.useFallback()` — a player-team quell runs `FlyingAI`
+/// (toward the enemy core) instead of following the ally.
+#[test]
+fn quell_uses_flying_ai_on_player_team() {
+    let mut sim = live_sim(64);
+    let quell = sim
+        .spawn_live_unit("quell", 1, 60.0, 100.0, 0.0)
+        .expect("quell");
+    let _ally = sim
+        .spawn_live_unit("dagger", 1, 200.0, 100.0, 0.0)
+        .expect("dagger");
+    let core = place(&mut sim, 30, 30, "core-shard", 2);
+    let core_pos = *sim.ecs.0.get::<Pos>(core).expect("core pos");
+    let start = *sim.ecs.0.get::<Pos>(quell).expect("quell pos");
+    let start_dst = ((core_pos.x - start.x).powi(2) + (core_pos.y - start.y).powi(2)).sqrt();
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let pos = *sim.ecs.0.get::<Pos>(quell).expect("quell alive");
+    let dst = ((core_pos.x - pos.x).powi(2) + (core_pos.y - pos.y).powi(2)).sqrt();
+    assert!(
+        dst < start_dst - 30.0,
+        "the player-team quell flew toward the enemy core ({start_dst} -> {dst})"
+    );
+}
+
+/// H01 T9: `HugAI.updateMovement` (`HugAI.java:16-61`) — a renale closes on an
+/// in-range enemy until the contact circle
+/// `(unit.hitSize + target.hitSize) * 0.5`.
+#[test]
+fn renale_hugs_target() {
+    use crate::entities::comp::unit::comp::HitboxComp;
+    let mut sim = live_sim(64);
+    let range = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_by_name("renale")
+        .expect("renale")
+        .range;
+    let renale = sim
+        .spawn_live_unit("renale", 2, 150.0, 100.0, 0.0)
+        .expect("renale");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 150.0 + range * 0.8, 100.0, 180.0)
+        .expect("dagger");
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+    }
+    let hit = |sim: &Sim, e| {
+        sim.ecs
+            .0
+            .get::<HitboxComp>(e)
+            .map_or(0.0, |hitbox| hitbox.hit_size)
+    };
+    let rpos = *sim.ecs.0.get::<Pos>(renale).expect("renale alive");
+    let dpos = *sim.ecs.0.get::<Pos>(dagger).expect("dagger alive");
+    let contact = (hit(&sim, renale) + hit(&sim, dagger)) * 0.5;
+    let dst = ((dpos.x - rpos.x).powi(2) + (dpos.y - rpos.y).powi(2)).sqrt();
+    assert!(
+        dst <= contact + 2.0,
+        "renale reached the contact circle {contact} (dist {dst})"
+    );
+}
+
+/// H01 T9: `NoAI.updateUnit(){}` (`NoAI.java`) — the dummy never moves.
+#[test]
+fn dummy_never_moves() {
+    let mut sim = live_sim(64);
+    let dummy = sim
+        .spawn_live_unit("dummy", 2, 100.0, 100.0, 0.0)
+        .expect("dummy");
+    let start = *sim.ecs.0.get::<Pos>(dummy).expect("dummy pos");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let pos = *sim.ecs.0.get::<Pos>(dummy).expect("dummy alive");
+    assert_eq!((pos.x, pos.y), (start.x, start.y), "the dummy never moves");
 }

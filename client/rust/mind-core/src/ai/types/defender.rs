@@ -1,80 +1,126 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `DefenderAI` (plan 11 §4.2). A stationary controller that acquires the
-//! nearest hostile in range, faces it and opens fire. Ported from
-//! `core/src/mindustry/ai/types/DefenderAI.java` (`updateUnit` targets, no
-//! movement).
+//! `DefenderAI` (`ai/types/DefenderAI.java`; H01 T9): oct defenders escort the
+//! healthiest player-controllable ally in `max(range, 400)`, falling back to
+//! the own core (then the enemy core on wave maps). No weapons pass of its own
+//! (only `!controllable && autoTarget` mounts self-target).
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 
-use super::super::ai_controller::AiCtx;
+use crate::content::{ContentRegistry, UnitTypeId};
+use crate::ecs::EntitySeq;
+use crate::entities::comp::unit::comp::UnitTypeComp;
+use crate::entities::comp::{Health, Pos};
 
-/// `DefenderAI` controller state.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DefenderAi {
-    /// Bound unit.
-    pub unit: Option<Entity>,
-    /// Current target.
+/// `DefenderAI` controller state (`AIController.target` + the 40/90-tick
+/// `timer(timerTarget)` cadence).
+#[derive(Debug, Clone, Copy, PartialEq, bevy_ecs::component::Component)]
+pub struct DefenderAiState {
+    /// `AIController.timer(timerTarget)`: seeded 39 like `GroundAiState` so the
+    /// first acquisition runs on the first tick.
+    pub retarget: f32,
+    /// `AIController.target`.
     pub target: Option<Entity>,
 }
 
-/// `DefenderAI.updateUnit`: acquire/fire at the nearest hostile.
-///
-/// Returns whether the unit has a target this tick.
-pub fn update_defender(ctx: &mut AiCtx, unit: Entity, state: &mut DefenderAi) -> bool {
-    let (range, target_air, target_ground) = ctx
-        .unit_type(unit)
-        .and_then(|id| ctx.content.unit(id))
-        .map(|def| (def.range, def.target_air, def.target_ground))
-        .unwrap_or((150.0, true, true));
-    let target = ctx.find_target(unit, range, target_air, target_ground);
-    state.target = target;
-    match target {
-        Some(target) => {
-            ctx.target(unit, Some(target));
-            true
-        }
-        None => {
-            ctx.stop_shooting(unit);
-            false
+impl Default for DefenderAiState {
+    fn default() -> Self {
+        Self {
+            retarget: 39.0,
+            target: None,
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ai::UnitHarness;
-    use crate::ai::ai_controller::AiCtx;
-    use crate::entities::comp::unit::weapon_mount::WeaponsComp;
-
-    #[test]
-    fn defender_fires_without_moving() {
-        let mut harness = UnitHarness::new(64, 64, 1);
-        let a = harness.spawn("dagger", 0, 100.0, 100.0, 0.0).expect("a");
-        let b = harness.spawn("dagger", 1, 160.0, 100.0, 0.0).expect("b");
-        assert_ne!(a, b);
-        let mut state = DefenderAi {
-            unit: Some(a),
-            target: None,
+/// `DefenderAI.findTarget` (`DefenderAI.java:26-38`):
+///
+/// ```java
+/// var result = Units.closest(unit.team, x, y, Math.max(range, 400f),
+///     u -> !u.dead() && u.type != unit.type && u.targetable(unit.team) && u.playerControllable(),
+///     (u, tx, ty) -> -u.maxHealth + Mathf.dst2(u.x, u.y, tx, ty) / 6400f);
+/// if(result != null) return result;
+/// var core = unit.closestCore(); if(core != null) return core;
+/// if(state.rules.waves && unit.team == state.rules.waveTeam) return unit.closestEnemyCore();
+/// return null;
+/// ```
+///
+/// The `Units.nearby` distance gate is `u.within(x, y, range + u.hitSize/2)`;
+/// iteration is in `(EntitySeq, index)` order so equal-cost ties keep the first
+/// spawned ally (Java's quadtree order is not reproducible).
+#[allow(clippy::too_many_arguments)]
+pub fn defender_find_target(
+    world: &mut World,
+    content: &ContentRegistry,
+    team: u8,
+    x: f32,
+    y: f32,
+    range: f32,
+    unit_type: UnitTypeId,
+    waves: bool,
+    wave_team: u8,
+) -> Option<Entity> {
+    let radius = range.max(400.0);
+    let mut candidates: Vec<(u64, Entity)> =
+        crate::entities::comp::unit::queries::in_radius(world, x, y, radius, Some(team))
+            .into_iter()
+            .map(|entity| {
+                let seq = world.get::<EntitySeq>(entity).map_or(u64::MAX, |seq| seq.0);
+                (seq, entity)
+            })
+            .collect();
+    candidates.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+    let mut best: Option<(f32, Entity)> = None;
+    for (_, other) in candidates {
+        if world
+            .get::<UnitTypeComp>(other)
+            .is_some_and(|comp| comp.type_id == unit_type)
+        {
+            continue;
+        }
+        let Some(def) = world
+            .get::<UnitTypeComp>(other)
+            .and_then(|comp| content.unit(comp.type_id))
+        else {
+            continue;
         };
-        let mut ctx = AiCtx {
-            world: &mut harness.build.world,
-            grid: &harness.build.grid,
-            content: &harness.build.content,
-            pathfinder: &mut harness.pathfinder,
-            team: 0,
+        if !def.player_controllable || !def.targetable {
+            continue;
+        }
+        let dead = world.get::<Health>(other).is_some_and(|health| health.dead);
+        if dead {
+            continue;
+        }
+        let Some(opos) = world.get::<Pos>(other).copied() else {
+            continue;
         };
-        assert!(update_defender(&mut ctx, a, &mut state));
-        let weapons = harness.build.world.get::<WeaponsComp>(a).unwrap();
-        assert!(weapons.mounts.iter().all(|mount| mount.shoot));
-        // No movement was issued.
-        let vel = harness
-            .build
-            .world
-            .get::<crate::entities::comp::Vel>(a)
-            .unwrap();
-        assert_eq!((vel.x, vel.y), (0.0, 0.0));
+        let dx = opos.x - x;
+        let dy = opos.y - y;
+        let dist2 = dx * dx + dy * dy;
+        // `Units.nearby`: `u.within(x, y, range + u.hitSize/2)`.
+        if dist2 > (radius + def.hit_size / 2.0) * (radius + def.hit_size / 2.0) {
+            continue;
+        }
+        let max_health = world
+            .get::<Health>(other)
+            .map_or(0.0, |health| health.max_health);
+        // `-u.maxHealth + dst2 / 6400`.
+        let cost = -max_health + dist2 / 6400.0;
+        if best.is_none_or(|(best_cost, _)| cost < best_cost) {
+            best = Some((cost, other));
+        }
     }
+    if let Some((_, target)) = best {
+        return Some(target);
+    }
+    // `unit.closestCore()`.
+    if let Some(core) = crate::sim::unit_runtime::closest_core_of_team(world, team, x, y) {
+        return Some(core);
+    }
+    // Enemy core on wave maps for the wave team.
+    if waves && team == wave_team {
+        return crate::sim::unit_runtime::closest_enemy_core(world, team, x, y);
+    }
+    None
 }

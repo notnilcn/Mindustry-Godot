@@ -865,12 +865,20 @@ fn spawn_weapon_bullet(
 
 /// Updates every unit in the world that has both [`UnitWeapons`] and
 /// [`UnitState`] (`Groups.unit.update` weapon half; plan 11 drives this).
+///
+/// Dead units are skipped (T6): Java's `AIController.updateWeapons` only runs
+/// while `!dead`, so a falling wreck's mounts stop firing even though
+/// `WeaponsComp.update` itself runs (`UnitComp.java:859-861`). Shoot-on-death
+/// weapons are unaffected: `run_shoot_on_death` calls [`update_weapon`]
+/// directly.
 pub fn update_weapons(ctx: &mut CombatCtx<'_>) {
     let units: Vec<Entity> = ctx
         .world
         .iter_entities()
         .filter(|entity| {
-            entity.get::<UnitWeapons>().is_some() && entity.get::<UnitState>().is_some()
+            entity.get::<UnitWeapons>().is_some()
+                && entity.get::<UnitState>().is_some()
+                && !entity.get::<Health>().is_some_and(|health| health.dead)
         })
         .map(|entity| entity.id())
         .collect();
