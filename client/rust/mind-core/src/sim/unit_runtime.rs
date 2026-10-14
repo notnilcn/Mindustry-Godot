@@ -73,6 +73,13 @@ pub const UNIT_SEQ_BASE: u64 = 1_000_000_000;
 /// World pixels per tile (`config::TILESIZE`).
 const TILE_SIZE: f32 = crate::config::TILESIZE as f32;
 
+/// Dead flying unit in its wreck fall (`UnitComp.killed`; UnitComp.java:980-991):
+/// the unit keeps existing with `Health.dead` until it crashes (grounded or
+/// overkilled), then `resolve_deaths` runs the normal destroy path
+/// (`UnitComp.update` dead branch, UnitComp.java:803-830).
+#[derive(Debug, Clone, Copy, PartialEq, bevy_ecs::component::Component)]
+pub struct Falling;
+
 /// Live unit/combat runtime state attached to a [`Sim`]'s ECS world.
 ///
 /// Owns the vanilla content snapshot the unit components need, the terrain
@@ -416,6 +423,38 @@ impl Sim {
                 })
                 .collect();
             for entity in dead {
+                // `UnitComp.killed` (`UnitComp.java:980-991`): a dead flying
+                // unit with `createWreck` (elevation != 0) is not destroyed
+                // immediately — it falls as a `Falling` wreck and only runs
+                // the destroy body once grounded or overkilled
+                // (`UnitComp.update`, UnitComp.java:803-830).
+                if let Some(def) = world
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id))
+                    .filter(|def| def.flying && def.create_wreck)
+                {
+                    let elevation = world
+                        .get::<UnitCore>(entity)
+                        .map_or(0.0, |core| core.elevation);
+                    let health_now = world.get::<Health>(entity).map_or(0.0, |h| h.health);
+                    let falling = world.get::<Falling>(entity).is_some();
+                    if !falling && elevation >= 0.001 {
+                        // `killed()`: `health = Math.min(health, 0); dead = true;`
+                        if let Some(mut health) = world.get_mut::<Health>(entity) {
+                            health.dead = true;
+                            health.health = health.health.min(0.0);
+                        }
+                        world.entity_mut(entity).insert(Falling);
+                        continue;
+                    }
+                    if falling
+                        && elevation >= 0.001
+                        && health_now > -def.health * def.wreck_health_multiplier
+                    {
+                        // Still falling (`Call.unitDestroy` not reached yet).
+                        continue;
+                    }
+                }
                 // `UnitComp.destroy()` (UnitComp.java:885-891): a unit carrying
                 // an explosive item blows up (G01 T14).
                 {
@@ -1566,12 +1605,21 @@ impl Sim {
                     .0
                     .get::<Health>(entity)
                     .is_none_or(|health| health.dead);
-            if gone {
+            let falling = self.ecs.0.get::<Falling>(entity).is_some();
+            if gone && !falling {
                 self.player_unit = None;
                 self.player_death_timer = 0.0;
                 if self.ecs.0.get_entity(entity).is_ok() {
                     let _ = self.ecs.0.despawn(entity);
                 }
+            } else if gone {
+                // A dead `Falling` player unit is a wreck: Java's `dead()` is
+                // true (the 60-tick respawn delay runs, `PlayerComp.update`)
+                // but the wreck stays in the world until it crashes and
+                // `resolve_deaths` destroys it (T6). Clear the handle so the
+                // respawn timer starts, do not despawn.
+                self.player_unit = None;
+                self.player_death_timer = 0.0;
             }
         }
         if self.player_unit.is_some() {
@@ -2328,6 +2376,27 @@ pub fn unit_update_system(world: &mut World) {
                 .is_none_or(|health| health.dead)
         {
             let _ = world.despawn(entity);
+            continue;
+        }
+
+        // `UnitComp.update` (`UnitComp.java:859-861`): `if(!net.client() &&
+        // !dead && shouldUpdateController()) controller.updateUnit();` — a dead
+        // unit never runs its controller/targeting/weapons. A `Falling` wreck
+        // keeps integrating its velocity with `drag = 0.01` and sinks at
+        // `type.fallSpeed` (UnitComp.java:803-830); any other dead unit is
+        // destroyed by `resolve_deaths` at the end of the tick.
+        if world
+            .get::<crate::entities::comp::Health>(entity)
+            .is_some_and(|health| health.dead)
+        {
+            if world.get::<Falling>(entity).is_some() {
+                crate::entities::comp::unit::environment::update_falling_wreck(
+                    world,
+                    &runtime.grid,
+                    &runtime.content,
+                    entity,
+                );
+            }
             continue;
         }
 

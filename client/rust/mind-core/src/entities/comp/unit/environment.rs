@@ -6,7 +6,7 @@
 //! `floor.damageTaken` and the solid-tile kill/boost branch. Ported from
 //! `entities/comp/UnitComp.java:662-870`.
 //!
-//! Deferred (documented): the dead-flyer fall (T6).
+//! The dead-flyer wreck fall (`Falling`) runs [`update_falling_wreck`] (T6).
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -79,6 +79,124 @@ fn drown_floor(
     tile_floor
 }
 
+/// `UnitComp.update`'s bounds block (`UnitComp.java:664-700`): repel units out
+/// of the (possibly `limitMapArea`-restricted) map bounds, clamp the position
+/// and kill units that left the final world bounds.
+///
+/// Java clamps the position here (`x = Mathf.clamp(..)`, UnitComp.java:697-706);
+/// the warp impulse itself is integrated by `vel_update` like the rest of `vel`.
+#[allow(clippy::too_many_arguments)] // world + grid + Java inputs + in/out pos/vel
+fn apply_bounds(
+    world: &mut World,
+    grid: &WorldGrid,
+    bounded: bool,
+    limit_area: Option<(i32, i32, i32, i32)>,
+    team_is_ai: bool,
+    entity: Entity,
+    pos: &mut Pos,
+    vel: &mut Vel,
+) {
+    if !bounded {
+        return;
+    }
+    let ts = crate::config::TILESIZE as f32;
+    let (mut left, mut bot) = (0.0f32, 0.0f32);
+    let (mut right, mut top) = (grid.width() as f32 * ts, grid.height() as f32 * ts);
+    if let Some((lx, ly, lw, lh)) = limit_area
+        && !team_is_ai
+    {
+        left = lx as f32 * ts;
+        bot = ly as f32 * ts;
+        right = (lx + lw) as f32 * ts;
+        top = (ly + lh) as f32 * ts;
+    }
+    let mut dx = 0.0f32;
+    let mut dy = 0.0f32;
+    if pos.x < left {
+        dx += -(pos.x - left) / WARP_DST;
+    }
+    if pos.y < bot {
+        dy += -(pos.y - bot) / WARP_DST;
+    }
+    if pos.x > right - 8.0 {
+        dx -= (pos.x - (right - 8.0)) / WARP_DST;
+    }
+    if pos.y > top - 8.0 {
+        dy -= (pos.y - (top - 8.0)) / WARP_DST;
+    }
+    let warp_x = dx.clamp(-10.0, 10.0);
+    let warp_y = dy.clamp(-10.0, 10.0);
+    vel.x += warp_x;
+    vel.y += warp_y;
+    pos.x = pos.x.clamp(left - 8.0, right - 8.0 + 8.0);
+    pos.y = pos.y.clamp(bot - 8.0, top - 8.0 + 8.0);
+    if !crate::combat::bullet::unit_is_flying(world, entity) {
+        pos.x = pos.x.clamp(left, right - 8.0);
+        pos.y = pos.y.clamp(bot, top - 8.0);
+    }
+    if pos.x < -FINAL_WORLD_BOUNDS + left
+        || pos.y < -FINAL_WORLD_BOUNDS + bot
+        || pos.x >= right + FINAL_WORLD_BOUNDS
+        || pos.y >= top + FINAL_WORLD_BOUNDS
+        || !pos.x.is_finite()
+        || !pos.y.is_finite()
+    {
+        kill(world, entity);
+    }
+}
+
+/// `UnitComp.update`'s dead-flying branch (`UnitComp.java:803-830`) for a
+/// `Falling` wreck: `drag = 0.01`, `elevation -= type.fallSpeed` and the bounds
+/// block. The rest of the environment update is skipped while falling
+/// (documented simplification; Java runs all of it on the dead unit too).
+pub fn update_falling_wreck(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    entity: Entity,
+) {
+    let Some(type_comp) = world.get::<UnitTypeComp>(entity).copied() else {
+        return;
+    };
+    let Some(def) = content.unit(type_comp.type_id).cloned() else {
+        return;
+    };
+    // `drag = 0.01f;` (`UnitComp.java:805`): less drag when dead.
+    if let Some(mut physics) = world.get_mut::<PhysicsComp>(entity) {
+        physics.drag = 0.01;
+    }
+    // `elevation -= type.fallSpeed * Time.delta;` (`UnitComp.java:825`).
+    if let Some(mut core) = world.get_mut::<UnitCore>(entity) {
+        core.elevation -= def.fall_speed;
+    }
+    let (Some(mut pos), Some(mut vel)) = (
+        world.get::<Pos>(entity).copied(),
+        world.get::<Vel>(entity).copied(),
+    ) else {
+        return;
+    };
+    let team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+    let team_is_ai = crate::entities::comp::unit::lifecycle::team_ai_flags(world, team)
+        .map(|(is_ai, _)| is_ai)
+        .unwrap_or(false);
+    apply_bounds(
+        world,
+        grid,
+        def.bounded,
+        grid.limit_area,
+        team_is_ai,
+        entity,
+        &mut pos,
+        &mut vel,
+    );
+    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
+        *stored = pos;
+    }
+    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
+        *stored = vel;
+    }
+}
+
 /// `UnitComp.update`'s environment block (`UnitComp.java:662-870`) for one unit.
 pub fn update_unit_environment(
     world: &mut World,
@@ -140,55 +258,16 @@ pub fn update_unit_environment(
         .unwrap_or(Vel { x: 0.0, y: 0.0 });
 
     // Bounds (`UnitComp.java:664-700`).
-    if def.bounded {
-        let ts = crate::config::TILESIZE as f32;
-        let (mut left, mut bot) = (0.0f32, 0.0f32);
-        let (mut right, mut top) = (grid.width() as f32 * ts, grid.height() as f32 * ts);
-        if let Some((lx, ly, lw, lh)) = limit_area
-            && !team_is_ai
-        {
-            left = lx as f32 * ts;
-            bot = ly as f32 * ts;
-            right = (lx + lw) as f32 * ts;
-            top = (ly + lh) as f32 * ts;
-        }
-        let mut dx = 0.0f32;
-        let mut dy = 0.0f32;
-        if pos.x < left {
-            dx += -(pos.x - left) / WARP_DST;
-        }
-        if pos.y < bot {
-            dy += -(pos.y - bot) / WARP_DST;
-        }
-        if pos.x > right - 8.0 {
-            dx -= (pos.x - (right - 8.0)) / WARP_DST;
-        }
-        if pos.y > top - 8.0 {
-            dy -= (pos.y - (top - 8.0)) / WARP_DST;
-        }
-        let warp_x = dx.clamp(-10.0, 10.0);
-        let warp_y = dy.clamp(-10.0, 10.0);
-        vel.x += warp_x;
-        vel.y += warp_y;
-        // Java clamps the position here (`x = Mathf.clamp(..)`, UnitComp.java:697-706);
-        // the warp impulse itself is integrated by `vel_update` like the rest
-        // of `vel`.
-        pos.x = pos.x.clamp(left - 8.0, right - 8.0 + 8.0);
-        pos.y = pos.y.clamp(bot - 8.0, top - 8.0 + 8.0);
-        if !crate::combat::bullet::unit_is_flying(world, entity) {
-            pos.x = pos.x.clamp(left, right - 8.0);
-            pos.y = pos.y.clamp(bot, top - 8.0);
-        }
-        if pos.x < -FINAL_WORLD_BOUNDS + left
-            || pos.y < -FINAL_WORLD_BOUNDS + bot
-            || pos.x >= right + FINAL_WORLD_BOUNDS
-            || pos.y >= top + FINAL_WORLD_BOUNDS
-            || !pos.x.is_finite()
-            || !pos.y.is_finite()
-        {
-            kill(world, entity);
-        }
-    }
+    apply_bounds(
+        world,
+        grid,
+        def.bounded,
+        limit_area,
+        team_is_ai,
+        entity,
+        &mut pos,
+        &mut vel,
+    );
     let dead = world
         .get::<Health>(entity)
         .is_some_and(|health| health.dead);

@@ -812,6 +812,16 @@ fn crashing_flare_damages_neighbours() {
         health.dead = true;
     }
     sim.tick().expect("tick");
+    // H01 T6: the flare sinks as a `Falling` wreck for `ceil(1 / 0.018) = 56`
+    // ticks before `Call.unitDestroy` runs the destroy body
+    // (`UnitComp.killed`, UnitComp.java:980-991; `UnitComp.update`,
+    // UnitComp.java:803-830).
+    for _ in 0..120 {
+        if sim.ecs.0.get_entity(flare).is_err() {
+            break;
+        }
+        sim.tick().expect("tick");
+    }
     assert!(
         sim.ecs.0.get_entity(flare).is_err(),
         "the crashed flare was removed"
@@ -5529,4 +5539,119 @@ fn attack_map_pushes_from_drop_zone() {
     );
     // The push is away from the wave-team core: the velocity points west.
     assert!(vel.x < 0.0, "pushed away from the core: {vel:?}");
+}
+
+/// H01 T6: `UnitComp.killed` (`UnitComp.java:980-991`) — a dead flying unit
+/// with `createWreck` keeps existing as a falling wreck (`Falling`) and only
+/// runs the destroy body once grounded (`UnitComp.update`,
+/// `UnitComp.java:803-830`, `fallSpeed = 0.018`, `wreckHealthMultiplier = 0.25`).
+#[test]
+fn dead_flare_falls_then_crashes() {
+    let mut sim = live_sim(64);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 100.0, 100.0, 0.0)
+        .expect("flare");
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(flare) {
+        vel.x = 2.0;
+    }
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(flare).expect("health");
+        health.health = 0.0;
+        health.dead = true;
+    }
+    let x0 = sim.ecs.0.get::<Pos>(flare).expect("pos").x;
+    // Tick 1: `resolve_deaths` starts the fall (`Falling`) instead of
+    // destroying the unit.
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(flare).is_ok(),
+        "the wreck exists after death"
+    );
+    assert!(
+        sim.ecs.0.get::<Health>(flare).is_some_and(|h| h.dead),
+        "the wreck is dead"
+    );
+    // `elevation 1 / fallSpeed 0.018` = 56 ticks of fall (ceil(1/0.018)).
+    let mut ticks = 1usize;
+    let mut last_x = x0;
+    while sim.ecs.0.get_entity(flare).is_ok() && ticks < 120 {
+        if let Some(pos) = sim.ecs.0.get::<Pos>(flare) {
+            last_x = pos.x;
+        }
+        sim.tick().expect("tick");
+        ticks += 1;
+        if let Some(pos) = sim.ecs.0.get::<Pos>(flare) {
+            last_x = pos.x;
+        }
+    }
+    assert!(
+        sim.ecs.0.get_entity(flare).is_err(),
+        "the wreck is destroyed after landing"
+    );
+    assert!(
+        (55..=58).contains(&ticks),
+        "landed after ~56 fall ticks (got {ticks})"
+    );
+    assert!(
+        last_x - x0 > 2.0,
+        "the wreck kept moving while falling ({x0} -> {last_x})"
+    );
+}
+
+/// H01 T6: a grounded unit without `createWreck` still dies through the
+/// destroy body on the death tick (`UnitComp.killed`: `!type.flying` ->
+/// `destroy()`).
+#[test]
+fn ground_unit_dies_instantly() {
+    let mut sim = live_sim(64);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(dagger).expect("health");
+        health.health = 0.0;
+        health.dead = true;
+    }
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(dagger).is_err(),
+        "the ground unit is destroyed on the death tick"
+    );
+}
+
+/// H01 T6: `UnitComp.update`: `health <= -maxHealth * wreckHealthMultiplier`
+/// destroys the falling wreck immediately (`UnitComp.java:827`).
+#[test]
+fn wreck_destroyed_by_overkill() {
+    let mut sim = live_sim(64);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 100.0, 100.0, 0.0)
+        .expect("flare");
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(flare).expect("health");
+        health.health = 0.0;
+        health.dead = true;
+    }
+    // Tick 1 starts the fall.
+    sim.tick().expect("tick");
+    assert!(sim.ecs.0.get_entity(flare).is_ok(), "falling");
+    let max_health = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let type_id = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(flare)
+            .expect("type")
+            .type_id;
+        runtime.content.unit(type_id).expect("flare def").health
+    };
+    {
+        let mut health = sim.ecs.0.get_mut::<Health>(flare).expect("health");
+        health.health = -max_health * 0.25 - 1.0;
+    }
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(flare).is_err(),
+        "overkill destroys the wreck mid-fall"
+    );
 }
