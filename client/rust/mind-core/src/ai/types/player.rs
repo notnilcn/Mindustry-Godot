@@ -456,6 +456,14 @@ mod tests {
         let wall = sim.world_block_id("copper-wall").expect("wall");
         sim.spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
             .expect("player spawns");
+        // The local player is team 1 (`sharded`); sync the placement guard like
+        // a campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+
         // Empty core: the plan stays queued, so the unit is actively building.
         assert!(sim.queue_player_place(14, 10, BlockId::new(wall), 0));
         sim.set_player_control(0.0, 0.0, true, 150.0, 80.0, false);

@@ -224,6 +224,29 @@ pub fn increment_dump(world: &mut World, entity: Entity, size: usize) {
     }
 }
 
+/// Queues a `liquid.unlock()` for the production path (`BuildingComp.java:896`
+/// campaigns only, default team; folded by `campaign_tick_system`).
+fn push_liquid_unlock(world: &World, entity: Entity, liquid: LiquidId) {
+    let team = world
+        .get::<crate::ecs::BuildingComp>(entity)
+        .map(|building| building.team.0);
+    if let (Some(team), Some(queues)) = (
+        team,
+        world.get_resource::<crate::game::runtime::CampaignCoreQueues>(),
+    ) && let Ok(mut state) = queues.0.lock()
+        && state.is_campaign
+        && team == state.default_team
+        && state
+            .unlocks
+            .last()
+            .is_none_or(|last| *last != crate::game::runtime::UnlockRef::Liquid(liquid))
+    {
+        state
+            .unlocks
+            .push(crate::game::runtime::UnlockRef::Liquid(liquid));
+    }
+}
+
 /// `Building.dumpLiquid(liquid, scaling, outputDir)`.
 pub fn dump_liquid(
     world: &mut World,
@@ -266,6 +289,9 @@ fn dump_liquid_impl(
     if stored <= 0.0001 {
         return;
     }
+    // `BuildingComp.dumpLiquid` (`BuildingComp.java:896`): a campaign dump of a
+    // default-team liquid queues the unlock (deduped against the last entry).
+    push_liquid_unlock(world, entity, liquid);
     let rotation = world
         .get::<Building>(entity)
         .map(|building| building.rotation)

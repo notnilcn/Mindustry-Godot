@@ -26,8 +26,9 @@ pub use crate::io::json::content_serde::SectorKey;
 
 /// `SectorInfo.valueWindow` (samples per rolling mean).
 pub const VALUE_WINDOW: usize = 60;
-/// `SectorInfo.refreshPeriod` (seconds between statistic refreshes).
-pub const REFRESH_PERIOD: f32 = 60.0;
+/// `SectorInfo.refreshPeriod` = 60 ticks = 1 s (`SectorInfo.java:23`; Arc
+/// `Interval.get` counts `Time.time` ticks, not seconds).
+pub const REFRESH_PERIOD: f32 = 1.0;
 
 /// Minimal core view needed by `SectorInfo::prepare`.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -50,6 +51,10 @@ pub struct CoreSnapshot {
     pub height: i32,
     /// `lightCoverage` computed by the caller.
     pub light_coverage: f32,
+    /// Default team has at least one `BlockFlag.launchPad` building.
+    pub any_launch_pads: bool,
+    /// Launch pads with `efficiency > 0` (`pads.contains(t -> t.efficiency > 0)`).
+    pub active_launch_pads: usize,
 }
 
 /// Builds the [`CoreSnapshot`] that `SectorInfo.prepare` consumes from the live
@@ -82,6 +87,21 @@ pub fn core_snapshot_of(
         let Some(def) = content.block(comp.block) else {
             continue;
         };
+        // `SectorInfo.prepare`'s launch-pad query (`SectorInfo.java:244-249`):
+        // any default-team launch pad, and the ones with `efficiency > 0`.
+        if def
+            .flags
+            .contains(&crate::content::registries::blocks::BlockFlag::LaunchPad)
+        {
+            snapshot.any_launch_pads = true;
+            let efficiency = world
+                .get::<crate::entities::comp::Building>(entity)
+                .map(|building| building.efficiency)
+                .unwrap_or(0.0);
+            if efficiency > 0.0 {
+                snapshot.active_launch_pads += 1;
+            }
+        }
         if def.kind != crate::content::BlockKind::CoreBlock {
             continue;
         }
@@ -117,17 +137,6 @@ pub fn core_snapshot_of(
         }
     }
     snapshot
-}
-
-/// Minimal sector/world view needed by `SectorInfo::write`.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct WriteTarget {
-    /// `rules.waveTeam` has a core.
-    pub wave_team_has_core: bool,
-    /// `planet.allowWaves`.
-    pub planet_allow_waves: bool,
-    /// `sector.preset.captureWave`.
-    pub preset_capture_wave: i32,
 }
 
 /// Transient statistic windows, parallel to [`SectorInfo`]'s persisted maps.
@@ -174,8 +183,10 @@ impl InfoWindows {
             if !window.has_enough_data() && window.mean() == 0.0 {
                 window.fill(stat.mean);
             }
-            let sample = stat.mean;
-            window.add(sample.max(0.0));
+            // `SectorInfo.java:297-309`: the window samples the transient
+            // counter (items accumulated since the last refresh), then resets it.
+            window.add(stat.counter.max(0.0));
+            stat.counter = 0.0;
             stat.mean = window.raw_mean();
         }
         *windows = taken;
@@ -244,13 +255,13 @@ impl SectorInfoState {
     /// `SectorInfo.handleItemExport`.
     pub fn handle_item_export(&mut self, name: &str, amount: i32) {
         let stat = self.info.export.entry(name.to_owned()).or_default();
-        stat.mean += amount as f32;
+        stat.counter += amount as f32;
     }
 
     /// `SectorInfo.handleItemImport`.
     pub fn handle_item_import(&mut self, name: &str, amount: i32) {
         let stat = self.info.imports.entry(name.to_owned()).or_default();
-        stat.mean += amount as f32;
+        stat.counter += amount as f32;
     }
 
     /// `SectorInfo.getExport`.
@@ -406,7 +417,10 @@ impl SectorInfoState {
         item_count: usize,
     ) {
         self.windows.refresh_clock += seconds_delta;
-        if self.windows.refresh_clock < REFRESH_PERIOD {
+        // Half a tick of tolerance: callers feed `1/60` per tick and 60 f32
+        // additions round to slightly under `1.0` (0.9999997), while Java's
+        // integer-tick `Interval.get(60)` fires exactly on the 60th tick.
+        if self.windows.refresh_clock < REFRESH_PERIOD - 0.5 / 60.0 {
             return;
         }
         self.windows.refresh_clock %= REFRESH_PERIOD;
@@ -416,7 +430,12 @@ impl SectorInfoState {
     }
 
     /// `SectorInfo.prepare(sector)`.
-    pub fn prepare(&mut self, core: &CoreSnapshot, min_production: bool) {
+    pub fn prepare(
+        &mut self,
+        core: &CoreSnapshot,
+        min_production: bool,
+        preset_name: Option<&str>,
+    ) {
         self.info.items.clear();
         for (name, amount) in &core.items {
             self.info.items.insert(name.clone(), *amount);
@@ -435,6 +454,11 @@ impl SectorInfoState {
         self.info.last_width = core.width;
         self.info.last_height = core.height;
         self.info.light_coverage = core.light_coverage;
+        // `SectorInfo.java:226-228` + `:244-249`.
+        self.info.last_preset_name = preset_name.map(str::to_owned);
+        if core.active_launch_pads == 0 {
+            self.info.export.clear();
+        }
 
         if min_production {
             // cap production at raw production
@@ -450,35 +474,35 @@ impl SectorInfoState {
         }
     }
 
-    /// `SectorInfo.write()`.
-    pub fn write(
+    /// `SectorInfo.write()` (`SectorInfo.java:165-196`): record -> live session.
+    ///
+    /// Returns the item stacks to put into the default core (clamped by the
+    /// caller against the core's `storageCapacity`).
+    pub fn write_to_state(
         &mut self,
-        target: &WriteTarget,
-        wave: i32,
-        win_wave: i32,
-        wave_spacing: f32,
-        waves: bool,
-        attack: bool,
-    ) {
-        let mut win = win_wave;
-        let mut attack_mode = attack;
-        if target.wave_team_has_core {
-            attack_mode = true;
-            if !target.planet_allow_waves {
-                win = 0;
+        wave_team_has_core: bool,
+        planet_allow_waves: bool,
+        preset_capture_wave: i32,
+        session: &mut crate::game::play::PlaySession,
+    ) -> IndexMap<String, i32> {
+        if wave_team_has_core {
+            self.info.attack = true;
+            if !planet_allow_waves {
+                self.info.win_wave = 0;
             }
         }
-        if win <= 0 && !attack_mode && target.planet_allow_waves {
-            win = 30;
+        if self.info.win_wave <= 0 && !self.info.attack && planet_allow_waves {
+            self.info.win_wave = 30;
         }
-        if target.preset_capture_wave > 0 && !target.planet_allow_waves {
-            win = target.preset_capture_wave;
+        if preset_capture_wave > 0 && !planet_allow_waves {
+            self.info.win_wave = preset_capture_wave;
         }
-        self.info.wave = wave;
-        self.info.win_wave = win;
-        self.info.wave_spacing = wave_spacing;
-        self.info.waves = waves;
-        self.info.attack = attack_mode;
+        session.wave = self.info.wave;
+        session.rules.waves = self.info.waves;
+        session.rules.wave_spacing = self.info.wave_spacing;
+        session.rules.win_wave = self.info.win_wave;
+        session.rules.attack_mode = self.info.attack;
+        self.info.items.clone()
     }
 
     /// `SectorInfo.handleItemExport(ItemStack)`.
@@ -750,6 +774,7 @@ mod tests {
     #![allow(clippy::field_reassign_with_default)]
 
     use super::*;
+    use crate::game::play::PlaySession;
 
     #[test]
     fn info_windows_update_and_cap() {
@@ -757,7 +782,11 @@ mod tests {
         // Seed export/import counters then refresh.
         state.handle_item_export("silicon", 30);
         state.handle_item_import("lead", 10);
-        assert_eq!(state.get_export("silicon"), 30.0);
+        // `SectorInfo.java:123-130`: `handleItemExport` fills the transient
+        // counter; the mean only moves when `updateStats` refreshes.
+        assert_eq!(state.info.export["silicon"].counter, 30.0);
+        assert_eq!(state.get_export("silicon"), 0.0);
+        assert_eq!(state.info.imports["lead"].counter, 10.0);
 
         // `handleItemExport` is a counter; updateStats moves it through the window.
         state
@@ -783,6 +812,57 @@ mod tests {
         );
         // Export was capped by raw production + core draw (draw is 0).
         assert!(state.get_export("silicon") <= 5.0 + 1e-3);
+    }
+
+    #[test]
+    fn export_counter_decays() {
+        let mut state = SectorInfoState::new();
+        // `updateStats` caps the export mean to `rawProduction + core draw`
+        // (`SectorInfo.java:330-340`), so the raw side must exist for the
+        // sample to survive; the window still holds 100 / 60.
+        state
+            .info
+            .raw_production
+            .entry("copper".to_owned())
+            .or_default()
+            .mean = 5.0;
+        state.handle_item_export("copper", 100);
+        state.update(1.0, &|_| None, &|_| None, 0);
+        // One sample in a 60-slot window (`SectorInfo.java:297-309`).
+        assert_eq!(state.get_export("copper"), 100.0 / 60.0);
+        // A refresh with no new exports keeps the window sample and resets the
+        // counter.
+        state.update(1.0, &|_| None, &|_| None, 0);
+        assert_eq!(state.get_export("copper"), 100.0 / 60.0);
+        assert_eq!(state.info.export["copper"].counter, 0.0);
+    }
+
+    #[test]
+    fn refresh_every_60_ticks() {
+        let mut state = SectorInfoState::new();
+        state.windows.production_deltas = vec![1; 1];
+        for _ in 0..59 {
+            state.update(
+                1.0 / 60.0,
+                &|_| None,
+                &|index| (index == 0).then(|| "copper".to_owned()),
+                1,
+            );
+        }
+        assert!(
+            state.info.production.is_empty(),
+            "no refresh before 60 ticks (1 s)"
+        );
+        state.update(
+            1.0 / 60.0,
+            &|_| None,
+            &|index| (index == 0).then(|| "copper".to_owned()),
+            1,
+        );
+        assert!(
+            state.info.production.contains_key("copper"),
+            "the 60th tick refreshes every item's statistics"
+        );
     }
 
     #[test]
@@ -832,25 +912,115 @@ mod tests {
             width: 200,
             height: 200,
             light_coverage: 3.5,
+            any_launch_pads: true,
+            active_launch_pads: 1,
         };
-        state.prepare(&core, false);
+        state.prepare(&core, false, Some("groundZero"));
         assert_eq!(state.info.items.get("copper"), Some(&250));
         assert_eq!(state.info.storage_capacity, 4000);
         assert_eq!(state.info.spawn_position, pack_position(32, 48));
         assert_eq!(unpack_position(state.info.spawn_position), (32, 48));
         assert_eq!(state.info.light_coverage, 3.5);
+        assert_eq!(state.info.last_preset_name.as_deref(), Some("groundZero"));
 
-        let target = WriteTarget {
-            wave_team_has_core: false,
-            planet_allow_waves: true,
-            preset_capture_wave: 0,
-        };
-        state.write(&target, 7, -1, 7200.0, true, false);
-        assert_eq!(state.info.wave, 7);
+        state.info.wave = 7;
+        state.info.win_wave = -1;
+        state.info.wave_spacing = 7200.0;
+        state.info.waves = true;
+        state.info.attack = false;
+        let mut session = PlaySession::default();
+        let items = state.write_to_state(false, true, 0, &mut session);
+        assert_eq!(items.get("copper"), Some(&250));
+        assert_eq!(session.wave, 7);
         assert_eq!(
-            state.info.win_wave, 30,
+            session.rules.win_wave, 30,
             "infinite waves get a default win wave"
         );
+        assert!(!session.rules.attack_mode);
+    }
+
+    #[test]
+    fn write_to_state_applies_record_and_win_wave() {
+        let mut state = SectorInfoState::new();
+        state.info.wave = 7;
+        state.info.waves = true;
+        state.info.win_wave = 0;
+        state.info.attack = false;
+        state.info.items.insert("copper".to_owned(), 5000);
+        let mut session = PlaySession::default();
+        // No wave core: the `winWave <= 0 && !attack && allowWaves` branch fills
+        // Java's 30 default (`SectorInfo.java:168`).
+        let items = state.write_to_state(false, true, 0, &mut session);
+        assert_eq!(items.get("copper"), Some(&5000));
+        assert_eq!(session.wave, 7);
+        assert!(!session.rules.attack_mode);
+        assert_eq!(session.rules.win_wave, 30);
+
+        // Same record with a wave-team core (the first write set winWave 30, so
+        // it survives; attack mode flips on).
+        let mut session = PlaySession::default();
+        state.write_to_state(true, true, 0, &mut session);
+        assert!(session.rules.attack_mode, "a wave-team core forces attack");
+        assert_eq!(
+            session.rules.win_wave, 30,
+            "allowWaves keeps the 30 default (`SectorInfo.java:168`)"
+        );
+
+        // `planet.allowWaves == false`: a wave core zeroes the win wave.
+        let mut state = SectorInfoState::new();
+        state.info.attack = false;
+        state.info.win_wave = 12;
+        let mut session = PlaySession::default();
+        state.write_to_state(true, false, 0, &mut session);
+        assert_eq!(session.rules.win_wave, 0);
+        assert!(session.rules.attack_mode);
+        // No core + a preset capture wave replaces the default.
+        let mut state = SectorInfoState::new();
+        state.info.win_wave = 12;
+        let mut session = PlaySession::default();
+        state.write_to_state(false, false, 42, &mut session);
+        assert_eq!(session.rules.win_wave, 42);
+    }
+
+    #[test]
+    fn prepare_sets_last_preset_and_clears_export_without_pads() {
+        let mut state = SectorInfoState::new();
+        state.info.export.insert(
+            "copper".to_owned(),
+            ExportStat {
+                mean: 3.0,
+                ..Default::default()
+            },
+        );
+        let core = CoreSnapshot {
+            has_core: true,
+            active_launch_pads: 0,
+            ..CoreSnapshot::default()
+        };
+        state.prepare(&core, false, Some("groundZero"));
+        assert_eq!(state.info.last_preset_name.as_deref(), Some("groundZero"));
+        assert!(
+            state.info.export.is_empty(),
+            "no active launch pad clears the stored export (`SectorInfo.java:244-249`)"
+        );
+        // With an active pad the export survives.
+        let mut state = SectorInfoState::new();
+        state.info.export.insert(
+            "copper".to_owned(),
+            ExportStat {
+                mean: 3.0,
+                ..Default::default()
+            },
+        );
+        let core = CoreSnapshot {
+            has_core: true,
+            any_launch_pads: true,
+            active_launch_pads: 1,
+            ..CoreSnapshot::default()
+        };
+        state.prepare(&core, false, None);
+        assert_eq!(state.info.export.get("copper").map(|s| s.mean), Some(3.0));
+        assert_eq!(state.info.last_preset_name, None);
     }
 
     #[test]

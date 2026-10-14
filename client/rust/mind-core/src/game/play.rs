@@ -704,7 +704,9 @@ pub fn sector_capture(session: &mut PlaySession, campaign: &mut Campaign) -> Vec
         sector.info.info.was_captured = true;
         sector.info.info.waves = false;
         sector.info.info.attack = false;
-        sector.being_played = false;
+        // `Logic.sectorCapture` (`Logic.java:394-425`) does not touch
+        // `isBeingPlayed`: the sector stays played until the client exits it
+        // (H04 T4; T1 clears the flag on `run_exit_save`).
     }
     // `Logic`'s `SectorCaptureEvent` listener: `stats.sectorsCaptured++`.
     if let Some(stats) = campaign.stats_for_mut(planet) {
@@ -1146,6 +1148,43 @@ mod tests {
         assert_eq!(spawn_index, 0, "wave 1 spawns getSpawned(0)");
         assert_eq!(session.wave, 2);
         assert_eq!(session.wavetime, session.rules.wave_spacing * 2.0);
+    }
+
+    /// H04 T3: `Control.playNewSector` (`Control.java:573-578`) records the
+    /// launcher sector as `origin`/`destination` (`SectorKey::format`).
+    #[test]
+    fn launch_sets_origin_and_destination() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let planet = campaign.planet_id_by_name("serpulo").unwrap();
+        let sector_id = registry.sector_by_name("groundZero").unwrap().sector;
+        let mut session = PlaySession::new(Rules::default());
+        let mut epoch = RulesEpoch::new();
+        let mut reloader = NoReloader;
+        play_new_sector(
+            &mut session,
+            &mut campaign,
+            &registry,
+            planet,
+            sector_id,
+            Some((planet, 15)),
+            &mut epoch,
+            &mut reloader,
+        );
+        let record = campaign.sector(planet, sector_id).unwrap();
+        assert_eq!(
+            record.info.info.origin.as_ref().map(|key| key.0.as_str()),
+            Some("serpulo-15")
+        );
+        assert_eq!(
+            record
+                .info
+                .info
+                .destination
+                .as_ref()
+                .map(|key| key.0.as_str()),
+            Some("serpulo-15")
+        );
     }
 
     /// T2b: a fresh session starts at Java's wave 1 (`GameState.java:17`) and

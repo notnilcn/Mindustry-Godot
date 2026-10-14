@@ -433,6 +433,13 @@ mod tests {
         let unit = sim
             .spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
             .expect("player unit");
+        // The local player is team 1 (`sharded`); sync the placement guard like
+        // a campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         (sim, unit)
     }
 

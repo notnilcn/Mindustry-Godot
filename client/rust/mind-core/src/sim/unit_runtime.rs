@@ -3584,7 +3584,14 @@ impl Sim {
                 // `tryDropPayload` -> `dropBlock`: keep carrying it when the
                 // placement is invalid (Java returns false and the stack is
                 // not popped).
-                if !self.runtime_place(tx, ty, block, rotation, team) {
+                if !self.runtime_place(
+                    tx,
+                    ty,
+                    block,
+                    rotation,
+                    team,
+                    crate::world::build::PlaceFlags::PLAYER,
+                ) {
                     return false;
                 }
                 if let Some(build) = self

@@ -77,7 +77,7 @@ pub struct AttributeCrafterDef {
 }
 
 /// `Drill` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DrillDef {
     /// `Drill.drillTime` (ticks per item).
     pub drill_time: f32,
@@ -91,6 +91,27 @@ pub struct DrillDef {
     pub blocked_items: Vec<u16>,
     /// Whether this is a wall drill (`Drill.wallDrill`).
     pub wall_drill: bool,
+    /// `Drill.liquidBoostIntensity` (`Drill.java:38`; blast 1.8, impact 1.75).
+    pub liquid_boost_intensity: f32,
+    /// `Drill.warmupSpeed` (`Drill.java:40`; blast drill 0.01).
+    pub warmup_speed: f32,
+}
+
+impl Default for DrillDef {
+    fn default() -> Self {
+        // `Drill.java:38,40`: `liquidBoostIntensity = 1.6f`,
+        // `warmupSpeed = 0.015f`.
+        Self {
+            drill_time: 0.0,
+            tier: 0,
+            hardness_drill_multiplier: 0.0,
+            drill_multipliers: Vec::new(),
+            blocked_items: Vec::new(),
+            wall_drill: false,
+            liquid_boost_intensity: 1.6,
+            warmup_speed: 0.015,
+        }
+    }
 }
 
 /// `BurstDrill` family knobs.
@@ -332,17 +353,41 @@ pub struct AcceleratorDef {
 }
 
 /// `LandingPad` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LandingPadDef {
     /// Item capacity for the landing inventory.
     pub item_capacity: i32,
+    /// `LandingPad.arrivalDuration` (ticks).
+    pub arrival_duration: f32,
+    /// `LandingPad.cooldownTime` (ticks).
+    pub cooldown_time: f32,
+    /// `LandingPad.consumeLiquidAmount` (water per pod).
+    pub consume_liquid_amount: f32,
+    /// `LandingPad.consumeLiquid` (`Liquids.water`).
+    pub consume_liquid: crate::content::LiquidId,
+}
+
+impl Default for LandingPadDef {
+    fn default() -> Self {
+        Self {
+            item_capacity: 0,
+            // `Blocks.java:6862-6871`: `arrivalDuration` 150, `cooldownTime`
+            // 150, `consumeLiquidAmount` 1500, `consumeLiquid` water.
+            arrival_duration: 150.0,
+            cooldown_time: 150.0,
+            consume_liquid_amount: 1500.0,
+            consume_liquid: crate::content::LiquidId::WATER,
+        }
+    }
 }
 
 /// `LaunchPad` family knobs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LaunchPadDef {
-    /// `LaunchPad.launchTime`.
+    /// `LaunchPad.launchTime` (ticks).
     pub launch_time: f32,
+    /// `LaunchPad.acceptMultipleItems` (false: one item type at a time).
+    pub accept_multiple_items: bool,
 }
 
 /// `LegacyBlock` marker data (replacement content id, when defined).
@@ -624,8 +669,24 @@ impl BlockKindData {
             }),
             BlockKind::PowerVoid => BlockKindData::PowerVoid,
             BlockKind::Accelerator => BlockKindData::Accelerator(AcceleratorDef::default()),
-            BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef::default()),
-            BlockKind::LaunchPad => BlockKindData::LaunchPad(LaunchPadDef::default()),
+            BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef {
+                item_capacity: def.item_capacity,
+                ..LandingPadDef::default()
+            }),
+            BlockKind::LaunchPad => BlockKindData::LaunchPad(match def.name.as_str() {
+                // `Blocks.java:6844,6846` (`launch-pad` 1200 ticks,
+                // `acceptMultipleItems = true`) and `:6854,6856`
+                // (`advanced-launch-pad` 1800 ticks, one item type).
+                "launch-pad" => LaunchPadDef {
+                    launch_time: 1200.0,
+                    accept_multiple_items: true,
+                },
+                "advanced-launch-pad" => LaunchPadDef {
+                    launch_time: 1800.0,
+                    accept_multiple_items: false,
+                },
+                _ => LaunchPadDef::default(),
+            }),
             BlockKind::LegacyMechPad
             | BlockKind::LegacyUnitFactory
             | BlockKind::LegacyCommandCenter => BlockKindData::Legacy(LegacyDef::default()),
@@ -828,7 +889,12 @@ impl BlockKindData {
             "mechanical-drill" => self.set_drill(600.0, 2, None),
             "pneumatic-drill" => self.set_drill(400.0, 3, None),
             "laser-drill" => self.set_drill(280.0, 4, None),
-            "blast-drill" => self.set_drill(280.0, 5, None),
+            "blast-drill" => {
+                self.set_drill(280.0, 5, None);
+                // `Blocks.java:2929,2933`: warmupSpeed 0.01,
+                // liquidBoostIntensity 1.8.
+                self.set_drill_boost(1.8, 0.01);
+            }
             // `Blocks.java:2299 mechanical-pump` — `pumpAmount = 7/60`.
             "mechanical-pump" => self.set_pump_amount(7.0 / 60.0),
             // `Blocks.java:2305 rotary-pump` — `pumpAmount = 0.2`.
@@ -849,6 +915,9 @@ impl BlockKindData {
                     // `BurstDrill.invertedTime` default 200 (BurstDrill.java:27).
                     def.inverted_time = 200.0;
                 }
+                // `Blocks.java:3103`: liquidBoostIntensity 1.75 (burst warmup
+                // stays the `BurstDrill.java:92,101` literal 0.01).
+                self.set_drill_boost(1.75, 0.01);
             }
             // `Blocks.java:3112 eruption-drill` — `drillTime = 281.25`, tier 7,
             // `BurstDrill.invertedTime` default 200.
@@ -967,6 +1036,18 @@ impl BlockKindData {
             crafter.craft_time = target.craft_time;
         }
         *target = crafter;
+    }
+
+    /// `Blocks.java` per-block drill boost/warmup overrides (blast drill,
+    /// impact drill).
+    fn set_drill_boost(&mut self, liquid_boost_intensity: f32, warmup_speed: f32) {
+        let def = match self {
+            BlockKindData::Drill(def) => def,
+            BlockKindData::BurstDrill(def) => &mut def.drill,
+            _ => return,
+        };
+        def.liquid_boost_intensity = liquid_boost_intensity;
+        def.warmup_speed = warmup_speed;
     }
 
     fn set_drill(&mut self, drill_time: f32, tier: i32, blocked: Option<u16>) {

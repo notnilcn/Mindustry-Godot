@@ -933,6 +933,9 @@ impl MapLocales {
 pub struct ExportStat {
     /// Mean items per refresh period.
     pub mean: f32,
+    /// Transient accumulator (`SectorInfo.ExportStat.counter`); not persisted.
+    #[serde(skip)]
+    pub counter: f32,
 }
 
 /// Per-sector persistent state (`mindustry.game.SectorInfo`), persisted fields
@@ -1230,8 +1233,13 @@ mod tests {
             ..SectorInfo::default()
         };
         info.resources.push("copper".to_owned());
-        info.export
-            .insert("silicon".to_owned(), ExportStat { mean: 3.5 });
+        info.export.insert(
+            "silicon".to_owned(),
+            ExportStat {
+                mean: 3.5,
+                ..Default::default()
+            },
+        );
         info.import_cooldown_timers.insert("lead".to_owned(), 0.25);
         let json = serde_json::to_string(&info).unwrap();
         assert!(json.contains("\"bestCoreType\":\"core-shard\""));
