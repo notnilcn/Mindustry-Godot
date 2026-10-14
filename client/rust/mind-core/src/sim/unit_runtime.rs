@@ -1172,6 +1172,14 @@ impl Sim {
         Some(entity)
     }
 
+    /// `PlayerComp.team` (`PlayerComp.java:44-48`): the player always has a
+    /// team, so `update_player_respawn` retries the spawn every 60 ticks even
+    /// when the first `spawn_player_at_best_core` failed (no supported core).
+    pub fn set_player_team(&mut self, team: u8) {
+        self.player_team = Some(team);
+        self.player_death_timer = 0.0;
+    }
+
     /// `PlayerComp.bestCore()` (`PlayerComp.java:121-126`): the largest core,
     /// then the closest to the last player position; supported-env cores are
     /// preferred unless there is only one core.
@@ -1276,6 +1284,32 @@ impl Sim {
         let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
         if let Some(mut vel) = self.ecs.0.get_mut::<Vel>(entity) {
             vel.y += 3.0 / mass;
+        }
+        // `if(state.isCampaign() && player == Vars.player){ spawnType.unlock(); }`
+        // (CoreBlock.java:121-123): queue the spawned unit type for the campaign
+        // unlock pipeline (H04 T2's `UnlockRef`).
+        let unit_type = self
+            .ecs
+            .0
+            .get::<UnitTypeComp>(entity)
+            .map(|comp| comp.type_id);
+        let is_campaign = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .is_some_and(|campaign| campaign.session.is_campaign());
+        if is_campaign
+            && let Some(id) = unit_type
+            && let Some(queues) = self
+                .ecs
+                .0
+                .get_resource::<crate::game::runtime::CampaignCoreQueues>()
+            && let Ok(mut queues) = queues.0.lock()
+        {
+            let unlock = crate::game::runtime::UnlockRef::Unit(id);
+            if !queues.unlocks.contains(&unlock) {
+                queues.unlocks.push(unlock);
+            }
         }
         Some(entity)
     }
@@ -1433,28 +1467,42 @@ impl Sim {
                         .and_then(|comp| runtime.content.unit(comp.type_id))
                         .cloned()
                 };
-                let kind = before_def.map_or(AiKind::Ground, |def| {
-                    crate::entities::comp::unit::lifecycle::select_team_controller(
-                        &self.ecs.0,
-                        &def,
-                        team,
-                    )
-                });
-                self.ecs.0.entity_mut(before).remove::<Player>();
-                if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(before) {
-                    slot.kind = kind;
-                    slot.target = None;
-                }
+                let _ = before_def;
+                self.release_unit_to_ai(before, team);
             }
         }
         true
+    }
+
+    /// Releases a possessed unit back to its team AI
+    /// (`InputHandler.unitClear` standard branch / `Unit.resetController`):
+    /// drop the `Player` marker and hand the unit to the team controller.
+    fn release_unit_to_ai(&mut self, entity: Entity, team: u8) {
+        use crate::entities::comp::Player;
+        let def = {
+            let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
+                return;
+            };
+            self.ecs
+                .0
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| runtime.content.unit(comp.type_id))
+                .cloned()
+        };
+        let kind = def.map_or(AiKind::Ground, |def| {
+            crate::entities::comp::unit::lifecycle::select_team_controller(&self.ecs.0, &def, team)
+        });
+        self.ecs.0.entity_mut(entity).remove::<Player>();
+        if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(entity) {
+            slot.kind = kind;
+            slot.target = None;
+        }
     }
 
     /// `InputHandler.unitClear` (`InputHandler.java:824-875`): dock into the
     /// carried core unit type when possible, otherwise release the unit and
     /// respawn at the best core immediately.
     pub fn clear_unit(&mut self) -> bool {
-        use crate::entities::comp::Player;
         use crate::entities::comp::unit::comp::{DockedType, HitboxComp, UnitCore};
         let Some(current) = self.player_unit else {
             return false;
@@ -1525,6 +1573,11 @@ impl Sim {
                 } else {
                     (px, py)
                 };
+                // The possessed unit must go back to the AI before the docked
+                // unit takes the `Player` controller (`unit.controller(player)`
+                // calls `old.resetController()`, InputHandler.java:865-872);
+                // otherwise two entities keep the player controller.
+                self.release_unit_to_ai(current, team);
                 let Some(entity) = self.spawn_player_unit(&name, team, sx, sy, rotation) else {
                     return false;
                 };
@@ -1535,24 +1588,7 @@ impl Sim {
             }
         }
         // Standard respawn: release the unit to AI, then `player.checkSpawn()`.
-        let def = {
-            let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {
-                return false;
-            };
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(current)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .cloned()
-        };
-        let kind = def.map_or(AiKind::Ground, |def| {
-            crate::entities::comp::unit::lifecycle::select_team_controller(&self.ecs.0, &def, team)
-        });
-        self.ecs.0.entity_mut(current).remove::<Player>();
-        if let Some(mut slot) = self.ecs.0.get_mut::<ControllerSlot>(current) {
-            slot.kind = kind;
-            slot.target = None;
-        }
+        self.release_unit_to_ai(current, team);
         self.player_unit = None;
         let _ = self.spawn_player_at_best_core(team);
         true
@@ -1561,6 +1597,31 @@ impl Sim {
     /// The controlled player unit entity, if any.
     pub fn player_unit(&self) -> Option<Entity> {
         self.player_unit
+    }
+
+    /// Debug seam (H01 T3): kill the unit with `EntitySeq == seq` by zeroing
+    /// its health (`UnitComp.killed`; `environment::kill`); returns whether a
+    /// live unit was found.
+    pub fn debug_kill_unit(&mut self, seq: i64) -> bool {
+        let target = self
+            .ecs
+            .0
+            .iter_entities()
+            .find(|entity| {
+                entity
+                    .get::<crate::ecs::EntitySeq>()
+                    .is_some_and(|s| s.0 == seq as u64)
+            })
+            .map(|entity| entity.id());
+        let Some(target) = target else {
+            return false;
+        };
+        let Some(mut health) = self.ecs.0.get_mut::<Health>(target) else {
+            return false;
+        };
+        health.health = 0.0;
+        health.dead = true;
+        true
     }
 
     /// Debug seam (G01 T19): apply a status by name to a unit selected by
