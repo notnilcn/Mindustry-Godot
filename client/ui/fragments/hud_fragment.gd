@@ -105,24 +105,18 @@ func _on_hotkey(action: String) -> void:
 		_toggle_menus()
 
 
-## `HudFragment.toggleMenus` (`HudFragment.java:455-461`): flip every HUD table;
-## the first use announces the bind once (`getBoolOnce("ui-hidden")`).
+## Local HUD visibility (`HudFragment.shown`, `HudFragment.java:45`); the
+## `ui-hidden` setting is only the announce-once gate (`:455-461`), never the
+## state.
+var _menus_shown := true
+
+## `HudFragment.toggleMenus` (`HudFragment.java:875-877` + `:455-461`): flip
+## every HUD table; the first press announces the bind once
+## (`Settings.getBoolOnce("ui-hidden")`).
 func _toggle_menus() -> void:
+	_menus_shown = not _menus_shown
 	var ui := get_node_or_null("/root/MindUi")
-	var shown := true
-	if ui != null and ui.has_method("settings_get_bool"):
-		shown = not bool(ui.call("settings_get_bool", "ui-hidden"))
-		ui.call("settings_set", "ui-hidden", not shown)
-	else:
-		shown = false
-	var hud := get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
-	if hud == null:
-		return
-	for path in ["WavesStack", "CoreInfo", "MinimapBox", "FpsBox", "placement"]:
-		var node := hud.get_node_or_null(path)
-		if node != null:
-			node.visible = shown
-	if shown and not _ui_hidden_warned and ui != null:
+	if ui != null and not _ui_hidden_warned:
 		_ui_hidden_warned = true
 		if ui.has_method("announce"):
 			var key_display := _bind_display("toggle_menus")
@@ -130,6 +124,17 @@ func _toggle_menus() -> void:
 			if assets != null and assets.has_method("bundle_get"):
 				var fmt := str(assets.call("bundle_get", "showui"))
 				ui.call("announce", fmt.replace("{0}", key_display), 5.0)
+	# The tables are children of this fragment; `placement` is a sibling
+	# fragment under the HUD group.
+	for path in ["WavesStack", "CoreInfo", "MinimapBox", "FpsBox"]:
+		var node := get_node_or_null(path)
+		if node != null:
+			node.visible = _menus_shown
+	var hud := get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
+	if hud != null:
+		var placement := hud.get_node_or_null("placement")
+		if placement != null:
+			placement.visible = _menus_shown
 
 
 ## Display name of one binding (`keybinds_json`), for the `showui` announce.
