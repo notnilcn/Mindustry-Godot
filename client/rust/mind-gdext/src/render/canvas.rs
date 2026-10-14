@@ -311,6 +311,18 @@ pub(crate) fn fill_rect(canvas: &mut Node2D, x1: f32, y1: f32, x2: f32, y2: f32,
         .done();
 }
 
+/// `Fill.circle(x, y, radius)` (`Fill.java:120-124`): a filled polygon with
+/// `Lines.circleVertices` sides (`Lines.java:24-26`).
+pub(crate) fn fill_circle(canvas: &mut Node2D, x: f32, y: f32, r: f32, color: Color) {
+    if r <= 0.0 {
+        return;
+    }
+    let sides = (11 + (r * 0.4) as u32).max(3);
+    let ring = drawf::poly_ring(x, y, sides, r, 0.0);
+    let packed = pack_points(&ring);
+    canvas.draw_colored_polygon(&packed, color);
+}
+
 /// RGBA8888 → `Color`.
 pub(crate) fn color_u32(rgba: u32) -> Color {
     Color::from_rgba8(

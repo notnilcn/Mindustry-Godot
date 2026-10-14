@@ -296,6 +296,36 @@ pub struct BlockStateDraw {
     pub damaged: bool,
 }
 
+/// Fire draw row (`FireComp.draw`; H03 T7).
+pub struct FireDraw {
+    /// World centre x (tile centre + `randomSeedRange(y, 2)` jitter).
+    pub x: f32,
+    /// World centre y (tile centre + `randomSeedRange(x, 2)` jitter).
+    pub y: f32,
+    /// `min((int)animation, frames - 1)`.
+    pub frame: i32,
+    /// `clamp(warmup / warmupDuration)`.
+    pub alpha: f32,
+}
+
+/// Puddle draw row (`PuddleComp.draw` / `Liquid.drawPuddle`; H03 T7).
+pub struct PuddleDraw {
+    /// World centre (`Puddle.x/y`).
+    pub x: f32,
+    /// World centre (`Puddle.x/y`).
+    pub y: f32,
+    /// Entity id (`Puddle.id`; seeds the sine phases and satellites).
+    pub id: i32,
+    /// `clamp(amount / (maxLiquid / 1.5))`.
+    pub f: f32,
+    /// `liquid.color.shiftValue(-0.05)`.
+    pub color: [f32; 4],
+    /// `tile.floor().isLiquid`.
+    pub on_liquid: bool,
+    /// `(lightColor, opacity)` when `lightColor.a > 0.001 && f > 0`.
+    pub light: Option<([f32; 4], f32)>,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -2989,6 +3019,48 @@ impl MindSimHost {
         created
     }
 
+    /// Playtest seam: deposits `amount` of `liquid` at `(x, y)`
+    /// (`Puddles.deposit`) through the live unit runtime rng. `false` when the
+    /// liquid is unknown, the deposit reacts/vaporizes, or there is no runtime.
+    #[func]
+    pub fn debug_deposit_puddle(&mut self, x: i32, y: i32, liquid: GString, amount: f64) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(id) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.liquid_id(liquid.to_string().as_str()))
+        else {
+            return false;
+        };
+        let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
+        else {
+            return false;
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            self.sim.ecs.0.insert_non_send(runtime);
+            return false;
+        };
+        let created = mind_core::combat::puddles::deposit(
+            &mut self.sim.ecs.0,
+            &self.sim.grid.tiles,
+            content,
+            tx,
+            ty,
+            id,
+            amount as f32,
+            &mut runtime.rng,
+        )
+        .is_some();
+        self.sim.ecs.0.insert_non_send(runtime);
+        created
+    }
+
     /// Playtest seam: force-spawns the player unit without the sector env gate
     /// (`CoreBlock.requestSpawn` refuses alpha when `rules.env` wrongly carries
     /// scorching — G01's recorded divergence). Lets input-path probes run on
@@ -3505,6 +3577,29 @@ impl MindSimHost {
                     opacity: 1.0,
                 }),
                 _ => {}
+            }
+        }
+        // Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
+        // `Liquid.drawPuddle`; H03 T7).
+        let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
+        for fire in self.fire_draws(rect) {
+            out.push(LightSource {
+                x: fire.x,
+                y: fire.y,
+                radius: 50.0 + mind_core::render::drawf::absin(ticks, 5.0, 5.0),
+                color: pal::LIGHT_FLAME,
+                opacity: 0.6 * fire.alpha,
+            });
+        }
+        for puddle in self.puddle_draws(rect) {
+            if let Some((color, opacity)) = puddle.light {
+                out.push(LightSource {
+                    x: puddle.x,
+                    y: puddle.y,
+                    radius: 30.0 * puddle.f,
+                    color,
+                    opacity,
+                });
             }
         }
         if rules.unit_light
@@ -5790,6 +5885,238 @@ impl MindSimHost {
                 .and_then(|state| state.item),
             healthf,
             damaged: healthf < 0.999,
+        })
+    }
+
+    /// Cheap per-building hash of the state that changes a `drawCached` bake
+    /// (`BuildingCacheRenderer` chunk state sums; H03 T18). `0` without a
+    /// building. Mirrors `BuildingComp.recache()` being called on config
+    /// changes that never bump the world revision.
+    pub fn cached_state_key(&self, x: i32, y: i32) -> u64 {
+        use mind_core::render::block_sprite::{CachedBlockState, cached_state_hash, crack_index};
+        let Some(state) = self.block_state_draw(x, y) else {
+            return 0;
+        };
+        cached_state_hash(&CachedBlockState {
+            door_open: state.door_open,
+            enabled: state.enabled,
+            item: state
+                .sort_item
+                .or(state.unloader_item)
+                .or(state.source_item),
+            damaged: state.damaged,
+            crack: crack_index(state.healthf),
+        })
+    }
+
+    /// `BlockRenderer` crack-overlay rows (`BlockRenderer.java:801-821`):
+    /// every damaged building whose block is `!draw_dynamic` (exactly the
+    /// buildings the dynamic pass skips and the static cache bakes; the port
+    /// counterpart of Java's `tileExtraCachedView`). `(world x, world y,
+    /// tile y, size, healthf)`.
+    pub fn cached_crack_draws(&self) -> Vec<(f32, f32, i32, i32, f32)> {
+        use mind_core::entities::comp::health::Health;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
+                continue;
+            };
+            let Some(def) = content.block(building.block) else {
+                continue;
+            };
+            // `drawCracks` guards (`BuildingComp.java:1234`): `drawDynamic`
+            // blocks draw their own cracks in the dynamic pass, and
+            // `BlockRenderer.maxCrackSize` is 7.
+            if def.draw_dynamic || def.size > 7 {
+                continue;
+            }
+            let Some(health) = entity.get::<Health>() else {
+                continue;
+            };
+            if !health.damaged() {
+                continue;
+            }
+            let size = def.size.max(1);
+            // `Building.x = tile.drawx() + Block.offset` (same anchor as the
+            // dynamic pass and the cache bake).
+            out.push((
+                f32::from(building.tile.x()) * 8.0 + def.offset,
+                f32::from(building.tile.y()) * 8.0 + def.offset,
+                i32::from(building.tile.y()),
+                size,
+                health.fraction(),
+            ));
+        }
+        out
+    }
+
+    /// Fires in `rect` (`FireComp.draw` view data; H03 T7), stable by entity
+    /// index. The tile centre gets Java's `randomSeedRange` jitter; `frame`
+    /// and `alpha` come from the sim's animation/warmup.
+    pub fn fire_draws(&self, rect: (f32, f32, f32, f32)) -> Vec<FireDraw> {
+        use mind_core::combat::fires::{FRAMES, FireState, WARMUP_DURATION};
+        use mind_core::render::drawf::random_seed_range;
+        let (x0, y0, w, h) = rect;
+        let (x1, y1) = (x0 + w, y0 + h);
+        let mut rows: Vec<(u32, FireDraw)> = Vec::new();
+        for entity_ref in self.sim.ecs.0.iter_entities() {
+            let Some(fire) = entity_ref.get::<FireState>() else {
+                continue;
+            };
+            let (tx, ty) = fire.tile;
+            let cx = f32::from(tx) * 8.0;
+            let cy = f32::from(ty) * 8.0;
+            // `Draw.rect(regions[...], x + randomSeedRange((int)y, 2), y + randomSeedRange((int)x, 2))`
+            // (`FireComp.java:104-106`): the fire's world coordinates seed the
+            // two axis offsets.
+            let x = cx + random_seed_range(i64::from(ty) * 8, 2.0);
+            let y = cy + random_seed_range(i64::from(tx) * 8, 2.0);
+            if x < x0 || y < y0 || x > x1 || y > y1 {
+                continue;
+            }
+            rows.push((
+                entity_ref.id().index_u32(),
+                FireDraw {
+                    x,
+                    y,
+                    frame: (fire.animation as i32).min(FRAMES as i32 - 1),
+                    alpha: (fire.warmup / WARMUP_DURATION).clamp(0.0, 1.0),
+                },
+            ));
+        }
+        rows.sort_by_key(|(index, _)| *index);
+        rows.into_iter().map(|(_, draw)| draw).collect()
+    }
+
+    /// Puddles in `rect` (`PuddleComp.draw`/`Liquid.drawPuddle` view data;
+    /// H03 T7), stable by entity index.
+    pub fn puddle_draws(&self, rect: (f32, f32, f32, f32)) -> Vec<PuddleDraw> {
+        use mind_core::combat::puddles::{MAX_LIQUID, PuddleState};
+        use mind_core::render::drawf::shift_value;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let (x0, y0, w, h) = rect;
+        let (x1, y1) = (x0 + w, y0 + h);
+        let mut rows: Vec<(u32, PuddleDraw)> = Vec::new();
+        for entity_ref in self.sim.ecs.0.iter_entities() {
+            let Some(puddle) = entity_ref.get::<PuddleState>() else {
+                continue;
+            };
+            let (tx, ty) = puddle.tile;
+            let x = f32::from(tx) * 8.0;
+            let y = f32::from(ty) * 8.0;
+            if x < x0 || y < y0 || x > x1 || y > y1 {
+                continue;
+            }
+            let Some(def) = content.liquid(puddle.liquid) else {
+                continue;
+            };
+            // `float f = Mathf.clamp(amount / (maxLiquid / 1.5f))`.
+            let f = (puddle.amount / (MAX_LIQUID / 1.5)).clamp(0.0, 1.0);
+            // `Tmp.c1.set(color).shiftValue(-0.05f)`.
+            let color = shift_value([def.color.r, def.color.g, def.color.b, def.color.a], -0.05);
+            let on_liquid = content
+                .block(self.sim.grid.tile(tx as i32, ty as i32).floor)
+                .is_some_and(mind_core::maps::filters::block_info::is_liquid);
+            let light = (def.light_color.a > 0.001 && f > 0.0).then(|| {
+                (
+                    [
+                        def.light_color.r,
+                        def.light_color.g,
+                        def.light_color.b,
+                        def.light_color.a,
+                    ],
+                    color[3] * f * 0.8,
+                )
+            });
+            rows.push((
+                entity_ref.id().index_u32(),
+                PuddleDraw {
+                    x,
+                    y,
+                    id: entity_ref.id().index_u32() as i32,
+                    f,
+                    color,
+                    on_liquid,
+                    light,
+                },
+            ));
+        }
+        rows.sort_by_key(|(index, _)| *index);
+        rows.into_iter().map(|(_, draw)| draw).collect()
+    }
+
+    /// `DrawState` for a block's `DrawBlock` chain (`world/draw/*`; H03 T8).
+    /// `None` without a building, a content def, or the content snapshot.
+    pub fn block_draw_state(
+        &self,
+        x: i32,
+        y: i32,
+    ) -> Option<mind_core::render::draw_desc::DrawState> {
+        use mind_core::content::LiquidId;
+        use mind_core::entities::comp::building::CrafterState;
+        use mind_core::world::blocks::heat::HeatState;
+        use mind_core::world::blocks::power::generator::GeneratorState;
+        use mind_core::world::modules::{LiquidModule, PowerModule};
+        let tile = self.tile_at(x, y)?;
+        let entity = tile.build?;
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(tile.block)?;
+        let ecs = &self.sim.ecs.0;
+        let size = def.size.max(1);
+        let rotation = self.building_rotation(x, y);
+        let cx = (x + (size - 1) / 2) as f32 * 8.0 + def.offset;
+        let cy = (y + (size - 1) / 2) as f32 * 8.0 + def.offset;
+        let crafter = ecs.get::<CrafterState>(entity);
+        // `GenericCrafter` carries `warmup` on `CrafterState`; generators drive
+        // their drawer from `productionEfficiency` (`ConsumeGenerator` /
+        // reactors), which the port keeps on `GeneratorState`.
+        let warmup = ecs
+            .get::<GeneratorState>(entity)
+            .map(|state| state.production_efficiency)
+            .or_else(|| crafter.map(|state| state.warmup))
+            .unwrap_or(0.0);
+        // Dominant liquid entry (for `liquidColor`/`liquidAmount` consumers).
+        let (liquid_amount, liquid_color) = ecs
+            .get::<LiquidModule>(entity)
+            .map(|module| {
+                let (id, amount) = module
+                    .liquids
+                    .iter()
+                    .enumerate()
+                    .max_by(|a, b| a.1.total_cmp(b.1))
+                    .map(|(id, amount)| (id as u16, *amount))
+                    .unwrap_or((0, 0.0));
+                let color = content
+                    .liquid(LiquidId::new(id))
+                    .map(|liquid| liquid.color.to_rgba8888())
+                    .unwrap_or(0xffff_ffff);
+                (amount, color)
+            })
+            .unwrap_or((0.0, 0xffff_ffff));
+        Some(mind_core::render::draw_desc::DrawState {
+            warmup,
+            progress: crafter.map(|state| state.progress).unwrap_or(0.0),
+            total_progress: crafter.map(|state| state.total_progress).unwrap_or(0.0),
+            // `Time.time` view clock (the same 60 Hz ticks the other passes use).
+            time: godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06,
+            id: entity.index_u32() as i32,
+            power_status: ecs
+                .get::<PowerModule>(entity)
+                .map(|module| module.status)
+                .unwrap_or(0.0),
+            liquid_capacity: def.liquid_capacity,
+            liquid_amount,
+            liquid_color,
+            heat: ecs
+                .get::<HeatState>(entity)
+                .map(|state| state.heat)
+                .unwrap_or(0.0),
+            ..mind_core::render::draw_desc::DrawState::new(cx, cy, i32::from(rotation), size)
         })
     }
 

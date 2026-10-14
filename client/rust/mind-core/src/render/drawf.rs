@@ -204,6 +204,74 @@ pub fn absin(x: f32, scl: f32, mag: f32) -> f32 {
     ((x / (scl * 2.0)).sin() * mag + mag) / 2.0
 }
 
+/// Arc `Mathf.randomSeedRange(seed, range)`: a deterministic value in
+/// `[-range, range]` (`Mathf.java:321-324`; the upstream `Rand` LCG is
+/// approximated by a splitmix hash — fire jitter `FireComp.draw` needs
+/// stability, not bit-identical streams).
+pub fn random_seed_range(seed: i64, range: f32) -> f32 {
+    let mut h = (seed as u64)
+        .wrapping_mul(0x5851_f42d_4c95_7f2d)
+        .wrapping_add(0x1405_7b7e_f767_814f);
+    h ^= h >> 33;
+    h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+    h ^= h >> 33;
+    let unit = (h >> 40) as f32 / (1u64 << 24) as f32;
+    (unit - 0.5) * 2.0 * range
+}
+
+/// Arc `Color.shiftValue(amount)` (`Color.java:722-727`): HSV value `v +=
+/// amount`, hue/saturation kept, clamped back to `[0, 1]` (`Liquid.drawPuddle`
+/// darkens its colour by `-0.05`).
+pub fn shift_value(color: [f32; 4], amount: f32) -> [f32; 4] {
+    let (h, s, v) = rgb_to_hsv(color[0], color[1], color[2]);
+    let v = (v + amount).clamp(0.0, 1.0);
+    let [r, g, b] = hsv_to_rgb(h, s, v);
+    [r, g, b, color[3]]
+}
+
+/// Arc `Color.toHsv` (hue in degrees, saturation/value in `0..1`).
+fn rgb_to_hsv(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let delta = max - min;
+    let h = if delta <= f32::EPSILON {
+        0.0
+    } else if max == r {
+        60.0 * (((g - b) / delta) % 6.0)
+    } else if max == g {
+        60.0 * ((b - r) / delta + 2.0)
+    } else {
+        60.0 * ((r - g) / delta + 4.0)
+    };
+    let s = if max <= f32::EPSILON {
+        0.0
+    } else {
+        delta / max
+    };
+    (h.rem_euclid(360.0), s, max)
+}
+
+/// Arc `Color.fromHsv` (`Color.java:663-700`).
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
+    if s <= f32::EPSILON {
+        return [v, v, v];
+    }
+    let h = h.rem_euclid(360.0) / 60.0;
+    let i = h.floor();
+    let f = h - i;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    match i as i32 {
+        0 => [v, t, p],
+        1 => [q, v, p],
+        2 => [p, v, t],
+        3 => [p, q, v],
+        4 => [t, p, v],
+        _ => [v, p, q],
+    }
+}
+
 /// `Angles.trnsx/trnsy(angle, len)` pair: `(cos * len, sin * len)`.
 pub fn trns(angle_deg: f32, len: f32) -> (f32, f32) {
     let r = angle_deg.to_radians();
@@ -483,5 +551,30 @@ mod tests {
         assert_eq!(bridge_arrow_count(10, 10, 13, 10), 4);
         let (x, y) = bridge_arrow_pos(80.0, 80.0, 1.0, 0.0, 0);
         assert!((x - 86.0).abs() < 1e-4 && (y - 80.0).abs() < 1e-4);
+    }
+
+    /// H03 T7 (`Liquid.drawPuddle`): `shiftValue(-0.05)` is value-only.
+    #[test]
+    fn shift_value_darkens() {
+        let [r, g, b, a] = shift_value([0.5, 0.5, 1.0, 1.0], -0.05);
+        assert!((r - 0.475).abs() < 1e-4, "r {r}");
+        assert!((g - 0.475).abs() < 1e-4, "g {g}");
+        assert!((b - 0.95).abs() < 1e-4, "b {b}");
+        assert_eq!(a, 1.0);
+        // The hue is kept (blue stays blue) and the value clamps at 0.
+        let [r, g, b, _] = shift_value([0.1, 0.1, 0.2, 0.4], -1.0);
+        assert!(r.abs() < 1e-4 && g.abs() < 1e-4 && b.abs() < 1e-4);
+    }
+
+    /// H03 T7 (`FireComp.draw` jitter): deterministic, bounded by `range`.
+    #[test]
+    fn seed_range_is_bounded_and_stable() {
+        for seed in 0..64i64 {
+            let v = random_seed_range(seed, 2.0);
+            assert!(v.abs() <= 2.0, "seed {seed}: {v}");
+            assert_eq!(v, random_seed_range(seed, 2.0));
+        }
+        // Different seeds are not a constant function.
+        assert_ne!(random_seed_range(1, 2.0), random_seed_range(2, 2.0));
     }
 }

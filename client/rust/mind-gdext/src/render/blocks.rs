@@ -24,11 +24,6 @@ use crate::sim_host::MindSimHost;
 
 use super::atlas_bind::{RegionResolver, ResolvedRegion};
 
-/// Core `Rgba` -> RGBA8888.
-fn rgba_u32(color: mind_core::content::Rgba) -> u32 {
-    let q = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u32;
-    (q(color.r) << 24) | (q(color.g) << 16) | (q(color.b) << 8) | q(color.a)
-}
 use super::shaders::ShaderRegistry;
 use super::units::{UnitQuad, build_unit_mesh};
 
@@ -42,6 +37,26 @@ const DRILL_ROTATE_SPEED: f32 = 2.0;
 const HEAT_COLOR: u32 = 0xab34_00ff;
 /// `Vars.itemSize` — belt item icons draw at 5 world px (`Conveyor.draw`).
 const ITEM_SIZE: f32 = 5.0;
+
+/// Blocks whose `DrawBlock` chain (H03 T8, `render/block_extras.rs`) animates
+/// parts that the composed `block-<name>-full` icon already bakes at rest:
+/// draw the plain `Block.region` as the base so the part is not doubled.
+/// Decided by diffing each chain block's `-full` icon against its region
+/// (identical or absent icons keep the current chain; listed blocks differ in
+/// the animated area). One comment per entry names the part.
+const ANIMATED_CHAIN_BASE: &[&str] = &[
+    // `DrawWeave` weaves over the icon's baked centre.
+    "phase-weaver",
+    // `DrawLiquidTile` re-draws the icon's baked liquid centre.
+    "cryofluid-mixer",
+    "melter",
+    "separator",
+    "disassembler",
+    // `DrawPistons` pumps over the icon's baked pistons.
+    "spore-press",
+    // `DrawCultivator` plants over the icon's baked plants.
+    "cultivator",
+];
 
 /// Block-renderer counters mirrored into `MindWorldRenderer`'s stats.
 #[derive(Clone, Copy, Debug, Default)]
@@ -351,157 +366,13 @@ impl BlockRenderer {
                     }
                     continue;
                 }
-                // T8: door/switch/sorter/source/unloader state sprites.
+                // Door/switch/sorter/item-source/unloader state sprites belong
+                // to the static building cache: those kinds are `drawCached`
+                // and `!drawDynamic`, so `visible_blocks` never yields them.
+                // The shared sprite chain lives in
+                // `mind_core::render::block_sprite::cached_bake_sprites`
+                // (H03 T18) and is consumed by `building_cache.rs`.
                 let state = host.block_state_draw(tile.x, tile.y);
-                if matches!(def.kind, BlockKind::Door | BlockKind::AutoDoor) {
-                    // `Door.draw`: `<name>-open` while open (`Door.java:132-135`).
-                    let open = state.as_ref().is_some_and(|state| state.door_open);
-                    let name = if open {
-                        format!("{}-open", def.name)
-                    } else {
-                        def.region.clone()
-                    };
-                    if let Some(region) = self.resolver.find(&name) {
-                        push(
-                            &region,
-                            region.uv,
-                            anchor_x,
-                            anchor_y,
-                            w,
-                            w,
-                            rot,
-                            0xffff_ffff,
-                            1.0,
-                        );
-                    }
-                    // Doors toggle on tap without a revision bump.
-                    animating = true;
-                    dynamic += 1;
-                    continue;
-                }
-                if def.kind == BlockKind::SwitchBlock {
-                    // `SwitchBlock.draw`: base, then `<name>-on` (`:64-71`).
-                    if let Some(base) = self.resolver.find(&def.region) {
-                        push(
-                            &base,
-                            base.uv,
-                            anchor_x,
-                            anchor_y,
-                            w,
-                            w,
-                            rot,
-                            0xffff_ffff,
-                            1.0,
-                        );
-                    }
-                    if state.as_ref().is_some_and(|state| state.enabled)
-                        && let Some(on) = self.resolver.find(&format!("{}-on", def.name))
-                    {
-                        push(&on, on.uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
-                    }
-                    animating = true;
-                    dynamic += 1;
-                    continue;
-                }
-                if matches!(def.kind, BlockKind::Sorter | BlockKind::ItemSource) {
-                    // `Sorter.draw`/`ItemSource.draw`: the item-colour square
-                    // under the frame, `cross-full` when unset (`:76-88`).
-                    let item = state.as_ref().and_then(|state| match def.kind {
-                        BlockKind::Sorter => state.sort_item,
-                        _ => state.source_item,
-                    });
-                    if let Some(item) = item {
-                        if let Some(white) = self.resolver.find("white")
-                            && let Some(item_def) = content.item(item)
-                        {
-                            push(
-                                &white,
-                                white.uv,
-                                anchor_x,
-                                anchor_y,
-                                8.0,
-                                8.0,
-                                0.0,
-                                rgba_u32(item_def.color),
-                                1.0,
-                            );
-                        }
-                    } else {
-                        let cross = self
-                            .resolver
-                            .find(&format!("{}-cross", def.name))
-                            .or_else(|| self.resolver.find("cross-full"));
-                        if let Some(cross) = cross {
-                            push(
-                                &cross,
-                                cross.uv,
-                                anchor_x,
-                                anchor_y,
-                                w,
-                                w,
-                                0.0,
-                                0xffff_ffff,
-                                1.0,
-                            );
-                        }
-                    }
-                    if let Some(base) = self.resolver.find(&def.region) {
-                        push(
-                            &base,
-                            base.uv,
-                            anchor_x,
-                            anchor_y,
-                            w,
-                            w,
-                            rot,
-                            0xffff_ffff,
-                            1.0,
-                        );
-                    }
-                    animating = true;
-                    dynamic += 1;
-                    continue;
-                }
-                if def.kind == BlockKind::Unloader {
-                    // `Unloader.draw`: base, then the tinted centre (`:263-269`).
-                    if let Some(base) = self.resolver.find(&def.region) {
-                        push(
-                            &base,
-                            base.uv,
-                            anchor_x,
-                            anchor_y,
-                            w,
-                            w,
-                            rot,
-                            0xffff_ffff,
-                            1.0,
-                        );
-                    }
-                    if let Some(item) = state.as_ref().and_then(|state| state.unloader_item)
-                        && let Some(item_def) = content.item(item)
-                    {
-                        let center = self
-                            .resolver
-                            .find(&format!("{}-center", def.name))
-                            .or_else(|| self.resolver.find("unloader-center"));
-                        if let Some(center) = center {
-                            push(
-                                &center,
-                                center.uv,
-                                anchor_x,
-                                anchor_y,
-                                w,
-                                w,
-                                0.0,
-                                rgba_u32(item_def.color),
-                                1.0,
-                            );
-                        }
-                    }
-                    animating = true;
-                    dynamic += 1;
-                    continue;
-                }
                 // `ConveyorBuild.draw`: `regions[blendbits][frame]` with the
                 // autotile scales from `Autotiler.buildBlending` (cached by
                 // the sim on proximity updates). A negative scale mirrors the
@@ -523,7 +394,7 @@ impl BlockRenderer {
                             let (v0, v1) = if scly < 0.0 { (v1, v0) } else { (v0, v1) };
                             (region, [u0, v0, u1, v1])
                         }),
-                    None => self.block_region(def).map(|region| {
+                    None => self.base_region(def).map(|region| {
                         let uv = region.uv;
                         (region, uv)
                     }),
@@ -712,6 +583,19 @@ impl BlockRenderer {
         mind_core::render::block_region_candidates(&def.name, &def.region)
             .into_iter()
             .find_map(|name| self.resolver.find(&name))
+    }
+
+    /// The base sprite actually drawn by the dynamic pass: for
+    /// [`ANIMATED_CHAIN_BASE`] blocks the plain `Block.region` wins (their
+    /// `DrawBlock` extras animate the part the composed icon bakes), else the
+    /// usual [`Self::block_region`] chain.
+    fn base_region(&mut self, def: &BlockDef) -> Option<ResolvedRegion> {
+        if ANIMATED_CHAIN_BASE.contains(&def.name.as_str()) {
+            self.resolver.find(&def.region)
+        } else {
+            None
+        }
+        .or_else(|| self.block_region(def))
     }
 
     /// Draws each visible construct site through its own `blockbuild` node

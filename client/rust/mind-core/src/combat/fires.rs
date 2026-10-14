@@ -23,6 +23,14 @@ const D4: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 
 /// `Fires.baseLifetime`.
 pub const BASE_LIFETIME: f32 = 1000.0;
+/// `FireComp.frames`.
+pub const FRAMES: f32 = 40.0;
+/// `FireComp.duration`.
+pub const DURATION: f32 = 90.0;
+/// `FireComp.ticksPerFrame = duration / frames` (2.25).
+pub const TICKS_PER_FRAME: f32 = DURATION / FRAMES;
+/// `FireComp.warmupDuration`.
+pub const WARMUP_DURATION: f32 = 20.0;
 /// `FireComp.spreadDelay`.
 pub const SPREAD_DELAY: f32 = 22.0;
 /// `FireComp.fireballDelay`.
@@ -33,6 +41,12 @@ pub const DAMAGE_DELAY: f32 = 40.0;
 pub const TILE_DAMAGE: f32 = 1.8;
 /// `FireComp.unitDamage`.
 pub const UNIT_DAMAGE: f32 = 3.0;
+
+/// Advances a fire's view animation by one tick (`animation += delta /
+/// ticksPerFrame; animation %= frames`, `FireComp.java:41-43`). View-only.
+pub fn advance_animation(animation: f32) -> f32 {
+    (animation + 1.0 / TICKS_PER_FRAME) % FRAMES
+}
 
 /// Marker resource set by [`create`] when a new fire is born (G05 T4b
 /// `Trigger.fireCreate` hint event); drained by `Sim::tick`.
@@ -317,8 +331,10 @@ pub fn update_fires(
         let Some(mut fire) = world.get::<FireState>(entity).copied() else {
             continue;
         };
-        // `animation += delta / ticksPerFrame; warmup += delta; animation %= frames`.
-        fire.animation = (fire.animation + 1.0) % 40.0;
+        // `animation += delta / ticksPerFrame; warmup += delta; animation %= frames`
+        // (`FireComp.java:41-43`; H03 T7 — the earlier rate advanced one full
+        // frame per tick, cycling the flame 2.25x too fast).
+        fire.animation = advance_animation(fire.animation);
         fire.warmup += 1.0;
         let speed_multiplier = 1.0 + (water_attr * 10.0).max(0.0);
         fire.time = (fire.time + speed_multiplier).clamp(0.0, fire.lifetime);
@@ -648,5 +664,22 @@ mod tests {
         let fire = create(&mut harness.build.world, 5, 7, &mut rng).expect("fire");
         let pos = harness.build.world.get::<Pos>(fire).expect("pos");
         assert_eq!((pos.x, pos.y), (40.0, 56.0));
+    }
+
+    /// H03 T7: `duration / frames = 2.25` ticks per frame, so one flame cycle
+    /// (`frames` 40) takes `duration` 90 ticks (`FireComp.java:23-43`).
+    #[test]
+    fn fire_animation_cycles_every_90_ticks() {
+        let mut animation = 0.0f32;
+        for _ in 0..90 {
+            animation = advance_animation(animation);
+        }
+        // The f32 accumulation may land just short of a full cycle: compare
+        // modulo the frame count.
+        let err = animation.min(FRAMES - animation);
+        assert!(err < 1e-3, "animation after 90 ticks: {animation}");
+        // And one tick advances exactly one frame step (1 / 2.25).
+        let one = advance_animation(0.0);
+        assert!((one - 1.0 / 2.25).abs() < 1e-6, "one-tick advance: {one}");
     }
 }

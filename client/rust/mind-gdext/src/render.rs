@@ -36,10 +36,12 @@ use crate::assets::MindAssets;
 use crate::sim_host::MindSimHost;
 
 mod atlas_bind;
+mod block_extras;
 mod blocks;
 mod build_beam;
 mod building_cache;
 mod bullets;
+mod cached_cracks;
 mod canvas;
 mod command_overlay;
 mod debug;
@@ -47,6 +49,7 @@ mod env;
 mod floor;
 mod fog;
 mod g3d;
+mod hazards;
 mod light;
 mod links;
 mod load;
@@ -236,6 +239,17 @@ pub struct MindWorldRenderer {
     blocks: Option<BlockRenderer>,
     units: Option<UnitRenderer>,
     building_cache: Option<BuildingCacheRenderer>,
+    /// Cracks for `!drawDynamic` cached buildings (`Layer.blockCracks` band;
+    /// H03 T18).
+    cached_cracks: Option<Gd<cached_cracks::CachedCrackRenderer>>,
+    /// Puddles (`Layer.debris` band; H03 T7).
+    puddles: Option<Gd<hazards::PuddleRenderer>>,
+    /// Fires (`Layer.effect` band; H03 T7).
+    fires: Option<Gd<hazards::FireRenderer>>,
+    /// `world/draw/*` extras, normal blend (`Layer.block` band; H03 T8).
+    block_extras: Option<Gd<block_extras::BlockExtras>>,
+    /// `world/draw/*` extras, additive blend (`Layer.block` band; H03 T8).
+    block_extras_add: Option<Gd<block_extras::BlockExtras>>,
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
@@ -301,6 +315,11 @@ impl INode2D for MindWorldRenderer {
             blocks: None,
             units: None,
             building_cache: None,
+            cached_cracks: None,
+            puddles: None,
+            fires: None,
+            block_extras: None,
+            block_extras_add: None,
             shadow: None,
             light: None,
             debug: None,
@@ -537,6 +556,56 @@ impl MindWorldRenderer {
                 under_band,
                 block_band,
             ));
+        }
+        // Cracks for `!drawDynamic` cached buildings at `Layer.blockCracks`
+        // (`BlockRenderer.java:801-821`; H03 T18).
+        if let Some(cracks_band) = self.band_node_at(BandKey::base(Layer::BlockCracks)) {
+            let node = cached_cracks::CachedCrackRenderer::new_alloc();
+            // code-instantiated: one crack overlay pass; the node count is
+            // fixed by the pipeline, not by content.
+            cracks_band.clone().add_child(&node);
+            self.cached_cracks = Some(node.clone());
+        }
+        // Puddles at the `Layer.debris` band (`PuddleComp.draw` targets
+        // `Layer.debris - 1`; the band table has no slot there; H03 T7).
+        if let Some(debris_band) = self.band_node_at(BandKey::base(Layer::Debris)) {
+            let mut node = hazards::PuddleRenderer::new_alloc();
+            node.set_name("PuddleRenderer");
+            // code-instantiated: one puddle pass; the node count is fixed by
+            // the pipeline, not by content.
+            debris_band.clone().add_child(&node);
+            self.puddles = Some(node.clone());
+        }
+        // Fires at `Layer.effect` (`FireComp.draw`; H03 T7).
+        if let Some(effect_band) = self.band_node_at(BandKey::base(Layer::Effect)) {
+            let mut node = hazards::FireRenderer::new_alloc();
+            node.set_name("FireRenderer");
+            // code-instantiated: one fire pass; the node count is fixed by the
+            // pipeline, not by content.
+            effect_band.clone().add_child(&node);
+            self.fires = Some(node.clone());
+        }
+        // `world/draw/*` extras over live buildings at `Layer.block`
+        // (`BlockRenderer` + `execute_extras`; H03 T8): one normal node plus
+        // one additive node (`CanvasItemMaterial` BLEND_MODE_ADD).
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
+            let mut normal = block_extras::BlockExtras::new_alloc();
+            normal.set_name("BlockExtras");
+            // The `BlockRenderer` pool creates its mesh nodes lazily, after
+            // this one, so tree order alone cannot keep the extras above the
+            // base sprites: one z step up inside the band does.
+            normal.set_z_index(1);
+            // code-instantiated: one extras pass per blend; the node count is
+            // fixed by the pipeline, not by content.
+            block_band.clone().add_child(&normal);
+            self.block_extras = Some(normal.clone());
+            let mut additive = block_extras::BlockExtras::new_alloc();
+            additive.set_name("BlockExtrasAdd");
+            additive.set_z_index(1);
+            additive.bind_mut().additive = true;
+            // code-instantiated: the additive half of the same pass.
+            block_band.clone().add_child(&additive);
+            self.block_extras_add = Some(additive.clone());
         }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
             && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))
