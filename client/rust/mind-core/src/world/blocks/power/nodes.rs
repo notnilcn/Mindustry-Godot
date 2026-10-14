@@ -63,12 +63,24 @@ pub fn circle_rect_overlap(cx: f32, cy: f32, radius: f32, rect: [f32; 4]) -> boo
     dx * dx + dy * dy <= radius * radius
 }
 
-/// Pixel hitbox of a placed block (`Tile.getHitbox` shape; center + size).
+/// `Block.offset` of a building's block (`tile*8 + offset`, Java
+/// `Tile.drawx/drawy = worldx() + block().offset`, `Tile.java:175-181`).
+pub fn block_offset(world: &World, entity: Entity) -> Option<f32> {
+    let building = world.get::<Building>(entity)?;
+    world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.get(building.block))
+        .map(|instance| instance.def.offset)
+}
+
+/// Pixel hitbox of a placed block (`Tile.getHitbox`, `Tile.java:535-537`:
+/// centred on `drawx()/drawy()` with `block.size * tilesize`).
 pub fn hitbox(world: &World, entity: Entity) -> Option<[f32; 4]> {
     let building = world.get::<Building>(entity)?;
     let size = block_size(world, entity)? as f32;
-    let cx = (building.tile.x() as f32 + 0.5) * TILE_SIZE;
-    let cy = (building.tile.y() as f32 + 0.5) * TILE_SIZE;
+    let offset = block_offset(world, entity).unwrap_or(0.0);
+    let cx = building.tile.x() as f32 * TILE_SIZE + offset;
+    let cy = building.tile.y() as f32 * TILE_SIZE + offset;
     Some([
         cx - size * TILE_SIZE / 2.0,
         cy - size * TILE_SIZE / 2.0,
@@ -97,8 +109,9 @@ pub fn overlaps(world: &World, source: Entity, other: Entity, range_world: f32) 
     let Some(source_building) = world.get::<Building>(source) else {
         return false;
     };
-    let cx = (source_building.tile.x() as f32 + 0.5) * TILE_SIZE;
-    let cy = (source_building.tile.y() as f32 + 0.5) * TILE_SIZE;
+    let offset = block_offset(world, source).unwrap_or(0.0);
+    let cx = source_building.tile.x() as f32 * TILE_SIZE + offset;
+    let cy = source_building.tile.y() as f32 * TILE_SIZE + offset;
     let Some(target) = hitbox(world, other) else {
         return false;
     };

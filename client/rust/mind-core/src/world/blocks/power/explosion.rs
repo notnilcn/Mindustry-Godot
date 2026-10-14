@@ -47,8 +47,15 @@ impl ReactorExplosion {
         fire: bool,
     ) -> Option<Self> {
         let building = world.get::<Building>(entity)?;
-        let x = (building.tile.x() as f32 + 0.5) * TILE_SIZE;
-        let y = (building.tile.y() as f32 + 0.5) * TILE_SIZE;
+        let offset = world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| table.get(building.block))
+            .map(|instance| instance.def.offset)
+            .unwrap_or(0.0);
+        // `PowerGenerator.onExplosion` uses the building's `x`/`y`, i.e.
+        // `tile.worldx() + block.offset` (`Tile.drawx`, `Tile.java:175-181`).
+        let x = building.tile.x() as f32 * TILE_SIZE + offset;
+        let y = building.tile.y() as f32 * TILE_SIZE + offset;
         let team = world.get::<TeamComp>(entity).map(|team| team.team);
         Some(Self {
             x,
@@ -169,14 +176,15 @@ mod tests {
     }
 
     #[test]
-    fn params_capture_tile_center_and_team() {
+    fn params_capture_building_center_and_team() {
         let (world, entity) = building();
         let explosion =
             ReactorExplosion::for_building(&world, entity, 19.0, 5000.0, true).expect("params");
         assert_eq!(explosion.team, Some(1));
         assert_eq!(explosion.radius, 19.0);
         assert_eq!(explosion.damage, 5000.0);
-        assert_eq!(explosion.x, 4.5 * TILE_SIZE);
-        assert_eq!(explosion.y, 4.5 * TILE_SIZE);
+        // 1x1 generator: `tile*8 + offset` with offset 0 (`Tile.drawx`).
+        assert_eq!(explosion.x, 4.0 * TILE_SIZE);
+        assert_eq!(explosion.y, 4.0 * TILE_SIZE);
     }
 }
