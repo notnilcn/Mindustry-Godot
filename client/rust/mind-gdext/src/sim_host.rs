@@ -5114,9 +5114,14 @@ impl MindSimHost {
         };
         let mut out = Vec::new();
         for entity in self.sim.ecs.0.iter_entities() {
-            let Some(_shield) = entity.get::<ShieldComp>() else {
+            let Some(shield) = entity.get::<ShieldComp>() else {
                 continue;
             };
+            // `UnitType.draw`: `if(unit.shieldAlpha > 0) drawShield(unit)`
+            // (`UnitType.java:1555-1556`; H03 T15). Transient per-hit flash.
+            if shield.shield_alpha <= 0.0 {
+                continue;
+            }
             let Some(pos) = entity.get::<Pos>() else {
                 continue;
             };
@@ -5134,8 +5139,11 @@ impl MindSimHost {
                 pos.x,
                 pos.y,
                 def.hit_size * 1.3,
-                0.55, // `shieldAlpha` default (`UnitType.shieldAlpha`)
+                shield.shield_alpha,
                 team,
+                // `UnitType.drawShield` lerps the rim toward white by
+                // `clamp(hitTime / 2)`: `hitTime` is view-only state owned by
+                // the unit renderer, so the port passes 0 (deviation).
                 0.0,
             ));
         }
