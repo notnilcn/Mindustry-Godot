@@ -331,6 +331,9 @@ mod tests {
             .unwrap()
             .x;
         for _ in 0..10 {
+            // `VelComp.update` first (the live loop's `@MethodPriority(-1)`);
+            // T4 controllers only write `vel`.
+            harness.vel_update(unit);
             let mut ctx = AiCtx {
                 world: &mut harness.build.world,
                 grid: &harness.build.grid,

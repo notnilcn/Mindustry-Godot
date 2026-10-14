@@ -209,15 +209,77 @@ impl ControlPathfinder {
 
     /// Whether every tile on the Bresenham line `from -> to` is passable
     /// (`ControlPathfinder.raycast` for the ground cost).
+    /// Line of sight between two tiles (`ControlPathfinder` smoothing): every
+    /// tile along the Bresenham ray must be passable, and a diagonal step
+    /// requires **both** orthogonal tiles passable — the same "diagonal corner
+    /// trap" rule as `Pathfinder.getTargetTile` (Pathfinder.java:426-429).
+    /// Without it the smoothing picks a waypoint that requires cutting a solid
+    /// corner, and the T4 `EntityCollisions` box catches the corner instead of
+    /// clipping through it.
     pub fn line_clear(&self, from: TilePos, to: TilePos) -> bool {
-        self.raycast(
+        let ray = self.raycast(
             from.x() as i32,
             from.y() as i32,
             to.x() as i32,
             to.y() as i32,
-        )
-        .iter()
-        .all(|tile| self.at(tile.x() as i32, tile.y() as i32))
+        );
+        for (index, tile) in ray.iter().enumerate() {
+            if !self.at(tile.x() as i32, tile.y() as i32) {
+                return false;
+            }
+            let Some(next) = ray.get(index + 1) else {
+                break;
+            };
+            let dx = (next.x() - tile.x()) as i32;
+            let dy = (next.y() - tile.y()) as i32;
+            if dx != 0
+                && dy != 0
+                && (!self.at(tile.x() as i32 + dx, tile.y() as i32)
+                    || !self.at(tile.x() as i32, tile.y() as i32 + dy))
+            {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Whether a unit box (`hitboxTile`: `min(hitSize * 0.66, 7.8)` wide,
+    /// `HitboxComp.java:69-76`) can travel the straight segment
+    /// `(from_x, from_y) -> (to_x, to_y)` without clipping a solid tile
+    /// (`EntityCollisions.moveDelta` uses the tile rect
+    /// `[x*8 - 4, x*8 + 4)`, `EntityCollisions.java:84`). The tile-centre
+    /// visibility check above ignores where the unit actually stands inside
+    /// its tile, which jams a unit hugging a wall end on a corner the box
+    /// cannot cut (T4, PAR-0202 corner jam). Sampled every 2 px.
+    pub fn segment_clear(&self, from_x: f32, from_y: f32, to_x: f32, to_y: f32, half: f32) -> bool {
+        let ts = crate::config::TILESIZE as f32;
+        let (dx, dy) = (to_x - from_x, to_y - from_y);
+        let dist = (dx * dx + dy * dy).sqrt();
+        let steps = (dist / 2.0).ceil().max(1.0) as i32;
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let x = from_x + dx * t;
+            let y = from_y + dy * t;
+            let (x0, x1) = (WorldGrid::to_tile(x - half), WorldGrid::to_tile(x + half));
+            let (y0, y1) = (WorldGrid::to_tile(y - half), WorldGrid::to_tile(y + half));
+            for tx in x0..=x1 {
+                for ty in y0..=y1 {
+                    if self.at(tx, ty) {
+                        continue;
+                    }
+                    // Strict tile-rect overlap (`Rect.overlaps`).
+                    let (cx, cy) = (tx as f32 * ts, ty as f32 * ts);
+                    if x - half < cx + ts / 2.0
+                        && x + half > cx - ts / 2.0
+                        && y - half < cy + ts / 2.0
+                        && y + half > cy - ts / 2.0
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
     }
 
     fn build_portals(&mut self) {

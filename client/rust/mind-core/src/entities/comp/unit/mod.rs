@@ -20,6 +20,7 @@ pub mod movement;
 pub mod queries;
 pub mod tank;
 pub mod tether;
+pub mod velocity;
 pub mod water_move;
 pub mod weapon_mount;
 

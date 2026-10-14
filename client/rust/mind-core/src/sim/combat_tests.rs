@@ -3557,6 +3557,24 @@ fn commanded_dagger_chases_moving_target() {
             crate::world::WorldGrid::to_tile(target_pos.y) as i16,
         ));
     }
+    // The scenario exercises the chaser's attack-target tracking, not the
+    // mutual exchange: the fleeing target holds fire (`holdFire` stance,
+    // `CommandAI.shouldFire`). With the T4 velocity model a fleeing unit's
+    // return fire lands (the old kinematic mover masked it), which turned the
+    // exchange into a symmetric race instead of a chase.
+    {
+        use crate::ai::unit_stance_runtime::{UnitStancesComp, apply_stance};
+        let def = sim
+            .unit_runtime()
+            .expect("rt")
+            .content
+            .unit_stance_by_name("holdfire")
+            .cloned()
+            .expect("holdfire stance");
+        let mut stances = UnitStancesComp::default();
+        assert!(apply_stance(&mut stances.0, &def));
+        sim.ecs.0.entity_mut(target).insert(stances);
+    }
     for _ in 0..1500 {
         sim.tick().expect("tick");
         if sim.ecs.0.get_entity(target).is_err() {
@@ -4215,25 +4233,39 @@ fn turret_leads_moving_target() {
         vel.x = 0.0;
         vel.y = 2.0;
     }
-    let flare_pos = (duo_pos.0 + 100.0, duo_pos.1);
     if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(duo) {
         state.target = Some(flare);
         state.target_timer = 1000.0;
     }
     sim.tick().expect("tick");
+    // `EntitySet::UpdateUnits` runs before `UpdateBuildings`, so the flare's
+    // own `VelComp.update` (T4) already integrated its velocity and applied
+    // drag before the turret aimed this tick.
+    let flare_now = sim
+        .ecs
+        .0
+        .get::<Pos>(flare)
+        .map(|p| (p.x, p.y))
+        .expect("flare pos");
+    let flare_vel = sim
+        .ecs
+        .0
+        .get::<Vel>(flare)
+        .map(|v| (v.x, v.y))
+        .expect("flare vel");
     let state = sim.ecs.0.get::<TurretState>(duo).expect("turret state");
     // `duo_copper` bullet speed (`register_bullets`).
     let expected = crate::combat::targeting::intercept_positions(
         duo_pos,
         (0.0, 0.0),
-        flare_pos,
-        (0.0, 2.0),
+        flare_now,
+        flare_vel,
         true,
         2.5,
     );
     assert!(
-        state.target_pos.1 > flare_pos.1,
-        "the aim leads the northbound flare: {:?} vs {flare_pos:?}",
+        state.target_pos.1 > flare_now.1,
+        "the aim leads the northbound flare: {:?} vs {flare_now:?}",
         state.target_pos
     );
     assert!(
@@ -4380,17 +4412,24 @@ fn scathe_does_not_predict() {
         vel.x = 0.0;
         vel.y = 2.0;
     }
-    let flare_pos = (scathe_pos.0 + 100.0, scathe_pos.1);
     if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(scathe) {
         state.target = Some(flare);
         state.target_timer = 1000.0;
     }
     sim.tick().expect("tick");
+    // `EntitySet::UpdateUnits` runs before `UpdateBuildings`: the flare's own
+    // `VelComp.update` (T4) integrated its velocity before the scathe aimed.
+    let flare_now = sim
+        .ecs
+        .0
+        .get::<Pos>(flare)
+        .map(|p| (p.x, p.y))
+        .expect("flare pos");
     let state = sim.ecs.0.get::<TurretState>(scathe).expect("state");
     assert!(
-        (state.target_pos.0 - flare_pos.0).abs() < 0.01
-            && (state.target_pos.1 - flare_pos.1).abs() < 0.01,
-        "no lead without predictTarget: {:?} vs {flare_pos:?}",
+        (state.target_pos.0 - flare_now.0).abs() < 0.01
+            && (state.target_pos.1 - flare_now.1).abs() < 0.01,
+        "no lead without predictTarget: {:?} vs {flare_now:?}",
         state.target_pos
     );
 }
@@ -5174,4 +5213,153 @@ fn campaign_spawn_queues_unlock() {
         .expect("player spawned again");
     let unlocked: Vec<UnlockRef> = queues.lock().expect("lock").unlocks.clone();
     assert_eq!(unlocked, vec![UnlockRef::Unit(alpha)], "no duplicate");
+}
+
+/// T4 (PAR-0202): `VelComp.update` integrates `vel` with tile collisions
+/// (`EntityCollisions.move`), zeroes a blocked axis (`Mathf.equal`) and then
+/// applies drag (`vel.scl(1 - drag)`).
+#[test]
+fn vel_update_applies_drag_and_stops_on_wall() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(20);
+    let _wall = place(&mut sim, 10, 5, "copper-wall", 1);
+    // Dagger hitSize 8 -> hitbox 5.28; the wall tile (10, 5) spans x [76, 84):
+    // the resolved box stops at `76 - 2.64 = 73.36`.
+    let blocked = sim
+        .spawn_live_unit("dagger", 2, 72.0, 40.0, 0.0)
+        .expect("blocked dagger");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(blocked) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(blocked) {
+        vel.x = 3.0;
+        vel.y = 0.0;
+    }
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+        let pos = *sim.ecs.0.get::<Pos>(blocked).expect("pos");
+        assert!(
+            pos.x <= 73.36 + 0.01,
+            "the unit never enters the wall tile: {}",
+            pos.x
+        );
+    }
+    let vel = *sim.ecs.0.get::<Vel>(blocked).expect("vel");
+    assert!(
+        vel.x.abs() < 0.01,
+        "the blocked axis decays to zero: {vel:?}"
+    );
+
+    // Free space: `vel = (1, 0)`, drag 0.3 -> move 1.0 px, then vel *= 0.7.
+    let free = sim
+        .spawn_live_unit("dagger", 2, 40.0, 120.0, 0.0)
+        .expect("free dagger");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(free) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(free) {
+        vel.x = 1.0;
+        vel.y = 0.0;
+    }
+    sim.tick().expect("tick");
+    let pos = *sim.ecs.0.get::<Pos>(free).expect("pos");
+    let vel = *sim.ecs.0.get::<Vel>(free).expect("vel");
+    assert!((pos.x - 41.0).abs() < 1e-3, "advanced 1.0 px: {}", pos.x);
+    assert!((vel.x - 0.7).abs() < 1e-4, "drag 0.3 applied: {vel:?}");
+}
+
+/// T4 (PAR-0202): `PhysicsComp.impulse` (`vel += v / mass`) on an idle unit
+/// survives into the position through `VelComp.update`.
+#[test]
+fn knockback_moves_ground_unit() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(32);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 160.0, 160.0, 0.0)
+        .expect("dagger");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(dagger) {
+        slot.kind = AiKind::NoAi;
+    }
+    // `mass = hitSize² π`; impulse of `mass * 2` -> `vel += 2.0`.
+    let mass = 8.0f32 * 8.0 * std::f32::consts::PI;
+    crate::entities::comp::unit::velocity::impulse(&mut sim.ecs.0, dagger, mass * 2.0, 0.0);
+    let vel = *sim.ecs.0.get::<Vel>(dagger).expect("vel");
+    assert!((vel.x - 2.0).abs() < 1e-4, "impulse applied: {vel:?}");
+    sim.tick().expect("tick");
+    let pos = *sim.ecs.0.get::<Pos>(dagger).expect("pos");
+    assert!(
+        (pos.x - 162.0).abs() < 1e-3,
+        "one tick of 2.0 px: {}",
+        pos.x
+    );
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let vel = *sim.ecs.0.get::<Vel>(dagger).expect("vel");
+    assert!(vel.x.abs() < 0.01, "drag stops the unit: {vel:?}");
+    let pos2 = *sim.ecs.0.get::<Pos>(dagger).expect("pos");
+    assert!(
+        pos2.x > pos.x,
+        "knockback moved the unit: {} -> {}",
+        pos.x,
+        pos2.x
+    );
+}
+
+/// T4 (PAR-0202): the sandstorm wind (`ParticleWeather.update` ->
+/// `unit.impulse`) now reaches the position: an idle flare drifts downwind by
+/// the Java steady state `a / drag` per tick (`a = force * intensity / mass`,
+/// `mass = hitSize² π`; flare drag 0.04).
+#[test]
+fn sandstorm_wind_pushes_idle_flare() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::State;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::{Rules, WeatherEntry};
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let registry = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(registry, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        wave_team: 2,
+        unit_cap: 100,
+        unit_cap_variable: false,
+        weather: vec![WeatherEntry {
+            weather: String::from("sandstorm"),
+            always: true,
+            intensity: 1.0,
+            ..WeatherEntry::default()
+        }],
+        ..Rules::default()
+    });
+    session.phase = State::Playing;
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let flare = sim
+        .spawn_live_unit("flare", 1, 160.0, 160.0, 0.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::NoAi;
+    }
+    let start = *sim.ecs.0.get::<Pos>(flare).expect("pos");
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let pos = *sim.ecs.0.get::<Pos>(flare).expect("pos");
+    let dist = ((pos.x - start.x).powi(2) + (pos.y - start.y).powi(2)).sqrt();
+    // Java steady state: `0.1 / (81π) / 0.04 ≈ 0.0098` px/tick -> ≈ 2.9 px.
+    assert!(
+        dist > 1.0 && dist < 6.0,
+        "the sandstorm moved the flare {dist} px (start {start:?}, end {pos:?})"
+    );
 }

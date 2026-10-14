@@ -1452,7 +1452,6 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
         .get::<UnitTypeComp>(unit)
         .and_then(|comp| ctx.content.unit(comp.type_id));
     let knock_mult = type_def.map_or(1.0, |d| d.knockback_multiplier);
-    let hit_size = type_def.map_or(8.0, |d| d.hit_size);
     if knock_mult > 0.0 && knockback != 0.0 {
         let (ux, uy) = ctx
             .world
@@ -1465,16 +1464,12 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
         } else {
             (uy - by).atan2(ux - bx)
         };
-        let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
         let (ix, iy) = if impact {
             (angle.cos() * len.abs(), angle.sin() * len.abs())
         } else {
             (angle.cos() * len, angle.sin() * len)
         };
-        if let Some(mut vel) = ctx.world.get_mut::<Vel>(unit) {
-            vel.x += ix / mass;
-            vel.y += iy / mass;
-        }
+        crate::entities::comp::unit::velocity::impulse(ctx.world, unit, ix, iy);
     }
     if status_chance >= 1.0 || ctx.rng.chance(RngStream::Sim, f64::from(status_chance)) {
         super::damage::status::apply_status(ctx.world, unit, status, status_duration);

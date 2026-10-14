@@ -1761,8 +1761,11 @@ mod tests {
         );
         assert_eq!(slot_b, slot_a, "both clustered units share the order");
 
-        // The order drives the live movement system.
+        // The order drives the live movement system. T4: the first tick only
+        // writes `vel` (`VelComp.update` integrates at the start of the next
+        // tick), so run two ticks before reading the position.
         let before = world.get::<Pos>(a).expect("pos a").x;
+        unit_update_system(&mut world);
         unit_update_system(&mut world);
         let after = world.get::<Pos>(a).expect("pos a").x;
         assert!(

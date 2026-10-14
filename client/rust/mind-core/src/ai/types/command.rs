@@ -334,15 +334,13 @@ pub fn update_command_move(
     target: crate::world::TilePos,
     flying: bool,
 ) -> bool {
-    use crate::entities::comp::unit::{HitboxComp, UnitCore};
+    use crate::entities::comp::unit::HitboxComp;
     use crate::entities::comp::{Pos, Vel};
     use crate::world::{TilePos, WorldGrid};
 
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return false;
     };
-    // `UnitComp.speed()` with floor/boost/status multipliers (PAR-0137).
-    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
     let hit_size = world
         .get::<HitboxComp>(entity)
         .map(|hitbox| hitbox.hit_size)
@@ -383,8 +381,15 @@ pub fn update_command_move(
                 WorldGrid::unconv(tile.y() as f32),
             )
         };
+        // The unit's `hitboxTile` half-extent: the straight-line checks below
+        // must keep the box clear of solid tiles, not only its centre line
+        // (`HitboxComp.java:69-76`).
+        let half = world
+            .get::<HitboxComp>(entity)
+            .map_or(0.0, |hitbox| (hitbox.hit_size * 0.66).min(7.8) / 2.0);
         if !control.at(current.x() as i32, current.y() as i32)
-            || control.line_clear(current, target)
+            || (control.line_clear(current, target)
+                && control.segment_clear(pos.x, pos.y, dest.0, dest.1, half))
         {
             // Trivially reachable in a straight line (or standing on a solid
             // tile, where the field has no entry): head for the destination.
@@ -398,9 +403,17 @@ pub fn update_command_move(
             if result.unreachable {
                 None
             } else {
+                // Waypoint smoothing: extend while the next path tile is
+                // visible from the unit's **actual position** and its
+                // `hitboxTile` box can travel the segment (`segment_clear`);
+                // the tile-centre check alone lets a unit hugging a wall end
+                // aim past the corner and jam on it (T4 `EntityCollisions`).
                 let mut best = result.next;
                 for &tile in result.path.iter().take(PATH_LOOKAHEAD).skip(1) {
-                    if control.line_clear(current, tile) {
+                    let (tx, ty) = tile_world(tile);
+                    if control.line_clear(current, tile)
+                        && control.segment_clear(pos.x, pos.y, tx, ty, half)
+                    {
                         best = Some(tile);
                     } else {
                         break;
@@ -423,21 +436,9 @@ pub fn update_command_move(
         }
         return false;
     };
-    let mut pos = pos;
-    let mut core = world
-        .get::<UnitCore>(entity)
-        .copied()
-        .unwrap_or(UnitCore::new(0.0));
-    let _ = super::ground::approach(&mut pos, &mut vel, &mut core, speed, mx, my, 0.0);
-    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
-        *stored = pos;
-    }
-    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
-        *stored = vel;
-    }
-    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
-        *stored = core;
-    }
+    // `unit.movePref(vec.set(target).sub(unit).limit(speed))`: the final-point
+    // brake capped to the remaining distance (`GroundAI`/`CommandAI` arrival).
+    let _ = super::ground::steer_to(world, grid, content, entity, mx, my, 0.0);
     within(pos.x, pos.y)
 }
 
@@ -577,6 +578,7 @@ mod tests {
         state.command_position(60.0 * ts, 60.0 * ts);
         let mut arrived = false;
         for _ in 0..1500 {
+            harness.vel_update(unit);
             let mut ctx = AiCtx {
                 world: &mut harness.build.world,
                 grid: &harness.build.grid,

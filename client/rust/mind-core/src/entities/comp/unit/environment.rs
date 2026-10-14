@@ -7,9 +7,8 @@
 //! `entities/comp/UnitComp.java:662-870`.
 //!
 //! Deferred (documented): the captured-sector AI death (needs the G04 captured
-//! flag + `Team.isOnlyAI`), `floor.dragMultiplier` (the port never integrates
-//! `PhysicsComp.drag` — velocities are set directly by the movement helpers)
-//! and the dead-flyer fall.
+//! flag + `Team.isOnlyAI`), the floor/status drag terms (`floor.dragMultiplier`
+//! is T5) and the dead-flyer fall (T6).
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -149,11 +148,9 @@ pub fn update_unit_environment(
         let warp_y = dy.clamp(-10.0, 10.0);
         vel.x += warp_x;
         vel.y += warp_y;
-        // Java integrates `vel` in `VelComp.update`; the port's AI helpers set
-        // the position directly, so step the warp here as well (idle units
-        // would never move otherwise — documented approximation).
-        pos.x += warp_x;
-        pos.y += warp_y;
+        // Java clamps the position here (`x = Mathf.clamp(..)`, UnitComp.java:697-706);
+        // the warp impulse itself is integrated by `vel_update` like the rest
+        // of `vel`.
         pos.x = pos.x.clamp(left - 8.0, right - 8.0 + 8.0);
         pos.y = pos.y.clamp(bot - 8.0, top - 8.0 + 8.0);
         if !crate::combat::bullet::unit_is_flying(world, entity) {
@@ -270,9 +267,6 @@ pub fn update_unit_environment(
                 let push_y = dy / dst * len * 0.45;
                 vel.x += push_x;
                 vel.y += push_y;
-                // Same integration note as the bounds warp above.
-                pos.x += push_x;
-                pos.y += push_y;
             }
         }
     }
@@ -282,11 +276,9 @@ pub fn update_unit_environment(
         crate::combat::damage::area::apply_health(world, entity, floor_damage_taken);
     }
 
-    // `if(!canPassOn())`: boosted units lift off, others die
-    // (`UnitComp.java:849-855`). The port's movement helpers do not run
-    // `EntityCollisions.move` (Java prevents solid overlap there), so a corner
-    // clip can round into a wall tile: push the unit back out on the least
-    // penetrating side and kill only when no neighbour is passable.
+    // `if(tile != null && !canPassOn())`: boosted units lift off, others die
+    // (`UnitComp.java:849-855`). `EntityCollisions.move` prevents the corner
+    // clips that made the old push-out necessary.
     let (tx, ty) = (WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
     if grid.tiles.in_bounds(tx, ty)
         && !crate::ai::types::ground::unit_can_pass(world, grid, content, entity, tx, ty)
@@ -296,39 +288,7 @@ pub fn update_unit_environment(
                 core.elevation = 1.0;
             }
         } else {
-            let ts = crate::config::TILESIZE as f32;
-            let (ix, iy) = (pos.x - tx as f32 * ts, pos.y - ty as f32 * ts);
-            let options = [
-                (ix, 0.0f32, -1i32, 0i32),
-                (ts - ix, 0.0, 1, 0),
-                (iy, 1.0, 0, -1),
-                (ts - iy, 1.0, 0, 1),
-            ];
-            let mut exit = options.to_vec();
-            exit.sort_by(|a, b| a.0.total_cmp(&b.0));
-            let mut pushed = false;
-            for (_, _, dx, dy) in exit {
-                if crate::ai::types::ground::unit_can_pass(
-                    world,
-                    grid,
-                    content,
-                    entity,
-                    tx + dx,
-                    ty + dy,
-                ) {
-                    if dx != 0 {
-                        pos.x = tx as f32 * ts + if dx < 0 { -0.5 } else { ts + 0.5 };
-                    }
-                    if dy != 0 {
-                        pos.y = ty as f32 * ts + if dy < 0 { -0.5 } else { ts + 0.5 };
-                    }
-                    pushed = true;
-                    break;
-                }
-            }
-            if !pushed {
-                kill(world, entity);
-            }
+            kill(world, entity);
         }
     }
 
