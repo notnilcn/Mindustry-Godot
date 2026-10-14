@@ -244,6 +244,11 @@ impl Bundle {
         self.get_or_null(key).unwrap_or(key)
     }
 
+    /// `Core.bundle.has(key)`: a non-empty value exists for the key.
+    pub fn has(&self, key: &str) -> bool {
+        self.get_or_null(key).is_some()
+    }
+
     /// `{0}`-style substitution (`Arc TextFormatter`).
     pub fn format(&self, key: &str, args: &[&str]) -> String {
         format_template(self.get(key), args)

@@ -72,6 +72,14 @@ pub fn poly_vertices(
         .collect()
 }
 
+/// `fog.frag`'s alpha for a sampled red channel: `(1 - floor(r / QUANT) *
+/// QUANT) * step(r, 0.99)` with `QUANT = 0.3` (H03 T12). White texels
+/// (revealed) give 0, black (fogged) 1; `>= 0.99` turns fully transparent.
+pub fn fog_alpha(r: f32) -> f32 {
+    let quant = (r / 0.3).floor() * 0.3;
+    (1.0 - quant) * if r <= 0.99 { 1.0 } else { 0.0 }
+}
+
 /// A single fog polygon in tile coordinates (`FogRenderer.poly`).
 pub fn fog_poly(cx: f32, cy: f32, radius: f32) -> Vec<[f32; 2]> {
     poly_vertices(cx, cy, FOG_POLYGON_SIDES, radius, 0.0)
@@ -80,6 +88,16 @@ pub fn fog_poly(cx: f32, cy: f32, radius: f32) -> Vec<[f32; 2]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fog_alpha_quantizes_like_the_shader() {
+        assert_eq!(fog_alpha(0.0), 1.0);
+        assert!((fog_alpha(0.35) - 0.7).abs() < 1e-6);
+        assert_eq!(fog_alpha(1.0), 0.0);
+        // `step(r, 0.99)` keeps r == 0.99 alive (only > 0.99 vanishes).
+        assert!((fog_alpha(0.99) - 0.1).abs() < 1e-5);
+        assert!((fog_alpha(0.5) - 0.7).abs() < 1e-6);
+    }
 
     #[test]
     fn fog_event_round_trips() {

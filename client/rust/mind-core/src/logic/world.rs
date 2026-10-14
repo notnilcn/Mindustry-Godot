@@ -30,7 +30,7 @@ use crate::content::{ContentRef, ContentType};
 use crate::entities::comp::unit::{HitboxComp, UnitTypeComp};
 use crate::entities::comp::{Building, Pos, TeamComp, Unit};
 use crate::game::map_markers::{MapMarkers, TextureValue, marker_name_to_type};
-use crate::game::map_objectives::{NoLocale, ObjectiveLocale};
+use crate::game::map_objectives::NoLocale;
 use crate::game::rules::Rules;
 use crate::io::json::ColorHex;
 use crate::io::json::objectives::ObjectiveMarker;
@@ -66,6 +66,31 @@ pub struct MessageState {
     pub announce_until: u64,
     /// World tick after which no info toast is visible (3.5 s).
     pub toast_until: u64,
+}
+
+/// Text sources for `FlushMessageI`/`LocalePrintI`/`PrintCharI` (host-installed,
+/// H06 T4).
+#[derive(Resource, Clone)]
+pub struct LogicText {
+    /// `Core.bundle` (properties layers).
+    pub bundle: Option<crate::assets::bundle::Bundle>,
+    /// `Iconc` (`UI.formatIcons` + `printchar` content emoji).
+    pub iconc: Option<crate::assets::icons::Iconc>,
+    /// `state.mapLocales` (map/save-scoped locale bundle).
+    pub map_locales: crate::io::json::MapLocales,
+    /// `player.locale()` (`GlobalVars.update` `@clientLocale`).
+    pub locale: String,
+}
+
+impl Default for LogicText {
+    fn default() -> Self {
+        Self {
+            bundle: None,
+            iconc: None,
+            map_locales: crate::io::json::MapLocales::new(),
+            locale: String::from("en"),
+        }
+    }
 }
 
 /// `Call.syncVariable` payload (plan 21 handshake).
@@ -354,6 +379,42 @@ impl LogicWorldEvent {
     }
 }
 
+/// `InputHandler.logicCutscene`/`logicCamPan`/`logicCamSpeed`/
+/// `logicCutsceneZoom`/`logicHideHud` (`InputHandler.java:86,921-922`).
+///
+/// `active` is the `logicCutscene` flag; `pan` is in world pixels
+/// (`World.unconv` applied), `speed` is the per-frame lerp alpha, `zoom` the
+/// `0..1` blend (`-1` keeps the gameplay target), `hide_hud` the `logicHideHud`
+/// flag and `shake` a host-consumed `Renderer.shake(p1, p2 * 60)` request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LogicCutscene {
+    /// `logicCutscene`.
+    pub active: bool,
+    /// `logicCamPan` (world pixels).
+    pub pan: (f32, f32),
+    /// `logicCamSpeed`.
+    pub speed: f32,
+    /// `logicCutsceneZoom`.
+    pub zoom: f32,
+    /// `logicHideHud`.
+    pub hide_hud: bool,
+    /// Pending `Renderer.shake` `(intensity, duration ticks)`.
+    pub shake: Option<(f32, f32)>,
+}
+
+impl Default for LogicCutscene {
+    fn default() -> Self {
+        Self {
+            active: false,
+            pan: (0.0, 0.0),
+            speed: 0.1,
+            zoom: -1.0,
+            hide_hud: false,
+            shake: None,
+        }
+    }
+}
+
 /// Live rules + markers + event log for the privileged world instructions.
 #[derive(Resource, Debug, Clone)]
 pub struct LogicWorldState {
@@ -377,6 +438,8 @@ pub struct LogicWorldState {
     pub map_height: i32,
     /// Active weather content ids (`weatherset` state, `weathersense` reads).
     pub weather_active: std::collections::BTreeSet<u16>,
+    /// `CutsceneI` presentation state (camera/HUD; H06 T3).
+    pub cutscene: LogicCutscene,
     /// Deterministic sink log (append-only, ordered).
     pub events: Vec<LogicWorldEvent>,
 }
@@ -401,6 +464,7 @@ impl LogicWorldState {
             map_width: 0,
             map_height: 0,
             weather_active: std::collections::BTreeSet::new(),
+            cutscene: LogicCutscene::default(),
             events: Vec::new(),
         }
     }
@@ -1164,22 +1228,23 @@ pub fn run_set_rule(
             &p4,
         )
     })
-    .unwrap_or(false);
-    if !applied {
+    .unwrap_or_default();
+    if !applied.applied {
         return;
     }
     with_wave(world, |wave_ref, wavetime_ref| {
         *wave_ref = wave;
         *wavetime_ref = wavetime;
     });
-    if rule == LogicRule::MapArea {
-        // G04 T5's world re-derive (`grid.limit_area` + border darkness) runs
-        // from `Sim::tick` when `rules_world_dirty` is set. G02 T8's
-        // `sync_build_rules` is not on main yet (noted in the summary).
-        if let Some(mut runtime) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-        {
-            runtime.rules_world_dirty = true;
-        }
+    // A real change re-derives the live world state (`Sim::apply_rules_to_world`
+    // via `rules_world_dirty`): per-team rules reach `BuildRules`, `mapArea`
+    // re-enables buildings outside the previous rect and every building
+    // re-checks `allowUpdate`. Unchanged rules (frozenForest/fungalPass run
+    // `setrule waveTimer x` every tick) cost nothing.
+    if applied.changed
+        && let Some(mut runtime) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    {
+        runtime.rules_world_dirty = true;
     }
 }
 
@@ -1230,9 +1295,23 @@ pub fn run_flush_message(
         return;
     }
 
-    // Java keeps the `@`-prefixed text; the bundle substitution happens only
-    // when the bundle has the key (host-side, T6).
-    let text = exec.text_buffer.clone();
+    // `FlushMessageI.run` (`LExecutor.java:1953-1964`): `text =
+    // UI.formatIcons(textBuffer)`; then `if(text.startsWith("@") &&
+    // Core.bundle.has(substr)) text = Core.bundle.get(substr);`.
+    let text = {
+        let logic_text = world.get_resource::<LogicText>();
+        let mut text = exec.text_buffer.clone();
+        if let Some(iconc) = logic_text.and_then(|t| t.iconc.as_ref()) {
+            text = crate::ui::text::format_icons(&text, iconc);
+        }
+        if let Some(key) = text.strip_prefix('@')
+            && let Some(bundle) = logic_text.and_then(|t| t.bundle.as_ref())
+            && bundle.has(key)
+        {
+            text = bundle.get(key).to_owned();
+        }
+        text
+    };
     let duration_s = num(exec, duration) as f32;
     exec.text_buffer.clear();
 
@@ -1265,7 +1344,8 @@ pub fn run_flush_message(
     }
 }
 
-/// `CutsceneI` — emits a camera/HUD request (headless rendering is plan 16).
+/// `CutsceneI` — applies the camera/HUD state (`CutsceneI.run`,
+/// `J/logic/LExecutor.java:1350-1369`) and emits the event for tests.
 pub fn run_cutscene(
     exec: &mut Executor,
     world: &mut World,
@@ -1275,15 +1355,47 @@ pub fn run_cutscene(
     p3: VarRef,
     p4: VarRef,
 ) {
+    // `if(headless) return;` — nothing (including the `p1` writes) happens.
     let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
         return;
     };
+    if state.headless {
+        return;
+    }
+    // Values for the emitted event (tests count it), read before the writes.
+    let (n1, n2, n3, n4) = (num(exec, p1), num(exec, p2), num(exec, p3), num(exec, p4));
+    match action {
+        CutsceneAction::Active => {
+            let active = state.cutscene.active;
+            exec.arena.get_mut(p1.id()).set_bool(active);
+        }
+        CutsceneAction::Pan => {
+            state.cutscene.active = true;
+            state.cutscene.pan = (num(exec, p1) as f32 * 8.0, num(exec, p2) as f32 * 8.0);
+            state.cutscene.speed = num(exec, p3) as f32;
+        }
+        CutsceneAction::Zoom => {
+            state.cutscene.active = true;
+            state.cutscene.zoom = (num(exec, p1) as f32).clamp(0.0, 1.0);
+        }
+        CutsceneAction::Stop => state.cutscene.active = false,
+        CutsceneAction::Shake => {
+            state.cutscene.shake = Some((num(exec, p1) as f32, num(exec, p2) as f32 * 60.0));
+        }
+        CutsceneAction::GetHud => {
+            let visible = !state.cutscene.hide_hud;
+            exec.arena.get_mut(p1.id()).set_bool(visible);
+        }
+        CutsceneAction::SetHud => {
+            state.cutscene.hide_hud = !bool_of(exec, p1);
+        }
+    }
     state.emit(LogicWorldEvent::Cutscene {
         action,
-        p1: num(exec, p1),
-        p2: num(exec, p2),
-        p3: num(exec, p3),
-        p4: num(exec, p4),
+        p1: n1,
+        p2: n2,
+        p3: n3,
+        p4: n4,
     });
 }
 
@@ -1540,7 +1652,25 @@ pub fn run_locale_print(exec: &mut Executor, world: &mut World, name: VarRef) {
     let Some(LogicObject::Str(key)) = obj_of(exec, name) else {
         return;
     };
-    let value = no_locale().fetch_text(&key);
+    // `LocalePrintI.run` (`LExecutor.java:2402-2420`): `state.mapLocales
+    // .getProperty(name)`, then the bundle, then `???key???`
+    // (`MapLocales.java:47-54`; the port's `get_property` already falls back
+    // to `en` and formats the marker).
+    let value = {
+        let logic_text = world.get_resource::<LogicText>();
+        let locale = logic_text.map(|t| t.locale.as_str()).unwrap_or("en");
+        if let Some(locales) = logic_text.map(|t| &t.map_locales)
+            && (locales.contains(locale, &key) || locales.contains("en", &key))
+        {
+            locales.get_property(locale, &key)
+        } else if let Some(bundle) = logic_text.and_then(|t| t.bundle.as_ref())
+            && bundle.has(&key)
+        {
+            bundle.get(&key).to_owned()
+        } else {
+            format!("???{key}???")
+        }
+    };
     exec.text_buffer.push_str(&value);
     if let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
         state.emit(LogicWorldEvent::LocalePrint { value });
@@ -1672,7 +1802,6 @@ mod tests {
     use crate::entities::comp::{Building, Pos, TeamComp, Unit};
     use crate::logic::assembler::Assembler;
     use crate::world::TilePos;
-
     fn run_code(world: &mut World, code: &str) -> Executor {
         let asm = Assembler::assemble(code, true).expect("assemble");
         let mut exec = Executor::new();
@@ -1806,5 +1935,79 @@ mod tests {
         }
         let state = world.get_resource::<LogicWorldState>().expect("state");
         assert_eq!(state.count("sync"), 4);
+    }
+
+    /// H06 T4: `print "@key"` + `message` resolves the bundle string
+    /// (`FlushMessageI.run`, `LExecutor.java:1953-1964`).
+    #[test]
+    fn flush_message_resolves_bundle_key() {
+        use crate::assets::bundle::Bundle;
+        use indexmap::IndexMap;
+
+        let mut world = World::new();
+        world.insert_resource(LogicWorldState {
+            headless: false,
+            ..LogicWorldState::new()
+        });
+        world.insert_resource(MessageState::default());
+        let mut layer = IndexMap::new();
+        layer.insert(
+            "atolls.noairunit".to_owned(),
+            "This base is too well-fortified to destroy with air units.".to_owned(),
+        );
+        world.insert_resource(LogicText {
+            bundle: Some(Bundle::from_layers(vec![layer])),
+            ..LogicText::default()
+        });
+        let _ = run_code(
+            &mut world,
+            "print \"@atolls.noairunit\"\nmessage announce 3 ok\n",
+        );
+        let state = world.get_resource::<LogicWorldState>().expect("state");
+        let text = state.events.iter().find_map(|event| match event {
+            LogicWorldEvent::Message { text, .. } => Some(text.as_str()),
+            _ => None,
+        });
+        assert_eq!(
+            text,
+            Some("This base is too well-fortified to destroy with air units.")
+        );
+    }
+
+    /// H06 T4: `localeprint` resolves map locales (`en` fallback), then the
+    /// bundle, then the `???key???` marker (`MapLocales.java:47-54`).
+    #[test]
+    fn locale_print_falls_back_to_bundle_then_marker() {
+        use crate::assets::bundle::Bundle;
+        use indexmap::IndexMap;
+
+        let mut world = World::new();
+        world.insert_resource(LogicWorldState {
+            headless: false,
+            ..LogicWorldState::new()
+        });
+        // No map locales and no bundle: the marker.
+        let exec = run_code(&mut world, "localeprint \"x.y\"\n");
+        assert_eq!(exec.text_buffer, "???x.y???");
+        // Map locale `en` wins.
+        let mut locales = crate::io::json::MapLocales::new();
+        let mut en = crate::io::StringMap::new();
+        en.insert("x.y".to_owned(), "hi".to_owned());
+        locales.0.insert("en".to_owned(), en);
+        world.insert_resource(LogicText {
+            map_locales: locales,
+            ..LogicText::default()
+        });
+        let exec = run_code(&mut world, "localeprint \"x.y\"\n");
+        assert_eq!(exec.text_buffer, "hi");
+        // No map locale has the key: the bundle fills in.
+        let mut layer = IndexMap::new();
+        layer.insert("z.k".to_owned(), "from-bundle".to_owned());
+        world.insert_resource(LogicText {
+            bundle: Some(Bundle::from_layers(vec![layer])),
+            ..LogicText::default()
+        });
+        let exec = run_code(&mut world, "localeprint \"z.k\"\n");
+        assert_eq!(exec.text_buffer, "from-bundle");
     }
 }

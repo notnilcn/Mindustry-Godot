@@ -677,8 +677,14 @@ pub fn set_prop_num(world: &mut World, target: &LogicObject, a: LAccess, v: f64)
 fn set_prop_building_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
     match a {
         LAccess::Health => {
+            // `BuildingComp.setProp(health)` (`BuildingComp.java:2176-2183`):
+            // clamp; `<= 0` destroys through `Call.buildDestroyed` (the port
+            // marks it dead and `resolve_deaths` runs the destruction).
             if let Some(mut h) = world.get_mut::<Health>(e) {
                 h.health = (v as f32).clamp(0.0, h.max_health);
+                if h.health <= 0.0 {
+                    h.dead = true;
+                }
                 return true;
             }
             false
@@ -724,8 +730,13 @@ fn set_prop_building_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bo
 fn set_prop_unit_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
     match a {
         LAccess::Health => {
+            // `UnitComp.setProp(health)` (`UnitComp.java:356-362`): clamp and
+            // kill at `<= 0` (`resolve_deaths` runs the destroy path).
             if let Some(mut h) = world.get_mut::<Health>(e) {
                 h.health = (v as f32).clamp(0.0, h.max_health);
+                if h.health <= 0.0 {
+                    h.dead = true;
+                }
                 return true;
             }
             false
@@ -779,17 +790,83 @@ fn set_prop_unit_num(world: &mut World, e: Entity, a: LAccess, v: f64) -> bool {
             }
             false
         }
-        LAccess::Armor => {
-            if let Some(mut status) = world.get_mut::<crate::entities::comp::unit::StatusComp>(e) {
-                status.armor_override = (v as f32).max(0.0);
+        LAccess::Flag => {
+            // `flag = value` (`UnitComp.java:381`).
+            world
+                .entity_mut(e)
+                .insert(crate::entities::comp::unit::comp::UnitFlag(v));
+            true
+        }
+        LAccess::Speed => {
+            // `statusSpeed(clamp(v, 0, 1000))` (`UnitComp.java:382`):
+            // `speedMultiplier = speed / (type.speed * 60 / tilesize)`.
+            let type_speed = unit_content(world).and_then(|content| {
+                world
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(e)
+                    .and_then(|t| content.unit(t.type_id).map(|def| def.speed))
+            });
+            let Some(type_speed) = type_speed else {
+                return true;
+            };
+            if !apply_dynamic_status(world, e) {
                 return true;
             }
-            false
+            let clamped = (v as f32).clamp(0.0, 1000.0);
+            let divisor = type_speed * 60.0 / 8.0;
+            if let Some(mut dynamic) =
+                world.get_mut::<crate::entities::comp::unit::comp::DynamicStatus>(e)
+            {
+                dynamic.speed_multiplier = if divisor > 0.0 {
+                    clamped / divisor
+                } else {
+                    1.0
+                };
+            }
+            true
         }
-        // `speed` (status speed) and `flag` remain unwired (T7 summary rows).
-        LAccess::Speed => true,
+        LAccess::Armor => {
+            // `statusArmor(max(v, 0))` (`UnitComp.java:383`).
+            if !apply_dynamic_status(world, e) {
+                return true;
+            }
+            if let Some(mut dynamic) =
+                world.get_mut::<crate::entities::comp::unit::comp::DynamicStatus>(e)
+            {
+                dynamic.armor_override = (v as f32).max(0.0);
+            }
+            true
+        }
         _ => false,
     }
+}
+
+/// Content registry when the live unit runtime is installed.
+fn unit_content(world: &World) -> Option<&crate::content::ContentRegistry> {
+    world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .map(|runtime| &runtime.content)
+}
+
+/// `StatusComp.applyDynamicStatus()` (`StatusComp.java:136-147`): inserts the
+/// [`crate::entities::comp::unit::comp::DynamicStatus`] component (once) and
+/// applies the `dynamic` status with infinite time.
+fn apply_dynamic_status(world: &mut World, e: Entity) -> bool {
+    let Some(dynamic) = unit_content(world).and_then(|content| content.status_id("dynamic")) else {
+        return false;
+    };
+    if world
+        .get::<crate::entities::comp::unit::comp::DynamicStatus>(e)
+        .is_none()
+    {
+        world
+            .entity_mut(e)
+            .insert(crate::entities::comp::unit::comp::DynamicStatus::default());
+    }
+    if let Some(mut statuses) = world.get_mut::<crate::entities::comp::unit::comp::StatusComp>(e) {
+        statuses.ensure_dynamic(dynamic);
+        return true;
+    }
+    false
 }
 
 /// `Settable.setProp` object dispatch; returns whether it was applied.
@@ -820,37 +897,129 @@ pub fn set_prop_obj(world: &mut World, target: &LogicObject, a: LAccess, v: &Log
     }
 }
 
-/// `Settable.setProp(Content, amount)`.
+/// `Settable.setProp(Content, amount)` (`BuildingComp.setProp`,
+/// `BuildingComp.java:2210-2227`; `UnitComp.setProp`,
+/// `UnitComp.java:415-424`).
 pub fn set_prop_content(
     world: &mut World,
     target: &LogicObject,
     c: crate::content::ContentRef,
     amount: f64,
 ) -> bool {
-    let LogicObject::Building(e) = target else {
-        return false;
-    };
+    match target {
+        LogicObject::Building(e) => set_prop_content_building(world, *e, c, amount),
+        LogicObject::Unit(e) => set_prop_content_unit(world, *e, c, amount),
+        _ => false,
+    }
+}
+
+fn set_prop_content_building(
+    world: &mut World,
+    e: Entity,
+    c: crate::content::ContentRef,
+    amount: f64,
+) -> bool {
     match c.type_ {
         ContentType::Item => {
-            let cap = block_def(world, *e).map(|d| d.item_capacity).unwrap_or(0);
-            if let Some(mut module) = world.get_mut::<ItemModule>(*e) {
-                let item = crate::content::ItemId::new(c.id);
-                if amount >= 0.0 {
-                    module.add(item, amount as i32, cap);
-                } else {
-                    module.remove(item, (-amount) as i32);
+            // Java SETS the count (`items.get != amount`): a shortfall runs
+            // `handleStack(acceptStack(diff))`, a surplus `removeStack`.
+            use crate::world::blocks::distribution::transfer;
+            let item = crate::content::ItemId::new(c.id);
+            let target = amount as i32;
+            let current = {
+                let Some(module) = world.get_mut::<ItemModule>(e) else {
+                    return false;
+                };
+                module.get(item)
+            };
+            if current == target {
+                return true;
+            }
+            if current < target {
+                let accepted =
+                    transfer::dispatch_accept_stack(world, e, item, target - current, None);
+                if accepted > 0 {
+                    transfer::dispatch_handle_stack(world, e, item, accepted);
                 }
+            } else if target >= 0
+                && let Some(mut module) = world.get_mut::<ItemModule>(e)
+            {
+                module.remove(item, current - target);
+            }
+            true
+        }
+        ContentType::Liquid => {
+            // Java clamps to `block.liquidCapacity`; decreasing is always
+            // allowed, increasing needs `acceptLiquid` + the current-liquid
+            // gate (`liquids.current() == liquid || currentAmount <= 0.1 ||
+            // consumesLiquid(liquid)`).
+            let capacity = block_def(world, e)
+                .map(|def| def.liquid_capacity)
+                .unwrap_or(0.0);
+            let liquid = crate::content::LiquidId::new(c.id);
+            let value = (amount as f32).clamp(0.0, capacity);
+            let (current, is_current, total) = {
+                let Some(module) = world.get_mut::<LiquidModule>(e) else {
+                    return false;
+                };
+                (
+                    module.get(liquid),
+                    crate::world::blocks::liquid::current_liquid(&module) == Some(liquid),
+                    module.current_amount,
+                )
+            };
+            let accepted_gate = value < current
+                || (crate::world::blocks::liquid::accept_liquid(world, e, e, liquid)
+                    && (is_current || total <= 0.1 || block_consumes_liquid(world, e, liquid)));
+            if accepted_gate && let Some(mut module) = world.get_mut::<LiquidModule>(e) {
+                if value < current {
+                    module.remove(liquid, current - value);
+                } else if value > current {
+                    module.add(liquid, value - current, capacity);
+                }
+            }
+            true
+        }
+        _ => false,
+    }
+}
+
+fn set_prop_content_unit(
+    world: &mut World,
+    e: Entity,
+    c: crate::content::ContentRef,
+    amount: f64,
+) -> bool {
+    match c.type_ {
+        ContentType::Item => {
+            // `stack.item = item; stack.amount = clamp((int)value, 0,
+            // type.itemCapacity)`.
+            let capacity = unit_content(world).and_then(|content| {
+                world
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(e)
+                    .and_then(|t| content.unit(t.type_id).map(|def| def.item_capacity))
+            });
+            let item = crate::content::ItemId::new(c.id);
+            let amount = (amount as i32).clamp(0, capacity.unwrap_or(0));
+            if let Some(mut items) =
+                world.get_mut::<crate::entities::comp::unit::comp::ItemsComp>(e)
+            {
+                items.item = Some((item, amount));
                 return true;
             }
             false
         }
-        ContentType::Liquid => {
-            if let Some(mut module) = world.get_mut::<LiquidModule>(*e) {
-                let liquid = crate::content::LiquidId::new(c.id);
-                if amount >= 0.0 {
-                    module.add(liquid, amount as f32, f32::MAX);
-                } else {
-                    module.remove(liquid, (-amount) as f32);
+        ContentType::Status => {
+            // `setDuration(effect, value * 60)`: set an existing entry's time,
+            // else `apply(effect, duration)`.
+            use crate::entities::comp::unit::comp::{StatusComp, StatusEntry};
+            let status = crate::content::StatusId::new(c.id);
+            let duration = (amount as f32) * 60.0;
+            if let Some(mut statuses) = world.get_mut::<StatusComp>(e) {
+                if statuses.has_effect_of(status) {
+                    statuses.set_duration(status, duration);
+                } else if duration > 0.0 {
+                    statuses.apply(StatusEntry::new(status, duration));
                 }
                 return true;
             }
@@ -858,6 +1027,18 @@ pub fn set_prop_content(
         }
         _ => false,
     }
+}
+
+/// `Block.consumesLiquid(liquid)`: the block has a matching liquid consumer.
+fn block_consumes_liquid(world: &World, e: Entity, liquid: crate::content::LiquidId) -> bool {
+    block_def(world, e).is_some_and(|def| {
+        def.consumes.iter().any(|c| {
+            matches!(
+                &c.consume,
+                crate::content::registries::blocks::Consume::Liquid { liquid: l, .. } if *l == liquid
+            )
+        })
+    })
 }
 
 /// `Controllable.control` dispatch; returns whether the accessor was applied.

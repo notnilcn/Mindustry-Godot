@@ -82,8 +82,10 @@ impl ShaderRegistry {
         names.extend_from_slice(core_shaders::AUXILIARY);
 
         for name in names {
+            let res_path = format!("res://shaders/{name}.gdshader");
             let candidates = shader_candidates(name, entries.get(name).map(String::as_str), &dir);
             let mut loaded = None;
+            let mut used_res = false;
             for path in &candidates {
                 if !FileAccess::file_exists(path) {
                     continue;
@@ -95,7 +97,28 @@ impl ShaderRegistry {
                 let mut shader = Shader::new_gd();
                 shader.set_code(&code);
                 loaded = Some(shader);
+                used_res = path == &res_path;
                 break;
+            }
+            // Boot warning: the committed `res://shaders` copy is the source of
+            // truth; a stale packed copy in the asset tree must be visible in
+            // the log instead of silently shadowing an edit (`light` was
+            // `blend_add` there for days after the client copy became
+            // `blend_mix`; H03 T6/PAR-0246).
+            if used_res
+                && !dir.is_empty()
+                && let Some(rel) = entries.get(name)
+            {
+                let packed = format!("{dir}/{rel}");
+                if FileAccess::file_exists(&packed) {
+                    let res_code = FileAccess::get_file_as_string(&res_path);
+                    let packed_code = FileAccess::get_file_as_string(&packed);
+                    if res_code != packed_code {
+                        log::warn!(
+                            "[W] [shaders] packed copy of '{name}' is stale; using res://shaders"
+                        );
+                    }
+                }
             }
             match loaded {
                 Some(shader) => {
@@ -158,8 +181,14 @@ impl ShaderRegistry {
 }
 
 /// Candidate paths for a logical shader name, most-specific first.
+///
+/// The committed `res://shaders/{name}.gdshader` is the source of truth
+/// (H03 T6): the packed copies under the asset tree stay as a fallback for
+/// exported builds without `res://shaders`, but they must never shadow a
+/// `client/shaders` edit (the packed `light` copy was stale `blend_add` and
+/// kept the composite invisible; PAR-0246).
 fn shader_candidates(name: &str, manifest_rel: Option<&str>, dir: &str) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut out = vec![format!("res://shaders/{name}.gdshader")];
     if let Some(rel) = manifest_rel
         && !dir.is_empty()
     {
@@ -168,6 +197,23 @@ fn shader_candidates(name: &str, manifest_rel: Option<&str>, dir: &str) -> Vec<S
     if !dir.is_empty() {
         out.push(format!("{dir}/shaders/godot/{name}.gdshader"));
     }
-    out.push(format!("res://shaders/{name}.gdshader"));
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::shader_candidates;
+
+    #[test]
+    fn candidates_prefer_res_shaders() {
+        let candidates = shader_candidates("light", Some("shaders/godot/light.gdshader"), "/a");
+        assert_eq!(candidates[0], "res://shaders/light.gdshader");
+        assert_eq!(candidates[1], "/a/shaders/godot/light.gdshader");
+        assert_eq!(candidates[2], "/a/shaders/godot/light.gdshader");
+        // Without an asset dir the res:// copy is the only candidate.
+        assert_eq!(
+            shader_candidates("light", None, ""),
+            vec![String::from("res://shaders/light.gdshader")]
+        );
+    }
 }

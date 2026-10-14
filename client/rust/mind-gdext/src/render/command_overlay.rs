@@ -12,11 +12,13 @@
 //! Colour is `Pal.accent` (`#ffd37f`). The pass lives at `Layer.plans`.
 
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{INode2D, Node2D};
+use godot::classes::{INode2D, Node2D, Time};
 use godot::obj::Base;
+use godot::obj::Singleton;
 use godot::prelude::*;
 
 use crate::input::MindInput;
+use crate::render::canvas;
 use crate::sim_host::MindSimHost;
 
 /// `Pal.accent` (`Pal.java`), the command overlay colour.
@@ -34,6 +36,9 @@ pub struct CommandOverlay {
     base: Base<Node2D>,
     host: Option<Gd<MindSimHost>>,
     input: Option<Gd<MindInput>>,
+    /// Draw only the attack reticle (`InputHandler.drawCommandedTargets`, at
+    /// `Layer.overlayUI`); the selection overlay instance leaves this false.
+    pub reticle_only: bool,
 }
 
 #[godot_api]
@@ -43,6 +48,7 @@ impl INode2D for CommandOverlay {
             base,
             host: None,
             input: None,
+            reticle_only: false,
         }
     }
 
@@ -70,6 +76,10 @@ impl INode2D for CommandOverlay {
             return;
         };
         if !input.bind().command_mode() {
+            return;
+        }
+        if self.reticle_only {
+            self.draw_reticles(&input);
             return;
         }
         let ids: Vec<i32> =
@@ -138,6 +148,46 @@ impl CommandOverlay {
             .base()
             .try_get_node_as::<MindInput>("/root/Spine/Input");
         self.base_mut().queue_redraw();
+    }
+
+    /// `InputHandler.drawCommandedTargets` (`InputHandler.java:1225-1237`):
+    /// for each selected unit with an attack target whose current command has
+    /// `drawTarget`, a rotating `Drawf.target(x, y, 6, Pal.remove)`.
+    fn draw_reticles(&mut self, input: &Gd<MindInput>) {
+        let ids: Vec<i32> =
+            serde_json::from_str(&input.bind().selection_json().to_string()).unwrap_or_default();
+        if ids.is_empty() {
+            return;
+        }
+        let Some(host) = self.host.clone() else {
+            return;
+        };
+        let targets = host.bind().command_targets();
+        let drawing: Vec<i32> = ids
+            .iter()
+            .copied()
+            .filter(|id| host.bind().command_draws_target(*id))
+            .collect();
+        if drawing.is_empty() {
+            return;
+        }
+        // View pulse: `Time.time * 1.5` with `Time.time` in ticks at 60/s.
+        let rot = Time::singleton().get_ticks_msec() as f32 * 0.06 * 1.5;
+        let mut base = self.base_mut();
+        for (id, x, y, attack) in targets {
+            if !attack || !drawing.contains(&id) {
+                continue;
+            }
+            canvas::target(
+                &mut base,
+                x,
+                y,
+                6.0,
+                rot,
+                1.0,
+                canvas::color_u32(0xe55454ff),
+            );
+        }
     }
 }
 

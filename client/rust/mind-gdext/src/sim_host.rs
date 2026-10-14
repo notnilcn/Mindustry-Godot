@@ -100,11 +100,12 @@ pub struct WeaponDraw {
     /// Visual recoil `0..1`.
     pub recoil: f32,
 }
+use mind_core::ai::StanceBits;
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
     BlockId, BlockKind, ContentRegistry, ContentType, ItemId, MemoryBundle, MemoryUnlockStore,
-    content_counts, create_base_content,
+    UnitCommandId, UnitStanceId, UnitTypeId, content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
 use mind_core::ecs::BuildingComp;
@@ -362,6 +363,9 @@ pub struct MindSimHost {
     /// loadout during the world load (`MindCampaign.start_sector_with_loadout`
     /// skips its own `place_launch_loadout` then; H05 T4).
     generated_loadout_placed: bool,
+    /// Last `logic_set_code` failure (`""` when none; H06 T1) — `"toolong:<len>"`
+    /// mirrors `LogicBuild.showEditDialog`'s error message.
+    logic_last_error: String,
 }
 
 #[godot_api]
@@ -396,6 +400,7 @@ impl INode for MindSimHost {
             pending_gen_extras: None,
             pending_launch: None,
             generated_loadout_placed: false,
+            logic_last_error: String::new(),
         }
     }
 
@@ -516,6 +521,9 @@ impl MindSimHost {
         // (logic globals, IO executor, audio sink). Must be re-run whenever a
         // fresh `Sim` replaces `self.sim`, or queued IO never drains.
         self.install_sim_seams();
+        // `InputHandler` world reset: clear the logic cutscene/HUD flags and
+        // message timers (`InputHandler.java:921-922`; H06 T3).
+        self.sim.reset_logic_presentation();
 
         // Live gameplay (the default spine world, custom maps and campaign
         // sectors) runs the plan-07 block stack so placed buildings execute their
@@ -561,6 +569,31 @@ impl MindSimHost {
     #[signal]
     fn world_changed();
 
+    /// Installs the content-initialized logic globals (`GlobalVars`) on the sim.
+    ///
+    /// `LAssembler.var` resolves constants from the global `Vars.logicVars`
+    /// (`J/logic/LAssembler.java:59-61`), created once in `Vars.init`
+    /// (`J/core/Vars.java:369`) and filled with the content by
+    /// `ContentLoader.java:107` — long before any map or save is read. Map/save
+    /// buildings are decoded by `materialize_map_buildings` (`LogicBuild.read`
+    /// -> `read_compressed` -> `update_code`), so this must run BEFORE them or
+    /// `@sharded`/`@duo`/`@scatter` become plain null variables (H06 T20).
+    /// Idempotent.
+    fn install_logic_globals(&mut self) {
+        if self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::logic::globals::GlobalVars>()
+            .is_some()
+        {
+            return;
+        }
+        if let Some(registry) = self.content_snapshot.as_ref() {
+            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
+        }
+    }
+
     /// Wires the host seams that live on the `Sim` value: the content-initialized
     /// logic globals (plan-13 M7), the live-sim IO executor (plan 04 §3.10) and
     /// the audio sink (plan-18).
@@ -569,8 +602,8 @@ impl MindSimHost {
     /// again after every replacement; otherwise `request_save`/`request_load`
     /// queue into an `IoQueue` with no handler and never drain.
     fn install_sim_seams(&mut self) {
+        self.install_logic_globals();
         if let Some(registry) = self.content_snapshot.take() {
-            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, &registry);
             // Live world-processor sinks (G06 T4): rules/markers/wave live in
             // the campaign session; the event log + message timers are sim
             // resources (headless=false so messages/cutscenes reach the host).
@@ -617,6 +650,27 @@ impl MindSimHost {
                     mind_core::logic::world::LogicContentIndex::from_content(&registry),
                 );
             }
+            // World-processor text sources (H06 T4): `Core.bundle`, `Iconc`
+            // and `player.locale()` for `message`/`localeprint`/`printchar`.
+            // The map-scoped locales are replaced per sector load.
+            let assets_dir = crate::assets::loader::resolve_assets_dir();
+            let locale = crate::assets::loader::resolve_locale();
+            let map_locales = self
+                .sim
+                .ecs
+                .0
+                .get_resource::<mind_core::logic::world::LogicText>()
+                .map(|text| text.map_locales.clone())
+                .unwrap_or_default();
+            self.sim
+                .ecs
+                .0
+                .insert_resource(mind_core::logic::world::LogicText {
+                    bundle: Some(crate::assets::bundle::load_bundle(&assets_dir, &locale)),
+                    iconc: Some(crate::assets::bundle::load_iconc(&assets_dir)),
+                    map_locales,
+                    locale,
+                });
             self.content_snapshot = Some(registry);
         }
 
@@ -1457,7 +1511,7 @@ impl MindSimHost {
     /// Whether the sim-integrated logic probes can mutate a live processor.
     #[func]
     pub fn logic_available(&self) -> bool {
-        false
+        true
     }
 
     /// Registered statement names (plan-14 editor handoff).
@@ -1523,17 +1577,204 @@ impl MindSimHost {
         false
     }
 
-    /// Placeholder for applying compressed logic code (awaits plan 05/07).
+    /// Normalized processor program text (`LogicDialog.show`:
+    /// `LAssembler.read` → `LAssembler.write`; empty string when no processor).
     #[func]
-    pub fn logic_set_code(&self, _x: i64, _y: i64, _code: GString) -> bool {
-        log::warn!("logic_set_code: sim-side logic building state is a plan-05/07 hook");
-        false
+    pub fn logic_get_code(&self, x: i64, y: i64) -> GString {
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            return GString::from("");
+        };
+        let Some(state) = world.get::<mind_core::logic::blocks::LogicBlockState>(e) else {
+            return GString::from("");
+        };
+        let privileged = mind_core::logic::blocks::privileged_of(world, e);
+        let text = mind_core::logic::Assembler::read(&state.code, privileged)
+            .map(|statements| mind_core::logic::Assembler::write(&statements))
+            .unwrap_or_else(|_| state.code.clone());
+        GString::from(text.as_str())
     }
 
-    /// Placeholder for reading a processor state (awaits plan 05/07).
+    /// Debug seam: writes `code` into the processor at `(x, y)` directly,
+    /// bypassing `LogicBuild.accessible()` like the editor (world processors
+    /// are not accessible in campaign; every later in-engine check uses them).
+    /// Returns false with `logic_last_error() == "toolong:<len>"` past
+    /// `LogicBlock.maxCompressedLen` (`showEditDialog`'s size gate).
     #[func]
-    pub fn logic_get_state(&self, _x: i64, _y: i64) -> Dictionary<GString, Variant> {
-        Dictionary::new()
+    pub fn logic_set_code(&mut self, x: i64, y: i64, code: GString) -> bool {
+        self.logic_last_error = String::new();
+        let code = code.to_string();
+        let world = &mut self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return false;
+        };
+        let links = world
+            .get::<mind_core::logic::blocks::LogicBlockState>(e)
+            .map(|state| state.relative_connections(world, e));
+        let Some(links) = links else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return false;
+        };
+        let bytes = match mind_core::logic::blocks::logic_block::encode_for_config(&code, &links) {
+            Ok(bytes) => bytes,
+            Err(len) => {
+                self.logic_last_error = format!("toolong:{len}");
+                return false;
+            }
+        };
+        let Some(mut state) = world
+            .entity_mut(e)
+            .take::<mind_core::logic::blocks::LogicBlockState>()
+        else {
+            return false;
+        };
+        let result = state.read_compressed(world, e, &bytes, true);
+        world.entity_mut(e).insert(state);
+        result.is_ok()
+    }
+
+    /// Last `logic_set_code` failure (`""` when none).
+    #[func]
+    pub fn logic_last_error(&self) -> GString {
+        GString::from(self.logic_last_error.as_str())
+    }
+
+    /// Processor readback (`privileged`/`accessible`/`ipt`/`tag`/`code`/`links`/
+    /// `vars`); empty `Dictionary` when no processor is at `(x, y)`.
+    #[func]
+    pub fn logic_get_state(&self, x: i64, y: i64) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::<GString, Variant>::new();
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            return out;
+        };
+        let Some(snapshot) = mind_core::logic::blocks::logic_block::state_snapshot(world, e) else {
+            return out;
+        };
+        out.set(
+            &GString::from("privileged"),
+            &snapshot.privileged.to_variant(),
+        );
+        out.set(
+            &GString::from("accessible"),
+            &snapshot.accessible.to_variant(),
+        );
+        out.set(&GString::from("ipt"), &(snapshot.ipt as i64).to_variant());
+        out.set(
+            &GString::from("tag"),
+            &match &snapshot.tag {
+                Some(tag) => GString::from(tag.as_str()).to_variant(),
+                None => Variant::nil(),
+            },
+        );
+        out.set(
+            &GString::from("code"),
+            &GString::from(snapshot.code.as_str()).to_variant(),
+        );
+        let mut links = Array::<Variant>::new();
+        for (name, lx, ly, valid) in &snapshot.links {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("name"),
+                &GString::from(name.as_str()).to_variant(),
+            );
+            row.set(&GString::from("x"), &(*lx as i64).to_variant());
+            row.set(&GString::from("y"), &(*ly as i64).to_variant());
+            row.set(&GString::from("valid"), &valid.to_variant());
+            links.push(&row.to_variant());
+        }
+        out.set(&GString::from("links"), &links.to_variant());
+        let mut vars = Array::<Variant>::new();
+        for (name, value, type_) in &snapshot.vars {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("name"),
+                &GString::from(name.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("value"),
+                &GString::from(value.as_str()).to_variant(),
+            );
+            row.set(&GString::from("type"), &GString::from(*type_).to_variant());
+            vars.push(&row.to_variant());
+        }
+        out.set(&GString::from("vars"), &vars.to_variant());
+        out
+    }
+
+    /// Last 64 drained logic-event kind tags (`LogicWorldEvent::kind`) as a
+    /// JSON array (H06 T1 debug probe).
+    #[func]
+    pub fn logic_event_log_json(&self) -> GString {
+        let value: Vec<&str> = self
+            .sim
+            .logic_event_log
+            .iter()
+            .map(String::as_str)
+            .collect();
+        GString::from(
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
+    /// `InputHandler.logicCutscene` state for the camera rig (plain Rust
+    /// forwarder; H06 T3).
+    pub fn logic_cutscene_state(&self) -> mind_core::logic::world::LogicCutscene {
+        self.sim.logic_cutscene()
+    }
+
+    /// Takes the pending `CutsceneI` shake request (camera rig poller).
+    pub fn take_logic_shake(&mut self) -> Option<(f32, f32)> {
+        self.sim.take_logic_shake()
+    }
+
+    /// Logic cutscene/HUD probe: `{"active","x","y","speed","zoom","hideHud"}`
+    /// (`x`/`y` in world pixels; H06 T3).
+    #[func]
+    pub fn logic_cutscene_json(&self) -> GString {
+        let cutscene = self.sim.logic_cutscene();
+        let value = serde_json::json!({
+            "active": cutscene.active,
+            "x": cutscene.pan.0,
+            "y": cutscene.pan.1,
+            "speed": cutscene.speed,
+            "zoom": cutscene.zoom,
+            "hideHud": cutscene.hide_hud,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Drains queued world-processor messages (`announce`/`notify`/`toast`) as
+    /// an Array of `{type, text, duration}` dictionaries (H06 T4).
+    #[func]
+    pub fn drain_logic_messages(&mut self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for (type_, text, duration) in self.sim.take_logic_messages() {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("type"),
+                &GString::from(type_.name()).to_variant(),
+            );
+            row.set(
+                &GString::from("text"),
+                &GString::from(text.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("duration"),
+                &f64::from(duration).to_variant(),
+            );
+            out.push(&row.to_variant());
+        }
+        out
     }
 
     /// Placeholder for a display command queue (awaits plan 16 rendering/05).
@@ -1824,6 +2065,7 @@ impl MindSimHost {
         self.sim = sim;
         self.player = Some(player);
         self.install_sim_seams();
+        self.sim.reset_logic_presentation();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();
@@ -2099,6 +2341,10 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = None;
+        // H06 T20: resolve `@content` constants from the point the globals
+        // exist — before the map/save processors are decoded below — exactly
+        // like `Vars.logicVars` at content init (`Vars.java:369`).
+        self.install_logic_globals();
         // A campaign sector is live play: its placed blocks must execute their
         // plan-07 behaviors (mining, transport, crafting, power). The runtime
         // resources are installed before any entity exists so ECS indices stay
@@ -2178,6 +2424,25 @@ impl MindSimHost {
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
+        self.sim.reset_logic_presentation();
+        // Sector map locales (`state.mapLocales`, from the save/map `locales`
+        // meta tag; H06 T4). Preset maps without the tag fall back to the
+        // global bundle in `run_locale_print`.
+        let map_locales = save
+            .as_ref()
+            .and_then(|save| save.tags.get("locales"))
+            .and_then(|text| {
+                mind_core::io::json::JsonIo::read::<mind_core::io::json::MapLocales>(text).ok()
+            })
+            .unwrap_or_default();
+        if let Some(mut text) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::logic::world::LogicText>()
+        {
+            text.map_locales = map_locales;
+        }
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();
@@ -5521,6 +5786,567 @@ impl MindSimHost {
     pub fn debug_set_building_team(&mut self, x: i32, y: i32, team: i32) -> bool {
         self.sim.debug_set_building_team(x, y, (team & 0xFF) as u8)
     }
+
+    // ---- H03 T3 command panel + reticle seams ----
+
+    /// `PlacementFragment` command table probe (`PlacementFragment.java:443-676`).
+    /// `ids_json` is the selection id array (`MindInput.selection_json()`);
+    /// returns the same JSON [`command_panel`] builds for the GDScript panel.
+    #[func]
+    pub fn command_panel_json(&self, ids_json: GString) -> GString {
+        let ids: Vec<i32> = serde_json::from_str(ids_json.to_string().as_str()).unwrap_or_default();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("{\"types\":[],\"commands\":[],\"stances\":[]}");
+        };
+        let units = self.command_panel_units(&ids);
+        GString::from(command_panel(content, &units).to_string().as_str())
+    }
+
+    /// Per-unit command-panel rows: `(type id, live command, stance bits)` for
+    /// the live units whose `EntitySeq` is in `ids`. The live command is the
+    /// `CommandAI` command component (`UnitCommandComp`, set by
+    /// `Sim::apply_live_unit_command`) falling back to `ControllerSlot.command`;
+    /// `None` = the type's `defaultCommand` (`CommandAI.currentCommand`).
+    pub(crate) fn command_panel_units(
+        &self,
+        ids: &[i32],
+    ) -> Vec<(i32, Option<UnitCommandId>, StanceBits)> {
+        use mind_core::ai::controller::{ControllerSlot, UnitCommandComp};
+        use mind_core::ai::unit_stance_runtime::{StanceBits, UnitStancesComp};
+        use mind_core::content::id::UnitCommandId;
+        use mind_core::ecs::EntitySeq;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let mut out = Vec::with_capacity(ids.len());
+        for &id in ids {
+            let Some(&entity) = runtime.units.iter().find(|&&entity| {
+                self.sim
+                    .ecs
+                    .0
+                    .get::<EntitySeq>(entity)
+                    .is_some_and(|seq| seq.0 as i32 == id)
+            }) else {
+                continue;
+            };
+            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            let Some(type_comp) = entity_ref.get::<UnitTypeComp>() else {
+                continue;
+            };
+            let command = entity_ref
+                .get::<UnitCommandComp>()
+                .map(|comp| UnitCommandId::new(comp.0))
+                .or_else(|| {
+                    entity_ref
+                        .get::<ControllerSlot>()
+                        .and_then(|slot| slot.command)
+                });
+            let stances: StanceBits = entity_ref
+                .get::<UnitStancesComp>()
+                .map(|comp| comp.0)
+                .unwrap_or_default();
+            out.push((type_comp.type_id.get() as i32, command, stances));
+        }
+        out
+    }
+
+    /// Whether the live command of unit `id` draws its target
+    /// (`UnitCommand.drawTarget`; `InputHandler.java:1231`). Rust-only reticle
+    /// filter (the command panel probe above reports the command but not the
+    /// icon behaviour).
+    pub fn command_draws_target(&self, id: i32) -> bool {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        self.command_panel_units(&[id])
+            .first()
+            .is_some_and(|(type_id, command, _)| {
+                let Some(unit) = content.unit(UnitTypeId::new(*type_id as u16)) else {
+                    return false;
+                };
+                let command = command.or_else(|| {
+                    mind_core::ai::unit_command_runtime::default_command(unit, content)
+                        .map(|def| def.id)
+                });
+                command
+                    .and_then(|id| content.unit_command(id))
+                    .is_some_and(|def| def.draw_target)
+            })
+    }
+
+    /// Live command targets (`Sim::command_targets`; G01 T16) as
+    /// `(id, world x, world y, is_attack)`. Rust-only feed for the T3 attack
+    /// reticle (`InputHandler.drawCommandedTargets`).
+    pub fn command_targets(&self) -> Vec<(i32, f32, f32, bool)> {
+        self.sim.command_targets()
+    }
+
+    /// Drains the per-tick `BuildDamageEvent` log as `(tile x, tile y, team)`
+    /// (`Control.java:68-72`; H03 T4). Rust-only: the minimap is the SINGLE
+    /// drain consumer (the T3-style `#[func] drain_build_damage_json` probe is
+    /// for debug reads only — two consumers would eat each other's rows).
+    pub fn drain_build_damage(&mut self) -> Vec<(i32, i32, u8)> {
+        self.sim
+            .drain_build_damage_events()
+            .into_iter()
+            .map(|event| (event.x as i32, event.y as i32, event.team))
+            .collect()
+    }
+
+    /// `Block.offset` of the building at `(x, y)` in world px
+    /// (`((size + 1) % 2) * tilesize / 2`); `0` without a building or off-map.
+    /// Minimap indicator centring (`MinimapRenderer.java:266-271`).
+    pub fn block_offset(&self, x: i32, y: i32) -> f32 {
+        let Some(tile) = self.tile_at(x, y) else {
+            return 0.0;
+        };
+        if tile.build.is_none() {
+            return 0.0;
+        }
+        self.content_snapshot
+            .as_ref()
+            .and_then(|content| content.block(tile.block))
+            .map(|def| def.offset)
+            .unwrap_or(0.0)
+    }
+
+    // ---- H03 T5 overlay-top seams ----
+
+    /// One frame of `OverlayRenderer.drawTop` inputs
+    /// (`OverlayRenderer.java:91-226`): player position/team, non-player-team
+    /// units, enemy cores and the ground spawn tiles.
+    pub fn overlay_view(&self) -> OverlayView {
+        use mind_core::entities::comp::{Pos, TeamComp};
+        let player_team = self.player_team();
+        let player = self.player_unit_position();
+        let mut enemy_units = Vec::new();
+        if let Some(runtime) = self.sim.unit_runtime() {
+            for &entity in &runtime.units {
+                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                    continue;
+                };
+                let team = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<TeamComp>(entity)
+                    .map(|comp| comp.team)
+                    .unwrap_or(0);
+                if team != player_team {
+                    enemy_units.push((pos.x, pos.y, team));
+                }
+            }
+        }
+        let mut enemy_cores = Vec::new();
+        if let Some(runtime) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+        {
+            for team in runtime.session.teams.active.clone() {
+                let Some(data) = runtime.session.teams.data(team) else {
+                    continue;
+                };
+                if team.0 == player_team {
+                    continue;
+                }
+                for &core in &data.cores {
+                    if let Some(pos) = self.sim.ecs.0.get::<Pos>(core) {
+                        enemy_cores.push((pos.x, pos.y, team.0));
+                    }
+                }
+            }
+        }
+        let spawns = self
+            .sim
+            .unit_runtime()
+            .map(|runtime| {
+                runtime
+                    .wave_spawner
+                    .spawns
+                    .iter()
+                    .map(|pos| {
+                        (
+                            (pos.x() as f32 + 0.5) * TILESIZE_F,
+                            (pos.y() as f32 + 0.5) * TILESIZE_F,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        OverlayView {
+            player,
+            player_team,
+            enemy_units,
+            enemy_cores,
+            spawns,
+        }
+    }
+
+    /// `input.config.getSelected().drawConfigure()` dispatch
+    /// (`BuildingComp.java:1732-1737`; `PowerNode.java:458-480`,
+    /// `ItemBridge.java:282-296`). `Logic` is filled by H06 T12; everything
+    /// else falls back to the generic accent square.
+    pub(crate) fn config_overlay(&self, x: i32, y: i32) -> Option<ConfigOverlay> {
+        use mind_core::world::modules::PowerModule;
+        let content = self.content_snapshot.as_ref()?;
+        let tile = self.tile_at(x, y)?;
+        let entity = tile.build?;
+        let def = content.block(tile.block)?;
+        let cx = x as f32 * TILESIZE_F + def.offset;
+        let cy = y as f32 * TILESIZE_F + def.offset;
+        if matches!(def.kind, BlockKind::PowerNode) {
+            let laser_range = power_laser_range(&def.name) * TILESIZE_F;
+            let mut links = Vec::new();
+            if let Some(module) = self.sim.ecs.0.get::<PowerModule>(entity) {
+                for packed in &module.links {
+                    let (lx, ly) = mind_core::world::pos::unpack(*packed);
+                    let Some(other) = self.tile_at(lx as i32, ly as i32) else {
+                        continue;
+                    };
+                    let size = self
+                        .content_snapshot
+                        .as_ref()
+                        .and_then(|content| content.block(other.block))
+                        .map(|def| def.size)
+                        .unwrap_or(1);
+                    links.push((
+                        lx as f32 * TILESIZE_F + size as f32 * 4.0,
+                        ly as f32 * TILESIZE_F + size as f32 * 4.0,
+                        size,
+                    ));
+                }
+            }
+            return Some(ConfigOverlay::PowerNodeLinks {
+                x: cx,
+                y: cy,
+                size: def.size,
+                laser_range,
+                links,
+            });
+        }
+        let bridge_range = bridge_link_range(def);
+        if let Some(range) = bridge_range {
+            use mind_core::world::blocks::distribution::item_bridge::ItemBridgeBuild;
+            let linked = self
+                .sim
+                .ecs
+                .0
+                .get::<ItemBridgeBuild>(entity)
+                .map(|bridge| bridge.link)
+                .unwrap_or(-1);
+            let team = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::TeamComp>(entity)
+                .map(|comp| comp.team)
+                .unwrap_or(0);
+            let mut targets = Vec::new();
+            let dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+            for (dx, dy) in dirs {
+                for step in 1..=range {
+                    let (tx, ty) = (x + dx * step, y + dy * step);
+                    let Some(other) = self.tile_at(tx, ty) else {
+                        continue;
+                    };
+                    if other.build.is_none() || other.block != tile.block {
+                        continue;
+                    }
+                    let other_team = other
+                        .build
+                        .and_then(|entity| {
+                            self.sim
+                                .ecs
+                                .0
+                                .get::<mind_core::entities::comp::TeamComp>(entity)
+                        })
+                        .map(|comp| comp.team)
+                        .unwrap_or(0);
+                    if other_team != team {
+                        continue;
+                    }
+                    targets.push((
+                        tx as f32 * TILESIZE_F + 4.0,
+                        ty as f32 * TILESIZE_F + 4.0,
+                        linked == (tx << 16) | ty,
+                    ));
+                }
+            }
+            return Some(ConfigOverlay::BridgeLink {
+                x: cx,
+                y: cy,
+                size: def.size,
+                range,
+                targets,
+            });
+        }
+        Some(ConfigOverlay::Generic {
+            x: cx,
+            y: cy,
+            size: def.size,
+        })
+    }
+
+    /// `Building.drawSelect` dispatch for the hovered player-team building
+    /// (`OverlayRenderer.java:213-229`): turret/projector range circles,
+    /// power-node `laserRange` circles (`PowerNode.java:445-453`).
+    pub(crate) fn select_overlay(&self, x: i32, y: i32) -> SelectOverlay {
+        let Some(tile) = self.tile_at(x, y) else {
+            return SelectOverlay::None;
+        };
+        let Some(entity) = tile.build else {
+            return SelectOverlay::None;
+        };
+        let team = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::TeamComp>(entity)
+            .map(|comp| comp.team)
+            .unwrap_or(0);
+        let content = self.content_snapshot.as_ref();
+        let def = content.and_then(|content| content.block(tile.block));
+        let (cx, cy) = def
+            .map(|def| {
+                (
+                    x as f32 * TILESIZE_F + def.offset,
+                    y as f32 * TILESIZE_F + def.offset,
+                )
+            })
+            .unwrap_or((x as f32 * TILESIZE_F, y as f32 * TILESIZE_F));
+        if team != self.player_team() {
+            return SelectOverlay::None;
+        }
+        if let Some((range, kind, color)) = self.block_place_range(tile.block) {
+            return SelectOverlay::Range {
+                x: cx,
+                y: cy,
+                range,
+                color,
+                circles: matches!(kind, PlaceRangeKind::PowerNode),
+            };
+        }
+        SelectOverlay::None
+    }
+
+    /// Debug probe for the placement range lookup (`Block.drawPlace` /
+    /// `drawSelect`): `{"range","kind","color"}` or `"null"` for a block name.
+    /// H03 T5 step 6 diagnosis seam.
+    #[func]
+    pub fn place_range_json(&self, name: GString) -> GString {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("null");
+        };
+        let Some(id) = content.block_id(&name.to_string()) else {
+            return GString::from("null");
+        };
+        match self.block_place_range(id) {
+            Some((range, kind, color)) => {
+                let kind = match kind {
+                    PlaceRangeKind::Turret => "turret",
+                    PlaceRangeKind::Projector => "projector",
+                    PlaceRangeKind::PowerNode => "power-node",
+                };
+                GString::from(
+                    serde_json::json!({"range": range, "kind": kind, "color": color})
+                        .to_string()
+                        .as_str(),
+                )
+            }
+            None => GString::from("null"),
+        }
+    }
+}
+
+/// `OverlayRenderer.drawTop` inputs (H03 T5).
+pub struct OverlayView {
+    /// Player (alpha) centre in world px.
+    pub player: Option<(f32, f32)>,
+    /// Player team id.
+    pub player_team: u8,
+    /// Non-player-team units `(x, y, team)`.
+    pub enemy_units: Vec<(f32, f32, u8)>,
+    /// Enemy core centres `(x, y, team)`.
+    pub enemy_cores: Vec<(f32, f32, u8)>,
+    /// Ground spawn tiles in world px.
+    pub spawns: Vec<(f32, f32)>,
+}
+
+/// `Building.drawConfigure` dispatch (`BuildingComp.java:1732-1737`).
+/// H06 T12 constructs `Logic`; `BridgeLink::range` stays for its use.
+#[allow(dead_code)]
+pub(crate) enum ConfigOverlay {
+    /// Generic accent square (half-size `size * 4 + 1`).
+    Generic { x: f32, y: f32, size: i32 },
+    /// `PowerNode.drawConfigure` (`PowerNode.java:458-480`): pulsing accent
+    /// rings at the node and at `laserRange`, one `Pal.place` square per link.
+    PowerNodeLinks {
+        x: f32,
+        y: f32,
+        size: i32,
+        laser_range: f32,
+        links: Vec<(f32, f32, i32)>,
+    },
+    /// `ItemBridge.drawConfigure` (`ItemBridge.java:282-296`): accent/place/
+    /// breakInvalid squares on the candidate targets.
+    BridgeLink {
+        x: f32,
+        y: f32,
+        size: i32,
+        range: i32,
+        targets: Vec<(f32, f32, bool)>,
+    },
+    /// Logic blocks (`LogicBlock.drawConfigure`); H06 T12 fills the drawing.
+    Logic,
+}
+
+/// `Building.drawSelect` dispatch (`OverlayRenderer.java:213-229`).
+/// H06 T12 constructs `MessageText`/`LogicTag`.
+#[allow(dead_code)]
+pub(crate) enum SelectOverlay {
+    /// Range circle(s) (`Drawf.dashCircle` / `Drawf.circles`).
+    Range {
+        x: f32,
+        y: f32,
+        range: f32,
+        color: u32,
+        circles: bool,
+    },
+    /// Message block text; H06 T12 fills the drawing.
+    MessageText,
+    /// Logic tag (processor link display); H06 T12 fills the drawing.
+    LogicTag,
+    /// No overlay.
+    None,
+}
+
+/// `Block.offset` world-pixel centre of a tile (H01 T1 convention).
+const TILESIZE_F: f32 = mind_core::config::TILESIZE as f32;
+
+/// `PowerNode.laserRange` per name (`Blocks.java:2483-2504`), in tiles.
+fn power_laser_range(name: &str) -> f32 {
+    match name {
+        "power-node" => 6.0,
+        "power-node-large" => 15.0,
+        "surge-tower" => 40.0,
+        _ => 0.0,
+    }
+}
+
+/// `ItemBridge.range` for bridge kinds (`ItemBridge.java`), in tiles.
+fn bridge_link_range(def: &mind_core::content::BlockDef) -> Option<i32> {
+    match def.name.as_str() {
+        "bridge-conveyor" => Some(4),
+        "phase-conveyor" => Some(12),
+        _ => None,
+    }
+}
+
+/// `PlacementFragment` unit table + command/stance rows (`PlacementFragment.java:443-676`).
+///
+/// `units` holds `(type id, live command, stance bits)` per selected unit.
+/// Types are counted and iterated by ascending type id; `commands` is the
+/// union of each type's `UnitType.commands` in that order, deduped
+/// (`PlacementFragment.java:564-570`), `stances` the union of
+/// `UnitType.getUnitStances`. A row is reported only when its union has more
+/// than one entry (`:574`, `:590`). `active` = any unit's live command
+/// (explicit, else `UnitType.defaultCommand`) equals it, / any stance bit is
+/// set (`:619-630`).
+pub(crate) fn command_panel(
+    content: &ContentRegistry,
+    units: &[(i32, Option<UnitCommandId>, StanceBits)],
+) -> serde_json::Value {
+    use mind_core::ai::unit_command_runtime::{default_command, get_unit_stances};
+    let mut counts: std::collections::BTreeMap<i32, i32> = std::collections::BTreeMap::new();
+    let mut ordered: Vec<&(i32, Option<UnitCommandId>, StanceBits)> = units.iter().collect();
+    ordered.sort_by_key(|(type_id, _, _)| *type_id);
+    let mut commands: Vec<UnitCommandId> = Vec::new();
+    let mut stances: Vec<UnitStanceId> = Vec::new();
+    let mut active_commands: Vec<UnitCommandId> = Vec::new();
+    let mut active_stances: Vec<UnitStanceId> = Vec::new();
+    for (type_id, _, _) in units {
+        *counts.entry(*type_id).or_default() += 1;
+    }
+    for (type_id, current, bits) in ordered {
+        let Some(def) = content.unit(UnitTypeId::new(*type_id as u16)) else {
+            continue;
+        };
+        for command in &def.commands {
+            if !commands.contains(command) {
+                commands.push(*command);
+            }
+        }
+        let current = current.or_else(|| default_command(def, content).map(|def| def.id));
+        if let Some(command) = current
+            && !active_commands.contains(&command)
+        {
+            active_commands.push(command);
+        }
+        let mut unit_stances = Vec::new();
+        get_unit_stances(def, content, &mut unit_stances);
+        for stance in unit_stances {
+            if !stances.contains(&stance) {
+                stances.push(stance);
+            }
+            if bits.get(stance) && !active_stances.contains(&stance) {
+                active_stances.push(stance);
+            }
+        }
+    }
+    let type_rows: Vec<serde_json::Value> = counts
+        .iter()
+        .map(|(type_id, count)| {
+            let name = content
+                .unit(UnitTypeId::new(*type_id as u16))
+                .map(|def| def.name.clone())
+                .unwrap_or_default();
+            serde_json::json!({"type": type_id, "name": name, "count": count})
+        })
+        .collect();
+    let command_rows: Vec<serde_json::Value> = if commands.len() > 1 {
+        commands
+            .iter()
+            .filter_map(|id| {
+                content.unit_command(*id).map(|def| {
+                    serde_json::json!({
+                        "name": def.name,
+                        "icon": def.icon,
+                        "key": def.localized_key,
+                        "active": active_commands.contains(id),
+                    })
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let stance_rows: Vec<serde_json::Value> = if stances.len() > 1 {
+        stances
+            .iter()
+            .filter_map(|id| {
+                content.unit_stance(*id).map(|def| {
+                    serde_json::json!({
+                        "name": def.name,
+                        "icon": def.icon,
+                        "key": def.localized_key,
+                        "active": active_stances.contains(id),
+                    })
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    serde_json::json!({
+        "types": type_rows,
+        "commands": command_rows,
+        "stances": stance_rows,
+    })
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core
@@ -6449,5 +7275,73 @@ mod tests {
             300.0
         ));
         assert!(!player_near_drop_zone_predicate(&spawns, None, 1, 2, 300.0));
+    }
+
+    /// H03 T3: types sort by id, command rows are the first-seen union without
+    /// duplicates, and each type's default command is reported active.
+    #[test]
+    fn command_panel_orders_types_and_unions_commands() {
+        use mind_core::ai::default_command;
+        let content = base_registry();
+        let (Some(dagger), Some(nova)) =
+            (content.unit_by_name("dagger"), content.unit_by_name("nova"))
+        else {
+            panic!("dagger/nova missing from content");
+        };
+        let (first, second) = if dagger.id < nova.id {
+            (dagger, nova)
+        } else {
+            (nova, dagger)
+        };
+        let units = vec![
+            (second.id.get() as i32, None, StanceBits::new()),
+            (first.id.get() as i32, None, StanceBits::new()),
+            (first.id.get() as i32, None, StanceBits::new()),
+        ];
+        let panel = command_panel(&content, &units);
+        let Some(types) = panel["types"].as_array() else {
+            panic!("types not an array: {panel}");
+        };
+        assert_eq!(types.len(), 2);
+        assert_eq!(types[0]["name"], serde_json::json!(first.name));
+        assert_eq!(types[0]["count"], serde_json::json!(2));
+        assert_eq!(types[1]["name"], serde_json::json!(second.name));
+        assert_eq!(types[1]["count"], serde_json::json!(1));
+        // Expected union: the lower id's list, then the other type's extras.
+        let mut expected: Vec<String> = Vec::new();
+        for command in first.commands.iter().chain(second.commands.iter()) {
+            let Some(def) = content.unit_command(*command) else {
+                panic!("command {command:?} missing");
+            };
+            let name = def.name.clone();
+            if !expected.contains(&name) {
+                expected.push(name);
+            }
+        }
+        let Some(commands) = panel["commands"].as_array() else {
+            panic!("commands not an array: {panel}");
+        };
+        if expected.len() > 1 {
+            let names: Vec<String> = commands
+                .iter()
+                .map(|row| row["name"].as_str().unwrap_or_default().to_owned())
+                .collect();
+            assert_eq!(names, expected);
+            for unit in [first, second] {
+                let Some(default) = default_command(unit, &content) else {
+                    panic!("{} has no default command", unit.name);
+                };
+                let default = default.name.clone();
+                let row = commands
+                    .iter()
+                    .find(|row| row["name"] == serde_json::json!(default));
+                assert!(
+                    row.is_some_and(|row| row["active"] == serde_json::json!(true)),
+                    "default command {default} not active"
+                );
+            }
+        } else {
+            assert!(commands.is_empty());
+        }
     }
 }

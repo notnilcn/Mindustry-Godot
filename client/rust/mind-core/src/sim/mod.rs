@@ -195,6 +195,9 @@ pub struct Sim {
     /// (G06 T4; T5/T6 extend the handling).
     pub logic_ui_events: Vec<crate::logic::world::LogicWorldEvent>,
 
+    /// Last 64 drained logic-event kind tags (host debug probe; H06 T1).
+    pub logic_event_log: std::collections::VecDeque<String>,
+
     /// Relay-side unit-command apply state (plan 15 M4). Built lazily on the
     /// first unit command so P0 worlds never pay for content boot.
     unit_commands: Option<command::UnitCommandRuntime>,
@@ -269,6 +272,7 @@ impl Sim {
             entity_seq: EntitySequencer::default(),
             commands_applied: 0,
             logic_ui_events: Vec::new(),
+            logic_event_log: std::collections::VecDeque::new(),
             pending_events: Vec::new(),
             event_log: Vec::new(),
         }
@@ -1142,12 +1146,26 @@ impl Sim {
             None => return,
         };
         for event in events {
-            // T5 adds SetBlock / SpawnWave handling here.
-            if let e @ (crate::logic::world::LogicWorldEvent::Message { .. }
-            | crate::logic::world::LogicWorldEvent::Cutscene { .. }) = event
-                && self.logic_ui_events.len() < 256
-            {
-                self.logic_ui_events.push(e);
+            if self.logic_event_log.len() == 64 {
+                self.logic_event_log.pop_front();
+            }
+            self.logic_event_log.push_back(event.kind().to_owned());
+            use crate::logic::world::LogicWorldEvent;
+            match event {
+                // `SpawnWaveI` natural: `logic.skipWave()` (`LExecutor.java:2173-2175`).
+                LogicWorldEvent::SpawnWave { natural: true, .. } => self.logic_skip_wave(),
+                // Positional spawn (`LExecutor.java:2177-2198`).
+                LogicWorldEvent::SpawnWave {
+                    natural: false,
+                    x,
+                    y,
+                } => self.logic_spawn_wave_at(x, y),
+                // T5 adds SetBlock handling here.
+                e @ LogicWorldEvent::Message { .. } if self.logic_ui_events.len() < 256 => {
+                    self.logic_ui_events.push(e);
+                }
+                // `CutsceneI` state lives in `LogicWorldState.cutscene` (T3).
+                _ => {}
             }
         }
     }
@@ -1155,6 +1173,71 @@ impl Sim {
     /// Monotonic update counter (`GameState.updateId`).
     pub fn update_id(&self) -> u64 {
         self.state.update_id
+    }
+
+    /// `InputHandler.logicCutscene` presentation state (defaults when no live
+    /// `LogicWorldState`).
+    pub fn logic_cutscene(&self) -> crate::logic::world::LogicCutscene {
+        self.ecs
+            .0
+            .get_resource::<crate::logic::world::LogicWorldState>()
+            .map(|state| state.cutscene)
+            .unwrap_or_default()
+    }
+
+    /// Takes the pending `CutsceneI shake` request (`Renderer.shake(p1, p2 * 60)`).
+    pub fn take_logic_shake(&mut self) -> Option<(f32, f32)> {
+        self.ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()?
+            .cutscene
+            .shake
+            .take()
+    }
+
+    /// Drains queued world-processor messages (`announce`/`notify`/`toast`;
+    /// `mission` is written to the rules directly). Only `Message` events
+    /// remain in `logic_ui_events` after T3.
+    pub fn take_logic_messages(&mut self) -> Vec<(crate::logic::enums::MessageType, String, f32)> {
+        let mut out = Vec::new();
+        self.logic_ui_events.retain(|event| {
+            if let crate::logic::world::LogicWorldEvent::Message {
+                type_,
+                text,
+                duration,
+            } = event
+            {
+                out.push((*type_, text.clone(), *duration));
+                false
+            } else {
+                true
+            }
+        });
+        out
+    }
+
+    /// `InputHandler` world-reset half (`InputHandler.java:921-922`): clears the
+    /// logic cutscene/HUD flags and the message timers on a world load.
+    pub fn reset_logic_presentation(&mut self) {
+        if let Some(mut state) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+        {
+            state.cutscene = crate::logic::world::LogicCutscene::default();
+        }
+        if let Some(mut messages) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::world::MessageState>()
+        {
+            messages.has_announcement = false;
+            messages.has_toast = false;
+            messages.mission = None;
+            messages.announce_until = 0;
+            messages.toast_until = 0;
+        }
+        self.logic_ui_events.clear();
     }
 
     /// Current phase name (inspector/parity).

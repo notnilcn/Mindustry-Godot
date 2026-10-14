@@ -623,13 +623,36 @@ fn write_or_check(
     if let Some(path) = check {
         let golden = std::fs::read_to_string(path)
             .with_context(|| format!("read golden {}", path.display()))?;
-        if golden.trim_end() != text.trim_end() {
-            eprintln!("fx golden mismatch: {}", path.display());
-            return Ok(EXIT_FAIL);
+        match serde_json::from_str::<Value>(golden.trim_end()) {
+            Ok(golden_value) if json_close(&golden_value, value, 1e-4) => {}
+            _ => {
+                eprintln!("fx golden mismatch: {}", path.display());
+                return Ok(EXIT_FAIL);
+            }
         }
     }
     emit(value, json)?;
     Ok(EXIT_PASS)
+}
+
+/// Structural JSON equality with an absolute float tolerance (FX goldens
+/// hold f32 trig results; 1-ULP drift between toolchains is not a change).
+fn json_close(a: &Value, b: &Value, eps: f64) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => match (x.as_f64(), y.as_f64()) {
+            (Some(x), Some(y)) => (x - y).abs() <= eps,
+            _ => x == y,
+        },
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len() && x.iter().zip(y).all(|(u, v)| json_close(u, v, eps))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, u)| y.get(k).is_some_and(|v| json_close(u, v, eps)))
+        }
+        _ => a == b,
+    }
 }
 
 fn emit(value: &Value, json: bool) -> Result<()> {
@@ -639,4 +662,22 @@ fn emit(value: &Value, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(value)?);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::json_close;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn json_close_tolerates_ulp_but_not_geometry() {
+        let golden: Value = json!({"y": 95.36211395263672});
+        let now: Value = json!({"y": 95.36210632324219});
+        assert!(json_close(&golden, &now, 1e-4));
+        assert!(!json_close(&json!({"y": 95.0}), &json!({"y": 96.0}), 1e-4));
+        assert!(!json_close(&json!([1.0, 2.0]), &json!([1.0]), 1e-4));
+        // Non-numeric structure still compares exactly.
+        assert!(json_close(&json!({"a": "x"}), &json!({"a": "x"}), 1e-4));
+        assert!(!json_close(&json!({"a": "x"}), &json!({"a": "y"}), 1e-4));
+    }
 }
