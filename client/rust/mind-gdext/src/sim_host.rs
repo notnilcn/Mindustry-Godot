@@ -5247,8 +5247,11 @@ fn hint_state_value(sim: &Sim, content: Option<&ContentRegistry>, team: u8) -> s
     // Campaign facts for the T4b predicates (live runtime campaign + rules).
     let rules = mind_core::game::runtime::rules_of(&sim.ecs.0);
     let attack_mode = rules.is_some_and(|rules| rules.attack_mode);
-    // `!rules.hasEnv(Env.scorching)` (`EnvFlag::Scorching` = bit 4).
-    let serpulo = rules.is_none_or(|rules| rules.env & (1 << 4) == 0);
+    // `!rules.hasEnv(Env.scorching)` (`world/meta/Env.java`; the one bit table
+    // is `game::planet::env_bit`).
+    let serpulo = rules.is_none_or(|rules| {
+        rules.env & mind_core::game::planet::env_bit(mind_core::content::EnvFlag::Scorching) == 0
+    });
     let team_rebuild_plans = runtime
         .and_then(|runtime| {
             runtime

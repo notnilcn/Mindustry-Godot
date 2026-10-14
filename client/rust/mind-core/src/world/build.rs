@@ -37,20 +37,6 @@ pub fn supports_env(def: &BlockDef, env: EnvFlag) -> bool {
     def.env_enabled.contains(env) || def.env_enabled.is_empty()
 }
 
-/// Java `Env` bit of a flag (`mindustry.world.meta.Env`).
-const fn java_env_bit(flag: EnvFlag) -> i32 {
-    match flag {
-        EnvFlag::Terrestrial => 1,
-        EnvFlag::Space => 1 << 1,
-        EnvFlag::Underwater => 1 << 2,
-        EnvFlag::Spores => 1 << 3,
-        EnvFlag::Scorching => 1 << 4,
-        EnvFlag::GroundOil => 1 << 5,
-        EnvFlag::GroundWater => 1 << 6,
-        EnvFlag::Oxygen => 1 << 7,
-    }
-}
-
 fn mask_bits(mask: &crate::content::EnvMask, empty: i32) -> i32 {
     if mask.any {
         return -1;
@@ -60,7 +46,7 @@ fn mask_bits(mask: &crate::content::EnvMask, empty: i32) -> i32 {
     }
     mask.flags
         .iter()
-        .fold(0, |bits, flag| bits | java_env_bit(*flag))
+        .fold(0, |bits, flag| bits | crate::game::planet::env_bit(*flag))
 }
 
 /// `Block.supportsEnv(env)` against a Java `Env` bitmask (`Rules.env`):
@@ -68,7 +54,10 @@ fn mask_bits(mask: &crate::content::EnvMask, empty: i32) -> i32 {
 /// || (envRequired & env) == envRequired)`. An unset `envEnabled` is the
 /// upstream default `Env.terrestrial`.
 pub fn supports_env_bits(def: &BlockDef, env: i32) -> bool {
-    let enabled = mask_bits(&def.env_enabled, java_env_bit(EnvFlag::Terrestrial));
+    let enabled = mask_bits(
+        &def.env_enabled,
+        crate::game::planet::env_bit(EnvFlag::Terrestrial),
+    );
     let disabled = mask_bits(&def.env_disabled, 0);
     let required = mask_bits(&def.env_required, 0);
     (enabled & env) != 0 && (disabled & env) == 0 && (required == 0 || (required & env) == required)

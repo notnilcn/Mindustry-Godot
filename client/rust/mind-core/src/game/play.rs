@@ -861,6 +861,7 @@ mod tests {
         assert!(session.add_starting_items, "groundZero adds starting items");
         // Planet/campaign fold applied.
         assert_eq!(session.rules.planet, "serpulo");
+        assert_eq!(session.rules.env, 233, "Serpulo `Planet.defaultEnv`");
         assert_eq!(session.difficulty_wave_time_multiplier, 1.0);
     }
 

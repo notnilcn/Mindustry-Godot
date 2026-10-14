@@ -141,4 +141,22 @@ mod tests {
         assert_eq!(selected[1].pass, "scorching");
         assert!(registry.select(SPACE).is_empty());
     }
+
+    /// The renderer's `u32` constants are the Java `Env` bits (`Env.java:5-26`)
+    /// and must match the single bit table `game::planet::env_bit`.
+    #[test]
+    fn render_env_bits_match_planet_env_bit() {
+        use crate::content::EnvFlag;
+        let bit = |flag: EnvFlag| crate::game::planet::env_bit(flag) as u32;
+        assert_eq!(TERRESTRIAL, bit(EnvFlag::Terrestrial));
+        assert_eq!(SPACE, bit(EnvFlag::Space));
+        assert_eq!(UNDERWATER, bit(EnvFlag::Underwater));
+        assert_eq!(SPORES, bit(EnvFlag::Spores));
+        assert_eq!(SCORCHING, bit(EnvFlag::Scorching));
+        assert_eq!(GROUND_OIL, bit(EnvFlag::GroundOil));
+        assert_eq!(GROUND_WATER, bit(EnvFlag::GroundWater));
+        assert_eq!(OXYGEN, bit(EnvFlag::Oxygen));
+        assert_eq!(ANY, u32::MAX);
+        assert_eq!(NONE, 0);
+    }
 }

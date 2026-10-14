@@ -1914,7 +1914,7 @@ pub fn unit_update_system(world: &mut World) {
         let rules = &campaign.session.rules;
         world.insert_resource(crate::combat::fires::CombatEnv {
             fire: rules.fire,
-            oxygen: rules.env & (1 << 7) != 0,
+            oxygen: rules.env & crate::game::planet::env_bit(crate::content::EnvFlag::Oxygen) != 0,
             heat: 0.0,
         });
     }

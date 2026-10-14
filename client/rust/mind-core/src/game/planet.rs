@@ -124,17 +124,20 @@ pub struct Planet {
     pub neighbors: Vec<Vec<u16>>,
 }
 
-/// `Env` bit for a flag (`mindustry.world.meta.Env`).
+/// `Env` bit for a flag (`mindustry.world.meta.Env`, `Env.java:5-26`).
+/// This is the only `Env` bit table in `mind-core`; every env mask
+/// (`Rules.env`, `Block`/`UnitType` `envEnabled/envDisabled/envRequired`)
+/// is built from it.
 pub const fn env_bit(flag: EnvFlag) -> i32 {
     match flag {
-        EnvFlag::Terrestrial => 1 << 0,
-        EnvFlag::Spores => 1 << 1,
-        EnvFlag::GroundOil => 1 << 2,
-        EnvFlag::GroundWater => 1 << 3,
-        EnvFlag::Oxygen => 1 << 4,
-        EnvFlag::Scorching => 1 << 5,
-        EnvFlag::Underwater => 1 << 6,
-        EnvFlag::Space => 1 << 7,
+        EnvFlag::Terrestrial => 1,
+        EnvFlag::Space => 1 << 1,
+        EnvFlag::Underwater => 1 << 2,
+        EnvFlag::Spores => 1 << 3,
+        EnvFlag::Scorching => 1 << 4,
+        EnvFlag::GroundOil => 1 << 5,
+        EnvFlag::GroundWater => 1 << 6,
+        EnvFlag::Oxygen => 1 << 7,
     }
 }
 
@@ -543,10 +546,34 @@ mod tests {
     }
 
     #[test]
-    fn env_mask_bits() {
-        let mask = env_mask(&[EnvFlag::Terrestrial, EnvFlag::Oxygen]);
-        assert_eq!(mask, 1 | 16);
-        assert_eq!(env_mask(&[EnvFlag::Space]), 128);
+    fn env_mask_bits_match_java_env() {
+        assert_eq!(env_mask(&[EnvFlag::Terrestrial, EnvFlag::Oxygen]), 1 | 128);
+        assert_eq!(env_mask(&[EnvFlag::Space]), 2);
+        assert_eq!(env_bit(EnvFlag::Underwater), 4);
+        assert_eq!(env_bit(EnvFlag::Spores), 8);
+        assert_eq!(env_bit(EnvFlag::Scorching), 16);
+        assert_eq!(env_bit(EnvFlag::GroundOil), 32);
+        assert_eq!(env_bit(EnvFlag::GroundWater), 64);
+    }
+
+    /// Planet defaults (`Planets.java:56` erekir `scorching|terrestrial`,
+    /// `:117` tantros `underwater|terrestrial`, `Planet.java:87` serpulo
+    /// `terrestrial|spores|groundOil|groundWater|oxygen` = 233).
+    #[test]
+    fn planet_default_env_matches_java() {
+        let registry = registry();
+        let default_env = |name: &str| {
+            let def = registry.planet_by_name(name).expect("planet");
+            Planet::from_def(&registry, def, 0.0).default_env
+        };
+        assert_eq!(default_env("serpulo"), 233);
+        assert_eq!(default_env("erekir"), 17);
+        assert_eq!(default_env("tantros"), 5);
+        assert_eq!(
+            default_env("serpulo"),
+            crate::io::json::rules::DEFAULT_ENV,
+            "`Planet.defaultEnv` matches `Vars.defaultEnv`"
+        );
     }
 
     #[test]

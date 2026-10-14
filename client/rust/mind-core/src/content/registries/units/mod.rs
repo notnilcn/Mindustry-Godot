@@ -1463,19 +1463,6 @@ impl UnitTypeDef {
     /// && (envDisabled & env) == 0 && (envRequired == 0 || (envRequired & env)
     /// == envRequired)`. Unset `envEnabled` defaults to `Env.terrestrial`.
     pub fn supports_env(&self, env: i32) -> bool {
-        /// Java `Env` bit of a flag (`mindustry.world.meta.Env`).
-        fn env_bit(flag: EnvFlag) -> i32 {
-            match flag {
-                EnvFlag::Terrestrial => 1,
-                EnvFlag::Space => 1 << 1,
-                EnvFlag::Underwater => 1 << 2,
-                EnvFlag::Spores => 1 << 3,
-                EnvFlag::Scorching => 1 << 4,
-                EnvFlag::GroundOil => 1 << 5,
-                EnvFlag::GroundWater => 1 << 6,
-                EnvFlag::Oxygen => 1 << 7,
-            }
-        }
         fn mask_bits(mask: &EnvMask, empty: i32) -> i32 {
             if mask.any {
                 return -1;
@@ -1485,9 +1472,12 @@ impl UnitTypeDef {
             }
             mask.flags
                 .iter()
-                .fold(0, |bits, flag| bits | env_bit(*flag))
+                .fold(0, |bits, flag| bits | crate::game::planet::env_bit(*flag))
         }
-        let enabled = mask_bits(&self.env_enabled, env_bit(EnvFlag::Terrestrial));
+        let enabled = mask_bits(
+            &self.env_enabled,
+            crate::game::planet::env_bit(EnvFlag::Terrestrial),
+        );
         let disabled = mask_bits(&self.env_disabled, 0);
         let required = mask_bits(&self.env_required, 0);
         (enabled & env) != 0
@@ -2884,5 +2874,16 @@ mod tests {
         for name in ["evoke", "incite", "emanate"] {
             assert!(!get(&registry, name).can_attack, "{name} can_attack");
         }
+    }
+
+    /// `UnitType.java:49-53` (`envRequired 0`, `envEnabled terrestrial`,
+    /// `envDisabled scorching`) + `:757` `supportsEnv`: alpha is allowed on
+    /// Serpulo's 233 but refused on Erekir's 17 (16 = scorching).
+    #[test]
+    fn alpha_supports_serpulo_not_erekir() {
+        let registry = test_registry();
+        let alpha = get(&registry, "alpha");
+        assert!(alpha.supports_env(233), "serpulo allows the mech");
+        assert!(!alpha.supports_env(17), "erekir: envDisabled = scorching");
     }
 }

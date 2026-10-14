@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use indexmap::IndexMap;
 
 use crate::content::ContentRegistry;
+use crate::content::EnvFlag;
 use crate::io::json::{JsonIo, Rules};
 use crate::util::strings::strip_colors;
 use crate::world::MapGenHooks;
@@ -22,7 +23,7 @@ use super::error::MapError;
 use super::preview;
 
 /// `Env.scorching` bit (`mindustry.world.meta.Env`).
-pub const ENV_SCORCHING: i32 = 1 << 4;
+pub const ENV_SCORCHING: i32 = crate::game::planet::env_bit(EnvFlag::Scorching);
 /// The default bundle "unknown" string (`Map.tag`).
 pub const UNKNOWN: &str = "unknown";
 
