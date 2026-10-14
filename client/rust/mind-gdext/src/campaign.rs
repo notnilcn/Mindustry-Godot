@@ -632,6 +632,21 @@ impl MindCampaign {
                 dirty = true;
             }
         }
+        // H04 T6: legacy launch pads queue destination records for the host to
+        // flush (`Sector.saveInfo` after `addItems`).
+        if !runtime.pending_info_saves.is_empty() {
+            for (planet, sector_id) in std::mem::take(&mut runtime.pending_info_saves) {
+                let planet_name = runtime
+                    .campaign
+                    .planet(planet)
+                    .map(|planet| planet.name.clone())
+                    .unwrap_or_default();
+                if let Some(sector) = runtime.campaign.sector(planet, sector_id) {
+                    let _ = sector.save_info(&mut self.settings, &planet_name);
+                }
+            }
+            dirty = true;
+        }
         self.registry = registry;
 
         if !replacements.is_empty() {
@@ -1393,6 +1408,55 @@ impl MindCampaign {
             );
         }
         Some(value)
+    }
+
+    /// `LaunchPad.buildConfiguration` -> `ui.planet.showSelect` result
+    /// (`LaunchPad.java:185-203`): sets the played sector's export destination
+    /// to `planet:sector`; `-1` clears it. H05 wires the pad config button.
+    #[func]
+    pub fn set_launch_destination(&mut self, planet: GString, sector: i64) -> bool {
+        let planet_name = planet.to_string();
+        let destination = if sector < 0 {
+            None
+        } else if sector <= i64::from(u16::MAX) {
+            Some(mind_core::io::json::content_serde::SectorKey::format(
+                &planet_name,
+                sector as u16,
+            ))
+        } else {
+            return false;
+        };
+        let Some((planet_id, sector_id)) = self.session.sector else {
+            return false;
+        };
+        let Some(registry) = self.registry.take() else {
+            return false;
+        };
+        let updated = self.with_campaign_mut(|campaign, settings| {
+            let previous = campaign
+                .sector(planet_id, sector_id)
+                .and_then(|sector| sector.info.info.destination.clone());
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
+                return false;
+            };
+            record.info.info.destination = destination.clone();
+            let _ = record.save_info(settings, &planet_name);
+            // `if(prev != null) prev.info.refreshImportRates(planet)`.
+            if let Some(previous) = previous
+                && let Some(prev_planet) = previous.planet()
+                && let Some(prev_sector) = previous.sector()
+                && let Some(prev_planet_id) = campaign.planet_id_by_name(prev_planet)
+            {
+                campaign.refresh_sector_import_rates(&registry, prev_planet_id, prev_sector);
+            }
+            true
+        });
+        self.registry = Some(registry);
+        if updated != Some(true) {
+            return false;
+        }
+        self.persist();
+        true
     }
 
     /// Advances the wave counter (`Logic.runWave`), mirroring into the live

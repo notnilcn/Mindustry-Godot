@@ -29,7 +29,7 @@ use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::rts_ai::{self, EnemyStat, MAX_TARGETS_CHECKED, RtsBuilding, RtsLiveUnit};
 use crate::ai::{BaseBuildInput, BaseRegistry, Cost};
 use crate::content::registries::blocks::BlockFlag;
-use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId, LiquidId, UnitTypeId};
+use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId, LiquidId, PlanetId, UnitTypeId};
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
@@ -238,6 +238,9 @@ pub struct CampaignRuntime {
     /// Newly produced content queued for the host to unlock through the tech
     /// tree (`UnlockRef`; drained by `MindCampaign.take_unlocked_content`).
     pub pending_unlocks: Vec<UnlockRef>,
+    /// Destination sector records queued by `launch_payload_system` for a host
+    /// `save_info` flush (legacy launch pads; H04 T6).
+    pub pending_info_saves: Vec<(PlanetId, u16)>,
 }
 
 impl CampaignRuntime {
@@ -256,6 +259,7 @@ impl CampaignRuntime {
             pending_time_destroy: Vec::new(),
             rules_world_dirty: false,
             pending_unlocks: Vec::new(),
+            pending_info_saves: Vec::new(),
         }
     }
 

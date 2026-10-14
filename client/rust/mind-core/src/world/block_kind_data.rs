@@ -341,8 +341,10 @@ pub struct LandingPadDef {
 /// `LaunchPad` family knobs.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LaunchPadDef {
-    /// `LaunchPad.launchTime`.
+    /// `LaunchPad.launchTime` (ticks).
     pub launch_time: f32,
+    /// `LaunchPad.acceptMultipleItems` (false: one item type at a time).
+    pub accept_multiple_items: bool,
 }
 
 /// `LegacyBlock` marker data (replacement content id, when defined).
@@ -625,7 +627,20 @@ impl BlockKindData {
             BlockKind::PowerVoid => BlockKindData::PowerVoid,
             BlockKind::Accelerator => BlockKindData::Accelerator(AcceleratorDef::default()),
             BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef::default()),
-            BlockKind::LaunchPad => BlockKindData::LaunchPad(LaunchPadDef::default()),
+            BlockKind::LaunchPad => BlockKindData::LaunchPad(match def.name.as_str() {
+                // `Blocks.java:6844,6846` (`launch-pad` 1200 ticks,
+                // `acceptMultipleItems = true`) and `:6854,6856`
+                // (`advanced-launch-pad` 1800 ticks, one item type).
+                "launch-pad" => LaunchPadDef {
+                    launch_time: 1200.0,
+                    accept_multiple_items: true,
+                },
+                "advanced-launch-pad" => LaunchPadDef {
+                    launch_time: 1800.0,
+                    accept_multiple_items: false,
+                },
+                _ => LaunchPadDef::default(),
+            }),
             BlockKind::LegacyMechPad
             | BlockKind::LegacyUnitFactory
             | BlockKind::LegacyCommandCenter => BlockKindData::Legacy(LegacyDef::default()),

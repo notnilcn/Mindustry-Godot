@@ -4760,6 +4760,35 @@ impl MindSimHost {
         true
     }
 
+    /// Launch pods in flight (`LaunchPayloadState`; H04 T6 seam for H03's
+    /// `LaunchPayloadComp.draw`: `fin = time/lifetime`, region `<block>-pod`).
+    #[func]
+    pub fn launch_payloads_json(&mut self) -> GString {
+        let rows = mind_core::game::launch_payload::payload_rows(&mut self.sim.ecs.0);
+        let mapped: Vec<String> = rows
+            .into_iter()
+            .map(|(id, x, y, time, lifetime, block, team)| {
+                let block = self
+                    .content_snapshot
+                    .as_ref()
+                    .and_then(|content| content.block(block))
+                    .map(|def| def.name.clone())
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "id": id,
+                    "x": x,
+                    "y": y,
+                    "time": time,
+                    "lifetime": lifetime,
+                    "block": block,
+                    "team": team,
+                })
+                .to_string()
+            })
+            .collect();
+        GString::from(format!("[{}]", mapped.join(",")).as_str())
+    }
+
     // ---- G03 T2 placement preview seams (Rust-only) ----
 
     /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;
