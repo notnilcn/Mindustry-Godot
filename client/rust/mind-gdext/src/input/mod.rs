@@ -1117,6 +1117,18 @@ impl MindInput {
         self.bridge.key_down(&self.bindings, ids::PAN)
     }
 
+    /// `mouseMove` binding held (mouse-back cursor pull; T9 uploads it to the
+    /// player unit, T10 makes it pan while paused/dead).
+    pub fn mouse_move_pressed(&self) -> bool {
+        self.bridge.key_down(&self.bindings, ids::MOUSE_MOVE)
+    }
+
+    /// Last tracked cursor position in viewport coordinates
+    /// (`Core.input.mouseX/Y`; the camera pan reads it, T10).
+    pub fn mouse_position(&self) -> (f32, f32) {
+        self.bridge.mouse
+    }
+
     /// Whether the world accepts gameplay input (no open dialog/text field).
     #[func]
     pub fn gameplay_input_active(&self) -> bool {
