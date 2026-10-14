@@ -214,10 +214,10 @@ pub fn collect_frame_loops(
             && !sound.is_none_or_unset()
         {
             let noise = if def.sound_vol_osc_mag > 0.0 && def.sound_vol_osc_scl > 0.0 {
-                // Arc `Noise.rawNoise` is 1-D Perlin; the port uses its simplex
-                // `raw2d` (deviation, audio only).
-                crate::math::noise::raw2d(0, f64::from(view_tick / def.sound_vol_osc_scl), 0.0)
-                    .abs() as f32
+                // `Weather.updateEffect` (`Weather.java:102-105`):
+                // `abs(Noise.rawNoise(Time.time / soundVolOscScl)) * soundVolOscMag`.
+                crate::math::noise::raw_noise_1d(f64::from(view_tick / def.sound_vol_osc_scl)).abs()
+                    as f32
                     * def.sound_vol_osc_mag
             } else {
                 0.0

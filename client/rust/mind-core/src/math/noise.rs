@@ -92,6 +92,101 @@ pub fn noise3d(
     (total / max_amplitude) as f32
 }
 
+/// Arc `Noise` 1-D Perlin tables (`arc/util/noise/Noise.java:222-262`, seed
+/// 100). Only `p` and `g1` are needed by `rawNoise`.
+struct ArcPerlin1 {
+    p: [usize; 514],
+    g1: [f64; 514],
+}
+
+static ARC_PERLIN1: std::sync::OnceLock<ArcPerlin1> = std::sync::OnceLock::new();
+
+fn arc_perlin1() -> &'static ArcPerlin1 {
+    ARC_PERLIN1.get_or_init(|| {
+        const B: usize = 256;
+        const M: i64 = 255;
+        let mut r = crate::random::JavaRandom::new(100);
+        let mut p = [0usize; 514];
+        let mut g1 = [0.0f64; 514];
+        for i in 0..B {
+            p[i] = i;
+            g1[i] = 2.0 * r.next_double() - 1.0;
+            // The 2-D and 3-D rejection loops' values are discarded, but the
+            // draws shift the `java.util.Random` stream (same positions as
+            // upstream).
+            loop {
+                let u = 2.0 * r.next_double() - 1.0;
+                let v = 2.0 * r.next_double() - 1.0;
+                if !(u * u + v * v > 1.0
+                    || u.abs() > 2.5 * v.abs()
+                    || v.abs() > 2.5 * u.abs()
+                    || (u.abs() - v.abs()).abs() < 0.4)
+                {
+                    break;
+                }
+            }
+            loop {
+                let u = 2.0 * r.next_double() - 1.0;
+                let v = 2.0 * r.next_double() - 1.0;
+                let w = 2.0 * r.next_double() - 1.0;
+                let (au, av, aw) = (u.abs(), v.abs(), w.abs());
+                let lo = au.min(av).min(aw);
+                let hi = au.max(av).max(aw);
+                if !(u * u + v * v + w * w > 1.0
+                    || hi > 4.0 * lo
+                    || (au - av).abs().min((au - aw).abs()).min((av - aw).abs()) < 0.2)
+                {
+                    break;
+                }
+            }
+        }
+        // `while(--i > 0){ k = p[i]; j = (int)(r.nextLong() & M); ... }`:
+        // bodies run for i = 255..=1.
+        let mut i = B;
+        while i > 1 {
+            i -= 1;
+            let k = p[i];
+            let j = (r.next_long() & M) as usize;
+            p[i] = p[j];
+            p[j] = k;
+        }
+        for i in 0..B + 2 {
+            p[B + i] = p[i];
+            g1[B + i] = g1[i];
+        }
+        ArcPerlin1 { p, g1 }
+    })
+}
+
+/// Arc `Noise.rawNoise(double)` (`arc/util/noise/Noise.java:30-45`): the 1-D
+/// Perlin value Mindustry's weather sound oscillator reads. `Noise.setSeed` is
+/// never called upstream, so seed 100 is fixed.
+pub fn raw_noise_1d(x: f64) -> f64 {
+    const M: i64 = 255;
+    const N: f64 = 256.0;
+    let table = arc_perlin1();
+    let t = x + N;
+    let ti = t as i32;
+    let bx0 = (i64::from(ti) & M) as usize;
+    let bx1 = ((i64::from(ti) + 1) & M) as usize;
+    let rx0 = t - f64::from(ti);
+    let rx1 = rx0 - 1.0;
+    let sx = rx0 * rx0 * (3.0 - 2.0 * rx0);
+    let u = rx0 * table.g1[table.p[bx0]];
+    let v = rx1 * table.g1[table.p[bx1]];
+    u + sx * (v - u)
+}
+
+/// Test-only table probe: `([p[0..4]], g1[0])` for the reference test.
+#[cfg(test)]
+pub(crate) fn arc_perlin1_probe() -> ([usize; 4], f64) {
+    let table = arc_perlin1();
+    (
+        [table.p[0], table.p[1], table.p[2], table.p[3]],
+        table.g1[0],
+    )
+}
+
 /// `Simplex.raw2d`: single-octave 2D simplex noise in `[-1, 1]`.
 pub fn raw2d(seed: i32, x: f64, y: f64) -> f64 {
     let f2 = 0.5 * (3.0_f64.sqrt() - 1.0);
@@ -251,5 +346,42 @@ mod tests {
         let b = raw3d(42, 0.3, 0.6, 0.9);
         assert_eq!(a, b);
         assert!((-1.0..=1.0).contains(&a));
+    }
+
+    /// H07 T8: Arc `Noise.rawNoise` values from an independent Python port of
+    /// `Noise.java` (seed 100, `java.util.Random` LCG re-implemented; **not** a
+    /// JVM run — see the plan's reference table).
+    #[test]
+    fn arc_raw_noise_1d_matches_reference() {
+        let (p, g1_0) = arc_perlin1_probe();
+        assert!(
+            (g1_0 - 0.4440193097192868).abs() < 1.0e-12,
+            "g1[0] = {g1_0}"
+        );
+        assert_eq!(p, [66, 74, 50, 45], "p[0..4]");
+
+        let cases = [
+            (0.25, 0.12894795904560868),
+            (0.5, 0.24520408728404314),
+            (1.7, 0.10345653783232334),
+            (1000.0 / 1100.0, 0.07698456651943808),
+            (12.345, -0.028115906860696198),
+        ];
+        for (x, expected) in cases {
+            let value = raw_noise_1d(x);
+            assert!(
+                (value - expected).abs() < 1.0e-12,
+                "raw_noise_1d({x}) = {value}, expected {expected}"
+            );
+        }
+    }
+
+    /// Integer lattice points are zero for this Perlin variant.
+    #[test]
+    fn arc_raw_noise_1d_zero_at_integers() {
+        for k in 0..10 {
+            let value = raw_noise_1d(f64::from(k));
+            assert!(value.abs() < 1.0e-12, "raw_noise_1d({k}) = {value}");
+        }
     }
 }
