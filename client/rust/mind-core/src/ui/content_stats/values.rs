@@ -220,3 +220,194 @@ pub fn item_ids(ctx: &StatCtx, ids: &[ItemId], display_name: bool) -> Vec<Cell> 
         .collect();
     items(ctx, &stacks, display_name)
 }
+
+/// `StatValues.displayItemPercent(item, percent, showName)`.
+pub fn display_item_percent(
+    ctx: &StatCtx,
+    item: ItemId,
+    percent: i32,
+    show_name: bool,
+) -> Vec<Cell> {
+    let mut cells = Vec::new();
+    let Some(name) = ctx.registry.item(item).map(|def| def.name.clone()) else {
+        return cells;
+    };
+    cells.push(Cell::Icon {
+        region: format!("item-{name}-ui"),
+        amount: None,
+        size: 32,
+        content: Some(name.clone()),
+    });
+    cells.push(Cell::Space { w: 2.0 });
+    let label = if show_name {
+        format!("{}\n[lightgray]{percent}%", ctx.item_name(&name))
+    } else {
+        format!("[lightgray]{percent}%")
+    };
+    cells.push(text(label));
+    cells.push(Cell::Space { w: 5.0 });
+    cells
+}
+
+/// Which floors `StatValues.drillables` accepts: `Drill.setStats` filters
+/// `Floor && !wallOre`, `BeamDrill.setStats` `(Floor && wallOre) || StaticWall`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrillablesScope {
+    /// `Drill.setStats` (`Drill.java:178-179`).
+    Floor,
+    /// `BeamDrill.setStats` (`BeamDrill.java:122-125`).
+    WallOre,
+}
+
+/// `StatValues.drillables(drillTime, drillMultiplier, size, multipliers, filter)`:
+/// one 40 px panel per drillable block with the item and its per-second rate.
+///
+/// Deviation: the port lists every drillable block in the registry (Java also
+/// requires `indexer.isBlockPresent(f)` in game); the item glyph is the 16 px
+/// item icon instead of `Item.emoji()`.
+pub fn drillables(
+    ctx: &StatCtx,
+    drill: &crate::world::block_kind_data::DrillDef,
+    size: f32,
+    scope: DrillablesScope,
+) -> Vec<Cell> {
+    use crate::content::registries::blocks::BlockKind;
+
+    let is_floor = |kind: BlockKind| {
+        matches!(
+            kind,
+            BlockKind::Floor
+                | BlockKind::EmptyFloor
+                | BlockKind::ColoredFloor
+                | BlockKind::OreBlock
+                | BlockKind::ShallowLiquid
+                | BlockKind::SteamVent
+        )
+    };
+    let mut cells = Vec::new();
+    let mut index = 0usize;
+    for def in ctx.registry.blocks() {
+        let Some(drop) = def.item_drop else {
+            continue;
+        };
+        let in_scope = match scope {
+            DrillablesScope::Floor => is_floor(def.kind) && !def.wall_ore,
+            DrillablesScope::WallOre => {
+                (is_floor(def.kind) && def.wall_ore)
+                    || (def.kind == BlockKind::StaticWall && def.item_drop.is_some())
+            }
+        };
+        if !in_scope {
+            continue;
+        }
+        let Some(item) = ctx.registry.item(drop) else {
+            continue;
+        };
+        if item.hardness > drill.tier || drill.blocked_items.contains(&drop.raw()) {
+            continue;
+        }
+        let multiplier = drill
+            .drill_multipliers
+            .iter()
+            .find(|(id, _)| *id == drop.raw())
+            .map(|(_, value)| *value)
+            .unwrap_or(1.0);
+        let time = (drill.drill_time + drill.hardness_drill_multiplier * item.hardness as f32)
+            .max(drill.drill_time);
+        let rate = 60.0 / (time / multiplier) * size;
+        cells.push(Cell::Panel {
+            cells: vec![
+                Cell::Icon {
+                    region: format!("block-{}-ui", def.name),
+                    amount: None,
+                    size: 40,
+                    content: Some(def.name.clone()),
+                },
+                text(block_display_name(ctx, def)),
+                Cell::Space { w: 4.0 },
+                Cell::Icon {
+                    region: format!("item-{}-ui", item.name),
+                    amount: None,
+                    size: 16,
+                    content: Some(item.name.clone()),
+                },
+                Cell::Space { w: 4.0 },
+                text(format!(
+                    "[lightgray]{}{}",
+                    auto_fixed(rate, 2),
+                    ctx.unit_label(StatUnit::PerSecond)
+                )),
+            ],
+        });
+        index += 1;
+        if index.is_multiple_of(2) {
+            cells.push(Cell::Row);
+        }
+    }
+    cells
+}
+
+/// `StatValues.speedBoosters(unit, amount, speed, strength, filter)`: one panel
+/// per boosting liquid (`unit` has its `{0}` replaced by the coloured speed).
+pub fn speed_boosters(
+    ctx: &StatCtx,
+    unit: &str,
+    liquids: &[(LiquidId, f32)],
+    speed: f32,
+    strength: bool,
+) -> Vec<Cell> {
+    let mut cells = Vec::new();
+    for (liquid, amount) in liquids {
+        let Some(def) = ctx.registry.liquid(*liquid) else {
+            continue;
+        };
+        let name = def.name.clone();
+        let mut panel = vec![
+            Cell::Icon {
+                region: format!("liquid-{name}-ui"),
+                amount: None,
+                size: 40,
+                content: Some(name.clone()),
+            },
+            text(ctx.localized_name("liquid", &name)),
+            Cell::Space { w: 4.0 },
+            text(format!(
+                "[lightgray]{} {}",
+                auto_fixed(amount * 60.0, 2),
+                ctx.unit_label(StatUnit::PerSecond)
+            )),
+        ];
+        if speed != f32::MAX {
+            let value = speed * (if strength { def.heat_capacity } else { 1.0 })
+                + if strength { 1.0 } else { 0.0 };
+            panel.push(Cell::Space { w: 6.0 });
+            panel.push(text(unit.replace(
+                "{0}",
+                &format!("[stat]{}[lightgray]", auto_fixed(value, 2)),
+            )));
+        }
+        cells.push(Cell::Panel { cells: panel });
+        cells.push(Cell::Row);
+    }
+    cells
+}
+
+/// `Block.localizedName` for the drillables list: an `OreBlock` copies its ore
+/// item's name (`OreBlock.java:17`, `this.localizedName = ore.localizedName`);
+/// a wall ore appends the `wallore` bundle suffix (`OreBlock.setup`).
+fn block_display_name(ctx: &StatCtx, def: &crate::content::registries::blocks::BlockDef) -> String {
+    if let Some(drop) = def.item_drop
+        && def.kind == crate::content::registries::blocks::BlockKind::OreBlock
+    {
+        let name = ctx
+            .registry
+            .item(drop)
+            .map(|item| ctx.item_name(&item.name))
+            .unwrap_or_else(|| def.name.clone());
+        if def.wall_ore {
+            return format!("{} {}", name, ctx.bundle.get("wallore"));
+        }
+        return name;
+    }
+    ctx.localized_name("block", &def.name)
+}
