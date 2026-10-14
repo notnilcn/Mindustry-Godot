@@ -19,6 +19,7 @@ pub mod math;
 pub mod music;
 pub mod priority;
 pub mod sim;
+pub mod steps;
 
 use std::sync::{Arc, Mutex};
 
