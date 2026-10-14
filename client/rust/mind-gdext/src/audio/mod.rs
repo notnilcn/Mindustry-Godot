@@ -25,9 +25,9 @@ use mind_core::audio::frame::{AudioGameState, LoopPos, LoopSource, TurretLoopSou
 use mind_core::audio::math::{Listener, MIN_INTERVAL_MS, MIN_PLAY_VOLUME, calc_falloff, calc_pan};
 use mind_core::audio::{
     ActiveVoice, AmbientPoller, AmbientSnapshot, AudioEvent, AudioRng, LoopMixer, LoopOutput,
-    MusicContext, MusicOutput, MusicPlayer, MusicRef, OneShotPlan, SeededAudioRng, SharedAudioLog,
-    SoundId, SoundLoopAction, SoundLoopState, SoundPlayState, SoundPriorityTable, TickedAudioEvent,
-    bus_for_sound, plan_one_shot, settings_keys,
+    MusicContext, MusicOutput, MusicPlayer, MusicRef, OneShotPlan, PlanetMusic, SeededAudioRng,
+    SharedAudioLog, SoundId, SoundLoopAction, SoundLoopState, SoundPlayState, SoundPriorityTable,
+    TickedAudioEvent, bus_for_sound, plan_one_shot, settings_keys,
 };
 
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
@@ -530,8 +530,9 @@ impl MindAudio {
     ///
     /// `is_menu` also accepts a visible menu background (`Control` boots in
     /// `State::Playing`, so the sim state alone reports "game" at the main
-    /// menu); `dialog` is `state.isGame() && Core.scene.hasDialog()`
-    /// (`SoundControl.java:120,130-132`).
+    /// menu) and the planet dialog opened from the menu (it hides the
+    /// `MenuBackground` while `HudGroup` stays hidden; PAR-0072). `dialog` is
+    /// `state.isGame() && Core.scene.hasDialog()` (`SoundControl.java:120,130-132`).
     fn music_context(&self, now_ms: f64, delta_frames: f32) -> MusicContext {
         let (state, paused, game) = match self.sim_host() {
             Some(host) => {
@@ -549,13 +550,24 @@ impl MindAudio {
             .get_node_or_null("/root/Spine/Ui/MenuBackground")
             .and_then(|node| node.get("visible").try_to::<bool>().ok())
             .unwrap_or(false);
-        let is_menu = state == "menu" || menu_background;
+        // Read the dialog stack once per frame.
+        let stack = self.dialog_stack();
+        let hud_visible = self.hud_group_visible();
+        let planet_dialog = stack.iter().any(|name| name == "planet");
+        let is_menu = state == "menu" || menu_background || (planet_dialog && !hud_visible);
         MusicContext {
             is_menu,
             is_game: !is_menu,
             paused,
-            dialog: !is_menu && self.ui_has_dialog(),
+            dialog: !is_menu && !stack.is_empty(),
             editor_rules: game.editor,
+            planet_ui_visible: is_menu && planet_dialog,
+            editor_ui_visible: is_menu && self.editor_dialog_visible(),
+            // `Planet.launchMusic = Musics.launch` (`Planet.java:143`).
+            planet_music: PlanetMusic {
+                launch: Some(MusicRef::new("launch")),
+                ..PlanetMusic::default()
+            },
             rules_music: game.rules.clone(),
             core_hp_fraction: game.core_hp_fraction,
             wave: game.wave,
@@ -566,22 +578,42 @@ impl MindAudio {
             always_music_setting: self.settings.alwaysmusic,
             now_ms,
             delta_frames,
-            ..MusicContext::default()
         }
     }
 
-    /// `Core.scene.hasDialog()` — non-empty `MindUi` dialog stack
-    /// (`gdext/input/mod.rs::dialog_open` pattern).
-    fn ui_has_dialog(&self) -> bool {
+    /// `Core.scene.hasDialog()` stack names (`MindUi.dialog_stack`).
+    fn dialog_stack(&self) -> Vec<String> {
         let Some(mut ui) = self.base().try_get_node_as::<GdNode>("/root/MindUi") else {
-            return false;
+            return Vec::new();
         };
         if !ui.has_method("dialog_stack") {
-            return false;
+            return Vec::new();
         }
         ui.call("dialog_stack", &[])
             .try_to::<PackedStringArray>()
-            .map(|stack| !stack.is_empty())
+            .map(|stack| {
+                stack
+                    .as_slice()
+                    .iter()
+                    .map(|name| name.to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// `/root/Spine/Ui/UiRoot/HudGroup.visible` (hidden at the main menu).
+    fn hud_group_visible(&self) -> bool {
+        self.base()
+            .get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
+            .and_then(|node| node.get("visible").try_to::<bool>().ok())
+            .unwrap_or(false)
+    }
+
+    /// `/root/Spine/Ui/EditorDialog.visible` (`ui.editor.isShown()`).
+    fn editor_dialog_visible(&self) -> bool {
+        self.base()
+            .get_node_or_null("/root/Spine/Ui/EditorDialog")
+            .and_then(|node| node.get("visible").try_to::<bool>().ok())
             .unwrap_or(false)
     }
 
@@ -1028,6 +1060,7 @@ impl MindAudio {
             .sim_host()
             .map(|host| host.bind().audio_game_state())
             .unwrap_or_default();
+        let context = self.music_context(0.0, 1.0);
         dict.set(&key("wave"), &(game.wave as i64).to_variant());
         dict.set(
             &key("core_hp"),
@@ -1048,6 +1081,16 @@ impl MindAudio {
             &self.last_in_game.unwrap_or(false).to_variant(),
         );
         dict.set(&key("land_playing"), &self.land_playing().to_variant());
+        // T10: menu/dialog selection inputs.
+        dict.set(&key("is_menu"), &context.is_menu.to_variant());
+        dict.set(
+            &key("planet_ui_visible"),
+            &context.planet_ui_visible.to_variant(),
+        );
+        dict.set(
+            &key("editor_ui_visible"),
+            &context.editor_ui_visible.to_variant(),
+        );
         dict
     }
 
