@@ -2419,4 +2419,23 @@ mod tests {
             "all requirements present"
         );
     }
+
+    /// H08 T2: the placement-preview validity is the exact
+    /// `queue_player_place_config` check (`Build.validPlace` under
+    /// `PlaceFlags::PLAYER`; `MindSimHost::can_place_player` forwards here).
+    /// The seam is H02 T3's `Sim::valid_place_player`.
+    #[test]
+    fn can_place_player_matches_queue() {
+        let (sim, _unit, _core, wall) = sim_with_player();
+        assert!(
+            sim.valid_place_player(14, 10, wall, 0),
+            "free ground accepts a copper wall"
+        );
+        // The core occupies (10,10); the same gate `queue_player_place_config`
+        // runs rejects the wall there.
+        assert!(
+            !sim.valid_place_player(10, 10, wall, 0),
+            "core tile rejects a copper wall"
+        );
+    }
 }

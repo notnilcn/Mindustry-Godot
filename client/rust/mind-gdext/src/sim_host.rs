@@ -4700,6 +4700,17 @@ impl MindSimHost {
             .unwrap_or(-1)
     }
 
+    /// Rust-only: `Build.validPlace` for the player team without mutating the
+    /// sim ([`Sim::valid_place_player`], the exact check
+    /// `queue_player_place_config` runs; the placement preview's
+    /// `HostWorld.valid_place`).
+    pub fn can_place_player(&self, x: i32, y: i32, block: BlockId, rotation: u8) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.sim.valid_place_player(x, y, block, rotation)
+    }
+
     /// `Team.items().remove(item, amount)` on the first core of `team`; returns
     /// the removed amount (`0` without a matching core/item). Rust-only seam for
     /// the campaign research spend.

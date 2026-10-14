@@ -127,11 +127,25 @@ pub enum Effect {
 
 /// Read-only [`PlacementWorld`] over the live sim grid/content.
 ///
-/// `valid_place` defers to the in-bounds test: the simulation validates and
-/// rejects invalid placements deterministically when the command applies.
+/// `valid_place` is the real `Build.validPlace` for the player team; build
+/// rotation and the `ChainedBuilding` walk read the live buildings. The host
+/// is borrowed immutably (`HostWorld` never mutates the sim).
 struct HostWorld<'a> {
     grid: &'a mind_core::world::WorldGrid,
     content: Option<&'a ContentRegistry>,
+    host: &'a MindSimHost,
+}
+
+impl HostWorld<'_> {
+    /// Block kind at a tile (`None` out of bounds/unloaded).
+    fn block_kind(&self, x: i32, y: i32) -> Option<mind_core::content::BlockKind> {
+        let content = self.content?;
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let block = self.grid.block_at(TilePos::new(x, y))?;
+        content.block(block).map(|def| def.kind)
+    }
 }
 
 impl PlacementWorld for HostWorld<'_> {
@@ -169,8 +183,49 @@ impl PlacementWorld for HostWorld<'_> {
         }
     }
 
-    fn valid_place(&self, _block: BlockId, x: i32, y: i32, _rotation: u8) -> bool {
-        self.in_bounds(x, y)
+    fn valid_place(&self, block: BlockId, x: i32, y: i32, rotation: u8) -> bool {
+        // `Build.validPlace(block, team, x, y, rotation)`; the exact check
+        // `InputHandler.flushPlans`/`updateLine` runs through `addBuild`.
+        self.host.can_place_player(x, y, block, rotation)
+    }
+
+    fn build_rotation(&self, x: i32, y: i32) -> Option<u8> {
+        // `plan.build().rotation` for `iterateLine`'s `end.rotation`; the
+        // existing `BuildingComp.rot` seam reads `0` without a building, so
+        // the build-presence check (`tile.build != null`) gates it.
+        self.host
+            .building_team(x, y)
+            .map(|_| self.host.building_rotation(x, y))
+    }
+
+    fn is_chained(&self, x: i32, y: i32) -> bool {
+        // `world.build(x,y) instanceof ChainedBuilding` (IH:2444-2449).
+        self.block_kind(x, y)
+            .is_some_and(mind_core::input::line::is_chained_kind)
+    }
+
+    fn chained_next(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        // `ConveyorBuild.next()` = `nextc` (the front tile's conveyor of the
+        // same team, `Conveyor.java:222/486-488`); `ConduitBuild.next()` is the
+        // front conduit with no team check (`Conduit.java:259-267`).
+        let kind = self.block_kind(x, y)?;
+        if !mind_core::input::line::is_chained_kind(kind) {
+            return None;
+        }
+        // A chained grid block always has its building (`BuildingComp.rot`).
+        let rotation = self.host.building_rotation(x, y) as usize % 4;
+        let (dx, dy) = mind_core::input::placement::D4[rotation];
+        let (nx, ny) = (x + dx, y + dy);
+        let next_kind = self.block_kind(nx, ny)?;
+        use mind_core::content::BlockKind as K;
+        let matches_front = match kind {
+            K::Conduit | K::ArmoredConduit => matches!(next_kind, K::Conduit | K::ArmoredConduit),
+            _ => {
+                matches!(next_kind, K::Conveyor | K::ArmoredConveyor)
+                    && self.host.building_team(x, y) == self.host.building_team(nx, ny)
+            }
+        };
+        matches_front.then_some((nx, ny))
     }
 }
 
@@ -2019,6 +2074,7 @@ impl DesktopBridge {
             let world = HostWorld {
                 grid: guard.grid(),
                 content: guard.content_registry(),
+                host: &guard,
             };
             'outer: for y in r.y..=r.y2 {
                 for x in r.x..=r.x2 {
@@ -2116,6 +2172,7 @@ impl DesktopBridge {
             let world = HostWorld {
                 grid: guard.grid(),
                 content: guard.content_registry(),
+                host: &guard,
             };
             let block_meta = self.line_block_for(&world);
             self.controller.state.update_line(
@@ -2145,24 +2202,13 @@ impl DesktopBridge {
         .to_string();
     }
 
-    /// Block metadata for `iterateLine` (plan-07 seam; `None` when unknown).
+    /// Block metadata for `iterateLine` (flags from the Java block class;
+    /// `None` when unknown).
     fn line_block_for(&self, world: &HostWorld<'_>) -> Option<LineBlock> {
         let block = self.controller.state.block?;
         let content = world.content?;
         let def = content.block(block)?;
-        Some(LineBlock {
-            id: block,
-            size: def.size,
-            offset: def.offset,
-            allow_diagonal: true,
-            conveyor_placement: matches!(
-                def.kind,
-                BlockKind::Conveyor | BlockKind::ArmoredConveyor | BlockKind::Duct
-            ),
-            allow_rectangle_placement: false,
-            swap_diagonal_placement: false,
-            ignore_line_rotation: false,
-        })
+        Some(mind_core::input::line::line_block_from_def(block, def))
     }
 
     /// Commits a placement drag into queued `SimCommand::Place`s.

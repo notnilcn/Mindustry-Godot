@@ -50,6 +50,99 @@ pub struct LineBlock {
     pub ignore_line_rotation: bool,
 }
 
+/// Line flags for a content block, read from its Java class tag (`Block`
+/// constructor flags). Java sources: `Conveyor.java:46`, `Conduit.java:52`,
+/// `Duct.java:43`, `OverflowDuct.java:27`, `StackConveyor.java:53`
+/// (`conveyorPlacement`); `ItemBridge.java:59`, `DirectionBridge.java:43`,
+/// `BeamNode.java:44` (`allowDiagonal = false`); `PowerNode.java:49`,
+/// `LightBlock.java:33` (`swapDiagonalPlacement = true`);
+/// `Turret.java:172`, `BeamDrill.java:72`, `WallCrafter.java:60`
+/// (`ignoreLineRotation = true`); `TileableLogicDisplay.java:36`,
+/// `Floor.java:114`, `StaticWall.java:32`, `RemoveWall.java:16`,
+/// `RemoveOre.java:16` (`allowRectanglePlacement = true`). Subclasses inherit
+/// the flag, so the environment/floor and turret families are included.
+pub fn line_block_from_def(id: BlockId, def: &crate::content::BlockDef) -> LineBlock {
+    use crate::content::BlockKind as K;
+    LineBlock {
+        id,
+        size: def.size,
+        offset: def.offset,
+        // `ItemBridge` (incl. buffered/phase), `LiquidBridge` (bridge/phase
+        // conduit, extends ItemBridge), `DirectionBridge`/`DuctBridge`,
+        // `BeamNode`.
+        allow_diagonal: !matches!(
+            def.kind,
+            K::ItemBridge
+                | K::BufferedItemBridge
+                | K::LiquidBridge
+                | K::DirectionLiquidBridge
+                | K::DuctBridge
+                | K::BeamNode
+        ),
+        // `Conveyor` family, `StackConveyor`, `Duct` family, `Conduit` family.
+        conveyor_placement: matches!(
+            def.kind,
+            K::Conveyor
+                | K::ArmoredConveyor
+                | K::StackConveyor
+                | K::Duct
+                | K::OverflowDuct
+                | K::Conduit
+                | K::ArmoredConduit
+        ),
+        // `TileableLogicDisplay` + the editor/environment families that
+        // inherit `Floor`/`StaticWall`/`RemoveWall`/`RemoveOre`.
+        allow_rectangle_placement: matches!(
+            def.kind,
+            K::TileableLogicDisplay
+                | K::Floor
+                | K::ShallowLiquid
+                | K::EmptyFloor
+                | K::ColoredFloor
+                | K::OverlayFloor
+                | K::OreBlock
+                | K::RemoveOre
+                | K::CharacterOverlay
+                | K::RuneOverlay
+                | K::SteamVent
+                | K::StaticWall
+                | K::ColoredWall
+                | K::StaticTree
+                | K::RemoveWall
+        ),
+        // `PowerNode` (power-node/large/surge) and `LightBlock`.
+        swap_diagonal_placement: matches!(
+            def.kind,
+            K::PowerNode | K::LongPowerNode | K::LightBlock
+        ),
+        // `Turret` subclasses only (`BuildTurret`/`PointDefenseTurret`/
+        // `TractorBeamTurret`/`RepairTurret` extend `BaseTurret`) + drills.
+        ignore_line_rotation: matches!(
+            def.kind,
+            K::ItemTurret
+                | K::LiquidTurret
+                | K::PowerTurret
+                | K::LaserTurret
+                | K::ContinuousTurret
+                | K::ContinuousLiquidTurret
+                | K::BeamDrill
+                | K::WallCrafter
+        ),
+    }
+}
+
+/// Whether a build of `kind` implements `ChainedBuilding`
+/// (`Conveyor.ConveyorBuild`, `Conveyor.java:123`, and
+/// `Conduit.ConduitBuild`, `Conduit.java:155`; `Duct`/`StackConveyor` builds do
+/// not).
+pub fn is_chained_kind(kind: crate::content::BlockKind) -> bool {
+    use crate::content::BlockKind as K;
+    matches!(
+        kind,
+        K::Conveyor | K::ArmoredConveyor | K::Conduit | K::ArmoredConduit
+    )
+}
+
 /// Client-side line parameters (`InputHandler` fields + settings).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LineParams {
@@ -509,6 +602,48 @@ mod tests {
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].rotation, 2);
+    }
+
+    #[test]
+    fn line_flags_follow_java() {
+        // Flags set in the Java block constructors (`line_block_from_def`
+        // cites each site). `create_base_content` mirrors the registry the
+        // live client builds.
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let flags = |name: &str| {
+            let id = registry.block_id(name).expect("block id");
+            let def = registry.block(id).expect("block def");
+            line_block_from_def(id, def)
+        };
+        assert!(flags("conduit").conveyor_placement, "Conduit.java:52");
+        assert!(
+            flags("plastanium-conveyor").conveyor_placement,
+            "StackConveyor.java:53"
+        );
+        assert!(
+            !flags("bridge-conveyor").allow_diagonal,
+            "ItemBridge.java:59"
+        );
+        assert!(!flags("beam-node").allow_diagonal, "BeamNode.java:44");
+        assert!(
+            flags("power-node").swap_diagonal_placement,
+            "PowerNode.java:49"
+        );
+        assert!(flags("duo").ignore_line_rotation, "Turret.java:172");
+        assert!(!flags("conveyor").ignore_line_rotation);
+        // `ChainedBuilding` implementers (`Conveyor.java:123`,
+        // `Conduit.java:155`); `Duct`/`StackConveyor` builds are not chained.
+        let kind = |name: &str| {
+            let id = registry.block_id(name).expect("block id");
+            registry.block(id).expect("block def").kind
+        };
+        assert!(is_chained_kind(kind("conveyor")));
+        assert!(is_chained_kind(kind("titanium-conveyor")));
+        assert!(is_chained_kind(kind("conduit")));
+        assert!(!is_chained_kind(kind("duct")));
+        assert!(!is_chained_kind(kind("plastanium-conveyor")));
     }
 
     #[test]
