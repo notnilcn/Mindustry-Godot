@@ -125,7 +125,16 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 				var row: Array = row_variant
 				if row.size() < 3:
 					continue
-				var position := _map_point(inner, region, tex_size, float(row[0]), float(row[1]))
+				# `offset = build.block.offset / tilesize` centres multiblock
+				# squares (`MinimapRenderer.java:266-271`; 0 when no building).
+				var offset := float(row[3]) if row.size() >= 4 else 0.0
+				var position := _map_point(
+					inner,
+					region,
+					tex_size,
+					float(row[0]) + offset,
+					float(row[1]) + offset
+				)
 				var rad := (fin * 5.0 + TILE_SIZE - 2.0) * world_to_widget
 				var stroke := ((1.0 - fin) * 4.0 + 0.5) * world_to_widget
 				var red := clampf(float(row[2]) / 70.0, 0.0, 1.0)

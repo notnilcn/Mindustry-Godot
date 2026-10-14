@@ -21,8 +21,8 @@ use godot::prelude::*;
 use mind_core::config::TILESIZE;
 use mind_core::io::map::preview::{BlockPalette, color_for};
 use mind_core::render::minimap::{
-    ABOVE_SOLID_MULTIPLIER, LIQUID_EDGE_MULTIPLIER, UPDATE_INTERVAL, region_for_camera, shade,
-    shade_rgb, zoom_clamp,
+    ABOVE_SOLID_MULTIPLIER, LIQUID_EDGE_MULTIPLIER, UPDATE_INTERVAL, age_indicators,
+    region_for_camera, shade, shade_rgb, texture_row, zoom_clamp,
 };
 use mind_core::world::darkness::get_static_darkness;
 
@@ -114,16 +114,32 @@ impl INode2D for MindMinimap {
     }
 
     fn process(&mut self, delta: f64) {
-        // `AttackIndicators.update`: `time += Time.delta` (seconds), removed at
-        // `duration = 15f * 60f` = 900 s (`AttackIndicators.java:11,40-50`).
-        const INDICATOR_LIFETIME_S: f32 = 15.0 * 60.0;
-        self.indicators.retain_mut(|(_, _, age)| {
-            *age += delta as f32;
-            *age < INDICATOR_LIFETIME_S
-        });
-        let Some(host) = self.host.clone() else {
+        let Some(mut host) = self.host.clone() else {
             return;
         };
+        // Feed is the minimap's (single drain consumer; H03 T4):
+        // `Control.java:68-72` adds an indicator for every player-team
+        // `BuildDamageEvent`. Drain every frame — the event log is per-tick
+        // and capped, and a second drain consumer would eat rows.
+        let (paused, player_team, damaged) = {
+            let mut host = host.bind_mut();
+            (
+                host.is_paused(),
+                host.player_team(),
+                host.drain_build_damage(),
+            )
+        };
+        // `AttackIndicators.update`: `time += Time.delta` **in ticks**
+        // (`AttackIndicators.java:11,38-55`, `duration = 900`, 60 tps) and the
+        // whole update is skipped while paused (`Control.java:709-712`).
+        if !paused {
+            age_indicators(&mut self.indicators, delta as f32 * 60.0);
+        }
+        for (x, y, team) in damaged {
+            if team == player_team {
+                self.add_indicator(x, y);
+            }
+        }
         let host = host.bind();
         let key = (
             host.world_revision(),
@@ -179,8 +195,11 @@ impl MindMinimap {
             let border = host.border_darkness_enabled();
             let limit = world.limit_area;
             let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
-            for y in 0..height {
-                // Top row first: `pixmap.set(x, height - 1 - y)`.
+            // Top row first: world y is up, image row 0 is the map top, so the
+            // first written row is world y = height - 1 (`texture_row`).
+            // Writing `0..height` here made every rebuild disagree with the
+            // batched flush and `region_for_camera` (all-black crops).
+            for y in (0..height).rev() {
                 for x in 0..width {
                     let team = host.building_team(x, y).unwrap_or(0);
                     let color =
@@ -247,8 +266,8 @@ impl MindMinimap {
             let y = index / width;
             let team = host.building_team(x, y).unwrap_or(0);
             let color = self.tile_color(&palette, world, content, x, y, team, border, limit);
-            // Texture is top-row-first.
-            image.set_pixel(x, height - 1 - y, color_from(color));
+            // Texture is top-row-first (`texture_row`).
+            image.set_pixel(x, texture_row(y, height), color_from(color));
         }
         texture.update(&image);
     }
@@ -399,13 +418,23 @@ impl MindMinimap {
         self.indicators.push((x, y, 0.0));
     }
 
-    /// Damage indicators as `[[x, y, age ticks], ...]` (widget draw probe).
+    /// Damage indicators as `[[x, y, age ticks, offset], ...]` (widget draw
+    /// probe). `offset` is `build.block.offset / tilesize`
+    /// (`MinimapRenderer.java:266-271`, `0.5` for even-sized multiblocks so the
+    /// square centres on the building).
     #[func]
     pub fn indicators_json(&self) -> GString {
-        let rows: Vec<[f32; 3]> = self
+        let host = self.host.clone();
+        let rows: Vec<[f32; 4]> = self
             .indicators
             .iter()
-            .map(|(x, y, age)| [*x as f32, *y as f32, *age])
+            .map(|(x, y, age)| {
+                let offset = host
+                    .clone()
+                    .map(|host| host.bind().block_offset(*x, *y) / TILESIZE as f32)
+                    .unwrap_or(0.0);
+                [*x as f32, *y as f32, *age, offset]
+            })
             .collect();
         GString::from(
             serde_json::Value::Array(

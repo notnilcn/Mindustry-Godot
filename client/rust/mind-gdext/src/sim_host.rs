@@ -5389,6 +5389,35 @@ impl MindSimHost {
     pub fn command_targets(&self) -> Vec<(i32, f32, f32, bool)> {
         self.sim.command_targets()
     }
+
+    /// Drains the per-tick `BuildDamageEvent` log as `(tile x, tile y, team)`
+    /// (`Control.java:68-72`; H03 T4). Rust-only: the minimap is the SINGLE
+    /// drain consumer (the T3-style `#[func] drain_build_damage_json` probe is
+    /// for debug reads only — two consumers would eat each other's rows).
+    pub fn drain_build_damage(&mut self) -> Vec<(i32, i32, u8)> {
+        self.sim
+            .drain_build_damage_events()
+            .into_iter()
+            .map(|event| (event.x as i32, event.y as i32, event.team))
+            .collect()
+    }
+
+    /// `Block.offset` of the building at `(x, y)` in world px
+    /// (`((size + 1) % 2) * tilesize / 2`); `0` without a building or off-map.
+    /// Minimap indicator centring (`MinimapRenderer.java:266-271`).
+    pub fn block_offset(&self, x: i32, y: i32) -> f32 {
+        let Some(tile) = self.tile_at(x, y) else {
+            return 0.0;
+        };
+        if tile.build.is_none() {
+            return 0.0;
+        }
+        self.content_snapshot
+            .as_ref()
+            .and_then(|content| content.block(tile.block))
+            .map(|def| def.offset)
+            .unwrap_or(0.0)
+    }
 }
 
 /// `PlacementFragment` unit table + command/stance rows (`PlacementFragment.java:443-676`).
