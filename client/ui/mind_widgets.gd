@@ -270,6 +270,18 @@ static func icon_texture(region_name: String) -> Texture2D:
 	return texture as Texture2D
 
 
+## Content icon with `SectorPreset.loadIcon`'s fallback (`SectorPreset.java:132-134`):
+## `Core.atlas.find("sector-" + name, Icon.terrain.getRegion())` — sector nodes
+## whose `sector-<name>-ui` region is not packed draw the `terrain` glyph.
+static func content_icon_texture(icon_region: String, type_name: String) -> Texture2D:
+	var texture := icon_texture(icon_region)
+	if texture == null and type_name == "sector":
+		texture = icon_texture("terrain")
+	if texture == null and not icon_region.is_empty():
+		push_warning("[ui] missing icon region `%s`" % icon_region)
+	return texture
+
+
 ## The `MindAssets` autoload (plan 03 M5), or null in a bare test host.
 static func assets() -> Node:
 	var loop := Engine.get_main_loop()

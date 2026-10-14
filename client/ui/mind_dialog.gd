@@ -68,8 +68,22 @@ func _apply_full_dialog() -> void:
 
 
 func _resize_full_panel() -> void:
+	_fit_panel()
+
+
+## Fills the centered panel to the whole viewport without switching its style
+## (`BaseDialog.java:18` `setFillParent(true)`; `ResearchDialog` is a plain
+## `BaseDialog` whose panel must stay `defaultDialog`, not `fullDialog`).
+func fill_panel() -> void:
+	var viewport := get_viewport()
+	if viewport != null and not viewport.size_changed.is_connected(_resize_full_panel):
+		viewport.size_changed.connect(_resize_full_panel)
+	_fit_panel()
+
+
+func _fit_panel() -> void:
 	var panel := get_node_or_null("Center/Panel") as Control
-	if panel != null and full_dialog:
+	if panel != null:
 		panel.custom_minimum_size = get_viewport_rect().size
 
 

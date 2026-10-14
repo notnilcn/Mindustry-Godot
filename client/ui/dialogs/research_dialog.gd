@@ -12,20 +12,27 @@ extends MindDialog
 
 var _view: MindResearchView = null
 var _title_button: Button = null
-var _root_selector: PopupPanel = null
+var _title_icon: TextureRect = null
+var _title_label: MindLabel = null
 var _items_display: MindResearchItemsDisplay = null
 var _popup: PanelContainer = null
 var _hovered := -1
 var _tree: Dictionary = {}
 var _last_root := ""
 
+## `iconMed` (`Scl.scl(32f)`) — title icon, root rows and the balancing spacer.
+const ICON_SIZE := 32.0
+
 
 func _ready() -> void:
 	# Java: `super("")` + `titleTable.remove()`.
 	title_text = ""
 	should_pause = true
-	full_dialog = true
+	# Java `BaseDialog`: `setFillParent(true)` + `margin(0f).marginBottom(8)`.
+	# ResearchDialog is a plain BaseDialog (black9 Dim + `defaultDialog`), so it
+	# fills the viewport without switching to the `full_dialog` style.
 	super._ready()
+	fill_panel()
 	_build()
 	add_close_button(210.0)
 	add_button(_t("@database"), _open_database, "book", 210.0)
@@ -35,14 +42,6 @@ func _build() -> void:
 	var layout := get_node_or_null("Center/Panel/Layout")
 	if layout == null:
 		return
-	# code-instantiated: root-selector title button (Java `titleTable`).
-	_title_button = Button.new()
-	_title_button.theme_type_variation = "flatTogglet"
-	_title_button.custom_minimum_size = Vector2(300.0, 60.0)
-	_title_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_title_button.visible = false
-	_title_button.pressed.connect(_open_root_selector)
-	layout.add_child(_title_button)
 	# code-instantiated: the tree canvas replaces the generic scroll body
 	# (Java `cont.stack(titleTable, view, itemDisplay)`).
 	_view = MindResearchView.new()
@@ -52,23 +51,29 @@ func _build() -> void:
 	_view.node_pressed.connect(_on_node_pressed)
 	_view.node_hovered.connect(_on_node_hovered)
 	_view.node_exited.connect(_on_node_exited)
+	# code-instantiated: root-selector title button (Java `titleTable`, a stack
+	# layer over the canvas; `titleTable.toFront()` keeps it on top).
+	_title_button = Button.new()
+	_title_button.theme_type_variation = "defaultt"
+	_title_button.visible = false
+	_title_button.pressed.connect(_open_root_selector)
+	_view.add_child(_title_button)
+	_title_button.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	_title_button.offset_left = -150.0
+	_title_button.offset_right = 150.0
+	_title_button.offset_top = 4.0
+	_title_button.offset_bottom = 64.0
+	_build_title_row()
 	# code-instantiated: the global item pool overlays the canvas top-left
 	# (Java `cont.stack(titleTable, view, itemDisplay)`).
 	_items_display = MindResearchItemsDisplay.new()
 	_items_display.position = Vector2.ZERO
 	_view.add_child(_items_display)
-	# code-instantiated: transient root selector (Java BaseDialog; a popup
-	# keeps the manifest dialog inventory unchanged).
-	_root_selector = PopupPanel.new()
-	_root_selector.hide()
-	add_child(_root_selector)
 	if body != null:
 		# The canvas is not a scroll body; keep it out of the ScrollContainer
-		# (it must receive drags): title first, then the view, above the hidden
-		# Body in the VBox (Java `cont.stack(titleTable, view, itemDisplay)`).
+		# (it must receive drags) and above the hidden Body in the VBox.
 		var body_slot := body.get_index()
-		layout.move_child(_title_button, body_slot)
-		layout.move_child(_view, body_slot + 1)
+		layout.move_child(_view, body_slot)
 		body.visible = false
 
 
@@ -78,8 +83,10 @@ func shown() -> void:
 	if _tree.is_empty():
 		return
 	_view.set_tree(_tree)
-	# The pool overlay draws above the node buttons (added last).
+	# The pool overlay draws above the node buttons; `titleTable.toFront()` draws
+	# the title above everything.
 	_view.move_child(_items_display, -1)
+	_view.move_child(_title_button, -1)
 	_items_display.max_height = maxf(60.0, _view.size.y - 120.0)
 	_items_display.rebuild(_tree.get("items", []))
 	var root_name := str(_tree.get("root", ""))
@@ -106,61 +113,88 @@ func hidden() -> void:
 		(planet as Node).call_deferred("refresh_page")
 
 
-## Title content: root icon + accent `techtree.<root>` label.
-func _update_title_button() -> void:
-	for child in _title_button.get_children():
-		child.queue_free()
+## `titleTable.button` content (`ResearchDialog.java` ctor): 32 px root icon,
+## `padRight(8)`, a grow spacer, the accent label, another grow spacer and a
+## 32 px spacer so the label sits centred; built once and retargeted per tree.
+func _build_title_row() -> void:
 	# code-instantiated: title row content is tree-driven.
 	var row := HBoxContainer.new()
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 8)
+	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_button.add_child(row)
 	# code-instantiated: root icon follows the tree data.
-	var icon := TextureRect.new()
-	icon.texture = MindWidgets.icon_texture(str(_tree.get("root_icon", "")))
-	icon.custom_minimum_size = Vector2(32.0, 32.0)
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(icon)
-	var label := MindWidgets.label(str(_tree.get("root_title", "")))
-	label.add_theme_color_override("default_color", MindStyles.ACCENT)
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(label)
+	_title_icon = TextureRect.new()
+	_title_icon.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
+	# A `TextureRect`'s minimum size is its texture size; ignore the source size
+	# so the 32 px cell wins (`b.imageDraw(...).size(iconMed)`).
+	_title_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_title_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_title_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_title_icon)
+	row.add_child(_title_spacer(8.0))
+	row.add_child(_title_spacer(-1.0))
+	_title_label = MindWidgets.label("")
+	_title_label.add_theme_color_override("default_color", MindStyles.ACCENT)
+	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(_title_label)
+	row.add_child(_title_spacer(-1.0))
+	row.add_child(_title_spacer(ICON_SIZE))
 
 
-## `titleTable.button` click: 300x60 `flatTogglet` rows per selectable root.
+## Retargets the title button on the displayed tree.
+func _update_title_button() -> void:
+	if _title_icon == null or _title_label == null:
+		return
+	_title_icon.texture = MindWidgets.content_icon_texture(
+		str(_tree.get("root_icon", "")), str(_tree.get("root_type", ""))
+	)
+	_title_label.text = str(_tree.get("root_title", ""))
+
+
+## Spacer cell for the title button row (`b.add().growX()` = -1).
+func _title_spacer(size: float) -> Control:
+	# code-instantiated: title row is data-driven (Java `b.add()` cells).
+	var spacer := Control.new()
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	if size < 0.0:
+		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	else:
+		spacer.custom_minimum_size = Vector2(size, 0.0)
+	return spacer
+
+
+## `titleTable.button` click: the `@techtree.select` BaseDialog (`ResearchDialog.java`
+## ctor) — one 300x60 `flatTogglet` icon+name row per selectable root.
 func _open_root_selector() -> void:
 	var roots: Array = _tree.get("roots", [])
 	if roots.size() <= 1:
 		return
-	for child in _root_selector.get_children():
-		child.queue_free()
-	# code-instantiated: root rows come from the tree JSON roots list.
-	var table := VBoxContainer.new()
-	table.add_theme_constant_override("separation", 0)
-	_root_selector.add_child(table)
-	for root_variant in roots:
-		var entry: Dictionary = root_variant
-		# code-instantiated: one toggle button per selectable root.
-		var row := Button.new()
-		row.text = str(entry.get("title", entry.get("name", "")))
-		row.theme_type_variation = "flatTogglet"
-		row.toggle_mode = true
-		row.button_pressed = bool(entry.get("selected", false))
-		row.custom_minimum_size = Vector2(300.0, 60.0)
-		row.pressed.connect(_select_root.bind(str(entry.get("name", ""))))
-		table.add_child(row)
-	var rect := _title_button.get_global_rect()
-	_root_selector.popup(Rect2i(Vector2i(rect.position), Vector2i(rect.size)))
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null or root == null:
+		return
+	var selector: Variant = root.call("dialog", "research_root_select")
+	if selector is Node and (selector as Node).has_signal("root_selected"):
+		if not (selector as Node).is_connected("root_selected", _select_root):
+			(selector as Node).connect("root_selected", _select_root)
+	if not bool(ui.call("open_dialog", "research_root_select", JSON.stringify({
+		"roots": roots, "selected": str(_tree.get("root", "")),
+	}))):
+		return
 
 
 ## `rebuildTree(node)`: switch tree, reset the view.
 func _select_root(root_name: String) -> void:
 	if root_name.is_empty():
 		return
-	_root_selector.hide()
+	if root_name == _last_root:
+		_update_title_button()
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("close_dialog"):
+		ui.call("close_dialog", "research_root_select")
 	_tree = campaign_json("research_tree_json", [root_name])
 	if _tree.is_empty():
 		return
@@ -211,6 +245,7 @@ func _on_node_pressed(index: int) -> void:
 		break
 	_view.set_tree(_tree)
 	_view.move_child(_items_display, -1)
+	_view.move_child(_title_button, -1)
 	_items_display.rebuild(_tree.get("items", []), shine)
 	_update_title_button()
 	if _hovered >= 0:

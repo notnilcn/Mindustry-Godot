@@ -404,11 +404,38 @@ pub fn expected_pause(name: &str) -> Option<bool> {
     Some(match name {
         "settings" | "database" | "planet" | "research" | "schematics" | "paused" | "logic"
         | "campaign_complete" | "full_text" => true,
-        "about" | "admins" | "bans" | "campaign_rules" | "canvas_edit" | "picker" | "content"
-        | "custom" | "custom_rules" | "discord" | "editor_maps" | "effects" | "file_chooser"
-        | "restart" | "host" | "icon_select" | "join" | "controls" | "language" | "credits"
-        | "launch_loadout" | "load" | "loadout" | "map_play" | "mod_browser" | "mods"
-        | "palette" | "save" | "sector_select" | "traces" | "editor" => false,
+        "about"
+        | "admins"
+        | "bans"
+        | "campaign_rules"
+        | "canvas_edit"
+        | "picker"
+        | "content"
+        | "custom"
+        | "custom_rules"
+        | "discord"
+        | "editor_maps"
+        | "effects"
+        | "file_chooser"
+        | "restart"
+        | "host"
+        | "icon_select"
+        | "join"
+        | "controls"
+        | "language"
+        | "credits"
+        | "launch_loadout"
+        | "load"
+        | "loadout"
+        | "map_play"
+        | "mod_browser"
+        | "mods"
+        | "palette"
+        | "save"
+        | "sector_select"
+        | "traces"
+        | "editor"
+        | "research_root_select" => false,
         _ => return None,
     })
 }

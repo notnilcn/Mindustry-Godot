@@ -104,7 +104,9 @@ func _build_button_content(button: Button, node: Dictionary) -> void:
 	if bool(node.get("selectable", false)):
 		# code-instantiated: node icon follows the tree data.
 		var image := TextureRect.new()
-		image.texture = MindWidgets.icon_texture(str(node.get("icon", "")))
+		image.texture = MindWidgets.content_icon_texture(
+			str(node.get("icon", "")), str(node.get("type", ""))
+		)
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.mouse_filter = Control.MOUSE_FILTER_IGNORE

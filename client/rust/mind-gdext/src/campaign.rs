@@ -2026,6 +2026,10 @@ impl MindCampaign {
             roots_json.push(serde_json::json!({
                 "name": name,
                 "title": self.tree_title(&name),
+                "type": node
+                    .content
+                    .map(|content| content.type_.name())
+                    .unwrap_or_default(),
                 "icon": node
                     .content
                     .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
@@ -2037,6 +2041,10 @@ impl MindCampaign {
         let root_name = root_node
             .and_then(|node| node.name.clone())
             .unwrap_or_else(|| tree.name.clone());
+        let root_type = root_node
+            .and_then(|node| node.content)
+            .map(|content| content.type_.name())
+            .unwrap_or("");
         let root_icon = root_node
             .map(|node| {
                 node.content
@@ -2160,6 +2168,7 @@ impl MindCampaign {
         let view = serde_json::json!({
             "root": tree.name,
             "root_title": self.tree_title(&root_name),
+            "root_type": root_type,
             "root_icon": root_icon,
             "roots": roots_json,
             "items": items_json,
