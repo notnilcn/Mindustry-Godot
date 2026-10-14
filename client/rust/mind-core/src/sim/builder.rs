@@ -622,6 +622,7 @@ fn update_builder(
                         current.block,
                         current.rotation,
                         team,
+                        crate::world::build::PlaceFlags::PLAYER,
                     ) {
                         plans.plans.pop_front();
                         continue;
@@ -652,6 +653,7 @@ fn update_builder(
                             current.block,
                             current.rotation,
                             team,
+                            crate::world::build::PlaceFlags::PLAYER,
                             rules.economy.cost_multiplier,
                         ) {
                             // `BuilderComp` passes `current.config` into the
@@ -939,7 +941,16 @@ impl Sim {
         let Some(runtime) = self.block_runtime.as_ref() else {
             return false;
         };
-        if !runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rotation, team) {
+        if !runtime.can_place(
+            &self.ecs.0,
+            &self.grid,
+            x,
+            y,
+            block,
+            rotation,
+            team,
+            crate::world::build::PlaceFlags::PLAYER,
+        ) {
             return false;
         }
         let mut plan = UnitBuildPlan::place(x, y, rotation, block);
@@ -1087,10 +1098,7 @@ impl Sim {
     /// placement-preview validity check, no side effects and nothing queued
     /// (`InputHandler.java:2029-2032` calls `Build.validPlace`).
     pub fn preview_can_place(&self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
-        let team = self.live_default_team();
-        self.block_runtime.as_ref().is_some_and(|runtime| {
-            runtime.can_place(&self.ecs.0, &self.grid, x, y, block, rotation, team)
-        })
+        self.valid_place_player(x, y, block, rotation)
     }
 
     /// Queues a deconstruction on the player unit
@@ -1159,6 +1167,7 @@ impl Sim {
         if !crate::world::build::valid_break(
             runtime.content(),
             &self.grid,
+            Some(&self.ecs.0),
             &rules,
             team,
             i32::from(anchor.x()),
@@ -1384,6 +1393,14 @@ mod tests {
         let unit = sim
             .spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
             .expect("player unit");
+        // The local player is team 1 (`sharded`); sync the placement guard like
+        // a campaign load does (`sync_build_rules`), so PLAYER-flag queries use
+        // the real player team.
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         (sim, unit, core_id, wall)
     }
 
@@ -2084,6 +2101,13 @@ mod tests {
             player: None,
         })
         .expect("instant API place");
+        // The local player is team 1 (`sharded`); sync the guard like a
+        // campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         sim.command(SimCommand::Break {
             x: 14,
             y: 10,
@@ -2153,6 +2177,13 @@ mod tests {
         .expect("instant API place");
         assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
         set_core_copper(&mut sim, 10);
+        // The local player is team 1 (`sharded`); sync the guard like a
+        // campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         sim.command(SimCommand::Break {
             x: 14,
             y: 10,
@@ -2202,6 +2233,14 @@ mod tests {
             runtime.fx = sink.clone();
         }
         set_core_copper(&mut sim, 100);
+        // The local player is team 1 (`sharded`); sync the guard like a
+        // campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+
         assert!(sim.queue_player_place(20, 20, wall, 1), "wall queued");
         for _ in 0..120 {
             sim.tick().expect("tick");
@@ -2254,6 +2293,130 @@ mod tests {
         assert!(
             !sim.queue_player_place(10, 10, wall, 0),
             "the queued placement rejects the core tile"
+        );
+    }
+
+    /// H02 T4: `CoreBlock.placeBegan` (`CoreBlock.java:205-239`): upgrading a
+    /// shard to a foundation over the same tile is instant and keeps the old
+    /// items minus the requirements.
+    #[test]
+    fn core_upgrade_keeps_items() {
+        let (mut sim, _unit, _core, _wall) = sim_with_player();
+        let foundation = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .block_id("core-foundation")
+            .expect("core-foundation");
+        // Shard capacity 4000 per item (`Blocks.java:3152`); foundation costs
+        // copper 3000 / lead 3000 / silicon 2000 (`Blocks.java:3160`).
+        let (copper, lead, silicon) = {
+            let content = &sim.block_runtime().expect("runtime").content();
+            (
+                content.item_id("copper").expect("copper"),
+                content.item_id("lead").expect("lead"),
+                content.item_id("silicon").expect("silicon"),
+            )
+        };
+        {
+            let core = team_core(&sim.ecs.0, 1).expect("core");
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(core).expect("items");
+            for item in [copper, lead, silicon] {
+                items.add(item, 4000, 4000);
+            }
+        }
+        assert!(
+            sim.queue_player_place(10, 10, foundation, 0),
+            "upgrade plan queued"
+        );
+        for _ in 0..600 {
+            sim.tick().expect("tick");
+            if sim.player_build_plans().is_empty() {
+                break;
+            }
+        }
+        assert!(
+            sim.player_build_plans().is_empty(),
+            "the upgrade plan finished"
+        );
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(10, 10)),
+            Some(foundation),
+            "core upgraded instantly"
+        );
+        let core = team_core(&sim.ecs.0, 1).expect("core");
+        let items = sim.ecs.0.get::<ItemModule>(core).expect("items");
+        assert_eq!(items.get(copper), 1000, "copper kept minus cost");
+        assert_eq!(items.get(lead), 1000);
+        assert_eq!(items.get(silicon), 2000);
+    }
+
+    /// H02 T4: a core can only be placed over a smaller own core
+    /// (`CoreBlock.canPlaceOn`, `CoreBlock.java:185-203`).
+    #[test]
+    fn core_needs_existing_core() {
+        let (sim, _unit, _core, _wall) = sim_with_player();
+        let foundation = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .block_id("core-foundation")
+            .expect("core-foundation");
+        assert!(
+            !sim.valid_place_player(30, 30, foundation, 0),
+            "foundation on free ground rejected"
+        );
+        // Over the shard without the requirements: rejected (`core == null` or
+        // `!items.has(requirements)`).
+        assert!(
+            !sim.valid_place_player(10, 10, foundation, 0),
+            "upgrade without items rejected"
+        );
+    }
+
+    /// H02 T4: the upgrade plan needs every requirement in the team core
+    /// (`CoreBlock.canPlaceOn`).
+    #[test]
+    fn core_upgrade_needs_items() {
+        let (mut sim, _unit, _core, _wall) = sim_with_player();
+        let foundation = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .block_id("core-foundation")
+            .expect("core-foundation");
+        let copper = sim
+            .block_runtime()
+            .expect("runtime")
+            .content()
+            .item_id("copper")
+            .expect("copper");
+        {
+            let core = team_core(&sim.ecs.0, 1).expect("core");
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(core).expect("items");
+            items.add(copper, 100, 4000);
+        }
+        assert!(
+            !sim.valid_place_player(10, 10, foundation, 0),
+            "copper 100 < 3000"
+        );
+        let (lead, silicon) = {
+            let content = &sim.block_runtime().expect("runtime").content();
+            (
+                content.item_id("lead").expect("lead"),
+                content.item_id("silicon").expect("silicon"),
+            )
+        };
+        {
+            let core = team_core(&sim.ecs.0, 1).expect("core");
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(core).expect("items");
+            items.add(copper, 3000, 4000);
+            items.add(lead, 3000, 4000);
+            items.add(silicon, 2000, 4000);
+        }
+        assert!(
+            sim.valid_place_player(10, 10, foundation, 0),
+            "all requirements present"
         );
     }
 }

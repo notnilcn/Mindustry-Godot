@@ -292,18 +292,19 @@ fn valid_place_ctx(ctx: &WorldCtx<'_>, block: BlockId, team: u8, rot: u8, x: i32
     ) else {
         return true;
     };
-    crate::world::build::valid_place_at(
+    crate::world::build::valid_place_query(
         ctx.content,
         table,
         rules,
         counter,
         ctx.grid,
+        Some(ctx.ecs),
         block,
         team,
         rot,
         x,
         y,
-        true,
+        crate::world::build::PlaceFlags::PLAYER,
     )
 }
 

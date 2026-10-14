@@ -95,17 +95,19 @@ fn valid_place(ctx: &AiCtx, team: u8, block: BlockId, x: i32, y: i32, rot: u8) -
         .get_resource::<crate::world::limits::BuildRules>()
         .cloned()
         .unwrap_or_default();
-    crate::world::build::valid_place(
+    crate::world::build::valid_place_query(
         ctx.content,
         table,
         &rules,
         counter,
         ctx.grid,
+        Some(ctx.world),
         block,
         team,
         rot,
         x,
         y,
+        crate::world::build::PlaceFlags::PLAYER,
     )
 }
 
@@ -116,7 +118,7 @@ fn valid_break(ctx: &AiCtx, team: u8, x: i32, y: i32) -> bool {
         .get_resource::<crate::world::limits::BuildRules>()
         .cloned()
         .unwrap_or_default();
-    crate::world::build::valid_break(ctx.content, ctx.grid, &rules, team, x, y)
+    crate::world::build::valid_break(ctx.content, ctx.grid, Some(ctx.world), &rules, team, x, y)
 }
 
 /// `BuilderAI.updateMovement` (`BuilderAI.java:48-262`), the plan-queue half.

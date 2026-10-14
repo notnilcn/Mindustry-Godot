@@ -732,6 +732,23 @@ impl MindSimHost {
         placed
     }
 
+    /// Placement ghost validity (`Build.validPlace(type, player.team(), x, y,
+    /// rot)`, `InputHandler.java:1455`); H08 consumes it. Out-of-range ints and
+    /// unknown block names return `false`.
+    #[func]
+    pub fn valid_place_preview(&self, x: i32, y: i32, block: GString, rotation: i32) -> bool {
+        let name = block.to_string();
+        let Ok(id) = self.sim.content().id(&name) else {
+            log::debug!("valid_place_preview: unknown block `{name}`");
+            return false;
+        };
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.sim
+            .valid_place_player(x, y, id, rotation.clamp(0, 3) as u8)
+    }
+
     /// Canonical sparse state dump as pretty JSON (same schema as `mind-headless`).
     #[func]
     pub fn get_state_json(&self) -> GString {
@@ -811,6 +828,14 @@ impl MindSimHost {
                     .and_then(|v| v.as_i64())
                     .unwrap_or(0)
                     .clamp(0, 3) as i8;
+                // The staged team (when given) drives the pre-check so enemy
+                // staging works; otherwise the live default team is used.
+                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+                let check_team = if value.get("team").is_some() {
+                    team
+                } else {
+                    self.sim.live_default_team()
+                };
                 // PAR-0165 (T7): reject invalid placements at enqueue time so
                 // callers get an honest `false` instead of a silently dropped
                 // command (`Sim::command` logs rejections at debug level).
@@ -819,12 +844,11 @@ impl MindSimHost {
                     y,
                     BlockId::new(block),
                     rotation as u8,
-                    self.sim.live_default_team(),
+                    check_team,
                 ) {
                     log::warn!("apply_sim_command_json: place rejected at ({x}, {y})");
                     return false;
                 }
-                let team = value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
                 SimCommand::Place {
                     x,
                     y,
@@ -4810,7 +4834,15 @@ impl MindSimHost {
             .get_resource::<mind_core::world::limits::BuildRules>()
             .cloned()
             .unwrap_or_default();
-        mind_core::world::build::valid_break(content, &self.sim.grid, &rules, team, x, y)
+        mind_core::world::build::valid_break(
+            content,
+            &self.sim.grid,
+            Some(&self.sim.ecs.0),
+            &rules,
+            team,
+            x,
+            y,
+        )
     }
 
     // ---- G03 T3 build-plan / beam seams (Rust-only) ----

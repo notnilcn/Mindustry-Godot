@@ -219,6 +219,15 @@ pub struct TurretConfig {
     pub target_blocks: bool,
     /// `Turret.alwaysShooting`.
     pub always_shooting: bool,
+    /// `Turret.predictTarget` (`Turret.java:111`; set false only by `scathe`,
+    /// `Blocks.java:5248`).
+    pub predict_target: bool,
+    /// `Turret.accurateDelay` (`Turret.java:84`; `lancer` sets false,
+    /// `Blocks.java:3594`).
+    pub accurate_delay: bool,
+    /// `Turret.moveWhileCharging` (`Turret.java:86`; `lancer` sets false,
+    /// `Blocks.java:3595`).
+    pub move_while_charging: bool,
     /// `BaseTurret.activationTime`.
     pub activation_time: f32,
     /// `BaseTurret.coolantMultiplier`.
@@ -747,6 +756,9 @@ fn config_for_inner(
                 target_ground: true,
                 target_blocks: true,
                 always_shooting: false,
+                predict_target: true,
+                accurate_delay: true,
+                move_while_charging: true,
                 activation_time: 0.0,
                 coolant_multiplier: 10.0,
                 coolant_amount: 0.1,
@@ -813,6 +825,9 @@ fn config_for_inner(
                 target_ground: true,
                 target_blocks: true,
                 always_shooting: false,
+                predict_target: true,
+                accurate_delay: true,
+                move_while_charging: true,
                 activation_time: 0.0,
                 coolant_multiplier: 10.0,
                 coolant_amount: 0.1,
@@ -879,6 +894,9 @@ fn config_for_inner(
                 target_ground: true,
                 target_blocks: true,
                 always_shooting: false,
+                predict_target: true,
+                accurate_delay: true,
+                move_while_charging: true,
                 activation_time: 0.0,
                 coolant_multiplier: 0.0,
                 coolant_amount: 0.0,
@@ -945,6 +963,9 @@ fn config_for_inner(
                 target_ground: true,
                 target_blocks: true,
                 always_shooting: false,
+                predict_target: true,
+                accurate_delay: true,
+                move_while_charging: true,
                 activation_time: 0.0,
                 coolant_multiplier: 0.0,
                 coolant_amount: 0.0,
@@ -1493,13 +1514,29 @@ fn update_turret(
     if state.target.is_none() {
         return;
     }
+    let Some(target) = state.target else {
+        return;
+    };
 
-    // Turn toward the target.
+    // `Turret.updateTile` (`Turret.java:571-605`): with a valid target the aim
+    // point is re-derived every tick (`targetPosition` leads through
+    // `Predict.intercept`) and firing is gated by
+    // `within(target, range() + target.hitSize()/1.9f)`.
+    let can_shoot = if state.logic_control_time > 0.0 {
+        // `logicControlled()` (`Turret.java:581-583`): logic drives firing and
+        // the aim point is whatever logic last set; no re-aim.
+        state.logic_shooting
+    } else {
+        target_position(ctx, e, state, x, y, target);
+        within_target_range(ctx, target, x, y, config.range)
+    };
+
+    // Turn toward the aim point.
     let target_rot = angle_to(x, y, state.target_pos.0, state.target_pos.1);
     state.rotation = move_toward(state.rotation, target_rot, config.rotate_speed * eff);
 
     let in_cone = angle_dist(state.rotation, target_rot) < config.shoot_cone;
-    if config.always_shooting || in_cone {
+    if config.always_shooting || (in_cone && can_shoot) {
         state.was_shooting = true;
         update_shooting(ctx, e, state);
     }
@@ -1830,6 +1867,90 @@ fn find_target(
     }
 }
 
+/// `Turret.targetPosition` (`Turret.java:459-479`): the per-tick aim point for
+/// the current ammo, leading the target through `Predict.intercept`.
+fn target_position(
+    ctx: &CombatCtx<'_>,
+    e: Entity,
+    state: &mut TurretState,
+    x: f32,
+    y: f32,
+    target: Entity,
+) {
+    if !has_ammo_state(state, ctx.world, e) {
+        return;
+    }
+    let Some((tx, ty)) = position(ctx.world, target) else {
+        return;
+    };
+    let speed = peek_ammo_state(state, ctx.world, e)
+        .and_then(|id| ctx.content.bullet(id))
+        .map(|def| def.speed)
+        .unwrap_or(0.0);
+    // Target per-tick displacement (`Hitboxc.deltaX/deltaY`); buildings carry
+    // no `Vel` and are static here.
+    let delta = ctx
+        .world
+        .get::<crate::entities::comp::Vel>(target)
+        .copied()
+        .unwrap_or(crate::entities::comp::Vel { x: 0.0, y: 0.0 });
+    // `when delay is accurate, assume unit has moved by chargeTime already`.
+    let config = &state.config;
+    let offset = if config.accurate_delay && !config.move_while_charging {
+        (
+            delta.x * config.shoot.first_shot_delay,
+            delta.y * config.shoot.first_shot_delay,
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let aim = if config.predict_target && speed >= 0.01 {
+        // `Predict.intercept(this, pos, offset.x, offset.y, bullet.speed)`:
+        // the turret is not a `Hitboxc`, so the source velocity is zero.
+        crate::combat::targeting::intercept_positions(
+            (x, y),
+            (0.0, 0.0),
+            (tx + offset.0, ty + offset.1),
+            (delta.x, delta.y),
+            true,
+            speed,
+        )
+    } else {
+        (tx, ty)
+    };
+    // `if(targetPos.isZero()) targetPos.set(pos)`.
+    state.target_pos = if aim.0 == 0.0 && aim.1 == 0.0 {
+        (tx, ty)
+    } else {
+        aim
+    };
+}
+
+/// `Turret.updateTile`'s `within(target, range() + target.hitSize()/1.9f)`
+/// (`Turret.java:587`): the fire gate uses the TARGET'S position, not the
+/// intercept point. Buildings use `BuildingComp.hitSize() = size * tilesize`
+/// (`BuildingComp.java:2054`).
+fn within_target_range(ctx: &CombatCtx<'_>, target: Entity, x: f32, y: f32, range: f32) -> bool {
+    let Some((tx, ty)) = position(ctx.world, target) else {
+        return false;
+    };
+    let hit_size = ctx
+        .world
+        .get::<crate::entities::comp::unit::comp::HitboxComp>(target)
+        .map(|hitbox| hitbox.hit_size)
+        .or_else(|| {
+            ctx.world
+                .get::<crate::entities::comp::Building>(target)
+                .and_then(|building| ctx.content.block(building.block))
+                .map(|def| def.size as f32 * crate::world::block::TILE_SIZE)
+        })
+        .unwrap_or(0.0);
+    let limit = range + hit_size / 1.9;
+    let dx = tx - x;
+    let dy = ty - y;
+    dx * dx + dy * dy <= limit * limit
+}
+
 /// `TurretBuild.validateTarget`.
 fn validate_target(ctx: &CombatCtx<'_>, _e: Entity, state: &TurretState) -> bool {
     let Some(target) = state.target else {
@@ -2123,6 +2244,31 @@ mod tests {
         assert!(progress > 0.0, "build turret advanced the construct");
         let state = harness.build.world.get::<TurretState>(turret).unwrap();
         assert!(state.build_warmup > 0.0, "build warmup ramped");
+    }
+
+    #[test]
+    fn turret_predict_flags_match_blocks_java() {
+        let harness = CombatHarness::new(8, 8, 1);
+        let cfg = |name: &str| {
+            config_for(harness.content(), name, harness.names_map())
+                .unwrap_or_else(|| panic!("config `{name}`"))
+        };
+        // `Turret.java:84,86,111`: class defaults (accurateDelay, moveWhileCharging,
+        // predictTarget all true unless a block overrides them).
+        let duo = cfg("duo");
+        assert!(duo.predict_target);
+        assert!(duo.accurate_delay);
+        assert!(duo.move_while_charging);
+        // `Blocks.java:3594-3595`: lancer sets moveWhileCharging/accurateDelay false.
+        let lancer = cfg("lancer");
+        assert!(!lancer.accurate_delay);
+        assert!(!lancer.move_while_charging);
+        assert!(lancer.predict_target);
+        // `Blocks.java:5248`: scathe sets predictTarget false.
+        let scathe = cfg("scathe");
+        assert!(!scathe.predict_target);
+        assert!(scathe.accurate_delay);
+        assert!(scathe.move_while_charging);
     }
 
     #[test]

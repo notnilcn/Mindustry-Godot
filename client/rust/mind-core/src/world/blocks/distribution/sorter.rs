@@ -225,12 +225,16 @@ mod tests {
         let coal = harness.content().item_id("coal").expect("coal");
         let conveyor = harness.content().block_id("conveyor").expect("conveyor");
         let sorter = harness.content().block_id("sorter").expect("sorter");
-        let vault = harness.content().block_id("vault").expect("vault");
+        // 2x2 containers: 3x3 vaults cannot be staged adjacent without their
+        // footprints overlapping (`Build.validPlace` rejects same-block
+        // overlaps, `Build.java:244-262`).
+        let container = harness.content().block_id("container").expect("container");
         assert!(harness.place(4, 4, conveyor, 0, true));
         assert!(harness.place(5, 4, sorter, 0, true));
-        assert!(harness.place(6, 4, vault, 0, true));
-        assert!(harness.place(5, 3, vault, 0, true));
-        assert!(harness.place(5, 5, vault, 0, true));
+        assert!(harness.place(6, 4, container, 0, true));
+        assert!(harness.place(5, 2, container, 0, true));
+        // (4,5), not (5,5): a 2x2 at (5,5) would overlap the forward container.
+        assert!(harness.place(4, 5, container, 0, true));
         assert!(harness.configure(5, 4, ConfigValue::Item(copper)));
         let belt = harness.build_at(4, 4).expect("belt");
         let sorter_e = harness.build_at(5, 4).expect("sorter");

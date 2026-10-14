@@ -29,9 +29,9 @@ use super::storage_block::{StorageBuild, incinerate_effect};
 
 /// Campaign/core policy hooks owned by plan 12 (`Rules`/`SectorInfo`).
 pub trait CoreCampaignHooks: Send + Sync {
-    /// `Rules.coreIncinerates`.
+    /// `Rules.coreIncinerates` (`Rules.java:225`, default `true` everywhere).
     fn core_incinerates(&self) -> bool {
-        false
+        true
     }
     /// `state.isCampaign()`.
     fn is_campaign(&self) -> bool {
@@ -256,21 +256,14 @@ impl BuildingBehavior for CoreBehavior {
             .get::<crate::entities::comp::TeamComp>(e)
             .map(|t| t.team);
         let h = hooks(world);
-        if current >= cap {
-            if !world.get::<CoreBuild>(e).is_some_and(|c| c.no_effect) {
-                incinerate_effect(world, e, source);
-            }
-            if let Some(mut core) = world.get_mut::<CoreBuild>(e) {
-                core.no_effect = false;
-            }
-            return;
-        }
-        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
-            items.add(item, 1, cap.max(0));
-        }
-        // `CoreBlock.handleItem`: default-team intakes count toward
-        // `state.stats.coreItemCount` (belt/dump transfers; the player offload
-        // goes through `handle_stack` instead and does not count).
+        // `CoreBlock.handleItem` (`CoreBlock.java:886-913`) counts the item
+        // BEFORE the full check, so an incinerated (but buildable) item still
+        // counts. `incinerateNonBuildable`: Erekir, not modelled.
+        //
+        // `state.stats.coreItemCount.increment(item)` (`CoreBlock.java:902`):
+        // default-team intakes count toward the shared stat (belt/dump
+        // transfers; the player offload goes through `handle_stack` instead and
+        // does not count).
         if let Some(name) = world
             .get_resource::<crate::sim::runtime::ContentIndex>()
             .and_then(|index| index.item_names.get(item.index()).cloned())
@@ -282,6 +275,18 @@ impl BuildingBehavior for CoreBehavior {
         }
         if team == Some(h.default_team()) && h.is_campaign() {
             h.handle_core_item(item, 1);
+        }
+        if current >= cap {
+            if !world.get::<CoreBuild>(e).is_some_and(|c| c.no_effect) {
+                incinerate_effect(world, e, source);
+            }
+            if let Some(mut core) = world.get_mut::<CoreBuild>(e) {
+                core.no_effect = false;
+            }
+            return;
+        }
+        if let Some(mut items) = world.get_mut::<ItemModule>(e) {
+            items.add(item, 1, cap.max(0));
         }
     }
 
@@ -391,7 +396,19 @@ mod tests {
 
     #[test]
     fn core_capacity_unifies_adjacent_storage() {
+        // Java `Rules.coreIncinerates` defaults true (`Rules.java:225`); pin the
+        // rejecting branch explicitly.
+        #[derive(Debug)]
+        struct NotIncinerating;
+        impl CoreCampaignHooks for NotIncinerating {
+            fn core_incinerates(&self) -> bool {
+                false
+            }
+        }
         let mut harness = BuildHarness::new(32, 32, 7);
+        harness
+            .world
+            .insert_resource(CoreHooks(std::sync::Arc::new(NotIncinerating)));
         let core = harness
             .content()
             .block_id("core-shard")
@@ -454,5 +471,27 @@ mod tests {
             ItemId::new(0),
         );
         assert_eq!(max, i32::MAX / 2);
+    }
+
+    /// H02 T1: the campaign hook queue carries the session's
+    /// `Rules.coreIncinerates`/`allowCoreUnloaders` into the core hooks.
+    #[test]
+    fn campaign_hooks_report_core_incinerates() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let queues = crate::game::runtime::install_campaign_core_hooks(&mut harness.world);
+        // Java defaults: `Rules.java:225` true, `:135` true.
+        {
+            let hooks = harness.world.get_resource::<CoreHooks>().expect("hooks");
+            assert!(hooks.0.core_incinerates());
+            assert!(hooks.0.allow_core_unloaders());
+        }
+        {
+            let mut state = queues.lock().expect("lock");
+            state.core_incinerates = false;
+            state.allow_core_unloaders = false;
+        }
+        let hooks = harness.world.get_resource::<CoreHooks>().expect("hooks");
+        assert!(!hooks.0.core_incinerates());
+        assert!(!hooks.0.allow_core_unloaders());
     }
 }
