@@ -173,6 +173,27 @@ pub fn emit_bullet_despawn(
     emit_at(audio, sound, x, y, volume, pitch, true);
 }
 
+/// `BulletType.healSound` (`BulletType.java:177`): `Sounds.blockHeal`; no
+/// vanilla content overrides it.
+pub const BULLET_HEAL_SOUND: SoundId = SoundId::BLOCK_HEAL;
+/// `BulletType.healSoundVolume` (`BulletType.java:179`).
+pub const BULLET_HEAL_VOLUME: f32 = 0.9;
+
+/// `BulletType.hitTile` heal branch (`BulletType.java:473`):
+/// `healSound.at(build, 1 + Mathf.range(0.1f), healSoundVolume)` at the
+/// building centre.
+pub fn emit_bullet_heal(audio: &AudioSinkRes, x: f32, y: f32, pitch: f32) {
+    emit_at(
+        audio,
+        BULLET_HEAL_SOUND,
+        x,
+        y,
+        BULLET_HEAL_VOLUME,
+        pitch,
+        true,
+    );
+}
+
 /// Emits a unit death sound (`UnitType.deathSound`).
 pub fn emit_unit_death(audio: &AudioSinkRes, sound: SoundId, x: f32, y: f32, volume: f32) {
     emit_at(audio, sound, x, y, volume, 1.0, false);
