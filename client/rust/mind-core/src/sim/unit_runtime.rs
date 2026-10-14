@@ -3551,6 +3551,8 @@ impl Sim {
                     .unwrap_or("?"),
                 "pos": entity_ref.get::<Pos>().map(|pos| [pos.x, pos.y]),
                 "rotation": entity_ref.get::<UnitCore>().map(|core| core.rotation),
+                // `UnitCore.elevation` (H08 T7 / PAR-0137 evidence).
+                "elevation": entity_ref.get::<UnitCore>().map(|core| core.elevation),
                 "health": entity_ref.get::<Health>().map(|health| health.health),
                 "can_shoot": entity_ref.get::<crate::weapons::UnitState>().map(|state| state.can_shoot),
                 "vel": entity_ref.get::<crate::entities::comp::Vel>().map(|vel| [vel.x, vel.y]),

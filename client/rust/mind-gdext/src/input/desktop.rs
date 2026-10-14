@@ -668,8 +668,23 @@ impl DesktopBridge {
     /// selected and no UI field/dialog owns input. The upstream boost-conflict
     /// guard (a live player unit that can boost sharing the key) needs the
     /// possessed-unit feed, which the bridge does not have yet.
-    fn command_mode_allowed(&self) -> bool {
-        self.controller.state.block.is_none() && !self.text_focus && !self.ui_dialog
+    /// `DesktopInput.java:300-311`: command mode needs an active game, an
+    /// unlocked input, no selected block and no text focus/dialog. It is
+    /// disabled while the player's unit can boost and `commandMode` shares one
+    /// key with `boost` (the default `shiftLeft`).
+    fn command_mode_allowed(&self, bindings: &BindingState) -> bool {
+        let shared = bindings.value(ids::COMMAND_MODE) == bindings.value(ids::BOOST);
+        let boost_guard = shared
+            && self
+                .host
+                .as_ref()
+                .is_some_and(|host| host.bind().player_unit_can_boost());
+        self.in_game
+            && !self.locked
+            && self.controller.state.block.is_none()
+            && !self.text_focus
+            && !self.ui_dialog
+            && !boost_guard
     }
 
     /// Re-applies the `DesktopInput.update` command-mode branch after one event.
@@ -681,7 +696,7 @@ impl DesktopBridge {
     /// `toggle_command_mode` (the MCP/test entry point), so that probe stays
     /// usable without holding the key.
     pub fn update_command_mode(&mut self, bindings: &BindingState, command_edge: Option<bool>) {
-        if !self.command_mode_allowed() {
+        if !self.command_mode_allowed(bindings) {
             self.set_command_mode(false);
             return;
         }
@@ -849,7 +864,7 @@ impl DesktopBridge {
             "command_mode" => {
                 // `input.keyTap` is the press edge (`justPressed`); hold mode is
                 // applied per frame by `update_command_mode`.
-                if !self.command_mode_hold && self.command_mode_allowed() {
+                if !self.command_mode_hold && self.command_mode_allowed(bindings) {
                     self.toggle_command_mode();
                 }
             }
@@ -3031,6 +3046,8 @@ mod tests {
         // `DesktopInput.update` + `commandmodehold` default true: command mode
         // follows the held command key (`boost` shares `shiftLeft`).
         let mut bridge = DesktopBridge::new();
+        // The whole `update` runs only in game (`Control.java:690-760`).
+        bridge.in_game = true;
         let bindings = BindingState::new();
         assert_eq!(bindings.name(ids::COMMAND_MODE), Some("shiftLeft"));
         assert_eq!(bindings.name(ids::BOOST), Some("shiftLeft"));
@@ -3040,6 +3057,18 @@ mod tests {
         assert_eq!(bridge.last_action, "command_mode");
         bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
         assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn command_mode_off_on_menu() {
+        // `Control.java:690-760`: `DesktopInput.update` only runs in game, so
+        // the command key is inert on the menu.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        assert!(!bridge.in_game);
+        bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
+        assert!(!bridge.controller.state.command_mode);
+        assert!(!bridge.command_mode_allowed(&bindings));
     }
 
     #[test]
@@ -3064,6 +3093,7 @@ mod tests {
     fn command_mode_ignored_while_placing() {
         // `DesktopInput.update` requires `block == null`.
         let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
         let bindings = BindingState::new();
         bridge
             .controller
@@ -3079,6 +3109,7 @@ mod tests {
         // `MindInput.toggle_command_mode()` (MCP/test) latches command mode;
         // hold mode must not clear it while the command key is up.
         let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
         let bindings = BindingState::new();
         bridge.toggle_command_mode();
         assert!(bridge.controller.state.command_mode);
@@ -3098,6 +3129,7 @@ mod tests {
         // `DesktopInput.update` assigns `commandMode = false` in the else
         // branch, so selecting a block while holding the key drops it.
         let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
         let bindings = BindingState::new();
         bridge.handle(&bindings, RawEvent::key_down("shiftLeft"));
         assert!(bridge.controller.state.command_mode);

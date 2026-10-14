@@ -3066,6 +3066,34 @@ impl MindSimHost {
         self.sim.player_plan_count()
     }
 
+    /// `player.unit().type.canBoost` and the unit is alive
+    /// (`DesktopInput.java:300-311`): the command-mode gate when `commandMode`
+    /// and `boost` share one key.
+    pub fn player_unit_can_boost(&self) -> bool {
+        use mind_core::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+        let Some(entity) = self.sim.player_unit() else {
+            return false;
+        };
+        if self
+            .sim
+            .ecs
+            .0
+            .get::<UnitCore>(entity)
+            .is_some_and(|core| core.dead)
+        {
+            return false;
+        }
+        self.sim
+            .ecs
+            .0
+            .get::<UnitTypeComp>(entity)
+            .and_then(|comp| {
+                self.content_registry()
+                    .and_then(|content| content.unit(comp.type_id))
+            })
+            .is_some_and(|def| def.can_boost)
+    }
+
     /// `build.isCommandable()` own commandable buildings (`DI:346-357`).
     pub fn commandable_buildings(&self) -> Vec<(i16, i16)> {
         self.sim.commandable_buildings(self.sim.live_default_team())
