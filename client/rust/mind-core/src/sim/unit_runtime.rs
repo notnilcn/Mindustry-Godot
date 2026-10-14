@@ -1320,8 +1320,9 @@ impl Sim {
     }
 
     /// Uploads the full desktop control state (`DesktopInput.updateMovement`):
-    /// movement axis, `player.shooting`, the cursor aim point and the boost
-    /// key. Read by [`crate::ai::types::player::update_player`].
+    /// movement axis, `player.shooting`, the cursor aim point, the boost key
+    /// and `mouseMove`. Read by [`crate::ai::types::player::update_player`].
+    #[allow(clippy::too_many_arguments)] // one atomic `Player`-state upload
     pub fn set_player_control(
         &mut self,
         axis_x: f32,
@@ -1330,6 +1331,7 @@ impl Sim {
         aim_x: f32,
         aim_y: f32,
         boosting: bool,
+        mouse_move: bool,
     ) {
         let mut input = self
             .ecs
@@ -1343,6 +1345,7 @@ impl Sim {
         input.aim_x = aim_x;
         input.aim_y = aim_y;
         input.boosting = boosting;
+        input.mouse_move = mouse_move;
         self.ecs.0.insert_resource(input);
     }
 

@@ -738,6 +738,13 @@ impl MindInput {
                         .base_mut()
                         .emit_signal("hotkey", &[GString::from(action.as_str()).to_variant()]);
                 }
+                Effect::UiCall(name) => {
+                    // T9: `toggle_power_lines` (F5) / `toggle_fullscreen` (F11)
+                    // live as `#[func]`s on the `/root/MindUi` autoload.
+                    if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
+                        let _ = ui.call(&name, &[]);
+                    }
+                }
                 Effect::SelectionChanged(json) => {
                     let _ = self.base_mut().emit_signal(
                         "selection_changed",
@@ -1055,11 +1062,13 @@ impl MindInput {
     /// `DesktopInput.updateMovement` inputs for the sim host:
     /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`. Only `bind`s the
     /// camera (the caller may hold the host) — never touches `MindSimHost`.
-    pub fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
+    pub fn player_control(&self) -> (f32, f32, bool, f32, f32, bool, bool) {
         let (axis_x, axis_y) = self.bridge.pan_axis(&self.bindings);
         let (aim_x, aim_y) = self.bridge.aim_world().unwrap_or((0.0, 0.0));
         let boosting =
             self.bridge.key_down(&self.bindings, ids::BOOST) && self.gameplay_input_active();
+        let mouse_move =
+            self.bridge.key_down(&self.bindings, ids::MOUSE_MOVE) && self.gameplay_input_active();
         (
             axis_x,
             axis_y,
@@ -1067,6 +1076,7 @@ impl MindInput {
             aim_x,
             aim_y,
             boosting,
+            mouse_move,
         )
     }
 
@@ -1111,6 +1121,12 @@ impl MindInput {
     #[func]
     pub fn gameplay_input_active(&self) -> bool {
         !self.bridge.text_focus && !self.bridge.ui_dialog
+    }
+
+    /// `InputHandler.locked()`: any active input lock gates the camera pan and
+    /// follow (`DesktopInput.java:276`; T10).
+    pub fn locked(&self) -> bool {
+        self.locks.any()
     }
 
     /// Toggles RTS command mode (`Binding.command_mode`).

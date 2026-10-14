@@ -431,9 +431,9 @@ impl INode for MindSimHost {
         // cursor aim, boost) reaches the player unit each tick; the same axis no
         // longer pans the camera while a player exists
         // (`MindCamera2D::process`).
-        let (axis_x, axis_y, shooting, aim_x, aim_y, boosting) = self.player_control();
+        let (axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move) = self.player_control();
         self.sim
-            .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting);
+            .set_player_control(axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move);
         self.advance_steps(steps);
         self.emit_state();
         self.emit_world_changed();
@@ -3022,18 +3022,18 @@ impl MindSimHost {
     }
 
     /// Binding-driven control state from the sibling `Input`:
-    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`.
+    /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting, mouse_move)`.
     /// `MindInput.player_control` shares the `move_x`/`move_y` axis; with a
     /// player unit it drives the unit instead of the camera
     /// (`DesktopInput.updateMovement`).
-    fn player_control(&self) -> (f32, f32, bool, f32, f32, bool) {
+    fn player_control(&self) -> (f32, f32, bool, f32, f32, bool, bool) {
         if self.input_locked {
             // `InputHandler.locked()`: movement and firing are gated off
             // (PAR-0100).
-            return (0.0, 0.0, false, 0.0, 0.0, false);
+            return (0.0, 0.0, false, 0.0, 0.0, false, false);
         }
         let Some(input) = self.input.clone() else {
-            return (0.0, 0.0, false, 0.0, 0.0, false);
+            return (0.0, 0.0, false, 0.0, 0.0, false, false);
         };
         input.bind().player_control()
     }
@@ -3045,7 +3045,7 @@ impl MindSimHost {
         self.input_locked = locked;
         if locked {
             self.sim
-                .set_player_control(0.0, 0.0, false, 0.0, 0.0, false);
+                .set_player_control(0.0, 0.0, false, 0.0, 0.0, false, false);
         }
     }
 

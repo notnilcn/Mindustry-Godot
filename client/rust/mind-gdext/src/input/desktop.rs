@@ -42,6 +42,22 @@ const CONTROL_RADIUS: f32 = 40.0;
 /// `selectedUnit()`'s hitbox grow per side (`InputHandler.java:2156`).
 const CONTROL_HITBOX_GROW: f32 = 6.0;
 
+/// Bindings whose world gesture runs directly from a pointer edge (T9); every
+/// other binding sharing the same mouse key keeps its normal key-down edge.
+const POINTER_BINDS: [&str; 5] = ["select", "deselect", "break_block", "pick", "command_queue"];
+
+/// Arc mouse key name for a raw button (`MouseButton.getName`).
+fn mouse_key_name(button: &str) -> Option<&'static str> {
+    match button {
+        "left" => Some("mouseLeft"),
+        "right" => Some("mouseRight"),
+        "middle" => Some("mouseMiddle"),
+        "back" => Some("mouseBack"),
+        "forward" => Some("mouseForward"),
+        _ => None,
+    }
+}
+
 /// One world interaction in flight.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DragKind {
@@ -138,6 +154,9 @@ pub enum Effect {
     CloseTopDialog,
     /// A binding fired (probe/UI signal).
     Hotkey(String),
+    /// Call a `#[func]` on the `/root/MindUi` autoload by name
+    /// (`toggle_power_lines` F5 / `toggle_fullscreen` F11).
+    UiCall(String),
     /// The RTS selection changed; payload is a JSON id array.
     SelectionChanged(String),
 }
@@ -660,7 +679,37 @@ impl DesktopBridge {
             }
         }
         for name in fired {
-            self.dispatch_action(bindings, name);
+            if POINTER_BINDS.contains(&name) {
+                self.pointer_action(bindings, name, true);
+            } else {
+                self.dispatch_action(bindings, name);
+            }
+        }
+    }
+
+    /// A pointer binding edge from the keyboard path (T9: rebinding `select` to
+    /// a key routes the same world handlers; the mouse path calls them from
+    /// `mouse_button`).
+    fn pointer_action(&mut self, bindings: &BindingState, name: &str, down: bool) {
+        if down {
+            match name {
+                "select" => self.left_press(bindings),
+                "break_block" | "deselect" => self.right_press(bindings),
+                "pick" | "command_queue" => {
+                    if self.controller.state.command_mode {
+                        self.command_tap_queued();
+                    } else {
+                        self.pick_block();
+                    }
+                }
+                _ => {}
+            }
+        } else {
+            match name {
+                "select" => self.left_release(),
+                "break_block" | "deselect" => self.right_release(bindings),
+                _ => {}
+            }
         }
     }
 
@@ -987,6 +1036,19 @@ impl DesktopBridge {
                 // the HUD fragment owns the setting write and the marker pass
                 // reads it (`Renderer.drawStatus`).
                 self.fire_hotkey(name);
+            }
+            "toggle_power_lines" => {
+                // `DesktopInput.java:459-466`: F5 swaps `lasersopacity` with
+                // `preferredlaseropacity` (the node owns the setting write).
+                self.effects
+                    .push(Effect::UiCall("toggle_power_lines".to_owned()));
+                self.fire_hotkey(name);
+            }
+            "fullscreen" => {
+                // `Control.java:690-694`: F11 (and the menu) flips the
+                // persisted `fullscreen` setting and the window mode.
+                self.effects
+                    .push(Effect::UiCall("toggle_fullscreen".to_owned()));
             }
             "toggle_menus" => {
                 // `HudFragment.java:455-461`: the HUD fragment flips its tables.
@@ -1741,6 +1803,17 @@ impl DesktopBridge {
 
     /// Key-release bindings (`DesktopInput.pollInputPlayer` release half).
     fn key_up_event(&mut self, bindings: &BindingState, code: &str) {
+        // T9: a pointer binding rebound to a key releases through the same
+        // handlers (`select` -> left release, `break_block`/`deselect` ->
+        // right release).
+        if bindings.name(ids::SELECT) == Some(code) {
+            self.left_release();
+        }
+        if bindings.name(ids::BREAK_BLOCK) == Some(code)
+            || bindings.name(ids::DESELECT) == Some(code)
+        {
+            self.right_release(bindings);
+        }
         if bindings.name(ids::DIAGONAL_PLACEMENT) == Some(code) {
             // `HintsFragment.conveyorPathfind` = `keyRelease(diagonalPlacement)`.
             self.push_hint("diagonal_release");
@@ -1921,19 +1994,60 @@ impl DesktopBridge {
     }
 
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
-        match (button, down) {
-            ("left", true) => self.left_press(bindings),
-            ("left", false) => self.left_release(),
-            ("right", true) => self.right_press(bindings),
-            ("right", false) => self.right_release(bindings),
-            ("middle", true) => {
+        let Some(key) = mouse_key_name(button) else {
+            return;
+        };
+        if down {
+            self.pressed.insert(key.to_owned());
+        } else {
+            self.pressed.remove(key);
+        }
+        // `Binding.select`/`deselect`/`break_block`/`pick`/`command_queue` own
+        // the pointer gestures (T9); the raw button is only their default key
+        // (`DesktopInput` reads the bindings, not the button).
+        let uses = |id: u16| matches!(bindings.value(id), BindingValue::Key(name) if name == key);
+        let select = uses(ids::SELECT);
+        let right = uses(ids::BREAK_BLOCK) || uses(ids::DESELECT);
+        let middle = uses(ids::PICK) || uses(ids::COMMAND_QUEUE);
+        if down {
+            if select {
+                self.left_press(bindings);
+            }
+            if right {
+                self.right_press(bindings);
+            }
+            if middle {
                 if self.controller.state.command_mode {
+                    // DI:924-934: command mode queues the order on the middle
+                    // click (`Binding.commandQueue`); outside it, pick (T5).
                     self.command_tap_queued();
                 } else {
                     self.pick_block();
                 }
             }
-            _ => {}
+        } else {
+            if select {
+                self.left_release();
+            }
+            if right {
+                self.right_release(bindings);
+            }
+        }
+        // Every other binding sharing the button still gets its key-down edge
+        // (`pan` = mouseForward, `mouseMove` = mouseBack, user rebinds).
+        let mut fired: Vec<&'static str> = Vec::new();
+        for (index, bind) in KeyBindTable::all().iter().enumerate() {
+            if POINTER_BINDS.contains(&bind.name) {
+                continue;
+            }
+            if uses(index as u16) {
+                fired.push(bind.name);
+            }
+        }
+        for name in fired {
+            if down {
+                self.dispatch_action(bindings, name);
+            }
         }
     }
 
@@ -3057,6 +3171,51 @@ mod tests {
         assert_eq!(bridge.last_action, "command_mode");
         bridge.handle(&bindings, RawEvent::key_up("shiftLeft"));
         assert!(!bridge.controller.state.command_mode);
+    }
+
+    #[test]
+    fn mouse_back_sets_pressed() {
+        // T9: `pan` (mouseForward) and `mouseMove` (mouseBack) are binding keys;
+        // the raw mouse press latches their key name in `pressed`, so
+        // `MindInput.pan_pressed`/`mouse_move_pressed` and the player pull see
+        // the held state.
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        let bindings = BindingState::new();
+        assert_eq!(bindings.name(ids::MOUSE_MOVE), Some("mouseBack"));
+        assert_eq!(bindings.name(ids::PAN), Some("mouseForward"));
+        bridge.handle(
+            &bindings,
+            RawEvent::MouseButton {
+                button: "back".to_owned(),
+                down: true,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        assert!(bridge.key_down(&bindings, ids::MOUSE_MOVE));
+        assert!(!bridge.key_down(&bindings, ids::PAN));
+        bridge.handle(
+            &bindings,
+            RawEvent::MouseButton {
+                button: "back".to_owned(),
+                down: false,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        assert!(!bridge.key_down(&bindings, ids::MOUSE_MOVE));
+
+        bridge.handle(
+            &bindings,
+            RawEvent::MouseButton {
+                button: "forward".to_owned(),
+                down: true,
+                x: 10.0,
+                y: 10.0,
+            },
+        );
+        assert!(bridge.key_down(&bindings, ids::PAN));
     }
 
     #[test]
