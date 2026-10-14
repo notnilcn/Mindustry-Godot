@@ -93,6 +93,18 @@ impl ItemModule {
         self.items.get(item.index()).copied().unwrap_or(0)
     }
 
+    /// `ItemModule.set(item, amount)`: replaces the stored amount and fixes
+    /// `total` (Java's `total` is an `int`; overflow wraps, `ItemModule.java`).
+    pub fn set(&mut self, item: ItemId, amount: i32) {
+        let Some(slot) = self.items.get_mut(item.index()) else {
+            return;
+        };
+        let old = *slot;
+        let clamped = amount.max(0);
+        *slot = clamped;
+        self.total = self.total.wrapping_add(clamped.wrapping_sub(old));
+    }
+
     /// `ItemModule.add(item, amount)`; returns the amount accepted.
     pub fn add(&mut self, item: ItemId, amount: i32, capacity: i32) -> i32 {
         let Some(slot) = self.items.get_mut(item.index()) else {

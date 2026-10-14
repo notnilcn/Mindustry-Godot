@@ -2422,3 +2422,117 @@ fn env_unsupported_block_disabled() {
         "{name} is disabled under env 17"
     );
 }
+
+/// H09 T8: `TeamRule.fillItems` refills the first core of every active team
+/// (`Logic.java:552-561`): with `coreIncinerates` the max accepted is
+/// `i32::MAX / 2`, hidden items stay 0 and without incineration the core's
+/// storage capacity is the cap.
+#[test]
+fn fill_items_fills_ai_core() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{
+        CampaignRuntime, install_campaign_core_hooks, sync_session_with_sim,
+    };
+    use crate::world::TilePos;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = true;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    // `PlaySession` starts in `Menu`; the campaign systems only run in
+    // `Playing`.
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    assert!(sim.place_for_team(5, 5, core, 0, 2), "team-2 core placed");
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+    let copper = item(&sim, "copper");
+    assert_eq!(
+        stored_item(&sim, entity, copper),
+        i32::MAX / 2,
+        "coreIncinerates -> getMaximumAccepted = i32::MAX / 2"
+    );
+    // A hidden item is never filled.
+    let hidden = {
+        let content = sim.block_runtime().expect("rt").content();
+        content
+            .items()
+            .iter()
+            .find(|item| item.is_hidden())
+            .map(|item| item.id)
+    };
+    if let Some(hidden) = hidden {
+        assert_eq!(
+            stored_item(&sim, entity, hidden),
+            0,
+            "hidden items are skipped"
+        );
+    }
+    assert!(
+        sim.ecs.0.get::<Building>(entity).is_some(),
+        "the core still exists"
+    );
+
+    // Without `coreIncinerates` the cap is the core's storage capacity.
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = false;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    assert!(sim.place_for_team(5, 5, core, 0, 2));
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+    let capacity = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::storage::core_block::CoreBuild>(entity)
+        .map(|core| core.storage_capacity)
+        .expect("core build");
+    assert_eq!(
+        stored_item(&sim, entity, copper),
+        capacity,
+        "without incineration the core fills to its storage capacity"
+    );
+}
