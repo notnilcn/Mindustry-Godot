@@ -4600,6 +4600,11 @@ impl MindSimHost {
             if self.sim.commands_applied() != applied_before {
                 self.world_dirty = true;
             }
+            // A world-processor `setblock` mutated tiles (H06 T8).
+            if self.sim.logic_world_changed {
+                self.sim.logic_world_changed = false;
+                self.world_dirty = true;
+            }
             self.tick_fx_view();
         }
         self.publish_selectable_units();

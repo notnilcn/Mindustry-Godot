@@ -897,10 +897,9 @@ fn block_size(world: &World, e: Entity) -> i32 {
         .unwrap_or(1)
 }
 
-/// `GetBlockI` — block/building layers from the `TileBuilds` mirror.
-///
-/// Floor/ore need the `WorldGrid`, which is not a world resource (deferred to
-/// plan 06/07); those layers return `null`.
+/// `GetBlockI` — block/building layers from the live `WorldGrid` (editor/
+/// generation), the unit-runtime grid snapshot (live client) or the
+/// `TileBuilds` mirror. Java rounds with `Mathf.round(x.numf())`.
 pub fn run_get_block(
     exec: &mut Executor,
     world: &mut World,
@@ -909,11 +908,31 @@ pub fn run_get_block(
     x: VarRef,
     y: VarRef,
 ) {
-    let tx = exec.arena.get(x.id()).numi();
-    let ty = exec.arena.get(y.id()).numi();
+    // `Mathf.round(float)` = `floor(x + 0.5)`.
+    let tx = (exec.arena.get(x.id()).numf() + 0.5).floor() as i32;
+    let ty = (exec.arena.get(y.id()).numf() + 0.5).floor() as i32;
     // The generation/editor world carries the live `WorldGrid`; read floor/ore
     // and block straight from it (plan 06 filter hook).
     if let Some(grid) = world.get_resource::<crate::world::WorldGrid>() {
+        let in_bounds = tx >= 0 && ty >= 0 && tx < grid.width() && ty < grid.height();
+        let value = if in_bounds {
+            let tile = grid.tile(tx, ty);
+            match layer {
+                TileLayer::Building => tile.build.map(LogicObject::Building),
+                TileLayer::Block => Some(LogicObject::Content(ContentRef::block(tile.block))),
+                TileLayer::Floor => Some(LogicObject::Content(ContentRef::block(tile.floor))),
+                TileLayer::Ore => Some(LogicObject::Content(ContentRef::block(tile.overlay))),
+            }
+        } else {
+            None
+        };
+        out_obj(exec, result, value);
+        return;
+    }
+    // Live client: the unit runtime's grid snapshot is the tile source
+    // (refreshed on every tile change).
+    if let Some(runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() {
+        let grid = &runtime.grid;
         let in_bounds = tx >= 0 && ty >= 0 && tx < grid.width() && ty < grid.height();
         let value = if in_bounds {
             let tile = grid.tile(tx, ty);
@@ -1016,7 +1035,8 @@ pub fn run_set_block(
     });
 }
 
-/// `SpawnUnitI` — host-gated; records the spawn (plan 11 sink applied by host).
+/// `SpawnUnitI` — applies the spawn live (`LExecutor.java:1615-1650`) and
+/// records the request for the event log/host observers.
 #[allow(clippy::too_many_arguments)]
 pub fn run_spawn_unit(
     exec: &mut Executor,
@@ -1026,27 +1046,85 @@ pub fn run_spawn_unit(
     y: VarRef,
     rotation: VarRef,
     team: VarRef,
-    _result: VarRef,
+    result: VarRef,
     effect: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
-    if !state.is_host {
-        return;
-    }
     let Some(team_id) = exec.arena.get(team.id()).team() else {
         return;
     };
-    let unit_type = obj_of(exec, type_);
-    state.emit(LogicWorldEvent::SpawnUnit {
-        type_: unit_type,
-        x: exec.arena.get(x.id()).numf_world(),
-        y: exec.arena.get(y.id()).numf_world(),
-        rotation: num(exec, rotation) as f32,
-        team: team_id,
-        effect: bool_of(exec, effect),
+    let type_obj = obj_of(exec, type_);
+    let px = exec.arena.get(x.id()).numf_world();
+    let py = exec.arena.get(y.id()).numf_world();
+    let rot = num(exec, rotation) as f32;
+    let with_effect = bool_of(exec, effect);
+    {
+        let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+            return;
+        };
+        if !state.is_host {
+            return;
+        }
+        state.emit(LogicWorldEvent::SpawnUnit {
+            type_: type_obj.clone(),
+            x: px,
+            y: py,
+            rotation: rot,
+            team: team_id,
+            effect: with_effect,
+        });
+    }
+    // Live half: `if(t != null && type.obj() instanceof UnitType type &&
+    // !type.internal && Units.canCreate(t, type))`.
+    let Some(LogicObject::Content(c)) = type_obj else {
+        return;
+    };
+    if c.type_ != ContentType::Unit {
+        return;
+    }
+    let unit_id = UnitTypeId::new(c.id);
+    let Some(mut runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+        return;
+    };
+    let allowed = runtime.content.unit(unit_id).is_some_and(|def| {
+        !def.internal && crate::entities::comp::unit::queries::can_create_unit(world, team_id, def)
     });
+    if !allowed {
+        world.insert_non_send(runtime);
+        return;
+    }
+    // `Mathf.range(0.01f)` per axis; drawn from the `Sim` stream (the Java call
+    // uses the global random; deterministic deviation).
+    let dx = runtime
+        .rng
+        .range(crate::determinism::RngStream::Sim, -0.01, 0.01);
+    let dy = runtime
+        .rng
+        .range(crate::determinism::RngStream::Sim, -0.01, 0.01);
+    let spawned = runtime.spawn_by_id(world, unit_id, team_id, px + dx, py + dy, rot);
+    if let Some(entity) = spawned {
+        if with_effect {
+            // `WaveSpawner.spawnEffect`: `unmoving` 30 + `invincible` 60 +
+            // `Fx.unitSpawn.at(...)` (the delayed `Fx.spawn` follow-up is
+            // skipped: H06 T8 note).
+            if let Some(unmoving) = runtime.content.status_id("unmoving") {
+                crate::combat::damage::status::apply_status(world, entity, unmoving, 30.0);
+            }
+            if let Some(invincible) = runtime.content.status_id("invincible") {
+                crate::combat::damage::status::apply_status(world, entity, invincible, 60.0);
+            }
+            if let Some(fx_id) = crate::content::registries::fx_meta::effect_by_name("unitSpawn") {
+                runtime.fx.effect(
+                    &crate::content::registries::fx_meta::EffectRef::Named(fx_id),
+                    px,
+                    py,
+                    rot,
+                    crate::content::Rgba::WHITE,
+                );
+            }
+        }
+        out_obj(exec, result, Some(LogicObject::Unit(entity)));
+    }
+    world.insert_non_send(runtime);
 }
 
 /// `SpawnBulletI` — records the resolved bullet request (plan 10 sink).
@@ -1095,7 +1173,8 @@ pub fn run_spawn_bullet(
     });
 }
 
-/// `ApplyEffectI` — host-gated status apply/clear request (plan 11 sink).
+/// `ApplyEffectI` — applies/clears the status live (`LExecutor.java:1765-1776`)
+/// and records the request for the event log.
 pub fn run_apply_status(
     exec: &mut Executor,
     world: &mut World,
@@ -1104,39 +1183,62 @@ pub fn run_apply_status(
     unit: VarRef,
     duration: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+    let unit_entity = match obj_of(exec, unit) {
+        Some(LogicObject::Unit(entity)) => Some(entity),
+        _ => None,
+    };
+    let effect_obj = obj_of(exec, effect);
+    let duration_s = num(exec, duration) as f32;
+    {
+        let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+            return;
+        };
+        if !state.is_host {
+            return;
+        }
+        let unit_index = unit_entity.map(|e| e.index().index()).unwrap_or(u32::MAX);
+        state.emit(LogicWorldEvent::ApplyStatus {
+            clear,
+            effect: effect_obj.clone(),
+            unit_index,
+            duration: duration_s,
+        });
+    }
+    let (Some(entity), Some(LogicObject::Content(c))) = (unit_entity, effect_obj) else {
         return;
     };
-    if !state.is_host {
+    if c.type_ != ContentType::Status {
         return;
     }
-    let Some(LogicObject::Unit(entity)) = obj_of(exec, unit) else {
-        return;
-    };
-    state.emit(LogicWorldEvent::ApplyStatus {
-        clear,
-        effect: obj_of(exec, effect),
-        unit_index: entity.index().index(),
-        duration: num(exec, duration) as f32,
-    });
+    let status = crate::content::StatusId::new(c.id);
+    if clear {
+        crate::combat::damage::status::unapply_status(world, entity, status);
+    } else {
+        // `unit.apply(effect, duration.numf() * 60f)`.
+        crate::combat::damage::status::apply_status(world, entity, status, duration_s * 60.0);
+    }
 }
 
-/// `SenseWeatherI`.
+/// `SenseWeatherI` — an active `WeatherRuntime` of that type
+/// (`weather.isActive()`, `LExecutor.java:1710-1719`).
 pub fn run_weather_sense(exec: &mut Executor, world: &mut World, to: VarRef, weather: VarRef) {
-    let active = obj_of(exec, weather)
-        .and_then(|obj| match obj {
-            LogicObject::Content(c) if c.type_ == ContentType::Weather => Some(c.id),
-            _ => None,
+    let wanted = obj_of(exec, weather).and_then(|obj| match obj {
+        LogicObject::Content(c) if c.type_ == ContentType::Weather => Some(c.id),
+        _ => None,
+    });
+    let active = wanted.is_some_and(|id| {
+        world.iter_entities().any(|entity| {
+            match entity.get::<crate::entities::comp::weather::WeatherRuntime>() {
+                Some(state) => state.weather.raw() == id,
+                None => false,
+            }
         })
-        .is_some_and(|id| {
-            world
-                .get_resource::<LogicWorldState>()
-                .is_some_and(|state| state.weather_active.contains(&id))
-        });
+    });
     exec.set_num(to.id(), if active { 1.0 } else { 0.0 });
 }
 
-/// `SetWeatherI`.
+/// `SetWeatherI` — creates/refreshes/expires the live weather entity
+/// (`LExecutor.java:1721-1749`).
 pub fn run_weather_set(exec: &mut Executor, world: &mut World, weather: VarRef, state_var: VarRef) {
     let Some(id) = obj_of(exec, weather).and_then(|obj| match obj {
         LogicObject::Content(c) if c.type_ == ContentType::Weather => Some(c.id),
@@ -1145,21 +1247,64 @@ pub fn run_weather_set(exec: &mut Executor, world: &mut World, weather: VarRef, 
         return;
     };
     let on = bool_of(exec, state_var);
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
+    let weather_id = crate::content::WeatherId::new(id);
+    let fade = crate::entities::comp::weather::WEATHER_FADE_TIME;
+    // Existing instance, if any.
+    let existing = world
+        .iter_entities()
+        .find(|entity| {
+            entity
+                .get::<crate::entities::comp::weather::WeatherRuntime>()
+                .is_some_and(|state| state.weather == weather_id)
+        })
+        .map(|entity| entity.id());
     if on {
-        state.weather_active.insert(id);
-    } else {
-        state.weather_active.remove(&id);
+        if let Some(entity) = existing {
+            // `weather.instance().life(WeatherState.fadeTime)`.
+            if let Some(mut state) =
+                world.get_mut::<crate::entities::comp::weather::WeatherRuntime>(entity)
+            {
+                state.life = fade;
+            }
+        } else if let Some(mut runtime) =
+            world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        {
+            // `Tmp.v1.setToRandomDirection()`; the Java call uses the global
+            // random, the port draws the `Fx` stream (deterministic deviation).
+            let angle = runtime
+                .rng
+                .range(crate::determinism::RngStream::Fx, 0.0, 360.0)
+                .to_radians();
+            let seq = runtime.seq;
+            runtime.seq = seq.wrapping_add(1);
+            // `Call.createWeather(weather, 1f, WeatherState.fadeTime, dir)`.
+            crate::entities::comp::weather::create_weather(
+                world,
+                seq,
+                weather_id,
+                1.0,
+                fade,
+                (angle.cos(), angle.sin()),
+            );
+            world.insert_non_send(runtime);
+        }
+    } else if let Some(entity) = existing
+        && let Some(mut state) =
+            world.get_mut::<crate::entities::comp::weather::WeatherRuntime>(entity)
+        && state.life > fade
+    {
+        // `if(weather.isActive() && weather.instance().life > fadeTime)`.
+        state.life = fade;
     }
-    state.emit(LogicWorldEvent::WeatherSet {
-        weather: Some(LogicObject::Content(ContentRef::new(
-            ContentType::Weather,
-            id,
-        ))),
-        state: on,
-    });
+    if let Some(mut state) = world.get_resource_mut::<LogicWorldState>() {
+        state.emit(LogicWorldEvent::WeatherSet {
+            weather: Some(LogicObject::Content(ContentRef::new(
+                ContentType::Weather,
+                id,
+            ))),
+            state: on,
+        });
+    }
 }
 
 /// `SpawnWaveI` — host-gated.
@@ -1399,7 +1544,8 @@ pub fn run_cutscene(
     });
 }
 
-/// `EffectI`.
+/// `EffectI` — plays the `LogicFx` entry live (`LExecutor.java:1975-2002`) and
+/// records the request for the event log.
 #[allow(clippy::too_many_arguments)]
 pub fn run_effect(
     exec: &mut Executor,
@@ -1414,23 +1560,46 @@ pub fn run_effect(
     let Some(entry) = effect else {
         return;
     };
+    // `rot = type.rotate ? rotation : min(rotation, 1000)`.
     let rotation_f = num(exec, rotation) as f32;
     let rot = if entry.rotate {
         rotation_f
     } else {
         rotation_f.min(1000.0)
     };
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+    let (px, py) = (
+        exec.arena.get(x.id()).numf_world(),
+        exec.arena.get(y.id()).numf_world(),
+    );
+    let color_bits = num(exec, color);
+    let data_obj = obj_of(exec, data);
+    {
+        let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+            return;
+        };
+        state.emit(LogicWorldEvent::Effect {
+            type_name: entry.name.to_owned(),
+            x: px,
+            y: py,
+            rotation: rot,
+            color: color_bits,
+            data: data_obj,
+        });
+    }
+    // Live half: `type.effect.at(x, y, rot, Color.fromDouble(color), data)`.
+    let Some(runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
         return;
     };
-    state.emit(LogicWorldEvent::Effect {
-        type_name: entry.name.to_owned(),
-        x: exec.arena.get(x.id()).numf_world(),
-        y: exec.arena.get(y.id()).numf_world(),
-        rotation: rot,
-        color: num(exec, color),
-        data: obj_of(exec, data),
-    });
+    if let Some(fx_id) = crate::content::registries::fx_meta::effect_by_name(entry.fx) {
+        runtime.fx.effect(
+            &crate::content::registries::fx_meta::EffectRef::Named(fx_id),
+            px,
+            py,
+            rot,
+            color_from_double(color_bits).0,
+        );
+    }
+    world.insert_non_send(runtime);
 }
 
 /// `ExplosionI` — host-gated (damage/FX applied by plan 10/17 host).
@@ -1448,34 +1617,84 @@ pub fn run_explosion(
     pierce: VarRef,
     effect: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
-        return;
-    };
-    if !state.is_host {
-        return;
+    {
+        let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+            return;
+        };
+        if !state.is_host {
+            return;
+        }
+        let team_id = exec
+            .arena
+            .get(team.id())
+            .team()
+            .unwrap_or(crate::game::team::DERELICT.0);
+        // Radius cap: 100 tiles.
+        let radius_tiles = (num(exec, radius) as f32).min(100.0) * TILE_PX;
+        let damage_v = num(exec, damage) as f32;
+        if damage_v < 0.0 {
+            return;
+        }
+        let (px, py) = (
+            exec.arena.get(x.id()).numf_world(),
+            exec.arena.get(y.id()).numf_world(),
+        );
+        let air_v = bool_of(exec, air);
+        let ground_v = bool_of(exec, ground);
+        let pierce_v = bool_of(exec, pierce);
+        let effect_v = bool_of(exec, effect);
+        state.emit(LogicWorldEvent::Explosion {
+            team: team_id,
+            x: px,
+            y: py,
+            radius: radius_tiles,
+            damage: damage_v,
+            air: air_v,
+            ground: ground_v,
+            pierce: pierce_v,
+            effect: effect_v,
+        });
+        // `Call.logicExplosion` live half: `Damage.damage(...)` + FX.
+        let Some(runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+            return;
+        };
+        // The port's `damage_area` targets units and buildings uniformly; the
+        // air/ground filters are not modelled there (H06 T8 deviation).
+        let _ = (air_v, ground_v);
+        let opts = crate::combat::damage::area::DamageOptions {
+            pierce_armor: pierce_v,
+            ..Default::default()
+        };
+        crate::combat::damage::area::damage_area(
+            world,
+            &runtime.content,
+            Some(team_id),
+            px,
+            py,
+            radius_tiles,
+            damage_v,
+            opts,
+        );
+        if effect_v {
+            // `pierce ? Fx.spawnShockwave.at(x, y, World.conv(radius))
+            //         : Fx.dynamicExplosion.at(x, y, World.conv(radius) / 8f)`.
+            let (name, rot) = if pierce_v {
+                ("spawnShockwave", radius_tiles / TILE_PX)
+            } else {
+                ("dynamicExplosion", radius_tiles / TILE_PX / 8.0)
+            };
+            if let Some(fx_id) = crate::content::registries::fx_meta::effect_by_name(name) {
+                runtime.fx.effect(
+                    &crate::content::registries::fx_meta::EffectRef::Named(fx_id),
+                    px,
+                    py,
+                    rot,
+                    crate::content::Rgba::WHITE,
+                );
+            }
+        }
+        world.insert_non_send(runtime);
     }
-    let team_id = exec
-        .arena
-        .get(team.id())
-        .team()
-        .unwrap_or(crate::game::team::DERELICT.0);
-    // Radius cap: 100 tiles.
-    let radius_tiles = (num(exec, radius) as f32).min(100.0) * TILE_PX;
-    let damage_v = num(exec, damage) as f32;
-    if damage_v < 0.0 {
-        return;
-    }
-    state.emit(LogicWorldEvent::Explosion {
-        team: team_id,
-        x: exec.arena.get(x.id()).numf_world(),
-        y: exec.arena.get(y.id()).numf_world(),
-        radius: radius_tiles,
-        damage: damage_v,
-        air: bool_of(exec, air),
-        ground: bool_of(exec, ground),
-        pierce: bool_of(exec, pierce),
-        effect: bool_of(exec, effect),
-    });
 }
 
 /// `GetFlagI`.
@@ -1600,7 +1819,8 @@ pub fn run_make_marker(
     };
 }
 
-/// `PlaySoundI` (plan 18 `SoundId` resolution is a host sink).
+/// `PlaySoundI` — plays through the audio sink (`LExecutor.java:2230-2259`)
+/// and records the request for the event log.
 #[allow(clippy::too_many_arguments)]
 pub fn run_play_sound(
     exec: &mut Executor,
@@ -1614,34 +1834,81 @@ pub fn run_play_sound(
     y: VarRef,
     limit: VarRef,
 ) {
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+    let raw = numi(exec, id);
+    let volume_v = (num(exec, volume) as f32).min(2.0);
+    let pitch_v = num(exec, pitch) as f32;
+    let pan_v = num(exec, pan) as f32;
+    let (px, py) = (
+        exec.arena.get(x.id()).numf_world(),
+        exec.arena.get(y.id()).numf_world(),
+    );
+    let limit_v = bool_of(exec, limit);
+    {
+        let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+            return;
+        };
+        state.emit(LogicWorldEvent::PlaySound {
+            positional,
+            id: raw,
+            volume: volume_v,
+            pitch: pitch_v,
+            pan: pan_v,
+            x: px,
+            y: py,
+            limit: limit_v,
+        });
+    }
+    // `Sounds.getSound(id)`; ids outside the table have no sound to play.
+    if raw < 0 || raw as usize >= crate::content::registries::sound_meta::SOUNDS.len() {
+        return;
+    }
+    let Some(sink) = world.get_resource::<crate::audio::AudioSinkRes>() else {
         return;
     };
-    state.emit(LogicWorldEvent::PlaySound {
-        positional,
-        id: numi(exec, id),
-        volume: (num(exec, volume) as f32).min(2.0),
-        pitch: num(exec, pitch) as f32,
-        pan: num(exec, pan) as f32,
-        x: exec.arena.get(x.id()).numf_world(),
-        y: exec.arena.get(y.id()).numf_world(),
-        limit: bool_of(exec, limit),
-    });
+    let sound = crate::audio::SoundId(raw as u16);
+    if positional {
+        // `sound.at(unconv(x), unconv(y), pitch, min(volume, 2), limit)`.
+        sink.emit(crate::audio::AudioEvent::at(
+            sound, px, py, pitch_v, volume_v, limit_v,
+        ));
+    } else {
+        // `sound.play(volume, pitch, pan, false, limit)`; the raw volume (the
+        // sink applies `sfxvol`, H07 seam).
+        sink.emit(crate::audio::AudioEvent::play(
+            sound, volume_v, pitch_v, pan_v, false, limit_v,
+        ));
+    }
 }
 
-/// `PlayMusicI`.
+/// `PlayMusicI` — resolves through the client's music catalog
+/// (`LExecutor.java:2261-2280`; empty name = stop).
 pub fn run_play_music(exec: &mut Executor, world: &mut World, name: VarRef, interrupt: VarRef) {
     let resolved = match obj_of(exec, name) {
         Some(LogicObject::Str(s)) => s,
         _ => String::new(),
     };
-    let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+    let interrupt_v = bool_of(exec, interrupt);
+    let headless = world
+        .get_resource::<LogicWorldState>()
+        .is_none_or(|state| state.headless);
+    {
+        let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
+            return;
+        };
+        state.emit(LogicWorldEvent::PlayMusic {
+            name: resolved.clone(),
+            interrupt: interrupt_v,
+        });
+    }
+    if headless {
         return;
-    };
-    state.emit(LogicWorldEvent::PlayMusic {
-        name: resolved,
-        interrupt: bool_of(exec, interrupt),
-    });
+    }
+    if let Some(sink) = world.get_resource::<crate::audio::AudioSinkRes>() {
+        sink.emit(crate::audio::AudioEvent::music_play(
+            crate::audio::MusicRef::new(resolved),
+            interrupt_v,
+        ));
+    }
 }
 
 /// `LocalePrintI` (appends to the text buffer; records for tests).

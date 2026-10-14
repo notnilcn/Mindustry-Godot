@@ -11,6 +11,8 @@
 pub struct EffectEntry {
     /// Effect name.
     pub name: &'static str,
+    /// Upstream `Fx` field this entry plays (`LogicFx.java` static table).
+    pub fx: &'static str,
     /// Has a size parameter.
     pub size: bool,
     /// Has a rotation parameter.
@@ -27,12 +29,18 @@ impl EffectEntry {
     const fn new(name: &'static str) -> Self {
         Self {
             name,
+            fx: "",
             size: false,
             rotate: false,
             color: false,
             data: None,
             bounds: -1.0,
         }
+    }
+    /// Upstream `Fx` field name (resolved by `effect_by_name`).
+    const fn fx(mut self, fx: &'static str) -> Self {
+        self.fx = fx;
+        self
     }
     const fn size(mut self) -> Self {
         self.size = true;
@@ -59,39 +67,39 @@ impl EffectEntry {
 /// The 35 vanilla entries in upstream `LogicFx` order.
 #[rustfmt::skip]
 pub const EFFECTS: &[EffectEntry] = &[
-    EffectEntry::new("warn"),
-    EffectEntry::new("cross"),
-    EffectEntry::new("blockFall").data("block").bounds(100.0),
-    EffectEntry::new("placeBlock").size(),
-    EffectEntry::new("placeBlockSpark").size(),
-    EffectEntry::new("breakBlock").size(),
-    EffectEntry::new("spawn"),
-    EffectEntry::new("trail").size().color(),
-    EffectEntry::new("breakProp").size().color(),
-    EffectEntry::new("smokeCloud").color(),
-    EffectEntry::new("vapor").color(),
-    EffectEntry::new("hit").color(),
-    EffectEntry::new("hitSquare").color(),
-    EffectEntry::new("shootSmall").color().rotate(),
-    EffectEntry::new("shootBig").color().rotate(),
-    EffectEntry::new("smokeSmall").rotate(),
-    EffectEntry::new("smokeBig").rotate(),
-    EffectEntry::new("smokeColor").rotate().color(),
-    EffectEntry::new("smokeSquare").rotate().color(),
-    EffectEntry::new("smokeSquareBig").rotate().color(),
-    EffectEntry::new("spark").color(),
-    EffectEntry::new("sparkBig").color(),
-    EffectEntry::new("sparkShoot").rotate().color(),
-    EffectEntry::new("sparkShootBig").rotate().color(),
-    EffectEntry::new("drill").color(),
-    EffectEntry::new("drillBig").color(),
-    EffectEntry::new("lightBlock").size().color(),
-    EffectEntry::new("explosion").size(),
-    EffectEntry::new("smokePuff").color(),
-    EffectEntry::new("sparkExplosion").color(),
-    EffectEntry::new("crossExplosion").size().color(),
-    EffectEntry::new("wave").size().color(),
-    EffectEntry::new("bubble"),
+    EffectEntry::new("warn").fx("unitCapKill"),
+    EffectEntry::new("cross").fx("unitEnvKill"),
+    EffectEntry::new("blockFall").fx("blockCrash").data("block").bounds(100.0),
+    EffectEntry::new("placeBlock").fx("placeBlock").size(),
+    EffectEntry::new("placeBlockSpark").fx("coreLaunchConstruct").size(),
+    EffectEntry::new("breakBlock").fx("breakBlock").size(),
+    EffectEntry::new("spawn").fx("spawn"),
+    EffectEntry::new("trail").fx("colorTrail").size().color(),
+    EffectEntry::new("breakProp").fx("breakProp").size().color(),
+    EffectEntry::new("smokeCloud").fx("missileTrailSmoke").color(),
+    EffectEntry::new("vapor").fx("vapor").color(),
+    EffectEntry::new("hit").fx("hitBulletColor").color(),
+    EffectEntry::new("hitSquare").fx("hitSquaresColor").color(),
+    EffectEntry::new("shootSmall").fx("shootSmall").color().rotate(),
+    EffectEntry::new("shootBig").fx("shootTitan").color().rotate(),
+    EffectEntry::new("smokeSmall").fx("shootSmallSmoke").rotate(),
+    EffectEntry::new("smokeBig").fx("shootBigSmoke").rotate(),
+    EffectEntry::new("smokeColor").fx("shootSmokeTitan").rotate().color(),
+    EffectEntry::new("smokeSquare").fx("shootSmokeSquare").rotate().color(),
+    EffectEntry::new("smokeSquareBig").fx("shootSmokeSquareBig").rotate().color(),
+    EffectEntry::new("spark").fx("hitLaserBlast").color(),
+    EffectEntry::new("sparkBig").fx("circleColorSpark").color(),
+    EffectEntry::new("sparkShoot").fx("colorSpark").rotate().color(),
+    EffectEntry::new("sparkShootBig").fx("randLifeSpark").rotate().color(),
+    EffectEntry::new("drill").fx("mine").color(),
+    EffectEntry::new("drillBig").fx("mineHuge").color(),
+    EffectEntry::new("lightBlock").fx("lightBlock").size().color(),
+    EffectEntry::new("explosion").fx("dynamicExplosion").size(),
+    EffectEntry::new("smokePuff").fx("smokePuff").color(),
+    EffectEntry::new("sparkExplosion").fx("titanExplosion").color(),
+    EffectEntry::new("crossExplosion").fx("dynamicSpikes").size().color(),
+    EffectEntry::new("wave").fx("dynamicWave").size().color(),
+    EffectEntry::new("bubble").fx("airBubble"),
 ];
 
 /// `LogicFx.get(name)`.
@@ -118,5 +126,20 @@ mod tests {
         assert!(get("trail").unwrap().color);
         assert!(get("shootBig").unwrap().rotate);
         assert!(get("localeprint").is_none());
+    }
+
+    /// H06 T8: every `LogicFx` entry resolves to a registry effect
+    /// (`LogicFx.java` names map onto `effect_by_name`).
+    #[test]
+    fn every_entry_resolves_to_a_registry_effect() {
+        for entry in EFFECTS {
+            assert!(!entry.fx.is_empty(), "{} has no Fx field", entry.name);
+            assert!(
+                crate::content::registries::fx_meta::effect_by_name(entry.fx).is_some(),
+                "{} -> Fx.{} does not resolve",
+                entry.name,
+                entry.fx
+            );
+        }
     }
 }

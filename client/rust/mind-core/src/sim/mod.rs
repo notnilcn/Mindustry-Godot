@@ -211,6 +211,10 @@ pub struct Sim {
     /// Last 64 drained logic-event kind tags (host debug probe; H06 T1).
     pub logic_event_log: std::collections::VecDeque<String>,
 
+    /// Set when a world-processor `setblock` mutated tiles (H06 T8): the host
+    /// frame pump marks the renderer dirty and clears it.
+    pub logic_world_changed: bool,
+
     /// Outcome of the last applied [`crate::determinism::SimCommand::ConfigTap`]
     /// (H02 T6, PAR-0220): `None` until one is applied. Bytes 0-2 of the
     /// `Building.onConfigureBuildTapped` return contract.
@@ -291,6 +295,7 @@ impl Sim {
             commands_applied: 0,
             logic_ui_events: Vec::new(),
             logic_event_log: std::collections::VecDeque::new(),
+            logic_world_changed: false,
             pending_events: Vec::new(),
             event_log: Vec::new(),
             last_config_tap: None,
@@ -1193,6 +1198,15 @@ impl Sim {
                     x,
                     y,
                 } => self.logic_spawn_wave_at(x, y),
+                // `SetBlockI` live apply (`LExecutor.java:1566-1612`).
+                LogicWorldEvent::SetBlock {
+                    layer,
+                    block,
+                    x,
+                    y,
+                    team,
+                    rotation,
+                } => self.logic_set_block(layer, block, x, y, team, rotation),
                 // T5 adds SetBlock handling here.
                 e @ LogicWorldEvent::Message { .. } if self.logic_ui_events.len() < 256 => {
                     self.logic_ui_events.push(e);
@@ -1206,6 +1220,112 @@ impl Sim {
     /// Monotonic update counter (`GameState.updateId`).
     pub fn update_id(&self) -> u64 {
         self.state.update_id
+    }
+
+    /// `SetBlockI` live apply (`LExecutor.java:1566-1612`): the ore/floor/block
+    /// branches against the authoritative grid. `Building` is not allowed.
+    pub fn logic_set_block(
+        &mut self,
+        layer: crate::logic::enums::TileLayer,
+        block: Option<crate::logic::value::LogicObject>,
+        x: i32,
+        y: i32,
+        team: u8,
+        rotation: i32,
+    ) {
+        use crate::content::ContentType;
+        let Some(crate::logic::value::LogicObject::Content(c)) = block else {
+            return;
+        };
+        if c.type_ != ContentType::Block {
+            return;
+        }
+        let block_id = BlockId::new(c.id);
+        let (tx, ty) = (x, y);
+        if tx < 0 || ty < 0 || tx >= self.grid.width() || ty >= self.grid.height() {
+            return;
+        }
+        // `Block instanceof Floor` / `OverlayFloor` / `b == Blocks.air`.
+        let (is_floor, is_overlay, is_air) = self
+            .block_runtime
+            .as_ref()
+            .and_then(|runtime| runtime.content().block(block_id))
+            .map(|def| {
+                (
+                    crate::maps::filters::block_info::is_floor(def),
+                    crate::maps::filters::block_info::is_overlay(def),
+                    def.kind == crate::content::registries::blocks::BlockKind::AirBlock,
+                )
+            })
+            .unwrap_or((false, false, block_id == BlockId::AIR));
+        let mut changed = false;
+        match layer {
+            crate::logic::enums::TileLayer::Ore => {
+                // `(b instanceof OverlayFloor || b == air) && tile.overlay != b`.
+                if (is_overlay || is_air) && self.grid.tile(tx, ty).overlay != block_id {
+                    self.grid.tiles.get_mut(tx, ty).overlay = block_id;
+                    changed = true;
+                }
+            }
+            crate::logic::enums::TileLayer::Floor => {
+                // `b instanceof Floor && tile.floor != f && !f.isOverlay()
+                // && !f.isAir()`.
+                if is_floor && !is_overlay && !is_air && self.grid.tile(tx, ty).floor != block_id {
+                    self.grid.tiles.get_mut(tx, ty).floor = block_id;
+                    changed = true;
+                }
+            }
+            crate::logic::enums::TileLayer::Block => {
+                // `!b.isFloor() || b == air`.
+                if !is_floor || is_air {
+                    let pos = TilePos::new(tx as i16, ty as i16);
+                    let current_block = self.grid.block_at(pos).unwrap_or(BlockId::AIR);
+                    let current_team = self
+                        .grid
+                        .entity_at(pos)
+                        .and_then(|e| self.ecs.0.get::<crate::entities::comp::TeamComp>(e))
+                        .map(|t| t.team)
+                        .unwrap_or(crate::game::team::DERELICT.0);
+                    if current_block != block_id || current_team != team {
+                        let rot = rotation.clamp(0, 3) as u8;
+                        if block_id == BlockId::AIR {
+                            if let Some(runtime) = self.block_runtime.as_mut() {
+                                runtime.remove_block_raw(
+                                    &mut self.ecs.0,
+                                    &mut self.grid,
+                                    tx as i16,
+                                    ty as i16,
+                                );
+                            } else {
+                                self.grid.tiles.get_mut(tx, ty).block = BlockId::AIR;
+                                self.grid.tiles.get_mut(tx, ty).build = None;
+                            }
+                        } else if let Some(runtime) = self.block_runtime.as_mut() {
+                            runtime.set_block_raw(
+                                &mut self.ecs.0,
+                                &mut self.grid,
+                                tx as i16,
+                                ty as i16,
+                                block_id,
+                                rot,
+                                team,
+                            );
+                        } else {
+                            self.grid.tiles.get_mut(tx, ty).block = block_id;
+                            self.grid.tiles.get_mut(tx, ty).build = None;
+                        }
+                        changed = true;
+                    }
+                }
+            }
+            // `building` case is not allowed.
+            crate::logic::enums::TileLayer::Building => {}
+        }
+        if changed {
+            // The unit runtime's grid snapshot feeds `getblock` and spawning.
+            self.refresh_unit_runtime();
+            self.logic_world_changed = true;
+        }
     }
 
     /// `InputHandler.logicCutscene` presentation state (defaults when no live
