@@ -2855,6 +2855,17 @@ pub fn unit_update_system(world: &mut World) {
             let _ =
                 movement::update_kinematics(world, &runtime.grid, &runtime.content, entity, delta);
 
+            // H07 T3: `MechComp.update` step + `UnitComp.update` walk sounds
+            // (view-only; no-op without an audio sink).
+            crate::audio::steps::update_unit_step_audio(
+                world,
+                &runtime.grid,
+                &runtime.content,
+                &mut runtime.rng,
+                entity,
+                delta,
+            );
+
             // `MinerComp.update` runs after the controller and the kind
             // kinematics for every unit (G01 T10a).
             crate::entities::comp::unit::miner::update_miner_comp(

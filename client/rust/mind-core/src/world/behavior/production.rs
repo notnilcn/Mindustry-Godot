@@ -1460,9 +1460,9 @@ impl BuildingBehavior for SolidPumpBehavior {
         let Some(inst) = instance(world, e) else {
             return;
         };
-        let (amount, result) = match &inst.kind_data {
-            BlockKindData::SolidPump(def) => (def.pump_amount, None),
-            BlockKindData::Fracker(def) => (def.pump_amount, def.result),
+        let (amount, result, attribute) = match &inst.kind_data {
+            BlockKindData::SolidPump(def) => (def.pump_amount, None, def.attribute.clone()),
+            BlockKindData::Fracker(def) => (def.pump_amount, def.result, def.attribute.clone()),
             _ => return,
         };
         let efficiency = world
@@ -1476,14 +1476,17 @@ impl BuildingBehavior for SolidPumpBehavior {
             state.warmup = approach(state.warmup, if efficiency > 0.0 { 1.0 } else { 0.0 }, 0.02);
         }
         let liquid = result.map(LiquidId::new).unwrap_or(LiquidId::WATER);
-        // `SolidPump.updateTile`: `fraction = max(validTiles + boost +
-        // attribute.env(), 0)`; the port ignores `attribute.env()`, which is 0
-        // on Serpulo (T7).
+        // `SolidPump.updateTile` (`SolidPump.java:124`): `fraction =
+        // max(validTiles + boost + (attribute == null ? 0 : attribute.env()), 0)`
+        // — rain raises a water extractor by +0.2 (H07 T9).
+        let env = crate::world::attributes::attribute_from_name(&attribute)
+            .map(|attribute| crate::world::blocks::power::behavior::env_attr(world, attribute))
+            .unwrap_or(0.0);
         let (valid_tiles, boost) = world
             .get::<PumpState>(e)
             .map(|state| (state.valid_tiles, state.boost))
             .unwrap_or((0.0, 0.0));
-        let fraction = (valid_tiles + boost).max(0.0);
+        let fraction = (valid_tiles + boost + env).max(0.0);
         let capacity = liquid_capacity(world, e);
         let stored = world
             .get::<LiquidModule>(e)

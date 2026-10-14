@@ -67,7 +67,8 @@ pub use shake::{ShakeState, shake_falloff, shake_visible};
 pub use sink::{FxBus, FxEvent, FxSettings, FxSink, NoopFxSink, emit_named};
 pub use trail::TrailRegistry;
 pub use weather_fx::{
-    SplashGround, WeatherFx, WeatherKind, WeatherStateView, WeatherView, splash_visible,
+    NoiseLayerDraw, SplashGround, WeatherFx, WeatherKind, WeatherStateView, WeatherView, noise_uv,
+    particle_noise_layers, splash_visible, weather_fx_for,
 };
 
 /// Converts a plan-16 `Pal`/`Drawf` `[f32; 4]` color to [`crate::content::Rgba`].

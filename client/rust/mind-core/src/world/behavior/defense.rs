@@ -224,6 +224,21 @@ impl BuildingBehavior for DoorBehavior {
             state.last_toggle = Some(now);
         }
         set_open(world, e, open);
+        // `Door.java:40`: `doorSound.at(base)` on a live config application.
+        // Java gates on `!world.isGenerating()`; the port never plays from the
+        // map/save read paths (they write `DoorState` directly), so reaching
+        // here already means a live configure.
+        if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+            crate::audio::sim::emit_world_sound(
+                world,
+                crate::audio::SoundId::DOOR,
+                x,
+                y,
+                1.0,
+                1.0,
+                0.0,
+            );
+        }
     }
 
     fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
@@ -328,6 +343,18 @@ impl BuildingBehavior for AutoDoorBehavior {
         };
         if let Some(mut state) = world.get_mut::<DoorState>(e) {
             state.open = open;
+        }
+        // `AutoDoor.java:82` (`setOpen`): `doorSound.at(this)` on a toggle.
+        if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+            crate::audio::sim::emit_world_sound(
+                world,
+                crate::audio::SoundId::DOOR,
+                x,
+                y,
+                1.0,
+                1.0,
+                0.0,
+            );
         }
     }
 

@@ -32,7 +32,7 @@ use super::atlas_bind::color_from;
 
 /// Reads row 0 of `sprites/block_colors.png` as packed `rgba8888` per block id
 /// (empty when the pack output is absent).
-fn load_block_colors() -> Vec<u32> {
+pub(crate) fn load_block_colors() -> Vec<u32> {
     let path = format!(
         "{}/sprites/block_colors.png",
         crate::assets::loader::resolve_assets_dir()

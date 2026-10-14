@@ -544,11 +544,120 @@ impl PlanetGenerator {
             }
         }
     }
+}
 
-    /// `PlanetGenerator.addWeather` is a plan-12 hook (needs `Rules`/`Weathers`).
-    pub fn add_weather(&self, _content: &ContentRegistry) {
-        log::debug!("PlanetGenerator.addWeather is a plan-12 hook; no-op in mind-core");
+/// `PlanetGenerator.addWeather` (`PlanetGenerator.java:102-160`): terrain
+/// weather for a freshly generated sector. Ties at equal counts break by block
+/// id ascending (Java `ObjectIntMap` order is hash-based; deviation).
+///
+/// The `World.getDarkness` sector-circle term is omitted (needs Arc 2-D
+/// `Noise.noise`, not ported; it only affects edge tiles of numbered sectors).
+pub fn add_weather(
+    grid: &crate::world::WorldGrid,
+    content: &ContentRegistry,
+    rules: &crate::io::json::rules::Rules,
+) -> Vec<crate::io::json::rules::WeatherEntry> {
+    use crate::world::darkness::{border_darkness, get_static_darkness};
+
+    let water = content.liquid_id("water");
+    let limit = rules.limit_map_area.then_some((
+        rules.limit_x,
+        rules.limit_y,
+        rules.limit_width,
+        rules.limit_height,
+    ));
+    let mut counts: std::collections::BTreeMap<BlockId, i32> = std::collections::BTreeMap::new();
+    let mut has_water = false;
+    for tile in grid.tiles.iter() {
+        let x = i32::from(tile.x);
+        let y = i32::from(tile.y);
+        let darkness = border_darkness(grid, rules.border_darkness, limit, x, y)
+            .max(get_static_darkness(grid, content, x, y));
+        if darkness >= 3.0 {
+            continue;
+        }
+        if let Some(floor) = content.block(tile.floor)
+            && floor.liquid_drop == water
+            && water.is_some()
+        {
+            has_water = true;
+        }
+        // `!tile.block().isStatic()`: only non-static tiles are counted.
+        let static_block = content
+            .block(tile.block)
+            .is_some_and(crate::maps::filters::block_info::is_static);
+        if static_block {
+            continue;
+        }
+        *counts.entry(tile.floor).or_insert(0) += 1;
+        if tile.overlay != BlockId::AIR {
+            *counts.entry(tile.overlay).or_insert(0) += 1;
+        }
     }
+    let mut entries: Vec<(BlockId, i32)> = counts.into_iter().collect();
+    // `entries.sort(e -> -e.value)`; ties resolve by id ascending here.
+    entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    entries.retain(|(_, count)| *count >= 30);
+    let name = |id: BlockId| content.block(id).map(|def| def.name.as_str()).unwrap_or("");
+    let top = entries.first().map(|(id, _)| *id);
+    let has_snow = top.is_some_and(|id| {
+        let name = name(id);
+        name.contains("ice") || name.contains("snow")
+    });
+    let has_rain = top.is_some_and(|id| !has_snow && has_water && !name(id).contains("sand"));
+    let has_desert = top.is_some_and(|id| !has_snow && !has_rain && name(id) == "sand-floor");
+    let has_spores = top.is_some_and(|id| {
+        let name = name(id);
+        name.contains("spore") || name.contains("moss") || name.contains("tainted")
+    });
+
+    let mut weather = Vec::new();
+    let mut push = |name: &str| {
+        if let Some(def) = content.weather_by_name(name) {
+            weather.push(weather_entry(def));
+        }
+    };
+    if has_snow {
+        // `Weathers.snow` loads as `snowing` in the port registry.
+        push("snowing");
+    }
+    if has_rain {
+        push("rain");
+        push("fog");
+    }
+    if has_desert {
+        push("sandstorm");
+    }
+    if has_spores {
+        push("sporestorm");
+    }
+    weather
+}
+
+/// `new WeatherEntry(weather)` (`Weather.java:275-287`): frequency/duration
+/// windows from the weather's `duration`. Java randomizes the initial
+/// `cooldown` from the global unseeded `Mathf.random(minFrequency,
+/// maxFrequency)`; the port uses the deterministic lower bound (deviation).
+pub fn weather_entry(
+    def: &crate::content::registries::weathers::WeatherDef,
+) -> crate::io::json::rules::WeatherEntry {
+    let min_frequency = def.duration * 2.0;
+    crate::io::json::rules::WeatherEntry {
+        weather: def.name.clone(),
+        min_frequency,
+        max_frequency: def.duration * 6.0,
+        min_duration: def.duration / 2.0,
+        max_duration: def.duration * 1.5,
+        cooldown: min_frequency,
+        intensity: 1.0,
+        always: false,
+    }
+}
+
+/// `BlankPlanetGenerator.addWeather`/`TantrosPlanetGenerator.addWeather` are
+/// empty overrides: only Serpulo and Erekir add terrain weather.
+pub fn planet_adds_weather(planet_name: &str) -> bool {
+    matches!(planet_name, "serpulo" | "erekir")
 }
 
 /// Blank planet (`BlankPlanetGenerator`): fills tiles and delegates generation.
@@ -649,5 +758,133 @@ mod tests {
                 .iter()
                 .all(|tile| tile.floor == stone && tile.block == wall)
         );
+    }
+
+    fn weather_grid(content: &ContentRegistry, floor: &str) -> crate::world::WorldGrid {
+        let mut grid = crate::world::WorldGrid::new(40, 40);
+        let id = content.block_id(floor).expect("floor");
+        for tile in grid.tiles.array_mut() {
+            tile.floor = id;
+        }
+        grid
+    }
+
+    fn weather_names(entries: &[crate::io::json::rules::WeatherEntry]) -> Vec<String> {
+        entries.iter().map(|entry| entry.weather.clone()).collect()
+    }
+
+    #[test]
+    fn add_weather_snow_floor() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let grid = weather_grid(&content, "snow");
+        let entries = add_weather(&grid, &content, &rules);
+        assert_eq!(weather_names(&entries), vec!["snowing".to_owned()]);
+        let snow = &entries[0];
+        assert_eq!(
+            (snow.min_frequency, snow.max_frequency),
+            (72000.0, 216000.0)
+        );
+        assert_eq!((snow.min_duration, snow.max_duration), (18000.0, 54000.0));
+        assert_eq!(snow.intensity, 1.0);
+        assert!(!snow.always);
+    }
+
+    #[test]
+    fn add_weather_rain_and_fog() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let mut grid = weather_grid(&content, "stone");
+        let water = content.block_id("shallow-water").expect("shallow-water");
+        grid.tiles.get_mut(20, 20).floor = water;
+        let entries = add_weather(&grid, &content, &rules);
+        assert_eq!(
+            weather_names(&entries),
+            vec!["rain".to_owned(), "fog".to_owned()]
+        );
+        assert_eq!(
+            (entries[0].min_frequency, entries[0].max_frequency),
+            (72000.0, 216000.0)
+        );
+        assert_eq!(
+            (entries[1].min_frequency, entries[1].max_frequency),
+            (108000.0, 324000.0)
+        );
+        assert_eq!(
+            (entries[1].min_duration, entries[1].max_duration),
+            (27000.0, 81000.0)
+        );
+    }
+
+    #[test]
+    fn add_weather_sand_desert() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let grid = weather_grid(&content, "sand-floor");
+        let entries = add_weather(&grid, &content, &rules);
+        assert_eq!(weather_names(&entries), vec!["sandstorm".to_owned()]);
+        assert_eq!(
+            (entries[0].min_frequency, entries[0].max_frequency),
+            (50400.0, 151200.0)
+        );
+        assert_eq!(
+            (entries[0].min_duration, entries[0].max_duration),
+            (12600.0, 37800.0)
+        );
+    }
+
+    #[test]
+    fn add_weather_darksand_no_rain() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let mut grid = weather_grid(&content, "darksand");
+        let water = content.block_id("shallow-water").expect("shallow-water");
+        grid.tiles.get_mut(20, 20).floor = water;
+        // "darksand" contains "sand" (no rain) but is not `sand-floor` (no
+        // desert) -> no weather.
+        let entries = add_weather(&grid, &content, &rules);
+        assert!(entries.is_empty(), "{:?}", weather_names(&entries));
+    }
+
+    #[test]
+    fn add_weather_moss_spores() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let grid = weather_grid(&content, "moss");
+        let entries = add_weather(&grid, &content, &rules);
+        assert_eq!(weather_names(&entries), vec!["sporestorm".to_owned()]);
+    }
+
+    #[test]
+    fn add_weather_skips_dark_and_static() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let mut grid = weather_grid(&content, "snow");
+        let stone = content.block_id("stone").expect("stone");
+        let wall = content.block_id("stone-wall").expect("stone-wall");
+        for x in 5..35 {
+            for y in 5..35 {
+                let tile = grid.tiles.get_mut(x, y);
+                tile.floor = stone;
+                tile.block = wall;
+            }
+        }
+        // The static-wall interior does not count (900 stone tiles); the snow
+        // border ring (700) wins.
+        let entries = add_weather(&grid, &content, &rules);
+        assert_eq!(weather_names(&entries), vec!["snowing".to_owned()]);
+    }
+
+    #[test]
+    fn add_weather_needs_30() {
+        let content = crate::content::test_support::test_registry();
+        let rules = crate::io::json::rules::Rules::default();
+        let mut grid = crate::world::WorldGrid::new(40, 40);
+        let snow = content.block_id("snow").expect("snow");
+        for x in 0..20 {
+            grid.tiles.get_mut(x, 0).floor = snow;
+        }
+        let entries = add_weather(&grid, &content, &rules);
+        assert!(entries.is_empty(), "{:?}", weather_names(&entries));
     }
 }

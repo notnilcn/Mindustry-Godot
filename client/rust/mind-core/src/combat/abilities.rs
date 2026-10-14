@@ -21,6 +21,7 @@ use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
+use crate::audio::SoundId;
 use crate::combat::bullet::{ABSORBED, Bullet};
 use crate::combat::damage::{apply_status, damage_entity, heal_health};
 use crate::combat::puddles::{self, PuddleState};
@@ -255,12 +256,27 @@ fn update_ability(
         AbilityKind::ShieldRegenField => {
             state.timer += 1.0;
             if state.timer >= spec.reload {
+                let mut applied = false;
                 for target in queries::in_radius(world, x, y, spec.range, Some(team)) {
                     if let Some(mut shield) = world.get_mut::<ShieldComp>(target)
                         && shield.shield < spec.max
                     {
                         shield.shield = (shield.shield + spec.amount).min(spec.max);
+                        applied = true;
                     }
+                }
+                if applied {
+                    // `ShieldRegenFieldAbility.java:64`:
+                    // `sound.at(unit, 1 + Mathf.range(0.1f), 0.7)`.
+                    crate::audio::sim::emit_world_sound(
+                        world,
+                        SoundId::SHIELD_WAVE,
+                        x,
+                        y,
+                        0.7,
+                        1.0,
+                        0.1,
+                    );
                 }
                 state.timer = 0.0;
             }
@@ -288,6 +304,17 @@ fn update_ability(
                 .unwrap_or(0.0);
             if shield <= 0.0 && !state.was_broken {
                 shield -= spec.cooldown * spec.regen;
+                // `ForceFieldAbility.java:88-91`:
+                // `breakSound.at(unit.x, unit.y)` (shieldBreakSmall).
+                crate::audio::sim::emit_world_sound(
+                    world,
+                    SoundId::SHIELD_BREAK_SMALL,
+                    x,
+                    y,
+                    1.0,
+                    1.0,
+                    0.0,
+                );
             }
             state.was_broken = shield <= 0.0;
             if shield < spec.max {
@@ -514,6 +541,9 @@ fn repair_field_tick(
         }
         if state.has_healed {
             state.timer = 0.0;
+            // `RepairFieldAbility.java:143`:
+            // `sound.at(unit, 1 + Mathf.range(0.1f), 0.5)` (healWave).
+            crate::audio::sim::emit_world_sound(world, SoundId::HEAL_WAVE, x, y, 0.5, 1.0, 0.1);
         }
     } else if spec.smart_heal && target_count > 0 {
         state.timer = if spec.reload >= 2.0 * SMART_INTERVAL {
@@ -574,6 +604,7 @@ fn energy_field_tick(
 
     let scaled_damage = spec.amount * damage_multiplier;
     let status = spec.status.and_then(|name| content.status_id(name));
+    let mut any_nearby = false;
     for (_, target) in candidates.iter().take(spec.max_targets.max(0) as usize) {
         let target_team = world.get::<TeamComp>(*target).map(|comp| comp.team);
         if target_team == Some(team) {
@@ -583,6 +614,7 @@ fn energy_field_tick(
             if health.health >= health.max_health - 0.001 {
                 continue;
             }
+            any_nearby = true;
             let same_type = unit_type.is_some()
                 && world.get::<UnitTypeComp>(*target).map(|comp| comp.type_id) == unit_type;
             let heal_mult = if same_type {
@@ -593,11 +625,25 @@ fn energy_field_tick(
             let heal = spec.heal_percent / 100.0 * health.max_health * heal_mult;
             heal_health(world, *target, heal);
         } else {
+            any_nearby = true;
             if let Some(status) = status {
                 apply_status(world, *target, status, spec.duration);
             }
             damage_entity(world, content, *target, scaled_damage, false, 1.0);
         }
+    }
+    if any_nearby {
+        // `EnergyFieldAbility.java:187-189`:
+        // `shootSound.at(unit, 1f + Mathf.range(0.1f), 1f)`.
+        crate::audio::sim::emit_world_sound(
+            world,
+            SoundId::SHOOT_ENERGY_FIELD,
+            x,
+            y,
+            1.0,
+            1.0,
+            0.1,
+        );
     }
 }
 
@@ -742,6 +788,17 @@ fn absorb_bullets_force_field(
         if let Some(mut stored) = world.get_mut::<Bullet>(bullet_entity) {
             stored.flags |= ABSORBED;
         }
+        // `ForceFieldAbility.java:49`:
+        // `hitSound.at(b.x, b.y, 1 + Mathf.range(0.1f), 0.12)`.
+        crate::audio::sim::emit_world_sound(
+            world,
+            SoundId::SHIELD_HIT,
+            pos.x,
+            pos.y,
+            0.12,
+            1.0,
+            0.1,
+        );
         *shield -= bullet.damage * def.shield_damage_multiplier;
         absorbed += 1;
     }
@@ -862,12 +919,35 @@ fn shield_arc_absorb(
             if let Some(mut stored) = world.get_mut::<TeamComp>(bullet_entity) {
                 stored.team = team;
             }
-        } else if let Some(mut stored) = world.get_mut::<Bullet>(bullet_entity) {
-            stored.flags |= ABSORBED;
+        } else {
+            if let Some(mut stored) = world.get_mut::<Bullet>(bullet_entity) {
+                stored.flags |= ABSORBED;
+            }
+            // `ShieldArcAbility.java:64`:
+            // `hitSound.at(b.x, b.y, 1 + Mathf.range(0.1f), 0.12)`.
+            crate::audio::sim::emit_world_sound(
+                world,
+                SoundId::SHIELD_HIT,
+                pos.x,
+                pos.y,
+                0.12,
+                1.0,
+                0.1,
+            );
         }
 
         if state.data <= bullet.damage {
             state.data -= spec.cooldown * spec.regen;
+            // `ShieldArcAbility.java:73`: `breakSound.at(paramPos.x, paramPos.y)`.
+            crate::audio::sim::emit_world_sound(
+                world,
+                SoundId::SHIELD_BREAK_SMALL,
+                rx,
+                ry,
+                1.0,
+                1.0,
+                0.0,
+            );
         }
         state.data -= bullet.damage * def.shield_damage_multiplier;
     }
@@ -901,6 +981,25 @@ pub fn run_death_abilities(
             AbilityKind::SpawnDeath => spawn_death(world, content, rng, seq, &spec, x, y, team),
             AbilityKind::LiquidExplode => {
                 liquid_explode(world, content, tiles, rng, &spec, x, y, hit_size)
+            }
+            // `ForceFieldAbility.death` (`ForceFieldAbility.java:121-125`): a
+            // unit dying with a live shield (`shield > 0`, which implies
+            // `!wasBroken`) breaks it audibly.
+            AbilityKind::ForceField => {
+                let shielded = world
+                    .get::<ShieldComp>(entity)
+                    .is_some_and(|comp| comp.shield > 0.0);
+                if shielded {
+                    crate::audio::sim::emit_world_sound(
+                        world,
+                        SoundId::SHIELD_BREAK_SMALL,
+                        x,
+                        y,
+                        1.0,
+                        1.0,
+                        0.0,
+                    );
+                }
             }
             _ => {}
         }
@@ -1086,6 +1185,101 @@ mod tests {
             health > 50.0,
             "repair field healed the ally (50 -> {health})"
         );
+    }
+
+    /// H07 T4 (`RepairFieldAbility.java:143`): a pulse that healed at least one
+    /// ally plays `healWave` (volume 0.5, `pitch = 1 + range(0.1)`) at the caster.
+    #[test]
+    fn repair_field_plays_heal_wave() {
+        use crate::audio::{AudioEvent, AudioSinkRes, SharedAudioLog, SoundId};
+
+        let mut harness = UnitHarness::new(32, 32, 7);
+        let log = SharedAudioLog::new();
+        harness
+            .build
+            .world
+            .insert_resource(AudioSinkRes::new(log.clone()));
+        let healer = harness.spawn("poly", 0, 64.0, 64.0, 0.0).expect("poly");
+        let ally = harness.spawn("dagger", 0, 80.0, 64.0, 0.0).expect("dagger");
+        harness.build.world.get_mut::<Health>(ally).unwrap().health = 50.0;
+        let index = ability_index(&harness, "poly", AbilityKind::RepairField);
+        let reload = spec_of(&harness, "poly", AbilityKind::RepairField).reload;
+        harness
+            .build
+            .world
+            .get_mut::<AbilityComp>(healer)
+            .unwrap()
+            .states[index]
+            .timer = reload;
+        update_unit_abilities(&mut harness.build.world, &harness.build.content, healer);
+        let events = log.events();
+        let heals: Vec<&AudioEvent> = events
+            .iter()
+            .filter_map(|ticked| match &ticked.event {
+                AudioEvent::At { sound, .. } if *sound == SoundId::HEAL_WAVE => Some(&ticked.event),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heals.len(), 1, "one healWave: {events:?}");
+        let AudioEvent::At {
+            x,
+            y,
+            pitch,
+            volume,
+            ..
+        } = heals[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!((*x, *y), (64.0, 64.0), "caster centre");
+        assert_eq!(*volume, 0.5);
+        assert!((0.9..=1.1).contains(pitch), "healWave pitch {pitch}");
+    }
+
+    /// H07 T4 (`ForceFieldAbility.java:88-91`): the frame after the shield is
+    /// emptied, `shieldBreakSmall` plays at the unit (`!wasBroken` transition).
+    #[test]
+    fn force_field_break_plays_shield_break_small() {
+        use crate::audio::{AudioEvent, AudioSinkRes, SharedAudioLog, SoundId};
+
+        let mut harness = UnitHarness::new(32, 32, 7);
+        let log = SharedAudioLog::new();
+        harness
+            .build
+            .world
+            .insert_resource(AudioSinkRes::new(log.clone()));
+        let unit = harness.spawn("quasar", 0, 64.0, 64.0, 0.0).expect("quasar");
+        harness
+            .build
+            .world
+            .get_mut::<ShieldComp>(unit)
+            .unwrap()
+            .shield = 0.0;
+        update_unit_abilities(&mut harness.build.world, &harness.build.content, unit);
+        let events = log.events();
+        let breaks: Vec<&AudioEvent> = events
+            .iter()
+            .filter_map(|ticked| match &ticked.event {
+                AudioEvent::At { sound, .. } if *sound == SoundId::SHIELD_BREAK_SMALL => {
+                    Some(&ticked.event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(breaks.len(), 1, "one shieldBreakSmall: {events:?}");
+        let AudioEvent::At {
+            x,
+            y,
+            pitch,
+            volume,
+            ..
+        } = breaks[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!((*x, *y), (64.0, 64.0), "unit centre");
+        assert_eq!(*volume, 1.0);
+        assert_eq!(*pitch, 1.0);
     }
 
     #[test]

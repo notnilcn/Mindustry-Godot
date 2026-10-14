@@ -637,6 +637,33 @@ mod tests {
         assert_eq!(out.playing, Some(MusicRef::new("launchTrack")));
     }
 
+    /// H07 T10 (`SoundControl.java:153-164`): opening the planet dialog from
+    /// the menu crossfades from `menu` into `Planet.launchMusic` (`launch`)
+    /// after the `foutTime` fade.
+    #[test]
+    fn launch_in_planet_dialog_crossfades_from_menu() {
+        let mut player = MusicPlayer::new();
+        let mut out = RecordingMusicOutput::default();
+        let mut context = ctx();
+        context.delta_frames = 1.0;
+        context.is_menu = true;
+        context.is_game = false;
+        player.update(&context, &mut SeededAudioRng::new(1), &mut out);
+        assert_eq!(out.playing, Some(MusicRef::new("menu")));
+
+        context.planet_ui_visible = true;
+        context.planet_music.launch = Some(MusicRef::new("launch"));
+        out.playing = None;
+        for _ in 0..130 {
+            player.update(&context, &mut SeededAudioRng::new(1), &mut out);
+        }
+        assert_eq!(
+            out.playing,
+            Some(MusicRef::new("launch")),
+            "crossfaded to launch"
+        );
+    }
+
     #[test]
     fn editor_selection() {
         let mut player = MusicPlayer::new();

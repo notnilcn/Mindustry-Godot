@@ -1251,14 +1251,14 @@ pub fn weather_system(world: &mut World) {
                 .to_radians();
             let seq = runtime.seq;
             runtime.seq = seq.wrapping_add(1);
-            let mut state = WeatherRuntime::new(weather, intensity, duration);
-            state.wind_x = angle.cos();
-            state.wind_y = angle.sin();
-            world.spawn((
-                state,
-                crate::entities::comp::WeatherState,
-                crate::ecs::EntitySeq(seq),
-            ));
+            crate::entities::comp::weather::create_weather(
+                world,
+                seq,
+                weather,
+                intensity,
+                duration,
+                (angle.cos(), angle.sin()),
+            );
         }
     }
 
@@ -1308,6 +1308,8 @@ pub fn weather_system(world: &mut World) {
             light_env: env(Attribute::Light),
             heat_env: env(Attribute::Heat),
             steam_env: env(Attribute::Steam),
+            water_env: env(Attribute::Water),
+            spores_env: env(Attribute::Spores),
             reactor_explosions: rules.reactor_explosions,
         });
     }
@@ -1913,6 +1915,16 @@ mod tests {
             (env.light_env - (-0.2)).abs() < 1.0e-6,
             "rain light env {}",
             env.light_env
+        );
+        assert!(
+            (env.water_env - 0.2).abs() < 1.0e-6,
+            "rain water env {}",
+            env.water_env
+        );
+        assert!(
+            (env.spores_env).abs() < 1.0e-6,
+            "rain spores env {}",
+            env.spores_env
         );
         assert_eq!(env.solar_multiplier, 1.0);
     }

@@ -4109,6 +4109,9 @@ impl MindSimHost {
             return;
         };
         mind_core::audio::frame::collect_turret_loops(&self.sim.ecs.0, content, out);
+        // H07 T11: continuous-weapon `SoundLoop`s (vela/navanax) append to the
+        // same per-key fade table.
+        mind_core::audio::frame::collect_weapon_loops(&self.sim.ecs.0, out);
     }
 
     /// T7: in-game music context state (rules/wave/boss/core hp; Rust-only).
@@ -4117,6 +4120,36 @@ impl MindSimHost {
             return Default::default();
         };
         mind_core::audio::frame::read_game_state(&self.sim.ecs.0, content)
+    }
+
+    /// H07 T6: one view per live `WeatherRuntime`, sorted by `EntitySeq`
+    /// (renderer input; Rust-only).
+    pub fn weather_views(&self, out: &mut Vec<mind_core::fx::WeatherStateView>) {
+        out.clear();
+        let mut rows: Vec<(u64, mind_core::fx::WeatherStateView)> = self
+            .sim
+            .ecs
+            .0
+            .iter_entities()
+            .filter_map(|entity| {
+                let state = entity.get::<mind_core::entities::comp::weather::WeatherRuntime>()?;
+                let seq = entity
+                    .get::<mind_core::ecs::EntitySeq>()
+                    .map_or(u64::MAX, |seq| seq.0);
+                Some((
+                    seq,
+                    mind_core::fx::WeatherStateView {
+                        weather: state.weather,
+                        intensity: state.intensity,
+                        opacity: state.opacity,
+                        wind_vector: (state.wind_x, state.wind_y),
+                        life: state.life,
+                    },
+                ))
+            })
+            .collect();
+        rows.sort_by_key(|(seq, _)| *seq);
+        out.extend(rows.into_iter().map(|(_, view)| view));
     }
 
     /// T9: weather rules entries + active runtime state (playtest readback).
@@ -4221,15 +4254,14 @@ impl MindSimHost {
             .to_radians();
         let seq = runtime.seq;
         runtime.seq = seq.wrapping_add(1);
-        let mut state =
-            mind_core::entities::comp::weather::WeatherRuntime::new(weather, intensity, duration);
-        state.wind_x = angle.cos();
-        state.wind_y = angle.sin();
-        self.sim.ecs.0.spawn((
-            state,
-            mind_core::entities::comp::WeatherState,
-            mind_core::ecs::EntitySeq(seq),
-        ));
+        mind_core::entities::comp::weather::create_weather(
+            &mut self.sim.ecs.0,
+            seq,
+            weather,
+            intensity,
+            duration,
+            (angle.cos(), angle.sin()),
+        );
         self.sim.ecs.0.insert_non_send(runtime);
         true
     }
