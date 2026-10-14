@@ -1460,6 +1460,16 @@ impl Sim {
                         self.commands_applied = self.commands_applied.wrapping_add(1);
                         return Ok(());
                     }
+                    if player.is_some() && self.team_has_core(*team) {
+                        // No builder: Java's `player.unit()` is `Nulls.unit`,
+                        // `addBuild` returns at `if(!canBuild()) return;`
+                        // (`BuilderComp.java`).
+                        log::debug!(
+                            "player plan at ({x}, {y}) dropped: no build-capable player unit"
+                        );
+                        self.commands_applied = self.commands_applied.wrapping_add(1);
+                        return Ok(());
+                    }
                     if self.runtime_place(*x, *y, id, rot, *team) {
                         self.push_event(SimEvent::BlockPlacedEvent(BlockPlacedEvent {
                             x: *x,
@@ -1489,6 +1499,17 @@ impl Sim {
                 if !self.queue_player_break(*x, *y) {
                     log::debug!("player break plan rejected at ({x}, {y})");
                 }
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::Break {
+                x,
+                y,
+                player: Some(_),
+            } if self.team_has_core(self.player_command_team()) => {
+                // No builder: `player.unit()` is `Nulls.unit`, whose
+                // `addBuild` (break plan) does nothing (`BuilderComp.java`).
+                log::debug!("player break at ({x}, {y}) dropped: no build-capable player unit");
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

@@ -894,6 +894,21 @@ impl Sim {
             .is_some_and(|def| def.build_speed > 0.0)
     }
 
+    /// Whether `team` owns a core. Player plans with no build-capable unit
+    /// are dropped in any world where the player's team has a core (Java:
+    /// `Nulls.unit.addBuild` is a no-op, `BuilderComp.java` `addBuild`
+    /// `if(!canBuild()) return;`). Core-less dev worlds keep the port's
+    /// instant placement (no Java counterpart; spine/determinism scenarios).
+    pub(crate) fn team_has_core(&self, team: u8) -> bool {
+        team_core(&self.ecs.0, team).is_some()
+    }
+
+    /// Team of player-issued commands that carry no team (`Break`): the
+    /// session `rules.defaultTeam` (`Vars.player.team()` in campaign).
+    pub(crate) fn player_command_team(&self) -> u8 {
+        crate::game::runtime::rules_of(&self.ecs.0).map_or(1, |rules| rules.default_team)
+    }
+
     /// Queues a placement on the player unit (`InputHandler.flushPlans` ->
     /// `player.unit().addBuild(plan)`); invalid placements are dropped.
     pub fn queue_player_place(&mut self, x: i16, y: i16, block: BlockId, rotation: u8) -> bool {
@@ -1556,6 +1571,108 @@ mod tests {
             .entity_at(TilePos::new(14, 10))
             .expect("wall entity");
         assert_eq!(read_config(&sim.ecs.0, entity), ConfigValue::None);
+    }
+
+    /// T2 (PAR-0215): with no player unit, a `player: Some` place in a world
+    /// whose team has a core changes nothing (Java `Nulls.unit.addBuild` is a
+    /// no-op; `BuilderComp.addBuild` returns at `if(!canBuild()) return;`).
+    #[test]
+    fn player_place_without_unit_is_dropped_when_team_has_core() {
+        let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let core_id = sim.world_block_id("core-shard").expect("core");
+        sim.command(SimCommand::Place {
+            x: 10,
+            y: 10,
+            block: core_id,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("core placed");
+        let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+        set_core_copper(&mut sim, 100);
+        sim.command(SimCommand::Place {
+            x: 20,
+            y: 20,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("dropped");
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(sim.grid.entity_at(TilePos::new(20, 20)), None);
+        assert!(sim.player_build_plans().is_empty(), "no plan queued");
+        assert_eq!(core_copper(&sim), 100, "no spend, no refund");
+    }
+
+    /// T2 (PAR-0215): the same for removal — `Break { player: Some(_) }` with
+    /// no build-capable unit is dropped when the player team owns a core.
+    #[test]
+    fn player_break_without_unit_is_dropped_when_team_has_core() {
+        let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let core_id = sim.world_block_id("core-shard").expect("core");
+        let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+        sim.command(SimCommand::Place {
+            x: 10,
+            y: 10,
+            block: core_id,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("core placed");
+        sim.command(SimCommand::Place {
+            x: 20,
+            y: 20,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("wall placed");
+        assert_eq!(sim.grid.block_at(TilePos::new(20, 20)), Some(wall));
+        sim.command(SimCommand::Break {
+            x: 20,
+            y: 20,
+            player: Some(0),
+        })
+        .expect("dropped");
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        assert_eq!(
+            sim.grid.block_at(TilePos::new(20, 20)),
+            Some(wall),
+            "wall survives the dead-player break"
+        );
+    }
+
+    /// Core-less dev worlds (spine/determinism scenarios) keep the port-only
+    /// instant placement affordance (no Java counterpart).
+    #[test]
+    fn player_place_without_core_stays_instant() {
+        let mut sim = Sim::new(7, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+        sim.command(SimCommand::Place {
+            x: 20,
+            y: 20,
+            block: wall.raw(),
+            rotation: 0,
+            team: 1,
+            player: Some(0),
+        })
+        .expect("instant");
+        sim.tick().expect("tick");
+        assert_eq!(sim.grid.block_at(TilePos::new(20, 20)), Some(wall));
     }
 
     #[test]
