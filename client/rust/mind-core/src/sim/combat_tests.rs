@@ -6559,3 +6559,101 @@ fn idle_rebuild_poly_helps_builder() {
         "no buildAi rule -> default rebuild period"
     );
 }
+
+/// H01 T13: a `manifold` (CargoAI) is dispatched to `AiKind::Cargo` instead of
+/// the generic flying branch. Without a tether the controller early-returns
+/// (`CargoAI.java:28`), so the unit stays put; the generic FlyingAI would have
+/// closed on the enemy core.
+#[test]
+fn manifold_dispatches_cargo_ai() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(64);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    // A team-1 core satisfies the campaign unit cap (`unitCap 0 + core +8`).
+    let _core = place(&mut sim, 5, 5, "core-shard", 1);
+    let _enemy_core = place(&mut sim, 55, 55, "core-shard", 2);
+    let manifold = sim
+        .spawn_live_unit("manifold", 1, 20.0 * 8.0, 20.0 * 8.0, 0.0)
+        .expect("manifold");
+    let start = *sim.ecs.0.get::<Pos>(manifold).expect("manifold pos");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let kind = sim
+        .ecs
+        .0
+        .get::<ControllerSlot>(manifold)
+        .map(|slot| slot.kind);
+    assert_eq!(kind, Some(AiKind::Cargo), "the manifold keeps CargoAI");
+    let pos = *sim.ecs.0.get::<Pos>(manifold).expect("manifold alive");
+    assert_eq!(
+        (pos.x, pos.y),
+        (start.x, start.y),
+        "no tether -> the cargo unit never paths to the enemy core"
+    );
+}
+
+/// H01 T13: an `assembly-drone` (AssemblerAI) is dispatched and reaches the
+/// spot the assembler arranges (`AssemblerAI.java:12-24`).
+#[test]
+fn assembly_drone_dispatches() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::ai::types::assembler::AssemblerAi;
+
+    let mut sim = live_sim(64);
+    let _enemy_core = place(&mut sim, 55, 55, "core-shard", 2);
+    let drone = sim
+        .spawn_live_unit("assembly-drone", 1, 20.0 * 8.0, 20.0 * 8.0, 0.0)
+        .expect("assembly-drone");
+    assert_eq!(
+        sim.ecs.0.get::<ControllerSlot>(drone).map(|slot| slot.kind),
+        Some(AiKind::Assembler),
+        "the drone's content controller is AssemblerAI"
+    );
+    // The assembler block arranges the drone around its spawn perimeter
+    // (`UnitAssembler.java:509-513`); the port writes the same state directly
+    // until the block half lands.
+    sim.ecs.0.entity_mut(drone).insert(AssemblerAi {
+        unit: Some(drone),
+        target_x: 26.0 * 8.0,
+        target_y: 26.0 * 8.0,
+        target_angle: 90.0,
+    });
+    for _ in 0..900 {
+        sim.tick().expect("tick");
+    }
+    let pos = *sim.ecs.0.get::<Pos>(drone).expect("drone alive");
+    let dst = ((pos.x - 26.0 * 8.0).powi(2) + (pos.y - 26.0 * 8.0).powi(2)).sqrt();
+    let rotation = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::unit::comp::UnitCore>(drone)
+        .map(|core| core.rotation)
+        .unwrap_or(0.0);
+    eprintln!(
+        "drone at ({}, {}) rotation {rotation} dst {dst}",
+        pos.x, pos.y
+    );
+    assert!(dst <= 10.0, "the drone reached its arranged spot ({dst})");
+    assert!(
+        (rotation - 90.0).abs() < 0.001 || (rotation - 450.0).abs() < 0.001,
+        "the drone faces the arranged angle ({rotation})"
+    );
+}

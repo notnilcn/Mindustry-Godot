@@ -58,14 +58,21 @@ fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) -> Option<
     let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
     let seq = next_unit_seq(world);
     let entity = spawn_unit_def(world, seq, def, team, pos.x, pos.y, 90.0);
+    adopt_output_unit(world, entity, &def.name);
+    Some(entity)
+}
+
+/// Adopts a block-produced unit into the live [`UnitRuntime`] list (the same
+/// bookkeeping `UnitRuntime::spawn`/`SpawnedByBullet` do), so its controller
+/// updates, fights and is selectable instead of sitting inert.
+fn adopt_output_unit(world: &mut World, entity: Entity, name: &str) {
     if let Some(mut runtime) = world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>() {
         runtime.units.push(entity);
         runtime.units_created += 1;
     }
     // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`, factory/reconstructor/
     // assembler output): H09 T10.
-    crate::game::stats::notify_unit_created(world, entity, Some(&def.name));
-    Some(entity)
+    crate::game::stats::notify_unit_created(world, entity, Some(name));
 }
 
 /// `Reconstructor.java:346-352`: spawns the upgraded unit and gives it the
@@ -751,7 +758,10 @@ impl BuildingBehavior for AssemblerBehavior {
         {
             let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
             let seq = next_unit_seq(world);
-            let _ = spawn_unit_def(world, seq, def, team, x, y, 90.0);
+            let drone = spawn_unit_def(world, seq, def, team, x, y, 90.0);
+            // The drone runs `AssemblerAI`; adopt it into the live runtime so
+            // the dispatched controller updates it (H01 T13).
+            adopt_output_unit(world, drone, &def.name);
             // `UnitAssembler.java:568`: `createSound.at(spawn.x, spawn.y, 1 + range(0.06), 1)`.
             crate::audio::sim::emit_world_sound(
                 world,
@@ -938,7 +948,19 @@ impl BuildingBehavior for CargoLoaderBehavior {
         {
             let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
             let seq = next_unit_seq(world);
-            state.unit = Some(spawn_unit_def(world, seq, def, team, pos.x, pos.y, 90.0));
+            let manifold = spawn_unit_def(world, seq, def, team, pos.x, pos.y, 90.0);
+            // `UnitCargoLoaderBuild.updateTile`: `bt.building(this)` plus the
+            // live-runtime adoption so the dispatched `CargoAI` updates it
+            // (H01 T13). `Call.unitTetherBlockSpawned` also resolves the
+            // spawner id on clients; both point at the loader here.
+            world.entity_mut(manifold).insert(
+                crate::entities::comp::unit::comp::BuildingTetherComp { building: Some(e) },
+            );
+            world
+                .entity_mut(manifold)
+                .insert(crate::entities::comp::unit::comp::UnitTetherComp { spawner: Some(e) });
+            adopt_output_unit(world, manifold, &def.name);
+            state.unit = Some(manifold);
         }
         world.entity_mut(e).insert(state);
     }
