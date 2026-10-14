@@ -64,7 +64,7 @@ impl HintEvents {
     }
 }
 pub use clock::SimClock;
-pub use command::{MOVE_COMMAND, UnitCommandRuntime, resolve_wire_target};
+pub use command::{MOVE_COMMAND, UnitCommandRuntime, pack_wire_target, resolve_wire_target};
 pub use config::SimConfig;
 pub use dump::StateDump;
 pub use events::{ALL_TRIGGERS, Trigger, TriggerRegistry};

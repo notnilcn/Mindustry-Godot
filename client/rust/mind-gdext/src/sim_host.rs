@@ -968,14 +968,26 @@ impl MindSimHost {
                     return false;
                 }
                 let command = value.get("command").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
-                // `unit_command` targets are world pixels (floats), not tiles.
+                // `unit_command` targets: `x`/`y` are the raw wire pair (world
+                // pixels for a move, or the lossless `pack_wire_target` pair);
+                // the optional `target_unit` key packs an EntitySeq attack
+                // target for recipes (H03 blocker #2: ids do not fit an f32).
                 let fx = value.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
                 let fy = value.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let (x, y) = value
+                    .get("target_unit")
+                    .and_then(|v| v.as_i64())
+                    .map(|id| {
+                        mind_core::sim::pack_wire_target(
+                            &mind_core::input::action::CommandTarget::Unit(id as i32),
+                        )
+                    })
+                    .unwrap_or((fx as f32, fy as f32));
                 SimCommand::UnitCommand {
                     units,
                     command,
-                    x: fx as f32,
-                    y: fy as f32,
+                    x,
+                    y,
                 }
             }
             // `InputHandler.setUnitStance` (G01 T11): `units` + `stance` id in

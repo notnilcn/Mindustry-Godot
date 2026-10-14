@@ -8,7 +8,7 @@ use smallvec::SmallVec;
 use crate::determinism::SimCommand;
 use crate::world::config::ConfigValue as WorldConfigValue;
 
-use super::action::{CommandTarget, RemoteAction};
+use super::action::RemoteAction;
 
 /// Unit-id chunk size per relay batch (`commandUnits`, §6.4).
 pub const COMMAND_CHUNK: usize = 200;
@@ -121,11 +121,11 @@ impl ActionBatcher {
                 if units.is_empty() {
                     return Err(ActionError::NoUnits);
                 }
-                let (x, y) = match target {
-                    CommandTarget::Position { x, y } => (x, y),
-                    CommandTarget::Unit(id) => (id as f32, 0.0),
-                    CommandTarget::Building(pos) => (pos.x() as f32, pos.y() as f32),
-                };
+                // Lossless target packing: `EntitySeq` unit ids do not fit an
+                // f32 (`command_emit.rs` H03 blocker), so `Unit`/`Building`
+                // targets go through [`pack_wire_target`] and
+                // `resolve_wire_target` decodes them.
+                let (x, y) = crate::sim::command::pack_wire_target(&target);
                 let _ = queue;
                 let _ = final_batch;
                 for chunk in units.chunks(COMMAND_CHUNK) {
@@ -263,7 +263,7 @@ pub fn to_sim_config(value: &WorldConfigValue) -> crate::determinism::ConfigValu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::action::{InventoryKind, PayloadAction};
+    use crate::input::action::{CommandTarget, InventoryKind, PayloadAction};
 
     #[test]
     fn chunk_200_final_batch() {
@@ -304,6 +304,61 @@ mod tests {
         assert_eq!(batches[2].client_seq, 2);
         assert_eq!(batches[0].match_id, 7);
         assert_eq!(batches[0].tick, 10);
+    }
+
+    #[test]
+    fn unit_target_wire_is_lossless_for_large_ids() {
+        // H03 blocker #2: `EntitySeq` ids live at >= 1e9 (unit_runtime.rs
+        // `UNIT_SEQ_BASE`) and an f32 rounds them to multiples of 64. The
+        // emitter must survive a round trip through `resolve_wire_target` for
+        // ids above 2^24 (where f32 integer precision ends).
+        let mut batcher = ActionBatcher::new(3);
+        for id in [1_000_000_001, (1 << 24) + 1, i32::MAX] {
+            let target = CommandTarget::Unit(id);
+            let batches = batcher
+                .emit(
+                    0,
+                    RemoteAction::CommandUnits {
+                        units: smallvec::smallvec![id],
+                        target,
+                        queue: false,
+                        final_batch: true,
+                    },
+                )
+                .expect("emit");
+            assert_eq!(batches.len(), 1);
+            let (x, y) = match &batches[0].commands[0] {
+                SimCommand::UnitCommand { x, y, .. } => (*x, *y),
+                other => panic!("expected a unit command, got {other:?}"),
+            };
+            assert_eq!(
+                crate::sim::command::resolve_wire_target(x, y),
+                target,
+                "id {id} (x {x}, y {y})"
+            );
+        }
+    }
+
+    #[test]
+    fn building_target_wire_keeps_the_tile() {
+        let mut batcher = ActionBatcher::new(1);
+        let target = CommandTarget::Building(crate::world::TilePos::new(140, 62));
+        let batches = batcher
+            .emit(
+                0,
+                RemoteAction::CommandUnits {
+                    units: smallvec::smallvec![7],
+                    target,
+                    queue: false,
+                    final_batch: true,
+                },
+            )
+            .expect("emit");
+        let (x, y) = match &batches[0].commands[0] {
+            SimCommand::UnitCommand { x, y, .. } => (*x, *y),
+            other => panic!("expected a unit command, got {other:?}"),
+        };
+        assert_eq!(crate::sim::command::resolve_wire_target(x, y), target);
     }
 
     #[test]
