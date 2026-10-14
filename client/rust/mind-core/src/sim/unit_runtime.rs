@@ -3032,6 +3032,64 @@ pub fn unit_update_system(world: &mut World) {
                 ground_rules,
                 &mut core_target_cache,
             );
+        } else if slot.kind == AiKind::Cargo {
+            // `CargoAI` (`CargoAI.java:26-97`, H01 T13): the tether unit
+            // shuttles items between its loader and a configured unload point.
+            let mut state = world
+                .get::<crate::ai::types::cargo::CargoAi>(entity)
+                .copied()
+                .unwrap_or_default();
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                let _ = crate::ai::types::cargo::update_cargo(&mut ctx, entity, &mut state);
+            }
+            if let Some(mut stored) = world.get_mut::<crate::ai::types::cargo::CargoAi>(entity) {
+                *stored = state;
+            } else if world.get_entity(entity).is_ok() {
+                world.entity_mut(entity).insert(state);
+            }
+        } else if slot.kind == AiKind::Assembler {
+            // `AssemblerAI` (`AssemblerAI.java:11-24`, H01 T13): hold at the
+            // arranged spot and face the locked angle.
+            let state = world
+                .get::<crate::ai::types::assembler::AssemblerAi>(entity)
+                .copied()
+                .unwrap_or_default();
+            {
+                let UnitRuntime {
+                    content,
+                    grid,
+                    pathfinder,
+                    ..
+                } = &mut runtime;
+                let mut ctx = crate::ai::ai_controller::AiCtx {
+                    world,
+                    grid,
+                    content,
+                    pathfinder,
+                    team,
+                };
+                crate::ai::types::assembler::update_assembler(&mut ctx, entity, &state);
+            }
+            if let Some(mut stored) =
+                world.get_mut::<crate::ai::types::assembler::AssemblerAi>(entity)
+            {
+                *stored = state;
+            } else if world.get_entity(entity).is_ok() {
+                world.entity_mut(entity).insert(state);
+            }
         } else if slot.kind == AiKind::NoAi {
             // `NoAI.updateUnit(){}`: the dummy never runs a controller (the
             // kinematics/environment tail still runs, as in Java `Unit.update`).
