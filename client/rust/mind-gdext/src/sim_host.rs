@@ -4712,6 +4712,54 @@ impl MindSimHost {
         }
     }
 
+    /// `SectorInfo.write()`'s core half (`SectorInfo.java:165-196`): clears the
+    /// default team's first core module and sets each record stack, clamped to
+    /// `CoreBuild.storage_capacity`. Rust-only seam for
+    /// `MindCampaign::start_sector_with_loadout`.
+    pub fn write_record_items_to_core(
+        &mut self,
+        team: u8,
+        items: &indexmap::IndexMap<String, i32>,
+    ) -> bool {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        let mut target = None;
+        for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
+            if comp.team.0 != team {
+                continue;
+            }
+            let is_core = content
+                .block(comp.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock);
+            if !is_core || self.sim.ecs.0.get::<ItemModule>(entity).is_none() {
+                continue;
+            }
+            target = Some(entity);
+            break;
+        }
+        let Some(entity) = target else {
+            return false;
+        };
+        let capacity = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
+            .map(|core| core.storage_capacity)
+            .unwrap_or(0);
+        let Some(mut module) = self.sim.ecs.0.get_mut::<ItemModule>(entity) else {
+            return false;
+        };
+        module.clear();
+        for (name, amount) in items {
+            if let Some(item) = content.item_id(name) {
+                module.set(item, (*amount).clamp(0, capacity));
+            }
+        }
+        true
+    }
+
     // ---- G03 T2 placement preview seams (Rust-only) ----
 
     /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;

@@ -121,6 +121,16 @@ impl ItemModule {
         self.total
     }
 
+    /// `ItemModule.set(item, amount)` (`ItemModule.java:220-223`): overwrites
+    /// the stored amount, adjusting `total` by the delta.
+    pub fn set(&mut self, item: ItemId, amount: i32) {
+        let Some(slot) = self.items.get_mut(item.index()) else {
+            return;
+        };
+        self.total += amount - *slot;
+        *slot = amount;
+    }
+
     /// `ItemModule.first()`: the first non-zero item in id order.
     pub fn first(&self) -> Option<ItemId> {
         self.items

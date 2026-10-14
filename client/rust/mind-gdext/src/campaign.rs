@@ -756,7 +756,7 @@ impl MindCampaign {
             return false;
         }
         let sector_id = sector as u16;
-        let Some(registry) = self.registry.take() else {
+        let Some(mut registry) = self.registry.take() else {
             return false;
         };
         // T1: a launch while a sector is live starts from the runtime's state
@@ -785,6 +785,7 @@ impl MindCampaign {
         let preset_id = record.preset;
         let has_save = record.has_save();
         let spawn_position = record.info.info.spawn_position;
+        let had_no_core = !record.info.info.has_core;
         let tech_unlocked = preset_id.is_none_or(|preset| {
             tech_tree::content_unlocked(&registry, ContentRef::of(ContentType::Sector, preset))
         });
@@ -795,17 +796,51 @@ impl MindCampaign {
             return false;
         }
 
-        // `Control.playSector`'s no-core branch (`Control.java:456-465`): the
-        // loaded save's world has no default-team core (the sector was lost
-        // while it still has a save). Run the lost-sector replay - `SectorDamage`
-        // snapshot, fresh reload, core + derelict restore (PAR-0084).
+        // `Control.playSector` (`Control.java:437-448`): quiet-unlock the preset
+        // (no unlock event) and record the planet's last sector.
+        let preset_name =
+            preset_id.and_then(|preset| registry.sector(preset).map(|def| def.name.clone()));
+        if let Some(preset) = preset_id
+            && let Some(name) = preset_name.as_deref()
+            && let Some(fields) = tech_tree::unlock_fields_mut(
+                &mut registry,
+                ContentRef::of(ContentType::Sector, preset),
+            )
+        {
+            fields.quiet_unlock(name, &mut SettingsUnlockStore::new(&mut self.settings));
+        }
+        if let Some(planet) = campaign.planet_mut(planet_id) {
+            planet.set_last_sector(&mut self.settings, sector_id);
+        }
+
+        // `Control.playSector`'s branch selection (`Control.java:449-470`): the
+        // normal load path is a save with a live core; a save whose sector was
+        // lost (`no_live_core || had_no_core`) takes the no-core branch, which
+        // replays only when `!clearSave && spawnPosition != 0 &&
+        // sectorDataMatches` (PAR-0084).
         let default_team = self.session.rules.default_team;
-        let lost_replay = has_save
-            && spawn_position != 0
-            && self
-                .host()
-                .map(|host| host.bind().player_core_blocks(default_team) == 0)
-                .unwrap_or(false);
+        let no_live_core = self
+            .host()
+            .map(|host| host.bind().player_core_blocks(default_team) == 0)
+            .unwrap_or(false);
+        let no_core_branch = no_live_core || had_no_core;
+        let clear_save = campaign
+            .planet(planet_id)
+            .is_some_and(|planet| planet.campaign_rules.clear_sector_on_lose);
+        let data_matches = campaign.sector(planet_id, sector_id).is_some_and(|sector| {
+            // Deviation: the preset def carries no map dimensions, so the
+            // record's own size is passed; the effective test is the preset
+            // name (`SectorInfo.sectorDataMatches`, `SectorInfo.java:98-103`).
+            sector.sector_data_matches(
+                preset_name.as_deref(),
+                sector.info.info.last_width,
+                sector.info.info.last_height,
+            )
+        });
+        let lost_replay =
+            has_save && no_core_branch && !clear_save && spawn_position != 0 && data_matches;
+        // Java's load branch: a save that is not in the no-core branch.
+        let resume = has_save && !no_core_branch;
         let mut restored_survivors = Vec::new();
         if lost_replay {
             let (spawn_x, spawn_y) = mind_core::world::pos::unpack(spawn_position);
@@ -843,7 +878,11 @@ impl MindCampaign {
         } else if let Some(stacks) = parse_loadout_stacks(&loadout_payload) {
             self.session.rules.loadout = stacks;
         }
-        let (launch_schematic, launch_stacks_json) = parse_launch_payload(&loadout_payload);
+        let (launch_schematic, launch_origin, launch_stacks_json) =
+            parse_launch_payload(&loadout_payload);
+        // `Control.playNewSector` (`Control.java:573-578`): the launcher sector
+        // id from the dialog becomes `origin`/`destination`.
+        let origin = launch_origin.map(|origin| (planet_id, origin));
 
         // `Sector.isBeingPlayed` (`Sector.java:148-151`): only the sector being
         // played reads true; a launch clears every previous flag first (T1).
@@ -854,14 +893,14 @@ impl MindCampaign {
         }
 
         self.reloader = HostReloader::default();
-        let events = if has_save && !lost_replay {
+        let events = if resume {
             play_sector(
                 &mut self.session,
                 &mut campaign,
                 &registry,
                 planet_id,
                 sector_id,
-                None,
+                origin,
                 &mut self.epoch,
                 &mut self.reloader,
             )
@@ -872,7 +911,7 @@ impl MindCampaign {
                 &registry,
                 planet_id,
                 sector_id,
-                None,
+                origin,
                 &mut self.epoch,
                 &mut self.reloader,
             )
@@ -881,8 +920,7 @@ impl MindCampaign {
         // save `MindSimHost.load_sector` just decoded. Java restores them inside
         // `SaveIO.load` (`SaveVersion.readMeta`) before the `SaveLoadEvent`
         // rule merge; the host also resumed the saved `tick`.
-        if has_save
-            && !lost_replay
+        if resume
             && let Some(meta) = self
                 .host()
                 .and_then(|mut host| host.bind_mut().take_sector_resume())
@@ -911,7 +949,7 @@ impl MindCampaign {
                 &registry,
                 preset_id.is_some(),
                 preset_no_lighting,
-                has_save && !lost_replay,
+                resume,
             );
             if let Some(mut host) = self.host() {
                 host.bind_mut().apply_world_rules(&self.session.rules);
@@ -975,11 +1013,57 @@ impl MindCampaign {
                     }
                 }
                 let taken = host.bind_mut().take_campaign_runtime();
+                let mut core_items: Option<indexmap::IndexMap<String, i32>> = None;
                 if let Some(mut runtime) = taken {
-                    self.session = runtime.session.clone();
                     // Carry the launch ownership back into the runtime copy.
                     runtime.campaign = campaign.clone();
+                    if resume {
+                        // `Logic` `SaveLoadEvent` (`Logic.java:70-88`):
+                        // `info.write()` pushes the stored record into the live
+                        // session, then `planet.applyRules` re-derives the
+                        // campaign rules over it (H04 T3).
+                        let wave_core = runtime.session.wave_core_count() > 0;
+                        let allow_waves = campaign
+                            .planet(planet_id)
+                            .is_some_and(|planet| planet.allow_waves);
+                        if let Some(record) = runtime.campaign.sector_mut(planet_id, sector_id) {
+                            let capture_wave = record.preset_capture_wave;
+                            let capacity = record.info.info.storage_capacity;
+                            let items = record.info.write_to_state(
+                                wave_core,
+                                allow_waves,
+                                capture_wave,
+                                &mut runtime.session,
+                            );
+                            record.info.info.has_core = true;
+                            let _ = record.save_info(&mut self.settings, &planet_name);
+                            // Keep the session team inventory equal to the core
+                            // module, like a fresh launch (`sync_session_with_sim`).
+                            let item_count = registry.items().len();
+                            let inventory = runtime
+                                .session
+                                .teams
+                                .inventory(mind_core::ecs::TeamId(default_team), item_count);
+                            inventory.clear();
+                            for (name, amount) in &items {
+                                if let Some(item) = registry.item_id(name) {
+                                    inventory.add(item, (*amount).clamp(0, capacity), i32::MAX);
+                                }
+                            }
+                            core_items = Some(items);
+                        }
+                        if let Some(planet) = campaign.planet(planet_id) {
+                            planet.apply_rules(&registry, &mut runtime.session.rules, false, true);
+                        }
+                    }
+                    self.session = runtime.session.clone();
                     host.bind_mut().put_campaign_runtime(runtime);
+                }
+                if let Some(items) = core_items
+                    && let Some(mut host) = self.host()
+                {
+                    host.bind_mut()
+                        .write_record_items_to_core(default_team, &items);
                 }
                 installed = true;
             }
@@ -2727,11 +2811,23 @@ impl MindCampaign {
             return;
         };
         if let Some(snapshot) = snapshot {
+            // `SectorInfo.prepare` `lastPresetName` (`SectorInfo.java:226-228`).
+            let preset = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.sector(planet, sector_id))
+                .and_then(|sector| sector.preset);
+            let preset_name = preset.and_then(|preset| {
+                self.registry
+                    .as_ref()
+                    .and_then(|registry| registry.sector(preset))
+                    .map(|def| def.name.clone())
+            });
             let mut prepared = mind_core::game::sector::SectorInfoState {
                 info: record,
                 ..Default::default()
             };
-            prepared.prepare(&snapshot, true);
+            prepared.prepare(&snapshot, true, preset_name.as_deref());
             record = prepared.info;
         }
         record.wave = wave;
@@ -3929,16 +4025,24 @@ fn parse_loadout_stacks(
 /// Launch payload split: the chosen schematic index (`Schematics.all`, `None`
 /// for the items-only fallback) and the `stacks` array JSON for
 /// `MindSimHost.place_launch_loadout`.
-fn parse_launch_payload(json: &str) -> (Option<i32>, String) {
+/// Parses the launcher launch payload (`PlanetDialog` `playSelected`):
+/// `(schematic index, origin sector id, stacks JSON)`.
+fn parse_launch_payload(json: &str) -> (Option<i32>, Option<u16>, String) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
-        return (None, String::from("[]"));
+        return (None, None, String::from("[]"));
     };
     let schematic = value
         .get("schematic")
         .and_then(serde_json::Value::as_i64)
         .map(|index| index as i32);
+    // `Control.playNewSector` (`Control.java:573-578`): `info.origin =
+    // info.destination = origin`; absent -> no origin (a free launch).
+    let origin = value
+        .get("origin")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|origin| u16::try_from(origin).ok());
     let stacks = value.get("stacks").cloned().unwrap_or(value);
-    (schematic, stacks.to_string())
+    (schematic, origin, stacks.to_string())
 }
 
 /// Clears one campaign sector's persisted base/items
