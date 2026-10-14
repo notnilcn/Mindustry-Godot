@@ -6290,3 +6290,272 @@ fn stuck_dagger_activates_avoidance_in_a_pocket() {
         "the NoAI blocker stayed put"
     );
 }
+
+/// H01 T12: a team-1 `poly` with the `assist` command escorts the local
+/// builder player and copies their build plan (`BuilderAI.java:57-100,143-186`).
+/// Before T12 `onlyAssist` returned early for every tick and the poly idled.
+#[test]
+fn assist_poly_follows_building_player() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::sim::builder::{BuilderPlans, UnitBuildPlan};
+    use crate::world::ConstructState;
+
+    let mut sim = live_sim(64);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    // A core funds the build (`shouldSkip`) and the campaign unit cap
+    // (`unitCap 0 + core +8`).
+    let core = place(&mut sim, 8, 8, "core-shard", 1);
+    let copper = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.item_id("copper").expect("copper")
+    };
+    if let Some(mut items) = sim.ecs.0.get_mut::<crate::world::modules::ItemModule>(core) {
+        items.add(copper, 500, 4000);
+    }
+
+    let player = sim
+        .spawn_player_unit("alpha", 1, 40.0 * 8.0, 40.0 * 8.0, 0.0)
+        .expect("player alpha");
+    let poly = sim
+        .spawn_live_unit("poly", 1, 10.0 * 8.0, 10.0 * 8.0, 0.0)
+        .expect("poly");
+    let assist = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime
+            .content
+            .unit_command_by_name("assist")
+            .expect("assist")
+            .id
+    };
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(poly) {
+        slot.kind = AiKind::Command;
+        slot.command = Some(assist);
+    }
+
+    // Phase 1: the player is idle -> `moveTo(assistFollowing, hit + hit/2 + 60)`.
+    let start = *sim.ecs.0.get::<Pos>(poly).expect("poly pos");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let ppos = *sim.ecs.0.get::<Pos>(poly).expect("poly pos");
+    let apos = *sim.ecs.0.get::<Pos>(player).expect("player pos");
+    let dst = ((ppos.x - apos.x).powi(2) + (ppos.y - apos.y).powi(2)).sqrt();
+    eprintln!("assist escort: poly {ppos:?} player {apos:?} dst {dst:.1} start {start:?}");
+    assert!(
+        ppos.x != start.x || ppos.y != start.y,
+        "the assist poly left its idle spot"
+    );
+    // `assistFollowing.type.hitSize + unit.type.hitSize/2 + 60` (+ the `moving`
+    // tolerance of 5): alpha hit 8, poly hit 9.
+    assert!(
+        dst <= 8.0 + 9.0 / 2.0 + 65.0,
+        "the poly escorts the player ({dst})"
+    );
+
+    // Phase 2: queue the player's wall plan one tile east; the alpha starts the
+    // construct (`updateBuildLogic`), then the cost is frozen so the plan stays
+    // open for the whole acceptance window.
+    let wall = BlockId::new(block(&sim, "copper-wall"));
+    let plan = UnitBuildPlan::place(41, 40, 0, wall);
+    sim.ecs
+        .0
+        .get_mut::<BuilderPlans>(player)
+        .expect("player plans")
+        .plans
+        .push_back(plan);
+    let mut construct = None;
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+        if let Some(entity) = sim.grid.tiles.get(41, 40).build
+            && sim.ecs.0.get::<ConstructState>(entity).is_some()
+        {
+            construct = Some(entity);
+            break;
+        }
+    }
+    let construct = construct.expect("the alpha started the construct");
+    sim.ecs
+        .0
+        .get_mut::<ConstructState>(construct)
+        .expect("construct state")
+        .build_cost = 1_000_000.0;
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let player_plan = sim
+        .ecs
+        .0
+        .get::<BuilderPlans>(player)
+        .and_then(|plans| plans.plans.front().cloned());
+    let poly_plan = sim
+        .ecs
+        .0
+        .get::<BuilderPlans>(poly)
+        .and_then(|plans| plans.plans.front().cloned());
+    // The per-unit plan progress mirrors diverge as each builder works; the
+    // plan identity (tile/block/rotation/mode) is what is copied.
+    let plan_id = |plan: Option<UnitBuildPlan>| {
+        plan.map(|plan| (plan.x, plan.y, plan.block, plan.rotation, plan.breaking))
+    };
+    eprintln!("assist copy: player {player_plan:?} poly {poly_plan:?}");
+    assert!(
+        player_plan.is_some(),
+        "the player is still actively building"
+    );
+    assert_eq!(
+        plan_id(poly_plan),
+        plan_id(player_plan),
+        "the poly mimics the player's front plan"
+    );
+    // The poly reached the construct's range (buildRange - hitSize*2 = 202).
+    let plan_tile = (41.0 * 8.0, 40.0 * 8.0);
+    let ppos = *sim.ecs.0.get::<Pos>(poly).expect("poly pos");
+    let plan_dst = ((ppos.x - plan_tile.0).powi(2) + (ppos.y - plan_tile.1).powi(2)).sqrt();
+    assert!(
+        plan_dst <= 202.0 + 12.0,
+        "the poly moved into build range of the plan ({plan_dst})"
+    );
+}
+
+/// H01 T12: an idle `rebuild` poly (the poly default command, `onlyAssist`
+/// false) picks an actively-building unit within `buildRadius` and copies its
+/// plan (`BuilderAI.java:149-169`).
+#[test]
+fn idle_rebuild_poly_helps_builder() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::ai::types::builder::{BuilderAiState, DEFAULT_REBUILD_PERIOD};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::sim::builder::{BuilderPlans, UnitBuildPlan};
+    use crate::world::ConstructState;
+
+    let mut sim = live_sim(64);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    // A core funds the build (`shouldSkip`) and the campaign unit cap
+    // (`unitCap 0 + core +8`).
+    let core = place(&mut sim, 8, 8, "core-shard", 1);
+    let copper = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime.content.item_id("copper").expect("copper")
+    };
+    if let Some(mut items) = sim.ecs.0.get_mut::<crate::world::modules::ItemModule>(core) {
+        items.add(copper, 500, 4000);
+    }
+
+    let player = sim
+        .spawn_player_unit("alpha", 1, 40.0 * 8.0, 40.0 * 8.0, 0.0)
+        .expect("player alpha");
+    let helper = sim
+        .spawn_live_unit("poly", 1, 10.0 * 8.0, 10.0 * 8.0, 0.0)
+        .expect("helper poly");
+    // `slot.command = None` -> the poly's `defaultCommand = rebuild`.
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(helper) {
+        slot.kind = AiKind::Command;
+    }
+
+    let wall = BlockId::new(block(&sim, "copper-wall"));
+    let plan = UnitBuildPlan::place(41, 40, 0, wall);
+    sim.ecs
+        .0
+        .get_mut::<BuilderPlans>(player)
+        .expect("player plans")
+        .plans
+        .push_back(plan);
+    let mut construct = None;
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+        if let Some(entity) = sim.grid.tiles.get(41, 40).build
+            && sim.ecs.0.get::<ConstructState>(entity).is_some()
+        {
+            construct = Some(entity);
+            break;
+        }
+    }
+    let construct = construct.expect("the alpha started the construct");
+    sim.ecs
+        .0
+        .get_mut::<ConstructState>(construct)
+        .expect("construct state")
+        .build_cost = 1_000_000.0;
+
+    let start = *sim.ecs.0.get::<Pos>(helper).expect("helper pos");
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+
+    let state = sim
+        .ecs
+        .0
+        .get::<BuilderAiState>(helper)
+        .copied()
+        .expect("builder state");
+    let player_plan = sim
+        .ecs
+        .0
+        .get::<BuilderPlans>(player)
+        .and_then(|plans| plans.plans.front().cloned());
+    let helper_plan = sim
+        .ecs
+        .0
+        .get::<BuilderPlans>(helper)
+        .and_then(|plans| plans.plans.front().cloned());
+    let hpos = *sim.ecs.0.get::<Pos>(helper).expect("helper pos");
+    let plan_tile = (41.0 * 8.0, 40.0 * 8.0);
+    let plan_dst = ((hpos.x - plan_tile.0).powi(2) + (hpos.y - plan_tile.1).powi(2)).sqrt();
+    eprintln!(
+        "rebuild help: following {:?} plan_dst {plan_dst:.1} start {start:?} state \
+         {state:?}",
+        state.following
+    );
+    assert_eq!(
+        state.following,
+        Some(player),
+        "the idle rebuild poly follows the building player"
+    );
+    // The per-unit plan progress mirrors diverge as each builder works; the
+    // plan identity (tile/block/rotation/mode) is what is copied.
+    let plan_id = |plan: Option<UnitBuildPlan>| {
+        plan.map(|plan| (plan.x, plan.y, plan.block, plan.rotation, plan.breaking))
+    };
+    assert_eq!(
+        plan_id(helper_plan),
+        plan_id(player_plan),
+        "the helper poly copies the player's front plan"
+    );
+    assert!(
+        plan_dst <= 202.0 + 12.0,
+        "the helper moved into build range of the plan ({plan_dst})"
+    );
+    assert_eq!(
+        state.rebuild_period, DEFAULT_REBUILD_PERIOD,
+        "no buildAi rule -> default rebuild period"
+    );
+}
