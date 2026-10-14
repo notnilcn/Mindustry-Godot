@@ -23,7 +23,9 @@ use crate::world::tiles::Tiles;
 use crate::maps::generators::WorldGenerator;
 use crate::maps::generators::astar;
 use crate::maps::generators::basic::{self, planet_wall};
-use crate::maps::generators::planet::{FlatSectorView, HexMesher, PlanetGenerator, SectorView};
+use crate::maps::generators::planet::{
+    FlatSectorView, HexMesher, PlanetGenerator, SectorView, StructureCtx, place_launch_loadout,
+};
 
 /// `SteamVent.offsets` after the static `sub(1, 1)` adjustment.
 const STEAM_VENT_OFFSETS: [(i32, i32); 9] = [
@@ -306,6 +308,15 @@ impl WorldGenerator for ErekirPlanetGenerator {
 
     fn sector_size_scl(&self) -> Option<f32> {
         Some(self.planet.size_scl)
+    }
+
+    fn player_spawn(&self) -> Option<(i32, i32)> {
+        Some(self.spawn)
+    }
+
+    /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4).
+    fn place_structures(&mut self, ctx: &mut StructureCtx) {
+        place_launch_loadout(ctx, self.spawn.0, self.spawn.1);
     }
 
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {

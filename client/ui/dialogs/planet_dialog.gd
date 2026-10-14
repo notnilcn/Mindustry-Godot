@@ -1619,6 +1619,30 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 	# flags (`state.rules.sector` is set before `World.loadSector`).
 	if campaign != null and campaign.has_method("prime_sector_load"):
 		campaign.call("prime_sector_load", planet_name, sector_id)
+	# H05 T4: the launcher branch computes its loadout before the world load
+	# (`Schematics.placeLaunchLoadout` runs inside generation for numbered
+	# sectors); the free launch primes the planet default with no resources.
+	var launcher_id := -1
+	var launch_resources: Dictionary = {}
+	var launch_row: Dictionary = {}
+	var launch_cost: Array = []
+	if loadout >= 0 and not resume:
+		launcher_id = _sector_launch_from(planet_name, sector_id)
+		var plan := _launch_plan(planet_name, launcher_id, sector_id, loadout)
+		launch_resources = plan.get("resources", {})
+		if launch_resources.is_empty():
+			launch_resources = _launch_resource_totals()
+		launch_row = _find_loadout_row(loadout)
+		launch_cost = _loadout_launch_stacks(launch_row, launch_resources)
+	# `PlanetDialog.playSelected`: the chosen schematic's build cost plus the
+	# staged resources is removed from the launcher sector and stocked into
+	# the new core. The staged resources come from `LaunchLoadoutDialog.update`
+	# (`launch_plan`) so the Max computation and capacity clamp apply.
+	if sim_host != null and sim_host.has_method("set_pending_launch"):
+		if loadout >= 0 and not resume:
+			sim_host.call("set_pending_launch", loadout, JSON.stringify(_stacks_of(launch_resources)))
+		else:
+			sim_host.call("set_pending_launch", -1, "[]")
 	if sim_host != null and sim_host.has_method("load_sector"):
 		sim_host.call("load_sector", planet_name, sector_id)
 	var started := false
@@ -1626,35 +1650,23 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 		if resume and campaign.has_method("play_sector"):
 			started = bool(campaign.call("play_sector", planet_name, sector_id))
 		elif loadout >= 0 and campaign.has_method("start_sector_with_loadout"):
-			# `PlanetDialog.playSelected` launcher branch (PAR-0085): the chosen
-			# schematic's build cost plus the staged resources is removed from
-			# the launcher sector and stocked into the new core. The staged
-			# resources come from `LaunchLoadoutDialog.update` (`launch_plan`)
-			# so the Max computation and capacity clamp apply.
-			var launcher_id := _sector_launch_from(planet_name, sector_id)
-			var plan := _launch_plan(planet_name, launcher_id, sector_id, loadout)
-			var resources: Dictionary = plan.get("resources", {})
-			if resources.is_empty():
-				resources = _launch_resource_totals()
-			var row := _find_loadout_row(loadout)
-			var cost := _loadout_launch_stacks(row, resources)
 			if launcher_id >= 0:
 				campaign.call(
 					"remove_sector_items",
 					planet_name,
 					launcher_id,
-					JSON.stringify(cost)
+					JSON.stringify(launch_cost)
 				)
 			# `Schematics.placeLaunchLoadout`: the placed core holds only the
 			# launch resources; the schematic requirements are its build cost
 			# (paid by the launcher above), not core contents.
-			var core_stacks := _stacks_of(resources)
+			var core_stacks := _stacks_of(launch_resources)
 			started = bool(campaign.call(
 				"start_sector_with_loadout",
 				planet_name,
 				sector_id,
 				JSON.stringify({
-					"core": str(row.get("core", "")),
+					"core": str(launch_row.get("core", "")),
 					"schematic": loadout,
 					"stacks": core_stacks,
 					"origin": launcher_id,

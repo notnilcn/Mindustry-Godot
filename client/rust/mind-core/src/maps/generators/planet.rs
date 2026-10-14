@@ -350,6 +350,55 @@ fn dst(a: [f32; 3], b: [f32; 3]) -> f32 {
     (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
 }
 
+/// `Universe.getLastLoadout`/`getLaunchResources` (H05 T4): the schematic and
+/// stocked items the launch loadout places.
+pub struct LaunchLoadout {
+    /// The loadout schematic (`Loadouts.basicShard`/`basicBastion`/...).
+    pub schematic: crate::game::schematic::Schematic,
+    /// Launch resources stocked into the new core (`getLaunchResources`).
+    pub stacks: Vec<(crate::content::ItemId, i32)>,
+}
+
+/// Live-world context for generator steps that place buildings (Java runs them
+/// inside `generate()`; H05 T4).
+pub struct StructureCtx<'a> {
+    /// Live sim (placement goes through the opt-in block runtime).
+    pub sim: &'a mut crate::sim::Sim,
+    /// Content registry.
+    pub content: &'a ContentRegistry,
+    /// Enemy base catalog (`Vars.bases`); T5.
+    pub bases: Option<&'a crate::ai::BaseRegistry>,
+    /// Launch loadout (`Universe.getLastLoadout` + `getLaunchResources`).
+    pub loadout: Option<&'a LaunchLoadout>,
+    /// Sector rules the generator may mutate (`state.rules`).
+    pub rules: &'a mut crate::game::rules::Rules,
+    /// Player team (`state.rules.defaultTeam`).
+    pub player_team: u8,
+    /// Wave team (`state.rules.waveTeam`).
+    pub wave_team: u8,
+}
+
+/// `Schematics.placeLaunchLoadout` (`Schematics.java:465-469`): places the
+/// loadout schematic at the spawn (`placeLoadout(..., check = true)`) and
+/// stocks the newly placed core with the launch resources.
+pub fn place_launch_loadout(ctx: &mut StructureCtx, x: i32, y: i32) {
+    let Some(loadout) = ctx.loadout else {
+        return;
+    };
+    let cores = ctx.sim.place_loadout(
+        &loadout.schematic,
+        x as i16,
+        y as i16,
+        ctx.player_team,
+        true,
+    );
+    let Some(&entity) = cores.first() else {
+        log::warn!("placeLaunchLoadout: no core placed at ({x}, {y})");
+        return;
+    };
+    crate::sim::Sim::stock_core(ctx.sim, entity, &loadout.stacks);
+}
+
 /// Planet-projected simplex noise (`PlanetGenerator.noise`).
 #[derive(Debug, Clone, Copy)]
 struct PlanetNoise {

@@ -207,4 +207,95 @@ mod tests {
         assert_eq!(generated.grid.tiles.width, expected);
         println!("serpulo sector 1 size = {expected}");
     }
+
+    #[test]
+    fn generated_sector_reports_spawn() {
+        // H05 T4: the generator exposes the spawn `placeLaunchLoadout` uses
+        // (`SerpuloPlanetGenerator.spawn`).
+        let content = content();
+        let generated =
+            generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("serpulo");
+        let Some((x, y)) = generated.generator.player_spawn() else {
+            panic!("serpulo sector 1 has a spawn");
+        };
+        let tile = generated.grid.tile(x, y);
+        let solid = content
+            .block(tile.block)
+            .map(|def| def.solid)
+            .unwrap_or(false);
+        assert!(!solid, "spawn tile ({x},{y}) is not solid");
+    }
+
+    #[test]
+    fn place_structures_places_shard() {
+        // H05 T4: `Schematics.placeLaunchLoadout` places the shard at the
+        // spawn and stocks it with the launch resources.
+        use crate::game::schematics::Schematics;
+        use crate::maps::generators::planet::{LaunchLoadout, StructureCtx};
+        use crate::world::blocks::storage::CoreBuild;
+        use crate::world::modules::ItemModule;
+
+        let content = content();
+        let generated =
+            generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("serpulo");
+        let Some((spawn_x, spawn_y)) = generated.generator.player_spawn() else {
+            panic!("serpulo spawn");
+        };
+        let GeneratedSector {
+            grid,
+            rules,
+            mut generator,
+            ..
+        } = generated;
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let mut sim = crate::sim::Sim::new(1, width, height, BlockId::AIR, BlockId::AIR);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("live runtime");
+
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&content);
+        let shard = content.block_id("core-shard").expect("core-shard");
+        let index = schematics
+            .get_default_loadout(shard)
+            .expect("basicShard registered");
+        let schematic = schematics.all[index].clone();
+        let copper = content.item_id("copper").expect("copper");
+        let loadout = LaunchLoadout {
+            schematic,
+            stacks: vec![(copper, 100)],
+        };
+        let mut rules = rules;
+        let mut ctx = StructureCtx {
+            sim: &mut sim,
+            content: &content,
+            bases: None,
+            loadout: Some(&loadout),
+            rules: &mut rules,
+            player_team: 1,
+            wave_team: 2,
+        };
+        generator.place_structures(&mut ctx);
+
+        let entity = sim
+            .grid
+            .tile(spawn_x, spawn_y)
+            .build
+            .expect("core placed at the spawn");
+        let building = sim
+            .ecs
+            .0
+            .get::<crate::ecs::BuildingComp>(entity)
+            .expect("building");
+        assert_eq!(building.block, shard, "core-shard at the spawn");
+        assert!(sim.ecs.0.get::<CoreBuild>(entity).is_some(), "CoreBuild");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<ItemModule>(entity)
+                .expect("items")
+                .get(copper),
+            100,
+            "launch resources stocked"
+        );
+    }
 }

@@ -18,7 +18,9 @@ use crate::world::WorldParams;
 use crate::world::tiles::Tiles;
 
 use crate::maps::generators::WorldGenerator;
-use crate::maps::generators::planet::{FlatSectorView, PlanetGenerator};
+use crate::maps::generators::planet::{
+    FlatSectorView, PlanetGenerator, StructureCtx, place_launch_loadout,
+};
 
 /// `Geometry.d8edge` (Arc `Geometry.java`): the four diagonal corner directions.
 const D8_EDGE: [(i32, i32); 4] = [(1, 1), (-1, 1), (-1, -1), (1, -1)];
@@ -187,6 +189,15 @@ impl WorldGenerator for AsteroidGenerator {
 
     fn sector_size_scl(&self) -> Option<f32> {
         Some(self.planet.size_scl)
+    }
+
+    fn player_spawn(&self) -> Option<(i32, i32)> {
+        Some((self.planet.base.width / 2, self.planet.base.height / 2))
+    }
+
+    /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4).
+    fn place_structures(&mut self, ctx: &mut StructureCtx) {
+        place_launch_loadout(ctx, self.planet.base.width / 2, self.planet.base.height / 2);
     }
 
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {

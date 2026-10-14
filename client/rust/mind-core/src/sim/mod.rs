@@ -928,6 +928,29 @@ impl Sim {
         cores
     }
 
+    /// `Schematics.placeLaunchLoadout`'s core stocking
+    /// (`Schematics.java:465-469`): `tile.build.items.add(universe.
+    /// getLaunchResources())` on the just-placed core, capped at its
+    /// `storageCapacity` (H05 T4).
+    pub fn stock_core(sim: &mut Sim, entity: Entity, stacks: &[(crate::content::ItemId, i32)]) {
+        let capacity = sim
+            .ecs
+            .0
+            .get::<crate::world::blocks::storage::CoreBuild>(entity)
+            .map(|core| core.storage_capacity)
+            .unwrap_or(i32::MAX);
+        if let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(entity)
+        {
+            module.clear();
+            for (item, amount) in stacks {
+                module.add(*item, *amount, capacity);
+            }
+        }
+    }
+
     /// Breaks through the opt-in live runtime; `false` when absent or rejected.
     fn runtime_break(&mut self, x: i16, y: i16) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {

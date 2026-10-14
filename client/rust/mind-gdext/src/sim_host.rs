@@ -355,6 +355,13 @@ pub struct MindSimHost {
     /// `MindCampaign.prime_sector_load` primes this before `load_sector`;
     /// `load_sector_world` falls back to `game::planet::static_gen_extras`.
     pending_gen_extras: Option<(String, u16, mind_core::maps::planet::SectorGenExtras)>,
+    /// Launch payload for the next generated sector (H05 T4): schematic index
+    /// (`-1` = planet default) and launch-resource stacks JSON.
+    pending_launch: Option<(i32, String)>,
+    /// Whether the last `load_sector` placed a generated sector's launch
+    /// loadout during the world load (`MindCampaign.start_sector_with_loadout`
+    /// skips its own `place_launch_loadout` then; H05 T4).
+    generated_loadout_placed: bool,
 }
 
 #[godot_api]
@@ -387,6 +394,8 @@ impl INode for MindSimHost {
             sector_resume: None,
             last_limit_area: None,
             pending_gen_extras: None,
+            pending_launch: None,
+            generated_loadout_placed: false,
         }
     }
 
@@ -1856,6 +1865,82 @@ impl MindSimHost {
         self.pending_gen_extras = Some((planet.to_owned(), sector as u16, extras));
     }
 
+    /// Sets the launch loadout the next generated sector places
+    /// (`Control.playNewSector`/`Universe.getLastLoadout`; H05 T4).
+    /// `schematic_index = -1` = planet default (free launch); `stacks_json` is
+    /// the launch-resources array (`[{item, amount}]`).
+    #[func]
+    pub fn set_pending_launch(&mut self, schematic_index: i32, stacks_json: GString) {
+        self.pending_launch = Some((schematic_index, stacks_json.to_string()));
+    }
+
+    /// Whether the last `load_sector` placed the generated sector's launch
+    /// loadout during the world load (H05 T4).
+    pub fn generated_loadout_placed(&self) -> bool {
+        self.generated_loadout_placed
+    }
+
+    /// Loads the user schematic directory (`dataDirectory/schematics`) into a
+    /// fresh registry (`Schematics.get()`; used by `place_launch_loadout` and
+    /// the generated-sector launch resolution).
+    fn load_user_schematics(&self) -> mind_core::game::schematics::Schematics {
+        use mind_core::game::schematics::Schematics;
+        let mut schematics = Schematics::new();
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return schematics;
+        };
+        // Java's `schematicDirectory` is `dataDirectory/schematics`; `user://`
+        // globalizes to the same data root the campaign facade loads from.
+        let paths = mind_core::io::fs::Paths::new(
+            ProjectSettings::singleton()
+                .globalize_path("user://")
+                .to_string(),
+        );
+        if let Err(error) = schematics.load(
+            &mind_core::io::fs::NativeFs,
+            &paths.root().join("schematics"),
+            registry,
+        ) {
+            log::warn!("load_user_schematics: schematic load failed: {error}");
+        }
+        schematics
+    }
+
+    /// Resolves the launch loadout for a generated sector (H05 T4): the
+    /// pending schematic index or the planet default (`getDefaultLoadout` on
+    /// the planet's `defaultCore`), with the pending launch-resource stacks.
+    fn resolve_generated_loadout(
+        &mut self,
+        planet_name: &str,
+    ) -> Option<mind_core::maps::generators::planet::LaunchLoadout> {
+        let (index, stacks_json) = self.pending_launch.take().unwrap_or((-1, String::new()));
+        let schematics = self.load_user_schematics();
+        let registry = self.content_snapshot.as_ref()?;
+        let index = if index >= 0 {
+            Some(index as usize)
+        } else {
+            registry
+                .planet_by_name(planet_name)
+                .and_then(|def| def.default_core.clone())
+                .and_then(|core| registry.block_id(&core))
+                .and_then(|core| schematics.get_default_loadout(core))
+        };
+        let Some(schematic) = index.and_then(|index| schematics.all.get(index).cloned()) else {
+            log::warn!("load_sector: no launch loadout for `{planet_name}`");
+            return None;
+        };
+        let stacks: Vec<mind_core::io::json::content_serde::JsonItemStack> =
+            serde_json::from_str(&stacks_json).unwrap_or_default();
+        let stacks = stacks
+            .iter()
+            .filter_map(|stack| {
+                let name = stack.item.as_deref()?;
+                Some((registry.item_id(name)?, stack.amount))
+            })
+            .collect();
+        Some(mind_core::maps::generators::planet::LaunchLoadout { schematic, stacks })
+    }
+
     /// Generates and installs a campaign sector's world into the sim
     /// (`Control.playNewSector` world half), preferring an existing sector save
     /// (`user://saves/sector-<planet>-<id>.msav`, resume) over the preset map
@@ -1878,6 +1963,8 @@ impl MindSimHost {
         self.sim.ecs.0.remove_resource::<CampaignRuntime>();
         // Resume metadata is per load; clear before this load decides.
         self.sector_resume = None;
+        // The loadout placement flag is per load (H05 T4).
+        self.generated_loadout_placed = false;
         // Take the registry out so the generator can borrow it while the sim is
         // rebuilt, then hand it back (content boot is expensive; never drop it).
         let Some(mut registry) = self.content_snapshot.take() else {
@@ -2020,6 +2107,42 @@ impl MindSimHost {
                 .insert_resource(mind_core::game::runtime::BaseCatalog(std::sync::Arc::new(
                     catalog,
                 )));
+        }
+        // H05 T4: a generated sector places its launch loadout during the
+        // world load (`Schematics.placeLaunchLoadout` runs inside `generate()`;
+        // T5/T6 add the enemy base and ruins to the same pass).
+        if let Some((generator, _, _)) = generated_ctx.as_mut() {
+            if let Some(loadout) = self.resolve_generated_loadout(planet_name) {
+                let bases = self
+                    .sim
+                    .ecs
+                    .0
+                    .get_resource::<mind_core::game::runtime::BaseCatalog>()
+                    .map(|catalog| catalog.0.clone());
+                let mut rules = self.sector_rules.take().unwrap_or_default();
+                // `state.rules.defaultTeam` (`Schematics.placeLaunchLoadout`):
+                // the fresh sim has no `CampaignRuntime`/`BuildRules` yet, so
+                // the load's own rules carry the team.
+                let player_team = rules.default_team;
+                let wave_team = rules.wave_team;
+                let content = self.content_snapshot.as_ref();
+                if let Some(content) = content {
+                    let mut ctx = mind_core::maps::generators::planet::StructureCtx {
+                        sim: &mut self.sim,
+                        content,
+                        bases: bases.as_deref(),
+                        loadout: Some(&loadout),
+                        rules: &mut rules,
+                        player_team,
+                        wave_team,
+                    };
+                    generator.place_structures(&mut ctx);
+                    self.generated_loadout_placed = true;
+                }
+                self.sector_rules = Some(rules);
+            }
+            self.pending_launch = None;
+            self.sim.refresh_unit_runtime();
         }
         // `World.loadMap`'s building half: the reader decoded the map's tile
         // entities into the pending queue while the grid was built, so spawn
@@ -3348,28 +3471,13 @@ impl MindSimHost {
     /// `stacks_json` (`[{item, amount}]`, the launch resources).
     #[func]
     pub fn place_launch_loadout(&mut self, schematic_index: i32, stacks_json: GString) -> bool {
-        use mind_core::game::schematics::Schematics;
         if schematic_index < 0 {
             return false;
         }
         let Some(registry) = self.content_snapshot.as_ref() else {
             return false;
         };
-        // Java's `schematicDirectory` is `dataDirectory/schematics`; `user://`
-        // globalizes to the same data root the campaign facade loads from.
-        let paths = mind_core::io::fs::Paths::new(
-            ProjectSettings::singleton()
-                .globalize_path("user://")
-                .to_string(),
-        );
-        let mut schematics = Schematics::new();
-        if let Err(error) = schematics.load(
-            &mind_core::io::fs::NativeFs,
-            &paths.root().join("schematics"),
-            registry,
-        ) {
-            log::warn!("place_launch_loadout: schematic load failed: {error}");
-        }
+        let schematics = self.load_user_schematics();
         let Some(schem) = schematics.all.get(schematic_index as usize).cloned() else {
             log::warn!("place_launch_loadout: no schematic at index {schematic_index}");
             return false;
@@ -3388,24 +3496,14 @@ impl MindSimHost {
         // on the freshly placed core (empty inventory).
         let stacks: Vec<mind_core::io::json::content_serde::JsonItemStack> =
             serde_json::from_str(&stacks_json.to_string()).unwrap_or_default();
-        let capacity = self
-            .sim
-            .ecs
-            .0
-            .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
-            .map(|core| core.storage_capacity)
-            .unwrap_or(i32::MAX);
-        if let Some(mut module) = self.sim.ecs.0.get_mut::<ItemModule>(entity) {
-            module.clear();
-            for stack in &stacks {
-                let Some(name) = stack.item.as_deref() else {
-                    continue;
-                };
-                if let Some(item) = registry.item_id(name) {
-                    module.add(item, stack.amount, capacity);
-                }
-            }
-        }
+        let resolved: Vec<(mind_core::content::ItemId, i32)> = stacks
+            .iter()
+            .filter_map(|stack| {
+                let name = stack.item.as_deref()?;
+                Some((registry.item_id(name)?, stack.amount))
+            })
+            .collect();
+        mind_core::sim::Sim::stock_core(&mut self.sim, entity, &resolved);
         self.world_dirty = true;
         self.emit_state();
         self.emit_world_changed();

@@ -1067,9 +1067,12 @@ impl MindCampaign {
             // launch replaces the map's core with the loadout schematic's core
             // before the session sync registers and stocks it. Fresh launches
             // only (`playNewSector`); a resume keeps the saved world unchanged.
+            // H05 T4: a generated sector already placed its loadout during the
+            // world load (the generator runs `placeLaunchLoadout`).
             if !has_save
                 && self.session.allow_launch_loadout
                 && let Some(index) = launch_schematic
+                && !host.bind().generated_loadout_placed()
             {
                 host.bind_mut()
                     .place_launch_loadout(index, GString::from(launch_stacks_json.as_str()));
