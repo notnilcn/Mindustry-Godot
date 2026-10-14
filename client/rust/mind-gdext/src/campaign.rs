@@ -644,6 +644,7 @@ impl MindCampaign {
         // Auto campaign turns (`Universe.update` turnCounter).
         if runtime.turn_due {
             runtime.turn_due = false;
+            let mut turn_events = Vec::new();
             if let (Some(registry), Some(campaign)) =
                 (self.registry.as_ref(), Some(&mut runtime.campaign))
             {
@@ -664,8 +665,11 @@ impl MindCampaign {
                     report.turn,
                     report.events.len()
                 );
+                turn_events = report.events;
                 dirty = true;
             }
+            // Played-sector invasions restart the live waves (T4).
+            mind_core::game::runtime::apply_played_invasions(&mut runtime, &turn_events);
         }
 
         // Mirror the authoritative runtime state into the facade for getters.
@@ -1289,6 +1293,21 @@ impl MindCampaign {
             self.registry = Some(registry);
             return false;
         };
+        // Played-sector invasions hit the live session rules (T4: `Universe.java:550-555`).
+        if report.events.iter().any(|event| {
+            matches!(
+                event,
+                mind_core::game::universe::CampaignEvent::SectorInvasion { played: true, .. }
+            )
+        }) && let Some(mut host) = self.host()
+        {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                mind_core::game::runtime::apply_played_invasions(&mut runtime, &report.events);
+                self.session.rules = runtime.session.rules.clone();
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+        }
         self.registry = Some(registry);
         self.persist();
         report.turn > 0

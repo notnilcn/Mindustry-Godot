@@ -704,7 +704,9 @@ pub fn sector_capture(session: &mut PlaySession, campaign: &mut Campaign) -> Vec
         sector.info.info.was_captured = true;
         sector.info.info.waves = false;
         sector.info.info.attack = false;
-        sector.being_played = false;
+        // `Logic.sectorCapture` (`Logic.java:394-425`) does not touch
+        // `isBeingPlayed`: the sector stays played until the client exits it
+        // (H04 T4; T1 clears the flag on `run_exit_save`).
     }
     // `Logic`'s `SectorCaptureEvent` listener: `stats.sectorsCaptured++`.
     if let Some(stats) = campaign.stats_for_mut(planet) {

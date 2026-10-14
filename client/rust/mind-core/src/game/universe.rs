@@ -284,6 +284,10 @@ pub enum CampaignEvent {
     /// A turn completed (`TurnEvent`).
     Turn,
     /// A sector was queued for an invasion (`SectorInvasionEvent`).
+    ///
+    /// `played` is true when the invaded sector is the one being played: Java
+    /// then writes the live rules instead of the stored record, exactly once
+    /// per invasion (`Universe.java:231-258`).
     SectorInvasion {
         /// Invaded planet.
         planet: PlanetId,
@@ -291,6 +295,8 @@ pub enum CampaignEvent {
         sector: u16,
         /// New win wave.
         win_wave: i32,
+        /// Invaded sector is the live one.
+        played: bool,
     },
 }
 
@@ -569,7 +575,7 @@ impl Campaign {
         }
 
         // Random invasions are queued after production (upstream pass 3).
-        self.invasion_pass(registry, ctx, seconds_passed, rand, &mut events);
+        self.invasion_pass(registry, ctx, seconds_passed, rand, settings, &mut events);
 
         events.push(CampaignEvent::Turn);
         self.universe.save(settings);
@@ -715,22 +721,31 @@ impl Campaign {
     fn invasion_pass(
         &mut self,
         registry: &ContentRegistry,
-        _ctx: &TurnContext,
+        ctx: &TurnContext,
         seconds_passed: f32,
         rand: &mut JavaRandom,
+        settings: &mut SettingsStore,
         events: &mut Vec<CampaignEvent>,
     ) {
         let _ = registry;
         let _ = seconds_passed;
         // Gather candidates first to avoid borrowing self mutably while reading.
-        let mut candidates: Vec<(PlanetId, u16, i32, bool, bool)> = Vec::new();
+        // `Regions.current.updateGroup` is empty in vanilla, so planets outside
+        // the played one are skipped (`Universe.java:160-163`).
+        let mut candidates: Vec<(PlanetId, u16, i32, bool)> = Vec::new();
         for planet in self.planets.values() {
             if !planet.campaign_rules.sector_invasion {
                 continue;
             }
+            if let Some(current) = ctx.current_planet
+                && current != planet.id
+            {
+                continue;
+            }
             for sector in &planet.sectors {
+                let played = ctx.current_sector == Some((planet.id, sector.id));
                 if !sector.has_base()
-                    || sector.is_attacked(None)
+                    || sector.is_attacked(if played { ctx.playing_rules } else { None })
                     || sector.info.info.minutes_captured <= INVASION_GRACE_PERIOD
                     || !sector.info.info.has_spawns
                 {
@@ -754,23 +769,45 @@ impl Campaign {
                 }
                 let chance = BASE_INVASION_CHANCE * (0.8 + (count as f64 - 1.0) * 0.3);
                 if rand.next_double() < chance {
-                    let base = sector.info.info.win_wave.max(sector.info.info.wave);
+                    // `Math.max(sector.info.winWave, isBeingPlayed() ?
+                    // state.wave : sector.info.wave) + Mathf.random(2, 4) * 5`.
+                    let base = sector.info.info.win_wave.max(if played {
+                        ctx.current_wave
+                    } else {
+                        sector.info.info.wave
+                    });
                     let wave_max = base + (2 + rand.next_int_bound(3)) * 5;
-                    candidates.push((planet.id, sector.id, wave_max, false, false));
+                    candidates.push((planet.id, sector.id, wave_max, played));
                 }
             }
         }
-        for (planet, sector_id, wave_max, _, _) in candidates {
-            if let Some(sector) = self.sector_mut(planet, sector_id) {
-                sector.info.info.win_wave = wave_max;
-                sector.info.info.waves = true;
-                sector.info.info.attack = false;
+        let mut to_save: Vec<(PlanetId, u16)> = Vec::new();
+        for (planet, sector_id, wave_max, played) in candidates {
+            if !played {
+                // The off-play record takes the invasion; the played sector's
+                // live rules are written by the host pump (`Universe.java:550-555`).
+                if let Some(sector) = self.sector_mut(planet, sector_id) {
+                    sector.info.info.win_wave = wave_max;
+                    sector.info.info.waves = true;
+                    sector.info.info.attack = false;
+                }
+                to_save.push((planet, sector_id));
             }
             events.push(CampaignEvent::SectorInvasion {
                 planet,
                 sector: sector_id,
                 win_wave: wave_max,
+                played,
             });
+        }
+        // `sector.saveInfo()` for every invaded record (`Universe.java:554`).
+        for (planet_id, sector_id) in to_save {
+            let Some(planet_name) = self.planet(planet_id).map(|planet| planet.name.clone()) else {
+                continue;
+            };
+            if let Some(sector) = self.sector(planet_id, sector_id) {
+                let _ = sector.save_info(settings, &planet_name);
+            }
         }
     }
 
@@ -1158,5 +1195,151 @@ mod tests {
             Some(&120),
             "no offline production for the played sector"
         );
+    }
+
+    /// A sector with a base, a live invasion clock and one enemy-base neighbour
+    /// (the `Universe.runTurn` invasion fixture).
+    fn invasion_setup(campaign: &mut Campaign, planet: PlanetId) -> (u16, u16) {
+        campaign
+            .planet_mut(planet)
+            .unwrap()
+            .campaign_rules
+            .sector_invasion = true;
+        let (sector_id, neighbor_id) = {
+            let planet_record = campaign.planet(planet).unwrap();
+            let sector_id = (0..planet_record.sectors.len() as u16)
+                .find(|id| {
+                    planet_record
+                        .neighbors
+                        .get(*id as usize)
+                        .is_some_and(|neighbors| !neighbors.is_empty())
+                })
+                .expect("a sector with a neighbour");
+            let neighbor_id = planet_record.neighbors[sector_id as usize][0];
+            (sector_id, neighbor_id)
+        };
+        {
+            let sector = campaign.sector_mut(planet, sector_id).unwrap();
+            sector.save = Some(format!("sector-serpulo-{sector_id}"));
+            sector.info.info.has_core = true;
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+            sector.info.info.minutes_captured = 30.0;
+            sector.info.info.has_spawns = true;
+            sector.info.info.win_wave = 10;
+            sector.info.info.wave = 5;
+            sector.being_played = false;
+        }
+        {
+            let neighbor = campaign.sector_mut(planet, neighbor_id).unwrap();
+            neighbor.save = None;
+            neighbor.preset = None;
+            neighbor.generate_enemy_base = true;
+        }
+        (sector_id, neighbor_id)
+    }
+
+    #[test]
+    fn invasion_of_played_sector_targets_live_rules() {
+        let (registry, mut campaign, planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        let (sector_id, _neighbor_id) = invasion_setup(&mut campaign, planet);
+        // Seed whose first draw triggers the base chance (0.01 * 0.8).
+        let seed = (0..10_000u64)
+            .find(|seed| JavaRandom::new(*seed).next_double() < 0.8 * BASE_INVASION_CHANCE)
+            .expect("a seed in range");
+        let mut probe = JavaRandom::new(seed);
+        let _ = probe.next_double();
+        let roll = probe.next_int_bound(3);
+        let context = TurnContext {
+            current_planet: Some(planet),
+            current_sector: Some((planet, sector_id)),
+            playing_rules: Some((false, false)),
+            current_wave: 12,
+        };
+        let before = campaign
+            .sector(planet, sector_id)
+            .unwrap()
+            .info
+            .info
+            .clone();
+        let report = campaign.run_turn(
+            &registry,
+            &mut settings,
+            &context,
+            &mut JavaRandom::new(seed),
+        );
+        assert_eq!(
+            report.events,
+            vec![
+                CampaignEvent::SectorInvasion {
+                    planet,
+                    sector: sector_id,
+                    win_wave: 12 + (2 + roll) * 5,
+                    played: true,
+                },
+                CampaignEvent::Turn,
+            ]
+        );
+        // The played sector's record is untouched: the host writes the live
+        // session rules (`Universe.java:550-553`).
+        let after = campaign
+            .sector(planet, sector_id)
+            .unwrap()
+            .info
+            .info
+            .clone();
+        assert_eq!(after.win_wave, before.win_wave);
+        assert_eq!(after.waves, before.waves);
+        assert_eq!(after.attack, before.attack);
+    }
+
+    #[test]
+    fn invasion_of_off_play_sector_writes_the_record() {
+        let (registry, mut campaign, planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        let (sector_id, _neighbor_id) = invasion_setup(&mut campaign, planet);
+        let seed = (0..10_000u64)
+            .find(|seed| JavaRandom::new(*seed).next_double() < 0.8 * BASE_INVASION_CHANCE)
+            .expect("a seed in range");
+        let mut probe = JavaRandom::new(seed);
+        let _ = probe.next_double();
+        let roll = probe.next_int_bound(3);
+        // `max(info.winWave, info.wave) + (2 + r) * 5`.
+        let expected = 10 + (2 + roll) * 5;
+        let report = campaign.run_turn(
+            &registry,
+            &mut settings,
+            &TurnContext::default(),
+            &mut JavaRandom::new(seed),
+        );
+        assert_eq!(
+            report.events,
+            vec![
+                CampaignEvent::SectorInvasion {
+                    planet,
+                    sector: sector_id,
+                    win_wave: expected,
+                    played: false,
+                },
+                CampaignEvent::Turn,
+            ]
+        );
+        let record = campaign
+            .sector(planet, sector_id)
+            .unwrap()
+            .info
+            .info
+            .clone();
+        assert_eq!(record.win_wave, expected);
+        assert!(record.waves);
+        assert!(!record.attack);
+        // `sector.saveInfo()` persisted the invaded record (`Universe.java:554`).
+        let saved: crate::io::json::rules::SectorInfo = settings
+            .get_json(&crate::game::sector::info_key("serpulo", sector_id))
+            .expect("read settings")
+            .expect("record present");
+        assert!(saved.waves);
+        assert_eq!(saved.win_wave, expected);
     }
 }

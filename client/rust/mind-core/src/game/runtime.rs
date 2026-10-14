@@ -283,6 +283,36 @@ pub fn rules_of(world: &World) -> Option<&Rules> {
         .map(|runtime| &runtime.session.rules)
 }
 
+/// `Universe.runTurn` played-sector invasion (`Universe.java:550-555`): restart
+/// the live waves (`winWave`/`waves`/`attackMode=false`) and re-derive the
+/// planet campaign rules on the live session, marking the world for the
+/// `Sim::apply_rules_to_world` drain.
+pub fn apply_played_invasions(
+    runtime: &mut CampaignRuntime,
+    events: &[crate::game::universe::CampaignEvent],
+) {
+    for event in events {
+        if let crate::game::universe::CampaignEvent::SectorInvasion {
+            planet,
+            played: true,
+            win_wave,
+            ..
+        } = event
+            && let Some(planet_record) = runtime.campaign.planet(*planet)
+        {
+            runtime.session.rules.win_wave = *win_wave;
+            runtime.session.rules.waves = true;
+            runtime.session.rules.attack_mode = false;
+            planet_record.campaign_rules.apply_planet(
+                planet_record,
+                &mut runtime.session.rules,
+                true,
+            );
+            runtime.rules_world_dirty = true;
+        }
+    }
+}
+
 /// Registers the live world's core buildings into the session team registry and
 /// reports the spawn accounting. `map_spawns` is the loaded map's enemy
 /// spawn-point count (0 when the map has none).
@@ -359,7 +389,9 @@ pub fn sync_session_with_sim(
     for (team, plans) in carried_plans {
         session.teams.get(TeamId(team)).plans = plans;
     }
-    sync.spawn_count = map_spawns.max(sync.wave_cores as i32);
+    // `WaveSpawner.countSpawns()` (`WaveSpawner.java:49-51`) counts ground spawn
+    // tiles only; enemy cores are added by `Logic.checkGameState`, never here.
+    sync.spawn_count = map_spawns;
     session.spawn_count = sync.spawn_count;
     session.enemies = 0;
     // `Logic.play` starting-items half: with the cores registered, clear the
