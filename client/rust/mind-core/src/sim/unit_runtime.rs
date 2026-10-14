@@ -1041,6 +1041,125 @@ impl Sim {
         runtime.pending_wave = Some(wave);
     }
 
+    /// `Logic.skipWave()` -> `runWave()` (`Logic.java:315-325`; `SpawnWaveI`
+    /// with `natural = true`, `J/logic/LExecutor.java:2173-2175`) on the live
+    /// session: advances the wave and queues `spawnEnemies()` for the
+    /// pre-increment wave. Without a `CampaignRuntime` (sandbox/scenario)
+    /// Java still runs the wave: `LogicWorldState.wave` increments and the
+    /// unit runtime spawns `getSpawned(wave - 1)`.
+    pub fn logic_skip_wave(&mut self) {
+        self.refresh_unit_runtime();
+        if let Some(mut runtime) = self
+            .ecs
+            .0
+            .remove_resource::<crate::game::runtime::CampaignRuntime>()
+        {
+            {
+                let mut unit_runtime = self.ecs.0.get_non_send_mut::<UnitRuntime>();
+                crate::game::runtime::run_wave_now(&mut runtime, unit_runtime.as_deref_mut());
+            }
+            self.ecs.0.insert_resource(runtime);
+            return;
+        }
+        let spawn_index = {
+            self.ecs
+                .0
+                .get_resource_mut::<crate::logic::world::LogicWorldState>()
+                .map(|mut state| {
+                    let index = state.wave - 1;
+                    state.wave += 1;
+                    index
+                })
+        };
+        if let Some(spawn_index) = spawn_index {
+            self.request_wave_spawn(spawn_index);
+        }
+    }
+
+    /// `SpawnWaveI` positional path (`J/logic/LExecutor.java:2177-2198`):
+    /// every spawn group whose `spawn` is `-1` or the packed `(x, y)` emits
+    /// `group.getSpawned(state.wave - 1)` units within `tilesize * 2` px of
+    /// `World.unconv(x, y)`, facing the map center; the wave does not advance.
+    pub fn logic_spawn_wave_at(&mut self, x: i32, y: i32) {
+        let Some((groups, wave, wave_team)) = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|campaign| {
+                (
+                    groups_from_rules(&campaign.session.rules),
+                    campaign.session.wave,
+                    campaign.session.wave_team(),
+                )
+            })
+        else {
+            return;
+        };
+        let packed = TilePos::new(x as i16, y as i16).pack();
+        let width_px = self.grid.width() as f32 * TILE_SIZE;
+        let height_px = self.grid.height() as f32 * TILE_SIZE;
+        // Java `Tmp.v1.rnd(spread)` with `spread = tilesize * 2`: a random
+        // direction of length 16 (same draw as `spawn_enemies`' ground branch).
+        let (wx, wy) = (x as f32 * 8.0, y as f32 * 8.0);
+        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
+            return;
+        };
+        let UnitRuntime {
+            content,
+            seq,
+            units,
+            units_created,
+            rng,
+            ..
+        } = &mut runtime;
+        let unmoving = content.status_id("unmoving");
+        let invincible = content.status_id("invincible");
+        let mut emitted = 0u64;
+        for group in &groups {
+            // `if(group.type == null) continue` (unresolvable unit type).
+            if content
+                .unit_id(&group.unit)
+                .and_then(|id| content.unit(id))
+                .is_none()
+            {
+                continue;
+            }
+            if group.spawn != -1 && group.spawn != packed {
+                continue;
+            }
+            let count = group.get_spawned(wave - 1);
+            for _ in 0..count {
+                let theta = rng
+                    .range(crate::determinism::RngStream::Sim, 0.0, 360.0)
+                    .to_radians();
+                let sx = wx + theta.cos() * 16.0;
+                let sy = wy + theta.sin() * 16.0;
+                let rotation = (height_px / 2.0 - sy)
+                    .atan2(width_px / 2.0 - sx)
+                    .to_degrees();
+                let team = group.team.unwrap_or(wave_team);
+                if let Some(entity) = spawn_group_unit(
+                    &mut self.ecs.0,
+                    content,
+                    seq,
+                    group,
+                    team,
+                    sx,
+                    sy,
+                    rotation,
+                    wave - 1,
+                    unmoving,
+                    invincible,
+                ) {
+                    units.push(entity);
+                    emitted += 1;
+                }
+            }
+        }
+        *units_created += emitted;
+        self.ecs.0.insert_non_send(runtime);
+    }
+
     /// Re-snapshots the live grid into the unit runtime (map load/tile change).
     pub fn refresh_unit_runtime(&mut self) {
         let grid = self.grid.clone();
@@ -3014,6 +3133,49 @@ pub fn bullet_collide_system(world: &mut World) {
 
 /// `TickSet::RunWave` system: advances the spawn window and emits the pending
 /// wave's groups through `WaveSpawner` (`Logic.runWave` + `WaveSpawner.update`).
+/// One `SpawnGroup.createUnit` + `WaveSpawner.spawnEffect` emission
+/// (`WaveSpawner.java:224-247`): the extracted per-unit body of
+/// `run_wave_system`'s closure, shared with the positional `spawnwave` path
+/// (`LExecutor.java:2190-2195`, H06 T2).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn spawn_group_unit(
+    world: &mut World,
+    content: &ContentRegistry,
+    seq: &mut u64,
+    group: &SpawnGroup,
+    team: u8,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    wave: i32,
+    unmoving: Option<crate::content::StatusId>,
+    invincible: Option<crate::content::StatusId>,
+) -> Option<Entity> {
+    let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
+    if let Some(status) = unmoving {
+        crate::combat::damage::status::apply_status(
+            world,
+            entity,
+            status,
+            SPAWN_EFFECT_UNMOVING_TICKS,
+        );
+    }
+    if let Some(status) = invincible {
+        crate::combat::damage::status::apply_status(
+            world,
+            entity,
+            status,
+            SPAWN_EFFECT_INVINCIBLE_TICKS,
+        );
+    }
+    let payloads = group
+        .payloads
+        .as_ref()
+        .map_or(0, |payloads| payloads.len() as u64);
+    *seq = seq.wrapping_add(1 + payloads);
+    Some(entity)
+}
+
 pub fn run_wave_system(world: &mut World) {
     let Some(mut runtime) = world.remove_non_send::<UnitRuntime>() else {
         return;
@@ -3211,28 +3373,9 @@ pub fn run_wave_system(world: &mut World) {
         rng,
         |group, x, y, rotation| {
             let team = group.team.unwrap_or(wave_team);
-            let entity = group.create_unit(world, content, *seq, team, x, y, rotation, wave)?;
-            if let Some(status) = unmoving {
-                crate::combat::damage::status::apply_status(
-                    world,
-                    entity,
-                    status,
-                    SPAWN_EFFECT_UNMOVING_TICKS,
-                );
-            }
-            if let Some(status) = invincible {
-                crate::combat::damage::status::apply_status(
-                    world,
-                    entity,
-                    status,
-                    SPAWN_EFFECT_INVINCIBLE_TICKS,
-                );
-            }
-            let payloads = group
-                .payloads
-                .as_ref()
-                .map_or(0, |payloads| payloads.len() as u64);
-            *seq = seq.wrapping_add(1 + payloads);
+            let entity = spawn_group_unit(
+                world, content, seq, group, team, x, y, rotation, wave, unmoving, invincible,
+            )?;
             spawned.push(entity);
             Some(entity)
         },
@@ -6006,6 +6149,71 @@ mod msav_tests {
             sim.group_counts().get("unit").copied().unwrap_or(0) >= 1,
             "groundZero wave spawned a live unit: {:?}",
             sim.group_counts()
+        );
+    }
+
+    /// H06 T20: the map's world processors must assemble with the logic globals
+    /// present (the fixed engine load order installs `GlobalVars` before the
+    /// building decode), so no executor keeps a non-constant `@`-named cell
+    /// (`@counter` excepted: `LAssembler.var` resolves `@sharded`/`@duo`/...
+    /// from `Vars.logicVars`, `J/logic/LAssembler.java:59-61`).
+    #[test]
+    fn ground_zero_processors_resolve_constants() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        // Fixed load order: the globals exist before the map is decoded
+        // (`Vars.init` before any map read, `Vars.java:369`).
+        crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+
+        let mut checked = 0;
+        for (_seq, entity, _comp) in sim.ecs.entities_by_seq() {
+            let Some(state) = sim
+                .ecs
+                .0
+                .get::<crate::logic::blocks::LogicBlockState>(entity)
+            else {
+                continue;
+            };
+            checked += 1;
+            for id in &state.executor.var_ids {
+                let cell = state.executor.arena.get(*id);
+                assert!(
+                    cell.constant || !cell.name.starts_with('@') || cell.name == "@counter",
+                    "processor {entity:?} kept unresolved `{}`",
+                    cell.name
+                );
+            }
+        }
+        assert!(
+            checked >= 5,
+            "groundZero ships 5 world processors, linked {checked}"
         );
     }
 

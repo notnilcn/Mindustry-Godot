@@ -231,6 +231,12 @@ pub fn update_unit_status(world: &mut World, content: &ContentRegistry, entity: 
         return;
     };
     comp.reset_modifiers();
+    // `StatusEffects.dynamic`'s multipliers live in [`DynamicStatus`] (H06 T6);
+    // Java reads them off the entry inside `update`.
+    let dynamic_id = content.status_id("dynamic");
+    let dynamic_status = world
+        .get::<crate::entities::comp::unit::comp::DynamicStatus>(entity)
+        .copied();
 
     let mut index = 0usize;
     while index < comp.statuses.len() {
@@ -278,12 +284,28 @@ pub fn update_unit_status(world: &mut World, content: &ContentRegistry, entity: 
             }
         }
 
-        comp.speed_multiplier *= effect.speed_multiplier;
-        comp.damage_multiplier *= effect.damage_multiplier;
-        comp.health_multiplier *= effect.health_multiplier;
-        comp.reload_multiplier *= effect.reload_multiplier;
-        comp.build_speed_multiplier *= effect.build_speed_multiplier;
-        comp.drag_multiplier *= effect.drag_multiplier;
+        if Some(effect_id) == dynamic_id {
+            // `entry.effect.dynamic` branch of `StatusComp.update`
+            // (`StatusComp.java:222-234`).
+            if let Some(dynamic) = dynamic_status {
+                comp.speed_multiplier *= dynamic.speed_multiplier;
+                comp.health_multiplier *= dynamic.health_multiplier;
+                comp.damage_multiplier *= dynamic.damage_multiplier;
+                comp.reload_multiplier *= dynamic.reload_multiplier;
+                comp.build_speed_multiplier *= dynamic.build_speed_multiplier;
+                comp.drag_multiplier *= dynamic.drag_multiplier;
+                if dynamic.armor_override >= 0.0 {
+                    comp.armor_override = dynamic.armor_override;
+                }
+            }
+        } else {
+            comp.speed_multiplier *= effect.speed_multiplier;
+            comp.damage_multiplier *= effect.damage_multiplier;
+            comp.health_multiplier *= effect.health_multiplier;
+            comp.reload_multiplier *= effect.reload_multiplier;
+            comp.build_speed_multiplier *= effect.build_speed_multiplier;
+            comp.drag_multiplier *= effect.drag_multiplier;
+        }
         comp.disarmed |= effect.disarm;
         index += 1;
     }

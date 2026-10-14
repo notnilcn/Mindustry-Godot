@@ -22,7 +22,7 @@ use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::io::entity::{EntityReader, EntityWriter};
 use crate::logic::assembler::Assembler;
 use crate::logic::executor::{Executor, Instruction};
-use crate::logic::value::{LogicObject, VarRef};
+use crate::logic::value::{LVar, LogicObject, VarRef};
 use crate::world::behavior::BuildingBehavior;
 use crate::world::config::ConfigValue;
 use crate::world::update::edelta;
@@ -429,6 +429,122 @@ impl LogicBlockState {
     }
 }
 
+/// `LogicBuild.showEditDialog` size gate: compressed bytes or the too-long length.
+pub fn encode_for_config(code: &str, links: &[LogicLink]) -> Result<Vec<u8>, usize> {
+    let bytes = compress(code, links);
+    if bytes.len() > MAX_COMPRESSED_LEN {
+        Err(bytes.len())
+    } else {
+        Ok(bytes)
+    }
+}
+
+/// Processor at a tile (multi-tile aware): the building entity whose footprint
+/// covers `(x, y)` and that carries `LogicBlockState`.
+pub fn processor_at(world: &World, x: i32, y: i32) -> Option<Entity> {
+    let e = crate::logic::access::linked_build(world, x, y)?;
+    world.get::<LogicBlockState>(e).is_some().then_some(e)
+}
+
+/// `LogicDialog` variables-view row data for one processor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LogicStateSnapshot {
+    /// `LogicBlock.privileged`.
+    pub privileged: bool,
+    /// `LogicBlock.accessible` under the live rules.
+    pub accessible: bool,
+    /// Instructions per tick.
+    pub ipt: i32,
+    /// World-processor tag.
+    pub tag: Option<String>,
+    /// Program source (`LogicBuild.code`).
+    pub code: String,
+    /// Links as `(name, x, y, valid)`.
+    pub links: Vec<(String, i32, i32, bool)>,
+    /// Variables as `(name, value text, type name)`; Java's variables view
+    /// skips constants and the snapshot also skips `@`-names.
+    pub vars: Vec<(String, String, &'static str)>,
+}
+
+/// `LogicDialog.typeName(LVar)` (`LogicDialog.java:89-101`).
+fn type_name_of(cell: &LVar) -> &'static str {
+    if !cell.is_obj {
+        return "number";
+    }
+    match &cell.obj {
+        None => "null",
+        Some(LogicObject::Str(_)) => "string",
+        Some(LogicObject::Content(_)) => "content",
+        Some(LogicObject::Building(_)) => "building",
+        Some(LogicObject::Team(_)) => "team",
+        Some(LogicObject::Unit(_)) => "unit",
+        // Java `Align`/`LUnitControl`/... are enums (`instanceof Enum`).
+        Some(LogicObject::Enum(_) | LogicObject::Align(_)) => "enum",
+        Some(LogicObject::Query(_)) => "unknown",
+    }
+}
+
+/// In-engine readback of one processor (`logic_get_state`): privileged/access
+/// flags, code, links and the Java variables view.
+pub fn state_snapshot(world: &World, e: Entity) -> Option<LogicStateSnapshot> {
+    let state = world.get::<LogicBlockState>(e)?;
+    let privileged = privileged_of(world, e);
+    let accessible = super::accessible(privileged, super::rules_ref(world));
+    let mut vars = Vec::new();
+    for id in &state.executor.var_ids {
+        let cell = state.executor.arena.get(*id);
+        // Java `LogicDialog.showVars`: `if(s.constant) continue;`; the port
+        // also hides `@`-names (`@counter` is a constant-free cell).
+        if cell.constant || cell.name.starts_with('@') {
+            continue;
+        }
+        vars.push((
+            cell.name.clone(),
+            crate::logic::executor::format_value_world(world, cell),
+            type_name_of(cell),
+        ));
+    }
+    Some(LogicStateSnapshot {
+        privileged,
+        accessible,
+        ipt: state.ipt,
+        tag: state.tag.clone(),
+        code: state.code.clone(),
+        links: state
+            .links
+            .iter()
+            .map(|link| (link.name.clone(), link.x, link.y, link.valid))
+            .collect(),
+        vars,
+    })
+}
+
+/// Re-assembles every processor against the currently installed `GlobalVars`
+/// (H06 T20 safety net for loaders that decode buildings before the globals
+/// exist). Values are kept (`update_code(world, e, true)`), like the Java
+/// editor's code reload; iteration is `EntitySeq` order.
+pub fn reassemble_all_processors(world: &mut World) {
+    let mut query = world.query::<(Entity, &LogicBlockState)>();
+    let mut entities: Vec<(u64, Entity)> = query
+        .iter(world)
+        .map(|(e, _)| {
+            let seq = world
+                .get::<crate::ecs::EntitySeq>(e)
+                .map(|seq| seq.0)
+                .unwrap_or(u64::MAX);
+            (seq, e)
+        })
+        .collect();
+    entities.sort_by_key(|(seq, _)| *seq);
+    for (_, e) in entities {
+        let Some(mut state) = world.entity_mut(e).take::<LogicBlockState>() else {
+            continue;
+        };
+        state.update_code(world, e, true);
+        world.entity_mut(e).insert(state);
+    }
+}
+
 /// `LogicBlock.findLinkName(block)`: lowest free `bname{n}` (`n >= 1`).
 pub fn find_link_name(links: &[LogicLink], bname: &str) -> String {
     let mut taken = IndexSet::new();
@@ -827,5 +943,34 @@ impl BuildingBehavior for LogicBlockBehavior {
         state.accumulator = accumulator;
 
         world.entity_mut(e).insert(state);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `LogicBuild.showEditDialog` gate: a program that compresses past
+    /// `maxByteLen` is rejected with its length; short programs pass.
+    #[test]
+    fn encode_for_config_rejects_too_long() {
+        // 1000 lines of `print "<30 LCG chars>"` (deterministic; printable
+        // ASCII keeps the payload incompressible past the 16 kB gate).
+        let mut state: u32 = 0x1234_5678;
+        let mut code = String::new();
+        for _ in 0..1000 {
+            code.push_str("print \"");
+            for _ in 0..30 {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let c = char::from_u32('!' as u32 + (state >> 24) % 94).unwrap_or('!');
+                code.push(c);
+            }
+            code.push_str("\"\n");
+        }
+        match encode_for_config(&code, &[]) {
+            Err(len) => assert!(len > MAX_COMPRESSED_LEN, "len {len}"),
+            Ok(bytes) => panic!("expected too-long, got {} bytes", bytes.len()),
+        }
+        assert!(encode_for_config("set a 1", &[]).is_ok());
     }
 }

@@ -363,6 +363,9 @@ pub struct MindSimHost {
     /// loadout during the world load (`MindCampaign.start_sector_with_loadout`
     /// skips its own `place_launch_loadout` then; H05 T4).
     generated_loadout_placed: bool,
+    /// Last `logic_set_code` failure (`""` when none; H06 T1) — `"toolong:<len>"`
+    /// mirrors `LogicBuild.showEditDialog`'s error message.
+    logic_last_error: String,
 }
 
 #[godot_api]
@@ -397,6 +400,7 @@ impl INode for MindSimHost {
             pending_gen_extras: None,
             pending_launch: None,
             generated_loadout_placed: false,
+            logic_last_error: String::new(),
         }
     }
 
@@ -517,6 +521,9 @@ impl MindSimHost {
         // (logic globals, IO executor, audio sink). Must be re-run whenever a
         // fresh `Sim` replaces `self.sim`, or queued IO never drains.
         self.install_sim_seams();
+        // `InputHandler` world reset: clear the logic cutscene/HUD flags and
+        // message timers (`InputHandler.java:921-922`; H06 T3).
+        self.sim.reset_logic_presentation();
 
         // Live gameplay (the default spine world, custom maps and campaign
         // sectors) runs the plan-07 block stack so placed buildings execute their
@@ -562,6 +569,31 @@ impl MindSimHost {
     #[signal]
     fn world_changed();
 
+    /// Installs the content-initialized logic globals (`GlobalVars`) on the sim.
+    ///
+    /// `LAssembler.var` resolves constants from the global `Vars.logicVars`
+    /// (`J/logic/LAssembler.java:59-61`), created once in `Vars.init`
+    /// (`J/core/Vars.java:369`) and filled with the content by
+    /// `ContentLoader.java:107` — long before any map or save is read. Map/save
+    /// buildings are decoded by `materialize_map_buildings` (`LogicBuild.read`
+    /// -> `read_compressed` -> `update_code`), so this must run BEFORE them or
+    /// `@sharded`/`@duo`/`@scatter` become plain null variables (H06 T20).
+    /// Idempotent.
+    fn install_logic_globals(&mut self) {
+        if self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::logic::globals::GlobalVars>()
+            .is_some()
+        {
+            return;
+        }
+        if let Some(registry) = self.content_snapshot.as_ref() {
+            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
+        }
+    }
+
     /// Wires the host seams that live on the `Sim` value: the content-initialized
     /// logic globals (plan-13 M7), the live-sim IO executor (plan 04 §3.10) and
     /// the audio sink (plan-18).
@@ -570,8 +602,8 @@ impl MindSimHost {
     /// again after every replacement; otherwise `request_save`/`request_load`
     /// queue into an `IoQueue` with no handler and never drain.
     fn install_sim_seams(&mut self) {
+        self.install_logic_globals();
         if let Some(registry) = self.content_snapshot.take() {
-            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, &registry);
             // Live world-processor sinks (G06 T4): rules/markers/wave live in
             // the campaign session; the event log + message timers are sim
             // resources (headless=false so messages/cutscenes reach the host).
@@ -618,6 +650,27 @@ impl MindSimHost {
                     mind_core::logic::world::LogicContentIndex::from_content(&registry),
                 );
             }
+            // World-processor text sources (H06 T4): `Core.bundle`, `Iconc`
+            // and `player.locale()` for `message`/`localeprint`/`printchar`.
+            // The map-scoped locales are replaced per sector load.
+            let assets_dir = crate::assets::loader::resolve_assets_dir();
+            let locale = crate::assets::loader::resolve_locale();
+            let map_locales = self
+                .sim
+                .ecs
+                .0
+                .get_resource::<mind_core::logic::world::LogicText>()
+                .map(|text| text.map_locales.clone())
+                .unwrap_or_default();
+            self.sim
+                .ecs
+                .0
+                .insert_resource(mind_core::logic::world::LogicText {
+                    bundle: Some(crate::assets::bundle::load_bundle(&assets_dir, &locale)),
+                    iconc: Some(crate::assets::bundle::load_iconc(&assets_dir)),
+                    map_locales,
+                    locale,
+                });
             self.content_snapshot = Some(registry);
         }
 
@@ -1458,7 +1511,7 @@ impl MindSimHost {
     /// Whether the sim-integrated logic probes can mutate a live processor.
     #[func]
     pub fn logic_available(&self) -> bool {
-        false
+        true
     }
 
     /// Registered statement names (plan-14 editor handoff).
@@ -1524,17 +1577,204 @@ impl MindSimHost {
         false
     }
 
-    /// Placeholder for applying compressed logic code (awaits plan 05/07).
+    /// Normalized processor program text (`LogicDialog.show`:
+    /// `LAssembler.read` → `LAssembler.write`; empty string when no processor).
     #[func]
-    pub fn logic_set_code(&self, _x: i64, _y: i64, _code: GString) -> bool {
-        log::warn!("logic_set_code: sim-side logic building state is a plan-05/07 hook");
-        false
+    pub fn logic_get_code(&self, x: i64, y: i64) -> GString {
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            return GString::from("");
+        };
+        let Some(state) = world.get::<mind_core::logic::blocks::LogicBlockState>(e) else {
+            return GString::from("");
+        };
+        let privileged = mind_core::logic::blocks::privileged_of(world, e);
+        let text = mind_core::logic::Assembler::read(&state.code, privileged)
+            .map(|statements| mind_core::logic::Assembler::write(&statements))
+            .unwrap_or_else(|_| state.code.clone());
+        GString::from(text.as_str())
     }
 
-    /// Placeholder for reading a processor state (awaits plan 05/07).
+    /// Debug seam: writes `code` into the processor at `(x, y)` directly,
+    /// bypassing `LogicBuild.accessible()` like the editor (world processors
+    /// are not accessible in campaign; every later in-engine check uses them).
+    /// Returns false with `logic_last_error() == "toolong:<len>"` past
+    /// `LogicBlock.maxCompressedLen` (`showEditDialog`'s size gate).
     #[func]
-    pub fn logic_get_state(&self, _x: i64, _y: i64) -> Dictionary<GString, Variant> {
-        Dictionary::new()
+    pub fn logic_set_code(&mut self, x: i64, y: i64, code: GString) -> bool {
+        self.logic_last_error = String::new();
+        let code = code.to_string();
+        let world = &mut self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return false;
+        };
+        let links = world
+            .get::<mind_core::logic::blocks::LogicBlockState>(e)
+            .map(|state| state.relative_connections(world, e));
+        let Some(links) = links else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return false;
+        };
+        let bytes = match mind_core::logic::blocks::logic_block::encode_for_config(&code, &links) {
+            Ok(bytes) => bytes,
+            Err(len) => {
+                self.logic_last_error = format!("toolong:{len}");
+                return false;
+            }
+        };
+        let Some(mut state) = world
+            .entity_mut(e)
+            .take::<mind_core::logic::blocks::LogicBlockState>()
+        else {
+            return false;
+        };
+        let result = state.read_compressed(world, e, &bytes, true);
+        world.entity_mut(e).insert(state);
+        result.is_ok()
+    }
+
+    /// Last `logic_set_code` failure (`""` when none).
+    #[func]
+    pub fn logic_last_error(&self) -> GString {
+        GString::from(self.logic_last_error.as_str())
+    }
+
+    /// Processor readback (`privileged`/`accessible`/`ipt`/`tag`/`code`/`links`/
+    /// `vars`); empty `Dictionary` when no processor is at `(x, y)`.
+    #[func]
+    pub fn logic_get_state(&self, x: i64, y: i64) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::<GString, Variant>::new();
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            return out;
+        };
+        let Some(snapshot) = mind_core::logic::blocks::logic_block::state_snapshot(world, e) else {
+            return out;
+        };
+        out.set(
+            &GString::from("privileged"),
+            &snapshot.privileged.to_variant(),
+        );
+        out.set(
+            &GString::from("accessible"),
+            &snapshot.accessible.to_variant(),
+        );
+        out.set(&GString::from("ipt"), &(snapshot.ipt as i64).to_variant());
+        out.set(
+            &GString::from("tag"),
+            &match &snapshot.tag {
+                Some(tag) => GString::from(tag.as_str()).to_variant(),
+                None => Variant::nil(),
+            },
+        );
+        out.set(
+            &GString::from("code"),
+            &GString::from(snapshot.code.as_str()).to_variant(),
+        );
+        let mut links = Array::<Variant>::new();
+        for (name, lx, ly, valid) in &snapshot.links {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("name"),
+                &GString::from(name.as_str()).to_variant(),
+            );
+            row.set(&GString::from("x"), &(*lx as i64).to_variant());
+            row.set(&GString::from("y"), &(*ly as i64).to_variant());
+            row.set(&GString::from("valid"), &valid.to_variant());
+            links.push(&row.to_variant());
+        }
+        out.set(&GString::from("links"), &links.to_variant());
+        let mut vars = Array::<Variant>::new();
+        for (name, value, type_) in &snapshot.vars {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("name"),
+                &GString::from(name.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("value"),
+                &GString::from(value.as_str()).to_variant(),
+            );
+            row.set(&GString::from("type"), &GString::from(*type_).to_variant());
+            vars.push(&row.to_variant());
+        }
+        out.set(&GString::from("vars"), &vars.to_variant());
+        out
+    }
+
+    /// Last 64 drained logic-event kind tags (`LogicWorldEvent::kind`) as a
+    /// JSON array (H06 T1 debug probe).
+    #[func]
+    pub fn logic_event_log_json(&self) -> GString {
+        let value: Vec<&str> = self
+            .sim
+            .logic_event_log
+            .iter()
+            .map(String::as_str)
+            .collect();
+        GString::from(
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
+    /// `InputHandler.logicCutscene` state for the camera rig (plain Rust
+    /// forwarder; H06 T3).
+    pub fn logic_cutscene_state(&self) -> mind_core::logic::world::LogicCutscene {
+        self.sim.logic_cutscene()
+    }
+
+    /// Takes the pending `CutsceneI` shake request (camera rig poller).
+    pub fn take_logic_shake(&mut self) -> Option<(f32, f32)> {
+        self.sim.take_logic_shake()
+    }
+
+    /// Logic cutscene/HUD probe: `{"active","x","y","speed","zoom","hideHud"}`
+    /// (`x`/`y` in world pixels; H06 T3).
+    #[func]
+    pub fn logic_cutscene_json(&self) -> GString {
+        let cutscene = self.sim.logic_cutscene();
+        let value = serde_json::json!({
+            "active": cutscene.active,
+            "x": cutscene.pan.0,
+            "y": cutscene.pan.1,
+            "speed": cutscene.speed,
+            "zoom": cutscene.zoom,
+            "hideHud": cutscene.hide_hud,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Drains queued world-processor messages (`announce`/`notify`/`toast`) as
+    /// an Array of `{type, text, duration}` dictionaries (H06 T4).
+    #[func]
+    pub fn drain_logic_messages(&mut self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for (type_, text, duration) in self.sim.take_logic_messages() {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("type"),
+                &GString::from(type_.name()).to_variant(),
+            );
+            row.set(
+                &GString::from("text"),
+                &GString::from(text.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("duration"),
+                &f64::from(duration).to_variant(),
+            );
+            out.push(&row.to_variant());
+        }
+        out
     }
 
     /// Placeholder for a display command queue (awaits plan 16 rendering/05).
@@ -1825,6 +2065,7 @@ impl MindSimHost {
         self.sim = sim;
         self.player = Some(player);
         self.install_sim_seams();
+        self.sim.reset_logic_presentation();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();
@@ -2100,6 +2341,10 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = None;
+        // H06 T20: resolve `@content` constants from the point the globals
+        // exist — before the map/save processors are decoded below — exactly
+        // like `Vars.logicVars` at content init (`Vars.java:369`).
+        self.install_logic_globals();
         // A campaign sector is live play: its placed blocks must execute their
         // plan-07 behaviors (mining, transport, crafting, power). The runtime
         // resources are installed before any entity exists so ECS indices stay
@@ -2179,6 +2424,25 @@ impl MindSimHost {
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
+        self.sim.reset_logic_presentation();
+        // Sector map locales (`state.mapLocales`, from the save/map `locales`
+        // meta tag; H06 T4). Preset maps without the tag fall back to the
+        // global bundle in `run_locale_print`.
+        let map_locales = save
+            .as_ref()
+            .and_then(|save| save.tags.get("locales"))
+            .and_then(|text| {
+                mind_core::io::json::JsonIo::read::<mind_core::io::json::MapLocales>(text).ok()
+            })
+            .unwrap_or_default();
+        if let Some(mut text) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::logic::world::LogicText>()
+        {
+            text.map_locales = map_locales;
+        }
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();

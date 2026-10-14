@@ -566,7 +566,58 @@ impl StatusComp {
         self.armor_override = -1.0;
         self.disarmed = false;
     }
+
+    /// `StatusComp.applyDynamicStatus()`: ensures the infinite `dynamic` entry
+    /// exists (the multipliers live in [`DynamicStatus`]; H06 T6).
+    pub fn ensure_dynamic(&mut self, dynamic: StatusId) {
+        if !self.has_effect_of(dynamic) {
+            self.apply(StatusEntry::new(dynamic, f32::INFINITY));
+        }
+    }
 }
+
+/// `StatusComp`'s dynamic-effect multipliers (`StatusEffects.dynamic`; H06 T6).
+///
+/// Java folds these into `StatusComp.update`'s per-tick products only while
+/// the infinite `dynamic` entry is active. The port keeps them in a component
+/// so `setprop @speed/@armor` survives the per-tick `reset_modifiers` (the old
+/// `armor_override` write lasted one tick). Not saved (out of scope, H06 T6).
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct DynamicStatus {
+    /// `speedMultiplier`.
+    pub speed_multiplier: f32,
+    /// `healthMultiplier`.
+    pub health_multiplier: f32,
+    /// `damageMultiplier`.
+    pub damage_multiplier: f32,
+    /// `reloadMultiplier`.
+    pub reload_multiplier: f32,
+    /// `buildSpeedMultiplier`.
+    pub build_speed_multiplier: f32,
+    /// `dragMultiplier`.
+    pub drag_multiplier: f32,
+    /// `armorOverride` (`>= 0` applies; `< 0` = none).
+    pub armor_override: f32,
+}
+
+impl Default for DynamicStatus {
+    fn default() -> Self {
+        Self {
+            speed_multiplier: 1.0,
+            health_multiplier: 1.0,
+            damage_multiplier: 1.0,
+            reload_multiplier: 1.0,
+            build_speed_multiplier: 1.0,
+            drag_multiplier: 1.0,
+            armor_override: -1.0,
+        }
+    }
+}
+
+/// `UnitComp.flag` (`setprop @flag` / `sensor @flag`; H06 T6/T11). Additive and
+/// not serialized (saving the flag is out of scope, H06 T6).
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct UnitFlag(pub f64);
 
 /// The unit type a possessed unit was docked from (`Unit.dockedType`); set on
 /// the new unit when the previous player unit was core-spawned
