@@ -1182,6 +1182,38 @@ fn water_extractor_scales_with_floor() {
     );
 }
 
+/// H07 T9 (`SolidPump.java:124`): `attribute.env()` scales the water
+/// extractor; rain carries `water = 0.2`, so output is `1.2x` the no-weather
+/// run (`Attribute.java:33`).
+#[test]
+fn water_extractor_rain_bonus() {
+    use crate::world::blocks::power::behavior::GeneratorEnv;
+
+    let run = |water_env: Option<f32>| {
+        let mut sim = runtime_sim();
+        if let Some(water_env) = water_env {
+            sim.ecs.0.insert_resource(GeneratorEnv {
+                water_env,
+                ..GeneratorEnv::default()
+            });
+        }
+        let _source = place(&mut sim, "power-source", 4, 5);
+        let pump = place(&mut sim, "water-extractor", 5, 5);
+        for _ in 0..60 {
+            sim.tick().expect("tick");
+        }
+        let water = liquid(&sim, "water");
+        stored_liquid(&sim, pump, water)
+    };
+    let base = run(None);
+    let boosted = run(Some(0.2));
+    assert!(base > 0.0, "base extractor pumped {base}");
+    assert!(
+        (boosted / base - 1.2).abs() < 0.05,
+        "rain bonus {boosted} vs {base}"
+    );
+}
+
 /// T7 (`SolidPump.canPlaceOn`/`updateTile`, `SolidPump.java:68-75`, `:116-135`;
 /// `Blocks.java:2985-2992`): the oil extractor has `baseEfficiency = 0`, so it
 /// cannot be placed on attribute-less floors and its yield is the oil affinity
