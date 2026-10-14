@@ -376,7 +376,9 @@ pub trait BuildingBehavior: Send + Sync {
 
     /// Production stat hook (`BuildingComp.produced`; 12 overrides).
     fn produced(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
-        let _ = (world, e, item, amount);
+        // `BuildingComp.java:1044-1050`: campaigns record `handleProduction`
+        // and unlock the item for the default team.
+        crate::world::blocks::distribution::transfer::record_produced(world, e, item, amount);
     }
 
     /// Liquid acceptance hook (`BuildingComp.acceptLiquid`,

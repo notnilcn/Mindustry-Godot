@@ -1449,6 +1449,42 @@ fn mechanical_drill_period_includes_hardness() {
     );
 }
 
+/// H04 T2: `BuildingComp.produced` (`BuildingComp.java:1044-1050`) records
+/// default-team production into the shared campaign queues and unlocks the
+/// item when it is offloaded.
+#[test]
+fn drill_offload_records_production() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let queues = crate::game::runtime::install_campaign_core_hooks(&mut sim.ecs.0);
+    {
+        let mut state = queues.lock().expect("lock");
+        state.is_campaign = true;
+        state.default_team = 1;
+    }
+    let copper = item(&sim, "copper");
+    let _drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let _container = place(&mut sim, "container", 7, 5);
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let state = queues.lock().expect("lock");
+    assert!(
+        state.production_deltas.contains(&(copper, 1)),
+        "offload queues produced(copper, 1): {:?}",
+        state.production_deltas
+    );
+    assert!(
+        state
+            .unlocks
+            .contains(&crate::game::runtime::UnlockRef::Item(copper)),
+        "producing copper queues its unlock: {:?}",
+        state.unlocks
+    );
+}
+
 /// T6: burst drills emit one burst of `dominantItems` per `drillTime`
 /// (`BurstDrillBuild.updateTile`, `BurstDrill.java:76-120`) instead of a
 /// continuous trickle; impact-drill drillTime 720, 16 ore tiles -> 16 items at

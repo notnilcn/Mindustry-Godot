@@ -52,8 +52,11 @@ pub const SIM_UNIT_CLASS_ID: u8 = 0xF0;
 /// Revision of the [`SIM_UNIT_CLASS_ID`] chunk payload (append-only).
 ///
 /// v2 appends the carried payload stack (`UnitPayloads.stack`: `u16 count` then
-/// per payload `u8 tag` + fields). v1 saves (no payloads) still load.
-pub const SIM_UNIT_REVISION: u16 = 2;
+/// per payload `u8 tag` + fields). v3 appends the unit-save completeness fields
+/// (H04 T9): `spawnedByCore`, `elevation`, `shield`, the carried item stack,
+/// statuses, the command id + move target and the builder plan queue. v1/v2
+/// saves (without those fields) still load.
+pub const SIM_UNIT_REVISION: u16 = 3;
 
 /// Reserved class id for the native live-sim fire chunk (`FireComp`).
 pub const SIM_FIRE_CLASS_ID: u8 = 0xF1;
@@ -99,6 +102,8 @@ impl Sim {
 /// One decoded live-unit record (`SaveVersion.writeWorldEntities`).
 #[derive(Debug, Clone, PartialEq)]
 struct DecodedUnit {
+    /// Chunk revision the unit was read from.
+    revision: u16,
     /// Content unit name (`UnitType.name`).
     name: String,
     /// Team id.
@@ -113,6 +118,22 @@ struct DecodedUnit {
     health: f32,
     /// Carried payload stack (revision 2+; empty in v1 saves).
     payloads: Vec<crate::entities::comp::unit::comp::CarriedPayload>,
+    /// `UnitComp.spawnedByCore` (revision 3+).
+    spawned_by_core: bool,
+    /// Flight elevation (revision 3+).
+    elevation: f32,
+    /// Current shield points (revision 3+).
+    shield: f32,
+    /// Carried item stack (revision 3+).
+    stack: Option<(crate::content::ItemId, i32)>,
+    /// Active status effects (revision 3+).
+    statuses: Vec<crate::entities::comp::unit::comp::StatusEntry>,
+    /// Active command id (revision 3+).
+    command: Option<u16>,
+    /// Saved controller kind (revision 3+).
+    controller: Option<crate::ai::controller::AiKind>,
+    /// Builder plan queue (revision 3+).
+    plans: Vec<crate::sim::builder::UnitBuildPlan>,
 }
 
 /// One decoded live fire record (`FireComp.read` sim fields).
@@ -163,12 +184,13 @@ impl EntitySink for LiveEntitySink {
         match class_id {
             SIM_UNIT_CLASS_ID => {
                 let revision = r.us()?;
-                if revision != 1 && revision != SIM_UNIT_REVISION {
+                if revision == 0 || revision > SIM_UNIT_REVISION {
                     return Err(IoError::corrupt(format!(
                         "unsupported live unit revision {revision}"
                     )));
                 }
                 let mut decoded = DecodedUnit {
+                    revision,
                     name: r.str()?,
                     team: r.ub()?,
                     x: r.f()?,
@@ -176,6 +198,14 @@ impl EntitySink for LiveEntitySink {
                     rotation: r.f()?,
                     health: r.f()?,
                     payloads: Vec::new(),
+                    spawned_by_core: false,
+                    elevation: 0.0,
+                    shield: 0.0,
+                    stack: None,
+                    statuses: Vec::new(),
+                    command: None,
+                    controller: None,
+                    plans: Vec::new(),
                 };
                 if revision >= 2 {
                     let count = r.us()?;
@@ -201,6 +231,40 @@ impl EntitySink for LiveEntitySink {
                             }
                         };
                         decoded.payloads.push(payload);
+                    }
+                }
+                if revision >= 3 {
+                    // H04 T9: unit-save completeness (pulled from
+                    // `SaveVersion.java:425-448` + the unit manifests).
+                    decoded.spawned_by_core = r.bool()?;
+                    decoded.elevation = r.f()?;
+                    decoded.shield = r.f()?;
+                    let stack_item = r.s()?;
+                    let stack_amount = r.i()?;
+                    if stack_item >= 0 {
+                        decoded.stack =
+                            Some((crate::content::ItemId::new(stack_item as u16), stack_amount));
+                    }
+                    let status_count = r.i()?.clamp(0, 1024) as usize;
+                    for _ in 0..status_count {
+                        let effect = r.s()?;
+                        let duration = r.f()?;
+                        if effect >= 0 {
+                            decoded.statuses.push(
+                                crate::entities::comp::unit::comp::StatusEntry::new(
+                                    crate::content::StatusId::new(effect as u16),
+                                    duration,
+                                ),
+                            );
+                        }
+                    }
+                    let command = r.s()?;
+                    decoded.command = (command >= 0).then_some(command as u16);
+                    decoded.controller = ai_kind_from_code(r.ub()?);
+                    let plan_count = r.i()?.clamp(0, 1024) as usize;
+                    for _ in 0..plan_count {
+                        let plan = crate::io::typeio::codecs::read_plan(r)?;
+                        decoded.plans.push(unit_plan_from_wire(plan));
                     }
                 }
                 self.units.push(decoded);
@@ -303,11 +367,10 @@ impl EntitySource for LiveEntitySource<'_> {
     }
 
     fn entity_count(&self) -> usize {
-        let units = self
-            .sim
-            .unit_runtime()
-            .map(|runtime| runtime.unit_count(&self.sim.ecs.0))
-            .unwrap_or(0);
+        // H04 T9: the count must equal the chunks `write_entities` emits
+        // (`SaveVersion.java:425-439`); the old `unit_count` counted units the
+        // writer skips, so the reader ate fire/puddle bytes as unit chunks.
+        let units = live_unit_rows(self.sim).len();
         let mut fires = 0usize;
         let mut puddles = 0usize;
         for entity in self.sim.ecs.0.iter_entities() {
@@ -324,39 +387,16 @@ impl EntitySource for LiveEntitySource<'_> {
         units + fires + puddles
     }
 
+    /// Units `write_entities` will actually write, in `(seq, entity, name)`
+    /// order (live entity + `UnitCore` + `UnitTypeComp` + `Pos` + a registered
+    /// name; H04 T9 `SaveVersion.writeWorldEntities` count).
     fn write_entities(&self, w: &mut WireWriter, scratch: &mut SaveScratch) -> IoResult<()> {
         let world = &self.sim.ecs.0;
-        let Some(runtime) = world.get_non_send::<UnitRuntime>() else {
+        if world.get_non_send::<UnitRuntime>().is_none() {
             return Ok(());
-        };
-        let mut live: Vec<(u64, Entity)> = runtime
-            .units
-            .iter()
-            .copied()
-            .filter(|entity| world.get_entity(*entity).is_ok())
-            .map(|entity| {
-                (
-                    world
-                        .get::<EntitySeq>(entity)
-                        .map(|seq| seq.0)
-                        .unwrap_or(u64::MAX),
-                    entity,
-                )
-            })
-            .collect();
-        live.sort_by_key(|(seq, entity)| (*seq, entity.index()));
-        for (seq, entity) in live {
-            let (Some(core), Some(unit), Some(pos)) = (
-                world.get::<UnitCore>(entity),
-                world.get::<UnitTypeComp>(entity),
-                world.get::<Pos>(entity),
-            ) else {
-                continue;
-            };
-            let Some(name) = runtime
-                .content
-                .unit(unit.type_id)
-                .map(|def| def.name.clone())
+        }
+        for (seq, entity, name) in live_unit_rows(self.sim) {
+            let (Some(core), Some(pos)) = (world.get::<UnitCore>(entity), world.get::<Pos>(entity))
             else {
                 continue;
             };
@@ -406,6 +446,48 @@ impl EntitySource for LiveEntitySource<'_> {
                         }
                     }
                 }
+                // Revision 3 (H04 T9): unit-save completeness.
+                chunk.bool(core.spawned_by_core);
+                chunk.f(core.elevation);
+                let shield = world
+                    .get::<crate::entities::comp::unit::comp::ShieldComp>(entity)
+                    .map(|shield| shield.shield)
+                    .unwrap_or(0.0);
+                chunk.f(shield);
+                let stack = world
+                    .get::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+                    .and_then(|items| items.item);
+                chunk.s(stack.map(|(item, _)| item.raw() as i16).unwrap_or(-1));
+                chunk.i(stack.map(|(_, amount)| amount).unwrap_or(0));
+                let statuses = world
+                    .get::<crate::entities::comp::unit::comp::StatusComp>(entity)
+                    .map(|status| status.statuses.clone())
+                    .unwrap_or_default();
+                chunk.i(statuses.len().min(i32::MAX as usize) as i32);
+                for entry in &statuses {
+                    chunk.s(entry.effect.raw() as i16);
+                    chunk.f(entry.duration);
+                }
+                let command = world
+                    .get::<crate::ai::controller::UnitCommandComp>(entity)
+                    .map(|command| command.0 as i16)
+                    .unwrap_or(-1);
+                chunk.s(command);
+                // Controller kind (`UnitComp.afterRead` -> `createController`;
+                // T13 keeps Logic/Command state and resets the rest).
+                let controller = world
+                    .get::<crate::ai::controller::ControllerSlot>(entity)
+                    .map(|slot| ai_kind_code(slot.kind))
+                    .unwrap_or(255);
+                chunk.ub(controller);
+                let plans: Vec<crate::io::typeio::codecs::BuildPlan> = world
+                    .get::<crate::sim::builder::BuilderPlans>(entity)
+                    .map(|builder| builder.plans.iter().map(unit_plan_to_wire).collect())
+                    .unwrap_or_default();
+                chunk.i(plans.len().min(i32::MAX as usize) as i32);
+                for plan in &plans {
+                    crate::io::typeio::codecs::write_plan(chunk, plan)?;
+                }
                 Ok(())
             })?;
         }
@@ -442,6 +524,121 @@ impl EntitySource for LiveEntitySource<'_> {
         }
         Ok(())
     }
+}
+
+/// Stable save code for [`crate::ai::controller::AiKind`] (revision 3;
+/// append-only).
+fn ai_kind_code(kind: crate::ai::controller::AiKind) -> u8 {
+    use crate::ai::controller::AiKind;
+    match kind {
+        AiKind::NoAi => 0,
+        AiKind::Ground => 1,
+        AiKind::Hug => 2,
+        AiKind::Flying => 3,
+        AiKind::FlyingFollow => 4,
+        AiKind::Command => 5,
+        AiKind::Logic => 6,
+        AiKind::Missile => 7,
+        AiKind::Builder => 8,
+        AiKind::Miner => 9,
+        AiKind::Cargo => 10,
+        AiKind::Defender => 11,
+        AiKind::Suicide => 12,
+        AiKind::Boost => 13,
+        AiKind::Assembler => 14,
+        AiKind::Prebuild => 15,
+        AiKind::Repair => 16,
+        AiKind::Player => 17,
+    }
+}
+
+fn ai_kind_from_code(code: u8) -> Option<crate::ai::controller::AiKind> {
+    use crate::ai::controller::AiKind;
+    Some(match code {
+        0 => AiKind::NoAi,
+        1 => AiKind::Ground,
+        2 => AiKind::Hug,
+        3 => AiKind::Flying,
+        4 => AiKind::FlyingFollow,
+        5 => AiKind::Command,
+        6 => AiKind::Logic,
+        7 => AiKind::Missile,
+        8 => AiKind::Builder,
+        9 => AiKind::Miner,
+        10 => AiKind::Cargo,
+        11 => AiKind::Defender,
+        12 => AiKind::Suicide,
+        13 => AiKind::Boost,
+        14 => AiKind::Assembler,
+        15 => AiKind::Prebuild,
+        16 => AiKind::Repair,
+        17 => AiKind::Player,
+        _ => return None,
+    })
+}
+
+/// Wire plan -> builder plan (`TypeIO.readPlan`).
+fn unit_plan_from_wire(
+    plan: crate::io::typeio::codecs::BuildPlan,
+) -> crate::sim::builder::UnitBuildPlan {
+    crate::sim::builder::UnitBuildPlan {
+        x: plan.x as i16,
+        y: plan.y as i16,
+        rotation: plan.rotation as u8,
+        block: plan.block,
+        config: type_value_to_config(&plan.config),
+        breaking: plan.breaking,
+        initialized: false,
+        stuck: false,
+        progress: 0.0,
+    }
+}
+
+/// Builder plan -> wire plan (`TypeIO.writePlan`).
+fn unit_plan_to_wire(
+    plan: &crate::sim::builder::UnitBuildPlan,
+) -> crate::io::typeio::codecs::BuildPlan {
+    crate::io::typeio::codecs::BuildPlan {
+        x: i32::from(plan.x),
+        y: i32::from(plan.y),
+        rotation: i32::from(plan.rotation),
+        block: plan.block,
+        config: config_to_type_value(&plan.config),
+        breaking: plan.breaking,
+    }
+}
+
+/// Units `write_entities` will actually write, in `(seq, entity, name)` order
+/// (live entity + `UnitCore` + `UnitTypeComp` + `Pos` + a registered name;
+/// H04 T9 `SaveVersion.writeWorldEntities` count).
+fn live_unit_rows(sim: &Sim) -> Vec<(u64, Entity, String)> {
+    let world = &sim.ecs.0;
+    let Some(runtime) = world.get_non_send::<UnitRuntime>() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(u64, Entity, String)> = runtime
+        .units
+        .iter()
+        .copied()
+        .filter(|entity| world.get_entity(*entity).is_ok())
+        .filter_map(|entity| {
+            let unit = world.get::<UnitTypeComp>(entity)?;
+            if world.get::<UnitCore>(entity).is_none() || world.get::<Pos>(entity).is_none() {
+                return None;
+            }
+            let name = runtime
+                .content
+                .unit(unit.type_id)
+                .map(|def| def.name.clone())?;
+            let seq = world
+                .get::<EntitySeq>(entity)
+                .map(|seq| seq.0)
+                .unwrap_or(u64::MAX);
+            Some((seq, entity, name))
+        })
+        .collect();
+    rows.sort_by_key(|(seq, entity, _)| (*seq, entity.index()));
+    rows
 }
 
 /// Restores decoded team build plans onto the live session (`readTeamBlocks`).
@@ -568,12 +765,16 @@ impl Sim {
             .unwrap_or_else(|| crate::game::rules::Rules::default().default_team);
         for unit in &save.entities.units {
             // `UnitComp.java:868-871` despawns a `spawnedByCore` unit that is
-            // not the player's, and the host spawns a fresh player unit
-            // (`spawn_player_unit`). Until revision 3 carries the flag (T9),
-            // the core unit types on the default team are skipped by name
-            // (`Blocks.java` `coreShard..coreAcropolis` `unitType`).
+            // not the player's; the host spawns a fresh player unit
+            // (`spawn_player_unit`). Revision 3 carries the real flag; v1/v2
+            // saves fall back to the core unit type names (`Blocks.java`
+            // `coreShard..coreAcropolis` `unitType`).
             const CORE_UNITS: [&str; 6] = ["alpha", "beta", "gamma", "evoke", "incite", "emanate"];
-            if unit.team == default_team && CORE_UNITS.contains(&unit.name.as_str()) {
+            let core_unit_by_name = unit.revision < 3;
+            if unit.team == default_team
+                && (unit.spawned_by_core
+                    || (core_unit_by_name && CORE_UNITS.contains(&unit.name.as_str())))
+            {
                 continue;
             }
             if let Some(entity) =
@@ -583,6 +784,93 @@ impl Sim {
                     && let Some(mut health) = self.ecs.0.get_mut::<Health>(entity)
                 {
                     health.health = unit.health;
+                }
+                // Revision 3: core spawn flag + elevation.
+                if let Some(mut core) = self.ecs.0.get_mut::<UnitCore>(entity) {
+                    core.spawned_by_core = unit.spawned_by_core;
+                    core.elevation = unit.elevation;
+                }
+                if unit.shield > 0.0 {
+                    if let Some(mut shield) =
+                        self.ecs
+                            .0
+                            .get_mut::<crate::entities::comp::unit::comp::ShieldComp>(entity)
+                    {
+                        shield.shield = unit.shield;
+                    } else {
+                        self.ecs.0.entity_mut(entity).insert(
+                            crate::entities::comp::unit::comp::ShieldComp {
+                                shield: unit.shield,
+                            },
+                        );
+                    }
+                }
+                if let Some((item, amount)) = unit.stack {
+                    if let Some(mut items) = self
+                        .ecs
+                        .0
+                        .get_mut::<crate::entities::comp::unit::comp::ItemsComp>(entity)
+                    {
+                        items.item = Some((item, amount));
+                    } else {
+                        self.ecs.0.entity_mut(entity).insert(
+                            crate::entities::comp::unit::comp::ItemsComp {
+                                item: Some((item, amount)),
+                            },
+                        );
+                    }
+                }
+                if !unit.statuses.is_empty() {
+                    if let Some(mut status) =
+                        self.ecs
+                            .0
+                            .get_mut::<crate::entities::comp::unit::comp::StatusComp>(entity)
+                    {
+                        status.statuses = unit.statuses.clone();
+                        status.damage_times.resize(unit.statuses.len(), 0.0);
+                    } else {
+                        let len = unit.statuses.len();
+                        self.ecs.0.entity_mut(entity).insert(
+                            crate::entities::comp::unit::comp::StatusComp {
+                                statuses: unit.statuses.clone(),
+                                damage_times: vec![0.0; len],
+                                ..Default::default()
+                            },
+                        );
+                    }
+                }
+                if let Some(command) = unit.command {
+                    self.ecs
+                        .0
+                        .entity_mut(entity)
+                        .insert(crate::ai::controller::UnitCommandComp(command));
+                }
+                if let Some(kind) = unit.controller
+                    && let Some(mut slot) = self
+                        .ecs
+                        .0
+                        .get_mut::<crate::ai::controller::ControllerSlot>(entity)
+                {
+                    slot.kind = kind;
+                }
+                if !unit.plans.is_empty() {
+                    let plans: std::collections::VecDeque<crate::sim::builder::UnitBuildPlan> =
+                        unit.plans.iter().cloned().collect();
+                    if let Some(mut builder) = self
+                        .ecs
+                        .0
+                        .get_mut::<crate::sim::builder::BuilderPlans>(entity)
+                    {
+                        builder.plans = plans;
+                    } else {
+                        self.ecs
+                            .0
+                            .entity_mut(entity)
+                            .insert(crate::sim::builder::BuilderPlans {
+                                plans,
+                                ..Default::default()
+                            });
+                    }
                 }
                 // Revision 2: restore the carried payload stack.
                 if !unit.payloads.is_empty() {
@@ -1209,9 +1497,11 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
-    /// T2: a core unit (`spawnedByCore`, until T9's flag lands matched by type
-    /// name) is skipped on respawn — the host spawns the player unit itself;
-    /// the other unit survives.
+    /// T9: revision 3 saves the real `spawnedByCore` flag, so a default-team
+    /// core-type unit WITHOUT the flag (a factory-made alpha) survives the
+    /// respawn; `UnitComp.java:868-871` only removes the flagged units (the
+    /// host spawns the player's own unit). The v1/v2 name fallback is covered
+    /// by `apply_decoded_entities_skips_spawned_by_core`.
     #[test]
     fn apply_decoded_entities_skips_core_units() {
         use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
@@ -1237,8 +1527,10 @@ mod tests {
         sim.ecs
             .0
             .insert_resource(CampaignRuntime::new(session, campaign));
-        sim.spawn_live_unit("alpha", 1, 100.0, 100.0, 0.0)
+        let alpha = sim
+            .spawn_live_unit("alpha", 1, 100.0, 100.0, 0.0)
             .expect("alpha");
+        let _ = alpha;
         sim.spawn_live_unit("dagger", 1, 120.0, 100.0, 0.0)
             .expect("dagger");
         sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
@@ -1255,7 +1547,7 @@ mod tests {
         let save = decode_save_bytes(&bytes, &mut content).expect("decode");
         assert_eq!(save.entities.units.len(), 2, "both units decoded");
 
-        // Apply to a fresh sim: only the dagger respawns.
+        // Apply to a fresh sim: both respawn (no `spawnedByCore` flag).
         let mut dst = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
         dst.install_block_runtime().expect("block runtime");
         dst.install_unit_runtime().expect("unit runtime");
@@ -1279,9 +1571,125 @@ mod tests {
                 names.push(def.name.clone());
             }
         }
-        assert_eq!(names, vec!["dagger".to_owned()], "core unit skipped");
+        assert_eq!(names, vec!["alpha".to_owned(), "dagger".to_owned()]);
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// T9: `spawnedByCore` default-team units are skipped on respawn; v1/v2
+    /// saves (no flag) fall back to the core unit type names
+    /// (`UnitComp.java:868-871`).
+    #[test]
+    fn apply_decoded_entities_skips_spawned_by_core() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let unit = |name: &str, revision: u16, spawned_by_core: bool| DecodedUnit {
+            revision,
+            name: name.to_owned(),
+            team: 1,
+            x: 100.0,
+            y: 100.0,
+            rotation: 0.0,
+            health: 150.0,
+            payloads: Vec::new(),
+            spawned_by_core,
+            elevation: 0.0,
+            shield: 0.0,
+            stack: None,
+            statuses: Vec::new(),
+            command: None,
+            controller: None,
+            plans: Vec::new(),
+        };
+        let save_with = |units: Vec<DecodedUnit>| DecodedSave {
+            grid: WorldGrid::new(0, 0),
+            pending: Vec::new(),
+            plans: Vec::new(),
+            tags: StringMap::default(),
+            rules: None,
+            stats: None,
+            markers: MapMarkers::default(),
+            entities: LiveEntitySink {
+                units,
+                fires: Vec::new(),
+                puddles: Vec::new(),
+            },
+        };
+        let mut dst = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        dst.install_block_runtime().expect("block runtime");
+        dst.install_unit_runtime().expect("unit runtime");
+        dst.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                wave_team: 2,
+                unit_cap: 100,
+                unit_cap_variable: false,
+                ..Rules::default()
+            }),
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        // Revision 3: the flag skips the alpha; the dagger stays.
+        dst.apply_decoded_entities(&save_with(vec![
+            unit("alpha", 3, true),
+            unit("dagger", 3, false),
+        ]));
+        let names: Vec<String> = dst
+            .unit_runtime()
+            .expect("runtime")
+            .units
+            .iter()
+            .copied()
+            .filter_map(|entity| {
+                let comp = dst.ecs.0.get::<UnitTypeComp>(entity)?;
+                dst.unit_runtime()?
+                    .content
+                    .unit(comp.type_id)
+                    .map(|def| def.name.clone())
+            })
+            .collect();
+        assert_eq!(names, vec!["dagger".to_owned()]);
+
+        // Revision 2 (no flag): the core type name skips the alpha.
+        let mut legacy = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        legacy.install_block_runtime().expect("block runtime");
+        legacy.install_unit_runtime().expect("unit runtime");
+        legacy.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                wave_team: 2,
+                unit_cap: 100,
+                unit_cap_variable: false,
+                ..Rules::default()
+            }),
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        legacy.apply_decoded_entities(&save_with(vec![
+            unit("alpha", 2, false),
+            unit("dagger", 2, false),
+        ]));
+        let names: Vec<String> = legacy
+            .unit_runtime()
+            .expect("runtime")
+            .units
+            .iter()
+            .copied()
+            .filter_map(|entity| {
+                let comp = legacy.ecs.0.get::<UnitTypeComp>(entity)?;
+                legacy
+                    .unit_runtime()?
+                    .content
+                    .unit(comp.type_id)
+                    .map(|def| def.name.clone())
+            })
+            .collect();
+        assert_eq!(names, vec!["dagger".to_owned()]);
     }
 
     /// The live unit/fire/puddle chunk class ids must stay clear of the
@@ -1295,9 +1703,155 @@ mod tests {
                 "class id {id} collides with an upstream class id"
             );
         }
-        assert_eq!(SIM_UNIT_REVISION, 2);
+        assert_eq!(SIM_UNIT_REVISION, 3);
         assert_eq!(SIM_FIRE_REVISION, 1);
         assert_eq!(SIM_PUDDLE_REVISION, 1);
+    }
+
+    /// H04 T9: `entity_count` equals the chunks `write_entities` emits even
+    /// when a unit is filtered out; the reader then never eats the fire bytes
+    /// as a unit chunk (`SaveVersion.java:425-439`).
+    #[test]
+    fn entity_count_matches_written_chunks() {
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let first = sim
+            .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+            .expect("dagger 1");
+        sim.spawn_live_unit("dagger", 2, 120.0, 100.0, 0.0)
+            .expect("dagger 2");
+        // Filtered out of the chunk stream: no `UnitCore`.
+        sim.ecs.0.entity_mut(first).remove::<UnitCore>();
+        sim.ecs.0.spawn((
+            Pos { x: 104.0, y: 104.0 },
+            crate::combat::fires::FireState {
+                tile: (13, 13),
+                time: 5.0,
+                lifetime: 600.0,
+                puddle_flammability: 0.0,
+                spread_timer: 0.0,
+                fireball_timer: 0.0,
+                damage_timer: 0.0,
+                warmup: 0.0,
+                animation: 0.0,
+            },
+        ));
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("entity-count");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        let bytes = std::fs::read(&path).expect("save bytes");
+        let mut content = boot_registry().expect("content");
+        let save = decode_save_bytes(&bytes, &mut content).expect("decode");
+        assert_eq!(save.entities.units.len(), 1, "only the live dagger");
+        assert_eq!(save.entities.fires.len(), 1, "the fire chunk follows");
+
+        let mut dst = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        dst.install_block_runtime().expect("block runtime");
+        dst.install_unit_runtime().expect("unit runtime");
+        dst.apply_decoded_entities(&save);
+        assert_eq!(
+            dst.unit_runtime().expect("runtime").units.len(),
+            1,
+            "one dagger restored"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// H04 T9: revision 3 round-trips elevation, the carried item, statuses,
+    /// shield, the command id + move target and the builder plan queue.
+    #[test]
+    fn unit_rev3_round_trip() {
+        use crate::ai::controller::UnitCommandComp;
+        use crate::entities::comp::unit::comp::{ItemsComp, ShieldComp, StatusComp, StatusEntry};
+        use crate::sim::builder::{BuilderPlans, UnitBuildPlan};
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let entity = sim
+            .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+            .expect("dagger");
+        let content = boot_registry().expect("content");
+        let copper = content.item_id("copper").expect("copper");
+        let wet = content.status_id("wet").expect("wet");
+        if let Some(mut core) = sim.ecs.0.get_mut::<UnitCore>(entity) {
+            core.elevation = 0.5;
+        }
+        sim.ecs.0.entity_mut(entity).insert(ItemsComp {
+            item: Some((copper, 10)),
+        });
+        sim.ecs
+            .0
+            .entity_mut(entity)
+            .insert(ShieldComp { shield: 20.0 });
+        sim.ecs.0.entity_mut(entity).insert(StatusComp {
+            statuses: vec![StatusEntry::new(wet, 120.0)],
+            damage_times: vec![0.0],
+            ..Default::default()
+        });
+        sim.ecs.0.entity_mut(entity).insert(UnitCommandComp(3));
+        if let Some(mut slot) = sim
+            .ecs
+            .0
+            .get_mut::<crate::ai::controller::ControllerSlot>(entity)
+        {
+            slot.kind = crate::ai::controller::AiKind::Logic;
+        } else {
+            sim.ecs
+                .0
+                .entity_mut(entity)
+                .insert(crate::ai::controller::ControllerSlot::new(
+                    crate::ai::controller::AiKind::Logic,
+                ));
+        }
+        sim.ecs.0.entity_mut(entity).insert(BuilderPlans {
+            plans: std::collections::VecDeque::from([UnitBuildPlan::place(
+                10,
+                12,
+                1,
+                BlockId::STONE_WALL,
+            )]),
+            ..Default::default()
+        });
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("unit-rev3");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        let bytes = std::fs::read(&path).expect("save bytes");
+        let mut content = boot_registry().expect("content");
+        let save = decode_save_bytes(&bytes, &mut content).expect("decode");
+        assert_eq!(save.entities.units.len(), 1);
+        let unit = &save.entities.units[0];
+        assert_eq!(unit.revision, SIM_UNIT_REVISION);
+        assert_eq!(unit.elevation, 0.5);
+        assert_eq!(unit.stack, Some((copper, 10)));
+        assert_eq!(unit.shield, 20.0);
+        assert_eq!(unit.statuses.len(), 1);
+        assert_eq!(unit.statuses[0].effect, wet);
+        assert_eq!(
+            unit.statuses[0].duration, 119.0,
+            "one capture tick elapsed before the save"
+        );
+        assert_eq!(unit.command, Some(3));
+        assert_eq!(unit.controller, Some(crate::ai::controller::AiKind::Logic));
+        assert_eq!(unit.plans.len(), 1);
+        assert_eq!(unit.plans[0].block, BlockId::STONE_WALL);
+        assert_eq!((unit.plans[0].x, unit.plans[0].y), (10, 12));
+
+        let _ = std::fs::remove_file(&path);
     }
 
     /// A live save must carry real meta (`tick`/`playtime`) and the entities

@@ -1653,6 +1653,7 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 					"core": str(row.get("core", "")),
 					"schematic": loadout,
 					"stacks": core_stacks,
+					"origin": launcher_id,
 				})
 			))
 		elif campaign.has_method("start_sector"):

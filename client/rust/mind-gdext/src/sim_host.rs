@@ -4736,6 +4736,123 @@ impl MindSimHost {
         }
     }
 
+    /// `SectorInfo.write()`'s core half (`SectorInfo.java:165-196`): clears the
+    /// default team's first core module and sets each record stack, clamped to
+    /// `CoreBuild.storage_capacity`. Rust-only seam for
+    /// `MindCampaign::start_sector_with_loadout`.
+    pub fn write_record_items_to_core(
+        &mut self,
+        team: u8,
+        items: &indexmap::IndexMap<String, i32>,
+    ) -> bool {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        let mut target = None;
+        for (_seq, entity, comp) in self.sim.ecs.entities_by_seq() {
+            if comp.team.0 != team {
+                continue;
+            }
+            let is_core = content
+                .block(comp.block)
+                .is_some_and(|def| def.kind == BlockKind::CoreBlock);
+            if !is_core || self.sim.ecs.0.get::<ItemModule>(entity).is_none() {
+                continue;
+            }
+            target = Some(entity);
+            break;
+        }
+        let Some(entity) = target else {
+            return false;
+        };
+        let capacity = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::storage::core_block::CoreBuild>(entity)
+            .map(|core| core.storage_capacity)
+            .unwrap_or(0);
+        let Some(mut module) = self.sim.ecs.0.get_mut::<ItemModule>(entity) else {
+            return false;
+        };
+        module.clear();
+        for (name, amount) in items {
+            if let Some(item) = content.item_id(name) {
+                module.set(item, (*amount).clamp(0, capacity));
+            }
+        }
+        true
+    }
+
+    /// Launch pods in flight (`LaunchPayloadState`; H04 T6 seam for H03's
+    /// `LaunchPayloadComp.draw`: `fin = time/lifetime`, region `<block>-pod`).
+    #[func]
+    pub fn launch_payloads_json(&mut self) -> GString {
+        let rows = mind_core::game::launch_payload::payload_rows(&mut self.sim.ecs.0);
+        let mapped: Vec<String> = rows
+            .into_iter()
+            .map(|(id, x, y, time, lifetime, block, team)| {
+                let block = self
+                    .content_snapshot
+                    .as_ref()
+                    .and_then(|content| content.block(block))
+                    .map(|def| def.name.clone())
+                    .unwrap_or_default();
+                serde_json::json!({
+                    "id": id,
+                    "x": x,
+                    "y": y,
+                    "time": time,
+                    "lifetime": lifetime,
+                    "block": block,
+                    "team": team,
+                })
+                .to_string()
+            })
+            .collect();
+        GString::from(format!("[{}]", mapped.join(",")).as_str())
+    }
+
+    /// Landing pads (`LandingPadState`; H04 T7 seam for H03's pod + cooldown
+    /// draw). `id` is the entity index; `config`/`arriving` are item names.
+    #[func]
+    pub fn landing_pads_json(&mut self) -> GString {
+        let rows = mind_core::game::landing_pad::landing_pad_rows(&mut self.sim.ecs.0);
+        let item_name = |id: Option<u16>| -> Option<String> {
+            id.and_then(|id| {
+                self.content_snapshot
+                    .as_ref()
+                    .and_then(|content| content.item(mind_core::content::ItemId::new(id)))
+                    .map(|item| item.name.clone())
+            })
+        };
+        let mapped: Vec<String> = rows
+            .into_iter()
+            .map(
+                |(id, x, y, block, config, arriving, arriving_timer, cooldown)| {
+                    let block = self
+                        .content_snapshot
+                        .as_ref()
+                        .and_then(|content| content.block(block))
+                        .map(|def| def.name.clone())
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "id": id,
+                        "x": x,
+                        "y": y,
+                        "block": block,
+                        "config": item_name(config),
+                        "arriving": item_name(arriving),
+                        "arrivingTimer": arriving_timer,
+                        "cooldown": cooldown,
+                    })
+                    .to_string()
+                },
+            )
+            .collect();
+        GString::from(format!("[{}]", mapped.join(",")).as_str())
+    }
+
     // ---- G03 T2 placement preview seams (Rust-only) ----
 
     /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;

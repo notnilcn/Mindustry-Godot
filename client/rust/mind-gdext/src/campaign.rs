@@ -12,7 +12,9 @@
 //! In-engine MCP verification (plan 12 §7c) is deferred to the orchestrator's
 //! single-editor mutex; this class compiles and exposes the API surface today.
 
-use godot::builtin::{PackedInt32Array, PackedVector3Array, VarDictionary, Vector3};
+use godot::builtin::{
+    PackedInt32Array, PackedStringArray, PackedVector3Array, VarDictionary, Vector3,
+};
 use godot::classes::notify::NodeNotification;
 use godot::classes::{FileAccess, INode, Node, ProjectSettings};
 use godot::obj::Base;
@@ -36,7 +38,7 @@ use mind_core::game::play::{
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::CampaignRuntime;
+use mind_core::game::runtime::{CampaignRuntime, UnlockRef};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
@@ -90,6 +92,9 @@ pub struct MindCampaign {
     last_pump_tick: u64,
     /// Tick at which an in-flight autosave clears `Saves.saving` (3-tick task).
     saving_finish_tick: Option<u64>,
+    /// Content names unlocked since the last `take_unlocked_content` (H05's
+    /// `hudfrag.showUnlock` popup; `Control.java:160-174`).
+    unlocked_since_last_take: Vec<String>,
 }
 
 #[godot_api]
@@ -111,6 +116,7 @@ impl INode for MindCampaign {
             campaign_complete: false,
             last_pump_tick: 0,
             saving_finish_tick: None,
+            unlocked_since_last_take: Vec::new(),
         }
     }
 
@@ -382,7 +388,13 @@ impl MindCampaign {
     }
 
     /// Persists campaign/universe/unlock state to `user://config/settings.bin`.
+    ///
+    /// Mirrors the live runtime campaign first: while a sector runs the runtime
+    /// copy is authoritative, so writing the facade's last-mirrored copy would
+    /// reset the turn counter and clock (Java has one object graph:
+    /// `Vars.universe`/`planet.sectors`; `Universe.save()` `Universe.java:293`).
     fn persist(&mut self) {
+        self.mirror_runtime_campaign();
         if let Some(campaign) = self.campaign.as_ref()
             && let Err(error) = campaign.save_all(&mut self.settings)
         {
@@ -390,6 +402,46 @@ impl MindCampaign {
         }
         if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
             log::warn!("campaign settings flush failed: {error}");
+        }
+    }
+
+    /// Runs `f` on THE live campaign: the runtime's copy while a sector runs
+    /// (then mirrors it into the facade), else the facade. Java has one
+    /// object graph (`Vars.universe` / `planet.sectors`); the facade is a view
+    /// that catches up, never a second copy (H04 T1).
+    ///
+    /// `f` runs with the runtime taken out of the host, so it must not call
+    /// back into Godot (H-environment §3: no held `bind_mut` across calls).
+    fn with_campaign_mut<R>(
+        &mut self,
+        f: impl FnOnce(&mut Campaign, &mut SettingsStore) -> R,
+    ) -> Option<R> {
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                let out = f(&mut runtime.campaign, &mut self.settings);
+                self.campaign = Some(runtime.campaign.clone());
+                host.bind_mut().put_campaign_runtime(runtime);
+                return Some(out);
+            }
+        }
+        let mut campaign = self.campaign.take()?;
+        let out = f(&mut campaign, &mut self.settings);
+        self.campaign = Some(campaign);
+        Some(out)
+    }
+
+    /// Copies the runtime campaign into the facade (no-op without a runtime).
+    /// Facade -> runtime copies never happen (T1: the runtime stays
+    /// authoritative until it is dropped).
+    fn mirror_runtime_campaign(&mut self) {
+        let Some(mut host) = self.host() else {
+            return;
+        };
+        let taken = host.bind_mut().take_campaign_runtime();
+        if let Some(runtime) = taken {
+            self.campaign = Some(runtime.campaign.clone());
+            host.bind_mut().put_campaign_runtime(runtime);
         }
     }
 
@@ -501,6 +553,14 @@ impl MindCampaign {
                 }
                 mind_core::game::play::PlayEvent::GameOver { .. }
                 | mind_core::game::play::PlayEvent::SectorLose { .. } => {
+                    // `Sector.isBeingPlayed` (`Sector.java:148-151`) is false
+                    // once `state.gameOver` is set; clear it on the runtime copy
+                    // so the sector produces offline on later turns (T1).
+                    if let Some((planet, sector_id)) = runtime.session.sector
+                        && let Some(sector) = runtime.campaign.sector_mut(planet, sector_id)
+                    {
+                        sector.being_played = false;
+                    }
                     // `Control` GameOverEvent (`Control.java:188-195`): save the
                     // game-over state immediately, so a later re-attack loads
                     // the destroyed base (PAR-0084).
@@ -519,6 +579,74 @@ impl MindCampaign {
                 _ => {}
             }
         }
+
+        // T2: produced/dumped content unlocks (`UnlockableContent.unlock()` ->
+        // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
+        // the registry, persist the unlock, then run `checkAutoUnlocks()`.
+        if !runtime.pending_unlocks.is_empty()
+            && let Some(registry) = registry.as_mut()
+        {
+            let mut newly: Vec<String> = Vec::new();
+            for unlock in std::mem::take(&mut runtime.pending_unlocks) {
+                let (content, name) = match unlock {
+                    UnlockRef::Item(id) => (
+                        ContentRef::of(ContentType::Item, id),
+                        registry.item(id).map(|c| c.name.clone()),
+                    ),
+                    UnlockRef::Liquid(id) => (
+                        ContentRef::of(ContentType::Liquid, id),
+                        registry.liquid(id).map(|c| c.name.clone()),
+                    ),
+                    UnlockRef::Unit(id) => (
+                        ContentRef::of(ContentType::Unit, id),
+                        registry.unit(id).map(|c| c.name.clone()),
+                    ),
+                };
+                let Some(name) = name else {
+                    continue;
+                };
+                let mut store = SettingsUnlockStore::new(&mut self.settings);
+                if let Some(fields) = tech_tree::unlock_fields_mut(registry, content)
+                    && fields.unlock(&name, &mut store)
+                {
+                    newly.push(name);
+                }
+            }
+            if !newly.is_empty() {
+                let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
+                let mut store = SettingsUnlockStore::new(&mut self.settings);
+                let auto = tech_tree::check_auto_unlocks(registry, &mut store, &ctx);
+                log::info!(
+                    "campaign unlock: {} produced, {} auto-unlocked",
+                    newly.len(),
+                    auto.len()
+                );
+                for content in auto {
+                    if let Some(name) = tech_tree::content_name(registry, content) {
+                        newly.push(name);
+                    }
+                }
+                self.unlocked_since_last_take.extend(newly);
+                let unlocked = collect_unlocked(registry);
+                runtime.set_unlocked_content(unlocked);
+                dirty = true;
+            }
+        }
+        // H04 T6: legacy launch pads queue destination records for the host to
+        // flush (`Sector.saveInfo` after `addItems`).
+        if !runtime.pending_info_saves.is_empty() {
+            for (planet, sector_id) in std::mem::take(&mut runtime.pending_info_saves) {
+                let planet_name = runtime
+                    .campaign
+                    .planet(planet)
+                    .map(|planet| planet.name.clone())
+                    .unwrap_or_default();
+                if let Some(sector) = runtime.campaign.sector(planet, sector_id) {
+                    let _ = sector.save_info(&mut self.settings, &planet_name);
+                }
+            }
+            dirty = true;
+        }
         self.registry = registry;
 
         if !replacements.is_empty() {
@@ -531,6 +659,7 @@ impl MindCampaign {
         // Auto campaign turns (`Universe.update` turnCounter).
         if runtime.turn_due {
             runtime.turn_due = false;
+            let mut turn_events = Vec::new();
             if let (Some(registry), Some(campaign)) =
                 (self.registry.as_ref(), Some(&mut runtime.campaign))
             {
@@ -551,8 +680,11 @@ impl MindCampaign {
                     report.turn,
                     report.events.len()
                 );
+                turn_events = report.events;
                 dirty = true;
             }
+            // Played-sector invasions restart the live waves (T4).
+            mind_core::game::runtime::apply_played_invasions(&mut runtime, &turn_events);
         }
 
         // Mirror the authoritative runtime state into the facade for getters.
@@ -572,6 +704,11 @@ impl MindCampaign {
         self.session.objectives = runtime.session.objectives.clone();
         if mirrored {
             self.session = runtime.session.clone();
+        }
+        // T1: while `dirty`, the facade must carry the runtime's campaign
+        // before `persist()` runs (the runtime is authoritative; the facade is
+        // only a view once this pump returns the runtime to the host).
+        if mirrored || dirty {
             self.campaign = Some(runtime.campaign.clone());
         }
         host.bind_mut().put_campaign_runtime(runtime);
@@ -638,9 +775,12 @@ impl MindCampaign {
             return false;
         }
         let sector_id = sector as u16;
-        let Some(registry) = self.registry.take() else {
+        let Some(mut registry) = self.registry.take() else {
             return false;
         };
+        // T1: a launch while a sector is live starts from the runtime's state
+        // (the old runtime is replaced below by `install_campaign_runtime`).
+        self.mirror_runtime_campaign();
         let Some(mut campaign) = self.campaign.take() else {
             self.registry = Some(registry);
             return false;
@@ -664,6 +804,7 @@ impl MindCampaign {
         let preset_id = record.preset;
         let has_save = record.has_save();
         let spawn_position = record.info.info.spawn_position;
+        let had_no_core = !record.info.info.has_core;
         let tech_unlocked = preset_id.is_none_or(|preset| {
             tech_tree::content_unlocked(&registry, ContentRef::of(ContentType::Sector, preset))
         });
@@ -674,17 +815,51 @@ impl MindCampaign {
             return false;
         }
 
-        // `Control.playSector`'s no-core branch (`Control.java:456-465`): the
-        // loaded save's world has no default-team core (the sector was lost
-        // while it still has a save). Run the lost-sector replay - `SectorDamage`
-        // snapshot, fresh reload, core + derelict restore (PAR-0084).
+        // `Control.playSector` (`Control.java:437-448`): quiet-unlock the preset
+        // (no unlock event) and record the planet's last sector.
+        let preset_name =
+            preset_id.and_then(|preset| registry.sector(preset).map(|def| def.name.clone()));
+        if let Some(preset) = preset_id
+            && let Some(name) = preset_name.as_deref()
+            && let Some(fields) = tech_tree::unlock_fields_mut(
+                &mut registry,
+                ContentRef::of(ContentType::Sector, preset),
+            )
+        {
+            fields.quiet_unlock(name, &mut SettingsUnlockStore::new(&mut self.settings));
+        }
+        if let Some(planet) = campaign.planet_mut(planet_id) {
+            planet.set_last_sector(&mut self.settings, sector_id);
+        }
+
+        // `Control.playSector`'s branch selection (`Control.java:449-470`): the
+        // normal load path is a save with a live core; a save whose sector was
+        // lost (`no_live_core || had_no_core`) takes the no-core branch, which
+        // replays only when `!clearSave && spawnPosition != 0 &&
+        // sectorDataMatches` (PAR-0084).
         let default_team = self.session.rules.default_team;
-        let lost_replay = has_save
-            && spawn_position != 0
-            && self
-                .host()
-                .map(|host| host.bind().player_core_blocks(default_team) == 0)
-                .unwrap_or(false);
+        let no_live_core = self
+            .host()
+            .map(|host| host.bind().player_core_blocks(default_team) == 0)
+            .unwrap_or(false);
+        let no_core_branch = no_live_core || had_no_core;
+        let clear_save = campaign
+            .planet(planet_id)
+            .is_some_and(|planet| planet.campaign_rules.clear_sector_on_lose);
+        let data_matches = campaign.sector(planet_id, sector_id).is_some_and(|sector| {
+            // Deviation: the preset def carries no map dimensions, so the
+            // record's own size is passed; the effective test is the preset
+            // name (`SectorInfo.sectorDataMatches`, `SectorInfo.java:98-103`).
+            sector.sector_data_matches(
+                preset_name.as_deref(),
+                sector.info.info.last_width,
+                sector.info.info.last_height,
+            )
+        });
+        let lost_replay =
+            has_save && no_core_branch && !clear_save && spawn_position != 0 && data_matches;
+        // Java's load branch: a save that is not in the no-core branch.
+        let resume = has_save && !no_core_branch;
         let mut restored_survivors = Vec::new();
         if lost_replay {
             let (spawn_x, spawn_y) = mind_core::world::pos::unpack(spawn_position);
@@ -722,17 +897,29 @@ impl MindCampaign {
         } else if let Some(stacks) = parse_loadout_stacks(&loadout_payload) {
             self.session.rules.loadout = stacks;
         }
-        let (launch_schematic, launch_stacks_json) = parse_launch_payload(&loadout_payload);
+        let (launch_schematic, launch_origin, launch_stacks_json) =
+            parse_launch_payload(&loadout_payload);
+        // `Control.playNewSector` (`Control.java:573-578`): the launcher sector
+        // id from the dialog becomes `origin`/`destination`.
+        let origin = launch_origin.map(|origin| (planet_id, origin));
+
+        // `Sector.isBeingPlayed` (`Sector.java:148-151`): only the sector being
+        // played reads true; a launch clears every previous flag first (T1).
+        for planet in campaign.planets.values_mut() {
+            for sector in &mut planet.sectors {
+                sector.being_played = false;
+            }
+        }
 
         self.reloader = HostReloader::default();
-        let events = if has_save && !lost_replay {
+        let events = if resume {
             play_sector(
                 &mut self.session,
                 &mut campaign,
                 &registry,
                 planet_id,
                 sector_id,
-                None,
+                origin,
                 &mut self.epoch,
                 &mut self.reloader,
             )
@@ -743,7 +930,7 @@ impl MindCampaign {
                 &registry,
                 planet_id,
                 sector_id,
-                None,
+                origin,
                 &mut self.epoch,
                 &mut self.reloader,
             )
@@ -752,8 +939,7 @@ impl MindCampaign {
         // save `MindSimHost.load_sector` just decoded. Java restores them inside
         // `SaveIO.load` (`SaveVersion.readMeta`) before the `SaveLoadEvent`
         // rule merge; the host also resumed the saved `tick`.
-        if has_save
-            && !lost_replay
+        if resume
             && let Some(meta) = self
                 .host()
                 .and_then(|mut host| host.bind_mut().take_sector_resume())
@@ -782,7 +968,7 @@ impl MindCampaign {
                 &registry,
                 preset_id.is_some(),
                 preset_no_lighting,
-                has_save && !lost_replay,
+                resume,
             );
             if let Some(mut host) = self.host() {
                 host.bind_mut().apply_world_rules(&self.session.rules);
@@ -846,11 +1032,63 @@ impl MindCampaign {
                     }
                 }
                 let taken = host.bind_mut().take_campaign_runtime();
+                let mut core_items: Option<indexmap::IndexMap<String, i32>> = None;
                 if let Some(mut runtime) = taken {
-                    self.session = runtime.session.clone();
                     // Carry the launch ownership back into the runtime copy.
                     runtime.campaign = campaign.clone();
+                    if resume {
+                        // `Logic` `SaveLoadEvent` (`Logic.java:70-88`):
+                        // `info.write()` pushes the stored record into the live
+                        // session, then `planet.applyRules` re-derives the
+                        // campaign rules over it (H04 T3).
+                        let wave_core = runtime.session.wave_core_count() > 0;
+                        let allow_waves = campaign
+                            .planet(planet_id)
+                            .is_some_and(|planet| planet.allow_waves);
+                        if let Some(record) = runtime.campaign.sector_mut(planet_id, sector_id) {
+                            let capture_wave = record.preset_capture_wave;
+                            let capacity = record.info.info.storage_capacity;
+                            let items = record.info.write_to_state(
+                                wave_core,
+                                allow_waves,
+                                capture_wave,
+                                &mut runtime.session,
+                            );
+                            record.info.info.has_core = true;
+                            let _ = record.save_info(&mut self.settings, &planet_name);
+                            // Keep the session team inventory equal to the core
+                            // module, like a fresh launch (`sync_session_with_sim`).
+                            let item_count = registry.items().len();
+                            let inventory = runtime
+                                .session
+                                .teams
+                                .inventory(mind_core::ecs::TeamId(default_team), item_count);
+                            inventory.clear();
+                            for (name, amount) in &items {
+                                if let Some(item) = registry.item_id(name) {
+                                    inventory.add(item, (*amount).clamp(0, capacity), i32::MAX);
+                                }
+                            }
+                            core_items = Some(items);
+                        }
+                        if let Some(planet) = campaign.planet(planet_id) {
+                            planet.apply_rules(&registry, &mut runtime.session.rules, false, true);
+                        }
+                    }
+                    // `Trigger.newGame` (`Control.java:212-216`):
+                    // `if(info.importRateCache != null) info.refreshImportRates(planet)`
+                    // so the played sector's landing pads see its importers (T7).
+                    runtime
+                        .campaign
+                        .refresh_sector_import_rates(&registry, planet_id, sector_id);
+                    self.session = runtime.session.clone();
                     host.bind_mut().put_campaign_runtime(runtime);
+                }
+                if let Some(items) = core_items
+                    && let Some(mut host) = self.host()
+                {
+                    host.bind_mut()
+                        .write_record_items_to_core(default_team, &items);
                 }
                 installed = true;
             }
@@ -1038,52 +1276,193 @@ impl MindCampaign {
     }
 
     /// Runs one production turn; returns success. Runs on the live runtime
-    /// campaign when one is installed.
+    /// campaign when one is installed (T1: one authoritative campaign).
     #[func]
     pub fn run_turn(&mut self) -> bool {
         let Some(registry) = self.registry.take() else {
             return false;
         };
-        if let Some(mut host) = self.host() {
+        // `ctx` reads the live session (runtime copy while a sector runs).
+        let ctx = if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                let turn = runtime.campaign.universe.turn;
-                let ctx = TurnContext {
-                    current_planet: runtime.session.sector.map(|(planet, _)| planet),
-                    current_sector: runtime.session.sector,
-                    playing_rules: Some((
-                        runtime.session.rules.waves,
-                        runtime.session.rules.attack_mode,
-                    )),
-                    current_wave: runtime.session.wave,
-                };
-                let report = runtime.campaign.run_turn(
-                    &registry,
-                    &mut self.settings,
-                    &ctx,
-                    &mut JavaRandom::new(turn as u64 + 1),
-                );
+            let ctx = taken.as_ref().map(|runtime| TurnContext {
+                current_planet: runtime.session.sector.map(|(planet, _)| planet),
+                current_sector: runtime.session.sector,
+                playing_rules: Some((
+                    runtime.session.rules.waves,
+                    runtime.session.rules.attack_mode,
+                )),
+                current_wave: runtime.session.wave,
+            });
+            if let Some(runtime) = taken {
                 host.bind_mut().put_campaign_runtime(runtime);
-                self.registry = Some(registry);
-                self.persist();
-                return report.turn > 0;
             }
+            ctx
+        } else {
+            None
         }
-        let Some(mut campaign) = self.campaign.take() else {
+        .unwrap_or_default();
+        let Some(report) = self.with_campaign_mut(|campaign, settings| {
+            let turn = campaign.universe.turn;
+            campaign.run_turn(
+                &registry,
+                settings,
+                &ctx,
+                &mut JavaRandom::new(turn as u64 + 1),
+            )
+        }) else {
             self.registry = Some(registry);
             return false;
         };
-        let turn = campaign.universe.turn;
-        let report = campaign.run_turn(
-            &registry,
-            &mut self.settings,
-            &TurnContext::default(),
-            &mut JavaRandom::new(turn as u64 + 1),
-        );
+        // Played-sector invasions hit the live session rules (T4: `Universe.java:550-555`).
+        if report.events.iter().any(|event| {
+            matches!(
+                event,
+                mind_core::game::universe::CampaignEvent::SectorInvasion { played: true, .. }
+            )
+        }) && let Some(mut host) = self.host()
+        {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                mind_core::game::runtime::apply_played_invasions(&mut runtime, &report.events);
+                self.session.rules = runtime.session.rules.clone();
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+        }
         self.registry = Some(registry);
-        self.campaign = Some(campaign);
         self.persist();
         report.turn > 0
+    }
+
+    /// Live `{turn, seconds}` of the universe (T1 seam; `Universe.java:293-296`).
+    ///
+    /// Reads the runtime copy while a sector is installed, else the facade
+    /// (`"{}"` with no campaign).
+    #[func]
+    pub fn universe_json(&self) -> GString {
+        let mut value = self.campaign.as_ref().map(|campaign| {
+            serde_json::json!({
+                "turn": campaign.universe.turn,
+                "seconds": campaign.universe.seconds,
+            })
+        });
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(runtime) = &taken {
+                value = Some(serde_json::json!({
+                    "turn": runtime.campaign.universe.turn,
+                    "seconds": runtime.campaign.universe.seconds,
+                }));
+            }
+            if let Some(runtime) = taken {
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+        }
+        GString::from(
+            value
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "{}".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// The live record of one sector as JSON (T1 seam): the `SectorInfo` serde
+    /// (camelCase) plus `"beingPlayed"` and `"hasSave"`; `"{}"` when unknown.
+    /// Reads the runtime copy while a sector is installed, else the facade.
+    #[func]
+    pub fn sector_record_json(&self, planet: GString, sector: i64) -> GString {
+        if !(0..=i64::from(u16::MAX)).contains(&sector) {
+            return GString::from("{}");
+        }
+        let planet_name = planet.to_string();
+        let sector_id = sector as u16;
+        let mut value = self
+            .campaign
+            .as_ref()
+            .and_then(|campaign| Self::sector_record_value(campaign, &planet_name, sector_id));
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(runtime) = &taken {
+                value = Self::sector_record_value(&runtime.campaign, &planet_name, sector_id);
+            }
+            if let Some(runtime) = taken {
+                host.bind_mut().put_campaign_runtime(runtime);
+            }
+        }
+        match value {
+            Some(value) => GString::from(value.to_string().as_str()),
+            None => GString::from("{}"),
+        }
+    }
+
+    fn sector_record_value(
+        campaign: &Campaign,
+        planet_name: &str,
+        sector_id: u16,
+    ) -> Option<serde_json::Value> {
+        let planet_id = campaign.planet_id_by_name(planet_name)?;
+        let sector = campaign.sector(planet_id, sector_id)?;
+        let mut value = serde_json::to_value(&sector.info.info).ok()?;
+        if let serde_json::Value::Object(ref mut map) = value {
+            map.insert(
+                "beingPlayed".to_owned(),
+                serde_json::Value::Bool(sector.being_played),
+            );
+            map.insert(
+                "hasSave".to_owned(),
+                serde_json::Value::Bool(sector.save.is_some()),
+            );
+        }
+        Some(value)
+    }
+
+    /// `LaunchPad.buildConfiguration` -> `ui.planet.showSelect` result
+    /// (`LaunchPad.java:185-203`): sets the played sector's export destination
+    /// to `planet:sector`; `-1` clears it. H05 wires the pad config button.
+    #[func]
+    pub fn set_launch_destination(&mut self, planet: GString, sector: i64) -> bool {
+        let planet_name = planet.to_string();
+        let destination = if sector < 0 {
+            None
+        } else if sector <= i64::from(u16::MAX) {
+            Some(mind_core::io::json::content_serde::SectorKey::format(
+                &planet_name,
+                sector as u16,
+            ))
+        } else {
+            return false;
+        };
+        let Some((planet_id, sector_id)) = self.session.sector else {
+            return false;
+        };
+        let Some(registry) = self.registry.take() else {
+            return false;
+        };
+        let updated = self.with_campaign_mut(|campaign, settings| {
+            let previous = campaign
+                .sector(planet_id, sector_id)
+                .and_then(|sector| sector.info.info.destination.clone());
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
+                return false;
+            };
+            record.info.info.destination = destination.clone();
+            let _ = record.save_info(settings, &planet_name);
+            // `if(prev != null) prev.info.refreshImportRates(planet)`.
+            if let Some(previous) = previous
+                && let Some(prev_planet) = previous.planet()
+                && let Some(prev_sector) = previous.sector()
+                && let Some(prev_planet_id) = campaign.planet_id_by_name(prev_planet)
+            {
+                campaign.refresh_sector_import_rates(&registry, prev_planet_id, prev_sector);
+            }
+            true
+        });
+        self.registry = Some(registry);
+        if updated != Some(true) {
+            return false;
+        }
+        self.persist();
+        true
     }
 
     /// Advances the wave counter (`Logic.runWave`), mirroring into the live
@@ -1174,6 +1553,8 @@ impl MindCampaign {
             .and_then(|node| node.root_node)
             .unwrap_or(node_ref);
         let planets = root_planets(&registry, root_ref);
+        // T1: reads (`research_inventory`/`ctx`) must see the live campaign.
+        self.mirror_runtime_campaign();
         let (mut items, mut sector_entries, mut played_items) =
             self.research_inventory(&registry, &planets);
 
@@ -1201,6 +1582,9 @@ impl MindCampaign {
         // sectors in order, then the remainder from the active sector last
         // (its live core module while playing; `Sector.removeItem`).
         let campaign_sector_active = self.session.is_campaign() && self.session.sector.is_some();
+        // T1: sector-record removals are applied to the live campaign after the
+        // loop (one `with_campaign_mut`), with the Java `saveInfo` flush.
+        let mut record_updates: Vec<(PlanetId, u16, String, i32)> = Vec::new();
         for spent in &result.spent {
             let Some(name) = registry.item(spent.item).map(|item| item.name.clone()) else {
                 continue;
@@ -1240,13 +1624,7 @@ impl MindCampaign {
                     .find(|(entry_name, _)| entry_name == &name)
                     .map(|(_, amount)| *amount)
                     .unwrap_or(0);
-                if let Some(record) = self
-                    .campaign
-                    .as_mut()
-                    .and_then(|campaign| campaign.sector_mut(planet, sector))
-                {
-                    record.info.info.items.insert(name.clone(), updated);
-                }
+                record_updates.push((planet, sector, name.clone(), updated));
             }
             if current_removal > 0
                 && let Some(mut host) = self.host()
@@ -1261,6 +1639,22 @@ impl MindCampaign {
                 }
             }
         }
+        // Apply the record removals on the live campaign (`Sector.removeItems`
+        // -> `addItems` -> `saveInfo()`; `Sector.java:207-231`).
+        if !record_updates.is_empty() {
+            self.with_campaign_mut(|campaign, settings| {
+                for (planet, sector_id, name, updated) in &record_updates {
+                    let planet_name = campaign
+                        .planet(*planet)
+                        .map(|p| p.name.clone())
+                        .unwrap_or_default();
+                    if let Some(record) = campaign.sector_mut(*planet, *sector_id) {
+                        record.info.info.items.insert(name.clone(), *updated);
+                        let _ = record.save_info(settings, &planet_name);
+                    }
+                }
+            });
+        }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
         if !result.unlocked.is_empty()
             && let Some(campaign_ref) = self.campaign.as_ref()
@@ -1271,7 +1665,8 @@ impl MindCampaign {
             log::info!("research auto-unlocked {} content", unlocked.len());
         }
         self.registry = Some(registry);
-        // Keep the runtime copy's campaign in sync with the spent inventory.
+        // Refresh the runtime copy's unlocked-content cache (the campaign
+        // mutations above already went through `with_campaign_mut`).
         self.push_campaign_to_runtime();
         if changed {
             self.persist();
@@ -1771,10 +2166,11 @@ impl MindCampaign {
 
     /// Copies the facade campaign into the installed runtime (post-research /
     /// rule edits).
+    /// Refreshes the live runtime's unlocked-content cache from the registry
+    /// after research/clear flows. The campaign itself is never copied
+    /// facade -> runtime (T1: the runtime copy is authoritative while a sector
+    /// runs; mutations go through [`Self::with_campaign_mut`]).
     fn push_campaign_to_runtime(&mut self) {
-        let Some(campaign) = self.campaign.clone() else {
-            return;
-        };
         let unlocked = self
             .registry
             .as_ref()
@@ -1783,7 +2179,6 @@ impl MindCampaign {
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
-                runtime.campaign = campaign;
                 runtime.set_unlocked_content(unlocked);
                 host.bind_mut().put_campaign_runtime(runtime);
             }
@@ -1802,6 +2197,17 @@ impl MindCampaign {
             return false;
         };
         tech_tree::content_unlocked(registry, content)
+    }
+
+    /// Content names unlocked since the last call (`Control.java:160-174`:
+    /// `hudfrag.showUnlock` popup; H05 consumes). Drained here.
+    #[func]
+    pub fn take_unlocked_content(&mut self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for name in self.unlocked_since_last_take.drain(..) {
+            out.push(&GString::from(name.as_str()));
+        }
+        out
     }
 
     /// Tech-tree summary (`nodes`, `unlocked`, error).
@@ -2438,11 +2844,24 @@ impl MindCampaign {
         // `SectorInfo.write()`/`saveInfo` on exit: the live wave/attack bookkeeping
         // lands in the stored record before the runtime is dropped (PAR-0081).
         self.persist_sector_record();
+        // T1: `Sector.isBeingPlayed` (`Sector.java:148-151`) is false once the
+        // game state leaves `isGame()`; clear it on the live campaign so the
+        // sector produces offline from the next turn on.
+        if let Some((planet, sector_id)) = self.session.sector {
+            self.with_campaign_mut(|campaign, _settings| {
+                if let Some(sector) = campaign.sector_mut(planet, sector_id) {
+                    sector.being_played = false;
+                }
+            });
+        }
         // `StateChangeEvent(menu)`: clears current/playtime (`logic.reset`).
         self.saves.on_state_change(State::Menu);
         self.saving_finish_tick = None;
         self.session.reset_world();
         self.runtime_installed = false;
+        // T1: mirror the runtime campaign before dropping it, or the turn
+        // clock and every other sector's turn production are lost.
+        self.mirror_runtime_campaign();
         if let Some(mut host) = self.host() {
             host.bind_mut().clear_campaign_runtime();
         }
@@ -2481,11 +2900,23 @@ impl MindCampaign {
             return;
         };
         if let Some(snapshot) = snapshot {
+            // `SectorInfo.prepare` `lastPresetName` (`SectorInfo.java:226-228`).
+            let preset = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.sector(planet, sector_id))
+                .and_then(|sector| sector.preset);
+            let preset_name = preset.and_then(|preset| {
+                self.registry
+                    .as_ref()
+                    .and_then(|registry| registry.sector(preset))
+                    .map(|def| def.name.clone())
+            });
             let mut prepared = mind_core::game::sector::SectorInfoState {
                 info: record,
                 ..Default::default()
             };
-            prepared.prepare(&snapshot, true);
+            prepared.prepare(&snapshot, true, preset_name.as_deref());
             record = prepared.info;
         }
         record.wave = wave;
@@ -2570,31 +3001,13 @@ impl MindCampaign {
             return false;
         };
 
-        let mut cleared = false;
-        if let Some(mut host) = self.host() {
-            let taken = host.bind_mut().take_campaign_runtime();
-            if let Some(mut runtime) = taken {
-                clear_sector_record(
-                    &mut runtime.campaign,
-                    &mut self.settings,
-                    planet,
-                    sector_id,
-                    &planet_name,
-                );
-                host.bind_mut().put_campaign_runtime(runtime);
-                cleared = true;
-            }
-        }
-        if let Some(campaign) = self.campaign.as_mut() {
-            clear_sector_record(
-                campaign,
-                &mut self.settings,
-                planet,
-                sector_id,
-                &planet_name,
-            );
-            cleared = true;
-        }
+        // T1: clear the record on the single live campaign (runtime while a
+        // sector runs), then mirror into the facade via `with_campaign_mut`.
+        let cleared = self
+            .with_campaign_mut(|campaign, settings| {
+                clear_sector_record(campaign, settings, planet, sector_id, &planet_name);
+            })
+            .is_some();
         if !cleared {
             return false;
         }
@@ -2668,9 +3081,9 @@ impl MindCampaign {
         let Some(mut registry) = self.registry.take() else {
             return false;
         };
-        if let Some(campaign) = self.campaign.as_mut() {
-            campaign.universe.clear_loadout_info(&mut self.settings);
-        }
+        self.with_campaign_mut(|campaign, settings| {
+            campaign.universe.clear_loadout_info(settings);
+        });
         let cleared = {
             let mut store = SettingsUnlockStore::new(&mut self.settings);
             registry.clear_unlocks(&mut store, None)
@@ -2700,9 +3113,9 @@ impl MindCampaign {
             log::warn!("clear_planet_research: unknown planet `{name}`");
             return false;
         };
-        if let Some(campaign) = self.campaign.as_mut() {
-            campaign.universe.clear_loadout_info(&mut self.settings);
-        }
+        self.with_campaign_mut(|campaign, settings| {
+            campaign.universe.clear_loadout_info(settings);
+        });
         let cleared = {
             let mut store = SettingsUnlockStore::new(&mut self.settings);
             registry.clear_unlocks(&mut store, Some(planet_id))
@@ -2747,38 +3160,46 @@ impl MindCampaign {
         let Some(registry) = self.registry.take() else {
             return false;
         };
-        let Some(mut campaign) = self.campaign.take() else {
+        // T1: read the planet list from the mirrored (live) campaign; the
+        // clearing runs on the live campaign through `with_campaign_mut`.
+        self.mirror_runtime_campaign();
+        let planets: Vec<(PlanetId, String)> = self
+            .campaign
+            .as_ref()
+            .map(|campaign| {
+                campaign
+                    .planets
+                    .values()
+                    .filter(|planet| only.is_none_or(|target| target == planet.id))
+                    .map(|planet| (planet.id, planet.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if planets.is_empty() {
+            self.registry = Some(registry);
+            return false;
+        }
+        let paths = self.paths.clone();
+        let Some(()) = self.with_campaign_mut(|campaign, settings| {
+            for (id, name) in &planets {
+                campaign.clear_stats(*id);
+                let Some(planet) = campaign.planet_mut(*id) else {
+                    continue;
+                };
+                for sector in &mut planet.sectors {
+                    sector.save = None;
+                    sector.being_played = false;
+                    sector.clear_info(settings, name);
+                    let file = paths.sector_save(name, sector.id as u32);
+                    let backup = mind_core::io::SaveIo::backup_file_for(&file);
+                    let _ = NativeFs.delete(&file);
+                    let _ = NativeFs.delete(&backup);
+                }
+            }
+        }) else {
             self.registry = Some(registry);
             return false;
         };
-        let planets: Vec<(PlanetId, String)> = campaign
-            .planets
-            .values()
-            .filter(|planet| only.is_none_or(|target| target == planet.id))
-            .map(|planet| (planet.id, planet.name.clone()))
-            .collect();
-        if planets.is_empty() {
-            self.registry = Some(registry);
-            self.campaign = Some(campaign);
-            return false;
-        }
-
-        for (id, name) in &planets {
-            campaign.clear_stats(*id);
-            let Some(planet) = campaign.planet_mut(*id) else {
-                continue;
-            };
-            for sector in &mut planet.sectors {
-                sector.save = None;
-                sector.being_played = false;
-                sector.clear_info(&mut self.settings, name);
-                let file = self.paths.sector_save(name, sector.id as u32);
-                let backup = mind_core::io::SaveIo::backup_file_for(&file);
-                let _ = NativeFs.delete(&file);
-                let _ = NativeFs.delete(&backup);
-            }
-        }
-        self.campaign = Some(campaign);
 
         // Re-list saves (a slot may have been written this session) and drop
         // the matching sector slots.
@@ -2865,6 +3286,10 @@ impl MindCampaign {
 
     /// Applies a `CampaignRules` JSON blob to the active planet, folds it into
     /// the session rules and persists it (GAP-11 / C-9).
+    ///
+    /// T1: the planet record is written on the live campaign; the runtime's
+    /// session rules are updated in a separate statement. The runtime campaign
+    /// is never replaced by the facade snapshot.
     #[func]
     pub fn set_campaign_rules_json(&mut self, json: GString) -> bool {
         let Ok(rules) = serde_json::from_str::<CampaignRules>(&json.to_string()) else {
@@ -2873,33 +3298,48 @@ impl MindCampaign {
         let Some((planet_id, _)) = self.session.sector else {
             return false;
         };
-        let Some(registry) = self.registry.as_ref() else {
+        let Some(registry) = self.registry.take() else {
             return false;
         };
-        let Some(campaign) = self.campaign.as_mut() else {
+        let Some(found) = self.with_campaign_mut(|campaign, _settings| {
+            let Some(planet_record) = campaign.planet_mut(planet_id) else {
+                return false;
+            };
+            planet_record.campaign_rules = rules;
+            true
+        }) else {
+            self.registry = Some(registry);
             return false;
         };
-        let Some(planet_record) = campaign.planet_mut(planet_id) else {
+        if !found {
+            self.registry = Some(registry);
             return false;
-        };
-        planet_record.campaign_rules = rules;
-        let applied = {
-            let planet_record = &*planet_record;
-            planet_record.apply_rules(registry, &mut self.session.rules, false, true)
+        }
+        // `PlanetDialog.rules` -> `Planet.applyRules(state.rules)`
+        // (`Planet.java:308-309`); the facade mirrors the live campaign now.
+        let applied = self
+            .campaign
+            .as_ref()
+            .and_then(|campaign| campaign.planet(planet_id))
+            .map(|planet_record| {
+                planet_record.apply_rules(&registry, &mut self.session.rules, false, true)
+            });
+        let Some(applied) = applied else {
+            self.registry = Some(registry);
+            return false;
         };
         if applied.rts_swapped {
             log::info!("campaign rules RTS-AI swap (controller reset is plan-11)");
         }
-        let campaign_snapshot = campaign.clone();
-        // Mirror into the live runtime session.
+        // Mirror into the live runtime session; `runtime.campaign` stays as-is.
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
                 runtime.session.rules = self.session.rules.clone();
-                runtime.campaign = campaign_snapshot;
                 host.bind_mut().put_campaign_runtime(runtime);
             }
         }
+        self.registry = Some(registry);
         self.persist();
         true
     }
@@ -2955,14 +3395,12 @@ impl MindCampaign {
         let Ok(stacks) = serde_json::from_str::<Vec<i32>>(&json.to_string()) else {
             return false;
         };
-        let Some(campaign) = self.campaign.as_mut() else {
+        let Some(result) = self.with_campaign_mut(|campaign, settings| {
+            campaign.universe.update_launch_resources(settings, stacks)
+        }) else {
             return false;
         };
-        if campaign
-            .universe
-            .update_launch_resources(&mut self.settings, stacks)
-            .is_err()
-        {
+        if result.is_err() {
             return false;
         }
         self.persist();
@@ -3137,12 +3575,12 @@ impl MindCampaign {
         );
 
         // `universe.updateLaunchResources(resources)`: persist the recomputed
-        // sequence so the launch path reads the same staged amounts.
+        // sequence so the launch path reads the same staged amounts (T1: on the
+        // live campaign). `registry` borrows `self.registry` here, so this
+        // cannot route through `with_campaign_mut` (which borrows all of
+        // `self`); take/put the runtime directly instead.
         let mut persist_resources = false;
-        if destination_allow
-            && max
-            && let Some(campaign) = self.campaign.as_mut()
-        {
+        if destination_allow && max {
             let mut dense = vec![0i32; registry.items().len()];
             for (name, amount) in &planned {
                 if let Some(index) = registry.item_id(name)
@@ -3151,10 +3589,25 @@ impl MindCampaign {
                     *slot = *amount;
                 }
             }
-            persist_resources = campaign
-                .universe
-                .update_launch_resources(&mut self.settings, dense)
-                .is_ok();
+            let mut updated = false;
+            if let Some(mut host) = self.host() {
+                let taken = host.bind_mut().take_campaign_runtime();
+                if let Some(mut runtime) = taken {
+                    persist_resources = runtime
+                        .campaign
+                        .universe
+                        .update_launch_resources(&mut self.settings, std::mem::take(&mut dense))
+                        .is_ok();
+                    host.bind_mut().put_campaign_runtime(runtime);
+                    updated = true;
+                }
+            }
+            if !updated && let Some(campaign) = self.campaign.as_mut() {
+                persist_resources = campaign
+                    .universe
+                    .update_launch_resources(&mut self.settings, dense)
+                    .is_ok();
+            }
         }
 
         let mut total = requirements.clone();
@@ -3234,14 +3687,16 @@ impl MindCampaign {
     /// `Universe.updateLoadout` for a core type (empty file clears it).
     #[func]
     pub fn update_loadout(&mut self, core: GString, file: GString) -> bool {
-        let Some(campaign) = self.campaign.as_mut() else {
-            return false;
-        };
+        let core_name = core.to_string();
         let file_name = file.to_string();
         let file_name = (!file_name.is_empty()).then_some(file_name.as_str());
-        campaign
-            .universe
-            .update_loadout(&mut self.settings, &core.to_string(), file_name);
+        let Some(()) = self.with_campaign_mut(|campaign, settings| {
+            campaign
+                .universe
+                .update_loadout(settings, &core_name, file_name);
+        }) else {
+            return false;
+        };
         self.persist();
         true
     }
@@ -3250,10 +3705,11 @@ impl MindCampaign {
     /// the stored loadout + launch resources (`PlanetDialog.playSelected`).
     #[func]
     pub fn clear_loadout_info(&mut self) -> bool {
-        let Some(campaign) = self.campaign.as_mut() else {
+        let Some(()) = self.with_campaign_mut(|campaign, settings| {
+            campaign.universe.clear_loadout_info(settings);
+        }) else {
             return false;
         };
-        campaign.universe.clear_loadout_info(&mut self.settings);
         self.persist();
         true
     }
@@ -3277,20 +3733,27 @@ impl MindCampaign {
             return false;
         };
         let planet_name = planet.to_string();
-        let Some(campaign) = self.campaign.as_mut() else {
+        let stacks: Vec<(String, i32)> = stacks
+            .iter()
+            .filter_map(|stack| stack.item.clone().map(|item| (item, stack.amount)))
+            .collect();
+        // T1: mutate the single live campaign; `Sector.removeItems` ->
+        // `addItems` -> `saveInfo()` (`Sector.java:207-231`) persists the
+        // record right away (the PAR-0085 launch cost must stick even while
+        // a sector runs).
+        let Some(true) = self.with_campaign_mut(|campaign, settings| {
+            let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+                return false;
+            };
+            let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+                return false;
+            };
+            record.remove_items(stacks.iter().cloned());
+            let _ = record.save_info(settings, &planet_name);
+            true
+        }) else {
             return false;
         };
-        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
-            return false;
-        };
-        let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
-            return false;
-        };
-        record.remove_items(
-            stacks
-                .iter()
-                .filter_map(|stack| stack.item.clone().map(|item| (item, stack.amount))),
-        );
         self.persist();
         true
     }
@@ -3651,16 +4114,24 @@ fn parse_loadout_stacks(
 /// Launch payload split: the chosen schematic index (`Schematics.all`, `None`
 /// for the items-only fallback) and the `stacks` array JSON for
 /// `MindSimHost.place_launch_loadout`.
-fn parse_launch_payload(json: &str) -> (Option<i32>, String) {
+/// Parses the launcher launch payload (`PlanetDialog` `playSelected`):
+/// `(schematic index, origin sector id, stacks JSON)`.
+fn parse_launch_payload(json: &str) -> (Option<i32>, Option<u16>, String) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
-        return (None, String::from("[]"));
+        return (None, None, String::from("[]"));
     };
     let schematic = value
         .get("schematic")
         .and_then(serde_json::Value::as_i64)
         .map(|index| index as i32);
+    // `Control.playNewSector` (`Control.java:573-578`): `info.origin =
+    // info.destination = origin`; absent -> no origin (a free launch).
+    let origin = value
+        .get("origin")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|origin| u16::try_from(origin).ok());
     let stacks = value.get("stacks").cloned().unwrap_or(value);
-    (schematic, stacks.to_string())
+    (schematic, origin, stacks.to_string())
 }
 
 /// Clears one campaign sector's persisted base/items

@@ -189,12 +189,17 @@ impl Planet {
 
         // `Planet.init`: applyDefaultRules(campaignRules) copies the assigned
         // defaults into the live rules, then `loadRules` overrides from settings.
+        // Java `Planet.applyDefaultRules` (`Planet.java:308-309`) yields
+        // `CampaignRules` all-false except Erekir's fog/hideSpawns/rtsAI
+        // (`CampaignRules.java:7-16`); Serpulo's `allowSectorInvasion` /
+        // `allowLegacyLaunchPads` only gate whether the player may toggle them,
+        // they are not the defaults.
         let defaults = CampaignRules {
             fog: def.campaign_rule_defaults.fog,
             hide_spawns: def.campaign_rule_defaults.hide_spawns,
             rts_ai: def.campaign_rule_defaults.rts_ai,
-            sector_invasion: def.allow_sector_invasion,
-            legacy_launch_pads: def.allow_legacy_launch_pads,
+            sector_invasion: false,
+            legacy_launch_pads: false,
             clear_sector_on_lose: def.clear_sector_on_lose,
             ..CampaignRules::default()
         };
@@ -592,6 +597,25 @@ mod tests {
         assert_eq!(sector.preset, Some(ground_zero.id));
         assert_eq!(sector.preset_difficulty, 1.0);
         assert_eq!(sector.preset_capture_wave, 10);
+    }
+
+    /// H04 T4: Java `Planet.applyDefaultRules` yields `CampaignRules` all-false
+    /// except Erekir's fog/hideSpawns/rtsAI (`Planet.java:308-309`,
+    /// `CampaignRules.java:7-16`); Serpulo's `allowSectorInvasion`/
+    /// `allowLegacyLaunchPads` only gate player toggles, they are not defaults.
+    #[test]
+    fn serpulo_campaign_rule_defaults_match_java() {
+        let registry = registry();
+        let serpulo_def = registry.planet_by_name("serpulo").unwrap();
+        let serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
+        assert!(!serpulo.campaign_rules.sector_invasion);
+        assert!(!serpulo.campaign_rules.legacy_launch_pads);
+        assert!(!serpulo.campaign_rules.fog);
+        let erekir_def = registry.planet_by_name("erekir").unwrap();
+        let erekir = Planet::from_def(&registry, erekir_def, 0.0);
+        assert!(erekir.campaign_rules.fog, "erekir keeps its defaults");
+        assert!(!erekir.campaign_rules.hide_spawns);
+        assert!(erekir.campaign_rules.rts_ai);
     }
 
     #[test]

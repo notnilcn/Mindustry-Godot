@@ -29,7 +29,7 @@ use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::rts_ai::{self, EnemyStat, MAX_TARGETS_CHECKED, RtsBuilding, RtsLiveUnit};
 use crate::ai::{BaseBuildInput, BaseRegistry, Cost};
 use crate::content::registries::blocks::BlockFlag;
-use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId};
+use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId, LiquidId, PlanetId, UnitTypeId};
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
@@ -59,6 +59,19 @@ pub struct SessionSync {
     pub spawn_count: i32,
 }
 
+/// Content unlock queued by the production/liquid paths (H04 T2), resolved
+/// host-side into the tech tree (`UnlockableContent.unlock()` ->
+/// `UnlockEvent` -> `Control.java:160-174`). `Unit` is pushed by H01 T3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnlockRef {
+    /// An item was produced/dumped.
+    Item(ItemId),
+    /// A liquid was dumped.
+    Liquid(LiquidId),
+    /// A unit was produced (`UnitTypeId`; H01 T3 pushes this).
+    Unit(UnitTypeId),
+}
+
 /// Shared campaign hook state: the live session snapshot plus the deferred
 /// `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the core and
 /// miner paths (consumed by [`campaign_tick_system`]).
@@ -76,6 +89,11 @@ pub struct CampaignHookQueues {
     pub core_deltas: Vec<(ItemId, i32)>,
     /// Pending `handleProduction` deltas `(item, amount)`.
     pub production_deltas: Vec<(ItemId, i32)>,
+    /// Pending content unlocks (`produced()`/`dumpLiquid()`).
+    pub unlocks: Vec<UnlockRef>,
+    /// Pending `SectorInfo.handleItemImport` deltas `(item, amount)` queued by
+    /// landing pads (H04 T7).
+    pub imports: Vec<(ItemId, i32)>,
 }
 
 impl Default for CampaignHookQueues {
@@ -89,6 +107,8 @@ impl Default for CampaignHookQueues {
             allow_core_unloaders: true,
             core_deltas: Vec::new(),
             production_deltas: Vec::new(),
+            unlocks: Vec::new(),
+            imports: Vec::new(),
         }
     }
 }
@@ -170,6 +190,17 @@ pub fn reset_campaign_core_hooks(world: &mut World) {
         state.allow_core_unloaders = true;
         state.core_deltas.clear();
         state.production_deltas.clear();
+        state.unlocks.clear();
+        state.imports.clear();
+    }
+}
+
+/// Dedupe key for [`UnlockRef`] (content kind, dense id).
+fn unlock_sort_key(unlock: &UnlockRef) -> (u8, u16) {
+    match unlock {
+        UnlockRef::Item(id) => (0, id.raw()),
+        UnlockRef::Liquid(id) => (1, id.raw()),
+        UnlockRef::Unit(id) => (2, id.raw()),
     }
 }
 
@@ -245,6 +276,12 @@ pub struct CampaignRuntime {
     /// rules): set by G06's `setrule`, the `Call.setRules` relay and the
     /// universe invasion; `Sim::tick` drains it (T5).
     pub rules_world_dirty: bool,
+    /// Newly produced content queued for the host to unlock through the tech
+    /// tree (`UnlockRef`; drained by `MindCampaign.take_unlocked_content`).
+    pub pending_unlocks: Vec<UnlockRef>,
+    /// Destination sector records queued by `launch_payload_system` for a host
+    /// `save_info` flush (legacy launch pads; H04 T6).
+    pub pending_info_saves: Vec<(PlanetId, u16)>,
 }
 
 impl CampaignRuntime {
@@ -262,6 +299,8 @@ impl CampaignRuntime {
             pending_derelict_team: None,
             pending_time_destroy: Vec::new(),
             rules_world_dirty: false,
+            pending_unlocks: Vec::new(),
+            pending_info_saves: Vec::new(),
         }
     }
 
@@ -287,6 +326,36 @@ pub fn rules_of(world: &World) -> Option<&Rules> {
     world
         .get_resource::<CampaignRuntime>()
         .map(|runtime| &runtime.session.rules)
+}
+
+/// `Universe.runTurn` played-sector invasion (`Universe.java:550-555`): restart
+/// the live waves (`winWave`/`waves`/`attackMode=false`) and re-derive the
+/// planet campaign rules on the live session, marking the world for the
+/// `Sim::apply_rules_to_world` drain.
+pub fn apply_played_invasions(
+    runtime: &mut CampaignRuntime,
+    events: &[crate::game::universe::CampaignEvent],
+) {
+    for event in events {
+        if let crate::game::universe::CampaignEvent::SectorInvasion {
+            planet,
+            played: true,
+            win_wave,
+            ..
+        } = event
+            && let Some(planet_record) = runtime.campaign.planet(*planet)
+        {
+            runtime.session.rules.win_wave = *win_wave;
+            runtime.session.rules.waves = true;
+            runtime.session.rules.attack_mode = false;
+            planet_record.campaign_rules.apply_planet(
+                planet_record,
+                &mut runtime.session.rules,
+                true,
+            );
+            runtime.rules_world_dirty = true;
+        }
+    }
 }
 
 /// Registers the live world's core buildings into the session team registry and
@@ -360,7 +429,9 @@ pub fn sync_session_with_sim(
     for (team, plans) in carried_plans {
         session.teams.get(TeamId(team)).plans = plans;
     }
-    sync.spawn_count = map_spawns.max(sync.wave_cores as i32);
+    // `WaveSpawner.countSpawns()` (`WaveSpawner.java:49-51`) counts ground spawn
+    // tiles only; enemy cores are added by `Logic.checkGameState`, never here.
+    sync.spawn_count = map_spawns;
     session.spawn_count = sync.spawn_count;
     session.enemies = 0;
     // `Logic.play` starting-items half: with the cores registered, clear the
@@ -478,7 +549,21 @@ pub fn campaign_tick_system(world: &mut World) {
             state.allow_core_unloaders = runtime.session.rules.allow_core_unloaders;
             let core_deltas = std::mem::take(&mut state.core_deltas);
             let production_deltas = std::mem::take(&mut state.production_deltas);
+            let unlocks = std::mem::take(&mut state.unlocks);
+            let imports = std::mem::take(&mut state.imports);
             drop(state);
+            // Produced/dumped content unlocks (`UnlockableContent.unlock()`
+            // -> `UnlockEvent`): dedupe into the runtime queue for the host.
+            let mut seen: std::collections::BTreeSet<(u8, u16)> = runtime
+                .pending_unlocks
+                .iter()
+                .map(unlock_sort_key)
+                .collect();
+            for unlock in unlocks {
+                if seen.insert(unlock_sort_key(&unlock)) {
+                    runtime.pending_unlocks.push(unlock);
+                }
+            }
             if let Some((planet, sector_id)) = runtime.session.sector
                 && let Some(sector) = runtime.campaign.sector_mut(planet, sector_id)
             {
@@ -499,6 +584,12 @@ pub fn campaign_tick_system(world: &mut World) {
                         .get_resource::<ContentIndex>()
                         .and_then(|content| content.item_names.get(index).cloned())
                 };
+                // Landing-pad arrivals record `handleItemImport` (H04 T7).
+                for (item, amount) in imports {
+                    if let Some(name) = name_of(item.index()) {
+                        sector.info.handle_item_import(&name, amount);
+                    }
+                }
                 let item_count = world
                     .get_resource::<ContentIndex>()
                     .map(|content| content.item_names.len())
