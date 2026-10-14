@@ -292,6 +292,51 @@ pub fn collect_turret_loops(
     }
 }
 
+/// `Weapon.update` continuous-weapon `SoundLoop` (`Weapon.java:381-421`):
+/// appends one loop source per live continuous mount (`vela`, `navanax`).
+///
+/// Keys are `entity.to_bits() ^ (1 << 63) ^ ((index + 1) << 56)`; unit
+/// entities never set bit 63 (only packed building entities can), so the keys
+/// cannot collide with [`collect_turret_loops`].
+pub fn collect_weapon_loops(world: &World, out: &mut Vec<TurretLoopSource>) {
+    for (_, entity) in sorted_entities(world) {
+        if world.get::<UnitCore>(entity).is_some_and(|core| core.dead) {
+            continue;
+        }
+        let Some(unit_weapons) = world.get::<crate::weapons::UnitWeapons>(entity) else {
+            continue;
+        };
+        let unit_pos = world.get::<Pos>(entity).copied();
+        for (index, weapon) in unit_weapons.weapons.iter().enumerate() {
+            if !weapon.continuous || weapon.shoot_sound.is_none_or_unset() {
+                continue;
+            }
+            let Some(mount) = unit_weapons.mounts.get(index) else {
+                continue;
+            };
+            // `mount.bullet != null && mount.bullet.isAdded()`.
+            let bullet = mount
+                .bullet
+                .filter(|bullet| world.get_entity(*bullet).is_ok());
+            let position = bullet
+                .and_then(|bullet| world.get::<Pos>(bullet).copied())
+                .or(unit_pos);
+            let Some(position) = position else {
+                continue;
+            };
+            out.push(TurretLoopSource {
+                key: entity.to_bits() ^ (1u64 << 63) ^ ((index as u64 + 1) << 56),
+                sound: weapon.shoot_sound,
+                base_volume: 1.0,
+                x: position.x,
+                y: position.y,
+                play: bullet.is_some(),
+                volume_scl: 1.0,
+            });
+        }
+    }
+}
+
 /// Everything `SoundControl.update` reads from the live game state (G07 T7).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AudioGameState {
@@ -537,6 +582,71 @@ mod tests {
             "snow volume {}",
             out[0].volume
         );
+    }
+
+    /// H07 T11 (`Weapon.java:381-421`): a live continuous mount reports
+    /// `play = true` at its bullet; with no bullet it reports the unit
+    /// position and `play = false`.
+    #[test]
+    fn continuous_weapon_loop_tracks_mount_bullet() {
+        use crate::ai::UnitHarness;
+
+        let mut harness = UnitHarness::new(32, 32, 7);
+        let vela = harness.spawn("vela", 0, 64.0, 64.0, 0.0).expect("vela");
+        let index = {
+            let world = &harness.build.world;
+            let weapons = world
+                .get::<crate::weapons::UnitWeapons>(vela)
+                .expect("weapons");
+            weapons
+                .weapons
+                .iter()
+                .position(|weapon| weapon.continuous && !weapon.shoot_sound.is_none_or_unset())
+                .expect("continuous weapon")
+        };
+        let key = |entity: Entity, index: usize| {
+            entity.to_bits() ^ (1u64 << 63) ^ ((index as u64 + 1) << 56)
+        };
+
+        // No bullet: the source exists with `play = false` at the unit.
+        let mut out = Vec::new();
+        collect_weapon_loops(&harness.build.world, &mut out);
+        let source = out
+            .iter()
+            .find(|source| source.key == key(vela, index))
+            .expect("continuous source");
+        assert!(!source.play);
+        assert_eq!((source.x, source.y), (64.0, 64.0));
+        assert_eq!(source.base_volume, 1.0);
+
+        // A live bullet at another position: `play = true` at the bullet.
+        let bullet = harness.build.world.spawn((Pos { x: 80.0, y: 90.0 },)).id();
+        {
+            let mut weapons = harness
+                .build
+                .world
+                .get_mut::<crate::weapons::UnitWeapons>(vela)
+                .expect("weapons");
+            weapons.mounts[index].bullet = Some(bullet);
+        }
+        let mut out = Vec::new();
+        collect_weapon_loops(&harness.build.world, &mut out);
+        let source = out
+            .iter()
+            .find(|source| source.key == key(vela, index))
+            .expect("continuous source");
+        assert!(source.play);
+        assert_eq!((source.x, source.y), (80.0, 90.0));
+
+        // Despawned bullet: off again.
+        let _ = harness.build.world.despawn(bullet);
+        let mut out = Vec::new();
+        collect_weapon_loops(&harness.build.world, &mut out);
+        let source = out
+            .iter()
+            .find(|source| source.key == key(vela, index))
+            .expect("continuous source");
+        assert!(!source.play);
     }
 
     #[test]

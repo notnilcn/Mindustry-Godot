@@ -3648,6 +3648,9 @@ impl MindSimHost {
             return;
         };
         mind_core::audio::frame::collect_turret_loops(&self.sim.ecs.0, content, out);
+        // H07 T11: continuous-weapon `SoundLoop`s (vela/navanax) append to the
+        // same per-key fade table.
+        mind_core::audio::frame::collect_weapon_loops(&self.sim.ecs.0, out);
     }
 
     /// T7: in-game music context state (rules/wave/boss/core hp; Rust-only).
