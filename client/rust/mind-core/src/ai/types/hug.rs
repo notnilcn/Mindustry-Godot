@@ -72,6 +72,7 @@ mod tests {
         };
         let mut contacted = false;
         for _ in 0..600 {
+            harness.vel_update(a);
             let mut ctx = AiCtx {
                 world: &mut harness.build.world,
                 grid: &harness.build.grid,

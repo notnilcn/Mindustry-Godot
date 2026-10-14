@@ -152,12 +152,26 @@ impl UnitHarness {
         snapshot(&self.build.world, entity)
     }
 
+    /// Integrates one unit's `vel` with tile collisions and drag
+    /// (`VelComp.update`, T4). [`Self::tick`] calls this before the controller;
+    /// tests that drive a controller directly call it once per simulated tick
+    /// to keep the Java `@MethodPriority(-1)` order.
+    pub fn vel_update(&mut self, entity: Entity) {
+        crate::entities::comp::unit::velocity::vel_update(
+            &mut self.build.world,
+            &self.build.grid,
+            &self.build.content,
+            entity,
+        );
+    }
+
     /// Advances one AI + movement + weapon + bullet tick.
     pub fn tick(&mut self) {
         let entities = self.units.clone();
         let team = self.path_team;
         for entity in entities {
             let before = self.build.world.get::<Pos>(entity).map(|p| (p.x, p.y));
+            self.vel_update(entity);
             let slot = self.build.world.get::<ControllerSlot>(entity).copied();
             if let Some(target) = slot.and_then(|slot| slot.target) {
                 let arrived = if slot.is_some_and(|slot| slot.kind == AiKind::Flying) {

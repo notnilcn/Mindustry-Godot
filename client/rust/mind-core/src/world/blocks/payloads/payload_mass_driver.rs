@@ -399,6 +399,19 @@ impl BuildingBehavior for PayloadMassDriverBehavior {
                     if build.charge >= self.charge_time {
                         let cx = build.turret_rotation.to_radians().cos() * self.length;
                         let cy = build.turret_rotation.to_radians().sin() * self.length;
+                        // `PayloadMassDriver.java:305`:
+                        // `shootSound.at(x, y, random(0.9, 1.1), 0.7)`.
+                        if let Some((sx, sy)) = crate::audio::sim::building_centre_of(world, e) {
+                            crate::audio::sim::emit_world_sound(
+                                world,
+                                crate::audio::SoundId::MASSDRIVER,
+                                sx,
+                                sy,
+                                0.7,
+                                1.0,
+                                0.1,
+                            );
+                        }
                         dispatch_handle_payload(world, target, e, payload);
                         if let Some(mut holder) = world.get_mut::<PayloadHolder>(e) {
                             holder.payload = None;
@@ -410,6 +423,23 @@ impl BuildingBehavior for PayloadMassDriverBehavior {
                             other.loaded = true;
                             other.turret_rotation = build.turret_rotation;
                             other.effect_delay_timer = 11.0;
+                        }
+                        // `PayloadMassDriver.java:186`:
+                        // `receiveSound.at(x, y, 1 + range(0.2), 0.7)`. Java plays
+                        // it when the 11-tick receive-effect delay expires; the
+                        // port has no receive-effect branch and plays it at
+                        // transfer time (deviation).
+                        if let Some((rx, ry)) = crate::audio::sim::building_centre_of(world, target)
+                        {
+                            crate::audio::sim::emit_world_sound(
+                                world,
+                                crate::audio::SoundId::MASSDRIVER_RECEIVE,
+                                rx,
+                                ry,
+                                0.7,
+                                1.0,
+                                0.2,
+                            );
                         }
                         if let Some(mut holder) = world.get_mut::<PayloadHolder>(target) {
                             holder.pay_vector = (-cx, -cy);

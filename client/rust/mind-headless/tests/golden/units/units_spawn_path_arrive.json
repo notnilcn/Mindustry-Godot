@@ -5,13 +5,13 @@
   "spawned": true,
   "ticks": 1500,
   "arrived": true,
-  "distance": 5.60699987411499,
+  "distance": 4.265999794006348,
   "hit_size": 8.0,
-  "x": 476.0350036621094,
-  "y": 476.0350036621094,
-  "rotation": 45.0,
+  "x": 476.9840087890625,
+  "y": 476.9840087890625,
+  "rotation": 0.0,
   "unit_count": 1,
   "units_created": 1,
   "units_removed": 0,
-  "checksum": "0adc28d71ce718ef"
+  "checksum": "681fa1948675b0b5"
 }

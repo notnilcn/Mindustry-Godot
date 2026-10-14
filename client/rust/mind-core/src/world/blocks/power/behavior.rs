@@ -68,6 +68,10 @@ pub struct GeneratorEnv {
     pub heat_env: f32,
     /// `Attribute.steam.env()` (Erekir vents; `turbine-condenser`).
     pub steam_env: f32,
+    /// `Attribute.water.env()` (H07 T9; rain +0.2, fog +0.05, sandstorm -0.1).
+    pub water_env: f32,
+    /// `Attribute.spores.env()` (H07 T9; sporestorm +1).
+    pub spores_env: f32,
     /// `Rules.reactorExplosions`.
     pub reactor_explosions: bool,
 }
@@ -81,17 +85,29 @@ impl Default for GeneratorEnv {
             light_env: 0.0,
             heat_env: 0.0,
             steam_env: 0.0,
+            water_env: 0.0,
+            spores_env: 0.0,
             reactor_explosions: true,
         }
     }
 }
 
-/// `Attribute.env()` for the two thermal-generator attributes this port models.
+/// `Attribute.env()` for the attributes the port carries traffic through
+/// (`Attribute.java:33`: `state.envAttrs.get(attribute)`).
 fn attribute_env(env: &GeneratorEnv, attribute: Attribute) -> f32 {
     match attribute {
+        Attribute::Heat => env.heat_env,
         Attribute::Steam => env.steam_env,
-        _ => env.heat_env,
+        Attribute::Light => env.light_env,
+        Attribute::Water => env.water_env,
+        Attribute::Spores => env.spores_env,
     }
+}
+
+/// `Attribute.env()` (`Attribute.java:33`) from the live world resource (H07
+/// T9 consumer seam for `SolidPump`/`AttributeCrafter`).
+pub fn env_attr(world: &World, attribute: Attribute) -> f32 {
+    attribute_env(&generator_env(world), attribute)
 }
 
 fn generator_env(world: &World) -> GeneratorEnv {

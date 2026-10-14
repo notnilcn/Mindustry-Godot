@@ -111,6 +111,8 @@ mod tests {
             team: 0,
         };
         update_flying_follow(&mut ctx, follower, &mut state);
+        // One `VelComp.update` pass: the controller only writes `vel` (T4).
+        harness.vel_update(follower);
         let before = harness.snapshot(follower).expect("alive");
         // The follower moved toward the leader's position.
         assert!(before.x > 40.0 || before.y > 40.0);

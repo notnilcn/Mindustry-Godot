@@ -621,6 +621,12 @@ pub(crate) fn hit_tile(
             target,
             heal_percent / 100.0 * max_health + heal_amount,
         );
+        // `BulletType.hitTile` (`BulletType.java:470-475`): `healSound.at(build,
+        // 1 + Mathf.range(0.1f), healSoundVolume)` at the building centre.
+        if let Some((hx, hy)) = crate::audio::sim::building_centre_of(ctx.world, target) {
+            let pitch = 1.0 + (ctx.rng.next_float(RngStream::Fx) * 2.0 - 1.0) * 0.1;
+            audio_sim::emit_bullet_heal(ctx.audio, hx, hy, pitch);
+        }
         behavior_hit(ctx, bullet, x, y, true);
     } else if !same_team && direct {
         behavior_hit(ctx, bullet, x, y, true);
@@ -649,15 +655,16 @@ pub(crate) fn hit_bullet(
     if def.hit_shake > 0.0 {
         ctx.fx.shake(def.hit_shake);
     }
-    // `BulletType.hit`: `hitSound.at(x, y, ...)` (plan 18 §2.3).
-    audio_sim::emit_bullet_hit(
-        ctx.audio,
-        def.hit_sound,
-        x,
-        y,
-        def.hit_sound_volume,
-        def.hit_sound_pitch,
-    );
+    // `BulletType.hit`: `hitSound.at(x, y, hitSoundPitch +
+    // Mathf.range(hitSoundPitchRange), hitSoundVolume)` (`BulletType.java:564`).
+    // The Fx draw happens only for audible bullets: Java draws from the global
+    // unseeded `Mathf`, so skipping the draw for `none`/`unset` keeps the
+    // view-only `Fx` stream minimal (deviation).
+    if !def.hit_sound.is_none_or_unset() {
+        let pitch = def.hit_sound_pitch
+            + (ctx.rng.next_float(RngStream::Fx) * 2.0 - 1.0) * def.hit_sound_pitch_range;
+        audio_sim::emit_bullet_hit(ctx.audio, def.hit_sound, x, y, def.hit_sound_volume, pitch);
+    }
     if create_frags && def.frag_on_hit {
         create_frags_of(ctx, bullet, x, y);
     }
@@ -714,8 +721,13 @@ pub(crate) fn despawn_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) {
     if despawn_shake > 0.0 {
         ctx.fx.shake(despawn_shake);
     }
-    // `BulletType.despawned`: `despawnSound.at(x, y)` (plan 18 §2.3).
-    audio_sim::emit_bullet_despawn(ctx.audio, despawn_sound, x, y, 1.0, 1.0);
+    // `BulletType.despawned` (`BulletType.java:658`): `despawnSound.at(b,
+    // 1f + Mathf.range(hitSoundPitchRange))`.
+    if !despawn_sound.is_none_or_unset() {
+        let pitch =
+            1.0 + (ctx.rng.next_float(RngStream::Fx) * 2.0 - 1.0) * def.hit_sound_pitch_range;
+        audio_sim::emit_bullet_despawn(ctx.audio, despawn_sound, x, y, 1.0, pitch);
+    }
 }
 
 /// `BulletType.removed`.
@@ -1452,7 +1464,6 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
         .get::<UnitTypeComp>(unit)
         .and_then(|comp| ctx.content.unit(comp.type_id));
     let knock_mult = type_def.map_or(1.0, |d| d.knockback_multiplier);
-    let hit_size = type_def.map_or(8.0, |d| d.hit_size);
     if knock_mult > 0.0 && knockback != 0.0 {
         let (ux, uy) = ctx
             .world
@@ -1465,16 +1476,12 @@ pub fn hit_entity(ctx: &mut CombatCtx<'_>, bullet: Entity, unit: Entity, health:
         } else {
             (uy - by).atan2(ux - bx)
         };
-        let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
         let (ix, iy) = if impact {
             (angle.cos() * len.abs(), angle.sin() * len.abs())
         } else {
             (angle.cos() * len, angle.sin() * len)
         };
-        if let Some(mut vel) = ctx.world.get_mut::<Vel>(unit) {
-            vel.x += ix / mass;
-            vel.y += iy / mass;
-        }
+        crate::entities::comp::unit::velocity::impulse(ctx.world, unit, ix, iy);
     }
     if status_chance >= 1.0 || ctx.rng.chance(RngStream::Sim, f64::from(status_chance)) {
         super::damage::status::apply_status(ctx.world, unit, status, status_duration);
@@ -1672,6 +1679,115 @@ mod tests {
                 .any(|event| event.event.sound() == Some(SoundId::EXPLOSION)),
             "collision must not emit despawnSound"
         );
+    }
+
+    /// H07 T4 (`BulletType.java:564`): `hitSound` pitch =
+    /// `hitSoundPitch + Mathf.range(hitSoundPitchRange)`; 50 hits with the
+    /// default `1 ± 0.1` must stay in range and vary.
+    #[test]
+    fn bullet_hit_pitch_varies_in_range() {
+        use crate::audio::{AudioEvent, SharedAudioLog};
+        use crate::content::registries::sound_meta::SoundId;
+
+        let log = SharedAudioLog::new();
+        let mut harness = CombatHarness::new(64, 16, 2);
+        harness.build.set_audio_sink(log.clone());
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        // One fresh wall per hit (a wall survives a single fuse hit).
+        for x in 10..60 {
+            assert!(harness.place(x, 8, wall, 0, true), "wall at ({x}, 8)");
+        }
+        for i in 0..50 {
+            let (x, y) = CombatHarness::tile_origin(9 + i, 8);
+            let _ = harness.spawn_bullet("fuse", x, y, 0.0, 1).expect("spawn");
+            for _ in 0..40 {
+                harness.step_bullets_only();
+            }
+        }
+        let pitches: Vec<f32> = log
+            .events()
+            .iter()
+            .filter_map(|ticked| match &ticked.event {
+                AudioEvent::At { sound, pitch, .. } if *sound == SoundId::EXPLOSION_ARTILLERY => {
+                    Some(*pitch)
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(pitches.len() >= 2, "hit sounds recorded: {pitches:?}");
+        for pitch in &pitches {
+            assert!((0.9..=1.1).contains(pitch), "pitch {pitch} outside range");
+        }
+        let first = pitches[0];
+        assert!(
+            pitches.iter().any(|pitch| (*pitch - first).abs() > 1.0e-6),
+            "pitches must vary: {pitches:?}"
+        );
+    }
+
+    /// H07 T4 (`BulletType.java:470-475`): a healing bullet hitting a damaged
+    /// friendly building plays `blockHeal` at the building centre
+    /// (`healSoundVolume = 0.9`, `pitch = 1 + Mathf.range(0.1)`).
+    #[test]
+    fn heal_bullet_plays_block_heal() {
+        use crate::audio::{AudioEvent, SharedAudioLog};
+        use crate::content::registries::bullets::{BulletDef, BulletKind};
+        use crate::content::registries::sound_meta::SoundId;
+
+        let log = SharedAudioLog::new();
+        let mut harness = CombatHarness::new(32, 32, 5);
+        harness.build.set_audio_sink(log.clone());
+        harness.build.rules.default_team = 1;
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(10, 8, wall, 0, true), "friendly wall");
+        let entity = harness.build_at(10, 8).expect("wall entity");
+        harness
+            .build
+            .world
+            .get_mut::<Health>(entity)
+            .expect("health")
+            .health = 100.0;
+        let mut def = BulletDef::new(BulletKind::Basic);
+        def.speed = 4.0;
+        def.lifetime = 60.0;
+        def.damage = 1.0;
+        def.heal_percent = 5.0;
+        def.collides_team = true;
+        let bullet = harness
+            .build
+            .content
+            .add_bullet(def)
+            .expect("heal bullet def");
+        let (x, y) = CombatHarness::tile_origin(9, 8);
+        let _ = harness.spawn_def(bullet, x, y, 0.0, 1).expect("spawn");
+        for _ in 0..40 {
+            harness.step_bullets_only();
+        }
+        let events = log.events();
+        let heals: Vec<&AudioEvent> = events
+            .iter()
+            .filter_map(|ticked| match &ticked.event {
+                AudioEvent::At { sound, .. } if *sound == SoundId::BLOCK_HEAL => {
+                    Some(&ticked.event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(heals.len(), 1, "one blockHeal: {events:?}");
+        let AudioEvent::At {
+            x,
+            y,
+            pitch,
+            volume,
+            ..
+        } = heals[0]
+        else {
+            unreachable!()
+        };
+        // Size-1 wall at (10,8): centre = tile*8, offset 0.
+        assert_eq!((*x, *y), (80.0, 64.0), "building centre");
+        assert_eq!(*volume, 0.9);
+        assert!((0.9..=1.1).contains(pitch), "blockHeal pitch {pitch}");
     }
 
     #[test]

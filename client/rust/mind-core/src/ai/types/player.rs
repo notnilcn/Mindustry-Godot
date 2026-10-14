@@ -68,7 +68,7 @@ pub fn update_player(
     let Some(mut input) = world.get_resource::<PlayerInput>().copied() else {
         return false;
     };
-    let Some(mut pos) = world.get::<Pos>(entity).copied() else {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
         return false;
     };
     let Some(mut vel) = world.get::<Vel>(entity).copied() else {
@@ -171,17 +171,14 @@ pub fn update_player(
         vel.y = target.1;
     }
 
-    // `VelComp.update`: `move(vel * Time.delta)` with `Time.delta == 1`.
-    pos.x += vel.x;
-    pos.y += vel.y;
+    // `VelComp.update` integrates `vel` on the next tick (the unit loop calls
+    // it before the controller); the player input only writes `vel`
+    // (`DesktopInput.updateMovement`).
 
     // `PlayerComp.update` (`PlayerComp.java:229-232`): the boost key lifts a
     // `canBoost` mech; `update_kinematics` consumes `UnitCore.boosting`.
     core.boosting = input.boosting;
 
-    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
-        *stored = pos;
-    }
     if let Some(mut stored) = world.get_mut::<Vel>(entity) {
         *stored = vel;
     }

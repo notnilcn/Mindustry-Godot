@@ -291,6 +291,18 @@ pub fn handle_payload(world: &mut World, to: Entity, data_entity: Entity) {
         driver.state = DriverState::Idle;
         driver.reload_counter = 1.0;
     }
+    // `MassDriver.java:342`: `receiveSound.at(x, y, 1 + range(0.2), 0.5)`.
+    if let Some((x, y)) = crate::audio::sim::building_centre_of(world, to) {
+        crate::audio::sim::emit_world_sound(
+            world,
+            crate::audio::SoundId::MASSDRIVER_RECEIVE,
+            x,
+            y,
+            0.5,
+            1.0,
+            0.2,
+        );
+    }
     let _ = world.despawn(data_entity);
 }
 
@@ -612,6 +624,18 @@ impl MassDriverBehavior {
             .map(|c| c.0.clone())
             .unwrap_or_else(|| Arc::new(TestBoltCarrier));
         carrier.fire(world, data, travel);
+        // `MassDriver.java:322`: `shootSound.at(x, y, 1 + range(0.2), 0.5)`.
+        if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+            crate::audio::sim::emit_world_sound(
+                world,
+                crate::audio::SoundId::MASSDRIVER,
+                x,
+                y,
+                0.5,
+                1.0,
+                0.2,
+            );
+        }
     }
 }
 
@@ -666,6 +690,79 @@ mod tests {
             .filter(|e| e.get::<DriverBulletData>().is_some())
             .count();
         assert_eq!(live, 0, "pool must have no live bolts");
+    }
+
+    /// H07 T2 (`MassDriver.java:322,342`): a shot plays `massdriver` at the
+    /// shooter and an arrival plays `massdriverReceive` at the receiver, each
+    /// volume 0.5, `pitch = 1 + range(0.2)`.
+    #[test]
+    fn shot_and_receive_play_sounds() {
+        use crate::audio::{AudioEvent, AudioSinkRes, SharedAudioLog, SoundId};
+
+        let mut harness = BuildHarness::new(64, 64, 7);
+        assume_power(&mut harness);
+        let log = SharedAudioLog::new();
+        harness
+            .world
+            .insert_resource(AudioSinkRes::new(log.clone()));
+        let driver = harness
+            .content()
+            .block_id("mass-driver")
+            .expect("mass-driver");
+        assert!(harness.place(8, 8, driver, 0, true));
+        assert!(harness.place(20, 8, driver, 0, true));
+        assert!(harness.configure(8, 8, ConfigValue::Point2(12, 0)));
+        let copper = harness.content().item_id("copper").expect("copper");
+        let from = harness.build_at(8, 8).expect("from");
+        harness
+            .world
+            .get_mut::<ItemModule>(from)
+            .expect("items")
+            .add(copper, 120, 120);
+        for _ in 0..600 {
+            harness.tick();
+        }
+        let events = log.events();
+        let by_sound = |sound: SoundId| -> Vec<&AudioEvent> {
+            events
+                .iter()
+                .filter_map(|ticked| match &ticked.event {
+                    AudioEvent::At { sound: s, .. } if *s == sound => Some(&ticked.event),
+                    _ => None,
+                })
+                .collect()
+        };
+        let shots = by_sound(SoundId::MASSDRIVER);
+        let receives = by_sound(SoundId::MASSDRIVER_RECEIVE);
+        assert_eq!(shots.len(), 1, "one massdriver shot: {events:?}");
+        assert_eq!(receives.len(), 1, "one massdriverReceive: {events:?}");
+        // Size-3 drivers at (8,8) and (20,8): centres 8*8 and 20*8, offset 0.
+        let AudioEvent::At {
+            x,
+            y,
+            pitch,
+            volume,
+            ..
+        } = shots[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!((*x, *y), (64.0, 64.0), "shooter centre");
+        assert_eq!(*volume, 0.5);
+        assert!((0.8..=1.2).contains(pitch), "shot pitch {pitch}");
+        let AudioEvent::At {
+            x,
+            y,
+            pitch,
+            volume,
+            ..
+        } = receives[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!((*x, *y), (160.0, 64.0), "receiver centre");
+        assert_eq!(*volume, 0.5);
+        assert!((0.8..=1.2).contains(pitch), "receive pitch {pitch}");
     }
 
     #[test]
