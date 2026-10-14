@@ -44,6 +44,22 @@ pub struct BuildRules {
     pub block_limits: IndexMap<(u8, BlockId), u32>,
     /// `Rules.env` (Java `Env` bits; `Vars.defaultEnv` = 233).
     pub env: i32,
+    /// Player-team static fog snapshot for `Build.validPlace`
+    /// (`Build.java:252`); `None` = fog off or not yet built.
+    pub static_fog_mask: Option<std::sync::Arc<StaticFogMask>>,
+}
+
+/// Player-team static fog snapshot for `Build.validPlace` (`Build.java:252`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticFogMask {
+    /// Team the bits belong to (the default team).
+    pub team: u8,
+    /// World width in tiles.
+    pub width: i32,
+    /// World height in tiles.
+    pub height: i32,
+    /// Discovered bits, row-major (`x + y * width`).
+    pub bits: crate::game::fog::FogBits,
 }
 
 impl Default for BuildRules {
@@ -63,6 +79,7 @@ impl Default for BuildRules {
             banned_blocks: Vec::new(),
             block_limits: IndexMap::new(),
             env: crate::io::json::rules::DEFAULT_ENV,
+            static_fog_mask: None,
         }
     }
 }

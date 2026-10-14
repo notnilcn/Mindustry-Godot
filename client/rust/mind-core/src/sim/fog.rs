@@ -4,10 +4,8 @@
 //! Live `FogControl` glue (`FogControl.java` + `Logic.java:533-535`): the
 //! `Sim` owns the resource, (re)initialises it on world load / rules apply,
 //! updates it once per tick before the entity pass and exposes the
-//! `isVisibleTile`/`isDiscovered` probes.
-//!
-//! The `BuildingComp.inFogTo`/`isDiscovered` bodies are private copies until
-//! T2 moves them into `crate::game::fog_gate` (the plan's order).
+//! `isVisibleTile`/`isDiscovered` probes. The `inFogTo`/`isDiscovered` gates
+//! live in `crate::game::fog_gate`.
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -19,8 +17,6 @@ use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::game::fog::{FogControl, FogSource, FogUnit};
 use crate::game::runtime::{CampaignRuntime, rules_of};
 use crate::sim::Sim;
-use crate::world::WorldGrid;
-use crate::world::darkness::{border_darkness, get_wall_darkness};
 
 impl Sim {
     /// `WorldLoadEvent` half: resets and sizes the fog for the current grid
@@ -29,11 +25,13 @@ impl Sim {
     pub fn reset_fog(&mut self) {
         let Some(rules) = rules_of(&self.ecs.0) else {
             self.ecs.0.remove_resource::<FogControl>();
+            self.refresh_static_fog_mask();
             return;
         };
         let (fog_on, static_fog) = (rules.fog, rules.static_fog);
         if !fog_on {
             self.ecs.0.remove_resource::<FogControl>();
+            self.refresh_static_fog_mask();
             return;
         }
         let is_campaign = self.is_campaign_session();
@@ -63,6 +61,7 @@ impl Sim {
             fog.on_world_load(width as u16, height as u16, fog_on, static_fog, &blocks);
             self.ecs.0.insert_resource(fog);
         }
+        self.refresh_static_fog_mask();
     }
 
     /// `Logic.update` -> `fogControl.update()` when `rules.fog`
@@ -108,9 +107,18 @@ impl Sim {
         };
 
         let tick = self.state.tick;
+        let mut static_dirty = false;
         if let Some(mut fog) = self.ecs.0.remove_resource::<FogControl>() {
             fog.update(tick, &teams, &blocks, &units, static_fog);
+            static_dirty = fog.static_dirty;
+            fog.static_dirty = false;
             self.ecs.0.insert_resource(fog);
+        }
+        // `Build.validPlace` (Build.java:252) reads the live static bits; the
+        // port snapshots them into `BuildRules` whenever they changed (or no
+        // snapshot exists yet).
+        if static_fog && (static_dirty || self.static_fog_mask_missing()) {
+            self.refresh_static_fog_mask();
         }
 
         // `updateFogVisibility` for the local player's team (single player =
@@ -293,6 +301,48 @@ impl Sim {
             .is_some_and(|runtime| runtime.session.is_campaign())
     }
 
+    /// Whether `BuildRules` has no static fog snapshot yet.
+    fn static_fog_mask_missing(&self) -> bool {
+        self.ecs
+            .0
+            .get_resource::<crate::world::limits::BuildRules>()
+            .is_some_and(|rules| rules.static_fog_mask.is_none())
+    }
+
+    /// Rebuilds `BuildRules.static_fog_mask` from the live static bits for the
+    /// default team (`Build.java:252`): `None` when fog is off, all-zero bits
+    /// while the player team has no fog data yet (Java `isDiscovered` returns
+    /// false without `FogData`).
+    fn refresh_static_fog_mask(&mut self) {
+        let (fog_on, static_fog, default_team) = match rules_of(&self.ecs.0) {
+            Some(rules) => (rules.fog, rules.static_fog, rules.default_team),
+            None => (false, false, 0),
+        };
+        let mask = if fog_on && static_fog {
+            let fog = self.ecs.0.get_resource::<FogControl>();
+            let (ww, wh) = fog.map_or((0, 0), |fog| (fog.ww as i32, fog.wh as i32));
+            let bits = fog
+                .and_then(|fog| fog.get_discovered(default_team))
+                .cloned()
+                .unwrap_or_else(|| crate::game::fog::FogBits::new((ww * wh).max(0) as usize));
+            Some(crate::world::limits::StaticFogMask {
+                team: default_team,
+                width: ww,
+                height: wh,
+                bits,
+            })
+        } else {
+            None
+        };
+        if let Some(mut rules) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+        {
+            rules.static_fog_mask = mask.map(std::sync::Arc::new);
+        }
+    }
+
     /// Chunked `BuildingComp.updateFogVisibility` pass
     /// (`FogControl.java:219-241`), default team only.
     fn update_fog_visibility(&mut self, default_team: u8) {
@@ -320,17 +370,9 @@ impl Sim {
         // Read phase: which of this tick's visited chunk is newly visible.
         let mut reveal: Vec<Entity> = Vec::new();
         {
-            let Some(fog) = self.ecs.0.get_resource::<FogControl>() else {
-                return;
-            };
             let Some(content) = sim_content(self) else {
                 return;
             };
-            let Some(rules) = rules_of(&self.ecs.0) else {
-                return;
-            };
-            let (fog_on, static_fog) = (rules.fog, rules.static_fog);
-            let is_ai_viewer = rules.team_is_ai(default_team, self.is_campaign_session());
             for step in 0..iterated {
                 let entity = buildings[(start + step) % size];
                 let Some(building) = self.ecs.0.get::<Building>(entity) else {
@@ -339,17 +381,12 @@ impl Sim {
                 if building.was_visible {
                     continue;
                 }
-                if !building_in_fog_to_local(
+                if !crate::game::fog_gate::building_in_fog_to(
                     &self.ecs.0,
-                    &self.grid,
                     content,
-                    fog,
+                    Some(&self.grid),
                     entity,
-                    building,
                     default_team,
-                    fog_on,
-                    static_fog,
-                    is_ai_viewer,
                 ) {
                     reveal.push(entity);
                 }
@@ -471,106 +508,6 @@ pub(crate) fn collect_fog_sources(
 /// core kinds, `BuildingComp.java:579-581`).
 pub(crate) fn building_fog_radius(_world: &World, def: &BlockDef, _e: Entity) -> f32 {
     def.fog_radius as f32
-}
-
-/// Private T1 copy of `BuildingComp.isDiscovered(viewer)`
-/// (`BuildingComp.java:315-333`); T2 replaces it with
-/// `crate::game::fog_gate::building_discovered`.
-#[allow(clippy::too_many_arguments)]
-fn building_discovered_local(
-    grid: &WorldGrid,
-    content: &ContentRegistry,
-    fog: &FogControl,
-    building: &Building,
-    viewer: u8,
-    fog_on: bool,
-    static_fog: bool,
-    is_ai_viewer: bool,
-) -> bool {
-    let (tx, ty) = (building.tile.x() as i32, building.tile.y() as i32);
-    // `state.rules.limitMapArea && world.getDarkness(tile.x, tile.y) >= 3`.
-    if grid.limit_area.is_some() {
-        let dark = (get_wall_darkness(grid, content, tx, ty) as f32).max(border_darkness(
-            grid,
-            grid.border_darkness,
-            grid.limit_area,
-            tx,
-            ty,
-        ));
-        if dark >= 3.0 {
-            return false;
-        }
-    }
-    if !static_fog || !fog_on || is_ai_viewer {
-        return true;
-    }
-    let Some(def) = content.block(building.block) else {
-        return true;
-    };
-    if def.size <= 2 {
-        return fog.is_discovered(viewer, tx, ty, static_fog, fog_on, is_ai_viewer);
-    }
-    let s = def.size / 2;
-    fog.is_discovered(viewer, tx, ty, static_fog, fog_on, is_ai_viewer)
-        || fog.is_discovered(viewer, tx - s, ty - s, static_fog, fog_on, is_ai_viewer)
-        || fog.is_discovered(viewer, tx - s, ty + s, static_fog, fog_on, is_ai_viewer)
-        || fog.is_discovered(viewer, tx + s, ty + s, static_fog, fog_on, is_ai_viewer)
-        || fog.is_discovered(viewer, tx + s, ty - s, static_fog, fog_on, is_ai_viewer)
-}
-
-/// Private T1 copy of `BuildingComp.inFogTo(viewer)`
-/// (`BuildingComp.java:2231-2249`); T2 replaces it with
-/// `crate::game::fog_gate::building_in_fog_to`.
-#[allow(clippy::too_many_arguments)]
-fn building_in_fog_to_local(
-    world: &World,
-    grid: &WorldGrid,
-    content: &ContentRegistry,
-    fog: &FogControl,
-    entity: Entity,
-    building: &Building,
-    viewer: u8,
-    fog_on: bool,
-    static_fog: bool,
-    is_ai_viewer: bool,
-) -> bool {
-    let Some(team) = world.get::<TeamComp>(entity).map(|team| team.team) else {
-        return false;
-    };
-    if team == viewer || !fog_on {
-        return false;
-    }
-    if !building_discovered_local(
-        grid,
-        content,
-        fog,
-        building,
-        viewer,
-        fog_on,
-        static_fog,
-        is_ai_viewer,
-    ) {
-        return true;
-    }
-    let Some(def) = content.block(building.block) else {
-        return true;
-    };
-    let (tx, ty) = (building.tile.x() as i32, building.tile.y() as i32);
-    let (size, offset) = (def.size.max(1), def.size_offset);
-    for x in 0..size {
-        for y in 0..size {
-            if fog.is_visible_tile(
-                viewer,
-                tx + x + offset,
-                ty + y + offset,
-                fog_on,
-                is_ai_viewer,
-            ) {
-                return false;
-            }
-        }
-    }
-    true
 }
 
 #[cfg(test)]

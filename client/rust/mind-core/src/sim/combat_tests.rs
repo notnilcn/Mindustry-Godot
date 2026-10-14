@@ -3931,3 +3931,205 @@ fn fog_update_creates_the_resource_when_missing() {
     assert!(sim.fog_visible_tile(1, 25, 20));
     assert!(sim.fog_discovered(1, 25, 20));
 }
+
+/// H09 T2: a player turret cannot target a unit hidden in fog; a friendly unit
+/// that reveals it restores the target (`Units.closestEnemy` `inFogTo`).
+#[test]
+fn turret_ignores_unit_in_fog() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.disable_unit_cap = true;
+    });
+    // The duo is placed before the fog reset: after it, the static-fog mask
+    // (all-zero until something is discovered) would reject the placement,
+    // mirroring Java's `fogControl.isDiscovered == false` for every tile.
+    let duo = place(&mut sim, 10, 10, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    sim.reset_fog();
+    sim.spawn_live_unit("dagger", 2, 25.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 180.0)
+        .expect("enemy dagger");
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .and_then(|state| state.target);
+    assert!(
+        target.is_none(),
+        "the duo does not target a unit hidden in fog"
+    );
+
+    // A team-1 dagger next to the enemy reveals it (radius 21).
+    sim.spawn_live_unit("dagger", 1, 24.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 0.0)
+        .expect("friendly dagger");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .and_then(|state| state.target);
+    assert!(target.is_some(), "the revealed dagger becomes the target");
+}
+
+/// H09 T2: AI teams ignore fog (`FogControl.isVisibleTile`: `team.isAI()`).
+#[test]
+fn ai_team_sees_through_fog() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    let duo = place(&mut sim, 20, 20, "duo", 2);
+    feed(&mut sim, duo, "copper", 10);
+    sim.spawn_live_unit("dagger", 1, 35.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 180.0)
+        .expect("player dagger");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .and_then(|state| state.target);
+    assert!(target.is_some(), "the wave team (AI) sees through fog");
+}
+
+/// H09 T2: `BlockIndexer.find_enemy_tile` skips enemy buildings on
+/// undiscovered tiles (`BlockIndexer.java:468`); a revealing unit restores it.
+#[test]
+fn find_enemy_tile_skips_undiscovered() {
+    use crate::ai::block_indexer::{BlockIndexer, BlockPriority};
+    use crate::sim::unit_runtime::UnitRuntime;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    place(&mut sim, 40, 40, "core-shard", 2);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let mut indexer = BlockIndexer::new();
+    indexer.rebuild(&mut sim.ecs.0, &runtime.content);
+    let before = indexer
+        .find_enemy_tile(
+            &sim.ecs.0,
+            &runtime.content,
+            1,
+            10.0 * 8.0,
+            10.0 * 8.0,
+            4000.0,
+            &[BlockPriority::Core],
+        )
+        .map(|tile| (tile.x(), tile.y()));
+    sim.ecs.0.insert_non_send(runtime);
+    assert_eq!(before, None, "undiscovered enemy core is skipped");
+
+    sim.spawn_live_unit("dagger", 1, 40.0 * 8.0 + 4.0, 40.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let mut indexer = BlockIndexer::new();
+    indexer.rebuild(&mut sim.ecs.0, &runtime.content);
+    let after = indexer
+        .find_enemy_tile(
+            &sim.ecs.0,
+            &runtime.content,
+            1,
+            10.0 * 8.0,
+            10.0 * 8.0,
+            4000.0,
+            &[BlockPriority::Core],
+        )
+        .map(|tile| (tile.x(), tile.y()));
+    sim.ecs.0.insert_non_send(runtime);
+    assert_eq!(after, Some((40, 40)), "the discovered core is found");
+}
+
+/// H09 T2: `Build.validPlace` rejects tiles the player team has not discovered
+/// (`Build.java:252`); a revealing unit unlocks the tile.
+#[test]
+fn placement_rejected_in_static_fog() {
+    use crate::sim::unit_runtime::UnitRuntime;
+    use crate::world::build::valid_place;
+    use crate::world::limits::{BlockCounter, BuildRules};
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    sim.tick().expect("tick");
+
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let table = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::BlockTable>()
+        .expect("block table");
+    let rules = sim.ecs.0.get_resource::<BuildRules>().expect("build rules");
+    let counter = sim.ecs.0.get_resource::<BlockCounter>().expect("counter");
+    let wall = runtime.content.block_id("copper-wall").expect("wall");
+    let before = valid_place(
+        &runtime.content,
+        table,
+        rules,
+        counter,
+        &sim.grid,
+        wall,
+        1,
+        0,
+        30,
+        30,
+    );
+    sim.ecs.0.insert_non_send(runtime);
+    assert!(!before, "an undiscovered tile rejects the placement");
+
+    sim.spawn_live_unit("dagger", 1, 30.0 * 8.0 + 4.0, 30.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let table = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::BlockTable>()
+        .expect("block table");
+    let rules = sim.ecs.0.get_resource::<BuildRules>().expect("build rules");
+    let counter = sim.ecs.0.get_resource::<BlockCounter>().expect("counter");
+    let after = valid_place(
+        &runtime.content,
+        table,
+        rules,
+        counter,
+        &sim.grid,
+        wall,
+        1,
+        0,
+        30,
+        30,
+    );
+    sim.ecs.0.insert_non_send(runtime);
+    assert!(after, "the revealed tile accepts the placement");
+}

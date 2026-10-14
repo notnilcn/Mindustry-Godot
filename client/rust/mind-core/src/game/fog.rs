@@ -195,6 +195,9 @@ pub struct FogControl {
     /// `UnitComp.lastFogPos` equivalents: last tile index a unit fog event was
     /// pushed for (lookups only, never iterated for game logic).
     pub last_fog_pos: indexmap::IndexMap<bevy_ecs::entity::Entity, i32>,
+    /// A static draw changed the discovery buffer (T2 rebuilds the placement
+    /// mask and clears this).
+    pub static_dirty: bool,
 }
 
 impl Default for FogControl {
@@ -218,6 +221,7 @@ impl FogControl {
             just_loaded: false,
             last_entity_update_index: 0,
             last_fog_pos: indexmap::IndexMap::new(),
+            static_dirty: false,
         }
     }
 
@@ -317,6 +321,7 @@ impl FogControl {
         self.unit_event_queue.clear();
         self.dynamic_events.clear();
         self.last_fog_pos.clear();
+        self.static_dirty = false;
     }
 
     /// `pushStaticBlocks`.
@@ -470,6 +475,7 @@ impl FogControl {
             if let Some(data) = self.fog[team].as_mut() {
                 let (ww, wh) = (self.ww, self.wh);
                 circle(&mut data.static_data, x, y, radius, ww, wh);
+                self.static_dirty = true;
             }
         }
     }
@@ -575,6 +581,7 @@ impl FogControl {
             }
             self.fog[team as usize] = Some(data);
         }
+        self.static_dirty = true;
     }
 
     fn world_len(&self) -> usize {

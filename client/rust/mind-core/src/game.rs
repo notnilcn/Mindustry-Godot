@@ -7,6 +7,7 @@
 pub mod attack_indicators;
 pub mod campaign_rules;
 pub mod fog;
+pub mod fog_gate;
 pub mod gamemode;
 pub mod map_markers;
 pub mod map_objectives;

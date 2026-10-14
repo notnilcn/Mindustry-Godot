@@ -209,6 +209,19 @@ pub fn valid_place_at(
             if !grid.tiles.in_bounds(tx, ty) {
                 return false;
             }
+            // `state.rules.staticFog && state.rules.fog &&
+            // !fogControl.isDiscovered(team, wx, wy)` (Build.java:252): the
+            // player-team static fog snapshot (T2).
+            if let Some(mask) = rules.static_fog_mask.as_ref()
+                && mask.team == team
+                && (tx < 0
+                    || ty < 0
+                    || tx >= mask.width
+                    || ty >= mask.height
+                    || !mask.bits.get((tx + ty * mask.width) as usize))
+            {
+                return false;
+            }
             let tile = grid.tile(tx, ty);
             // Air and the same block are always placeable (upstream
             // `Build.validPlace`'s "same block, same rotation" bypass; the port
