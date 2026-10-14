@@ -2596,6 +2596,166 @@ fn cutscene_headless_noop() {
     );
 }
 
+/// H06 T5: an unchanged `setrule` does not request a world re-derive
+/// (frozenForest/fungalPass re-set `waveTimer` every tick).
+#[test]
+fn setrule_unchanged_is_not_dirty() {
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    let mut rules = test_rules();
+    rules.wave_timer = true;
+    rules.waves = true;
+    install_campaign_session(&mut sim, rules);
+    // Sabotage the derived world copy: if the setrule re-derived the world,
+    // `sync_build_rules` would copy `rules.waves = true` back.
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("build rules")
+        .waves = false;
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "setrule waveTimer true 0 0 0 0\nsetrule waves true 0 0 0 0\nstop\n",
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(runtime.session.rules.wave_timer);
+    assert!(runtime.session.rules.waves);
+    assert!(
+        !runtime.rules_world_dirty,
+        "no change -> no re-derive request"
+    );
+    assert!(
+        !sim.ecs
+            .0
+            .get_resource::<BuildRules>()
+            .expect("build rules")
+            .waves,
+        "the world copy was not re-synced"
+    );
+}
+
+/// H06 T5: a real change marks the session dirty so the world re-derive runs
+/// and `sync_build_rules` reaches `BuildRules`.
+#[test]
+fn setrule_waves_resyncs_build_rules() {
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules()); // waves = false
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("build rules")
+        .waves = false;
+    place_world_processor(&mut sim, 10, 10, "setrule waves true 0 0 0 0\nstop\n");
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(runtime.session.rules.waves);
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<BuildRules>()
+            .expect("build rules")
+            .waves,
+        "the changed rule drove the world re-sync"
+    );
+}
+
+/// H06 T5: per-team `setrule` marks the session dirty (the world re-derive
+/// runs; `grid.border_darkness` is one of its writes).
+#[test]
+fn per_team_rule_changes_mark_dirty() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    // `@sharded` resolves through the content globals.
+    let content = crate::world::harness::BuildHarness::load_content();
+    crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
+    // Out-of-band world copy of a re-derived field.
+    sim.grid.border_darkness = false;
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "setrule buildSpeed 2 @sharded 0 0 0\nstop\n",
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert_eq!(
+        runtime.session.rules.team_rule(1).build_speed_multiplier,
+        2.0
+    );
+    assert!(
+        sim.grid.border_darkness,
+        "the world re-derive ran (dirty was set on the per-team change)"
+    );
+}
+
+/// H06 T5: `mapArea` re-enables a building disabled outside the previous area
+/// (Java `World.checkMapArea`, World.java:469-481).
+#[test]
+fn map_area_reenables_outside_buildings() {
+    use crate::entities::comp::Building;
+
+    let mut sim = Sim::new(3, 300, 300, BlockId::AIR, BlockId::AIR);
+    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+    sim.grid.fill(stone, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime");
+    let mut rules = test_rules();
+    rules.limit_map_area = true;
+    rules.limit_x = 0;
+    rules.limit_y = 0;
+    rules.limit_width = 20;
+    rules.limit_height = 20;
+    rules.disable_outside_area = true;
+    install_campaign_session(&mut sim, rules.clone());
+    // Place before the limit is applied to the grid (placement outside the
+    // rect is refused once `grid.limit_area` is set).
+    let conveyor = place(&mut sim, "conveyor", 25, 25);
+    sim.apply_rules_to_world(&rules);
+    assert!(
+        !sim.ecs
+            .0
+            .get::<Building>(conveyor)
+            .expect("building")
+            .enabled,
+        "disabled outside the 20x20 area"
+    );
+    place_world_processor(&mut sim, 10, 10, "setrule mapArea 10 0 0 50 50\nstop\n");
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.ecs
+            .0
+            .get::<Building>(conveyor)
+            .expect("building")
+            .enabled,
+        "re-enabled by checkMapArea(prev)"
+    );
+}
+
 /// `message announce 2 @wait` blocks until the announcement timer expires.
 #[test]
 fn message_wait_blocks_until_announcement_expires() {

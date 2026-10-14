@@ -1203,22 +1203,23 @@ pub fn run_set_rule(
             &p4,
         )
     })
-    .unwrap_or(false);
-    if !applied {
+    .unwrap_or_default();
+    if !applied.applied {
         return;
     }
     with_wave(world, |wave_ref, wavetime_ref| {
         *wave_ref = wave;
         *wavetime_ref = wavetime;
     });
-    if rule == LogicRule::MapArea {
-        // G04 T5's world re-derive (`grid.limit_area` + border darkness) runs
-        // from `Sim::tick` when `rules_world_dirty` is set. G02 T8's
-        // `sync_build_rules` is not on main yet (noted in the summary).
-        if let Some(mut runtime) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-        {
-            runtime.rules_world_dirty = true;
-        }
+    // A real change re-derives the live world state (`Sim::apply_rules_to_world`
+    // via `rules_world_dirty`): per-team rules reach `BuildRules`, `mapArea`
+    // re-enables buildings outside the previous rect and every building
+    // re-checks `allowUpdate`. Unchanged rules (frozenForest/fungalPass run
+    // `setrule waveTimer x` every tick) cost nothing.
+    if applied.changed
+        && let Some(mut runtime) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    {
+        runtime.rules_world_dirty = true;
     }
 }
 
