@@ -366,6 +366,66 @@ impl BlockRenderer {
                     }
                     continue;
                 }
+                // `UnitFactory.draw` / `Reconstructor.draw` (H03 T9): base
+                // `region`, the reconstructor input sides (`-in`; the Java
+                // neighbour-blend test is approximated by the rotation
+                // fallback) and the output arrow at `rotdeg()`. The construct
+                // preview + top region draw in `unit_build.rs` at
+                // `Layer.blockOver` (`UnitFactory.java:380-397`,
+                // `Reconstructor.java:287-317`).
+                if matches!(def.kind, BlockKind::UnitFactory | BlockKind::Reconstructor) {
+                    if let Some(base) = self.resolver.find(&def.region) {
+                        push(
+                            &base,
+                            base.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            0.0,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    let factory_size = def.size.max(1);
+                    if def.kind == BlockKind::Reconstructor
+                        && let Some(in_region) = self
+                            .resolver
+                            .find(&format!("{}-in", def.name))
+                            .or_else(|| self.resolver.find(&format!("factory-in-{factory_size}")))
+                    {
+                        push(
+                            &in_region,
+                            in_region.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            f32::from(rotation) * 90.0,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    if let Some(out_region) = self
+                        .resolver
+                        .find(&format!("{}-out", def.name))
+                        .or_else(|| self.resolver.find(&format!("factory-out-{factory_size}")))
+                    {
+                        push(
+                            &out_region,
+                            out_region.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            f32::from(rotation) * 90.0,
+                            0xffff_ffff,
+                            1.0,
+                        );
+                    }
+                    dynamic += 1;
+                    continue;
+                }
                 // Door/switch/sorter/item-source/unloader state sprites belong
                 // to the static building cache: those kinds are `drawCached`
                 // and `!drawDynamic`, so `visible_blocks` never yields them.

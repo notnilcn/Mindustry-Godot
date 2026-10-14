@@ -197,6 +197,12 @@ pub fn sin_scl(x: f32, scl: f32, mag: f32) -> f32 {
     (x / scl).sin() * mag
 }
 
+/// `Drawf.construct` sweep-line centre x (`Drawf.java:597-601`):
+/// `x + Mathf.sin(time, 20, size / 2)`.
+pub fn construct_line_x(cx: f32, time: f32, size: f32) -> f32 {
+    cx + sin_scl(time, 20.0, size / 2.0)
+}
+
 /// `Mathf.absin(in, scl, mag) = (sin(in, scl * 2, mag) + mag) / 2`
 /// (`Mathf.java:78-80`). Note the `scl * 2` factor: the full period is
 /// `4 * PI * scl` ticks (`Drawf.java:343` uses it for the placement pulse).
@@ -576,5 +582,16 @@ mod tests {
         }
         // Different seeds are not a constant function.
         assert_ne!(random_seed_range(1, 2.0), random_seed_range(2, 2.0));
+    }
+
+    /// H03 T9 (`Drawf.construct`): at `sin = 1` the sweep line sits at the
+    /// footprint's right edge and returns to the centre-cos path.
+    #[test]
+    fn construct_line_sweeps_the_footprint() {
+        let size = 20.0;
+        let quarter = 20.0 * std::f32::consts::FRAC_PI_2;
+        assert!((construct_line_x(80.0, quarter, size) - 90.0).abs() < 1e-4);
+        let three_quarter = 20.0 * std::f32::consts::FRAC_PI_2 * 3.0;
+        assert!((construct_line_x(80.0, three_quarter, size) - 70.0).abs() < 1e-4);
     }
 }

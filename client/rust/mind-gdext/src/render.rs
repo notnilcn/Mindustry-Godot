@@ -64,6 +64,7 @@ mod shaders;
 mod shadow;
 mod shields;
 mod status;
+mod unit_build;
 mod unit_overlays;
 mod units;
 mod weather;
@@ -250,6 +251,9 @@ pub struct MindWorldRenderer {
     block_extras: Option<Gd<block_extras::BlockExtras>>,
     /// `world/draw/*` extras, additive blend (`Layer.block` band; H03 T8).
     block_extras_add: Option<Gd<block_extras::BlockExtras>>,
+    /// Unit factory/reconstructor build preview (`Layer.blockOver` band;
+    /// H03 T9).
+    unit_build: Option<Gd<unit_build::UnitBuildRenderer>>,
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
@@ -320,6 +324,7 @@ impl INode2D for MindWorldRenderer {
             fires: None,
             block_extras: None,
             block_extras_add: None,
+            unit_build: None,
             shadow: None,
             light: None,
             debug: None,
@@ -606,6 +611,17 @@ impl MindWorldRenderer {
             // code-instantiated: the additive half of the same pass.
             block_band.clone().add_child(&additive);
             self.block_extras_add = Some(additive.clone());
+        }
+        // Unit factory / reconstructor build preview at `Layer.blockOver`
+        // (`UnitFactory.draw` -> `Drawf.construct`; H03 T9).
+        if let Some(over_band) = self.band_node_at(BandKey::base(Layer::BlockOver)) {
+            let mut node = unit_build::UnitBuildRenderer::new_alloc();
+            node.set_name("UnitBuildRenderer");
+            node.bind_mut().set_shader(self.shaders.get("unitbuild"));
+            // code-instantiated: one build-preview pass; the node count is
+            // fixed by the pipeline, not by content.
+            over_band.clone().add_child(&node);
+            self.unit_build = Some(node.clone());
         }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
             && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))
