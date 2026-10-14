@@ -1034,7 +1034,10 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         liquid_consumed: 1.0 / 60.0,
         range: 0.0,
         reload: 10.0,
-        max_ammo: 0,
+        // `Turret.maxAmmo = 30` (`Turret.java:47`); item turrets that do not
+        // override it inherit 30 (`foreshadow` 40, `titan` `ammoPerShot * 3`,
+        // `scathe` 45). Non-item turrets never take ammo items.
+        max_ammo: if kind == TurretKind::Item { 30 } else { 0 },
         ammo_per_shot: 1,
         consume_ammo_once: true,
         rotate_speed: 10.0,
@@ -1637,6 +1640,9 @@ pub fn config_for(
                     item_ammo("surge-alloy", "scathe_surge")?,
                 ]),
             );
+            // `Blocks.java:5674`: `maxAmmo = 45` (the only item turret besides
+            // `foreshadow`/`titan` that overrides the 30 default).
+            c.max_ammo = 45;
             // `range = max(spawnUnit.lifetime * spawnUnit.speed)` over the ammo
             // (carbide missile: 4.6 * 330 = 1518).
             c.range = 1518.0;

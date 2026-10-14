@@ -199,6 +199,25 @@ pub fn apply_status(world: &mut World, entity: Entity, status: StatusId, duratio
     });
 }
 
+/// `UnitComp.unapply(effect)` (`Unit.java`): drops the status entry and its
+/// interval-damage accumulator. The per-tick multiplier update re-derives from
+/// the remaining entries.
+pub fn unapply_status(world: &mut World, entity: Entity, status: StatusId) {
+    let Some(mut comp) = world.get_mut::<StatusComp>(entity) else {
+        return;
+    };
+    if let Some(index) = comp
+        .statuses
+        .iter()
+        .position(|entry| entry.effect == status)
+    {
+        comp.statuses.remove(index);
+        if index < comp.damage_times.len() {
+            comp.damage_times.remove(index);
+        }
+    }
+}
+
 /// Advances every unit's status list one tick (`StatusComp.update`).
 ///
 /// Iteration is `(EntitySeq, entity.index())` ordered so damage application and
