@@ -129,6 +129,14 @@ pub struct UnitRuntime {
     pub bullets_created: u64,
     /// Total bullets removed.
     pub bullets_removed: u64,
+    /// `AvoidanceProcess` occupancy grid (`getAvoidance()`), one `i32` per
+    /// tile: `max(i32::MAX - unit.id)` over every ground-layer AI unit
+    /// (`AvoidanceProcess.java:52-106`). Rebuilt at the start of every tick
+    /// while active; queried via `get_target_tile`'s avoidance term.
+    pub avoidance: Vec<i32>,
+    /// `AvoidanceProcess.active`: lazily set by the first
+    /// `getTargetTile(.., avoidanceId)` request (`AvoidanceProcess.java:40-48`).
+    pub avoidance_active: bool,
 }
 
 impl UnitRuntime {
@@ -167,6 +175,8 @@ impl UnitRuntime {
             units_removed: 0,
             bullets_created: 0,
             bullets_removed: 0,
+            avoidance: Vec::new(),
+            avoidance_active: false,
         }
     }
 
@@ -2206,6 +2216,75 @@ fn collision_layer(
     }
 }
 
+/// `AvoidanceProcess.begin`/`process` (`AvoidanceProcess.java:52-106`): marks
+/// every ground-layer unit's collision radius on the occupancy grid with
+/// `i32::MAX - unit.id`, so a lower-id unit's tile "wins".
+///
+/// The port rebuilds the whole grid at the start of the tick from the current
+/// positions — the end of the previous tick, exactly the buffer Java's
+/// double-buffered queries read — instead of the async request/process split.
+fn rebuild_avoidance(world: &World, runtime: &mut UnitRuntime) {
+    let width = runtime.grid.width().max(0) as usize;
+    let height = runtime.grid.height().max(0) as usize;
+    runtime.avoidance.clear();
+    runtime.avoidance.resize(width * height, 0);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let entities = runtime.units.clone();
+    for entity in entities {
+        let Some(def) = world
+            .get::<UnitTypeComp>(entity)
+            .and_then(|comp| runtime.content.unit(comp.type_id))
+        else {
+            continue;
+        };
+        let Some(team) = world.get::<TeamComp>(entity).map(|comp| comp.team) else {
+            continue;
+        };
+        // `team.team.isAI() && !team.team.rules().rtsAi`
+        // (`AvoidanceProcess.java:61-62`).
+        if crate::entities::comp::unit::lifecycle::team_ai_flags(world, team) != Some((true, false))
+        {
+            continue;
+        }
+        // `unit.collisionLayer() == PhysicsProcess.layerGround` (`:63`).
+        if collision_layer(world, def, entity) != 0 {
+            continue;
+        }
+        let Some(pos) = world.get::<Pos>(entity).copied() else {
+            continue;
+        };
+        // Java `unit.id`; the port's id is `EntitySeq` (low 31 bits used as
+        // `i32`, documented in `update_ground_ai`).
+        let id = world
+            .get::<EntitySeq>(entity)
+            .map_or(0, |seq| (seq.0 & 0x7fff_ffff) as i32);
+        // `hitSize * unitCollisionRadiusScale / tilesize * scaling` with
+        // `scaling = 2f` (`AvoidanceProcess.java:68-70`).
+        let rad =
+            def.hit_size * crate::ai::unit_group::UNIT_COLLISION_RADIUS_SCALE / TILE_SIZE * 2.0;
+        let rad2 = rad * rad;
+        let r = (rad.ceil() as i32).clamp(1, 20);
+        let rx = WorldGrid::to_tile(pos.x);
+        let ry = WorldGrid::to_tile(pos.y);
+        for dx in -r..=r {
+            for dy in -r..=r {
+                let x = rx + dx;
+                let y = ry + dy;
+                if x < 0 || y < 0 || x >= width as i32 || y >= height as i32 {
+                    continue;
+                }
+                if (dx * dx + dy * dy) as f32 > rad2 {
+                    continue;
+                }
+                let slot = &mut runtime.avoidance[x as usize + y as usize * width];
+                *slot = (*slot).max(i32::MAX - id);
+            }
+        }
+    }
+}
+
 /// `PhysicsProcess` (`PhysicsProcess.java:188-247`): one relaxation pass over
 /// every physics-enabled unit, pairing only same-layer bodies.
 ///
@@ -2347,6 +2426,12 @@ pub fn unit_update_system(world: &mut World) {
     // One target index per tick (buildings by team + live units), reused by
     // every unit's acquisition pass. Bullets/fires/puddles never enter it.
     let queries = TargetQueries::build(world, &runtime.content);
+    // `AvoidanceProcess`: while active, rebuild the occupancy grid from the
+    // current positions before any unit moves this tick (queries read the
+    // previous frame's buffer; the tick-start grid is that data).
+    if runtime.avoidance_active {
+        rebuild_avoidance(world, &mut runtime);
+    }
     // `state.rules` fields `GroundAI` reads, snapshotted once per tick so the
     // unit loop can mutate the world freely.
     let ground_rules = world
@@ -4311,19 +4396,40 @@ fn update_ground_ai(
         return;
     };
     // Copy out of the content borrow before touching the rest of the runtime.
-    let (max_range, type_range, target_air, target_ground, target_under_blocks, cost) = (
+    let ground_layer = collision_layer(world, def, entity) == 0;
+    let (
+        max_range,
+        type_range,
+        target_air,
+        target_ground,
+        target_under_blocks,
+        cost,
+        speed,
+        hit_size,
+    ) = (
         def.max_range,
         def.range,
         def.target_air,
         def.target_ground,
         def.target_under_blocks,
         unit_flowfield_cost(def),
+        def.speed,
+        def.hit_size,
     );
 
     let mut state = world
         .get::<GroundAiState>(entity)
         .copied()
         .unwrap_or_default();
+    // `GroundAI.stuckRange/stuckThreshold` (`GroundAI.java:18,24`): "if it
+    // hasn't moved the stuck range in twice the time it should have taken,
+    // it's stuck".
+    let stuck_range = TILE_SIZE * 1.5;
+    let stuck_threshold = (stuck_range * 2.0 / speed).max(1.0);
+    // `pathfind(fieldCore, true, stuckTime >= stuckThreshold)`
+    // (`GroundAI.java:54`) with `avoidance && unit.collisionLayer() ==
+    // layerGround` (`AIController.java:155`).
+    let avoid = ground_layer && state.stuck_time >= stuck_threshold;
 
     // `AIController.retarget()` (AIController.java:289): 40 ticks without a
     // target, 90 with one.
@@ -4422,28 +4528,40 @@ fn update_ground_ai(
                 let targets = core_targets
                     .entry(team)
                     .or_insert_with(|| enemy_core_targets(world, runtime, team, Some(rules)));
+                // `AvoidanceProcess.getAvoidance()` lazily activates on the
+                // first avoidance request (`AvoidanceProcess.java:40-48`).
+                if avoid {
+                    runtime.avoidance_active = true;
+                }
+                let avoid_id = world
+                    .get::<EntitySeq>(entity)
+                    .map_or(0, |seq| (seq.0 & 0x7fff_ffff) as i32);
                 let UnitRuntime {
                     grid,
                     content,
                     pathfinder,
+                    avoidance,
                     ..
                 } = &mut *runtime;
+                let avoid_arg = avoid.then_some((avoidance.as_slice(), avoid_id));
                 let _ = pathfind_field(
-                    world, grid, content, pathfinder, team, entity, cost, targets, true,
+                    world, grid, content, pathfinder, team, entity, cost, targets, true, avoid_arg,
                 );
             }
         }
     }
 
-    // Stuck bookkeeping (`GroundAI.java:63-85`): a movement-less `stuckTime`
-    // used only for the flowfield avoidance flag, which the port does not
-    // consume yet, so no nearby-unit propagation is written.
+    // Stuck bookkeeping (`GroundAI.java:63-85`): the threshold-crossing tick
+    // propagates the stuck marker to nearby same-team GroundAI units.
     if moved {
-        let stuck_range = TILE_SIZE * 1.5;
         let dx = pos.x - state.stuck_x;
         let dy = pos.y - state.stuck_y;
         if dx * dx + dy * dy <= stuck_range * stuck_range {
+            let before = state.stuck_time;
             state.stuck_time += 1.0;
+            if before < stuck_threshold && state.stuck_time >= stuck_threshold {
+                propagate_stuck(world, runtime, entity, team, hit_size, pos.x, pos.y);
+            }
         } else {
             state.stuck_x = pos.x;
             state.stuck_y = pos.y;
@@ -4476,6 +4594,66 @@ fn update_ground_ai(
         *stored = state;
     } else if world.get_entity(entity).is_ok() {
         world.entity_mut(entity).insert(state);
+    }
+}
+
+/// `GroundAI.java:67-75`: on the threshold-crossing tick, mark nearby
+/// same-team `GroundAI` units as stuck at their own position with
+/// `max(1, stuckRange * 2 / other.speed) + 1`. Java's `Units.nearby` is a
+/// quadtree query over the team's units (box `±radius/2`, inclusive).
+fn propagate_stuck(
+    world: &mut World,
+    runtime: &UnitRuntime,
+    entity: Entity,
+    team: u8,
+    hit_size: f32,
+    x: f32,
+    y: f32,
+) {
+    // `radius = unit.hitSize * Vars.unitCollisionRadiusScale * 2f`.
+    let scale = crate::ai::unit_group::UNIT_COLLISION_RADIUS_SCALE;
+    let radius = hit_size * scale * 2.0;
+    let half = radius / 2.0;
+    let mut writes: Vec<(Entity, f32, f32, f32)> = Vec::new();
+    for &other in &runtime.units {
+        if other == entity {
+            continue;
+        }
+        if world.get::<TeamComp>(other).map(|comp| comp.team) != Some(team) {
+            continue;
+        }
+        // `other.controller() instanceof GroundAI` (`GroundAI.java:70`).
+        if world.get::<ControllerSlot>(other).map(|slot| slot.kind) != Some(AiKind::Ground) {
+            continue;
+        }
+        let Some(other_pos) = world.get::<Pos>(other).copied() else {
+            continue;
+        };
+        if (other_pos.x - x).abs() > half || (other_pos.y - y).abs() > half {
+            continue;
+        }
+        let Some(other_def) = world
+            .get::<UnitTypeComp>(other)
+            .and_then(|comp| runtime.content.unit(comp.type_id))
+        else {
+            continue;
+        };
+        // `other.within(unit, radius + other.hitSize * unitCollisionRadiusScale)`.
+        let reach = radius + other_def.hit_size * scale;
+        let dx = other_pos.x - x;
+        let dy = other_pos.y - y;
+        if dx * dx + dy * dy > reach * reach {
+            continue;
+        }
+        let threshold = (TILE_SIZE * 1.5 * 2.0 / other_def.speed).max(1.0) + 1.0;
+        writes.push((other, other_pos.x, other_pos.y, threshold));
+    }
+    for (other, stuck_x, stuck_y, threshold) in writes {
+        if let Some(mut state) = world.get_mut::<GroundAiState>(other) {
+            state.stuck_x = stuck_x;
+            state.stuck_y = stuck_y;
+            state.stuck_time = threshold;
+        }
     }
 }
 
@@ -5050,7 +5228,7 @@ fn update_hug_ai(
             ..
         } = &mut *runtime;
         let _ = pathfind_field(
-            world, grid, content, pathfinder, team, entity, cost, targets, true,
+            world, grid, content, pathfinder, team, entity, cost, targets, true, None,
         );
     }
 
@@ -6575,6 +6753,53 @@ mod tests {
         let pos = *sim.ecs.0.get::<Pos>(unit).expect("pos");
         assert!(done, "the detour order finished (at {}, {})", pos.x, pos.y);
         assert!(pos.x > 21.0 * 8.0, "crossed to the far side of the wall");
+    }
+
+    /// H01 T11 corner-jam regression (pass-2 open item): the original
+    /// `routes_around_walls` geometry — destination east of the wall on the
+    /// same row, so the detour rounds a wall end where the unit's rounded
+    /// tile flips. Covered by the T4 `line_clear`/`segment_clear` fixes;
+    /// eight sub-tile/end-row variants were re-probed and none jams
+    /// (2026-10-15, session 3).
+    #[test]
+    fn command_ai_ground_order_around_wall_mid_row() {
+        let (mut sim, dagger) = player_team_world(48);
+        let wall = block_id(&sim, "copper-wall");
+        for y in 4..=28 {
+            assert!(
+                sim.command(SimCommand::Place {
+                    x: 20,
+                    y,
+                    block: wall,
+                    rotation: 0,
+                    team: 1,
+                    player: None,
+                })
+                .is_ok(),
+                "wall placed"
+            );
+        }
+        let (unit, id) = spawn_dagger(&mut sim, dagger, 12.0 * 8.0, 16.0 * 8.0, 1);
+        move_order(&mut sim, id, 28.0 * 8.0, 16.0 * 8.0);
+        let mut done = false;
+        let mut last = (0.0, 0.0);
+        for _ in 0..6000 {
+            sim.tick().expect("tick");
+            let slot = sim
+                .ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(unit)
+                .expect("slot");
+            if let Some(pos) = sim.ecs.0.get::<Pos>(unit) {
+                last = (pos.x, pos.y);
+            }
+            if slot.target.is_none() {
+                done = true;
+                break;
+            }
+        }
+        assert!(done, "the wall-end order finished (at {:?})", last);
+        assert!(last.0 > 21.0 * 8.0, "crossed past the wall (at {:?})", last);
     }
 
     /// PAR-0140: the player's own unit (`Player` controller) is listed but

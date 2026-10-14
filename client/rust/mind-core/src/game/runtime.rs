@@ -1054,14 +1054,6 @@ pub fn team_ai_system(world: &mut World) {
                         return None;
                     }
                     let data = runtime.session.teams.get_or_null(*team)?;
-                    // `var rules = data.team.rules(); if(rules.fillItems && ...)`
-                    // (`Logic.java:553-554`): only teams whose rule sets
-                    // `fillItems` are refilled. Without this gate the player
-                    // team's core was filled with `i32::MAX / 2` of every item,
-                    // corrupting sector saves (H06 T20 blocker).
-                    if !rules.team_rule(team.0).fill_items {
-                        return None;
-                    }
                     let core = data.core()?;
                     let building = world.get::<crate::entities::comp::Building>(core)?;
                     let instance = table.and_then(|table| table.instance(building.block))?;
@@ -1106,7 +1098,46 @@ pub fn team_ai_system(world: &mut World) {
             if rule.rts_ai {
                 rts_ai::ensure_rts_ai(runtime.session.teams.get(team));
             }
-            let rts_ready = rule.rts_ai
+            // `RtsAI.update` (`RtsAI.java:72-77`): the 120-tick `timeUpdate`
+            // gate runs `assignSquads()` and `checkBuilding()`. Java calls
+            // `update` for every active rtsAi team every tick, so the gate is
+            // ticked here; the squad half below only runs when idle units exist.
+            let rts_fired = rule.rts_ai
+                && runtime
+                    .session
+                    .teams
+                    .get(team)
+                    .rts_ai
+                    .as_mut()
+                    .is_some_and(|rts| rts.update_timer(rts_ai::UPDATE_INTERVAL));
+            if rts_fired {
+                // `checkBuilding` (`RtsAI.java:86-99`): on its 420-tick
+                // `timerSpawn` the team's first core block spawns one core unit
+                // up to `data.cores.size` units.
+                if let Some((name, type_id)) = core_unit_type(world, &runtime.session.teams, team.0)
+                {
+                    let core_units = live_type_count(world, team.0, type_id);
+                    let cores = runtime
+                        .session
+                        .teams
+                        .get_or_null(team)
+                        .map_or(0, |data| data.cores.len() as i32);
+                    let spawn =
+                        runtime
+                            .session
+                            .teams
+                            .get(team)
+                            .rts_ai
+                            .as_mut()
+                            .is_some_and(|rts| {
+                                rts.check_building_spawn(rule.ai_core_spawn, core_units, cores)
+                            });
+                    if spawn {
+                        spawn_random_core_unit(world, &mut runtime, team.0, name);
+                    }
+                }
+            }
+            let rts_ready = rts_fired
                 && units.iter().any(|row| row.team == team.0 && row.idle)
                 && runtime
                     .session
@@ -1121,11 +1152,11 @@ pub fn team_ai_system(world: &mut World) {
                     .collect();
                 let targets = team_ai_targets(&buildings, team.0);
                 let damaged = team_ai_damaged(&buildings, team.0);
-                let enemy_stats = team_ai_enemy_stats(&units, team.0);
+                let enemy_stats = enemy_stats_for(world, &units, &buildings, team.0);
                 let Some(rts) = runtime.session.teams.get(team).rts_ai.as_mut() else {
                     continue;
                 };
-                let orders = rts.plan_live_orders(&rts_ai::RtsLiveInput {
+                let orders = rts.plan_live_orders_now(&rts_ai::RtsLiveInput {
                     min_squad: rule.rts_min_squad,
                     max_squad: rule.rts_max_squad,
                     min_weight: rule.rts_min_weight,
@@ -1153,6 +1184,11 @@ pub fn team_ai_system(world: &mut World) {
             }
             if rule.build_ai {
                 run_team_base_builder(world, &mut runtime, team, &rule, &rules);
+            }
+            // `Logic.java:574-584`: `prebuildAi` defenders, one core unit per
+            // core, flagged with the core's packed position.
+            if rule.prebuild_ai && !rules.editor {
+                run_prebuild_ai_defenders(world, &mut runtime, team.0);
             }
         }
     }
@@ -1386,6 +1422,8 @@ fn run_team_base_builder(
     else {
         return;
     };
+    let mut actions = crate::ai::BaseBuildActions::default();
+    let mut core_unit: Option<(&'static str, UnitTypeId)> = None;
     {
         let table = world.get_resource::<BlockTable>();
         let build_rules = world.get_resource::<BuildRules>();
@@ -1395,6 +1433,7 @@ fn run_team_base_builder(
                 grid,
                 content,
                 pathfinder,
+                units,
                 ..
             } = &mut unit_runtime;
             let field = pathfinder.get_field(Cost::Ground, team.0, &enemy_cores);
@@ -1402,6 +1441,28 @@ fn run_team_base_builder(
                 session, ai_rng, ..
             } = runtime;
             let data = session.teams.get(team);
+            // `data.core().block`'s `unitType` (`BaseBuilderAI.java:62`): the
+            // core-unit content of the team's first core.
+            core_unit = data
+                .core()
+                .and_then(|core| core_unit_of(world, content, table, core));
+            // `data.countType(block.unitType)` (`BaseBuilderAI.java:63`).
+            let core_unit_count = core_unit.map_or(0, |(_, type_id)| {
+                units
+                    .iter()
+                    .filter(|&&entity| {
+                        world.get_entity(entity).is_ok_and(|entity_ref| {
+                            entity_ref
+                                .get::<UnitTypeComp>()
+                                .is_some_and(|comp| comp.type_id == type_id)
+                                && entity_ref
+                                    .get::<TeamComp>()
+                                    .is_some_and(|comp| comp.team == team.0)
+                                && entity_ref.get::<UnitCore>().is_some_and(|core| !core.dead)
+                        })
+                    })
+                    .count() as i32
+            });
             if crate::ai::ensure_build_ai(data) {
                 log::info!("team ai: base builder enabled for team {}", team.0);
             }
@@ -1418,13 +1479,11 @@ fn run_team_base_builder(
                 spawns: &spawn_tiles,
                 enemy_core_field: Some(field),
                 enemy_cores: &enemy_cores,
-                // `CoreBlock.unitType` content is not on `BlockDef` yet, so the
-                // core-unit cap stays at zero (plan note).
-                core_unit_count: 0,
+                core_unit_count,
                 bases: catalog.0.as_ref(),
                 rng: ai_rng,
             };
-            let _ = crate::ai::update_base_build(data, &mut input);
+            actions = crate::ai::update_base_build(data, &mut input);
             while let Some(plan) = data.plans.pop_front() {
                 if plan.removed {
                     continue;
@@ -1438,6 +1497,16 @@ fn run_team_base_builder(
                 });
             }
         }
+    }
+    // `BaseBuilderAI.update` host side effects (`BaseBuilderAI.java:53-70`),
+    // applied before the unit runtime goes back into the world.
+    if actions.fill_core_items {
+        fill_first_core_items(world, runtime, &unit_runtime.content, team.0);
+    }
+    if actions.spawn_core_unit
+        && let Some((name, _)) = core_unit
+    {
+        spawn_core_unit_at_random_core(&mut unit_runtime, world, runtime, team.0, name);
     }
     world.insert_non_send(unit_runtime);
     if queued.is_empty() {
@@ -1453,6 +1522,317 @@ fn run_team_base_builder(
         team.0,
         queued.len()
     );
+}
+
+/// `data.core().block`'s unit type (`CoreBlock.unitType`): the unit name from
+/// the block table and its content id (`BaseBuilderAI.java:62`,
+/// `RtsAI.java:90`, `Logic.java:576`).
+fn core_unit_of(
+    world: &World,
+    content: &ContentRegistry,
+    table: &BlockTable,
+    core: Entity,
+) -> Option<(&'static str, UnitTypeId)> {
+    let block = world.get::<BuildingComp>(core)?.block;
+    let name = table.get(block)?.def.core_unit?;
+    let id = content.unit_by_name(name)?.id;
+    Some((name, id))
+}
+
+/// The team's first core's unit type (`data.core()`), resolved live.
+fn core_unit_type(world: &World, teams: &Teams, team: u8) -> Option<(&'static str, UnitTypeId)> {
+    let core = teams.get_or_null(TeamId(team))?.core()?;
+    let unit_runtime = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>()?;
+    let table = world.get_resource::<BlockTable>()?;
+    core_unit_of(world, &unit_runtime.content, table, core)
+}
+
+/// Live count of `type_id` units owned by `team` (`TeamData.countType`).
+fn live_type_count(world: &World, team: u8, type_id: UnitTypeId) -> i32 {
+    let Some(unit_runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+        return 0;
+    };
+    unit_runtime
+        .units
+        .iter()
+        .filter(|&&entity| {
+            world.get_entity(entity).is_ok_and(|entity_ref| {
+                entity_ref
+                    .get::<UnitTypeComp>()
+                    .is_some_and(|comp| comp.type_id == type_id)
+                    && entity_ref
+                        .get::<TeamComp>()
+                        .is_some_and(|comp| comp.team == team)
+                    && entity_ref.get::<UnitCore>().is_some_and(|core| !core.dead)
+            })
+        })
+        .count() as i32
+}
+
+/// `BaseBuilderAI.java:53-58`: every tick, fill the team's first core with
+/// every item to `getMaximumAccepted` (unlike `Logic.fillItems` there is no
+/// planet/hidden filter upstream).
+fn fill_first_core_items(
+    world: &mut World,
+    runtime: &CampaignRuntime,
+    content: &ContentRegistry,
+    team: u8,
+) {
+    let Some(core) = runtime
+        .session
+        .teams
+        .get_or_null(TeamId(team))
+        .and_then(|data| data.core())
+    else {
+        return;
+    };
+    let Some(block) = world.get::<BuildingComp>(core).map(|comp| comp.block) else {
+        return;
+    };
+    let amounts: Vec<(ItemId, i32)> = {
+        let Some(table) = world.get_resource::<BlockTable>() else {
+            return;
+        };
+        let Some(instance) = table.instance(block) else {
+            return;
+        };
+        content
+            .items()
+            .iter()
+            .map(|item| {
+                (
+                    item.id,
+                    instance.behavior.get_maximum_accepted(world, core, item.id),
+                )
+            })
+            .collect()
+    };
+    if let Some(mut module) = world.get_mut::<ItemModule>(core) {
+        for (item, amount) in amounts {
+            module.set(item, amount);
+        }
+    }
+}
+
+/// `BaseBuilderAI.java:61-70` / `RtsAI.java:90-98`: spawn the core block's unit
+/// type at a random live core (`unit.set(data.cores.random())`). Needs the
+/// already-removed [`crate::sim::unit_runtime::UnitRuntime`] to track the unit.
+fn spawn_core_unit_at_random_core(
+    unit_runtime: &mut crate::sim::unit_runtime::UnitRuntime,
+    world: &mut World,
+    runtime: &mut CampaignRuntime,
+    team: u8,
+    name: &str,
+) -> Option<Entity> {
+    let cores = runtime
+        .session
+        .teams
+        .get_or_null(TeamId(team))
+        .map_or(Vec::new(), |data| data.cores.clone());
+    if cores.is_empty() {
+        return None;
+    }
+    let index = runtime.ai_rng.next_int_bound(cores.len() as i32) as usize;
+    let core = cores[index.min(cores.len().saturating_sub(1))];
+    let pos = world.get::<Pos>(core).map(|pos| (pos.x, pos.y))?;
+    unit_runtime.spawn(world, name, team, pos.0, pos.1, 0.0)
+}
+
+/// [`spawn_core_unit_at_random_core`] taking the unit runtime out of the world
+/// (the `team_ai_system` path, where it is installed).
+fn spawn_random_core_unit(
+    world: &mut World,
+    runtime: &mut CampaignRuntime,
+    team: u8,
+    name: &str,
+) -> Option<Entity> {
+    let mut unit_runtime = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()?;
+    let spawned = spawn_core_unit_at_random_core(&mut unit_runtime, world, runtime, team, name);
+    world.insert_non_send(unit_runtime);
+    spawned
+}
+
+/// Spawns a unit by content name at a fixed position through the live
+/// [`crate::sim::unit_runtime::UnitRuntime`].
+fn spawn_unit_at(world: &mut World, team: u8, name: &str, x: f32, y: f32) -> Option<Entity> {
+    let mut unit_runtime = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()?;
+    let spawned = unit_runtime.spawn(world, name, team, x, y, 0.0);
+    world.insert_non_send(unit_runtime);
+    spawned
+}
+
+/// `Logic.java:574-584` (`prebuildAi`): one core-unit defender per core,
+/// flagged with the core's packed tile position (`unit.flag = core.pos()`) so
+/// it is not respawned.
+fn run_prebuild_ai_defenders(world: &mut World, runtime: &mut CampaignRuntime, team: u8) {
+    let mut pending: Vec<(Entity, &'static str)> = Vec::new();
+    {
+        let Some(data) = runtime.session.teams.get_or_null(TeamId(team)) else {
+            return;
+        };
+        for &core in &data.cores {
+            let Some(comp) = world.get::<BuildingComp>(core) else {
+                continue;
+            };
+            let packed = comp.pos.pack() as f64;
+            let Some(unit_runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            else {
+                return;
+            };
+            let Some(table) = world.get_resource::<BlockTable>() else {
+                return;
+            };
+            let Some((name, type_id)) = core_unit_of(world, &unit_runtime.content, table, core)
+            else {
+                continue;
+            };
+            // `units.contains(u -> u.flag == core.pos())` (`Logic.java:577`).
+            let present = world.iter_entities().any(|entity_ref| {
+                entity_ref
+                    .get::<UnitTypeComp>()
+                    .is_some_and(|comp| comp.type_id == type_id)
+                    && entity_ref
+                        .get::<TeamComp>()
+                        .is_some_and(|comp| comp.team == team)
+                    && entity_ref
+                        .get::<UnitCore>()
+                        .is_some_and(|unit| !unit.dead && unit.flag == packed)
+            });
+            if !present {
+                pending.push((core, name));
+            }
+        }
+    }
+    for (core, name) in pending {
+        let Some(pos) = world.get::<Pos>(core).map(|pos| (pos.x, pos.y)) else {
+            continue;
+        };
+        if let Some(unit) = spawn_unit_at(world, team, name, pos.0, pos.1) {
+            // `unit.flag = core.pos()` (`Logic.java:579`).
+            let packed = world
+                .get::<BuildingComp>(core)
+                .map_or(0.0, |comp| comp.pos.pack() as f64);
+            if let Some(mut unit_core) = world.get_mut::<UnitCore>(unit) {
+                unit_core.flag = packed;
+            }
+        }
+    }
+}
+
+/// `estimateStats` enemy rows for one team: unit rows plus turret rows.
+fn enemy_stats_for(
+    world: &World,
+    units: &[TeamAiUnitRow],
+    buildings: &[TeamAiBuildingRow],
+    team: u8,
+) -> Vec<EnemyStat> {
+    let mut stats = team_ai_enemy_stats(units, team);
+    if let Some(unit_runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() {
+        stats.extend(turret_enemy_stats(
+            world,
+            &unit_runtime.content,
+            buildings,
+            team,
+        ));
+    }
+    stats
+}
+
+/// `RtsAI.estimateStats` turret rows: every live enemy turret of an active
+/// non-derelict team (`indexer.getEnemy(team, BlockFlag.turret)`,
+/// `RtsAI.java:329-335`), with the per-kind `estimateDps` of
+/// `Turret.java:335-338`, `ContinuousTurret.java:43-46` and
+/// `TractorBeamTurret.java:150-153`.
+fn turret_enemy_stats(
+    world: &World,
+    content: &ContentRegistry,
+    buildings: &[TeamAiBuildingRow],
+    team: u8,
+) -> Vec<EnemyStat> {
+    use crate::world::blocks::defense::turrets::{TurretKind, TurretState, has_ammo, peek_ammo};
+    let mut rows: Vec<(u64, EnemyStat)> = buildings
+        .iter()
+        .filter(|row| row.team != team && row.team != 0)
+        .filter_map(|row| {
+            let state = world.get::<TurretState>(row.entity)?;
+            let config = &state.config;
+            let (potential_efficiency, time_scale, efficiency) = world
+                .get::<crate::entities::comp::Building>(row.entity)
+                .map_or((1.0, 1.0, 1.0), |building| {
+                    (
+                        building.potential_efficiency,
+                        building.time_scale,
+                        building.efficiency,
+                    )
+                });
+            let dps = match config.kind {
+                // `ContinuousTurret.estimateDps` (`ContinuousTurret.java:43`).
+                TurretKind::Continuous => {
+                    if has_ammo(world, row.entity) {
+                        let bullet = peek_ammo(world, row.entity).and_then(|id| content.bullet(id));
+                        let damage = bullet.map_or(0.0, |bullet| bullet.damage);
+                        let interval = bullet.map_or(5.0, |bullet| bullet.damage_interval);
+                        damage * 60.0 / if interval > 0.0 { interval } else { 5.0 }
+                    } else {
+                        0.0
+                    }
+                }
+                // `TractorBeamTurret.estimateDps` (`TractorBeamTurret.java:150`).
+                TurretKind::TractorBeam => {
+                    if !state.any || config.beam_damage <= 0.0 {
+                        0.0
+                    } else {
+                        config.beam_damage * 60.0 * efficiency * config.coolant_multiplier
+                    }
+                }
+                // `Turret.estimateDps` (`Turret.java:335-338`) for the item /
+                // liquid / power / laser / payload-ammo families.
+                TurretKind::Item
+                | TurretKind::Liquid
+                | TurretKind::Power
+                | TurretKind::Laser
+                | TurretKind::PayloadAmmo => {
+                    if has_ammo(world, row.entity) {
+                        let ammo_dps = peek_ammo(world, row.entity)
+                            .and_then(|id| content.bullet(id))
+                            .map_or(0.0, |bullet| bullet.estimate_dps);
+                        config.shoot.shots as f32 / config.reload
+                            * 60.0
+                            * ammo_dps
+                            * potential_efficiency
+                            * time_scale
+                    } else {
+                        0.0
+                    }
+                }
+                // `BaseTurretBuild.estimateDps()` = 0 (`BaseTurret.java:138-140`).
+                TurretKind::PointDefense | TurretKind::Build => 0.0,
+            };
+            let health = world
+                .get::<Health>(row.entity)
+                .map_or(0.0, |health| health.health);
+            Some((
+                row.seq,
+                EnemyStat {
+                    x: row.x,
+                    y: row.y,
+                    health,
+                    dps,
+                    // Java `t.range()` adds the ammo's `rangeChange` when
+                    // present (`Turret.java:347-353`); the port does not model
+                    // `BulletType.rangeChange` yet.
+                    range: config.range,
+                    target_air: config.target_air,
+                    target_ground: config.target_ground,
+                    air: false,
+                    is_turret: true,
+                },
+            ))
+        })
+        .collect();
+    // Stable `EntitySeq` order so the summed health/DPS is deterministic.
+    rows.sort_by_key(|(seq, _)| *seq);
+    rows.into_iter().map(|(_, stat)| stat).collect()
 }
 
 /// Tile positions of `team`'s live cores (`TeamData.cores` -> `BuildingComp`).
@@ -1614,15 +1994,12 @@ fn team_ai_damaged(buildings: &[TeamAiBuildingRow], team: u8) -> Vec<RtsBuilding
         .collect()
 }
 
-/// `estimateStats` enemy rows: every live enemy unit.
-///
-/// Upstream also folds enemy turret buildings (health + `estimateDps`) into the
-/// score; the live port has no turret DPS estimate yet, so only units
-/// contribute (tracked in the fix plan).
+/// `estimateStats` enemy unit rows (`Units.nearbyEnemies` excludes
+/// `Team.derelict`); turret rows are appended by [`turret_enemy_stats`].
 fn team_ai_enemy_stats(units: &[TeamAiUnitRow], team: u8) -> Vec<EnemyStat> {
     units
         .iter()
-        .filter(|row| row.team != team)
+        .filter(|row| row.team != team && row.team != 0)
         .map(|row| EnemyStat {
             x: row.x,
             y: row.y,
@@ -1634,6 +2011,7 @@ fn team_ai_enemy_stats(units: &[TeamAiUnitRow], team: u8) -> Vec<EnemyStat> {
             // The enemy's own mobility state (used by the defense aggressor
             // filter; `estimateStats` ignores it).
             air: row.flying,
+            is_turret: false,
         })
         .collect()
 }
@@ -2088,6 +2466,240 @@ mod tests {
         assert_eq!(queued[0].team, 2);
         assert_eq!((queued[0].x, queued[0].y), (5, 5));
         world.insert_resource(runtime);
+    }
+
+    /// T10 scaffolding: a world with the live unit/block runtimes, a team-2
+    /// `core-shard` at (16, 16) and the resources `team_ai_system` reads.
+    fn t10_team_world() -> (World, Entity, Campaign) {
+        use crate::ecs::BuildingComp;
+        use crate::sim::unit_runtime::UnitRuntime;
+        use crate::world::WorldGrid;
+        use crate::world::limits::{BlockCounter, BuildRules};
+
+        let registry = crate::sim::runtime::load_vanilla_content().expect("content");
+        let table = BlockTable::build_default(&registry).expect("table");
+        let mut world = World::new();
+        let grid = WorldGrid::new(32, 32);
+        let runtime_content = crate::sim::runtime::load_vanilla_content().expect("content");
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, &world, 2, false));
+        let core_inst = table.get_named("core-shard").expect("core-shard").clone();
+        let core = core_inst.spawn(
+            &mut world,
+            1,
+            TilePos::new(16, 16),
+            2,
+            0,
+            registry.items().len(),
+            registry.liquids().len(),
+        );
+        world.entity_mut(core).insert(BuildingComp {
+            pos: TilePos::new(16, 16),
+            block: registry.block_id("core-shard").expect("core id"),
+            team: TeamId(2),
+            rot: 0,
+        });
+        world.insert_resource(table);
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(BlockCounter::new());
+        world.insert_resource(BaseCatalog::default());
+        let campaign = campaign(&registry);
+        (world, core, campaign)
+    }
+
+    fn t10_session(
+        world: &mut World,
+        core: Entity,
+        campaign: Campaign,
+        configure: impl FnOnce(&mut crate::game::rules::TeamRule),
+    ) {
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        configure(session.rules.team_rule_mut(2));
+        session.teams.register_core(core, TeamId(2), &session.rules);
+        world.insert_resource(CampaignRuntime::new(session, campaign));
+    }
+
+    fn alpha_id(world: &World) -> UnitTypeId {
+        world
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("unit runtime")
+            .content
+            .unit_by_name("alpha")
+            .expect("alpha")
+            .id
+    }
+
+    /// T10 (`BaseBuilderAI.java:53-58`): a `buildAi` team's first core is
+    /// refilled to `getMaximumAccepted` every update — no planet/hidden filter,
+    /// unlike the `fillItems` rule.
+    #[test]
+    fn base_builder_fills_enemy_core() {
+        use crate::ecs::BuildingComp;
+
+        let (mut world, core, campaign) = t10_team_world();
+        t10_session(&mut world, core, campaign, |rule| rule.build_ai = true);
+        let mut runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        let rule = runtime.session.rules.team_rule(2).clone();
+        let rules = runtime.session.rules.clone();
+        run_team_base_builder(&mut world, &mut runtime, TeamId(2), &rule, &rules);
+        let copper = world
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("unit runtime")
+            .content
+            .item_id("copper")
+            .expect("copper");
+        let expected = {
+            let block = world.get::<BuildingComp>(core).expect("building").block;
+            let table = world.get_resource::<BlockTable>().expect("table");
+            let instance = table.instance(block).expect("instance");
+            instance.behavior.get_maximum_accepted(&world, core, copper)
+        };
+        assert!(expected > 0, "the core accepts copper");
+        let module = world.get::<ItemModule>(core).expect("core items");
+        assert_eq!(module.get(copper), expected, "filled to maximum accepted");
+        world.insert_resource(runtime);
+    }
+
+    /// T10 (`BaseBuilderAI.java:61-70`): the 360-tick spawn timer creates core
+    /// units up to `cores.size * coreUnitMultiplier` (= 2 per core).
+    #[test]
+    fn ai_core_spawn_caps_at_two_per_core() {
+        let (mut world, core, campaign) = t10_team_world();
+        t10_session(&mut world, core, campaign, |rule| rule.build_ai = true);
+        let mut runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
+        let rule = runtime.session.rules.team_rule(2).clone();
+        let rules = runtime.session.rules.clone();
+        let alpha = alpha_id(&world);
+        // Three 360-tick spawn windows (`timerSpawn`, `60 * 6`).
+        for _ in 0..3 * 360 + 1 {
+            run_team_base_builder(&mut world, &mut runtime, TeamId(2), &rule, &rules);
+        }
+        assert_eq!(
+            live_type_count(&world, 2, alpha),
+            2,
+            "cores.size * coreUnitMultiplier = 2"
+        );
+        for _ in 0..720 {
+            run_team_base_builder(&mut world, &mut runtime, TeamId(2), &rule, &rules);
+        }
+        assert_eq!(live_type_count(&world, 2, alpha), 2, "the cap holds");
+        world.insert_resource(runtime);
+    }
+
+    /// T10 (`RtsAI.java:86-99`): the RtsAI core-unit spawn runs off the
+    /// 120-tick gate even when the team has no idle squad.
+    #[test]
+    fn rts_ai_spawns_core_unit_without_idle_squads() {
+        let (mut world, core, campaign) = t10_team_world();
+        t10_session(&mut world, core, campaign, |rule| rule.rts_ai = true);
+        let alpha = alpha_id(&world);
+        for _ in 0..500 {
+            team_ai_system(&mut world);
+        }
+        assert_eq!(
+            live_type_count(&world, 2, alpha),
+            1,
+            "RtsAI.checkBuilding spawned the core unit"
+        );
+    }
+
+    /// T10 (`Logic.java:574-584`): `prebuildAi` spawns one core-unit defender
+    /// per core and flags it with the core's packed tile position.
+    #[test]
+    fn prebuild_ai_spawns_one_defender_per_core() {
+        let (mut world, core, campaign) = t10_team_world();
+        t10_session(&mut world, core, campaign, |rule| rule.prebuild_ai = true);
+        let alpha = alpha_id(&world);
+        team_ai_system(&mut world);
+        assert_eq!(live_type_count(&world, 2, alpha), 1, "one defender");
+        let flag = world
+            .iter_entities()
+            .find(|entity| {
+                entity
+                    .get::<UnitTypeComp>()
+                    .is_some_and(|comp| comp.type_id == alpha)
+            })
+            .and_then(|entity| entity.get::<UnitCore>().map(|unit| unit.flag))
+            .expect("defender flag");
+        assert_eq!(
+            flag,
+            TilePos::new(16, 16).pack() as f64,
+            "unit.flag = core.pos()"
+        );
+        team_ai_system(&mut world);
+        assert_eq!(
+            live_type_count(&world, 2, alpha),
+            1,
+            "the flag prevents a respawn"
+        );
+    }
+
+    /// T10 (`RtsAI.java:329-335`, `Turret.java:335-338`): `estimateStats` gains
+    /// a turret row per live enemy turret with its ammo-based DPS.
+    #[test]
+    fn estimate_stats_counts_loaded_turret() {
+        use crate::world::blocks::defense::turrets::{TurretState, handle_item, peek_ammo};
+
+        let (mut world, _core, _campaign) = t10_team_world();
+        let duo_inst = world
+            .get_resource::<BlockTable>()
+            .expect("table")
+            .get_named("duo")
+            .expect("duo")
+            .clone();
+        let duo = duo_inst.spawn(&mut world, 2, TilePos::new(20, 20), 1, 0, 0, 0);
+        let copper = world
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("unit runtime")
+            .content
+            .item_id("copper")
+            .expect("copper");
+        for _ in 0..10 {
+            handle_item(&mut world, duo, copper);
+        }
+        let row = TeamAiBuildingRow {
+            entity: duo,
+            seq: 5,
+            team: 1,
+            pos: TilePos::new(20, 20),
+            x: 160.0,
+            y: 160.0,
+            in_core: false,
+            flag_rank: None,
+            damaged: false,
+        };
+        // Without ammo the same turret contributes 0 (`hasAmmo()` gate).
+        let empty = duo_inst.spawn(&mut world, 3, TilePos::new(24, 20), 1, 0, 0, 0);
+        let empty_row = TeamAiBuildingRow {
+            entity: empty,
+            ..row
+        };
+        let content = &world
+            .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            .expect("unit runtime")
+            .content;
+        let stats = turret_enemy_stats(&world, content, &[row], 2);
+        assert_eq!(stats.len(), 1, "one enemy turret row");
+        assert!(stats[0].is_turret, "row is tagged as a turret");
+        let expected = {
+            let state = world.get::<TurretState>(duo).expect("turret state");
+            let bullet = peek_ammo(&world, duo).expect("ammo peek");
+            let def = content.bullet(bullet).expect("bullet");
+            state.config.shoot.shots as f32 / state.config.reload * 60.0 * def.estimate_dps
+        };
+        assert!(expected > 0.0, "a loaded duo has DPS");
+        assert!(
+            (stats[0].dps - expected).abs() < 0.001,
+            "dps {} == {expected}",
+            stats[0].dps
+        );
+        let stats = turret_enemy_stats(&world, content, &[empty_row], 2);
+        assert_eq!(stats.len(), 1);
+        assert_eq!(stats[0].dps, 0.0, "no ammo -> 0 DPS");
     }
 
     #[test]

@@ -536,6 +536,10 @@ pub fn install_turret_ammo(content: &mut ContentRegistry) {
     }
     let mut names = BTreeMap::new();
     register_bullets(content, &mut names);
+    // The anonymous ammo bullets are appended after the registry's `link`
+    // pass, so patch their `BulletType.estimateDPS()` too (`BulletType.java:
+    // 424-441`; `Turret.estimateDps` reads it for the RTS `estimateStats`).
+    crate::content::registries::units::compute_bullet_dps(content);
 }
 
 /// Builds the resolved [`TurretConfig`] for a supported block name.

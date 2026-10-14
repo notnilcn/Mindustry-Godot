@@ -64,6 +64,11 @@ pub struct EnemyStat {
     pub target_ground: bool,
     /// Whether the *attacking* squad is air (selects the eligibility flag).
     pub air: bool,
+    /// Whether this row is an enemy turret (`BaseTurretBuild`) rather than a
+    /// unit. Only turret rows carry the `targetAir`/`targetGround` eligibility
+    /// filter and only unit rows are restricted to the from→to query rect
+    /// (`RtsAI.java:331-360`).
+    pub is_turret: bool,
 }
 
 /// Aggregate squad stats (`RtsAI.handleSquad` loop).
@@ -168,6 +173,9 @@ pub struct RtsAi {
     pub squads: Vec<Squad>,
     /// Timer until the next squad re-assignment, in ticks (`timer`).
     pub timer: f32,
+    /// `checkBuilding` timer accumulator, in ticks (`timerSpawn`, `60 * 7f`).
+    /// Advanced once per 120-tick `timeUpdate` gate.
+    pub spawn_timer: f32,
     /// Monotonic assignment counter (deterministic target shuffle seed).
     pub assignment_id: u64,
 }
@@ -393,12 +401,44 @@ impl RtsAi {
     ) -> bool {
         ai_core_spawn && timer_fired && cores > 0 && core_units < cores
     }
+
+    /// `RtsAI.checkBuilding` (`RtsAI.java:86-99`) with its own `timerSpawn`
+    /// state: returns whether one core unit should spawn on this `timeUpdate`
+    /// gate. The caller runs it only when the 120-tick squad timer fired and
+    /// owns the spawn (`block.unitType.create(team); unit.set(cores.random())`).
+    ///
+    /// The accumulator advances [`SPAWN_INTERVAL`] per gate, exactly like the
+    /// `Interval`-based `timer.get(timerSpawn, 60 * 7f)` re-evaluated every
+    /// 120 ticks: fires on every 4th gate (480 ticks).
+    pub fn check_building_spawn(
+        &mut self,
+        ai_core_spawn: bool,
+        core_units: i32,
+        cores: i32,
+    ) -> bool {
+        if !ai_core_spawn {
+            return false;
+        }
+        self.spawn_timer += UPDATE_INTERVAL;
+        if self.spawn_timer < SPAWN_INTERVAL {
+            return false;
+        }
+        self.spawn_timer = 0.0;
+        cores > 0 && core_units < cores
+    }
 }
 
 /// `RtsAI.estimateStats`: combat-worth score in `[0, 100000]`.
 ///
 /// `100000` means the squad can destroy the target with no losses; `0` means it
 /// cannot win. Matches the upstream infinite/zero guard order exactly.
+///
+/// Enemy rows follow `RtsAI.java:329-364`: turret rows carry the
+/// `targetAir`/`targetGround` eligibility test and are drawn from
+/// `indexer.getEnemy(team, BlockFlag.turret)`; unit rows have no air/ground
+/// filter but must fall inside `Tmp.r1` — the normalized from→to rect grown by
+/// 140 px per side — because upstream queries `Units.nearbyEnemies(team, r1)`.
+/// Both rows then need `distanceSegmentPoint(..) <= range + 50`.
 #[allow(clippy::too_many_arguments)]
 pub fn estimate_stats(
     from_x: f32,
@@ -413,11 +453,25 @@ pub fn estimate_stats(
     let mut health = 0.0f32;
     let mut dps = 0.0f32;
     let extra_radius = 50.0f32;
+    // `Tmp.r1.set(fromX, fromY, x - fromX, y - fromY).normalize().grow(140f * 2f)`
+    // (`RtsAI.java:356-357`): midpoints of the rect are the from/to extremes
+    // with 140 px of slack per side. `QuadTree.intersect` bounds are inclusive.
+    let min_x = from_x.min(to_x) - 140.0;
+    let max_x = from_x.max(to_x) + 140.0;
+    let min_y = from_y.min(to_y) - 140.0;
+    let max_y = from_y.max(to_y) + 140.0;
     for stat in enemy_stats {
-        let targets = (stat.target_air && air) || (stat.target_ground && !air);
-        if targets
-            && distance_segment_point(from_x, from_y, to_x, to_y, stat.x, stat.y)
-                <= stat.range + extra_radius
+        if stat.is_turret {
+            // `((tb.targetAir && air) || (tb.targetGround && !air))`
+            // (`RtsAI.java:333`).
+            if !((stat.target_air && air) || (stat.target_ground && !air)) {
+                continue;
+            }
+        } else if stat.x < min_x || stat.x > max_x || stat.y < min_y || stat.y > max_y {
+            continue;
+        }
+        if distance_segment_point(from_x, from_y, to_x, to_y, stat.x, stat.y)
+            <= stat.range + extra_radius
         {
             health += stat.health;
             dps += stat.dps;
@@ -485,6 +539,8 @@ pub fn update(rts: &mut RtsAi) -> bool {
 pub const SQUAD_RADIUS: f32 = 60.0;
 /// Squad re-assignment period in ticks (`RtsAI.update` `60 * 2`).
 pub const UPDATE_INTERVAL: f32 = 120.0;
+/// Core-unit spawn period in ticks (`RtsAI.checkBuilding` `60 * 7f`).
+pub const SPAWN_INTERVAL: f32 = 60.0 * 7.0;
 /// Maximum targets checked per update (`RtsAI.maxTargetsChecked`).
 pub const MAX_TARGETS_CHECKED: usize = 15;
 /// Aggressor search radius around a defended building (`checkRange`).
@@ -600,6 +656,14 @@ impl RtsAi {
         if !self.update_timer(UPDATE_INTERVAL) {
             return Vec::new();
         }
+        self.plan_live_orders_now(input)
+    }
+
+    /// The `assignSquads`/`handleSquad` body (`RtsAI.java:79-140`) after the
+    /// 120-tick gate. The live driver ticks [`RtsAi::update_timer`] for every
+    /// active `rtsAi` team itself — so `checkBuilding` also fires with no idle
+    /// squads — and calls this on the tick the gate fires.
+    pub fn plan_live_orders_now(&mut self, input: &RtsLiveInput<'_>) -> Vec<SquadOrder> {
         self.squads.clear();
         if input.units.is_empty() {
             return Vec::new();
@@ -690,6 +754,10 @@ fn nearest_aggressor(
     let range2 = DEFEND_CHECK_RANGE * DEFEND_CHECK_RANGE;
     let mut best: Option<(f32, f32, f32)> = None;
     for stat in enemy_stats {
+        // `Units.closestEnemy` iterates units only (`RtsAI.java:218`).
+        if stat.is_turret {
+            continue;
+        }
         // `Unit.checkTarget(tair, tground)`: a grounded enemy needs the squad's
         // ground capability, a flying one its air capability.
         let targetable = (stat.air && stats.target_air) || (!stat.air && stats.target_ground);
@@ -725,6 +793,7 @@ mod tests {
             target_air: false,
             target_ground: true,
             air: false,
+            is_turret: false,
         }];
         // self can kill the target fast, takes little damage -> high score.
         let strong = estimate_stats(0.0, 0.0, 100.0, 0.0, 100.0, 1000.0, false, &enemy);
@@ -746,11 +815,78 @@ mod tests {
             target_air: false,
             target_ground: true,
             air: false,
+            is_turret: false,
         }];
         assert_eq!(
             estimate_stats(0.0, 0.0, 10.0, 0.0, 0.0, 100.0, false, &enemy),
             0.0
         );
+    }
+
+    /// `RtsAI.java:331-360`: the air/ground eligibility filter applies to
+    /// turret rows only; unit rows are gated by the `Units.nearbyEnemies` query
+    /// rect instead, so a ground squad still counts an air-only unit inside the
+    /// rect (it cannot shoot the squad but the squad cannot ignore it either,
+    /// because a flight-over target still costs time).
+    #[test]
+    fn estimate_stats_units_ignore_air_filter() {
+        let unit = EnemyStat {
+            x: 50.0,
+            y: 0.0,
+            health: 100.0,
+            dps: 10.0,
+            range: 100.0,
+            target_air: true,
+            target_ground: false,
+            air: true,
+            is_turret: false,
+        };
+        // Ground squad (`air = false`): the air-only unit is counted.
+        let with_unit = estimate_stats(0.0, 0.0, 100.0, 0.0, 10.0, 1000.0, false, &[unit]);
+        let without = estimate_stats(0.0, 0.0, 100.0, 0.0, 10.0, 1000.0, false, &[]);
+        assert!(
+            with_unit < without,
+            "unit row must count for a ground squad: {with_unit} < {without}"
+        );
+        // Turret rows keep the filter: the same row as a turret is skipped.
+        let turret = EnemyStat {
+            is_turret: true,
+            ..unit
+        };
+        assert_eq!(
+            estimate_stats(0.0, 0.0, 100.0, 0.0, 10.0, 1000.0, false, &[turret]),
+            without,
+            "air-only turret is ignored by a ground squad"
+        );
+        // Air squad (`air = true`): the turret counts again.
+        assert!(estimate_stats(0.0, 0.0, 100.0, 0.0, 10.0, 1000.0, true, &[turret]) < 100_000.0);
+        // Unit rows outside the grown query rect are dropped.
+        let far = EnemyStat { x: 500.0, ..unit };
+        assert_eq!(
+            estimate_stats(0.0, 0.0, 100.0, 0.0, 10.0, 1000.0, false, &[far]),
+            without,
+            "unit beyond the rect + 140px slack is not in `nearbyEnemies`"
+        );
+    }
+
+    #[test]
+    fn check_building_spawn_fires_every_fourth_gate() {
+        let mut rts = RtsAi::new();
+        let mut fired = Vec::new();
+        for gate in 0..16 {
+            if rts.check_building_spawn(true, 0, 1) {
+                fired.push(gate);
+            }
+        }
+        assert_eq!(fired, vec![3, 7, 11, 15], "every 4th 120-tick gate");
+        // Cap and the `aiCoreSpawn` gate.
+        let mut capped = RtsAi::new();
+        capped.spawn_timer = SPAWN_INTERVAL - UPDATE_INTERVAL;
+        assert!(
+            !capped.check_building_spawn(true, 1, 1),
+            "coreUnits >= cores"
+        );
+        assert!(!capped.check_building_spawn(false, 0, 1), "aiCoreSpawn off");
     }
 
     #[test]
@@ -1013,6 +1149,7 @@ mod tests {
             target_air: false,
             target_ground: true,
             air: false,
+            is_turret: false,
         };
         let mut rts = RtsAi::new();
         let input = RtsLiveInput {
