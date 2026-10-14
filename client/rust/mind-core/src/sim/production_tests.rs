@@ -2944,3 +2944,383 @@ fn drill_warmup_scales_with_time_scale() {
         warmup(&sim)
     );
 }
+/// H09 T4: a derelict building stops updating (`BuildingComp.allowUpdate`,
+/// `BuildingComp.java:627-632`): a team-0 drill mines nothing.
+#[test]
+fn derelict_drill_does_not_mine() {
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    let drill = place(&mut sim, "mechanical-drill", 5, 5);
+    let copper = item(&sim, "copper");
+    let container = place(&mut sim, "container", 7, 5);
+    assert!(
+        sim.debug_set_building_team(5, 5, 0),
+        "team switch to derelict"
+    );
+    let enabled = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(drill)
+        .map(|building| building.enabled);
+    assert_eq!(enabled, Some(false), "derelict drill is disabled");
+    for _ in 0..1625 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, container, copper),
+        0,
+        "a derelict drill never mines"
+    );
+
+    // Control: the same drill on team 1 mines (G02 T6 rate).
+    let mut sim = runtime_sim();
+    for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
+        set_floor(&mut sim, x, y, "ore-copper");
+    }
+    place(&mut sim, "mechanical-drill", 5, 5);
+    let container = place(&mut sim, "container", 7, 5);
+    for _ in 0..1625 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_item(&sim, container, copper) >= 9,
+        "a team-1 drill mines ~10 copper in 1625 ticks"
+    );
+}
+
+/// H09 T4: buildings outside a limited map area are disabled; growing the area
+/// re-enables the auto-reset ones (`World.checkMapArea`,
+/// `World.java:469-481`).
+#[test]
+fn outside_map_area_disabled_and_reset() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+
+    let mut sim = runtime_sim();
+    let drill = place(&mut sim, "mechanical-drill", 20, 20);
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.limit_map_area = true;
+    rules.limit_width = 16;
+    rules.limit_height = 16;
+    rules.disable_outside_area = true;
+    install_campaign_session(&mut sim, rules.clone());
+    sim.apply_rules_to_world(&rules);
+    assert_eq!(
+        sim.ecs.0.get::<Building>(drill).map(|b| b.enabled),
+        Some(false),
+        "a drill outside the 16x16 area is disabled"
+    );
+
+    rules.limit_width = 32;
+    rules.limit_height = 32;
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.rules = rules.clone();
+    }
+    sim.apply_rules_to_world(&rules);
+    assert_eq!(
+        sim.ecs.0.get::<Building>(drill).map(|b| b.enabled),
+        Some(true),
+        "growing the area re-enables the auto-reset drill"
+    );
+}
+
+/// H09 T4: a block whose env flags do not support the planet's env stops
+/// updating (`Block.supportsEnv`, `BuildingComp.allowUpdate`).
+#[test]
+fn env_unsupported_block_disabled() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::world::build::supports_env_bits;
+
+    let mut sim = runtime_sim();
+    let name = "cultivator";
+    let def = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_by_name(name)
+        .expect("def")
+        .clone();
+    // Erekir env (17 = space | scorching).
+    assert!(
+        !supports_env_bits(&def, 17),
+        "{name} (requires spores) is not supported on Erekir"
+    );
+    let generator = place(&mut sim, name, 5, 5);
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.env = 17;
+    install_campaign_session(&mut sim, rules.clone());
+    sim.apply_rules_to_world(&rules);
+    assert_eq!(
+        sim.ecs.0.get::<Building>(generator).map(|b| b.enabled),
+        Some(false),
+        "{name} is disabled under env 17"
+    );
+}
+
+/// H09 T8: `TeamRule.fillItems` refills the first core of every active team
+/// (`Logic.java:552-561`): with `coreIncinerates` the max accepted is
+/// `i32::MAX / 2`, hidden items stay 0 and without incineration the core's
+/// storage capacity is the cap.
+#[test]
+fn fill_items_fills_ai_core() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{
+        CampaignRuntime, install_campaign_core_hooks, sync_session_with_sim,
+    };
+    use crate::world::TilePos;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = true;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    // `PlaySession` starts in `Menu`; the campaign systems only run in
+    // `Playing`.
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    // API staging form (`player: None`): the player core-placement gate
+    // (`CoreBlock.canPlaceOn`, H02 T4) rightly refuses a fresh core on free
+    // ground through the player form.
+    sim.command(crate::determinism::SimCommand::Place {
+        x: 5,
+        y: 5,
+        block: core.raw(),
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("team-2 core placed");
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+    let copper = item(&sim, "copper");
+    assert_eq!(
+        stored_item(&sim, entity, copper),
+        i32::MAX / 2,
+        "coreIncinerates -> getMaximumAccepted = i32::MAX / 2"
+    );
+    // A hidden item is never filled.
+    let hidden = {
+        let content = sim.block_runtime().expect("rt").content();
+        content
+            .items()
+            .iter()
+            .find(|item| item.is_hidden())
+            .map(|item| item.id)
+    };
+    if let Some(hidden) = hidden {
+        assert_eq!(
+            stored_item(&sim, entity, hidden),
+            0,
+            "hidden items are skipped"
+        );
+    }
+    assert!(
+        sim.ecs.0.get::<Building>(entity).is_some(),
+        "the core still exists"
+    );
+
+    // Without `coreIncinerates` the cap is the core's storage capacity.
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = false;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    sim.command(crate::determinism::SimCommand::Place {
+        x: 5,
+        y: 5,
+        block: core.raw(),
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("team-2 core placed");
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+    let capacity = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::storage::core_block::CoreBuild>(entity)
+        .map(|core| core.storage_capacity)
+        .expect("core build");
+    assert_eq!(
+        stored_item(&sim, entity, copper),
+        capacity,
+        "without incineration the core fills to its storage capacity"
+    );
+}
+
+/// H09 T10: the `Logic` event counters (`Logic.java:186-216`) follow player
+/// builds, deconstructs and losses.
+#[test]
+fn game_stats_count_build_break_destroy() {
+    use crate::command::Command;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(
+        &mut sim,
+        Rules {
+            default_team: 1,
+            ..Rules::default()
+        },
+    );
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+
+    // Two player-team walls; the API place path emits `BlockPlacedEvent`
+    // (`BlockBuildEndEvent`).
+    assert!(sim.place_for_team(5, 5, wall, 0, 1));
+    assert!(sim.place_for_team(7, 5, wall, 0, 1));
+    // Deconstruct one through the break command (`BlockBuildEndEvent{breaking}`).
+    sim.apply(Command::Break { x: 5, y: 5 }).expect("break");
+    // Destroy one player wall and one enemy wall (`BlockDestroyEvent`).
+    let player_wall = sim.grid.entity_at(TilePos::new(7, 5)).expect("player wall");
+    if let Some(mut health) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::Health>(player_wall)
+    {
+        health.health = 0.0;
+    }
+    assert!(sim.place_for_team(9, 5, wall, 0, 2));
+    let enemy_wall = sim.grid.entity_at(TilePos::new(9, 5)).expect("enemy wall");
+    if let Some(mut health) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::Health>(enemy_wall)
+    {
+        health.health = 0.0;
+    }
+    // One tick resolves the deaths and flushes the events.
+    sim.tick().expect("tick");
+    sim.tick().expect("tick");
+
+    let stats = &sim
+        .ecs
+        .0
+        .get_resource::<CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .stats;
+    assert_eq!(stats.buildings_built, 2, "two walls built");
+    assert_eq!(stats.buildings_deconstructed, 1, "one wall deconstructed");
+    assert_eq!(stats.buildings_destroyed, 1, "one player wall destroyed");
+    assert_eq!(
+        stats.get_destroyed("copper-wall"),
+        1,
+        "one enemy wall destroyed by name"
+    );
+    // `placedBlockCount` only counts the default team's placements.
+    assert_eq!(stats.placed_block_count.get("copper-wall"), Some(&2));
+}
+
+/// H09 T10: a factory-produced default-team unit bumps `unitsCreated`
+/// (`Logic.java:228-235`).
+#[test]
+fn game_stats_count_units_created() {
+    use crate::game::rules::Rules;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(
+        &mut sim,
+        Rules {
+            default_team: 1,
+            // No core in this fixture; Java's unit-cap check would kill the
+            // factory output at spawn.
+            disable_unit_cap: true,
+            ..Rules::default()
+        },
+    );
+    if let Some(mut runtime) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 10, 60);
+            items.add(lead, 10, 60);
+        }
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, dagger) {
+            break;
+        }
+    }
+    assert!(spawned_unit(&sim, dagger), "factory produced a dagger");
+    let stats = &sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .stats;
+    assert_eq!(stats.units_created, 1, "one unit created");
+}

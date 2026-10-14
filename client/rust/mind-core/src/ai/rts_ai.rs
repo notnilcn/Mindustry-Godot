@@ -212,8 +212,9 @@ impl RtsAi {
                 continue;
             }
             let ts = crate::config::TILESIZE as f32;
-            let cx = (candidate.x() as f32 + 0.5) * ts;
-            let cy = (candidate.y() as f32 + 0.5) * ts;
+            // `Tile.worldx()/worldy()` (Tile.java:166-171).
+            let cx = candidate.x() as f32 * ts;
+            let cy = candidate.y() as f32 * ts;
             let dx = cx - x;
             let dy = cy - y;
             let dist2 = dx * dx + dy * dy;
@@ -947,8 +948,9 @@ mod tests {
         RtsBuilding {
             entity: Entity::from_raw_u32(entity).expect("entity"),
             pos: tile,
-            x: (tile.x() as f32 + 0.5) * tile_size,
-            y: (tile.y() as f32 + 0.5) * tile_size,
+            // `Tile.worldx()/worldy()` (Tile.java:166-171).
+            x: tile.x() as f32 * tile_size,
+            y: tile.y() as f32 * tile_size,
             in_core,
         }
     }

@@ -722,6 +722,11 @@ impl CombatHarness {
         BuildHarness::tile_center(x, y)
     }
 
+    /// `Tile.worldx()`/`worldy()` corner point of a tile (`BuildHarness::tile_origin`).
+    pub fn tile_origin(x: i32, y: i32) -> (f32, f32) {
+        BuildHarness::tile_origin(x, y)
+    }
+
     /// Canonical FNV-1a-64 checksum over the live bullets in spawn order.
     pub fn checksum_value(&self) -> Checksum {
         let mut c = Checksummer::new();

@@ -1219,6 +1219,10 @@ impl MindSimHost {
             {
                 put("turret_total_ammo", Variant::from(state.total_ammo));
             }
+            // Fog discovery progress (`Radar.progress`; H09 T3 readback).
+            if let Some(state) = world.get::<mind_core::entities::comp::RadarState>(entity) {
+                put("radarProgress", Variant::from(f64::from(state.progress)));
+            }
             // In-progress construction (`ConstructBuild`; PAR-0098 §2d).
             if let Some(state) = world.get::<mind_core::world::construct::ConstructState>(entity) {
                 put(
@@ -2572,6 +2576,14 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(plans).to_string().as_str())
     }
 
+    /// Playtest seam (H01 T3): kills the unit with `EntitySeq == seq`; the
+    /// next tick's `resolve_deaths` runs the normal death path (respawn timer,
+    /// wreck for flyers, kill stats).
+    #[func]
+    pub fn debug_kill_unit(&mut self, seq: i64) -> bool {
+        self.sim.debug_kill_unit(seq)
+    }
+
     /// Playtest seam: kills a building (`Health.health = 0`); the next tick's
     /// `resolve_deaths` destroys it and pushes the ghost plan.
     #[func]
@@ -2771,6 +2783,17 @@ impl MindSimHost {
         self.sim.player_actively_building()
     }
 
+    /// `player.unit().plans.size` (`BuilderComp.plans`; the `buildautopause`
+    /// auto-pause/resume and the deselect-mining gate).
+    pub fn player_plan_count(&self) -> usize {
+        self.sim.player_plan_count()
+    }
+
+    /// `build.isCommandable()` own commandable buildings (`DI:346-357`).
+    pub fn commandable_buildings(&self) -> Vec<(i16, i16)> {
+        self.sim.commandable_buildings(self.sim.live_default_team())
+    }
+
     /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.
@@ -2832,6 +2855,10 @@ impl MindSimHost {
         let team = self
             .last_sector_rules()
             .map_or(1, |rules| rules.default_team);
+        // `PlayerComp.team` is set before the spawn attempt so a failed first
+        // spawn (no supported core yet) is retried by
+        // `update_player_respawn` every 60 ticks (PlayerComp.java:44-48).
+        self.sim.set_player_team(team);
         let spawned = self.sim.spawn_player_at_best_core(team).is_some();
         if spawned {
             log::info!("spawn_player_unit: core unit team {team} spawned");
@@ -4896,6 +4923,17 @@ impl MindSimHost {
             .unwrap_or(-1)
     }
 
+    /// Rust-only: `Build.validPlace` for the player team without mutating the
+    /// sim ([`Sim::valid_place_player`], the exact check
+    /// `queue_player_place_config` runs; the placement preview's
+    /// `HostWorld.valid_place`).
+    pub fn can_place_player(&self, x: i32, y: i32, block: BlockId, rotation: u8) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        self.sim.valid_place_player(x, y, block, rotation)
+    }
+
     /// `Team.items().remove(item, amount)` on the first core of `team`; returns
     /// the removed amount (`0` without a matching core/item). Rust-only seam for
     /// the campaign research spend.
@@ -5411,6 +5449,77 @@ impl MindSimHost {
             })
             .collect();
         GString::from(serde_json::Value::Array(json).to_string().as_str())
+    }
+
+    /// Discovered (static) fog bits for `team`, one byte per tile (`0`/`255`,
+    /// row-major, y up), or `None` when fog is off (H03 T12 render seam).
+    pub fn fog_static_bytes(&self, team: u8) -> Option<(i32, i32, Vec<u8>)> {
+        self.sim.fog_static_bytes(team)
+    }
+
+    /// Dynamic vision sources for `team`: `(world x, world y, radius px)`
+    /// (H03 T12 render seam; radius = fog radius in tiles * 8).
+    pub fn fog_sources(&self, team: u8) -> Vec<(f32, f32, f32)> {
+        self.sim.fog_sources(team)
+    }
+
+    /// Fog probe (`FogControl.isVisibleTile`/`isDiscovered`) for playtests and
+    /// the H03 fog renderer: `{fog, staticFog, visible, discovered, teams:[id]}`.
+    /// Reports `{"fog":false}` without a `CampaignRuntime`.
+    #[func]
+    pub fn fog_debug_json(&self, team: i32, x: i32, y: i32) -> GString {
+        let Some(rules) = mind_core::game::runtime::rules_of(&self.sim.ecs.0) else {
+            return GString::from("{\"fog\":false}");
+        };
+        let team = (team & 0xFF) as u8;
+        let mut teams: Vec<u8> = Vec::new();
+        if let Some(fog) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::fog::FogControl>()
+        {
+            for (id, data) in fog.fog.iter().enumerate() {
+                if data.is_some() {
+                    teams.push(id as u8);
+                }
+            }
+        }
+        let value = serde_json::json!({
+            "fog": rules.fog,
+            "staticFog": rules.static_fog,
+            "visible": self.sim.fog_visible_tile(team, x, y),
+            "discovered": self.sim.fog_discovered(team, x, y),
+            "teams": teams,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Debug: forces `rules.fog`/`rules.staticFog` on the live session and
+    /// re-initialises fog. `false` without a `CampaignRuntime`.
+    #[func]
+    pub fn debug_set_fog(&mut self, fog: bool, static_fog: bool) -> bool {
+        {
+            let Some(mut runtime) = self
+                .sim
+                .ecs
+                .0
+                .get_resource_mut::<mind_core::game::runtime::CampaignRuntime>()
+            else {
+                return false;
+            };
+            runtime.session.rules.fog = fog;
+            runtime.session.rules.static_fog = static_fog;
+        }
+        self.sim.reset_fog();
+        true
+    }
+
+    /// Debug: `Tile.setTeam` for the building at `(x, y)` (`BuildingComp.changeTeam`
+    /// -> `checkAllowUpdate`); `false` when the tile has no building.
+    #[func]
+    pub fn debug_set_building_team(&mut self, x: i32, y: i32, team: i32) -> bool {
+        self.sim.debug_set_building_team(x, y, (team & 0xFF) as u8)
     }
 }
 

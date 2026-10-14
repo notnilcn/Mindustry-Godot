@@ -59,6 +59,8 @@ pub struct BlockBrokenEvent {
     /// API break. The destroy path plays `destroySound`, the other plays
     /// `breakSound` (G07 T3 / PAR-0073).
     pub destroyed: bool,
+    /// Owning team at removal (`BlockDestroyEvent.tile.team()`; H09 T10).
+    pub team: u8,
 }
 
 /// Event fired when the simulation is reset to the menu (`EventType.ResetEvent`).

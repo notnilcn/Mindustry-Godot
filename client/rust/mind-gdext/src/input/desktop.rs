@@ -53,6 +53,17 @@ enum DragKind {
     SelectRect,
 }
 
+/// `Binding.selectAllUnits` variants (`DesktopInput.java:315-357`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectAllKind {
+    /// Own commandable units with `type.controlSelectGlobal`.
+    Units,
+    /// Own commandable units `instanceof Payloadc`.
+    Transport,
+    /// Own commandable buildings (`command_buildings`).
+    Factories,
+}
+
 /// The active pointer drag.
 #[derive(Debug, Clone, Copy)]
 struct Drag {
@@ -115,6 +126,12 @@ pub enum Effect {
         /// `{item_name: amount}` JSON.
         items: String,
     },
+    /// `inv.hide()` (`InputHandler.tileTapped`: a non-inventory tap hides the
+    /// open inventory).
+    HideInventory,
+    /// `config.hideConfig(); inv.hide(); planConfig.hide();`
+    /// (`InputHandler.tileTapped` on an empty tile).
+    HidePanels,
     /// Capture the running viewport.
     Screenshot,
     /// `MindUi.close_top_dialog()` (research/planet toggle keys).
@@ -127,11 +144,25 @@ pub enum Effect {
 
 /// Read-only [`PlacementWorld`] over the live sim grid/content.
 ///
-/// `valid_place` defers to the in-bounds test: the simulation validates and
-/// rejects invalid placements deterministically when the command applies.
+/// `valid_place` is the real `Build.validPlace` for the player team; build
+/// rotation and the `ChainedBuilding` walk read the live buildings. The host
+/// is borrowed immutably (`HostWorld` never mutates the sim).
 struct HostWorld<'a> {
     grid: &'a mind_core::world::WorldGrid,
     content: Option<&'a ContentRegistry>,
+    host: &'a MindSimHost,
+}
+
+impl HostWorld<'_> {
+    /// Block kind at a tile (`None` out of bounds/unloaded).
+    fn kind_at(&self, x: i32, y: i32) -> Option<mind_core::content::BlockKind> {
+        let content = self.content?;
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let block = self.grid.block_at(TilePos::new(x, y))?;
+        content.block(block).map(|def| def.kind)
+    }
 }
 
 impl PlacementWorld for HostWorld<'_> {
@@ -169,8 +200,55 @@ impl PlacementWorld for HostWorld<'_> {
         }
     }
 
-    fn valid_place(&self, _block: BlockId, x: i32, y: i32, _rotation: u8) -> bool {
-        self.in_bounds(x, y)
+    fn valid_place(&self, block: BlockId, x: i32, y: i32, rotation: u8) -> bool {
+        // `Build.validPlace(block, team, x, y, rotation)`; the exact check
+        // `InputHandler.flushPlans`/`updateLine` runs through `addBuild`.
+        self.host.can_place_player(x, y, block, rotation)
+    }
+
+    fn build_rotation(&self, x: i32, y: i32) -> Option<u8> {
+        // `plan.build().rotation` for `iterateLine`'s `end.rotation`; the
+        // existing `BuildingComp.rot` seam reads `0` without a building, so
+        // the build-presence check (`tile.build != null`) gates it.
+        self.host
+            .building_team(x, y)
+            .map(|_| self.host.building_rotation(x, y))
+    }
+
+    fn is_chained(&self, x: i32, y: i32) -> bool {
+        // `world.build(x,y) instanceof ChainedBuilding` (IH:2444-2449).
+        self.kind_at(x, y)
+            .is_some_and(mind_core::input::line::is_chained_kind)
+    }
+
+    fn block_kind(&self, block: BlockId) -> Option<mind_core::content::BlockKind> {
+        // Java block class tag for the line-family checks (`getReplacement`,
+        // `calculateBridges` `avoid`).
+        self.content?.block(block).map(|def| def.kind)
+    }
+
+    fn chained_next(&self, x: i32, y: i32) -> Option<(i32, i32)> {
+        // `ConveyorBuild.next()` = `nextc` (the front tile's conveyor of the
+        // same team, `Conveyor.java:222/486-488`); `ConduitBuild.next()` is the
+        // front conduit with no team check (`Conduit.java:259-267`).
+        let kind = self.kind_at(x, y)?;
+        if !mind_core::input::line::is_chained_kind(kind) {
+            return None;
+        }
+        // A chained grid block always has its building (`BuildingComp.rot`).
+        let rotation = self.host.building_rotation(x, y) as usize % 4;
+        let (dx, dy) = mind_core::input::placement::D4[rotation];
+        let (nx, ny) = (x + dx, y + dy);
+        let next_kind = self.kind_at(nx, ny)?;
+        use mind_core::content::BlockKind as K;
+        let matches_front = match kind {
+            K::Conduit | K::ArmoredConduit => matches!(next_kind, K::Conduit | K::ArmoredConduit),
+            _ => {
+                matches!(next_kind, K::Conveyor | K::ArmoredConveyor)
+                    && self.host.building_team(x, y) == self.host.building_team(nx, ny)
+            }
+        };
+        matches_front.then_some((nx, ny))
     }
 }
 
@@ -216,6 +294,14 @@ fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
                     .get("hit_size")
                     .and_then(|value| value.as_f64())
                     .unwrap_or(0.0) as f32,
+                select_global: entry
+                    .get("select_global")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true),
+                payload: entry
+                    .get("payload")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
             })
         })
         .collect()
@@ -301,6 +387,15 @@ pub struct DesktopBridge {
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
     command_mode_hold: bool,
+    /// `settings.blockreplace`: `InputHandler.updateLine` runs the
+    /// `getReplacement`/`handlePlacementLine` half (junction/bridge placement)
+    /// only when set.
+    pub block_replace: bool,
+    /// `settings.buildautopause` (`DesktopInput.java:591-594`).
+    pub build_autopause: bool,
+    /// `InputHandler.buildWasAutoPaused` (`DesktopInput.java:593/673`,
+    /// resumed by `ConstructBlock.tapped`, `ConstructBlock.java:206-208`).
+    build_was_auto_paused: bool,
 }
 
 impl Default for DesktopBridge {
@@ -345,6 +440,9 @@ impl DesktopBridge {
             payload_hold_ms: 0,
             hint_keys: Vec::new(),
             command_mode_hold: true,
+            block_replace: true,
+            build_autopause: false,
+            build_was_auto_paused: false,
         }
     }
 
@@ -604,6 +702,39 @@ impl DesktopBridge {
         self.command_mode_hold = hold;
     }
 
+    /// `settings.blockreplace` (read once in `bootstrap`).
+    pub fn set_block_replace(&mut self, replace: bool) {
+        self.block_replace = replace;
+    }
+
+    /// `settings.buildautopause` (read once in `bootstrap`).
+    pub fn set_build_autopause(&mut self, enabled: bool) {
+        self.build_autopause = enabled;
+    }
+
+    /// `DesktopInput.java:591-594` auto-pause plus the Java resume rule: the
+    /// auto-pause latch clears when a plan exists again (`ConstructBlock.tapped`
+    /// resumes building after queueing its plan, `ConstructBlock.java:206-208`).
+    pub fn update_build_autopause(&mut self) {
+        if !self.build_autopause {
+            return;
+        }
+        let Some(mut host) = self.host.clone() else {
+            return;
+        };
+        let plans = host.bind().player_plan_count();
+        if self.controller.state.is_building && plans == 0 {
+            // `isBuilding = false; buildWasAutoPaused = true;`
+            self.controller.state.is_building = false;
+            self.build_was_auto_paused = true;
+            host.bind_mut().set_player_building_paused(true);
+        } else if self.build_was_auto_paused && !self.controller.state.is_building && plans > 0 {
+            self.controller.state.is_building = true;
+            self.build_was_auto_paused = false;
+            host.bind_mut().set_player_building_paused(false);
+        }
+    }
+
     /// Sets command mode to `enabled` (`DesktopInput.update` assignment).
     /// Turning it off clears the RTS selection like `toggle_command_mode`.
     pub fn set_command_mode(&mut self, enabled: bool) {
@@ -657,6 +788,7 @@ impl DesktopBridge {
                 // queue is cleared too (`player.unit().clearBuilding()`), and
                 // `pollInputPlayer` L632 also drops the copied plans.
                 self.controller.state.select_block(None);
+                self.controller.state.override_line_rotation = false;
                 self.controller.state.select_plans.clear();
                 self.refresh_select_preview();
                 if let Some(mut host) = self.host.clone() {
@@ -685,9 +817,14 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "pause_building" => {
-                // `DesktopInput.java:675`: toggles `isBuilding`, applied to the
-                // unit in `InputHandler.update` (`updateBuilding = isBuilding`).
+                // `DesktopInput.java:671-678`: toggles `isBuilding`, clears the
+                // auto-pause latch and stops shooting when resuming; applied to
+                // the unit in `InputHandler.update` (`updateBuilding`).
                 self.controller.state.is_building = !self.controller.state.is_building;
+                self.build_was_auto_paused = false;
+                if self.controller.state.is_building {
+                    self.shooting = false;
+                }
                 if let Some(mut host) = self.host.clone() {
                     host.bind_mut()
                         .set_player_building_paused(!self.controller.state.is_building);
@@ -716,11 +853,21 @@ impl DesktopBridge {
                     self.toggle_command_mode();
                 }
             }
-            "select_all_units" | "select_all_unit_transport" => {
-                self.select_all_units(bindings, false);
+            "select_all_units" => self.select_all_units(bindings, SelectAllKind::Units),
+            "select_all_unit_transport" => {
+                self.select_all_units(bindings, SelectAllKind::Transport)
             }
-            "select_all_unit_factories" => self.select_all_units(bindings, true),
-            "cancel_orders" | "deselect" => {
+            "select_all_unit_factories" => {
+                self.select_all_units(bindings, SelectAllKind::Factories)
+            }
+            "cancel_orders" => {
+                // PlacementFragment command table: `cancelOrders` orders stance
+                // `stop` (it does NOT deselect).
+                if self.controller.state.command_mode {
+                    self.set_stance_named("stop", true);
+                }
+            }
+            "deselect" => {
                 self.controller.state.selected_units.clear();
                 self.controller.state.command_buildings.clear();
                 self.emit_selection();
@@ -739,17 +886,52 @@ impl DesktopBridge {
                 // per-frame refresh both push the trigger.
                 self.push_hint("boost_down");
             }
-            "unit_stance_hold_fire" => self.set_stance(0, true),
-            "unit_stance_pursue_target" => self.set_stance(1, true),
-            "unit_stance_patrol" => self.set_stance(2, true),
-            "unit_stance_ram" => self.set_stance(3, true),
-            "unit_stance_boost" => self.set_stance(4, true),
-            "unit_stance_hold_position" => self.set_stance(5, true),
-            "unit_command_move" => self.command_units(0),
-            "unit_command_repair" => self.command_units(1),
-            "unit_command_rebuild" => self.command_units(2),
-            "unit_command_assist" => self.command_units(3),
-            "unit_command_mine" => self.command_units(4),
+            "unit_stance_hold_fire"
+            | "unit_stance_pursue_target"
+            | "unit_stance_patrol"
+            | "unit_stance_ram"
+            | "unit_stance_boost"
+            | "unit_stance_hold_position" => {
+                // PlacementFragment command table: names resolved through the
+                // stance registry; command mode only.
+                if self.controller.state.command_mode {
+                    let stance = match name {
+                        "unit_stance_hold_fire" => "holdfire",
+                        "unit_stance_pursue_target" => "pursuetarget",
+                        "unit_stance_patrol" => "patrol",
+                        "unit_stance_ram" => "ram",
+                        "unit_stance_boost" => "boost",
+                        _ => "holdposition",
+                    };
+                    self.set_stance_named(stance, true);
+                }
+            }
+            "unit_command_move"
+            | "unit_command_repair"
+            | "unit_command_rebuild"
+            | "unit_command_assist"
+            | "unit_command_mine"
+            | "unit_command_enter_payload"
+            | "unit_command_load_units"
+            | "unit_command_load_blocks"
+            | "unit_command_unload_payload"
+            | "unit_command_loop_payload" => {
+                if self.controller.state.command_mode {
+                    let command = match name {
+                        "unit_command_move" => "move",
+                        "unit_command_repair" => "repair",
+                        "unit_command_rebuild" => "rebuild",
+                        "unit_command_assist" => "assist",
+                        "unit_command_mine" => "mine",
+                        "unit_command_enter_payload" => "enterPayload",
+                        "unit_command_load_units" => "loadUnits",
+                        "unit_command_load_blocks" => "loadBlocks",
+                        "unit_command_unload_payload" => "unloadPayload",
+                        _ => "loopPayload",
+                    };
+                    self.command_units_named(command);
+                }
+            }
             "minimap" => {
                 self.effects
                     .push(Effect::ToggleFragment(String::from("minimap")));
@@ -906,42 +1088,63 @@ impl DesktopBridge {
     }
 
     /// Live player team (`player.team().id`) for RTS selection filters.
-    fn player_team(&self) -> u8 {
+    pub fn player_team(&self) -> u8 {
         self.host
             .as_ref()
             .map(|host| host.bind().default_team().clamp(0, 255) as u8)
             .unwrap_or(0)
     }
 
-    fn select_all_units(&mut self, bindings: &BindingState, factories: bool) {
-        // `selectAllUnits` only runs in command mode upstream; enabling it here
-        // gives the player a direct entry point without first holding the
-        // command-mode key.
+    fn select_all_units(&mut self, bindings: &BindingState, kind: SelectAllKind) {
+        // `DI:315-357`: select-all runs only while command mode is active.
         if !self.controller.state.command_mode {
-            self.toggle_command_mode();
-        }
-        let screens = self.key_down(bindings, ids::SELECT_ACROSS_SCREEN);
-        if factories {
-            // Command buildings come from the sim selection feed.
-            self.controller.state.command_buildings.clear();
-            self.controller.state.selected_units.clear();
-            self.emit_selection();
             return;
         }
-        let rect = if screens {
-            self.viewport_world_rect()
-        } else {
-            SelectRect {
-                x: f32::NEG_INFINITY,
-                y: f32::NEG_INFINITY,
-                w: f32::INFINITY,
-                h: f32::INFINITY,
-            }
-        };
-        let mut out = SmallVec::new();
-        select_units_rect(&self.selectable, self.player_team(), rect, &mut out);
-        self.controller.state.selected_units = out;
+        let screens = self.key_down(bindings, ids::SELECT_ACROSS_SCREEN);
+        let rect = screens.then(|| self.viewport_world_rect());
         self.controller.state.command_buildings.clear();
+        match kind {
+            SelectAllKind::Factories => {
+                // `build.isCommandable()` buildings (`CoreBlock`, `UnitFactory`,
+                // `Reconstructor`, `UnitAssembler`, `PayloadSource`).
+                self.controller.state.selected_units.clear();
+                let tile = mind_core::config::TILESIZE as f32;
+                if let Some(host) = self.host.clone() {
+                    self.controller.state.command_buildings = host
+                        .bind()
+                        .commandable_buildings()
+                        .into_iter()
+                        .filter(|(x, y)| {
+                            rect.is_none_or(|rect| {
+                                rect.contains(*x as f32 * tile, *y as f32 * tile)
+                            })
+                        })
+                        .map(|(x, y)| TilePos::new(x, y))
+                        .collect();
+                }
+            }
+            SelectAllKind::Units | SelectAllKind::Transport => {
+                // `type.controlSelectGlobal` (`mono` excluded) or
+                // `unit instanceof Payloadc`; no infinite rect (NaN bounds).
+                let transport = kind == SelectAllKind::Transport;
+                let team = self.player_team();
+                self.controller.state.selected_units = self
+                    .selectable
+                    .iter()
+                    .filter(|unit| {
+                        unit.team == team
+                            && unit.commandable
+                            && if transport {
+                                unit.payload
+                            } else {
+                                unit.select_global
+                            }
+                            && rect.is_none_or(|rect| rect.contains(unit.x, unit.y))
+                    })
+                    .map(|unit| unit.id)
+                    .collect();
+            }
+        }
         self.emit_selection();
     }
 
@@ -995,6 +1198,44 @@ impl DesktopBridge {
         });
     }
 
+    /// `Call.setUnitStance(player, selected ids, stance, enabled)` by
+    /// `UnitStance` name. Java toggles `!activeStances.get(id)`; without a
+    /// per-unit active-stance feed the port passes `enabled` through (callers
+    /// send `true`).
+    pub fn set_stance_named(&mut self, name: &str, enabled: bool) -> bool {
+        if self.controller.state.selected_units.is_empty() {
+            return false;
+        }
+        let Some(stance) = self.host.as_ref().and_then(|host| {
+            host.bind()
+                .content_registry()
+                .and_then(|content| content.unit_stance_by_name(name))
+                .map(|def| def.id.get())
+        }) else {
+            return false;
+        };
+        self.set_stance(stance, enabled);
+        true
+    }
+
+    /// `Call.setUnitCommand(player, selected ids, command)` by `UnitCommand`
+    /// name (`false` when nothing is selected or the name is unknown).
+    pub fn command_units_named(&mut self, name: &str) -> bool {
+        if self.controller.state.selected_units.is_empty() {
+            return false;
+        }
+        let Some(command) = self.host.as_ref().and_then(|host| {
+            host.bind()
+                .content_registry()
+                .and_then(|content| content.unit_command_by_name(name))
+                .map(|def| def.id.get())
+        }) else {
+            return false;
+        };
+        self.command_units(command);
+        true
+    }
+
     /// `requestUnitPayload`/`requestDropPayload` at the cursor.
     fn payload(&mut self, kind: PayloadAction) {
         let Some((x, y)) = self.cursor_world() else {
@@ -1038,6 +1279,14 @@ impl DesktopBridge {
         {
             self.payload(action);
             self.payload_hold_ms = now;
+        }
+    }
+
+    /// Per-frame `pollInputPlayer` L762-768 mirror: outside an active placement
+    /// line (`mode == placing && block != null`) the wheel snap latch clears.
+    pub fn sync_line_override(&mut self) {
+        if !(self.controller.state.is_placing() && self.controller.state.block.is_some()) {
+            self.controller.state.override_line_rotation = false;
         }
     }
 
@@ -1108,9 +1357,25 @@ impl DesktopBridge {
 
     /// Rotates the pending placement by `step` (`input.rotation`).
     fn rotate_placement_step(&mut self, bindings: &BindingState, step: i32) {
+        // Same snap as the wheel path (`pollInputPlayer` L762-768 runs for any
+        // `axisTap(rotate)`, wheel or bound key, before L836-849 steps it).
+        let diagonal_held = self.key_down(bindings, ids::DIAGONAL_PLACEMENT);
+        if let Some(drag) = self.drag
+            && drag.kind == DragKind::Place
+            && !self.controller.state.override_line_rotation
+            && !diagonal_held
+            && drag.start != drag.last
+        {
+            self.controller.state.rotation = mind_core::input::placement::line_angle_rotation(
+                drag.start.0,
+                drag.start.1,
+                drag.last.0,
+                drag.last.1,
+            );
+            self.controller.state.override_line_rotation = true;
+        }
         self.controller.state.rotation =
             (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
-        self.controller.state.override_line_rotation = true;
         if let Some(drag) = self.drag
             && drag.kind == DragKind::Place
         {
@@ -1694,6 +1959,9 @@ impl DesktopBridge {
             return;
         };
         self.controller.state.begin_place();
+        // A fresh drag never starts with a latched wheel override
+        // (`pollInputPlayer` L762-768 clears it on every frame between drags).
+        self.controller.state.override_line_rotation = false;
         self.drag = Some(Drag {
             kind: DragKind::Place,
             start: (x, y),
@@ -1821,11 +2089,62 @@ impl DesktopBridge {
         true
     }
 
-    /// `tileTapped` (`InputHandler.java:1973-2029`): a left tap on a placed
+    /// `build.interactable(player.team())` (`Tile.interactable`,
+    /// `Tile.java:576-578`): own team or derelict.
+    fn tile_interactable(&self, x: i32, y: i32) -> bool {
+        let team = self.player_team();
+        self.host.as_ref().is_some_and(|host| {
+            host.bind()
+                .building_team(x, y)
+                .is_some_and(|tile_team| tile_team == team || tile_team == 0)
+        })
+    }
+
+    /// `build.block.synthetic()` (`Block.synthetic()` = `update || destructible`).
+    fn block_synthetic_at(&self, x: i32, y: i32) -> bool {
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let Some(content) = guard.content_registry() else {
+            return false;
+        };
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        guard
+            .grid()
+            .block_at(TilePos::new(tx, ty))
+            .and_then(|block| content.block(block))
+            .is_some_and(mind_core::maps::filters::block_info::synthetic)
+    }
+
+    /// `tileTapped` (`InputHandler.java:1973-2030`): a left tap on a placed
     /// building opens its config UI, or its inventory when it stores items.
     /// Returns `true` when the tap was consumed (`InputHandler.tileTapped`
     /// returns `consumed`; `DesktopInput.java:701` gates shooting on it).
     fn tile_tapped(&mut self, x: i32, y: i32) -> bool {
+        // H02 owns the `checkConfigTap`/`onConfigureBuildTapped` tap-to-link
+        // branch at the top of this function (`world::config_tap::config_tap`
+        // is not on main: skipped, waiting for H02 T6). If both edit here,
+        // keep H02's link branch before these gates.
+        //
+        // `if(build == null){ inv.hide(); config.hideConfig(); return false; }`
+        if !self
+            .host
+            .as_ref()
+            .is_some_and(|host| host.bind().building_team(x, y).is_some())
+        {
+            self.effects.push(Effect::HidePanels);
+            return false;
+        }
+        // `build.interactable(player.team())`: enemy buildings never open a
+        // panel or inventory (IH:1980-1990).
+        if !self.tile_interactable(x, y) {
+            self.effects.push(Effect::HideInventory);
+            return false;
+        }
+        // `build.block.configurable && build.interactable(team)`.
         // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
         // returns false, so no panel opens (PAR-0108).
         if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
@@ -1851,6 +2170,8 @@ impl DesktopBridge {
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!enabled),
             });
+            // `if(!showedInventory) inv.hide();`
+            self.effects.push(Effect::HideInventory);
             return true;
         }
         // `Door.tapped` (`Door.java:148-154`, T13): a tap toggles unless a unit
@@ -1869,6 +2190,7 @@ impl DesktopBridge {
             let open = host.bind().building_config_json(x, y) == "true";
             if open && host.bind().building_has_unit_overlap(x, y) {
                 // `Door.tapped` returns without toggling: the tap is not consumed.
+                self.effects.push(Effect::HideInventory);
                 return false;
             }
             self.emit_action(RemoteAction::Configure {
@@ -1876,6 +2198,7 @@ impl DesktopBridge {
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!open),
             });
+            self.effects.push(Effect::HideInventory);
             return true;
         }
         if let Some(spec) = self.config_spec(x, y) {
@@ -1885,21 +2208,28 @@ impl DesktopBridge {
                 screen: self.mouse,
                 spec,
             });
+            self.effects.push(Effect::HideInventory);
             return true;
         }
-        let Some(host) = self.host.clone() else {
-            return false;
-        };
-        let items = host.bind().block_items_json(x, y);
-        if let Some(items) = items {
-            self.effects.push(Effect::OpenBlockInventory {
-                x,
-                y,
-                screen: self.mouse,
-                items,
-            });
-            return true;
+        // `build.interactable(team) && build.block.synthetic() &&
+        // build.block.hasItems && build.items.total() > 0` (IH:1998-2004).
+        if self.block_synthetic_at(x, y) {
+            let Some(host) = self.host.clone() else {
+                return false;
+            };
+            let items = host.bind().block_items_json(x, y);
+            if let Some(items) = items {
+                self.effects.push(Effect::OpenBlockInventory {
+                    x,
+                    y,
+                    screen: self.mouse,
+                    items,
+                });
+                return true;
+            }
         }
+        // `if(!showedInventory) inv.hide();`
+        self.effects.push(Effect::HideInventory);
         false
     }
 
@@ -1907,6 +2237,23 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
+        // `DesktopInput.java:608-610` runs before the select/deselect taps: the
+        // right tap clears `mineTile` when no placement mode, unit plans or
+        // command mode owns the tap. Do not return: the break drag still
+        // starts (`DI:740-748`).
+        let plans = self
+            .host
+            .as_ref()
+            .map(|host| host.bind().player_plan_count())
+            .unwrap_or(0);
+        if mind_core::input::desktop::deselect_stops_mining(
+            self.controller.state.block.is_some(),
+            self.controller.state.command_mode,
+            plans,
+        ) && let Some(mut host) = self.host.clone()
+        {
+            host.bind_mut().set_player_mine(None);
+        }
         if self.controller.state.command_mode {
             self.command_tap(bindings);
             return;
@@ -1918,6 +2265,7 @@ impl DesktopBridge {
         // (PAR-0045).
         if self.controller.state.block.is_some() {
             self.controller.state.select_block(None);
+            self.controller.state.override_line_rotation = false;
             if let Some(mut host) = self.host.clone() {
                 host.bind_mut().select_block(GString::from("air"));
             }
@@ -1990,6 +2338,7 @@ impl DesktopBridge {
             let world = HostWorld {
                 grid: guard.grid(),
                 content: guard.content_registry(),
+                host: &guard,
             };
             'outer: for y in r.y..=r.y2 {
                 for x in r.x..=r.x2 {
@@ -2082,20 +2431,54 @@ impl DesktopBridge {
             override_line_rotation: self.controller.state.override_line_rotation,
             ..LineParams::default()
         };
+        let block = self.controller.state.block;
+        let block_replace = self.block_replace;
         {
             let guard = host.bind();
             let world = HostWorld {
                 grid: guard.grid(),
                 content: guard.content_registry(),
+                host: &guard,
             };
             let block_meta = self.line_block_for(&world);
-            self.controller.state.update_line(
-                &world,
-                block_meta.as_ref(),
-                TilePos::new(start.0 as i16, start.1 as i16),
-                TilePos::new(end.0 as i16, end.1 as i16),
-                &params,
-            );
+            let rules = block.and_then(|block| {
+                world
+                    .content
+                    .map(|content| mind_core::input::line_rules::line_rules_for(content, block))
+            });
+            // `changePlacementPath` runs inside `iterateLine` regardless of
+            // `blockreplace`; the rules half (`getReplacement` /
+            // `handlePlacementLine`) is the gated part (IH:1952-1961).
+            let active = rules.as_ref().filter(|_| block_replace);
+            match rules.as_ref().and_then(|rules| rules.node) {
+                Some(rule) => {
+                    let hooks = mind_core::input::line_rules::NodeHooks {
+                        rule,
+                        world: &world,
+                        block: block.unwrap_or(BlockId::AIR),
+                    };
+                    self.controller.state.update_line_with(
+                        &world,
+                        block_meta.as_ref(),
+                        TilePos::new(start.0 as i16, start.1 as i16),
+                        TilePos::new(end.0 as i16, end.1 as i16),
+                        &params,
+                        &hooks,
+                        active,
+                    );
+                }
+                None => {
+                    self.controller.state.update_line_with(
+                        &world,
+                        block_meta.as_ref(),
+                        TilePos::new(start.0 as i16, start.1 as i16),
+                        TilePos::new(end.0 as i16, end.1 as i16),
+                        &params,
+                        &mind_core::input::line::NoLineHooks,
+                        active,
+                    );
+                }
+            }
         }
         self.controller.state.refresh_preview();
         self.preview_json = serde_json::Value::Array(
@@ -2116,24 +2499,13 @@ impl DesktopBridge {
         .to_string();
     }
 
-    /// Block metadata for `iterateLine` (plan-07 seam; `None` when unknown).
+    /// Block metadata for `iterateLine` (flags from the Java block class;
+    /// `None` when unknown).
     fn line_block_for(&self, world: &HostWorld<'_>) -> Option<LineBlock> {
         let block = self.controller.state.block?;
         let content = world.content?;
         let def = content.block(block)?;
-        Some(LineBlock {
-            id: block,
-            size: def.size,
-            offset: def.offset,
-            allow_diagonal: true,
-            conveyor_placement: matches!(
-                def.kind,
-                BlockKind::Conveyor | BlockKind::ArmoredConveyor | BlockKind::Duct
-            ),
-            allow_rectangle_placement: false,
-            swap_diagonal_placement: false,
-            ignore_line_rotation: false,
-        })
+        Some(mind_core::input::line::line_block_from_def(block, def))
     }
 
     /// Commits a placement drag into queued `SimCommand::Place`s.
@@ -2213,6 +2585,8 @@ impl DesktopBridge {
         self.controller.state.line_plans.clear();
         self.controller.state.line.clear();
         self.controller.state.place_mode = PlaceMode::None;
+        // `pollInputPlayer` L762-768: the latch clears once the drag is over.
+        self.controller.state.override_line_rotation = false;
         self.controller.state.preview.clear();
     }
 
@@ -2300,29 +2674,30 @@ impl DesktopBridge {
         let route = mind_core::input::desktop::route_scroll(&ctx);
         let step = if delta > 0.0 { 1 } else { -1 };
         if route.rotate_selection {
-            // `rotation = mod(rotation + axisTap(rotate), 4)`.
+            // `pollInputPlayer` L762-768 (snap to the drag angle) runs BEFORE
+            // L836-849 (`rotation = mod(rotation + axisTap, 4)`): a wheel during
+            // a fresh drag snaps to the drag angle, adds the step and latches
+            // `overrideLineRotation`, so every line step gets `input.rotation`.
+            let drag = self.drag.filter(|drag| drag.kind == DragKind::Place);
+            if placing
+                && let Some(drag) = drag
+                && !self.controller.state.override_line_rotation
+                && !diagonal_held
+                && drag.start != drag.last
+            {
+                self.controller.state.rotation = mind_core::input::placement::line_angle_rotation(
+                    drag.start.0,
+                    drag.start.1,
+                    drag.last.0,
+                    drag.last.1,
+                );
+                self.controller.state.override_line_rotation = true;
+            }
             self.controller.state.rotation =
                 (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
-            if placing {
-                if let Some(drag) = self.drag
-                    && drag.kind == DragKind::Place
-                {
-                    // `pollInputPlayer` L766-773: while no override is latched,
-                    // align to the drag angle before the wheel step.
-                    if !self.controller.state.override_line_rotation
-                        && !diagonal_held
-                        && drag.start != drag.last
-                    {
-                        let dx = (drag.last.0 - drag.start.0) as f32;
-                        let dy = (drag.last.1 - drag.start.1) as f32;
-                        let angle = dy.atan2(dx).to_degrees();
-                        self.controller.state.rotation =
-                            (((angle + 45.0) / 90.0) as i32).rem_euclid(4) as u8;
-                    }
-                    self.controller.state.override_line_rotation = true;
-                    self.update_place_line(bindings, drag.start, drag.last);
-                }
-            } else if !self.controller.state.select_plans.is_empty() {
+            if placing && let Some(drag) = drag {
+                self.update_place_line(bindings, drag.start, drag.last);
+            } else if !placing && !self.controller.state.select_plans.is_empty() {
                 self.rotate_select_plans(step);
             }
         }
@@ -2732,6 +3107,65 @@ mod tests {
             )),
             "N in a campaign opens the planet map"
         );
+    }
+
+    #[test]
+    fn override_line_rotation_resets_when_the_drag_ends() {
+        // Java DI:762-768: the wheel snap latch clears whenever the frame is
+        // not a placement line, so a second drag after a wheel step gets
+        // per-step rotations again.
+        let mut bridge = DesktopBridge::new();
+        bridge
+            .controller
+            .state
+            .select_block(Some(BlockId::STONE_WALL));
+        bridge.controller.state.override_line_rotation = true;
+        bridge.controller.state.place_mode = PlaceMode::Placing;
+        bridge.commit_place(Drag {
+            kind: DragKind::Place,
+            start: (1, 1),
+            last: (1, 2),
+            moved: true,
+        });
+        assert!(!bridge.controller.state.override_line_rotation);
+
+        // The per-frame mirror also clears it outside a drag.
+        bridge.controller.state.override_line_rotation = true;
+        bridge.sync_line_override();
+        assert!(!bridge.controller.state.override_line_rotation);
+
+        // While a placement line is active the latch survives.
+        bridge.controller.state.override_line_rotation = true;
+        bridge.controller.state.place_mode = PlaceMode::Placing;
+        bridge.sync_line_override();
+        assert!(bridge.controller.state.override_line_rotation);
+    }
+
+    #[test]
+    fn rotate_step_snaps_to_the_drag_angle_before_stepping() {
+        // `pollInputPlayer` L762-768 runs before L836-849: a rotate tap during
+        // a fresh drag snaps to the drag angle (upward drag = 1), then adds
+        // the step and latches the override.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        bridge
+            .controller
+            .state
+            .select_block(Some(BlockId::STONE_WALL));
+        bridge.drag = Some(Drag {
+            kind: DragKind::Place,
+            start: (5, 5),
+            last: (5, 8),
+            moved: true,
+        });
+        bridge.controller.state.override_line_rotation = false;
+        bridge.rotate_placement_step(&bindings, 1);
+        assert_eq!(bridge.controller.state.rotation, 2);
+        assert!(bridge.controller.state.override_line_rotation);
+
+        // A latched override skips the snap and only steps.
+        bridge.rotate_placement_step(&bindings, 1);
+        assert_eq!(bridge.controller.state.rotation, 3);
     }
 
     #[test]

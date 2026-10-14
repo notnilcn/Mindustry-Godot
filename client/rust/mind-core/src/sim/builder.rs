@@ -813,6 +813,7 @@ fn update_builder(
                             block: state.current,
                             // `deconstructFinish` (break sound).
                             destroyed: false,
+                            team,
                         }));
                 }
             } else {
@@ -1201,6 +1202,45 @@ impl Sim {
             .and_then(|unit| self.ecs.0.get::<BuilderPlans>(unit))
             .map(|plans| plans.plans.iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// `player.unit().plans.size` (`BuilderComp.plans`; the `buildautopause`
+    /// auto-pause and deselect-mining gates, `DesktopInput.java:593/609`)
+    /// without cloning the queue.
+    pub fn player_plan_count(&self) -> usize {
+        self.player_unit
+            .and_then(|unit| self.ecs.0.get::<BuilderPlans>(unit))
+            .map(|plans| plans.plans.len())
+            .unwrap_or(0)
+    }
+
+    /// `build.isCommandable()` own buildings (`DesktopInput.java:346-357`):
+    /// cores, unit factories, reconstructors, assemblers and payload sources,
+    /// in `EntitySeq` order (`(x, y)` anchor tiles).
+    pub fn commandable_buildings(&self, team: u8) -> Vec<(i16, i16)> {
+        use crate::content::BlockKind;
+        let Some(runtime) = self.block_runtime.as_ref() else {
+            return Vec::new();
+        };
+        let content = runtime.content();
+        self.ecs
+            .entities_by_seq()
+            .into_iter()
+            .filter(|(_, _, comp)| {
+                comp.team.0 == team
+                    && content.block(comp.block).is_some_and(|def| {
+                        matches!(
+                            def.kind,
+                            BlockKind::CoreBlock
+                                | BlockKind::UnitFactory
+                                | BlockKind::Reconstructor
+                                | BlockKind::UnitAssembler
+                                | BlockKind::PayloadSource
+                        )
+                    })
+            })
+            .map(|(_, _, comp)| (comp.pos.x(), comp.pos.y()))
+            .collect()
     }
 
     /// Clears the player unit's queue (`BuilderComp.clearBuilding`).
@@ -2417,6 +2457,25 @@ mod tests {
         assert!(
             sim.valid_place_player(10, 10, foundation, 0),
             "all requirements present"
+        );
+    }
+
+    /// H08 T2: the placement-preview validity is the exact
+    /// `queue_player_place_config` check (`Build.validPlace` under
+    /// `PlaceFlags::PLAYER`; `MindSimHost::can_place_player` forwards here).
+    /// The seam is H02 T3's `Sim::valid_place_player`.
+    #[test]
+    fn can_place_player_matches_queue() {
+        let (sim, _unit, _core, wall) = sim_with_player();
+        assert!(
+            sim.valid_place_player(14, 10, wall, 0),
+            "free ground accepts a copper wall"
+        );
+        // The core occupies (10,10); the same gate `queue_player_place_config`
+        // runs rejects the wall there.
+        assert!(
+            !sim.valid_place_player(10, 10, wall, 0),
+            "core tile rejects a copper wall"
         );
     }
 }

@@ -216,8 +216,35 @@ impl INode for MindInput {
         // state changes that arrive without a key edge (block selection from a
         // fragment, focus changes) still close the gate.
         self.bridge.update_command_mode(&self.bindings, None);
+        // `pollInputPlayer` L762-768: `overrideLineRotation` clears whenever the
+        // frame is not an active placement line.
+        self.bridge.sync_line_override();
         // Cargo keys repeat while held (`DesktopInput.updateMovement`).
         self.bridge.update_payload_hold(&self.bindings);
+        // `DesktopInput.java:591-594`: auto-pause building while the player
+        // unit's queue is empty (`buildautopause`).
+        self.bridge.update_build_autopause();
+        // `DI:313`: `selectedUnits.removeAll(u -> !u.allowCommand() ||
+        // !u.isValid() || u.team != player.team());`
+        {
+            let team = self.bridge.player_team();
+            let valid: std::collections::HashSet<i32> = self
+                .bridge
+                .selectable
+                .iter()
+                .filter(|unit| unit.commandable && unit.team == team)
+                .map(|unit| unit.id)
+                .collect();
+            let before = self.bridge.controller.state.selected_units.len();
+            self.bridge
+                .controller
+                .state
+                .selected_units
+                .retain(|id| valid.contains(id));
+            if self.bridge.controller.state.selected_units.len() != before {
+                self.bridge.emit_selection();
+            }
+        }
         // G05 T4b hint triggers while a key is held (`boost`,
         // `rebuild_selecting`).
         self.bridge.refresh_hints(&self.bindings);
@@ -264,6 +291,9 @@ impl MindInput {
         self.bindings = bindings::load();
         self.bridge
             .set_command_mode_hold(Self::read_command_mode_hold());
+        self.bridge.set_block_replace(Self::read_block_replace());
+        self.bridge
+            .set_build_autopause(Self::read_build_autopause());
         // Scene wiring (tscn-first): the spine declares SimHost as a sibling of
         // Input and Camera2D under World.
         self.bridge.host = self.base().try_get_node_as::<MindSimHost>("../SimHost");
@@ -322,6 +352,19 @@ impl MindInput {
     fn read_command_mode_hold() -> bool {
         let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
         store.get_bool("commandmodehold", true)
+    }
+
+    /// `settings.getBool("blockreplace", true)` (`InputHandler.updateLine`:
+    /// junction/bridge replacement + `handlePlacementLine`).
+    fn read_block_replace() -> bool {
+        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+        store.get_bool("blockreplace", true)
+    }
+
+    /// `settings.getBool("buildautopause", false)` (`SettingsMenuDialog.java:411`).
+    fn read_build_autopause() -> bool {
+        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+        store.get_bool("buildautopause", false)
     }
 
     /// Re-reads the hold setting when a command-mode key edge arrives so a live
@@ -569,6 +612,19 @@ impl MindInput {
         }
     }
 
+    /// Calls `hide_panel()` on a fragment (or clears `visible` when the
+    /// fragment has no such method).
+    fn hide_panel_at(&self, path: &str) {
+        let Some(mut node) = self.base().try_get_node_as::<Node>(path) else {
+            return;
+        };
+        if node.has_method("hide_panel") {
+            let _ = node.call("hide_panel", &[]);
+        } else {
+            node.set("visible", &false.to_variant());
+        }
+    }
+
     /// Resolves UI effects produced by the desktop bridge.
     fn drain_effects(&mut self) {
         let effects = self.bridge.take_effects();
@@ -656,6 +712,17 @@ impl MindInput {
                 Effect::CloseTopDialog => {
                     if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
                         let _ = ui.call("close_top_dialog", &[]);
+                    }
+                }
+                Effect::HideInventory => {
+                    self.hide_panel_at(BLOCK_INVENTORY_PATH);
+                }
+                Effect::HidePanels => {
+                    // `config.hideConfig(); inv.hide(); planConfig.hide();`
+                    // (`InputHandler.tileTapped` empty-tile branch).
+                    self.hide_panel_at(BLOCK_INVENTORY_PATH);
+                    if let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH) {
+                        node.set("visible", &false.to_variant());
                     }
                 }
                 Effect::Hotkey(action) => {
@@ -1067,6 +1134,51 @@ impl MindInput {
     #[func]
     pub fn set_unit_stance(&mut self, stance: i64, enabled: bool) {
         self.bridge.set_stance(stance.max(0) as u16, enabled);
+    }
+
+    /// `Call.setUnitCommand(player, selected ids, command)` by UnitCommand
+    /// name (H08 T6a seam; H03 T3 consumes the same signature).
+    #[func]
+    pub fn set_unit_command(&mut self, command: GString) -> bool {
+        self.bridge.command_units_named(&command.to_string())
+    }
+
+    /// `Call.setUnitStance(player, selected ids, stance, enabled)` by stance
+    /// name (H08 T6a seam; H03 T3 consumes the same signature).
+    #[func]
+    pub fn set_unit_stance_named(&mut self, stance: GString, enabled: bool) -> bool {
+        self.bridge.set_stance_named(&stance.to_string(), enabled)
+    }
+
+    /// `selectTypedUnits`: replace the selection with every own unit of the
+    /// given type id (`false` without a sim host).
+    #[func]
+    pub fn select_only_type(&mut self, type_id: i64) -> bool {
+        let team = self.bridge.player_team();
+        self.bridge.controller.state.selected_units = self
+            .bridge
+            .selectable
+            .iter()
+            .filter(|unit| unit.team == team && unit.commandable && unit.type_id == type_id as i32)
+            .map(|unit| unit.id)
+            .collect();
+        self.bridge.emit_selection();
+        true
+    }
+
+    /// `deselectTypedUnits` / typed deselect: drop every own unit of the
+    /// given type id from the selection.
+    #[func]
+    pub fn deselect_type(&mut self, type_id: i64) -> bool {
+        self.bridge.controller.state.selected_units.retain(|id| {
+            !self
+                .bridge
+                .selectable
+                .iter()
+                .any(|unit| unit.id == *id && unit.type_id == type_id as i32)
+        });
+        self.bridge.emit_selection();
+        true
     }
 
     /// Selects a buildable block by name and syncs the placement state.

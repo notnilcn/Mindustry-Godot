@@ -1094,6 +1094,7 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         loop_sound_volume: 0.5,
         sound_pitch_min: 0.9,
         sound_pitch_max: 1.1,
+        fog_radius_multiplier: 1.0,
     }
 }
 
@@ -1639,6 +1640,9 @@ pub fn config_for(
             // `range = max(spawnUnit.lifetime * spawnUnit.speed)` over the ammo
             // (carbide missile: 4.6 * 330 = 1518).
             c.range = 1518.0;
+            // `Blocks.java:5661`: `fogRadiusMultiplier = 0.4f` (the only
+            // vanilla turret with a multiplier).
+            c.fog_radius_multiplier = 0.4;
             c.reload = 10.0;
             c.target_interval = 20.0;
             // `Blocks.java:5248`: `scathe` sets `predictTarget = false`.

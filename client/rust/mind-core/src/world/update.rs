@@ -93,8 +93,10 @@ impl BlockInstance {
         item_count: usize,
         liquid_count: usize,
     ) -> Entity {
-        let center_x = (tile.x() as f32 + 0.5) * super::block::TILE_SIZE;
-        let center_y = (tile.y() as f32 + 0.5) * super::block::TILE_SIZE;
+        // `Building.set(tile.drawx(), tile.drawy())` (BuildingComp.java:126):
+        // `drawx = tile.worldx() + block.offset` (Tile.java:166-177).
+        let center_x = tile.x() as f32 * super::block::TILE_SIZE + self.def.offset;
+        let center_y = tile.y() as f32 * super::block::TILE_SIZE + self.def.offset;
         let mut entity = world.spawn((
             EntitySeq(seq),
             TeamComp { team },

@@ -650,7 +650,7 @@ fn campaign_schematic() -> Result<(Value, Value)> {
 /// `campaign fog` — plan 12 §7b M7 (`fog_reveal` + attack indicators).
 fn campaign_fog() -> Result<(Value, Value)> {
     use mind_core::game::attack_indicators::AttackIndicators;
-    use mind_core::game::fog::{FogControl, FogSource};
+    use mind_core::game::fog::{FogControl, FogSource, FogUnit};
 
     let mut fog = FogControl::new();
     let blocks = vec![FogSource {
@@ -659,15 +659,16 @@ fn campaign_fog() -> Result<(Value, Value)> {
         radius: 8,
         team: 0,
     }];
-    let units = vec![FogSource {
-        x: 40,
-        y: 40,
+    let units = vec![FogUnit {
+        entity: bevy_ecs::entity::Entity::from_raw_u32(1).expect("entity"),
+        tile_x: 40,
+        tile_y: 40,
         radius: 6,
         team: 0,
     }];
     fog.on_world_load(64, 64, true, true, &blocks);
-    fog.update(40, &[0], &blocks, &units, true, true, false);
-    fog.update(120, &[0], &blocks, &units, true, true, false);
+    fog.update(40, &[0], &blocks, &units, true);
+    fog.update(120, &[0], &blocks, &units, true);
 
     // Static discovery around the building; dynamic visibility around the unit.
     let discovered_center = fog.is_discovered(0, 32, 32, true, true, false);
@@ -1180,6 +1181,8 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
 
     // -- fog: 2000 buildings + 400 units per tick --
     if profiles.iter().any(|name| name == "fog") {
+        use mind_core::game::fog::FogUnit;
+
         let blocks: Vec<FogSource> = (0..2000)
             .map(|i| FogSource {
                 x: i % 50,
@@ -1188,10 +1191,11 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
                 team: (i % 2) as u8,
             })
             .collect();
-        let units: Vec<FogSource> = (0..400)
-            .map(|i| FogSource {
-                x: i % 25 + 50,
-                y: i / 25,
+        let units: Vec<FogUnit> = (0..400)
+            .map(|i| FogUnit {
+                entity: bevy_ecs::entity::Entity::from_raw_u32(i + 1).expect("entity"),
+                tile_x: (i % 25) as i32 + 50,
+                tile_y: (i / 25) as i32,
                 radius: 4,
                 team: (i % 2) as u8,
             })
@@ -1200,7 +1204,7 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
         fog.on_world_load(128, 128, true, true, &blocks);
         let start = Instant::now();
         for tick in 0..ticks.max(1) {
-            fog.update(tick as u64, &[0, 1], &blocks, &units, true, true, false);
+            fog.update(tick as u64, &[0, 1], &blocks, &units, true);
         }
         let elapsed = start.elapsed();
         let chunk = fog.write();

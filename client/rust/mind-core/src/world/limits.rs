@@ -94,6 +94,22 @@ pub struct BuildRules {
     pub is_campaign: bool,
     /// Per-team placement rules (`Rules.teams`), ordered by team id.
     pub team_rules: Vec<TeamPlaceRule>,
+    /// Player-team static fog snapshot for `Build.validPlace`
+    /// (`Build.java:252`); `None` = fog off or not yet built.
+    pub static_fog_mask: Option<std::sync::Arc<StaticFogMask>>,
+}
+
+/// Player-team static fog snapshot for `Build.validPlace` (`Build.java:252`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct StaticFogMask {
+    /// Team the bits belong to (the default team).
+    pub team: u8,
+    /// World width in tiles.
+    pub width: i32,
+    /// World height in tiles.
+    pub height: i32,
+    /// Discovered bits, row-major (`x + y * width`).
+    pub bits: crate::game::fog::FogBits,
 }
 
 impl Default for BuildRules {
@@ -126,6 +142,7 @@ impl Default for BuildRules {
             allow_edit_world_processors: false,
             is_campaign: false,
             team_rules: Vec::new(),
+            static_fog_mask: None,
         }
     }
 }

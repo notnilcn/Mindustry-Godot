@@ -21,6 +21,7 @@ pub mod focus;
 pub mod input_log;
 pub mod keycode;
 pub mod line;
+pub mod line_rules;
 pub mod mobile;
 pub mod place_mode;
 pub mod placement;

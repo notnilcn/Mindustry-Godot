@@ -42,6 +42,9 @@ pub const DAMAGE_LIGHTNING: BulletId = BulletId::new(1);
 pub const DAMAGE_LIGHTNING_GROUND: BulletId = BulletId::new(2);
 /// `Bullets.damageLightningAir` id.
 pub const DAMAGE_LIGHTNING_AIR: BulletId = BulletId::new(3);
+/// `Bullets.fireball` id (`Bullets.java:44-46`: `FireBulletType(1f, 4)`,
+/// `hittable = false`) — H09 T7's explosion fireball.
+pub const FIREBALL: BulletId = BulletId::new(4);
 
 /// Bullet class tag (`BulletType` hierarchy; content ABI, append-only).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -2138,7 +2141,7 @@ mod tests {
         assert!(!air.collides_ground);
         assert!(!air.collides_tiles);
 
-        let fireball = registry.bullet(BulletId::new(4)).unwrap();
+        let fireball = registry.bullet(FIREBALL).unwrap();
         assert_eq!(fireball.speed, 1.0);
         assert_eq!(fireball.damage, 4.0);
         assert!(!fireball.hittable);

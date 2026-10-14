@@ -961,7 +961,9 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
         return CollisionOutcome::None;
     }
 
-    let to_tile = |v: f32| (v / tile_size).floor() as i32;
+    // `BulletComp.tileRaycast(World.toTile(lastX), World.toTile(lastY), tileX(), tileY())`
+    // (BulletComp.java:187): `World.toTile` = `Math.round(c / 8)` (World.java:174).
+    let to_tile = |v: f32| crate::world::WorldGrid::to_tile(v);
     let start_x = to_tile(state.last.0);
     let start_y = to_tile(state.last.1);
     let (ex, ey) = ctx.pos(bullet).unwrap_or(state.last);
@@ -1554,13 +1556,39 @@ mod tests {
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.build.place(10, 10, wall, 0, true));
         let before = harness.building_health_at(10, 10);
-        let (x, y) = CombatHarness::tile_center(8, 10);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 10).
+        let (x, y) = CombatHarness::tile_origin(8, 10);
         assert!(harness.spawn_bullet("fuse", x, y, 0.0, 1).is_some());
         for _ in 0..120 {
             harness.tick();
         }
         let after = harness.building_health_at(10, 10);
         assert!(after < before, "wall took damage: {before} -> {after}");
+    }
+
+    /// T1: `BulletComp.tileRaycast` uses `World.toTile` = `Math.round(c / 8)`
+    /// (World.java:174). A bullet at y = 79 rounds into row 10, so it hits the
+    /// wall on tile row 10; the old `floor` lookup gave row 9 and passed under.
+    #[test]
+    fn bullet_row_lookup_uses_round() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(11, 10, wall, 0, true));
+        let before = harness.building_health_at(11, 10);
+        assert_eq!(before, 320.0, "full copper-wall health");
+        assert!(
+            harness
+                .spawn_bullet("fuse", 100.0, 79.0, 180.0, 1)
+                .is_some()
+        );
+        for _ in 0..30 {
+            harness.step_bullets_only();
+        }
+        let after = harness.building_health_at(11, 10);
+        assert!(
+            after < before,
+            "row 10 wall took damage: {before} -> {after}"
+        );
     }
 
     #[test]
@@ -1625,7 +1653,8 @@ mod tests {
         harness.build.set_audio_sink(log.clone());
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.build.place(10, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 8).
+        let (x, y) = CombatHarness::tile_origin(4, 8);
         let _ = harness.spawn_bullet("fuse", x, y, 0.0, 1).expect("spawn");
         for _ in 0..40 {
             harness.step_bullets_only();
@@ -1691,7 +1720,8 @@ mod tests {
         let mut harness = CombatHarness::new(32, 32, 5);
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(10, 10, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(8, 10);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 10).
+        let (x, y) = CombatHarness::tile_origin(8, 10);
         let created_before = harness.bullets_created;
         assert!(harness.spawn_bullet("frag", x, y, 0.0, 1).is_some());
         for _ in 0..12 {
@@ -1739,7 +1769,8 @@ mod tests {
         if let Some(mut health) = harness.build.world.get_mut::<Health>(wall_entity) {
             health.health = 100.0;
         }
-        let (x, y) = CombatHarness::tile_center(6, 8);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 8).
+        let (x, y) = CombatHarness::tile_origin(6, 8);
         let _ = harness
             .spawn_bullet("heal_bolt", x, y, 0.0, 1)
             .expect("spawn");
@@ -1759,7 +1790,8 @@ mod tests {
         let mut harness = CombatHarness::new(32, 16, 4);
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(10, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(6, 8);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 8).
+        let (x, y) = CombatHarness::tile_origin(6, 8);
         let _ = harness
             .spawn_bullet("heal_bolt", x, y, 0.0, 1)
             .expect("spawn");
@@ -1830,10 +1862,11 @@ mod tests {
     fn point_bullet_teleports_and_hits() {
         let mut harness = CombatHarness::new(32, 16, 7);
         let wall = wall(&harness);
-        // speed 4 * lifetime 20 = 80 px from x=36 -> x=116 (tile 14).
+        // speed 4 * lifetime 20 = 80 px from x=32 -> x=112 (tile 14).
         assert!(harness.place(14, 8, wall, 0, true));
         let before = harness.building_health_at(14, 8);
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 8).
+        let (x, y) = CombatHarness::tile_origin(4, 8);
         let e = harness.spawn_bullet("point", x, y, 0.0, 1).expect("spawn");
         assert!(
             harness.building_health_at(14, 8) < before,
@@ -1862,7 +1895,8 @@ mod tests {
         let wall = wall(&harness);
         assert!(harness.place(10, 10, wall, 0, true));
         assert!(harness.place(12, 10, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(8, 10);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 10).
+        let (x, y) = CombatHarness::tile_origin(8, 10);
         let _ = harness.spawn_bullet("emp", x, y, 0.0, 1).expect("spawn");
         for _ in 0..20 {
             harness.tick();
@@ -1879,7 +1913,8 @@ mod tests {
         let mut harness = CombatHarness::new(32, 16, 7);
         let wall = wall(&harness);
         assert!(harness.place(10, 10, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(8, 10);
+        // `World.toTile` rounds: spawn on the tile's `worldx` (row 10).
+        let (x, y) = CombatHarness::tile_origin(8, 10);
         let _ = harness.spawn_bullet("flak", x, y, 0.0, 1).expect("spawn");
         for _ in 0..40 {
             harness.tick();

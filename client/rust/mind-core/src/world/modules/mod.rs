@@ -122,12 +122,14 @@ impl ItemModule {
     }
 
     /// `ItemModule.set(item, amount)` (`ItemModule.java:220-223`): overwrites
-    /// the stored amount, adjusting `total` by the delta.
+    /// the stored amount, adjusting `total` by the delta. Java's `total` is an
+    /// `int` (overflow wraps); `fillItems` sets `i32::MAX / 2`-scale amounts,
+    /// so the arithmetic must wrap instead of panicking in debug builds.
     pub fn set(&mut self, item: ItemId, amount: i32) {
         let Some(slot) = self.items.get_mut(item.index()) else {
             return;
         };
-        self.total += amount - *slot;
+        self.total = self.total.wrapping_add(amount.wrapping_sub(*slot));
         *slot = amount;
     }
 

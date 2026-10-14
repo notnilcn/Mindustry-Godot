@@ -120,7 +120,9 @@ pub struct FogData {
     pub write: FogBits,
     /// Static exploration fog.
     pub static_data: FogBits,
-    /// Last dynamic flush tick.
+    /// Last dynamic flush tick. `u64::MAX` = never flushed: Java's
+    /// `lastDynamicMs = 0` compares against the app uptime, so the first
+    /// `update()` after a load always flushes (`FogControl.java:274`).
     pub last_dynamic_tick: u64,
     /// A dynamic flush is pending.
     pub dynamic_updated: bool,
@@ -133,10 +135,25 @@ impl FogData {
             read: FogBits::new(len),
             write: FogBits::new(len),
             static_data: FogBits::new(len),
-            last_dynamic_tick: 0,
+            last_dynamic_tick: u64::MAX,
             dynamic_updated: true,
         }
     }
+}
+
+/// One unit fog source for [`FogControl::update`] (`FogControl.java:257-270`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FogUnit {
+    /// Entity handle (replaces Java's `unit.lastFogPos` keyed by object).
+    pub entity: bevy_ecs::entity::Entity,
+    /// Tile x (`unit.tileX()`).
+    pub tile_x: i32,
+    /// Tile y (`unit.tileY()`).
+    pub tile_y: i32,
+    /// `(int)unit.type.fogRadius` (truncation, `FogControl.java:260`).
+    pub radius: i32,
+    /// Owning team id.
+    pub team: u8,
 }
 
 /// One fog-emitting building/unit (`hasFogRadius` sources).
@@ -153,7 +170,7 @@ pub struct FogSource {
 }
 
 /// `FogControl` deterministic port.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, bevy_ecs::prelude::Resource)]
 pub struct FogControl {
     /// World width in tiles.
     pub ww: u16,
@@ -175,6 +192,12 @@ pub struct FogControl {
     pub just_loaded: bool,
     /// Rotating building-chunk cursor.
     pub last_entity_update_index: usize,
+    /// `UnitComp.lastFogPos` equivalents: last tile index a unit fog event was
+    /// pushed for (lookups only, never iterated for game logic).
+    pub last_fog_pos: indexmap::IndexMap<bevy_ecs::entity::Entity, i32>,
+    /// A static draw changed the discovery buffer (T2 rebuilds the placement
+    /// mask and clears this).
+    pub static_dirty: bool,
 }
 
 impl Default for FogControl {
@@ -197,6 +220,8 @@ impl FogControl {
             loaded_static: false,
             just_loaded: false,
             last_entity_update_index: 0,
+            last_fog_pos: indexmap::IndexMap::new(),
+            static_dirty: false,
         }
     }
 
@@ -295,6 +320,8 @@ impl FogControl {
         self.dynamic_event_queue.clear();
         self.unit_event_queue.clear();
         self.dynamic_events.clear();
+        self.last_fog_pos.clear();
+        self.static_dirty = false;
     }
 
     /// `pushStaticBlocks`.
@@ -327,68 +354,65 @@ impl FogControl {
         }
     }
 
-    /// `FogControl.update` (static drain + chunked visibility + dynamic flush).
-    #[allow(clippy::too_many_arguments)]
+    /// `FogControl.update` (static drain + dynamic flush, `FogControl.java:189-316`).
+    ///
+    /// `teams` = present teams that are not only-AI, ascending id. The
+    /// chunked-building-visibility pass Java runs here is done by the caller
+    /// (`Sim::update_fog`, `BuildingComp.java:2285-2293`).
     pub fn update(
         &mut self,
         tick: u64,
-        present_teams: &[u8],
+        teams: &[u8],
         blocks: &[FogSource],
-        units: &[FogSource],
-        fog_enabled: bool,
+        units: &[FogUnit],
         static_fog: bool,
-        headless: bool,
     ) {
+        // Force update static (`FogControl.java:195-199`).
         if static_fog && !self.loaded_static {
             self.push_static_blocks(blocks, false);
             self.update_static();
             self.loaded_static = true;
         }
 
+        // Clear to prepare for queuing fog radius from units and buildings.
         self.dynamic_event_queue.clear();
 
-        // Chunked building visibility refresh (`updateFogVisibility`).
-        if fog_enabled && !headless && !blocks.is_empty() {
-            let size = blocks.len();
-            let chunk_size = 5usize;
-            let chunks = chunk_size.min(size);
-            let iterated = (size / chunks).max(1);
-            let mut steps = 0;
-            let mut i = self.last_entity_update_index % size;
-            while steps < iterated {
-                if let Some(block) = blocks.get(i)
-                    && let Some(data) = self.fog[block.team as usize].as_mut()
-                {
-                    data.dynamic_updated = true;
-                }
-                steps += 1;
-                i += 1;
-                if i >= size {
-                    i = 0;
-                }
-            }
-            self.last_entity_update_index = i;
-        }
-
-        for &team in present_teams {
+        for &team in teams {
             self.unit_event_queue.clear();
             let index = team as usize;
+            if self.fog[index].is_none() {
+                self.fog[index] = Some(FogData::new(self.world_len()));
+            }
 
+            // Team units: always queue, push a static event + mark dynamic only
+            // when the unit's tile changed (`FogControl.java:257-270`).
             for unit in units.iter().filter(|unit| unit.team == team) {
                 if unit.radius <= 0 {
                     continue;
                 }
-                let event = fog_event(unit.x, unit.y, unit.radius, team);
+                let pos = unit.tile_x + unit.tile_y * self.ww as i32;
+                let event = fog_event(unit.tile_x, unit.tile_y, unit.radius, team);
                 self.unit_event_queue.push(event);
-                self.push_event(event, false);
-                if let Some(data) = self.fog[index].as_mut() {
-                    data.dynamic_updated = true;
+                if self.last_fog_pos.get(&unit.entity) != Some(&pos) {
+                    if static_fog {
+                        self.push_event(event, false);
+                    }
+                    self.last_fog_pos.insert(unit.entity, pos);
+                    if let Some(data) = self.fog[index].as_mut() {
+                        data.dynamic_updated = true;
+                    }
                 }
             }
 
+            // If it's time for an update, flush everything onto the queue
+            // (`FogControl.java:274-285`). The first update after a load always
+            // flushes (`lastDynamicMs = 0` vs. uptime); later flushes wait
+            // `dynamicUpdateInterval` = 3 ticks.
             let flush = self.fog[index].as_ref().is_some_and(|data| {
                 data.dynamic_updated
-                    && tick.saturating_sub(data.last_dynamic_tick) >= DYNAMIC_UPDATE_INTERVAL_TICKS
+                    && (data.last_dynamic_tick == u64::MAX
+                        || tick.saturating_sub(data.last_dynamic_tick)
+                            >= DYNAMIC_UPDATE_INTERVAL_TICKS)
             });
             if flush {
                 if let Some(data) = self.fog[index].as_mut() {
@@ -412,13 +436,31 @@ impl FogControl {
         // every queued static event in order on the same tick.
         self.update_static();
 
+        // The dynamic thread's work, done synchronously: any flush redraws the
+        // whole buffer set (`FogControl.java:289-308`).
         if !self.dynamic_event_queue.is_empty() {
             self.dynamic_events = std::mem::take(&mut self.dynamic_event_queue);
-            if self.just_loaded {
-                let mut cleared = vec![false; 256];
-                self.update_dynamic(&mut cleared);
-                self.just_loaded = false;
-            }
+            let mut cleared = [false; 256];
+            self.update_dynamic(&mut cleared);
+            self.just_loaded = false;
+        }
+    }
+
+    /// `FogControl.update` TileChangeEvent / TilePreChangeEvent half
+    /// (`FogControl.java:64-88`): `data.dynamicUpdated = true`.
+    pub fn mark_dynamic(&mut self, team: u8) {
+        if let Some(data) = self.fog[team as usize].as_mut() {
+            data.dynamic_updated = true;
+        }
+    }
+
+    /// Java TileChangeEvent body: mark the flush pending and (with static fog)
+    /// push a static event for the changed source (`FogControl.java:64-78`).
+    pub fn on_source_changed(&mut self, src: FogSource, static_fog: bool) {
+        self.mark_dynamic(src.team);
+        if static_fog && self.fog[src.team as usize].is_some() {
+            let event = fog_event(src.x, src.y, src.radius, src.team);
+            self.push_event(event, false);
         }
     }
 
@@ -433,6 +475,7 @@ impl FogControl {
             if let Some(data) = self.fog[team].as_mut() {
                 let (ww, wh) = (self.ww, self.wh);
                 circle(&mut data.static_data, x, y, radius, ww, wh);
+                self.static_dirty = true;
             }
         }
     }
@@ -538,6 +581,7 @@ impl FogControl {
             }
             self.fog[team as usize] = Some(data);
         }
+        self.static_dirty = true;
     }
 
     fn world_len(&self) -> usize {
@@ -602,6 +646,16 @@ mod tests {
         FogSource { x, y, radius, team }
     }
 
+    fn unit(index: u32, x: i32, y: i32, radius: i32, team: u8) -> FogUnit {
+        FogUnit {
+            entity: bevy_ecs::entity::Entity::from_raw_u32(index).expect("entity"),
+            tile_x: x,
+            tile_y: y,
+            radius,
+            team,
+        }
+    }
+
     #[test]
     fn event_packing_roundtrips() {
         let event = fog_event(12, 300, 40, 2);
@@ -650,22 +704,58 @@ mod tests {
     fn dynamic_visibility_cadence_is_deterministic() {
         let mut fog = FogControl::new();
         let blocks = vec![source(4, 4, 3, 0)];
-        let units = vec![source(10, 10, 4, 0)];
+        let units = vec![unit(1, 10, 10, 4, 0)];
         fog.on_world_load(16, 16, true, true, &blocks);
-        // First update at the milestone tick flushes and swaps buffers.
-        fog.update(40, &[0], &blocks, &units, true, true, false);
+        // First update at the milestone tick flushes and swaps buffers
+        // (`1000 / 25` ms = 3 ticks at 60 Hz).
+        fog.update(40, &[0], &blocks, &units, true);
         assert!(fog.is_visible_tile(0, 10, 10, true, false));
         assert!(fog.is_visible_tile(0, 4, 4, true, false));
 
         // Same seed of inputs + ticks gives identical buffers.
         let mut other = FogControl::new();
         other.on_world_load(16, 16, true, true, &blocks);
-        other.update(40, &[0], &blocks, &units, true, true, false);
+        other.update(40, &[0], &blocks, &units, true);
         assert_eq!(other.write(), fog.write());
         let a = other.fog[0].as_ref().unwrap();
         let b = fog.fog[0].as_ref().unwrap();
         assert_eq!(a.read, b.read);
         assert_eq!(a.write, b.write);
+    }
+
+    /// T1: `dynamicUpdateInterval` = `1000 / 25` ms: the first update after a
+    /// load flushes immediately (Java's `lastDynamicMs = 0` vs. uptime), every
+    /// later flush waits 3 ticks at 60 Hz.
+    #[test]
+    fn fog_dynamic_interval_is_three_ticks() {
+        let mut fog = FogControl::new();
+        let blocks = vec![source(4, 4, 3, 0)];
+        fog.on_world_load(16, 16, true, false, &blocks);
+        let units = vec![unit(1, 10, 10, 4, 0)];
+        fog.update(0, &[0], &blocks, &units, false);
+        assert_eq!(
+            fog.fog[0].as_ref().map(|d| d.last_dynamic_tick),
+            Some(0),
+            "first update flushes immediately"
+        );
+        assert!(fog.is_visible_tile(0, 10, 10, true, false));
+
+        // Move the unit: the changed tile schedules the next flush 3 ticks
+        // later, not before.
+        let units = vec![unit(1, 12, 10, 4, 0)];
+        fog.update(1, &[0], &blocks, &units, false);
+        fog.update(2, &[0], &blocks, &units, false);
+        assert_eq!(
+            fog.fog[0].as_ref().map(|d| d.last_dynamic_tick),
+            Some(0),
+            "no flush before tick 3"
+        );
+        fog.update(3, &[0], &blocks, &units, false);
+        assert_eq!(
+            fog.fog[0].as_ref().map(|d| d.last_dynamic_tick),
+            Some(3),
+            "second flush at tick 3"
+        );
     }
 
     #[test]

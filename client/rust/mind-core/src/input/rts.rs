@@ -31,6 +31,11 @@ pub struct SelectableUnit {
     pub commandable: bool,
     /// Hitbox side (`UnitType.hitSize`; `selectedUnit()`'s grown-box check).
     pub hit_size: f32,
+    /// `UnitType.controlSelectGlobal` (`false` only for `mono` upstream):
+    /// the select-all-units filter.
+    pub select_global: bool,
+    /// Unit has a payload module (`instanceof Payloadc`; transport select).
+    pub payload: bool,
 }
 
 /// Selection box (`command_rect`) in world pixels.
@@ -254,6 +259,8 @@ mod tests {
             team,
             commandable,
             hit_size: 8.0,
+            select_global: true,
+            payload: false,
         }
     }
 

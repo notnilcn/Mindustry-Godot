@@ -14,6 +14,7 @@
 //! than `resource_scope::<WorldGrid>`; this is observationally identical and
 //! avoids the aliasing constraints of re-entrant hook spawning.
 
+pub mod allow_update;
 pub mod attributes;
 pub mod behavior;
 pub mod block;
@@ -56,7 +57,6 @@ pub mod tile;
 pub mod tile_index;
 pub mod tiles;
 pub mod update;
-
 pub use attributes::Attributes;
 pub use behavior::{
     BehaviorRegistry, BuildingBehavior, BuildingKind, BuildingReader, BuildingWriter, NoopBehavior,

@@ -342,6 +342,19 @@ pub fn valid_place_query(
             if !grid.tiles.in_bounds(tx, ty) {
                 return false;
             }
+            // `state.rules.staticFog && state.rules.fog &&
+            // !fogControl.isDiscovered(team, wx, wy)` (Build.java:252): the
+            // player-team static fog snapshot (T2).
+            if let Some(mask) = rules.static_fog_mask.as_ref()
+                && mask.team == team
+                && (tx < 0
+                    || ty < 0
+                    || tx >= mask.width
+                    || ty >= mask.height
+                    || !mask.bits.get((tx + ty * mask.width) as usize))
+            {
+                return false;
+            }
             let tile = grid.tile(tx, ty);
             if tile.block == BlockId::AIR {
                 continue;

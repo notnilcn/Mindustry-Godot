@@ -123,19 +123,20 @@ pub fn update_repair_ai(ctx: &mut AiCtx, unit: Entity, state: &mut RepairAiState
         .filter(|target| ctx.world.get::<Building>(*target).is_some());
 
     if let Some(target) = target_building {
-        // `unit.aim(target); controlWeapons(shoot)` — the port feeds the mount
-        // target and lets `set_mount_targets` gate `shoot` by weapon range.
-        crate::sim::unit_runtime::set_mount_targets(
-            ctx.world,
-            ctx.content,
-            unit,
-            Some(target),
-            None,
-        );
+        // `RepairAI.updateMovement`: `if(target.within(unit, unit.type.range)){
+        // unit.aim(target); shoot = true; } unit.controlWeapons(shoot);`
+        // (RepairAI.java:19-29). The target is the unit's OWN team, which
+        // `Units.invalidateTarget` rejects, so the mounts are set directly.
+        let shoot = ctx.world.get::<Pos>(target).is_some_and(|tpos| {
+            let dx = tpos.x - pos.x;
+            let dy = tpos.y - pos.y;
+            dx * dx + dy * dy <= def.range * def.range
+        });
+        crate::sim::unit_runtime::control_weapons_for(ctx.world, unit, target, shoot);
     } else {
         // `super.updateTargeting()`: enemy targeting for the mounts.
         let enemy = ctx.find_target(unit, def.max_range, true, true);
-        crate::sim::unit_runtime::set_mount_targets(ctx.world, ctx.content, unit, enemy, None);
+        crate::sim::unit_runtime::update_ai_weapons_for(ctx, unit, enemy);
     }
 
     // `boolean hold = hasStance(UnitStance.holdPosition)` (T11).

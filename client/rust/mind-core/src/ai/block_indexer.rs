@@ -219,6 +219,11 @@ impl BlockIndexer {
             if other_team == team {
                 continue;
             }
+            // `BlockIndexer.findTile(... b -> pred.get(b) && b.isDiscovered(team)
+            // ...)` (BlockIndexer.java:468).
+            if !crate::game::fog_gate::building_discovered(world, content, None, entity, team) {
+                continue;
+            }
             let Some(building) = world.get::<Building>(entity) else {
                 continue;
             };
@@ -271,6 +276,11 @@ impl BlockIndexer {
             // `rules.coreCapture` (BlockIndexer.java:466).
             let other = world.get::<TeamComp>(entity).map(|t| t.team);
             if other == Some(team) || other.is_some_and(|other| is_derelict(world, other)) {
+                continue;
+            }
+            // `BlockIndexer.findTile(...)` discovery gate (BlockIndexer.java:468);
+            // no content borrow here, so the size comes from the `BlockTable`.
+            if !crate::game::fog_gate::building_discovered_table(world, None, entity, team) {
                 continue;
             }
             // `AIController.target`: `targetUnderBlocks || !t.block.underBullets`
