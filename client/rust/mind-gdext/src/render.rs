@@ -666,7 +666,7 @@ impl MindWorldRenderer {
             self.env = Some(EnvRenderer::new(light_band));
         }
         if let Some(fog_band) = self.band_node_at(BandKey::base(Layer::FogOfWar)) {
-            self.fog = Some(FogRenderer::new(fog_band)); // T12-REAPPLY
+            self.fog = Some(FogRenderer::new(host.clone(), fog_band, &self.shaders));
         }
         if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
             self.overlays = Some(OverlayRenderer::new(overlay_band.clone()));
