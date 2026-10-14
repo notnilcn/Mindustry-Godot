@@ -26,6 +26,7 @@ pub mod cached;
 pub mod checksum;
 pub mod color_mapper;
 pub mod config;
+pub mod config_tap;
 pub mod construct;
 pub mod consumers;
 pub mod context;

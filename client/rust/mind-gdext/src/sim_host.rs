@@ -1344,6 +1344,38 @@ impl MindSimHost {
         GString::from(value.to_string().as_str())
     }
 
+    /// Read-only `Building.onConfigureBuildTapped` preview for the tap handler
+    /// (H02 T6, PAR-0220): `0` = Java `return false` (panel stays), `1` =
+    /// `deselect(); return false` (panel closes), `2` = `return true` (switch
+    /// the panel to the tapped building). `-1` when either tile has no build.
+    #[func]
+    pub fn preview_config_tap(&self, selected_x: i32, selected_y: i32, x: i32, y: i32) -> i32 {
+        let (Ok(sx), Ok(sy), Ok(tx), Ok(ty)) = (
+            i16::try_from(selected_x),
+            i16::try_from(selected_y),
+            i16::try_from(x),
+            i16::try_from(y),
+        ) else {
+            return -1;
+        };
+        let Some(selected) = self.sim.grid.entity_at(TilePos::new(sx, sy)) else {
+            return -1;
+        };
+        let Some(other) = self.sim.grid.entity_at(TilePos::new(tx, ty)) else {
+            return -1;
+        };
+        match mind_core::world::config_tap::config_tap(
+            &self.sim.ecs.0,
+            &self.sim.grid,
+            selected,
+            other,
+        ) {
+            mind_core::world::behavior::ConfigTapResult::Consume(_) => 0,
+            mind_core::world::behavior::ConfigTapResult::ConsumeAndDeselect(_) => 1,
+            mind_core::world::behavior::ConfigTapResult::SwitchAfter(_) => 2,
+        }
+    }
+
     /// Building config readback as a plain string (`nil` for non-string configs).
     #[func]
     pub fn building_config_string(&self, x: i32, y: i32) -> Variant {

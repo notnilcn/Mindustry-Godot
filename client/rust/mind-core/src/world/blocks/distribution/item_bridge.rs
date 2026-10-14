@@ -16,7 +16,7 @@ use smallvec::SmallVec;
 
 use crate::content::{BlockId, BlockKind, ItemId};
 use crate::entities::comp::Building;
-use crate::world::behavior::BuildingBehavior;
+use crate::world::behavior::{BuildingBehavior, ConfigTapResult};
 use crate::world::block::BlockTable;
 use crate::world::config::ConfigValue;
 use crate::world::item_buffer::ItemBuffer;
@@ -91,6 +91,45 @@ pub fn positions_valid(x1: i32, y1: i32, x2: i32, y2: i32, base_range: i32) -> b
     } else {
         false
     }
+}
+
+/// Shared `ItemBridge.onConfigureBuildTapped` body (`ItemBridge.java:298-316`),
+/// also inherited by `LiquidBridge` (`LiquidBridge.java:7`).
+///
+/// `link_valid` is the family's `linkValid(tile, other)` (`checkDouble = true`).
+/// The returned values are absolute packed positions or `-1`.
+pub(crate) fn item_bridge_tapped(
+    world: &World,
+    e: Entity,
+    other: Entity,
+    link_valid: impl Fn(Entity, Entity) -> bool,
+) -> ConfigTapResult {
+    let (Some(a), Some(b)) = (world.get::<Building>(e), world.get::<Building>(other)) else {
+        return ConfigTapResult::SwitchAfter(Vec::new());
+    };
+    let e_pos = a.tile.pack();
+    let other_pos = b.tile.pack();
+    // Reverse connection: `if(other instanceof ItemBridgeBuild b && b.link == pos())`.
+    if world
+        .get::<ItemBridgeBuild>(other)
+        .is_some_and(|bridge| bridge.link == e_pos)
+    {
+        return ConfigTapResult::SwitchAfter(vec![
+            (e, ConfigValue::Number(f64::from(other_pos))),
+            (other, ConfigValue::Number(-1.0)),
+        ]);
+    }
+    if link_valid(e, other) {
+        let own_link = world
+            .get::<ItemBridgeBuild>(e)
+            .map(|bridge| bridge.link)
+            .unwrap_or(-1);
+        if own_link == other_pos {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(-1.0))]);
+        }
+        return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(f64::from(other_pos)))]);
+    }
+    ConfigTapResult::SwitchAfter(Vec::new())
 }
 
 /// `ItemBridge` behavior (`phase-conveyor`, `bridge-conveyor`).
@@ -301,6 +340,17 @@ impl BuildingBehavior for ItemBridgeBehavior {
     /// two-argument form in `findLink`/`playerPlaced`; T11 bridge chaining).
     fn link_valid_between(&self, world: &World, e: Entity, other: Entity) -> bool {
         self.link_valid(world, e, other, true)
+    }
+
+    /// `ItemBridge.onConfigureBuildTapped` (`ItemBridge.java:298-316`).
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        _grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> ConfigTapResult {
+        item_bridge_tapped(world, e, other, |a, b| self.link_valid(world, a, b, true))
     }
 
     fn update_batch(

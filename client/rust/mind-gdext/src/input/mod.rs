@@ -732,6 +732,9 @@ impl MindInput {
                     if let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH) {
                         node.set("visible", &false.to_variant());
                     }
+                    // The tap dispatch only reacts while a panel is open (H02 T6).
+                    self.config_tile = None;
+                    self.bridge.config_selected = None;
                 }
                 Effect::Hotkey(action) => {
                     let _ = self
@@ -1233,6 +1236,15 @@ impl MindInput {
         let node = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH)?;
         let visible = node.get("visible").try_to::<bool>().unwrap_or(false);
         visible.then_some((x, y))
+    }
+
+    /// Clears the config-panel selection (`config.hideConfig()`): the close
+    /// button calls this so the tap dispatch stops treating the panel as open
+    /// (H02 T6, PAR-0220).
+    #[func]
+    pub fn close_block_config(&mut self) {
+        self.config_tile = None;
+        self.bridge.config_selected = None;
     }
 
     /// [`Self::config_selected`] as `"[x,y]"` or `"null"`.

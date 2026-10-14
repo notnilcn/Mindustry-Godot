@@ -199,6 +199,20 @@ pub enum SimCommand {
         /// Whether the stance is enabled (`false` = clear).
         enabled: bool,
     },
+    /// Tap a second building while a config panel is open
+    /// (`config.getSelected().onConfigureBuildTapped`, `InputHandler.java:1993-2005`;
+    /// H02 T6, PAR-0220). The arm records the outcome in
+    /// [`crate::sim::Sim::last_config_tap`].
+    ConfigTap {
+        /// Selected building's tile x.
+        x: i16,
+        /// Selected building's tile y.
+        y: i16,
+        /// Tapped building's tile x.
+        other_x: i16,
+        /// Tapped building's tile y.
+        other_y: i16,
+    },
 }
 
 impl SimCommand {
@@ -221,6 +235,7 @@ impl SimCommand {
             SimCommand::UnitClear => "unit_clear",
             SimCommand::BuildingControlSelect { .. } => "building_control_select",
             SimCommand::UnitStance { .. } => "unit_stance",
+            SimCommand::ConfigTap { .. } => "config_tap",
         }
     }
 
@@ -639,6 +654,18 @@ fn encode_command(out: &mut Vec<u8>, command: &SimCommand) {
             put_u16(out, *stance);
             put_u8(out, u8::from(*enabled));
         }
+        SimCommand::ConfigTap {
+            x,
+            y,
+            other_x,
+            other_y,
+        } => {
+            put_u8(out, 16);
+            put_i16(out, *x);
+            put_i16(out, *y);
+            put_i16(out, *other_x);
+            put_i16(out, *other_y);
+        }
     }
 }
 
@@ -914,6 +941,18 @@ fn decode_command(cur: &mut Cursor<'_>) -> Result<SimCommand, CommandLogError> {
                 units,
                 stance,
                 enabled,
+            })
+        }
+        16 => {
+            let x = cur.i16()?;
+            let y = cur.i16()?;
+            let other_x = cur.i16()?;
+            let other_y = cur.i16()?;
+            Ok(SimCommand::ConfigTap {
+                x,
+                y,
+                other_x,
+                other_y,
             })
         }
         other => Err(CommandLogError::UnknownOp(other)),
@@ -1226,6 +1265,15 @@ mod tests {
                 value: ConfigValue::Text("hello\nworld".to_owned()),
             },
         );
+        log.push(
+            26,
+            SimCommand::ConfigTap {
+                x: 5,
+                y: 5,
+                other_x: 8,
+                other_y: 5,
+            },
+        );
         log
     }
 
@@ -1297,6 +1345,15 @@ mod tests {
                     enabled: false,
                 },
                 "unit_stance",
+            ),
+            (
+                SimCommand::ConfigTap {
+                    x: 5,
+                    y: 5,
+                    other_x: 8,
+                    other_y: 5,
+                },
+                "config_tap",
             ),
         ];
         for (command, name) in cases {

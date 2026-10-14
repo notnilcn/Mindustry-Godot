@@ -4480,3 +4480,45 @@ fn node_configure_point_array() {
         .unwrap_or(0);
     assert_eq!(links, 2, "node linked both batteries");
 }
+
+/// H02 T6: `SimCommand::ConfigTap` runs `config_tap` and applies the returned
+/// configs in order (bridge tap-to-link through the sim command path).
+#[test]
+fn sim_config_tap_command_applies() {
+    use crate::sim::ConfigTapKind;
+    use crate::world::blocks::distribution::ItemBridgeBuild;
+
+    let mut sim = runtime_sim();
+    let from = place(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
+    sim.command(SimCommand::ConfigTap {
+        x: 5,
+        y: 5,
+        other_x: 8,
+        other_y: 5,
+    })
+    .expect("config tap");
+    assert_eq!(sim.last_config_tap, Some(ConfigTapKind::Consume));
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(from).map(|b| b.link),
+        Some(TilePos::new(8, 5).pack())
+    );
+    // Inverse tap: the reverse-link branch switches and clears the old link.
+    sim.command(SimCommand::ConfigTap {
+        x: 8,
+        y: 5,
+        other_x: 5,
+        other_y: 5,
+    })
+    .expect("config tap");
+    assert_eq!(sim.last_config_tap, Some(ConfigTapKind::Switch));
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(from).map(|b| b.link),
+        Some(-1)
+    );
+    let to = sim.grid.entity_at(TilePos::new(8, 5)).expect("dest");
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(to).map(|b| b.link),
+        Some(TilePos::new(5, 5).pack())
+    );
+}

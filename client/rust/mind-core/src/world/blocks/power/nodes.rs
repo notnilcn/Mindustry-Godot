@@ -15,8 +15,9 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::entities::comp::Building;
-use crate::world::behavior::BuildingBehavior;
+use crate::world::behavior::{BuildingBehavior, ConfigTapResult};
 use crate::world::block::TILE_SIZE;
+use crate::world::config::ConfigValue;
 use crate::world::modules::{PowerGraphId, PowerModule};
 use crate::world::{TilePos, WorldGrid};
 
@@ -50,6 +51,67 @@ impl BuildingBehavior for PowerNodeBehavior {
                 same_block_connection: self.same_block_connection,
             });
         }
+    }
+
+    /// `PowerNode.onConfigureBuildTapped` (`PowerNode.java:419-441`): link to
+    /// the tapped node/consumer; a double tap autolinks (`Point2[]`) or clears.
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        grid: &WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> ConfigTapResult {
+        if link_valid(world, grid, e, other, true)
+            && let Some(other_pos) = world.get::<Building>(other).map(|b| b.tile.pack())
+        {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(f64::from(other_pos)))]);
+        }
+        if e == other {
+            let links = world
+                .get::<PowerModule>(e)
+                .map(|module| module.links.len())
+                .unwrap_or(0);
+            if links == 0 {
+                let Some(e_tile) = world.get::<Building>(e).map(|b| b.tile) else {
+                    return ConfigTapResult::ConsumeAndDeselect(Vec::new());
+                };
+                let mut candidates = Vec::new();
+                get_potential_links(world, grid, e, &mut candidates);
+                let max_nodes = world
+                    .get::<PowerNodeConfig>(e)
+                    .map(|config| config.max_nodes as usize)
+                    .unwrap_or(0);
+                let mut points: Vec<i32> = Vec::new();
+                for link in candidates {
+                    if points.len() >= max_nodes {
+                        break;
+                    }
+                    let Some(link_tile) = world.get::<Building>(link).map(|b| b.tile) else {
+                        continue;
+                    };
+                    if !insulated(world, grid, e_tile, link_tile) {
+                        points.push(
+                            TilePos::new(
+                                (link_tile.x() as i32 - e_tile.x() as i32) as i16,
+                                (link_tile.y() as i32 - e_tile.y() as i32) as i16,
+                            )
+                            .pack(),
+                        );
+                    }
+                }
+                return ConfigTapResult::ConsumeAndDeselect(vec![(
+                    e,
+                    ConfigValue::Point2Array(points.into()),
+                )]);
+            }
+            // Clear all links: `configure(new Point2[0])`.
+            return ConfigTapResult::ConsumeAndDeselect(vec![(
+                e,
+                ConfigValue::Point2Array(Default::default()),
+            )]);
+        }
+        ConfigTapResult::SwitchAfter(Vec::new())
     }
 }
 

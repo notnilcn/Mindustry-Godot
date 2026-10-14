@@ -159,6 +159,19 @@ impl ChecksumScope {
     }
 }
 
+/// Result kind of an applied `SimCommand::ConfigTap`
+/// (`Building.onConfigureBuildTapped`; H02 T6, PAR-0220).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigTapKind {
+    /// Java `return false` without `deselect()`: the panel stays on the
+    /// selected building.
+    Consume,
+    /// Java `deselect(); return false`: the panel closes.
+    Deselect,
+    /// Java `return true`: the panel switches to the tapped building.
+    Switch,
+}
+
 /// The P0 simulation container.
 pub struct Sim {
     /// ECS world (placed blocks at P0).
@@ -197,6 +210,11 @@ pub struct Sim {
 
     /// Last 64 drained logic-event kind tags (host debug probe; H06 T1).
     pub logic_event_log: std::collections::VecDeque<String>,
+
+    /// Outcome of the last applied [`crate::determinism::SimCommand::ConfigTap`]
+    /// (H02 T6, PAR-0220): `None` until one is applied. Bytes 0-2 of the
+    /// `Building.onConfigureBuildTapped` return contract.
+    pub last_config_tap: Option<ConfigTapKind>,
 
     /// Relay-side unit-command apply state (plan 15 M4). Built lazily on the
     /// first unit command so P0 worlds never pay for content boot.
@@ -275,6 +293,7 @@ impl Sim {
             logic_event_log: std::collections::VecDeque::new(),
             pending_events: Vec::new(),
             event_log: Vec::new(),
+            last_config_tap: None,
         }
     }
 
@@ -498,6 +517,20 @@ impl Sim {
     /// all links) through the `PowerGrids` arena.
     ///
     /// Returns `false` when `entity` is not a power node or the value is not a
+    /// Applies one `world::config::ConfigValue` to a building: the power-node
+    /// graph path first, then the behavior `configured` path — the exact order
+    /// of the `SimCommand::Configure` arm.
+    fn apply_world_config(
+        &mut self,
+        entity: Entity,
+        value: crate::world::config::ConfigValue,
+    ) -> bool {
+        if self.configure_power_node(entity, &value) {
+            return true;
+        }
+        crate::world::config::configure(&mut self.ecs.0, entity, None, value)
+    }
+
     /// link config, so the caller falls through to the normal behavior config
     /// path.
     fn configure_power_node(
@@ -1752,13 +1785,49 @@ impl Sim {
                 // T2: power nodes take link configs (`PowerNode.java`
                 // `config(Integer.class)` / `config(Point2[].class)`) through the
                 // `PowerGrids` arena, not the behavior config path.
-                if self.configure_power_node(entity, &world_value) {
-                    self.commands_applied = self.commands_applied.wrapping_add(1);
-                    return Ok(());
-                }
-                if !crate::world::config::configure(&mut self.ecs.0, entity, None, world_value) {
+                if !self.apply_world_config(entity, world_value) {
                     return Err(CommandError::InvalidTarget);
                 }
+                self.commands_applied = self.commands_applied.wrapping_add(1);
+                return Ok(());
+            }
+            SimCommand::ConfigTap {
+                x,
+                y,
+                other_x,
+                other_y,
+            } => {
+                // H02 T6 (PAR-0220): `config.getSelected().onConfigureBuildTapped(other)`
+                // (`InputHandler.java:1993-2005`). Java computes the tap on the
+                // client and sends `configure` calls; the port's input layer
+                // holds no rules, so the sim computes the result and applies the
+                // returned configs in order.
+                if self.block_runtime.is_none() {
+                    return Err(CommandError::Unsupported("config_tap"));
+                }
+                let Some(selected) = self.grid.entity_at(TilePos::new(*x, *y)) else {
+                    return Err(CommandError::InvalidTarget);
+                };
+                let Some(other) = self.grid.entity_at(TilePos::new(*other_x, *other_y)) else {
+                    return Err(CommandError::InvalidTarget);
+                };
+                let result =
+                    crate::world::config_tap::config_tap(&self.ecs.0, &self.grid, selected, other);
+                let (kind, values) = match result {
+                    crate::world::behavior::ConfigTapResult::Consume(values) => {
+                        (ConfigTapKind::Consume, values)
+                    }
+                    crate::world::behavior::ConfigTapResult::ConsumeAndDeselect(values) => {
+                        (ConfigTapKind::Deselect, values)
+                    }
+                    crate::world::behavior::ConfigTapResult::SwitchAfter(values) => {
+                        (ConfigTapKind::Switch, values)
+                    }
+                };
+                for (entity, value) in values {
+                    self.apply_world_config(entity, value);
+                }
+                self.last_config_tap = Some(kind);
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }
