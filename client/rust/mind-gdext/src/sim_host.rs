@@ -2611,6 +2611,29 @@ impl MindSimHost {
         true
     }
 
+    /// Playtest seam: starts a fire at `(x, y)` (`Fires.create`) through the
+    /// live unit runtime rng. `false` when fire is disabled or there is no
+    /// runtime.
+    #[func]
+    pub fn debug_create_fire(&mut self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
+        else {
+            return false;
+        };
+        let created =
+            mind_core::combat::fires::create(&mut self.sim.ecs.0, tx, ty, &mut runtime.rng)
+                .is_some();
+        self.sim.ecs.0.insert_non_send(runtime);
+        created
+    }
+
     /// Playtest seam: force-spawns the player unit without the sector env gate
     /// (`CoreBlock.requestSpawn` refuses alpha when `rules.env` wrongly carries
     /// scorching — G01's recorded divergence). Lets input-path probes run on

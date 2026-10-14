@@ -2131,9 +2131,10 @@ mod tests {
             .collect();
         assert_eq!(fires.len(), 1, "one fire restored");
         assert_eq!(fires[0].tile, fire_before.tile);
-        // One tick (the load tick) advances the restored fire/puddle.
+        // One tick (the load tick) advances the restored fire: 1 + the
+        // bare-ground 8 (`FireComp.java:67-69`).
         assert!(
-            (fires[0].time - fire_before.time - 1.0).abs() < 0.001,
+            (fires[0].time - fire_before.time - 9.0).abs() < 0.001,
             "fire time resumes ({} vs {})",
             fires[0].time,
             fire_before.time
