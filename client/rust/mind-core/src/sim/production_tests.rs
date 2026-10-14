@@ -2838,3 +2838,73 @@ fn kind_rotates_matches_java() {
         assert!(!kind_rotates(kind), "{kind:?} does not rotate");
     }
 }
+
+/// H02 T8: per-block drill boost/warmup knobs (`Drill.java:38,40`,
+/// `Blocks.java:2929,2933,3103`).
+#[test]
+fn blast_drill_boost_knobs_match_java() {
+    use crate::world::BlockKindData;
+
+    let sim = runtime_sim();
+    let table = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::BlockTable>()
+        .expect("table");
+    let drill_def = |name: &str| match &table.get_named(name).expect(name).kind_data {
+        BlockKindData::Drill(def) => def.clone(),
+        BlockKindData::BurstDrill(def) => def.drill.clone(),
+        _ => panic!("not a drill"),
+    };
+    let blast = drill_def("blast-drill");
+    assert_eq!(blast.liquid_boost_intensity, 1.8);
+    assert_eq!(blast.warmup_speed, 0.01);
+    let impact = drill_def("impact-drill");
+    assert_eq!(impact.liquid_boost_intensity, 1.75);
+    // `Drill.java:38,40` class defaults survive everywhere else.
+    let mechanical = drill_def("mechanical-drill");
+    assert_eq!(mechanical.liquid_boost_intensity, 1.6);
+    assert_eq!(mechanical.warmup_speed, 0.015);
+}
+
+/// H02 T8: `Mathf.approachDelta(warmup, speed, warmupSpeed)` scales with the
+/// building's delta (`Drill.java:304`): one tick at time scale 2 advances the
+/// warmup by two steps.
+#[test]
+fn drill_warmup_scales_with_time_scale() {
+    let mut sim = runtime_sim();
+    for x in 10..12 {
+        for y in 10..12 {
+            set_floor(&mut sim, x, y, "ore-copper");
+        }
+    }
+    let drill = place(&mut sim, "mechanical-drill", 10, 10);
+    sim.tick().expect("tick");
+    let warmup = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::DrillState>(drill)
+            .map(|state| state.warmup)
+            .unwrap_or(0.0)
+    };
+    assert!(
+        (warmup(&sim) - 0.015).abs() < 1e-4,
+        "one tick at 1x: {}",
+        warmup(&sim)
+    );
+    {
+        let mut building = sim
+            .ecs
+            .0
+            .get_mut::<crate::entities::comp::Building>(drill)
+            .expect("building");
+        building.time_scale = 2.0;
+        building.time_scale_duration = 1000.0;
+    }
+    sim.tick().expect("tick");
+    assert!(
+        (warmup(&sim) - 0.045).abs() < 1e-4,
+        "overdrive doubles the warmup step: {}",
+        warmup(&sim)
+    );
+}
