@@ -3435,6 +3435,9 @@ fn drop_zone_pushes_player_units() {
     let session = PlaySession::new(Rules {
         default_team: 1,
         waves: true,
+        // `GameState.hasSpawns()` (`GameState.java:68-70`) needs a spawn
+        // *group* list; the drop-zone tiles come from the runtime spawner below.
+        spawns: vec![crate::game::rules::SpawnGroup::default()],
         unit_cap: 100,
         unit_cap_variable: false,
         ..Rules::default()
@@ -5362,4 +5365,168 @@ fn sandstorm_wind_pushes_idle_flare() {
         dist > 1.0 && dist < 6.0,
         "the sandstorm moved the flare {dist} px (start {start:?}, end {pos:?})"
     );
+}
+
+/// H01 T5: the `UnitComp.update` drag line (`UnitComp.java:790`) —
+/// `type.drag * (isGrounded() ? floorOn().dragMultiplier : 1)`. The same
+/// velocity coasts farther on `ice` (`dragMultiplier 0.35`, `Blocks.java:563`)
+/// than on the default floor.
+#[test]
+fn ice_reduces_drag() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(32);
+    let ice = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .block_id("ice")
+        .expect("ice");
+    let index = sim.grid.tiles.index(8, 8);
+    sim.grid.tiles.geti_mut(index).floor = ice;
+    sim.refresh_unit_runtime();
+    let icy = sim
+        .spawn_live_unit("dagger", 2, 64.0, 64.0, 0.0)
+        .expect("icy dagger");
+    let default_floor = sim
+        .spawn_live_unit("dagger", 2, 64.0, 160.0, 0.0)
+        .expect("dagger");
+    for unit in [icy, default_floor] {
+        if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+            slot.kind = AiKind::NoAi;
+        }
+        if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(unit) {
+            vel.x = 2.0;
+            vel.y = 0.0;
+        }
+    }
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+    let icy_dx = sim.ecs.0.get::<Pos>(icy).expect("icy pos").x - 64.0;
+    let dry_dx = sim.ecs.0.get::<Pos>(default_floor).expect("pos").x - 64.0;
+    assert!(
+        icy_dx > dry_dx + 1.0,
+        "ice coasts farther ({icy_dx} vs {dry_dx})"
+    );
+}
+
+/// H01 T5 (`UnitComp.java:750-753`): in a captured campaign sector
+/// (`!waves && !attackMode`) every AI-team unit dies; the default team lives.
+#[test]
+fn enemy_dies_on_captured_sector() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(32);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        wave_team: 2,
+        waves: false,
+        attack_mode: false,
+        // `Rules.unitCap` default 0 kills live units; the campaign sets 100.
+        unit_cap: 100,
+        unit_cap_variable: false,
+        ..Rules::default()
+    });
+    session.sector = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .planet_id("serpulo")
+        .map(|planet| (planet, 170));
+    assert!(session.is_campaign(), "campaign session");
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let enemy = sim
+        .spawn_live_unit("dagger", 2, 64.0, 64.0, 0.0)
+        .expect("enemy");
+    let friendly = sim
+        .spawn_live_unit("dagger", 1, 160.0, 64.0, 0.0)
+        .expect("friendly");
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(enemy).is_err()
+            || sim
+                .ecs
+                .0
+                .get::<Health>(enemy)
+                .is_some_and(|health| health.dead),
+        "the AI-team unit dies on a captured sector"
+    );
+    assert!(
+        sim.ecs.0.get_entity(friendly).is_ok()
+            && sim
+                .ecs
+                .0
+                .get::<Health>(friendly)
+                .is_some_and(|health| !health.dead),
+        "the default-team unit lives"
+    );
+}
+
+/// H01 T5: `GameState.hasSpawns()` (`GameState.java:68-70`) — a wave map in
+/// attack mode with a wave-team core (`wavesSpawnAtCores` supplies the spawn
+/// position) pushes non-wave-team units out of the drop zone
+/// (`UnitComp.java:734-744,793`).
+#[test]
+fn attack_map_pushes_from_drop_zone() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::State;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(64);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    // Wave-team core: the attack-mode half of `hasSpawns` and, with
+    // `wavesSpawnAtCores`, the drop-zone spawn position for the wave request.
+    let _enemy_core = place(&mut sim, 40, 40, "core-shard", 2);
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        wave_team: 2,
+        waves: true,
+        attack_mode: true,
+        unit_cap: 100,
+        unit_cap_variable: false,
+        ..Rules::default()
+    });
+    session.phase = State::Playing;
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let unit = sim
+        .spawn_live_unit("dagger", 1, 420.0, 320.0, 0.0)
+        .expect("unit");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(unit) {
+        vel.x = 0.0;
+        vel.y = 0.0;
+    }
+    sim.request_wave_spawn(0);
+    sim.tick().expect("tick");
+    let vel = *sim.ecs.0.get::<Vel>(unit).expect("vel");
+    assert!(
+        vel.x * vel.x + vel.y * vel.y > 0.0,
+        "the unit is pushed out of the drop zone: {vel:?}"
+    );
+    // The push is away from the wave-team core: the velocity points west.
+    assert!(vel.x < 0.0, "pushed away from the core: {vel:?}");
 }

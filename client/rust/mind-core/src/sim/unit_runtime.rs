@@ -2281,6 +2281,18 @@ pub fn unit_update_system(world: &mut World) {
     // `Pathfinder.EnemyCoreField.getPositions` target sets, one per team per
     // tick (plan G01 §6.9: stable targets keep the `(team, cost)` field cache).
     let mut core_target_cache: BTreeMap<u8, Vec<TilePos>> = BTreeMap::new();
+    // `GameState.hasSpawns()` (`GameState.java:68-70`): `rules.waves &&
+    // ((rules.waveTeam has a core && rules.attackMode) || !rules.spawns.isEmpty())`.
+    // Snapshotted once per tick for the per-unit drop-zone push gate (T5).
+    let has_spawns = world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|campaign| {
+            let rules = &campaign.session.rules;
+            rules.waves
+                && ((rules.attack_mode
+                    && has_core_of_team(world, &runtime.content, rules.wave_team))
+                    || !rules.spawns.is_empty())
+        });
     let entities = runtime.units.clone();
     for entity in entities {
         if world.get_entity(entity).is_err() {
@@ -2865,6 +2877,7 @@ pub fn unit_update_system(world: &mut World) {
                 &runtime.grid,
                 &runtime.content,
                 runtime.wave_spawner.get_spawns(),
+                has_spawns,
                 entity,
             );
 
@@ -6607,7 +6620,10 @@ mod msav_tests {
 
         let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
         let mut session = PlaySession::new(Rules {
-            waves: false,
+            // `waves: true`: the sector is not captured, so the wave-team
+            // daggers live (`Sector.isCaptured()` = `!waves && !attackMode`,
+            // `Sector.java:181-184`; `UnitComp.java:757`).
+            waves: true,
             default_team: 1,
             wave_team: 2,
             ..Rules::default()
@@ -6618,6 +6634,11 @@ mod msav_tests {
         // reports the sector loss when the core dies.
         session.sector = content.planet_id("serpulo").map(|planet| (planet, 170));
         session.teams.register_core(core, TeamId(1), &session.rules);
+        // The hand-built session does not decode the map's spawn overlays;
+        // `spawn_count` keeps `check_game_state`'s "no enemy spawns -> waves
+        // disabled" rule from flipping the sector to captured, which would kill
+        // the wave-team daggers (`Sector.isCaptured()` + `UnitComp.java:757`).
+        session.spawn_count = 1;
         sim.ecs
             .0
             .insert_resource(CampaignRuntime::new(session, campaign));

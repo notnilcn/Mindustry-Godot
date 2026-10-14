@@ -6,15 +6,15 @@
 //! `floor.damageTaken` and the solid-tile kill/boost branch. Ported from
 //! `entities/comp/UnitComp.java:662-870`.
 //!
-//! Deferred (documented): the captured-sector AI death (needs the G04 captured
-//! flag + `Team.isOnlyAI`), the floor/status drag terms (`floor.dragMultiplier`
-//! is T5) and the dead-flyer fall (T6).
+//! Deferred (documented): the dead-flyer fall (T6).
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::{BlockId, ContentRegistry};
-use crate::entities::comp::unit::comp::{CrawlComp, MechComp, TankComp, UnitCore, UnitTypeComp};
+use crate::entities::comp::unit::comp::{
+    CrawlComp, MechComp, PhysicsComp, StatusComp, TankComp, UnitCore, UnitTypeComp,
+};
 use crate::entities::comp::{Health, Pos, TeamComp, Vel};
 use crate::world::behavior::environment::floor_meta;
 use crate::world::{TilePos, WorldGrid};
@@ -85,6 +85,7 @@ pub fn update_unit_environment(
     grid: &WorldGrid,
     content: &ContentRegistry,
     spawns: &[TilePos],
+    has_spawns: bool,
     entity: Entity,
 ) {
     let (Some(mut pos), Some(type_comp)) = (
@@ -101,7 +102,17 @@ pub fn update_unit_environment(
     let team_is_ai = crate::entities::comp::unit::lifecycle::team_ai_flags(world, team)
         .map(|(is_ai, _)| is_ai)
         .unwrap_or(false);
-    let (limit_area, rules_env, rules_waves, wave_team, drop_zone_radius, has_rules) = {
+    let (
+        limit_area,
+        rules_env,
+        rules_waves,
+        wave_team,
+        drop_zone_radius,
+        has_rules,
+        rules_attack,
+        rules_drag,
+        default_team,
+    ) = {
         let rules = crate::game::runtime::rules_of(world);
         (
             grid.limit_area,
@@ -110,8 +121,19 @@ pub fn update_unit_environment(
             rules.map_or(team, |rules| rules.wave_team),
             rules.map_or(300.0, |rules| rules.drop_zone_radius),
             rules.is_some(),
+            rules.is_some_and(|rules| rules.attack_mode),
+            rules.map_or(1.0, |rules| rules.drag_multiplier),
+            rules.map_or(team, |rules| rules.default_team),
         )
     };
+    // `state.isCampaign()` (`State.isCampaign()` = `sector != null`).
+    let is_campaign = world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .is_some_and(|campaign| campaign.session.is_campaign());
+    // `UnitComp.isGrounded()` (`elevation < 0.001`, UnitComp.java:80-82).
+    let grounded = world
+        .get::<UnitCore>(entity)
+        .is_none_or(|core| core.elevation < 0.001);
     let mut vel = world
         .get::<Vel>(entity)
         .copied()
@@ -181,8 +203,8 @@ pub fn update_unit_environment(
     }
 
     // Floor data (read once; no table borrow survives into the mutations).
-    let (floor_status, floor_status_duration, floor_damage_taken, drown_meta) = {
-        let mut out = (None, 60.0f32, 0.0f32, None);
+    let (floor_status, floor_status_duration, floor_damage_taken, floor_drag, drown_meta) = {
+        let mut out = (None, 60.0f32, 0.0f32, 1.0f32, None);
         if let Some(table) = world.get_resource::<crate::world::BlockTable>() {
             let tile_floor = grid
                 .tiles
@@ -194,18 +216,22 @@ pub fn update_unit_environment(
                 out.0 = inst.def.floor_status;
                 out.1 = inst.def.floor_status_duration;
                 out.2 = inst.def.floor_damage_taken;
+                out.3 = inst.def.floor_drag_multiplier;
             }
-            out.3 = drown_floor(world, grid, table, &def, entity, tile_floor)
+            out.4 = drown_floor(world, grid, table, &def, entity, tile_floor)
                 .and_then(|floor| floor_meta(table, floor));
         }
         out
     };
-    let (floor_status, floor_status_duration, floor_damage_taken) =
-        (floor_status, floor_status_duration, floor_damage_taken);
+    let (floor_status, floor_status_duration, floor_damage_taken, floor_drag) = (
+        floor_status,
+        floor_status_duration,
+        floor_damage_taken,
+        floor_drag,
+    );
     let _ = floor_status_duration;
 
     // Drowning (`updateDrowning`, UnitComp.java:706-723).
-    let grounded = !crate::combat::bullet::unit_is_flying(world, entity);
     let mut drown = world.get::<DrownComp>(entity).map_or(0.0, |comp| comp.0);
     if let Some(meta) = drown_meta
         && meta.is_liquid
@@ -224,6 +250,22 @@ pub fn update_unit_environment(
         stored.0 = drown;
     } else if world.get_entity(entity).is_ok() {
         world.entity_mut(entity).insert(DrownComp(drown));
+    }
+
+    // Captured-sector AI death (`UnitComp.java:750-753`):
+    // `team.isOnlyAI() && state.isCampaign() && state.getSector().isCaptured()`.
+    // `isCaptured()` for the sector being played is
+    // `!rules.waves && !rules.attackMode`; the port has a single local player,
+    // so `players.size == 0` is approximated by `team != rules.defaultTeam`
+    // (documented single-player deviation).
+    if has_rules
+        && is_campaign
+        && !rules_waves
+        && !rules_attack
+        && team_is_ai
+        && team != default_team
+    {
+        kill(world, entity);
     }
 
     // Environment death (`if(!type.supportsEnv(rules.env) && !dead)`).
@@ -245,9 +287,23 @@ pub fn update_unit_environment(
         crate::combat::damage::status::apply_status(world, entity, status, floor_status_duration);
     }
 
+    // Drag (`UnitComp.java:790`):
+    // `drag = type.drag * (isGrounded() ? floorOn().dragMultiplier : 1f) *
+    //  dragMultiplier * state.rules.dragMultiplier`.
+    let status_drag = world
+        .get::<StatusComp>(entity)
+        .map_or(1.0, |status| status.drag_multiplier);
+    if let Some(mut physics) = world.get_mut::<PhysicsComp>(entity) {
+        physics.drag =
+            def.drag * if grounded { floor_drag } else { 1.0 } * status_drag * rules_drag;
+    }
+
     // Drop-zone push (`UnitComp.java:734-744`): non-wave-team units inside a
-    // spawn's `dropZoneRadius + hitSize/2 + 1` are pushed out.
-    if rules_waves
+    // spawn's `dropZoneRadius + hitSize/2 + 1` are pushed out. The gate is
+    // `GameState.hasSpawns()` = `rules.waves && ((waveTeam has a core &&
+    // rules.attackMode) || rules.spawns.size > 0)` (`GameState.java:68-70`),
+    // computed once per tick by the caller.
+    if has_spawns
         && team != wave_team
         && !spawns.is_empty()
         && world
