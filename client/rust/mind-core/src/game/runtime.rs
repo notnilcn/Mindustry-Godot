@@ -1031,6 +1031,14 @@ pub fn team_ai_system(world: &mut World) {
                 .iter()
                 .filter_map(|team| {
                     let data = runtime.session.teams.get_or_null(*team)?;
+                    // `var rules = data.team.rules(); if(rules.fillItems && ...)`
+                    // (`Logic.java:553-554`): only teams whose rule sets
+                    // `fillItems` are refilled. Without this gate the player
+                    // team's core was filled with `i32::MAX / 2` of every item,
+                    // corrupting sector saves (H06 T20 blocker).
+                    if !rules.team_rule(team.0).fill_items {
+                        return None;
+                    }
                     let core = data.core()?;
                     let building = world.get::<crate::entities::comp::Building>(core)?;
                     let instance = table.and_then(|table| table.instance(building.block))?;

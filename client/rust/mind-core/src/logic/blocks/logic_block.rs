@@ -519,6 +519,32 @@ pub fn state_snapshot(world: &World, e: Entity) -> Option<LogicStateSnapshot> {
     })
 }
 
+/// Re-assembles every processor against the currently installed `GlobalVars`
+/// (H06 T20 safety net for loaders that decode buildings before the globals
+/// exist). Values are kept (`update_code(world, e, true)`), like the Java
+/// editor's code reload; iteration is `EntitySeq` order.
+pub fn reassemble_all_processors(world: &mut World) {
+    let mut query = world.query::<(Entity, &LogicBlockState)>();
+    let mut entities: Vec<(u64, Entity)> = query
+        .iter(world)
+        .map(|(e, _)| {
+            let seq = world
+                .get::<crate::ecs::EntitySeq>(e)
+                .map(|seq| seq.0)
+                .unwrap_or(u64::MAX);
+            (seq, e)
+        })
+        .collect();
+    entities.sort_by_key(|(seq, _)| *seq);
+    for (_, e) in entities {
+        let Some(mut state) = world.entity_mut(e).take::<LogicBlockState>() else {
+            continue;
+        };
+        state.update_code(world, e, true);
+        world.entity_mut(e).insert(state);
+    }
+}
+
 /// `LogicBlock.findLinkName(block)`: lowest free `bname{n}` (`n >= 1`).
 pub fn find_link_name(links: &[LogicLink], bname: &str) -> String {
     let mut taken = IndexSet::new();

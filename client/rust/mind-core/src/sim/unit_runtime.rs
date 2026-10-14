@@ -5951,6 +5951,71 @@ mod msav_tests {
         );
     }
 
+    /// H06 T20: the map's world processors must assemble with the logic globals
+    /// present (the fixed engine load order installs `GlobalVars` before the
+    /// building decode), so no executor keeps a non-constant `@`-named cell
+    /// (`@counter` excepted: `LAssembler.var` resolves `@sharded`/`@duo`/...
+    /// from `Vars.logicVars`, `J/logic/LAssembler.java:59-61`).
+    #[test]
+    fn ground_zero_processors_resolve_constants() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        // Fixed load order: the globals exist before the map is decoded
+        // (`Vars.init` before any map read, `Vars.java:369`).
+        crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+
+        let mut checked = 0;
+        for (_seq, entity, _comp) in sim.ecs.entities_by_seq() {
+            let Some(state) = sim
+                .ecs
+                .0
+                .get::<crate::logic::blocks::LogicBlockState>(entity)
+            else {
+                continue;
+            };
+            checked += 1;
+            for id in &state.executor.var_ids {
+                let cell = state.executor.arena.get(*id);
+                assert!(
+                    cell.constant || !cell.name.starts_with('@') || cell.name == "@counter",
+                    "processor {entity:?} kept unresolved `{}`",
+                    cell.name
+                );
+            }
+        }
+        assert!(
+            checked >= 5,
+            "groundZero ships 5 world processors, linked {checked}"
+        );
+    }
+
     /// T15: the Ground Zero wave-1 dagger walks around the deep pool near
     /// world (1088, 1100) instead of entering it and drowning
     /// (`Pathfinder.costGround`: deep `+6000`, all-deep impassable,

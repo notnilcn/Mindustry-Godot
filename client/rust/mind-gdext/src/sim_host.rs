@@ -551,6 +551,31 @@ impl MindSimHost {
     #[signal]
     fn world_changed();
 
+    /// Installs the content-initialized logic globals (`GlobalVars`) on the sim.
+    ///
+    /// `LAssembler.var` resolves constants from the global `Vars.logicVars`
+    /// (`J/logic/LAssembler.java:59-61`), created once in `Vars.init`
+    /// (`J/core/Vars.java:369`) and filled with the content by
+    /// `ContentLoader.java:107` — long before any map or save is read. Map/save
+    /// buildings are decoded by `materialize_map_buildings` (`LogicBuild.read`
+    /// -> `read_compressed` -> `update_code`), so this must run BEFORE them or
+    /// `@sharded`/`@duo`/`@scatter` become plain null variables (H06 T20).
+    /// Idempotent.
+    fn install_logic_globals(&mut self) {
+        if self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::logic::globals::GlobalVars>()
+            .is_some()
+        {
+            return;
+        }
+        if let Some(registry) = self.content_snapshot.as_ref() {
+            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
+        }
+    }
+
     /// Wires the host seams that live on the `Sim` value: the content-initialized
     /// logic globals (plan-13 M7), the live-sim IO executor (plan 04 §3.10) and
     /// the audio sink (plan-18).
@@ -559,8 +584,8 @@ impl MindSimHost {
     /// again after every replacement; otherwise `request_save`/`request_load`
     /// queue into an `IoQueue` with no handler and never drain.
     fn install_sim_seams(&mut self) {
+        self.install_logic_globals();
         if let Some(registry) = self.content_snapshot.take() {
-            mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, &registry);
             // Live world-processor sinks (G06 T4): rules/markers/wave live in
             // the campaign session; the event log + message timers are sim
             // resources (headless=false so messages/cutscenes reach the host).
@@ -2054,6 +2079,10 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = None;
+        // H06 T20: resolve `@content` constants from the point the globals
+        // exist — before the map/save processors are decoded below — exactly
+        // like `Vars.logicVars` at content init (`Vars.java:369`).
+        self.install_logic_globals();
         // A campaign sector is live play: its placed blocks must execute their
         // plan-07 behaviors (mining, transport, crafting, power). The runtime
         // resources are installed before any entity exists so ECS indices stay

@@ -2195,6 +2195,72 @@ fn logic_state_snapshot_lists_vars() {
     assert!(snapshot.accessible);
 }
 
+/// H06 T20: a processor decoded before `GlobalVars` exists assembles
+/// `@sharded`/`@duo` as null variables; re-assembling after the globals
+/// arrive resolves them (the fixed engine load order: `Vars.logicVars`
+/// exists before any map/save is read, `Vars.java:369`).
+#[test]
+fn processor_loaded_before_globals_resolves_constants() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::logic::globals::GlobalVars>()
+            .is_none(),
+        "runtime_sim carries no GlobalVars"
+    );
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "fetch buildCount n @sharded 0 @duo\nstop\n",
+    );
+    {
+        let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+        let state = sim
+            .ecs
+            .0
+            .get::<crate::logic::blocks::LogicBlockState>(e)
+            .expect("state");
+        let sharded = state
+            .executor
+            .optional_var("@sharded")
+            .expect("@sharded assembled");
+        assert!(
+            !state.executor.arena.get(sharded).constant,
+            "without globals the content constant is a plain variable"
+        );
+    }
+    // Fixed load order: content globals exist before the buildings decode.
+    let content = crate::world::harness::BuildHarness::load_content();
+    crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
+    crate::logic::blocks::logic_block::reassemble_all_processors(&mut sim.ecs.0);
+    place(&mut sim, "duo", 20, 20);
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::logic::blocks::LogicBlockState>(e)
+        .expect("state");
+    let mut bad = Vec::new();
+    for id in &state.executor.var_ids {
+        let cell = state.executor.arena.get(*id);
+        if cell.name.starts_with('@') && !cell.constant && cell.name != "@counter" {
+            bad.push(cell.name.clone());
+        }
+    }
+    assert!(bad.is_empty(), "unresolved constants: {bad:?}");
+    let n = state
+        .executor
+        .optional_var("n")
+        .map(|id| state.executor.arena.get(id).num());
+    assert_eq!(n, Some(1.0), "buildCount sees the team-1 duo");
+}
+
 /// `message announce 2 @wait` blocks until the announcement timer expires.
 #[test]
 fn message_wait_blocks_until_announcement_expires() {
@@ -3246,6 +3312,81 @@ fn fill_items_fills_ai_core() {
         capacity,
         "without incineration the core fills to its storage capacity"
     );
+}
+
+/// H06 T20 blocker regression: `team_ai_system` must skip teams whose rule
+/// leaves `fillItems` false (`Logic.java:553-554`). The missing gate filled
+/// the player team's core with `i32::MAX / 2` of every item every tick and
+/// wrote an unloadable sector save.
+#[test]
+fn fill_items_gate_skips_other_teams() {
+    use crate::entities::comp::Building;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{
+        CampaignRuntime, install_campaign_core_hooks, sync_session_with_sim,
+    };
+    use crate::world::TilePos;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let rules = Rules {
+        default_team: 1,
+        core_incinerates: true,
+        ..Rules::default()
+    };
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    sim.command(SimCommand::Place {
+        x: 5,
+        y: 5,
+        block: core.raw(),
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("team-2 core placed");
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    let copper = item(&sim, "copper");
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+    assert_eq!(
+        stored_item(&sim, entity, copper),
+        0,
+        "team 2 leaves fillItems off: the core is untouched"
+    );
+    // Flip the rule: the same core is refilled.
+    sim.ecs
+        .0
+        .get_resource_mut::<CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .rules
+        .team_rule_mut(2)
+        .fill_items = true;
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored_item(&sim, entity, copper),
+        i32::MAX / 2,
+        "fillItems on: refilled to getMaximumAccepted"
+    );
+    assert!(sim.ecs.0.get::<Building>(entity).is_some(), "core exists");
 }
 
 /// H09 T10: the `Logic` event counters (`Logic.java:186-216`) follow player
