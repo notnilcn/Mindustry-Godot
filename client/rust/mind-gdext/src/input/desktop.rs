@@ -657,6 +657,7 @@ impl DesktopBridge {
                 // queue is cleared too (`player.unit().clearBuilding()`), and
                 // `pollInputPlayer` L632 also drops the copied plans.
                 self.controller.state.select_block(None);
+                self.controller.state.override_line_rotation = false;
                 self.controller.state.select_plans.clear();
                 self.refresh_select_preview();
                 if let Some(mut host) = self.host.clone() {
@@ -1041,6 +1042,14 @@ impl DesktopBridge {
         }
     }
 
+    /// Per-frame `pollInputPlayer` L762-768 mirror: outside an active placement
+    /// line (`mode == placing && block != null`) the wheel snap latch clears.
+    pub fn sync_line_override(&mut self) {
+        if !(self.controller.state.is_placing() && self.controller.state.block.is_some()) {
+            self.controller.state.override_line_rotation = false;
+        }
+    }
+
     /// `HintsFragment` triggers that fire while a key is held (G05 T4b):
     /// `boost` (`keyDown(boost)`) and `rebuildSelecting`
     /// (`input.isRebuildSelecting()` = `keyDown(rebuildSelect)`).
@@ -1108,9 +1117,25 @@ impl DesktopBridge {
 
     /// Rotates the pending placement by `step` (`input.rotation`).
     fn rotate_placement_step(&mut self, bindings: &BindingState, step: i32) {
+        // Same snap as the wheel path (`pollInputPlayer` L762-768 runs for any
+        // `axisTap(rotate)`, wheel or bound key, before L836-849 steps it).
+        let diagonal_held = self.key_down(bindings, ids::DIAGONAL_PLACEMENT);
+        if let Some(drag) = self.drag
+            && drag.kind == DragKind::Place
+            && !self.controller.state.override_line_rotation
+            && !diagonal_held
+            && drag.start != drag.last
+        {
+            self.controller.state.rotation = mind_core::input::placement::line_angle_rotation(
+                drag.start.0,
+                drag.start.1,
+                drag.last.0,
+                drag.last.1,
+            );
+            self.controller.state.override_line_rotation = true;
+        }
         self.controller.state.rotation =
             (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
-        self.controller.state.override_line_rotation = true;
         if let Some(drag) = self.drag
             && drag.kind == DragKind::Place
         {
@@ -1694,6 +1719,9 @@ impl DesktopBridge {
             return;
         };
         self.controller.state.begin_place();
+        // A fresh drag never starts with a latched wheel override
+        // (`pollInputPlayer` L762-768 clears it on every frame between drags).
+        self.controller.state.override_line_rotation = false;
         self.drag = Some(Drag {
             kind: DragKind::Place,
             start: (x, y),
@@ -1918,6 +1946,7 @@ impl DesktopBridge {
         // (PAR-0045).
         if self.controller.state.block.is_some() {
             self.controller.state.select_block(None);
+            self.controller.state.override_line_rotation = false;
             if let Some(mut host) = self.host.clone() {
                 host.bind_mut().select_block(GString::from("air"));
             }
@@ -2213,6 +2242,8 @@ impl DesktopBridge {
         self.controller.state.line_plans.clear();
         self.controller.state.line.clear();
         self.controller.state.place_mode = PlaceMode::None;
+        // `pollInputPlayer` L762-768: the latch clears once the drag is over.
+        self.controller.state.override_line_rotation = false;
         self.controller.state.preview.clear();
     }
 
@@ -2300,29 +2331,30 @@ impl DesktopBridge {
         let route = mind_core::input::desktop::route_scroll(&ctx);
         let step = if delta > 0.0 { 1 } else { -1 };
         if route.rotate_selection {
-            // `rotation = mod(rotation + axisTap(rotate), 4)`.
+            // `pollInputPlayer` L762-768 (snap to the drag angle) runs BEFORE
+            // L836-849 (`rotation = mod(rotation + axisTap, 4)`): a wheel during
+            // a fresh drag snaps to the drag angle, adds the step and latches
+            // `overrideLineRotation`, so every line step gets `input.rotation`.
+            let drag = self.drag.filter(|drag| drag.kind == DragKind::Place);
+            if placing
+                && let Some(drag) = drag
+                && !self.controller.state.override_line_rotation
+                && !diagonal_held
+                && drag.start != drag.last
+            {
+                self.controller.state.rotation = mind_core::input::placement::line_angle_rotation(
+                    drag.start.0,
+                    drag.start.1,
+                    drag.last.0,
+                    drag.last.1,
+                );
+                self.controller.state.override_line_rotation = true;
+            }
             self.controller.state.rotation =
                 (self.controller.state.rotation as i32 + step).rem_euclid(4) as u8;
-            if placing {
-                if let Some(drag) = self.drag
-                    && drag.kind == DragKind::Place
-                {
-                    // `pollInputPlayer` L766-773: while no override is latched,
-                    // align to the drag angle before the wheel step.
-                    if !self.controller.state.override_line_rotation
-                        && !diagonal_held
-                        && drag.start != drag.last
-                    {
-                        let dx = (drag.last.0 - drag.start.0) as f32;
-                        let dy = (drag.last.1 - drag.start.1) as f32;
-                        let angle = dy.atan2(dx).to_degrees();
-                        self.controller.state.rotation =
-                            (((angle + 45.0) / 90.0) as i32).rem_euclid(4) as u8;
-                    }
-                    self.controller.state.override_line_rotation = true;
-                    self.update_place_line(bindings, drag.start, drag.last);
-                }
-            } else if !self.controller.state.select_plans.is_empty() {
+            if placing && let Some(drag) = drag {
+                self.update_place_line(bindings, drag.start, drag.last);
+            } else if !placing && !self.controller.state.select_plans.is_empty() {
                 self.rotate_select_plans(step);
             }
         }
@@ -2732,6 +2764,65 @@ mod tests {
             )),
             "N in a campaign opens the planet map"
         );
+    }
+
+    #[test]
+    fn override_line_rotation_resets_when_the_drag_ends() {
+        // Java DI:762-768: the wheel snap latch clears whenever the frame is
+        // not a placement line, so a second drag after a wheel step gets
+        // per-step rotations again.
+        let mut bridge = DesktopBridge::new();
+        bridge
+            .controller
+            .state
+            .select_block(Some(BlockId::STONE_WALL));
+        bridge.controller.state.override_line_rotation = true;
+        bridge.controller.state.place_mode = PlaceMode::Placing;
+        bridge.commit_place(Drag {
+            kind: DragKind::Place,
+            start: (1, 1),
+            last: (1, 2),
+            moved: true,
+        });
+        assert!(!bridge.controller.state.override_line_rotation);
+
+        // The per-frame mirror also clears it outside a drag.
+        bridge.controller.state.override_line_rotation = true;
+        bridge.sync_line_override();
+        assert!(!bridge.controller.state.override_line_rotation);
+
+        // While a placement line is active the latch survives.
+        bridge.controller.state.override_line_rotation = true;
+        bridge.controller.state.place_mode = PlaceMode::Placing;
+        bridge.sync_line_override();
+        assert!(bridge.controller.state.override_line_rotation);
+    }
+
+    #[test]
+    fn rotate_step_snaps_to_the_drag_angle_before_stepping() {
+        // `pollInputPlayer` L762-768 runs before L836-849: a rotate tap during
+        // a fresh drag snaps to the drag angle (upward drag = 1), then adds
+        // the step and latches the override.
+        let mut bridge = DesktopBridge::new();
+        let bindings = BindingState::new();
+        bridge
+            .controller
+            .state
+            .select_block(Some(BlockId::STONE_WALL));
+        bridge.drag = Some(Drag {
+            kind: DragKind::Place,
+            start: (5, 5),
+            last: (5, 8),
+            moved: true,
+        });
+        bridge.controller.state.override_line_rotation = false;
+        bridge.rotate_placement_step(&bindings, 1);
+        assert_eq!(bridge.controller.state.rotation, 2);
+        assert!(bridge.controller.state.override_line_rotation);
+
+        // A latched override skips the snap and only steps.
+        bridge.rotate_placement_step(&bindings, 1);
+        assert_eq!(bridge.controller.state.rotation, 3);
     }
 
     #[test]

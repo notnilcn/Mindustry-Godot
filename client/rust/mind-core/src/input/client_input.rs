@@ -196,6 +196,11 @@ impl InputState {
             &super::line::NoLineHooks,
             &mut self.line,
         );
+        // `InputHandler.updateLine` (IH:1943-1950) writes `rotation = l.rotation`
+        // for every step; the input rotation ends as the last step's.
+        if let Some(last) = self.line.last() {
+            self.rotation = last.rotation;
+        }
         let block = self.block.unwrap_or(BlockId::AIR);
         self.line_plans.clear();
         self.line_plans.extend(
@@ -328,6 +333,26 @@ mod tests {
         assert!(state.is_building);
         assert_eq!(state.control_groups.len(), CONTROL_GROUPS);
         assert!(!state.is_placing());
+    }
+
+    #[test]
+    fn update_line_carries_last_rotation() {
+        // `InputHandler.updateLine` (IH:1943-1950) writes `rotation` for every
+        // step; after an upward drag the input rotation is the last step's.
+        let world = FlatWorld;
+        let mut state = InputState::new();
+        state.select_block(Some(BlockId::STONE_WALL));
+        state.update_line(
+            &world,
+            None,
+            TilePos::new(5, 5),
+            TilePos::new(5, 8),
+            &LineParams {
+                rotation: 0,
+                ..LineParams::default()
+            },
+        );
+        assert_eq!(state.rotation, 1);
     }
 
     #[test]

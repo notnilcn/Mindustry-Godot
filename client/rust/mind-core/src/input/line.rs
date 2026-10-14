@@ -147,7 +147,12 @@ pub fn iterate_line(
         base_rotation = if start == end {
             params.rotation
         } else {
-            relative(start, end) as u8
+            super::placement::line_angle_rotation(
+                start.x() as i32,
+                start.y() as i32,
+                end.x() as i32,
+                end.y() as i32,
+            )
         };
     }
 
@@ -180,12 +185,17 @@ pub fn iterate_line(
         let ignore_line_rotation =
             block.is_some_and(|block| block.ignore_line_rotation) && !params.mobile;
         if (!params.override_line_rotation || diagonal) && !ignore_line_rotation {
+            // `Tile.relativeTo` returns `-1` for a non-adjacent pair; Java then
+            // keeps `line.rotation` (`if(result != -1)`), modelled by leaving
+            // the `base_rotation` initializer in place.
             let resolved = if let Some(next) = next {
-                Some(relative(*point, next) as u8)
+                let r = relative(*point, next);
+                (r >= 0).then_some(r as u8)
             } else if let Some(end_rotation) = end_rotation {
                 Some(end_rotation)
             } else if block.is_some_and(|block| block.conveyor_placement) && index > 0 {
-                Some(relative(points[index - 1], *point) as u8)
+                let r = relative(points[index - 1], *point);
+                (r >= 0).then_some(r as u8)
             } else {
                 None
             };
@@ -401,6 +411,104 @@ mod tests {
         fn is_chained(&self, _x: i32, _y: i32) -> bool {
             false
         }
+    }
+
+    /// Flat 1x1 conveyor line block (`conveyorPlacement` true).
+    fn conveyor_block() -> LineBlock {
+        LineBlock {
+            id: BlockId::STONE_WALL,
+            size: 1,
+            offset: 0.0,
+            allow_diagonal: true,
+            conveyor_placement: true,
+            allow_rectangle_placement: false,
+            swap_diagonal_placement: false,
+            ignore_line_rotation: false,
+        }
+    }
+
+    #[test]
+    fn vertical_conveyor_drag_points_up() {
+        // `Tile.relativeTo`: (5,5) -> (5,6) is north (+y) = rotation 1
+        // (Java points a dragged-up conveyor up; `Tile.java:95-101`).
+        let world = FlatWorld {
+            width: 16,
+            height: 16,
+        };
+        let block = conveyor_block();
+        let params = LineParams {
+            rotation: 0,
+            ..LineParams::default()
+        };
+        let mut out = Vec::new();
+        iterate_line(
+            &world,
+            Some(&block),
+            &params,
+            TilePos::new(5, 5),
+            TilePos::new(5, 8),
+            &NoLineHooks,
+            &mut out,
+        );
+        assert_eq!(out.len(), 4);
+        assert!(
+            out.iter().all(|line| line.rotation == 1),
+            "all steps point up: {out:?}"
+        );
+    }
+
+    #[test]
+    fn downward_drag_points_down() {
+        let world = FlatWorld {
+            width: 16,
+            height: 16,
+        };
+        let block = conveyor_block();
+        let params = LineParams {
+            rotation: 0,
+            ..LineParams::default()
+        };
+        let mut out = Vec::new();
+        iterate_line(
+            &world,
+            Some(&block),
+            &params,
+            TilePos::new(5, 8),
+            TilePos::new(5, 5),
+            &NoLineHooks,
+            &mut out,
+        );
+        assert_eq!(out.len(), 4);
+        assert!(
+            out.iter().all(|line| line.rotation == 3),
+            "all steps point down: {out:?}"
+        );
+    }
+
+    #[test]
+    fn single_tile_keeps_rotation() {
+        // `startX == endX && startY == endY` keeps `input.rotation` (IH:2467).
+        let world = FlatWorld {
+            width: 16,
+            height: 16,
+        };
+        let block = conveyor_block();
+        let params = LineParams {
+            rotation: 2,
+            ..LineParams::default()
+        };
+        let mut out = Vec::new();
+        iterate_line(
+            &world,
+            Some(&block),
+            &params,
+            TilePos::new(5, 5),
+            TilePos::new(5, 5),
+            &NoLineHooks,
+            &mut out,
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].rotation, 2);
     }
 
     #[test]

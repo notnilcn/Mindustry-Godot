@@ -216,6 +216,9 @@ impl INode for MindInput {
         // state changes that arrive without a key edge (block selection from a
         // fragment, focus changes) still close the gate.
         self.bridge.update_command_mode(&self.bindings, None);
+        // `pollInputPlayer` L762-768: `overrideLineRotation` clears whenever the
+        // frame is not an active placement line.
+        self.bridge.sync_line_override();
         // Cargo keys repeat while held (`DesktopInput.updateMovement`).
         self.bridge.update_payload_hold(&self.bindings);
         // G05 T4b hint triggers while a key is held (`boost`,

@@ -114,15 +114,28 @@ fn pos_mod(value: i32, modulus: i32) -> i32 {
     value.rem_euclid(modulus)
 }
 
-/// Direction index from `a` to `b` among [`D4`] (Arc `Tile.relativeTo` shape).
+/// `Tile.relativeTo(x, y, cx, cy)` (`Tile.java:95-101`): direction index of
+/// `b` seen from `a` (`0` east, `1` north/+y, `2` west, `3` south), `-1`
+/// when `b` is not a 4-neighbour.
 pub fn relative(a: TilePos, b: TilePos) -> i32 {
     match (b.x() as i32 - a.x() as i32, b.y() as i32 - a.y() as i32) {
         (1, 0) => 0,
-        (0, -1) => 1,
+        (0, 1) => 1,
         (-1, 0) => 2,
-        (0, 1) => 3,
-        _ => 0,
+        (0, -1) => 3,
+        _ => -1,
     }
+}
+
+/// `Angles.angle(x1, y1, x2, y2)` in degrees, `[0, 360)`.
+pub fn angle_deg(x1: i32, y1: i32, x2: i32, y2: i32) -> f32 {
+    let a = ((y2 - y1) as f32).atan2((x2 - x1) as f32).to_degrees();
+    if a < 0.0 { a + 360.0 } else { a }
+}
+
+/// `((int)((angle + 45) / 90f)) % 4` (IH:2467, DI:764).
+pub fn line_angle_rotation(x1: i32, y1: i32, x2: i32, y2: i32) -> u8 {
+    (((angle_deg(x1, y1, x2, y2) + 45.0) / 90.0) as i32 % 4) as u8
 }
 
 /// `Placement.normalizeLine`: snap to the dominant axis, no diagonals.
@@ -796,6 +809,32 @@ mod tests {
             &mut out,
         );
         out.iter().map(|p| (p.x() as i32, p.y() as i32)).collect()
+    }
+
+    #[test]
+    fn relative_matches_tile_relative_to() {
+        // `Tile.relativeTo` (`Tile.java:95-101`): east 0, north (+y) 1,
+        // west 2, south 3, non-adjacent -1.
+        let a = TilePos::new(5, 5);
+        assert_eq!(relative(a, TilePos::new(6, 5)), 0);
+        assert_eq!(relative(a, TilePos::new(5, 6)), 1);
+        assert_eq!(relative(a, TilePos::new(4, 5)), 2);
+        assert_eq!(relative(a, TilePos::new(5, 4)), 3);
+        assert_eq!(relative(a, TilePos::new(7, 5)), -1);
+        assert_eq!(relative(a, TilePos::new(6, 6)), -1);
+    }
+
+    #[test]
+    fn line_angle_rotation_quadrants() {
+        // `((int)((Angles.angle(...) + 45) / 90f)) % 4` (IH:2467, DI:764).
+        assert_eq!(line_angle_rotation(0, 0, 5, 0), 0);
+        assert_eq!(line_angle_rotation(0, 0, 0, 5), 1);
+        assert_eq!(line_angle_rotation(0, 0, -5, 0), 2);
+        assert_eq!(line_angle_rotation(0, 0, 0, -5), 3);
+        // Angle 348.7: (393.7/90) = 4 -> 0.
+        assert_eq!(line_angle_rotation(0, 0, 5, -1), 0);
+        // Angle 258.7: 3.
+        assert_eq!(line_angle_rotation(0, 0, -1, -5), 3);
     }
 
     #[test]
