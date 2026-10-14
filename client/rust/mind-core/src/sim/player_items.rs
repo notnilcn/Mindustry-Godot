@@ -155,8 +155,9 @@ impl Sim {
                 // `transferInventory` (`InputHandler.java:513-535`): deposit the
                 // whole held stack into a building that accepts it (the wire's
                 // item/amount are ignored; Java uses `unit.item()`/`stack.amount`).
-                // `allowDeposit()` is true: `onlyDepositCore` defaults false and
-                // is not ported (`grep only_deposit_core core/game/rules.rs`).
+                // `BuildingComp.allowDeposit()` (`BuildingComp.java:745`)
+                // gates the transfer on `!state.rules.onlyDepositCore` (cores
+                // set `alwaysAllowDeposit`).
                 let Some((held, held_amount)) = self
                     .ecs
                     .0
@@ -166,6 +167,9 @@ impl Sim {
                     return false;
                 };
                 if held_amount <= 0 {
+                    return false;
+                }
+                if !self.building_allows_deposit(entity) {
                     return false;
                 }
                 let accepted =
@@ -183,6 +187,27 @@ impl Sim {
             }
             _ => false,
         }
+    }
+
+    /// `BuildingComp.allowDeposit()` (`BuildingComp.java:745`):
+    /// `block.alwaysAllowDeposit || !state.rules.onlyDepositCore`. Cores set
+    /// `alwaysAllowDeposit = true` (`CoreBlock.java:75`); Erekir sets the rule
+    /// (`Planets.java:82`).
+    fn building_allows_deposit(&self, entity: Entity) -> bool {
+        let only_core = crate::game::runtime::rules_of(&self.ecs.0)
+            .is_some_and(|rules| rules.only_deposit_core);
+        if !only_core {
+            return true;
+        }
+        self.ecs
+            .0
+            .get::<Building>(entity)
+            .and_then(|building| {
+                self.block_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.content().block(building.block))
+            })
+            .is_some_and(|def| def.kind == crate::content::BlockKind::CoreBlock)
     }
 
     /// `InputHandler.tryDropItems` (`InputHandler.java:2286-2308`) deposit
@@ -228,6 +253,9 @@ impl Sim {
             })
             .is_some_and(|def| def.has_items);
         if !has_items {
+            return 0;
+        }
+        if !self.building_allows_deposit(entity) {
             return 0;
         }
         dispatch_accept_stack(&self.ecs.0, entity, held, held_amount, Some(unit))
@@ -359,6 +387,63 @@ mod tests {
         let turret = sim.grid.entity_at(TilePos::new(13, 10)).expect("turret");
         let state = sim.ecs.0.get::<TurretState>(turret).expect("turret state");
         assert_eq!(state.total_ammo, 30);
+    }
+
+    #[test]
+    fn only_deposit_core_blocks_turret_deposit() {
+        // `Planets.java:82` (Erekir) sets `onlyDepositCore`; `duo` has no
+        // `alwaysAllowDeposit`, a core does (`CoreBlock.java:75`).
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let (mut sim, unit, copper) = sim_with_player();
+        let duo = sim.world_block_id("duo").expect("duo");
+        sim.command(SimCommand::Place {
+            x: 13,
+            y: 10,
+            block: duo,
+            rotation: 0,
+            team: 1,
+            player: None,
+        })
+        .expect("duo placed");
+        let campaign = {
+            let content = &sim.unit_runtime().expect("rt").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            only_deposit_core: true,
+            ..Rules::default()
+        });
+        session.phase = crate::game::State::Playing;
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        // The rule is on: the duo refuses the deposit, the core accepts it.
+        set_player_stack(&mut sim, unit, copper, 30);
+        assert_eq!(sim.player_deposit_accepted(TilePos::new(13, 10)), 0);
+        assert!(!sim.apply_player_inventory(1, TilePos::new(13, 10), None, 0));
+        assert_eq!(sim.player_unit_stack(), Some((copper, 30)));
+        assert_eq!(sim.player_deposit_accepted(TilePos::new(10, 10)), 30);
+        assert!(sim.apply_player_inventory(1, TilePos::new(10, 10), None, 0));
+        assert_eq!(sim.player_unit_stack(), None);
+        // Rule off: the duo takes it again (`allowDeposit` true).
+        set_player_stack(&mut sim, unit, copper, 30);
+        sim.ecs
+            .0
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("campaign")
+            .session
+            .rules
+            .only_deposit_core = false;
+        // `duo` caps the accepted stack (15 items = 30 ammo, see
+        // `deposit_accepted_matches_apply`).
+        assert_eq!(sim.player_deposit_accepted(TilePos::new(13, 10)), 15);
     }
 
     #[test]
