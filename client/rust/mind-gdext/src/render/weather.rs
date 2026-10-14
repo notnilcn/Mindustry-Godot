@@ -13,14 +13,16 @@
 
 use std::collections::HashMap;
 
+use godot::classes::canvas_item::{TextureFilter, TextureRepeat};
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{INode2D, ImageTexture, Node2D, Texture2D};
+use godot::classes::{INode2D, Image, ImageTexture, Node2D, Texture2D};
 use godot::obj::Base;
 use godot::prelude::*;
 
 use mind_core::content::Rgba;
 use mind_core::fx::weather_fx::{
-    SplashGround, WeatherKind, WeatherStateView, WeatherView, splash_visible, weather_fx_for,
+    NoiseLayerDraw, SplashGround, WeatherKind, WeatherStateView, WeatherView,
+    particle_noise_layers, splash_visible, weather_fx_for,
 };
 use mind_core::render::draw::{DrawPrim, PrimKind, RegionKey};
 
@@ -69,8 +71,9 @@ pub struct WeatherRenderer {
     /// Atlas region lookup cache (`ParticleWeather.region`, splash frames).
     regions: HashMap<&'static str, Option<Gd<Texture2D>>>,
     /// Raw noise textures (T7).
-    #[allow(dead_code, reason = "T7 noise pass reads this cache")]
     noise_textures: HashMap<String, Option<Gd<ImageTexture>>>,
+    /// Scratch for the noise pass (`particle_noise_layers`).
+    noise_scratch: Vec<NoiseLayerDraw>,
     /// Packed minimap colours per block id (`Weather.drawSplashes` floor tint).
     block_colors: Vec<u32>,
     views: Vec<WeatherStateView>,
@@ -89,6 +92,7 @@ impl INode2D for WeatherRenderer {
             pass: WeatherPass::Over,
             regions: HashMap::new(),
             noise_textures: HashMap::new(),
+            noise_scratch: Vec::new(),
             block_colors: Vec::new(),
             views: Vec::new(),
             prims: Vec::new(),
@@ -163,6 +167,41 @@ impl INode2D for WeatherRenderer {
                 let Some(def) = content.weather(view.weather) else {
                     continue;
                 };
+                // `ParticleWeather.drawOver` noise loop at the weather band
+                // (drawn before the particles: the Noise node precedes the Over
+                // node in tree order). `fog` has no `WeatherFx` at all, so this
+                // pass reads the def directly.
+                if self.pass == WeatherPass::Noise {
+                    let mut layers = std::mem::take(&mut self.noise_scratch);
+                    layers.clear();
+                    particle_noise_layers(def, &view, cam, tick, &mut layers);
+                    for layer in &layers {
+                        let Some(texture) = self.noise_texture(layer.texture) else {
+                            continue;
+                        };
+                        let tw = texture.get_width() as f32;
+                        let th = texture.get_height() as f32;
+                        let uv = layer.uv;
+                        // Region in pixels; `clip_uv(false)` repeats the
+                        // texture instead of clamping (the scrolled uv runs
+                        // outside `[0, 1]`).
+                        let src = Rect2::new(
+                            Vector2::new(uv[0] * tw, uv[1] * th),
+                            Vector2::new((uv[2] - uv[0]) * tw, (uv[3] - uv[1]) * th),
+                        );
+                        // Positive height in the y-up world equals Java's
+                        // `-camera.height` flipped draw.
+                        let dest =
+                            Rect2::new(Vector2::new(cam.x, cam.y), Vector2::new(cam.w, cam.h));
+                        let mut base = self.base_mut();
+                        base.draw_texture_rect_region_ex(&texture, dest, src)
+                            .modulate(to_color(layer.color))
+                            .clip_uv(false)
+                            .done();
+                    }
+                    self.noise_scratch = layers;
+                    continue;
+                }
                 let Some(fx) = weather_fx_for(def) else {
                     continue;
                 };
@@ -247,8 +286,8 @@ impl INode2D for WeatherRenderer {
                             &mut prims,
                         );
                     }
-                    // The noise pass is T7; other pass/kind combinations draw
-                    // nothing (`fog` has no particles).
+                    // Other pass/kind combinations draw nothing (`fog` has no
+                    // particles and is handled by the Noise pass above).
                     (WeatherPass::Noise, _) | (WeatherPass::Under, WeatherKind::Particle) => {}
                 }
             }
@@ -273,6 +312,13 @@ impl WeatherRenderer {
             .base()
             .try_get_node_as::<MindSimHost>("/root/Spine/SimHost");
         self.block_colors = load_block_colors();
+        if self.pass == WeatherPass::Noise {
+            // `ParticleWeather.drawOver` sets wrap repeat + linear filter on the
+            // noise texture (`ParticleWeather.java:67-71`); the parent renderer
+            // forces NEAREST, so this pass overrides it on its own node.
+            self.base_mut().set_texture_repeat(TextureRepeat::ENABLED);
+            self.base_mut().set_texture_filter(TextureFilter::LINEAR);
+        }
         self.show_weather = self.ui_show_weather();
         self.base_mut().queue_redraw();
     }
@@ -339,6 +385,30 @@ impl WeatherRenderer {
                     .map(|texture| texture.upcast::<Texture2D>())
             });
         self.regions.insert(name, texture.clone());
+        texture
+    }
+
+    /// Loads a raw `sprites/<name>.png` noise texture (repeat-friendly), cached
+    /// with `None` on failure and one warning.
+    fn noise_texture(&mut self, name: &str) -> Option<Gd<ImageTexture>> {
+        if let Some(cached) = self.noise_textures.get(name) {
+            return cached.clone();
+        }
+        let path = format!(
+            "{}/sprites/{name}.png",
+            crate::assets::loader::resolve_assets_dir()
+        );
+        let texture = Image::load_from_file(&path).and_then(|image| {
+            let texture = ImageTexture::create_from_image(&image);
+            if texture.is_none() {
+                log::warn!("weather: failed to create texture for `{path}`");
+            }
+            texture
+        });
+        if texture.is_none() {
+            log::warn!("weather: missing noise texture `{path}`");
+        }
+        self.noise_textures.insert(name.to_owned(), texture.clone());
         texture
     }
 

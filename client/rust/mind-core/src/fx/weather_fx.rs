@@ -322,6 +322,105 @@ pub fn splash_visible(state: &WeatherStateView) -> bool {
     curve(state.intensity, 0.0, 1.0) > 0.0 && state.opacity > 0.0001
 }
 
+/// One noise layer to draw (T7): the `NoiseEffect.drawNoise` UV rect after
+/// `TextureRegion.scroll`, the layer tint and the texture name.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct NoiseLayerDraw {
+    /// `(u, v, u2, v2)`; may run outside `[0, 1]` (the texture must repeat).
+    pub uv: [f32; 4],
+    /// `noiseColor` with alpha `state.opacity * salpha * opacityMultiplier`.
+    pub color: Rgba,
+    /// `"fog"` or `"noiseAlpha"` (`sprites/<noisePath>.png`).
+    pub texture: &'static str,
+}
+
+/// `NoiseEffect.drawNoise` UV rect after `TextureRegion.scroll`
+/// (`NoiseEffect.java:57-71`; Arc `TextureRegion.java:267-278`).
+pub fn noise_uv(
+    cam: WeatherView,
+    time: f32,
+    noisescl: f32,
+    base_speed: f32,
+    intensity: f32,
+    vwind: (f32, f32),
+    offset: f32,
+) -> [f32; 4] {
+    let speed = base_speed * intensity;
+    let (wx, wy) = (vwind.0 * speed, vwind.1 * speed);
+    let scale = 1.0 / noisescl;
+    let scroll = time * scale + offset;
+    let (mut u, mut v) = (cam.x * scale, cam.y * scale);
+    let (mut u2, mut v2) = ((cam.x + cam.w) * scale, (cam.y + cam.h) * scale);
+    let (xa, ya) = (-wx * scroll, -wy * scroll);
+    if xa != 0.0 {
+        let w = u2 - u;
+        u = (u + xa) % 1.0;
+        u2 = u + w;
+    }
+    if ya != 0.0 {
+        let h = v2 - v;
+        v = (v + ya) % 1.0;
+        v2 = v + h;
+    }
+    [u, v, u2, v2]
+}
+
+/// `ParticleWeather.drawOver` noise loop (`ParticleWeather.java:66-83`): one
+/// layer row per `noiseLayers`, with the per-layer speed/alpha/scale/offset
+/// progression. `time` replaces `Time.time`.
+pub fn particle_noise_layers(
+    def: &WeatherDef,
+    state: &WeatherStateView,
+    cam: WeatherView,
+    time: f32,
+    out: &mut Vec<NoiseLayerDraw>,
+) {
+    let Some(p) = def.particle.as_ref() else {
+        return;
+    };
+    if !p.draw_noise {
+        return;
+    }
+    // Same wind resolution as `drawOver` (`useWindVector` rule).
+    let wind = if p.use_wind_vector {
+        let speed = p.base_speed * state.intensity;
+        (state.wind_vector.0 * speed, state.wind_vector.1 * speed)
+    } else {
+        (p.xspeed, p.yspeed)
+    };
+    let texture = if p.noise_path == "fog" {
+        "fog"
+    } else {
+        "noiseAlpha"
+    };
+    let mut sspeed = 1.0f32;
+    let mut sscl = 1.0f32;
+    let mut salpha = 1.0f32;
+    let mut offset = 0.0f32;
+    for _ in 0..p.noise_layers {
+        let uv = noise_uv(
+            cam,
+            time,
+            p.noise_scale * sscl,
+            sspeed * if p.use_wind_vector { 1.0 } else { p.base_speed },
+            state.intensity,
+            wind,
+            offset,
+        );
+        out.push(NoiseLayerDraw {
+            uv,
+            color: p
+                .noise_color
+                .with_alpha(state.opacity * salpha * def.opacity_multiplier),
+            texture,
+        });
+        sspeed *= p.noise_layer_speed_m;
+        salpha *= p.noise_layer_alpha_m;
+        sscl *= p.noise_layer_scl_m;
+        offset += 0.29;
+    }
+}
+
 /// The world surface under a splash sample (`Weather.drawSplashes` branch).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SplashGround {
@@ -752,6 +851,83 @@ mod tests {
 
         // `fog` has `drawParticles = false`.
         assert!(weather_fx_for(content.weather_by_name("fog").expect("fog")).is_none());
+    }
+
+    /// H07 T7: `noise_uv` matches `TextureRegion.scroll` after
+    /// `NoiseEffect.drawNoise`.
+    #[test]
+    fn uv_scroll_math() {
+        let cam = WeatherView {
+            x: 50.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        // `xAmount = -0.0` is `== 0.0`: no scroll at `time = 0`.
+        let uv = noise_uv(cam, 0.0, 1000.0, 1.0, 1.0, (1.0, 0.0), 0.0);
+        assert_eq!(uv, [0.05, 0.0, 0.15, 0.1]);
+        // `time = 1000`: `scroll = 1`, `u = (0.05 - 1) % 1 = -0.95`.
+        let uv = noise_uv(cam, 1000.0, 1000.0, 1.0, 1.0, (1.0, 0.0), 0.0);
+        assert!((uv[0] - -0.95).abs() < 1.0e-6, "{uv:?}");
+        assert!((uv[1]).abs() < 1.0e-6, "{uv:?}");
+        assert!((uv[2] - -0.85).abs() < 1.0e-6, "{uv:?}");
+        assert!((uv[3] - 0.1).abs() < 1.0e-6, "{uv:?}");
+    }
+
+    /// H07 T7: fog's three layers match `ParticleWeather.drawOver` multipliers
+    /// (uses `Weathers.java` fog values).
+    #[test]
+    fn fog_layers_match_java() {
+        let content = crate::content::test_support::test_registry();
+        let fog = content.weather_by_name("fog").expect("fog");
+        let state = WeatherStateView {
+            intensity: 1.0,
+            opacity: 0.8,
+            ..Default::default()
+        };
+        let cam = WeatherView {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        };
+        let mut out = Vec::new();
+        particle_noise_layers(fog, &state, cam, 0.0, &mut out);
+        assert_eq!(out.len(), 3, "fog has 3 noise layers");
+        assert_eq!(out[0].texture, "fog");
+        for (index, layer) in out.iter().enumerate() {
+            let alpha = 0.8 * 0.47 * 0.7f32.powi(index as i32);
+            assert!(
+                (layer.color.a - alpha).abs() < 1.0e-6,
+                "layer {index} alpha {} vs {alpha}",
+                layer.color.a
+            );
+            assert!((layer.color.r - 0.4).abs() < 1.0e-6);
+        }
+        // `noiseScale` decays by 0.6: `{1100, 660, 396}` -> uv width cam.w/scl.
+        for (index, scale) in [1100.0f32, 660.0, 396.0].into_iter().enumerate() {
+            let width = out[index].uv[2] - out[index].uv[0];
+            assert!(
+                (width - 100.0 / scale).abs() < 1.0e-6,
+                "layer {index} width {width}"
+            );
+        }
+        // Per-layer base speed `{0.05, 0.1}` checked against the exact scroll:
+        // `u = (0 - wind.x * speed * (time / noisescl + offset)) % 1`.
+        let mut scrolled = Vec::new();
+        particle_noise_layers(fog, &state, cam, 1.0, &mut scrolled);
+        let expected0 = -(1.0 * 0.05 * (1.0 / 1100.0));
+        assert!(
+            (scrolled[0].uv[0] - expected0).abs() < 1.0e-9,
+            "layer 0 u {} vs {expected0}",
+            scrolled[0].uv[0]
+        );
+        let expected1 = -(1.0 * 0.1 * (1.0 / 660.0 + 0.29));
+        assert!(
+            (scrolled[1].uv[0] - expected1).abs() < 1.0e-6,
+            "layer 1 u {} vs {expected1}",
+            scrolled[1].uv[0]
+        );
     }
 
     #[test]
