@@ -998,7 +998,10 @@ impl MindCampaign {
         // T2: `readMeta`'s resume fields — `wavetime`/`stats`/markers — from the
         // save `MindSimHost.load_sector` just decoded. Java restores them inside
         // `SaveIO.load` (`SaveVersion.readMeta`) before the `SaveLoadEvent`
-        // rule merge; the host also resumed the saved `tick`.
+        // rule merge; the host also resumed the saved `tick`. The
+        // `static-fog-data` chunk is applied after the rules adoption below
+        // (it needs the live `FogControl` created by `reset_fog`).
+        let mut resume_static_fog: Option<Vec<u8>> = None;
         if resume
             && let Some(meta) = self
                 .host()
@@ -1009,6 +1012,7 @@ impl MindCampaign {
                 self.session.stats = stats;
             }
             self.session.markers = meta.markers;
+            resume_static_fog = meta.static_fog;
         }
         // Adopt the loaded map/save rules wholesale (T5:
         // `SaveVersion.readRules` + `World.setSectorRules`) and re-derive the
@@ -1155,6 +1159,15 @@ impl MindCampaign {
                 }
                 installed = true;
             }
+        }
+
+        // `static-fog-data`: applied after the campaign runtime is installed
+        // (only then can `reset_fog` build the `FogControl` from `rules.fog`).
+        if installed
+            && let Some(bytes) = resume_static_fog.take()
+            && let Some(mut host) = self.host()
+        {
+            host.bind_mut().apply_static_fog(bytes);
         }
 
         // `CoreBlock.playerSpawn` (upstream `Trigger.newGame` → `player.set(core)`):

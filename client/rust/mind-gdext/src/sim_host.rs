@@ -2174,6 +2174,7 @@ impl MindSimHost {
                 tick: mind_core::io::sim_io::meta_tick(&save.tags),
                 stats: save.stats.clone(),
                 markers: save.markers.clone(),
+                static_fog: save.static_fog.clone(),
             });
         }
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
@@ -2218,6 +2219,32 @@ impl MindSimHost {
     pub fn apply_world_rules(&mut self, rules: &Rules) {
         self.sim.apply_rules_to_world(rules);
         self.world_dirty = true;
+    }
+
+    /// Applies a decoded `static-fog-data` chunk to the live `FogControl`
+    /// (campaign resume path; `FogControl.read`). Builds the controller from the
+    /// live rules first when the world load has not run yet. `false` when the
+    /// rules keep fog off.
+    pub fn apply_static_fog(&mut self, bytes: Vec<u8>) -> bool {
+        if self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::fog::FogControl>()
+            .is_none()
+        {
+            self.sim.reset_fog();
+        }
+        let Some(mut fog) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::game::fog::FogControl>()
+        else {
+            return false;
+        };
+        fog.read(&bytes);
+        true
     }
 
     /// Default-team core count in the live world (the lost-sector probe; the
