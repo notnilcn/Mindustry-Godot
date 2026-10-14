@@ -31,6 +31,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         group: Some(BlockGroup::Payloads),
         priority: Some(TARGET_PRIORITY_TRANSPORT),
         update: Some(true),
+        // `Blocks.java:6628`.
+        can_overdrive: Some(false),
         ..spec("payload-conveyor", BlockKind::PayloadConveyor)
     })?;
 
@@ -42,6 +44,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         priority: Some(TARGET_PRIORITY_TRANSPORT),
         update: Some(true),
         configurable: Some(true),
+        // `Blocks.java:6633`.
+        can_overdrive: Some(false),
         ..spec("payload-router", BlockKind::PayloadRouter)
     })?;
 
@@ -54,6 +58,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         group: Some(BlockGroup::Payloads),
         priority: Some(TARGET_PRIORITY_TRANSPORT),
         update: Some(true),
+        // `Blocks.java:6639`.
+        can_overdrive: Some(false),
         ..spec("reinforced-payload-conveyor", BlockKind::PayloadConveyor)
     })?;
 
@@ -67,6 +73,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         priority: Some(TARGET_PRIORITY_TRANSPORT),
         update: Some(true),
         configurable: Some(true),
+        // `Blocks.java:6649`.
+        can_overdrive: Some(false),
         ..spec("reinforced-payload-router", BlockKind::PayloadRouter)
     })?;
 

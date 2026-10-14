@@ -214,6 +214,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         configurable: Some(true),
         consumes: vec![consume_power(0.3f32)],
+        // `Blocks.java:2394`: `canOverdrive = false` (phase-conduit).
+        can_overdrive: Some(false),
         ..spec("phase-conduit", BlockKind::LiquidBridge)
     })?;
 

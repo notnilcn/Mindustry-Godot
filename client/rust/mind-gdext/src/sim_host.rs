@@ -1332,6 +1332,18 @@ impl MindSimHost {
                 put("accumulator", Variant::from(f64::from(state.accumulator)));
                 put("emitted", Variant::from(i64::from(state.emitted)));
             }
+            // Force projector state (`ForceProjector.java:166-167`; H02 T7).
+            if let Some(state) =
+                world.get::<mind_core::world::blocks::defense::shields::ForceProjectorState>(entity)
+            {
+                put("force_radscl", Variant::from(f64::from(state.radscl)));
+                put("force_buildup", Variant::from(f64::from(state.buildup)));
+                put("force_broken", Variant::from(state.broken));
+                put(
+                    "force_phase_heat",
+                    Variant::from(f64::from(state.phase_heat)),
+                );
+            }
         }
         out
     }

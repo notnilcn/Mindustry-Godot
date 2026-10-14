@@ -195,6 +195,9 @@ pub struct LiquidModule {
     pub liquids: Vec<f32>,
     /// Current total (`current`).
     pub current_amount: f32,
+    /// `LiquidModule.current` (`LiquidModule.java:29`): last liquid added,
+    /// removed or loaded. Defaults to liquid id 0 (water) like Java.
+    pub current_liquid: LiquidId,
     /// UI flow window.
     pub flow: Option<FlowWindow>,
 }
@@ -205,6 +208,7 @@ impl LiquidModule {
         Self {
             liquids: vec![0.0; liquids],
             current_amount: 0.0,
+            current_liquid: LiquidId::new(0),
             flow: None,
         }
     }
@@ -214,7 +218,21 @@ impl LiquidModule {
         self.liquids.get(liquid.index()).copied().unwrap_or(0.0)
     }
 
+    /// `LiquidModule.current()`.
+    pub fn current_liquid(&self) -> LiquidId {
+        self.current_liquid
+    }
+
+    /// `LiquidModule.currentAmount()` as the current liquid's slot
+    /// (`LiquidModule.java:106-108`); the unrelated `current_amount` field
+    /// stays the total for the multi-liquid UI paths.
+    pub fn current_liquid_amount(&self) -> f32 {
+        self.get(self.current_liquid)
+    }
+
     /// `LiquidModule.add(liquid, amount)`; returns the amount accepted.
+    ///
+    /// Java sets `current = liquid` unconditionally (`LiquidModule.java:118-125`).
     pub fn add(&mut self, liquid: LiquidId, amount: f32, capacity: f32) -> f32 {
         let Some(slot) = self.liquids.get_mut(liquid.index()) else {
             return 0.0;
@@ -223,10 +241,14 @@ impl LiquidModule {
         *slot = (*slot + amount).clamp(0.0, capacity);
         let accepted = *slot - before;
         self.current_amount += accepted;
+        self.current_liquid = liquid;
         accepted
     }
 
     /// `LiquidModule.remove(liquid, amount)`; returns the amount removed.
+    ///
+    /// Java routes through `add` (`LiquidModule.java:133-136`), so removal also
+    /// sets `current = liquid`.
     pub fn remove(&mut self, liquid: LiquidId, amount: f32) -> f32 {
         let Some(slot) = self.liquids.get_mut(liquid.index()) else {
             return 0.0;
@@ -234,7 +256,37 @@ impl LiquidModule {
         let removed = amount.min(*slot).max(0.0);
         *slot -= removed;
         self.current_amount -= removed;
+        self.current_liquid = liquid;
         removed
+    }
+
+    /// `LiquidModule.set(liquid, amount)` (`LiquidModule.java:99-104`): sets the
+    /// slot and only promotes `current` when the new amount is at least the
+    /// current liquid's amount.
+    pub fn set(&mut self, liquid: LiquidId, amount: f32) {
+        if amount >= self.get(self.current_liquid) {
+            self.current_liquid = liquid;
+        }
+        let Some(slot) = self.liquids.get_mut(liquid.index()) else {
+            return;
+        };
+        let before = *slot;
+        *slot = amount.max(0.0);
+        self.current_amount += *slot - before;
+    }
+
+    /// `LiquidModule.reset(liquid, amount)` (`LiquidModule.java:93-97`): drops
+    /// every slot and stores `amount` of `liquid` as the current liquid.
+    pub fn reset(&mut self, liquid: LiquidId, amount: f32) {
+        self.liquids.fill(0.0);
+        self.current_amount = 0.0;
+        let amount = amount.max(0.0);
+        if let Some(slot) = self.liquids.get_mut(liquid.index()) {
+            *slot = amount;
+            self.current_amount = amount;
+        }
+        self.current_liquid = liquid;
+        self.flow = None;
     }
 
     /// Total current liquid (`current()`).
@@ -252,6 +304,9 @@ impl LiquidModule {
     pub fn check_array_capacity(&mut self, size: usize) {
         if self.liquids.len() != size {
             self.liquids.resize(size, 0.0);
+        }
+        if self.current_liquid.index() >= self.liquids.len() {
+            self.current_liquid = LiquidId::new(0);
         }
         self.flow = None;
     }
@@ -321,6 +376,8 @@ pub struct LiquidTraits {
     pub incinerable: Vec<bool>,
     /// `Liquid.heatCapacity` (`ForceProjector` coolant scaling).
     pub heat_capacity: Vec<f32>,
+    /// `Liquid.blockReactive` (`BuildingComp.moveLiquid` reactions).
+    pub block_reactive: Vec<bool>,
 }
 
 impl LiquidTraits {
@@ -334,6 +391,7 @@ impl LiquidTraits {
             traits.flammability.push(liquid.flammability);
             traits.incinerable.push(liquid.incinerable);
             traits.heat_capacity.push(liquid.heat_capacity);
+            traits.block_reactive.push(liquid.block_reactive);
         }
         traits
     }

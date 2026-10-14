@@ -38,6 +38,12 @@ pub type BuildingWriter<'a> = EntityWriter<'a>;
 /// Plan-07 alias for plan 04's entity reader (`BuildingReader`).
 pub type BuildingReader<'a> = EntityReader<'a>;
 
+/// `unitOn` effects that need a `CombatCtx` (shock-mine tendrils), queued by
+/// [`BuildingBehavior::unit_on`] and drained in push order by the unit pass
+/// (H02 T11).
+#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+pub struct PendingShockMineTriggers(pub Vec<(Entity, u8)>);
+
 /// Reference to a payload held by a building (`Payload` handle; plan 08 owns the
 /// payload system, this is the opaque cross-plan hand-off type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -234,6 +240,12 @@ pub trait BuildingBehavior: Send + Sync {
         } else {
             ConfigTapResult::Consume(Vec::new())
         }
+    }
+
+    /// `BuildingComp.unitOn(unit)` (`UnitComp.java:832-835`): a grounded,
+    /// non-hovering unit stands on this building's tile (H02 T11).
+    fn unit_on(&self, world: &mut World, e: Entity, unit: Entity) {
+        let _ = (world, e, unit);
     }
 
     /// Inserts family state components at spawn.
@@ -639,6 +651,11 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::ForceProjector => Arc::new(
             crate::world::blocks::defense::behaviors::ForceProjectorBehavior {
                 state: crate::world::blocks::defense::shields::ForceProjectorState::default(),
+                // `defense::register` overrides this arm with the resolved
+                // phase-fabric id; the fallback only lacks the item gate.
+                phase_use_time: 350.0,
+                phase_item: None,
+                coolant_amount: 0.1,
             },
         ),
         K::ShockMine => Arc::new(

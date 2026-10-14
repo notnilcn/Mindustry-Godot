@@ -76,12 +76,31 @@ impl OverdriveProjectorState {
     }
 }
 
-/// `BuildingComp.applyBoost`: raise `timeScale` for `duration` ticks.
+/// `BuildingComp.applyBoost` (`BuildingComp.java:467-474`): raise `timeScale`
+/// for `duration` ticks, unless the target's block opts out of overdrive.
 pub fn apply_boost(world: &mut World, e: Entity, boost: f32, duration: f32) {
-    if let Some(mut building) = world.get_mut::<Building>(e) {
-        building.time_scale = building.time_scale.max(boost);
-        building.time_scale_duration = building.time_scale_duration.max(duration);
+    if !can_overdrive(world, e) {
+        return;
     }
+    if let Some(mut building) = world.get_mut::<Building>(e) {
+        // Do not refresh the duration when a lower intensity arrives.
+        if boost >= building.time_scale - 0.001 {
+            building.time_scale_duration = building.time_scale_duration.max(duration);
+        }
+        building.time_scale = building.time_scale.max(boost);
+    }
+}
+
+/// `Block.canOverdrive` of an entity's block (`Block.java:314`).
+pub fn can_overdrive(world: &World, e: Entity) -> bool {
+    let Some(block) = world.get::<Building>(e).map(|building| building.block) else {
+        return false;
+    };
+    world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.instance(block))
+        .map(|inst| inst.def.can_overdrive)
+        .unwrap_or(true)
 }
 
 /// `OverdriveBuild.updateTile` (`delta == 1`).
@@ -103,7 +122,11 @@ pub fn update_overdrive_projector(
         let boost = state.real_boost(efficiency);
         let targets = buildings_in_range(world, e, real_range);
         for target in targets {
-            apply_boost(world, target, boost, state.reload + 1.0);
+            // `OverdriveProjector.java:110`: only `other.block.canOverdrive`
+            // blocks are boosted (`applyBoost` re-checks).
+            if can_overdrive(world, target) {
+                apply_boost(world, target, boost, state.reload + 1.0);
+            }
         }
     }
 
