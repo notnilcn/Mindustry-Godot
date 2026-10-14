@@ -119,6 +119,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         destructible: Some(true),
         always_unlocked: Some(true),
         core_unit: Some("evoke"),
+        // `Blocks.java:3197` `coreBastion.incinerateNonBuildable = true`.
+        incinerate_non_buildable: Some(true),
         ..spec("core-bastion", BlockKind::CoreBlock)
     })?;
 
@@ -147,6 +149,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         destructible: Some(true),
         core_unit: Some("incite"),
+        // `Blocks.java:3216` `coreCitadel.incinerateNonBuildable = true`.
+        incinerate_non_buildable: Some(true),
         ..spec("core-citadel", BlockKind::CoreBlock)
     })?;
 
@@ -176,6 +180,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         destructible: Some(true),
         core_unit: Some("emanate"),
+        // `Blocks.java:3234` `coreAcropolis.incinerateNonBuildable = true`.
+        incinerate_non_buildable: Some(true),
         ..spec("core-acropolis", BlockKind::CoreBlock)
     })?;
 

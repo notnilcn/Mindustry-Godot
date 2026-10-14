@@ -94,6 +94,8 @@ pub struct ContentIndex {
     pub item_ids: std::collections::HashMap<String, u16>,
     /// Dense item id → name (id-indexed; `ContentRegistry::items` order).
     pub item_names: Vec<String>,
+    /// Dense item id → `Item.buildable` (`CoreBlock.incinerateNonBuildable`).
+    pub item_buildable: Vec<bool>,
     /// Block name → dense id (`ContentRegistry::block_id`).
     pub block_ids: std::collections::HashMap<String, u16>,
     /// Unit name → dense id (`ContentRegistry::unit_id`; `UnitCountObjective`).
@@ -1231,6 +1233,7 @@ impl Sim {
             .iter()
             .map(|item| item.name.clone())
             .collect();
+        content_index.item_buildable = content.items().iter().map(|item| item.buildable).collect();
         for block in content.blocks() {
             content_index
                 .block_ids

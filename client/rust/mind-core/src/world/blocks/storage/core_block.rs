@@ -136,6 +136,49 @@ pub fn owns(world: &World, core: Entity, tile: Entity) -> bool {
         && (storage.linked_core == Some(core) || storage.linked_core.is_none())
 }
 
+/// `CoreBlock.CoreBuild.incinerateNonBuildable && !item.buildable`
+/// (`CoreBlock.java:786,885`): Erekir cores drop non-buildable items on intake.
+fn incinerates(world: &World, e: Entity, item: ItemId) -> bool {
+    let incinerating_core = world
+        .get::<crate::entities::comp::Building>(e)
+        .and_then(|building| {
+            world
+                .get_resource::<BlockTable>()
+                .and_then(|table| table.get(building.block))
+        })
+        .is_some_and(|instance| instance.def.incinerate_non_buildable);
+    if !incinerating_core {
+        return false;
+    }
+    // Unknown items default to buildable (no incineration).
+    !world
+        .get_resource::<crate::sim::runtime::ContentIndex>()
+        .and_then(|index| index.item_buildable.get(item.index()).copied())
+        .unwrap_or(true)
+}
+
+/// `Fx.coreBurn.at(x, y)` (`CoreBlock.java:797`, view-only) through the live
+/// unit runtime's FX sink.
+fn emit_core_burn(world: &World, e: Entity) {
+    let Some(fx) = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .map(|runtime| runtime.fx.clone())
+    else {
+        return;
+    };
+    let Some(building) = world.get::<crate::entities::comp::Building>(e) else {
+        return;
+    };
+    let ts = crate::config::TILESIZE as f32;
+    fx.effect(
+        &crate::content::registries::fx_meta::EffectRef::Named(crate::content::EffectId::CORE_BURN),
+        building.tile.x() as f32 * ts,
+        building.tile.y() as f32 * ts,
+        0.0,
+        crate::content::Rgba::WHITE,
+    );
+}
+
 impl BuildingBehavior for CoreBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         let cap = item_capacity(world, e);
@@ -267,12 +310,14 @@ impl BuildingBehavior for CoreBehavior {
         let h = hooks(world);
         // `CoreBlock.handleItem` (`CoreBlock.java:886-913`) counts the item
         // BEFORE the full check, so an incinerated (but buildable) item still
-        // counts. `incinerateNonBuildable`: Erekir, not modelled.
+        // counts. `incinerateNonBuildable` (Erekir cores) drops non-buildable
+        // items on intake.
         //
         // `state.stats.coreItemCount.increment(item)` (`CoreBlock.java:902`):
         // default-team intakes count toward the shared stat (belt/dump
         // transfers; the player offload goes through `handle_stack` instead and
         // does not count).
+        let incinerate = incinerates(world, e, item);
         if let Some(name) = world
             .get_resource::<crate::sim::runtime::ContentIndex>()
             .and_then(|index| index.item_names.get(item.index()).cloned())
@@ -282,10 +327,10 @@ impl BuildingBehavior for CoreBehavior {
         {
             runtime.session.stats.add_core_item(&name, 1);
         }
-        if team == Some(h.default_team()) && h.is_campaign() {
+        if team == Some(h.default_team()) && h.is_campaign() && !incinerate {
             h.handle_core_item(item, 1);
         }
-        if current >= cap {
+        if current >= cap || incinerate {
             if !world.get::<CoreBuild>(e).is_some_and(|c| c.no_effect) {
                 incinerate_effect(world, e, source);
             }
@@ -300,12 +345,20 @@ impl BuildingBehavior for CoreBehavior {
     }
 
     fn handle_stack(&self, world: &mut World, e: Entity, item: ItemId, amount: i32) {
+        // `handleStack` (`CoreBlock.java:786-800`): non-buildable items are
+        // incinerated, the sector record still counts only real intakes, and a
+        // visible core with nothing stored burns.
+        let incinerate = incinerates(world, e, item);
         let cap = world
             .get::<CoreBuild>(e)
             .map(|c| c.storage_capacity)
             .unwrap_or(0);
         let current = world.get::<ItemModule>(e).map(|m| m.get(item)).unwrap_or(0);
-        let real = amount.min((cap - current).max(0));
+        let real = if incinerate {
+            0
+        } else {
+            amount.min((cap - current).max(0))
+        };
         if let Some(mut items) = world.get_mut::<ItemModule>(e) {
             items.add(item, real, cap.max(0));
         }
@@ -314,7 +367,16 @@ impl BuildingBehavior for CoreBehavior {
             .map(|t| t.team);
         let h = hooks(world);
         if team == Some(h.default_team()) && h.is_campaign() {
-            h.handle_core_item(item, amount);
+            if !incinerate {
+                h.handle_core_item(item, amount);
+            }
+            if real == 0
+                && world
+                    .get::<crate::entities::comp::Building>(e)
+                    .is_some_and(|building| building.was_visible)
+            {
+                emit_core_burn(world, e);
+            }
         }
     }
 
@@ -502,5 +564,149 @@ mod tests {
         let hooks = harness.world.get_resource::<CoreHooks>().expect("hooks");
         assert!(!hooks.0.core_incinerates());
         assert!(!hooks.0.allow_core_unloaders());
+    }
+
+    /// Installs the live runtime's `ContentIndex` shape (`item.buildable`) so
+    /// `incinerateNonBuildable` can resolve items without a content registry.
+    fn install_item_buildable(harness: &mut BuildHarness) {
+        let index = crate::sim::runtime::ContentIndex {
+            item_buildable: harness
+                .content()
+                .items()
+                .iter()
+                .map(|item| item.buildable)
+                .collect(),
+            ..crate::sim::runtime::ContentIndex::default()
+        };
+        harness.world.insert_resource(index);
+    }
+
+    /// H09 T9: an Erekir core (`incinerateNonBuildable = true`) drops sand on
+    /// intake but stores buildable beryllium (`CoreBlock.java:786-800,885-913`).
+    #[test]
+    fn erekir_core_incinerates_sand() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        install_item_buildable(&mut harness);
+        let bastion = harness
+            .content()
+            .block_id("core-bastion")
+            .expect("core-bastion");
+        assert!(harness.place(5, 5, bastion, 0, true));
+        let core_e = harness.build_at(5, 5).expect("core");
+        let sand = harness.content().item_id("sand").expect("sand");
+        let beryllium = harness.content().item_id("beryllium").expect("beryllium");
+        let instance = harness
+            .world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(bastion))
+            .expect("instance");
+        instance
+            .behavior
+            .handle_item(&mut harness.world, core_e, core_e, sand);
+        instance
+            .behavior
+            .handle_item(&mut harness.world, core_e, core_e, beryllium);
+        let items = harness.world.get::<ItemModule>(core_e).expect("items");
+        assert_eq!(items.get(sand), 0, "sand incinerated");
+        assert_eq!(items.get(beryllium), 1, "beryllium stored");
+    }
+
+    /// H09 T9 spy: records `SectorInfo.handleCoreItem` calls.
+    #[derive(Debug, Default)]
+    struct CountingHooks {
+        calls: std::sync::Mutex<Vec<(u16, i32)>>,
+        team: u8,
+    }
+
+    impl CoreCampaignHooks for CountingHooks {
+        fn core_incinerates(&self) -> bool {
+            true
+        }
+        fn is_campaign(&self) -> bool {
+            true
+        }
+        fn default_team(&self) -> u8 {
+            self.team
+        }
+        fn handle_core_item(&self, item: ItemId, amount: i32) {
+            self.calls.lock().expect("lock").push((item.raw(), amount));
+        }
+    }
+
+    /// H09 T9: a full campaign core still counts the arriving item for
+    /// `SectorInfo.handleCoreItem` (`CoreBlock.java:788-800`), and the
+    /// incinerating Erekir core does not.
+    #[test]
+    fn full_core_still_counts_items() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        install_item_buildable(&mut harness);
+        let core = harness
+            .content()
+            .block_id("core-shard")
+            .expect("core-shard");
+        assert!(harness.place(5, 5, core, 0, true));
+        let core_e = harness.build_at(5, 5).expect("core");
+        let team = harness
+            .world
+            .get::<crate::entities::comp::TeamComp>(core_e)
+            .map(|t| t.team)
+            .unwrap_or(1);
+        let spy = std::sync::Arc::new(CountingHooks {
+            calls: std::sync::Mutex::new(Vec::new()),
+            team,
+        });
+        harness.world.insert_resource(CoreHooks(spy.clone()));
+        let copper = harness.content().item_id("copper").expect("copper");
+        let cap = harness
+            .world
+            .get::<CoreBuild>(core_e)
+            .map(|c| c.storage_capacity)
+            .unwrap_or(0);
+        {
+            let mut items = harness.world.get_mut::<ItemModule>(core_e).expect("items");
+            items.add(copper, cap + 10, cap);
+            assert_eq!(items.get(copper), cap, "core is full");
+        }
+        let instance = harness
+            .world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(core))
+            .expect("instance");
+        instance
+            .behavior
+            .handle_stack(&mut harness.world, core_e, copper, 25);
+        assert_eq!(
+            spy.calls.lock().expect("lock").as_slice(),
+            &[(copper.raw(), 25)],
+            "a full core still counts the whole stack"
+        );
+
+        // An incinerating Erekir core does not count the dropped item.
+        let mut harness = BuildHarness::new(16, 16, 7);
+        install_item_buildable(&mut harness);
+        let spy = std::sync::Arc::new(CountingHooks {
+            calls: std::sync::Mutex::new(Vec::new()),
+            team,
+        });
+        harness.world.insert_resource(CoreHooks(spy.clone()));
+        let bastion = harness
+            .content()
+            .block_id("core-bastion")
+            .expect("core-bastion");
+        assert!(harness.place(5, 5, bastion, 0, true));
+        let core_e = harness.build_at(5, 5).expect("core");
+        let sand = harness.content().item_id("sand").expect("sand");
+        let instance = harness
+            .world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(bastion))
+            .expect("instance");
+        instance
+            .behavior
+            .handle_stack(&mut harness.world, core_e, sand, 25);
+        assert!(
+            spy.calls.lock().expect("lock").is_empty(),
+            "incinerated items are not counted"
+        );
     }
 }
