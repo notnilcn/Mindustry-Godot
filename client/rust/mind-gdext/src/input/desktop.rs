@@ -2099,6 +2099,15 @@ impl DesktopBridge {
             return;
         }
         if self.controller.state.block.is_none() {
+            // `InputHandler.java:726` (`!checkConfigTap() && selected != null &&
+            // !tryRepairDerelict(selected)`; H08 T11): a derelict building
+            // under the cursor queues its repair before the
+            // tap-player/tile-tap chain.
+            if let Some(mut host) = self.host.clone()
+                && host.bind_mut().try_repair_derelict(x, y)
+            {
+                return;
+            }
             // `DesktopInput.java:701-721` order: `tryTapPlayer`, `tileTapped`,
             // the active build plan, then `tryStopMine`/`tryBeginMine`;
             // anything consumed keeps `player.shooting` false.

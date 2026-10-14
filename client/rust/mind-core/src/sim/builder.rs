@@ -1013,7 +1013,73 @@ impl Sim {
                 queued += 1;
             }
         }
+        // `for(x..x2) for(y..y2) world.tileBuilding(x, y)` -> `tryRepairDerelict`
+        // deduped by building origin (`intSet.add(tile.pos())`,
+        // InputHandler.java:2331-2341).
+        let mut seen: std::collections::HashSet<(i16, i16)> = std::collections::HashSet::new();
+        for x in r.x..=r.x2 {
+            for y in r.y..=r.y2 {
+                let Some(entity) = self.grid.tiles.getn(x, y).and_then(|tile| tile.build) else {
+                    continue;
+                };
+                let origin = self
+                    .ecs
+                    .0
+                    .get::<crate::ecs::BuildingComp>(entity)
+                    .map(|building| (building.pos.x(), building.pos.y()))
+                    .unwrap_or((x as i16, y as i16));
+                if !seen.insert(origin) {
+                    continue;
+                }
+                if self.try_repair_derelict(x, y) {
+                    queued += 1;
+                }
+            }
+        }
         queued
+    }
+
+    /// `InputHandler.canRepairDerelict` (`InputHandler.java:2076-2081`): the
+    /// derelict (team-0) building at `(x, y)` can be rebuilt by the player
+    /// team when `Build.validPlace` accepts the same block/rotation there.
+    ///
+    /// `block.unlockedNowHost()` is a no-op here: the live content registry
+    /// carries the full vanilla set (the campaign unlock gate runs in the
+    /// research UI, not on the repair plan).
+    pub fn derelict_repair_plan(
+        &self,
+        x: i32,
+        y: i32,
+    ) -> Option<(i16, i16, BlockId, u8, crate::world::config::ConfigValue)> {
+        if self.player_unit.is_none() || self.live_default_team() == 0 {
+            return None;
+        }
+        let entity = self.grid.tiles.getn(x, y).and_then(|tile| tile.build)?;
+        let building = self.ecs.0.get::<crate::ecs::BuildingComp>(entity)?;
+        // `tile.build.team == Team.derelict`.
+        if building.team.0 != 0 {
+            return None;
+        }
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let block = building.block;
+        let rotation = building.rot;
+        if !self.valid_place_player(tx, ty, block, rotation) {
+            return None;
+        }
+        // `build.config()` (`BuildPlan(..., selected.block(), build.config())`).
+        let config = crate::world::config::read_config(&self.ecs.0, entity);
+        Some((tx, ty, block, rotation, config))
+    }
+
+    /// `InputHandler.tryRepairDerelict`: queue the derelict building's repair
+    /// into the player build queue.
+    pub fn try_repair_derelict(&mut self, x: i32, y: i32) -> bool {
+        let Some((tx, ty, block, rotation, config)) = self.derelict_repair_plan(x, y) else {
+            return false;
+        };
+        self.queue_player_place_config(tx, ty, block, rotation, config)
     }
 
     /// `InputHandler.removeSelection`'s plan half (`InputHandler.java:1905-1935`):
@@ -1776,6 +1842,61 @@ mod tests {
         kill_building(&mut sim, entity);
         // Zero-width rect still overlaps the block bounds (strict inequalities).
         assert_eq!(sim.queue_team_rebuild(14, 10, 14, 10), 1);
+    }
+
+    #[test]
+    fn derelict_wall_click_queues_repair() {
+        // `InputHandler.tryRepairDerelict` / `canRepairDerelict`
+        // (IH:2070-2081): a team-0 derelict wall is queued for the player team
+        // when `Build.validPlace` accepts the same block/rotation.
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        with_campaign(&mut sim);
+        set_core_copper(&mut sim, 100);
+        sim.command(SimCommand::Place {
+            x: 14,
+            y: 10,
+            block: wall.raw(),
+            rotation: 0,
+            team: 0,
+            player: None,
+        })
+        .expect("derelict placed");
+        assert_eq!(
+            sim.grid
+                .entity_at(TilePos::new(14, 10))
+                .and_then(|entity| sim.ecs.0.get::<crate::ecs::BuildingComp>(entity))
+                .map(|building| building.team.0),
+            Some(0),
+            "team 0"
+        );
+        assert!(sim.try_repair_derelict(14, 10));
+        let plans = sim.player_build_plans();
+        assert_eq!(plans.len(), 1);
+        assert_eq!((plans[0].x, plans[0].y, plans[0].block), (14, 10, wall));
+        // Own buildings and empty tiles are not derelicts.
+        assert!(!sim.try_repair_derelict(10, 10), "core is not derelict");
+        assert!(!sim.try_repair_derelict(20, 20), "empty tile");
+    }
+
+    #[test]
+    fn rebuild_rect_repairs_derelicts() {
+        let (mut sim, _unit, _core, wall) = sim_with_player();
+        with_campaign(&mut sim);
+        set_core_copper(&mut sim, 100);
+        for (x, y) in [(14, 10), (15, 10), (16, 10)] {
+            sim.command(SimCommand::Place {
+                x,
+                y,
+                block: wall.raw(),
+                rotation: 0,
+                team: 0,
+                player: None,
+            })
+            .expect("derelict placed");
+        }
+        // `rebuildArea` (IH:2331-2341) queues every derelict in the rect.
+        assert_eq!(sim.queue_team_rebuild(13, 9, 17, 11), 3);
+        assert_eq!(sim.player_build_plans().len(), 3);
     }
 
     #[test]

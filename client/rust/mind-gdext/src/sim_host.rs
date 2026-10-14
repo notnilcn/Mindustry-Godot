@@ -3099,6 +3099,12 @@ impl MindSimHost {
         self.sim.commandable_buildings(self.sim.live_default_team())
     }
 
+    /// `InputHandler.tryRepairDerelict` (H08 T11): queue a team-0 building in
+    /// the rect/cursor for repair (the click and rebuild-select paths).
+    pub fn try_repair_derelict(&mut self, x: i32, y: i32) -> bool {
+        self.sim.try_repair_derelict(x, y)
+    }
+
     /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.
