@@ -2536,3 +2536,128 @@ fn fill_items_fills_ai_core() {
         "without incineration the core fills to its storage capacity"
     );
 }
+
+/// H09 T10: the `Logic` event counters (`Logic.java:186-216`) follow player
+/// builds, deconstructs and losses.
+#[test]
+fn game_stats_count_build_break_destroy() {
+    use crate::command::Command;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(
+        &mut sim,
+        Rules {
+            default_team: 1,
+            ..Rules::default()
+        },
+    );
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let wall = BlockId::new(sim.world_block_id("copper-wall").expect("wall"));
+
+    // Two player-team walls; the API place path emits `BlockPlacedEvent`
+    // (`BlockBuildEndEvent`).
+    assert!(sim.place_for_team(5, 5, wall, 0, 1));
+    assert!(sim.place_for_team(7, 5, wall, 0, 1));
+    // Deconstruct one through the break command (`BlockBuildEndEvent{breaking}`).
+    sim.apply(Command::Break { x: 5, y: 5 }).expect("break");
+    // Destroy one player wall and one enemy wall (`BlockDestroyEvent`).
+    let player_wall = sim.grid.entity_at(TilePos::new(7, 5)).expect("player wall");
+    if let Some(mut health) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::Health>(player_wall)
+    {
+        health.health = 0.0;
+    }
+    assert!(sim.place_for_team(9, 5, wall, 0, 2));
+    let enemy_wall = sim.grid.entity_at(TilePos::new(9, 5)).expect("enemy wall");
+    if let Some(mut health) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::Health>(enemy_wall)
+    {
+        health.health = 0.0;
+    }
+    // One tick resolves the deaths and flushes the events.
+    sim.tick().expect("tick");
+    sim.tick().expect("tick");
+
+    let stats = &sim
+        .ecs
+        .0
+        .get_resource::<CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .stats;
+    assert_eq!(stats.buildings_built, 2, "two walls built");
+    assert_eq!(stats.buildings_deconstructed, 1, "one wall deconstructed");
+    assert_eq!(stats.buildings_destroyed, 1, "one player wall destroyed");
+    assert_eq!(
+        stats.get_destroyed("copper-wall"),
+        1,
+        "one enemy wall destroyed by name"
+    );
+    // `placedBlockCount` only counts the default team's placements.
+    assert_eq!(stats.placed_block_count.get("copper-wall"), Some(&2));
+}
+
+/// H09 T10: a factory-produced default-team unit bumps `unitsCreated`
+/// (`Logic.java:228-235`).
+#[test]
+fn game_stats_count_units_created() {
+    use crate::game::rules::Rules;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(
+        &mut sim,
+        Rules {
+            default_team: 1,
+            // No core in this fixture; Java's unit-cap check would kill the
+            // factory output at spawn.
+            disable_unit_cap: true,
+            ..Rules::default()
+        },
+    );
+    if let Some(mut runtime) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let factory = place(&mut sim, "ground-factory", 5, 5);
+    let (silicon, lead) = (item(&sim, "silicon"), item(&sim, "lead"));
+    {
+        let world = &mut sim.ecs.0;
+        if let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(factory) {
+            items.add(silicon, 10, 60);
+            items.add(lead, 10, 60);
+        }
+    }
+    let _source = place(&mut sim, "power-source", 3, 5);
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    for _ in 0..1500 {
+        sim.tick().expect("tick");
+        if spawned_unit(&sim, dagger) {
+            break;
+        }
+    }
+    assert!(spawned_unit(&sim, dagger), "factory produced a dagger");
+    let stats = &sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .stats;
+    assert_eq!(stats.units_created, 1, "one unit created");
+}

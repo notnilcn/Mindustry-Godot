@@ -126,6 +126,40 @@ impl GameStats {
     }
 }
 
+/// `Logic`'s `UnitCreateEvent` listener (`Logic.java:228-235`): a
+/// default-team spawn bumps `stats.unitsCreated` and the campaign planet's
+/// `unitsProduced` keyed by unit-type name.
+///
+/// `name` is the spawned unit's type name when the caller has the content
+/// registry (the runtime may be taken out of the world during the spawn pass).
+pub fn notify_unit_created(
+    world: &mut bevy_ecs::world::World,
+    unit: bevy_ecs::entity::Entity,
+    name: Option<&str>,
+) {
+    let Some(team) = world
+        .get::<crate::entities::comp::TeamComp>(unit)
+        .map(|team| team.team)
+    else {
+        return;
+    };
+    let Some(mut campaign) = world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    else {
+        return;
+    };
+    if team != campaign.session.rules.default_team {
+        return;
+    }
+    campaign.session.stats.units_created += 1;
+    if campaign.session.is_campaign()
+        && let Some((planet, _)) = campaign.session.sector
+        && let Some(name) = name
+        && let Some(stats) = campaign.campaign.stats_for_mut(planet)
+    {
+        stats.add_unit_produced(name, 1);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

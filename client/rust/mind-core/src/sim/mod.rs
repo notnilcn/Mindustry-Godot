@@ -377,6 +377,14 @@ impl Sim {
                 if current == BlockId::AIR {
                     log::debug!("break command rejected at ({x}, {y}): tile is empty");
                 } else if self.block_runtime.is_some() {
+                    let team = self
+                        .grid
+                        .entity_at(pos)
+                        .and_then(|entity| {
+                            self.ecs.0.get::<crate::entities::comp::TeamComp>(entity)
+                        })
+                        .map(|team| team.team)
+                        .unwrap_or(0);
                     if self.runtime_break(x, y) {
                         self.push_event(SimEvent::BlockBrokenEvent(BlockBrokenEvent {
                             x,
@@ -384,9 +392,18 @@ impl Sim {
                             block: current,
                             // `Command::Break` is a deconstruct/API break.
                             destroyed: false,
+                            team,
                         }));
                     }
                 } else {
+                    let team = self
+                        .grid
+                        .entity_at(pos)
+                        .and_then(|entity| {
+                            self.ecs.0.get::<crate::entities::comp::TeamComp>(entity)
+                        })
+                        .map(|team| team.team)
+                        .unwrap_or(0);
                     if let Some(entity) = self.grid.entity_at(pos) {
                         self.ecs.despawn(entity);
                     }
@@ -397,6 +414,7 @@ impl Sim {
                         block: current,
                         // `Command::Break` is a deconstruct/API break.
                         destroyed: false,
+                        team,
                     }));
                 }
             }
@@ -1972,17 +1990,66 @@ impl Sim {
             // H09 T1 fog listeners (`FogControl.java:64-95`): placed/broken
             // fog-radius buildings mark the dynamic flush pending.
             self.handle_fog_block_event(&event);
-            // `Logic`'s `BlockBuildEndEvent` listener: a player-team placement
-            // bumps the live match's `stats.placedBlockCount`.
-            if let SimEvent::BlockPlacedEvent(placed) = &event
-                && let Ok(name) = self.content.name(placed.block)
-                && let Some(mut runtime) = self
-                    .ecs
-                    .0
-                    .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-                && runtime.session.rules.default_team == placed.team
-            {
-                runtime.session.stats.add_placed(name, 1);
+            // `Logic`'s `BlockBuildEndEvent`/`BlockDestroyEvent` listeners
+            // (`Logic.java:186-216`; H09 T10): placed/deconstructed/destroyed
+            // counts plus the campaign planet maps, keyed by block name.
+            match &event {
+                SimEvent::BlockPlacedEvent(placed) => {
+                    if let Ok(name) = self.content.name(placed.block)
+                        && let Some(mut runtime) = self
+                            .ecs
+                            .0
+                            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                        && runtime.session.rules.default_team == placed.team
+                    {
+                        runtime.session.stats.add_placed(name, 1);
+                        runtime.session.stats.buildings_built += 1;
+                        if runtime.session.is_campaign()
+                            && let Some((planet, _)) = runtime.session.sector
+                            && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                        {
+                            stats.add_building_built(name, 1);
+                        }
+                    }
+                }
+                SimEvent::BlockBrokenEvent(broken) => {
+                    if let Ok(name) = self.content.name(broken.block)
+                        && let Some(mut runtime) = self
+                            .ecs
+                            .0
+                            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+                    {
+                        let default_team = runtime.session.rules.default_team;
+                        if broken.destroyed {
+                            if broken.team == default_team {
+                                runtime.session.stats.buildings_destroyed += 1;
+                                if runtime.session.is_campaign()
+                                    && let Some((planet, _)) = runtime.session.sector
+                                    && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                                {
+                                    stats.add_building_destroyed(name, 1);
+                                }
+                            } else {
+                                runtime.session.stats.add_destroyed(name, 1);
+                                if runtime.session.is_campaign()
+                                    && let Some((planet, _)) = runtime.session.sector
+                                    && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                                {
+                                    stats.add_enemy_building_destroyed(name, 1);
+                                }
+                            }
+                        } else if broken.team == default_team {
+                            runtime.session.stats.buildings_deconstructed += 1;
+                            if runtime.session.is_campaign()
+                                && let Some((planet, _)) = runtime.session.sector
+                                && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+                            {
+                                stats.add_building_deconstructed(name, 1);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
             let record = dump::block_event_record(self, &event);
             if let Some(record) = record {

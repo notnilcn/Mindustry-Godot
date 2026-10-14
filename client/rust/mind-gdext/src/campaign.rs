@@ -570,6 +570,8 @@ impl MindCampaign {
         self.session.attack_after_waves = runtime.session.attack_after_waves;
         self.session.rules = runtime.session.rules.clone();
         self.session.objectives = runtime.session.objectives.clone();
+        // H09 T10: `game_stats_json` reads the live counters (small clone).
+        self.session.stats = runtime.session.stats.clone();
         if mirrored {
             self.session = runtime.session.clone();
             self.campaign = Some(runtime.campaign.clone());

@@ -537,8 +537,13 @@ impl Sim {
                     ..
                 } = &mut runtime;
                 let before = *seq;
-                // Read the team before the kill despawns the entity.
+                // Read the team and type name before the kill despawns the
+                // entity (`Logic.java:218-226` needs both for stats).
                 let unit_team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
+                let unit_name = world
+                    .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+                    .and_then(|comp| content.unit(comp.type_id))
+                    .map(|def| def.name.clone());
                 if crate::entities::comp::unit::lifecycle::kill_unit_with_abilities(
                     world,
                     content,
@@ -551,12 +556,26 @@ impl Sim {
                     runtime.units_removed += 1;
                     // `Logic` `UnitDestroyEvent` (`Logic.java:218-226`): a
                     // killed unit of a non-default team counts as an enemy
-                    // kill (`stats.enemyUnitsDestroyed`; T4).
+                    // kill; the campaign planet maps count every death by type
+                    // name (H09 T10).
                     if let Some(mut campaign) =
                         world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
-                        && unit_team != campaign.session.rules.default_team
                     {
-                        campaign.session.stats.enemy_units_destroyed += 1;
+                        let default_team = campaign.session.rules.default_team;
+                        if unit_team != default_team {
+                            campaign.session.stats.enemy_units_destroyed += 1;
+                        }
+                        if campaign.session.is_campaign()
+                            && let Some((planet, _)) = campaign.session.sector
+                            && let Some(name) = unit_name.as_deref()
+                            && let Some(stats) = campaign.campaign.stats_for_mut(planet)
+                        {
+                            if unit_team != default_team {
+                                stats.add_enemy_unit_destroyed(name, 1);
+                            } else {
+                                stats.add_unit_destroyed(name, 1);
+                            }
+                        }
                     }
                     // `FogControl.UnitDestroyEvent` (`FogControl.java:91-95`):
                     // a dead unit's team needs a dynamic redraw.
@@ -748,6 +767,7 @@ impl Sim {
                             block,
                             // `BuildingComp.onDestroyed` (destroy sound path).
                             destroyed: true,
+                            team,
                         },
                     ));
                     // `BuildingComp.onDestroyed` -> `playDestroySound` + the
@@ -2656,6 +2676,14 @@ fn adopt_spawned_units(world: &mut World, runtime: &mut UnitRuntime) {
         .collect();
     found.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
     for (_, entity) in found {
+        // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`) for payload/
+        // ability spawns (H09 T10); the runtime is out of the world here, so
+        // the type name comes from the local one.
+        let name = world
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
+            .and_then(|comp| runtime.content.unit(comp.type_id))
+            .map(|def| def.name.clone());
+        crate::game::stats::notify_unit_created(world, entity, name.as_deref());
         world
             .entity_mut(entity)
             .remove::<crate::combat::bullet::spawn::SpawnedByBullet>();
