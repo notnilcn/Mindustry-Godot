@@ -399,7 +399,10 @@ pub fn apply_base(world: &mut World, entity: Entity, decoded: &DecodedBase, max_
         for (id, amount) in &decoded.items {
             if let Some(slot) = items.items.get_mut(*id as usize) {
                 *slot = *amount;
-                items.total += *amount;
+                // Java `ItemModule.total` is an `int` and `total += amount`
+                // wraps; `fillItems` AI cores store `i32::MAX / 2` per item, so
+                // a plain `+=` panics in debug builds (matches `ItemModule::set`).
+                items.total = items.total.wrapping_add(*amount);
             }
         }
     }
@@ -615,6 +618,24 @@ mod tests {
         let mut decoded = DecodedBase::default();
         read_base(&mut decoded, &mut reader, 3).expect("read");
         assert!(decoded.items.contains(&(0, 7)));
+    }
+
+    /// Save-resume regression: a `fillItems` AI core stores `i32::MAX / 2` per
+    /// item (`ItemModule::set`), so `apply_base` must wrap `total` like Java's
+    /// `int` (`ItemModule.java:30`) instead of panicking in debug builds.
+    #[test]
+    fn apply_base_wraps_fill_items_total() {
+        let (mut world, entity) = spawn_smelter();
+        let mut decoded = DecodedBase::default();
+        // 16 items at `i32::MAX / 2`: the sum exceeds `i32::MAX`.
+        for id in 0..16u16 {
+            decoded.items.push((id, i32::MAX / 2));
+        }
+        apply_base(&mut world, entity, &decoded, 100.0);
+        let expected = (0..16).fold(0i32, |total, _| total.wrapping_add(i32::MAX / 2));
+        let items = world.get::<ItemModule>(entity).expect("items");
+        assert_eq!(items.total, expected, "total wraps like Java");
+        assert_eq!(items.get(crate::content::ItemId::new(0)), i32::MAX / 2);
     }
 
     /// PAR-0161: `write_all_java` emits the Java chunk layout —
