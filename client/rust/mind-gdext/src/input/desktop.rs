@@ -53,6 +53,17 @@ enum DragKind {
     SelectRect,
 }
 
+/// `Binding.selectAllUnits` variants (`DesktopInput.java:315-357`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SelectAllKind {
+    /// Own commandable units with `type.controlSelectGlobal`.
+    Units,
+    /// Own commandable units `instanceof Payloadc`.
+    Transport,
+    /// Own commandable buildings (`command_buildings`).
+    Factories,
+}
+
 /// The active pointer drag.
 #[derive(Debug, Clone, Copy)]
 struct Drag {
@@ -283,6 +294,14 @@ fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
                     .get("hit_size")
                     .and_then(|value| value.as_f64())
                     .unwrap_or(0.0) as f32,
+                select_global: entry
+                    .get("select_global")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true),
+                payload: entry
+                    .get("payload")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false),
             })
         })
         .collect()
@@ -834,11 +853,21 @@ impl DesktopBridge {
                     self.toggle_command_mode();
                 }
             }
-            "select_all_units" | "select_all_unit_transport" => {
-                self.select_all_units(bindings, false);
+            "select_all_units" => self.select_all_units(bindings, SelectAllKind::Units),
+            "select_all_unit_transport" => {
+                self.select_all_units(bindings, SelectAllKind::Transport)
             }
-            "select_all_unit_factories" => self.select_all_units(bindings, true),
-            "cancel_orders" | "deselect" => {
+            "select_all_unit_factories" => {
+                self.select_all_units(bindings, SelectAllKind::Factories)
+            }
+            "cancel_orders" => {
+                // PlacementFragment command table: `cancelOrders` orders stance
+                // `stop` (it does NOT deselect).
+                if self.controller.state.command_mode {
+                    self.set_stance_named("stop", true);
+                }
+            }
+            "deselect" => {
                 self.controller.state.selected_units.clear();
                 self.controller.state.command_buildings.clear();
                 self.emit_selection();
@@ -857,17 +886,52 @@ impl DesktopBridge {
                 // per-frame refresh both push the trigger.
                 self.push_hint("boost_down");
             }
-            "unit_stance_hold_fire" => self.set_stance(0, true),
-            "unit_stance_pursue_target" => self.set_stance(1, true),
-            "unit_stance_patrol" => self.set_stance(2, true),
-            "unit_stance_ram" => self.set_stance(3, true),
-            "unit_stance_boost" => self.set_stance(4, true),
-            "unit_stance_hold_position" => self.set_stance(5, true),
-            "unit_command_move" => self.command_units(0),
-            "unit_command_repair" => self.command_units(1),
-            "unit_command_rebuild" => self.command_units(2),
-            "unit_command_assist" => self.command_units(3),
-            "unit_command_mine" => self.command_units(4),
+            "unit_stance_hold_fire"
+            | "unit_stance_pursue_target"
+            | "unit_stance_patrol"
+            | "unit_stance_ram"
+            | "unit_stance_boost"
+            | "unit_stance_hold_position" => {
+                // PlacementFragment command table: names resolved through the
+                // stance registry; command mode only.
+                if self.controller.state.command_mode {
+                    let stance = match name {
+                        "unit_stance_hold_fire" => "holdfire",
+                        "unit_stance_pursue_target" => "pursuetarget",
+                        "unit_stance_patrol" => "patrol",
+                        "unit_stance_ram" => "ram",
+                        "unit_stance_boost" => "boost",
+                        _ => "holdposition",
+                    };
+                    self.set_stance_named(stance, true);
+                }
+            }
+            "unit_command_move"
+            | "unit_command_repair"
+            | "unit_command_rebuild"
+            | "unit_command_assist"
+            | "unit_command_mine"
+            | "unit_command_enter_payload"
+            | "unit_command_load_units"
+            | "unit_command_load_blocks"
+            | "unit_command_unload_payload"
+            | "unit_command_loop_payload" => {
+                if self.controller.state.command_mode {
+                    let command = match name {
+                        "unit_command_move" => "move",
+                        "unit_command_repair" => "repair",
+                        "unit_command_rebuild" => "rebuild",
+                        "unit_command_assist" => "assist",
+                        "unit_command_mine" => "mine",
+                        "unit_command_enter_payload" => "enterPayload",
+                        "unit_command_load_units" => "loadUnits",
+                        "unit_command_load_blocks" => "loadBlocks",
+                        "unit_command_unload_payload" => "unloadPayload",
+                        _ => "loopPayload",
+                    };
+                    self.command_units_named(command);
+                }
+            }
             "minimap" => {
                 self.effects
                     .push(Effect::ToggleFragment(String::from("minimap")));
@@ -1024,42 +1088,63 @@ impl DesktopBridge {
     }
 
     /// Live player team (`player.team().id`) for RTS selection filters.
-    fn player_team(&self) -> u8 {
+    pub fn player_team(&self) -> u8 {
         self.host
             .as_ref()
             .map(|host| host.bind().default_team().clamp(0, 255) as u8)
             .unwrap_or(0)
     }
 
-    fn select_all_units(&mut self, bindings: &BindingState, factories: bool) {
-        // `selectAllUnits` only runs in command mode upstream; enabling it here
-        // gives the player a direct entry point without first holding the
-        // command-mode key.
+    fn select_all_units(&mut self, bindings: &BindingState, kind: SelectAllKind) {
+        // `DI:315-357`: select-all runs only while command mode is active.
         if !self.controller.state.command_mode {
-            self.toggle_command_mode();
-        }
-        let screens = self.key_down(bindings, ids::SELECT_ACROSS_SCREEN);
-        if factories {
-            // Command buildings come from the sim selection feed.
-            self.controller.state.command_buildings.clear();
-            self.controller.state.selected_units.clear();
-            self.emit_selection();
             return;
         }
-        let rect = if screens {
-            self.viewport_world_rect()
-        } else {
-            SelectRect {
-                x: f32::NEG_INFINITY,
-                y: f32::NEG_INFINITY,
-                w: f32::INFINITY,
-                h: f32::INFINITY,
-            }
-        };
-        let mut out = SmallVec::new();
-        select_units_rect(&self.selectable, self.player_team(), rect, &mut out);
-        self.controller.state.selected_units = out;
+        let screens = self.key_down(bindings, ids::SELECT_ACROSS_SCREEN);
+        let rect = screens.then(|| self.viewport_world_rect());
         self.controller.state.command_buildings.clear();
+        match kind {
+            SelectAllKind::Factories => {
+                // `build.isCommandable()` buildings (`CoreBlock`, `UnitFactory`,
+                // `Reconstructor`, `UnitAssembler`, `PayloadSource`).
+                self.controller.state.selected_units.clear();
+                let tile = mind_core::config::TILESIZE as f32;
+                if let Some(host) = self.host.clone() {
+                    self.controller.state.command_buildings = host
+                        .bind()
+                        .commandable_buildings()
+                        .into_iter()
+                        .filter(|(x, y)| {
+                            rect.is_none_or(|rect| {
+                                rect.contains(*x as f32 * tile, *y as f32 * tile)
+                            })
+                        })
+                        .map(|(x, y)| TilePos::new(x, y))
+                        .collect();
+                }
+            }
+            SelectAllKind::Units | SelectAllKind::Transport => {
+                // `type.controlSelectGlobal` (`mono` excluded) or
+                // `unit instanceof Payloadc`; no infinite rect (NaN bounds).
+                let transport = kind == SelectAllKind::Transport;
+                let team = self.player_team();
+                self.controller.state.selected_units = self
+                    .selectable
+                    .iter()
+                    .filter(|unit| {
+                        unit.team == team
+                            && unit.commandable
+                            && if transport {
+                                unit.payload
+                            } else {
+                                unit.select_global
+                            }
+                            && rect.is_none_or(|rect| rect.contains(unit.x, unit.y))
+                    })
+                    .map(|unit| unit.id)
+                    .collect();
+            }
+        }
         self.emit_selection();
     }
 
@@ -1111,6 +1196,44 @@ impl DesktopBridge {
             stance,
             enabled,
         });
+    }
+
+    /// `Call.setUnitStance(player, selected ids, stance, enabled)` by
+    /// `UnitStance` name. Java toggles `!activeStances.get(id)`; without a
+    /// per-unit active-stance feed the port passes `enabled` through (callers
+    /// send `true`).
+    pub fn set_stance_named(&mut self, name: &str, enabled: bool) -> bool {
+        if self.controller.state.selected_units.is_empty() {
+            return false;
+        }
+        let Some(stance) = self.host.as_ref().and_then(|host| {
+            host.bind()
+                .content_registry()
+                .and_then(|content| content.unit_stance_by_name(name))
+                .map(|def| def.id.get())
+        }) else {
+            return false;
+        };
+        self.set_stance(stance, enabled);
+        true
+    }
+
+    /// `Call.setUnitCommand(player, selected ids, command)` by `UnitCommand`
+    /// name (`false` when nothing is selected or the name is unknown).
+    pub fn command_units_named(&mut self, name: &str) -> bool {
+        if self.controller.state.selected_units.is_empty() {
+            return false;
+        }
+        let Some(command) = self.host.as_ref().and_then(|host| {
+            host.bind()
+                .content_registry()
+                .and_then(|content| content.unit_command_by_name(name))
+                .map(|def| def.id.get())
+        }) else {
+            return false;
+        };
+        self.command_units(command);
+        true
     }
 
     /// `requestUnitPayload`/`requestDropPayload` at the cursor.

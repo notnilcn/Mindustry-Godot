@@ -2568,6 +2568,11 @@ impl MindSimHost {
         self.sim.player_plan_count()
     }
 
+    /// `build.isCommandable()` own commandable buildings (`DI:346-357`).
+    pub fn commandable_buildings(&self) -> Vec<(i16, i16)> {
+        self.sim.commandable_buildings(self.sim.live_default_team())
+    }
+
     /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.

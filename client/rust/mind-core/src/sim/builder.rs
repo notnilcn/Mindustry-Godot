@@ -1214,6 +1214,35 @@ impl Sim {
             .unwrap_or(0)
     }
 
+    /// `build.isCommandable()` own buildings (`DesktopInput.java:346-357`):
+    /// cores, unit factories, reconstructors, assemblers and payload sources,
+    /// in `EntitySeq` order (`(x, y)` anchor tiles).
+    pub fn commandable_buildings(&self, team: u8) -> Vec<(i16, i16)> {
+        use crate::content::BlockKind;
+        let Some(runtime) = self.block_runtime.as_ref() else {
+            return Vec::new();
+        };
+        let content = runtime.content();
+        self.ecs
+            .entities_by_seq()
+            .into_iter()
+            .filter(|(_, _, comp)| {
+                comp.team.0 == team
+                    && content.block(comp.block).is_some_and(|def| {
+                        matches!(
+                            def.kind,
+                            BlockKind::CoreBlock
+                                | BlockKind::UnitFactory
+                                | BlockKind::Reconstructor
+                                | BlockKind::UnitAssembler
+                                | BlockKind::PayloadSource
+                        )
+                    })
+            })
+            .map(|(_, _, comp)| (comp.pos.x(), comp.pos.y()))
+            .collect()
+    }
+
     /// Clears the player unit's queue (`BuilderComp.clearBuilding`).
     pub fn clear_player_build_plans(&mut self) {
         if let Some(unit) = self.player_unit

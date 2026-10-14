@@ -272,6 +272,8 @@ mod tests {
     fn flat_units() -> Vec<SelectableUnit> {
         (0..6)
             .map(|id| SelectableUnit {
+                select_global: true,
+                payload: false,
                 id,
                 type_id: 0,
                 x: 10.0 + id as f32,

@@ -224,6 +224,27 @@ impl INode for MindInput {
         // `DesktopInput.java:591-594`: auto-pause building while the player
         // unit's queue is empty (`buildautopause`).
         self.bridge.update_build_autopause();
+        // `DI:313`: `selectedUnits.removeAll(u -> !u.allowCommand() ||
+        // !u.isValid() || u.team != player.team());`
+        {
+            let team = self.bridge.player_team();
+            let valid: std::collections::HashSet<i32> = self
+                .bridge
+                .selectable
+                .iter()
+                .filter(|unit| unit.commandable && unit.team == team)
+                .map(|unit| unit.id)
+                .collect();
+            let before = self.bridge.controller.state.selected_units.len();
+            self.bridge
+                .controller
+                .state
+                .selected_units
+                .retain(|id| valid.contains(id));
+            if self.bridge.controller.state.selected_units.len() != before {
+                self.bridge.emit_selection();
+            }
+        }
         // G05 T4b hint triggers while a key is held (`boost`,
         // `rebuild_selecting`).
         self.bridge.refresh_hints(&self.bindings);
@@ -1113,6 +1134,51 @@ impl MindInput {
     #[func]
     pub fn set_unit_stance(&mut self, stance: i64, enabled: bool) {
         self.bridge.set_stance(stance.max(0) as u16, enabled);
+    }
+
+    /// `Call.setUnitCommand(player, selected ids, command)` by UnitCommand
+    /// name (H08 T6a seam; H03 T3 consumes the same signature).
+    #[func]
+    pub fn set_unit_command(&mut self, command: GString) -> bool {
+        self.bridge.command_units_named(&command.to_string())
+    }
+
+    /// `Call.setUnitStance(player, selected ids, stance, enabled)` by stance
+    /// name (H08 T6a seam; H03 T3 consumes the same signature).
+    #[func]
+    pub fn set_unit_stance_named(&mut self, stance: GString, enabled: bool) -> bool {
+        self.bridge.set_stance_named(&stance.to_string(), enabled)
+    }
+
+    /// `selectTypedUnits`: replace the selection with every own unit of the
+    /// given type id (`false` without a sim host).
+    #[func]
+    pub fn select_only_type(&mut self, type_id: i64) -> bool {
+        let team = self.bridge.player_team();
+        self.bridge.controller.state.selected_units = self
+            .bridge
+            .selectable
+            .iter()
+            .filter(|unit| unit.team == team && unit.commandable && unit.type_id == type_id as i32)
+            .map(|unit| unit.id)
+            .collect();
+        self.bridge.emit_selection();
+        true
+    }
+
+    /// `deselectTypedUnits` / typed deselect: drop every own unit of the
+    /// given type id from the selection.
+    #[func]
+    pub fn deselect_type(&mut self, type_id: i64) -> bool {
+        self.bridge.controller.state.selected_units.retain(|id| {
+            !self
+                .bridge
+                .selectable
+                .iter()
+                .any(|unit| unit.id == *id && unit.type_id == type_id as i32)
+        });
+        self.bridge.emit_selection();
+        true
     }
 
     /// Selects a buildable block by name and syncs the placement state.
