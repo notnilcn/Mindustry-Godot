@@ -692,6 +692,10 @@ impl MindCampaign {
             }
             // Played-sector invasions restart the live waves (T4).
             mind_core::game::runtime::apply_played_invasions(&mut runtime, &turn_events);
+            // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+            if !turn_events.is_empty() {
+                self.toast_campaign_events(&turn_events);
+            }
         }
 
         // Mirror the authoritative runtime state into the facade for getters.
@@ -1332,6 +1336,56 @@ impl MindCampaign {
         !events.is_empty()
     }
 
+    /// `HudFragment.showToast` for `CampaignEvent`s (`HudFragment.java:261-275`):
+    /// `sector.attacked` with the warning icon on a `SectorInvasion`. The
+    /// off-play `sector.capture`/`sector.lost` toasts land when the
+    /// `CampaignEvent` variants exist (seam §6). The label itself is suppressed
+    /// in the menu by `ui_root.gd _on_toast` (`HudFragment.java:753-754`).
+    fn toast_campaign_events(&self, events: &[mind_core::game::universe::CampaignEvent]) {
+        use mind_core::game::universe::CampaignEvent;
+        for event in events {
+            let CampaignEvent::SectorInvasion { planet, sector, .. } = event else {
+                continue;
+            };
+            let planet_name = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.planet(*planet).map(|planet| planet.name.clone()))
+                .unwrap_or_default();
+            let name = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.sector(*planet, *sector))
+                .map(|record| sector_toast_name(record, &planet_name, *sector))
+                .unwrap_or_else(|| format!("{planet_name}-{sector}"));
+            log::info!("campaign event: `{planet_name}:{sector}` invaded (toast sector.attacked)");
+            let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+                continue;
+            };
+            let text = self
+                .base()
+                .get_node_or_null("/root/MindAssets")
+                .and_then(|mut assets| {
+                    assets
+                        .call(
+                            "bundle_format",
+                            &[
+                                GString::from("sector.attacked").to_variant(),
+                                PackedStringArray::from(vec![GString::from(name.as_str())])
+                                    .to_variant(),
+                            ],
+                        )
+                        .try_to::<GString>()
+                        .ok()
+                })
+                .unwrap_or_else(|| GString::from(format!("Sector {name} under attack!").as_str()));
+            let _ = hud.call(
+                "push_toast",
+                &[text.to_variant(), GString::from("warning").to_variant()],
+            );
+        }
+    }
+
     /// Runs one production turn; returns success. Runs on the live runtime
     /// campaign when one is installed (T1: one authoritative campaign).
     #[func]
@@ -1386,6 +1440,8 @@ impl MindCampaign {
                 host.bind_mut().put_campaign_runtime(runtime);
             }
         }
+        // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+        self.toast_campaign_events(&report.events);
         self.registry = Some(registry);
         self.persist();
         report.turn > 0
@@ -4155,6 +4211,22 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// `Sector.name()` (`Sector.java:243-245`): the stored display name, else the
+/// preset name, else `<planet>-<id>`.
+fn sector_toast_name(
+    record: &mind_core::game::sector::Sector,
+    planet_name: &str,
+    id: u16,
+) -> String {
+    if let Some(name) = &record.info.info.name {
+        return name.clone();
+    }
+    if let Some(preset) = &record.preset_name {
+        return preset.clone();
+    }
+    format!("{planet_name}-{id}")
 }
 
 /// Parses a launch-loadout payload: the dialog envelope

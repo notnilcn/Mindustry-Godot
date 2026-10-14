@@ -407,10 +407,11 @@ func _on_show_info(text: String) -> void:
 
 func _on_toast(text: String, _icon: String) -> void:
 	# `HudFragment.showToast`: `if(state.isMenu()) return;` then uiNotify.
-	if not menu_group.visible:
-		var ui := _ui()
-		if ui != null:
-			ui.call("play_ui_sound", "uiNotify")
+	if menu_group.visible:
+		return
+	var ui := _ui()
+	if ui != null:
+		ui.call("play_ui_sound", "uiNotify")
 	_toast_label(text, 3.5)
 
 
