@@ -3824,3 +3824,210 @@ fn explosion_absorbed_polygon() {
         "the shield's own team is ignored"
     );
 }
+
+/// H02 T16: the duo aims at the intercept point for its 2.5 px/tick copper
+/// bullet, not at the target's current position (`Turret.targetPosition`,
+/// `Turret.java:459-479`; `Predict.intercept`, `Predict.java:27-52`).
+#[test]
+fn turret_leads_moving_target() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 10, 10, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    let duo_pos = sim
+        .ecs
+        .0
+        .get::<Pos>(duo)
+        .map(|p| (p.x, p.y))
+        .expect("duo pos");
+    let flare = sim
+        .spawn_live_unit("flare", 2, duo_pos.0 + 100.0, duo_pos.1, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(flare) {
+        vel.x = 0.0;
+        vel.y = 2.0;
+    }
+    let flare_pos = (duo_pos.0 + 100.0, duo_pos.1);
+    if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(duo) {
+        state.target = Some(flare);
+        state.target_timer = 1000.0;
+    }
+    sim.tick().expect("tick");
+    let state = sim.ecs.0.get::<TurretState>(duo).expect("turret state");
+    // `duo_copper` bullet speed (`register_bullets`).
+    let expected = crate::combat::targeting::intercept_positions(
+        duo_pos,
+        (0.0, 0.0),
+        flare_pos,
+        (0.0, 2.0),
+        true,
+        2.5,
+    );
+    assert!(
+        state.target_pos.1 > flare_pos.1,
+        "the aim leads the northbound flare: {:?} vs {flare_pos:?}",
+        state.target_pos
+    );
+    assert!(
+        (state.target_pos.0 - expected.0).abs() < 0.01
+            && (state.target_pos.1 - expected.1).abs() < 0.01,
+        "aim equals Predict.intercept: {:?} vs {expected:?}",
+        state.target_pos
+    );
+}
+
+/// H02 T16: the aim point is recomputed every tick even between retargets
+/// (`Turret.updateTile` calls `targetPosition` on every tick, not only in
+/// `findTarget`).
+#[test]
+fn turret_reaims_every_tick() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 10, 10, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    let duo_pos = sim
+        .ecs
+        .0
+        .get::<Pos>(duo)
+        .map(|p| (p.x, p.y))
+        .expect("duo pos");
+    let flare = sim
+        .spawn_live_unit("flare", 2, duo_pos.0 + 80.0, duo_pos.1, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(flare) {
+        vel.x = 0.0;
+        vel.y = 0.0;
+    }
+    if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(duo) {
+        state.target = Some(flare);
+        state.target_timer = 1000.0;
+    }
+    sim.tick().expect("tick");
+    // Move the target 20 px north; the retarget timer stays high.
+    if let Some(mut pos) = sim.ecs.0.get_mut::<Pos>(flare) {
+        pos.y -= 20.0;
+    }
+    let moved = sim
+        .ecs
+        .0
+        .get::<Pos>(flare)
+        .map(|p| (p.x, p.y))
+        .expect("flare pos");
+    sim.tick().expect("tick");
+    let state = sim.ecs.0.get::<TurretState>(duo).expect("turret state");
+    assert!(
+        (state.target_pos.0 - moved.0).abs() < 0.01 && (state.target_pos.1 - moved.1).abs() < 0.01,
+        "aim follows the moved target: {:?} vs {moved:?}",
+        state.target_pos
+    );
+}
+
+/// H02 T16: firing is gated by `within(target, range() + hitSize/1.9)`
+/// (`Turret.java:587`), evaluated against the target's own position.
+#[test]
+fn turret_holds_fire_out_of_range() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 10, 10, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    let duo_pos = sim
+        .ecs
+        .0
+        .get::<Pos>(duo)
+        .map(|p| (p.x, p.y))
+        .expect("duo pos");
+    let hit_size = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_by_name("flare")
+        .expect("flare def")
+        .hit_size;
+    let far = 160.0 + hit_size / 1.9 + 2.0;
+    let flare = sim
+        .spawn_live_unit("flare", 2, duo_pos.0 + far, duo_pos.1, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(flare) {
+        vel.x = 0.0;
+        vel.y = 0.0;
+    }
+    if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(duo) {
+        state.target = Some(flare);
+        state.target_timer = 1000.0;
+        state.rotation = 0.0; // already facing the target
+        state.reload_counter = 1000.0; // ready to fire if allowed
+    }
+    let before = sim.unit_runtime().expect("rt").bullets_created;
+    sim.tick().expect("tick");
+    let after = sim.unit_runtime().expect("rt").bullets_created;
+    assert_eq!(
+        before, after,
+        "out-of-range target holds fire (Turret.java:587)"
+    );
+}
+
+/// H02 T16: `scathe` does not predict (`Blocks.java:5248`), so its aim point
+/// is the target's current position.
+#[test]
+fn scathe_does_not_predict() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(64);
+    let scathe = place(&mut sim, 20, 20, "scathe", 1);
+    // `Turret.targetPosition` returns without ammo (`Turret.java:460`).
+    feed(&mut sim, scathe, "carbide", 1);
+    let scathe_pos = sim
+        .ecs
+        .0
+        .get::<Pos>(scathe)
+        .map(|p| (p.x, p.y))
+        .expect("scathe pos");
+    assert!(
+        !sim.ecs
+            .0
+            .get::<TurretState>(scathe)
+            .expect("scathe state")
+            .config
+            .predict_target,
+        "scathe predictTarget = false"
+    );
+    let flare = sim
+        .spawn_live_unit("flare", 2, scathe_pos.0 + 100.0, scathe_pos.1, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::NoAi;
+    }
+    if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(flare) {
+        vel.x = 0.0;
+        vel.y = 2.0;
+    }
+    let flare_pos = (scathe_pos.0 + 100.0, scathe_pos.1);
+    if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(scathe) {
+        state.target = Some(flare);
+        state.target_timer = 1000.0;
+    }
+    sim.tick().expect("tick");
+    let state = sim.ecs.0.get::<TurretState>(scathe).expect("state");
+    assert!(
+        (state.target_pos.0 - flare_pos.0).abs() < 0.01
+            && (state.target_pos.1 - flare_pos.1).abs() < 0.01,
+        "no lead without predictTarget: {:?} vs {flare_pos:?}",
+        state.target_pos
+    );
+}

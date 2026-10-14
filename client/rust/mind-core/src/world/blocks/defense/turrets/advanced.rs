@@ -1063,6 +1063,9 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         target_ground: true,
         target_blocks: true,
         always_shooting: false,
+        predict_target: true,
+        accurate_delay: true,
+        move_while_charging: true,
         activation_time: 0.0,
         coolant_multiplier: 1.0,
         coolant_amount: 0.0,
@@ -1430,6 +1433,10 @@ pub fn config_for(
             c.shoot.first_shot_delay = 40.0;
             c.coolant_amount = 0.2;
             c.coolant_multiplier = 10.0;
+            // `Blocks.java:3594-3595`: `moveWhileCharging = false;
+            // accurateDelay = false`.
+            c.move_while_charging = false;
+            c.accurate_delay = false;
             Some(c)
         }
         "arc" => {
@@ -1634,6 +1641,8 @@ pub fn config_for(
             c.range = 1518.0;
             c.reload = 10.0;
             c.target_interval = 20.0;
+            // `Blocks.java:5248`: `scathe` sets `predictTarget = false`.
+            c.predict_target = false;
             Some(c)
         }
         // `build-tower` (`BuildTurret`): proxy build-plan follower (plan 10 M6).
