@@ -105,6 +105,24 @@ pub fn indicator_offset(target: [f32; 2], source: [f32; 2], length: f32) -> ([f3
     ([source[0] + ox, source[1] + oy], dy.atan2(dx).to_degrees())
 }
 
+/// `OverlayRenderer.drawTop` enemy indicator line (`OverlayRenderer.java:110-121`):
+/// `v = (unit - player).setLength(INDICATOR_LENGTH)`, line from `player + v`
+/// along `v.angle()` for `line` px. Returns `(x1, y1, x2, y2)`.
+pub fn indicator_segment(target: [f32; 2], source: [f32; 2], line: f32) -> [f32; 4] {
+    let ([vx, vy], angle) = indicator_offset(target, source, INDICATOR_LENGTH);
+    let rad = angle.to_radians();
+    [vx, vy, vx + rad.cos() * line, vy + rad.sin() * line]
+}
+
+/// `OverlayRenderer.java:200-211` spawn drop-zone alpha:
+/// `clamp(1 - (distance - dropZoneRadius) / spawnerMargin)`.
+pub fn spawn_alpha(distance: f32, drop_zone_radius: f32, margin: f32) -> f32 {
+    if margin <= 0.0 {
+        return 1.0;
+    }
+    (1.0 - (distance - drop_zone_radius) / margin).clamp(0.0, 1.0)
+}
+
 /// `true` when `(x, y)` is outside the `0.9 * camera` centered rect (the
 /// `if(!rect.contains(...))` indicator gate).
 pub fn offscreen(center: [f32; 2], cam_w: f32, cam_h: f32, x: f32, y: f32) -> bool {
@@ -163,5 +181,25 @@ mod tests {
         // (100, 0) with a 50x50 camera is off-screen; (0,0) is on-screen.
         assert!(offscreen([0.0, 0.0], 50.0, 50.0, 100.0, 0.0));
         assert!(!offscreen([0.0, 0.0], 50.0, 50.0, 1.0, 1.0));
+    }
+
+    #[test]
+    fn indicator_segment_points_at_the_target() {
+        // Player (0,0), enemy (100,0): the segment starts 14 px along +x and
+        // runs 3 px further (`Lines.lineAngle(player.x + v.x, ..., angle, 3)`).
+        let segment = indicator_segment([100.0, 0.0], [0.0, 0.0], 3.0);
+        assert!((segment[0] - 14.0).abs() < 1e-3, "{segment:?}");
+        assert!(segment[1].abs() < 1e-3);
+        assert!((segment[2] - 17.0).abs() < 1e-3);
+        assert!(segment[3].abs() < 1e-3);
+    }
+
+    #[test]
+    fn spawn_alpha_fades_over_the_margin() {
+        // drop radius 300, spawner margin 88: distance 344 -> 0.5.
+        assert!((spawn_alpha(344.0, 300.0, 88.0) - 0.5).abs() < 1e-6);
+        assert_eq!(spawn_alpha(300.0, 300.0, 88.0), 1.0);
+        assert_eq!(spawn_alpha(388.0, 300.0, 88.0), 0.0);
+        assert_eq!(spawn_alpha(500.0, 300.0, 88.0), 0.0);
     }
 }

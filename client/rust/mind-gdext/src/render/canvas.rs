@@ -177,6 +177,87 @@ pub(crate) fn target_spikes(x: f32, y: f32, rad: f32, rot: f32) -> [(f32, f32, f
     })
 }
 
+/// `Lines.circle(x, y, rad)` at `stroke` (single colour; the overlay-top core
+/// radius and power-node rings use `Lines.stroke` per call). Side count as
+/// [`circles`].
+pub(crate) fn circle_stroke(
+    canvas: &mut Node2D,
+    x: f32,
+    y: f32,
+    r: f32,
+    stroke: f32,
+    color: Color,
+) {
+    let sides = 11 + (r * 0.4) as u32;
+    let mut ring = drawf::poly_ring(x, y, sides.max(3), r, 0.0);
+    if let Some(first) = ring.first().copied() {
+        ring.push(first);
+    }
+    let packed = pack_points(&ring);
+    canvas
+        .draw_polyline_ex(&packed, color)
+        .width(stroke.max(0.5))
+        .done();
+}
+
+/// `Lines.dashCircle(x, y, radius)` at `stroke` (single colour; the drop-zone
+/// circle draws `Lines.stroke(2)` then this).
+pub(crate) fn dash_circle_stroke(
+    canvas: &mut Node2D,
+    x: f32,
+    y: f32,
+    r: f32,
+    stroke: f32,
+    color: Color,
+) {
+    for s in drawf::dash_circle_segments(x, y, r) {
+        canvas
+            .draw_line_ex(Vector2::new(s[0], s[1]), Vector2::new(s[2], s[3]), color)
+            .width(stroke.max(0.5))
+            .done();
+    }
+}
+
+/// `Drawf.square(x, y, radius, rotation, color)` (`Drawf.java:426-438`):
+/// stroke 3 `Pal.gray` (alpha = color alpha) then stroke 1 `color`, both on
+/// `Lines.square(x, y, radius + 1, rotation)` = `poly(.., rot - 45)`.
+pub(crate) fn square(canvas: &mut Node2D, x: f32, y: f32, r: f32, rot: f32, color: Color) {
+    let mut gray = color_f4(pal::GRAY);
+    gray.a = color.a;
+    let mut ring = drawf::poly_ring(x, y, 4, r + 1.0, rot - 45.0);
+    if let Some(first) = ring.first().copied() {
+        ring.push(first);
+    }
+    let packed = pack_points(&ring);
+    canvas.draw_polyline_ex(&packed, gray).width(3.0).done();
+    canvas.draw_polyline_ex(&packed, color).width(1.0).done();
+}
+
+/// `Drawf.select(x, y, radius, color)` (`Drawf.java:418-424`): stroke 3 gray
+/// axis-aligned square half-width `radius + 1`, then stroke 1 `color` at
+/// `radius`.
+pub(crate) fn select(canvas: &mut Node2D, x: f32, y: f32, r: f32, color: Color) {
+    let gray = color_f4(pal::GRAY);
+    let mut outer = drawf::poly_ring(x, y, 4, r + 1.0, -45.0);
+    if let Some(first) = outer.first().copied() {
+        outer.push(first);
+    }
+    let packed_outer = pack_points(&outer);
+    canvas
+        .draw_polyline_ex(&packed_outer, gray)
+        .width(3.0)
+        .done();
+    let mut inner = drawf::poly_ring(x, y, 4, r, -45.0);
+    if let Some(first) = inner.first().copied() {
+        inner.push(first);
+    }
+    let packed_inner = pack_points(&inner);
+    canvas
+        .draw_polyline_ex(&packed_inner, color)
+        .width(1.0)
+        .done();
+}
+
 /// `Lines.poly` outline: a polyline through `pts` with the given `stroke`.
 pub(crate) fn poly_line(canvas: &mut Node2D, pts: &[(f32, f32)], stroke: f32, color: Color) {
     if pts.len() < 2 {

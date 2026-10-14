@@ -53,6 +53,7 @@ mod load;
 mod menu;
 mod minimap;
 mod objective_markers;
+mod overlay_top;
 pub(crate) mod overlays;
 mod pixelate;
 mod plans;
@@ -245,6 +246,8 @@ pub struct MindWorldRenderer {
     command_overlay: Option<Gd<command_overlay::CommandOverlay>>,
     /// Command-mode attack reticle (`Layer.overlayUI` band; H03 T3).
     command_reticle: Option<Gd<command_overlay::CommandOverlay>>,
+    /// `OverlayRenderer.drawTop` pass (`Layer.overlayUI` band; H03 T5).
+    overlay_top: Option<Gd<overlay_top::OverlayTop>>,
     /// Placement preview (`Layer.plans` band; G03 T2).
     plan_overlay: Option<Gd<plans::PlanOverlay>>,
     /// Build-beam fan (`Layer.buildBeam` band; G03 T3).
@@ -302,6 +305,7 @@ impl INode2D for MindWorldRenderer {
             shields: None,
             command_overlay: None,
             command_reticle: None,
+            overlay_top: None,
             plan_overlay: None,
             build_beam: None,
             bullets: None,
@@ -592,6 +596,15 @@ impl MindWorldRenderer {
             overlay_band.clone().add_child(&node);
             self.command_reticle = Some(node.clone());
         }
+        // `OverlayRenderer.drawTop` - indicators, configure outline, core
+        // radius, drop zone, hover range (`OverlayRenderer.java:91-226`).
+        if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
+            let node = overlay_top::OverlayTop::new_alloc();
+            // code-instantiated: one overlay-top pass; the node count is fixed
+            // by the pipeline, not by content.
+            overlay_band.clone().add_child(&node);
+            self.overlay_top = Some(node.clone());
+        }
         // Placement preview at `Layer.plans` (`DesktopInput.drawBottom`; G03 T2).
         if let Some(plans_band) = self.band_node_at(BandKey::base(Layer::Plans)) {
             let mut node = plans::PlanOverlay::new_alloc();
@@ -824,6 +837,9 @@ impl MindWorldRenderer {
             self.stats.overlay_edges = overlays.stats().edges;
         }
         self.stats.stage_trace.push(String::from("overlays"));
+        if let Some(overlay_top) = self.overlay_top.as_mut() {
+            overlay_top.bind_mut().update_rules(&self.rules);
+        }
         if let Some(fog) = self.fog.as_mut() {
             fog.update(&view, &self.rules);
             let fog_stats = fog.stats();
