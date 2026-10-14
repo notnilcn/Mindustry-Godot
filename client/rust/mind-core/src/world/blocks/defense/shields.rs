@@ -170,10 +170,12 @@ impl ForceProjectorState {
     }
 }
 
-/// `ForceBuild.updateTile` state half (`delta == 1`), without the bullet pass.
+/// `ForceBuild.updateTile` state half, without the bullet pass.
 ///
 /// `coolant_heat_capacity` is the active coolant's `heatCapacity` (`0` = none),
-/// supplied by plan 09 through the consumer pass.
+/// supplied by the caller after `coolantConsumer.update` ran. `delta` is
+/// `Building.delta()` (fixed step × `timeScale`); the three `lerpDelta` calls
+/// use `Time.delta` and are therefore constant-step (delta 1) here.
 pub fn update_force_projector_state(
     world: &mut World,
     e: Entity,
@@ -181,17 +183,20 @@ pub fn update_force_projector_state(
     eff: f32,
     phase_valid: bool,
     coolant_heat_capacity: f32,
+    delta: f32,
 ) {
     let Some((x, y)) = position(world, e) else {
         return;
     };
+    // `ForceProjector.java:209-257`, order matters.
     state.phase_heat = lerp_delta(state.phase_heat, if phase_valid { 1.0 } else { 0.0 }, 0.1);
-    state.warmup = lerp_delta(state.warmup, eff, 0.1);
+    // `ForceProjector.java:221`: `radscl` chases the *previous* tick's warmup.
     state.radscl = lerp_delta(
         state.radscl,
         if state.broken { 0.0 } else { state.warmup },
         0.05,
     );
+    state.warmup = lerp_delta(state.warmup, eff, 0.1);
 
     if state.buildup > 0.0 {
         let mut scale = if !state.broken {
@@ -202,10 +207,9 @@ pub fn update_force_projector_state(
         if coolant_heat_capacity > 0.0 {
             scale *= state.cooldown_liquid * (1.0 + (coolant_heat_capacity - 0.4) * 0.9);
         }
-        state.buildup -= scale;
-        if state.buildup < 0.0 {
-            state.buildup = 0.0;
-        }
+        // `ForceProjector.java:240`: `buildup -= delta() * scale` (no clamp in
+        // Java; `broken` recovers on `buildup <= 0`).
+        state.buildup -= delta * scale;
     }
     if state.broken && state.buildup <= 0.0 {
         state.broken = false;
@@ -227,11 +231,13 @@ pub fn update_force_projector_state(
         );
     }
     if state.hit > 0.0 {
+        // `ForceProjector.java:255`: `hit -= 1f / 5f * Time.delta` (global
+        // delta, not `delta()`; fixed-step 1 here).
         state.hit -= 1.0 / 5.0;
     }
 }
 
-/// `ForceBuild.updateTile` + `deflectBullets` (`delta == 1`).
+/// `ForceBuild.updateTile` + `deflectBullets` (`CombatHarness` path).
 ///
 /// `coolant_heat_capacity` is the active coolant's `heatCapacity` (`0` = none),
 /// supplied by plan 09 through the consumer pass.
@@ -247,7 +253,21 @@ pub fn update_force_projector(
     if position(ctx.world, e).is_none() {
         return;
     }
-    update_force_projector_state(ctx.world, e, state, eff, phase_valid, coolant_heat_capacity);
+    // Harness fixtures have no `Building`; Java's `timeScale` default is 1.
+    let delta = ctx
+        .world
+        .get::<Building>(e)
+        .map(|building| building.time_scale)
+        .unwrap_or(1.0);
+    update_force_projector_state(
+        ctx.world,
+        e,
+        state,
+        eff,
+        phase_valid,
+        coolant_heat_capacity,
+        delta,
+    );
     let Some((x, y)) = position(ctx.world, e) else {
         return;
     };
@@ -262,25 +282,40 @@ fn deflect_bullets(
     x: f32,
     y: f32,
 ) {
+    deflect_bullets_world(ctx.world, ctx.content, state, team, x, y);
+}
+
+/// `ForceBuild.deflectBullets` without a [`CombatCtx`] (live building pass).
+///
+/// Bullets are collected first and processed in ascending `Entity::index()`
+/// order so absorption (and the buildup sum) is deterministic.
+pub fn deflect_bullets_world(
+    world: &mut World,
+    content: &crate::content::ContentRegistry,
+    state: &mut ForceProjectorState,
+    team: u8,
+    x: f32,
+    y: f32,
+) {
     let radius = state.real_radius();
     if radius <= 0.0 || state.broken {
         return;
     }
-    let bullets: Vec<Entity> = ctx
-        .world
+    let mut bullets: Vec<Entity> = world
         .iter_entities()
         .filter(|entity_ref| entity_ref.contains::<crate::combat::bullet::Bullet>())
         .map(|entity_ref| entity_ref.id())
         .collect();
+    bullets.sort_by_key(|entity| entity.index());
     for bullet in bullets {
-        if ctx.world.get::<TeamComp>(bullet).map(|t| t.team) == Some(team) {
+        if world.get::<TeamComp>(bullet).map(|t| t.team) == Some(team) {
             continue;
         }
         let (absorbable, damage) = {
-            let Some(b) = ctx.world.get::<crate::combat::bullet::Bullet>(bullet) else {
+            let Some(b) = world.get::<crate::combat::bullet::Bullet>(bullet) else {
                 continue;
             };
-            let Some(def) = ctx.content.bullet(b.def) else {
+            let Some(def) = content.bullet(b.def) else {
                 continue;
             };
             (
@@ -291,11 +326,11 @@ fn deflect_bullets(
         if !absorbable {
             continue;
         }
-        let Some((bx, by)) = position(ctx.world, bullet) else {
+        let Some((bx, by)) = position(world, bullet) else {
             continue;
         };
         if is_in_regular_polygon(state.sides, x, y, radius, state.shield_rotation, bx, by) {
-            if let Some(mut b) = ctx.world.get_mut::<crate::combat::bullet::Bullet>(bullet) {
+            if let Some(mut b) = world.get_mut::<crate::combat::bullet::Bullet>(bullet) {
                 b.set(crate::combat::bullet::ABSORBED);
             }
             state.hit = 1.0;
@@ -303,7 +338,7 @@ fn deflect_bullets(
             // `ForceProjector.java:65`:
             // `hitSound.at(bullet.x, bullet.y, 1 + range(0.1), 0.12)`.
             crate::audio::sim::emit_world_sound(
-                ctx.world,
+                world,
                 crate::audio::SoundId::SHIELD_HIT,
                 bx,
                 by,

@@ -639,6 +639,11 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::ForceProjector => Arc::new(
             crate::world::blocks::defense::behaviors::ForceProjectorBehavior {
                 state: crate::world::blocks::defense::shields::ForceProjectorState::default(),
+                // `defense::register` overrides this arm with the resolved
+                // phase-fabric id; the fallback only lacks the item gate.
+                phase_use_time: 350.0,
+                phase_item: None,
+                coolant_amount: 0.1,
             },
         ),
         K::ShockMine => Arc::new(

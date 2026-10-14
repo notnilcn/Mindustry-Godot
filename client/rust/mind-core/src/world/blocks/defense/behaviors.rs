@@ -16,7 +16,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
-use crate::entities::comp::Building;
+use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
 use crate::world::modules::PowerModule;
 
@@ -26,8 +26,8 @@ use super::projectors::{
 };
 use super::shields::{
     ForceProjectorState, MendProjectorState, ShieldWallState, ShockMineState, TargetDummyState,
-    update_force_projector_state, update_mend_projector_world, update_shield_wall,
-    update_target_dummy,
+    deflect_bullets_world, update_force_projector_state, update_mend_projector_world,
+    update_shield_wall, update_target_dummy,
 };
 use super::turrets::{behavior::TurretBehavior, config_for};
 
@@ -57,6 +57,13 @@ fn potential_efficiency(world: &World, e: Entity) -> f32 {
 pub struct ForceProjectorBehavior {
     /// Initial `ForceBuild` state.
     pub state: ForceProjectorState,
+    /// `ForceProjector.phaseUseTime` (`ForceProjector.java:32`).
+    pub phase_use_time: f32,
+    /// `Items.phaseFabric` id for the `itemConsumer` gate
+    /// (`Blocks.java:1976`; resolved at registration).
+    pub phase_item: Option<crate::content::ItemId>,
+    /// `ForceProjector.coolantConsumption` (`ForceProjector.java:41`).
+    pub coolant_amount: f32,
 }
 
 impl BuildingBehavior for ForceProjectorBehavior {
@@ -69,9 +76,62 @@ impl BuildingBehavior for ForceProjectorBehavior {
             return;
         };
         let eff = efficiency(world, e);
-        update_force_projector_state(world, e, &mut state, eff, false, 0.0);
+        let delta = crate::world::update::delta(world, e);
+
+        // `ForceProjector.java:207-215`: phase fabric gates the phase heat;
+        // `timer(timerUse, phaseUseTime / timeScale)` consumes one per cycle
+        // while charged (`consume()` triggers the item consumer).
+        let phase_valid = self.phase_item.is_some_and(|item| {
+            world
+                .get::<crate::world::modules::ItemModule>(e)
+                .is_some_and(|items| items.has(item))
+        });
+        if phase_valid && !state.broken {
+            let interval = self.phase_use_time / delta.max(0.000_1);
+            let ripe = crate::world::update::run_timer(world, e, 0, interval);
+            if ripe
+                && eff > 0.0
+                && let Some(item) = self.phase_item
+                && let Some(mut items) = world.get_mut::<crate::world::modules::ItemModule>(e)
+            {
+                items.remove(item, 1);
+            }
+        }
+
+        // `ForceProjector.java:230-240`: an accepted coolant is consumed while
+        // there is buildup and scales the decay rate by its heat capacity.
+        let mut coolant_heat_capacity = 0.0f32;
+        if state.buildup > 0.0 {
+            let edelta = eff * delta;
+            if let Some((liquid, heat_capacity)) = self.coolant_pick(world, e, edelta)
+                && let Some(mut liquids) = world.get_mut::<crate::world::modules::LiquidModule>(e)
+            {
+                liquids.remove(liquid, self.coolant_amount * edelta);
+                coolant_heat_capacity = heat_capacity;
+            }
+        }
+
+        update_force_projector_state(
+            world,
+            e,
+            &mut state,
+            eff,
+            phase_valid,
+            coolant_heat_capacity,
+            delta,
+        );
+
+        // `ForceProjector.java:256`: `deflectBullets()` last.
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        if let Some((x, y)) = world.get::<Pos>(e).map(|p| (p.x, p.y))
+            && let Some(rt) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        {
+            deflect_bullets_world(world, &rt.content, &mut state, team, x, y);
+            world.insert_non_send(rt);
+        }
         world.entity_mut(e).insert(state);
     }
+
     fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
         let (broken, buildup, radscl, warmup, phase_heat) = world
             .get::<ForceProjectorState>(e)
@@ -111,6 +171,52 @@ impl BuildingBehavior for ForceProjectorBehavior {
             state.warmup = warmup;
             state.phase_heat = phase_heat;
         }
+    }
+}
+
+impl ForceProjectorBehavior {
+    /// `ConsumeCoolant.getConsumed`/`efficiency` (`ConsumeLiquidFilter.java:63-83`):
+    /// the current liquid when the coolant filter accepts it, otherwise the
+    /// first content-order liquid that does; `None` when nothing is consumable.
+    ///
+    /// The heat capacity of Java's `liquids.current()` scales the decay rate in
+    /// `updateTile`; until T10 tracks a per-module current liquid, the largest
+    /// non-zero slot stands in for it (`TODO(T10)`: switch to
+    /// `LiquidModule::current_liquid()`).
+    fn coolant_pick(
+        &self,
+        world: &World,
+        e: Entity,
+        edelta: f32,
+    ) -> Option<(crate::content::LiquidId, f32)> {
+        if edelta <= 0.000_000_1 {
+            return None;
+        }
+        let traits = world.get_resource::<crate::world::modules::LiquidTraits>()?;
+        let module = world.get::<crate::world::modules::LiquidModule>(e)?;
+        let mut current: Option<(crate::content::LiquidId, f32)> = None;
+        for (index, &amount) in module.liquids.iter().enumerate() {
+            if amount > current.map(|(_, best)| best).unwrap_or(0.0) {
+                current = Some((crate::content::LiquidId::new(index as u16), amount));
+            }
+        }
+        let consumed = match current {
+            Some((liquid, _))
+                if traits.coolant_accepts(liquid, true, false) && module.current_amount > 0.0 =>
+            {
+                liquid
+            }
+            _ => (0..module.liquids.len())
+                .map(|index| crate::content::LiquidId::new(index as u16))
+                .find(|&liquid| {
+                    traits.coolant_accepts(liquid, true, false) && module.get(liquid) > 0.0
+                })?,
+        };
+        // `ConsumeLiquidFilter.efficiency(this) > 0`.
+        if module.get(consumed) <= 0.0 {
+            return None;
+        }
+        Some((consumed, traits.heat_capacity[consumed.index()]))
     }
 }
 
@@ -497,6 +603,11 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 cooldown_liquid: 1.2,
                 ..ForceProjectorState::default()
             },
+            // `ForceProjector.java:32` `phaseUseTime`.
+            phase_use_time: 350.0,
+            // `ForceProjector.java:41` `coolantConsumption`.
+            coolant_amount: 0.1,
+            phase_item: content.item_id("phase-fabric"),
         }),
     );
     // `Blocks.java:1980 shock-mine`.

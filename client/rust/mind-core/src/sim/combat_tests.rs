@@ -3777,7 +3777,7 @@ fn fire_disabled_rule_blocks_fire() {
 #[test]
 fn force_projector_absorbs_explosion() {
     use crate::entities::comp::unit::comp::ItemsComp;
-    use crate::world::blocks::defense::projectors::BaseShieldState;
+    use crate::world::blocks::defense::shields::ForceProjectorState;
 
     let mut sim = live_sim(48);
     // Power-source feeds the projector; the wall sits inside its radius.
@@ -3787,18 +3787,14 @@ fn force_projector_absorbs_explosion() {
     for _ in 0..600 {
         sim.tick().expect("tick");
     }
-    let radius = sim
+    let (broken, radius) = sim
         .ecs
         .0
-        .get::<BaseShieldState>(projector)
-        .map(|state| state.smooth_radius)
-        .unwrap_or(0.0);
-    if radius <= 1.0 {
-        eprintln!(
-            "force projector uncharged (radius {radius}); absorption covered by the shield unit tests"
-        );
-        return;
-    }
+        .get::<ForceProjectorState>(projector)
+        .map(|state| (state.broken, state.real_radius()))
+        .expect("force projector state");
+    assert!(!broken, "a powered projector is charged");
+    assert!(radius > 90.0, "charged shield radius {radius}");
     let wall_start = health(&sim, wall).expect("wall health");
     let dagger = sim
         .spawn_live_unit("dagger", 2, 22.5 * 8.0, 20.5 * 8.0, 180.0)
@@ -3818,15 +3814,116 @@ fn force_projector_absorbs_explosion() {
     }
     sim.tick().expect("tick");
     sim.tick().expect("tick");
-    eprintln!(
-        "shield radius {radius}, wall {wall_start} -> {:?}",
-        health(&sim, wall)
-    );
     assert_eq!(
         health(&sim, wall),
         Some(wall_start),
         "the projector absorbed the explosion"
     );
+}
+
+/// H02 T7 (PAR-0129): a force projector next to a power source charges to
+/// efficiency 1 and draws its dome (`ForceBuild.updateTile`, warmup/radscl).
+#[test]
+fn force_projector_powered_by_adjacent_source() {
+    use crate::entities::comp::Building;
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let efficiency = sim.ecs.0.get::<Building>(projector).map(|b| b.efficiency);
+    assert!(
+        efficiency.is_some_and(|e| e > 0.99),
+        "powered projector efficiency {efficiency:?}"
+    );
+    let (warmup, radscl) = sim
+        .ecs
+        .0
+        .get::<ForceProjectorState>(projector)
+        .map(|state| (state.warmup, state.radscl))
+        .expect("force projector state");
+    assert!(warmup > 0.99, "warmup {warmup}");
+    assert!(radscl > 0.9, "radscl {radscl}");
+}
+
+/// H02 T7: enemy bullets inside the live dome are absorbed and add buildup
+/// (`ForceBuild.deflectBullets` over `Groups.bullet`).
+#[test]
+fn force_projector_absorbs_enemy_bullet() {
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    // Inside the ~101.7 px dome, 60 px east of the projector centre
+    // (tile centre (20,20) = world (160,160)), facing it.
+    sim.spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0 + 4.0, 180.0)
+        .expect("dagger");
+    let mut absorbed = false;
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+        if let Some(state) = sim.ecs.0.get::<ForceProjectorState>(projector)
+            && (state.buildup > 0.0 || state.hit > 0.0)
+        {
+            absorbed = true;
+            break;
+        }
+    }
+    assert!(absorbed, "dagger bullets are absorbed by the shield");
+}
+
+/// H02 T7: phase fabric raises `phaseHeat` and is consumed every
+/// `phaseUseTime / timeScale` ticks (`ForceProjector.java:207-215`).
+#[test]
+fn force_projector_phase_boost() {
+    use crate::world::blocks::defense::shields::ForceProjectorState;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = live_sim(48);
+    place(&mut sim, 18, 20, "power-source", 1);
+    let projector = place(&mut sim, 20, 20, "force-projector", 1);
+    let phase = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .item_id("phase-fabric")
+        .expect("phase-fabric");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(projector) {
+        items.add(phase, 2, 10);
+    }
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let phase_heat = sim
+        .ecs
+        .0
+        .get::<ForceProjectorState>(projector)
+        .map(|state| state.phase_heat)
+        .expect("force projector state");
+    let count = sim
+        .ecs
+        .0
+        .get::<ItemModule>(projector)
+        .map(|items| items.get(phase))
+        .unwrap_or(0);
+    assert!(phase_heat > 0.9, "phase heat {phase_heat}");
+    assert_eq!(count, 1, "one fabric consumed after the first timer cycle");
+    for _ in 0..400 {
+        sim.tick().expect("tick");
+    }
+    let count = sim
+        .ecs
+        .0
+        .get::<ItemModule>(projector)
+        .map(|items| items.get(phase))
+        .unwrap_or(0);
+    assert_eq!(count, 0, "the second fabric is consumed on the next cycle");
 }
 
 /// G01 T14: `explosion_absorbed` covers the point when a live shield polygon

@@ -540,7 +540,15 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_power: Some(true),
         solid: Some(true),
         update: Some(true),
-        consumes: vec![consume_power(4.0f32)],
+        consumes: vec![
+            // `ForceProjector.java:85-86`: `consume(coolantConsumer =
+            // new ConsumeCoolant(coolantConsumption)).boost().update(false)`.
+            consume_optional(consume_coolant(0.1, true, false)).update(false),
+            // `Blocks.java:1976`: `itemConsumer = consumeItem(Items.phaseFabric).boost()`.
+            consume_optional(consume_items(vec![stack("phase-fabric", 1)])),
+            // `Blocks.java:1977`: `consumePower(4f)`.
+            consume_power(4.0f32),
+        ],
         ..spec("force-projector", BlockKind::ForceProjector)
     })?;
 
