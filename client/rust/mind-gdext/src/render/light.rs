@@ -84,6 +84,16 @@ impl LightRenderer {
         self.stats
     }
 
+    /// The composite mesh node (H03 T6 debug probe).
+    pub fn node(&self) -> Gd<MeshInstance2D> {
+        self.node.clone()
+    }
+
+    /// The composite material, if the `light` shader loaded.
+    pub fn material(&self) -> Option<Gd<ShaderMaterial>> {
+        self.material.clone()
+    }
+
     /// Rebuilds the camera-sized light map when the world, the camera or the
     /// 4-frame cadence asks for it, then composites with `rules.ambient_light`.
     pub fn update(&mut self, view: &CameraView, rules: &RulesRenderView, draw_light: bool) {

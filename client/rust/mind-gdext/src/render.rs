@@ -666,7 +666,7 @@ impl MindWorldRenderer {
             self.env = Some(EnvRenderer::new(light_band));
         }
         if let Some(fog_band) = self.band_node_at(BandKey::base(Layer::FogOfWar)) {
-            self.fog = Some(FogRenderer::new(fog_band));
+            self.fog = Some(FogRenderer::new(fog_band)); // T12-REAPPLY
         }
         if let Some(overlay_band) = self.band_node_at(BandKey::base(Layer::OverlayUi)) {
             self.overlays = Some(OverlayRenderer::new(overlay_band.clone()));
@@ -758,6 +758,22 @@ impl MindWorldRenderer {
             {
                 self.rules = view;
             }
+        }
+        if self.rules_poll.is_multiple_of(30) {
+            // `Renderer.drawLight = settings.getBool("drawlight", true)`
+            // (`Renderer.java:175`; H03 T6): the renderer polls the setting on
+            // the same 30-frame cadence as the rules feed.
+            self.draw_light = self
+                .base()
+                .try_get_node_as::<Node>("/root/MindUi")
+                .map(|mut ui| {
+                    ui.call(
+                        "settings_get_bool",
+                        &[GString::from("drawlight").to_variant()],
+                    )
+                    .booleanize()
+                })
+                .unwrap_or(true);
         }
         self.stats.stage_trace.push(String::from("process_blocks"));
         // `mesh_rebuilds` is cumulative per pass; each pass reports its own boot
@@ -983,6 +999,65 @@ impl MindWorldRenderer {
     #[func]
     pub fn set_draw_light(&mut self, enabled: bool) {
         self.draw_light = enabled;
+    }
+
+    /// Debug probe (kept): light-composite state for the PAR-0246 diagnosis
+    /// table (H03 T6). Never on a per-frame path.
+    #[func]
+    pub fn light_debug_json(&self) -> GString {
+        let Some(light) = self.light.as_ref() else {
+            return GString::from("{\"active\":false}");
+        };
+        let stats = light.stats();
+        let node = light.node();
+        let (surfaces, aabb) = match node.get_mesh() {
+            Some(mesh) => {
+                let aabb = mesh.get_aabb();
+                (
+                    mesh.get_surface_count(),
+                    [aabb.position.x, aabb.position.y, aabb.size.x, aabb.size.y],
+                )
+            }
+            None => (0, [0.0; 4]),
+        };
+        let (shader_head, u_ambient) = match light.material() {
+            Some(material) => {
+                let head = material
+                    .get_shader()
+                    .map(|shader| shader.get_code().to_string())
+                    .unwrap_or_default();
+                let head: String = head.chars().take(120).collect();
+                (
+                    head,
+                    format!("{:?}", material.get_shader_parameter("u_ambient")),
+                )
+            }
+            None => (String::new(), String::from("null")),
+        };
+        let texture_size = node
+            .get_texture()
+            .map(|texture| [texture.get_width(), texture.get_height()])
+            .unwrap_or([0, 0]);
+        let band_visible = node
+            .get_parent()
+            .and_then(|parent| parent.try_cast::<godot::classes::CanvasItem>().ok())
+            .map(|parent| parent.is_visible_in_tree())
+            .unwrap_or(false);
+        let value = serde_json::json!({
+            "active": stats.visible,
+            "rebuilds": stats.rebuilds,
+            "lights": stats.lights,
+            "node_visible": node.is_visible(),
+            "visible_in_tree": node.is_visible_in_tree(),
+            "band_visible": band_visible,
+            "mesh_surfaces": surfaces,
+            "mesh_aabb": aabb,
+            "has_material": light.material().is_some(),
+            "shader_head": shader_head,
+            "u_ambient": u_ambient,
+            "texture_size": texture_size,
+        });
+        GString::from(value.to_string().as_str())
     }
 
     /// Enables/disables the `DebugCollisionRenderer` overlay (plan 16 M6).
