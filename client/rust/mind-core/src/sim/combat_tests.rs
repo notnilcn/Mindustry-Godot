@@ -912,6 +912,11 @@ fn destroyed_blast_container_damages_neighbours() {
         sim.ecs.0.get_entity(container).is_err(),
         "the container was destroyed"
     );
+    // `Damage.dynamicExplosion` staggers its waves 2 ticks apart
+    // (`Time.run(i * 2f)`); the outer waves carry the radius.
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
     assert!(
         health(&sim, wall).is_none_or(|hp| hp < wall_start),
         "the explosion damaged the wall 2 tiles away: {:?}",
@@ -952,6 +957,11 @@ fn destroyed_coal_container_starts_fire() {
         sim.ecs.0.get_entity(container).is_err(),
         "the container was destroyed"
     );
+    // The fire now comes from the staggered `Bullets.fireball` spawns
+    // (`Time.run(i / 2f)`), not an immediate `Fires.create`.
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
     let fire = (10..=11)
         .any(|tx| (10..=11).any(|ty| crate::combat::fires::find_at(&sim.ecs.0, tx, ty).is_some()));
     assert!(
@@ -3661,7 +3671,10 @@ fn unit_with_blast_compound_explodes() {
         hp.dead = true;
     }
     sim.tick().expect("tick");
-    sim.tick().expect("tick");
+    // Staggered waves (`Time.run(i * 2f)`): the growing radius needs ticks.
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
     let wall_end = health(&sim, wall);
     eprintln!("wall {wall_start} -> {wall_end:?}");
     assert!(
@@ -4263,4 +4276,167 @@ fn disabled_duo_does_not_fire() {
         Some(start),
         "the enemy takes no duo damage"
     );
+}
+
+/// H09 T7: a container full of 100 blast-compound explodes with
+/// `explosiveness = 120` and `flammability = 40` (before the
+/// `* 3.5 * explosivenessScale` caller scaling).
+#[test]
+fn blast_container_explosion_terms() {
+    let mut sim = live_sim(32);
+    let container = place(&mut sim, 5, 5, "container", 1);
+    let (content_len, blast, capacity) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        (
+            content.items().len(),
+            content.item_id("blast-compound").expect("blast-compound"),
+            content
+                .block_by_name("container")
+                .map(|def| def.item_capacity)
+                .unwrap_or(300),
+        )
+    };
+    let mut module = crate::world::modules::ItemModule::with_items(content_len);
+    module.add(blast, 100, capacity.max(100));
+    sim.ecs.0.entity_mut(container).insert(module);
+
+    let content = &sim.unit_runtime().expect("rt").content;
+    let def = content.block_by_name("container").expect("def").clone();
+    let (flammability, explosiveness, power) =
+        super::unit_runtime::building_explosion_terms(&sim.ecs.0, content, container, &def);
+    assert!(
+        (explosiveness - 120.0).abs() < 1e-3,
+        "explosiveness {explosiveness}"
+    );
+    assert!(
+        (flammability - 40.0).abs() < 1e-3,
+        "flammability {flammability}"
+    );
+    assert_eq!(power, 0.0, "no charge items");
+    // Caller scaling (`BuildingComp.java:1518`).
+    assert!((explosiveness * 3.5 * def.explosiveness_scale - 420.0).abs() < 1e-3);
+}
+
+/// H09 T7: a vault linked to a core caps its item explosion at
+/// `min(itemCapacity / 60, 6)` (`StorageBlock.java:99-103`).
+#[test]
+fn linked_vault_explodes_weakly() {
+    let mut sim = live_sim(32);
+    place(&mut sim, 5, 5, "core-shard", 1);
+    let vault = place(&mut sim, 8, 5, "vault", 1);
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::storage::storage_block::StorageBuild>(vault)
+            .and_then(|storage| storage.linked_core)
+            .is_some(),
+        "the vault links to the adjacent core"
+    );
+    let (content_len, blast, capacity) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        (
+            content.items().len(),
+            content.item_id("blast-compound").expect("blast-compound"),
+            content
+                .block_by_name("vault")
+                .map(|def| def.item_capacity)
+                .unwrap_or(1000),
+        )
+    };
+    let mut module = crate::world::modules::ItemModule::with_items(content_len);
+    module.add(blast, 1000, capacity);
+    sim.ecs.0.entity_mut(vault).insert(module);
+
+    let content = &sim.unit_runtime().expect("rt").content;
+    let def = content.block_by_name("vault").expect("def").clone();
+    let (_, explosiveness, _) =
+        super::unit_runtime::building_explosion_terms(&sim.ecs.0, content, vault, &def);
+    assert!(
+        (explosiveness - 1.2 * 6.0).abs() < 1e-3,
+        "capped explosiveness (6 items) {explosiveness}"
+    );
+}
+
+/// H09 T7: a charged battery's `power` term is `status * capacity` (4000) and
+/// `dynamic_explosion` schedules `clamp(4000/700, 0, 8) = 6` lightning bolts.
+#[test]
+fn battery_lightning_count() {
+    use crate::combat::damage::explosion::{
+        DelayedAction, DelayedExplosionActions, dynamic_explosion,
+    };
+
+    let mut sim = live_sim(32);
+    let battery = place(&mut sim, 5, 5, "battery", 1);
+    if let Some(mut power) = sim
+        .ecs
+        .0
+        .get_mut::<crate::world::modules::PowerModule>(battery)
+    {
+        power.status = 1.0;
+    }
+    let content = &sim.unit_runtime().expect("rt").content;
+    let def = content.block_by_name("battery").expect("def").clone();
+    assert_eq!(def.base_explosiveness, 1.0, "battery baseExplosiveness");
+    let (_, explosiveness, power) =
+        super::unit_runtime::building_explosion_terms(&sim.ecs.0, content, battery, &def);
+    assert_eq!(explosiveness, 1.0);
+    assert!(
+        (power - 4000.0).abs() < 1e-3,
+        "battery buffered capacity 4000: {power}"
+    );
+    sim.with_combat_ctx(|ctx| {
+        dynamic_explosion(
+            ctx,
+            40.0,
+            40.0,
+            0.0,
+            explosiveness,
+            power,
+            16.0,
+            true,
+            false,
+            Some(1),
+        );
+    });
+    let actions = sim
+        .ecs
+        .0
+        .get_resource::<DelayedExplosionActions>()
+        .expect("actions");
+    let bolts = actions
+        .0
+        .iter()
+        .filter(|(_, action)| matches!(action, DelayedAction::Lightning { .. }))
+        .count();
+    assert_eq!(bolts, 6, "4000 / 700 = 5.71 -> 6 bolts");
+    assert_eq!(actions.0.len(), 6, "no fireballs or waves");
+}
+
+/// H09 T7: explosiveness 33 splits into 3 waves spaced 2 ticks apart
+/// (`Time.run(i * 2f)`).
+#[test]
+fn explosion_waves_are_staggered() {
+    use crate::combat::damage::explosion::dynamic_explosion;
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let start = health(&sim, wall).expect("wall health");
+    let (x, y) = (20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0);
+    sim.with_combat_ctx(|ctx| {
+        // Team 2 is protected; the team-1 wall takes every wave.
+        dynamic_explosion(ctx, x, y, 0.0, 33.0, 0.0, 24.0, true, false, Some(2));
+    });
+    let after_inline = health(&sim, wall).expect("wall health");
+    assert!(after_inline < start, "wave 0 damages inline");
+    let mut drops = 1;
+    let mut previous = after_inline;
+    for _ in 0..8 {
+        sim.tick().expect("tick");
+        let now = health(&sim, wall).expect("wall health");
+        if now < previous - 1e-3 {
+            drops += 1;
+        }
+        previous = now;
+    }
+    assert_eq!(drops, 3, "three staggered waves (+0/+2/+4)");
 }

@@ -2212,6 +2212,14 @@ pub struct BlockDef {
     /// `SwitchBlock.java:23`): re-enabled by `World.checkMapArea` when a map
     /// area shrinks (`World.java:469-481`).
     pub auto_reset_enabled: bool,
+    /// `Block.baseExplosiveness` (`Block.java:197`; `PowerGenerator` 5,
+    /// batteries 1/5 — H09 T7).
+    pub base_explosiveness: f32,
+    /// `Block.explosivenessScale` (`Block.java:199`; the conduit family
+    /// fractions from `Blocks.java:2327-2458`).
+    pub explosiveness_scale: f32,
+    /// `Block.flammabilityScale` (`Block.java:200`).
+    pub flammability_scale: f32,
     /// `Block.replaceable` (plan 07 `can_replace`).
     pub replaceable: bool,
     /// `Block.quickRotate` (plan 07 `can_replace` self-replacement).
@@ -2502,6 +2510,11 @@ impl BlockDef {
             // `SwitchBlock.java:23`: `autoResetEnabled = false` (switch and
             // world-switch are the only vanilla overrides).
             auto_reset_enabled: spec.kind != BlockKind::SwitchBlock,
+            // Actual values (generators/batteries/conduits) are set in
+            // `init_self` (`Block.java:197-201`).
+            base_explosiveness: 0.0,
+            explosiveness_scale: 1.0,
+            flammability_scale: 1.0,
             replaceable: spec.replaceable.unwrap_or(true),
             quick_rotate: spec.quick_rotate.unwrap_or(true),
             subclass,
@@ -2784,6 +2797,48 @@ impl Content for BlockDef {
         ) && !self.flags.contains(&BlockFlag::HasFogRadius)
         {
             self.flags.push(BlockFlag::HasFogRadius);
+        }
+
+        // `Block.baseExplosiveness`/`explosivenessScale`/`flammabilityScale`
+        // (`Block.java:197-201`): every `PowerGenerator` subclass gets
+        // `baseExplosiveness = 5` (`PowerGenerator.java:60`), batteries override
+        // it (`Blocks.java:2513,2520`) and the conduit family scales down
+        // (`Blocks.java:2327-2458`, written upstream as
+        // `explosivenessScale = flammabilityScale = A/B` -> both `A/B`).
+        if matches!(
+            self.kind,
+            BlockKind::ConsumeGenerator
+                | BlockKind::ThermalGenerator
+                | BlockKind::SolarGenerator
+                | BlockKind::NuclearReactor
+                | BlockKind::ImpactReactor
+                | BlockKind::VariableReactor
+                | BlockKind::HeaterGenerator
+        ) {
+            self.base_explosiveness = 5.0;
+        }
+        let (base, explosiveness_scale, flammability_scale) = match self.name.as_str() {
+            "battery" => (Some(1.0), None, None),
+            "battery-large" => (Some(5.0), None, None),
+            "conduit" => (None, Some(10.0 / 20.0), Some(10.0 / 20.0)),
+            "pulse-conduit" => (None, Some(16.0 / 40.0), Some(16.0 / 40.0)),
+            "plated-conduit" => (None, Some(16.0 / 50.0), Some(16.0 / 50.0)),
+            "liquid-router" => (None, Some(20.0 / 120.0), Some(20.0 / 120.0)),
+            "bridge-conduit" => (None, Some(20.0 / 100.0), Some(20.0 / 100.0)),
+            "phase-conduit" => (None, Some(20.0 / 100.0), Some(20.0 / 100.0)),
+            "reinforced-conduit" => (None, Some(20.0 / 50.0), Some(20.0 / 50.0)),
+            "reinforced-bridge-conduit" => (None, Some(20.0 / 120.0), Some(20.0 / 120.0)),
+            "reinforced-liquid-router" => (None, Some(40.0 / 150.0), Some(40.0 / 150.0)),
+            _ => (None, None, None),
+        };
+        if let Some(base) = base {
+            self.base_explosiveness = base;
+        }
+        if let Some(scale) = explosiveness_scale {
+            self.explosiveness_scale = scale;
+        }
+        if let Some(scale) = flammability_scale {
+            self.flammability_scale = scale;
         }
 
         if self.health == -1 {
