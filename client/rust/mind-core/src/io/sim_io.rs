@@ -101,61 +101,61 @@ impl Sim {
 
 /// One decoded live-unit record (`SaveVersion.writeWorldEntities`).
 #[derive(Debug, Clone, PartialEq)]
-struct DecodedUnit {
+pub(crate) struct DecodedUnit {
     /// Chunk revision the unit was read from.
-    revision: u16,
+    pub(crate) revision: u16,
     /// Content unit name (`UnitType.name`).
-    name: String,
+    pub(crate) name: String,
     /// Team id.
-    team: u8,
+    pub(crate) team: u8,
     /// World-pixel x.
-    x: f32,
+    pub(crate) x: f32,
     /// World-pixel y.
-    y: f32,
+    pub(crate) y: f32,
     /// Facing angle in degrees.
-    rotation: f32,
+    pub(crate) rotation: f32,
     /// Current health.
-    health: f32,
+    pub(crate) health: f32,
     /// Carried payload stack (revision 2+; empty in v1 saves).
-    payloads: Vec<crate::entities::comp::unit::comp::CarriedPayload>,
+    pub(crate) payloads: Vec<crate::entities::comp::unit::comp::CarriedPayload>,
     /// `UnitComp.spawnedByCore` (revision 3+).
-    spawned_by_core: bool,
+    pub(crate) spawned_by_core: bool,
     /// Flight elevation (revision 3+).
-    elevation: f32,
+    pub(crate) elevation: f32,
     /// Current shield points (revision 3+).
-    shield: f32,
+    pub(crate) shield: f32,
     /// Carried item stack (revision 3+).
-    stack: Option<(crate::content::ItemId, i32)>,
+    pub(crate) stack: Option<(crate::content::ItemId, i32)>,
     /// Active status effects (revision 3+).
-    statuses: Vec<crate::entities::comp::unit::comp::StatusEntry>,
+    pub(crate) statuses: Vec<crate::entities::comp::unit::comp::StatusEntry>,
     /// Active command id (revision 3+).
-    command: Option<u16>,
+    pub(crate) command: Option<u16>,
     /// Saved controller kind (revision 3+).
-    controller: Option<crate::ai::controller::AiKind>,
+    pub(crate) controller: Option<crate::ai::controller::AiKind>,
     /// Builder plan queue (revision 3+).
-    plans: Vec<crate::sim::builder::UnitBuildPlan>,
+    pub(crate) plans: Vec<crate::sim::builder::UnitBuildPlan>,
 }
 
 /// One decoded live fire record (`FireComp.read` sim fields).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct DecodedFire {
+pub(crate) struct DecodedFire {
     /// Owning tile.
-    tile: (i16, i16),
+    pub(crate) tile: (i16, i16),
     /// Ticks lived.
-    time: f32,
+    pub(crate) time: f32,
     /// Ticks to live.
-    lifetime: f32,
+    pub(crate) lifetime: f32,
 }
 
 /// One decoded live puddle record (`PuddleComp.read` sim fields).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct DecodedPuddle {
+pub(crate) struct DecodedPuddle {
     /// Owning tile.
-    tile: (i16, i16),
+    pub(crate) tile: (i16, i16),
     /// Liquid content id.
-    liquid: crate::content::LiquidId,
+    pub(crate) liquid: crate::content::LiquidId,
     /// Current amount.
-    amount: f32,
+    pub(crate) amount: f32,
 }
 
 /// Read-side entity sink collecting the native live-unit/fire/puddle chunks.
@@ -167,11 +167,16 @@ struct LiveEntitySink {
 }
 
 impl EntitySink for LiveEntitySink {
-    fn supports_class(&self, class_id: u8, _custom_name: Option<&str>) -> bool {
-        matches!(
+    fn supports_class(&self, class_id: u8, custom_name: Option<&str>) -> bool {
+        if matches!(
             class_id,
             SIM_UNIT_CLASS_ID | SIM_FIRE_CLASS_ID | SIM_PUDDLE_CLASS_ID
-        )
+        ) {
+            return true;
+        }
+        // H04 T10: upstream (Java `MSAV`) classes. A custom id-map name means
+        // a mod entity reusing the byte; only the vanilla classes decode.
+        custom_name.is_none() && crate::io::java_entities::supports_java_class(class_id)
     }
 
     fn read_entity(
@@ -179,6 +184,7 @@ impl EntitySink for LiveEntitySink {
         class_id: u8,
         _custom_name: Option<&str>,
         _id: i32,
+        content: Option<&ContentRegistry>,
         r: &mut WireReader,
     ) -> IoResult<()> {
         match class_id {
@@ -317,10 +323,28 @@ impl EntitySink for LiveEntitySink {
                     amount: state.amount,
                 });
             }
+            // H04 T10: upstream `FireComp`/`PuddleComp`/unit chunks
+            // (`supports_class` only routes the decodable Java classes here).
+            crate::io::java_entities::JAVA_FIRE_CLASS_ID => {
+                if let Some(fire) = crate::io::java_entities::read_java_fire(r)? {
+                    self.fires.push(fire);
+                }
+            }
+            crate::io::java_entities::JAVA_PUDDLE_CLASS_ID => {
+                let Some(content) = content else {
+                    return Ok(());
+                };
+                if let Some(puddle) = crate::io::java_entities::read_java_puddle(r, content)? {
+                    self.puddles.push(puddle);
+                }
+            }
             other => {
-                return Err(IoError::corrupt(format!(
-                    "unknown live entity class id {other}"
-                )));
+                let Some(content) = content else {
+                    return Ok(());
+                };
+                if let Some(unit) = crate::io::java_entities::read_java_unit(other, r, content)? {
+                    self.units.push(unit);
+                }
             }
         }
         Ok(())
@@ -783,6 +807,10 @@ impl Sim {
     /// Respawns the decoded world entities (units, fires, puddles) into the
     /// live runtime (`SaveVersion.readWorldEntities` application half).
     pub fn apply_decoded_entities(&mut self, save: &DecodedSave) {
+        // H04 T13: remember which units this restore spawned so
+        // `reset_loaded_controllers` can run Java's `UnitComp.afterRead` once
+        // the session rules reach the world.
+        self.loaded_unit_entities.clear();
         let default_team = self
             .ecs
             .0
@@ -806,6 +834,7 @@ impl Sim {
             if let Some(entity) =
                 self.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
             {
+                self.loaded_unit_entities.push(entity);
                 if unit.health > 0.0
                     && let Some(mut health) = self.ecs.0.get_mut::<Health>(entity)
                 {
@@ -956,6 +985,37 @@ impl Sim {
                     effect_time: 0.0,
                 },
             ));
+        }
+    }
+
+    /// `UnitComp.afterRead` (`UnitComp.java:585-593`): every unit read from a
+    /// save re-derives `type.createController(unit)` unless its saved
+    /// controller keeps state (`LogicAI`/`CommandAI`; `keepState`). The resume
+    /// path calls this once the session rules are installed, because the
+    /// world load spawns the units before `CampaignRuntime` exists and the
+    /// spawn fallback (`BuildRules.defaultTeam` = derelict) marks a
+    /// player-team unit as AI (`GroundAI` instead of `CommandAI`).
+    pub fn reset_loaded_controllers(&mut self) {
+        use crate::ai::controller::{AiKind, ControllerSlot};
+        let entities = std::mem::take(&mut self.loaded_unit_entities);
+        for entity in entities {
+            let Some(kind) = self
+                .ecs
+                .0
+                .get::<ControllerSlot>(entity)
+                .map(|slot| slot.kind)
+            else {
+                continue;
+            };
+            // The player's own unit keeps its `Player` bridge; upstream keeps
+            // the saved controller instance only when `keepState` is true.
+            if kind == AiKind::Player || crate::ai::controller_registry::keep_state(kind) {
+                continue;
+            }
+            let Some(team) = self.ecs.0.get::<TeamComp>(entity).map(|comp| comp.team) else {
+                continue;
+            };
+            self.release_unit_to_ai(entity, team);
         }
     }
 }
@@ -1753,6 +1813,247 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec!["dagger".to_owned()]);
+    }
+
+    /// H04 T13: `UnitComp.afterRead` (`UnitComp.java:585-593`). A world load
+    /// spawns the saved units before the campaign session exists, so the spawn
+    /// fallback (`BuildRules.defaultTeam` = derelict) gives a player-team unit
+    /// the per-type AI. Once the session rules are installed,
+    /// `reset_loaded_controllers` re-derives `type.createController`
+    /// (`UnitType.java:281-283`): team `defaultTeam` -> `CommandAI`, wave team
+    /// -> `GroundAI`; a saved `Player` bridge is never replaced.
+    #[test]
+    fn loaded_player_team_units_get_command_ai() {
+        use crate::ai::controller::{AiKind, ControllerSlot};
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let unit = |name: &str, team: u8, controller: Option<AiKind>| DecodedUnit {
+            revision: 3,
+            name: name.to_owned(),
+            team,
+            x: 100.0,
+            y: 100.0,
+            rotation: 0.0,
+            health: 150.0,
+            payloads: Vec::new(),
+            spawned_by_core: false,
+            elevation: 0.0,
+            shield: 0.0,
+            stack: None,
+            statuses: Vec::new(),
+            command: None,
+            controller,
+            plans: Vec::new(),
+        };
+        let save_with = |units: Vec<DecodedUnit>| DecodedSave {
+            grid: WorldGrid::new(0, 0),
+            pending: Vec::new(),
+            plans: Vec::new(),
+            tags: StringMap::default(),
+            rules: None,
+            stats: None,
+            markers: MapMarkers::default(),
+            entities: LiveEntitySink {
+                units,
+                fires: Vec::new(),
+                puddles: Vec::new(),
+            },
+            static_fog: None,
+        };
+        let by_team = |sim: &Sim| -> Vec<(u8, AiKind)> {
+            sim.unit_runtime()
+                .expect("runtime")
+                .units
+                .iter()
+                .copied()
+                .filter_map(|entity| {
+                    let team = sim.ecs.0.get::<TeamComp>(entity)?.team;
+                    let kind = sim.ecs.0.get::<ControllerSlot>(entity)?.kind;
+                    Some((team, kind))
+                })
+                .collect()
+        };
+
+        // World-load order: no `CampaignRuntime` yet (`load_sector` runs before
+        // `start_sector_with_loadout` installs the session).
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.apply_decoded_entities(&save_with(vec![
+            unit("dagger", 1, None),
+            unit("dagger", 2, None),
+            unit("dagger", 1, Some(AiKind::Player)),
+        ]));
+        // Fallback: every team but derelict reads as AI, so both daggers get
+        // their per-type `GroundAI` (the bug state).
+        assert!(by_team(&sim).iter().enumerate().all(|(i, (_, kind))| {
+            if i == 2 {
+                *kind == AiKind::Player
+            } else {
+                *kind == AiKind::Ground
+            }
+        }));
+
+        // The session rules reach the world; Java's `afterRead` then re-derives
+        // the controllers. A live campaign sector (`PlaySession.sector`) is
+        // what makes wave team 2 an AI team (`Team.isAI`) even with
+        // `rules.waves` false.
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            unit_cap: 100,
+            unit_cap_variable: false,
+            ..Rules::default()
+        });
+        session.sector = Some((crate::content::PlanetId::new(0), 170));
+        sim.ecs.0.insert_resource(CampaignRuntime::new(
+            session,
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        sim.reset_loaded_controllers();
+        let kinds = by_team(&sim);
+        assert!(
+            kinds.contains(&(1, AiKind::Command)),
+            "player team: {kinds:?}"
+        );
+        assert!(kinds.contains(&(2, AiKind::Ground)), "wave team: {kinds:?}");
+        assert!(
+            kinds.contains(&(1, AiKind::Player)),
+            "player bridge: {kinds:?}"
+        );
+
+        // The stash is consumed: a second call changes nothing.
+        sim.reset_loaded_controllers();
+        assert_eq!(by_team(&sim), kinds);
+    }
+
+    /// H04 T13: a revision-3 unit whose saved controller keeps state
+    /// (`LogicAI`, `AIController.keepState`) survives `afterRead`.
+    #[test]
+    fn loaded_logic_unit_keeps_state() {
+        use crate::ai::controller::{AiKind, ControllerSlot};
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let save = DecodedSave {
+            grid: WorldGrid::new(0, 0),
+            pending: Vec::new(),
+            plans: Vec::new(),
+            tags: StringMap::default(),
+            rules: None,
+            stats: None,
+            markers: MapMarkers::default(),
+            entities: LiveEntitySink {
+                units: vec![DecodedUnit {
+                    revision: 3,
+                    name: "dagger".to_owned(),
+                    team: 1,
+                    x: 100.0,
+                    y: 100.0,
+                    rotation: 0.0,
+                    health: 150.0,
+                    payloads: Vec::new(),
+                    spawned_by_core: false,
+                    elevation: 0.0,
+                    shield: 0.0,
+                    stack: None,
+                    statuses: Vec::new(),
+                    command: None,
+                    controller: Some(AiKind::Logic),
+                    plans: Vec::new(),
+                }],
+                fires: Vec::new(),
+                puddles: Vec::new(),
+            },
+            static_fog: None,
+        };
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.apply_decoded_entities(&save);
+        sim.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                wave_team: 2,
+                unit_cap: 100,
+                unit_cap_variable: false,
+                ..Rules::default()
+            }),
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        sim.reset_loaded_controllers();
+        let entity = sim.unit_runtime().expect("runtime").units[0];
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<ControllerSlot>(entity)
+                .map(|slot| slot.kind),
+            Some(AiKind::Logic)
+        );
+    }
+
+    /// H04 T10: the reference client's Ground Zero save (v13 `MSAV`) entity
+    /// region decodes — the only chunk is the player's core alpha
+    /// (`spawnedByCore`), which `apply_decoded_entities` then skips
+    /// (`apply_decoded_entities_skips_core_units` contract: 0 units restored).
+    #[cfg(feature = "msav-import")]
+    #[test]
+    fn java_gz_fixture_skips_core_unit() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        registry.init().expect("init");
+        registry.post_init().expect("post init");
+        let path = format!(
+            "{}/tests/fixtures/saves/java-gz-r05.msav",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).expect("java gz fixture");
+        let save = decode_save_bytes(&bytes, &mut registry).expect("decode");
+        assert_eq!(save.entities.units.len(), 1, "the core alpha decodes");
+        assert_eq!(save.entities.units[0].name, "alpha");
+        assert!(save.entities.units[0].spawned_by_core);
+        assert_eq!(save.entities.units[0].team, 1);
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                wave_team: 2,
+                unit_cap: 100,
+                unit_cap_variable: false,
+                ..Rules::default()
+            }),
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        sim.apply_decoded_entities(&save);
+        assert!(
+            sim.unit_runtime().expect("runtime").units.is_empty(),
+            "the core unit is skipped on apply"
+        );
     }
 
     /// The live unit/fire/puddle chunk class ids must stay clear of the

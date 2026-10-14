@@ -17,6 +17,7 @@ pub mod data_archive;
 pub mod entity;
 pub mod error;
 pub mod fs;
+pub mod java_entities;
 pub mod json;
 pub mod legacy;
 pub mod map;

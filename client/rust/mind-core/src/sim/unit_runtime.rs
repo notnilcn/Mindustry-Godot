@@ -1793,7 +1793,8 @@ impl Sim {
     /// Releases a possessed unit back to its team AI
     /// (`InputHandler.unitClear` standard branch / `Unit.resetController`):
     /// drop the `Player` marker and hand the unit to the team controller.
-    fn release_unit_to_ai(&mut self, entity: Entity, team: u8) {
+    /// Also the controller-switch half of `UnitComp.afterRead` (H04 T13).
+    pub(crate) fn release_unit_to_ai(&mut self, entity: Entity, team: u8) {
         use crate::entities::comp::Player;
         let def = {
             let Some(runtime) = self.ecs.0.get_non_send::<UnitRuntime>() else {

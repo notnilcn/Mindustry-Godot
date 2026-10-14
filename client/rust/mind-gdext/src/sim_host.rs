@@ -2721,6 +2721,14 @@ impl MindSimHost {
         Some(sync)
     }
 
+    /// `UnitComp.afterRead` (`UnitComp.java:585-593`): re-derives the
+    /// controllers of the units the last world load restored, now that the
+    /// session rules are installed (H04 T13). Rust-only seam for
+    /// `MindCampaign.start_sector`'s resume path.
+    pub fn reset_loaded_unit_controllers(&mut self) {
+        self.sim.reset_loaded_controllers();
+    }
+
     /// Queues the spawn of `wave` (0-based) on the live unit runtime; the
     /// `TickSet::RunWave` system emits it on the next tick. No-op without the
     /// runtime. Rust-only seam for `MindCampaign.run_wave`.

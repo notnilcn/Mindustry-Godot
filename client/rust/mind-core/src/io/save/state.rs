@@ -275,12 +275,14 @@ pub trait EntitySink {
     fn supports_class(&self, class_id: u8, custom_name: Option<&str>) -> bool;
     /// Reads one entity chunk payload (after class id + entity id): the codec
     /// revision (`u16`) then fields. Implementations instantiate/register the
-    /// entity and honor duplicate-ID reassignment.
+    /// entity and honor duplicate-ID reassignment. `content` carries the
+    /// active save mapper for upstream (Java) chunks (H04 T10).
     fn read_entity(
         &mut self,
         class_id: u8,
         custom_name: Option<&str>,
         id: i32,
+        content: Option<&ContentRegistry>,
         r: &mut WireReader,
     ) -> IoResult<()>;
     /// The `afterReadAll` pass (`Groups.all/unit/allBuildings.each`).
