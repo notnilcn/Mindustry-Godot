@@ -62,7 +62,7 @@ impl UnitHarness {
     pub fn new(width: i32, height: i32, seed: u64) -> Self {
         let build = BuildHarness::new(width, height, seed);
         let mut pathfinder = Pathfinder::new(width, height);
-        pathfinder.rebuild(&build.grid, &build.content, 0);
+        pathfinder.rebuild(&build.grid, &build.content, &build.world, false);
         Self {
             build,
             pathfinder,
@@ -336,8 +336,12 @@ impl UnitHarness {
 
     /// Updates the pathfinding tile layer (call after placing/breaking blocks).
     pub fn refresh_path_tiles(&mut self) {
-        self.pathfinder
-            .rebuild(&self.build.grid, &self.build.content, self.path_team);
+        self.pathfinder.rebuild(
+            &self.build.grid,
+            &self.build.content,
+            &self.build.world,
+            false,
+        );
     }
 
     /// Deterministic checksum over live units in `EntitySeq` order.

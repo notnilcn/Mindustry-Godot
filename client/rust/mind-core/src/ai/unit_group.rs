@@ -315,7 +315,7 @@ mod tests {
             }
         }
         let mut path = ControlPathfinder::new(width, height);
-        path.build(&grid, &content, 0);
+        path.build(&grid, &content, &bevy_ecs::world::World::new(), 0, false);
         path
     }
 

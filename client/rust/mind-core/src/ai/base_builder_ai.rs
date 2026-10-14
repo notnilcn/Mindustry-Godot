@@ -318,7 +318,7 @@ impl BaseBuilderAi {
         for _ in 0..PATH_STEP {
             let cx = calc.x() as i32;
             let cy = calc.y() as i32;
-            let mut min_cost = f32::INFINITY;
+            let mut min_cost = i32::MAX;
             let mut next: Option<TilePos> = None;
             for (dx, dy) in D4 {
                 let nx = cx + dx;
@@ -327,7 +327,7 @@ impl BaseBuilderAi {
                     continue;
                 }
                 let weight = weights[(nx + ny * width) as usize];
-                if weight.is_finite() && weight < min_cost {
+                if weight != crate::ai::pathfinder::flowfield::UNREACHABLE && weight < min_cost {
                     min_cost = weight;
                     next = Some(TilePos::new(nx as i16, ny as i16));
                 }

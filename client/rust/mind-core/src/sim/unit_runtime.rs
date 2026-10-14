@@ -126,9 +126,18 @@ pub struct UnitRuntime {
 
 impl UnitRuntime {
     /// Builds a runtime over `grid` with `content` and a fresh pathfinder.
-    pub fn new(content: ContentRegistry, grid: &WorldGrid, wave_team: u8) -> Self {
+    ///
+    /// `world` supplies the per-tile building terms of the packed path tiles
+    /// (`Pathfinder.packTile`); `core_capture` mirrors `Rules.coreCapture`.
+    pub fn new(
+        content: ContentRegistry,
+        grid: &WorldGrid,
+        world: &World,
+        wave_team: u8,
+        core_capture: bool,
+    ) -> Self {
         let mut pathfinder = Pathfinder::new(grid.width(), grid.height());
-        pathfinder.rebuild(grid, &content, wave_team);
+        pathfinder.rebuild(grid, &content, world, core_capture);
         Self {
             content,
             grid: grid.clone(),
@@ -155,10 +164,10 @@ impl UnitRuntime {
     }
 
     /// Re-snapshots the terrain and rebuilds the packed path tiles.
-    pub fn refresh_grid(&mut self, grid: &WorldGrid) {
+    pub fn refresh_grid(&mut self, grid: &WorldGrid, world: &World, core_capture: bool) {
         self.grid = grid.clone();
         self.pathfinder
-            .rebuild(&self.grid, &self.content, self.path_team);
+            .rebuild(&self.grid, &self.content, world, core_capture);
         self.control_path_dirty = true;
     }
 
@@ -166,10 +175,12 @@ impl UnitRuntime {
     /// [`Self::refresh_grid`] (`ControlPathfinder` world-update hook).
     pub fn control_path(&mut self) -> &mut crate::ai::ControlPathfinder {
         if self.control_path_dirty {
+            let team = self.path_team;
             self.control_path.rebuild_passability(
                 self.pathfinder.width,
                 self.pathfinder.height,
                 &self.pathfinder.tiles,
+                team,
             );
             self.control_path_dirty = false;
         }
@@ -177,7 +188,7 @@ impl UnitRuntime {
     }
 
     /// Clears transient match state after `Logic.reset` (`Groups.clear`).
-    pub fn reset(&mut self, grid: &WorldGrid) {
+    pub fn reset(&mut self, grid: &WorldGrid, world: &World, core_capture: bool) {
         self.units.clear();
         self.bullets.clear();
         self.pending_wave = None;
@@ -188,7 +199,7 @@ impl UnitRuntime {
         self.units_removed = 0;
         self.bullets_created = 0;
         self.bullets_removed = 0;
-        self.refresh_grid(grid);
+        self.refresh_grid(grid, world, core_capture);
     }
 
     /// Live unit count (entity-validated).
@@ -941,7 +952,9 @@ impl Sim {
             .0
             .insert_resource(crate::world::events::BuildDamageLog::default());
         let wave_team = crate::game::rules::Rules::default().wave_team;
-        let runtime = UnitRuntime::new(content, &self.grid, wave_team);
+        let core_capture =
+            crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
+        let runtime = UnitRuntime::new(content, &self.grid, &self.ecs.0, wave_team, core_capture);
         self.ecs.0.insert_non_send(runtime);
     }
 
@@ -949,14 +962,17 @@ impl Sim {
     /// the packed path tiles when it changes.
     pub fn set_unit_wave_team(&mut self, team: u8) {
         let grid = self.grid.clone();
-        let Some(mut runtime) = self.ecs.0.get_non_send_mut::<UnitRuntime>() else {
+        let core_capture =
+            crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
+        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
             return;
         };
         runtime.wave_team = team;
         if runtime.path_team != team {
             runtime.path_team = team;
-            runtime.refresh_grid(&grid);
+            runtime.refresh_grid(&grid, &self.ecs.0, core_capture);
         }
+        self.ecs.0.insert_non_send(runtime);
     }
 
     /// Requests a wave spawn for `wave` (0-based; `Logic.runWave` calls
@@ -973,10 +989,13 @@ impl Sim {
     /// Re-snapshots the live grid into the unit runtime (map load/tile change).
     pub fn refresh_unit_runtime(&mut self) {
         let grid = self.grid.clone();
-        let Some(mut runtime) = self.ecs.0.get_non_send_mut::<UnitRuntime>() else {
+        let core_capture =
+            crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
+        let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() else {
             return;
         };
-        runtime.refresh_grid(&grid);
+        runtime.refresh_grid(&grid, &self.ecs.0, core_capture);
+        self.ecs.0.insert_non_send(runtime);
     }
 
     /// `Groups.fires`/`Groups.puddles` update half of `Logic.updateEntities`:
@@ -2732,6 +2751,9 @@ pub fn run_wave_system(world: &mut World) {
     };
     runtime.wave_team = wave_team;
     runtime.path_team = wave_team;
+    let core_capture = world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|campaign| campaign.session.rules.core_capture);
     {
         let UnitRuntime {
             grid,
@@ -2739,7 +2761,7 @@ pub fn run_wave_system(world: &mut World) {
             pathfinder,
             ..
         } = &mut runtime;
-        pathfinder.rebuild(grid, content, wave_team);
+        pathfinder.rebuild(grid, content, world, core_capture);
     }
 
     // `WaveSpawner` spawn tiles are the `spawn` overlay tiles of the live grid
@@ -5341,6 +5363,113 @@ mod msav_tests {
             "groundZero wave spawned a live unit: {:?}",
             sim.group_counts()
         );
+    }
+
+    /// T15: the Ground Zero wave-1 dagger walks around the deep pool near
+    /// world (1088, 1100) instead of entering it and drowning
+    /// (`Pathfinder.costGround`: deep `+6000`, all-deep impassable,
+    /// Pathfinder.java:53-62; `getTargetTile` refuses a dangerous step).
+    #[test]
+    fn ground_zero_wave_dagger_avoids_deep_water() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+
+        // Per-tile deep map + the `wet` status id, read before the tick loop
+        // (the runtime borrow must end before `sim.tick`).
+        let (deep, wet, dagger_id) = {
+            let runtime = sim.unit_runtime().expect("runtime");
+            let deep: Vec<bool> = (0..sim.grid.tiles.len())
+                .map(|index| {
+                    let tile = sim.grid.tiles.geti(index);
+                    tile.block == BlockId::AIR
+                        && runtime
+                            .content
+                            .block(tile.floor)
+                            .is_some_and(|def| def.is_deep)
+                })
+                .collect();
+            (
+                deep,
+                runtime.content.status_id("wet").expect("wet"),
+                runtime.content.unit_id("dagger").expect("dagger"),
+            )
+        };
+        assert!(deep.iter().any(|&d| d), "groundZero has deep water");
+
+        sim.set_unit_wave_team(2);
+        sim.request_wave_spawn(0);
+        let mut max_drown = 0.0f32;
+        let mut wet_samples = 0usize;
+        let mut sampled = 0usize;
+        for tick in 0..3000 {
+            sim.tick().expect("tick");
+            if tick % 30 != 0 {
+                continue;
+            }
+            for entity in sim.ecs.0.iter_entities() {
+                if entity.get::<TeamComp>().map(|t| t.team) != Some(2) {
+                    continue;
+                }
+                if entity.get::<UnitTypeComp>().map(|u| u.type_id) != Some(dagger_id) {
+                    continue;
+                }
+                let Some(pos) = entity.get::<Pos>().copied() else {
+                    continue;
+                };
+                sampled += 1;
+                let (tx, ty) = (
+                    crate::world::WorldGrid::to_tile(pos.x),
+                    crate::world::WorldGrid::to_tile(pos.y),
+                );
+                if let Some(&is_deep) = deep.get(sim.grid.tiles.index(tx, ty)) {
+                    assert!(
+                        !is_deep,
+                        "dagger entered deep water at tick {tick} ({tx}, {ty})"
+                    );
+                }
+                if let Some(drown) =
+                    entity.get::<crate::entities::comp::unit::environment::DrownComp>()
+                {
+                    max_drown = max_drown.max(drown.0);
+                }
+                if entity
+                    .get::<crate::entities::comp::unit::comp::StatusComp>()
+                    .is_some_and(|status| status.has_effect_of(wet))
+                {
+                    wet_samples += 1;
+                }
+            }
+        }
+        assert!(sampled > 0, "the wave-1 dagger was sampled");
+        assert_eq!(max_drown, 0.0, "the dagger never started drowning");
+        eprintln!("T15 probe: samples={sampled} wet={wet_samples} max_drown={max_drown}");
     }
 
     /// T2b: resuming at wave 1 must spawn `getSpawned(0)` BEFORE the counter

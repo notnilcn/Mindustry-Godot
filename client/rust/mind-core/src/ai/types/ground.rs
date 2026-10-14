@@ -173,11 +173,8 @@ pub fn update_ground(
     } else {
         let dest = {
             let width = pathfinder.width;
-            let height = pathfinder.height;
             let index = current.x() as usize + current.y() as usize * width as usize;
-            let next = pathfinder
-                .get_field(Cost::Ground, team, &[target])
-                .get_target_tile(index, width, height, true);
+            let next = pathfinder.target_tile(Cost::Ground, team, &[target], index, true);
             match next {
                 Some(next) => tile_center((next as i32) % width, (next as i32) / width),
                 None => tile_center(target.x() as i32, target.y() as i32),
@@ -240,16 +237,12 @@ pub fn pathfind_field(
         return false;
     }
     let width = pathfinder.width;
-    let height = pathfinder.height;
     let index = current.x() as usize + current.y() as usize * width as usize;
-    let next = {
-        let field = pathfinder.get_field(cost, team, targets);
-        // `Flowfield.getNextTile(tile, avoidance ? unit.id : 0)`: the port's
-        // flowfield has no per-unit avoidance flag, so the avoid id is unused.
-        field
-            .get_target_tile(index, width, height, true)
-            .map(|next| ((next as i32) % width, (next as i32) / width))
-    };
+    // `Flowfield.getNextTile(tile, avoidance ? unit.id : 0)`: the port's
+    // flowfield has no per-unit avoidance flag, so the avoid id is unused.
+    let next = pathfinder
+        .target_tile(cost, team, targets, index, true)
+        .map(|next| ((next as i32) % width, (next as i32) / width));
     let Some((nx, ny)) = next else {
         return false;
     };
