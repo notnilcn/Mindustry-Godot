@@ -300,6 +300,14 @@ impl WorldGenerator for ErekirPlanetGenerator {
         "erekir"
     }
 
+    fn set_sector(&mut self, view: FlatSectorView) {
+        self.sector = view;
+    }
+
+    fn sector_size_scl(&self) -> Option<f32> {
+        Some(self.planet.size_scl)
+    }
+
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {
         let ids = Ids::load(content);
         self.ids = ids;

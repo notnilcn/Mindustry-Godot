@@ -351,6 +351,10 @@ pub struct MindSimHost {
     /// Last `grid.limit_area` seen by the pump; a change (rules adoption,
     /// G06 `setrule`) sets `world_dirty` so the renderer rebuilds (T5).
     last_limit_area: Option<(i32, i32, i32, i32)>,
+    /// Campaign extras for the next generated numbered sector (H05 T2):
+    /// `MindCampaign.prime_sector_load` primes this before `load_sector`;
+    /// `load_sector_world` falls back to `game::planet::static_gen_extras`.
+    pending_gen_extras: Option<(String, u16, mind_core::maps::planet::SectorGenExtras)>,
 }
 
 #[godot_api]
@@ -382,6 +386,7 @@ impl INode for MindSimHost {
             place_range_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             sector_resume: None,
             last_limit_area: None,
+            pending_gen_extras: None,
         }
     }
 
@@ -1813,6 +1818,44 @@ impl MindSimHost {
         true
     }
 
+    /// Primes the campaign extras (`SectorGenExtras`) the next generated
+    /// numbered sector reads at load time (H05 T2;
+    /// `MindCampaign.prime_sector_load`). Only for `planet`/`sector` matching
+    /// the next `load_sector`; otherwise the static fallback applies.
+    #[func]
+    pub fn set_sector_gen_extras(
+        &mut self,
+        planet: GString,
+        sector: i32,
+        threat: f32,
+        has_enemy_base: bool,
+        has_base: bool,
+    ) {
+        self.set_sector_gen_extras_rs(
+            &planet.to_string(),
+            sector,
+            mind_core::maps::planet::SectorGenExtras {
+                threat,
+                has_enemy_base,
+                has_base,
+            },
+        );
+    }
+
+    /// Rust-only variant (called by `MindCampaign` through a sibling bind, and
+    /// by the lost-sector replay before its `load_sector`).
+    pub fn set_sector_gen_extras_rs(
+        &mut self,
+        planet: &str,
+        sector: i32,
+        extras: mind_core::maps::planet::SectorGenExtras,
+    ) {
+        if sector < 0 {
+            return;
+        }
+        self.pending_gen_extras = Some((planet.to_owned(), sector as u16, extras));
+    }
+
     /// Generates and installs a campaign sector's world into the sim
     /// (`Control.playNewSector` world half), preferring an existing sector save
     /// (`user://saves/sector-<planet>-<id>.msav`, resume) over the preset map
@@ -1841,7 +1884,6 @@ impl MindSimHost {
             log::warn!("load_sector: content registry unavailable");
             return false;
         };
-        const SECTOR_SIZE: i32 = 128;
         // `Control.playSector`: an existing sector save is the resume source.
         let save_path = sector_save_path(planet_name, sector as u16);
         let resume_file = use_save && std::path::Path::new(&save_path).is_file();
@@ -1854,18 +1896,34 @@ impl MindSimHost {
             // fall back to the planet generator.
             load_preset_map_grid(planet_name, sector as u16, &mut registry)
         };
-        let generated = if loaded.is_none() {
-            mind_core::maps::planet::generate_sector(
-                planet_name,
-                sector as u16,
-                1,
-                SECTOR_SIZE,
-                SECTOR_SIZE,
-                &registry,
-            )
+        let generated_sector = if loaded.is_none() {
+            // H05 T2: the campaign primes the live threat/enemy-base flags;
+            // the static fallback reproduces `updateBaseCoverage` for an
+            // unsaved cell (`SectorGenExtras`).
+            let extras = match self.pending_gen_extras.take() {
+                Some((planet, id, extras)) if planet == planet_name && id == sector as u16 => {
+                    extras
+                }
+                other => {
+                    self.pending_gen_extras = other;
+                    mind_core::game::planet::static_gen_extras(
+                        &registry,
+                        planet_name,
+                        sector as u16,
+                    )
+                }
+            };
+            mind_core::maps::planet::generate_sector(planet_name, sector as u16, &registry, extras)
         } else {
             None
         };
+        // The generator survives the grid/rules move so T4-T6 can run its
+        // structure passes on the live sim.
+        let mut _generated_ctx: Option<(
+            Box<dyn mind_core::maps::generators::WorldGenerator>,
+            mind_core::maps::generators::planet::SectorRect,
+            usize,
+        )> = None;
         let (grid, rules, pending_buildings, plans, save) = match loaded {
             Some(loaded) => (
                 loaded.grid,
@@ -1874,14 +1932,18 @@ impl MindSimHost {
                 loaded.plans,
                 loaded.save,
             ),
-            None => match generated {
-                Some(generated) => (
-                    generated.grid,
-                    Some(generated.rules),
-                    Vec::new(),
-                    Vec::new(),
-                    None,
-                ),
+            None => match generated_sector {
+                Some(generated) => {
+                    let mind_core::maps::planet::GeneratedSector {
+                        grid,
+                        rules,
+                        generator,
+                        rect,
+                        sides,
+                    } = generated;
+                    _generated_ctx = Some((generator, rect, sides));
+                    (grid, Some(rules), Vec::new(), Vec::new(), None)
+                }
                 None => {
                     self.content_snapshot = Some(registry);
                     log::warn!("load_sector: no map or generator for planet `{planet_name}`");
@@ -1903,7 +1965,7 @@ impl MindSimHost {
 
         // Reuse a fresh sim and swap in the loaded/generated grid; a new
         // iteration keeps no ECS entities from the previous world.
-        let mut sim = Sim::new(1, SECTOR_SIZE, SECTOR_SIZE, BlockId::AIR, BlockId::AIR);
+        let mut sim = Sim::new(1, grid.width(), grid.height(), BlockId::AIR, BlockId::AIR);
         sim.grid = grid;
         let _ = sim.set_phase(mind_core::game::State::Playing);
         self.runner =

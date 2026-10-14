@@ -105,6 +105,14 @@ impl WorldGenerator for TantrosPlanetGenerator {
         "tantros"
     }
 
+    fn set_sector(&mut self, view: FlatSectorView) {
+        self.sector = view;
+    }
+
+    fn sector_size_scl(&self) -> Option<f32> {
+        Some(self.planet.size_scl)
+    }
+
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {
         let redmat = content.block_id("redmat").unwrap_or(BlockId::AIR);
         let bluemat = content.block_id("bluemat").unwrap_or(BlockId::AIR);

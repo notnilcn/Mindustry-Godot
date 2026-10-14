@@ -53,4 +53,15 @@ pub trait WorldGenerator {
         _content: &ContentRegistry,
     ) {
     }
+
+    /// Sets the campaign sector view before generation (`Control.playNewSector`
+    /// assigns `state.rules.sector`; the planet generators read
+    /// `sector.threat`/`tile_v`/`hasEnemyBase`). H05 T2.
+    fn set_sector(&mut self, _view: planet::FlatSectorView) {}
+
+    /// `PlanetGenerator.getSizeScl` for the sector-size computation; `None`
+    /// keeps the 128 default (planets without a projected rect).
+    fn sector_size_scl(&self) -> Option<f32> {
+        None
+    }
 }

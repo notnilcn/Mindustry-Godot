@@ -1614,9 +1614,13 @@ func _launch(planet_name: String, sector_id: int, loadout: int = -1, resume: boo
 	# Generate and install the sector's world into the sim host first so the
 	# renderer draws terrain (`Control.playNewSector` world half).
 	var sim_host := get_node_or_null("/root/Spine/SimHost")
+	var campaign := campaign_node()
+	# H05 T2: prime the generator with the live campaign threat/enemy-base
+	# flags (`state.rules.sector` is set before `World.loadSector`).
+	if campaign != null and campaign.has_method("prime_sector_load"):
+		campaign.call("prime_sector_load", planet_name, sector_id)
 	if sim_host != null and sim_host.has_method("load_sector"):
 		sim_host.call("load_sector", planet_name, sector_id)
-	var campaign := campaign_node()
 	var started := false
 	if campaign != null:
 		if resume and campaign.has_method("play_sector"):

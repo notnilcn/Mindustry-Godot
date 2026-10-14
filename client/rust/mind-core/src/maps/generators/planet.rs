@@ -9,6 +9,7 @@
 //! real `Sector`/`Planet` views; [`SectorView`] is the seam.
 
 use crate::content::{BlockId, ContentRegistry};
+use crate::render::g3d::grid::PlanetGrid;
 use crate::world::WorldParams;
 use crate::world::cached::TileGen;
 use crate::world::tiles::Tiles;
@@ -58,6 +59,8 @@ pub struct SectorRect {
     pub right: [f32; 3],
     /// Plane radius.
     pub radius: f32,
+    /// Pentagon/hexagon rotation (`Sector.SectorRect.rotation`).
+    pub rotation: f32,
 }
 
 impl Default for SectorRect {
@@ -67,6 +70,7 @@ impl Default for SectorRect {
             top: [0.0, 1.0, 0.0],
             right: [1.0, 0.0, 0.0],
             radius: 1.0,
+            rotation: 0.0,
         }
     }
 }
@@ -152,6 +156,9 @@ pub struct FlatSectorView {
     pub has_enemy_base: bool,
     /// Whether the player owns a base here.
     pub has_base: bool,
+    /// Full projected plane when built from a `PlanetGrid` tile
+    /// (`Sector.makeRect`); `None` keeps the flat default plane.
+    pub rect: Option<SectorRect>,
 }
 
 impl Default for FlatSectorView {
@@ -163,6 +170,7 @@ impl Default for FlatSectorView {
             tile_v: [0.0, 0.0, 0.0],
             has_enemy_base: false,
             has_base: false,
+            rect: None,
         }
     }
 }
@@ -173,10 +181,10 @@ impl SectorView for FlatSectorView {
     }
 
     fn rect(&self) -> SectorRect {
-        SectorRect {
+        self.rect.unwrap_or(SectorRect {
             radius: self.radius,
             ..SectorRect::default()
-        }
+        })
     }
 
     fn threat(&self) -> f32 {
@@ -194,6 +202,152 @@ impl SectorView for FlatSectorView {
     fn has_base(&self) -> bool {
         self.has_base
     }
+}
+
+/// `Sector.makeRect` (`Sector.java:255-282`): projects a `PlanetGrid` tile's
+/// unit-sphere corners onto the planet sphere and builds the generation plane
+/// basis (`center`/`top`/`right`/`radius`/`rotation`). A tile with no corners
+/// returns the default plane with `radius = 1.0`.
+pub fn make_rect(grid: &PlanetGrid, tile: usize, planet_radius: f32) -> SectorRect {
+    let fallback = SectorRect {
+        radius: 1.0,
+        ..SectorRect::default()
+    };
+    let Some(ptile) = grid.tiles.get(tile) else {
+        return fallback;
+    };
+    if ptile.corners.is_empty() {
+        return fallback;
+    }
+    let corners: Vec<[f32; 3]> = ptile
+        .corners
+        .iter()
+        .filter_map(|&corner| grid.corners.get(corner))
+        .map(|corner| set_length(corner.v, planet_radius))
+        .collect();
+    if corners.len() < 5 {
+        return fallback;
+    }
+
+    let mut sum = [0.0f32; 3];
+    for corner in &corners {
+        sum = add(sum, *corner);
+    }
+    // `Tmp.v33` is the center of this shape.
+    let center = scale(sum, 1.0 / corners.len() as f32);
+    // Radius of the circle.
+    let radius = dst(center, corners[0]) * 0.98;
+
+    // Plane through corners 0/2/4 (`Plane.set`).
+    let (normal, d) = plane_through(corners[0], corners[2], corners[4]);
+
+    // Relative vectors.
+    let top = set_length(
+        sub(
+            plane_project(add(center, [0.0, 1.0, 0.0]), normal, d),
+            center,
+        ),
+        radius,
+    );
+    let right = set_length(
+        sub(plane_project(rotate_y(center, -4.0), normal, d), center),
+        radius,
+    );
+
+    // Angle from the first corner to the top vector, in degrees.
+    let first = sub(corners[1], center);
+    let rotation = angle(first, top);
+
+    SectorRect {
+        center,
+        top,
+        right,
+        radius,
+        rotation,
+    }
+}
+
+/// The plane through three points (`Plane.set`, `Plane.java:53-56`):
+/// `normal = (p1 - p2) x (p2 - p3)`, normalized; `d = -p1 . normal`.
+pub(crate) fn plane_through(p1: [f32; 3], p2: [f32; 3], p3: [f32; 3]) -> ([f32; 3], f32) {
+    let crs = cross(sub(p1, p2), sub(p2, p3));
+    let normal = normalize(crs);
+    let d = -dot(p1, normal);
+    (normal, d)
+}
+
+/// `Plane.project` (`Plane.java:69-73`); in place on the copy.
+pub(crate) fn plane_project(v: [f32; 3], normal: [f32; 3], d: f32) -> [f32; 3] {
+    let npd = dot(normal, v) + d;
+    [
+        v[0] - npd * normal[0],
+        v[1] - npd * normal[1],
+        v[2] - npd * normal[2],
+    ]
+}
+
+/// `Vec3.setLength` (`Vec3.java:597-605`).
+fn set_length(v: [f32; 3], len: f32) -> [f32; 3] {
+    let old_len2 = v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+    let len2 = len * len;
+    if old_len2 == 0.0 || old_len2 == len2 {
+        return v;
+    }
+    scale(v, (len2 / old_len2).sqrt())
+}
+
+/// `Vec3.rotate(Vec3.Y, degrees)` (`Vec3.java:437` + `Mat.setToRotation`):
+/// for the Y axis, `x' = cos*x - sin*z`, `y' = y`, `z' = sin*x + cos*z`.
+fn rotate_y(v: [f32; 3], degrees: f32) -> [f32; 3] {
+    // Port convention: libm trig for `Mathf.cosDeg/sinDeg` (plan 06 goldens
+    // are Rust-recorded).
+    let (sin, cos) = degrees.to_radians().sin_cos();
+    [v[0] * cos - v[2] * sin, v[1], v[0] * sin + v[2] * cos]
+}
+
+/// `Vec3.angle` (`Vec3.java:355-364`), degrees.
+fn angle(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let la = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    let lb = (b[0] * b[0] + b[1] * b[1] + b[2] * b[2]).sqrt();
+    let d = dot(
+        [a[0] / la, a[1] / la, a[2] / la],
+        [b[0] / lb, b[1] / lb, b[2] / lb],
+    );
+    (d as f64).acos() as f32 * (180.0 / std::f32::consts::PI)
+}
+
+fn add(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+
+fn scale(v: [f32; 3], s: f32) -> [f32; 3] {
+    [v[0] * s, v[1] * s, v[2] * s]
+}
+
+fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn normalize(v: [f32; 3]) -> [f32; 3] {
+    let len = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if len == 0.0 { v } else { scale(v, 1.0 / len) }
+}
+
+fn dst(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let d = sub(a, b);
+    (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
 }
 
 /// Planet-projected simplex noise (`PlanetGenerator.noise`).
@@ -389,6 +543,33 @@ mod tests {
         assert_eq!(rect.project(0.0, 0.0), [-1.0, -1.0, 0.0]);
         assert_eq!(rect.project(1.0, 1.0), [1.0, 1.0, 0.0]);
         assert_eq!(rect.project(0.5, 0.5), [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn make_rect_center_projects() {
+        // `Sector.makeRect` (`Sector.java:255-282`) on the serpulo icosphere.
+        let grid = PlanetGrid::create(3);
+        let rect = make_rect(&grid, 1, 1.0);
+        let center = rect.project(0.5, 0.5);
+        for (index, value) in center.iter().enumerate() {
+            assert!(
+                (value - rect.center[index]).abs() < 1e-5,
+                "project(0.5, 0.5) == center"
+            );
+        }
+        let top_len =
+            (rect.top[0] * rect.top[0] + rect.top[1] * rect.top[1] + rect.top[2] * rect.top[2])
+                .sqrt();
+        assert!((top_len - rect.radius).abs() < 1e-4, "|top| == radius");
+        let tile = &grid.tiles[1];
+        let corners: Vec<[f32; 3]> = tile
+            .corners
+            .iter()
+            .map(|&corner| set_length(grid.corners[corner].v, 1.0))
+            .collect();
+        let (normal, _d) = plane_through(corners[0], corners[2], corners[4]);
+        let out_of_plane = dot(rect.top, normal).abs();
+        assert!(out_of_plane < 1e-4, "top lies in the plane: {out_of_plane}");
     }
 
     #[test]

@@ -1391,4 +1391,29 @@ mod tests {
             sector.threat
         );
     }
+
+    #[test]
+    fn static_gen_extras_matches_campaign() {
+        // `game::planet::static_gen_extras` is the generator fallback for a
+        // sector the campaign has not primed; its threat must equal the boot
+        // campaign coverage (`updateBaseCoverage`) for every preset-less cell.
+        let (registry, campaign, id) = serpulo();
+        let planet = campaign.planet(id).unwrap();
+        let mut checked = 0;
+        for index in 0..20u16 {
+            let sector = planet.sector(index).unwrap();
+            if sector.preset.is_some() {
+                continue;
+            }
+            let extras = crate::game::planet::static_gen_extras(&registry, "serpulo", index);
+            assert!(
+                (extras.threat - sector.threat).abs() < 1e-6,
+                "sector {index}: static {} != campaign {}",
+                extras.threat,
+                sector.threat
+            );
+            checked += 1;
+        }
+        assert!(checked > 0, "some preset-less sectors in 0..20");
+    }
 }

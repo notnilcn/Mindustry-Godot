@@ -760,6 +760,38 @@ impl MindCampaign {
     #[signal]
     fn campaign_complete();
 
+    /// Primes the host's sector-generation extras from the campaign record
+    /// (`Sector.threat`/`hasEnemyBase`/`hasBase`) so the next `load_sector` of
+    /// a numbered sector generates with the live campaign state (H05 T2).
+    /// Call before `MindSimHost.load_sector` for the same planet+sector.
+    #[func]
+    pub fn prime_sector_load(&mut self, planet: GString, sector: i32) -> bool {
+        let planet_name = planet.to_string();
+        if sector < 0 {
+            return false;
+        }
+        let Some(campaign) = self.campaign.as_ref() else {
+            return false;
+        };
+        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+            return false;
+        };
+        let Some(record) = campaign.sector(planet_id, sector as u16) else {
+            return false;
+        };
+        let extras = mind_core::maps::planet::SectorGenExtras {
+            threat: record.threat,
+            has_enemy_base: record.has_enemy_base(),
+            has_base: record.has_base(),
+        };
+        let Some(mut host) = self.host() else {
+            return false;
+        };
+        host.bind_mut()
+            .set_sector_gen_extras_rs(&planet_name, sector, extras);
+        true
+    }
+
     /// Starts a campaign sector (host-side launch), returning success.
     ///
     /// `loadout_json` is an optional `[{item, amount}]` launch loadout applied
@@ -869,6 +901,21 @@ impl MindCampaign {
         let resume = has_save && !no_core_branch;
         let mut restored_survivors = Vec::new();
         if lost_replay {
+            // H05 T2: the replay regenerates the world through the host, so
+            // prime the generator extras from the live record first.
+            if let Some(record) = campaign.sector(planet_id, sector_id)
+                && let Some(mut host) = self.host()
+            {
+                host.bind_mut().set_sector_gen_extras_rs(
+                    &planet_name,
+                    sector,
+                    mind_core::maps::planet::SectorGenExtras {
+                        threat: record.threat,
+                        has_enemy_base: record.has_enemy_base(),
+                        has_base: record.has_base(),
+                    },
+                );
+            }
             let (spawn_x, spawn_y) = mind_core::world::pos::unpack(spawn_position);
             restored_survivors = self
                 .host()
