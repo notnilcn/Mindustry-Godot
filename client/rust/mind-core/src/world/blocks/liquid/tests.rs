@@ -221,3 +221,170 @@ fn flow_window_rates() {
     assert!((cache.get_flow_rate(LiquidId::WATER) - 60.0).abs() < 0.001);
     assert!(cache.has_flow_liquid(LiquidId::WATER));
 }
+
+/// H02 T10: `LiquidModule.add`/`remove` always retarget `current`
+/// (`LiquidModule.java:118-136`).
+#[test]
+fn module_tracks_current_liquid() {
+    let slag = LiquidId::new(1);
+    let oil = LiquidId::new(2);
+    let mut module = LiquidModule::with_liquids(3);
+    module.add(LiquidId::WATER, 5.0, 100.0);
+    assert_eq!(module.current_liquid(), LiquidId::WATER);
+    module.add(oil, 1.0, 100.0);
+    assert_eq!(module.current_liquid(), oil);
+    assert_eq!(module.current_liquid_amount(), 1.0);
+    module.remove(LiquidId::WATER, 1.0);
+    assert_eq!(module.current_liquid(), LiquidId::WATER);
+    // `set` only promotes `current` when the amount is at least the current's.
+    module.set(LiquidId::WATER, 10.0);
+    assert_eq!(module.current_liquid(), LiquidId::WATER);
+    module.set(slag, 1.0);
+    assert_eq!(module.current_liquid(), LiquidId::WATER);
+    module.set(slag, 20.0);
+    assert_eq!(module.current_liquid(), slag);
+}
+
+/// H02 T10: a conduit refuses a second liquid until drained below 0.2
+/// (`Conduit.java:241-245`).
+#[test]
+fn conduit_refuses_second_liquid() {
+    let oil = LiquidId::new(2);
+    let mut fixture = LiquidFixture::new();
+    let conduit = fixture.spawn(
+        0,
+        0,
+        LiquidNode {
+            reject_from_output: true,
+            ..conduit(100.0)
+        },
+    );
+    fixture.add_water(conduit, 5.0);
+    assert!(
+        !super::movement::accept_liquid(&fixture.world, conduit, conduit, oil),
+        "water-filled conduit rejects oil"
+    );
+    if let Some(mut module) = fixture.world.get_mut::<LiquidModule>(conduit) {
+        module.remove(LiquidId::WATER, 4.9);
+    }
+    assert!(
+        super::movement::accept_liquid(&fixture.world, conduit, conduit, oil),
+        "drained conduit accepts a new liquid"
+    );
+}
+
+/// H02 T10: a router (and its tank subclasses) refuses a second liquid
+/// (`LiquidRouter.java:41-43`).
+#[test]
+fn router_refuses_second_liquid() {
+    let oil = LiquidId::new(2);
+    let mut fixture = LiquidFixture::new();
+    let router = fixture.spawn(
+        0,
+        0,
+        LiquidNode {
+            router: true,
+            ..conduit(100.0)
+        },
+    );
+    fixture.add_water(router, 5.0);
+    assert!(!super::movement::accept_liquid(
+        &fixture.world,
+        router,
+        router,
+        oil
+    ));
+    if let Some(mut module) = fixture.world.get_mut::<LiquidModule>(router) {
+        module.remove(LiquidId::WATER, 4.9);
+    }
+    assert!(super::movement::accept_liquid(
+        &fixture.world,
+        router,
+        router,
+        oil
+    ));
+}
+
+/// Builds the three-liquid trait table the mixing tests need (water, slag,
+/// oil in content order).
+fn mixing_traits() -> crate::world::modules::LiquidTraits {
+    crate::world::modules::LiquidTraits {
+        coolant: vec![true, true, true],
+        gas: vec![false, false, false],
+        temperature: vec![0.5, 1.0, 0.5],
+        flammability: vec![0.0, 0.0, 1.2],
+        incinerable: vec![true, true, true],
+        heat_capacity: vec![0.4, 0.5, 0.7],
+        block_reactive: vec![true, true, true],
+    }
+}
+
+/// H02 T10: hot slag meeting oil damages both conduits
+/// (`BuildingComp.java:947-966`, `damageContinuous(1)` per tick).
+#[test]
+fn slag_into_oil_conduit_damages() {
+    use crate::entities::comp::Health;
+    let slag = LiquidId::new(1);
+    let oil = LiquidId::new(2);
+    let mut fixture = LiquidFixture::new();
+    fixture.world.insert_resource(mixing_traits());
+    let source = fixture.spawn(0, 0, conduit(100.0));
+    let dest = fixture.spawn(1, 0, conduit(100.0));
+    fixture.world.entity_mut(source).insert(Health::new(500.0));
+    fixture.world.entity_mut(dest).insert(Health::new(500.0));
+    if let Some(mut module) = fixture.world.get_mut::<LiquidModule>(source) {
+        module.add(slag, 50.0, 100.0);
+    }
+    if let Some(mut module) = fixture.world.get_mut::<LiquidModule>(dest) {
+        module.check_array_capacity(3);
+        module.add(oil, 50.0, 100.0);
+    }
+    for _ in 0..60 {
+        move_liquid(&mut fixture.world, &fixture.grid, source, dest, slag);
+    }
+    let health = |entity| {
+        fixture
+            .world
+            .get::<Health>(entity)
+            .map(|h| h.health)
+            .unwrap_or(0.0)
+    };
+    assert!(
+        health(source) <= 441.0,
+        "source conduit took damage: {}",
+        health(source)
+    );
+    assert!(
+        health(dest) <= 441.0,
+        "oil conduit took damage: {}",
+        health(dest)
+    );
+}
+
+/// H02 T10: hot slag meeting water evaporates the incoming liquid on the
+/// source side (`BuildingComp.java:960-964`).
+#[test]
+fn hot_into_cold_evaporates() {
+    let slag = LiquidId::new(1);
+    let mut fixture = LiquidFixture::new();
+    fixture.world.insert_resource(mixing_traits());
+    let source = fixture.spawn(0, 0, conduit(100.0));
+    let dest = fixture.spawn(1, 0, conduit(100.0));
+    if let Some(mut module) = fixture.world.get_mut::<LiquidModule>(source) {
+        module.add(slag, 50.0, 100.0);
+    }
+    fixture.add_water(dest, 50.0);
+    for _ in 0..10 {
+        move_liquid(&mut fixture.world, &fixture.grid, source, dest, slag);
+    }
+    let stored = fixture
+        .world
+        .get::<LiquidModule>(source)
+        .map(|module| module.get(slag))
+        .unwrap_or(0.0);
+    assert!(
+        (stored - 43.0).abs() < 0.01,
+        "slag evaporated 0.7/tick: {stored}"
+    );
+    assert_eq!(fixture.water(dest), 50.0, "water is untouched");
+}

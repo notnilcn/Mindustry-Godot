@@ -416,6 +416,11 @@ pub fn apply_base(world: &mut World, entity: Entity, decoded: &DecodedBase, max_
             if let Some(slot) = liquids.liquids.get_mut(*id as usize) {
                 *slot = *amount;
                 liquids.current_amount += *amount;
+                // `LiquidModule.read` (`LiquidModule.java:182-197`):
+                // `if(amount > liquids[current.id]) current = liq`.
+                if *amount > liquids.get(liquids.current_liquid) {
+                    liquids.current_liquid = crate::content::LiquidId::new(*id);
+                }
             }
         }
     }

@@ -176,13 +176,9 @@ impl BuildingBehavior for ForceProjectorBehavior {
 
 impl ForceProjectorBehavior {
     /// `ConsumeCoolant.getConsumed`/`efficiency` (`ConsumeLiquidFilter.java:63-83`):
-    /// the current liquid when the coolant filter accepts it, otherwise the
-    /// first content-order liquid that does; `None` when nothing is consumable.
-    ///
-    /// The heat capacity of Java's `liquids.current()` scales the decay rate in
-    /// `updateTile`; until T10 tracks a per-module current liquid, the largest
-    /// non-zero slot stands in for it (`TODO(T10)`: switch to
-    /// `LiquidModule::current_liquid()`).
+    /// the current liquid when the coolant filter accepts it and it is present,
+    /// otherwise the first content-order liquid that does; `None` when nothing
+    /// is consumable.
     fn coolant_pick(
         &self,
         world: &World,
@@ -194,23 +190,17 @@ impl ForceProjectorBehavior {
         }
         let traits = world.get_resource::<crate::world::modules::LiquidTraits>()?;
         let module = world.get::<crate::world::modules::LiquidModule>(e)?;
-        let mut current: Option<(crate::content::LiquidId, f32)> = None;
-        for (index, &amount) in module.liquids.iter().enumerate() {
-            if amount > current.map(|(_, best)| best).unwrap_or(0.0) {
-                current = Some((crate::content::LiquidId::new(index as u16), amount));
-            }
-        }
-        let consumed = match current {
-            Some((liquid, _))
-                if traits.coolant_accepts(liquid, true, false) && module.current_amount > 0.0 =>
-            {
-                liquid
-            }
-            _ => (0..module.liquids.len())
+        let current = module.current_liquid();
+        let consumed = if traits.coolant_accepts(current, true, false)
+            && module.current_liquid_amount() > 0.0
+        {
+            current
+        } else {
+            (0..module.liquids.len())
                 .map(|index| crate::content::LiquidId::new(index as u16))
                 .find(|&liquid| {
                     traits.coolant_accepts(liquid, true, false) && module.get(liquid) > 0.0
-                })?,
+                })?
         };
         // `ConsumeLiquidFilter.efficiency(this) > 0`.
         if module.get(consumed) <= 0.0 {
