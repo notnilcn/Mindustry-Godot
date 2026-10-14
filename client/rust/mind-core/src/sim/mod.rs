@@ -1110,12 +1110,23 @@ impl Sim {
                 self.logic_event_log.pop_front();
             }
             self.logic_event_log.push_back(event.kind().to_owned());
-            // T5 adds SetBlock / SpawnWave handling here.
-            if let e @ (crate::logic::world::LogicWorldEvent::Message { .. }
-            | crate::logic::world::LogicWorldEvent::Cutscene { .. }) = event
-                && self.logic_ui_events.len() < 256
-            {
-                self.logic_ui_events.push(e);
+            use crate::logic::world::LogicWorldEvent;
+            match event {
+                // `SpawnWaveI` natural: `logic.skipWave()` (`LExecutor.java:2173-2175`).
+                LogicWorldEvent::SpawnWave { natural: true, .. } => self.logic_skip_wave(),
+                // Positional spawn (`LExecutor.java:2177-2198`).
+                LogicWorldEvent::SpawnWave {
+                    natural: false,
+                    x,
+                    y,
+                } => self.logic_spawn_wave_at(x, y),
+                // T5 adds SetBlock handling here.
+                e @ (LogicWorldEvent::Message { .. } | LogicWorldEvent::Cutscene { .. })
+                    if self.logic_ui_events.len() < 256 =>
+                {
+                    self.logic_ui_events.push(e);
+                }
+                _ => {}
             }
         }
     }

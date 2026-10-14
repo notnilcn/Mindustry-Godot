@@ -1972,6 +1972,19 @@ fn install_campaign_session(sim: &mut Sim, rules: crate::game::rules::Rules) {
         .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
 }
 
+/// Live-client logic resources (what `gdext` `install_sim_seams` inserts).
+fn install_logic_world(sim: &mut Sim) {
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::LogicWorldState {
+            headless: false,
+            ..crate::logic::world::LogicWorldState::new()
+        });
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::MessageState::default());
+}
+
 /// Places a configurable world processor running `code`.
 fn place_world_processor(sim: &mut Sim, x: i16, y: i16, code: &str) {
     let id = sim
@@ -2259,6 +2272,213 @@ fn processor_loaded_before_globals_resolves_constants() {
         .optional_var("n")
         .map(|id| state.executor.arena.get(id).num());
     assert_eq!(n, Some(1.0), "buildCount sees the team-1 duo");
+}
+
+/// H06 T2: the world processor's `spawnwave natural` runs one live wave
+/// (`SpawnWaveI` -> `Logic.skipWave` -> `runWave`,
+/// `J/logic/LExecutor.java:2173-2175`, `Logic.java:315-325`).
+#[test]
+fn spawnwave_natural_runs_wave() {
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = test_rules();
+    rules.spawns.push(crate::io::json::SpawnGroup {
+        type_: "dagger".to_owned(),
+        begin: 0,
+        unit_amount: 1,
+        ..Default::default()
+    });
+    let wave_spacing = rules.wave_spacing;
+    install_campaign_session(&mut sim, rules);
+    install_logic_world(&mut sim);
+    let spawn = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("spawn")
+        .expect("spawn");
+    let index = sim.grid.tiles.index(6, 6);
+    sim.grid.tiles.geti_mut(index).overlay = spawn;
+    place_world_processor(&mut sim, 10, 10, "spawnwave natural 10 true\nstop\n");
+    let before = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .wave;
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert_eq!(runtime.session.wave, before + 1, "one wave advanced");
+    assert_eq!(
+        runtime.session.wavetime, wave_spacing,
+        "countdown reset to waveSpacing (non-campaign multiplier 1)"
+    );
+    // The queued `spawnEnemies` runs in the next `run_wave_system`.
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let count = sim
+        .unit_runtime()
+        .expect("runtime")
+        .units
+        .iter()
+        .filter(|e| {
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::unit::UnitTypeComp>(**e)
+                .map(|c| c.type_id)
+                == Some(dagger)
+                && sim
+                    .ecs
+                    .0
+                    .get::<crate::entities::comp::TeamComp>(**e)
+                    .map(|t| t.team)
+                    == Some(2)
+        })
+        .count();
+    assert_eq!(count, 1, "one crux dagger spawned");
+    assert!(
+        sim.logic_event_log.iter().any(|kind| kind == "spawnwave"),
+        "{:?}",
+        sim.logic_event_log
+    );
+}
+
+/// H06 T2: Ground Zero GZ-1 verbatim — the flag is consumed, one wave runs,
+/// and later ticks do not run more waves (the program falls off its end).
+#[test]
+fn gz1_spawn_wave_flag() {
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = test_rules();
+    rules.spawns.push(crate::io::json::SpawnGroup {
+        type_: "dagger".to_owned(),
+        begin: 0,
+        unit_amount: 1,
+        ..Default::default()
+    });
+    install_campaign_session(&mut sim, rules);
+    install_logic_world(&mut sim);
+    let spawn = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("spawn")
+        .expect("spawn");
+    let index = sim.grid.tiles.index(6, 6);
+    sim.grid.tiles.geti_mut(index).overlay = spawn;
+    sim.ecs
+        .0
+        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .rules
+        .objective_flags
+        .insert("spawnWave".to_owned());
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "getflag wave \"spawnWave\"\njump 0 equal wave false\nsetflag \"spawnWave\" false\nspawnwave natural 10 true\n",
+    );
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert!(
+        !runtime.session.rules.objective_flags.contains("spawnWave"),
+        "GZ-1 consumed the flag"
+    );
+    assert_eq!(runtime.session.wave, 2, "wave 1 -> 2");
+    for _ in 0..100 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert_eq!(runtime.session.wave, 2, "no further wave without the flag");
+}
+
+/// H06 T2: positional `spawnwave` spawns at the given point without
+/// advancing the wave (`J/logic/LExecutor.java:2177-2198`).
+#[test]
+fn spawnwave_positional_no_wave_advance() {
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = test_rules();
+    rules.spawns.push(crate::io::json::SpawnGroup {
+        type_: "dagger".to_owned(),
+        begin: 0,
+        unit_amount: 1,
+        spawn: -1,
+        ..Default::default()
+    });
+    install_campaign_session(&mut sim, rules);
+    install_logic_world(&mut sim);
+    place_world_processor(&mut sim, 10, 10, "spawnwave 20 20 false\nstop\n");
+    let before = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime")
+        .session
+        .wave;
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim
+        .ecs
+        .0
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .expect("runtime");
+    assert_eq!(
+        runtime.session.wave, before,
+        "positional spawn keeps the wave"
+    );
+    let dagger = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .expect("dagger");
+    let position = sim
+        .unit_runtime()
+        .expect("runtime")
+        .units
+        .iter()
+        .find(|e| {
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::unit::UnitTypeComp>(**e)
+                .map(|c| c.type_id)
+                == Some(dagger)
+        })
+        .and_then(|e| sim.ecs.0.get::<crate::entities::comp::Pos>(*e).copied());
+    let position = position.expect("positional dagger spawned");
+    let distance = ((position.x - 160.0).powi(2) + (position.y - 160.0).powi(2)).sqrt();
+    assert!(
+        distance <= 16.5,
+        "dagger within 16 px of (160,160), got {distance}"
+    );
 }
 
 /// `message announce 2 @wait` blocks until the announcement timer expires.

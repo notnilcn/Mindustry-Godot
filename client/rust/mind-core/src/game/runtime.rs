@@ -467,6 +467,30 @@ pub fn sync_session_with_sim(
 
 /// `TickSet::Campaign`: universe clock, global positions, sector lighting and
 /// the campaign wave timer (`Universe.update` + `Logic.update`).
+/// `Logic.runWave()` (`Logic.java:319-325`) on the live session: advances the
+/// wave, resets the countdown, counts `wavesLasted`, and queues
+/// `spawnEnemies()` for the pre-increment wave on the unit runtime.
+///
+/// `run_wave_campaign` returns the `SpawnGroup.getSpawned` index (the
+/// pre-increment `wave - 1`, `WaveSpawner.java:74`); callers must use it for
+/// `pending_wave`, never `session.wave - 1` after the increment (H00 T2b).
+pub fn run_wave_now(
+    runtime: &mut CampaignRuntime,
+    unit_runtime: Option<&mut crate::sim::unit_runtime::UnitRuntime>,
+) {
+    let (event, spawn_index) = run_wave_campaign(&mut runtime.session);
+    runtime.events.push(event);
+    if let Some(ur) = unit_runtime {
+        ur.pending_wave = Some(spawn_index);
+    }
+    // `WaveEvent` listener: `stats.wavesLasted++`.
+    if let Some((planet, _)) = runtime.session.sector
+        && let Some(stats) = runtime.campaign.stats_for_mut(planet)
+    {
+        stats.waves_lasted += 1;
+    }
+}
+
 pub fn campaign_tick_system(world: &mut World) {
     let Some(mut runtime) = world.remove_resource::<CampaignRuntime>() else {
         return;
@@ -494,21 +518,11 @@ pub fn campaign_tick_system(world: &mut World) {
             }
         }
         if runtime.session.wavetime <= 0.0 && runtime.session.rules.waves {
-            let (event, spawn_index) = run_wave_campaign(&mut runtime.session);
-            runtime.events.push(event);
             // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
             // runtime spawns the pre-increment wave in `TickSet::RunWave`.
-            if let Some(mut unit_runtime) =
-                world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
-            {
-                unit_runtime.pending_wave = Some(spawn_index);
-            }
-            // `WaveEvent` listener: `stats.wavesLasted++`.
-            if let Some((planet, _)) = runtime.session.sector
-                && let Some(stats) = runtime.campaign.stats_for_mut(planet)
-            {
-                stats.waves_lasted += 1;
-            }
+            let mut unit_runtime =
+                world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>();
+            run_wave_now(&mut runtime, unit_runtime.as_deref_mut());
         }
 
         // `Teams.unregisterCore` on destroyed cores: the port's break/combat
