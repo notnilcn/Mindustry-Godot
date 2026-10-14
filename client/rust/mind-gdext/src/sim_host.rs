@@ -4810,7 +4810,15 @@ impl MindSimHost {
             .get_resource::<mind_core::world::limits::BuildRules>()
             .cloned()
             .unwrap_or_default();
-        mind_core::world::build::valid_break(content, &self.sim.grid, &rules, team, x, y)
+        mind_core::world::build::valid_break(
+            content,
+            &self.sim.grid,
+            Some(&self.sim.ecs.0),
+            &rules,
+            team,
+            x,
+            y,
+        )
     }
 
     // ---- G03 T3 build-plan / beam seams (Rust-only) ----

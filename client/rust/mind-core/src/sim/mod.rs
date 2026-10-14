@@ -1610,9 +1610,16 @@ impl Sim {
             rules.limit_height,
         ));
         self.grid.border_darkness = rules.border_darkness;
-        // G02 T8's `sync_build_rules(&mut World, &Rules)`; call it here once it
-        // exists — until then the place gate reads the live `BuildRules`
-        // resource only.
+        // `World.setRules` + every `Build.validPlace` read of `state.rules`
+        // (H02 T2 `sync_build_rules`); `is_campaign` comes from the live
+        // campaign runtime when present.
+        let is_campaign = self
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|runtime| runtime.session.is_campaign())
+            .unwrap_or(false);
+        crate::world::limits::sync_build_rules(&mut self.ecs.0, rules, is_campaign);
         self.refresh_unit_runtime();
     }
 

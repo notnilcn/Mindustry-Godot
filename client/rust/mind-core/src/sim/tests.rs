@@ -1162,6 +1162,13 @@ fn time_destroy_spares_buildings_near_another_core() {
     assert!(sim.place_for_team(110, 10, core, 0, 2));
     assert!(sim.place_for_team(20, 10, wall, 0, 2));
     assert!(sim.place_for_team(105, 10, wall, 0, 2));
+    // Deconstructing a core requires `coreBuildAndConfig` (`CoreBlock.java:173
+    // -177`); this test drives `timeDestroy`, not the break guard.
+    sim.ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+        .expect("build rules")
+        .core_build_and_config = true;
     sim.apply(Command::Break { x: 10, y: 10 })
         .expect("core A destroyed");
     assert!(sim.grid.entity_at(TilePos::new(10, 10)).is_none());

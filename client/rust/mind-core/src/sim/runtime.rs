@@ -562,6 +562,7 @@ impl SimRuntime {
         if !crate::world::build::valid_break(
             &self.content,
             grid,
+            Some(world),
             &rules,
             team,
             i32::from(x),
@@ -620,6 +621,7 @@ impl SimRuntime {
         if !crate::world::build::valid_break(
             &self.content,
             grid,
+            Some(world),
             &rules,
             team,
             i32::from(x),

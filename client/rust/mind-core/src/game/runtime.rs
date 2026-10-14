@@ -336,15 +336,10 @@ pub fn sync_session_with_sim(
     session.teams = Teams::new();
     let default_team = session.default_team();
     let wave_team = session.wave_team();
-    // `World.setRules`: player placements carry `state.rules.defaultTeam`
-    // (`Team.sharded` = 1 for the campaign); the build guard resource starts at
-    // the derelict id, so sync it with the loaded session.
-    let env = session.rules.env;
-    if let Some(mut rules) = world.get_resource_mut::<crate::world::limits::BuildRules>() {
-        rules.default_team = default_team;
-        // `Block.isPlaceable` -> `supportsEnv(state.rules.env)`.
-        rules.env = env;
-    }
+    // `World.setRules`: copy every placement-relevant rule into the
+    // `BuildRules` resource (H02 T2 `sync_build_rules`); H04/H06 call the same
+    // entry point after any rules swap.
+    crate::world::limits::sync_build_rules(world, &session.rules, session.is_campaign());
     let mut sync = SessionSync::default();
     for (entity, team, _) in &cores {
         session

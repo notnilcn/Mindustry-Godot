@@ -2368,3 +2368,185 @@ fn core_rejects_when_not_incinerating() {
         &sim.ecs.0, core, core, copper
     ));
 }
+
+/// H02 T2: `sync_build_rules` copies the placement/break rule subset of a
+/// `Rules` value into the `BuildRules` resource (`World.setRules` half).
+#[test]
+fn sync_build_rules_copies_rules() {
+    use crate::game::rules::Rules;
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    let copper_wall = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("copper-wall")
+        .expect("copper-wall");
+    let titanium_wall = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .block_id("titanium-wall")
+        .expect("titanium-wall");
+    let mut rules = Rules::default();
+    rules.banned_blocks.insert("copper-wall".to_owned());
+    rules.block_whitelist = false;
+    rules.derelict_repair = false;
+    rules.place_range_check = true;
+    rules.enemy_core_build_radius = 320.0;
+    rules.team_rule_mut(2).extra_core_build_radius = 40.0;
+    crate::world::limits::sync_build_rules(&mut sim.ecs.0, &rules, true);
+    {
+        let build = sim.ecs.0.get_resource::<BuildRules>().expect("build rules");
+        assert!(build.is_banned(copper_wall), "banned list copied");
+        assert!(!build.allow_derelict_repair);
+        assert!(build.place_range_check);
+        assert_eq!(build.build_radius(2), 360.0, "320 + 40 extra");
+        assert_eq!(build.build_radius(1), 320.0, "default team extra 0");
+        assert!(build.is_campaign);
+        assert_eq!(build.banned_blocks, vec![copper_wall]);
+    }
+    // `Rules.isBanned`: `blockWhitelist != bannedBlocks.contains(block)`.
+    rules.block_whitelist = true;
+    crate::world::limits::sync_build_rules(&mut sim.ecs.0, &rules, true);
+    let build = sim.ecs.0.get_resource::<BuildRules>().expect("build rules");
+    assert!(!build.is_banned(copper_wall), "whitelisted");
+    assert!(build.is_banned(titanium_wall), "not in the whitelist");
+}
+
+/// H02 T2: `Build.validBreak` rejects other teams' buildings
+/// (`Build.java:317-320`, `Teams.java:125-127`); derelict and own team stay
+/// breakable.
+#[test]
+fn cannot_break_enemy_building() {
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    let wall = sim.world_block_id("copper-wall").expect("copper-wall");
+    for (x, y, team) in [(5i16, 5i16, 2u8), (7, 5, 0), (9, 5, 1)] {
+        sim.command(SimCommand::Place {
+            x,
+            y,
+            block: wall,
+            rotation: 0,
+            team,
+            player: None,
+        })
+        .expect("place wall");
+    }
+    let rules = sim
+        .ecs
+        .0
+        .get_resource::<BuildRules>()
+        .cloned()
+        .expect("rules");
+    let runtime = sim.block_runtime().expect("runtime");
+    assert!(
+        !crate::world::build::valid_break(
+            runtime.content(),
+            &sim.grid,
+            Some(&sim.ecs.0),
+            &rules,
+            1,
+            5,
+            5
+        ),
+        "enemy building rejected"
+    );
+    assert!(
+        crate::world::build::valid_break(
+            runtime.content(),
+            &sim.grid,
+            Some(&sim.ecs.0),
+            &rules,
+            1,
+            7,
+            5
+        ),
+        "derelict building allowed"
+    );
+    assert!(
+        crate::world::build::valid_break(
+            runtime.content(),
+            &sim.grid,
+            Some(&sim.ecs.0),
+            &rules,
+            1,
+            9,
+            5
+        ),
+        "own building allowed"
+    );
+}
+
+/// H02 T2: `CoreBlock.canBreak` (`CoreBlock.java:173-177`) keeps the last core
+/// unbreakable; `coreBuildAndConfig` with a second core allows it.
+#[test]
+fn last_core_unbreakable() {
+    use crate::world::limits::BuildRules;
+
+    let mut sim = runtime_sim();
+    let core = sim.world_block_id("core-shard").expect("core-shard");
+    sim.command(SimCommand::Place {
+        x: 10,
+        y: 10,
+        block: core,
+        rotation: 0,
+        team: 1,
+        player: None,
+    })
+    .expect("place core");
+    let rules = sim
+        .ecs
+        .0
+        .get_resource::<BuildRules>()
+        .cloned()
+        .expect("rules");
+    let runtime = sim.block_runtime().expect("runtime");
+    assert!(
+        !crate::world::build::valid_break(
+            runtime.content(),
+            &sim.grid,
+            Some(&sim.ecs.0),
+            &rules,
+            1,
+            10,
+            10
+        ),
+        "last core unbreakable"
+    );
+    sim.ecs
+        .0
+        .get_resource_mut::<BuildRules>()
+        .expect("rules")
+        .core_build_and_config = true;
+    sim.command(SimCommand::Place {
+        x: 20,
+        y: 20,
+        block: core,
+        rotation: 0,
+        team: 1,
+        player: None,
+    })
+    .expect("place second core");
+    let rules = sim
+        .ecs
+        .0
+        .get_resource::<BuildRules>()
+        .cloned()
+        .expect("rules");
+    let runtime = sim.block_runtime().expect("runtime");
+    assert!(
+        crate::world::build::valid_break(
+            runtime.content(),
+            &sim.grid,
+            Some(&sim.ecs.0),
+            &rules,
+            1,
+            10,
+            10
+        ),
+        "two cores with coreBuildAndConfig are breakable"
+    );
+}

@@ -1159,6 +1159,7 @@ impl Sim {
         if !crate::world::build::valid_break(
             runtime.content(),
             &self.grid,
+            Some(&self.ecs.0),
             &rules,
             team,
             i32::from(anchor.x()),
@@ -2084,6 +2085,13 @@ mod tests {
             player: None,
         })
         .expect("instant API place");
+        // The local player is team 1 (`sharded`); sync the guard like a
+        // campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         sim.command(SimCommand::Break {
             x: 14,
             y: 10,
@@ -2153,6 +2161,13 @@ mod tests {
         .expect("instant API place");
         assert_eq!(sim.grid.block_at(TilePos::new(14, 10)), Some(wall));
         set_core_copper(&mut sim, 10);
+        // The local player is team 1 (`sharded`); sync the guard like a
+        // campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
         sim.command(SimCommand::Break {
             x: 14,
             y: 10,
@@ -2202,6 +2217,14 @@ mod tests {
             runtime.fx = sink.clone();
         }
         set_core_copper(&mut sim, 100);
+        // The local player is team 1 (`sharded`); sync the guard like a
+        // campaign load does (`sync_build_rules`).
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+
         assert!(sim.queue_player_place(20, 20, wall, 1), "wall queued");
         for _ in 0..120 {
             sim.tick().expect("tick");

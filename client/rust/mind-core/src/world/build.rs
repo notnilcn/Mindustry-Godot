@@ -68,8 +68,13 @@ pub fn can_place_on(_def: &BlockDef, _team: u8, _rot: u8) -> bool {
     true
 }
 
-/// `Block.canBreak`.
-pub fn can_break(_def: &BlockDef) -> bool {
+/// `Block.canBreak` (`CoreBlock.java:173-177` for cores; `Block.canBreak` is
+/// unconditionally true otherwise).
+pub fn can_break(def: &BlockDef, rules: &BuildRules, cores_of_team: usize) -> bool {
+    if def.kind == BlockKind::CoreBlock {
+        //always keep at least 1 core to not lose the save
+        return rules.editor || (rules.core_build_and_config && cores_of_team > 1);
+    }
     true
 }
 
@@ -94,10 +99,12 @@ pub fn can_replace(def: &BlockDef, other: &BlockDef) -> bool {
     other.replaceable && self_replace && grouped && sized
 }
 
-/// Whether a tile holds a breakable, interactable block for `team`.
+/// Whether a tile holds a breakable, interactable block for `team`
+/// (`Build.validBreak`, `Build.java:317-320`).
 pub fn valid_break(
     content: &ContentRegistry,
     grid: &WorldGrid,
+    world: Option<&bevy_ecs::world::World>,
     rules: &BuildRules,
     team: u8,
     x: i32,
@@ -114,15 +121,36 @@ pub fn valid_break(
         return false;
     };
     let breakable = tile.breakable(content) || rules.allow_environment_deconstruct;
-    if !breakable || !can_break(def) {
+    if !breakable {
         return false;
     }
     match tile.build {
         Some(entity) => {
-            // Interactability is resolved by the runtime; no cross-entity read
-            // needed here because placement always uses the local team.
-            let _ = (entity, team);
-            true
+            // `Tile.interactable(team)` -> `state.teams.canInteract(team, team())`
+            // (`Tile.java:576-578`, `Teams.java:125-127`): own team or derelict.
+            // Without a world (harness/scenarios) the team cannot be read; keep
+            // the pre-world behavior (any team).
+            let tile_team = world
+                .and_then(|world| world.get::<crate::entities::comp::TeamComp>(entity))
+                .map(|comp| comp.team)
+                .unwrap_or(team);
+            if tile_team != team && tile_team != 0 {
+                return false;
+            }
+            // `CoreBlock.canBreak`: always keep at least 1 core to not lose the
+            // save.
+            let cores_of_team = world.map_or(usize::MAX, |world| {
+                world
+                    .iter_entities()
+                    .filter(|entity| {
+                        entity.contains::<crate::world::blocks::storage::CoreBuild>()
+                            && entity
+                                .get::<crate::entities::comp::TeamComp>()
+                                .is_some_and(|comp| comp.team == tile_team)
+                    })
+                    .count()
+            });
+            can_break(def, rules, cores_of_team)
         }
         None => true,
     }
