@@ -1091,26 +1091,64 @@ impl BuildingBehavior for VariableReactorBehavior {
 /// `sumAttribute(attribute, x, y)`: sums an environment attribute over every tile
 /// in the block footprint (`ThermalGeneratorBuild.onProximityAdded`).
 ///
-/// Reads `WorldGrid`/`BlockTable` from resources; the plan-07 harness keeps the
-/// grid in its own field, so hosts that drive this hook must install the grid as
-/// a resource (the P0 `Sim` does; `BuildHarness` documents this seam).
+/// Reads `WorldGrid`/`BlockTable` from resources. The live `Sim` keeps its grid
+/// in its own field (it never installs a `WorldGrid` resource), so
+/// `Sim::refresh_thermal_generators` re-runs the sum through
+/// [`refresh_thermal_sum_grid`] every tick; this resource form stays for hosts
+/// that do install the grid (map generation/filters).
 pub fn refresh_thermal_sum(world: &mut World, e: Entity, attribute: Attribute) {
-    let Some(block) = world.get::<Building>(e).map(|building| building.block) else {
-        return;
+    let sum = {
+        let (Some(building), Some(grid), Some(table)) = (
+            world.get::<Building>(e),
+            world.get_resource::<crate::world::WorldGrid>(),
+            world.get_resource::<crate::world::block::BlockTable>(),
+        ) else {
+            return;
+        };
+        let size = table
+            .instance(building.block)
+            .map(|instance| instance.def.size.max(1))
+            .unwrap_or(1);
+        thermal_sum(grid, table, building.tile, size, attribute)
     };
-    let Some(tile) = world.get::<Building>(e).map(|building| building.tile) else {
-        return;
+    if let Some(mut state) = world.get_mut::<ThermalState>(e) {
+        state.sum = sum;
+    }
+}
+
+/// Explicit-grid form of [`refresh_thermal_sum`] for the live `Sim` pass.
+pub fn refresh_thermal_sum_grid(
+    world: &mut World,
+    grid: &crate::world::WorldGrid,
+    e: Entity,
+    attribute: Attribute,
+) {
+    let sum = {
+        let (Some(building), Some(table)) = (
+            world.get::<Building>(e),
+            world.get_resource::<crate::world::block::BlockTable>(),
+        ) else {
+            return;
+        };
+        let size = table
+            .instance(building.block)
+            .map(|instance| instance.def.size.max(1))
+            .unwrap_or(1);
+        thermal_sum(grid, table, building.tile, size, attribute)
     };
-    let Some(grid) = world.get_resource::<crate::world::WorldGrid>() else {
-        return;
-    };
-    let Some(table) = world.get_resource::<crate::world::block::BlockTable>() else {
-        return;
-    };
-    let size = table
-        .instance(block)
-        .map(|instance| instance.def.size.max(1))
-        .unwrap_or(1);
+    if let Some(mut state) = world.get_mut::<ThermalState>(e) {
+        state.sum = sum;
+    }
+}
+
+/// `ThermalGeneratorBuild.sumAttribute` body shared by both entry points.
+fn thermal_sum(
+    grid: &crate::world::WorldGrid,
+    table: &crate::world::block::BlockTable,
+    tile: crate::world::TilePos,
+    size: i32,
+    attribute: Attribute,
+) -> f32 {
     let mut sum = 0.0f32;
     for dx in 0..size {
         for dy in 0..size {
@@ -1128,9 +1166,7 @@ pub fn refresh_thermal_sum(world: &mut World, e: Entity, attribute: Attribute) {
             }
         }
     }
-    if let Some(mut state) = world.get_mut::<ThermalState>(e) {
-        state.sum = sum;
-    }
+    sum
 }
 
 /// `PowerDiode` behavior (`PowerDiode.java:47-80`): each tick moves half the

@@ -1072,6 +1072,9 @@ impl Sim {
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.
         self.refresh_facing_drills();
+        // `ThermalGeneratorBuild.onProximityAdded` (T14): the floor-attribute
+        // sum also needs the grid.
+        self.refresh_thermal_generators();
         // `Groups.fires`/`Groups.puddles.update()` (`Logic.updateEntities`):
         // fires burn/spread and puddles evaporate/apply statuses every tick
         // (PAR-0091). Damage they deal is picked up by `resolve_deaths` below.

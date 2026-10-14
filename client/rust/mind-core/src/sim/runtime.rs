@@ -27,8 +27,8 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::{
-    BlockId, BlockKind, BuildVisibility, ContentError, ContentRegistry, ContentType, ItemId,
-    LiquidId, MemoryBundle, MemoryUnlockStore, UnitTypeId, create_base_content,
+    Attribute, BlockId, BlockKind, BuildVisibility, ContentError, ContentRegistry, ContentType,
+    ItemId, LiquidId, MemoryBundle, MemoryUnlockStore, UnitTypeId, create_base_content,
 };
 use crate::determinism::{Checksum, Checksummer, CommandError};
 use crate::ecs::{BuildingComp, TeamId};
@@ -166,6 +166,10 @@ pub struct SimRuntime {
     /// Entities whose facing edge is rescanned every tick (`BeamDrill`/
     /// `WallCrafter`; T5). Stale entries are dropped by the refresh pass.
     facing_drills: Vec<Entity>,
+    /// Live `ThermalGenerator` buildings whose floor-attribute sum is rescanned
+    /// every tick (the behavior hook cannot see `Sim`'s grid). Stale entries are
+    /// dropped by the refresh pass.
+    thermal_generators: Vec<Entity>,
 }
 
 impl SimRuntime {
@@ -525,6 +529,14 @@ impl SimRuntime {
             // `WallCrafter.getEfficiency`; T5).
             if self.is_facing_drill(world, entity) && !self.facing_drills.contains(&entity) {
                 self.facing_drills.push(entity);
+            }
+            // Thermal generators rescan their floor-attribute sum every tick
+            // (`ThermalGeneratorBuild.onProximityAdded`; T14 - the behavior hook
+            // cannot see `Sim`'s grid).
+            if self.thermal_attribute(world, entity).is_some()
+                && !self.thermal_generators.contains(&entity)
+            {
+                self.thermal_generators.push(entity);
             }
         }
         if let Some(mut counter) = world.get_resource_mut::<BlockCounter>() {
@@ -914,6 +926,28 @@ impl SimRuntime {
             })
     }
 
+    /// `ThermalGenerator.attribute` for a live thermal generator
+    /// (`heat` for `thermal-generator`, `steam` for `turbine-condenser`);
+    /// `None` for every other block.
+    fn thermal_attribute(&self, world: &World, entity: Entity) -> Option<Attribute> {
+        world
+            .get::<crate::entities::comp::Building>(entity)
+            .and_then(|building| {
+                world
+                    .get_resource::<BlockTable>()
+                    .and_then(|table| table.get(building.block))
+            })
+            .and_then(|inst| {
+                (inst.def.kind == crate::content::BlockKind::ThermalGenerator).then(|| {
+                    if inst.name == "turbine-condenser" {
+                        Attribute::Steam
+                    } else {
+                        Attribute::Heat
+                    }
+                })
+            })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn remove_building(
         &mut self,
@@ -928,6 +962,8 @@ impl SimRuntime {
         let _ = remove_from_proximity(world, entity, &self.content);
         self.remove_power_graph(world, grid, entity);
         self.facing_drills.retain(|drill| *drill != entity);
+        self.thermal_generators
+            .retain(|generator| *generator != entity);
         {
             let mut ctx = WorldCtx {
                 grid: &mut *grid,
@@ -1037,6 +1073,15 @@ impl SimRuntime {
         for entity in &spawned {
             if self.is_facing_drill(ecs, *entity) && !self.facing_drills.contains(entity) {
                 self.facing_drills.push(*entity);
+            }
+        }
+        // Materialized thermal generators join the per-tick floor-attribute
+        // rescan (T14).
+        for entity in &spawned {
+            if self.thermal_attribute(ecs, *entity).is_some()
+                && !self.thermal_generators.contains(entity)
+            {
+                self.thermal_generators.push(*entity);
             }
         }
         spawned.len()
@@ -1210,6 +1255,39 @@ impl Sim {
         }
     }
 
+    /// `ThermalGeneratorBuild.onProximityAdded` rescan (T14): the behavior hook
+    /// cannot see the live grid (`Sim.grid` is not an ECS resource), so the
+    /// whole floor-attribute sum is recomputed for every registered thermal
+    /// generator once per tick.
+    pub(crate) fn refresh_thermal_generators(&mut self) {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return;
+        };
+        if runtime.thermal_generators.is_empty() {
+            return;
+        }
+        let generators = std::mem::take(&mut runtime.thermal_generators);
+        for entity in generators {
+            if self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Building>(entity)
+                .is_none()
+            {
+                continue;
+            }
+            if let Some(attribute) = runtime.thermal_attribute(&self.ecs.0, entity) {
+                crate::world::blocks::power::behavior::refresh_thermal_sum_grid(
+                    &mut self.ecs.0,
+                    &self.grid,
+                    entity,
+                    attribute,
+                );
+                runtime.thermal_generators.push(entity);
+            }
+        }
+    }
+
     /// Installs the live building runtime with default configuration (no
     /// placement gate). Content is booted from the vanilla registry.
     pub fn install_block_runtime(&mut self) -> Result<(), RuntimeError> {
@@ -1301,6 +1379,7 @@ impl Sim {
             log: WorldEventLog::default(),
             render: NoopRenderHooks,
             facing_drills: Vec::new(),
+            thermal_generators: Vec::new(),
         });
         // A host may install the runtime after loading a grid with pre-placed
         // power buildings (`World.endMapLoad` rebuild).
