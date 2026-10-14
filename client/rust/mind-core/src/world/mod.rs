@@ -154,6 +154,22 @@ pub struct WorldGrid {
     /// `Rules.borderDarkness`: whether the map-area border darkens and blocks
     /// placement (`World.getDarkness` border term, `World.java:483-503`).
     pub border_darkness: bool,
+    /// Generated-sector polygon darkness (`World.getDarkness` sector term,
+    /// `World.java:505-529`): set for numbered (preset-less) sectors; `None`
+    /// keeps the square map.
+    pub sector_polygon: Option<SectorPolygon>,
+}
+
+/// The generated-sector polygon (`Sector.rect` + tile corner count + generated
+/// size) the darkness term projects; H05 T3.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectorPolygon {
+    /// `Sector.rect.rotation`.
+    pub rotation: f32,
+    /// `Sector.tile.corners.length` (6 for a hexagon, 5 for a pentagon).
+    pub sides: i32,
+    /// `Sector.getSize()` (the generated grid width).
+    pub size: i32,
 }
 
 impl Default for WorldGrid {
@@ -174,6 +190,7 @@ impl WorldGrid {
             generator_seed: 0,
             limit_area: None,
             border_darkness: true,
+            sector_polygon: None,
         }
     }
 

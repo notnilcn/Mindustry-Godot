@@ -6,6 +6,7 @@
 //! Plan 05 did not land a `math/` module, so `noise` is hosted here (the plan's
 //! additive-file intent); generators import `crate::math::noise`.
 
+pub mod arc_noise;
 pub mod interp;
 pub mod noise;
 pub mod rand_arc;

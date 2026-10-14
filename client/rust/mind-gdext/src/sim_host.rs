@@ -1919,7 +1919,7 @@ impl MindSimHost {
         };
         // The generator survives the grid/rules move so T4-T6 can run its
         // structure passes on the live sim.
-        let mut _generated_ctx: Option<(
+        let mut generated_ctx: Option<(
             Box<dyn mind_core::maps::generators::WorldGenerator>,
             mind_core::maps::generators::planet::SectorRect,
             usize,
@@ -1941,7 +1941,7 @@ impl MindSimHost {
                         rect,
                         sides,
                     } = generated;
-                    _generated_ctx = Some((generator, rect, sides));
+                    generated_ctx = Some((generator, rect, sides));
                     (grid, Some(rules), Vec::new(), Vec::new(), None)
                 }
                 None => {
@@ -1967,6 +1967,42 @@ impl MindSimHost {
         // iteration keeps no ECS entities from the previous world.
         let mut sim = Sim::new(1, grid.width(), grid.height(), BlockId::AIR, BlockId::AIR);
         sim.grid = grid;
+        // H05 T3: a generated sector is bounded by its projected polygon
+        // (`World.getDarkness` sector term, `World.java:505-529`); presets and
+        // saves of preset sectors keep the square map. A resumed generated
+        // sector needs the same polygon as a fresh generation.
+        if let Some((_, rect, sides)) = &generated_ctx {
+            sim.grid.sector_polygon = Some(mind_core::world::SectorPolygon {
+                rotation: rect.rotation,
+                sides: *sides as i32,
+                size: sim.grid.tiles.width,
+            });
+        } else if resume_from_save
+            && let Some(registry) = self.content_snapshot.as_ref()
+            && let Some(def) = registry.planet_by_name(planet_name)
+            && def
+                .sectors
+                .get(sector as usize)
+                .is_some_and(|cell| cell.preset.is_none())
+        {
+            let planet_grid =
+                mind_core::render::g3d::grid::PlanetGrid::create(def.sector_tiles as usize);
+            let rect = mind_core::maps::generators::planet::make_rect(
+                &planet_grid,
+                sector as usize,
+                def.radius,
+            );
+            let sides = planet_grid
+                .tiles
+                .get(sector as usize)
+                .map(|tile| tile.corners.len())
+                .unwrap_or(0);
+            sim.grid.sector_polygon = Some(mind_core::world::SectorPolygon {
+                rotation: rect.rotation,
+                sides: sides as i32,
+                size: sim.grid.tiles.width,
+            });
+        }
         let _ = sim.set_phase(mind_core::game::State::Playing);
         self.runner =
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
