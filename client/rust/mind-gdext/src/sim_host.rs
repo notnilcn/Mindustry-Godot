@@ -2550,6 +2550,12 @@ impl MindSimHost {
         self.sim.player_actively_building()
     }
 
+    /// `player.unit().plans.size` (`BuilderComp.plans`; the `buildautopause`
+    /// auto-pause/resume and the deselect-mining gate).
+    pub fn player_plan_count(&self) -> usize {
+        self.sim.player_plan_count()
+    }
+
     /// `tryDropItems` deposit check (`InputHandler.java:2286-2308`):
     /// `Some(true)` when the building at the tile accepts the held stack,
     /// `None` when Java takes the `Call.dropItem` branch.

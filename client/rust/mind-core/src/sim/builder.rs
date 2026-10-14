@@ -1203,6 +1203,16 @@ impl Sim {
             .unwrap_or_default()
     }
 
+    /// `player.unit().plans.size` (`BuilderComp.plans`; the `buildautopause`
+    /// auto-pause and deselect-mining gates, `DesktopInput.java:593/609`)
+    /// without cloning the queue.
+    pub fn player_plan_count(&self) -> usize {
+        self.player_unit
+            .and_then(|unit| self.ecs.0.get::<BuilderPlans>(unit))
+            .map(|plans| plans.plans.len())
+            .unwrap_or(0)
+    }
+
     /// Clears the player unit's queue (`BuilderComp.clearBuilding`).
     pub fn clear_player_build_plans(&mut self) {
         if let Some(unit) = self.player_unit

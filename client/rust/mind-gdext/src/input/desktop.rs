@@ -115,6 +115,12 @@ pub enum Effect {
         /// `{item_name: amount}` JSON.
         items: String,
     },
+    /// `inv.hide()` (`InputHandler.tileTapped`: a non-inventory tap hides the
+    /// open inventory).
+    HideInventory,
+    /// `config.hideConfig(); inv.hide(); planConfig.hide();`
+    /// (`InputHandler.tileTapped` on an empty tile).
+    HidePanels,
     /// Capture the running viewport.
     Screenshot,
     /// `MindUi.close_top_dialog()` (research/planet toggle keys).
@@ -366,6 +372,11 @@ pub struct DesktopBridge {
     /// `getReplacement`/`handlePlacementLine` half (junction/bridge placement)
     /// only when set.
     pub block_replace: bool,
+    /// `settings.buildautopause` (`DesktopInput.java:591-594`).
+    pub build_autopause: bool,
+    /// `InputHandler.buildWasAutoPaused` (`DesktopInput.java:593/673`,
+    /// resumed by `ConstructBlock.tapped`, `ConstructBlock.java:206-208`).
+    build_was_auto_paused: bool,
 }
 
 impl Default for DesktopBridge {
@@ -411,6 +422,8 @@ impl DesktopBridge {
             hint_keys: Vec::new(),
             command_mode_hold: true,
             block_replace: true,
+            build_autopause: false,
+            build_was_auto_paused: false,
         }
     }
 
@@ -675,6 +688,34 @@ impl DesktopBridge {
         self.block_replace = replace;
     }
 
+    /// `settings.buildautopause` (read once in `bootstrap`).
+    pub fn set_build_autopause(&mut self, enabled: bool) {
+        self.build_autopause = enabled;
+    }
+
+    /// `DesktopInput.java:591-594` auto-pause plus the Java resume rule: the
+    /// auto-pause latch clears when a plan exists again (`ConstructBlock.tapped`
+    /// resumes building after queueing its plan, `ConstructBlock.java:206-208`).
+    pub fn update_build_autopause(&mut self) {
+        if !self.build_autopause {
+            return;
+        }
+        let Some(mut host) = self.host.clone() else {
+            return;
+        };
+        let plans = host.bind().player_plan_count();
+        if self.controller.state.is_building && plans == 0 {
+            // `isBuilding = false; buildWasAutoPaused = true;`
+            self.controller.state.is_building = false;
+            self.build_was_auto_paused = true;
+            host.bind_mut().set_player_building_paused(true);
+        } else if self.build_was_auto_paused && !self.controller.state.is_building && plans > 0 {
+            self.controller.state.is_building = true;
+            self.build_was_auto_paused = false;
+            host.bind_mut().set_player_building_paused(false);
+        }
+    }
+
     /// Sets command mode to `enabled` (`DesktopInput.update` assignment).
     /// Turning it off clears the RTS selection like `toggle_command_mode`.
     pub fn set_command_mode(&mut self, enabled: bool) {
@@ -757,9 +798,14 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "pause_building" => {
-                // `DesktopInput.java:675`: toggles `isBuilding`, applied to the
-                // unit in `InputHandler.update` (`updateBuilding = isBuilding`).
+                // `DesktopInput.java:671-678`: toggles `isBuilding`, clears the
+                // auto-pause latch and stops shooting when resuming; applied to
+                // the unit in `InputHandler.update` (`updateBuilding`).
                 self.controller.state.is_building = !self.controller.state.is_building;
+                self.build_was_auto_paused = false;
+                if self.controller.state.is_building {
+                    self.shooting = false;
+                }
                 if let Some(mut host) = self.host.clone() {
                     host.bind_mut()
                         .set_player_building_paused(!self.controller.state.is_building);
@@ -1920,11 +1966,62 @@ impl DesktopBridge {
         true
     }
 
-    /// `tileTapped` (`InputHandler.java:1973-2029`): a left tap on a placed
+    /// `build.interactable(player.team())` (`Tile.interactable`,
+    /// `Tile.java:576-578`): own team or derelict.
+    fn tile_interactable(&self, x: i32, y: i32) -> bool {
+        let team = self.player_team();
+        self.host.as_ref().is_some_and(|host| {
+            host.bind()
+                .building_team(x, y)
+                .is_some_and(|tile_team| tile_team == team || tile_team == 0)
+        })
+    }
+
+    /// `build.block.synthetic()` (`Block.synthetic()` = `update || destructible`).
+    fn block_synthetic_at(&self, x: i32, y: i32) -> bool {
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let Some(content) = guard.content_registry() else {
+            return false;
+        };
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        guard
+            .grid()
+            .block_at(TilePos::new(tx, ty))
+            .and_then(|block| content.block(block))
+            .is_some_and(mind_core::maps::filters::block_info::synthetic)
+    }
+
+    /// `tileTapped` (`InputHandler.java:1973-2030`): a left tap on a placed
     /// building opens its config UI, or its inventory when it stores items.
     /// Returns `true` when the tap was consumed (`InputHandler.tileTapped`
     /// returns `consumed`; `DesktopInput.java:701` gates shooting on it).
     fn tile_tapped(&mut self, x: i32, y: i32) -> bool {
+        // H02 owns the `checkConfigTap`/`onConfigureBuildTapped` tap-to-link
+        // branch at the top of this function (`world::config_tap::config_tap`
+        // is not on main: skipped, waiting for H02 T6). If both edit here,
+        // keep H02's link branch before these gates.
+        //
+        // `if(build == null){ inv.hide(); config.hideConfig(); return false; }`
+        if !self
+            .host
+            .as_ref()
+            .is_some_and(|host| host.bind().building_team(x, y).is_some())
+        {
+            self.effects.push(Effect::HidePanels);
+            return false;
+        }
+        // `build.interactable(player.team())`: enemy buildings never open a
+        // panel or inventory (IH:1980-1990).
+        if !self.tile_interactable(x, y) {
+            self.effects.push(Effect::HideInventory);
+            return false;
+        }
+        // `build.block.configurable && build.interactable(team)`.
         // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
         // returns false, so no panel opens (PAR-0108).
         if self.block_kind_at(x, y) == Some(BlockKind::SwitchBlock) {
@@ -1950,6 +2047,8 @@ impl DesktopBridge {
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!enabled),
             });
+            // `if(!showedInventory) inv.hide();`
+            self.effects.push(Effect::HideInventory);
             return true;
         }
         // `Door.tapped` (`Door.java:148-154`, T13): a tap toggles unless a unit
@@ -1968,6 +2067,7 @@ impl DesktopBridge {
             let open = host.bind().building_config_json(x, y) == "true";
             if open && host.bind().building_has_unit_overlap(x, y) {
                 // `Door.tapped` returns without toggling: the tap is not consumed.
+                self.effects.push(Effect::HideInventory);
                 return false;
             }
             self.emit_action(RemoteAction::Configure {
@@ -1975,6 +2075,7 @@ impl DesktopBridge {
                 y: ty,
                 value: mind_core::world::config::ConfigValue::Bool(!open),
             });
+            self.effects.push(Effect::HideInventory);
             return true;
         }
         if let Some(spec) = self.config_spec(x, y) {
@@ -1984,21 +2085,28 @@ impl DesktopBridge {
                 screen: self.mouse,
                 spec,
             });
+            self.effects.push(Effect::HideInventory);
             return true;
         }
-        let Some(host) = self.host.clone() else {
-            return false;
-        };
-        let items = host.bind().block_items_json(x, y);
-        if let Some(items) = items {
-            self.effects.push(Effect::OpenBlockInventory {
-                x,
-                y,
-                screen: self.mouse,
-                items,
-            });
-            return true;
+        // `build.interactable(team) && build.block.synthetic() &&
+        // build.block.hasItems && build.items.total() > 0` (IH:1998-2004).
+        if self.block_synthetic_at(x, y) {
+            let Some(host) = self.host.clone() else {
+                return false;
+            };
+            let items = host.bind().block_items_json(x, y);
+            if let Some(items) = items {
+                self.effects.push(Effect::OpenBlockInventory {
+                    x,
+                    y,
+                    screen: self.mouse,
+                    items,
+                });
+                return true;
+            }
         }
+        // `if(!showedInventory) inv.hide();`
+        self.effects.push(Effect::HideInventory);
         false
     }
 
@@ -2006,6 +2114,23 @@ impl DesktopBridge {
         let Some((x, y)) = self.cursor_tile() else {
             return;
         };
+        // `DesktopInput.java:608-610` runs before the select/deselect taps: the
+        // right tap clears `mineTile` when no placement mode, unit plans or
+        // command mode owns the tap. Do not return: the break drag still
+        // starts (`DI:740-748`).
+        let plans = self
+            .host
+            .as_ref()
+            .map(|host| host.bind().player_plan_count())
+            .unwrap_or(0);
+        if mind_core::input::desktop::deselect_stops_mining(
+            self.controller.state.block.is_some(),
+            self.controller.state.command_mode,
+            plans,
+        ) && let Some(mut host) = self.host.clone()
+        {
+            host.bind_mut().set_player_mine(None);
+        }
         if self.controller.state.command_mode {
             self.command_tap(bindings);
             return;

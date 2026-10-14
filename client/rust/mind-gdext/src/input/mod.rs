@@ -221,6 +221,9 @@ impl INode for MindInput {
         self.bridge.sync_line_override();
         // Cargo keys repeat while held (`DesktopInput.updateMovement`).
         self.bridge.update_payload_hold(&self.bindings);
+        // `DesktopInput.java:591-594`: auto-pause building while the player
+        // unit's queue is empty (`buildautopause`).
+        self.bridge.update_build_autopause();
         // G05 T4b hint triggers while a key is held (`boost`,
         // `rebuild_selecting`).
         self.bridge.refresh_hints(&self.bindings);
@@ -268,6 +271,8 @@ impl MindInput {
         self.bridge
             .set_command_mode_hold(Self::read_command_mode_hold());
         self.bridge.set_block_replace(Self::read_block_replace());
+        self.bridge
+            .set_build_autopause(Self::read_build_autopause());
         // Scene wiring (tscn-first): the spine declares SimHost as a sibling of
         // Input and Camera2D under World.
         self.bridge.host = self.base().try_get_node_as::<MindSimHost>("../SimHost");
@@ -333,6 +338,12 @@ impl MindInput {
     fn read_block_replace() -> bool {
         let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
         store.get_bool("blockreplace", true)
+    }
+
+    /// `settings.getBool("buildautopause", false)` (`SettingsMenuDialog.java:411`).
+    fn read_build_autopause() -> bool {
+        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+        store.get_bool("buildautopause", false)
     }
 
     /// Re-reads the hold setting when a command-mode key edge arrives so a live
@@ -580,6 +591,19 @@ impl MindInput {
         }
     }
 
+    /// Calls `hide_panel()` on a fragment (or clears `visible` when the
+    /// fragment has no such method).
+    fn hide_panel_at(&self, path: &str) {
+        let Some(mut node) = self.base().try_get_node_as::<Node>(path) else {
+            return;
+        };
+        if node.has_method("hide_panel") {
+            let _ = node.call("hide_panel", &[]);
+        } else {
+            node.set("visible", &false.to_variant());
+        }
+    }
+
     /// Resolves UI effects produced by the desktop bridge.
     fn drain_effects(&mut self) {
         let effects = self.bridge.take_effects();
@@ -667,6 +691,17 @@ impl MindInput {
                 Effect::CloseTopDialog => {
                     if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
                         let _ = ui.call("close_top_dialog", &[]);
+                    }
+                }
+                Effect::HideInventory => {
+                    self.hide_panel_at(BLOCK_INVENTORY_PATH);
+                }
+                Effect::HidePanels => {
+                    // `config.hideConfig(); inv.hide(); planConfig.hide();`
+                    // (`InputHandler.tileTapped` empty-tile branch).
+                    self.hide_panel_at(BLOCK_INVENTORY_PATH);
+                    if let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH) {
+                        node.set("visible", &false.to_variant());
                     }
                 }
                 Effect::Hotkey(action) => {
