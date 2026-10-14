@@ -7430,4 +7430,219 @@ mod msav_tests {
             "the authored pin matches the Arc pack order"
         );
     }
+
+    /// H01 T14: the real Ground Zero wave-1 fight. The plan's acceptance: a
+    /// drill-fed `duo` next to the core kills the wave and the core survives.
+    /// Prints the wave composition and the survivors so a failure can be
+    /// recorded without tuning the fixture.
+    #[test]
+    fn ground_zero_wave_one_dies_to_drill_fed_duo() {
+        use crate::ecs::TeamId;
+        use crate::game::State;
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+        let ore = content.block_id("ore-copper").expect("ore");
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+        // Bullet-vs-building collision reads the runtime grid snapshot.
+        sim.refresh_unit_runtime();
+        let core_block = content.block_id("core-shard").expect("core");
+        let (core_x, core_y, core) = sim
+            .grid
+            .tiles
+            .array()
+            .iter()
+            .find(|t| t.block == core_block)
+            .and_then(|t| t.build.map(|build| (i32::from(t.x), i32::from(t.y), build)))
+            .expect("core tile + entity");
+
+        let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
+        let mut session = PlaySession::new(Rules {
+            // The sector is not captured, so the wave-team units live
+            // (`Sector.isCaptured()` = `!waves && !attackMode`).
+            waves: true,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.sector = content.planet_id("serpulo").map(|planet| (planet, 170));
+        session.teams.register_core(core, TeamId(1), &session.rules);
+        // The hand-built session has no decoded spawn overlays; `spawn_count`
+        // keeps `check_game_state` from flipping the sector to captured.
+        session.spawn_count = 1;
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        // A drill on a free 2x2 copper patch with a free tile to its right.
+        let free = |sim: &Sim, x: i32, y: i32| {
+            sim.grid
+                .tiles
+                .getn(x, y)
+                .is_some_and(|t| t.block == air && t.build.is_none())
+        };
+        let is_ore =
+            |sim: &Sim, x: i32, y: i32| sim.grid.tiles.getn(x, y).is_some_and(|t| t.overlay == ore);
+        let mut site = None;
+        'search: for r in 2..40 {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let (x, y) = (core_x + dx, core_y + dy);
+                    let cells = [(x, y), (x + 1, y), (x, y + 1), (x + 1, y + 1)];
+                    if cells
+                        .iter()
+                        .all(|&(cx, cy)| free(&sim, cx, cy) && is_ore(&sim, cx, cy))
+                        && free(&sim, x + 2, y)
+                    {
+                        site = Some((x, y));
+                        break 'search;
+                    }
+                }
+            }
+        }
+        let (dx, dy) = site.expect("copper patch near the core");
+        let drill = content.block_id("mechanical-drill").expect("drill").get();
+        let duo = content.block_id("duo").expect("duo").get();
+        for (x, y, block) in [(dx, dy, drill), (dx + 2, dy, duo)] {
+            sim.command(crate::determinism::SimCommand::Place {
+                x: x as i16,
+                y: y as i16,
+                block,
+                rotation: 0,
+                team: 1,
+                player: None,
+            })
+            .expect("place");
+        }
+        let duo_entity = sim.grid.tiles.get(dx + 2, dy).build.expect("duo built");
+        for _ in 0..1800 {
+            sim.tick().expect("tick");
+        }
+        let ammo = sim
+            .ecs
+            .0
+            .get::<crate::world::blocks::defense::turrets::TurretState>(duo_entity)
+            .map(|state| state.total_ammo)
+            .unwrap_or(0);
+        assert!(ammo > 0, "the drill fed copper ammo into the duo");
+
+        sim.request_wave_spawn(0);
+        let mut wave_composition: Vec<String> = Vec::new();
+        let mut ticks = 0usize;
+        for tick in 0..6000 {
+            sim.tick().expect("tick");
+            ticks = tick;
+            let runtime = sim.unit_runtime().expect("runtime");
+            if tick < 5 {
+                for &entity in &runtime.units {
+                    if sim.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(2) {
+                        continue;
+                    }
+                    let name = sim
+                        .ecs
+                        .0
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .map(|def| def.name.clone())
+                        .unwrap_or_default();
+                    if !wave_composition.contains(&name) {
+                        wave_composition.push(name);
+                    }
+                }
+            }
+            let enemies = runtime
+                .units
+                .iter()
+                .filter(|&&entity| {
+                    sim.ecs.0.get::<TeamComp>(entity).map(|t| t.team) == Some(2)
+                        && sim
+                            .ecs
+                            .0
+                            .get::<Health>(entity)
+                            .is_none_or(|health| !health.dead)
+                })
+                .count();
+            if enemies == 0 {
+                break;
+            }
+        }
+        eprintln!(
+            "T14 wave composition {wave_composition:?} after {ticks} ticks; core {:?} duo {:?}",
+            sim.ecs.0.get::<Health>(core).map(|health| health.health),
+            sim.ecs
+                .0
+                .get::<Health>(duo_entity)
+                .map(|health| health.health),
+        );
+        let runtime = sim.unit_runtime().expect("runtime");
+        let alive_enemies: Vec<String> = runtime
+            .units
+            .iter()
+            .filter_map(|&entity| {
+                if sim.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(2) {
+                    return None;
+                }
+                let alive = sim
+                    .ecs
+                    .0
+                    .get::<Health>(entity)
+                    .is_none_or(|health| !health.dead);
+                if !alive {
+                    return None;
+                }
+                Some(
+                    sim.ecs
+                        .0
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .map(|def| def.name.clone())
+                        .unwrap_or_default(),
+                )
+            })
+            .collect();
+        assert!(
+            alive_enemies.is_empty(),
+            "the drill-fed duo killed the wave (alive: {alive_enemies:?})"
+        );
+        assert!(
+            sim.ecs.0.get_entity(core).is_ok()
+                && sim.grid.tiles.get(core_x, core_y).build.is_some(),
+            "the core survived the wave"
+        );
+        assert!(
+            sim.ecs.0.get_entity(duo_entity).is_ok(),
+            "the duo survived the wave"
+        );
+    }
 }
