@@ -21,6 +21,7 @@ use crate::world::tiles::Tiles;
 
 use crate::maps::generators::WorldGenerator;
 use crate::maps::generators::astar;
+use crate::maps::generators::base::BaseRand;
 use crate::maps::generators::basic::{self, D4, GenNoise, planet_wall};
 use crate::maps::generators::planet::{
     FlatSectorView, HexMesher, PlanetGenerator, SectorRect, SectorView, StructureCtx,
@@ -743,6 +744,206 @@ fn rand_range_int(rand: &mut SimRng, min: i32, max: i32) -> i32 {
     min + rand.random(RngStream::MapGen, max - min + 1)
 }
 
+impl SerpuloPlanetGenerator {
+    /// Derelict ruins (`SerpuloPlanetGenerator.java:633-711`): 0-4 derelict
+    /// base parts near ores with scrap ore around them and debris damage.
+    /// Runs on the same `rand` state as the decoration pass (nothing draws from
+    /// `planet.base.rand` between it and the end of `generate`).
+    fn place_ruins(&mut self, ctx: &mut StructureCtx) {
+        use crate::ai::base_registry::BaseResource;
+        use crate::maps::generators::base::{get_frac, try_place};
+
+        let Some(bases) = ctx.bases else {
+            return;
+        };
+        let width = ctx.sim.grid.tiles.width;
+        let height = ctx.sim.grid.tiles.height;
+        let (spawn_x, spawn_y) = self.spawn;
+        let difficulty = self.sector.threat;
+        let rand = &mut self.planet.base.rand;
+
+        // `rand.random(-2, 4)`.
+        let ruin_count = rand_range_int(rand, -2, 4);
+        if ruin_count <= 0 {
+            return;
+        }
+
+        let padding = 25;
+        let mut ints: Vec<(i32, i32)> = Vec::new();
+        for x in padding..width - padding {
+            for y in padding..height - padding {
+                let Some(tile) = ctx.sim.grid.tiles.getn(x, y) else {
+                    continue;
+                };
+                let solid = ctx
+                    .content
+                    .block(tile.block)
+                    .map(|def| def.solid)
+                    .unwrap_or(false);
+                let overlay_drop = ctx
+                    .content
+                    .block(tile.overlay)
+                    .and_then(|def| def.item_drop);
+                let floor_liquid = ctx
+                    .content
+                    .block(tile.floor)
+                    .and_then(|def| def.liquid_drop);
+                if !solid && (overlay_drop.is_some() || floor_liquid.is_some()) {
+                    ints.push((x, y));
+                }
+            }
+        }
+
+        // `IntSeq.shuffle(rand)`: `for i = size-1 downTo 0`.
+        for i in (0..ints.len()).rev() {
+            let ii = rand.random(RngStream::MapGen, i as i32 + 1) as usize;
+            ints.swap(i, ii);
+        }
+
+        let ore_scrap = ctx.content.block_id("ore-scrap");
+        let mut placed = 0;
+        for &(x, y) in &ints {
+            if placed >= ruin_count {
+                break;
+            }
+            // Do not overwrite the player spawn (`Mathf.within(... 18f)`).
+            let dx = x - spawn_x;
+            let dy = y - spawn_y;
+            if dx * dx + dy * dy < 18 * 18 {
+                continue;
+            }
+
+            let range = difficulty + rand.next_float(RngStream::MapGen) * 0.4;
+
+            let Some(tile) = ctx.sim.grid.tiles.getn(x, y) else {
+                continue;
+            };
+            let overlay_drop = ctx
+                .content
+                .block(tile.overlay)
+                .and_then(|def| def.item_drop);
+            let floor_liquid = ctx
+                .content
+                .block(tile.floor)
+                .and_then(|def| def.liquid_drop);
+            let part = if let Some(drop) = overlay_drop {
+                // `tile.drop()`: the overlay's drop wins over the floor's.
+                let resource = drop;
+                get_frac(bases.for_resource(BaseResource::Item(resource)), range)
+            } else if floor_liquid.is_some() && rand.chance(RngStream::MapGen, 0.05) {
+                let liquid = floor_liquid.unwrap_or_default();
+                get_frac(bases.for_resource(BaseResource::Liquid(liquid)), range)
+            } else if rand.chance(RngStream::MapGen, 0.05) {
+                get_frac(&bases.parts, range)
+            } else {
+                None
+            };
+            let Some(part) = part else {
+                continue;
+            };
+
+            // The ore-scrap callback (`posc`) writes overlays and draws the
+            // d8 chances inline, in Java order.
+            let mut posc = |ctx: &mut StructureCtx, rand: &mut dyn BaseRand, cx: i32, cy: i32| {
+                let Some(other) = ctx.sim.grid.tiles.getn(cx, cy) else {
+                    return;
+                };
+                let surface = ctx
+                    .content
+                    .block(other.floor)
+                    .map(block_info::has_surface)
+                    .unwrap_or(false);
+                if !surface {
+                    return;
+                }
+                if let Some(ore_scrap) = ore_scrap {
+                    set_overlay(ctx, cx, cy, ore_scrap);
+                }
+                for j in 1..=2 {
+                    for (ddx, ddy) in basic::D8 {
+                        let tx = cx + ddx * j;
+                        let ty = cy + ddy * j;
+                        if !ctx.sim.grid.tiles.in_bounds(tx, ty) {
+                            continue;
+                        }
+                        let floor = ctx.sim.grid.tile(tx, ty).floor;
+                        let surface = ctx
+                            .content
+                            .block(floor)
+                            .map(block_info::has_surface)
+                            .unwrap_or(false);
+                        if surface
+                            && rand.chance(if j == 1 { 0.4 } else { 0.2 })
+                            && let Some(ore_scrap) = ore_scrap
+                        {
+                            set_overlay(ctx, tx, ty, ore_scrap);
+                        }
+                    }
+                }
+            };
+            let success = try_place(ctx, part, x, y, 0, rand, Some(&mut posc));
+            if !success {
+                continue;
+            }
+            placed += 1;
+            log::info!(
+                "ruins: derelict part placed at ({x}, {y}) [{} total]",
+                placed
+            );
+
+            // Debris: damage or remove derelict buildings in the circle.
+            let debris_radius = part.schematic.width.max(part.schematic.height) / 2 + 3;
+            basic::circle(x, y, width, height, debris_radius, |cx, cy| {
+                let dst = (((cx - x) * (cx - x) + (cy - y) * (cy - y)) as f32).sqrt();
+                let remove_chance = 0.05 + (0.5 - 0.05) * (dst / debris_radius as f32);
+                let Some(entity) = ctx.sim.grid.tiles.getn(cx, cy).and_then(|tile| tile.build)
+                else {
+                    return;
+                };
+                let center_pos = crate::world::TilePos::new(cx as i16, cy as i16);
+                let Some(comp) = ctx.sim.ecs.0.get::<crate::ecs::BuildingComp>(entity) else {
+                    return;
+                };
+                if comp.pos != center_pos {
+                    return;
+                }
+                let team = comp.team.0;
+                if team == 0 && rand.chance(RngStream::MapGen, remove_chance as f64) {
+                    if let (Ok(cx), Ok(cy)) = (i16::try_from(cx), i16::try_from(cy)) {
+                        ctx.sim.with_world_ctx(|wctx| wctx.remove_block(cx, cy));
+                    }
+                } else if rand.chance(RngStream::MapGen, 0.5) {
+                    let health = ctx
+                        .sim
+                        .ecs
+                        .0
+                        .get::<crate::entities::comp::Health>(entity)
+                        .map(|health| health.health)
+                        .unwrap_or(0.0);
+                    let damage = rand.next_float(RngStream::MapGen) * (health * 0.9);
+                    if let Some(mut health) = ctx
+                        .sim
+                        .ecs
+                        .0
+                        .get_mut::<crate::entities::comp::Health>(entity)
+                    {
+                        health.health -= damage;
+                    }
+                }
+            });
+        }
+    }
+}
+
+/// `WorldCtx.set_overlay` shorthand for the ruins callback.
+fn set_overlay(ctx: &mut StructureCtx, x: i32, y: i32, overlay: crate::content::BlockId) {
+    let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+        return;
+    };
+    ctx.sim
+        .with_world_ctx(|wctx| wctx.set_overlay(x, y, overlay));
+}
+
 impl WorldGenerator for SerpuloPlanetGenerator {
     fn name(&self) -> &'static str {
         "serpulo"
@@ -760,8 +961,11 @@ impl WorldGenerator for SerpuloPlanetGenerator {
         Some(self.spawn)
     }
 
-    /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4).
+    /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4/T6):
+    /// derelict ruins first (`SerpuloPlanetGenerator.java:633-711`), then the
+    /// launch loadout (`:719`).
     fn place_structures(&mut self, ctx: &mut StructureCtx) {
+        self.place_ruins(ctx);
         place_launch_loadout(ctx, self.spawn.0, self.spawn.1);
     }
 

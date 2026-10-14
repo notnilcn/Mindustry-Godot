@@ -298,4 +298,106 @@ mod tests {
             "launch resources stocked"
         );
     }
+
+    #[test]
+    fn ruins_placed_when_roll_positive() {
+        // H05 T6: on a numbered sector whose ruin roll is > 0, the structures
+        // pass scatters team-0 derelict parts (none within 18 tiles of the
+        // spawn). Uses the real `assets/baseparts` catalog; skips (with a note)
+        // when it is absent.
+        use crate::maps::generators::planet::StructureCtx;
+        use std::path::PathBuf;
+
+        let baseparts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../assets/baseparts");
+        if !baseparts.is_dir() {
+            println!("assets/baseparts absent; skipping ruins test");
+            return;
+        }
+        let content = content();
+        let mut schematics = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&baseparts) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("msch") {
+                    continue;
+                }
+                if let Ok(bytes) = std::fs::read(&path)
+                    && let Ok(schem) = crate::game::schematics::read(&bytes, &content)
+                {
+                    schematics.push(schem);
+                }
+            }
+        }
+        if schematics.is_empty() {
+            println!("no base parts decoded; skipping ruins test");
+            return;
+        }
+        let mut bases = crate::ai::BaseRegistry::new();
+        bases.load(&content, schematics);
+        if bases.parts.is_empty() && bases.req_parts.is_empty() {
+            println!("no base parts classified; skipping ruins test");
+            return;
+        }
+
+        let def = content.planet_by_name("serpulo").expect("serpulo");
+        for id in 1..30u16 {
+            if def
+                .sectors
+                .get(id as usize)
+                .is_none_or(|cell| cell.preset.is_some())
+            {
+                continue;
+            }
+            let generated = generate_sector("serpulo", id, &content, SectorGenExtras::default())
+                .expect("serpulo");
+            let Some((spawn_x, spawn_y)) = generated.generator.player_spawn() else {
+                continue;
+            };
+            let GeneratedSector {
+                grid,
+                rules,
+                mut generator,
+                ..
+            } = generated;
+            let (width, height) = (grid.tiles.width, grid.tiles.height);
+            let mut sim = crate::sim::Sim::new(1, width, height, BlockId::AIR, BlockId::AIR);
+            sim.grid = grid;
+            sim.install_block_runtime().expect("live runtime");
+            let mut rules = rules;
+            let mut ctx = StructureCtx {
+                sim: &mut sim,
+                content: &content,
+                bases: Some(&bases),
+                loadout: None,
+                rules: &mut rules,
+                player_team: 1,
+                wave_team: 2,
+            };
+            generator.place_structures(&mut ctx);
+
+            let mut ruin_tiles: Vec<(i32, i32)> = Vec::new();
+            for (_, _, comp) in sim.ecs.entities_by_seq() {
+                if comp.team.0 == 0 {
+                    ruin_tiles.push((i32::from(comp.pos.x()), i32::from(comp.pos.y())));
+                }
+            }
+            if ruin_tiles.is_empty() {
+                continue;
+            }
+            for &(x, y) in &ruin_tiles {
+                let dx = x - spawn_x;
+                let dy = y - spawn_y;
+                assert!(
+                    dx * dx + dy * dy >= 18 * 18,
+                    "sector {id}: team-0 building at ({x},{y}) too close to the spawn"
+                );
+            }
+            println!(
+                "sector {id}: {} derelict building(s) from the ruins pass",
+                ruin_tiles.len()
+            );
+            return;
+        }
+        println!("no sector in 1..30 rolled ruins; skipping");
+    }
 }

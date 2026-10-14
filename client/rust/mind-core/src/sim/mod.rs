@@ -928,6 +928,23 @@ impl Sim {
         cores
     }
 
+    /// Runs `f` with the live [`crate::world::ops::WorldCtx`] (generator
+    /// structure passes; returns `None` without a block runtime) and refreshes
+    /// the unit runtime afterwards (H05 T5/T6).
+    pub fn with_world_ctx<R>(
+        &mut self,
+        f: impl FnOnce(&mut crate::world::ops::WorldCtx<'_>) -> R,
+    ) -> Option<R> {
+        let outcome = {
+            let grid = &mut self.grid;
+            let world = &mut self.ecs.0;
+            let runtime = self.block_runtime.as_mut()?;
+            runtime.with_world_ctx(world, grid, f)
+        };
+        self.refresh_unit_runtime();
+        Some(outcome)
+    }
+
     /// `Schematics.placeLaunchLoadout`'s core stocking
     /// (`Schematics.java:465-469`): `tile.build.items.add(universe.
     /// getLaunchResources())` on the just-placed core, capped at its

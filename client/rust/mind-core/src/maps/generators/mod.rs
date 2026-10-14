@@ -20,7 +20,7 @@ use crate::game::rules::Rules;
 use crate::world::WorldParams;
 use crate::world::tiles::Tiles;
 
-pub use base::{BaseGenerator, BaseRegistryView, SchematicHooks};
+pub use base::{BaseRand, get_frac, try_place};
 pub use basic::{BasicGenerator, Draw, GenNoise, SimplexNoise};
 pub use file_map::FileMapGenerator;
 pub use planet::{
