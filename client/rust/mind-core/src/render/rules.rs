@@ -42,10 +42,25 @@ pub struct RulesRenderView {
     pub limit_map_area: bool,
     /// `Rules.limitX/Y/limitW/limitH`.
     pub limit_rect: [i32; 4],
+    /// `Rules.dropZoneRadius` (`OverlayRenderer.java:200-211`).
+    pub drop_zone_radius: f32,
+    /// `Rules.enemyCoreBuildRadius` (core no-build circles).
+    pub enemy_core_build_radius: f32,
+    /// `Rules.polygonCoreProtection`.
+    pub polygon_core_protection: bool,
+    /// `Rules.unitLight` (light pass gate).
+    pub unit_light: bool,
+    /// `Rules.buildRadius(team)` per team present in `Rules.teams`
+    /// (`protectCores ? enemyCoreBuildRadius + extraCoreBuildRadius : 0`);
+    /// teams absent from the map default to protected
+    /// (`fallbackTeamRule().protectCores = true`, `Rules.java:355,412`).
+    pub core_build_radius: Vec<(u8, f32)>,
 }
 
 impl Default for RulesRenderView {
     fn default() -> Self {
+        // Java defaults come from the live `Rules` model, never hard-coded.
+        let rules = crate::io::json::rules::Rules::default();
         Self {
             static_fog: false,
             fog: false,
@@ -62,6 +77,11 @@ impl Default for RulesRenderView {
             custom_background_callback: None,
             limit_map_area: false,
             limit_rect: [0, 0, 0, 0],
+            drop_zone_radius: rules.drop_zone_radius,
+            enemy_core_build_radius: rules.enemy_core_build_radius,
+            polygon_core_protection: rules.polygon_core_protection,
+            unit_light: rules.unit_light,
+            core_build_radius: Vec::new(),
         }
     }
 }
@@ -89,8 +109,29 @@ impl RulesRenderView {
                 rules.limit_width,
                 rules.limit_height,
             ],
+            drop_zone_radius: rules.drop_zone_radius,
+            enemy_core_build_radius: rules.enemy_core_build_radius,
+            polygon_core_protection: rules.polygon_core_protection,
+            unit_light: rules.unit_light,
+            core_build_radius: rules
+                .teams
+                .0
+                .keys()
+                .map(|team| (*team, rules.build_radius(*team)))
+                .collect(),
             ..Self::default()
         }
+    }
+
+    /// `Rules.buildRadius(team)`: the view's per-team radius, falling back to
+    /// `enemyCoreBuildRadius` for teams absent from `Rules.teams` (the Java
+    /// fallback team rule has `protectCores = true`, `Rules.java:355,412`).
+    pub fn core_build_radius_for(&self, team: u8) -> f32 {
+        self.core_build_radius
+            .iter()
+            .find(|(t, _)| *t == team)
+            .map(|(_, radius)| *radius)
+            .unwrap_or(self.enemy_core_build_radius)
     }
 
     /// `FogRenderer.drawFog`: the dynamic fog color with the `0.5` alpha floor
@@ -126,6 +167,11 @@ mod tests {
         assert!(!rules.static_fog && !rules.fog && !rules.lighting);
         assert_eq!(rules.ambient_light, [0.01, 0.01, 0.04, 0.99]);
         assert_eq!(rules.env, 0);
+        // Java defaults (`Rules.java:125-151,213`): 400 / false / 300 / true.
+        assert_eq!(rules.enemy_core_build_radius, 400.0);
+        assert!(!rules.polygon_core_protection);
+        assert_eq!(rules.drop_zone_radius, 300.0);
+        assert!(rules.unit_light);
     }
 
     #[test]
@@ -149,6 +195,26 @@ mod tests {
             view.ambient_light,
             [ambient.r, ambient.g, ambient.b, ambient.a]
         );
+    }
+
+    #[test]
+    fn from_rules_core_radius() {
+        // Default rules have no team entries; absent teams use the protected
+        // fallback -> 400 for team 2 (`Rules.buildRadius`).
+        let rules = crate::io::json::rules::Rules::default();
+        let view = RulesRenderView::from_rules(&rules);
+        assert_eq!(view.core_build_radius_for(2), 400.0);
+        // A team rule with `protect_cores = false` -> 0, even with an extra
+        // radius; `protectCores` wins.
+        let mut rules = crate::io::json::rules::Rules::default();
+        rules.team_rule_mut(2).protect_cores = false;
+        rules.team_rule_mut(2).extra_core_build_radius = 50.0;
+        let view = RulesRenderView::from_rules(&rules);
+        assert_eq!(view.core_build_radius, vec![(2, 0.0)]);
+        rules.team_rule_mut(2).protect_cores = true;
+        let view = RulesRenderView::from_rules(&rules);
+        assert_eq!(view.core_build_radius, vec![(2, 450.0)]);
+        assert_eq!(view.core_build_radius_for(2), 450.0);
     }
 
     #[test]

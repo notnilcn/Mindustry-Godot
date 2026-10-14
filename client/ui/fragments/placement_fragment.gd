@@ -38,6 +38,9 @@ var _bar_campaign := false
 @onready var top_table: PanelContainer = get_node_or_null("Panel/Frame/TopTable")
 @onready var top_rows: VBoxContainer = get_node_or_null("Panel/Frame/TopTable/Rows")
 @onready var top_divider: ColorRect = get_node_or_null("Panel/Frame/TopDivider")
+@onready var command_panel: PanelContainer = get_node_or_null("Panel/Frame/CommandPanel")
+@onready var command_rows: VBoxContainer = get_node_or_null("Panel/Frame/CommandPanel/Rows")
+@onready var layout: HBoxContainer = get_node_or_null("Panel/Frame/Layout")
 
 ## Last rendered top-table state (`b:<block>` or `h:<kind>:<name>`); the header
 ## rebuilds only when it changes (`PlacementFragment.lastDisplayState`).
@@ -62,6 +65,13 @@ const TOP_REFRESH_MS := 250
 var _hover_tile := Vector2i(-1, -1)
 ## Live `Block.setBars` rows: `[[row_dict, MindBar], ...]` (T6).
 var _hover_bars: Array = []
+## Command-mode panel state (`PlacementFragment.commandTable`; H03 T3).
+var _command_mode := false
+var _command_json := ""
+var _command_dirty := true
+var _command_refresh_ms := 0
+## `PlacementFragment` command-table re-read cadence (msec).
+const COMMAND_REFRESH_MS := 250
 
 
 func _ready() -> void:
@@ -75,6 +85,7 @@ func _ready() -> void:
 	if search != null:
 		search.text_changed.connect(func(_value: String) -> void: _rebuild())
 	_setup_top_style()
+	_setup_command_style()
 	_build_input_bar()
 	# The HUD starts hidden in the menu; the catalogue is rebuilt on every reveal
 	# so a sector launch or research that happened while it was hidden is
@@ -85,8 +96,21 @@ func _ready() -> void:
 	var input := get_node_or_null("/root/Spine/Input")
 	if input != null and input.has_signal("hotkey") and not input.is_connected("hotkey", Callable(self, "_on_hotkey")):
 		input.connect("hotkey", Callable(self, "_on_hotkey"))
+	if (
+		input != null
+		and input.has_signal("selection_changed")
+		and not input.is_connected("selection_changed", Callable(self, "_on_selection_changed"))
+	):
+		input.connect("selection_changed", Callable(self, "_on_selection_changed"))
 	_refresh_input_bar()
 	_ensure_loaded()
+
+
+## `PlacementFragment` commandTable update (`PlacementFragment.java:613-630`):
+## the selection re-renders the unit/command/stance rows; block mode restores
+## the block table (`mainStack` swap at `:443-453`).
+func _on_selection_changed(_units_json: String) -> void:
+	_command_dirty = true
 
 
 ## Campaign-gated icon-row visibility, change-cached per frame (`hud.campaign`
@@ -99,6 +123,7 @@ func _process(_delta: float) -> void:
 		_refresh_input_bar()
 	_update_top_table()
 	_update_selection_highlight()
+	_update_command_panel()
 
 
 ## `PlacementFragment` per-frame `button.update`: the checked cell follows
@@ -142,6 +167,220 @@ func _setup_top_style() -> void:
 	box.content_margin_right = 5.0
 	box.content_margin_bottom = 5.0
 	top_table.add_theme_stylebox_override("panel", box)
+
+
+## `Tex.pane2` ninepatch for the command table (`commandTable = new
+## Table(Tex.pane2)`, `PlacementFragment.java:444`; `pane-2` splits 12).
+func _setup_command_style() -> void:
+	if command_panel == null:
+		return
+	var texture: Variant = MindWidgets.icon_texture("pane-2")
+	if not (texture is Texture2D):
+		return
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	box.texture_margin_left = 12.0
+	box.texture_margin_top = 12.0
+	box.texture_margin_right = 12.0
+	box.texture_margin_bottom = 12.0
+	command_panel.add_theme_stylebox_override("panel", box)
+
+
+## `control.input.commandMode ? commandTable : blockCatTable`
+## (`PlacementFragment.java:443-453`): swaps the block palette for the command
+## table and re-reads `command_panel_json` at most every `COMMAND_REFRESH_MS`
+## (or immediately after a selection change).
+func _update_command_panel() -> void:
+	if command_panel == null:
+		return
+	var input := get_node_or_null("/root/Spine/Input")
+	var mode := false
+	if input != null and input.has_method("command_mode"):
+		mode = bool(input.call("command_mode"))
+	if mode != _command_mode:
+		_command_mode = mode
+		if layout != null:
+			layout.visible = not mode
+		command_panel.visible = mode
+		_command_dirty = true
+		if mode and layout != null:
+			# Java forces the command table to the block table width
+			# (`commandTable.getWidth()` constraint, `:446`).
+			command_panel.custom_minimum_size.x = layout.size.x
+	if not mode:
+		return
+	var now := Time.get_ticks_msec()
+	if not _command_dirty and now - _command_refresh_ms < COMMAND_REFRESH_MS:
+		return
+	_command_refresh_ms = now
+	if input == null or not input.has_method("selection_json"):
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("command_panel_json"):
+		return
+	var json := str(host.call("command_panel_json", str(input.call("selection_json"))))
+	if json == _command_json and not _command_dirty:
+		return
+	_command_json = json
+	_command_dirty = false
+	_rebuild_command_panel(JSON.parse_string(json))
+
+
+## `rebuildCommand` (`PlacementFragment.java:492-610`): title, accent rule,
+## unit-type grid, command row and stance row from the probe JSON.
+func _rebuild_command_panel(view: Variant) -> void:
+	if command_rows == null:
+		return
+	for child in command_rows.get_children():
+		child.queue_free()
+	# code-instantiated: rows follow the live selection (type counts, command
+	# and stance unions); the count is driven by the selection, never authored.
+	if not (view is Dictionary):
+		return
+	var data: Dictionary = view
+	var title := MindWidgets.label(MindWidgets.markup("@commandmode.name"))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	command_rows.add_child(title)
+	# `image().color(Pal.accent).growX().pad(20f).padTop(0f).padBottom(4f)`.
+	var rule_margin := MarginContainer.new()
+	rule_margin.add_theme_constant_override("margin_left", 20)
+	rule_margin.add_theme_constant_override("margin_right", 20)
+	rule_margin.add_theme_constant_override("margin_bottom", 4)
+	var rule := ColorRect.new()
+	rule.custom_minimum_size = Vector2(0, 4)
+	rule.color = Color("ffd37f")
+	rule.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rule_margin.add_child(rule)
+	command_rows.add_child(rule_margin)
+	var types: Array = data.get("types", [])
+	if types.is_empty():
+		# `commandmode.nounits`, light grey, centred, pad 6 (`:611`).
+		var none := MindWidgets.label(MindWidgets.markup("@commandmode.nounits"))
+		none.modulate = Color(0.75, 0.75, 0.75)
+		none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		none.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var pad := MarginContainer.new()
+		pad.add_theme_constant_override("margin_left", 6)
+		pad.add_theme_constant_override("margin_right", 6)
+		pad.add_theme_constant_override("margin_top", 6)
+		pad.add_theme_constant_override("margin_bottom", 6)
+		pad.add_child(none)
+		command_rows.add_child(pad)
+		return
+	var type_grid := GridContainer.new()
+	type_grid.columns = 7
+	for entry in types:
+		if entry is Dictionary:
+			type_grid.add_child(_command_type_cell(entry))
+	command_rows.add_child(type_grid)
+	var commands: Array = data.get("commands", [])
+	var stances: Array = data.get("stances", [])
+	if not commands.is_empty():
+		command_rows.add_child(_command_button_grid(commands, true))
+	if not stances.is_empty():
+		if not commands.is_empty():
+			# `image().color(Pal.gray).height(3).pad(7)` separator (`:592-594`).
+			var sep_margin := MarginContainer.new()
+			sep_margin.add_theme_constant_override("margin_left", 7)
+			sep_margin.add_theme_constant_override("margin_right", 7)
+			sep_margin.add_theme_constant_override("margin_top", 7)
+			sep_margin.add_theme_constant_override("margin_bottom", 7)
+			var separator := ColorRect.new()
+			separator.custom_minimum_size = Vector2(0, 3)
+			separator.color = Color("454545")
+			separator.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			sep_margin.add_child(separator)
+			command_rows.add_child(sep_margin)
+		command_rows.add_child(_command_button_grid(stances, false))
+
+
+## `StatValues.stack(type, count)` cell (`PlacementFragment.java:530-553`):
+## 32px unit icon with the count at the bottom-right; left click keeps the
+## type, right click drops it.
+func _command_type_cell(entry: Dictionary) -> Control:
+	var name := str(entry.get("name", ""))
+	var count := int(entry.get("count", 0))
+	var button := Button.new()
+	button.custom_minimum_size = Vector2(42, 42)
+	button.tooltip_text = _bundle("unit.%s.name" % name, name)
+	button.icon = MindWidgets.icon_texture("unit-%s-ui" % name)
+	button.expand_icon = true
+	button.add_theme_constant_override("icon_max_width", 32)
+	button.gui_input.connect(_on_command_type_input.bind(int(entry.get("type", -1))))
+	# code-instantiated: the stack amount follows the live selection count.
+	var amount := MindWidgets.label(str(count))
+	amount.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	amount.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.add_child(amount)
+	return button
+
+
+## `b.clicked(KeyCode.mouseLeft/mouseRight)` (`PlacementFragment.java:537-548`).
+func _on_command_type_input(event: InputEvent, type_id: int) -> void:
+	if not (event is InputEventMouseButton):
+		return
+	var mouse := event as InputEventMouseButton
+	if not mouse.pressed or type_id < 0:
+		return
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null:
+		return
+	if mouse.button_index == MOUSE_BUTTON_LEFT and input.has_method("select_only_type"):
+		input.call("select_only_type", type_id)
+	elif mouse.button_index == MOUSE_BUTTON_RIGHT and input.has_method("deselect_type"):
+		input.call("deselect_type", type_id)
+
+
+## Command buttons (`:579-581`, 50x50, checked when any selected unit runs it)
+## or stance buttons (`:602-603`, toggled).
+func _command_button_grid(entries: Array, is_command: bool) -> GridContainer:
+	var grid := GridContainer.new()
+	grid.columns = 6
+	for entry_variant in entries:
+		if not (entry_variant is Dictionary):
+			continue
+		var entry: Dictionary = entry_variant
+		var name := str(entry.get("name", ""))
+		var active := bool(entry.get("active", false))
+		var label := _bundle(str(entry.get("key", "")), name)
+		# `Icon.icons.get(command.icon, Icon.cancel)`: the Java field name maps
+		# to the port's kebab-case alias; unknown icons fall back.
+		# code-instantiated: one button per command/stance in the live union.
+		var button := MindWidgets.glyph_button(_icon_alias(str(entry.get("icon", ""))), "?", "clearNoneTogglei")
+		button.toggle_mode = true
+		button.set_pressed_no_signal(active)
+		button.custom_minimum_size = Vector2(50, 50)
+		button.tooltip_text = label
+		if is_command:
+			button.pressed.connect(_set_command.bind(name))
+		else:
+			button.pressed.connect(_toggle_stance.bind(name, active))
+		grid.add_child(button)
+	return grid
+
+
+## `Call.setUnitCommand(player, ids, command)` (`:579-581`).
+func _set_command(name: String) -> void:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_method("set_unit_command"):
+		input.call("set_unit_command", name)
+
+
+## `Call.setUnitStance(player, ids, stance, !activeStances.get(...))` (`:602-603`).
+func _toggle_stance(name: String, active: bool) -> void:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_method("set_unit_stance_named"):
+		input.call("set_unit_stance_named", name, not active)
+
+
+## Java `Icon` field name -> port glyph alias (`downOpen` -> `down-open`); empty
+## when the port has no such glyph (`Icon.icons.get(..., Icon.cancel)`).
+func _icon_alias(name: String) -> String:
+	var alias := name.to_snake_case().replace("_", "-")
+	if MindIcons.glyph(alias).is_empty():
+		return "cancel"
+	return alias
 
 
 ## `PlacementFragment` top table: selected block header + requirements, else the

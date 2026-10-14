@@ -100,11 +100,12 @@ pub struct WeaponDraw {
     /// Visual recoil `0..1`.
     pub recoil: f32,
 }
+use mind_core::ai::StanceBits;
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
     BlockId, BlockKind, ContentRegistry, ContentType, ItemId, MemoryBundle, MemoryUnlockStore,
-    content_counts, create_base_content,
+    UnitCommandId, UnitStanceId, UnitTypeId, content_counts, create_base_content,
 };
 use mind_core::determinism::SimCommand;
 use mind_core::ecs::BuildingComp;
@@ -5521,6 +5522,567 @@ impl MindSimHost {
     pub fn debug_set_building_team(&mut self, x: i32, y: i32, team: i32) -> bool {
         self.sim.debug_set_building_team(x, y, (team & 0xFF) as u8)
     }
+
+    // ---- H03 T3 command panel + reticle seams ----
+
+    /// `PlacementFragment` command table probe (`PlacementFragment.java:443-676`).
+    /// `ids_json` is the selection id array (`MindInput.selection_json()`);
+    /// returns the same JSON [`command_panel`] builds for the GDScript panel.
+    #[func]
+    pub fn command_panel_json(&self, ids_json: GString) -> GString {
+        let ids: Vec<i32> = serde_json::from_str(ids_json.to_string().as_str()).unwrap_or_default();
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("{\"types\":[],\"commands\":[],\"stances\":[]}");
+        };
+        let units = self.command_panel_units(&ids);
+        GString::from(command_panel(content, &units).to_string().as_str())
+    }
+
+    /// Per-unit command-panel rows: `(type id, live command, stance bits)` for
+    /// the live units whose `EntitySeq` is in `ids`. The live command is the
+    /// `CommandAI` command component (`UnitCommandComp`, set by
+    /// `Sim::apply_live_unit_command`) falling back to `ControllerSlot.command`;
+    /// `None` = the type's `defaultCommand` (`CommandAI.currentCommand`).
+    pub(crate) fn command_panel_units(
+        &self,
+        ids: &[i32],
+    ) -> Vec<(i32, Option<UnitCommandId>, StanceBits)> {
+        use mind_core::ai::controller::{ControllerSlot, UnitCommandComp};
+        use mind_core::ai::unit_stance_runtime::{StanceBits, UnitStancesComp};
+        use mind_core::content::id::UnitCommandId;
+        use mind_core::ecs::EntitySeq;
+        use mind_core::entities::comp::unit::comp::UnitTypeComp;
+        let Some(runtime) = self.sim.unit_runtime() else {
+            return Vec::new();
+        };
+        let mut out = Vec::with_capacity(ids.len());
+        for &id in ids {
+            let Some(&entity) = runtime.units.iter().find(|&&entity| {
+                self.sim
+                    .ecs
+                    .0
+                    .get::<EntitySeq>(entity)
+                    .is_some_and(|seq| seq.0 as i32 == id)
+            }) else {
+                continue;
+            };
+            let Ok(entity_ref) = self.sim.ecs.0.get_entity(entity) else {
+                continue;
+            };
+            let Some(type_comp) = entity_ref.get::<UnitTypeComp>() else {
+                continue;
+            };
+            let command = entity_ref
+                .get::<UnitCommandComp>()
+                .map(|comp| UnitCommandId::new(comp.0))
+                .or_else(|| {
+                    entity_ref
+                        .get::<ControllerSlot>()
+                        .and_then(|slot| slot.command)
+                });
+            let stances: StanceBits = entity_ref
+                .get::<UnitStancesComp>()
+                .map(|comp| comp.0)
+                .unwrap_or_default();
+            out.push((type_comp.type_id.get() as i32, command, stances));
+        }
+        out
+    }
+
+    /// Whether the live command of unit `id` draws its target
+    /// (`UnitCommand.drawTarget`; `InputHandler.java:1231`). Rust-only reticle
+    /// filter (the command panel probe above reports the command but not the
+    /// icon behaviour).
+    pub fn command_draws_target(&self, id: i32) -> bool {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return false;
+        };
+        self.command_panel_units(&[id])
+            .first()
+            .is_some_and(|(type_id, command, _)| {
+                let Some(unit) = content.unit(UnitTypeId::new(*type_id as u16)) else {
+                    return false;
+                };
+                let command = command.or_else(|| {
+                    mind_core::ai::unit_command_runtime::default_command(unit, content)
+                        .map(|def| def.id)
+                });
+                command
+                    .and_then(|id| content.unit_command(id))
+                    .is_some_and(|def| def.draw_target)
+            })
+    }
+
+    /// Live command targets (`Sim::command_targets`; G01 T16) as
+    /// `(id, world x, world y, is_attack)`. Rust-only feed for the T3 attack
+    /// reticle (`InputHandler.drawCommandedTargets`).
+    pub fn command_targets(&self) -> Vec<(i32, f32, f32, bool)> {
+        self.sim.command_targets()
+    }
+
+    /// Drains the per-tick `BuildDamageEvent` log as `(tile x, tile y, team)`
+    /// (`Control.java:68-72`; H03 T4). Rust-only: the minimap is the SINGLE
+    /// drain consumer (the T3-style `#[func] drain_build_damage_json` probe is
+    /// for debug reads only — two consumers would eat each other's rows).
+    pub fn drain_build_damage(&mut self) -> Vec<(i32, i32, u8)> {
+        self.sim
+            .drain_build_damage_events()
+            .into_iter()
+            .map(|event| (event.x as i32, event.y as i32, event.team))
+            .collect()
+    }
+
+    /// `Block.offset` of the building at `(x, y)` in world px
+    /// (`((size + 1) % 2) * tilesize / 2`); `0` without a building or off-map.
+    /// Minimap indicator centring (`MinimapRenderer.java:266-271`).
+    pub fn block_offset(&self, x: i32, y: i32) -> f32 {
+        let Some(tile) = self.tile_at(x, y) else {
+            return 0.0;
+        };
+        if tile.build.is_none() {
+            return 0.0;
+        }
+        self.content_snapshot
+            .as_ref()
+            .and_then(|content| content.block(tile.block))
+            .map(|def| def.offset)
+            .unwrap_or(0.0)
+    }
+
+    // ---- H03 T5 overlay-top seams ----
+
+    /// One frame of `OverlayRenderer.drawTop` inputs
+    /// (`OverlayRenderer.java:91-226`): player position/team, non-player-team
+    /// units, enemy cores and the ground spawn tiles.
+    pub fn overlay_view(&self) -> OverlayView {
+        use mind_core::entities::comp::{Pos, TeamComp};
+        let player_team = self.player_team();
+        let player = self.player_unit_position();
+        let mut enemy_units = Vec::new();
+        if let Some(runtime) = self.sim.unit_runtime() {
+            for &entity in &runtime.units {
+                let Some(pos) = self.sim.ecs.0.get::<Pos>(entity) else {
+                    continue;
+                };
+                let team = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<TeamComp>(entity)
+                    .map(|comp| comp.team)
+                    .unwrap_or(0);
+                if team != player_team {
+                    enemy_units.push((pos.x, pos.y, team));
+                }
+            }
+        }
+        let mut enemy_cores = Vec::new();
+        if let Some(runtime) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+        {
+            for team in runtime.session.teams.active.clone() {
+                let Some(data) = runtime.session.teams.data(team) else {
+                    continue;
+                };
+                if team.0 == player_team {
+                    continue;
+                }
+                for &core in &data.cores {
+                    if let Some(pos) = self.sim.ecs.0.get::<Pos>(core) {
+                        enemy_cores.push((pos.x, pos.y, team.0));
+                    }
+                }
+            }
+        }
+        let spawns = self
+            .sim
+            .unit_runtime()
+            .map(|runtime| {
+                runtime
+                    .wave_spawner
+                    .spawns
+                    .iter()
+                    .map(|pos| {
+                        (
+                            (pos.x() as f32 + 0.5) * TILESIZE_F,
+                            (pos.y() as f32 + 0.5) * TILESIZE_F,
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        OverlayView {
+            player,
+            player_team,
+            enemy_units,
+            enemy_cores,
+            spawns,
+        }
+    }
+
+    /// `input.config.getSelected().drawConfigure()` dispatch
+    /// (`BuildingComp.java:1732-1737`; `PowerNode.java:458-480`,
+    /// `ItemBridge.java:282-296`). `Logic` is filled by H06 T12; everything
+    /// else falls back to the generic accent square.
+    pub(crate) fn config_overlay(&self, x: i32, y: i32) -> Option<ConfigOverlay> {
+        use mind_core::world::modules::PowerModule;
+        let content = self.content_snapshot.as_ref()?;
+        let tile = self.tile_at(x, y)?;
+        let entity = tile.build?;
+        let def = content.block(tile.block)?;
+        let cx = x as f32 * TILESIZE_F + def.offset;
+        let cy = y as f32 * TILESIZE_F + def.offset;
+        if matches!(def.kind, BlockKind::PowerNode) {
+            let laser_range = power_laser_range(&def.name) * TILESIZE_F;
+            let mut links = Vec::new();
+            if let Some(module) = self.sim.ecs.0.get::<PowerModule>(entity) {
+                for packed in &module.links {
+                    let (lx, ly) = mind_core::world::pos::unpack(*packed);
+                    let Some(other) = self.tile_at(lx as i32, ly as i32) else {
+                        continue;
+                    };
+                    let size = self
+                        .content_snapshot
+                        .as_ref()
+                        .and_then(|content| content.block(other.block))
+                        .map(|def| def.size)
+                        .unwrap_or(1);
+                    links.push((
+                        lx as f32 * TILESIZE_F + size as f32 * 4.0,
+                        ly as f32 * TILESIZE_F + size as f32 * 4.0,
+                        size,
+                    ));
+                }
+            }
+            return Some(ConfigOverlay::PowerNodeLinks {
+                x: cx,
+                y: cy,
+                size: def.size,
+                laser_range,
+                links,
+            });
+        }
+        let bridge_range = bridge_link_range(def);
+        if let Some(range) = bridge_range {
+            use mind_core::world::blocks::distribution::item_bridge::ItemBridgeBuild;
+            let linked = self
+                .sim
+                .ecs
+                .0
+                .get::<ItemBridgeBuild>(entity)
+                .map(|bridge| bridge.link)
+                .unwrap_or(-1);
+            let team = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::TeamComp>(entity)
+                .map(|comp| comp.team)
+                .unwrap_or(0);
+            let mut targets = Vec::new();
+            let dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)];
+            for (dx, dy) in dirs {
+                for step in 1..=range {
+                    let (tx, ty) = (x + dx * step, y + dy * step);
+                    let Some(other) = self.tile_at(tx, ty) else {
+                        continue;
+                    };
+                    if other.build.is_none() || other.block != tile.block {
+                        continue;
+                    }
+                    let other_team = other
+                        .build
+                        .and_then(|entity| {
+                            self.sim
+                                .ecs
+                                .0
+                                .get::<mind_core::entities::comp::TeamComp>(entity)
+                        })
+                        .map(|comp| comp.team)
+                        .unwrap_or(0);
+                    if other_team != team {
+                        continue;
+                    }
+                    targets.push((
+                        tx as f32 * TILESIZE_F + 4.0,
+                        ty as f32 * TILESIZE_F + 4.0,
+                        linked == (tx << 16) | ty,
+                    ));
+                }
+            }
+            return Some(ConfigOverlay::BridgeLink {
+                x: cx,
+                y: cy,
+                size: def.size,
+                range,
+                targets,
+            });
+        }
+        Some(ConfigOverlay::Generic {
+            x: cx,
+            y: cy,
+            size: def.size,
+        })
+    }
+
+    /// `Building.drawSelect` dispatch for the hovered player-team building
+    /// (`OverlayRenderer.java:213-229`): turret/projector range circles,
+    /// power-node `laserRange` circles (`PowerNode.java:445-453`).
+    pub(crate) fn select_overlay(&self, x: i32, y: i32) -> SelectOverlay {
+        let Some(tile) = self.tile_at(x, y) else {
+            return SelectOverlay::None;
+        };
+        let Some(entity) = tile.build else {
+            return SelectOverlay::None;
+        };
+        let team = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::TeamComp>(entity)
+            .map(|comp| comp.team)
+            .unwrap_or(0);
+        let content = self.content_snapshot.as_ref();
+        let def = content.and_then(|content| content.block(tile.block));
+        let (cx, cy) = def
+            .map(|def| {
+                (
+                    x as f32 * TILESIZE_F + def.offset,
+                    y as f32 * TILESIZE_F + def.offset,
+                )
+            })
+            .unwrap_or((x as f32 * TILESIZE_F, y as f32 * TILESIZE_F));
+        if team != self.player_team() {
+            return SelectOverlay::None;
+        }
+        if let Some((range, kind, color)) = self.block_place_range(tile.block) {
+            return SelectOverlay::Range {
+                x: cx,
+                y: cy,
+                range,
+                color,
+                circles: matches!(kind, PlaceRangeKind::PowerNode),
+            };
+        }
+        SelectOverlay::None
+    }
+
+    /// Debug probe for the placement range lookup (`Block.drawPlace` /
+    /// `drawSelect`): `{"range","kind","color"}` or `"null"` for a block name.
+    /// H03 T5 step 6 diagnosis seam.
+    #[func]
+    pub fn place_range_json(&self, name: GString) -> GString {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("null");
+        };
+        let Some(id) = content.block_id(&name.to_string()) else {
+            return GString::from("null");
+        };
+        match self.block_place_range(id) {
+            Some((range, kind, color)) => {
+                let kind = match kind {
+                    PlaceRangeKind::Turret => "turret",
+                    PlaceRangeKind::Projector => "projector",
+                    PlaceRangeKind::PowerNode => "power-node",
+                };
+                GString::from(
+                    serde_json::json!({"range": range, "kind": kind, "color": color})
+                        .to_string()
+                        .as_str(),
+                )
+            }
+            None => GString::from("null"),
+        }
+    }
+}
+
+/// `OverlayRenderer.drawTop` inputs (H03 T5).
+pub struct OverlayView {
+    /// Player (alpha) centre in world px.
+    pub player: Option<(f32, f32)>,
+    /// Player team id.
+    pub player_team: u8,
+    /// Non-player-team units `(x, y, team)`.
+    pub enemy_units: Vec<(f32, f32, u8)>,
+    /// Enemy core centres `(x, y, team)`.
+    pub enemy_cores: Vec<(f32, f32, u8)>,
+    /// Ground spawn tiles in world px.
+    pub spawns: Vec<(f32, f32)>,
+}
+
+/// `Building.drawConfigure` dispatch (`BuildingComp.java:1732-1737`).
+/// H06 T12 constructs `Logic`; `BridgeLink::range` stays for its use.
+#[allow(dead_code)]
+pub(crate) enum ConfigOverlay {
+    /// Generic accent square (half-size `size * 4 + 1`).
+    Generic { x: f32, y: f32, size: i32 },
+    /// `PowerNode.drawConfigure` (`PowerNode.java:458-480`): pulsing accent
+    /// rings at the node and at `laserRange`, one `Pal.place` square per link.
+    PowerNodeLinks {
+        x: f32,
+        y: f32,
+        size: i32,
+        laser_range: f32,
+        links: Vec<(f32, f32, i32)>,
+    },
+    /// `ItemBridge.drawConfigure` (`ItemBridge.java:282-296`): accent/place/
+    /// breakInvalid squares on the candidate targets.
+    BridgeLink {
+        x: f32,
+        y: f32,
+        size: i32,
+        range: i32,
+        targets: Vec<(f32, f32, bool)>,
+    },
+    /// Logic blocks (`LogicBlock.drawConfigure`); H06 T12 fills the drawing.
+    Logic,
+}
+
+/// `Building.drawSelect` dispatch (`OverlayRenderer.java:213-229`).
+/// H06 T12 constructs `MessageText`/`LogicTag`.
+#[allow(dead_code)]
+pub(crate) enum SelectOverlay {
+    /// Range circle(s) (`Drawf.dashCircle` / `Drawf.circles`).
+    Range {
+        x: f32,
+        y: f32,
+        range: f32,
+        color: u32,
+        circles: bool,
+    },
+    /// Message block text; H06 T12 fills the drawing.
+    MessageText,
+    /// Logic tag (processor link display); H06 T12 fills the drawing.
+    LogicTag,
+    /// No overlay.
+    None,
+}
+
+/// `Block.offset` world-pixel centre of a tile (H01 T1 convention).
+const TILESIZE_F: f32 = mind_core::config::TILESIZE as f32;
+
+/// `PowerNode.laserRange` per name (`Blocks.java:2483-2504`), in tiles.
+fn power_laser_range(name: &str) -> f32 {
+    match name {
+        "power-node" => 6.0,
+        "power-node-large" => 15.0,
+        "surge-tower" => 40.0,
+        _ => 0.0,
+    }
+}
+
+/// `ItemBridge.range` for bridge kinds (`ItemBridge.java`), in tiles.
+fn bridge_link_range(def: &mind_core::content::BlockDef) -> Option<i32> {
+    match def.name.as_str() {
+        "bridge-conveyor" => Some(4),
+        "phase-conveyor" => Some(12),
+        _ => None,
+    }
+}
+
+/// `PlacementFragment` unit table + command/stance rows (`PlacementFragment.java:443-676`).
+///
+/// `units` holds `(type id, live command, stance bits)` per selected unit.
+/// Types are counted and iterated by ascending type id; `commands` is the
+/// union of each type's `UnitType.commands` in that order, deduped
+/// (`PlacementFragment.java:564-570`), `stances` the union of
+/// `UnitType.getUnitStances`. A row is reported only when its union has more
+/// than one entry (`:574`, `:590`). `active` = any unit's live command
+/// (explicit, else `UnitType.defaultCommand`) equals it, / any stance bit is
+/// set (`:619-630`).
+pub(crate) fn command_panel(
+    content: &ContentRegistry,
+    units: &[(i32, Option<UnitCommandId>, StanceBits)],
+) -> serde_json::Value {
+    use mind_core::ai::unit_command_runtime::{default_command, get_unit_stances};
+    let mut counts: std::collections::BTreeMap<i32, i32> = std::collections::BTreeMap::new();
+    let mut ordered: Vec<&(i32, Option<UnitCommandId>, StanceBits)> = units.iter().collect();
+    ordered.sort_by_key(|(type_id, _, _)| *type_id);
+    let mut commands: Vec<UnitCommandId> = Vec::new();
+    let mut stances: Vec<UnitStanceId> = Vec::new();
+    let mut active_commands: Vec<UnitCommandId> = Vec::new();
+    let mut active_stances: Vec<UnitStanceId> = Vec::new();
+    for (type_id, _, _) in units {
+        *counts.entry(*type_id).or_default() += 1;
+    }
+    for (type_id, current, bits) in ordered {
+        let Some(def) = content.unit(UnitTypeId::new(*type_id as u16)) else {
+            continue;
+        };
+        for command in &def.commands {
+            if !commands.contains(command) {
+                commands.push(*command);
+            }
+        }
+        let current = current.or_else(|| default_command(def, content).map(|def| def.id));
+        if let Some(command) = current
+            && !active_commands.contains(&command)
+        {
+            active_commands.push(command);
+        }
+        let mut unit_stances = Vec::new();
+        get_unit_stances(def, content, &mut unit_stances);
+        for stance in unit_stances {
+            if !stances.contains(&stance) {
+                stances.push(stance);
+            }
+            if bits.get(stance) && !active_stances.contains(&stance) {
+                active_stances.push(stance);
+            }
+        }
+    }
+    let type_rows: Vec<serde_json::Value> = counts
+        .iter()
+        .map(|(type_id, count)| {
+            let name = content
+                .unit(UnitTypeId::new(*type_id as u16))
+                .map(|def| def.name.clone())
+                .unwrap_or_default();
+            serde_json::json!({"type": type_id, "name": name, "count": count})
+        })
+        .collect();
+    let command_rows: Vec<serde_json::Value> = if commands.len() > 1 {
+        commands
+            .iter()
+            .filter_map(|id| {
+                content.unit_command(*id).map(|def| {
+                    serde_json::json!({
+                        "name": def.name,
+                        "icon": def.icon,
+                        "key": def.localized_key,
+                        "active": active_commands.contains(id),
+                    })
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let stance_rows: Vec<serde_json::Value> = if stances.len() > 1 {
+        stances
+            .iter()
+            .filter_map(|id| {
+                content.unit_stance(*id).map(|def| {
+                    serde_json::json!({
+                        "name": def.name,
+                        "icon": def.icon,
+                        "key": def.localized_key,
+                        "active": active_stances.contains(id),
+                    })
+                })
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    serde_json::json!({
+        "types": type_rows,
+        "commands": command_rows,
+        "stances": stance_rows,
+    })
 }
 
 /// First core block's item counts as a JSON object (empty when there is no core
@@ -6449,5 +7011,73 @@ mod tests {
             300.0
         ));
         assert!(!player_near_drop_zone_predicate(&spawns, None, 1, 2, 300.0));
+    }
+
+    /// H03 T3: types sort by id, command rows are the first-seen union without
+    /// duplicates, and each type's default command is reported active.
+    #[test]
+    fn command_panel_orders_types_and_unions_commands() {
+        use mind_core::ai::default_command;
+        let content = base_registry();
+        let (Some(dagger), Some(nova)) =
+            (content.unit_by_name("dagger"), content.unit_by_name("nova"))
+        else {
+            panic!("dagger/nova missing from content");
+        };
+        let (first, second) = if dagger.id < nova.id {
+            (dagger, nova)
+        } else {
+            (nova, dagger)
+        };
+        let units = vec![
+            (second.id.get() as i32, None, StanceBits::new()),
+            (first.id.get() as i32, None, StanceBits::new()),
+            (first.id.get() as i32, None, StanceBits::new()),
+        ];
+        let panel = command_panel(&content, &units);
+        let Some(types) = panel["types"].as_array() else {
+            panic!("types not an array: {panel}");
+        };
+        assert_eq!(types.len(), 2);
+        assert_eq!(types[0]["name"], serde_json::json!(first.name));
+        assert_eq!(types[0]["count"], serde_json::json!(2));
+        assert_eq!(types[1]["name"], serde_json::json!(second.name));
+        assert_eq!(types[1]["count"], serde_json::json!(1));
+        // Expected union: the lower id's list, then the other type's extras.
+        let mut expected: Vec<String> = Vec::new();
+        for command in first.commands.iter().chain(second.commands.iter()) {
+            let Some(def) = content.unit_command(*command) else {
+                panic!("command {command:?} missing");
+            };
+            let name = def.name.clone();
+            if !expected.contains(&name) {
+                expected.push(name);
+            }
+        }
+        let Some(commands) = panel["commands"].as_array() else {
+            panic!("commands not an array: {panel}");
+        };
+        if expected.len() > 1 {
+            let names: Vec<String> = commands
+                .iter()
+                .map(|row| row["name"].as_str().unwrap_or_default().to_owned())
+                .collect();
+            assert_eq!(names, expected);
+            for unit in [first, second] {
+                let Some(default) = default_command(unit, &content) else {
+                    panic!("{} has no default command", unit.name);
+                };
+                let default = default.name.clone();
+                let row = commands
+                    .iter()
+                    .find(|row| row["name"] == serde_json::json!(default));
+                assert!(
+                    row.is_some_and(|row| row["active"] == serde_json::json!(true)),
+                    "default command {default} not active"
+                );
+            }
+        } else {
+            assert!(commands.is_empty());
+        }
     }
 }

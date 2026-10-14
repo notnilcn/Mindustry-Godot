@@ -42,6 +42,28 @@ pub fn darkness_multiplier(darkness: f32) -> f32 {
     1.0 - (darkness / 4.0).clamp(0.0, 1.0)
 }
 
+/// Texture row (top-first `Image` row) for world tile row `y`
+/// (`MinimapRenderer.update`: `pixmap.set(x, height - 1 - y)`; world y is up,
+/// image row 0 is the top of the map). Both the full rebuild and the batched
+/// dirty flush must use this so the texture and `region_for_camera` agree.
+pub fn texture_row(y: i32, height: i32) -> i32 {
+    height - 1 - y
+}
+
+/// `AttackIndicators.duration` in ticks (`AttackIndicators.java:11`,
+/// `15f * 60f`).
+pub const INDICATOR_LIFETIME_TICKS: f32 = 15.0 * 60.0;
+
+/// `AttackIndicators.update` (`AttackIndicators.java:38-55`): advance every
+/// row's `time` by `delta_ticks` and drop rows at `>= duration`. Called only
+/// while the game is not paused (`Control.java:709-712`).
+pub fn age_indicators(rows: &mut Vec<(i32, i32, f32)>, delta_ticks: f32) {
+    rows.retain_mut(|(_, _, time)| {
+        *time += delta_ticks;
+        *time < INDICATOR_LIFETIME_TICKS
+    });
+}
+
 /// The `0.7` shade applied when an air tile sits below a solid block.
 pub const ABOVE_SOLID_MULTIPLIER: f32 = 0.7;
 
@@ -101,5 +123,33 @@ mod tests {
         assert_eq!(darkness_multiplier(0.0), 1.0);
         assert_eq!(darkness_multiplier(2.0), 0.5);
         assert_eq!(darkness_multiplier(8.0), 0.0);
+    }
+
+    #[test]
+    fn texture_row_flips_world_y() {
+        // World y=0 is the bottom row; world y=height-1 is texture row 0.
+        assert_eq!(texture_row(0, 256), 255);
+        assert_eq!(texture_row(255, 256), 0);
+        assert_eq!(texture_row(55, 256), 200);
+        // A rebuild writing rows top-first (`(0..height).rev()`) therefore
+        // writes texture rows 0..height in order (region_for_camera rows).
+        let order: Vec<i32> = (0..4).rev().map(|y| texture_row(y, 4)).collect();
+        assert_eq!(order, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn indicator_expires_after_900_ticks() {
+        // `AttackIndicators.duration = 900` ticks; `time += Time.delta`.
+        let mut fresh = vec![(4, 5, 899.0)];
+        age_indicators(&mut fresh, 0.5);
+        assert_eq!(fresh.len(), 1, "899 + 0.5 survives");
+        let mut expired = vec![(6, 7, 900.0)];
+        age_indicators(&mut expired, 0.0);
+        assert!(expired.is_empty(), "900 ticks removed");
+        let mut both = vec![(4, 5, 100.0), (6, 7, 899.0)];
+        age_indicators(&mut both, 0.5);
+        assert_eq!(both, vec![(4, 5, 100.5), (6, 7, 899.5)]);
+        age_indicators(&mut both, 1.0);
+        assert_eq!(both, vec![(4, 5, 101.5)], "only the 899 row expires");
     }
 }
