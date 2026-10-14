@@ -168,9 +168,11 @@ pub fn find_length(
             return true;
         }
         if grid.tiles.get(tx, ty).build.is_some() {
+            // `b.dst(furthest.worldx(), furthest.worldy())` (Damage.java:173):
+            // `Tile.worldx()` = `x * tilesize`.
             let (cx, cy) = (
-                (tx as f32 + 0.5) * crate::config::TILESIZE as f32,
-                (ty as f32 + 0.5) * crate::config::TILESIZE as f32,
+                tx as f32 * crate::config::TILESIZE as f32,
+                ty as f32 * crate::config::TILESIZE as f32,
             );
             dist = ((cx - x).powi(2) + (cy - y).powi(2)).sqrt();
             true

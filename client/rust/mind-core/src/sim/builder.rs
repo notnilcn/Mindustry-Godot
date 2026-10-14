@@ -813,6 +813,7 @@ fn update_builder(
                             block: state.current,
                             // `deconstructFinish` (break sound).
                             destroyed: false,
+                            team,
                         }));
                 }
             } else {

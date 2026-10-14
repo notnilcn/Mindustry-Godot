@@ -34,8 +34,9 @@ pub const MAX_SCHEMATIC_DIMENSION: i32 = 128;
 pub const MAX_LOADOUT_SCHEMATIC_PAD: i32 = 5;
 /// `Vars.maxPreviewsMobile` (plan 19).
 pub const MAX_PREVIEWS_MOBILE: usize = 32;
-/// `FogControl.DYNAMIC_UPDATE_INTERVAL` quantized to fixed ticks (25 Hz at 60 tps).
-pub const DYNAMIC_UPDATE_INTERVAL_TICKS: u64 = 40;
+/// `FogControl.dynamicUpdateInterval` (`1000 / 25` ms, `FogControl.java:23`):
+/// `timeSinceMillis(last) > 40` at 60 Hz first holds on the 3rd frame (50 ms).
+pub const DYNAMIC_UPDATE_INTERVAL_TICKS: u64 = 3;
 /// `AttackIndicators.LIFETIME` (15 s at 60 Hz).
 pub const ATTACK_INDICATOR_LIFETIME_TICKS: u64 = 900;
 /// `TeamData.clusterChunkSize` (world pixels).

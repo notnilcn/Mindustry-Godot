@@ -40,8 +40,11 @@ impl BulletBehavior for LiquidBehavior {
         if space {
             return;
         }
-        let ts = crate::config::TILESIZE as f32;
-        let (tx, ty) = ((x / ts).floor() as i16, (y / ts).floor() as i16);
+        // `Vars.world.tileWorld(x, y)` = `World.toTile` (round), World.java:174.
+        let (tx, ty) = (
+            crate::world::WorldGrid::to_tile(x) as i16,
+            crate::world::WorldGrid::to_tile(y) as i16,
+        );
         let _ = puddles::deposit(
             ctx.world,
             &ctx.grid.tiles,

@@ -62,6 +62,9 @@ fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) -> Option<
         runtime.units.push(entity);
         runtime.units_created += 1;
     }
+    // `Logic`'s `UnitCreateEvent` (`Logic.java:228-235`, factory/reconstructor/
+    // assembler output): H09 T10.
+    crate::game::stats::notify_unit_created(world, entity, Some(&def.name));
     Some(entity)
 }
 

@@ -13,6 +13,8 @@ pub mod worker;
 
 use std::collections::BTreeMap;
 
+use bevy_ecs::world::World;
+
 use crate::content::ContentRegistry;
 use crate::world::{TilePos, WorldGrid};
 
@@ -42,6 +44,8 @@ pub struct Pathfinder {
     pub height: i32,
     /// Packed `PathTile` per flat index.
     pub tiles: Vec<PathTile>,
+    /// `Tile.dangerous()` per flat index (`getTargetTile` guard).
+    pub dangerous: Vec<bool>,
     /// Cached fields keyed by `(team, cost)`.
     fields: BTreeMap<FieldKey, Flowfield>,
     /// Fields with an in-progress incremental solve, in deterministic enqueue
@@ -58,49 +62,105 @@ impl Pathfinder {
             width,
             height,
             tiles: Vec::new(),
+            dangerous: Vec::new(),
             fields: BTreeMap::new(),
             pending: Vec::new(),
             updates: 0,
         }
     }
 
-    /// Rebuilds the packed tile layer, e.g. on `WorldLoadEvent` or a tile change.
-    pub fn rebuild(&mut self, grid: &WorldGrid, content: &ContentRegistry, team: u8) {
+    /// Rebuilds the packed tile layer, e.g. on `WorldLoadEvent` or a tile change
+    /// (`Pathfinder` `WorldLoadEvent` loop, Pathfinder.java:124-128).
+    ///
+    /// `core_capture` is `Rules.coreCapture` (derelict buildings pack team 255).
+    pub fn rebuild(
+        &mut self,
+        grid: &WorldGrid,
+        content: &ContentRegistry,
+        world: &World,
+        core_capture: bool,
+    ) {
         self.width = grid.width();
         self.height = grid.height();
-        self.tiles = path_tile::build_tiles(grid, content, team);
+        self.tiles = path_tile::build_tiles(grid, content, world, core_capture);
+        self.dangerous = built_dangerous(grid, content);
         self.fields.clear();
         self.pending.clear();
     }
 
-    /// Updates one tile's packed data (`TileChangeEvent` main-thread path).
+    /// Updates one tile's packed data (`Pathfinder.updateTile`, Pathfinder.java:306-320):
+    /// re-packs the building's linked (footprint) tiles plus their four
+    /// neighbours (their near-solid bit can change), then invalidates the fields.
     pub fn update_tile(
         &mut self,
         grid: &WorldGrid,
         content: &ContentRegistry,
+        world: &World,
+        core_capture: bool,
         x: i32,
         y: i32,
-        team: u8,
     ) {
         if !grid.tiles.in_bounds(x, y) {
             return;
         }
-        let index = grid.tiles.index(x, y);
-        let tile = grid.tile_ref(index);
-        let def = content.block(tile.block);
-        let solid = def.map(|def| def.solid).unwrap_or(false);
-        let health = def
-            .map(|def| ((def.health as f32 / 40.0).min(80.0)) as u8)
-            .unwrap_or(0);
-        self.tiles[index] = PathTile::from_parts(health, team, solid, false, false);
+        let mut footprint: Vec<(i32, i32)> = vec![(x, y)];
+        if let Some(entity) = grid.tiles.get(x, y).build {
+            let size = content
+                .block(grid.tiles.get(x, y).block)
+                .map(|def| def.size.max(1))
+                .unwrap_or(1);
+            let offset = -(size - 1) / 2;
+            // The footprint is anchored on the building's center tile
+            // (`Tile.getLinkedTiles` walks the multiblock from the center).
+            let (cx, cy) = world
+                .get::<crate::ecs::BuildingComp>(entity)
+                .map(|comp| (comp.pos.x() as i32, comp.pos.y() as i32))
+                .unwrap_or((x, y));
+            footprint.clear();
+            for dx in 0..size {
+                for dy in 0..size {
+                    footprint.push((cx + offset + dx, cy + offset + dy));
+                }
+            }
+        }
+        // Repack the footprint, then each tile's neighbours (near-solid OR).
+        let mut repack: Vec<(i32, i32)> = Vec::with_capacity(footprint.len() * 5);
+        for &(tx, ty) in &footprint {
+            repack.push((tx, ty));
+            for (dx, dy) in path_tile::D4 {
+                repack.push((tx + dx, ty + dy));
+            }
+        }
+        repack.sort_unstable();
+        repack.dedup();
+        for (tx, ty) in repack {
+            if !grid.tiles.in_bounds(tx, ty) {
+                continue;
+            }
+            let building = path_tile::building_at(world, grid, content, tx, ty);
+            let packed = path_tile::pack_tile(
+                grid,
+                content,
+                core_capture,
+                tx,
+                ty,
+                building,
+                &mut self.tiles,
+            );
+            let index = grid.tiles.index(tx, ty);
+            self.tiles[index] = packed;
+            if let Some(slot) = self.dangerous.get_mut(index) {
+                *slot = grid.tiles.get(tx, ty).dangerous(content);
+            }
+        }
         // Invalidate every cached field; it is rebuilt lazily on next access.
         self.fields.clear();
         self.pending.clear();
     }
 
-    /// Returns (building if needed) the flowfield for `(team, cost)` targeting
-    /// `targets` (upstream `getField`). `targets` are tile positions.
-    pub fn get_field(&mut self, cost: Cost, team: u8, targets: &[TilePos]) -> &Flowfield {
+    /// Ensures a field for `(team, cost)` targeting `targets` exists and is
+    /// current, returning its cache key (`Pathfinder.getField`).
+    fn ensure_field(&mut self, cost: Cost, team: u8, targets: &[TilePos]) -> FieldKey {
         use std::collections::btree_map::Entry;
         let key = FieldKey {
             team,
@@ -111,19 +171,62 @@ impl Pathfinder {
         match self.fields.entry(key) {
             Entry::Occupied(mut entry) => {
                 if entry.get().targets != target_indices {
-                    let field =
-                        build_field(&self.tiles, self.width, self.height, cost, target_indices);
+                    let field = build_field(
+                        &self.tiles,
+                        self.width,
+                        self.height,
+                        cost,
+                        team,
+                        target_indices,
+                    );
                     entry.insert(field);
                     self.updates = self.updates.wrapping_add(1);
                 }
-                entry.into_mut()
             }
             Entry::Vacant(entry) => {
-                let field = build_field(&self.tiles, self.width, self.height, cost, target_indices);
+                let field = build_field(
+                    &self.tiles,
+                    self.width,
+                    self.height,
+                    cost,
+                    team,
+                    target_indices,
+                );
                 self.updates = self.updates.wrapping_add(1);
-                entry.insert(field)
+                entry.insert(field);
             }
         }
+        key
+    }
+
+    /// Returns (building if needed) the flowfield for `(team, cost)` targeting
+    /// `targets` (upstream `getField`). `targets` are tile positions.
+    pub fn get_field(&mut self, cost: Cost, team: u8, targets: &[TilePos]) -> &Flowfield {
+        let key = self.ensure_field(cost, team, targets);
+        let width = self.width;
+        let height = self.height;
+        // `ensure_field` inserted the entry; `or_insert_with` keeps this
+        // panic-free without `expect`.
+        self.fields
+            .entry(key)
+            .or_insert_with(|| Flowfield::new(width, height))
+    }
+
+    /// The next tile toward `targets` from `node` (`Flowfield.getTargetTile`
+    /// with the packed-tile layer + dangerous map resolved).
+    pub fn target_tile(
+        &mut self,
+        cost: Cost,
+        team: u8,
+        targets: &[TilePos],
+        node: usize,
+        diagonals: bool,
+    ) -> Option<usize> {
+        let key = self.ensure_field(cost, team, targets);
+        let width = self.width;
+        let height = self.height;
+        let field = self.fields.get(&key)?;
+        field.get_target_tile(&self.tiles, &self.dangerous, node, width, height, diagonals)
     }
 
     /// Number of cached fields (debug/tests).
@@ -197,13 +300,13 @@ impl Pathfinder {
         let pending = std::mem::take(&mut self.pending);
         let mut still = Vec::with_capacity(pending.len());
         for key in pending {
-            let Some(cost) = Cost::from_id(key.cost) else {
+            if Cost::from_id(key.cost).is_none() {
                 continue;
-            };
+            }
             let Some(field) = self.fields.get_mut(&key) else {
                 continue;
             };
-            let done = field.advance(&self.tiles, self.width, self.height, cost, true, share);
+            let done = field.advance(&self.tiles, self.width, self.height, key.team, share);
             if !done {
                 still.push(key);
             }
@@ -218,12 +321,27 @@ fn build_field(
     width: i32,
     height: i32,
     cost: Cost,
+    team: u8,
     targets: Vec<usize>,
 ) -> Flowfield {
     let mut field = Flowfield::new(width, height);
+    field.cost = cost;
+    field.team = team;
     field.targets = targets;
-    field.update(tiles, width, height, cost, true);
+    field.update(tiles, width, height, cost, team);
     field
+}
+
+/// `Tile.dangerous()` per flat index, read once per rebuild.
+fn built_dangerous(grid: &WorldGrid, content: &ContentRegistry) -> Vec<bool> {
+    let mut dangerous = vec![false; grid.len()];
+    for y in 0..grid.height() {
+        for x in 0..grid.width() {
+            let index = grid.tiles.index(x, y);
+            dangerous[index] = grid.tiles.get(x, y).dangerous(content);
+        }
+    }
+    dangerous
 }
 
 #[cfg(test)]
@@ -248,10 +366,14 @@ mod tests {
         let mut grid = WorldGrid::new(32, 8);
         grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
         let mut path = Pathfinder::new(grid.width(), grid.height());
-        path.rebuild(&grid, &content, 0);
+        let world = World::new();
+        path.rebuild(&grid, &content, &world, false);
         let field = path.get_field(Cost::Ground, 0, &[TilePos::new(30, 4)]);
         assert!(field.done);
-        assert!(field.complete_weights[4 * 32 + 1].is_finite());
+        assert_ne!(
+            field.complete_weights[4 * 32 + 1],
+            crate::ai::pathfinder::flowfield::UNREACHABLE
+        );
         // Cached second call returns the same field.
         let count = path.field_count();
         let _ = path.get_field(Cost::Ground, 0, &[TilePos::new(30, 4)]);
@@ -275,15 +397,16 @@ mod tests {
         }
         let targets = [TilePos::new(20, 8)];
 
+        let world = World::new();
         let mut eager = Pathfinder::new(grid.width(), grid.height());
-        eager.rebuild(&grid, &content, 0);
+        eager.rebuild(&grid, &content, &world, false);
         let expected = eager
             .get_field(Cost::Ground, 0, &targets)
             .complete_weights
             .clone();
 
         let mut inc = Pathfinder::new(grid.width(), grid.height());
-        inc.rebuild(&grid, &content, 0);
+        inc.rebuild(&grid, &content, &world, false);
         assert!(inc.request_field(Cost::Ground, 0, &targets));
         // A small per-tick budget must converge over several calls.
         let mut calls = 0;

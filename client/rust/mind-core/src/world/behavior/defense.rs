@@ -36,6 +36,11 @@ const D8: [(i32, i32); 8] = [
     (1, -1),
 ];
 
+/// `Mathf.lerp(from, to, progress)` with Arc's clamped progress.
+fn lerp(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * progress.clamp(0.0, 1.0)
+}
+
 fn building_identity(
     world: &World,
     e: Entity,
@@ -351,9 +356,51 @@ impl BuildingBehavior for RadarBehavior {
         }
     }
 
-    fn update_tile(&self, _world: &mut World, _e: Entity) {
-        // `progress += edelta() / discoveryTime` and fog indexing are plan 11's
-        // (`FogControl`). The progress field is carried so that plan can resume.
+    fn update_tile(&self, world: &mut World, e: Entity) {
+        // `Radar.updateTile` (`Radar.java:59-72`): ramp the efficiency, force a
+        // fog update when the radius moved by >= 0.5, grow the discovery
+        // progress and the rotation accumulator.
+        let (def_fog_radius, discovery_time, efficiency, edelta) = {
+            let Some(building) = world.get::<Building>(e) else {
+                return;
+            };
+            let Some(table) = world.get_resource::<BlockTable>() else {
+                return;
+            };
+            let Some(inst) = table.get(building.block) else {
+                return;
+            };
+            let discovery_time = match &inst.kind_data {
+                crate::world::block_kind_data::BlockKindData::Radar(radar) => radar.discovery_time,
+                _ => 600.0,
+            };
+            (
+                inst.def.fog_radius as f32,
+                discovery_time,
+                building.efficiency,
+                crate::world::update::edelta(world, e),
+            )
+        };
+        let force = {
+            let Some(mut state) = world.get_mut::<RadarState>(e) else {
+                return;
+            };
+            // `Mathf.lerpDelta(smoothEfficiency, efficiency, 0.05f)`: Arc clamps
+            // `progress * Time.delta` with `Time.delta = 1` at 60 Hz.
+            state.smooth_efficiency = lerp(state.smooth_efficiency, efficiency, 0.05);
+            let fog_radius = def_fog_radius * state.progress * state.smooth_efficiency;
+            let force = (fog_radius - state.last_radius).abs() >= 0.5;
+            if force {
+                state.last_radius = fog_radius;
+            }
+            state.progress =
+                (state.progress + edelta / discovery_time.max(f32::EPSILON)).clamp(0.0, 1.0);
+            state.total_progress += efficiency * edelta;
+            force
+        };
+        if force {
+            crate::sim::fog::fog_force_update(world, e);
+        }
     }
     fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
         w.f(world

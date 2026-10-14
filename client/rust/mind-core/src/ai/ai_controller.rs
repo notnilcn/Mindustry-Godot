@@ -285,16 +285,21 @@ impl AiCtx<'_> {
             return self.move_direct(unit, cx, cy, arrive);
         }
         let width = self.pathfinder.width;
-        let height = self.pathfinder.height;
         let index = current.x() as usize + current.y() as usize * width as usize;
         let next = self
             .pathfinder
-            .get_field(Cost::Ground, self.team, &[dest])
-            .get_target_tile(index, width, height, true);
+            .target_tile(Cost::Ground, self.team, &[dest], index, true);
         match next {
             Some(next) => {
                 let (nx, ny) = ground::tile_center((next as i32) % width, (next as i32) / width);
-                self.move_direct(unit, nx, ny, arrive)
+                // Arrival is judged against the final destination only; an
+                // intermediate flowfield waypoint uses a zero radius, else a
+                // unit within `arrive` of the next tile (only 8 px away with
+                // Java tile centres) reports "arrived" before it moves
+                // (PAR-0140; CommandAI.java:403-405). Steering is Java
+                // `AIController.pathfind`'s `movePref(.., targetTile.worldx())`.
+                let _ = self.move_direct(unit, nx, ny, 0.0);
+                false
             }
             None => self.move_direct(unit, cx, cy, arrive),
         }

@@ -128,9 +128,29 @@ impl Tile {
             .is_some_and(|def| (def.destructible || def.update) && def.kind != BlockKind::AirBlock)
     }
 
-    /// Whether the tile damages entities (floor hazard; floor data in 02).
-    pub fn dangerous(&self, _content: &ContentRegistry) -> bool {
-        false
+    /// Whether the block/floor is solid (`Tile.solid()`, Tile.java:462-464):
+    /// `block.solid || floor.solid || (build != null && build.checkSolid())`
+    /// (`checkSolid` has no port override — grep `fn check_solid`).
+    pub fn solid_full(&self, content: &ContentRegistry) -> bool {
+        self.solid(content) || content.block(self.floor).is_some_and(|def| def.solid)
+    }
+
+    /// `Tile.isDeep()` (Tile.java:475-477): `block == air && floor.isDeep()`.
+    pub fn is_deep(&self, content: &ContentRegistry) -> bool {
+        self.block == BlockId::AIR && content.block(self.floor).is_some_and(|def| def.is_deep)
+    }
+
+    /// Whether the tile damages entities (`Tile.dangerous()`, Tile.java:471-473):
+    /// `!block.solid && (floor.isDeep() || floor.damages())`.
+    pub fn dangerous(&self, content: &ContentRegistry) -> bool {
+        if self.solid(content) {
+            return false;
+        }
+        let deep = self.is_deep(content);
+        let damages = content
+            .block(self.floor)
+            .is_some_and(|def| floor_damages(def, content));
+        deep || damages
     }
 
     /// Whether legs can stand on the block (`Tile.legSolid`, Tile.java:600):
@@ -219,6 +239,17 @@ impl Tile {
     pub fn block_def<'a>(&self, content: &'a ContentRegistry) -> Option<&'a BlockDef> {
         content.block(self.block)
     }
+}
+
+/// `Floor.damages()` (Floor.java:431-433):
+/// `damageTaken > 0f || (status != null && status.damage > 0f)`.
+pub fn floor_damages(def: &BlockDef, content: &ContentRegistry) -> bool {
+    def.floor_damage_taken > 0.0
+        || def.floor_status.is_some_and(|status| {
+            content
+                .status(status)
+                .is_some_and(|status_def| status_def.damage > 0.0)
+        })
 }
 
 /// Whether a kind is treated as static (darkens neighbours) upstream.

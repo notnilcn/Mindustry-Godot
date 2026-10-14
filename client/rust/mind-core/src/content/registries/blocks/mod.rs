@@ -1348,6 +1348,8 @@ pub struct BlockSpec {
     pub crush_damage_multiplier: Option<f32>,
     /// `Block.unitMoveBreakable` (deconstructed by moving units; plan 11).
     pub unit_move_breakable: Option<bool>,
+    /// `Block.teamPassable` (`AutoDoor`; pathfinder `teamPassable` bit).
+    pub team_passable: Option<bool>,
     /// `Block.alwaysReplace` (plan 07 `Block.canReplace`).
     pub always_replace: Option<bool>,
     /// `Block.privileged` (world processors/cells; plan 07/13).
@@ -1456,6 +1458,7 @@ impl Default for BlockSpec {
             crush_fragile: None,
             crush_damage_multiplier: None,
             unit_move_breakable: None,
+            team_passable: None,
             always_replace: None,
             privileged: None,
             replaceable: None,
@@ -2204,10 +2207,24 @@ pub struct BlockDef {
     pub crush_damage_multiplier: f32,
     /// `Block.unitMoveBreakable` (plan 11 unit deconstruct).
     pub unit_move_breakable: bool,
+    /// `Block.teamPassable` (H01 T15 pathfinder bit; `AutoDoor.java:38`).
+    pub team_passable: bool,
     /// `Block.alwaysReplace` (plan 07 `can_replace`).
     pub always_replace: bool,
     /// `Block.privileged` (plan 07/13 world processors).
     pub privileged: bool,
+    /// `Block.autoResetEnabled` (`Block.java:170`; false for switches,
+    /// `SwitchBlock.java:23`): re-enabled by `World.checkMapArea` when a map
+    /// area shrinks (`World.java:469-481`).
+    pub auto_reset_enabled: bool,
+    /// `Block.baseExplosiveness` (`Block.java:197`; `PowerGenerator` 5,
+    /// batteries 1/5 — H09 T7).
+    pub base_explosiveness: f32,
+    /// `Block.explosivenessScale` (`Block.java:199`; the conduit family
+    /// fractions from `Blocks.java:2327-2458`).
+    pub explosiveness_scale: f32,
+    /// `Block.flammabilityScale` (`Block.java:200`).
+    pub flammability_scale: f32,
     /// `Block.replaceable` (plan 07 `can_replace`).
     pub replaceable: bool,
     /// `Block.quickRotate` (plan 07 `can_replace` self-replacement).
@@ -2493,8 +2510,19 @@ impl BlockDef {
             crush_fragile: spec.crush_fragile.unwrap_or(false),
             crush_damage_multiplier: spec.crush_damage_multiplier.unwrap_or(1.0),
             unit_move_breakable: spec.unit_move_breakable.unwrap_or(false),
+            team_passable: spec
+                .team_passable
+                .unwrap_or(spec.kind == BlockKind::AutoDoor),
             always_replace: spec.always_replace.unwrap_or(false),
             privileged: spec.privileged.unwrap_or(false),
+            // `SwitchBlock.java:23`: `autoResetEnabled = false` (switch and
+            // world-switch are the only vanilla overrides).
+            auto_reset_enabled: spec.kind != BlockKind::SwitchBlock,
+            // Actual values (generators/batteries/conduits) are set in
+            // `init_self` (`Block.java:197-201`).
+            base_explosiveness: 0.0,
+            explosiveness_scale: 1.0,
+            flammability_scale: 1.0,
             replaceable: spec.replaceable.unwrap_or(true),
             quick_rotate: spec.quick_rotate.unwrap_or(true),
             subclass,
@@ -2750,6 +2778,75 @@ impl Content for BlockDef {
 
         if self.fog_radius > 0 && !self.flags.contains(&BlockFlag::HasFogRadius) {
             self.flags.push(BlockFlag::HasFogRadius);
+        }
+
+        // `CoreBlock.java:158-159`: `lightRadius = 30f + 20f * size;
+        // fogRadius = Math.max(fogRadius, (int)(lightRadius / 8f * 3f) + 13)`.
+        if self.kind == BlockKind::CoreBlock {
+            let light_radius = 30.0 + 20.0 * self.size as f32;
+            self.fog_radius = self.fog_radius.max((light_radius / 8.0 * 3.0) as i32 + 13);
+        }
+        // `BaseTurret.java:59` (`init()`): `fogRadius = max(round(range / 8 *
+        // fogRadiusMultiplier), fogRadius)` — the runtime range lives on
+        // `TurretConfig`, so turrets only get the flag here (the radius is
+        // computed by `crate::sim::fog::building_fog_radius`).
+        if matches!(
+            self.kind,
+            BlockKind::BuildTurret
+                | BlockKind::ItemTurret
+                | BlockKind::LiquidTurret
+                | BlockKind::PowerTurret
+                | BlockKind::TractorBeamTurret
+                | BlockKind::PointDefenseTurret
+                | BlockKind::LaserTurret
+                | BlockKind::ContinuousLiquidTurret
+                | BlockKind::ContinuousTurret
+                | BlockKind::RepairTurret
+        ) && !self.flags.contains(&BlockFlag::HasFogRadius)
+        {
+            self.flags.push(BlockFlag::HasFogRadius);
+        }
+
+        // `Block.baseExplosiveness`/`explosivenessScale`/`flammabilityScale`
+        // (`Block.java:197-201`): every `PowerGenerator` subclass gets
+        // `baseExplosiveness = 5` (`PowerGenerator.java:60`), batteries override
+        // it (`Blocks.java:2513,2520`) and the conduit family scales down
+        // (`Blocks.java:2327-2458`, written upstream as
+        // `explosivenessScale = flammabilityScale = A/B` -> both `A/B`).
+        if matches!(
+            self.kind,
+            BlockKind::ConsumeGenerator
+                | BlockKind::ThermalGenerator
+                | BlockKind::SolarGenerator
+                | BlockKind::NuclearReactor
+                | BlockKind::ImpactReactor
+                | BlockKind::VariableReactor
+                | BlockKind::HeaterGenerator
+        ) {
+            self.base_explosiveness = 5.0;
+        }
+        let (base, explosiveness_scale, flammability_scale) = match self.name.as_str() {
+            "battery" => (Some(1.0), None, None),
+            "battery-large" => (Some(5.0), None, None),
+            "conduit" => (None, Some(10.0 / 20.0), Some(10.0 / 20.0)),
+            "pulse-conduit" => (None, Some(16.0 / 40.0), Some(16.0 / 40.0)),
+            "plated-conduit" => (None, Some(16.0 / 50.0), Some(16.0 / 50.0)),
+            "liquid-router" => (None, Some(20.0 / 120.0), Some(20.0 / 120.0)),
+            "bridge-conduit" => (None, Some(20.0 / 100.0), Some(20.0 / 100.0)),
+            "phase-conduit" => (None, Some(20.0 / 100.0), Some(20.0 / 100.0)),
+            "reinforced-conduit" => (None, Some(20.0 / 50.0), Some(20.0 / 50.0)),
+            "reinforced-bridge-conduit" => (None, Some(20.0 / 120.0), Some(20.0 / 120.0)),
+            "reinforced-liquid-router" => (None, Some(40.0 / 150.0), Some(40.0 / 150.0)),
+            _ => (None, None, None),
+        };
+        if let Some(base) = base {
+            self.base_explosiveness = base;
+        }
+        if let Some(scale) = explosiveness_scale {
+            self.explosiveness_scale = scale;
+        }
+        if let Some(scale) = flammability_scale {
+            self.flammability_scale = scale;
         }
 
         if self.health == -1 {

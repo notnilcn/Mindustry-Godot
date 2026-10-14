@@ -381,13 +381,13 @@ fn bullets_pass_over_enemy_conveyor() {
     let conveyor_start = health(&sim, conveyor).expect("conveyor health");
     // Immobile enemy unit behind the wall: the dagger's primary target.
     let decoy = sim
-        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0 + 4.0, 180.0)
+        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0, 180.0)
         .expect("decoy");
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(decoy) {
         slot.kind = AiKind::Player;
     }
     let _ = sim
-        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0 + 4.0, 0.0)
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0, 0.0)
         .expect("dagger");
     for _ in 0..600 {
         sim.tick().expect("tick");
@@ -912,6 +912,11 @@ fn destroyed_blast_container_damages_neighbours() {
         sim.ecs.0.get_entity(container).is_err(),
         "the container was destroyed"
     );
+    // `Damage.dynamicExplosion` staggers its waves 2 ticks apart
+    // (`Time.run(i * 2f)`); the outer waves carry the radius.
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
     assert!(
         health(&sim, wall).is_none_or(|hp| hp < wall_start),
         "the explosion damaged the wall 2 tiles away: {:?}",
@@ -952,6 +957,11 @@ fn destroyed_coal_container_starts_fire() {
         sim.ecs.0.get_entity(container).is_err(),
         "the container was destroyed"
     );
+    // The fire now comes from the staggered `Bullets.fireball` spawns
+    // (`Time.run(i / 2f)`), not an immediate `Fires.create`.
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
     let fire = (10..=11)
         .any(|tx| (10..=11).any(|ty| crate::combat::fires::find_at(&sim.ecs.0, tx, ty).is_some()));
     assert!(
@@ -3661,7 +3671,10 @@ fn unit_with_blast_compound_explodes() {
         hp.dead = true;
     }
     sim.tick().expect("tick");
-    sim.tick().expect("tick");
+    // Staggered waves (`Time.run(i * 2f)`): the growing radius needs ticks.
+    for _ in 0..40 {
+        sim.tick().expect("tick");
+    }
     let wall_end = health(&sim, wall);
     eprintln!("wall {wall_start} -> {wall_end:?}");
     assert!(
@@ -3822,6 +3835,356 @@ fn explosion_absorbed_polygon() {
     assert!(
         !explosion_absorbed(&mut sim.ecs.0, x, y, 30.0, Some(1)),
         "the shield's own team is ignored"
+    );
+}
+
+/// T1: `Building.set(tile.drawx(), tile.drawy())` (BuildingComp.java:126) with
+/// `drawx = tile.worldx() + block.offset` (Tile.java:166-177); the offset is
+/// `((size + 1) % 2) * tilesize / 2` (Block.java:774), so odd sizes (and 1x1)
+/// sit on the tile's `worldx` and even sizes shift `+4`.
+#[test]
+fn building_pos_uses_block_offset() {
+    let mut sim = live_sim(64);
+    let cases = [
+        ("duo", 10, 80.0),               // 1x1, offset 0
+        ("core-shard", 20, 160.0),       // 3x3, offset 0
+        ("mechanical-drill", 30, 244.0), // 2x2, offset 4
+        ("core-foundation", 40, 324.0),  // 4x4, offset 4
+    ];
+    for (name, tile, expected) in cases {
+        let entity = place(&mut sim, tile, tile, name, 1);
+        let pos = sim.ecs.0.get::<Pos>(entity).expect("pos");
+        assert_eq!(
+            (pos.x, pos.y),
+            (expected, expected),
+            "{name} at tile {tile} must sit at drawx/drawy"
+        );
+    }
+}
+
+/// T2: `AIController.updateWeapons` searches per mount
+/// (`findTarget(mountX, mountY, weapon.range(), bullet.collidesAir,
+/// bullet.collidesGround)`, AIController.java:216-222), so a ground-only weapon
+/// ignores the flyer the unit's main target search picked. The unit is the
+/// first content unit whose first weapon bullet does not collide air (printed
+/// by the test).
+#[test]
+fn ground_weapon_ignores_air_target_per_mount() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let name = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let content = &runtime.content;
+        content
+            .units()
+            .iter()
+            .find(|unit| {
+                unit.weapons.first().is_some_and(|weapon| {
+                    content
+                        .bullet(weapon.bullet.id)
+                        .is_some_and(|bullet| !bullet.collides_air && bullet.collides_ground)
+                })
+            })
+            .map(|unit| unit.name.clone())
+            .expect("a ground-only unit exists")
+    };
+    eprintln!("T2 ground-only unit: {name}");
+
+    let wall = place(&mut sim, 29, 25, "copper-wall", 1);
+    let unit = sim
+        .spawn_live_unit(&name, 2, 200.0, 200.0, 0.0)
+        .expect("ground-only unit");
+    // A flying enemy at the same distance as the wall (`hitSize/2` apart).
+    let flare = sim
+        .spawn_live_unit("flare", 1, 230.0, 200.0, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<crate::weapons::UnitWeapons>(unit)
+        .and_then(|weapons| weapons.mounts.first().and_then(|mount| mount.target));
+    assert_eq!(
+        target,
+        Some(wall),
+        "the ground-only mount searched its own target (the wall), not the flyer"
+    );
+}
+
+/// T2: the shoot/invalidate range adds the TARGET's `hitSize/2`
+/// (`mount.target.within(mountX, mountY, wrange + target.hitSize/2)`,
+/// AIController.java:239; `Units.invalidateTarget`, Units.java:151-157). A 3x3
+/// core-shard adds 12 px where the pre-T2 port added the shooter's `hitSize/2`.
+///
+/// The per-mount search radius is `weapon.range() + |shootY|` (a tighter gate
+/// than the shoot range), so the shoot gate is exercised with the mount target
+/// set directly on a non-`singleTarget` unit.
+#[test]
+fn dagger_engages_core_at_target_hitsize() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(64);
+    let (name, weapon_x, weapon_y, range, shooter_hit) = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let content = &runtime.content;
+        let def = content
+            .units()
+            .iter()
+            .find(|unit| {
+                !unit.single_target
+                    && !unit.flying
+                    && unit
+                        .weapons
+                        .first()
+                        .and_then(|weapon| content.bullet(weapon.bullet.id))
+                        .is_some_and(|bullet| bullet.collides_ground)
+            })
+            .expect("a non-singleTarget ground unit exists");
+        let weapon = def.weapons.first().expect("weapon");
+        (
+            def.name.clone(),
+            weapon.x,
+            weapon.y,
+            weapon.range(),
+            def.hit_size,
+        )
+    };
+    eprintln!(
+        "T2 hitSize unit: {name} range {range} weapon ({weapon_x}, {weapon_y}) hit {shooter_hit}"
+    );
+    let core = place(&mut sim, 20, 20, "core-shard", 1);
+    // core-shard Pos = (160, 160); hitSize = 24 -> the shoot/invalidate range is
+    // `range + 12`. `rotation 0` puts the mount at `unit - (weapon.y, weapon.x)`.
+    let target_dist = range + 12.0 - 4.0;
+    let unit = sim
+        .spawn_live_unit(
+            &name,
+            2,
+            160.0 + target_dist + weapon_y,
+            160.0 + weapon_x,
+            0.0,
+        )
+        .expect("unit");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    // Tick 1 runs the first (search) tick; the search radius is `range + |shootY|`.
+    sim.tick().expect("tick");
+    let set_target = |sim: &mut Sim, target: Option<Entity>| {
+        if let Some(mut weapons) = sim.ecs.0.get_mut::<crate::weapons::UnitWeapons>(unit)
+            && let Some(mount) = weapons.mounts.first_mut()
+        {
+            mount.target = target;
+        }
+    };
+    let mount_state = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(unit)
+            .and_then(|weapons| {
+                weapons
+                    .mounts
+                    .first()
+                    .map(|mount| (mount.target, mount.shoot))
+            })
+    };
+    set_target(&mut sim, Some(core));
+    sim.tick().expect("tick");
+    let (target, shoot) = mount_state(&sim).expect("mounts");
+    assert_eq!(
+        target,
+        Some(core),
+        "the target survives the invalidate check"
+    );
+    assert!(shoot, "engages at range + target.hitSize/2 - 4");
+    // Move 5 px further: beyond `range + 12` -> invalidated and not shooting.
+    if let Some(mut pos) = sim.ecs.0.get_mut::<Pos>(unit) {
+        pos.x += 5.0;
+    }
+    set_target(&mut sim, Some(core));
+    sim.tick().expect("tick");
+    let (target, shoot) = mount_state(&sim).expect("mounts");
+    assert_eq!(
+        target, None,
+        "beyond range + target.hitSize/2 is invalidated"
+    );
+    assert!(!shoot, "does not shoot past range + target.hitSize/2");
+}
+
+/// T2: `FlyingAI.findTarget` keeps the in-range main target
+/// (FlyingAI.java:34-39): a flare whose main target (the core) is in range does
+/// not switch to a closer dagger.
+#[test]
+fn flying_mount_keeps_in_range_main_target() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(64);
+    let core = place(&mut sim, 20, 20, "core-shard", 1);
+    let dagger = place(&mut sim, 24, 20, "duo", 1);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 200.0, 190.0, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::Flying;
+    }
+    // A team-1 dagger (closer than the core) must not steal the mount target.
+    let bait = sim
+        .spawn_live_unit("dagger", 1, 175.0, 190.0, 180.0)
+        .expect("bait");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(bait) {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    for _ in 0..130 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<crate::weapons::UnitWeapons>(flare)
+        .and_then(|weapons| weapons.mounts.first().and_then(|mount| mount.target));
+    assert!(
+        target == Some(core) || target == Some(dagger),
+        "the flare engaged a building ({target:?}), not the closer dagger"
+    );
+}
+
+/// T2: `autoDropBombs` (AIController.java:225-229): a horizon with no valid
+/// main target drops its bomb weapon on the ground unit below it
+/// (`Units.closestTarget(.., u -> !u.isFlying(), t -> true)`).
+#[test]
+fn horizon_auto_drops_bombs_on_conveyor() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    // A concrete ground victim: a copper wall on a building tile.
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let before = health(&sim, wall).expect("wall health");
+    let horizon = sim
+        .spawn_live_unit("horizon", 2, 20.0 * 8.0, 20.0 * 8.0 - 14.0, 90.0)
+        .expect("horizon");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(horizon) {
+        slot.kind = AiKind::Flying;
+    }
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let after = health(&sim, wall).unwrap_or(0.0);
+    eprintln!("T2 horizon bombs: wall {before} -> {after}");
+    assert!(after < before, "the horizon dropped bombs on the wall");
+}
+
+/// T2: a `!controllable` mount is never overwritten by the AI's main target
+/// (`if(!weapon.controllable || weapon.noAttack) continue;`,
+/// AIController.java:214).
+#[test]
+fn non_controllable_mount_not_overwritten() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(64);
+    let name = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let content = &runtime.content;
+        content
+            .units()
+            .iter()
+            .find(|unit| {
+                unit.weapons
+                    .iter()
+                    .any(|weapon| !weapon.controllable && !weapon.no_attack)
+            })
+            .map(|unit| unit.name.clone())
+            .expect("a unit with a non-controllable weapon exists")
+    };
+    eprintln!("T2 non-controllable weapon unit: {name}");
+    // The first such unit is naval (oxynoe): give it water so the
+    // environment pass does not kill it on land.
+    let water = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .block_id("deep-water")
+        .expect("deep-water");
+    for x in 11..=14 {
+        sim.grid.tiles.get_mut(x, 20).floor = water;
+    }
+    let _wall = place(&mut sim, 28, 20, "copper-wall", 1);
+    let unit = sim
+        .spawn_live_unit(&name, 2, 100.0, 160.0, 0.0)
+        .expect("unit");
+    // A close enemy unit so the AI main target is Some.
+    let bait = sim
+        .spawn_live_unit("dagger", 1, 120.0, 160.0, 180.0)
+        .expect("bait");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(bait) {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let weapons = sim
+        .ecs
+        .0
+        .get::<crate::weapons::UnitWeapons>(unit)
+        .expect("weapons");
+    let any_non_controllable = weapons
+        .weapons
+        .iter()
+        .zip(weapons.mounts.iter())
+        .filter(|(def, _)| !def.controllable)
+        .all(|(_, mount)| mount.target != Some(bait));
+    assert!(
+        any_non_controllable,
+        "a non-controllable mount was overwritten with the AI main target"
     );
 }
 
@@ -4030,4 +4393,785 @@ fn scathe_does_not_predict() {
         "no lead without predictTarget: {:?} vs {flare_pos:?}",
         state.target_pos
     );
+}
+/// H09 T1: `Logic.java:533-535` fog update — a player-team unit reveals its
+/// radius, discovers tiles permanently and does not distinguish hidden tiles.
+#[test]
+fn fog_unit_reveals_and_discovers() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        // Team 1 has no core in this fixture; without the cap exception the
+        // spawned dagger is unit-cap-killed at spawn (`spawn_unit_def`).
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    // Dagger fog radius 174/8 = 21.75 -> event radius 21, drawn +1.
+    assert!(
+        sim.fog_visible_tile(1, 30, 20),
+        "tile 10 tiles away is visible"
+    );
+    assert!(
+        !sim.fog_visible_tile(1, 50, 20),
+        "tile 30 tiles away is not visible"
+    );
+    assert!(sim.fog_discovered(1, 30, 20), "seen tile is discovered");
+    assert!(
+        !sim.fog_discovered(1, 50, 20),
+        "unseen tile is not discovered"
+    );
+    // Only-AI teams ignore fog (`FogControl.isVisibleTile`).
+    assert!(
+        sim.fog_visible_tile(2, 60, 60),
+        "the wave team is AI and sees everything"
+    );
+
+    // Moving away keeps the explored tile discovered but not visible.
+    let mut pos = sim.ecs.0.get_mut::<Pos>(dagger).expect("dagger pos");
+    pos.x = 50.0 * 8.0 + 4.0;
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        !sim.fog_visible_tile(1, 20, 20),
+        "the left-behind tile is no longer visible"
+    );
+    assert!(
+        sim.fog_discovered(1, 20, 20),
+        "the left-behind tile stays discovered"
+    );
+}
+
+/// H09 T1: with `rules.fog` off there is no `FogControl` and every probe is
+/// true (Serpulo pays nothing).
+#[test]
+fn fog_off_everything_visible() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+    });
+    sim.reset_fog();
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::game::fog::FogControl>()
+            .is_none(),
+        "no fog resource without rules.fog"
+    );
+    assert!(sim.fog_visible_tile(1, 60, 60));
+    assert!(sim.fog_discovered(1, 60, 60));
+    assert!(sim.fog_visible_tile(2, 60, 60));
+    assert!(sim.fog_discovered(2, 60, 60));
+}
+
+/// H09 T1: the sector-start path applies the world rules before the campaign
+/// runtime exists, so no `FogControl` resource was created; the first tick must
+/// create and size it (`FogControl.update`: `fog == null` -> new array).
+#[test]
+fn fog_update_creates_the_resource_when_missing() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::game::fog::FogControl>()
+            .is_none()
+    );
+    sim.spawn_live_unit("dagger", 1, 20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs
+            .0
+            .get_resource::<crate::game::fog::FogControl>()
+            .is_some(),
+        "the first tick creates the fog resource"
+    );
+    assert!(sim.fog_visible_tile(1, 25, 20));
+    assert!(sim.fog_discovered(1, 25, 20));
+}
+
+/// H09 T2: a player turret cannot target a unit hidden in fog; a friendly unit
+/// that reveals it restores the target (`Units.closestEnemy` `inFogTo`).
+#[test]
+fn turret_ignores_unit_in_fog() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.disable_unit_cap = true;
+    });
+    // Placed before the fog reset: after it, the static-fog mask
+    // (all-zero until something is discovered) would reject the placement,
+    // mirroring Java's `fogControl.isDiscovered == false` for every tile.
+    let duo = place(&mut sim, 10, 10, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    sim.reset_fog();
+    // T3 makes every turret a fog source covering its range; zero the
+    // multiplier so the duo reveals nothing (the pre-T3 viewer state this gate
+    // test needs).
+    if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(duo) {
+        let mut config = (*state.config).clone();
+        config.fog_radius_multiplier = 0.0;
+        state.config = std::sync::Arc::new(config);
+    }
+    sim.spawn_live_unit("dagger", 2, 25.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 180.0)
+        .expect("enemy dagger");
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .and_then(|state| state.target);
+    assert!(
+        target.is_none(),
+        "the duo does not target a unit hidden in fog"
+    );
+
+    // A team-1 dagger next to the enemy reveals it (radius 21).
+    sim.spawn_live_unit("dagger", 1, 24.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 0.0)
+        .expect("friendly dagger");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .and_then(|state| state.target);
+    assert!(target.is_some(), "the revealed dagger becomes the target");
+}
+
+/// H09 T2: AI teams ignore fog (`FogControl.isVisibleTile`: `team.isAI()`).
+#[test]
+fn ai_team_sees_through_fog() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    let duo = place(&mut sim, 20, 20, "duo", 2);
+    feed(&mut sim, duo, "copper", 10);
+    sim.spawn_live_unit("dagger", 1, 35.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 180.0)
+        .expect("player dagger");
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .and_then(|state| state.target);
+    assert!(target.is_some(), "the wave team (AI) sees through fog");
+}
+
+/// H09 T2: `BlockIndexer.find_enemy_tile` skips enemy buildings on
+/// undiscovered tiles (`BlockIndexer.java:468`); a revealing unit restores it.
+#[test]
+fn find_enemy_tile_skips_undiscovered() {
+    use crate::ai::block_indexer::{BlockIndexer, BlockPriority};
+    use crate::sim::unit_runtime::UnitRuntime;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    place(&mut sim, 40, 40, "core-shard", 2);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let mut indexer = BlockIndexer::new();
+    indexer.rebuild(&mut sim.ecs.0, &runtime.content);
+    let before = indexer
+        .find_enemy_tile(
+            &sim.ecs.0,
+            &runtime.content,
+            1,
+            10.0 * 8.0,
+            10.0 * 8.0,
+            4000.0,
+            &[BlockPriority::Core],
+        )
+        .map(|tile| (tile.x(), tile.y()));
+    sim.ecs.0.insert_non_send(runtime);
+    assert_eq!(before, None, "undiscovered enemy core is skipped");
+
+    sim.spawn_live_unit("dagger", 1, 40.0 * 8.0 + 4.0, 40.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let mut indexer = BlockIndexer::new();
+    indexer.rebuild(&mut sim.ecs.0, &runtime.content);
+    let after = indexer
+        .find_enemy_tile(
+            &sim.ecs.0,
+            &runtime.content,
+            1,
+            10.0 * 8.0,
+            10.0 * 8.0,
+            4000.0,
+            &[BlockPriority::Core],
+        )
+        .map(|tile| (tile.x(), tile.y()));
+    sim.ecs.0.insert_non_send(runtime);
+    assert_eq!(after, Some((40, 40)), "the discovered core is found");
+}
+
+/// H09 T2: `Build.validPlace` rejects tiles the player team has not discovered
+/// (`Build.java:252`); a revealing unit unlocks the tile.
+#[test]
+fn placement_rejected_in_static_fog() {
+    use crate::sim::unit_runtime::UnitRuntime;
+    use crate::world::build::valid_place;
+    use crate::world::limits::{BlockCounter, BuildRules};
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.static_fog = true;
+        rules.disable_unit_cap = true;
+    });
+    sim.reset_fog();
+    sim.tick().expect("tick");
+
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let table = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::BlockTable>()
+        .expect("block table");
+    let rules = sim.ecs.0.get_resource::<BuildRules>().expect("build rules");
+    let counter = sim.ecs.0.get_resource::<BlockCounter>().expect("counter");
+    let wall = runtime.content.block_id("copper-wall").expect("wall");
+    let before = valid_place(
+        &runtime.content,
+        table,
+        rules,
+        counter,
+        &sim.grid,
+        wall,
+        1,
+        0,
+        30,
+        30,
+    );
+    sim.ecs.0.insert_non_send(runtime);
+    assert!(!before, "an undiscovered tile rejects the placement");
+
+    sim.spawn_live_unit("dagger", 1, 30.0 * 8.0 + 4.0, 30.0 * 8.0 + 4.0, 0.0)
+        .expect("dagger");
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let runtime = sim.ecs.0.remove_non_send::<UnitRuntime>().expect("rt");
+    let table = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::BlockTable>()
+        .expect("block table");
+    let rules = sim.ecs.0.get_resource::<BuildRules>().expect("build rules");
+    let counter = sim.ecs.0.get_resource::<BlockCounter>().expect("counter");
+    let after = valid_place(
+        &runtime.content,
+        table,
+        rules,
+        counter,
+        &sim.grid,
+        wall,
+        1,
+        0,
+        30,
+        30,
+    );
+    sim.ecs.0.insert_non_send(runtime);
+    assert!(after, "the revealed tile accepts the placement");
+}
+
+/// H09 T3: a powered `radar` discovers its radius in `discoveryTime` = 600
+/// ticks (`Radar.java:18,59-72`).
+#[test]
+fn radar_discovers_in_600_ticks() {
+    use crate::entities::comp::building::RadarState;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.disable_unit_cap = true;
+    });
+    // Placed before the fog reset (the all-zero static mask else rejects).
+    let radar = place(&mut sim, 20, 20, "radar", 1);
+    place(&mut sim, 21, 20, "power-source", 1);
+    sim.reset_fog();
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let progress = sim
+        .ecs
+        .0
+        .get::<RadarState>(radar)
+        .map(|state| state.progress)
+        .unwrap_or(0.0);
+    assert!(
+        (progress - 0.5).abs() < 0.02,
+        "progress ~0.5 at 300 ticks: {progress}"
+    );
+    // One tick is lost while the power graph links (efficiency 0 on the first
+    // tick), so full discovery completes on tick 601.
+    for _ in 0..301 {
+        sim.tick().expect("tick");
+    }
+    let progress = sim
+        .ecs
+        .0
+        .get::<RadarState>(radar)
+        .map(|state| state.progress)
+        .unwrap_or(0.0);
+    assert!(
+        (progress - 1.0).abs() < 1e-3,
+        "progress 1.0 at 600 ticks: {progress}"
+    );
+}
+
+/// H09 T3: every turret reveals its range (`BaseTurret.java:59`,
+/// `Turret.java:426-428`): a `duo` (range 160) reveals 20 tiles.
+#[test]
+fn duo_reveals_its_range() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.disable_unit_cap = true;
+    });
+    // Placed before the fog reset (the all-zero static mask else rejects).
+    place(&mut sim, 10, 10, "duo", 1);
+    sim.reset_fog();
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    // `Mathf.round(160 / 8) = 20` tiles, drawn with the +1 visual margin.
+    assert!(sim.fog_visible_tile(1, 30, 10), "a tile at +20 is visible");
+    assert!(
+        !sim.fog_visible_tile(1, 32, 10),
+        "a tile at +22 is not visible"
+    );
+    assert!(
+        sim.fog_discovered(1, 20, 10),
+        "revealed tiles are discovered"
+    );
+}
+
+/// H09 T3: core fog radius = `max(fogRadius, (int)((30 + 20*size) / 8 * 3) + 13)`
+/// (`CoreBlock.java:158-159`).
+#[test]
+fn core_fog_radius_values() {
+    let sim = live_sim(8);
+    let content = &sim.unit_runtime().expect("rt").content;
+    let radius = |name: &str| {
+        content
+            .block_id(name)
+            .and_then(|id| content.block(id))
+            .map(|def| def.fog_radius)
+    };
+    assert_eq!(radius("core-shard"), Some(46), "size 3");
+    assert_eq!(radius("core-bastion"), Some(54), "size 4");
+    assert_eq!(radius("core-acropolis"), Some(69), "size 6");
+}
+
+/// H09 T4: `Building.update()` skips `updateTile` for a disabled turret
+/// (`Turret` has the default `noUpdateDisabled = false`): a disabled, fed duo
+/// never fires at an enemy in range.
+#[test]
+fn disabled_duo_does_not_fire() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    let enemy = sim
+        .spawn_live_unit("dagger", 2, 20.0 * 8.0 + 60.0, 20.0 * 8.0 + 20.0, 180.0)
+        .expect("enemy dagger");
+    let start = health(&sim, enemy).expect("health");
+    if let Some(mut building) = sim.ecs.0.get_mut::<crate::entities::comp::Building>(duo) {
+        building.enabled = false;
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let shots = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .map(|state| state.total_shots)
+        .unwrap_or(-1);
+    assert_eq!(shots, 0, "a disabled duo never fires");
+    assert_eq!(
+        health(&sim, enemy),
+        Some(start),
+        "the enemy takes no duo damage"
+    );
+}
+
+/// H09 T7: a container full of 100 blast-compound explodes with
+/// `explosiveness = 120` and `flammability = 40` (before the
+/// `* 3.5 * explosivenessScale` caller scaling).
+#[test]
+fn blast_container_explosion_terms() {
+    let mut sim = live_sim(32);
+    let container = place(&mut sim, 5, 5, "container", 1);
+    let (content_len, blast, capacity) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        (
+            content.items().len(),
+            content.item_id("blast-compound").expect("blast-compound"),
+            content
+                .block_by_name("container")
+                .map(|def| def.item_capacity)
+                .unwrap_or(300),
+        )
+    };
+    let mut module = crate::world::modules::ItemModule::with_items(content_len);
+    module.add(blast, 100, capacity.max(100));
+    sim.ecs.0.entity_mut(container).insert(module);
+
+    let content = &sim.unit_runtime().expect("rt").content;
+    let def = content.block_by_name("container").expect("def").clone();
+    let (flammability, explosiveness, power) =
+        super::unit_runtime::building_explosion_terms(&sim.ecs.0, content, container, &def);
+    assert!(
+        (explosiveness - 120.0).abs() < 1e-3,
+        "explosiveness {explosiveness}"
+    );
+    assert!(
+        (flammability - 40.0).abs() < 1e-3,
+        "flammability {flammability}"
+    );
+    assert_eq!(power, 0.0, "no charge items");
+    // Caller scaling (`BuildingComp.java:1518`).
+    assert!((explosiveness * 3.5 * def.explosiveness_scale - 420.0).abs() < 1e-3);
+}
+
+/// H09 T7: a vault linked to a core caps its item explosion at
+/// `min(itemCapacity / 60, 6)` (`StorageBlock.java:99-103`).
+#[test]
+fn linked_vault_explodes_weakly() {
+    let mut sim = live_sim(32);
+    place(&mut sim, 5, 5, "core-shard", 1);
+    let vault = place(&mut sim, 8, 5, "vault", 1);
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::storage::storage_block::StorageBuild>(vault)
+            .and_then(|storage| storage.linked_core)
+            .is_some(),
+        "the vault links to the adjacent core"
+    );
+    let (content_len, blast, capacity) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        (
+            content.items().len(),
+            content.item_id("blast-compound").expect("blast-compound"),
+            content
+                .block_by_name("vault")
+                .map(|def| def.item_capacity)
+                .unwrap_or(1000),
+        )
+    };
+    let mut module = crate::world::modules::ItemModule::with_items(content_len);
+    module.add(blast, 1000, capacity);
+    sim.ecs.0.entity_mut(vault).insert(module);
+
+    let content = &sim.unit_runtime().expect("rt").content;
+    let def = content.block_by_name("vault").expect("def").clone();
+    let (_, explosiveness, _) =
+        super::unit_runtime::building_explosion_terms(&sim.ecs.0, content, vault, &def);
+    assert!(
+        (explosiveness - 1.2 * 6.0).abs() < 1e-3,
+        "capped explosiveness (6 items) {explosiveness}"
+    );
+}
+
+/// H09 T7: a charged battery's `power` term is `status * capacity` (4000) and
+/// `dynamic_explosion` schedules `clamp(4000/700, 0, 8) = 6` lightning bolts.
+#[test]
+fn battery_lightning_count() {
+    use crate::combat::damage::explosion::{
+        DelayedAction, DelayedExplosionActions, dynamic_explosion,
+    };
+
+    let mut sim = live_sim(32);
+    let battery = place(&mut sim, 5, 5, "battery", 1);
+    if let Some(mut power) = sim
+        .ecs
+        .0
+        .get_mut::<crate::world::modules::PowerModule>(battery)
+    {
+        power.status = 1.0;
+    }
+    let content = &sim.unit_runtime().expect("rt").content;
+    let def = content.block_by_name("battery").expect("def").clone();
+    assert_eq!(def.base_explosiveness, 1.0, "battery baseExplosiveness");
+    let (_, explosiveness, power) =
+        super::unit_runtime::building_explosion_terms(&sim.ecs.0, content, battery, &def);
+    assert_eq!(explosiveness, 1.0);
+    assert!(
+        (power - 4000.0).abs() < 1e-3,
+        "battery buffered capacity 4000: {power}"
+    );
+    sim.with_combat_ctx(|ctx| {
+        dynamic_explosion(
+            ctx,
+            40.0,
+            40.0,
+            0.0,
+            explosiveness,
+            power,
+            16.0,
+            true,
+            false,
+            Some(1),
+        );
+    });
+    let actions = sim
+        .ecs
+        .0
+        .get_resource::<DelayedExplosionActions>()
+        .expect("actions");
+    let bolts = actions
+        .0
+        .iter()
+        .filter(|(_, action)| matches!(action, DelayedAction::Lightning { .. }))
+        .count();
+    assert_eq!(bolts, 6, "4000 / 700 = 5.71 -> 6 bolts");
+    assert_eq!(actions.0.len(), 6, "no fireballs or waves");
+}
+
+/// H09 T7: explosiveness 33 splits into 3 waves spaced 2 ticks apart
+/// (`Time.run(i * 2f)`).
+#[test]
+fn explosion_waves_are_staggered() {
+    use crate::combat::damage::explosion::dynamic_explosion;
+
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let start = health(&sim, wall).expect("wall health");
+    let (x, y) = (20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0);
+    sim.with_combat_ctx(|ctx| {
+        // Team 2 is protected; the team-1 wall takes every wave.
+        dynamic_explosion(ctx, x, y, 0.0, 33.0, 0.0, 24.0, true, false, Some(2));
+    });
+    let after_inline = health(&sim, wall).expect("wall health");
+    assert!(after_inline < start, "wave 0 damages inline");
+    let mut drops = 1;
+    let mut previous = after_inline;
+    for _ in 0..8 {
+        sim.tick().expect("tick");
+        let now = health(&sim, wall).expect("wall health");
+        if now < previous - 1e-3 {
+            drops += 1;
+        }
+        previous = now;
+    }
+    assert_eq!(drops, 3, "three staggered waves (+0/+2/+4)");
+}
+
+/// T3: `PlayerComp.team` is set before the spawn attempt, so a player without
+/// a supported core retries `bestCore()` every 60 ticks
+/// (`PlayerComp.java:214-243`) instead of staying teamless forever.
+#[test]
+fn player_team_set_without_core_retries_spawn() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    sim.set_player_team(1);
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(sim.player_unit().is_none(), "no player unit without a core");
+    // Landing a core lets the next 60-tick window spawn the unit.
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let player = sim.player_unit().expect("player spawned at the new core");
+    let pos = sim.ecs.0.get::<Pos>(player).expect("pos");
+    assert_eq!((pos.x, pos.y), (160.0, 160.0), "spawned on the core");
+}
+
+/// T3/PAR-0175: the `unitClear` dock branch releases the possessed unit before
+/// the docked unit takes the player controller (`InputHandler.java:823-873`):
+/// exactly one entity keeps `comp::Player`.
+#[test]
+fn clear_unit_dock_releases_possessed_unit() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::entities::comp::Player;
+
+    let mut sim = live_sim(48);
+    if let Some(mut rules) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+    {
+        // Team 1 must be the player team (`select_team_controller` gives
+        // `Command` only to the player's team; the rest get the AI branch).
+        rules.default_team = 1;
+    }
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    // The dockable types are the `core_unit_dock` units (Java: evoke, incite,
+    // emanate, UnitTypes.java:4355/4421/4500) - the shard's alpha is not one.
+    let dock_name = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime
+            .content
+            .units()
+            .iter()
+            .find(|unit| unit.core_unit_dock)
+            .map(|unit| unit.name.clone())
+            .expect("a coreUnitDock unit exists")
+    };
+    eprintln!("T3 dock unit: {dock_name}");
+    let player = sim
+        .spawn_player_unit("alpha", 1, 160.0, 160.0, 90.0)
+        .expect("player alpha");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 200.0, 160.0, 0.0)
+        .expect("dagger");
+    let dagger_seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    // Force the dockable type so the dock branch is exercised on this map.
+    let dock_id = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_by_name(&dock_name)
+        .map(|def| def.id)
+        .expect("dock unit id");
+    if let Some(mut docked) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::unit::comp::DockedType>(dagger)
+    {
+        docked.0 = dock_id;
+    }
+    let _ = player;
+    assert!(sim.possess_unit(dagger_seq), "dagger possessed");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Player)
+    );
+    assert!(sim.clear_unit(), "unitClear ran the dock branch");
+    // Exactly one entity carries the Player marker, and the dagger is back on
+    // its team AI.
+    let players = sim
+        .ecs
+        .0
+        .iter_entities()
+        .filter(|entity| entity.get::<Player>().is_some())
+        .count();
+    assert_eq!(players, 1, "exactly one player entity");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Command),
+        "the possessed dagger went back to its team controller"
+    );
+}
+
+/// T3: `CoreBlock.playerSpawn` queues `spawnType.unlock()` in the campaign
+/// (`CoreBlock.java:121-123`) through H04 T2's `UnlockRef` pipeline.
+#[test]
+fn campaign_spawn_queues_unlock() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{CampaignCoreQueues, CampaignRuntime, UnlockRef};
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    session.sector = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .planet_id("serpulo")
+        .map(|planet| (planet, 170));
+    assert!(session.is_campaign(), "the play session is a campaign run");
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    let queues = crate::game::runtime::install_campaign_core_hooks(&mut sim.ecs.0);
+    assert!(
+        sim.ecs.0.get_resource::<CampaignCoreQueues>().is_some(),
+        "campaign hook queues installed"
+    );
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let alpha = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_id("alpha")
+        .expect("alpha");
+    sim.spawn_player_at_best_core(1).expect("player spawned");
+    let unlocked: Vec<UnlockRef> = queues.lock().expect("lock").unlocks.clone();
+    assert_eq!(unlocked, vec![UnlockRef::Unit(alpha)], "alpha queued once");
+    // A second spawn must not queue a duplicate.
+    sim.player_unit = None;
+    sim.spawn_player_at_best_core(1)
+        .expect("player spawned again");
+    let unlocked: Vec<UnlockRef> = queues.lock().expect("lock").unlocks.clone();
+    assert_eq!(unlocked, vec![UnlockRef::Unit(alpha)], "no duplicate");
 }

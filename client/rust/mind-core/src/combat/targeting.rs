@@ -116,6 +116,11 @@ impl TargetQueries {
             if !world.get::<Health>(entity).is_some_and(|h| !h.dead) {
                 continue;
             }
+            // `Units.closestEnemy`/`bestEnemy`: `e.inFogTo(team)` skips units
+            // hidden in the viewer's fog (UnitComp.java:232-248).
+            if crate::game::fog_gate::unit_in_fog_to(world, entity, team) {
+                continue;
+            }
             let flying = crate::combat::bullet::unit_is_flying(world, entity);
             if !((flying && target_air) || (!flying && target_ground)) {
                 continue;

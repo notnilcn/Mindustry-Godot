@@ -107,8 +107,9 @@ pub fn create(world: &mut World, tx: i16, ty: i16, rng: &mut SimRng) -> Option<E
     let entity = world
         .spawn((
             Pos {
-                x: (tx as f32 + 0.5) * ts,
-                y: (ty as f32 + 0.5) * ts,
+                // `fire.set(tile.worldx(), tile.worldy())` (Fires.java:26).
+                x: tx as f32 * ts,
+                y: ty as f32 * ts,
             },
             TeamComp { team: 0 },
             FireState {
@@ -421,5 +422,15 @@ mod tests {
         assert_eq!(dst.tile, (3, 4));
         assert_eq!(dst.time, 12.5);
         assert_eq!(dst.lifetime, BASE_LIFETIME);
+    }
+
+    /// T1: `fire.set(tile.worldx(), tile.worldy())` (Fires.java:26).
+    #[test]
+    fn fire_sits_on_tile_world() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let mut rng = SimRng::new(3);
+        let fire = create(&mut harness.build.world, 5, 7, &mut rng).expect("fire");
+        let pos = harness.build.world.get::<Pos>(fire).expect("pos");
+        assert_eq!((pos.x, pos.y), (40.0, 56.0));
     }
 }

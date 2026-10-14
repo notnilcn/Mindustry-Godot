@@ -120,8 +120,10 @@ pub fn deposit(
     }
 
     let ts = crate::config::TILESIZE as f32;
-    let ax = (tx as f32 + 0.5) * ts;
-    let ay = (ty as f32 + 0.5) * ts;
+    // `Puddles.deposit`: `ax = (tile.worldx() + source.worldx()) / 2f` with
+    // `source == tile` for the port's single-tile deposit = `tile.worldx()`.
+    let ax = tx as f32 * ts;
+    let ay = ty as f32 * ts;
 
     // Floor liquid-drop reaction (`Puddles.deposit` step 4): an `isLiquid` floor
     // carries a `liquidDrop`; if the incoming liquid cannot stay on it, react
@@ -319,7 +321,9 @@ pub fn update_puddles(
             let _ = puddle;
             if def.effect != crate::content::StatusId::NONE {
                 let ts = crate::config::TILESIZE as f32;
-                let (cx, cy) = ((tx as f32 + 0.5) * ts, (ty as f32 + 0.5) * ts);
+                // The puddle's own position: `puddle.set(ax, ay)` with
+                // `ax = tile.worldx()` (Puddles.java:77).
+                let (cx, cy) = (tx as f32 * ts, ty as f32 * ts);
                 let candidates = crate::entities::comp::unit::queries::in_radius(
                     world,
                     cx,

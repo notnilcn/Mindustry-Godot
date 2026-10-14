@@ -102,8 +102,9 @@ impl WaveSpawner {
     pub fn player_near(&self, x: f32, y: f32, range: f32) -> bool {
         let ts = crate::config::TILESIZE as f32;
         self.spawns.iter().any(|tile| {
-            let cx = (tile.x() as f32 + 0.5) * ts;
-            let cy = (tile.y() as f32 + 0.5) * ts;
+            // `Tile.worldx()/worldy()` (Tile.java:166-171).
+            let cx = tile.x() as f32 * ts;
+            let cy = tile.y() as f32 * ts;
             let dx = cx - x;
             let dy = cy - y;
             dx * dx + dy * dy <= range * range
