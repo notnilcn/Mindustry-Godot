@@ -1070,4 +1070,87 @@ mod tests {
         assert_eq!(campaign.planet(erekir).unwrap().stats.sectors_captured, 0);
         assert_eq!(campaign.planet(serpulo).unwrap().stats.sectors_captured, 7);
     }
+
+    #[test]
+    fn save_all_after_run_turn_keeps_turn() {
+        let (registry, mut campaign, _planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        // `stale_facade` is exactly what `MindCampaign.persist` used to write
+        // while a sector was live (the facade's last-mirrored snapshot): its
+        // `universe.turn` never advanced, so saving it reset the clock. The
+        // facade now mirrors the runtime before saving (H04 T1).
+        let stale_facade = campaign.clone();
+        for _ in 0..2 {
+            let turn = campaign.universe.turn;
+            campaign.run_turn(
+                &registry,
+                &mut settings,
+                &TurnContext::default(),
+                &mut JavaRandom::new(turn as u64 + 1),
+            );
+        }
+        campaign.save_all(&mut settings).unwrap();
+        assert_eq!(settings.get_i32("turn", 0), 2);
+        // The stale copy would write 0 back over the live turn counter.
+        stale_facade.save_all(&mut settings).unwrap();
+        assert_eq!(settings.get_i32("turn", 0), 0);
+    }
+
+    #[test]
+    fn left_sector_produces_on_next_turn() {
+        let (registry, mut campaign, planet) = serpulo();
+        let mut settings = SettingsStore::new();
+        let id = 15u16;
+        {
+            let sector = campaign.sector_mut(planet, id).unwrap();
+            sector.save = Some(format!("sector-serpulo-{id}"));
+            sector.info.info.has_core = true;
+            sector.info.info.storage_capacity = 4000;
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+            sector.being_played = false;
+            sector
+                .info
+                .info
+                .production
+                .insert("copper".to_owned(), ExportStat { mean: 1.0 });
+        }
+        let report = campaign.run_turn(
+            &registry,
+            &mut settings,
+            &TurnContext::default(),
+            &mut JavaRandom::new(3),
+        );
+        assert_eq!(report.turn, 1);
+        // `turnDuration / 60` = 120 s of mean 1.0/s production (`Universe.java:154,213`).
+        assert_eq!(
+            campaign
+                .sector(planet, id)
+                .unwrap()
+                .info
+                .info
+                .items
+                .get("copper"),
+            Some(&120)
+        );
+        // A sector that is being played is skipped (`Sector.isBeingPlayed`).
+        campaign.sector_mut(planet, id).unwrap().being_played = true;
+        campaign.run_turn(
+            &registry,
+            &mut settings,
+            &TurnContext::default(),
+            &mut JavaRandom::new(4),
+        );
+        assert_eq!(
+            campaign
+                .sector(planet, id)
+                .unwrap()
+                .info
+                .info
+                .items
+                .get("copper"),
+            Some(&120),
+            "no offline production for the played sector"
+        );
+    }
 }
