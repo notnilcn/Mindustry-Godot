@@ -67,6 +67,10 @@ pub struct MindCamera2D {
     cutscene_locked: bool,
     /// Whether the `MindInput` logic-cutscene lock is currently raised (H06 T3).
     logic_locked: bool,
+    /// `DesktopInput.panning`: set by the pan key, cleared by manual movement.
+    panning: bool,
+    /// `smoothcamera` setting (`DesktopInput.java:289` follow lerp 0.08 vs 1).
+    smooth_camera: bool,
 }
 
 #[godot_api]
@@ -90,6 +94,8 @@ impl ICamera2D for MindCamera2D {
             cutscene_locked: false,
             logic_locked: false,
             follow_target: None,
+            panning: false,
+            smooth_camera: true,
         }
     }
 
@@ -149,28 +155,64 @@ impl ICamera2D for MindCamera2D {
                 .host
                 .as_ref()
                 .and_then(|host| host.bind().player_unit_position());
+            let paused = self
+                .host
+                .as_ref()
+                .map(|host| host.bind().is_paused())
+                .unwrap_or(false);
             let (axis_x, axis_y) = self.pan_axis();
             let boost = self.boost_pressed();
-            if let Some((player_x, player_y)) = player {
-                self.follow_target = Some((player_x, player_y));
-                if self.pan_pressed() {
-                    // Middle-mouse pan holds the lock off until released.
-                    self.follow_target = None;
+            let pan_key = self.pan_pressed();
+            let mouse_move = self.mouse_move_pressed();
+            let active = self.gameplay_active();
+            // `DesktopInput.java:270-273`: the pan latch drops on any manual
+            // movement input (axis or `mouseMove`).
+            if active {
+                if pan_key {
+                    self.panning = true;
                 }
-            } else if axis_x != 0.0 || axis_y != 0.0 || self.pan_pressed() {
-                // Manual pan detaches the follow lock (`DesktopInput.panning`).
-                self.follow_target = None;
+                if axis_x != 0.0 || axis_y != 0.0 || mouse_move {
+                    self.panning = false;
+                }
             }
-            if let Some((target_x, target_y)) = self.follow_target {
-                self.camera.follow(target_x, target_y, true, delta_frames);
-            }
-            if player.is_none() {
-                self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
+            let mut pan_cam = pan_key && active;
+            if !self.locked() {
+                if (player.is_none() || paused) && active {
+                    // `DesktopInput.java:277-283`: desktop pans with WASD while
+                    // the player is dead or the game is paused.
+                    if mouse_move {
+                        pan_cam = true;
+                    }
+                    self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
+                    self.follow_target = None;
+                } else if let Some((player_x, player_y)) = player
+                    && !self.panning
+                {
+                    self.camera
+                        .follow(player_x, player_y, self.smooth_camera, delta_frames);
+                    self.follow_target = Some((player_x, player_y));
+                }
+                if pan_cam {
+                    // Arc `mouseY` is bottom-up; the tracked cursor is in
+                    // Godot viewport coords (top-down) - flip. Reading
+                    // `MindInput`'s tracked position (not the viewport getter)
+                    // keeps synthetic bridge events in sync.
+                    let (mouse_x, mouse_y) = self.mouse_position();
+                    self.camera.pan_mouse(
+                        mouse_x,
+                        self.camera.viewport.1 - mouse_y,
+                        delta_frames,
+                        boost,
+                    );
+                }
             }
 
-            if player.is_none()
+            // Edge pan is `MobileInput`-only; the desktop port used to run it
+            // whenever no player existed (T10).
+            if godot::classes::Os::singleton().has_feature("mobile")
+                && player.is_none()
                 && self.mouse_inside
-                && self.gameplay_active()
+                && active
                 && let Some(viewport) = self.base().get_viewport()
             {
                 let rect = viewport.get_visible_rect();
@@ -348,6 +390,8 @@ impl MindCamera2D {
         self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
         // Sibling `Input` owns the binding state (`BindingState`).
         self.input = self.base().try_get_node_as::<MindInput>("../../Input");
+        // `smoothcamera` (T10): the WorldLoadEvent re-reads it too.
+        self.smooth_camera = self.read_smooth_camera();
         let position = self.base().get_position();
         self.camera.position = (position.x, position.y);
         // Seed the echo-guard shadows from the node so no write is issued for
@@ -378,6 +422,8 @@ impl MindCamera2D {
         }
         self.world_dims = (width, height);
         self.world_loads = loads;
+        // A world load re-reads `smoothcamera` (`Control` WorldLoadEvent).
+        self.smooth_camera = self.read_smooth_camera();
         let unit = TILESIZE as f32;
         self.camera.world_size = Some((width as f32 * unit, height as f32 * unit));
         match host.bind().best_core_position_px() {
@@ -419,6 +465,46 @@ impl MindCamera2D {
             return false;
         };
         input.bind().pan_pressed()
+    }
+
+    /// `mouseMove` binding hold (`DesktopInput.java:994-996`, T9/T10).
+    fn mouse_move_pressed(&self) -> bool {
+        let Some(input) = self.input.clone() else {
+            return false;
+        };
+        input.bind().mouse_move_pressed()
+    }
+
+    /// Tracked cursor position (`Core.input.mouseX/Y`; viewport coordinates).
+    fn mouse_position(&self) -> (f32, f32) {
+        let Some(input) = self.input.clone() else {
+            return (0.0, 0.0);
+        };
+        input.bind().mouse_position()
+    }
+
+    /// `InputHandler.locked()` (T10): any input lock skips the pan/follow.
+    fn locked(&self) -> bool {
+        let Some(input) = self.input.clone() else {
+            return false;
+        };
+        input.bind().locked()
+    }
+
+    /// `smoothcamera` setting (`/root/MindUi` owns the store; default true).
+    fn read_smooth_camera(&self) -> bool {
+        let Some(mut ui) = self
+            .base()
+            .try_get_node_as::<godot::classes::Node>("/root/MindUi")
+        else {
+            return true;
+        };
+        ui.call(
+            "settings_get_bool",
+            &[GString::from("smoothcamera").to_variant()],
+        )
+        .try_to::<bool>()
+        .unwrap_or(true)
     }
 
     /// Whether the world accepts gameplay input (no dialog/text field open).

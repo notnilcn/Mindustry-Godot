@@ -555,11 +555,13 @@ fn sim_command_unit_state_is_deterministic() {
             y: 34.0,
         })
         .unwrap();
+        let (attack_x, attack_y) =
+            crate::sim::pack_wire_target(&crate::input::action::CommandTarget::Unit(9));
         sim.command(SimCommand::UnitCommand {
             units: smallvec::smallvec![b],
             command: 0,
-            x: 9.0,
-            y: 0.0,
+            x: attack_x,
+            y: attack_y,
         })
         .unwrap();
     }

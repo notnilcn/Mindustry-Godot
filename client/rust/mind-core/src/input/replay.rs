@@ -359,7 +359,9 @@ mod tests {
             Some((0.0, 0.0, 100.0, 100.0))
         );
         let action = controller
-            .command_tap(&units, 0, 60.0, 60.0, false)
+            .command_tap(&units, 0, 60.0, 60.0, false, None)
+            .into_iter()
+            .next()
             .expect("command");
         match action {
             super::super::action::RemoteAction::CommandUnits {

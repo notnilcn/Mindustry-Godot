@@ -765,15 +765,21 @@ fn input_rts_move(json: bool, out: Option<&Path>, golden: Option<&Path>) -> Resu
 
     // Move command to a ground position.
     let move_action = controller
-        .command_tap(&units, 0, 50.0, 50.0, false)
+        .command_tap(&units, 0, 50.0, 50.0, false, None)
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("move command not emitted"))?;
     // Attack command on the enemy unit (within the 11 px tap radius).
     let attack_action = controller
-        .command_tap(&units, 0, 30.0, 10.0, false)
+        .command_tap(&units, 0, 30.0, 10.0, false, None)
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("attack command not emitted"))?;
     // Queued move command.
     let queue_action = controller
-        .command_tap(&units, 0, 60.0, 10.0, true)
+        .command_tap(&units, 0, 60.0, 10.0, true, None)
+        .into_iter()
+        .next()
         .ok_or_else(|| anyhow::anyhow!("queue command not emitted"))?;
 
     for action in [move_action, attack_action, queue_action] {

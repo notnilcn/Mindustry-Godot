@@ -5,8 +5,9 @@
 //! Ports the apply half of `mindustry.gen.InputHandler.java:310-466` onto the
 //! plan-11 [`CommandAiState`] runtime. The relay wire form ([`SimCommand`])
 //! carries only unit ids, a command id and an `(x, y)` target, so the resolve
-//! step maps it back to a [`CommandTarget`] (see [`resolve_wire_target`]) — the
-//! documented plan-15 §3.3.1 gap where `UnitCommand` has no target-kind field.
+//! step maps it back to a [`CommandTarget`] (see [`resolve_wire_target`]);
+//! [`pack_wire_target`] is the lossless encoder for that pair (plan-15 §3.3.1
+//! target-kind gap: `EntitySeq` ids exceed an f32's 24-bit integer range).
 //!
 //! Determinism: tracked units live in a `BTreeMap` keyed by relay id and are
 //! always iterated in ascending-id order (no `HashMap` iteration in sim order).
@@ -307,14 +308,54 @@ impl Default for UnitCommandRuntime {
     }
 }
 
-/// Resolves the relay `(x, y)` pair back to a [`CommandTarget`].
+/// Wire packing base for unit targets: `x = id & 0xFFFF`,
+/// `y = WIRE_UNIT_BASE + (id >> 16)` (see [`pack_wire_target`]).
+pub const WIRE_UNIT_BASE: f32 = 1_000_000.0;
+/// Wire packing base for building targets:
+/// `x = tile.x`, `y = WIRE_BUILDING_BASE + tile.y + 32768`.
+pub const WIRE_BUILDING_BASE: f32 = 2_000_000.0;
+
+/// Packs a [`CommandTarget`] into the `UnitCommand` wire `(x, y)` pair.
 ///
-/// The wire gap (plan 15 §3.3.1): the batcher encodes `CommandTarget::Unit(id)`
-/// as `(x = id as f32, y = 0.0)`. Mirror that convention here; every other pair
-/// is a world position.
+/// `EntitySeq` ids live at/above [`crate::sim::unit_runtime::UNIT_SEQ_BASE`]
+/// (`1_000_000_000`) and do not fit an f32's 24-bit integer mantissa, so the
+/// old `x = id as f32` encoding rounded them (`1_000_000_002 as f32 ==
+/// 1_000_000_000`) and attack orders resolved the wrong entity (H03 blocker
+/// #2). The id is split into two exactly-representable 16-bit halves instead.
+/// Building targets pack the tile pair; [`CommandTarget::Position`] stays raw
+/// world pixels.
+///
+/// The bases cannot collide with a real position: tiles are `i16`, so world
+/// pixels satisfy `|v| <= 32768 * 8 = 262_144` (`Tile.worldx()`, Tile.java:
+/// 166-171), far below [`WIRE_UNIT_BASE`]. Both packed `y` forms are integers
+/// below `2^24` and the packed `x` is a 16-bit integer, so every half
+/// round-trips exactly.
+pub fn pack_wire_target(target: &CommandTarget) -> (f32, f32) {
+    match target {
+        CommandTarget::Position { x, y } => (*x, *y),
+        CommandTarget::Unit(id) => {
+            let id = *id as u32;
+            ((id & 0xFFFF) as f32, WIRE_UNIT_BASE + (id >> 16) as f32)
+        }
+        CommandTarget::Building(pos) => (
+            pos.x() as f32,
+            WIRE_BUILDING_BASE + (pos.y() as i32 + 32768) as f32,
+        ),
+    }
+}
+
+/// Resolves the relay `(x, y)` pair back to a [`CommandTarget`] — the exact
+/// inverse of [`pack_wire_target`].
 pub fn resolve_wire_target(x: f32, y: f32) -> CommandTarget {
-    if y == 0.0 && x > 0.0 && x.fract() == 0.0 {
-        CommandTarget::Unit(x as i32)
+    if y >= WIRE_BUILDING_BASE {
+        CommandTarget::Building(crate::world::TilePos::new(
+            x as i16,
+            ((y - WIRE_BUILDING_BASE) as i32 - 32768) as i16,
+        ))
+    } else if y >= WIRE_UNIT_BASE {
+        let low = (x as i32 as u32) & 0xFFFF;
+        let id = (((y - WIRE_UNIT_BASE) as u32) << 16) | low;
+        CommandTarget::Unit(id as i32)
     } else {
         CommandTarget::Position { x, y }
     }
@@ -338,7 +379,6 @@ mod tests {
 
     #[test]
     fn wire_target_resolution_matches_emitter() {
-        assert_eq!(resolve_wire_target(9.0, 0.0), CommandTarget::Unit(9));
         assert_eq!(
             resolve_wire_target(50.0, 10.0),
             CommandTarget::Position { x: 50.0, y: 10.0 }
@@ -347,6 +387,47 @@ mod tests {
             resolve_wire_target(0.0, 0.0),
             CommandTarget::Position { x: 0.0, y: 0.0 }
         );
+    }
+
+    /// Regression for H03 blocker #2: the old `x = id as f32` wire rounded
+    /// `EntitySeq` ids (`1_000_000_000` and `1_000_000_002` share one f32),
+    /// so an attack order resolved the wrong entity.
+    #[test]
+    fn wire_target_round_trips_large_unit_ids() {
+        for id in [1, 9, 1_000_000_001, 1_000_000_002, (1 << 24) + 1, i32::MAX] {
+            let target = CommandTarget::Unit(id);
+            let (x, y) = pack_wire_target(&target);
+            assert_eq!(resolve_wire_target(x, y), target, "id {id}");
+        }
+        // The two ids that used to collapse into one f32 stay distinct.
+        assert_eq!(
+            1_000_000_002u32 as f32, 1_000_000_000u32 as f32,
+            "f32 cannot separate these ids - the pre-fix wire bug"
+        );
+        let (ax, ay) = pack_wire_target(&CommandTarget::Unit(1_000_000_000));
+        let (bx, by) = pack_wire_target(&CommandTarget::Unit(1_000_000_002));
+        assert_ne!((ax, ay), (bx, by));
+        assert_eq!(
+            resolve_wire_target(ax, ay),
+            CommandTarget::Unit(1_000_000_000)
+        );
+        assert_eq!(
+            resolve_wire_target(bx, by),
+            CommandTarget::Unit(1_000_000_002)
+        );
+    }
+
+    #[test]
+    fn wire_target_round_trips_building_tiles() {
+        for pos in [
+            crate::world::TilePos::new(0, 0),
+            crate::world::TilePos::new(129, 55),
+            crate::world::TilePos::new(-3, 32767),
+        ] {
+            let target = CommandTarget::Building(pos);
+            let (x, y) = pack_wire_target(&target);
+            assert_eq!(resolve_wire_target(x, y), target, "{pos:?}");
+        }
     }
 
     #[test]
