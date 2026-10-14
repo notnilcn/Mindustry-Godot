@@ -29,7 +29,7 @@ use crate::ai::controller::{AiKind, ControllerSlot};
 use crate::ai::rts_ai::{self, EnemyStat, MAX_TARGETS_CHECKED, RtsBuilding, RtsLiveUnit};
 use crate::ai::{BaseBuildInput, BaseRegistry, Cost};
 use crate::content::registries::blocks::BlockFlag;
-use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId};
+use crate::content::{BlockId, BlockKind, ContentRegistry, ItemId, LiquidId, UnitTypeId};
 use crate::ecs::{BuildingComp, EntitySeq, TeamId};
 use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
 use crate::entities::comp::{Building, Health, Pos, TeamComp};
@@ -59,6 +59,19 @@ pub struct SessionSync {
     pub spawn_count: i32,
 }
 
+/// Content unlock queued by the production/liquid paths (H04 T2), resolved
+/// host-side into the tech tree (`UnlockableContent.unlock()` ->
+/// `UnlockEvent` -> `Control.java:160-174`). `Unit` is pushed by H01 T3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnlockRef {
+    /// An item was produced/dumped.
+    Item(ItemId),
+    /// A liquid was dumped.
+    Liquid(LiquidId),
+    /// A unit was produced (`UnitTypeId`; H01 T3 pushes this).
+    Unit(UnitTypeId),
+}
+
 /// Shared campaign hook state: the live session snapshot plus the deferred
 /// `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the core and
 /// miner paths (consumed by [`campaign_tick_system`]).
@@ -72,6 +85,8 @@ pub struct CampaignHookQueues {
     pub core_deltas: Vec<(ItemId, i32)>,
     /// Pending `handleProduction` deltas `(item, amount)`.
     pub production_deltas: Vec<(ItemId, i32)>,
+    /// Pending content unlocks (`produced()`/`dumpLiquid()`).
+    pub unlocks: Vec<UnlockRef>,
 }
 
 /// `CoreCampaignHooks` impl for a live campaign session: queues the deltas the
@@ -135,6 +150,16 @@ pub fn reset_campaign_core_hooks(world: &mut World) {
         state.is_campaign = false;
         state.core_deltas.clear();
         state.production_deltas.clear();
+        state.unlocks.clear();
+    }
+}
+
+/// Dedupe key for [`UnlockRef`] (content kind, dense id).
+fn unlock_sort_key(unlock: &UnlockRef) -> (u8, u16) {
+    match unlock {
+        UnlockRef::Item(id) => (0, id.raw()),
+        UnlockRef::Liquid(id) => (1, id.raw()),
+        UnlockRef::Unit(id) => (2, id.raw()),
     }
 }
 
@@ -210,6 +235,9 @@ pub struct CampaignRuntime {
     /// rules): set by G06's `setrule`, the `Call.setRules` relay and the
     /// universe invasion; `Sim::tick` drains it (T5).
     pub rules_world_dirty: bool,
+    /// Newly produced content queued for the host to unlock through the tech
+    /// tree (`UnlockRef`; drained by `MindCampaign.take_unlocked_content`).
+    pub pending_unlocks: Vec<UnlockRef>,
 }
 
 impl CampaignRuntime {
@@ -227,6 +255,7 @@ impl CampaignRuntime {
             pending_derelict_team: None,
             pending_time_destroy: Vec::new(),
             rules_world_dirty: false,
+            pending_unlocks: Vec::new(),
         }
     }
 
@@ -446,7 +475,20 @@ pub fn campaign_tick_system(world: &mut World) {
             state.default_team = runtime.session.rules.default_team;
             let core_deltas = std::mem::take(&mut state.core_deltas);
             let production_deltas = std::mem::take(&mut state.production_deltas);
+            let unlocks = std::mem::take(&mut state.unlocks);
             drop(state);
+            // Produced/dumped content unlocks (`UnlockableContent.unlock()`
+            // -> `UnlockEvent`): dedupe into the runtime queue for the host.
+            let mut seen: std::collections::BTreeSet<(u8, u16)> = runtime
+                .pending_unlocks
+                .iter()
+                .map(unlock_sort_key)
+                .collect();
+            for unlock in unlocks {
+                if seen.insert(unlock_sort_key(&unlock)) {
+                    runtime.pending_unlocks.push(unlock);
+                }
+            }
             if let Some((planet, sector_id)) = runtime.session.sector
                 && let Some(sector) = runtime.campaign.sector_mut(planet, sector_id)
             {

@@ -369,11 +369,13 @@ fn campaign_sector_cycle(
             .default_core
             .clone()
             .unwrap_or_else(|| "core-shard".to_owned());
-        sector
-            .info
-            .info
-            .production
-            .insert("copper".to_owned(), ExportStat { mean: 1.0 });
+        sector.info.info.production.insert(
+            "copper".to_owned(),
+            ExportStat {
+                mean: 1.0,
+                ..Default::default()
+            },
+        );
     }
 
     // Campaign rules fold (fog/hideSpawns/enemy multipliers) + RulesLoadEvent.
@@ -510,16 +512,20 @@ fn campaign_turn(turns: u32) -> Result<(Value, Value)> {
         let source = campaign
             .sector_mut(planet, source_id)
             .ok_or_else(|| anyhow::anyhow!("source sector missing"))?;
-        source
-            .info
-            .info
-            .production
-            .insert("silicon".to_owned(), ExportStat { mean: 2.5 });
-        source
-            .info
-            .info
-            .export
-            .insert("silicon".to_owned(), ExportStat { mean: 2.5 });
+        source.info.info.production.insert(
+            "silicon".to_owned(),
+            ExportStat {
+                mean: 2.5,
+                ..Default::default()
+            },
+        );
+        source.info.info.export.insert(
+            "silicon".to_owned(),
+            ExportStat {
+                mean: 2.5,
+                ..Default::default()
+            },
+        );
         source.info.info.destination = Some(mind_core::io::json::content_serde::SectorKey::format(
             "serpulo", dest_id,
         ));
@@ -1236,7 +1242,13 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
             .info
             .info
             .production
-            .insert("copper".to_owned(), ExportStat { mean: 1.0 });
+            .insert(
+                "copper".to_owned(),
+                ExportStat {
+                    mean: 1.0,
+                    ..Default::default()
+                },
+            );
         let turns = ticks.clamp(1, 1000) as usize;
         let mut settings = mind_core::io::settings::SettingsStore::new();
         let mut rand = JavaRandom::new(3);

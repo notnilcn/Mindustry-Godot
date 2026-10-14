@@ -994,16 +994,20 @@ mod tests {
         let source_key = crate::io::json::content_serde::SectorKey::format("serpulo", dest_id);
         {
             let sector = campaign.sector_mut(planet, source_id).unwrap();
-            sector
-                .info
-                .info
-                .production
-                .insert("silicon".to_owned(), ExportStat { mean: 2.5 });
-            sector
-                .info
-                .info
-                .export
-                .insert("silicon".to_owned(), ExportStat { mean: 2.5 });
+            sector.info.info.production.insert(
+                "silicon".to_owned(),
+                ExportStat {
+                    mean: 2.5,
+                    ..Default::default()
+                },
+            );
+            sector.info.info.export.insert(
+                "silicon".to_owned(),
+                ExportStat {
+                    mean: 2.5,
+                    ..Default::default()
+                },
+            );
             sector.info.info.destination = Some(source_key);
         }
         // Legacy launch pads drive the import/export pass.
@@ -1109,11 +1113,13 @@ mod tests {
             sector.info.info.waves = false;
             sector.info.info.attack = false;
             sector.being_played = false;
-            sector
-                .info
-                .info
-                .production
-                .insert("copper".to_owned(), ExportStat { mean: 1.0 });
+            sector.info.info.production.insert(
+                "copper".to_owned(),
+                ExportStat {
+                    mean: 1.0,
+                    ..Default::default()
+                },
+            );
         }
         let report = campaign.run_turn(
             &registry,

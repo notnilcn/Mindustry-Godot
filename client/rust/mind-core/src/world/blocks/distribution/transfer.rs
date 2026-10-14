@@ -388,8 +388,32 @@ pub fn increment_dump(world: &mut World, e: Entity, prox: usize) {
     }
 }
 
+/// `BuildingComp.produced(item, amount)` (`BuildingComp.java:1044-1050`):
+/// default-team production feeds `SectorInfo.handleProduction` and unlocks the
+/// item (campaign only; queued, folded by `campaign_tick_system`).
+pub fn record_produced(world: &World, e: Entity, item: ItemId, amount: i32) {
+    let team = world
+        .get::<crate::ecs::BuildingComp>(e)
+        .map(|building| building.team.0);
+    if let (Some(team), Some(queues)) = (
+        team,
+        world.get_resource::<crate::game::runtime::CampaignCoreQueues>(),
+    ) && let Ok(mut state) = queues.0.lock()
+        && state.is_campaign
+        && team == state.default_team
+    {
+        state.production_deltas.push((item, amount));
+        state
+            .unlocks
+            .push(crate::game::runtime::UnlockRef::Item(item));
+    }
+}
+
 /// `Building.offload(item)`.
 pub fn offload(world: &mut World, e: Entity, item: ItemId) {
+    // `BuildingComp.offload` -> `produced(item, 1)` (`BuildingComp.java:1006-1007`):
+    // record the production/unlock before the item leaves the building.
+    record_produced(world, e, item, 1);
     let prox = proximity(world, e);
     let dump = world.get::<Building>(e).map(|b| b.cdump).unwrap_or(0) as usize;
     for i in 0..prox.len() {

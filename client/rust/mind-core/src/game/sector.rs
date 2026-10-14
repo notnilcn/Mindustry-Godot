@@ -26,8 +26,9 @@ pub use crate::io::json::content_serde::SectorKey;
 
 /// `SectorInfo.valueWindow` (samples per rolling mean).
 pub const VALUE_WINDOW: usize = 60;
-/// `SectorInfo.refreshPeriod` (seconds between statistic refreshes).
-pub const REFRESH_PERIOD: f32 = 60.0;
+/// `SectorInfo.refreshPeriod` = 60 ticks = 1 s (`SectorInfo.java:23`; Arc
+/// `Interval.get` counts `Time.time` ticks, not seconds).
+pub const REFRESH_PERIOD: f32 = 1.0;
 
 /// Minimal core view needed by `SectorInfo::prepare`.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -174,8 +175,10 @@ impl InfoWindows {
             if !window.has_enough_data() && window.mean() == 0.0 {
                 window.fill(stat.mean);
             }
-            let sample = stat.mean;
-            window.add(sample.max(0.0));
+            // `SectorInfo.java:297-309`: the window samples the transient
+            // counter (items accumulated since the last refresh), then resets it.
+            window.add(stat.counter.max(0.0));
+            stat.counter = 0.0;
             stat.mean = window.raw_mean();
         }
         *windows = taken;
@@ -244,13 +247,13 @@ impl SectorInfoState {
     /// `SectorInfo.handleItemExport`.
     pub fn handle_item_export(&mut self, name: &str, amount: i32) {
         let stat = self.info.export.entry(name.to_owned()).or_default();
-        stat.mean += amount as f32;
+        stat.counter += amount as f32;
     }
 
     /// `SectorInfo.handleItemImport`.
     pub fn handle_item_import(&mut self, name: &str, amount: i32) {
         let stat = self.info.imports.entry(name.to_owned()).or_default();
-        stat.mean += amount as f32;
+        stat.counter += amount as f32;
     }
 
     /// `SectorInfo.getExport`.
@@ -406,7 +409,10 @@ impl SectorInfoState {
         item_count: usize,
     ) {
         self.windows.refresh_clock += seconds_delta;
-        if self.windows.refresh_clock < REFRESH_PERIOD {
+        // Half a tick of tolerance: callers feed `1/60` per tick and 60 f32
+        // additions round to slightly under `1.0` (0.9999997), while Java's
+        // integer-tick `Interval.get(60)` fires exactly on the 60th tick.
+        if self.windows.refresh_clock < REFRESH_PERIOD - 0.5 / 60.0 {
             return;
         }
         self.windows.refresh_clock %= REFRESH_PERIOD;
@@ -757,7 +763,11 @@ mod tests {
         // Seed export/import counters then refresh.
         state.handle_item_export("silicon", 30);
         state.handle_item_import("lead", 10);
-        assert_eq!(state.get_export("silicon"), 30.0);
+        // `SectorInfo.java:123-130`: `handleItemExport` fills the transient
+        // counter; the mean only moves when `updateStats` refreshes.
+        assert_eq!(state.info.export["silicon"].counter, 30.0);
+        assert_eq!(state.get_export("silicon"), 0.0);
+        assert_eq!(state.info.imports["lead"].counter, 10.0);
 
         // `handleItemExport` is a counter; updateStats moves it through the window.
         state
@@ -783,6 +793,57 @@ mod tests {
         );
         // Export was capped by raw production + core draw (draw is 0).
         assert!(state.get_export("silicon") <= 5.0 + 1e-3);
+    }
+
+    #[test]
+    fn export_counter_decays() {
+        let mut state = SectorInfoState::new();
+        // `updateStats` caps the export mean to `rawProduction + core draw`
+        // (`SectorInfo.java:330-340`), so the raw side must exist for the
+        // sample to survive; the window still holds 100 / 60.
+        state
+            .info
+            .raw_production
+            .entry("copper".to_owned())
+            .or_default()
+            .mean = 5.0;
+        state.handle_item_export("copper", 100);
+        state.update(1.0, &|_| None, &|_| None, 0);
+        // One sample in a 60-slot window (`SectorInfo.java:297-309`).
+        assert_eq!(state.get_export("copper"), 100.0 / 60.0);
+        // A refresh with no new exports keeps the window sample and resets the
+        // counter.
+        state.update(1.0, &|_| None, &|_| None, 0);
+        assert_eq!(state.get_export("copper"), 100.0 / 60.0);
+        assert_eq!(state.info.export["copper"].counter, 0.0);
+    }
+
+    #[test]
+    fn refresh_every_60_ticks() {
+        let mut state = SectorInfoState::new();
+        state.windows.production_deltas = vec![1; 1];
+        for _ in 0..59 {
+            state.update(
+                1.0 / 60.0,
+                &|_| None,
+                &|index| (index == 0).then(|| "copper".to_owned()),
+                1,
+            );
+        }
+        assert!(
+            state.info.production.is_empty(),
+            "no refresh before 60 ticks (1 s)"
+        );
+        state.update(
+            1.0 / 60.0,
+            &|_| None,
+            &|index| (index == 0).then(|| "copper".to_owned()),
+            1,
+        );
+        assert!(
+            state.info.production.contains_key("copper"),
+            "the 60th tick refreshes every item's statistics"
+        );
     }
 
     #[test]

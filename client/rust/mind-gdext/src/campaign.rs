@@ -12,7 +12,9 @@
 //! In-engine MCP verification (plan 12 §7c) is deferred to the orchestrator's
 //! single-editor mutex; this class compiles and exposes the API surface today.
 
-use godot::builtin::{PackedInt32Array, PackedVector3Array, VarDictionary, Vector3};
+use godot::builtin::{
+    PackedInt32Array, PackedStringArray, PackedVector3Array, VarDictionary, Vector3,
+};
 use godot::classes::notify::NodeNotification;
 use godot::classes::{FileAccess, INode, Node, ProjectSettings};
 use godot::obj::Base;
@@ -36,7 +38,7 @@ use mind_core::game::play::{
 };
 use mind_core::game::rules::Rules;
 use mind_core::game::rules_event::{RulesEpoch, apply_set_rules};
-use mind_core::game::runtime::CampaignRuntime;
+use mind_core::game::runtime::{CampaignRuntime, UnlockRef};
 use mind_core::game::saves::{
     DEFAULT_SAVE_INTERVAL_SECONDS, Saves, SavesUpdate, SavesUpdateResult,
 };
@@ -90,6 +92,9 @@ pub struct MindCampaign {
     last_pump_tick: u64,
     /// Tick at which an in-flight autosave clears `Saves.saving` (3-tick task).
     saving_finish_tick: Option<u64>,
+    /// Content names unlocked since the last `take_unlocked_content` (H05's
+    /// `hudfrag.showUnlock` popup; `Control.java:160-174`).
+    unlocked_since_last_take: Vec<String>,
 }
 
 #[godot_api]
@@ -111,6 +116,7 @@ impl INode for MindCampaign {
             campaign_complete: false,
             last_pump_tick: 0,
             saving_finish_tick: None,
+            unlocked_since_last_take: Vec::new(),
         }
     }
 
@@ -571,6 +577,59 @@ impl MindCampaign {
                     dirty = true;
                 }
                 _ => {}
+            }
+        }
+
+        // T2: produced/dumped content unlocks (`UnlockableContent.unlock()` ->
+        // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
+        // the registry, persist the unlock, then run `checkAutoUnlocks()`.
+        if !runtime.pending_unlocks.is_empty()
+            && let Some(registry) = registry.as_mut()
+        {
+            let mut newly: Vec<String> = Vec::new();
+            for unlock in std::mem::take(&mut runtime.pending_unlocks) {
+                let (content, name) = match unlock {
+                    UnlockRef::Item(id) => (
+                        ContentRef::of(ContentType::Item, id),
+                        registry.item(id).map(|c| c.name.clone()),
+                    ),
+                    UnlockRef::Liquid(id) => (
+                        ContentRef::of(ContentType::Liquid, id),
+                        registry.liquid(id).map(|c| c.name.clone()),
+                    ),
+                    UnlockRef::Unit(id) => (
+                        ContentRef::of(ContentType::Unit, id),
+                        registry.unit(id).map(|c| c.name.clone()),
+                    ),
+                };
+                let Some(name) = name else {
+                    continue;
+                };
+                let mut store = SettingsUnlockStore::new(&mut self.settings);
+                if let Some(fields) = tech_tree::unlock_fields_mut(registry, content)
+                    && fields.unlock(&name, &mut store)
+                {
+                    newly.push(name);
+                }
+            }
+            if !newly.is_empty() {
+                let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
+                let mut store = SettingsUnlockStore::new(&mut self.settings);
+                let auto = tech_tree::check_auto_unlocks(registry, &mut store, &ctx);
+                log::info!(
+                    "campaign unlock: {} produced, {} auto-unlocked",
+                    newly.len(),
+                    auto.len()
+                );
+                for content in auto {
+                    if let Some(name) = tech_tree::content_name(registry, content) {
+                        newly.push(name);
+                    }
+                }
+                self.unlocked_since_last_take.extend(newly);
+                let unlocked = collect_unlocked(registry);
+                runtime.set_unlocked_content(unlocked);
+                dirty = true;
             }
         }
         self.registry = registry;
@@ -1967,6 +2026,17 @@ impl MindCampaign {
         tech_tree::content_unlocked(registry, content)
     }
 
+    /// Content names unlocked since the last call (`Control.java:160-174`:
+    /// `hudfrag.showUnlock` popup; H05 consumes). Drained here.
+    #[func]
+    pub fn take_unlocked_content(&mut self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for name in self.unlocked_since_last_take.drain(..) {
+            out.push(&GString::from(name.as_str()));
+        }
+        out
+    }
+
     /// Tech-tree summary (`nodes`, `unlocked`, error).
     #[func]
     pub fn get_tech_state(&self) -> VarDictionary {
@@ -3347,9 +3417,7 @@ impl MindCampaign {
                     updated = true;
                 }
             }
-            if !updated
-                && let Some(campaign) = self.campaign.as_mut()
-            {
+            if !updated && let Some(campaign) = self.campaign.as_mut() {
                 persist_resources = campaign
                     .universe
                     .update_launch_resources(&mut self.settings, dense)
