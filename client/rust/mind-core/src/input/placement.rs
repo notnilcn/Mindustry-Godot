@@ -64,6 +64,13 @@ pub trait PlacementWorld {
     fn team(&self) -> u8 {
         0
     }
+    /// Java block class tag (`Block` subclass) for kind-family checks
+    /// (`getReplacement` junction families, `calculateBridges` `avoid`);
+    /// `None` when unknown.
+    fn block_kind(&self, block: BlockId) -> Option<crate::content::BlockKind> {
+        let _ = block;
+        None
+    }
 }
 
 /// Bridge placement callback (`Placement.BridgePlacer`).
@@ -497,7 +504,13 @@ pub fn calculate_bridges(
     let is_first = |plan: &PlanCopy| plan.x == first.x && plan.y == first.y;
     let placeable = |plan: &PlanCopy| -> bool {
         let tile_block = world.block_at(plan.x, plan.y);
-        let accessible = plan.placeable() || tile_block == plan.block;
+        // `plan.placeable(player.team())` (`Placement.java:198`):
+        // `!breaking && block != null && unlockedNow() && Build.validPlace(...)`.
+        // The port's `placeable()` covers the air/breaking half; the real
+        // validity comes from the world (H08 T2's `HostWorld`).
+        let accessible = (plan.placeable()
+            && world.valid_place(plan.block, plan.x, plan.y, plan.rotation))
+            || tile_block == plan.block;
         let rotation_mismatch = !is_first(plan)
             && world
                 .build_rotation(plan.x, plan.y)

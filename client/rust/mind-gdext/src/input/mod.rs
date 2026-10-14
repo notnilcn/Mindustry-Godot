@@ -267,6 +267,7 @@ impl MindInput {
         self.bindings = bindings::load();
         self.bridge
             .set_command_mode_hold(Self::read_command_mode_hold());
+        self.bridge.set_block_replace(Self::read_block_replace());
         // Scene wiring (tscn-first): the spine declares SimHost as a sibling of
         // Input and Camera2D under World.
         self.bridge.host = self.base().try_get_node_as::<MindSimHost>("../SimHost");
@@ -325,6 +326,13 @@ impl MindInput {
     fn read_command_mode_hold() -> bool {
         let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
         store.get_bool("commandmodehold", true)
+    }
+
+    /// `settings.getBool("blockreplace", true)` (`InputHandler.updateLine`:
+    /// junction/bridge replacement + `handlePlacementLine`).
+    fn read_block_replace() -> bool {
+        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+        store.get_bool("blockreplace", true)
     }
 
     /// Re-reads the hold setting when a command-mode key edge arrives so a live

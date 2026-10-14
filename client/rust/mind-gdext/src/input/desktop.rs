@@ -138,7 +138,7 @@ struct HostWorld<'a> {
 
 impl HostWorld<'_> {
     /// Block kind at a tile (`None` out of bounds/unloaded).
-    fn block_kind(&self, x: i32, y: i32) -> Option<mind_core::content::BlockKind> {
+    fn kind_at(&self, x: i32, y: i32) -> Option<mind_core::content::BlockKind> {
         let content = self.content?;
         let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
             return None;
@@ -200,15 +200,21 @@ impl PlacementWorld for HostWorld<'_> {
 
     fn is_chained(&self, x: i32, y: i32) -> bool {
         // `world.build(x,y) instanceof ChainedBuilding` (IH:2444-2449).
-        self.block_kind(x, y)
+        self.kind_at(x, y)
             .is_some_and(mind_core::input::line::is_chained_kind)
+    }
+
+    fn block_kind(&self, block: BlockId) -> Option<mind_core::content::BlockKind> {
+        // Java block class tag for the line-family checks (`getReplacement`,
+        // `calculateBridges` `avoid`).
+        self.content?.block(block).map(|def| def.kind)
     }
 
     fn chained_next(&self, x: i32, y: i32) -> Option<(i32, i32)> {
         // `ConveyorBuild.next()` = `nextc` (the front tile's conveyor of the
         // same team, `Conveyor.java:222/486-488`); `ConduitBuild.next()` is the
         // front conduit with no team check (`Conduit.java:259-267`).
-        let kind = self.block_kind(x, y)?;
+        let kind = self.kind_at(x, y)?;
         if !mind_core::input::line::is_chained_kind(kind) {
             return None;
         }
@@ -216,7 +222,7 @@ impl PlacementWorld for HostWorld<'_> {
         let rotation = self.host.building_rotation(x, y) as usize % 4;
         let (dx, dy) = mind_core::input::placement::D4[rotation];
         let (nx, ny) = (x + dx, y + dy);
-        let next_kind = self.block_kind(nx, ny)?;
+        let next_kind = self.kind_at(nx, ny)?;
         use mind_core::content::BlockKind as K;
         let matches_front = match kind {
             K::Conduit | K::ArmoredConduit => matches!(next_kind, K::Conduit | K::ArmoredConduit),
@@ -356,6 +362,10 @@ pub struct DesktopBridge {
     /// held command key when on (upstream default) and toggles on a key press
     /// when off.
     command_mode_hold: bool,
+    /// `settings.blockreplace`: `InputHandler.updateLine` runs the
+    /// `getReplacement`/`handlePlacementLine` half (junction/bridge placement)
+    /// only when set.
+    pub block_replace: bool,
 }
 
 impl Default for DesktopBridge {
@@ -400,6 +410,7 @@ impl DesktopBridge {
             payload_hold_ms: 0,
             hint_keys: Vec::new(),
             command_mode_hold: true,
+            block_replace: true,
         }
     }
 
@@ -657,6 +668,11 @@ impl DesktopBridge {
     /// Applies the `commandmodehold` client setting (defaults to upstream true).
     pub fn set_command_mode_hold(&mut self, hold: bool) {
         self.command_mode_hold = hold;
+    }
+
+    /// `settings.blockreplace` (read once in `bootstrap`).
+    pub fn set_block_replace(&mut self, replace: bool) {
+        self.block_replace = replace;
     }
 
     /// Sets command mode to `enabled` (`DesktopInput.update` assignment).
@@ -2167,6 +2183,8 @@ impl DesktopBridge {
             override_line_rotation: self.controller.state.override_line_rotation,
             ..LineParams::default()
         };
+        let block = self.controller.state.block;
+        let block_replace = self.block_replace;
         {
             let guard = host.bind();
             let world = HostWorld {
@@ -2175,13 +2193,44 @@ impl DesktopBridge {
                 host: &guard,
             };
             let block_meta = self.line_block_for(&world);
-            self.controller.state.update_line(
-                &world,
-                block_meta.as_ref(),
-                TilePos::new(start.0 as i16, start.1 as i16),
-                TilePos::new(end.0 as i16, end.1 as i16),
-                &params,
-            );
+            let rules = block.and_then(|block| {
+                world
+                    .content
+                    .map(|content| mind_core::input::line_rules::line_rules_for(content, block))
+            });
+            // `changePlacementPath` runs inside `iterateLine` regardless of
+            // `blockreplace`; the rules half (`getReplacement` /
+            // `handlePlacementLine`) is the gated part (IH:1952-1961).
+            let active = rules.as_ref().filter(|_| block_replace);
+            match rules.as_ref().and_then(|rules| rules.node) {
+                Some(rule) => {
+                    let hooks = mind_core::input::line_rules::NodeHooks {
+                        rule,
+                        world: &world,
+                        block: block.unwrap_or(BlockId::AIR),
+                    };
+                    self.controller.state.update_line_with(
+                        &world,
+                        block_meta.as_ref(),
+                        TilePos::new(start.0 as i16, start.1 as i16),
+                        TilePos::new(end.0 as i16, end.1 as i16),
+                        &params,
+                        &hooks,
+                        active,
+                    );
+                }
+                None => {
+                    self.controller.state.update_line_with(
+                        &world,
+                        block_meta.as_ref(),
+                        TilePos::new(start.0 as i16, start.1 as i16),
+                        TilePos::new(end.0 as i16, end.1 as i16),
+                        &params,
+                        &mind_core::input::line::NoLineHooks,
+                        active,
+                    );
+                }
+            }
         }
         self.controller.state.refresh_preview();
         self.preview_json = serde_json::Value::Array(
