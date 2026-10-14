@@ -1186,7 +1186,7 @@ impl Sim {
         // `state.envAttrs.get(Attribute.water)` from the active weathers
         // (PAR-0127); `0.0` when no weather is running.
         let water_attr = crate::game::runtime::weather_water_attr(&self.ecs.0, &runtime.content);
-        crate::combat::fires::update_fires(
+        let fireballs = crate::combat::fires::update_fires(
             &mut self.ecs.0,
             &mut self.grid.tiles,
             &runtime.content,
@@ -1202,6 +1202,33 @@ impl Sim {
             fx.as_ref(),
         );
         self.ecs.0.insert_non_send(runtime);
+        // `FireComp.update` fireballs (`Bullets.fireball.createNet`, team
+        // derelict, random angle, type damage) plus the puddle-reaction
+        // fireballs collected by `Puddles.reactPuddle`.
+        let pending_puddle_fireballs = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::combat::puddles::PendingFireballs>()
+            .map(|mut pending| std::mem::take(&mut pending.0))
+            .unwrap_or_default();
+        if !fireballs.is_empty() || !pending_puddle_fireballs.is_empty() {
+            self.with_combat_ctx(|ctx| {
+                for (x, y) in fireballs.into_iter().chain(pending_puddle_fireballs) {
+                    let angle = ctx
+                        .rng
+                        .range(crate::determinism::RngStream::Sim, 0.0, 360.0);
+                    let _ = ctx.spawn(&crate::combat::bullet::BulletSpawn {
+                        def: crate::content::registries::bullets::FIREBALL,
+                        team: 0,
+                        x,
+                        y,
+                        angle,
+                        damage: -1.0,
+                        ..crate::combat::bullet::BulletSpawn::default()
+                    });
+                }
+            });
+        }
         // H09 T7: due `Damage.dynamicExplosion` delayed actions (lightning,
         // fireballs, staggered waves).
         self.drain_delayed_explosions();

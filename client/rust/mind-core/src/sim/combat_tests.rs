@@ -3772,6 +3772,86 @@ fn fire_disabled_rule_blocks_fire() {
     assert!(fire.is_none(), "rules.fire = false blocks fires");
 }
 
+/// H09 T5: a fire's damage tick burns a grounded unit for `unitDamage` and
+/// applies `burning` for 300 ticks; flying units are skipped
+/// (`FireComp.java:88-99`).
+#[test]
+fn fire_burns_ground_units() {
+    use crate::entities::comp::unit::comp::StatusComp;
+
+    let mut sim = live_sim(48);
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 80.0, 80.0, 0.0)
+        .expect("dagger");
+    let flare = sim
+        .spawn_live_unit("flare", 1, 80.0, 80.0, 0.0)
+        .expect("flare");
+    let mut rng = crate::determinism::SimRng::new(9);
+    let fire = crate::combat::fires::create(&mut sim.ecs.0, 10, 10, &mut rng).expect("fire");
+    {
+        let mut state = sim
+            .ecs
+            .0
+            .get_mut::<crate::combat::fires::FireState>(fire)
+            .expect("fire state");
+        state.damage_timer = 39.0;
+    }
+    let dagger_before = health(&sim, dagger).expect("dagger health");
+    let flare_before = health(&sim, flare).expect("flare health");
+    sim.tick().expect("tick");
+    let dagger_after = health(&sim, dagger).expect("dagger health");
+    assert!(
+        (dagger_before - dagger_after - 3.0).abs() < 1e-3,
+        "dagger took unitDamage 3 ({dagger_before} -> {dagger_after})"
+    );
+    let burning = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .status_id("burning")
+        .expect("burning");
+    let statuses = sim.ecs.0.get::<StatusComp>(dagger).expect("statuses");
+    assert!(
+        statuses
+            .statuses
+            .iter()
+            .any(|entry| entry.effect == burning),
+        "dagger is burning"
+    );
+    assert_eq!(
+        health(&sim, flare),
+        Some(flare_before),
+        "a flying flare is untouched"
+    );
+}
+
+/// H09 T5: fire tile damage goes through `apply_health`, so
+/// `rules.blockHealth(team)` scales it (`BuildingComp.damage`).
+#[test]
+fn fire_damage_respects_block_health_multiplier() {
+    let mut sim = campaign_sim(48, |rules| {
+        rules.block_health_multiplier = 2.0;
+    });
+    let container = place(&mut sim, 10, 10, "container", 1);
+    let mut rng = crate::determinism::SimRng::new(9);
+    let fire = crate::combat::fires::create(&mut sim.ecs.0, 10, 10, &mut rng).expect("fire");
+    {
+        let mut state = sim
+            .ecs
+            .0
+            .get_mut::<crate::combat::fires::FireState>(fire)
+            .expect("fire state");
+        state.damage_timer = 39.0;
+    }
+    let before = health(&sim, container).expect("container health");
+    sim.tick().expect("tick");
+    let after = health(&sim, container).expect("container health");
+    assert!(
+        (before - after - 0.9).abs() < 1e-3,
+        "tileDamage 1.8 / blockHealth 2 = 0.9 ({before} -> {after})"
+    );
+}
+
 /// G01 T14: a charged force projector absorbs the death explosion
 /// (`ForceBuild.absorbExplosion`): the wall under the shield is undamaged.
 #[test]

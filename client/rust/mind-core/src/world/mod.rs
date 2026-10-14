@@ -161,6 +161,13 @@ pub struct WorldGrid {
     pub sector_polygon: Option<SectorPolygon>,
 }
 
+/// `World.isGenerating()` mirror for `BuildingBehavior` hooks, which only see
+/// the ECS world (`CoreBlock.java:773-778` skips the core item clamp while the
+/// world is generating). `Sim::materialize_map_buildings` sets it around the
+/// `endMapLoad` proximity pass; absence means "not generating".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Resource)]
+pub struct WorldGenerating(pub bool);
+
 /// The generated-sector polygon (`Sector.rect` + tile corner count + generated
 /// size) the darkness term projects; H05 T3.
 #[derive(Debug, Clone, Copy, PartialEq)]

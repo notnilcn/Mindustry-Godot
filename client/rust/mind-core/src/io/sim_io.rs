@@ -680,6 +680,9 @@ pub struct DecodedSave {
     pub markers: MapMarkers,
     /// Decoded world entities (units/fires/puddles).
     entities: LiveEntitySink,
+    /// `static-fog-data` raw chunk bytes (`FogControl.write`), applied after
+    /// the world rebuild (`SaveVersion.readCustomChunks`).
+    pub static_fog: Option<Vec<u8>>,
 }
 
 /// Decodes one save/map container into [`DecodedSave`] without touching the
@@ -696,6 +699,19 @@ pub fn decode_save_bytes(
     grid.begin_map_load();
     let mut entities = LiveEntitySink::default();
     let mut markers = MapMarkers::new();
+    // `static-fog-data` (`FogControl.java:97`): registered so the reader's
+    // custom-chunk pass collects it instead of skipping it.
+    let static_fog_chunk = std::sync::Arc::new(crate::game::fog::StaticFogChunk(
+        std::sync::Mutex::new(None),
+    ));
+    let mut custom_chunks: indexmap::IndexMap<
+        String,
+        std::sync::Arc<dyn crate::io::save::state::CustomChunk>,
+    > = indexmap::IndexMap::new();
+    custom_chunks.insert(
+        "static-fog-data".to_owned(),
+        static_fog_chunk.clone() as std::sync::Arc<dyn crate::io::save::state::CustomChunk>,
+    );
     let (result, tags, rules, stats, plans, pending) = {
         let mut context = crate::editor::context::EditorContext::new(&mut grid, registry);
         let mut state = SaveReadState {
@@ -703,6 +719,7 @@ pub fn decode_save_bytes(
             content: Some(registry),
             entities: Some(&mut entities),
             markers: Some(&mut markers),
+            custom_chunks: Some(&custom_chunks),
             ..SaveReadState::default()
         };
         let result = SaveIo::load_bytes(bytes, &mut state);
@@ -717,6 +734,11 @@ pub fn decode_save_bytes(
     };
     result?;
     grid.end_map_load(registry);
+    let static_fog = static_fog_chunk
+        .0
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
     Ok(DecodedSave {
         grid,
         pending,
@@ -726,6 +748,7 @@ pub fn decode_save_bytes(
         stats,
         markers,
         entities,
+        static_fog,
     })
 }
 
@@ -751,6 +774,9 @@ pub struct SectorResumeMeta {
     pub stats: Option<crate::io::json::GameStats>,
     /// Saved map markers.
     pub markers: MapMarkers,
+    /// `static-fog-data` raw chunk bytes (`FogControl.write`), applied by the
+    /// host after the rules adoption (`DecodedSave.static_fog`).
+    pub static_fog: Option<Vec<u8>>,
 }
 
 impl Sim {
@@ -1120,11 +1146,34 @@ impl SimIoHandler {
             .map(|runtime| &runtime.session.markers as &dyn MarkersIo);
         let mut tags = live_meta_tags(sim, &content, width, height, name);
         tags.insert("name".to_owned(), name.to_owned());
+        // `static-fog-data` (`FogControl.shouldWrite`): only when fog is on and
+        // a controller with data exists.
+        let mut fog_chunks: indexmap::IndexMap<
+            String,
+            std::sync::Arc<dyn crate::io::save::state::CustomChunk>,
+        > = indexmap::IndexMap::new();
+        if let Some(fog) = sim.ecs.0.get_resource::<crate::game::fog::FogControl>() {
+            let (fog_enabled, static_fog) = crate::game::runtime::rules_of(&sim.ecs.0)
+                .map(|rules| (rules.fog, rules.static_fog))
+                .unwrap_or((false, false));
+            if fog.should_write(fog_enabled, static_fog) {
+                fog_chunks.insert(
+                    "static-fog-data".to_owned(),
+                    std::sync::Arc::new(crate::game::fog::StaticFogChunk(std::sync::Mutex::new(
+                        Some(fog.write()),
+                    )))
+                        as std::sync::Arc<dyn crate::io::save::state::CustomChunk>,
+                );
+            }
+        }
         let mut ctx = WriteContext::meta_only(tags);
         ctx.content = Some(&content);
         ctx.map = Some(&source);
         ctx.entities = Some(&entities);
         ctx.markers = markers;
+        if !fog_chunks.is_empty() {
+            ctx.custom_chunks = Some(&fog_chunks);
+        }
         match SaveIo::save(&NativeFs, path, &ctx, &self.options) {
             Ok(()) => IoStatus::Ok,
             Err(error) => IoStatus::Failed(error.to_string()),
@@ -1200,6 +1249,13 @@ impl SimIoHandler {
         // `WorldLoadEvent` fog half (FogControl.java:46-62): size the fog to
         // the just-swapped grid with the loaded rules.
         sim.reset_fog();
+        // `static-fog-data` (`FogControl.read`): the custom chunk overwrites the
+        // freshly reset fog, restoring each saved team's exploration.
+        if let Some(bytes) = save.static_fog.as_ref()
+            && let Some(mut fog) = sim.ecs.0.get_resource_mut::<crate::game::fog::FogControl>()
+        {
+            fog.read(bytes);
+        }
         IoStatus::Ok
     }
 }
@@ -1627,6 +1683,7 @@ mod tests {
                 fires: Vec::new(),
                 puddles: Vec::new(),
             },
+            static_fog: None,
         };
         let mut dst = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
         dst.install_block_runtime().expect("block runtime");
@@ -1915,6 +1972,159 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// PAR-0249: a core holding `i32::MAX / 2` item stacks (the `fillItems`
+    /// value under `coreIncinerates`, `CoreBlock.java:749-751`) saves and
+    /// reloads without panicking; `ItemModule.total` wraps like Java's `int`
+    /// (`ItemModule.java:319-334`).
+    #[test]
+    fn live_sim_save_then_load_keeps_oversized_item_stacks() {
+        use crate::world::modules::ItemModule;
+
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let core = sim.content().id("core-shard").expect("core-shard");
+        sim.apply(Command::Place {
+            x: 5,
+            y: 5,
+            block: core,
+        })
+        .expect("place core");
+        for _ in 0..5 {
+            sim.tick().expect("tick");
+        }
+        let entity = sim.grid.entity_at(TilePos::new(5, 5)).expect("core entity");
+        let content = boot_registry().expect("content");
+        let copper = content.item_id("copper").expect("copper");
+        let lead = content.item_id("lead").expect("lead");
+        let graphite = content.item_id("graphite").expect("graphite");
+        let silicon = content.item_id("silicon").expect("silicon");
+        let huge = i32::MAX / 2;
+        // Four `i32::MAX / 2` stacks sum past `i32::MAX`: the plain `+=` the
+        // decoder used panicked here in debug builds (the H03 crash report).
+        let expected_total = huge
+            .wrapping_add(huge)
+            .wrapping_add(huge)
+            .wrapping_add(huge);
+        {
+            let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
+            items.set(copper, huge);
+            items.set(lead, huge);
+            items.set(graphite, huge);
+            items.set(silicon, huge);
+            assert_eq!(items.total(), expected_total, "Java int wrap (set)");
+        }
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("live-oversized-items-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load rebuilds the core and must not panic
+        // on the overflow the sum of the two stacks produces in `apply_base`.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let entity = sim
+            .grid
+            .entity_at(TilePos::new(5, 5))
+            .expect("core reloaded");
+        let items = sim.ecs.0.get::<ItemModule>(entity).expect("items");
+        assert_eq!(items.get(copper), huge, "stack round-trips");
+        assert_eq!(items.get(lead), huge, "stack round-trips");
+        assert_eq!(items.get(graphite), huge, "stack round-trips");
+        assert_eq!(items.get(silicon), huge, "stack round-trips");
+        assert_eq!(items.total(), expected_total, "wrapped total round-trips");
+        // The live module keeps working after the oversized load.
+        let mut items = sim.ecs.0.get_mut::<ItemModule>(entity).expect("items");
+        assert_eq!(items.remove(copper, 1), 1);
+        assert_eq!(items.total(), expected_total.wrapping_sub(1));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// H09 T11: the `static-fog-data` custom chunk (`FogControl.java:97,
+    /// 437-505`) round-trips a live save: the reloaded fog has the same
+    /// discovered tiles as the saved one.
+    #[test]
+    fn live_save_keeps_static_fog() {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let campaign = {
+            let content = &sim.unit_runtime().expect("rt").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let rules = Rules {
+            default_team: 1,
+            waves: true,
+            fog: true,
+            static_fog: true,
+            ..Rules::default()
+        };
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
+        sim.reset_fog();
+        let _dagger = sim
+            .spawn_live_unit("dagger", 1, 20.0 * 8.0 + 4.0, 20.0 * 8.0 + 4.0, 0.0)
+            .expect("dagger");
+        for _ in 0..4 {
+            sim.tick().expect("tick");
+        }
+        let sample: Vec<(i32, i32)> = (18..23)
+            .flat_map(|y| (18..23).map(move |x| (x, y)))
+            .collect();
+        let before: Vec<bool> = sample
+            .iter()
+            .map(|(x, y)| sim.fog_discovered(1, *x, *y))
+            .collect();
+        assert!(
+            before.iter().any(|discovered| *discovered),
+            "the unit discovered tiles"
+        );
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("live-static-fog");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        // Wipe the live world; the load must restore the fog from the chunk.
+        sim.grid.fill(BlockId::AIR, BlockId::AIR);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+        for (index, (x, y)) in sample.iter().enumerate() {
+            assert_eq!(
+                sim.fog_discovered(1, *x, *y),
+                before[index],
+                "discovered ({x}, {y}) round-trips"
+            );
+        }
+
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// PAR-0138: a live save round-trips the carried payload stack (revision 2
     /// unit chunk); a v1 save without payloads still loads.
     #[test]
@@ -2052,9 +2262,10 @@ mod tests {
             .collect();
         assert_eq!(fires.len(), 1, "one fire restored");
         assert_eq!(fires[0].tile, fire_before.tile);
-        // One tick (the load tick) advances the restored fire/puddle.
+        // One tick (the load tick) advances the restored fire: 1 + the
+        // bare-ground 8 (`FireComp.java:67-69`).
         assert!(
-            (fires[0].time - fire_before.time - 1.0).abs() < 0.001,
+            (fires[0].time - fire_before.time - 9.0).abs() < 0.001,
             "fire time resumes ({} vs {})",
             fires[0].time,
             fire_before.time

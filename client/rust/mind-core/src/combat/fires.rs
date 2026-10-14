@@ -25,6 +25,8 @@ const D4: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 pub const BASE_LIFETIME: f32 = 1000.0;
 /// `FireComp.spreadDelay`.
 pub const SPREAD_DELAY: f32 = 22.0;
+/// `FireComp.fireballDelay`.
+pub const FIREBALL_DELAY: f32 = 40.0;
 /// `FireComp.damageDelay`.
 pub const DAMAGE_DELAY: f32 = 40.0;
 /// `FireComp.tileDamage`.
@@ -147,10 +149,153 @@ pub fn remove(world: &mut World, entity: Entity) {
     let _ = world.despawn(entity);
 }
 
-/// Updates every fire one tick (`FireComp.update`).
+/// `Tile.getFlammability()` (`Tile.java:142-160`).
+///
+/// Air: the floor's `liquidDrop` flammability. A building: the item term
+/// (`sum(item.flammability * amount) / max(itemCapacity, 1)` times
+/// `clamp(itemCapacity / 2.4, 1, 3)`) plus the liquid term
+/// (`sum(liquid.flammability * amount / 1.6) / max(liquidCapacity, 1)` times
+/// `clamp(liquidCapacity / 30, 1, 2)`). Other blocks return 0; the puddle
+/// contribution is added by the caller from the stored
+/// `FireComp.puddleFlammability`.
+pub fn tile_flammability(
+    world: &World,
+    tiles: &crate::world::tiles::Tiles,
+    content: &crate::content::ContentRegistry,
+    tx: i32,
+    ty: i32,
+) -> f32 {
+    if !tiles.in_bounds(tx, ty) {
+        return 0.0;
+    }
+    let tile = tiles.get(tx, ty);
+    if tile.block == crate::content::BlockId::AIR {
+        return tile.get_flammability(content);
+    }
+    let Some(build) = tile.build else {
+        return 0.0;
+    };
+    let Some(def) = content.block(tile.block) else {
+        return 0.0;
+    };
+    let mut result = 0.0f32;
+    if def.has_items
+        && let Some(items) = world.get::<crate::world::modules::ItemModule>(build)
+        && items.total() > 0
+    {
+        // `build.items.sum((item, amount) -> item.flammability * amount)`.
+        let sum: f32 = content
+            .items()
+            .iter()
+            .map(|item| item.flammability * items.get(item.id) as f32)
+            .sum();
+        result += sum / (def.item_capacity.max(1) as f32)
+            * (def.item_capacity as f32 / 2.4).clamp(1.0, 3.0);
+    }
+    if def.has_liquids
+        && let Some(liquids) = world.get::<crate::world::modules::LiquidModule>(build)
+    {
+        // `build.liquids.sum((liquid, amount) -> liquid.flammability * amount / 1.6f)`.
+        let sum: f32 = content
+            .liquids()
+            .iter()
+            .map(|liquid| liquid.flammability * liquids.get(liquid.id) / 1.6)
+            .sum();
+        result += sum / def.liquid_capacity.max(1.0) * (def.liquid_capacity / 30.0).clamp(1.0, 2.0);
+    }
+    result
+}
+
+/// Stored puddle flammability contribution (`Puddle.getFlammability() / 3f`),
+/// refreshed only on the damage tick (`FireComp.java:90-91`).
+fn puddle_flammability_at(
+    world: &World,
+    content: &crate::content::ContentRegistry,
+    tx: i16,
+    ty: i16,
+) -> f32 {
+    super::puddles::find_at(world, tx, ty)
+        .and_then(|p| world.get::<super::puddles::PuddleState>(p).copied())
+        .map(|p| {
+            content
+                .liquid(p.liquid)
+                .map(|def| def.flammability * p.amount / 3.0)
+                .unwrap_or(0.0)
+        })
+        .unwrap_or(0.0)
+}
+
+/// `Damage.damageUnits(null, x, y, tilesize, unitDamage, pred, acceptor)`
+/// (`Damage.java:436-454`): every unit whose square hitbox overlaps the
+/// `2 * tilesize` square centred on `(cx, cy)` that is not flying and not
+/// immune to `burning` takes [`UNIT_DAMAGE`] and gets `burning` for `60 * 5`
+/// ticks. Iterates in `EntitySeq` order.
+fn damage_units_square(
+    world: &mut World,
+    content: &crate::content::ContentRegistry,
+    cx: f32,
+    cy: f32,
+) {
+    let Some(burning) = content.status_id("burning") else {
+        return;
+    };
+    let half = crate::config::TILESIZE as f32;
+    let mut units: Vec<(u64, Entity)> = Vec::new();
+    for entity_ref in world.iter_entities() {
+        let Some(pos) = entity_ref.get::<Pos>() else {
+            continue;
+        };
+        let Some(hitbox) = entity_ref.get::<crate::entities::comp::unit::comp::HitboxComp>() else {
+            continue;
+        };
+        if entity_ref.get::<Health>().is_none() {
+            continue;
+        }
+        // `unit -> !unit.isFlying() && !unit.isImmune(StatusEffects.burning)`.
+        let entity = entity_ref.id();
+        if crate::combat::bullet::unit_is_flying(world, entity) {
+            continue;
+        }
+        let immune = entity_ref
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>()
+            .and_then(|comp| content.unit(comp.type_id))
+            .is_none_or(|def| def.immunities.contains(&burning));
+        if immune {
+            continue;
+        }
+        let hittable = entity_ref
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>()
+            .and_then(|comp| content.unit(comp.type_id))
+            .is_none_or(|def| def.hittable);
+        if !hittable {
+            continue;
+        }
+        // `entity.hitbox(hitrect); hitrect.overlaps(rect)` with the outer rect a
+        // `size * 2` square (`Arc Rect.overlaps` uses strict comparisons).
+        let reach = half + hitbox.hit_size / 2.0;
+        if (pos.x - cx).abs() >= reach || (pos.y - cy).abs() >= reach {
+            continue;
+        }
+        let seq = entity_ref
+            .get::<crate::ecs::EntitySeq>()
+            .map(|seq| seq.0)
+            .unwrap_or(u64::MAX);
+        units.push((seq, entity));
+    }
+    units.sort_by_key(|(seq, entity)| (*seq, entity.index()));
+    for (_, unit) in units {
+        crate::combat::damage::area::damage_entity(world, content, unit, UNIT_DAMAGE, false, 1.0);
+        crate::combat::damage::status::apply_status(world, unit, burning, 60.0 * 5.0);
+    }
+}
+
+/// Updates every fire one tick (`FireComp.update`, `FireComp.java:39-100`).
 ///
 /// `water_attr` is `state.envAttrs.get(Attribute.water)` (plan 12); `tiles` is
 /// mutated to keep the `Tiles::fires` cache in sync with live entities.
+/// Returns the fireball origins queued this tick
+/// (`Bullets.fireball.createNet`); the caller spawns them with a
+/// [`crate::combat::bullet::CombatCtx`].
 pub fn update_fires(
     world: &mut World,
     tiles: &mut crate::world::tiles::Tiles,
@@ -158,26 +303,29 @@ pub fn update_fires(
     rng: &mut SimRng,
     fx: &dyn FxSink,
     water_attr: f32,
-) {
+) -> Vec<(f32, f32)> {
     // Reset the slot cache; re-register live fires below.
     tiles.clear_fire_slots();
-    let entities: Vec<Entity> = world
+    let mut entities: Vec<Entity> = world
         .iter_entities()
         .filter(|entity_ref| entity_ref.get::<FireState>().is_some())
         .map(|entity_ref| entity_ref.id())
         .collect();
+    entities.sort_by_key(|entity| entity.index());
+    let mut fireballs: Vec<(f32, f32)> = Vec::new();
     for entity in entities {
-        let Some(mut fire) = world.get_mut::<FireState>(entity) else {
+        let Some(mut fire) = world.get::<FireState>(entity).copied() else {
             continue;
         };
+        // `animation += delta / ticksPerFrame; warmup += delta; animation %= frames`.
         fire.animation = (fire.animation + 1.0) % 40.0;
         fire.warmup += 1.0;
         let speed_multiplier = 1.0 + (water_attr * 10.0).max(0.0);
-        fire.time = (fire.time + speed_multiplier).min(fire.lifetime);
+        fire.time = (fire.time + speed_multiplier).clamp(0.0, fire.lifetime);
 
         let (tx, ty) = fire.tile;
-        if fire.time >= fire.lifetime {
-            let _ = fire;
+        let in_bounds = tiles.in_bounds(tx as i32, ty as i32);
+        if fire.time >= fire.lifetime || !in_bounds || !fire.lifetime.is_finite() {
             // `remove()` hook: fire-remove FX.
             if let Some(pos) = world.get::<Pos>(entity) {
                 fx.effect(
@@ -193,79 +341,64 @@ pub fn update_fires(
             remove(world, entity);
             continue;
         }
-        let _ = fire;
+        let build = tiles.get(tx as i32, ty as i32).build;
+        let world_x = tx as f32 * crate::config::TILESIZE as f32;
+        let world_y = ty as f32 * crate::config::TILESIZE as f32;
 
-        let in_bounds = tiles.in_bounds(tx as i32, ty as i32);
-        let flammability = if in_bounds {
-            let tile = tiles.get(tx as i32, ty as i32);
-            let base = tile.get_flammability(content);
-            let puddle = super::puddles::find_at(world, tx, ty)
-                .and_then(|p| world.get::<super::puddles::PuddleState>(p).copied())
-                .map(|p| {
-                    content
-                        .liquid(p.liquid)
-                        .map(|def| def.flammability * p.amount)
-                        .unwrap_or(0.0)
-                })
-                .unwrap_or(0.0);
-            Some((base + puddle, tile.build))
-        } else {
-            None
-        };
-        let Some((flammability, build)) = flammability else {
-            remove(world, entity);
-            continue;
-        };
+        // `float flammability = tile.getFlammability() + puddleFlammability`.
+        let flammability = tile_flammability(world, tiles, content, tx as i32, ty as i32)
+            + fire.puddle_flammability;
 
-        // Flammable floors damage themselves and spread to `d4` neighbors.
-        if let Some(mut fire) = world.get_mut::<FireState>(entity) {
-            fire.puddle_flammability = flammability;
-            if flammability > 1.0 {
-                let rate = (flammability / 5.0).clamp(0.3, 2.0);
-                fire.spread_timer += rate;
-                if fire.spread_timer >= SPREAD_DELAY {
-                    fire.spread_timer = 0.0;
-                    let pick = rng.random(RngStream::Sim, 4) as usize;
-                    let (dx, dy) = D4[pick % 4];
-                    let _ = fire;
-                    let (nx, ny) = (tx as i32 + dx, ty as i32 + dy);
-                    if tiles.in_bounds(nx, ny) {
-                        let _ = create(world, nx as i16, ny as i16, rng);
-                    }
+        // Not on a building: bare ground with nothing to burn dies 8x faster.
+        if build.is_none() && flammability <= 0.0 {
+            fire.time += 8.0;
+        }
+        // A burning building feeds the fire.
+        if build.is_some() {
+            fire.lifetime += (flammability / 8.0).clamp(0.0, 0.6);
+        }
+
+        // Flammable tiles spread to `d4` neighbors.
+        if flammability > 1.0 {
+            fire.spread_timer += (flammability / 5.0).clamp(0.3, 2.0);
+            if fire.spread_timer >= SPREAD_DELAY {
+                fire.spread_timer = 0.0;
+                let pick = rng.random(RngStream::Sim, 4) as usize;
+                let (dx, dy) = D4[pick % 4];
+                let (nx, ny) = (tx as i32 + dx, ty as i32 + dy);
+                if tiles.in_bounds(nx, ny) {
+                    let _ = create(world, nx as i16, ny as i16, rng);
                 }
             }
         }
 
-        // Damage the building on the tile every `damageDelay`.
-        let damage_tick = {
-            let Some(mut fire) = world.get_mut::<FireState>(entity) else {
-                continue;
-            };
-            fire.fireball_timer =
-                (fire.fireball_timer + (flammability / 10.0).clamp(0.0, 0.5)).min(40.0);
-            fire.damage_timer += 1.0;
-            if fire.damage_timer >= DAMAGE_DELAY {
-                fire.damage_timer = 0.0;
-                true
-            } else {
-                false
-            }
-        };
-        if damage_tick
-            && let Some(build) = build
-            && let Some(mut health) = world.get_mut::<Health>(build)
-        {
-            health.health = (health.health - TILE_DAMAGE).max(0.0);
-            if health.health <= 0.0 {
-                health.dead = true;
+        // Throw fireballs while anything is burning.
+        if flammability > 0.0 {
+            fire.fireball_timer += (flammability / 10.0).clamp(0.0, 0.5);
+            if fire.fireball_timer >= FIREBALL_DELAY {
+                fire.fireball_timer = 0.0;
+                fireballs.push((world_x, world_y));
             }
         }
 
-        // Keep the tile-slot cache in sync.
-        if in_bounds {
-            tiles.set_fire(tiles.index(tx as i32, ty as i32), Some(entity));
+        // Damage the building and nearby ground units every `damageDelay`.
+        fire.damage_timer += 1.0;
+        if fire.damage_timer >= DAMAGE_DELAY {
+            fire.damage_timer = 0.0;
+            fire.puddle_flammability = puddle_flammability_at(world, content, tx, ty);
+            if let Some(build) = build {
+                crate::combat::damage::area::apply_health(world, build, TILE_DAMAGE);
+            }
+            damage_units_square(world, content, world_x, world_y);
         }
+
+        if let Some(mut slot) = world.get_mut::<FireState>(entity) {
+            *slot = fire;
+        }
+        // Keep the tile-slot cache in sync.
+        tiles.set_fire(tiles.index(tx as i32, ty as i32), Some(entity));
     }
+    fireballs
 }
 
 /// `Fire` save revision (`plan 10 §6.3`).
@@ -362,8 +495,91 @@ mod tests {
             .get::<FireState>(e)
             .map(|f| f.time)
             .unwrap_or(0.0);
-        // speedMultiplier = 1 + 0.2*10 = 3.
-        assert!((time - 3.0).abs() < 1e-4, "time={time}");
+        // speedMultiplier = 1 + 0.2*10 = 3, then the bare-ground branch adds 8
+        // (`FireComp.java:67-69`: `if(!damage && flammability <= 0) time += 8`).
+        assert!((time - 11.0).abs() < 1e-4, "time={time}");
+    }
+
+    /// H09 T5: a fire on bare, non-flammable ground burns out in
+    /// `ceil(BASE_LIFETIME / 9)` ticks (`time += 8` on top of the normal 1).
+    #[test]
+    fn fire_on_bare_ground_dies_fast() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let mut rng = SimRng::new(3);
+        let _ = create(&mut harness.build.world, 4, 4, &mut rng).expect("fire");
+        for _ in 0..111 {
+            let _ = harness.fire_tick(0.0);
+            assert!(has(&harness.build.world, 4, 4), "alive before tick 112");
+        }
+        let _ = harness.fire_tick(0.0);
+        assert!(!has(&harness.build.world, 4, 4), "removed on tick 112");
+    }
+
+    /// H09 T5: `Tile.getFlammability` reads the building's stored items; a
+    /// container with a full load of coal has flammability 3, feeds lifetime and
+    /// throws a fireball every `fireballDelay` accumulation
+    /// (`FireComp.java:71-85`).
+    #[test]
+    fn fire_on_coal_container_lives_longer_and_throws_fireballs() {
+        let mut harness = CombatHarness::new(16, 16, 7);
+        let mut rng = SimRng::new(7);
+        let container = harness.content().block_id("container").expect("container");
+        assert!(harness.place(8, 8, container, 0, true));
+        let entity = harness.build_at(8, 8).expect("container entity");
+        let coal = harness.content().item_id("coal").expect("coal");
+        {
+            let mut items = harness
+                .build
+                .world
+                .get_mut::<crate::world::modules::ItemModule>(entity)
+                .expect("items");
+            items.set(coal, 300);
+        }
+        let flammability = tile_flammability(
+            &harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+        );
+        assert!(
+            (flammability - 3.0).abs() < 1e-4,
+            "300 coal -> 3.0 ({flammability})"
+        );
+
+        let fire = create(&mut harness.build.world, 8, 8, &mut rng).expect("fire");
+        {
+            let mut state = harness
+                .build
+                .world
+                .get_mut::<FireState>(fire)
+                .expect("fire");
+            state.fireball_timer = 0.0;
+        }
+        let mut fireballs = Vec::new();
+        for _ in 0..100 {
+            fireballs = harness.fire_tick(0.0);
+        }
+        let lifetime = harness
+            .build
+            .world
+            .get::<FireState>(fire)
+            .map(|f| f.lifetime)
+            .unwrap_or(0.0);
+        // `lifetime += clamp(3 / 8, 0, 0.6) = 0.375` per tick.
+        assert!(
+            (lifetime - 1037.5).abs() < 1e-3,
+            "lifetime after 100 ticks = 1037.5 ({lifetime})"
+        );
+        assert!(fireballs.is_empty(), "no fireball within 100 ticks");
+        // Timer grows 0.3/tick -> the first fireball lands on tick 134.
+        for _ in 0..33 {
+            fireballs = harness.fire_tick(0.0);
+        }
+        assert!(fireballs.is_empty(), "no fireball at tick 133");
+        fireballs = harness.fire_tick(0.0);
+        assert_eq!(fireballs.len(), 1, "one fireball at tick 134");
+        assert_eq!(fireballs[0], (64.0, 64.0), "fireball at the tile origin");
     }
 
     #[test]
