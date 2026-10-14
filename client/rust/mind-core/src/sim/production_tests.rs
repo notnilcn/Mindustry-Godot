@@ -2147,6 +2147,54 @@ fn logic_events_drain_each_tick() {
     assert!(state.events.is_empty(), "{:?}", state.events);
 }
 
+/// H06 T1: `state_snapshot` lists the Java variables view of a live
+/// processor (numbers, no constants, no `@`-names).
+#[test]
+fn logic_state_snapshot_lists_vars() {
+    let mut sim = runtime_sim();
+    place(&mut sim, "micro-processor", 10, 10);
+    let bytes = crate::logic::blocks::logic_block::compress("set a 1\nop add b a 2", &[]);
+    configure(
+        &mut sim,
+        10,
+        10,
+        crate::determinism::ConfigValue::Bytes(bytes),
+    );
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let snapshot =
+        crate::logic::blocks::logic_block::state_snapshot(&sim.ecs.0, e).expect("snapshot");
+    assert!(
+        snapshot
+            .vars
+            .iter()
+            .any(|(name, value, type_)| name == "a" && value == "1" && *type_ == "number"),
+        "{:?}",
+        snapshot.vars
+    );
+    assert!(
+        snapshot
+            .vars
+            .iter()
+            .any(|(name, value, type_)| name == "b" && value == "3" && *type_ == "number"),
+        "{:?}",
+        snapshot.vars
+    );
+    assert!(
+        !snapshot
+            .vars
+            .iter()
+            .any(|(name, _, _)| name.starts_with('@')),
+        "{:?}",
+        snapshot.vars
+    );
+    assert_eq!(snapshot.ipt, 2);
+    assert!(!snapshot.privileged);
+    assert!(snapshot.accessible);
+}
+
 /// `message announce 2 @wait` blocks until the announcement timer expires.
 #[test]
 fn message_wait_blocks_until_announcement_expires() {

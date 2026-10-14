@@ -351,6 +351,9 @@ pub struct MindSimHost {
     /// Last `grid.limit_area` seen by the pump; a change (rules adoption,
     /// G06 `setrule`) sets `world_dirty` so the renderer rebuilds (T5).
     last_limit_area: Option<(i32, i32, i32, i32)>,
+    /// Last `logic_set_code` failure (`""` when none; H06 T1) — `"toolong:<len>"`
+    /// mirrors `LogicBuild.showEditDialog`'s error message.
+    logic_last_error: String,
 }
 
 #[godot_api]
@@ -382,6 +385,7 @@ impl INode for MindSimHost {
             place_range_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             sector_resume: None,
             last_limit_area: None,
+            logic_last_error: String::new(),
         }
     }
 
@@ -1443,7 +1447,7 @@ impl MindSimHost {
     /// Whether the sim-integrated logic probes can mutate a live processor.
     #[func]
     pub fn logic_available(&self) -> bool {
-        false
+        true
     }
 
     /// Registered statement names (plan-14 editor handoff).
@@ -1509,17 +1513,153 @@ impl MindSimHost {
         false
     }
 
-    /// Placeholder for applying compressed logic code (awaits plan 05/07).
+    /// Normalized processor program text (`LogicDialog.show`:
+    /// `LAssembler.read` → `LAssembler.write`; empty string when no processor).
     #[func]
-    pub fn logic_set_code(&self, _x: i64, _y: i64, _code: GString) -> bool {
-        log::warn!("logic_set_code: sim-side logic building state is a plan-05/07 hook");
-        false
+    pub fn logic_get_code(&self, x: i64, y: i64) -> GString {
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            return GString::from("");
+        };
+        let Some(state) = world.get::<mind_core::logic::blocks::LogicBlockState>(e) else {
+            return GString::from("");
+        };
+        let privileged = mind_core::logic::blocks::privileged_of(world, e);
+        let text = mind_core::logic::Assembler::read(&state.code, privileged)
+            .map(|statements| mind_core::logic::Assembler::write(&statements))
+            .unwrap_or_else(|_| state.code.clone());
+        GString::from(text.as_str())
     }
 
-    /// Placeholder for reading a processor state (awaits plan 05/07).
+    /// Debug seam: writes `code` into the processor at `(x, y)` directly,
+    /// bypassing `LogicBuild.accessible()` like the editor (world processors
+    /// are not accessible in campaign; every later in-engine check uses them).
+    /// Returns false with `logic_last_error() == "toolong:<len>"` past
+    /// `LogicBlock.maxCompressedLen` (`showEditDialog`'s size gate).
     #[func]
-    pub fn logic_get_state(&self, _x: i64, _y: i64) -> Dictionary<GString, Variant> {
-        Dictionary::new()
+    pub fn logic_set_code(&mut self, x: i64, y: i64, code: GString) -> bool {
+        self.logic_last_error = String::new();
+        let code = code.to_string();
+        let world = &mut self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return false;
+        };
+        let links = world
+            .get::<mind_core::logic::blocks::LogicBlockState>(e)
+            .map(|state| state.relative_connections(world, e));
+        let Some(links) = links else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return false;
+        };
+        let bytes = match mind_core::logic::blocks::logic_block::encode_for_config(&code, &links) {
+            Ok(bytes) => bytes,
+            Err(len) => {
+                self.logic_last_error = format!("toolong:{len}");
+                return false;
+            }
+        };
+        let Some(mut state) = world
+            .entity_mut(e)
+            .take::<mind_core::logic::blocks::LogicBlockState>()
+        else {
+            return false;
+        };
+        let result = state.read_compressed(world, e, &bytes, true);
+        world.entity_mut(e).insert(state);
+        result.is_ok()
+    }
+
+    /// Last `logic_set_code` failure (`""` when none).
+    #[func]
+    pub fn logic_last_error(&self) -> GString {
+        GString::from(self.logic_last_error.as_str())
+    }
+
+    /// Processor readback (`privileged`/`accessible`/`ipt`/`tag`/`code`/`links`/
+    /// `vars`); empty `Dictionary` when no processor is at `(x, y)`.
+    #[func]
+    pub fn logic_get_state(&self, x: i64, y: i64) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::<GString, Variant>::new();
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            return out;
+        };
+        let Some(snapshot) = mind_core::logic::blocks::logic_block::state_snapshot(world, e) else {
+            return out;
+        };
+        out.set(
+            &GString::from("privileged"),
+            &snapshot.privileged.to_variant(),
+        );
+        out.set(
+            &GString::from("accessible"),
+            &snapshot.accessible.to_variant(),
+        );
+        out.set(&GString::from("ipt"), &(snapshot.ipt as i64).to_variant());
+        out.set(
+            &GString::from("tag"),
+            &match &snapshot.tag {
+                Some(tag) => GString::from(tag.as_str()).to_variant(),
+                None => Variant::nil(),
+            },
+        );
+        out.set(
+            &GString::from("code"),
+            &GString::from(snapshot.code.as_str()).to_variant(),
+        );
+        let mut links = Array::<Variant>::new();
+        for (name, lx, ly, valid) in &snapshot.links {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("name"),
+                &GString::from(name.as_str()).to_variant(),
+            );
+            row.set(&GString::from("x"), &(*lx as i64).to_variant());
+            row.set(&GString::from("y"), &(*ly as i64).to_variant());
+            row.set(&GString::from("valid"), &valid.to_variant());
+            links.push(&row.to_variant());
+        }
+        out.set(&GString::from("links"), &links.to_variant());
+        let mut vars = Array::<Variant>::new();
+        for (name, value, type_) in &snapshot.vars {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("name"),
+                &GString::from(name.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("value"),
+                &GString::from(value.as_str()).to_variant(),
+            );
+            row.set(&GString::from("type"), &GString::from(*type_).to_variant());
+            vars.push(&row.to_variant());
+        }
+        out.set(&GString::from("vars"), &vars.to_variant());
+        out
+    }
+
+    /// Last 64 drained logic-event kind tags (`LogicWorldEvent::kind`) as a
+    /// JSON array (H06 T1 debug probe).
+    #[func]
+    pub fn logic_event_log_json(&self) -> GString {
+        let value: Vec<&str> = self
+            .sim
+            .logic_event_log
+            .iter()
+            .map(String::as_str)
+            .collect();
+        GString::from(
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
     }
 
     /// Placeholder for a display command queue (awaits plan 16 rendering/05).

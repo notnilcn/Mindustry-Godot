@@ -195,6 +195,9 @@ pub struct Sim {
     /// (G06 T4; T5/T6 extend the handling).
     pub logic_ui_events: Vec<crate::logic::world::LogicWorldEvent>,
 
+    /// Last 64 drained logic-event kind tags (host debug probe; H06 T1).
+    pub logic_event_log: std::collections::VecDeque<String>,
+
     /// Relay-side unit-command apply state (plan 15 M4). Built lazily on the
     /// first unit command so P0 worlds never pay for content boot.
     unit_commands: Option<command::UnitCommandRuntime>,
@@ -269,6 +272,7 @@ impl Sim {
             entity_seq: EntitySequencer::default(),
             commands_applied: 0,
             logic_ui_events: Vec::new(),
+            logic_event_log: std::collections::VecDeque::new(),
             pending_events: Vec::new(),
             event_log: Vec::new(),
         }
@@ -1102,6 +1106,10 @@ impl Sim {
             None => return,
         };
         for event in events {
+            if self.logic_event_log.len() == 64 {
+                self.logic_event_log.pop_front();
+            }
+            self.logic_event_log.push_back(event.kind().to_owned());
             // T5 adds SetBlock / SpawnWave handling here.
             if let e @ (crate::logic::world::LogicWorldEvent::Message { .. }
             | crate::logic::world::LogicWorldEvent::Cutscene { .. }) = event
