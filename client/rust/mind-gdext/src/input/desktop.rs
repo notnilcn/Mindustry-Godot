@@ -1973,29 +1973,36 @@ impl DesktopBridge {
     }
 
     /// `InputHandler.selectedControlBuild()` (`InputHandler.java:2165-2171`):
-    /// a same-team controllable building (turret `ControlBlock`) under the
-    /// cursor.
+    /// a same-team building with `canControlSelect(player.unit())` under the
+    /// cursor — `CoreBlock` (core respawn) and the `PayloadConveyor`/
+    /// `PayloadRouter` family (enter payload).
+    ///
+    /// Turrets are `ControlBlock`s, NOT `canControlSelect`; the port routes
+    /// them through `selected_unit_for_control`'s ControlBlock branch, which
+    /// needs H01's block-unit model (skipped, recorded).
     fn selected_control_build(&self) -> Option<(i32, i32)> {
         let (x, y) = self.cursor_tile()?;
         let kind = self.block_kind_at(x, y)?;
-        if !matches!(
-            kind,
-            BlockKind::ItemTurret
-                | BlockKind::LiquidTurret
-                | BlockKind::PowerTurret
-                | BlockKind::TractorBeamTurret
-                | BlockKind::PointDefenseTurret
-                | BlockKind::LaserTurret
-                | BlockKind::ContinuousLiquidTurret
-                | BlockKind::ContinuousTurret
-                | BlockKind::RepairTurret
-                | BlockKind::BuildTurret
-        ) {
+        let payload_build = matches!(kind, BlockKind::PayloadConveyor | BlockKind::PayloadRouter);
+        if kind != BlockKind::CoreBlock && !payload_build {
             return None;
         }
         let host = self.host.clone()?;
         let team = host.bind().building_team(x, y)?;
-        (team == self.player_team()).then_some((x, y))
+        if team != self.player_team() {
+            return None;
+        }
+        if !payload_build {
+            // `CoreBlock.canControlSelect(unit)` = `player.isPlayer()`.
+            return Some((x, y));
+        }
+        // `PayloadConveyor.canControlSelect` (PayloadConveyor.java:85-87):
+        // `unit.tileOn().build == this` (the `spawnedByCore`/payload gate is
+        // approximated by the tile condition; the sim half of
+        // `BuildingControlSelect` is H01's).
+        let (px, py) = host.bind().player_unit_position()?;
+        let (tx, ty) = (WorldGrid::to_tile(px), WorldGrid::to_tile(py));
+        (tx == x && ty == y).then_some((x, y))
     }
 
     fn mouse_button(&mut self, bindings: &BindingState, button: &str, down: bool) {
