@@ -282,6 +282,89 @@ fn liquid_source_fills_conduit() {
     );
 }
 
+/// H09 T6: `BuildingComp.onDeconstructed` (`BuildingComp.java:1478-1487`) drops
+/// `currentAmount / (size * size) * 2` per footprint tile for a
+/// non-incinerable liquid (neoplasm); an incinerable one (slag) is not dropped.
+#[test]
+fn deconstructing_tank_drops_non_incinerable_puddles() {
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let neph = liquid(&sim, "neoplasm");
+    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    {
+        let mut liquids = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+            .expect("liquids");
+        liquids.add(neph, 1500.0, 1500.0);
+    }
+    // The player deconstruct path starts through `Build.beginBreak`
+    // (`Command::Break` is the instant/API break), so call it directly.
+    {
+        let crate::sim::Sim {
+            block_runtime,
+            ecs,
+            grid,
+            ..
+        } = &mut sim;
+        let runtime = block_runtime.as_mut().expect("block runtime");
+        assert!(runtime.begin_break(&mut ecs.0, grid, 6, 6, 1, 1.0));
+    }
+    // 3x3 footprint (5..7, 5..7): 1500/9*2 = 333 per tile, capped at
+    // maxLiquid (70).
+    for y in 5..8 {
+        for x in 5..8 {
+            let puddle = crate::combat::puddles::find_at(&sim.ecs.0, x, y)
+                .and_then(|entity| {
+                    sim.ecs
+                        .0
+                        .get::<crate::combat::puddles::PuddleState>(entity)
+                        .copied()
+                })
+                .unwrap_or_else(|| panic!("puddle at ({x}, {y})"));
+            assert_eq!(puddle.liquid, neph);
+            assert!(
+                (puddle.amount - crate::combat::puddles::MAX_LIQUID).abs() < 1e-3,
+                "({x}, {y}) amount {}",
+                puddle.amount
+            );
+        }
+    }
+
+    // Incinerable slag is left behind (Java `!liquids.current().incinerable`).
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let slag = liquid(&sim, "slag");
+    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    {
+        let mut liquids = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+            .expect("liquids");
+        liquids.add(slag, 1500.0, 1500.0);
+    }
+    {
+        let crate::sim::Sim {
+            block_runtime,
+            ecs,
+            grid,
+            ..
+        } = &mut sim;
+        let runtime = block_runtime.as_mut().expect("block runtime");
+        assert!(runtime.begin_break(&mut ecs.0, grid, 6, 6, 1, 1.0));
+    }
+    for y in 5..8 {
+        for x in 5..8 {
+            assert!(
+                crate::combat::puddles::find_at(&sim.ecs.0, x, y).is_none(),
+                "no puddle at ({x}, {y}) for incinerable slag"
+            );
+        }
+    }
+}
+
 /// PAR-0077: a power source feeds an adjacent power consumer; the graph reports
 /// full satisfaction.
 #[test]

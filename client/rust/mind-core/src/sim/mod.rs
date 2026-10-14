@@ -1201,6 +1201,23 @@ impl Sim {
                     .is_some()
             })
             .count();
+        // Tile entities (`Groups.fires` / `Groups.puddles`).
+        let fire = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| entity.get::<crate::combat::fires::FireState>().is_some())
+            .count();
+        let puddle = self
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| {
+                entity
+                    .get::<crate::combat::puddles::PuddleState>()
+                    .is_some()
+            })
+            .count();
         let mut counts = std::collections::BTreeMap::new();
         counts.insert("all", all);
         counts.insert("unit", unit);
@@ -1212,6 +1229,8 @@ impl Sim {
         counts.insert("power_graph", 0);
         counts.insert("sync", 0);
         counts.insert("draw", 0);
+        counts.insert("fire", fire);
+        counts.insert("puddle", puddle);
         counts
     }
 

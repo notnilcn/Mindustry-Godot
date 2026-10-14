@@ -2038,6 +2038,11 @@ pub struct BlockDef {
     /// `Block.rebuildable`: dead blocks leave a rebuild ghost
     /// (`Block.java:148`, `Logic.java:42-50`).
     pub rebuildable: bool,
+    /// `Block.deconstructDropAllLiquid` (`Block.java:181`, default false; no
+    /// vanilla block sets it): drops every stored liquid on deconstruct even
+    /// when incinerable (`BuildingComp.onDeconstructed`,
+    /// `BuildingComp.java:1480-1487`).
+    pub deconstruct_drop_all_liquid: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
@@ -2418,6 +2423,7 @@ impl BlockDef {
                 spec.kind,
                 BlockKind::BaseShield | BlockKind::NuclearReactor | BlockKind::VariableReactor
             ),
+            deconstruct_drop_all_liquid: false,
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             core_unit: spec.core_unit,
             flags: spec.flags,

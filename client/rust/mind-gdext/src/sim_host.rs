@@ -3477,6 +3477,51 @@ impl MindSimHost {
         }
     }
 
+    /// Debug/playtest seam: adds `amount` of `liquid` to the building at (x, y)
+    /// (clamped to `Block.liquidCapacity`); returns the amount accepted.
+    #[func]
+    pub fn debug_add_building_liquid(
+        &mut self,
+        x: i32,
+        y: i32,
+        liquid: GString,
+        amount: f64,
+    ) -> f64 {
+        let Some(entity) = self.sim.grid.tiles.getn(x, y).and_then(|tile| tile.build) else {
+            return 0.0;
+        };
+        let Some(liquid) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.liquid_id(&liquid.to_string()))
+        else {
+            return 0.0;
+        };
+        let capacity = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::block::BlockTable>()
+            .and_then(|table| {
+                self.sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::Building>(entity)
+                    .map(|building| building.block)
+                    .and_then(|block| table.get(block).map(|inst| inst.def.liquid_capacity))
+            })
+            .unwrap_or(0.0);
+        match self
+            .sim
+            .ecs
+            .0
+            .get_mut::<mind_core::world::modules::LiquidModule>(entity)
+        {
+            Some(mut module) => f64::from(module.add(liquid, amount as f32, capacity)),
+            None => 0.0,
+        }
+    }
+
     /// Debug/playtest seam: adds `amount` of `item` to the building at (x, y)
     /// (clamped to `Block.itemCapacity`); returns the amount accepted.
     #[func]

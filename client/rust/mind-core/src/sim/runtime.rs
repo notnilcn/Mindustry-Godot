@@ -672,6 +672,17 @@ impl SimRuntime {
             .get::<BuildingComp>(entity)
             .map(|comp| comp.rot)
             .unwrap_or(0);
+        // `tile.build.onDeconstructed(unit); tile.build.dead = true;`
+        // (`Build.java:50-53`), before the swap to the construct block. The
+        // per-kind hook may override the base liquid drop (`BuildingComp.java:
+        // 1480-1487`).
+        self.drop_deconstruct_liquid(world, grid, entity, def);
+        if let Some(inst) = world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(previous))
+        {
+            inst.behavior.on_deconstructed(world, entity, None);
+        }
         let Some(sub) = self.construct_block(size) else {
             return self.break_block(world, grid, x, y).is_some();
         };
@@ -683,6 +694,68 @@ impl SimRuntime {
         state.set_deconstruct(previous, build_time, &requirements, cost_multiplier);
         world.entity_mut(entity).insert(state);
         true
+    }
+
+    /// `BuildingComp.onDeconstructed` (`BuildingComp.java:1478-1487`): a block
+    /// holding liquid drops `currentAmount / (size * size) * 2` on every
+    /// footprint tile unless the liquid is incinerable and the block does not
+    /// set `deconstructDropAllLiquid`.
+    fn drop_deconstruct_liquid(
+        &self,
+        world: &mut World,
+        grid: &WorldGrid,
+        entity: Entity,
+        def: &crate::content::registries::blocks::BlockDef,
+    ) {
+        let Some(module) = world.get::<crate::world::modules::LiquidModule>(entity) else {
+            return;
+        };
+        let amount = module.current();
+        let Some(liquid) = crate::world::blocks::liquid::current_liquid(module) else {
+            return;
+        };
+        if amount <= 0.0 {
+            return;
+        }
+        let incinerable = self
+            .content
+            .liquid(liquid)
+            .map(|liquid| liquid.incinerable)
+            .unwrap_or(false);
+        if incinerable && !def.deconstruct_drop_all_liquid {
+            return;
+        }
+        let Some(building) = world.get::<crate::entities::comp::Building>(entity) else {
+            return;
+        };
+        let anchor = building.tile;
+        let size = def.size.max(1);
+        let per_cell = amount / (size * size) as f32 * 2.0;
+        // The deposit rng is the live unit runtime's, like the fire/puddle pass.
+        let Some(mut runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        else {
+            return;
+        };
+        for oy in 0..size {
+            for ox in 0..size {
+                let tx = anchor.x() + ox as i16 + def.size_offset as i16;
+                let ty = anchor.y() + oy as i16 + def.size_offset as i16;
+                if !grid.tiles.in_bounds(tx as i32, ty as i32) {
+                    continue;
+                }
+                let _ = crate::combat::puddles::deposit(
+                    world,
+                    &grid.tiles,
+                    &self.content,
+                    tx,
+                    ty,
+                    liquid,
+                    per_cell,
+                    &mut runtime.rng,
+                );
+            }
+        }
+        world.insert_non_send(runtime);
     }
 
     /// Breaks the block at `(x, y)` through the real tile ops (`Tile.remove`).
