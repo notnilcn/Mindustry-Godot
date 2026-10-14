@@ -19,7 +19,8 @@ use godot::classes::{
 use godot::obj::{NewGd, Singleton};
 use godot::prelude::*;
 
-use mind_core::render::unit_draw::{self, UnitViewState};
+use mind_core::content::registries::fx_meta::{EffectId, effect_by_name};
+use mind_core::render::unit_draw::{self, UnitFxInput, UnitViewState, ViewEffect};
 
 use crate::sim_host::MindSimHost;
 
@@ -70,6 +71,10 @@ pub struct UnitRenderer {
     flash_material: Gd<CanvasItemMaterial>,
     /// Per-unit view state (hit flash from health drops; T5).
     view: HashMap<u64, UnitViewState>,
+    /// `Fx.unitLand` id (resolved once; H03 T10).
+    unit_land: EffectId,
+    /// `Fx.ripple` id (`Floor.walkEffect` on liquid floors; H03 T10).
+    ripple: EffectId,
     /// Tick clock of the last `update` (delta ticks for the view lerps).
     last_tick: f32,
     stats: UnitStats,
@@ -97,6 +102,8 @@ impl UnitRenderer {
             flash_nodes: HashMap::new(),
             flash_material,
             view: HashMap::new(),
+            unit_land: effect_by_name("unitLand").unwrap_or(EffectId::NONE),
+            ripple: effect_by_name("ripple").unwrap_or(EffectId::NONE),
             last_tick: 0.0,
             stats: UnitStats::default(),
         }
@@ -110,13 +117,16 @@ impl UnitRenderer {
     /// Rebuilds the per-bucket unit meshes; called once per frame.
     ///
     /// Composition follows `UnitType.draw` (`:1471-1560`): `drawSoftShadow`,
-    /// `drawMech` legs, outline, body, `drawCell`, `drawWeapons`.
-    pub fn update(&mut self) {
+    /// `drawMech` legs, outline, body, `drawCell`, `drawWeapons`. Returns the
+    /// view-side effect spawns (H03 T10: status particles, landing dust, walk
+    /// ripples) for the caller to forward to `MindFx`.
+    pub fn update(&mut self) -> Vec<ViewEffect> {
         let draws = self.host.clone().bind().unit_draws_full();
         let ticks = Time::singleton().get_ticks_msec() as f32 * 0.06;
         let delta_ticks = (ticks - self.last_tick).max(0.0);
         self.last_tick = ticks;
         let time = ticks / 60.0;
+        let mut effects: Vec<ViewEffect> = Vec::new();
         let mut groups: BTreeMap<(usize, i32), UnitBucket> = BTreeMap::new();
         let mut flash_groups: BTreeMap<(usize, i32), UnitBucket> = BTreeMap::new();
         let mut live_units = HashSet::new();
@@ -127,6 +137,29 @@ impl UnitRenderer {
             let view = self.view.entry(unit.id).or_default();
             unit_draw::advance_view(view, unit.health, unit.item.is_some(), delta_ticks);
             let hit_time = view.hit_time;
+            // `StatusEffect.update` + `UnitComp.update` view half (H03 T10):
+            // status particles, the landing dust and walk ripples.
+            let fx_input = UnitFxInput {
+                x: unit.x,
+                y: unit.y,
+                elevation: unit.elevation,
+                hit_size: unit.hit_size,
+                hovering: unit.hovering,
+                emit_walk_effect: unit.emit_walk_effect,
+                floor_is_liquid: unit.floor_is_liquid,
+                floor_color: unit.floor_color,
+                unit_land: self.unit_land,
+                ripple: self.ripple,
+            };
+            let mut rand = || godot::global::randf() as f32;
+            unit_draw::advance_unit_fx(
+                view,
+                &fx_input,
+                &unit.statuses,
+                delta_ticks,
+                &mut rand,
+                &mut effects,
+            );
             live_units.insert(unit.id);
             let bucket = if unit.low_altitude {
                 1
@@ -445,6 +478,7 @@ impl UnitRenderer {
 
         self.stats.sprites = sprites;
         self.stats.missing_regions = self.resolver.missing();
+        effects
     }
 }
 

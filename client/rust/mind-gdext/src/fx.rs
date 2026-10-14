@@ -520,6 +520,27 @@ impl MindFx {
         self.bus.clone()
     }
 
+    /// View-side effect spawn (H03 T10): status particles, landing dust and
+    /// walk ripples derived from the unit view state. Not the sim `FxBus`
+    /// (that stays the deterministic tick path); respects `effects`.
+    pub fn spawn_view_effect(
+        &mut self,
+        effect: EffectId,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+    ) {
+        if !self.settings.effects || effect == EffectId::NONE {
+            return;
+        }
+        let def = registry().get(effect);
+        let snapshot = EmptySnapshot;
+        self.pool
+            .spawn(def, x, y, rotation, color, EffectData::None, &snapshot);
+        self.base_mut().queue_redraw();
+    }
+
     /// Drains the bus and advances the view pools by one tick.
     #[func]
     pub fn tick_view(&mut self) {

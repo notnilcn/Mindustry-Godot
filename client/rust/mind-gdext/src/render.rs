@@ -915,11 +915,25 @@ impl MindWorldRenderer {
         }
         self.stats.mesh_rebuilds = mesh_rebuilds;
         self.stats.stage_trace.push(String::from("blocks"));
+        // H03 T10: unit view effects (status particles, landing dust, walk
+        // ripples) are collected by the unit pass and forwarded to `MindFx`
+        // after its borrow ends.
+        let mut view_effects = Vec::new();
         if let Some(units) = self.units.as_mut() {
-            units.update();
+            view_effects = units.update();
             let unit_stats = units.stats();
             self.stats.unit_sprites = unit_stats.sprites;
             self.stats.missing_regions += unit_stats.missing_regions as i64;
+        }
+        if !view_effects.is_empty()
+            && let Some(mut fx) = self
+                .base()
+                .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+        {
+            let mut fx = fx.bind_mut();
+            for (effect, x, y, rotation, color) in view_effects {
+                fx.spawn_view_effect(effect, x, y, rotation, color);
+            }
         }
         self.stats.stage_trace.push(String::from("units"));
         if let Some(shadow) = self.shadow.as_mut() {

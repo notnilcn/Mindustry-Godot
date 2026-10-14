@@ -62,6 +62,20 @@ pub struct UnitDraw {
     pub is_player: bool,
     /// Absolute health (`Health.health`).
     pub health: f32,
+    /// Active status effects with view parameters `(effect, chance, color)`
+    /// (`StatusEffect.update` particles; H03 T10).
+    pub statuses: Vec<(mind_core::content::EffectId, f32, mind_core::content::Rgba)>,
+    /// `isGrounded()` = `elevation < 0.001` (`UnitComp.java:80-82`; H03 T10).
+    pub grounded: bool,
+    /// `UnitType.hovering` (walk-effect gate; H03 T10).
+    pub hovering: bool,
+    /// `UnitType.emitWalkEffect` (H03 T10).
+    pub emit_walk_effect: bool,
+    /// `floorOn().isLiquid` (walk effect is `Fx.ripple` on liquid floors;
+    /// H03 T10).
+    pub floor_is_liquid: bool,
+    /// `tile.getFloorColor()` (`Floor.mapColor`; H03 T10).
+    pub floor_color: mind_core::content::Rgba,
 }
 
 /// `MechComp` walk state resolved for drawing (`drawMech`).
@@ -4330,6 +4344,40 @@ impl MindSimHost {
                     .get::<Health>(*entity)
                     .map(|health| health.health)
                     .unwrap_or(0.0);
+                // H03 T10: active status effects with their view parameters
+                // (`StatusEffect.effect/effectChance/color`).
+                let statuses = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::StatusComp>(*entity)
+                    .map(|comp| {
+                        comp.statuses
+                            .iter()
+                            .filter_map(|entry| content.status(entry.effect))
+                            .filter(|def| {
+                                def.effect != mind_core::content::EffectId::NONE
+                                    && def.effect_chance > 0.0
+                            })
+                            .map(|def| (def.effect, def.effect_chance, def.color))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // H03 T10: floor under the unit (`floorOn()`).
+                let (floor_is_liquid, floor_color) = {
+                    let tile = self
+                        .sim
+                        .grid
+                        .tiles
+                        .getn(WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
+                    let floor = tile.and_then(|tile| content.block(tile.floor));
+                    (
+                        floor.map(|def| def.is_liquid).unwrap_or(false),
+                        floor
+                            .and_then(|def| def.map_color)
+                            .unwrap_or(mind_core::content::Rgba::WHITE),
+                    )
+                };
                 Some(UnitDraw {
                     x: pos.x,
                     y: pos.y,
@@ -4348,6 +4396,12 @@ impl MindSimHost {
                     item,
                     is_player,
                     health,
+                    statuses,
+                    grounded: core.elevation < 0.001,
+                    hovering: def.hovering,
+                    emit_walk_effect: def.emit_walk_effect,
+                    floor_is_liquid,
+                    floor_color,
                 })
             })
             .collect()
