@@ -201,16 +201,31 @@ pub struct IncineratorDef {
 }
 
 /// `Wall` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WallDef {
     /// `Wall.autotile`.
     pub autotile: bool,
-    /// `Wall.baseExplosiveness`/`lightningChance` etc. are 10-hook data.
+    /// `Wall.lightningChance` (`-1` = disabled).
     pub lightning_chance: f32,
     /// `Wall.lightningDamage`.
     pub lightning_damage: f32,
     /// `Wall.lightningLength`.
     pub lightning_length: i32,
+    /// `Wall.chanceDeflect` (`-1` = disabled).
+    pub chance_deflect: f32,
+}
+
+impl Default for WallDef {
+    fn default() -> Self {
+        // `Wall.java:21-31` field defaults.
+        Self {
+            autotile: false,
+            lightning_chance: -1.0,
+            lightning_damage: 20.0,
+            lightning_length: 17,
+            chance_deflect: -1.0,
+        }
+    }
 }
 
 /// `Door`/`AutoDoor` family knobs.
@@ -744,6 +759,27 @@ impl BlockKindData {
             "radar" => {
                 if let BlockKindData::Radar(def) = self {
                     def.discovery_time = 600.0;
+                }
+            }
+            // `Blocks.java:1759-1772`: phase walls deflect bullets
+            // (`chanceDeflect = 10f; flashHit = true`).
+            "phase-wall" | "phase-wall-large" => {
+                if let BlockKindData::Wall(def) = self {
+                    def.chance_deflect = 10.0;
+                }
+            }
+            // `Blocks.java:1774-1785`: surge walls arc lightning
+            // (`lightningChance = 0.05f`; damage/length are the class defaults).
+            "surge-wall" | "surge-wall-large" => {
+                if let BlockKindData::Wall(def) = self {
+                    def.lightning_chance = 0.05;
+                }
+            }
+            // `Blocks.java:1873-1888`: Erekir surge walls arc for 30 damage.
+            "reinforced-surge-wall" | "reinforced-surge-wall-large" => {
+                if let BlockKindData::Wall(def) = self {
+                    def.lightning_chance = 0.05;
+                    def.lightning_damage = 30.0;
                 }
             }
             "silicon-smelter" => self.set_crafter(craft(vec![(item("silicon"), 1)], vec![], false)),

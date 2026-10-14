@@ -565,6 +565,110 @@ fn world_team(world: &bevy_ecs::world::World, entity: Entity) -> u8 {
         .unwrap_or(0)
 }
 
+/// `Wall.WallBuild.collision` (`Wall.java:164-208`): surge-wall lightning and
+/// phase-wall bullet deflection.
+///
+/// Called right after [`hit_building`] (Java `Wall.collision` runs
+/// `super.collision(bullet)` = `BuildingComp.collision`, which applies the
+/// damage). Returns Java's "remove" flag: `true` normally, `false` when a phase
+/// wall deflected the bullet so it keeps flying. `hit = 1f` (the white flash)
+/// and the lightning/deflect sounds are view/audio (H03/H07).
+pub fn wall_collision(ctx: &mut CombatCtx<'_>, bullet: Entity, target: Entity) -> bool {
+    let Some(block) = ctx
+        .world
+        .get::<crate::ecs::BuildingComp>(target)
+        .map(|building| building.block)
+    else {
+        return true;
+    };
+    // `Wall.*` knobs; every other block uses `Block.collision` (returns true).
+    let Some((lightning_chance, lightning_damage, lightning_length, chance_deflect)) = ctx
+        .world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.instance(block))
+        .and_then(|inst| match &inst.kind_data {
+            crate::world::BlockKindData::Wall(def) => Some((
+                def.lightning_chance,
+                def.lightning_damage,
+                def.lightning_length,
+                def.chance_deflect,
+            )),
+            _ => None,
+        })
+    else {
+        return true;
+    };
+
+    // `Wall.java:169-175`: `Lightning.create(team, lightningColor, damage, x, y,
+    // bullet.rotation() + 180f, length)`; `lightningColor = Pal.surge`.
+    if lightning_chance > 0.0 && ctx.rng.chance(RngStream::Sim, lightning_chance as f64) {
+        let (x, y) = ctx.pos(target).unwrap_or((0.0, 0.0));
+        let rotation = ctx.bullet(bullet).map(|b| b.rotation).unwrap_or(0.0);
+        let team = ctx.team(target);
+        let _ = crate::combat::lightning::create(
+            ctx,
+            team,
+            crate::content::registries::pal::SURGE,
+            lightning_damage,
+            x,
+            y,
+            rotation + 180.0,
+            lightning_length,
+        );
+    }
+
+    // `Wall.java:177-207`: deflected bullets reverse direction.
+    if chance_deflect > 0.0 {
+        let Some((vx, vy)) = ctx.world.get::<Vel>(bullet).map(|v| (v.x, v.y)) else {
+            return true;
+        };
+        let speed = (vx * vx + vy * vy).sqrt();
+        let reflectable = ctx
+            .bullet(bullet)
+            .and_then(|b| ctx.content.bullet(b.def))
+            .is_some_and(|def| def.reflectable);
+        // Slow and non-reflectable bullets are never deflected.
+        if speed <= 0.1 || !reflectable {
+            return true;
+        }
+        let damage = ctx.bullet(bullet).map(|b| b.damage).unwrap_or(0.0);
+        // Reflection chance falls with bullet damage (`chanceDeflect / damage`).
+        if !ctx
+            .rng
+            .chance(RngStream::Sim, (chance_deflect / damage) as f64)
+        {
+            return true;
+        }
+        // `bullet.trns(-vel)` then flip the dominant penetration axis.
+        let (bx, by) = ctx.pos(bullet).unwrap_or((0.0, 0.0));
+        let (nx, ny) = (bx - vx, by - vy);
+        if let Some(mut pos) = ctx.world.get_mut::<Pos>(bullet) {
+            pos.x = nx;
+            pos.y = ny;
+        }
+        let (wx, wy) = ctx.pos(target).unwrap_or((nx, ny));
+        let pen_x = (wx - nx).abs();
+        let pen_y = (wy - ny).abs();
+        if let Some(mut vel) = ctx.world.get_mut::<Vel>(bullet) {
+            if pen_x > pen_y {
+                vel.x = -vel.x;
+            } else {
+                vel.y = -vel.y;
+            }
+        }
+        let team = ctx.team(target);
+        if let Some(mut state) = ctx.world.get_mut::<Bullet>(bullet) {
+            state.owner = Some(target);
+            state.time += 1.0;
+        }
+        if let Some(mut comp) = ctx.world.get_mut::<TeamComp>(bullet) {
+            comp.team = team;
+        }
+        return false;
+    }
+    true
+}
+
 /// `BulletType.hitTile` (`BulletType.java:465-486`): create a fire on enemy
 /// hits, heal friendly non-construct buildings, or run the `hit` pipeline for
 /// direct enemy hits. Pierce bookkeeping stays in the callers
@@ -966,7 +1070,8 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
     let building_damage_multiplier = def.building_damage_multiplier;
     let _ = (max_damage_fraction, building_damage_multiplier);
     let sticky = state.sticky;
-    let bullet_team = ctx.team(bullet);
+    // The bullet's team is re-read per tile below: a `Wall` deflection steals
+    // the bullet for the wall's team mid-tick.
     let tile_size = crate::config::TILESIZE as f32;
     // `!collides` bullets (fire, liquid, lasers, empty) never hit buildings.
     if !collides && !collide_terrain && !collide_floor {
@@ -1007,6 +1112,10 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
             return true;
         }
         if let Some(target) = tile.build {
+            // A `Wall` deflection (`wall_collision`) steals the bullet for the
+            // wall's team mid-tick, so the friendly checks below must use the
+            // bullet's live team (`BulletComp.tileRaycast` re-reads `team`).
+            let bullet_team = ctx.team(bullet);
             // `BulletComp.checkUnderBuild` (BulletComp.java:212-225): a bullet
             // passes over `underBullets` buildings unless it was aimed at that
             // building, the def allows hitting under builds (`hitUnder`), the
@@ -1060,13 +1169,24 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
                 .map(|h| h.health)
                 .unwrap_or(0.0);
             let (hit_x, hit_y) = ctx.pos(bullet).unwrap_or(state.last);
-            if !same_team {
+            // `BulletComp.collision` (`BulletComp.java:269-293`): enemy hits run
+            // `build.collision(self())`, which damages the building
+            // (`BuildingComp.collision`) and may return "do not remove" (phase
+            // wall deflection, `Wall.java:164-208`).
+            let remove = if same_team {
+                false
+            } else {
                 hit_building(ctx, bullet, target);
-            }
+                wall_collision(ctx, bullet, target)
+            };
             // `BulletType.hitTile` (`BulletType.java:465-486`): enemy direct
             // hits run the effect pipeline, friendly heals apply, pierce stays
-            // below.
+            // below. It runs even when the bullet is deflected.
             hit_tile(ctx, bullet, target, hit_x, hit_y, initial_health, true);
+            if !remove && !collide_team {
+                // Deflected: Java skips the removal block and keeps raycasting.
+                return false;
+            }
             if pierce_building {
                 let sub = if pierce_damage_factor == 0.0 {
                     0.0
@@ -1117,6 +1237,9 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
 
     if outcome == CollisionOutcome::None {
         // Direct overlap fallback (fast bullets that land on the same tile).
+        // The raycast may have deflected the bullet onto the wall's team, so
+        // the friendly checks use its live team like the closure above.
+        let bullet_team = ctx.team(bullet);
         if let Some(target) = ctx
             .grid
             .tiles
@@ -1141,14 +1264,19 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
                     .map(|h| h.health)
                     .unwrap_or(0.0);
                 let (x, y) = ctx.pos(bullet).unwrap_or(state.last);
-                if !same_team {
+                let remove = if same_team {
+                    false
+                } else {
                     hit_building(ctx, bullet, target);
-                }
+                    wall_collision(ctx, bullet, target)
+                };
                 hit_tile(ctx, bullet, target, x, y, initial_health, true);
-                if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
-                    b.set(HIT);
+                if remove || collide_team {
+                    if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+                        b.set(HIT);
+                    }
+                    outcome = CollisionOutcome::Hit;
                 }
-                outcome = CollisionOutcome::Hit;
             }
         }
     }
