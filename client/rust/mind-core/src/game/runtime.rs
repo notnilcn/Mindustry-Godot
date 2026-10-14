@@ -393,13 +393,14 @@ pub fn campaign_tick_system(world: &mut World) {
             }
         }
         if runtime.session.wavetime <= 0.0 && runtime.session.rules.waves {
-            runtime.events.push(run_wave_campaign(&mut runtime.session));
+            let (event, spawn_index) = run_wave_campaign(&mut runtime.session);
+            runtime.events.push(event);
             // `Logic.runWave` -> `WaveSpawner.spawnEnemies`: the live unit
             // runtime spawns the pre-increment wave in `TickSet::RunWave`.
             if let Some(mut unit_runtime) =
                 world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>()
             {
-                unit_runtime.pending_wave = Some(runtime.session.wave - 1);
+                unit_runtime.pending_wave = Some(spawn_index);
             }
             // `WaveEvent` listener: `stats.wavesLasted++`.
             if let Some((planet, _)) = runtime.session.sector
@@ -1942,12 +1943,12 @@ mod tests {
         }
         {
             let runtime = world.get_resource::<CampaignRuntime>().expect("runtime");
-            assert_eq!(runtime.session.wave, 0, "wave not due yet");
+            assert_eq!(runtime.session.wave, 1, "wave not due yet");
             assert_eq!(runtime.session.wavetime, 1.0, "one tick per tick");
         }
         campaign_tick_system(&mut world);
         let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
-        assert_eq!(runtime.session.wave, 1, "wave fired at zero");
+        assert_eq!(runtime.session.wave, 2, "wave fired at zero");
         assert_eq!(runtime.session.wavetime, 7200.0, "spacing re-armed");
     }
 
@@ -2011,8 +2012,8 @@ mod tests {
         campaign_tick_system(&mut world);
         let runtime = world.remove_resource::<CampaignRuntime>().expect("runtime");
         assert_eq!(
-            runtime.session.wave, 1,
-            "Java runs the wave regardless of timer"
+            runtime.session.wave, 2,
+            "Java runs the wave regardless of timer (wave 1 -> 2)"
         );
     }
 

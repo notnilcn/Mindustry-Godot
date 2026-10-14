@@ -91,7 +91,7 @@ mod tests {
         let mut reloader = HostReloader::default();
         reloader.begin(&mut session);
         assert!(reloader.began && reloader.was_server);
-        assert_eq!(session.wave, 0, "logic.reset clears the match");
+        assert_eq!(session.wave, 1, "logic.reset restores wave 1");
         // Second begin is a no-op.
         session.wave = 9;
         reloader.begin(&mut session);

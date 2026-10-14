@@ -109,6 +109,10 @@ pub struct PlaySession {
     /// Per-match statistics.
     pub stats: GameStats,
     /// Current wave.
+    ///
+    /// Java's `GameState.wave` starts at 1 (`GameState.java:17`) and
+    /// `Logic.runWave` increments it AFTER the spawner consumed
+    /// `wave - 1` (`WaveSpawner.java:74`).
     pub wave: i32,
     /// Ticks until the next wave.
     pub wavetime: f32,
@@ -158,7 +162,7 @@ impl PlaySession {
             markers: MapMarkers::new(),
             objectives: MapObjectivesRuntime::new(),
             stats: GameStats::default(),
-            wave: 0,
+            wave: 1,
             wavetime: 0.0,
             game_over: false,
             after_game_over: false,
@@ -217,7 +221,7 @@ impl PlaySession {
         self.markers.clear();
         self.objectives.clear();
         self.stats.reset();
-        self.wave = 0;
+        self.wave = 1;
         self.wavetime = 0.0;
         self.game_over = false;
         self.after_game_over = false;
@@ -474,7 +478,9 @@ pub fn play_sector(
         .sector(planet, sector_id)
         .map(|sector| sector.info.info.clone())
     {
-        session.wave = record.wave;
+        // A port-native save written before the wave-start fix may hold 0;
+        // Java never writes 0 (`GameState.wave = 1`, `GameState.java:17`).
+        session.wave = record.wave.max(1);
         session.rules.waves = record.waves;
         session.rules.wave_spacing = record.wave_spacing;
         session.rules.win_wave = record.win_wave;
@@ -517,7 +523,12 @@ pub fn logic_play(session: &mut PlaySession) -> Vec<PlayEvent> {
 }
 
 /// `Logic.runWave()` campaign difficulty scaling.
-pub fn run_wave_campaign(session: &mut PlaySession) -> PlayEvent {
+///
+/// Returns the `SpawnGroup.getSpawned` index (the pre-increment `wave - 1`,
+/// `WaveSpawner.java:74`) alongside the event so callers cannot invert Java's
+/// order: `spawnEnemies()` runs BEFORE `state.wave++` (`Logic.java:319-321`).
+pub fn run_wave_campaign(session: &mut PlaySession) -> (PlayEvent, i32) {
+    let spawn_index = session.wave - 1;
     session.wave += 1;
     let multiplier = if session.is_campaign() {
         session.difficulty_wave_time_multiplier
@@ -525,7 +536,7 @@ pub fn run_wave_campaign(session: &mut PlaySession) -> PlayEvent {
         1.0
     };
     session.wavetime = session.rules.wave_spacing * multiplier;
-    PlayEvent::Wave
+    (PlayEvent::Wave, spawn_index)
 }
 
 /// `Logic.isWaitingWave` (`Logic.java:621-624`): the countdown is held while
@@ -1130,9 +1141,36 @@ mod tests {
         assert_eq!(session.phase, State::Playing);
 
         session.difficulty_wave_time_multiplier = 2.0;
-        let event = run_wave_campaign(&mut session);
+        let (event, spawn_index) = run_wave_campaign(&mut session);
         assert_eq!(event, PlayEvent::Wave);
-        assert_eq!(session.wave, 1);
+        assert_eq!(spawn_index, 0, "wave 1 spawns getSpawned(0)");
+        assert_eq!(session.wave, 2);
         assert_eq!(session.wavetime, session.rules.wave_spacing * 2.0);
+    }
+
+    /// T2b: a fresh session starts at Java's wave 1 (`GameState.java:17`) and
+    /// `logic.reset()` restores it (`Logic.java:308`).
+    #[test]
+    fn fresh_session_starts_at_wave_one() {
+        let mut session = PlaySession::new(Rules::default());
+        assert_eq!(session.wave, 1, "fresh session is wave 1");
+        session.wave = 5;
+        session.reset_world();
+        assert_eq!(session.wave, 1, "logic.reset restores wave 1");
+    }
+
+    /// T2b: `run_wave_campaign` returns the pre-increment `getSpawned` index
+    /// (`WaveSpawner.java:74`) so callers cannot invert Java's order.
+    #[test]
+    fn run_wave_returns_pre_increment_index() {
+        let mut session = PlaySession::new(Rules::default());
+        let (event, spawn_index) = run_wave_campaign(&mut session);
+        assert_eq!(event, PlayEvent::Wave);
+        assert_eq!(spawn_index, 0, "wave 1 -> getSpawned(0)");
+        assert_eq!(session.wave, 2);
+        session.wave = 5;
+        let (_, spawn_index) = run_wave_campaign(&mut session);
+        assert_eq!(spawn_index, 4, "wave 5 -> getSpawned(4)");
+        assert_eq!(session.wave, 6);
     }
 }

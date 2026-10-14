@@ -2718,8 +2718,10 @@ pub fn run_wave_system(world: &mut World) {
         return;
     };
 
-    // `SpawnGroup.getSpawned(state.wave - 1)`: the pending index is already the
-    // pre-increment wave (`MindCampaign.run_wave`/the campaign timer store it).
+    // `SpawnGroup.getSpawned(state.wave - 1)`: the pending value is the
+    // pre-increment wave minus one (`WaveSpawner.java:74`;
+    // `MindCampaign.run_wave`/the campaign timer return it from
+    // `run_wave_campaign`).
     let (groups, wave_team) = match world.get_resource::<CampaignRuntime>() {
         Some(campaign) if !campaign.session.rules.spawns.is_empty() => (
             groups_from_rules(&campaign.session.rules),
@@ -5335,6 +5337,107 @@ mod msav_tests {
             sim.group_counts().get("unit").copied().unwrap_or(0) >= 1,
             "groundZero wave spawned a live unit: {:?}",
             sim.group_counts()
+        );
+    }
+
+    /// T2b: resuming at wave 1 must spawn `getSpawned(0)` BEFORE the counter
+    /// increments (`Logic.java:319-321`, `WaveSpawner.java:74`). Ground Zero's
+    /// wave-1 group is ONE dagger; the flare group has `begin: 1`.
+    #[test]
+    fn ground_zero_wave_one_is_one_dagger() {
+        use crate::ecs::TeamId;
+        use crate::game::State;
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../assets/maps/serpulo/groundZero.msav");
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content");
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending: Vec<(usize, DecodedBase)> = {
+            let mut context = EditorContext::new(&mut grid, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("map imports");
+            std::mem::take(&mut context.pending_buildings)
+        };
+        grid.end_map_load(&content);
+
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let air = BlockId::AIR;
+        let mut sim = Sim::new(1, width, height, air, air);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        assert!(sim.materialize_map_buildings(&pending) > 0, "core linked");
+
+        let campaign = {
+            let content = &sim.unit_runtime().expect("runtime").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let mut session = PlaySession::new(Rules {
+            waves: true,
+            wave_timer: true,
+            wave_spacing: 1000.0,
+            default_team: 1,
+            wave_team: 2,
+            ..Rules::default()
+        });
+        session.phase = State::Playing;
+        session.spawn_count = 1;
+        session.wavetime = 0.001;
+        // Stable player core so `checkGameState` does not end the match.
+        let core_entity = Entity::from_raw_u32(1).expect("entity");
+        session
+            .teams
+            .register_core(core_entity, TeamId(1), &session.rules);
+        assert_eq!(session.wave, 1, "resumed session starts at wave 1");
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(session, campaign));
+
+        for _ in 0..120 {
+            sim.tick().expect("tick");
+        }
+        let runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("campaign runtime");
+        assert_eq!(runtime.session.wave, 2, "wave 1 fired and incremented");
+        sim.ecs.0.insert_resource(runtime);
+
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_id("dagger")
+            .expect("dagger");
+        let mut wave_units: Vec<u16> = Vec::new();
+        for entity in sim.ecs.0.iter_entities() {
+            if entity.get::<TeamComp>().map(|t| t.team) != Some(2) {
+                continue;
+            }
+            if let Some(unit_type) = entity.get::<UnitTypeComp>() {
+                wave_units.push(unit_type.type_id.raw());
+            }
+        }
+        assert_eq!(
+            wave_units,
+            vec![dagger.raw()],
+            "wave 1 is exactly one dagger (getSpawned(0))"
         );
     }
 

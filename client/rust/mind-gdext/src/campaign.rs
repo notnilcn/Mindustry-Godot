@@ -1095,10 +1095,9 @@ impl MindCampaign {
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
-                let _ = run_wave_campaign(&mut runtime.session);
-                let wave = runtime.session.wave;
+                let (_, spawn_index) = run_wave_campaign(&mut runtime.session);
                 host.bind_mut().put_campaign_runtime(runtime);
-                host.bind_mut().request_wave_spawn(wave - 1);
+                host.bind_mut().request_wave_spawn(spawn_index);
             }
         }
         true
