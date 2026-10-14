@@ -849,7 +849,9 @@ fn cargo_pickup_deliver() -> Result<ScenarioOutput> {
             }
         } else if tick >= in_transit_until {
             let point = &mut points[trips % 2];
-            point.update_stale(true);
+            // The drop-off leaves the point below capacity, which resets its
+            // stale timer (`UnitCargoUnloadPoint.java:64-66`).
+            point.update_stale(0, 10, 1.0);
             delivered += 10;
             in_transit_until = 0;
             if trips == 0 {
@@ -861,14 +863,12 @@ fn cargo_pickup_deliver() -> Result<ScenarioOutput> {
         checksummer.part(&delivered);
     }
 
-    // Staleness flips exactly after 360 empty ticks.
-    let mut stale = UnitCargoUnloadPoint {
-        stale_time: 360.0,
-        ..UnitCargoUnloadPoint::default()
-    };
+    // Staleness flips exactly after 360 full ticks
+    // (`UnitCargoUnloadPoint.java:69-73`).
+    let mut stale = UnitCargoUnloadPoint::default();
     let mut flips_at = None;
     for tick in 0..400u64 {
-        if stale.update_stale(false) && flips_at.is_none() {
+        if stale.update_stale(10, 10, 1.0) && flips_at.is_none() {
             flips_at = Some(tick);
         }
     }

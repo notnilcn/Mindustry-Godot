@@ -894,6 +894,32 @@ impl BuildingBehavior for RepairTurretBehavior {
             .get::<RepairTurret>(e)
             .is_some_and(|turret| turret.target.is_some())
     }
+
+    /// `RepairPointBuild.version() = 1` (`RepairTurret.java:252`).
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    /// `RepairPointBuild.write`: `super.write(write); write.f(rotation)`
+    /// (`RepairTurret.java:243-248`; shared by repair-point and repair-turret).
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        w.f(world
+            .get::<RepairTurret>(e)
+            .map(|turret| turret.rotation)
+            .unwrap_or(0.0));
+    }
+
+    /// `RepairPointBuild.read`: `if(revision >= 1) rotation = read.f();`
+    /// (`RepairTurret.java:250-254`).
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        if revision < 1 {
+            return;
+        }
+        let rotation = r.f().unwrap_or(0.0);
+        if let Some(mut turret) = world.get_mut::<RepairTurret>(e) {
+            turret.rotation = rotation;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -956,12 +982,35 @@ impl BuildingBehavior for CargoUnloadPointBehavior {
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
-        let has_items = world
+        let total = world
             .get::<ItemModule>(e)
-            .map(|items| items.total > 0)
-            .unwrap_or(false);
+            .map(|items| items.total)
+            .unwrap_or(0);
+        let capacity = transfer::item_capacity(world, e);
+        let delta = crate::world::update::delta(world, e);
         if let Some(mut point) = world.get_mut::<UnitCargoUnloadPoint>(e) {
-            let _ = point.update_stale(has_items);
+            let _ = point.update_stale(total, capacity, delta);
+        }
+    }
+
+    /// `UnitCargoUnloadPointBuild.write` (`UnitCargoUnloadPoint.java:90-96`):
+    /// `s item == null ? -1 : item.id`, then `bool stale`.
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        let Some(point) = world.get::<UnitCargoUnloadPoint>(e) else {
+            return;
+        };
+        w.s(point.item.map(|item| item.raw() as i16).unwrap_or(-1));
+        w.bool(point.stale);
+    }
+
+    /// `UnitCargoUnloadPointBuild.read` (`UnitCargoUnloadPoint.java:99-103`):
+    /// `item = content.item(read.s())` (`-1` = null), `stale = read.bool()`.
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, _revision: u8) {
+        let item = r.s().unwrap_or(-1);
+        let stale = r.bool().unwrap_or(false);
+        if let Some(mut point) = world.get_mut::<UnitCargoUnloadPoint>(e) {
+            point.item = (item >= 0).then(|| ItemId::new(item as u16));
+            point.stale = stale;
         }
     }
 }

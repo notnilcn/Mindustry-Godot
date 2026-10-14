@@ -422,6 +422,57 @@ fn liquid_bridge_body_matches_java() {
     assert!(state.was_moved && state.moved);
 }
 
+/// H02 T13: `RepairPointBuild` body (`RepairTurret.java:243-254`): revision 1
+/// writes one `f rotation` (`version() = 1`); the shared body of repair-point
+/// and repair-turret.
+#[test]
+fn repair_turret_body_matches_java() {
+    use crate::world::blocks::units::RepairTurret;
+
+    let (mut world, e, inst) = spawn_block("repair-turret");
+    let mut bytes = Vec::new();
+    {
+        let mut w = WireWriter::new(&mut bytes);
+        w.f(37.5);
+    }
+    assert_body_roundtrip(&mut world, &inst, e, &bytes, 1);
+    let state = world.get::<RepairTurret>(e).expect("state");
+    assert_eq!(state.rotation, 37.5);
+}
+
+/// H02 T13: `UnitCargoUnloadPointBuild` body
+/// (`UnitCargoUnloadPoint.java:90-103`): `s item` (`-1` = null) then
+/// `bool stale`.
+#[test]
+fn cargo_unload_point_body_matches_java() {
+    use crate::world::blocks::units::UnitCargoUnloadPoint;
+
+    let (mut world, e, inst) = spawn_block("unit-cargo-unload-point");
+    let mut bytes = Vec::new();
+    {
+        let mut w = WireWriter::new(&mut bytes);
+        w.s(0);
+        w.bool(true);
+    }
+    assert_body_roundtrip(&mut world, &inst, e, &bytes, 0);
+    let state = world.get::<UnitCargoUnloadPoint>(e).expect("state");
+    assert_eq!(state.item.map(|item| item.raw()), Some(0));
+    assert!(state.stale);
+
+    // `-1` (no configured item) round-trips as `None`.
+    let (mut world, e, inst) = spawn_block("unit-cargo-unload-point");
+    let mut bytes = Vec::new();
+    {
+        let mut w = WireWriter::new(&mut bytes);
+        w.s(-1);
+        w.bool(false);
+    }
+    assert_body_roundtrip(&mut world, &inst, e, &bytes, 0);
+    let state = world.get::<UnitCargoUnloadPoint>(e).expect("state");
+    assert!(state.item.is_none());
+    assert!(!state.stale);
+}
+
 /// The smoke helper also asserts the `WorldGrid` fixture compiles in this file.
 #[allow(dead_code)]
 fn _grid_fixture() -> WorldGrid {
