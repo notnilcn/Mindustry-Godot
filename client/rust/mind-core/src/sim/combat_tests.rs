@@ -3926,6 +3926,108 @@ fn force_projector_phase_boost() {
     assert_eq!(count, 0, "the second fabric is consumed on the next cycle");
 }
 
+/// H02 T11: a dagger standing on an enemy shock mine triggers the tendrils
+/// (`ShockMineBuild.unitOn`); the mine pays `tileDamage` and cannot re-trigger
+/// before `cooldown` ticks.
+#[test]
+fn shock_mine_zaps_enemy_dagger() {
+    use crate::world::blocks::defense::shields::ShockMineState;
+
+    let mut sim = live_sim(48);
+    let mine = place(&mut sim, 20, 20, "shock-mine", 1);
+    let mine_start = health(&sim, mine).expect("mine health");
+    assert_eq!(mine_start, 50.0, "vanilla shock-mine health");
+    // Tile centre: `WorldGrid::to_tile` rounds, so only `tile * 8` lands on
+    // tile (20, 20) (the plan's (164,164) is the corner between tiles).
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 160.0, 160.0, 0.0)
+        .expect("dagger");
+    let dagger_start = health(&sim, dagger).expect("dagger health");
+    let hold = |sim: &mut Sim, dagger| {
+        if let Some(mut vel) = sim.ecs.0.get_mut::<Vel>(dagger) {
+            vel.x = 0.0;
+            vel.y = 0.0;
+        }
+        sim.tick().expect("tick");
+    };
+    for _ in 0..2 {
+        hold(&mut sim, dagger);
+    }
+    let first = sim
+        .ecs
+        .0
+        .get::<ShockMineState>(mine)
+        .and_then(|state| state.last_trigger);
+    assert!(first.is_some(), "mine triggered on the unit");
+    assert!(
+        health(&sim, dagger).is_some_and(|hp| hp < dagger_start),
+        "dagger zapped by the mine"
+    );
+    assert!(
+        health(&sim, mine).is_some_and(|hp| hp <= mine_start - 7.0 + 0.001),
+        "mine paid tileDamage: {:?}",
+        health(&sim, mine)
+    );
+    // No re-trigger inside the 80-tick cooldown.
+    for _ in 0..40 {
+        hold(&mut sim, dagger);
+    }
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ShockMineState>(mine)
+            .and_then(|state| state.last_trigger),
+        first,
+        "cooldown blocks the re-trigger"
+    );
+    // Past the cooldown the mine fires again.
+    let mut refreshed = false;
+    for _ in 0..60 {
+        if sim.ecs.0.get_entity(dagger).is_err() {
+            break;
+        }
+        hold(&mut sim, dagger);
+        if sim
+            .ecs
+            .0
+            .get::<ShockMineState>(mine)
+            .and_then(|state| state.last_trigger)
+            != first
+        {
+            refreshed = true;
+            break;
+        }
+    }
+    assert!(refreshed, "second trigger after the cooldown");
+}
+
+/// H02 T11: a running conveyor pushes a grounded friendly unit along its
+/// rotation (`ConveyorBuild.unitOn`).
+#[test]
+fn conveyor_carries_dagger() {
+    let mut sim = live_sim(48);
+    for x in 10..=20 {
+        place(&mut sim, x, 20, "titanium-conveyor", 1);
+    }
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 96.0, 160.0, 0.0)
+        .expect("dagger");
+    let start_x = sim.ecs.0.get::<Pos>(dagger).map(|p| p.x).unwrap_or(0.0);
+    for i in 0..60 {
+        sim.tick().expect("tick");
+        if i % 10 == 0 {
+            let p = sim.ecs.0.get::<Pos>(dagger).map(|p| (p.x, p.y));
+            let v = sim.ecs.0.get::<Vel>(dagger).map(|v| (v.x, v.y));
+            eprintln!("CONV i={i} pos={p:?} vel={v:?}");
+        }
+    }
+    let end_x = sim.ecs.0.get::<Pos>(dagger).map(|p| p.x).unwrap_or(0.0);
+    assert!(
+        end_x > start_x + 8.0,
+        "belt carried the dagger east: {start_x} -> {end_x}"
+    );
+}
+
 /// G01 T14: `explosion_absorbed` covers the point when a live shield polygon
 /// contains it and skips the ignore team's own shields.
 #[test]

@@ -327,15 +327,18 @@ pub fn update_unit_environment(
         }
     }
 
+    // `UnitComp.java:832-845`: a grounded, non-hovering unit standing on a
+    // building's tile triggers `unitOn` (shock mines, conveyor push).
+    let (tx, ty) = (WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
+
     // `floor.damageTaken` (`UnitComp.java:837-841`).
-    if grounded && floor_damage_taken > 0.0 {
+    if grounded && !def.hovering && floor_damage_taken > 0.0 {
         crate::combat::damage::area::apply_health(world, entity, floor_damage_taken);
     }
 
     // `if(tile != null && !canPassOn())`: boosted units lift off, others die
     // (`UnitComp.java:849-855`). `EntityCollisions.move` prevents the corner
     // clips that made the old push-out necessary.
-    let (tx, ty) = (WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
     if grid.tiles.in_bounds(tx, ty)
         && !crate::ai::types::ground::unit_can_pass(world, grid, content, entity, tx, ty)
     {
@@ -353,5 +356,28 @@ pub fn update_unit_environment(
     }
     if let Some(mut stored) = world.get_mut::<Vel>(entity) {
         *stored = vel;
+    }
+
+    // `UnitComp.java:832-835`: a grounded, non-hovering unit standing on a
+    // building's tile triggers `unitOn` (shock mines, conveyor push). Runs
+    // after the local `vel` write-back so an impulse (belt push) survives.
+    let tile_build = i16::try_from(tx)
+        .ok()
+        .zip(i16::try_from(ty).ok())
+        .and_then(|(tx, ty)| grid.entity_at(TilePos::new(tx, ty)));
+    if grounded
+        && !def.hovering
+        && let Some(build) = tile_build
+    {
+        let behavior = world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| {
+                let block = world.get::<crate::entities::comp::Building>(build)?.block;
+                table.instance(block)
+            })
+            .map(|inst| inst.behavior.clone());
+        if let Some(behavior) = behavior {
+            behavior.unit_on(world, build, entity);
+        }
     }
 }

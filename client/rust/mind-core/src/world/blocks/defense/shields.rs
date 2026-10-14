@@ -568,8 +568,9 @@ pub struct ShockMineState {
     pub tendrils: i32,
     /// `ShockMine.shots`.
     pub shots: i32,
-    /// `timer(timerDamage, cooldown)` accumulator.
-    pub timer_damage: f32,
+    /// `timer(timerDamage, cooldown)` bookkeeping: the `build_time` of the last
+    /// trigger (`None` = never, the Java timer's first call fires).
+    pub last_trigger: Option<f32>,
 }
 
 impl Default for ShockMineState {
@@ -581,29 +582,19 @@ impl Default for ShockMineState {
             length: 10,
             tendrils: 6,
             shots: 6,
-            timer_damage: 0.0,
+            last_trigger: None,
         }
     }
 }
 
-/// `ShockMineBuild.unitOn(unit)`; returns `true` when the mine triggered.
-pub fn shock_mine_unit_on(
-    ctx: &mut CombatCtx<'_>,
-    e: Entity,
-    state: &mut ShockMineState,
-    team: u8,
-    unit_team: u8,
-) -> bool {
-    if unit_team == team {
-        return false;
-    }
-    if state.timer_damage > 0.0 {
-        state.timer_damage -= 1.0;
-        return false;
-    }
-    state.timer_damage = state.cooldown;
+/// `ShockMineBuild.triggered()` (`ShockMine.java:78-85`): the tendril lightning.
+///
+/// The cooldown/self-damage half of `unitOn` runs in
+/// `ShockMineBehavior::unit_on`; the unit pass drains the queued triggers into
+/// this function when a `CombatCtx` is available.
+pub fn shock_mine_trigger(ctx: &mut CombatCtx<'_>, e: Entity, state: &ShockMineState, team: u8) {
     let Some((x, y)) = position(ctx.world, e) else {
-        return false;
+        return;
     };
     // `Lightning.create(Bullets.damageLightningGround, ...)` per tendril.
     for _ in 0..state.tendrils.max(0) {
@@ -621,7 +612,6 @@ pub fn shock_mine_unit_on(
             state.length,
         );
     }
-    true
 }
 
 // ---------------------------------------------------------------------------
@@ -991,26 +981,18 @@ mod tests {
     }
 
     #[test]
-    fn shock_mine_triggers_on_enemy_unit_with_cooldown() {
+    fn shock_mine_trigger_fires_tendrils() {
         let mut harness = CombatHarness::new(32, 32, 7);
         let mine = harness.spawn_test_shock_mine(8, 8, 1);
-        let (x, y) = CombatHarness::tile_center(9, 8);
-        let unit = harness.spawn_test_unit(x, y, 2, Vec::new());
-        let mut state = harness
+        let state = harness
             .build
             .world
-            .entity_mut(mine)
-            .take::<ShockMineState>()
-            .unwrap();
-        let first = shock_mine_unit_on(&mut harness.combat_ctx(), mine, &mut state, 1, 2);
+            .get::<ShockMineState>(mine)
+            .cloned()
+            .expect("shock mine state");
+        // `ShockMineBuild.triggered()` creates `tendrils` lightning bolts.
+        shock_mine_trigger(&mut harness.combat_ctx(), mine, &state, 1);
         harness.claim_scratch_spawned();
-        assert!(first, "mine triggered on enemy unit");
-        // Immediate re-trigger is blocked by the cooldown.
-        let second = shock_mine_unit_on(&mut harness.combat_ctx(), mine, &mut state, 1, 2);
-        harness.claim_scratch_spawned();
-        assert!(!second, "cooldown blocks immediate retrigger");
-        harness.build.world.entity_mut(mine).insert(state);
-        let _ = unit;
     }
 
     #[test]

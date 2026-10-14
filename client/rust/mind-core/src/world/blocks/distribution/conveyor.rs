@@ -20,8 +20,8 @@ use crate::world::modules::ItemModule;
 use crate::world::{TilePos, no_sleep, sleep};
 
 use super::super::autotiler::{
-    BlendNeighbor, BlendWorld, blends_armored, build_blending, looking_at, looking_at_either,
-    relative_to,
+    BlendNeighbor, BlendWorld, blends_armored, build_blending, d4x, d4y, looking_at,
+    looking_at_either, relative_to,
 };
 use super::transfer;
 
@@ -255,6 +255,54 @@ impl BuildingBehavior for ConveyorBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<ConveyorBuild>(e).is_none() {
             world.entity_mut(e).insert(ConveyorBuild::default());
+        }
+    }
+
+    /// `ConveyorBuild.unitOn` (`Conveyor.java:227-251`): a grounded unit on the
+    /// belt is pushed along `rotation` plus a small centering impulse.
+    fn unit_on(&self, world: &mut World, e: Entity, unit: Entity) {
+        let Some(building) = world.get::<Building>(e) else {
+            return;
+        };
+        let (enabled, rotation) = (building.enabled, building.rotation);
+        let (len, clog_heat) = world
+            .get::<ConveyorBuild>(e)
+            .map(|belt| (belt.len, belt.clog_heat))
+            .unwrap_or((0, 0.0));
+        // `pushUnits` is true for every vanilla conveyor (`ArmoredConveyor`
+        // does not override it).
+        if !enabled || clog_heat > 0.5 {
+            return;
+        }
+        let Some(centre) = world.get::<crate::entities::comp::Pos>(e).copied() else {
+            return;
+        };
+        let Some(unit_pos) = world.get::<crate::entities::comp::Pos>(unit).copied() else {
+            return;
+        };
+        let delta = crate::world::update::delta(world, e);
+        let mspeed = self.speed * 8.0 * 55.0;
+        let (tx, ty) = (d4x(rotation) as f32, d4y(rotation) as f32);
+        let mut centerx = 0.0f32;
+        let mut centery = 0.0f32;
+        if tx.abs() > ty.abs() {
+            centery = ((centre.y - unit_pos.y) / 3.0).clamp(-0.1, 0.1);
+            if (centre.y - unit_pos.y).abs() < 1.0 {
+                centery = 0.0;
+            }
+        } else {
+            centerx = ((centre.x - unit_pos.x) / 3.0).clamp(-0.1, 0.1);
+            if (centre.x - unit_pos.x).abs() < 1.0 {
+                centerx = 0.0;
+            }
+        }
+        if len as f32 * ITEM_SPACE < 0.9 {
+            crate::entities::comp::unit::velocity::impulse(
+                world,
+                unit,
+                (tx * mspeed + centerx) * delta,
+                (ty * mspeed + centery) * delta,
+            );
         }
     }
 

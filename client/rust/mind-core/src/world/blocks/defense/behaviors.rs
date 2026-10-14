@@ -17,7 +17,7 @@ use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
 use crate::entities::comp::{Building, Pos, TeamComp};
-use crate::world::behavior::{BehaviorRegistry, BuildingBehavior};
+use crate::world::behavior::{BehaviorRegistry, BuildingBehavior, PendingShockMineTriggers};
 use crate::world::modules::PowerModule;
 
 use super::projectors::{
@@ -316,11 +316,38 @@ impl BuildingBehavior for ShockMineBehavior {
         world.entity_mut(e).insert(self.state.clone());
     }
 
-    fn update_tile(&self, world: &mut World, e: Entity) {
-        if let Some(mut state) = world.get_mut::<ShockMineState>(e)
-            && state.timer_damage > 0.0
+    /// `ShockMineBuild.unitOn` (`ShockMine.java:69-85`): an enemy unit on the
+    /// mine's tile triggers the tendrils at most every `cooldown` ticks and
+    /// costs the mine `tileDamage` health. The tendril creation needs a
+    /// `CombatCtx`, so the trigger is queued for the unit pass to drain.
+    fn unit_on(&self, world: &mut World, e: Entity, unit: Entity) {
+        let enabled = world
+            .get::<Building>(e)
+            .is_some_and(|building| building.enabled);
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        let unit_team = world.get::<TeamComp>(unit).map(|t| t.team).unwrap_or(0);
+        if !enabled || unit_team == team {
+            return;
+        }
+        let now = crate::world::update::build_time(world);
+        let tile_damage = {
+            let Some(mut state) = world.get_mut::<ShockMineState>(e) else {
+                return;
+            };
+            // `timer(timerDamage, cooldown)`: the first call fires.
+            if state
+                .last_trigger
+                .is_some_and(|last| now - last < state.cooldown)
+            {
+                return;
+            }
+            state.last_trigger = Some(now);
+            state.tile_damage
+        };
+        crate::combat::damage::area::apply_health(world, e, tile_damage);
         {
-            state.timer_damage -= 1.0;
+            let mut pending = world.get_resource_or_insert_with(PendingShockMineTriggers::default);
+            pending.0.push((e, team));
         }
     }
 }
