@@ -89,6 +89,15 @@ pub fn can_replace(def: &BlockDef, other: &BlockDef) -> bool {
     if other.kind == BlockKind::ConstructBlock || other.always_replace {
         return true;
     }
+    // `CoreBlock.canReplace` (`CoreBlock.java:179-183`): cores upgrade smaller
+    // cores.
+    if def.kind == BlockKind::CoreBlock
+        && other.kind == BlockKind::CoreBlock
+        && def.size >= other.size
+        && other.id != def.id
+    {
+        return true;
+    }
     if other.privileged {
         return false;
     }
@@ -516,8 +525,102 @@ pub fn valid_place_query(
         }
         _ => {}
     }
-    // `canPlaceOn` is `true` on `Block`; T4 adds the `CoreBlock` rule.
+    // (c) `Block.canPlaceOn` (`CoreBlock.canPlaceOn`, `CoreBlock.java:185-203`).
+    // Deviations: `requiresCoreZone` is treated false (no Erekir cores in the
+    // port), and the API/dev form (`PlaceFlags::API`, `check_core_radius` off)
+    // skips the check like it skips the other world gates, so map/test staging
+    // of cores keeps working; the player form runs it exactly as Java.
+    if def.kind == BlockKind::CoreBlock
+        && flags.check_core_radius
+        && !core_can_place_on(content, grid, world, rules, def, team, x, y)
+    {
+        return false;
+    }
     true
+}
+
+/// `CoreBlock.canPlaceOn` (`CoreBlock.java:185-203`): a `core-zone`-free
+/// footprint of allowed floors is always placeable; otherwise the team's core
+/// must hold the requirements and the centre tile must hold a smaller core.
+/// `requiresCoreZone` is true only for the Erekir cores; treated as false (the
+/// port's Serpulo content never sets it).
+#[allow(clippy::too_many_arguments)]
+fn core_can_place_on(
+    content: &ContentRegistry,
+    grid: &WorldGrid,
+    world: Option<&bevy_ecs::world::World>,
+    rules: &BuildRules,
+    def: &BlockDef,
+    team: u8,
+    x: i32,
+    y: i32,
+) -> bool {
+    if rules.editor || rules.core_build_and_config {
+        return true;
+    }
+    let size = def.size.max(1);
+    let offset = -(size - 1) / 2;
+    let mut any_core_or_disallowed = false;
+    for dx in 0..size {
+        for dy in 0..size {
+            let tx = x + offset + dx;
+            let ty = y + offset + dy;
+            if !grid.tiles.in_bounds(tx, ty) {
+                return false;
+            }
+            let tile = grid.tile(tx, ty);
+            let floor_allows = content
+                .block(tile.floor)
+                .is_some_and(|floor| floor.allow_core_placement);
+            let holds_core = content
+                .block(tile.block)
+                .is_some_and(|block| block.kind == BlockKind::CoreBlock);
+            if !floor_allows || holds_core {
+                any_core_or_disallowed = true;
+            }
+        }
+    }
+    if !any_core_or_disallowed {
+        return true;
+    }
+    // Without a world the team core/items cannot be read (harness paths).
+    let Some(world) = world else {
+        return true;
+    };
+    let Some(core) = first_team_core(world, team) else {
+        return false;
+    };
+    if !rules.infinite_resources {
+        let items = world.get::<crate::world::modules::ItemModule>(core);
+        for stack in &def.requirements {
+            let amount = ((stack.amount as f32) * rules.build_cost_multiplier).round() as i32;
+            if items.map(|module| module.get(stack.item)).unwrap_or(0) < amount {
+                return false;
+            }
+        }
+    }
+    let center = &grid.tile(x, y);
+    content
+        .block(center.block)
+        .is_some_and(|block| block.kind == BlockKind::CoreBlock && def.size > block.size)
+}
+
+/// The team's core (`Team.core()`): first `CoreBuild` of `team` by entity
+/// index.
+fn first_team_core(world: &bevy_ecs::world::World, team: u8) -> Option<bevy_ecs::entity::Entity> {
+    let mut cores: Vec<(u32, bevy_ecs::entity::Entity)> = world
+        .iter_entities()
+        .filter(|entity| entity.contains::<crate::world::blocks::storage::CoreBuild>())
+        .filter_map(|entity| {
+            let core_team = entity.get::<TeamComp>()?.team;
+            if core_team != team {
+                return None;
+            }
+            Some((entity.id().index().index(), entity.id()))
+        })
+        .collect();
+    cores.sort_unstable_by_key(|(index, _)| *index);
+    cores.first().map(|(_, entity)| *entity)
 }
 
 /// `Block.bounds(x, y)` (`Block.java:1023-1025`) in world pixels: size in

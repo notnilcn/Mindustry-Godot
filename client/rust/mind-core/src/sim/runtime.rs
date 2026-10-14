@@ -516,6 +516,42 @@ impl SimRuntime {
         let Some(def) = self.content.block(block) else {
             return false;
         };
+        // `CoreBlock.placeBegan` + `beforePlaceBegan` (`CoreBlock.java:205-239`):
+        // placing a core over a same-team core replaces it immediately,
+        // keeping the old items minus the requirements.
+        if def.kind == crate::content::BlockKind::CoreBlock
+            && let Some(old) = grid.entity_at(TilePos::new(x, y))
+            && world
+                .get::<crate::entities::comp::TeamComp>(old)
+                .map(|t| t.team)
+                == Some(team)
+            && world
+                .get::<crate::world::blocks::storage::CoreBuild>(old)
+                .is_some()
+        {
+            let mut next_items = world.get::<ItemModule>(old).cloned();
+            let infinite = world
+                .get_resource::<BuildRules>()
+                .map(|rules| rules.infinite_resources)
+                .unwrap_or(false);
+            if !infinite && let Some(items) = next_items.as_mut() {
+                for stack in &def.requirements {
+                    let amount = ((stack.amount as f32) * cost_multiplier).round() as i32;
+                    items.remove(stack.item, amount);
+                }
+            }
+            self.set_block_raw(world, grid, x, y, block, rot, team);
+            let Some(new_entity) = grid.entity_at(TilePos::new(x, y)) else {
+                return false;
+            };
+            // `items.set(nextItems)` force-sets the totals.
+            if let Some(items) = next_items {
+                world.entity_mut(new_entity).insert(items);
+            }
+            let grid_ref: &WorldGrid = grid;
+            self.placed_hooks(world, grid_ref, new_entity);
+            return true;
+        }
         let (size, build_time, requirements) = (def.size, def.build_time, def.requirements.clone());
         let Some(sub) = self.construct_block(size) else {
             // No construct singleton for this size: fall back to the
