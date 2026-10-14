@@ -704,6 +704,181 @@ pub fn set_power_void(world: &mut World, entity: Entity) {
     set_status(world, entity, 1.0);
 }
 
+/// `BeamNode.BeamNodeBuild` state (`BeamNode.java:150-160`).
+///
+/// The four directional links are rebuilt from the live grid by
+/// [`update_beam_directions`] (called from `Sim::refresh_beam_nodes` when
+/// `WorldGrid.tile_changes` moved).
+#[derive(Debug, Clone, Copy, PartialEq, bevy_ecs::component::Component)]
+pub struct BeamNodeState {
+    /// `links[i]`: the building direction `i` (`Geometry.d4`) currently feeds.
+    pub links: [Option<Entity>; 4],
+    /// `lastChange`: the `WorldGrid.tile_changes` the links were resolved for.
+    pub last_change: i32,
+    /// `BeamNode.range` (tiles).
+    pub range: i32,
+}
+
+impl Default for BeamNodeState {
+    fn default() -> Self {
+        // `BeamNode.java`: `lastChange = -1`, empty links.
+        Self {
+            links: [None; 4],
+            last_change: -1,
+            range: 10,
+        }
+    }
+}
+
+/// `BeamNode` behavior (`BeamNode.java:190-196`): the direction update itself
+/// needs the grid, so `Sim::refresh_beam_nodes` runs it; this only installs the
+/// state carrying `range`/`lastChange`.
+#[derive(Debug, Clone, Copy)]
+pub struct BeamNodeBehavior {
+    /// `BeamNode.range`.
+    pub range: i32,
+}
+
+impl BuildingBehavior for BeamNodeBehavior {
+    fn create_state(&self, world: &mut World, e: Entity) {
+        if world.get::<BeamNodeState>(e).is_none() {
+            world.entity_mut(e).insert(BeamNodeState {
+                range: self.range,
+                ..BeamNodeState::default()
+            });
+        }
+    }
+}
+
+/// `BeamNode.BeamNodeBuild.updateDirections` (`BeamNode.java:241-293`): link
+/// the first same-team powered, `connectedPower`, non-`PowerNode` building in
+/// each of the four directions within `range` tiles, stopping at insulated
+/// buildings, and reflow/merge the power graphs on every change.
+pub fn update_beam_directions(
+    graphs: &mut PowerGrids,
+    world: &mut World,
+    grid: &WorldGrid,
+    e: Entity,
+) {
+    let Some((tile, block)) = world
+        .get::<Building>(e)
+        .map(|building| (building.tile, building.block))
+    else {
+        return;
+    };
+    let Some(mut state) = world.get::<BeamNodeState>(e).copied() else {
+        return;
+    };
+    let range = state.range;
+    let size = world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.get(block))
+        .map(|inst| inst.def.size.max(1))
+        .unwrap_or(1);
+    let team = world
+        .get::<crate::entities::comp::TeamComp>(e)
+        .map(|comp| comp.team)
+        .unwrap_or(0);
+
+    for i in 0..4u8 {
+        let prev = state.links[i as usize];
+        let (dx, dy) = crate::world::blocks::autotiler::d4(i);
+        state.links[i as usize] = None;
+        let offset = size / 2;
+        // `for(j = 1 + offset; j <= range + offset; j++)`.
+        for j in (1 + offset)..=(range + offset) {
+            let tx = tile.x() as i32 + j * dx;
+            let ty = tile.y() as i32 + j * dy;
+            if !grid.tiles.in_bounds(tx, ty) {
+                continue;
+            }
+            let Some(other) = grid.tiles.get(tx, ty).build else {
+                continue;
+            };
+            // `other.isInsulated()` stops the scan.
+            let insulated = world
+                .get::<Building>(other)
+                .and_then(|b| {
+                    world
+                        .get_resource::<crate::world::block::BlockTable>()
+                        .and_then(|table| table.get(b.block))
+                })
+                .is_some_and(|inst| inst.def.insulated);
+            if insulated {
+                break;
+            }
+            // `other.block.hasPower && connectedPower && same team &&
+            // !(other.block instanceof PowerNode)`.
+            let has_power = world.get::<PowerModule>(other).is_some();
+            let same_team = world
+                .get::<crate::entities::comp::TeamComp>(other)
+                .map(|comp| comp.team)
+                == Some(team);
+            let is_node = world.get::<PowerNodeConfig>(other).is_some();
+            if has_power && same_team && !is_node {
+                state.links[i as usize] = Some(other);
+                break;
+            }
+        }
+
+        let next = state.links[i as usize];
+        if next == prev {
+            continue;
+        }
+        let own_pack = super::module::pack(world, e);
+        // Unlink the old direction and reflow both ends (`BeamNode.java:265-282`).
+        if let Some(prev) = prev
+            && world.get_entity(prev).is_ok()
+        {
+            let prev_pack = super::module::pack(world, prev);
+            if let Some(mut module) = world.get_mut::<PowerModule>(e) {
+                module.links.retain(|value| *value != prev_pack);
+            }
+            if let Some(mut module) = world.get_mut::<PowerModule>(prev) {
+                module.links.retain(|value| *value != own_pack);
+            }
+            graphs.reflow(world, grid, e);
+            let same_graph = world
+                .get::<PowerModule>(prev)
+                .zip(world.get::<PowerModule>(e))
+                .is_some_and(|(a, b)| a.graph == b.graph);
+            if !same_graph {
+                graphs.reflow(world, grid, prev);
+            }
+        }
+        // Link the new direction and merge the graphs (`BeamNode.java:284-292`).
+        if let Some(next) = next {
+            let next_pack = super::module::pack(world, next);
+            if let Some(mut module) = world.get_mut::<PowerModule>(e)
+                && !module.links.contains(&next_pack)
+            {
+                module.links.push(next_pack);
+            }
+            if let Some(mut module) = world.get_mut::<PowerModule>(next)
+                && !module.links.contains(&own_pack)
+            {
+                module.links.push(own_pack);
+            }
+            let own_graph = world
+                .get::<PowerModule>(e)
+                .map(|module| module.graph)
+                .unwrap_or(PowerGraphId::NONE);
+            let next_graph = world
+                .get::<PowerModule>(next)
+                .map(|module| module.graph)
+                .unwrap_or(PowerGraphId::NONE);
+            if own_graph != PowerGraphId::NONE && next_graph != PowerGraphId::NONE {
+                graphs.add_graph(world, own_graph, next_graph);
+            }
+        }
+    }
+
+    state.last_change = grid.tile_changes;
+    if let Some(mut comp) = world.get_mut::<BeamNodeState>(e) {
+        *comp = state;
+    }
+}
+
 /// Blocks that are "connected power" for auto-link (`Block.connectedPower`).
 pub fn connected_power(world: &World, entity: Entity) -> bool {
     read_power_info(world, entity).is_some_and(|params| {

@@ -293,6 +293,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         drown_time: Some(230.0),
         floor_status: Some("melting"),
         floor_status_duration: Some(240.0),
+        // `Blocks.java:327`: `attributes.set(Attribute.heat, 0.85f)`.
+        attributes: vec![("heat", 0.85f32)],
         ..spec("molten-slag", BlockKind::Floor)
     })?;
 
@@ -325,14 +327,15 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     })?;
 
     sink.push(BlockSpec {
-        // `Blocks.java`: floor attribute affinities (T7).
-        attributes: vec![("water", -0.5f32)],
+        // `Blocks.java:365-366`: floor attribute affinities (T7) + heat 0.5 for
+        // the thermal generator (`ThermalGenerator.java:87-89`).
+        attributes: vec![("heat", 0.5f32), ("water", -0.5f32)],
         ..spec("hotrock", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
-        // `Blocks.java`: floor attribute affinities (T7).
-        attributes: vec![("water", -0.75f32)],
+        // `Blocks.java:375-376`: floor attribute affinities (T7) + heat 0.75.
+        attributes: vec![("heat", 0.75f32), ("water", -0.75f32)],
         ..spec("magmarock", BlockKind::Floor)
     })?;
 

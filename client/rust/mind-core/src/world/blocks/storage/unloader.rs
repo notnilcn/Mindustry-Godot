@@ -114,9 +114,9 @@ pub struct UnloaderBehavior {
 }
 
 impl UnloaderBehavior {
-    /// Vanilla `unloader`.
+    /// Vanilla `unloader` (`Blocks.java:2164`: `speed = 60f / 11f`).
     pub const VANILLA: UnloaderBehavior = UnloaderBehavior {
-        speed: 1.0,
+        speed: 60.0 / 11.0,
         allow_core_unload: true,
     };
 }

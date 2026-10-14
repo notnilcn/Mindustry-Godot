@@ -751,8 +751,11 @@ pub struct UnitCargoUnloadPoint {
     pub item: Option<ItemId>,
     /// Stale duration in ticks (`staleTimeDuration = 360`).
     pub stale_time_duration: f32,
-    /// Remaining stale time.
-    pub stale_time: f32,
+    /// Ticks the point has stayed full (`staleTimer`).
+    pub stale_timer: f32,
+    /// `stale`: the point was full for `staleTimeDuration` ticks, so cargo
+    /// stops flying here.
+    pub stale: bool,
 }
 
 impl Default for UnitCargoUnloadPoint {
@@ -760,22 +763,32 @@ impl Default for UnitCargoUnloadPoint {
         Self {
             item: None,
             stale_time_duration: 360.0,
-            stale_time: 0.0,
+            stale_timer: 0.0,
+            stale: false,
         }
     }
 }
 
 impl UnitCargoUnloadPoint {
-    /// `UnitCargoUnloadPoint.updateTile`: decrement the stale timer while empty.
+    /// `UnitCargoUnloadPointBuild.updateTile` full/stale half
+    /// (`UnitCargoUnloadPoint.java:60-73`): the point marks itself stale after
+    /// `staleTimeDuration` full ticks; dropping below capacity resets it.
+    /// Java's `dumpAccumulate()` reset is not modelled (the port's unload point
+    /// has no dump path).
     ///
-    /// Returns `true` while the point is stale (`staleTime <= 0`).
-    pub fn update_stale(&mut self, has_items: bool) -> bool {
-        if has_items {
-            self.stale_time = self.stale_time_duration;
-        } else {
-            self.stale_time -= 1.0;
+    /// Returns `true` while the point is stale.
+    pub fn update_stale(&mut self, total: i32, capacity: i32, delta: f32) -> bool {
+        if total < capacity {
+            self.stale_timer = 0.0;
+            self.stale = false;
         }
-        self.stale_time <= 0.0
+        if total >= capacity {
+            self.stale_timer += delta;
+            if self.stale_timer >= self.stale_time_duration {
+                self.stale = true;
+            }
+        }
+        self.stale
     }
 }
 
@@ -861,13 +874,15 @@ mod tests {
     #[test]
     fn unload_point_stale_flips() {
         let mut point = UnitCargoUnloadPoint::default();
-        assert!(!point.update_stale(true), "fresh when receiving items");
-        for _ in 0..360 {
-            point.update_stale(false);
+        assert!(!point.update_stale(0, 10, 1.0), "fresh while not full");
+        for _ in 0..359 {
+            assert!(!point.update_stale(10, 10, 1.0));
         }
-        assert!(point.update_stale(false), "stale after 360 empty ticks");
-        point.update_stale(true);
-        assert!(!point.update_stale(true), "reset by items");
+        assert!(
+            point.update_stale(10, 10, 1.0),
+            "stale after 360 full ticks"
+        );
+        assert!(!point.update_stale(0, 10, 1.0), "reset below capacity");
     }
 
     #[test]
