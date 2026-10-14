@@ -1167,6 +1167,13 @@ impl MindCampaign {
                         .refresh_sector_import_rates(&registry, planet_id, sector_id);
                     self.session = runtime.session.clone();
                     host.bind_mut().put_campaign_runtime(runtime);
+                    // H04 T13: `UnitComp.afterRead` (`UnitComp.java:585-593`).
+                    // The world load spawned the saved units before the session
+                    // rules existed, so a player-team unit came back as
+                    // `GroundAI`; re-derive the controllers now that the
+                    // runtime is installed. A fresh launch has no restored
+                    // units, so the call is a no-op there.
+                    host.bind_mut().reset_loaded_unit_controllers();
                 }
                 if let Some(items) = core_items
                     && let Some(mut host) = self.host()

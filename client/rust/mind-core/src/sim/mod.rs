@@ -240,6 +240,10 @@ pub struct Sim {
     last_fog_flags: Option<(bool, bool)>,
     /// Currently selected controllable building (`buildingControlSelect`).
     control_building: Option<TilePos>,
+    /// Unit entities the last `apply_decoded_entities` restored (H04 T13).
+    /// `reset_loaded_controllers` re-derives their controllers with Java's
+    /// `UnitComp.afterRead` semantics once the session rules are installed.
+    pub(crate) loaded_unit_entities: Vec<Entity>,
     /// `HintsFragment` tick inputs (placed blocks + fired events).
     pub hint_events: HintEvents,
 
@@ -281,6 +285,7 @@ impl Sim {
             player_last_pos: None,
             last_fog_flags: None,
             control_building: None,
+            loaded_unit_entities: Vec::new(),
             hint_events: HintEvents::default(),
             seed,
             // Upstream `player.block == null` at boot: no placement block is

@@ -783,6 +783,10 @@ impl Sim {
     /// Respawns the decoded world entities (units, fires, puddles) into the
     /// live runtime (`SaveVersion.readWorldEntities` application half).
     pub fn apply_decoded_entities(&mut self, save: &DecodedSave) {
+        // H04 T13: remember which units this restore spawned so
+        // `reset_loaded_controllers` can run Java's `UnitComp.afterRead` once
+        // the session rules reach the world.
+        self.loaded_unit_entities.clear();
         let default_team = self
             .ecs
             .0
@@ -806,6 +810,7 @@ impl Sim {
             if let Some(entity) =
                 self.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
             {
+                self.loaded_unit_entities.push(entity);
                 if unit.health > 0.0
                     && let Some(mut health) = self.ecs.0.get_mut::<Health>(entity)
                 {
@@ -956,6 +961,37 @@ impl Sim {
                     effect_time: 0.0,
                 },
             ));
+        }
+    }
+
+    /// `UnitComp.afterRead` (`UnitComp.java:585-593`): every unit read from a
+    /// save re-derives `type.createController(unit)` unless its saved
+    /// controller keeps state (`LogicAI`/`CommandAI`; `keepState`). The resume
+    /// path calls this once the session rules are installed, because the
+    /// world load spawns the units before `CampaignRuntime` exists and the
+    /// spawn fallback (`BuildRules.defaultTeam` = derelict) marks a
+    /// player-team unit as AI (`GroundAI` instead of `CommandAI`).
+    pub fn reset_loaded_controllers(&mut self) {
+        use crate::ai::controller::{AiKind, ControllerSlot};
+        let entities = std::mem::take(&mut self.loaded_unit_entities);
+        for entity in entities {
+            let Some(kind) = self
+                .ecs
+                .0
+                .get::<ControllerSlot>(entity)
+                .map(|slot| slot.kind)
+            else {
+                continue;
+            };
+            // The player's own unit keeps its `Player` bridge; upstream keeps
+            // the saved controller instance only when `keepState` is true.
+            if kind == AiKind::Player || crate::ai::controller_registry::keep_state(kind) {
+                continue;
+            }
+            let Some(team) = self.ecs.0.get::<TeamComp>(entity).map(|comp| comp.team) else {
+                continue;
+            };
+            self.release_unit_to_ai(entity, team);
         }
     }
 }
@@ -1753,6 +1789,197 @@ mod tests {
             })
             .collect();
         assert_eq!(names, vec!["dagger".to_owned()]);
+    }
+
+    /// H04 T13: `UnitComp.afterRead` (`UnitComp.java:585-593`). A world load
+    /// spawns the saved units before the campaign session exists, so the spawn
+    /// fallback (`BuildRules.defaultTeam` = derelict) gives a player-team unit
+    /// the per-type AI. Once the session rules are installed,
+    /// `reset_loaded_controllers` re-derives `type.createController`
+    /// (`UnitType.java:281-283`): team `defaultTeam` -> `CommandAI`, wave team
+    /// -> `GroundAI`; a saved `Player` bridge is never replaced.
+    #[test]
+    fn loaded_player_team_units_get_command_ai() {
+        use crate::ai::controller::{AiKind, ControllerSlot};
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let unit = |name: &str, team: u8, controller: Option<AiKind>| DecodedUnit {
+            revision: 3,
+            name: name.to_owned(),
+            team,
+            x: 100.0,
+            y: 100.0,
+            rotation: 0.0,
+            health: 150.0,
+            payloads: Vec::new(),
+            spawned_by_core: false,
+            elevation: 0.0,
+            shield: 0.0,
+            stack: None,
+            statuses: Vec::new(),
+            command: None,
+            controller,
+            plans: Vec::new(),
+        };
+        let save_with = |units: Vec<DecodedUnit>| DecodedSave {
+            grid: WorldGrid::new(0, 0),
+            pending: Vec::new(),
+            plans: Vec::new(),
+            tags: StringMap::default(),
+            rules: None,
+            stats: None,
+            markers: MapMarkers::default(),
+            entities: LiveEntitySink {
+                units,
+                fires: Vec::new(),
+                puddles: Vec::new(),
+            },
+            static_fog: None,
+        };
+        let by_team = |sim: &Sim| -> Vec<(u8, AiKind)> {
+            sim.unit_runtime()
+                .expect("runtime")
+                .units
+                .iter()
+                .copied()
+                .filter_map(|entity| {
+                    let team = sim.ecs.0.get::<TeamComp>(entity)?.team;
+                    let kind = sim.ecs.0.get::<ControllerSlot>(entity)?.kind;
+                    Some((team, kind))
+                })
+                .collect()
+        };
+
+        // World-load order: no `CampaignRuntime` yet (`load_sector` runs before
+        // `start_sector_with_loadout` installs the session).
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.apply_decoded_entities(&save_with(vec![
+            unit("dagger", 1, None),
+            unit("dagger", 2, None),
+            unit("dagger", 1, Some(AiKind::Player)),
+        ]));
+        // Fallback: every team but derelict reads as AI, so both daggers get
+        // their per-type `GroundAI` (the bug state).
+        assert!(by_team(&sim).iter().enumerate().all(|(i, (_, kind))| {
+            if i == 2 {
+                *kind == AiKind::Player
+            } else {
+                *kind == AiKind::Ground
+            }
+        }));
+
+        // The session rules reach the world; Java's `afterRead` then re-derives
+        // the controllers. A live campaign sector (`PlaySession.sector`) is
+        // what makes wave team 2 an AI team (`Team.isAI`) even with
+        // `rules.waves` false.
+        let mut session = PlaySession::new(Rules {
+            default_team: 1,
+            wave_team: 2,
+            unit_cap: 100,
+            unit_cap_variable: false,
+            ..Rules::default()
+        });
+        session.sector = Some((crate::content::PlanetId::new(0), 170));
+        sim.ecs.0.insert_resource(CampaignRuntime::new(
+            session,
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        sim.reset_loaded_controllers();
+        let kinds = by_team(&sim);
+        assert!(
+            kinds.contains(&(1, AiKind::Command)),
+            "player team: {kinds:?}"
+        );
+        assert!(kinds.contains(&(2, AiKind::Ground)), "wave team: {kinds:?}");
+        assert!(
+            kinds.contains(&(1, AiKind::Player)),
+            "player bridge: {kinds:?}"
+        );
+
+        // The stash is consumed: a second call changes nothing.
+        sim.reset_loaded_controllers();
+        assert_eq!(by_team(&sim), kinds);
+    }
+
+    /// H04 T13: a revision-3 unit whose saved controller keeps state
+    /// (`LogicAI`, `AIController.keepState`) survives `afterRead`.
+    #[test]
+    fn loaded_logic_unit_keeps_state() {
+        use crate::ai::controller::{AiKind, ControllerSlot};
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("content");
+        let save = DecodedSave {
+            grid: WorldGrid::new(0, 0),
+            pending: Vec::new(),
+            plans: Vec::new(),
+            tags: StringMap::default(),
+            rules: None,
+            stats: None,
+            markers: MapMarkers::default(),
+            entities: LiveEntitySink {
+                units: vec![DecodedUnit {
+                    revision: 3,
+                    name: "dagger".to_owned(),
+                    team: 1,
+                    x: 100.0,
+                    y: 100.0,
+                    rotation: 0.0,
+                    health: 150.0,
+                    payloads: Vec::new(),
+                    spawned_by_core: false,
+                    elevation: 0.0,
+                    shield: 0.0,
+                    stack: None,
+                    statuses: Vec::new(),
+                    command: None,
+                    controller: Some(AiKind::Logic),
+                    plans: Vec::new(),
+                }],
+                fires: Vec::new(),
+                puddles: Vec::new(),
+            },
+            static_fog: None,
+        };
+
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.apply_decoded_entities(&save);
+        sim.ecs.0.insert_resource(CampaignRuntime::new(
+            PlaySession::new(Rules {
+                default_team: 1,
+                wave_team: 2,
+                unit_cap: 100,
+                unit_cap_variable: false,
+                ..Rules::default()
+            }),
+            Campaign::from_registry(&registry, &EmptyNeighborhood),
+        ));
+        sim.reset_loaded_controllers();
+        let entity = sim.unit_runtime().expect("runtime").units[0];
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<ControllerSlot>(entity)
+                .map(|slot| slot.kind),
+            Some(AiKind::Logic)
+        );
     }
 
     /// The live unit/fire/puddle chunk class ids must stay clear of the
