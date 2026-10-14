@@ -3943,12 +3943,20 @@ fn turret_ignores_unit_in_fog() {
         rules.fog = true;
         rules.disable_unit_cap = true;
     });
-    // The duo is placed before the fog reset: after it, the static-fog mask
+    // Placed before the fog reset: after it, the static-fog mask
     // (all-zero until something is discovered) would reject the placement,
     // mirroring Java's `fogControl.isDiscovered == false` for every tile.
     let duo = place(&mut sim, 10, 10, "duo", 1);
     feed(&mut sim, duo, "copper", 10);
     sim.reset_fog();
+    // T3 makes every turret a fog source covering its range; zero the
+    // multiplier so the duo reveals nothing (the pre-T3 viewer state this gate
+    // test needs).
+    if let Some(mut state) = sim.ecs.0.get_mut::<TurretState>(duo) {
+        let mut config = (*state.config).clone();
+        config.fog_radius_multiplier = 0.0;
+        state.config = std::sync::Arc::new(config);
+    }
     sim.spawn_live_unit("dagger", 2, 25.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0, 180.0)
         .expect("enemy dagger");
     for _ in 0..30 {
@@ -4132,4 +4140,93 @@ fn placement_rejected_in_static_fog() {
     );
     sim.ecs.0.insert_non_send(runtime);
     assert!(after, "the revealed tile accepts the placement");
+}
+
+/// H09 T3: a powered `radar` discovers its radius in `discoveryTime` = 600
+/// ticks (`Radar.java:18,59-72`).
+#[test]
+fn radar_discovers_in_600_ticks() {
+    use crate::entities::comp::building::RadarState;
+
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.disable_unit_cap = true;
+    });
+    // Placed before the fog reset (the all-zero static mask else rejects).
+    let radar = place(&mut sim, 20, 20, "radar", 1);
+    place(&mut sim, 21, 20, "power-source", 1);
+    sim.reset_fog();
+    for _ in 0..300 {
+        sim.tick().expect("tick");
+    }
+    let progress = sim
+        .ecs
+        .0
+        .get::<RadarState>(radar)
+        .map(|state| state.progress)
+        .unwrap_or(0.0);
+    assert!(
+        (progress - 0.5).abs() < 0.02,
+        "progress ~0.5 at 300 ticks: {progress}"
+    );
+    // One tick is lost while the power graph links (efficiency 0 on the first
+    // tick), so full discovery completes on tick 601.
+    for _ in 0..301 {
+        sim.tick().expect("tick");
+    }
+    let progress = sim
+        .ecs
+        .0
+        .get::<RadarState>(radar)
+        .map(|state| state.progress)
+        .unwrap_or(0.0);
+    assert!(
+        (progress - 1.0).abs() < 1e-3,
+        "progress 1.0 at 600 ticks: {progress}"
+    );
+}
+
+/// H09 T3: every turret reveals its range (`BaseTurret.java:59`,
+/// `Turret.java:426-428`): a `duo` (range 160) reveals 20 tiles.
+#[test]
+fn duo_reveals_its_range() {
+    let mut sim = campaign_sim(64, |rules| {
+        rules.waves = true;
+        rules.fog = true;
+        rules.disable_unit_cap = true;
+    });
+    // Placed before the fog reset (the all-zero static mask else rejects).
+    place(&mut sim, 10, 10, "duo", 1);
+    sim.reset_fog();
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    // `Mathf.round(160 / 8) = 20` tiles, drawn with the +1 visual margin.
+    assert!(sim.fog_visible_tile(1, 30, 10), "a tile at +20 is visible");
+    assert!(
+        !sim.fog_visible_tile(1, 32, 10),
+        "a tile at +22 is not visible"
+    );
+    assert!(
+        sim.fog_discovered(1, 20, 10),
+        "revealed tiles are discovered"
+    );
+}
+
+/// H09 T3: core fog radius = `max(fogRadius, (int)((30 + 20*size) / 8 * 3) + 13)`
+/// (`CoreBlock.java:158-159`).
+#[test]
+fn core_fog_radius_values() {
+    let sim = live_sim(8);
+    let content = &sim.unit_runtime().expect("rt").content;
+    let radius = |name: &str| {
+        content
+            .block_id(name)
+            .and_then(|id| content.block(id))
+            .map(|def| def.fog_radius)
+    };
+    assert_eq!(radius("core-shard"), Some(46), "size 3");
+    assert_eq!(radius("core-bastion"), Some(54), "size 4");
+    assert_eq!(radius("core-acropolis"), Some(69), "size 6");
 }

@@ -455,7 +455,19 @@ pub(crate) fn collect_fog_sources(
         let Some(def) = content.block(building.block) else {
             continue;
         };
-        if !def.flags.contains(&BlockFlag::HasFogRadius) {
+        // `Block.java:1390`: `fogRadius > 0` sets the flag; radar/turret/core
+        // kinds are runtime-radius sources (`building_fog_radius`).
+        let is_source = def.flags.contains(&BlockFlag::HasFogRadius)
+            || world
+                .get::<crate::entities::comp::building::RadarState>(entity)
+                .is_some()
+            || world
+                .get::<crate::world::blocks::defense::turrets::TurretState>(entity)
+                .is_some()
+            || world
+                .get::<crate::world::blocks::storage::core_block::CoreBuild>(entity)
+                .is_some();
+        if !is_source {
             continue;
         }
         blocks.push(FogSource {
@@ -504,10 +516,56 @@ pub(crate) fn collect_fog_sources(
     (blocks, units)
 }
 
-/// `Building.fogRadius()` for the T1 sources (T3 extends with radar/turret/
-/// core kinds, `BuildingComp.java:579-581`).
-pub(crate) fn building_fog_radius(_world: &World, def: &BlockDef, _e: Entity) -> f32 {
+/// `Building.fogRadius()` for every source kind (`BuildingComp.java:579-581`
+/// plus the per-class overrides).
+pub(crate) fn building_fog_radius(world: &World, def: &BlockDef, e: Entity) -> f32 {
+    // `Radar.fogRadius()` (`Radar.java:55-57`).
+    if let Some(state) = world.get::<crate::entities::comp::building::RadarState>(e) {
+        return def.fog_radius as f32 * state.progress * state.smooth_efficiency;
+    }
+    // `Turret.fogRadius()` (`Turret.java:426-428`). The ammo `rangeChange` term
+    // is not carried by `BulletDef` yet (H02 range_change), so it is ignored.
+    if let Some(state) = world.get::<crate::world::blocks::defense::turrets::TurretState>(e) {
+        return state.config.range / 8.0 * state.config.fog_radius_multiplier;
+    }
+    // Cores: `init_self` folds `CoreBlock.java:158-159` into `def.fog_radius`.
     def.fog_radius as f32
+}
+
+/// `FogControl.forceUpdate(team, build)` (`FogControl.java:177-187`): marks the
+/// dynamic flush pending and pushes the changed source's static event.
+pub(crate) fn fog_force_update(world: &mut World, e: Entity) {
+    let Some(rules) = rules_of(world) else {
+        return;
+    };
+    if !rules.fog {
+        return;
+    }
+    let static_fog = rules.static_fog;
+    let source = {
+        let Some(building) = world.get::<Building>(e) else {
+            return;
+        };
+        let Some(team) = world.get::<TeamComp>(e).map(|team| team.team) else {
+            return;
+        };
+        let Some(table) = world.get_resource::<crate::world::BlockTable>() else {
+            return;
+        };
+        let Some(instance) = table.instance(building.block) else {
+            return;
+        };
+        let radius = (building_fog_radius(world, &instance.def, e) + 0.5).floor() as i32;
+        FogSource {
+            x: building.tile.x() as i32,
+            y: building.tile.y() as i32,
+            radius,
+            team,
+        }
+    };
+    if let Some(mut fog) = world.get_resource_mut::<FogControl>() {
+        fog.on_source_changed(source, static_fog);
+    }
 }
 
 #[cfg(test)]

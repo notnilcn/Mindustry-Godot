@@ -198,10 +198,28 @@ pub struct DoorState {
 }
 
 /// `Radar` build state.
-#[derive(Debug, Clone, Default, PartialEq, Component)]
+#[derive(Debug, Clone, PartialEq, Component)]
 pub struct RadarState {
     /// Discovery progress (`progress`).
     pub progress: f32,
+    /// Fog radius at the last `forceUpdate` (`lastRadius`).
+    pub last_radius: f32,
+    /// Ramped efficiency (`smoothEfficiency`; starts at 1).
+    pub smooth_efficiency: f32,
+    /// Rotation accumulator (`totalProgress`).
+    pub total_progress: f32,
+}
+
+impl Default for RadarState {
+    fn default() -> Self {
+        Self {
+            progress: 0.0,
+            last_radius: 0.0,
+            // `RadarBuild.smoothEfficiency = 1f` (`Radar.java:51`).
+            smooth_efficiency: 1.0,
+            total_progress: 0.0,
+        }
+    }
 }
 
 /// `Incinerator` build state (`Incinerator.java:30-81`).

@@ -2752,6 +2752,33 @@ impl Content for BlockDef {
             self.flags.push(BlockFlag::HasFogRadius);
         }
 
+        // `CoreBlock.java:158-159`: `lightRadius = 30f + 20f * size;
+        // fogRadius = Math.max(fogRadius, (int)(lightRadius / 8f * 3f) + 13)`.
+        if self.kind == BlockKind::CoreBlock {
+            let light_radius = 30.0 + 20.0 * self.size as f32;
+            self.fog_radius = self.fog_radius.max((light_radius / 8.0 * 3.0) as i32 + 13);
+        }
+        // `BaseTurret.java:59` (`init()`): `fogRadius = max(round(range / 8 *
+        // fogRadiusMultiplier), fogRadius)` — the runtime range lives on
+        // `TurretConfig`, so turrets only get the flag here (the radius is
+        // computed by `crate::sim::fog::building_fog_radius`).
+        if matches!(
+            self.kind,
+            BlockKind::BuildTurret
+                | BlockKind::ItemTurret
+                | BlockKind::LiquidTurret
+                | BlockKind::PowerTurret
+                | BlockKind::TractorBeamTurret
+                | BlockKind::PointDefenseTurret
+                | BlockKind::LaserTurret
+                | BlockKind::ContinuousLiquidTurret
+                | BlockKind::ContinuousTurret
+                | BlockKind::RepairTurret
+        ) && !self.flags.contains(&BlockFlag::HasFogRadius)
+        {
+            self.flags.push(BlockFlag::HasFogRadius);
+        }
+
         if self.health == -1 {
             let mut round = false;
             if self.scaled_health < 0.0 {

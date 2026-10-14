@@ -1181,6 +1181,10 @@ impl MindSimHost {
             {
                 put("turret_total_ammo", Variant::from(state.total_ammo));
             }
+            // Fog discovery progress (`Radar.progress`; H09 T3 readback).
+            if let Some(state) = world.get::<mind_core::entities::comp::RadarState>(entity) {
+                put("radarProgress", Variant::from(f64::from(state.progress)));
+            }
             // In-progress construction (`ConstructBuild`; PAR-0098 §2d).
             if let Some(state) = world.get::<mind_core::world::construct::ConstructState>(entity) {
                 put(

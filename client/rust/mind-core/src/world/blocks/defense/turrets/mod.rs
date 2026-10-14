@@ -277,6 +277,9 @@ pub struct TurretConfig {
     pub sound_pitch_min: f32,
     /// `Turret.soundPitchMax` (default 1.1).
     pub sound_pitch_max: f32,
+    /// `Turret.fogRadiusMultiplier` (default 1; scathe 0.4,
+    /// `Blocks.java:5661`).
+    pub fog_radius_multiplier: f32,
 }
 
 impl TurretConfig {
@@ -775,6 +778,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         "test-item" => {
@@ -841,6 +845,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         "test-liquid" => {
@@ -907,6 +912,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         "test-power" => {
@@ -973,6 +979,7 @@ fn config_for_inner(
                 loop_sound_volume: 0.5,
                 sound_pitch_min: 0.9,
                 sound_pitch_max: 1.1,
+                fog_radius_multiplier: 1.0,
             })
         }
         _ => advanced::config_for(content, name, names),
