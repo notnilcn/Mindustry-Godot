@@ -437,7 +437,9 @@ impl MindFx {
             }
         }
 
-        // Weather particle/rain field (state frozen by plan 12).
+        // Weather particle/rain field (state frozen by plan 12). The probe
+        // resolves `useWindVector` here (the caller rule lives in
+        // `ParticleWeather.drawOver`); rain's alpha is the probe opacity.
         if let Some((fx, state)) = &self.weather {
             match fx.kind {
                 WeatherKind::Particle => fx.build_particles(
@@ -445,6 +447,7 @@ impl MindFx {
                     self.view_rect,
                     self.view_rect,
                     self.view_tick as f32,
+                    state.wind_vector,
                     &mut program.prims,
                 ),
                 WeatherKind::Rain => fx.build_rain(
@@ -452,6 +455,7 @@ impl MindFx {
                     self.view_rect,
                     self.view_rect,
                     self.view_tick as f32,
+                    state.opacity,
                     &mut program.prims,
                 ),
             }

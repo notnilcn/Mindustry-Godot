@@ -8,6 +8,8 @@
 use godot::classes::{AudioStream, AudioStreamPlayer, AudioStreamPlayer2D, Node, Node2D};
 use godot::prelude::*;
 
+use mind_core::audio::{ActiveVoice, SoundId};
+
 /// World one-shot voices (`MAX_VOICES`).
 pub const MAX_VOICES: usize = 128;
 /// UI one-shot voices (`MAX_UI_VOICES`).
@@ -15,12 +17,30 @@ pub const MAX_UI_VOICES: usize = 16;
 /// Looping world voices (aggregated loops + `SoundLoop` instances).
 pub const MAX_LOOP_VOICES: usize = 32;
 
+/// Per-slot policy metadata for the world one-shot pool (`Sound` state).
+///
+/// `sound: None` marks a slot played outside the policy (`play_world`), which
+/// `active_voices` does not report to the admission table.
+#[derive(Debug, Clone, Copy, Default)]
+struct SlotMeta {
+    sound: Option<SoundId>,
+    started_ms: f64,
+    priority: f32,
+    group: i32,
+    min_interrupt: f32,
+    volume: f32,
+}
+
 /// Pooled non-positional + positional one-shot voices.
 pub struct VoicePool {
     world: Vec<Gd<AudioStreamPlayer2D>>,
     ui: Vec<Gd<AudioStreamPlayer>>,
     world_cursor: usize,
     ui_cursor: usize,
+    /// Policy metadata per world slot.
+    meta: Vec<SlotMeta>,
+    /// Voice id generation per world slot (ids are `(generation << 8) | slot`).
+    generation: Vec<u32>,
 }
 
 impl VoicePool {
@@ -56,7 +76,18 @@ impl VoicePool {
             ui,
             world_cursor: 0,
             ui_cursor: 0,
+            meta: vec![SlotMeta::default(); MAX_VOICES],
+            generation: vec![1; MAX_VOICES],
         }
+    }
+
+    /// Splits a voice id into `(slot, generation)` (`MAX_VOICES < 256`).
+    fn split_voice(voice: u64) -> (usize, u32) {
+        ((voice & 0xFF) as usize, (voice >> 8) as u32)
+    }
+
+    fn position_for(pan: f32, listener: (f32, f32), width: f32) -> Vector2 {
+        Vector2::new(listener.0 + pan * width / 2.0, listener.1)
     }
 
     /// Number of currently playing world + UI voices.
@@ -66,6 +97,28 @@ impl VoicePool {
             .filter(|player| player.is_playing())
             .count()
             + self.ui.iter().filter(|player| player.is_playing()).count()
+    }
+
+    /// Policy-visible world voices (`SoundPriority` admission input).
+    pub fn active_voices(&self, out: &mut Vec<ActiveVoice>) {
+        out.clear();
+        for (slot, player) in self.world.iter().enumerate() {
+            if !player.is_playing() {
+                continue;
+            }
+            let Some(sound) = self.meta[slot].sound else {
+                continue;
+            };
+            out.push(ActiveVoice {
+                voice: (u64::from(self.generation[slot]) << 8) | slot as u64,
+                sound,
+                group: self.meta[slot].group,
+                priority: self.meta[slot].priority,
+                started_ms: self.meta[slot].started_ms,
+                min_interrupt: self.meta[slot].min_interrupt,
+                volume: self.meta[slot].volume,
+            });
+        }
     }
 
     /// Plays a non-positional UI voice; returns the voice index (always `>= 0`).
@@ -81,6 +134,9 @@ impl VoicePool {
     }
 
     /// Plays a positional world voice using the deviation-5 pan mapping.
+    ///
+    /// Keeps the id/meta bookkeeping (`sound: None`, not visible to the
+    /// admission policy) so a stale id can never address a recycled slot.
     #[allow(clippy::too_many_arguments)]
     pub fn play_world(
         &mut self,
@@ -93,15 +149,85 @@ impl VoicePool {
     ) -> i64 {
         let index = self.world_cursor % self.world.len();
         self.world_cursor = self.world_cursor.wrapping_add(1);
+        self.generation[index] = self.generation[index].wrapping_add(1);
+        self.meta[index] = SlotMeta::default();
         let player = &mut self.world[index];
         player.set_stream(&stream);
         player.set_volume_linear(volume.clamp(0.0, 1.0));
         player.set_pitch_scale(pitch.clamp(0.0001, 10.0));
         // Pan via node offset from the listener (attenuation 0); plan 18 §2.4 dev 5.
-        let x = listener.0 + pan * viewport_width / 2.0;
-        player.set_position(Vector2::new(x, listener.1));
+        player.set_position(Self::position_for(pan, listener, viewport_width));
         player.play();
-        index as i64
+        ((u64::from(self.generation[index]) << 8) | index as u64) as i64
+    }
+
+    /// Plays a policy-admitted world voice.
+    ///
+    /// `replace` reuses that voice's slot when its generation still matches
+    /// (the evicted player is stopped first); otherwise the first idle slot is
+    /// used. `meta` carries `(sound, started_ms, priority, group,
+    /// min_interrupt)`; the id generation is bumped before the id is returned.
+    /// `None` means the pool is full (the caller treats it as a denied play).
+    #[allow(clippy::too_many_arguments)]
+    pub fn play_world_meta(
+        &mut self,
+        replace: Option<u64>,
+        stream: Gd<AudioStream>,
+        volume: f32,
+        pitch: f32,
+        pan: f32,
+        listener: (f32, f32),
+        width: f32,
+        meta: (SoundId, f64, f32, i32, f32),
+    ) -> Option<u64> {
+        let slot = match replace {
+            Some(voice) => {
+                let (slot, generation) = Self::split_voice(voice);
+                if slot < self.world.len() && self.generation[slot] == generation {
+                    self.world[slot].stop();
+                    slot
+                } else {
+                    self.world.iter().position(|player| !player.is_playing())?
+                }
+            }
+            None => self.world.iter().position(|player| !player.is_playing())?,
+        };
+        self.generation[slot] = self.generation[slot].wrapping_add(1);
+        let player = &mut self.world[slot];
+        player.set_stream(&stream);
+        player.set_volume_linear(volume.clamp(0.0, 1.0));
+        player.set_pitch_scale(pitch.clamp(0.0001, 10.0));
+        player.set_position(Self::position_for(pan, listener, width));
+        player.play();
+        let (sound, started_ms, priority, group, min_interrupt) = meta;
+        self.meta[slot] = SlotMeta {
+            sound: Some(sound),
+            started_ms,
+            priority,
+            group,
+            min_interrupt,
+            volume,
+        };
+        Some((u64::from(self.generation[slot]) << 8) | slot as u64)
+    }
+
+    /// Sets a running world voice's volume/pan (stale ids are ignored).
+    pub fn set_voice_volume(
+        &mut self,
+        voice: u64,
+        volume: f32,
+        pan: f32,
+        listener: (f32, f32),
+        width: f32,
+    ) {
+        let (slot, generation) = Self::split_voice(voice);
+        if slot >= self.world.len() || self.generation[slot] != generation {
+            return;
+        }
+        let player = &mut self.world[slot];
+        player.set_volume_linear(volume.clamp(0.0, 1.0));
+        player.set_position(Self::position_for(pan, listener, width));
+        self.meta[slot].volume = volume;
     }
 
     /// Pauses/resumes every world+UI voice (plan 18 §3.5 pause mirror).

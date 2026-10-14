@@ -64,6 +64,25 @@ impl WeatherRuntime {
     }
 }
 
+/// `Weather.create(intensity, duration)` + `windVector.set(wind)`
+/// (`Weather.java:56-67,258-260`): spawns the live weather entity with the
+/// shared component tuple `(WeatherRuntime, WeatherState, EntitySeq)`.
+pub fn create_weather(
+    world: &mut World,
+    seq: u64,
+    weather: WeatherId,
+    intensity: f32,
+    duration: f32,
+    wind: (f32, f32),
+) -> Entity {
+    let mut state = WeatherRuntime::new(weather, intensity, duration);
+    state.wind_x = wind.0;
+    state.wind_y = wind.1;
+    world
+        .spawn((state, crate::entities::comp::WeatherState, EntitySeq(seq)))
+        .id()
+}
+
 /// Applies the weather's status to every matching unit (`Weather.updateEffect`).
 ///
 /// `checkTarget(statusAir, statusGround)`: air units take air statuses, ground

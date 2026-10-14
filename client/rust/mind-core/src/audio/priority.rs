@@ -418,6 +418,61 @@ impl SoundPlayState {
     }
 }
 
+/// What the client does with one world one-shot (Arc `Sound.play` + SoLoud admission).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum OneShotPlan {
+    /// Inside the 16 ms window and not louder: drop.
+    Skip,
+    /// Inside the window and louder: set `voice` to `volume` (`Core.audio.set`).
+    Intensify { voice: u64, volume: f32 },
+    /// Start a new voice in an idle slot.
+    Play,
+    /// Start the new voice in the slot of `voice` (evict it).
+    Replace { voice: u64 },
+    /// SoLoud refused (concurrency/priority).
+    Deny,
+}
+
+/// Arc `Sound.play` (`checkFrame` branch) followed by [`admit`].
+///
+/// Java records `lastVolume`/`lastTimePlayed` before `sourcePlayBus`; a play
+/// denied by SoLoud still left a `0` handle, so the port keeps the record only
+/// after a successful `Play`/`Replace` (`SoundPlayState::record` by the caller).
+#[allow(clippy::too_many_arguments)]
+pub fn plan_one_shot(
+    state: &mut SoundPlayState,
+    active: &[ActiveVoice],
+    spec: &SoundPrioritySpec,
+    sound: SoundId,
+    volume: f32,
+    length_s: f32,
+    now_ms: f64,
+    check_frame: bool,
+) -> OneShotPlan {
+    if check_frame && state.within_min_interval(now_ms, MIN_INTERVAL_MS) {
+        if volume > state.last_volume {
+            let current = state.intensify(volume);
+            return OneShotPlan::Intensify {
+                voice: state.last_voice,
+                volume: current,
+            };
+        }
+        return OneShotPlan::Skip;
+    }
+    let request = PlayRequest {
+        sound,
+        priority: spec.priority,
+        group: spec.group,
+        max_concurrent: spec.max_concurrent,
+        min_interrupt: spec.min_interrupt(length_s),
+    };
+    match admit(active, &request, now_ms) {
+        Admission::Play => OneShotPlan::Play,
+        Admission::Replace { voice } => OneShotPlan::Replace { voice },
+        Admission::Deny => OneShotPlan::Deny,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -590,5 +645,103 @@ mod tests {
         assert!((state.intensify(0.5) - 0.625).abs() < 1.0e-6);
         // last=0.625, new=0.5 -> min(1.125, 0.625) = 0.625
         assert!((state.intensify(0.5) - 0.625).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn plan_skips_quieter_replay_within_16ms() {
+        let mut state = SoundPlayState::default();
+        state.record(5, 0.5, 1000.0);
+        let spec = SoundPriorityTable::build().spec(SoundId::SHOOT_DUO);
+        let plan = plan_one_shot(
+            &mut state,
+            &[],
+            &spec,
+            SoundId::SHOOT_DUO,
+            0.4,
+            1.0,
+            1010.0,
+            true,
+        );
+        assert_eq!(plan, OneShotPlan::Skip);
+        // `Skip` does not record: the state keeps its last-play values.
+        assert_eq!(state.last_time_played, 1000.0);
+        assert_eq!(state.last_volume, 0.5);
+    }
+
+    #[test]
+    fn plan_intensifies_louder_replay() {
+        let mut state = SoundPlayState::default();
+        state.record(5, 0.5, 1000.0);
+        let spec = SoundPriorityTable::build().spec(SoundId::SHOOT_DUO);
+        let plan = plan_one_shot(
+            &mut state,
+            &[],
+            &spec,
+            SoundId::SHOOT_DUO,
+            0.8,
+            1.0,
+            1010.0,
+            true,
+        );
+        match plan {
+            // `max(0.5, min(0.5 + 0.8, 0.8 * 1.25)) = max(0.5, 1.0) = 1.0`.
+            OneShotPlan::Intensify { voice, volume } => {
+                assert_eq!(voice, 5);
+                assert!((volume - 1.0).abs() < 1.0e-6);
+            }
+            other => panic!("expected Intensify, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn plan_ignores_window_without_check_frame() {
+        let mut state = SoundPlayState::default();
+        state.record(5, 0.5, 1000.0);
+        let spec = SoundPriorityTable::build().spec(SoundId::SHOOT_DUO);
+        let plan = plan_one_shot(
+            &mut state,
+            &[],
+            &spec,
+            SoundId::SHOOT_DUO,
+            0.8,
+            1.0,
+            1010.0,
+            false,
+        );
+        assert_eq!(plan, OneShotPlan::Play);
+    }
+
+    #[test]
+    fn plan_denies_seventh_concurrent() {
+        let now = 20_000.0;
+        let six: Vec<ActiveVoice> = (1..=6)
+            .map(|v| voice(v, SoundId::SHOOT_DUO, 0.0, now - 10_000.0))
+            .collect();
+        let spec = SoundPriorityTable::build().spec(SoundId::SHOOT_DUO);
+        let mut state = SoundPlayState::default();
+        let plan = plan_one_shot(
+            &mut state,
+            &six,
+            &spec,
+            SoundId::SHOOT_DUO,
+            1.0,
+            1.0,
+            now,
+            false,
+        );
+        assert_ne!(plan, OneShotPlan::Play);
+        // The plan mirrors `admit` exactly for the same request.
+        let request = PlayRequest {
+            sound: SoundId::SHOOT_DUO,
+            priority: spec.priority,
+            group: spec.group,
+            max_concurrent: spec.max_concurrent,
+            min_interrupt: spec.min_interrupt(1.0),
+        };
+        match admit(&six, &request, now) {
+            Admission::Play => panic!("expected admit to refuse the seventh voice"),
+            Admission::Deny => assert_eq!(plan, OneShotPlan::Deny),
+            Admission::Replace { voice } => assert_eq!(plan, OneShotPlan::Replace { voice }),
+        }
     }
 }

@@ -175,16 +175,16 @@ impl ForceProjectorState {
 /// `coolant_heat_capacity` is the active coolant's `heatCapacity` (`0` = none),
 /// supplied by plan 09 through the consumer pass.
 pub fn update_force_projector_state(
-    world: &World,
+    world: &mut World,
     e: Entity,
     state: &mut ForceProjectorState,
     eff: f32,
     phase_valid: bool,
     coolant_heat_capacity: f32,
 ) {
-    if position(world, e).is_none() {
+    let Some((x, y)) = position(world, e) else {
         return;
-    }
+    };
     state.phase_heat = lerp_delta(state.phase_heat, if phase_valid { 1.0 } else { 0.0 }, 0.1);
     state.warmup = lerp_delta(state.warmup, eff, 0.1);
     state.radscl = lerp_delta(
@@ -215,6 +215,16 @@ pub fn update_force_projector_state(
     {
         state.broken = true;
         state.buildup = state.shield_health;
+        // `ForceProjector.java:246`: `breakSound.at(x, y)` (shieldBreak).
+        crate::audio::sim::emit_world_sound(
+            world,
+            crate::audio::SoundId::SHIELD_BREAK,
+            x,
+            y,
+            1.0,
+            1.0,
+            0.0,
+        );
     }
     if state.hit > 0.0 {
         state.hit -= 1.0 / 5.0;
@@ -290,6 +300,17 @@ fn deflect_bullets(
             }
             state.hit = 1.0;
             state.buildup += damage;
+            // `ForceProjector.java:65`:
+            // `hitSound.at(bullet.x, bullet.y, 1 + range(0.1), 0.12)`.
+            crate::audio::sim::emit_world_sound(
+                ctx.world,
+                crate::audio::SoundId::SHIELD_HIT,
+                bx,
+                by,
+                0.12,
+                1.0,
+                0.1,
+            );
         }
     }
 }
@@ -467,6 +488,7 @@ pub fn update_mend_projector_world(
     let amount_percent = (state.heal_percent + state.phase_heat * state.phase_boost) / 100.0;
     let targets =
         crate::world::blocks::defense::projectors::buildings_in_range(world, e, real_range);
+    let mut any = false;
     for target in targets {
         let Some(mut health) = world.get_mut::<Health>(target) else {
             continue;
@@ -476,6 +498,19 @@ pub fn update_mend_projector_world(
         }
         let heal = health.max_health * amount_percent * eff;
         health.health = (health.health + heal).min(health.max_health);
+        any = true;
+    }
+    if any && let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
+        // `MendProjector.java:120`: `mendSound.at(this, 1 + range(0.1), 0.5)`.
+        crate::audio::sim::emit_world_sound(
+            world,
+            crate::audio::SoundId::HEAL_WAVE,
+            x,
+            y,
+            0.5,
+            1.0,
+            0.1,
+        );
     }
 }
 
@@ -726,6 +761,133 @@ mod tests {
                 .broken,
             "projector unbreaks after cooldown"
         );
+    }
+
+    /// H07 T2 (`ForceProjector.java:65`): each absorbed bullet plays `shieldHit`
+    /// (volume 0.12, `pitch = 1 + range(0.1)`) at the bullet position.
+    #[test]
+    fn force_projector_hit_plays_shield_hit() {
+        use crate::audio::{AudioEvent, AudioSinkRes, SharedAudioLog, SoundId};
+
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let log = SharedAudioLog::new();
+        harness
+            .build
+            .world
+            .insert_resource(AudioSinkRes::new(log.clone()));
+        let projector = harness.spawn_test_force_projector(16, 16, 1, 100.0);
+        {
+            let mut state = harness
+                .build
+                .world
+                .get_mut::<ForceProjectorState>(projector)
+                .unwrap();
+            state.broken = false;
+            state.radscl = 1.0;
+            state.warmup = 1.0;
+        }
+        let (x, y) = CombatHarness::tile_center(16, 17);
+        let bullet = harness
+            .spawn_bullet("fuse_slow", x, y, 0.0, 2)
+            .expect("bullet");
+        for _ in 0..3 {
+            harness.tick();
+        }
+        assert!(
+            harness.build.world.get_entity(bullet).is_err(),
+            "absorbed bullet removed"
+        );
+        let events = log.events();
+        let hits: Vec<&AudioEvent> = events
+            .iter()
+            .filter_map(|ticked| match &ticked.event {
+                AudioEvent::At { sound, .. } if *sound == SoundId::SHIELD_HIT => {
+                    Some(&ticked.event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(hits.len(), 1, "one shieldHit: {events:?}");
+        let AudioEvent::At {
+            x: hx,
+            y: hy,
+            pitch,
+            volume,
+            ..
+        } = hits[0]
+        else {
+            unreachable!()
+        };
+        assert_eq!((*hx, *hy), (x, y), "hit at the bullet position");
+        assert_eq!(*volume, 0.12);
+        assert!((0.9..=1.1).contains(pitch), "shieldHit pitch {pitch}");
+    }
+
+    /// H07 T2 (`ForceProjector.java:246`): the break transition plays
+    /// `shieldBreak` at the projector centre.
+    #[test]
+    fn force_projector_break_plays_shield_break() {
+        use crate::audio::{AudioEvent, AudioSinkRes, SharedAudioLog, SoundId};
+
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let log = SharedAudioLog::new();
+        harness
+            .build
+            .world
+            .insert_resource(AudioSinkRes::new(log.clone()));
+        let projector = harness.spawn_test_force_projector(16, 16, 1, 100.0);
+        {
+            let mut state = harness
+                .build
+                .world
+                .get_mut::<ForceProjectorState>(projector)
+                .unwrap();
+            state.shield_health = 30.0;
+            state.broken = false;
+            state.radscl = 1.0;
+            state.warmup = 1.0;
+        }
+        let (x, y) = CombatHarness::tile_center(16, 17);
+        // `fuse` deals 40 shield damage -> over the 30 HP shield, so it breaks.
+        let _ = harness.spawn_bullet("fuse", x, y, 0.0, 2);
+        for _ in 0..3 {
+            harness.tick();
+        }
+        assert!(
+            harness
+                .build
+                .world
+                .get::<ForceProjectorState>(projector)
+                .unwrap()
+                .broken,
+            "projector broke under fire"
+        );
+        let events = log.events();
+        let breaks: Vec<&AudioEvent> = events
+            .iter()
+            .filter_map(|ticked| match &ticked.event {
+                AudioEvent::At { sound, .. } if *sound == SoundId::SHIELD_BREAK => {
+                    Some(&ticked.event)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(breaks.len(), 1, "one shieldBreak: {events:?}");
+        let AudioEvent::At {
+            x: bx,
+            y: by,
+            pitch,
+            volume,
+            ..
+        } = breaks[0]
+        else {
+            unreachable!()
+        };
+        // The harness fixture spawns the projector at `tile_center(16, 16)`.
+        let (px, py) = CombatHarness::tile_center(16, 16);
+        assert_eq!((*bx, *by), (px, py), "projector centre");
+        assert_eq!(*volume, 1.0);
+        assert_eq!(*pitch, 1.0);
     }
 
     #[test]
