@@ -2463,6 +2463,7 @@ impl MindSimHost {
                 tick: mind_core::io::sim_io::meta_tick(&save.tags),
                 stats: save.stats.clone(),
                 markers: save.markers.clone(),
+                static_fog: save.static_fog.clone(),
             });
         }
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
@@ -2526,6 +2527,32 @@ impl MindSimHost {
     pub fn apply_world_rules(&mut self, rules: &Rules) {
         self.sim.apply_rules_to_world(rules);
         self.world_dirty = true;
+    }
+
+    /// Applies a decoded `static-fog-data` chunk to the live `FogControl`
+    /// (campaign resume path; `FogControl.read`). Builds the controller from the
+    /// live rules first when the world load has not run yet. `false` when the
+    /// rules keep fog off.
+    pub fn apply_static_fog(&mut self, bytes: Vec<u8>) -> bool {
+        if self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::fog::FogControl>()
+            .is_none()
+        {
+            self.sim.reset_fog();
+        }
+        let Some(mut fog) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::game::fog::FogControl>()
+        else {
+            return false;
+        };
+        fog.read(&bytes);
+        true
     }
 
     /// Default-team core count in the live world (the lost-sector probe; the
@@ -2917,6 +2944,29 @@ impl MindSimHost {
         };
         health.health = 0.0;
         true
+    }
+
+    /// Playtest seam: starts a fire at `(x, y)` (`Fires.create`) through the
+    /// live unit runtime rng. `false` when fire is disabled or there is no
+    /// runtime.
+    #[func]
+    pub fn debug_create_fire(&mut self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
+        else {
+            return false;
+        };
+        let created =
+            mind_core::combat::fires::create(&mut self.sim.ecs.0, tx, ty, &mut runtime.rng)
+                .is_some();
+        self.sim.ecs.0.insert_non_send(runtime);
+        created
     }
 
     /// Playtest seam: force-spawns the player unit without the sector env gate
@@ -3759,6 +3809,51 @@ impl MindSimHost {
         match self.sim.ecs.0.get_mut::<ItemModule>(entity) {
             Some(mut module) => i64::from(module.add(item, amount, capacity)),
             None => 0,
+        }
+    }
+
+    /// Debug/playtest seam: adds `amount` of `liquid` to the building at (x, y)
+    /// (clamped to `Block.liquidCapacity`); returns the amount accepted.
+    #[func]
+    pub fn debug_add_building_liquid(
+        &mut self,
+        x: i32,
+        y: i32,
+        liquid: GString,
+        amount: f64,
+    ) -> f64 {
+        let Some(entity) = self.sim.grid.tiles.getn(x, y).and_then(|tile| tile.build) else {
+            return 0.0;
+        };
+        let Some(liquid) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.liquid_id(&liquid.to_string()))
+        else {
+            return 0.0;
+        };
+        let capacity = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::block::BlockTable>()
+            .and_then(|table| {
+                self.sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::Building>(entity)
+                    .map(|building| building.block)
+                    .and_then(|block| table.get(block).map(|inst| inst.def.liquid_capacity))
+            })
+            .unwrap_or(0.0);
+        match self
+            .sim
+            .ecs
+            .0
+            .get_mut::<mind_core::world::modules::LiquidModule>(entity)
+        {
+            Some(mut module) => f64::from(module.add(liquid, amount as f32, capacity)),
+            None => 0.0,
         }
     }
 

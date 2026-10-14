@@ -177,7 +177,7 @@ impl CombatHarness {
     }
 
     /// Updates the fire system one tick with a water attribute multiplier.
-    pub fn fire_tick(&mut self, water_attr: f32) {
+    pub fn fire_tick(&mut self, water_attr: f32) -> Vec<(f32, f32)> {
         super::fires::update_fires(
             &mut self.build.world,
             &mut self.build.grid.tiles,
@@ -185,7 +185,7 @@ impl CombatHarness {
             &mut self.rng,
             self.fx.as_ref(),
             water_attr,
-        );
+        )
     }
 
     /// Updates the puddle system one tick.

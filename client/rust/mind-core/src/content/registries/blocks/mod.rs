@@ -1250,6 +1250,9 @@ pub struct BlockSpec {
     pub solid: Option<bool>,
     /// Can float on liquids.
     pub floating: Option<bool>,
+    /// `CoreBlock.incinerateNonBuildable`: drop non-buildable items on intake
+    /// (Erekir cores). Default false.
+    pub incinerate_non_buildable: Option<bool>,
     /// Updates each tick.
     pub update: Option<bool>,
     /// Destructible.
@@ -1412,6 +1415,7 @@ impl Default for BlockSpec {
             env_disabled: None,
             solid: None,
             floating: None,
+            incinerate_non_buildable: None,
             update: None,
             destructible: None,
             save_data: None,
@@ -2041,6 +2045,15 @@ pub struct BlockDef {
     /// `Block.rebuildable`: dead blocks leave a rebuild ghost
     /// (`Block.java:148`, `Logic.java:42-50`).
     pub rebuildable: bool,
+    /// `Block.deconstructDropAllLiquid` (`Block.java:181`, default false; no
+    /// vanilla block sets it): drops every stored liquid on deconstruct even
+    /// when incinerable (`BuildingComp.onDeconstructed`,
+    /// `BuildingComp.java:1480-1487`).
+    pub deconstruct_drop_all_liquid: bool,
+    /// `CoreBlock.incinerateNonBuildable` (`CoreBlock.java:54`; true for the
+    /// three Erekir cores, `Blocks.java:3197,3216,3234`): drops non-buildable
+    /// items on intake instead of storing them.
+    pub incinerate_non_buildable: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
@@ -2423,6 +2436,8 @@ impl BlockDef {
                 spec.kind,
                 BlockKind::BaseShield | BlockKind::NuclearReactor | BlockKind::VariableReactor
             ),
+            deconstruct_drop_all_liquid: false,
+            incinerate_non_buildable: spec.incinerate_non_buildable.unwrap_or(false),
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             core_unit: spec.core_unit,
             flags: spec.flags,

@@ -282,6 +282,89 @@ fn liquid_source_fills_conduit() {
     );
 }
 
+/// H09 T6: `BuildingComp.onDeconstructed` (`BuildingComp.java:1478-1487`) drops
+/// `currentAmount / (size * size) * 2` per footprint tile for a
+/// non-incinerable liquid (neoplasm); an incinerable one (slag) is not dropped.
+#[test]
+fn deconstructing_tank_drops_non_incinerable_puddles() {
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let neph = liquid(&sim, "neoplasm");
+    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    {
+        let mut liquids = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+            .expect("liquids");
+        liquids.add(neph, 1500.0, 1500.0);
+    }
+    // The player deconstruct path starts through `Build.beginBreak`
+    // (`Command::Break` is the instant/API break), so call it directly.
+    {
+        let crate::sim::Sim {
+            block_runtime,
+            ecs,
+            grid,
+            ..
+        } = &mut sim;
+        let runtime = block_runtime.as_mut().expect("block runtime");
+        assert!(runtime.begin_break(&mut ecs.0, grid, 6, 6, 1, 1.0));
+    }
+    // 3x3 footprint (5..7, 5..7): 1500/9*2 = 333 per tile, capped at
+    // maxLiquid (70).
+    for y in 5..8 {
+        for x in 5..8 {
+            let puddle = crate::combat::puddles::find_at(&sim.ecs.0, x, y)
+                .and_then(|entity| {
+                    sim.ecs
+                        .0
+                        .get::<crate::combat::puddles::PuddleState>(entity)
+                        .copied()
+                })
+                .unwrap_or_else(|| panic!("puddle at ({x}, {y})"));
+            assert_eq!(puddle.liquid, neph);
+            assert!(
+                (puddle.amount - crate::combat::puddles::MAX_LIQUID).abs() < 1e-3,
+                "({x}, {y}) amount {}",
+                puddle.amount
+            );
+        }
+    }
+
+    // Incinerable slag is left behind (Java `!liquids.current().incinerable`).
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let slag = liquid(&sim, "slag");
+    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    {
+        let mut liquids = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+            .expect("liquids");
+        liquids.add(slag, 1500.0, 1500.0);
+    }
+    {
+        let crate::sim::Sim {
+            block_runtime,
+            ecs,
+            grid,
+            ..
+        } = &mut sim;
+        let runtime = block_runtime.as_mut().expect("block runtime");
+        assert!(runtime.begin_break(&mut ecs.0, grid, 6, 6, 1, 1.0));
+    }
+    for y in 5..8 {
+        for x in 5..8 {
+            assert!(
+                crate::combat::puddles::find_at(&sim.ecs.0, x, y).is_none(),
+                "no puddle at ({x}, {y}) for incinerable slag"
+            );
+        }
+    }
+}
+
 /// PAR-0077: a power source feeds an adjacent power consumer; the graph reports
 /// full satisfaction.
 #[test]
@@ -4386,6 +4469,78 @@ fn fill_items_gate_skips_other_teams() {
         "fillItems on: refilled to getMaximumAccepted"
     );
     assert!(sim.ecs.0.get::<Building>(entity).is_some(), "core exists");
+}
+
+/// PAR-0249 regression (found by the H03 session): only teams whose rule sets
+/// `fillItems` may be refilled (`Logic.java:554`
+/// `if(rules.fillItems && data.cores.size > 0)`). The campaign sets it on the
+/// wave team alone (`apply_world_load_campaign_rules`), so the PLAYER core must
+/// stay empty — filling it wrote `i32::MAX / 2` per item (`coreIncinerates`)
+/// into every exit save.
+#[test]
+fn fill_items_does_not_fill_player_core() {
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{
+        CampaignRuntime, install_campaign_core_hooks, sync_session_with_sim,
+    };
+    use crate::world::TilePos;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    // Campaign shape: only the wave team's rule gets `fillItems`.
+    rules.team_rule_mut(1).fill_items = false;
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = true;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    for (x, y, team) in [(5, 5, 1u8), (15, 15, 2u8)] {
+        sim.command(crate::determinism::SimCommand::Place {
+            x,
+            y,
+            block: core.raw(),
+            rotation: 0,
+            team,
+            player: None,
+        })
+        .expect("core placed");
+    }
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let copper = item(&sim, "copper");
+    let player_core = sim.grid.entity_at(TilePos::new(5, 5)).expect("player core");
+    let enemy_core = sim
+        .grid
+        .entity_at(TilePos::new(15, 15))
+        .expect("enemy core");
+    assert_eq!(
+        stored_item(&sim, player_core, copper),
+        0,
+        "the player core (fillItems=false) is never refilled"
+    );
+    assert_eq!(
+        stored_item(&sim, enemy_core, copper),
+        i32::MAX / 2,
+        "the wave team's core is still filled (fillItems=true)"
+    );
 }
 
 /// H09 T10: the `Logic` event counters (`Logic.java:186-216`) follow player

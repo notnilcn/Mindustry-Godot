@@ -23,6 +23,14 @@ pub const MAX_LIQUID: f32 = 70.0;
 /// `Geometry.d4` neighbor offsets.
 const D4: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
 
+/// `Geometry.d4c`: the four cardinals plus the center (Arc's `d4c`).
+const D4C: [(i32, i32); 5] = [(1, 0), (0, 1), (-1, 0), (0, -1), (0, 0)];
+
+/// Pending `Bullets.fireball` origins emitted by `Puddles.reactPuddle`
+/// (`Puddles.java:123-125`); drained by `Sim::update_fires_and_puddles`.
+#[derive(Debug, Default, Clone, bevy_ecs::prelude::Resource)]
+pub struct PendingFireballs(pub Vec<(f32, f32)>);
+
 /// Puddle state (`PuddleComp` sim fields; draw is plan 16).
 #[derive(Debug, Clone, Copy, Component)]
 pub struct PuddleState {
@@ -147,10 +155,10 @@ pub fn deposit(
         && let Some(puddle) = world.get::<PuddleState>(entity).copied()
     {
         if puddle.liquid == liquid {
+            // `p.accepting = Math.max(amount, p.accepting)` (`Puddles.java:83`):
+            // the amount is folded in by the next `update` (`amount += accepting`).
             if let Some(mut puddle) = world.get_mut::<PuddleState>(entity) {
-                puddle.accepting += amount;
-                puddle.amount = (puddle.amount + puddle.accepting).min(MAX_LIQUID);
-                puddle.accepting = 0.0;
+                puddle.accepting = puddle.accepting.max(amount);
             }
             return Some(entity);
         }
@@ -205,6 +213,15 @@ fn react_puddle(
         || (other.flammability > 0.3 && dest_def.temperature > 0.7);
     if flammable_hot {
         let _ = super::fires::create(world, tx, ty, rng);
+        // `if(Mathf.chance(0.006 * amount)) Bullets.fireball.createNet(...)`
+        // (`Puddles.java:123-125`); drained by `update_fires_and_puddles`.
+        if rng.chance(RngStream::Sim, 0.006 * amount as f64) {
+            let ts = crate::config::TILESIZE as f32;
+            world
+                .get_resource_or_insert_with(PendingFireballs::default)
+                .0
+                .push((tx as f32 * ts, ty as f32 * ts));
+        }
     } else if dest_def.temperature > 0.7 && other.temperature < 0.55 {
         // Cold liquid poured onto a hot puddle.
         return -0.1 * amount;
@@ -268,7 +285,6 @@ pub fn update_puddles(
         puddle.amount += puddle.accepting;
         puddle.amount = puddle.amount.min(MAX_LIQUID);
         puddle.accepting = 0.0;
-        puddle.update_time -= 1.0;
 
         if puddle.amount >= MAX_LIQUID / 1.5 {
             let deposited = ((puddle.amount - MAX_LIQUID / 1.5) / 4.0).min(0.3);
@@ -278,7 +294,9 @@ pub fn update_puddles(
                 let (nx, ny) = (tx as i32 + dx, ty as i32 + dy);
                 if tiles.in_bounds(nx, ny) {
                     let other = tiles.get(nx, ny);
-                    if other.build.is_none() || def.move_through_blocks {
+                    // `other.block() == Blocks.air || liquid.moveThroughBlocks`
+                    // (`PuddleComp.java:63-70`).
+                    if other.block == crate::content::BlockId::AIR || def.move_through_blocks {
                         targets += 1;
                     }
                 }
@@ -290,7 +308,8 @@ pub fn update_puddles(
             for (dx, dy) in D4 {
                 let (nx, ny) = (tx as i32 + dx, ty as i32 + dy);
                 if tiles.in_bounds(nx, ny) {
-                    let empty = tiles.get(nx, ny).build.is_none() || def.move_through_blocks;
+                    let empty = tiles.get(nx, ny).block == crate::content::BlockId::AIR
+                        || def.move_through_blocks;
                     if empty {
                         let _ = deposit(
                             world, tiles, content, nx as i16, ny as i16, liquid, deposited, rng,
@@ -381,10 +400,161 @@ pub fn update_puddles(
             continue;
         };
         puddle.update_time -= 1.0;
+        // `liquid.update(self())` (`PuddleComp.java:122`): `CellLiquid.update`
+        // (neoplasm spreads into adjacent spread-target buildings/puddles).
+        if def.cell.is_some() {
+            update_cell_liquid(world, tiles, content, entity, rng);
+        }
         if tiles.in_bounds(tx as i32, ty as i32) {
             tiles.set_puddle(tiles.index(tx as i32, ty as i32), Some(entity));
         }
     }
+}
+
+/// `CellLiquid.update(puddle)` (`CellLiquid.java:36-92`): spreads the target
+/// liquid out of adjacent (and the puddle's own) buildings, damages the
+/// building it sits on and drains adjacent `spreadTarget` puddles into itself.
+fn update_cell_liquid(
+    world: &mut World,
+    tiles: &crate::world::tiles::Tiles,
+    content: &ContentRegistry,
+    entity: Entity,
+    rng: &mut SimRng,
+) {
+    // `if(!Vars.state.rules.fire) return;`
+    if !world
+        .get_resource::<super::fires::CombatEnv>()
+        .map(|env| env.fire)
+        .unwrap_or(true)
+    {
+        return;
+    }
+    let Some(puddle) = world.get::<PuddleState>(entity).copied() else {
+        return;
+    };
+    let Some(cell) = content
+        .liquid(puddle.liquid)
+        .and_then(|def| def.cell.as_ref())
+    else {
+        return;
+    };
+    let Some(spread_target) = cell.spread_target else {
+        return;
+    };
+    let (tx, ty) = puddle.tile;
+    let scaling = (puddle.amount / MAX_LIQUID).clamp(0.0, 1.0).powi(2);
+
+    // `for(var point : Geometry.d4c)` — cardinals plus the center tile, so the
+    // building the puddle sits on is drained too.
+    for (dx, dy) in D4C {
+        let (nx, ny) = (tx as i32 + dx, ty as i32 + dy);
+        if !tiles.in_bounds(nx, ny) {
+            continue;
+        }
+        let Some(build) = tiles.get(nx, ny).build else {
+            continue;
+        };
+        let available = world
+            .get::<crate::world::modules::LiquidModule>(build)
+            .map(|liquids| liquids.get(spread_target))
+            .unwrap_or(0.0);
+        if available <= 0.0001 {
+            continue;
+        }
+        let amount = available.min(cell.max_spread * scaling);
+        if let Some(mut liquids) = world.get_mut::<crate::world::modules::LiquidModule>(build) {
+            liquids.remove(spread_target, amount * cell.remove_scaling);
+        }
+        // `Puddles.deposit(tile, this, amount * spreadConversion)`.
+        let _ = deposit(
+            world,
+            tiles,
+            content,
+            nx as i16,
+            ny as i16,
+            puddle.liquid,
+            amount * cell.spread_conversion,
+            rng,
+        );
+    }
+
+    // Damage the building the puddle sits on (`CellLiquid.java:54-67`).
+    if cell.spread_damage > 0.0 {
+        let build = tiles.get(tx as i32, ty as i32).build;
+        let available = build
+            .and_then(|build| world.get::<crate::world::modules::LiquidModule>(build))
+            .map(|liquids| liquids.get(spread_target))
+            .unwrap_or(0.0);
+        if available > 0.0001 {
+            let amount_spread = (available * cell.spread_conversion).min(cell.max_spread) / 2.0;
+            for _ in D4 {
+                // Java deposits at `puddle.tile` with the neighbor as the
+                // source; the port's deposit is single-tile (source == tile).
+                let _ = deposit(
+                    world,
+                    tiles,
+                    content,
+                    tx,
+                    ty,
+                    puddle.liquid,
+                    amount_spread,
+                    rng,
+                );
+            }
+            if let Some(build) = build {
+                crate::combat::damage::area::apply_health(
+                    world,
+                    build,
+                    cell.spread_damage * scaling,
+                );
+            }
+        }
+    }
+
+    // Drain adjacent puddles of the spread target into this one
+    // (`CellLiquid.java:70-86`).
+    for (dx, dy) in D4 {
+        let (nx, ny) = (tx as i32 + dx, ty as i32 + dy);
+        if !tiles.in_bounds(nx, ny) {
+            continue;
+        }
+        let Some(other_entity) = find_at(world, nx as i16, ny as i16) else {
+            continue;
+        };
+        let Some(other) = world.get::<PuddleState>(other_entity).copied() else {
+            continue;
+        };
+        if other.liquid != spread_target {
+            continue;
+        }
+        let amount = other
+            .amount
+            .min((cell.max_spread * scaling).max(other.amount * 0.25 * scaling));
+        let remaining = other.amount - amount;
+        if let Some(mut other) = world.get_mut::<PuddleState>(other_entity) {
+            other.amount = remaining;
+        }
+        if let Some(mut puddle) = world.get_mut::<PuddleState>(entity) {
+            puddle.amount += amount;
+        }
+        if remaining <= MAX_LIQUID / 3.0 {
+            // `other.remove(); Puddles.deposit(tile, puddle.tile, this,
+            // max(amount, maxLiquid / 3f))`.
+            remove(world, other_entity);
+            let _ = deposit(
+                world,
+                tiles,
+                content,
+                nx as i16,
+                ny as i16,
+                puddle.liquid,
+                amount.max(MAX_LIQUID / 3.0),
+                rng,
+            );
+        }
+    }
+    // Java also fires `Trigger.neoplasmReact` when `reacted`; the port's hint
+    // driver (G05) owns that trigger and no live consumer reads it here.
 }
 
 #[cfg(test)]
@@ -653,5 +823,213 @@ mod tests {
         assert_eq!(dst.tile, (7, 9));
         assert_eq!(dst.liquid, LiquidId::new(2));
         assert_eq!(dst.amount, 42.5);
+    }
+
+    /// H09 T6: same-liquid deposits only raise `accepting` to `max(amount)`
+    /// (`Puddles.java:83`); the amount is folded in by the next update.
+    #[test]
+    fn same_liquid_deposit_uses_max_accepting() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let water = harness.content().liquid_id("water").expect("water");
+        let mut rng = SimRng::new(3);
+        let e = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            water,
+            10.0,
+            &mut rng,
+        )
+        .expect("puddle");
+        // Two deposits in the same tick: 5 then 3 -> `accepting = max(5, 3)`.
+        let _ = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            water,
+            5.0,
+            &mut rng,
+        );
+        let _ = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            water,
+            3.0,
+            &mut rng,
+        );
+        harness.puddle_tick();
+        let amount = harness
+            .build
+            .world
+            .get::<PuddleState>(e)
+            .map(|p| p.amount)
+            .unwrap_or(0.0);
+        // 10 + 5 - (1 - 0.5) / (5 + 3) evaporation (water viscosity 0.5,
+        // addSpeed 3 because accepting > 0).
+        assert!(
+            (amount - 14.9375).abs() < 1e-4,
+            "amount grew by max(5, 3), not their sum ({amount})"
+        );
+    }
+
+    /// H09 T6: spread only reaches `Blocks.air` tiles; a non-air block without
+    /// a building (static wall) is skipped (`PuddleComp.java:63-70`).
+    #[test]
+    fn spread_skips_static_walls() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let wall = harness
+            .content()
+            .block_id("stone-wall")
+            .expect("stone-wall");
+        // A block-only wall tile (no building entity) beside the puddle.
+        harness.build.grid.tiles.get_mut(9, 8).block = wall;
+        let water = harness.content().liquid_id("water").expect("water");
+        let mut rng = SimRng::new(3);
+        let _ = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            water,
+            MAX_LIQUID,
+            &mut rng,
+        )
+        .expect("puddle");
+        for _ in 0..5 {
+            harness.puddle_tick();
+        }
+        assert!(
+            find_at(&harness.build.world, 9, 8).is_none(),
+            "no puddle on the static wall"
+        );
+        // The open neighbors still receive spread.
+        let neighbors = [(7, 8), (8, 7), (8, 9)]
+            .iter()
+            .filter(|(x, y)| find_at(&harness.build.world, *x, *y).is_some())
+            .count();
+        assert!(neighbors >= 1, "spread still reaches air tiles");
+    }
+
+    /// H09 T6: `CellLiquid.update` drains `spreadTarget` out of adjacent
+    /// buildings and deposits it back as the cell liquid
+    /// (`CellLiquid.java:39-51`).
+    #[test]
+    fn neoplasm_spreads_into_water_building() {
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let neph = harness.content().liquid_id("neoplasm").expect("neoplasm");
+        let water = harness.content().liquid_id("water").expect("water");
+        let router = harness.content().block_id("liquid-router").expect("router");
+        assert!(harness.place(9, 8, router, 0, true));
+        let building = harness.build_at(9, 8).expect("router entity");
+        {
+            let mut liquids = harness
+                .build
+                .world
+                .get_mut::<crate::world::modules::LiquidModule>(building)
+                .expect("liquids");
+            liquids.add(water, 20.0, 20.0);
+        }
+        let mut rng = SimRng::new(3);
+        let _ = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            neph,
+            30.0,
+            &mut rng,
+        )
+        .expect("neoplasm puddle");
+        harness.puddle_tick();
+        let remaining = harness
+            .build
+            .world
+            .get::<crate::world::modules::LiquidModule>(building)
+            .map(|liquids| liquids.get(water))
+            .unwrap_or(0.0);
+        assert!(
+            remaining < 20.0,
+            "the router lost water to the spread ({remaining})"
+        );
+        let puddle = find_at(&harness.build.world, 9, 8)
+            .and_then(|e| harness.build.world.get::<PuddleState>(e).map(|p| p.liquid));
+        assert_eq!(puddle, Some(neph), "a neoplasm puddle replaced it");
+    }
+
+    /// H09 T6: the status re-apply interval is 40 ticks (`updateTime = 40` plus
+    /// one decrement per update, `PuddleComp.java:105,120`) — 2 applications
+    /// over 80 ticks, not 4.
+    #[test]
+    fn status_interval_is_40_ticks() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct Counting {
+            count: Arc<AtomicUsize>,
+        }
+        impl crate::combat::damage::status::StatusApply for Counting {
+            fn apply(
+                &mut self,
+                _world: &mut World,
+                _entity: Entity,
+                _status: crate::content::StatusId,
+                _duration: f32,
+            ) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let mut harness = CombatHarness::new(16, 16, 3);
+        let count = Arc::new(AtomicUsize::new(0));
+        harness
+            .build
+            .world
+            .insert_resource(crate::combat::damage::status::StatusApplier(Box::new(
+                Counting {
+                    count: count.clone(),
+                },
+            )));
+        // A ground unit on the puddle tile (hitbox component required).
+        let unit = harness.spawn_test_unit(
+            crate::combat::harness::CombatHarness::tile_center(8, 8).0,
+            crate::combat::harness::CombatHarness::tile_center(8, 8).1,
+            1,
+            Vec::new(),
+        );
+        harness
+            .build
+            .world
+            .entity_mut(unit)
+            .insert(crate::entities::comp::unit::HitboxComp { hit_size: 8.0 });
+        let slag = harness.content().liquid_id("slag").expect("slag");
+        let mut rng = SimRng::new(3);
+        let _ = deposit(
+            &mut harness.build.world,
+            &harness.build.grid.tiles,
+            &harness.build.content,
+            8,
+            8,
+            slag,
+            MAX_LIQUID,
+            &mut rng,
+        )
+        .expect("slag puddle");
+        for _ in 0..80 {
+            harness.puddle_tick();
+        }
+        assert_eq!(
+            count.load(Ordering::SeqCst),
+            2,
+            "status applied twice in 80 ticks"
+        );
     }
 }

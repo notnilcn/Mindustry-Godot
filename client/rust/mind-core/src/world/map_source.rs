@@ -107,7 +107,9 @@ impl MapSource for EcsMapSource<'_> {
         // tile.build.writeAll(out)` (`SaveVersion.java:257-269`) — the
         // per-kind revision, then `writeBase` with its embedded base version,
         // then the per-kind body. Native v2 (never v1) produces this layout.
-        crate::world::building_io::write_all_java(self.ecs, entity, chunk, false)
+        // `BuildingComp.writeVisibility = state.rules.fog && visibleFlags != 0`.
+        let fog = crate::game::runtime::rules_of(self.ecs).is_some_and(|rules| rules.fog);
+        crate::world::building_io::write_all_java(self.ecs, entity, chunk, fog)
     }
 
     fn core_team(&self, index: usize) -> Option<u8> {

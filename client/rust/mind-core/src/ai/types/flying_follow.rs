@@ -1,120 +1,104 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `FlyingFollowAI` (plan 11 §4.2). Air units escort an allied formation leader;
-//! when no leader is in range they fall back to `FlyingAI` flag targeting.
-//! Ported from `core/src/mindustry/ai/types/FlyingFollowAI.java`.
+//! `FlyingFollowAI` (`ai/types/FlyingFollowAI.java`; H01 T9): quell/disrupt
+//! wave support flyers follow the healthiest allied unit that is not another
+//! follower; non-wave teams fall back to `FlyingAI`
+//! (`useFallback()` = `rules.pvp || rules.waveTeam != unit.team`).
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 
-use crate::entities::comp::unit::comp::PhysicsComp;
-use crate::entities::comp::{Pos, TeamComp};
-use crate::world::TilePos;
+use crate::ai::controller::{AiKind, ControllerSlot};
+use crate::content::UnitTypeId;
+use crate::ecs::EntitySeq;
+use crate::entities::comp::unit::comp::UnitTypeComp;
+use crate::entities::comp::{Health, Pos};
 
-use super::super::ai_controller::AiCtx;
-use super::super::controller::ControllerSlot;
-
-/// `FlyingFollowAI` controller state.
-#[derive(Debug, Default, Clone, Copy)]
-pub struct FlyingFollowAi {
-    /// Bound unit.
-    pub unit: Option<Entity>,
-    /// Current follow leader.
-    pub follow: Option<Entity>,
+/// `FlyingFollowAI` controller state (`following` + the 30-tick
+/// `timer(timerTarget3)` cadence).
+#[derive(Debug, Clone, Copy, PartialEq, bevy_ecs::component::Component)]
+pub struct FlyingFollowAiState {
+    /// `FlyingFollowAI.following`.
+    pub following: Option<Entity>,
+    /// `AIController.timer(timerTarget3, 30f)` countdown. Seeded 29 so the
+    /// first pick runs on the first tick (`GroundAiState` pattern).
+    pub follow_timer: f32,
 }
 
-/// `FlyingFollowAI.updateUnit`: escort the leader, else fall back to the
-/// assigned target at `fallback_range`.
-pub fn update_flying_follow(ctx: &mut AiCtx, unit: Entity, state: &mut FlyingFollowAi) -> bool {
-    let Some(leader) = state.follow.or_else(|| nearest_ally(ctx, unit)) else {
-        // Fall back to a direct fly toward the assigned target tile.
-        let target = ctx
-            .world
-            .get::<ControllerSlot>(unit)
-            .and_then(|slot| slot.target);
-        let Some(target) = target else {
-            return false;
-        };
-        return ctx.pathfind(unit, target, 4.0);
-    };
-    state.follow = Some(leader);
-    let Some(lpos) = ctx.world.get::<Pos>(leader).copied() else {
-        state.follow = None;
-        return false;
-    };
-    ctx.move_direct(unit, lpos.x, lpos.y, 16.0)
-}
-
-/// Nearest allied flying unit that is not `unit`.
-fn nearest_ally(ctx: &mut AiCtx, unit: Entity) -> Option<Entity> {
-    let pos = ctx.world.get::<Pos>(unit).copied()?;
-    let team = ctx.world.get::<TeamComp>(unit)?.team;
-    let candidates =
-        crate::entities::comp::unit::queries::in_radius(ctx.world, pos.x, pos.y, 200.0, Some(team));
-    let mut best: Option<(f32, Entity)> = None;
-    for other in candidates {
-        if other == unit {
-            continue;
+impl Default for FlyingFollowAiState {
+    fn default() -> Self {
+        Self {
+            following: None,
+            follow_timer: 29.0,
         }
-        if !ctx
-            .world
-            .get::<PhysicsComp>(other)
-            .map(|physics| physics.flying)
-            .unwrap_or(false)
+    }
+}
+
+/// `FlyingFollowAI.updateMovement`'s follow pick (`FlyingFollowAI.java:26-29`):
+///
+/// ```java
+/// following = Units.closest(unit.team, unit.x, unit.y, Math.max(unit.type.range, 400f),
+///     u -> !u.dead() && !(u.controller() instanceof FlyingFollowAI) && u.type != unit.type,
+///     (u, tx, ty) -> -u.maxHealth + Mathf.dst2(u.x, u.y, tx, ty) / 6400f);
+/// ```
+///
+/// Deterministic iteration in `(EntitySeq, index)` order; the distance gate is
+/// `u.within(x, y, range + u.hitSize/2)`.
+pub fn flying_follow_closest(
+    world: &mut World,
+    team: u8,
+    x: f32,
+    y: f32,
+    range: f32,
+    unit_type: UnitTypeId,
+) -> Option<Entity> {
+    let radius = range.max(400.0);
+    let mut candidates: Vec<(u64, Entity)> =
+        crate::entities::comp::unit::queries::in_radius(world, x, y, radius, Some(team))
+            .into_iter()
+            .map(|entity| {
+                let seq = world.get::<EntitySeq>(entity).map_or(u64::MAX, |seq| seq.0);
+                (seq, entity)
+            })
+            .collect();
+    candidates.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+    let mut best: Option<(f32, Entity)> = None;
+    for (_, other) in candidates {
+        if world
+            .get::<ControllerSlot>(other)
+            .is_some_and(|slot| slot.kind == AiKind::FlyingFollow)
         {
             continue;
         }
-        let Some(opos) = ctx.world.get::<Pos>(other) else {
+        if world
+            .get::<UnitTypeComp>(other)
+            .is_some_and(|comp| comp.type_id == unit_type)
+        {
+            continue;
+        }
+        if world.get::<Health>(other).is_some_and(|health| health.dead) {
+            continue;
+        }
+        let Some(opos) = world.get::<Pos>(other).copied() else {
             continue;
         };
-        let dx = opos.x - pos.x;
-        let dy = opos.y - pos.y;
+        let dx = opos.x - x;
+        let dy = opos.y - y;
         let dist2 = dx * dx + dy * dy;
-        match best {
-            Some((best_dist, best_entity))
-                if best_dist < dist2
-                    || (best_dist == dist2 && best_entity.index() <= other.index()) => {}
-            _ => best = Some((dist2, other)),
+        let hit = world
+            .get::<crate::entities::comp::unit::comp::HitboxComp>(other)
+            .map_or(0.0, |hitbox| hitbox.hit_size);
+        if dist2 > (radius + hit / 2.0) * (radius + hit / 2.0) {
+            continue;
+        }
+        let max_health = world
+            .get::<Health>(other)
+            .map_or(0.0, |health| health.max_health);
+        let cost = -max_health + dist2 / 6400.0;
+        if best.is_none_or(|(best_cost, _)| cost < best_cost) {
+            best = Some((cost, other));
         }
     }
     best.map(|(_, entity)| entity)
-}
-
-#[allow(dead_code)]
-fn tile_of(pos: &Pos) -> TilePos {
-    TilePos::new(
-        crate::world::WorldGrid::to_tile(pos.x) as i16,
-        crate::world::WorldGrid::to_tile(pos.y) as i16,
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ai::UnitHarness;
-    use crate::ai::ai_controller::AiCtx;
-
-    #[test]
-    fn follow_moves_toward_leader() {
-        let mut harness = UnitHarness::new(64, 64, 1);
-        let leader = harness.spawn("flare", 0, 200.0, 200.0, 0.0).expect("flare");
-        let follower = harness.spawn("flare", 0, 40.0, 40.0, 0.0).expect("flare");
-        let mut state = FlyingFollowAi {
-            unit: Some(follower),
-            follow: Some(leader),
-        };
-        let mut ctx = AiCtx {
-            world: &mut harness.build.world,
-            grid: &harness.build.grid,
-            content: &harness.build.content,
-            pathfinder: &mut harness.pathfinder,
-            team: 0,
-        };
-        update_flying_follow(&mut ctx, follower, &mut state);
-        // One `VelComp.update` pass: the controller only writes `vel` (T4).
-        harness.vel_update(follower);
-        let before = harness.snapshot(follower).expect("alive");
-        // The follower moved toward the leader's position.
-        assert!(before.x > 40.0 || before.y > 40.0);
-    }
 }

@@ -20,6 +20,7 @@ use crate::content::ContentRegistry;
 use crate::content::Rgba;
 use crate::content::registries::bullets::FIREBALL;
 use crate::determinism::RngStream;
+use crate::ecs::EntitySeq;
 use crate::entities::comp::{Pos, TeamComp};
 use crate::world::blocks::defense::projectors::{BaseShieldState, base_shield_radius};
 use crate::world::blocks::defense::shields::ForceProjectorState;
@@ -236,8 +237,17 @@ pub fn dynamic_explosion(
 
 /// `ForceBuild.absorbExplosion(ex, ey, damage)` (ForceProjector.java:270-278)
 /// over the live shields: `ForceProjectorState` uses its polygon and buildup
-/// (`absorb_explosion`), `BaseShieldState` the simplified latch. Any absorbing
-/// enemy shield skips the whole wave.
+/// (`absorb_explosion`), `BaseShieldState` the simplified latch.
+///
+/// Java semantics (`Damage.java:112-113`, `UnitComp.java:925-927`):
+/// `var shields = ignoreTeam == null ? null : indexer.getEnemy(ignoreTeam,
+/// BlockFlag.shield); if(shields == null || shields.isEmpty() ||
+/// !shields.contains(s -> s.absorbExplosion(x, y, d))) damage(..)`:
+/// * no ignore team -> no shield check at all (no buildup either);
+/// * `indexer.getEnemy` skips the ignore team and derelict
+///   (`BlockIndexer.java:389-414`);
+/// * `Seq.contains` stops at the first absorbing shield — only that one gets
+///   `hit`/buildup; the wave is still skipped.
 pub fn explosion_absorbed(
     world: &mut World,
     x: f32,
@@ -245,50 +255,55 @@ pub fn explosion_absorbed(
     damage: f32,
     ignore_team: Option<u8>,
 ) -> bool {
-    let mut projectors: Vec<Entity> = Vec::new();
-    let mut base_shields: Vec<Entity> = Vec::new();
+    // `ignoreTeam == null -> shields == null`: the check never runs.
+    let Some(ignore_team) = ignore_team else {
+        return false;
+    };
+    // `indexer.getEnemy(ignoreTeam, BlockFlag.shield)`: shield buildings of the
+    // other teams (derelict is not an active enemy, BlockIndexer.java:389-414).
+    let mut candidates: Vec<(u64, Entity)> = Vec::new();
     for entity_ref in world.iter_entities() {
-        if entity_ref.get::<TeamComp>().map(|team| team.team) == ignore_team {
-            continue;
-        }
-        if entity_ref.get::<ForceProjectorState>().is_some() {
-            projectors.push(entity_ref.id());
-        } else if entity_ref.get::<BaseShieldState>().is_some() {
-            base_shields.push(entity_ref.id());
-        }
-    }
-    let mut absorbed = false;
-    for entity in projectors {
-        let pos = world.get::<Pos>(entity).copied();
-        if let (Some(pos), Some(mut state)) = (pos, world.get_mut::<ForceProjectorState>(entity))
-            && state.absorb_explosion(pos.x, pos.y, x, y, damage)
+        if entity_ref.get::<ForceProjectorState>().is_none()
+            && entity_ref.get::<BaseShieldState>().is_none()
         {
-            absorbed = true;
-        }
-    }
-    let mut hit: Vec<Entity> = Vec::new();
-    for entity in base_shields {
-        let Some(state) = world.get::<BaseShieldState>(entity) else {
-            continue;
-        };
-        if state.broken {
             continue;
         }
-        let Some(pos) = world.get::<Pos>(entity) else {
+        let team = entity_ref
+            .get::<TeamComp>()
+            .map(|team| team.team)
+            .unwrap_or(0);
+        if crate::ai::block_indexer::is_derelict(world, team) || team == ignore_team {
             continue;
-        };
-        let radius = base_shield_radius(state);
-        if radius > 0.0 && is_in_regular_polygon(state.sides, pos.x, pos.y, radius, 0.0, x, y) {
-            hit.push(entity);
+        }
+        let seq = entity_ref.get::<EntitySeq>().map_or(u64::MAX, |seq| seq.0);
+        candidates.push((seq, entity_ref.id()));
+    }
+    candidates.sort_unstable_by_key(|(seq, entity)| (*seq, entity.index()));
+    // `Seq.contains(pred)`: the first absorbing shield wins.
+    for (_, entity) in candidates {
+        let pos = world.get::<Pos>(entity).copied();
+        if world.get::<ForceProjectorState>(entity).is_some() {
+            if let Some(mut state) = world.get_mut::<ForceProjectorState>(entity)
+                && let Some(pos) = pos
+                && state.absorb_explosion(pos.x, pos.y, x, y, damage)
+            {
+                return true;
+            }
+        } else if let Some(mut state) = world.get_mut::<BaseShieldState>(entity) {
+            if state.broken {
+                continue;
+            }
+            let radius = base_shield_radius(&state);
+            if let Some(pos) = pos
+                && radius > 0.0
+                && is_in_regular_polygon(state.sides, pos.x, pos.y, radius, 0.0, x, y)
+            {
+                state.hit = 1.0;
+                return true;
+            }
         }
     }
-    for entity in hit {
-        if let Some(mut state) = world.get_mut::<BaseShieldState>(entity) {
-            state.hit = 1.0;
-        }
-        absorbed = true;
-    }
-    absorbed
+    false
 }
 
 /// `Damage.tileDamage`: square-radius building damage from an explosion.
@@ -345,6 +360,103 @@ mod tests {
                 12.0,
                 40.0
             ) > 0.0
+        );
+    }
+
+    /// PAR-0091: `var shields = ignoreTeam == null ? null : ...` — without an
+    /// ignore team Java never runs the shield check, so nothing is absorbed
+    /// and no shield takes buildup (`Damage.java:112-113`).
+    #[test]
+    fn no_absorption_without_ignore_team() {
+        use crate::entities::comp::TeamComp;
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let projector = harness
+            .content()
+            .block_id("force-projector")
+            .expect("projector");
+        assert!(harness.place(10, 10, projector, 0, true));
+        let entity = harness.build_at(10, 10).expect("build");
+        {
+            if let Some(mut team) = harness.build.world.get_mut::<TeamComp>(entity) {
+                team.team = 1;
+            }
+            if let Some(mut state) = harness.build.world.get_mut::<ForceProjectorState>(entity) {
+                state.radscl = 1.0;
+                state.radius = 100.0;
+                state.broken = false;
+                state.sides = 24;
+                state.buildup = 0.0;
+            }
+        }
+        let (x, y) = CombatHarness::tile_center(10, 10);
+        assert!(
+            !explosion_absorbed(&mut harness.build.world, x, y, 30.0, None),
+            "no ignore team -> no shield check"
+        );
+        let buildup = harness
+            .build
+            .world
+            .get::<ForceProjectorState>(entity)
+            .expect("state")
+            .buildup;
+        assert_eq!(buildup, 0.0, "no buildup without an ignore team");
+    }
+
+    /// PAR-0091: `Seq.contains(pred)` stops at the first absorbing shield — two
+    /// covered projectors absorb together but only one takes `hit`/buildup
+    /// (`Damage.java:112-127`).
+    #[test]
+    fn only_first_shield_absorbs() {
+        use crate::entities::comp::TeamComp;
+        use crate::world::blocks::defense::shields::ForceProjectorState;
+
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let projector = harness
+            .content()
+            .block_id("force-projector")
+            .expect("projector");
+        let mut shields = Vec::new();
+        // Two 3x3 projectors far enough apart to both place, both covering the
+        // probe point at tile (12, 10).
+        for (tx, ty) in [(10, 10), (14, 10)] {
+            assert!(harness.place(tx, ty, projector, 0, true));
+            let entity = harness.build_at(tx, ty).expect("build");
+            {
+                if let Some(mut team) = harness.build.world.get_mut::<TeamComp>(entity) {
+                    team.team = 1;
+                }
+                if let Some(mut state) = harness.build.world.get_mut::<ForceProjectorState>(entity)
+                {
+                    state.radscl = 1.0;
+                    state.radius = 100.0;
+                    state.broken = false;
+                    state.sides = 24;
+                    state.buildup = 0.0;
+                }
+            }
+            shields.push(entity);
+        }
+        let (x, y) = CombatHarness::tile_center(12, 10);
+        assert!(
+            explosion_absorbed(&mut harness.build.world, x, y, 30.0, Some(2)),
+            "an enemy shield absorbs the explosion"
+        );
+        let buildups: Vec<f32> = shields
+            .iter()
+            .map(|entity| {
+                harness
+                    .build
+                    .world
+                    .get::<ForceProjectorState>(*entity)
+                    .map_or(0.0, |state| state.buildup)
+            })
+            .collect();
+        assert_eq!(
+            buildups.iter().filter(|buildup| **buildup > 0.0).count(),
+            1,
+            "exactly one shield takes buildup: {buildups:?}"
         );
     }
 }
