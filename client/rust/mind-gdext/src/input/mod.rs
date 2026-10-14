@@ -37,9 +37,9 @@ use crate::sim_host::MindSimHost;
 use desktop::{DesktopBridge, Effect};
 
 /// Path of the block-config overlay in the UI root.
-const BLOCK_CONFIG_PATH: &str = "../Ui/UiRoot/OverlayLayer/block_config";
+const BLOCK_CONFIG_PATH: &str = "../Ui/UiRoot/HudGroup/block_config";
 /// Path of the block-inventory overlay in the UI root.
-const BLOCK_INVENTORY_PATH: &str = "../Ui/UiRoot/OverlayLayer/block_inventory";
+const BLOCK_INVENTORY_PATH: &str = "../Ui/UiRoot/HudGroup/block_inventory";
 /// Path of a HUD fragment under the UI root (`minimap`, `console`, ...).
 const HUD_FRAGMENT_DIR: &str = "../Ui/UiRoot/HudGroup";
 
