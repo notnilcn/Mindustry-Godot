@@ -1270,6 +1270,8 @@ pub struct BlockSpec {
     pub placeable_on: Option<bool>,
     /// Insulated.
     pub insulated: Option<bool>,
+    /// `Block.canOverdrive` (`Block.java:314`; default true).
+    pub can_overdrive: Option<bool>,
     /// Absorbs lasers.
     pub absorb_lasers: Option<bool>,
     /// Core zone placement allowed.
@@ -1420,6 +1422,7 @@ impl Default for BlockSpec {
             placeable_liquid: None,
             placeable_on: None,
             insulated: None,
+            can_overdrive: None,
             absorb_lasers: None,
             allow_core_placement: None,
             player_unmineable: None,
@@ -2112,6 +2115,8 @@ pub struct BlockDef {
     pub placeable_on: bool,
     /// Insulated.
     pub insulated: bool,
+    /// `Block.canOverdrive` (`Block.java:314`).
+    pub can_overdrive: bool,
     /// Absorbs lasers.
     pub absorb_lasers: bool,
     /// Core zone placement allowed.
@@ -2457,6 +2462,11 @@ impl BlockDef {
             placeable_liquid: spec.placeable_liquid.unwrap_or(false),
             placeable_on: spec.placeable_on.unwrap_or(true),
             insulated: spec.insulated.unwrap_or(false),
+            // `Block.canOverdrive` (`Block.java:314`); `LandingPad` clears it
+            // in its constructor (`LandingPad.java:69`).
+            can_overdrive: spec
+                .can_overdrive
+                .unwrap_or(!matches!(spec.kind, BlockKind::LandingPad)),
             absorb_lasers: spec.absorb_lasers.unwrap_or(false),
             allow_core_placement: spec.allow_core_placement.unwrap_or(false),
             player_unmineable: spec.player_unmineable.unwrap_or(false),

@@ -737,6 +737,60 @@ mod tests {
         assert!(boosted, "overdrive boosted the wall's timeScale");
     }
 
+    /// H02 T9 (`Blocks.java:2394`): `canOverdrive = false` blocks (phase
+    /// conduit) are skipped by the overdrive projector.
+    #[test]
+    fn overdrive_skips_phase_conduit() {
+        use crate::entities::comp::Building as BuildingComp;
+        use crate::world::modules::PowerModule;
+
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let overdrive = harness
+            .content()
+            .block_id("overdrive-projector")
+            .expect("overdrive-projector");
+        let conduit = harness
+            .content()
+            .block_id("phase-conduit")
+            .expect("phase-conduit");
+        assert!(harness.place(0, 0, overdrive, 0, true));
+        assert!(harness.place(2, 0, conduit, 0, true));
+        let projector = harness.build_at(0, 0).expect("projector");
+        let target = harness.build_at(2, 0).expect("phase-conduit");
+        for _ in 0..80 {
+            if let Some(mut power) = harness.world.get_mut::<PowerModule>(projector) {
+                power.status = 1.0;
+            }
+            harness.tick();
+        }
+        assert_eq!(
+            harness
+                .world
+                .get::<BuildingComp>(target)
+                .map(|building| building.time_scale),
+            Some(1.0),
+            "phase conduit is never overdriven"
+        );
+    }
+
+    /// H02 T9 (`BuildingComp.java:467-474`): a weaker boost does not refresh
+    /// the duration set by a stronger one.
+    #[test]
+    fn apply_boost_keeps_duration_for_weaker_boost() {
+        use super::super::projectors::apply_boost;
+        use crate::entities::comp::Building as BuildingComp;
+
+        let mut harness = BuildHarness::new(8, 8, 7);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(2, 0, wall, 0, true));
+        let target = harness.build_at(2, 0).expect("wall");
+        apply_boost(&mut harness.world, target, 2.5, 100.0);
+        apply_boost(&mut harness.world, target, 1.5, 500.0);
+        let building = harness.world.get::<BuildingComp>(target).expect("building");
+        assert_eq!(building.time_scale, 2.5);
+        assert_eq!(building.time_scale_duration, 100.0);
+    }
+
     /// gap5 GAP-5 / K-2: `regen-projector` heals a damaged building.
     #[test]
     fn regen_projector_heals_damaged_building() {

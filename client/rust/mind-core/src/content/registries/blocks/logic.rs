@@ -216,6 +216,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         configurable: Some(true),
         privileged: Some(true),
+        // `Blocks.java:7001`.
+        can_overdrive: Some(false),
         ..spec("world-processor", BlockKind::LogicBlock)
     })?;
 
