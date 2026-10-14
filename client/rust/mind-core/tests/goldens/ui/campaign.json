@@ -246,7 +246,7 @@
     "icon": null,
     "content_icon": null,
     "difficulty": 1.0,
-    "threat": 0.0,
+    "threat": 0.10000000149011612,
     "threat_band": "low",
     "unlocked": true,
     "locked": false,
@@ -318,5 +318,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "3d361777c4639d79"
+  "checksum": "91f5a9a8f79530e6"
 }

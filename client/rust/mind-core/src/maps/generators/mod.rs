@@ -20,10 +20,13 @@ use crate::game::rules::Rules;
 use crate::world::WorldParams;
 use crate::world::tiles::Tiles;
 
-pub use base::{BaseGenerator, BaseRegistryView, SchematicHooks};
+pub use base::{BaseRand, get_frac, try_place};
 pub use basic::{BasicGenerator, Draw, GenNoise, SimplexNoise};
 pub use file_map::FileMapGenerator;
-pub use planet::{BlankPlanetGenerator, HexMesher, PlanetGenerator, SectorRect, SectorView};
+pub use planet::{
+    BlankPlanetGenerator, HexMesher, LaunchLoadout, PlanetGenerator, SectorRect, SectorView,
+    StructureCtx,
+};
 pub use simplex::SimplexGenerator;
 
 /// A world generator (`WorldGenerator`).
@@ -53,4 +56,27 @@ pub trait WorldGenerator {
         _content: &ContentRegistry,
     ) {
     }
+
+    /// Sets the campaign sector view before generation (`Control.playNewSector`
+    /// assigns `state.rules.sector`; the planet generators read
+    /// `sector.threat`/`tile_v`/`hasEnemyBase`). H05 T2.
+    fn set_sector(&mut self, _view: planet::FlatSectorView) {}
+
+    /// `PlanetGenerator.getSizeScl` for the sector-size computation; `None`
+    /// keeps the 128 default (planets without a projected rect).
+    fn sector_size_scl(&self) -> Option<f32> {
+        None
+    }
+
+    /// The player spawn tile the launch loadout lands on
+    /// (`SerpuloPlanetGenerator.spawn`, Tantros/Asteroid `width/2`); `None`
+    /// when the generator has no campaign spawn. H05 T4.
+    fn player_spawn(&self) -> Option<(i32, i32)> {
+        None
+    }
+
+    /// Runs the generator's structure passes on the live world
+    /// (`Schematics.placeLaunchLoadout`, the enemy base and ruins; Java runs
+    /// them inside `generate()`). H05 T4-T6.
+    fn place_structures(&mut self, _ctx: &mut StructureCtx) {}
 }

@@ -428,6 +428,26 @@ impl SimRuntime {
         )
     }
 
+    /// Runs `f` with the live [`crate::world::ops::WorldCtx`] (same
+    /// construction as `place_schematic`; H05 T5/T6 generator structure
+    /// passes).
+    pub fn with_world_ctx<R>(
+        &mut self,
+        world: &mut World,
+        grid: &mut WorldGrid,
+        f: impl FnOnce(&mut crate::world::ops::WorldCtx<'_>) -> R,
+    ) -> R {
+        let mut ctx = crate::world::ops::WorldCtx {
+            grid,
+            content: &self.content,
+            ecs: world,
+            hooks: &self.hooks,
+            render: &self.render,
+            log: &mut self.log,
+        };
+        f(&mut ctx)
+    }
+
     /// `Tile.setBlock` without validation: replaces whatever occupies the
     /// footprint, then relinks proximity, drill ore, power and the counter.
     #[allow(clippy::too_many_arguments)]

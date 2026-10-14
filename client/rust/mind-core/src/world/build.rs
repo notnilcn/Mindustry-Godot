@@ -11,7 +11,7 @@
 use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry, EnvFlag};
 use crate::ecs::BuildingComp;
 use crate::entities::comp::TeamComp;
-use crate::world::darkness::{border_darkness, get_wall_darkness};
+use crate::world::darkness::get_wall_darkness;
 
 use super::WorldGrid;
 use super::block::{BlockTable, BlockView};
@@ -318,13 +318,8 @@ pub fn valid_place_query(
         }
     }
     // (c)/(d) Darkness (`Build.java:229`) + shallows (`Build.java:230`).
-    let dark = (get_wall_darkness(grid, content, x, y) as f32).max(border_darkness(
-        grid,
-        grid.border_darkness,
-        grid.limit_area,
-        x,
-        y,
-    ));
+    let dark = (get_wall_darkness(grid, content, x, y) as f32)
+        .max(crate::world::darkness::get_darkness(grid, content, x, y));
     if dark >= 3.0 {
         return false;
     }
@@ -372,9 +367,8 @@ pub fn valid_place_query(
             };
             // `size == 2 && world.getDarkness(wx, wy) >= 3`.
             if size == 2 {
-                let check_dark = (get_wall_darkness(grid, content, tx, ty) as f32).max(
-                    border_darkness(grid, grid.border_darkness, grid.limit_area, tx, ty),
-                );
+                let check_dark = (get_wall_darkness(grid, content, tx, ty) as f32)
+                    .max(crate::world::darkness::get_darkness(grid, content, tx, ty));
                 if check_dark >= 3.0 {
                     return false;
                 }

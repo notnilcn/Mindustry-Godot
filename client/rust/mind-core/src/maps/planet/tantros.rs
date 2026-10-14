@@ -17,7 +17,9 @@ use crate::world::cached::TileGen;
 use crate::world::tiles::Tiles;
 
 use crate::maps::generators::WorldGenerator;
-use crate::maps::generators::planet::{FlatSectorView, HexMesher, PlanetGenerator};
+use crate::maps::generators::planet::{
+    FlatSectorView, HexMesher, PlanetGenerator, StructureCtx, place_launch_loadout,
+};
 
 /// Tantros' floor matrix (one row).
 const ARR: [[&str; 5]; 1] = [["redmat", "redmat", "darksand", "bluemat", "bluemat"]];
@@ -103,6 +105,23 @@ impl HexMesher for TantrosPlanetGenerator {
 impl WorldGenerator for TantrosPlanetGenerator {
     fn name(&self) -> &'static str {
         "tantros"
+    }
+
+    fn set_sector(&mut self, view: FlatSectorView) {
+        self.sector = view;
+    }
+
+    fn sector_size_scl(&self) -> Option<f32> {
+        Some(self.planet.size_scl)
+    }
+
+    fn player_spawn(&self) -> Option<(i32, i32)> {
+        Some((self.planet.base.width / 2, self.planet.base.height / 2))
+    }
+
+    /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4).
+    fn place_structures(&mut self, ctx: &mut StructureCtx) {
+        place_launch_loadout(ctx, self.planet.base.width / 2, self.planet.base.height / 2);
     }
 
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {

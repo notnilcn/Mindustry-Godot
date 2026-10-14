@@ -498,6 +498,60 @@ impl Planet {
     }
 }
 
+/// `Planet.updateBaseCoverage` for an unsaved generated sector (H05 T2): the
+/// campaign facade primes `MindSimHost` with the live values via
+/// `prime_sector_load`; this static fallback mirrors what
+/// [`Planet::update_base_coverage_from_neighbors`] would compute for the cell
+/// before any campaign state is read (`has_base = false`).
+pub fn static_gen_extras(
+    registry: &ContentRegistry,
+    planet: &str,
+    sector: u16,
+) -> crate::maps::planet::SectorGenExtras {
+    let fallback = crate::maps::planet::SectorGenExtras::default();
+    let Some(def) = registry.planet_by_name(planet) else {
+        return fallback;
+    };
+    let grid = crate::render::g3d::grid::PlanetGrid::create(def.sector_tiles as usize);
+    let Some(cell) = def.sectors.get(sector as usize) else {
+        return fallback;
+    };
+    let mut sum = 1.0f32;
+    for neighbor in grid
+        .tiles
+        .get(sector as usize)
+        .map(|tile| &tile.tiles)
+        .into_iter()
+        .flatten()
+    {
+        if def
+            .sectors
+            .get(*neighbor)
+            .is_some_and(|other| other.generate_enemy_base)
+        {
+            sum += 0.9;
+        }
+    }
+    // `Sector.hasEnemyBase` with `save == null` (`Sector.java:144-146`).
+    let has_enemy_base = cell.generate_enemy_base && cell.preset.is_none();
+    if has_enemy_base {
+        sum += 0.88;
+    }
+    let preset = cell.preset.and_then(|id| registry.sector(id));
+    let threat = if cell.preset.is_none()
+        || preset.is_some_and(|preset| !preset.require_unlock && preset.difficulty == 0.0)
+    {
+        (sum / 5.0).clamp(0.3, 1.2)
+    } else {
+        (preset.map_or(0.0, |preset| preset.difficulty) / 10.0).clamp(0.0, 1.0)
+    };
+    crate::maps::planet::SectorGenExtras {
+        threat,
+        has_enemy_base,
+        has_base: false,
+    }
+}
+
 /// Helper so `Planet::apply_rules` can call `CampaignRules::apply` without
 /// rebuilding a `PlanetDef`. Mirrors `CampaignRules.apply` using the runtime
 /// flags copied at construction.

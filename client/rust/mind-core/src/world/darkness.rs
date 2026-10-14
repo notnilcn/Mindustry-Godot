@@ -159,6 +159,89 @@ pub fn border_darkness(
     }
 }
 
+/// `World.getDarkness` generated-sector polygon term (`World.java:505-529`):
+/// dark when the tile lies outside the projected sector polygon (hexagon or
+/// pentagon), with the Arc noise ragged edge. `grid.sector_polygon == None`
+/// (presets/saves) returns 0.
+pub fn sector_polygon_darkness(grid: &WorldGrid, x: i32, y: i32) -> f32 {
+    let Some(polygon) = grid.sector_polygon else {
+        return 0.0;
+    };
+    if polygon.sides <= 0 {
+        return 0.0;
+    }
+    const CIRCLE_BLEND: f32 = 5.0;
+    let width = grid.tiles.width;
+    let height = grid.tiles.height;
+    // `state.getSector().rect.rotation + 90`.
+    let offset = polygon.rotation + 90.0;
+    // `Angles.angle(x, y, tiles.width/2, tiles.height/2) + offset`.
+    // Deviation: Arc `Mathf.atan2` is a polynomial approximation; the port
+    // uses libm (`port convention`, plan 06 goldens are Rust-recorded).
+    let ang = (height / 2 - y) as f32;
+    let ang2 = (width / 2 - x) as f32;
+    let mut angle = ang.atan2(ang2) * (180.0f32 / std::f32::consts::PI);
+    if angle < 0.0 {
+        angle += 360.0;
+    }
+    let angle = angle + offset;
+    // Polygon sides and quantized angles.
+    let sides = polygon.sides;
+    let step = 360.0 / sides as f32;
+    // `Mathf.round(value, step) = (int)(value / step) * step`.
+    let prev = ((angle / step) as i32) as f32 * step;
+    let next = prev + step;
+    // Raw line length to be translated.
+    let length = polygon.size as f32 / 2.0;
+    // `Tmp.v1.trns(prev, length)` / `Tmp.v2.trns(next, length)`.
+    let (sx, sy) = (length * deg_cos(prev), length * deg_sin(prev));
+    let (ex, ey) = (length * deg_cos(next), length * deg_sin(next));
+    // `Tmp.v3.set(x - tiles.width/2, y - tiles.height/2).rotate(offset)`.
+    let rx = (x - width / 2) as f32;
+    let ry = (y - height / 2) as f32;
+    let cos = deg_cos(offset);
+    let sin = deg_sin(offset);
+    let px = rx * cos - ry * sin;
+    let py = rx * sin + ry * cos;
+
+    // `Intersector.distanceLinePoint(sx, sy, ex, ey, px, py)`.
+    let normal_length = ((ex - sx) * (ex - sx) + (ey - sy) * (ey - sy)).sqrt();
+    let dist = if normal_length == 0.0 {
+        0.0
+    } else {
+        ((px - sx) * (ey - sy) - (py - sy) * (ex - sx)).abs() / normal_length
+    };
+    let mut raw_dst = dist / 1.732_050_8 - 1.0;
+    // `rawDst += Noise.noise(x, y, 11f, 7f) + Noise.noise(x, y, 22f, 15f)`.
+    raw_dst += crate::math::arc_noise::noise(x as f32, y as f32, 11.0, 7.0);
+    raw_dst += crate::math::arc_noise::noise(x as f32, y as f32, 22.0, 15.0);
+    let circle_dst = (raw_dst - (length - CIRCLE_BLEND)) as i32;
+    if circle_dst > 0 {
+        circle_dst as f32
+    } else {
+        0.0
+    }
+}
+
+/// `Vec2.trns`/`Vec2.rotate` degree trig (`Vec2.java:456-458`); port convention
+/// is libm.
+fn deg_cos(degrees: f32) -> f32 {
+    degrees.to_radians().cos()
+}
+
+fn deg_sin(degrees: f32) -> f32 {
+    degrees.to_radians().sin()
+}
+
+/// `World.getDarkness` (`World.java:484-536`): the max of the border term, the
+/// generated-sector polygon term and the static-wall term, in Java order.
+pub fn get_darkness(grid: &WorldGrid, content: &ContentRegistry, x: i32, y: i32) -> f32 {
+    let mut dark = border_darkness(grid, grid.border_darkness, grid.limit_area, x, y);
+    dark = dark.max(sector_polygon_darkness(grid, x, y));
+    dark = dark.max(get_static_darkness(grid, content, x, y));
+    dark
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +313,19 @@ mod tests {
         grid.fill(BlockId::STONE_WALL, BlockId::AIR);
         add_darkness(&mut grid, &content);
         assert!(grid.tiles.iter().all(|tile| tile.data == 0));
+    }
+
+    /// Generated-sector polygon darkness (`World.java:505-529`): the centre of
+    /// a 300-tile hexagon is clear, the map corner is dark (>= 3).
+    #[test]
+    fn sector_polygon_dark_outside() {
+        let mut grid = WorldGrid::new(300, 300);
+        grid.sector_polygon = Some(crate::world::SectorPolygon {
+            rotation: 0.0,
+            sides: 6,
+            size: 300,
+        });
+        assert_eq!(sector_polygon_darkness(&grid, 150, 150), 0.0);
+        assert!(sector_polygon_darkness(&grid, 0, 0) >= 3.0);
     }
 }

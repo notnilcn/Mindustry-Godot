@@ -952,6 +952,46 @@ impl Sim {
         cores
     }
 
+    /// Runs `f` with the live [`crate::world::ops::WorldCtx`] (generator
+    /// structure passes; returns `None` without a block runtime) and refreshes
+    /// the unit runtime afterwards (H05 T5/T6).
+    pub fn with_world_ctx<R>(
+        &mut self,
+        f: impl FnOnce(&mut crate::world::ops::WorldCtx<'_>) -> R,
+    ) -> Option<R> {
+        let outcome = {
+            let grid = &mut self.grid;
+            let world = &mut self.ecs.0;
+            let runtime = self.block_runtime.as_mut()?;
+            runtime.with_world_ctx(world, grid, f)
+        };
+        self.refresh_unit_runtime();
+        Some(outcome)
+    }
+
+    /// `Schematics.placeLaunchLoadout`'s core stocking
+    /// (`Schematics.java:465-469`): `tile.build.items.add(universe.
+    /// getLaunchResources())` on the just-placed core, capped at its
+    /// `storageCapacity` (H05 T4).
+    pub fn stock_core(sim: &mut Sim, entity: Entity, stacks: &[(crate::content::ItemId, i32)]) {
+        let capacity = sim
+            .ecs
+            .0
+            .get::<crate::world::blocks::storage::CoreBuild>(entity)
+            .map(|core| core.storage_capacity)
+            .unwrap_or(i32::MAX);
+        if let Some(mut module) = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(entity)
+        {
+            module.clear();
+            for (item, amount) in stacks {
+                module.add(*item, *amount, capacity);
+            }
+        }
+    }
+
     /// Breaks through the opt-in live runtime; `false` when absent or rejected.
     fn runtime_break(&mut self, x: i16, y: i16) -> bool {
         let Some(runtime) = self.block_runtime.as_mut() else {

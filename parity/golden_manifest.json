@@ -477,7 +477,7 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "cce080b8ed92cdded48df91fbec4352a4dfbc0e01a160106b8c17583d7dcc012"
+      "sha256": "c12b751897909dfcdb13c3cc447f4636ca959c91279660cfdb20e8c6361e723e"
     },
     {
       "id": "harness_ui_chat_console",

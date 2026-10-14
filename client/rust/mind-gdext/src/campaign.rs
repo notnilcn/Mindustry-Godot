@@ -236,6 +236,13 @@ impl MindCampaign {
                         }
                     }
                 }
+                // `Planet.init` (`Planet.java:469-471`) recomputes base coverage
+                // after `sector.loadInfo`; run it once more now that the stored
+                // infos and save files are on the sectors, so boot threat and
+                // `hasEnemyBase` match Java (H05 T1).
+                for planet in campaign.planets.values_mut() {
+                    planet.update_base_coverage_from_neighbors();
+                }
                 self.registry = Some(registry);
                 self.campaign = Some(campaign);
                 self.runtime_installed = false;
@@ -685,6 +692,10 @@ impl MindCampaign {
             }
             // Played-sector invasions restart the live waves (T4).
             mind_core::game::runtime::apply_played_invasions(&mut runtime, &turn_events);
+            // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+            if !turn_events.is_empty() {
+                self.toast_campaign_events(&turn_events);
+            }
         }
 
         // Mirror the authoritative runtime state into the facade for getters.
@@ -754,6 +765,38 @@ impl MindCampaign {
     /// victory); the UI opens `campaign_complete`.
     #[signal]
     fn campaign_complete();
+
+    /// Primes the host's sector-generation extras from the campaign record
+    /// (`Sector.threat`/`hasEnemyBase`/`hasBase`) so the next `load_sector` of
+    /// a numbered sector generates with the live campaign state (H05 T2).
+    /// Call before `MindSimHost.load_sector` for the same planet+sector.
+    #[func]
+    pub fn prime_sector_load(&mut self, planet: GString, sector: i32) -> bool {
+        let planet_name = planet.to_string();
+        if sector < 0 {
+            return false;
+        }
+        let Some(campaign) = self.campaign.as_ref() else {
+            return false;
+        };
+        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+            return false;
+        };
+        let Some(record) = campaign.sector(planet_id, sector as u16) else {
+            return false;
+        };
+        let extras = mind_core::maps::planet::SectorGenExtras {
+            threat: record.threat,
+            has_enemy_base: record.has_enemy_base(),
+            has_base: record.has_base(),
+        };
+        let Some(mut host) = self.host() else {
+            return false;
+        };
+        host.bind_mut()
+            .set_sector_gen_extras_rs(&planet_name, sector, extras);
+        true
+    }
 
     /// Starts a campaign sector (host-side launch), returning success.
     ///
@@ -864,6 +907,21 @@ impl MindCampaign {
         let resume = has_save && !no_core_branch;
         let mut restored_survivors = Vec::new();
         if lost_replay {
+            // H05 T2: the replay regenerates the world through the host, so
+            // prime the generator extras from the live record first.
+            if let Some(record) = campaign.sector(planet_id, sector_id)
+                && let Some(mut host) = self.host()
+            {
+                host.bind_mut().set_sector_gen_extras_rs(
+                    &planet_name,
+                    sector,
+                    mind_core::maps::planet::SectorGenExtras {
+                        threat: record.threat,
+                        has_enemy_base: record.has_enemy_base(),
+                        has_base: record.has_base(),
+                    },
+                );
+            }
             let (spawn_x, spawn_y) = mind_core::world::pos::unpack(spawn_position);
             restored_survivors = self
                 .host()
@@ -1015,9 +1073,12 @@ impl MindCampaign {
             // launch replaces the map's core with the loadout schematic's core
             // before the session sync registers and stocks it. Fresh launches
             // only (`playNewSector`); a resume keeps the saved world unchanged.
+            // H05 T4: a generated sector already placed its loadout during the
+            // world load (the generator runs `placeLaunchLoadout`).
             if !has_save
                 && self.session.allow_launch_loadout
                 && let Some(index) = launch_schematic
+                && !host.bind().generated_loadout_placed()
             {
                 host.bind_mut()
                     .place_launch_loadout(index, GString::from(launch_stacks_json.as_str()));
@@ -1277,6 +1338,56 @@ impl MindCampaign {
         !events.is_empty()
     }
 
+    /// `HudFragment.showToast` for `CampaignEvent`s (`HudFragment.java:261-275`):
+    /// `sector.attacked` with the warning icon on a `SectorInvasion`. The
+    /// off-play `sector.capture`/`sector.lost` toasts land when the
+    /// `CampaignEvent` variants exist (seam §6). The label itself is suppressed
+    /// in the menu by `ui_root.gd _on_toast` (`HudFragment.java:753-754`).
+    fn toast_campaign_events(&self, events: &[mind_core::game::universe::CampaignEvent]) {
+        use mind_core::game::universe::CampaignEvent;
+        for event in events {
+            let CampaignEvent::SectorInvasion { planet, sector, .. } = event else {
+                continue;
+            };
+            let planet_name = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.planet(*planet).map(|planet| planet.name.clone()))
+                .unwrap_or_default();
+            let name = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.sector(*planet, *sector))
+                .map(|record| sector_toast_name(record, &planet_name, *sector))
+                .unwrap_or_else(|| format!("{planet_name}-{sector}"));
+            log::info!("campaign event: `{planet_name}:{sector}` invaded (toast sector.attacked)");
+            let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+                continue;
+            };
+            let text = self
+                .base()
+                .get_node_or_null("/root/MindAssets")
+                .and_then(|mut assets| {
+                    assets
+                        .call(
+                            "bundle_format",
+                            &[
+                                GString::from("sector.attacked").to_variant(),
+                                PackedStringArray::from(vec![GString::from(name.as_str())])
+                                    .to_variant(),
+                            ],
+                        )
+                        .try_to::<GString>()
+                        .ok()
+                })
+                .unwrap_or_else(|| GString::from(format!("Sector {name} under attack!").as_str()));
+            let _ = hud.call(
+                "push_toast",
+                &[text.to_variant(), GString::from("warning").to_variant()],
+            );
+        }
+    }
+
     /// Runs one production turn; returns success. Runs on the live runtime
     /// campaign when one is installed (T1: one authoritative campaign).
     #[func]
@@ -1331,6 +1442,8 @@ impl MindCampaign {
                 host.bind_mut().put_campaign_runtime(runtime);
             }
         }
+        // T7: toasts for off-play sectors (`HudFragment.java:261-275`).
+        self.toast_campaign_events(&report.events);
         self.registry = Some(registry);
         self.persist();
         report.turn > 0
@@ -4101,6 +4214,22 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// `Sector.name()` (`Sector.java:243-245`): the stored display name, else the
+/// preset name, else `<planet>-<id>`.
+fn sector_toast_name(
+    record: &mind_core::game::sector::Sector,
+    planet_name: &str,
+    id: u16,
+) -> String {
+    if let Some(name) = &record.info.info.name {
+        return name.clone();
+    }
+    if let Some(preset) = &record.preset_name {
+        return preset.clone();
+    }
+    format!("{planet_name}-{id}")
 }
 
 /// Parses a launch-loadout payload: the dialog envelope

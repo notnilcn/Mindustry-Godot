@@ -20,7 +20,9 @@ pub use tantros::TantrosPlanetGenerator;
 
 use crate::content::ContentRegistry;
 use crate::game::rules::Rules;
+use crate::maps::generators::planet::{FlatSectorView, SectorRect, make_rect};
 use crate::maps::generators::{BlankPlanetGenerator, WorldGenerator};
+use crate::render::g3d::grid::PlanetGrid;
 use crate::world::{WorldGrid, WorldParams};
 
 /// Builds the vanilla planet generator for a planet content name
@@ -38,42 +40,106 @@ pub fn generator_for(planet: &str, seed: u64) -> Option<Box<dyn WorldGenerator>>
     Some(generator)
 }
 
+/// Campaign state the planet generator reads at load time
+/// (`state.rules.attackMode`/`sector.hasEnemyBase()`); H05 T2.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectorGenExtras {
+    /// Sector difficulty (`Sector.threat`).
+    pub threat: f32,
+    /// Whether the sector generates an enemy base.
+    pub has_enemy_base: bool,
+    /// Whether the player owns a base here.
+    pub has_base: bool,
+}
+
+impl Default for SectorGenExtras {
+    fn default() -> Self {
+        Self {
+            threat: 0.0,
+            has_enemy_base: false,
+            has_base: false,
+        }
+    }
+}
+
 /// A generated sector world plus the rules its generator assigned
-/// (`WorldGenerator.generate_rules`).
+/// (`WorldGenerator.generate_rules`); T4-T6 run the generator's structure
+/// passes on the live sim through `generator`/`rect`.
 pub struct GeneratedSector {
     /// Generated tile grid.
     pub grid: WorldGrid,
     /// Rules the generator wrote (`waves`, `winWave`, `spawns`, …).
     pub rules: Rules,
+    /// The generator that built the grid (structure passes run later).
+    pub generator: Box<dyn WorldGenerator>,
+    /// The projected sector plane (`Sector.makeRect`).
+    pub rect: SectorRect,
+    /// Tile corner count (`Sector.tile.corners.length`; hexagon = 6).
+    pub sides: usize,
 }
 
 /// Generates one campaign sector's tile grid (`Control.playNewSector` world
 /// half + `PlanetGenerator.generate`). Returns `None` for an unknown planet.
+///
+/// `PlanetGenerator.generate`: `rand.setSeed(sec.id + params.seedOffset +
+/// baseSeed)` with `World.loadSector`'s default `seedOffset = 0`; the tile
+/// position projects through the sector's own rect and the size comes from
+/// `getSectorSize(sector)` (`PlanetGenerator.java:173-196`).
 pub fn generate_sector(
     planet: &str,
     sector: u16,
-    seed: u64,
-    width: i32,
-    height: i32,
     content: &ContentRegistry,
+    extras: SectorGenExtras,
 ) -> Option<GeneratedSector> {
-    let mut generator = generator_for(planet, seed)?;
+    let def = content.planet_by_name(planet)?;
+    let planet_grid = PlanetGrid::create(def.sector_tiles as usize);
+    let rect = make_rect(&planet_grid, sector as usize, def.radius);
+    let mut generator = generator_for(planet, 0)?;
+    let size = generator
+        .sector_size_scl()
+        .map(|size_scl| {
+            let res = (rect.radius * size_scl) as i32;
+            if res % 2 == 0 { res } else { res + 1 }
+        })
+        .unwrap_or(128);
+    let tile_v = planet_grid
+        .tiles
+        .get(sector as usize)
+        .map(|tile| tile.v)
+        .unwrap_or([0.0, 0.0, 0.0]);
+    let sides = planet_grid
+        .tiles
+        .get(sector as usize)
+        .map(|tile| tile.corners.len())
+        .unwrap_or(0);
+    generator.set_sector(FlatSectorView {
+        id: sector as u32,
+        radius: rect.radius,
+        threat: extras.threat,
+        tile_v,
+        has_enemy_base: extras.has_enemy_base,
+        has_base: extras.has_base,
+        rect: Some(rect),
+    });
     let params = WorldParams {
-        seed_offset: seed,
-        width,
-        height,
+        seed_offset: 0,
+        width: size,
+        height: size,
         ..WorldParams::default()
     };
-    let mut grid = WorldGrid::new(width, height);
+    let mut grid = WorldGrid::new(size, size);
     grid.begin_map_load();
     generator.generate(&mut grid.tiles, &params, content);
     let mut rules = Rules::default();
     generator.generate_rules(&mut rules, &params, content);
     grid.end_map_load(content);
-    // Sector id selects the planet-grid cell upstream; the vanilla generator
-    // port does not yet consume it, so the seed fully drives the layout.
-    let _ = sector;
-    Some(GeneratedSector { grid, rules })
+    Some(GeneratedSector {
+        grid,
+        rules,
+        generator,
+        rect,
+        sides,
+    })
 }
 
 #[cfg(test)]
@@ -89,9 +155,11 @@ mod tests {
     #[test]
     fn generate_sector_produces_terrain() {
         let content = content();
-        let generated = generate_sector("serpulo", 0, 7, 64, 64, &content).expect("serpulo");
-        assert_eq!(generated.grid.tiles.width, 64);
-        assert_eq!(generated.grid.tiles.height, 64);
+        let generated =
+            generate_sector("serpulo", 0, &content, SectorGenExtras::default()).expect("serpulo");
+        // T2: the grid is the sector's own `getSectorSize` (even).
+        assert_eq!(generated.grid.tiles.width % 2, 0);
+        assert_eq!(generated.grid.tiles.width, generated.grid.tiles.height);
         let floors = generated
             .grid
             .tiles
@@ -104,6 +172,232 @@ mod tests {
     #[test]
     fn generate_sector_unknown_planet_is_none() {
         let content = content();
-        assert!(generate_sector("does-not-exist", 0, 1, 8, 8, &content).is_none());
+        assert!(
+            generate_sector("does-not-exist", 0, &content, SectorGenExtras::default()).is_none()
+        );
+    }
+
+    #[test]
+    fn sectors_differ_by_id() {
+        // T2 acceptance: two numbered sectors no longer share one 128x128 map.
+        let content = content();
+        let a = generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("a");
+        let b = generate_sector("serpulo", 2, &content, SectorGenExtras::default()).expect("b");
+        let floors_a: Vec<BlockId> = a.grid.tiles.iter().map(|tile| tile.floor).collect();
+        let floors_b: Vec<BlockId> = b.grid.tiles.iter().map(|tile| tile.floor).collect();
+        assert_ne!(floors_a, floors_b, "sectors 1 and 2 differ");
+    }
+
+    #[test]
+    fn sector_size_is_even_and_from_rect() {
+        // T2: size = `getSectorSize(rect.radius)` (`PlanetGenerator.java:173-180`).
+        let content = content();
+        let def = content.planet_by_name("serpulo").expect("serpulo");
+        let planet_grid = PlanetGrid::create(def.sector_tiles as usize);
+        let rect = make_rect(&planet_grid, 1, def.radius);
+        let radius_size = (rect.radius * 3200.0) as i32;
+        let expected = if radius_size % 2 == 0 {
+            radius_size
+        } else {
+            radius_size + 1
+        };
+        let generated =
+            generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("serpulo");
+        assert_eq!(generated.grid.tiles.width % 2, 0);
+        assert_eq!(generated.grid.tiles.width, expected);
+        println!("serpulo sector 1 size = {expected}");
+    }
+
+    #[test]
+    fn generated_sector_reports_spawn() {
+        // H05 T4: the generator exposes the spawn `placeLaunchLoadout` uses
+        // (`SerpuloPlanetGenerator.spawn`).
+        let content = content();
+        let generated =
+            generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("serpulo");
+        let Some((x, y)) = generated.generator.player_spawn() else {
+            panic!("serpulo sector 1 has a spawn");
+        };
+        let tile = generated.grid.tile(x, y);
+        let solid = content
+            .block(tile.block)
+            .map(|def| def.solid)
+            .unwrap_or(false);
+        assert!(!solid, "spawn tile ({x},{y}) is not solid");
+    }
+
+    #[test]
+    fn place_structures_places_shard() {
+        // H05 T4: `Schematics.placeLaunchLoadout` places the shard at the
+        // spawn and stocks it with the launch resources.
+        use crate::game::schematics::Schematics;
+        use crate::maps::generators::planet::{LaunchLoadout, StructureCtx};
+        use crate::world::blocks::storage::CoreBuild;
+        use crate::world::modules::ItemModule;
+
+        let content = content();
+        let generated =
+            generate_sector("serpulo", 1, &content, SectorGenExtras::default()).expect("serpulo");
+        let Some((spawn_x, spawn_y)) = generated.generator.player_spawn() else {
+            panic!("serpulo spawn");
+        };
+        let GeneratedSector {
+            grid,
+            rules,
+            mut generator,
+            ..
+        } = generated;
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let mut sim = crate::sim::Sim::new(1, width, height, BlockId::AIR, BlockId::AIR);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("live runtime");
+
+        let mut schematics = Schematics::new();
+        schematics.load_loadouts(&content);
+        let shard = content.block_id("core-shard").expect("core-shard");
+        let index = schematics
+            .get_default_loadout(shard)
+            .expect("basicShard registered");
+        let schematic = schematics.all[index].clone();
+        let copper = content.item_id("copper").expect("copper");
+        let loadout = LaunchLoadout {
+            schematic,
+            stacks: vec![(copper, 100)],
+        };
+        let mut rules = rules;
+        let mut ctx = StructureCtx {
+            sim: &mut sim,
+            content: &content,
+            bases: None,
+            loadout: Some(&loadout),
+            rules: &mut rules,
+            player_team: 1,
+            wave_team: 2,
+        };
+        generator.place_structures(&mut ctx);
+
+        let entity = sim
+            .grid
+            .tile(spawn_x, spawn_y)
+            .build
+            .expect("core placed at the spawn");
+        let building = sim
+            .ecs
+            .0
+            .get::<crate::ecs::BuildingComp>(entity)
+            .expect("building");
+        assert_eq!(building.block, shard, "core-shard at the spawn");
+        assert!(sim.ecs.0.get::<CoreBuild>(entity).is_some(), "CoreBuild");
+        assert_eq!(
+            sim.ecs
+                .0
+                .get::<ItemModule>(entity)
+                .expect("items")
+                .get(copper),
+            100,
+            "launch resources stocked"
+        );
+    }
+
+    #[test]
+    fn ruins_placed_when_roll_positive() {
+        // H05 T6: on a numbered sector whose ruin roll is > 0, the structures
+        // pass scatters team-0 derelict parts (none within 18 tiles of the
+        // spawn). Uses the real `assets/baseparts` catalog; skips (with a note)
+        // when it is absent.
+        use crate::maps::generators::planet::StructureCtx;
+        use std::path::PathBuf;
+
+        let baseparts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../assets/baseparts");
+        if !baseparts.is_dir() {
+            println!("assets/baseparts absent; skipping ruins test");
+            return;
+        }
+        let content = content();
+        let mut schematics = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&baseparts) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("msch") {
+                    continue;
+                }
+                if let Ok(bytes) = std::fs::read(&path)
+                    && let Ok(schem) = crate::game::schematics::read(&bytes, &content)
+                {
+                    schematics.push(schem);
+                }
+            }
+        }
+        if schematics.is_empty() {
+            println!("no base parts decoded; skipping ruins test");
+            return;
+        }
+        let mut bases = crate::ai::BaseRegistry::new();
+        bases.load(&content, schematics);
+        if bases.parts.is_empty() && bases.req_parts.is_empty() {
+            println!("no base parts classified; skipping ruins test");
+            return;
+        }
+
+        let def = content.planet_by_name("serpulo").expect("serpulo");
+        for id in 1..30u16 {
+            if def
+                .sectors
+                .get(id as usize)
+                .is_none_or(|cell| cell.preset.is_some())
+            {
+                continue;
+            }
+            let generated = generate_sector("serpulo", id, &content, SectorGenExtras::default())
+                .expect("serpulo");
+            let Some((spawn_x, spawn_y)) = generated.generator.player_spawn() else {
+                continue;
+            };
+            let GeneratedSector {
+                grid,
+                rules,
+                mut generator,
+                ..
+            } = generated;
+            let (width, height) = (grid.tiles.width, grid.tiles.height);
+            let mut sim = crate::sim::Sim::new(1, width, height, BlockId::AIR, BlockId::AIR);
+            sim.grid = grid;
+            sim.install_block_runtime().expect("live runtime");
+            let mut rules = rules;
+            let mut ctx = StructureCtx {
+                sim: &mut sim,
+                content: &content,
+                bases: Some(&bases),
+                loadout: None,
+                rules: &mut rules,
+                player_team: 1,
+                wave_team: 2,
+            };
+            generator.place_structures(&mut ctx);
+
+            let mut ruin_tiles: Vec<(i32, i32)> = Vec::new();
+            for (_, _, comp) in sim.ecs.entities_by_seq() {
+                if comp.team.0 == 0 {
+                    ruin_tiles.push((i32::from(comp.pos.x()), i32::from(comp.pos.y())));
+                }
+            }
+            if ruin_tiles.is_empty() {
+                continue;
+            }
+            for &(x, y) in &ruin_tiles {
+                let dx = x - spawn_x;
+                let dy = y - spawn_y;
+                assert!(
+                    dx * dx + dy * dy >= 18 * 18,
+                    "sector {id}: team-0 building at ({x},{y}) too close to the spawn"
+                );
+            }
+            println!(
+                "sector {id}: {} derelict building(s) from the ruins pass",
+                ruin_tiles.len()
+            );
+            return;
+        }
+        println!("no sector in 1..30 rolled ruins; skipping");
     }
 }

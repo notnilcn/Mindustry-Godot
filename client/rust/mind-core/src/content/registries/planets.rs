@@ -305,6 +305,9 @@ pub struct PlanetDef {
     /// `PlanetData.presets` (`planets/<name>.json`): authored preset name ->
     /// generated sector cell (`SectorPreset.initialize` remap).
     pub preset_remap: Vec<(&'static str, i32)>,
+    /// `PlanetData.attackSectors` (`planets/<name>.json`): cells whose
+    /// `generateEnemyBase` is set at content init (`Planet.java:476-490`).
+    pub attack_sectors: Vec<i32>,
     /// Enemy rebuild speed multiplier.
     pub enemy_build_speed_multiplier: f32,
     /// Enemy factory activation delay.
@@ -401,6 +404,7 @@ impl PlanetDef {
             enemy_core_spawn_replace: false,
             load_planet_data: false,
             preset_remap: Vec::new(),
+            attack_sectors: Vec::new(),
             enemy_build_speed_multiplier: 1.0,
             enemy_factory_activation_delay: 0.0,
             enemy_infinite_items: true,
@@ -726,6 +730,21 @@ pub fn load(
             ("tarFields", 99),
             ("biomassFacility", 23),
         ];
+        // `PlanetData.attackSectors` (`assets/planets/serpulo.json`): the 45
+        // authored attack cells; `Planet.getData` (`Planet.java:476-490`) marks
+        // every listed cell `generateEnemyBase` at content init.
+        planet.attack_sectors = vec![
+            0, 6, 13, 16, 19, 20, 24, 27, 30, 47, 55, 66, 67, 69, 76, 92, 94, 111, 116, 127, 133,
+            161, 162, 176, 180, 185, 191, 192, 197, 200, 207, 225, 230, 240, 242, 243, 244, 245,
+            246, 247, 248, 254, 259, 263, 265,
+        ];
+        for &index in &planet.attack_sectors {
+            if index >= 0
+                && let Some(cell) = planet.sectors.get_mut(index as usize)
+            {
+                cell.generate_enemy_base = true;
+            }
+        }
         planet.unlock.always_unlocked = true;
         planet.allow_self_sector_launch = true;
         let spore = Rgba::from_hex("7457ce").unwrap_or(Rgba::WHITE);
