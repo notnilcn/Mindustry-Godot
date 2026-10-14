@@ -2828,6 +2828,48 @@ fn message_wait_blocks_until_announcement_expires() {
     assert_eq!(state_at(&sim), 2.0, "wait released after the announcement");
 }
 
+/// H06 T4: `take_logic_messages` drains queued `announce`/`notify`/`toast`
+/// events (resolved text + duration) exactly once.
+#[test]
+fn message_announce_drained() {
+    use crate::logic::enums::MessageType;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    install_logic_world(&mut sim);
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "print \"hi\"\nmessage announce 3 ok\nstop\n",
+    );
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let messages = sim.take_logic_messages();
+    assert_eq!(messages.len(), 1, "{messages:?}");
+    assert_eq!(messages[0].0, MessageType::Announce);
+    assert_eq!(messages[0].1, "hi");
+    assert!((messages[0].2 - 3.0).abs() < 1e-6);
+    assert!(
+        sim.take_logic_messages().is_empty(),
+        "messages drain exactly once"
+    );
+    // `outSuccess` stays 1 for a delivered (non-blocked) message.
+    let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let ok = sim
+        .ecs
+        .0
+        .get::<crate::logic::blocks::LogicBlockState>(e)
+        .and_then(|state| {
+            state
+                .executor
+                .optional_var("ok")
+                .map(|id| state.executor.arena.get(id).num())
+        });
+    assert_eq!(ok, Some(1.0));
+}
+
 // ---- G06 T7 (sensor/control coverage) ----
 
 /// Ground Zero's `duoAmmo` objective: `sensor amount d @ammo` on a duo reads

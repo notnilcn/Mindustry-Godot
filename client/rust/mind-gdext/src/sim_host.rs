@@ -635,6 +635,27 @@ impl MindSimHost {
                     mind_core::logic::world::LogicContentIndex::from_content(&registry),
                 );
             }
+            // World-processor text sources (H06 T4): `Core.bundle`, `Iconc`
+            // and `player.locale()` for `message`/`localeprint`/`printchar`.
+            // The map-scoped locales are replaced per sector load.
+            let assets_dir = crate::assets::loader::resolve_assets_dir();
+            let locale = crate::assets::loader::resolve_locale();
+            let map_locales = self
+                .sim
+                .ecs
+                .0
+                .get_resource::<mind_core::logic::world::LogicText>()
+                .map(|text| text.map_locales.clone())
+                .unwrap_or_default();
+            self.sim
+                .ecs
+                .0
+                .insert_resource(mind_core::logic::world::LogicText {
+                    bundle: Some(crate::assets::bundle::load_bundle(&assets_dir, &locale)),
+                    iconc: Some(crate::assets::bundle::load_iconc(&assets_dir)),
+                    map_locales,
+                    locale,
+                });
             self.content_snapshot = Some(registry);
         }
 
@@ -1717,6 +1738,30 @@ impl MindSimHost {
         GString::from(value.to_string().as_str())
     }
 
+    /// Drains queued world-processor messages (`announce`/`notify`/`toast`) as
+    /// an Array of `{type, text, duration}` dictionaries (H06 T4).
+    #[func]
+    pub fn drain_logic_messages(&mut self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for (type_, text, duration) in self.sim.take_logic_messages() {
+            let mut row = Dictionary::<GString, Variant>::new();
+            row.set(
+                &GString::from("type"),
+                &GString::from(type_.name()).to_variant(),
+            );
+            row.set(
+                &GString::from("text"),
+                &GString::from(text.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("duration"),
+                &f64::from(duration).to_variant(),
+            );
+            out.push(&row.to_variant());
+        }
+        out
+    }
+
     /// Placeholder for a display command queue (awaits plan 16 rendering/05).
     #[func]
     pub fn logic_display_commands(&self, _x: i64, _y: i64) -> PackedInt64Array {
@@ -2158,6 +2203,24 @@ impl MindSimHost {
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
         self.sim.reset_logic_presentation();
+        // Sector map locales (`state.mapLocales`, from the save/map `locales`
+        // meta tag; H06 T4). Preset maps without the tag fall back to the
+        // global bundle in `run_locale_print`.
+        let map_locales = save
+            .as_ref()
+            .and_then(|save| save.tags.get("locales"))
+            .and_then(|text| {
+                mind_core::io::json::JsonIo::read::<mind_core::io::json::MapLocales>(text).ok()
+            })
+            .unwrap_or_default();
+        if let Some(mut text) = self
+            .sim
+            .ecs
+            .0
+            .get_resource_mut::<mind_core::logic::world::LogicText>()
+        {
+            text.map_locales = map_locales;
+        }
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();

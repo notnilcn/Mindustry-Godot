@@ -1155,6 +1155,27 @@ impl Sim {
             .take()
     }
 
+    /// Drains queued world-processor messages (`announce`/`notify`/`toast`;
+    /// `mission` is written to the rules directly). Only `Message` events
+    /// remain in `logic_ui_events` after T3.
+    pub fn take_logic_messages(&mut self) -> Vec<(crate::logic::enums::MessageType, String, f32)> {
+        let mut out = Vec::new();
+        self.logic_ui_events.retain(|event| {
+            if let crate::logic::world::LogicWorldEvent::Message {
+                type_,
+                text,
+                duration,
+            } = event
+            {
+                out.push((*type_, text.clone(), *duration));
+                false
+            } else {
+                true
+            }
+        });
+        out
+    }
+
     /// `InputHandler` world-reset half (`InputHandler.java:921-922`): clears the
     /// logic cutscene/HUD flags and the message timers on a world load.
     pub fn reset_logic_presentation(&mut self) {

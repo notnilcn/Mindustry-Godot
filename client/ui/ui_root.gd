@@ -166,6 +166,7 @@ func _on_escape() -> bool:
 
 
 func _process(delta: float) -> void:
+	_drain_logic_messages()
 	if _uiscale_prompt.is_empty():
 		return
 	_uiscale_countdown -= delta
@@ -177,12 +178,49 @@ func _process(delta: float) -> void:
 		_finish_uiscale(false)
 
 
+## World-processor messages (`message`/`localeprint`) drained from the sim host
+## and routed through the same `MindUi` surfaces as Java's `FlushMessageI`
+## (`announce`/`hudfrag.showToast`/`showInfoToast`); H06 T4. Bundle and
+## map-locale resolution happen in core before the drain, so no text lookups
+## here.
+func _drain_logic_messages() -> void:
+	if menu_group != null and menu_group.visible:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("drain_logic_messages"):
+		return
+	var ui := _ui()
+	if ui == null:
+		return
+	var rows: Variant = host.call("drain_logic_messages")
+	if not (rows is Array):
+		return
+	for row in rows:
+		if not (row is Dictionary):
+			continue
+		var text := str(row.get("text", ""))
+		var duration := float(row.get("duration", 0.0))
+		match str(row.get("type", "")):
+			"announce":
+				ui.call("announce", text, duration)
+			"notify":
+				ui.call("toast", text, "info")
+			"toast":
+				# `UI.showInfoToast` visuals are H03's; fall back to the
+				# announcement box until `MindUi.show_info_toast` lands.
+				if ui.has_method("show_info_toast"):
+					ui.call("show_info_toast", text, duration)
+				else:
+					ui.call("announce", text, duration)
+
+
 func _finish_uiscale(keep: bool) -> void:
 	if _uiscale_prompt.is_empty():
 		return
 	_uiscale_prompt.root.queue_free()
 	_uiscale_prompt = {}
-	set_process(false)
+	# `_process` also drains world-processor messages (H06 T4), so it stays on.
+	set_process(true)
 	var ui := _ui()
 	if ui == null:
 		return
