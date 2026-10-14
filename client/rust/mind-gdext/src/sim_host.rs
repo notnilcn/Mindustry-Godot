@@ -4789,6 +4789,46 @@ impl MindSimHost {
         GString::from(format!("[{}]", mapped.join(",")).as_str())
     }
 
+    /// Landing pads (`LandingPadState`; H04 T7 seam for H03's pod + cooldown
+    /// draw). `id` is the entity index; `config`/`arriving` are item names.
+    #[func]
+    pub fn landing_pads_json(&mut self) -> GString {
+        let rows = mind_core::game::landing_pad::landing_pad_rows(&mut self.sim.ecs.0);
+        let item_name = |id: Option<u16>| -> Option<String> {
+            id.and_then(|id| {
+                self.content_snapshot
+                    .as_ref()
+                    .and_then(|content| content.item(mind_core::content::ItemId::new(id)))
+                    .map(|item| item.name.clone())
+            })
+        };
+        let mapped: Vec<String> = rows
+            .into_iter()
+            .map(
+                |(id, x, y, block, config, arriving, arriving_timer, cooldown)| {
+                    let block = self
+                        .content_snapshot
+                        .as_ref()
+                        .and_then(|content| content.block(block))
+                        .map(|def| def.name.clone())
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "id": id,
+                        "x": x,
+                        "y": y,
+                        "block": block,
+                        "config": item_name(config),
+                        "arriving": item_name(arriving),
+                        "arrivingTimer": arriving_timer,
+                        "cooldown": cooldown,
+                    })
+                    .to_string()
+                },
+            )
+            .collect();
+        GString::from(format!("[{}]", mapped.join(",")).as_str())
+    }
+
     // ---- G03 T2 placement preview seams (Rust-only) ----
 
     /// `InputHandler.validPlace` for the placement-preview ghost. Rust-only;

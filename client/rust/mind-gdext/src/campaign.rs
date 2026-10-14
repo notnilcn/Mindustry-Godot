@@ -1075,6 +1075,12 @@ impl MindCampaign {
                             planet.apply_rules(&registry, &mut runtime.session.rules, false, true);
                         }
                     }
+                    // `Trigger.newGame` (`Control.java:212-216`):
+                    // `if(info.importRateCache != null) info.refreshImportRates(planet)`
+                    // so the played sector's landing pads see its importers (T7).
+                    runtime
+                        .campaign
+                        .refresh_sector_import_rates(&registry, planet_id, sector_id);
                     self.session = runtime.session.clone();
                     host.bind_mut().put_campaign_runtime(runtime);
                 }

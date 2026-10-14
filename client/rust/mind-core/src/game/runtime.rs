@@ -87,6 +87,9 @@ pub struct CampaignHookQueues {
     pub production_deltas: Vec<(ItemId, i32)>,
     /// Pending content unlocks (`produced()`/`dumpLiquid()`).
     pub unlocks: Vec<UnlockRef>,
+    /// Pending `SectorInfo.handleItemImport` deltas `(item, amount)` queued by
+    /// landing pads (H04 T7).
+    pub imports: Vec<(ItemId, i32)>,
 }
 
 /// `CoreCampaignHooks` impl for a live campaign session: queues the deltas the
@@ -151,6 +154,7 @@ pub fn reset_campaign_core_hooks(world: &mut World) {
         state.core_deltas.clear();
         state.production_deltas.clear();
         state.unlocks.clear();
+        state.imports.clear();
     }
 }
 
@@ -512,6 +516,7 @@ pub fn campaign_tick_system(world: &mut World) {
             let core_deltas = std::mem::take(&mut state.core_deltas);
             let production_deltas = std::mem::take(&mut state.production_deltas);
             let unlocks = std::mem::take(&mut state.unlocks);
+            let imports = std::mem::take(&mut state.imports);
             drop(state);
             // Produced/dumped content unlocks (`UnlockableContent.unlock()`
             // -> `UnlockEvent`): dedupe into the runtime queue for the host.
@@ -545,6 +550,12 @@ pub fn campaign_tick_system(world: &mut World) {
                         .get_resource::<ContentIndex>()
                         .and_then(|content| content.item_names.get(index).cloned())
                 };
+                // Landing-pad arrivals record `handleItemImport` (H04 T7).
+                for (item, amount) in imports {
+                    if let Some(name) = name_of(item.index()) {
+                        sector.info.handle_item_import(&name, amount);
+                    }
+                }
                 let item_count = world
                     .get_resource::<ContentIndex>()
                     .map(|content| content.item_names.len())

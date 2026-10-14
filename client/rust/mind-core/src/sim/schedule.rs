@@ -417,10 +417,12 @@ pub fn build_sim_schedule() -> Schedule {
     // is installed in the ECS world. Owns only the Campaign / Objectives /
     // GameStateCheck blocks; never reorders the sets above.
     schedule.add_systems(crate::game::runtime::campaign_tick_system.in_set(TickSet::Campaign));
-    // H04 T6: launch pods age and export on removal, right after the campaign
-    // tick (same set, added order preserved).
+    // H04 T6/T7: launch pods age and export on removal; landing pads land the
+    // queued imports, right after the campaign tick (same set, added order
+    // preserved).
     schedule
         .add_systems(crate::game::launch_payload::launch_payload_system.in_set(TickSet::Campaign));
+    schedule.add_systems(crate::game::landing_pad::landing_pads_system.in_set(TickSet::Campaign));
     schedule.add_systems(crate::game::runtime::objectives_tick_system.in_set(TickSet::Objectives));
     schedule
         .add_systems(crate::game::runtime::game_state_tick_system.in_set(TickSet::GameStateCheck));

@@ -254,6 +254,27 @@ pub struct CampaignState {
     pub item: Option<ItemId>,
 }
 
+/// `LandingPad.LandingPadBuild` state (H04 T7): config, landing queue priority,
+/// cooldown, arrival progress and the water draw of an arriving pod.
+#[derive(Debug, Clone, PartialEq, Default, Component)]
+pub struct LandingPadState {
+    /// Configured import item (`config`).
+    pub config: Option<ItemId>,
+    /// Queue priority (`priority`; Java draws `Mathf.rand.nextInt()`, the port
+    /// uses the packed tile — deterministic ties only, documented deviation).
+    pub priority: i32,
+    /// Cooldown timer (`cooldown`).
+    pub cooldown: f32,
+    /// Item currently landing (`arriving`).
+    pub arriving: Option<ItemId>,
+    /// Arrival progress `0..1` (`arrivingTimer`).
+    pub arriving_timer: f32,
+    /// Water removed so far (`liquidRemoved`).
+    pub liquid_removed: f32,
+    /// Set by `updateTile`, consumed by `landing_pads_system`.
+    pub wants_landing: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

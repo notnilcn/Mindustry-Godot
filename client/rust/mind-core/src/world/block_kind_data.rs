@@ -332,10 +332,32 @@ pub struct AcceleratorDef {
 }
 
 /// `LandingPad` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LandingPadDef {
     /// Item capacity for the landing inventory.
     pub item_capacity: i32,
+    /// `LandingPad.arrivalDuration` (ticks).
+    pub arrival_duration: f32,
+    /// `LandingPad.cooldownTime` (ticks).
+    pub cooldown_time: f32,
+    /// `LandingPad.consumeLiquidAmount` (water per pod).
+    pub consume_liquid_amount: f32,
+    /// `LandingPad.consumeLiquid` (`Liquids.water`).
+    pub consume_liquid: crate::content::LiquidId,
+}
+
+impl Default for LandingPadDef {
+    fn default() -> Self {
+        Self {
+            item_capacity: 0,
+            // `Blocks.java:6862-6871`: `arrivalDuration` 150, `cooldownTime`
+            // 150, `consumeLiquidAmount` 1500, `consumeLiquid` water.
+            arrival_duration: 150.0,
+            cooldown_time: 150.0,
+            consume_liquid_amount: 1500.0,
+            consume_liquid: crate::content::LiquidId::WATER,
+        }
+    }
 }
 
 /// `LaunchPad` family knobs.
@@ -626,7 +648,10 @@ impl BlockKindData {
             }),
             BlockKind::PowerVoid => BlockKindData::PowerVoid,
             BlockKind::Accelerator => BlockKindData::Accelerator(AcceleratorDef::default()),
-            BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef::default()),
+            BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef {
+                item_capacity: def.item_capacity,
+                ..LandingPadDef::default()
+            }),
             BlockKind::LaunchPad => BlockKindData::LaunchPad(match def.name.as_str() {
                 // `Blocks.java:6844,6846` (`launch-pad` 1200 ticks,
                 // `acceptMultipleItems = true`) and `:6854,6856`

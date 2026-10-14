@@ -683,12 +683,13 @@ impl Campaign {
                 sector.info.info.minutes_captured += TURN_DURATION_TICKS as f32 / 60.0 / 60.0;
             }
 
+            // Refresh import rates for every base sector, played or not
+            // (`Universe.java:195-197`; H04 T7 moved this out of the skip).
+            self.refresh_sector_import_rates(registry, planet, id);
+
             if is_attacked || being_played {
                 continue;
             }
-
-            // Refresh import rates for the sector.
-            self.refresh_sector_import_rates(registry, planet, id);
 
             // Production capped by capacity.
             let productions: Vec<(String, f32)> = self
