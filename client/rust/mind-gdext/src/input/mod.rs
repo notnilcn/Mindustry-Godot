@@ -1370,10 +1370,12 @@ impl MindInput {
 
     /// Submits a building config (`tileConfig`) through the sim command queue.
     ///
-    /// `kind` is `none`/`string`/`int`/`content`/`item`/`number`/`bool`;
-    /// content-ish kinds carry the content name in `value`. `string` and `int`
-    /// bypass `RemoteAction` (its `to_sim_config` collapses `String` to the
-    /// content wire) and enqueue the wire `Text`/`Int` value directly.
+    /// `kind` is `none`/`string`/`int`/`content`/`item`/`liquid`/`block`/`unit`/
+    /// `number`/`bool`/`point`; content-ish kinds carry the content name in
+    /// `value`; `point` carries a relative `"dx,dy"` offset (`ItemBridge.java:66-69`).
+    /// `string` and `int` bypass `RemoteAction` (its `to_sim_config` collapses
+    /// `String` to the content wire) and enqueue the wire `Text`/`Int` value
+    /// directly.
     #[func]
     pub fn configure_building(&mut self, x: i32, y: i32, kind: GString, value: GString) -> bool {
         let kind = kind.to_string();
@@ -1410,6 +1412,18 @@ impl MindInput {
                 Err(_) => return false,
             },
             "bool" => ConfigValue::Bool(value == "true" || value == "1"),
+            "point" => {
+                // Relative packed offset (`ItemBridge.config(Point2.class, ..)`).
+                let Some((dx, dy)) = value.split_once(',') else {
+                    return false;
+                };
+                match (dx.trim().parse::<i32>(), dy.trim().parse::<i32>()) {
+                    (Ok(dx), Ok(dy)) => ConfigValue::Point2(dx, dy),
+                    _ => return false,
+                }
+            }
+            // `content`/`item`/`liquid`/`block`/`unit`: by-name lookup on the
+            // sim side (`resolve_config`).
             _ => ConfigValue::String(value),
         };
         // `BuildingComp.configure` -> `Block.lastConfig`: the next plan of this

@@ -243,20 +243,44 @@ impl ActionBatcher {
 /// Best-effort `world::config::ConfigValue` → `determinism::ConfigValue` bridge.
 ///
 /// The two enums are owned by plans 07 and 05; a typed bridge is the plan-07
-/// seam. Network plan configs are `Number|Boolean|Content` only (07 §6.3), which
-/// this mapping preserves exactly.
+/// seam. Values keep their Java kind (PAR-0190): relative `Point2`/`Point2[]`
+/// stay relative, content references become typed `(ContentType, id)` pairs and
+/// integral `Number`s become `Int` so packed positions keep all 32 bits.
+/// `Building` references have no wire form yet (`Content("complex")`).
 pub fn to_sim_config(value: &WorldConfigValue) -> crate::determinism::ConfigValue {
+    use crate::content::ContentType;
     use crate::determinism::ConfigValue as SimValue;
+
+    fn content_id(kind: ContentType, id: u16) -> crate::determinism::ConfigValue {
+        crate::determinism::ConfigValue::ContentId {
+            kind: kind as u8,
+            id,
+        }
+    }
+
     match value {
         WorldConfigValue::None => SimValue::None,
         WorldConfigValue::Bool(value) => SimValue::Bool(*value),
-        WorldConfigValue::Number(value) => SimValue::Float(*value as f32),
+        WorldConfigValue::Number(value) => {
+            if value.fract() == 0.0
+                && *value >= f64::from(i32::MIN)
+                && *value <= f64::from(i32::MAX)
+            {
+                SimValue::Int(*value as i32)
+            } else {
+                SimValue::Float(*value as f32)
+            }
+        }
         WorldConfigValue::String(value) => SimValue::Content(value.clone()),
         WorldConfigValue::Bytes(value) => SimValue::Bytes(value.to_vec()),
-        WorldConfigValue::Point2(x, y) => {
-            SimValue::Int(crate::world::TilePos::new(*x as i16, *y as i16).pack())
-        }
-        _ => SimValue::Content("complex".to_owned()),
+        WorldConfigValue::Point2(x, y) => SimValue::Point2(*x, *y),
+        WorldConfigValue::Point2Array(points) => SimValue::Point2Array(points.to_vec()),
+        WorldConfigValue::Item(id) => content_id(ContentType::Item, id.raw()),
+        WorldConfigValue::Liquid(id) => content_id(ContentType::Liquid, id.raw()),
+        WorldConfigValue::Block(id) => content_id(ContentType::Block, id.raw()),
+        WorldConfigValue::Unit(id) => content_id(ContentType::Unit, id.raw()),
+        WorldConfigValue::Content(type_, id) => content_id(*type_, *id),
+        WorldConfigValue::Building(_) => SimValue::Content("complex".to_owned()),
     }
 }
 
@@ -440,6 +464,60 @@ mod tests {
                 )
                 .unwrap_err(),
             ActionError::NoUnits
+        );
+    }
+
+    /// PAR-0190: a relative `Point2` must stay relative over the wire
+    /// (`ItemBridge.java:66-69` distinguishes `Point2` from absolute `Integer`).
+    #[test]
+    fn to_sim_config_keeps_relative_point() {
+        assert_eq!(
+            to_sim_config(&WorldConfigValue::Point2(3, 0)),
+            crate::determinism::ConfigValue::Point2(3, 0)
+        );
+        assert_eq!(
+            to_sim_config(&WorldConfigValue::Point2Array(
+                vec![
+                    crate::world::TilePos::new(3, 0).pack(),
+                    crate::world::TilePos::new(0, 3).pack(),
+                ]
+                .into()
+            )),
+            crate::determinism::ConfigValue::Point2Array(vec![
+                crate::world::TilePos::new(3, 0).pack(),
+                crate::world::TilePos::new(0, 3).pack(),
+            ])
+        );
+    }
+
+    /// Integral `Number`s become `Int` (packed positions need 32 bits; `f32`
+    /// loses them above `2^24`).
+    #[test]
+    fn to_sim_config_number_integral_is_int() {
+        assert_eq!(
+            to_sim_config(&WorldConfigValue::Number(9_830_470.0)),
+            crate::determinism::ConfigValue::Int(9_830_470)
+        );
+        assert_eq!(
+            to_sim_config(&WorldConfigValue::Number(9371716.0)),
+            crate::determinism::ConfigValue::Int(9371716)
+        );
+        assert_eq!(
+            to_sim_config(&WorldConfigValue::Number(1.25)),
+            crate::determinism::ConfigValue::Float(1.25)
+        );
+    }
+
+    /// Typed content references keep `(ContentType, id)` on the wire.
+    #[test]
+    fn to_sim_config_carries_content_id() {
+        use crate::content::{ContentType, ItemId};
+        assert_eq!(
+            to_sim_config(&WorldConfigValue::Item(ItemId::new(5))),
+            crate::determinism::ConfigValue::ContentId {
+                kind: ContentType::Item as u8,
+                id: 5
+            }
         );
     }
 }

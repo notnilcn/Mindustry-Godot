@@ -15,8 +15,13 @@ use crate::command::Command as P0Command;
 use crate::content::BlockId;
 
 /// A configuration value payload (`@Configure` intent).
+///
+/// Serde uses adjacent tagging (`tag` + `content`): internal tagging cannot
+/// represent tuple variants, and it already fails at runtime for newtype
+/// variants around primitives (`Int`/`Bool`/`Float`). The binary codec below
+/// (`encode_config`/`decode_config`) is the actual wire format.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
 pub enum ConfigValue {
     /// No value.
     None,
@@ -32,6 +37,17 @@ pub enum ConfigValue {
     Bytes(Vec<u8>),
     /// Free text (`MessageBlock`/logic code); tag 6 on the wire.
     Text(String),
+    /// Relative packed point (`Point2`, e.g. a bridge link offset); tag 7.
+    Point2(i32, i32),
+    /// Relative packed points (`Point2[]`, e.g. power node autolink); tag 8.
+    Point2Array(Vec<i32>),
+    /// Typed content reference (`kind` = `ContentType as u8`); tag 9.
+    ContentId {
+        /// `ContentType` ordinal (stable per `ContentType.java`).
+        kind: u8,
+        /// Per-type raw content id (`Content.id`).
+        id: u16,
+    },
 }
 
 /// A single simulation command (plan 05 §6.4).
@@ -660,6 +676,23 @@ fn encode_config(out: &mut Vec<u8>, value: &ConfigValue) {
             put_u8(out, 6);
             put_str(out, value);
         }
+        ConfigValue::Point2(x, y) => {
+            put_u8(out, 7);
+            put_i32(out, *x);
+            put_i32(out, *y);
+        }
+        ConfigValue::Point2Array(points) => {
+            put_u8(out, 8);
+            put_u32(out, points.len() as u32);
+            for point in points {
+                put_i32(out, *point);
+            }
+        }
+        ConfigValue::ContentId { kind, id } => {
+            put_u8(out, 9);
+            put_u8(out, *kind);
+            put_u16(out, *id);
+        }
     }
 }
 
@@ -903,6 +936,22 @@ fn decode_config(cur: &mut Cursor<'_>) -> Result<ConfigValue, CommandLogError> {
         4 => Ok(ConfigValue::Content(cur.string()?)),
         5 => Ok(ConfigValue::Bytes(cur.bytes()?)),
         6 => Ok(ConfigValue::Text(cur.string()?)),
+        7 => Ok(ConfigValue::Point2(cur.i32()?, cur.i32()?)),
+        8 => {
+            let count = cur.u32()?;
+            if count > MAX_SIMLOG_UNITS {
+                return Err(CommandLogError::LengthOverflow(count, MAX_SIMLOG_UNITS));
+            }
+            let mut points = Vec::with_capacity(count.min(1024) as usize);
+            for _ in 0..count {
+                points.push(cur.i32()?);
+            }
+            Ok(ConfigValue::Point2Array(points))
+        }
+        9 => Ok(ConfigValue::ContentId {
+            kind: cur.u8()?,
+            id: cur.u16()?,
+        }),
         other => Err(CommandLogError::UnknownOp(other)),
     }
 }
@@ -1290,5 +1339,65 @@ mod tests {
             CommandLog::from_bytes(&bytes).unwrap_err(),
             CommandLogError::UnsupportedFormat { found: 9 }
         );
+    }
+
+    /// Tags 7/8 (`Point2`/`Point2Array`) keep the raw values, including
+    /// relative offsets and negative packed points (PAR-0190).
+    #[test]
+    fn config_wire_point2_roundtrip() {
+        let cases = [
+            ConfigValue::Point2(3, 0),
+            ConfigValue::Point2(-1, -1),
+            ConfigValue::Point2Array(vec![
+                crate::world::TilePos::new(3, 0).pack(),
+                crate::world::TilePos::new(0, 3).pack(),
+            ]),
+            ConfigValue::Point2Array(Vec::new()),
+        ];
+        for value in cases {
+            let mut log = CommandLog::new(LogHeader::new(1, "flat"));
+            log.push(
+                0,
+                SimCommand::Configure {
+                    x: 5,
+                    y: 5,
+                    value: value.clone(),
+                },
+            );
+            let decoded = CommandLog::from_bytes(&log.to_bytes()).expect("decode");
+            assert_eq!(decoded, log);
+        }
+    }
+
+    /// Tag 9 (`ContentId`) keeps `(ContentType, id)` over the wire.
+    #[test]
+    fn config_wire_content_id_roundtrip() {
+        let cases = [
+            ConfigValue::ContentId {
+                kind: crate::content::ContentType::Item as u8,
+                id: 0,
+            },
+            ConfigValue::ContentId {
+                kind: crate::content::ContentType::Liquid as u8,
+                id: 4,
+            },
+            ConfigValue::ContentId {
+                kind: crate::content::ContentType::Block as u8,
+                id: 65535,
+            },
+        ];
+        for value in cases {
+            let mut log = CommandLog::new(LogHeader::new(1, "flat"));
+            log.push(
+                0,
+                SimCommand::Configure {
+                    x: 5,
+                    y: 5,
+                    value: value.clone(),
+                },
+            );
+            let decoded = CommandLog::from_bytes(&log.to_bytes()).expect("decode");
+            assert_eq!(decoded, log);
+        }
     }
 }

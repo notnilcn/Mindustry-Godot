@@ -544,6 +544,12 @@ impl ItemBridgeBehavior {
             self.update_transport_buffered(world, e, other);
             return;
         }
+        // `transportTime == 0` only exists on buffered bridges; guard the loop
+        // so a future non-buffered registration can never spin (the reported
+        // G03 "configure a bridge" hang).
+        if self.transport_time <= 0.0 {
+            return;
+        }
         let mut counter = world
             .get::<ItemBridgeBuild>(e)
             .map(|b| b.transport_counter)
