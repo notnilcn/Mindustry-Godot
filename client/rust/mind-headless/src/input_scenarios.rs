@@ -391,7 +391,15 @@ fn placement_validation_table(json: bool, out: Option<&Path>, golden: Option<&Pa
                 y,
                 true,
             );
-            let break_ok = valid_break(&world.content, &world.grid, &world.rules, world.team, x, y);
+            let break_ok = valid_break(
+                &world.content,
+                &world.grid,
+                None,
+                &world.rules,
+                world.team,
+                x,
+                y,
+            );
             rows.push(serde_json::json!({
                 "block": name,
                 "x": x,

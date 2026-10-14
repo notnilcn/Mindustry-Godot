@@ -75,12 +75,16 @@ pub enum UnlockRef {
 /// Shared campaign hook state: the live session snapshot plus the deferred
 /// `SectorInfo.handleCoreItem`/`handleProduction` deltas queued by the core and
 /// miner paths (consumed by [`campaign_tick_system`]).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct CampaignHookQueues {
     /// `state.isCampaign()` snapshot (refreshed by the campaign tick).
     pub is_campaign: bool,
     /// `state.rules.defaultTeam` snapshot.
     pub default_team: u8,
+    /// `Rules.coreIncinerates` snapshot.
+    pub core_incinerates: bool,
+    /// `Rules.allowCoreUnloaders` snapshot.
+    pub allow_core_unloaders: bool,
     /// Pending `handleCoreItem` deltas `(item, amount)`.
     pub core_deltas: Vec<(ItemId, i32)>,
     /// Pending `handleProduction` deltas `(item, amount)`.
@@ -90,6 +94,23 @@ pub struct CampaignHookQueues {
     /// Pending `SectorInfo.handleItemImport` deltas `(item, amount)` queued by
     /// landing pads (H04 T7).
     pub imports: Vec<(ItemId, i32)>,
+}
+
+impl Default for CampaignHookQueues {
+    fn default() -> Self {
+        // Java `Rules.java:225` (`coreIncinerates = true`) and `:135`
+        // (`allowCoreUnloaders = true`) are the field defaults.
+        Self {
+            is_campaign: false,
+            default_team: 0,
+            core_incinerates: true,
+            allow_core_unloaders: true,
+            core_deltas: Vec::new(),
+            production_deltas: Vec::new(),
+            unlocks: Vec::new(),
+            imports: Vec::new(),
+        }
+    }
 }
 
 /// `CoreCampaignHooks` impl for a live campaign session: queues the deltas the
@@ -113,6 +134,20 @@ impl crate::world::blocks::storage::CoreCampaignHooks for CampaignCoreHooks {
             .lock()
             .map(|queues| queues.default_team)
             .unwrap_or(0)
+    }
+
+    fn core_incinerates(&self) -> bool {
+        self.queues
+            .lock()
+            .map(|queues| queues.core_incinerates)
+            .unwrap_or(true)
+    }
+
+    fn allow_core_unloaders(&self) -> bool {
+        self.queues
+            .lock()
+            .map(|queues| queues.allow_core_unloaders)
+            .unwrap_or(true)
     }
 
     fn handle_core_item(&self, item: ItemId, amount: i32) {
@@ -151,6 +186,8 @@ pub fn reset_campaign_core_hooks(world: &mut World) {
         && let Ok(mut state) = queues.0.lock()
     {
         state.is_campaign = false;
+        state.core_incinerates = true;
+        state.allow_core_unloaders = true;
         state.core_deltas.clear();
         state.production_deltas.clear();
         state.unlocks.clear();
@@ -368,15 +405,10 @@ pub fn sync_session_with_sim(
     session.teams = Teams::new();
     let default_team = session.default_team();
     let wave_team = session.wave_team();
-    // `World.setRules`: player placements carry `state.rules.defaultTeam`
-    // (`Team.sharded` = 1 for the campaign); the build guard resource starts at
-    // the derelict id, so sync it with the loaded session.
-    let env = session.rules.env;
-    if let Some(mut rules) = world.get_resource_mut::<crate::world::limits::BuildRules>() {
-        rules.default_team = default_team;
-        // `Block.isPlaceable` -> `supportsEnv(state.rules.env)`.
-        rules.env = env;
-    }
+    // `World.setRules`: copy every placement-relevant rule into the
+    // `BuildRules` resource (H02 T2 `sync_build_rules`); H04/H06 call the same
+    // entry point after any rules swap.
+    crate::world::limits::sync_build_rules(world, &session.rules, session.is_campaign());
     let mut sync = SessionSync::default();
     for (entity, team, _) in &cores {
         session
@@ -513,6 +545,8 @@ pub fn campaign_tick_system(world: &mut World) {
         {
             state.is_campaign = runtime.session.is_campaign();
             state.default_team = runtime.session.rules.default_team;
+            state.core_incinerates = runtime.session.rules.core_incinerates;
+            state.allow_core_unloaders = runtime.session.rules.allow_core_unloaders;
             let core_deltas = std::mem::take(&mut state.core_deltas);
             let production_deltas = std::mem::take(&mut state.production_deltas);
             let unlocks = std::mem::take(&mut state.unlocks);

@@ -140,7 +140,13 @@ impl BlockInstance {
             draw: DrawSpec::Default,
             sounds,
             icon_descriptors,
-            rotate: kind_rotates(def.kind),
+            rotate: match def.name.as_str() {
+                // `Blocks.java:1362` electrolyzer sets `rotate = true`;
+                // `Blocks.java:1177` cryofluidMixer sets `rotate = false`.
+                "electrolyzer" => true,
+                "cryofluid-mixer" => false,
+                _ => kind_rotates(def.kind),
+            },
         })
     }
 
@@ -519,36 +525,19 @@ pub fn building_kind(data: &BlockKindData) -> BuildingKind {
 /// owned by plans 08/10.
 pub fn kind_rotates(kind: crate::content::BlockKind) -> bool {
     use crate::content::BlockKind as K;
+    // `rotate = true` in `J/world/blocks` plus the `Blocks.java` per-block
+    // overrides applied in `BlockInstance::from_def` (`Block.java:122` default
+    // false): Thruster, Turret (all subclasses), Conveyor/ArmoredConveyor,
+    // DirectionalUnloader, DirectionBridge (Duct/DirectionLiquidBridge), Duct,
+    // DuctRouter/StackRouter, OverflowDuct, StackConveyor, HeatConductor,
+    // HeatProducer, Conduit/ArmoredConduit, BlockProducer (Constructor),
+    // PayloadConveyor/PayloadRouter, PayloadLoader/PayloadUnloader,
+    // PayloadMassDriver, PayloadSource, HeaterGenerator, PowerDiode, BeamDrill,
+    // WallCrafter, UnitAssembler, UnitAssemblerModule, UnitBlock
+    // (UnitFactory/Reconstructor).
     matches!(
         kind,
-        K::Conveyor
-            | K::StackConveyor
-            | K::ArmoredConveyor
-            | K::Junction
-            | K::BufferedItemBridge
-            | K::ItemBridge
-            | K::Sorter
-            | K::Router
-            | K::OverflowGate
-            | K::MassDriver
-            | K::Duct
-            | K::DuctRouter
-            | K::OverflowDuct
-            | K::DuctBridge
-            | K::DirectionalUnloader
-            | K::StackRouter
-            | K::DirectionLiquidBridge
-            | K::Conduit
-            | K::ArmoredConduit
-            | K::LiquidJunction
-            | K::LiquidBridge
-            | K::LiquidRouter
-            | K::Drill
-            | K::BurstDrill
-            | K::WallCrafter
-            | K::Door
-            | K::AutoDoor
-            | K::Thruster
+        K::Thruster
             | K::ItemTurret
             | K::LiquidTurret
             | K::PowerTurret
@@ -557,16 +546,37 @@ pub fn kind_rotates(kind: crate::content::BlockKind) -> bool {
             | K::LaserTurret
             | K::ContinuousLiquidTurret
             | K::ContinuousTurret
+            | K::RepairTurret
+            | K::BuildTurret
+            | K::Conveyor
+            | K::ArmoredConveyor
+            | K::DirectionalUnloader
+            | K::DuctBridge
+            | K::DirectionLiquidBridge
+            | K::Duct
+            | K::DuctRouter
+            | K::StackRouter
+            | K::OverflowDuct
+            | K::StackConveyor
+            | K::HeatConductor
+            | K::HeatProducer
+            | K::Conduit
+            | K::ArmoredConduit
+            | K::Constructor
             | K::PayloadConveyor
             | K::PayloadRouter
-            | K::PayloadMassDriver
-            | K::PayloadDeconstructor
-            | K::Constructor
             | K::PayloadLoader
             | K::PayloadUnloader
-            | K::PowerNode
+            | K::PayloadMassDriver
+            | K::PayloadSource
+            | K::HeaterGenerator
             | K::PowerDiode
-            | K::BeamNode
+            | K::BeamDrill
+            | K::WallCrafter
+            | K::UnitAssembler
+            | K::UnitAssemblerModule
+            | K::UnitFactory
+            | K::Reconstructor
     )
 }
 
@@ -655,8 +665,12 @@ mod tests {
     #[test]
     fn rotate_predicate_wires_plan04_seam() {
         let (content, table) = table();
+        // `Conveyor.java:40` sets `rotate = true`; `Door`/`Wall` keep the
+        // `Block.java:122` default.
+        let conveyor = content.block_id("conveyor").expect("conveyor");
+        assert!(table.rotate(conveyor));
         let door = content.block_id("door").expect("door");
-        assert!(table.rotate(door));
+        assert!(!table.rotate(door));
         let wall = content.block_id("copper-wall").expect("copper-wall");
         assert!(!table.rotate(wall));
     }

@@ -257,8 +257,9 @@ impl SimRuntime {
         block: BlockId,
         rot: u8,
         team: u8,
+        flags: crate::world::build::PlaceFlags,
     ) -> bool {
-        if !self.can_place(world, grid, x, y, block, rot, team) {
+        if !self.can_place(world, grid, x, y, block, rot, team, flags) {
             return false;
         }
         self.set_block_raw(world, grid, x, y, block, rot, team);
@@ -364,6 +365,7 @@ impl SimRuntime {
         block: BlockId,
         rot: u8,
         team: u8,
+        flags: crate::world::build::PlaceFlags,
     ) -> bool {
         if !self.placement_allowed(block) {
             return false;
@@ -378,17 +380,19 @@ impl SimRuntime {
         let Some(counter) = world.get_resource::<BlockCounter>() else {
             return false;
         };
-        crate::world::build::valid_place(
+        crate::world::build::valid_place_query(
             &self.content,
             table,
             &rules,
             counter,
             grid,
+            Some(world),
             block,
             team,
             rot,
             i32::from(x),
             i32::from(y),
+            flags,
         )
     }
 
@@ -503,14 +507,51 @@ impl SimRuntime {
         block: BlockId,
         rot: u8,
         team: u8,
+        flags: crate::world::build::PlaceFlags,
         cost_multiplier: f32,
     ) -> bool {
-        if !self.can_place(world, grid, x, y, block, rot, team) {
+        if !self.can_place(world, grid, x, y, block, rot, team, flags) {
             return false;
         }
         let Some(def) = self.content.block(block) else {
             return false;
         };
+        // `CoreBlock.placeBegan` + `beforePlaceBegan` (`CoreBlock.java:205-239`):
+        // placing a core over a same-team core replaces it immediately,
+        // keeping the old items minus the requirements.
+        if def.kind == crate::content::BlockKind::CoreBlock
+            && let Some(old) = grid.entity_at(TilePos::new(x, y))
+            && world
+                .get::<crate::entities::comp::TeamComp>(old)
+                .map(|t| t.team)
+                == Some(team)
+            && world
+                .get::<crate::world::blocks::storage::CoreBuild>(old)
+                .is_some()
+        {
+            let mut next_items = world.get::<ItemModule>(old).cloned();
+            let infinite = world
+                .get_resource::<BuildRules>()
+                .map(|rules| rules.infinite_resources)
+                .unwrap_or(false);
+            if !infinite && let Some(items) = next_items.as_mut() {
+                for stack in &def.requirements {
+                    let amount = ((stack.amount as f32) * cost_multiplier).round() as i32;
+                    items.remove(stack.item, amount);
+                }
+            }
+            self.set_block_raw(world, grid, x, y, block, rot, team);
+            let Some(new_entity) = grid.entity_at(TilePos::new(x, y)) else {
+                return false;
+            };
+            // `items.set(nextItems)` force-sets the totals.
+            if let Some(items) = next_items {
+                world.entity_mut(new_entity).insert(items);
+            }
+            let grid_ref: &WorldGrid = grid;
+            self.placed_hooks(world, grid_ref, new_entity);
+            return true;
+        }
         let (size, build_time, requirements) = (def.size, def.build_time, def.requirements.clone());
         let Some(sub) = self.construct_block(size) else {
             // No construct singleton for this size: fall back to the
@@ -562,6 +603,7 @@ impl SimRuntime {
         if !crate::world::build::valid_break(
             &self.content,
             grid,
+            Some(world),
             &rules,
             team,
             i32::from(x),
@@ -620,6 +662,7 @@ impl SimRuntime {
         if !crate::world::build::valid_break(
             &self.content,
             grid,
+            Some(world),
             &rules,
             team,
             i32::from(x),

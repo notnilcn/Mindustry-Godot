@@ -591,7 +591,9 @@ impl BuildingBehavior for DrillBehavior {
             .get::<ItemModule>(e)
             .map(ItemModule::total)
             .unwrap_or(0);
-        let speed = (1.0 + 0.6 * optional) * efficiency;
+        // `Drill.java:301`: `Mathf.lerp(1f, liquidBoostIntensity,
+        // optionalEfficiency) * efficiency`.
+        let speed = (1.0 + (def.liquid_boost_intensity - 1.0) * optional) * efficiency;
         let delay = self.drill_time(&def, item);
 
         if let Some(burst) = burst {
@@ -618,11 +620,12 @@ impl BuildingBehavior for DrillBehavior {
             state.time_drilled += state.warmup * delta;
             if total < item_capacity && count > 0 && efficiency > 0.0 {
                 state.last_drill_speed = (speed * count as f32 * state.warmup) / delay;
-                state.warmup = approach(state.warmup, speed, 0.015);
+                // `Mathf.approachDelta(warmup, speed, warmupSpeed)`.
+                state.warmup = approach(state.warmup, speed, def.warmup_speed * delta);
                 state.progress += delta * count as f32 * speed * state.warmup;
             } else {
                 state.last_drill_speed = 0.0;
-                state.warmup = approach(state.warmup, 0.0, 0.015);
+                state.warmup = approach(state.warmup, 0.0, def.warmup_speed * delta);
                 return;
             }
             (state.progress, total < item_capacity)

@@ -298,7 +298,8 @@ impl BuildHarness {
 
     /// Breaks the block at `(x, y)`, going through deconstruction unless `instant`.
     pub fn break_block(&mut self, x: i32, y: i32, instant: bool) -> bool {
-        if !crate::world::build::valid_break(&self.content, &self.grid, &self.rules, 0, x, y) {
+        if !crate::world::build::valid_break(&self.content, &self.grid, None, &self.rules, 0, x, y)
+        {
             return false;
         }
         let Some(entity) = self.grid.tile(x, y).build else {
