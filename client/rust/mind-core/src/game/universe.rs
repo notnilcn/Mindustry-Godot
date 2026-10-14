@@ -362,6 +362,9 @@ impl Campaign {
             {
                 parent_planet.children.push(def.id);
             }
+            // `Planet.init` (`Planet.java:458-473`): `updateBaseCoverage()` runs
+            // after the generator pass, before any campaign save is loaded.
+            planet.update_base_coverage_from_neighbors();
             planets.insert(def.id.raw(), planet);
         }
 
@@ -1342,5 +1345,50 @@ mod tests {
             .expect("record present");
         assert!(saved.waves);
         assert_eq!(saved.win_wave, expected);
+    }
+
+    #[test]
+    fn serpulo_attack_sectors_marked() {
+        // `Planet.getData().attackSectors` (`assets/planets/serpulo.json`,
+        // `Planet.java:476-490`): every listed cell is marked; every marked
+        // cell already carries a hidden-map submission preset
+        // (`SectorSubmissions.java:27-75`), so no marked cell is preset-less.
+        let (_, campaign, id) = serpulo();
+        let planet = campaign.planet(id).unwrap();
+        assert!(planet.sectors[0].generate_enemy_base, "sector 0");
+        assert!(planet.sectors[265].generate_enemy_base, "sector 265");
+        assert!(!planet.sectors[1].generate_enemy_base, "sector 1");
+        let marked_without_preset = planet
+            .sectors
+            .iter()
+            .filter(|sector| sector.generate_enemy_base && sector.preset.is_none())
+            .count();
+        assert_eq!(marked_without_preset, 0);
+    }
+
+    #[test]
+    fn boot_threat_matches_update_base_coverage() {
+        // `Planet.updateBaseCoverage` (`Planet.java:386-403`) at boot:
+        // `sum = 1 + 0.9 * (# marked neighbours) + (0.88 if hasEnemyBase)`,
+        // `threat = clamp(sum / 5, 0.3, 1.2)` for a preset-less sector.
+        let (_, campaign, id) = serpulo();
+        let planet = campaign.planet(id).unwrap();
+        let sector = planet.sector(1).unwrap();
+        assert!(sector.preset.is_none(), "sector 1 is generated");
+        let mut sum = 1.0f32;
+        for neighbor in &planet.neighbors[1] {
+            if planet.sectors[*neighbor as usize].generate_enemy_base {
+                sum += 0.9;
+            }
+        }
+        if sector.has_enemy_base() {
+            sum += 0.88;
+        }
+        let expected = (sum / 5.0).clamp(0.3, 1.2);
+        assert!(
+            (sector.threat - expected).abs() < 1e-6,
+            "boot threat {} != hand-computed {expected}",
+            sector.threat
+        );
     }
 }

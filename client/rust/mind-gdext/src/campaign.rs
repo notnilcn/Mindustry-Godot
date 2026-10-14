@@ -236,6 +236,13 @@ impl MindCampaign {
                         }
                     }
                 }
+                // `Planet.init` (`Planet.java:469-471`) recomputes base coverage
+                // after `sector.loadInfo`; run it once more now that the stored
+                // infos and save files are on the sectors, so boot threat and
+                // `hasEnemyBase` match Java (H05 T1).
+                for planet in campaign.planets.values_mut() {
+                    planet.update_base_coverage_from_neighbors();
+                }
                 self.registry = Some(registry);
                 self.campaign = Some(campaign);
                 self.runtime_installed = false;
