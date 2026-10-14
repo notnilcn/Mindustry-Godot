@@ -282,6 +282,89 @@ fn liquid_source_fills_conduit() {
     );
 }
 
+/// H09 T6: `BuildingComp.onDeconstructed` (`BuildingComp.java:1478-1487`) drops
+/// `currentAmount / (size * size) * 2` per footprint tile for a
+/// non-incinerable liquid (neoplasm); an incinerable one (slag) is not dropped.
+#[test]
+fn deconstructing_tank_drops_non_incinerable_puddles() {
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let neph = liquid(&sim, "neoplasm");
+    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    {
+        let mut liquids = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+            .expect("liquids");
+        liquids.add(neph, 1500.0, 1500.0);
+    }
+    // The player deconstruct path starts through `Build.beginBreak`
+    // (`Command::Break` is the instant/API break), so call it directly.
+    {
+        let crate::sim::Sim {
+            block_runtime,
+            ecs,
+            grid,
+            ..
+        } = &mut sim;
+        let runtime = block_runtime.as_mut().expect("block runtime");
+        assert!(runtime.begin_break(&mut ecs.0, grid, 6, 6, 1, 1.0));
+    }
+    // 3x3 footprint (5..7, 5..7): 1500/9*2 = 333 per tile, capped at
+    // maxLiquid (70).
+    for y in 5..8 {
+        for x in 5..8 {
+            let puddle = crate::combat::puddles::find_at(&sim.ecs.0, x, y)
+                .and_then(|entity| {
+                    sim.ecs
+                        .0
+                        .get::<crate::combat::puddles::PuddleState>(entity)
+                        .copied()
+                })
+                .unwrap_or_else(|| panic!("puddle at ({x}, {y})"));
+            assert_eq!(puddle.liquid, neph);
+            assert!(
+                (puddle.amount - crate::combat::puddles::MAX_LIQUID).abs() < 1e-3,
+                "({x}, {y}) amount {}",
+                puddle.amount
+            );
+        }
+    }
+
+    // Incinerable slag is left behind (Java `!liquids.current().incinerable`).
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let slag = liquid(&sim, "slag");
+    let tank = place(&mut sim, "liquid-tank", 6, 6);
+    {
+        let mut liquids = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(tank)
+            .expect("liquids");
+        liquids.add(slag, 1500.0, 1500.0);
+    }
+    {
+        let crate::sim::Sim {
+            block_runtime,
+            ecs,
+            grid,
+            ..
+        } = &mut sim;
+        let runtime = block_runtime.as_mut().expect("block runtime");
+        assert!(runtime.begin_break(&mut ecs.0, grid, 6, 6, 1, 1.0));
+    }
+    for y in 5..8 {
+        for x in 5..8 {
+            assert!(
+                crate::combat::puddles::find_at(&sim.ecs.0, x, y).is_none(),
+                "no puddle at ({x}, {y}) for incinerable slag"
+            );
+        }
+    }
+}
+
 /// PAR-0077: a power source feeds an adjacent power consumer; the graph reports
 /// full satisfaction.
 #[test]
@@ -4388,6 +4471,78 @@ fn fill_items_gate_skips_other_teams() {
     assert!(sim.ecs.0.get::<Building>(entity).is_some(), "core exists");
 }
 
+/// PAR-0249 regression (found by the H03 session): only teams whose rule sets
+/// `fillItems` may be refilled (`Logic.java:554`
+/// `if(rules.fillItems && data.cores.size > 0)`). The campaign sets it on the
+/// wave team alone (`apply_world_load_campaign_rules`), so the PLAYER core must
+/// stay empty — filling it wrote `i32::MAX / 2` per item (`coreIncinerates`)
+/// into every exit save.
+#[test]
+fn fill_items_does_not_fill_player_core() {
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{
+        CampaignRuntime, install_campaign_core_hooks, sync_session_with_sim,
+    };
+    use crate::world::TilePos;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let mut rules = Rules {
+        default_team: 1,
+        ..Rules::default()
+    };
+    // Campaign shape: only the wave team's rule gets `fillItems`.
+    rules.team_rule_mut(1).fill_items = false;
+    rules.team_rule_mut(2).fill_items = true;
+    rules.core_incinerates = true;
+    install_campaign_session(&mut sim, rules);
+    install_campaign_core_hooks(&mut sim.ecs.0);
+    if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+        runtime.session.phase = crate::game::State::Playing;
+    }
+    let core = BlockId::new(sim.world_block_id("core-shard").expect("core-shard"));
+    for (x, y, team) in [(5, 5, 1u8), (15, 15, 2u8)] {
+        sim.command(crate::determinism::SimCommand::Place {
+            x,
+            y,
+            block: core.raw(),
+            rotation: 0,
+            team,
+            player: None,
+        })
+        .expect("core placed");
+    }
+    {
+        let content = crate::world::harness::BuildHarness::load_content();
+        let mut runtime = sim
+            .ecs
+            .0
+            .remove_resource::<CampaignRuntime>()
+            .expect("runtime");
+        let _ = sync_session_with_sim(&mut runtime.session, &mut sim.ecs.0, &content, 0, false);
+        sim.ecs.0.insert_resource(runtime);
+    }
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    let copper = item(&sim, "copper");
+    let player_core = sim.grid.entity_at(TilePos::new(5, 5)).expect("player core");
+    let enemy_core = sim
+        .grid
+        .entity_at(TilePos::new(15, 15))
+        .expect("enemy core");
+    assert_eq!(
+        stored_item(&sim, player_core, copper),
+        0,
+        "the player core (fillItems=false) is never refilled"
+    );
+    assert_eq!(
+        stored_item(&sim, enemy_core, copper),
+        i32::MAX / 2,
+        "the wave team's core is still filled (fillItems=true)"
+    );
+}
+
 /// H09 T10: the `Logic` event counters (`Logic.java:186-216`) follow player
 /// builds, deconstructs and losses.
 #[test]
@@ -4511,4 +4666,204 @@ fn game_stats_count_units_created() {
         .session
         .stats;
     assert_eq!(stats.units_created, 1, "one unit created");
+}
+
+/// PAR-0190: wire `ContentId`/`Bool` configs reach `configured()` — sorter,
+/// door (with Java's 60-tick toggle throttle) and switch.
+#[test]
+fn configure_reaches_sorter_door_switch() {
+    use crate::content::ContentType;
+    use crate::entities::comp::{Building, DoorState};
+
+    let mut sim = runtime_sim();
+    let sorter = place(&mut sim, "sorter", 5, 5);
+    let door = place(&mut sim, "door", 8, 5);
+    let switch = place(&mut sim, "switch", 11, 5);
+    let copper = item(&sim, "copper");
+
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::ContentId {
+            kind: ContentType::Item as u8,
+            id: copper.raw(),
+        },
+    );
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::world::blocks::distribution::SorterBuild>(sorter)
+            .and_then(|sorter| sorter.sort_item),
+        Some(copper),
+        "typed item id reached Sorter.configured"
+    );
+
+    configure(&mut sim, 8, 5, crate::determinism::ConfigValue::Bool(true));
+    assert!(
+        sim.ecs
+            .0
+            .get::<DoorState>(door)
+            .is_some_and(|state| state.open),
+        "door opened"
+    );
+    for _ in 0..61 {
+        sim.tick().expect("tick");
+    }
+    configure(&mut sim, 8, 5, crate::determinism::ConfigValue::Bool(false));
+    assert!(
+        sim.ecs
+            .0
+            .get::<DoorState>(door)
+            .is_some_and(|state| !state.open),
+        "door closed after the toggle throttle elapsed"
+    );
+
+    configure(
+        &mut sim,
+        11,
+        5,
+        crate::determinism::ConfigValue::Bool(false),
+    );
+    assert!(
+        !sim.ecs.0.get::<Building>(switch).expect("switch").enabled,
+        "switch disabled"
+    );
+}
+
+/// PAR-0190: an absolute packed `Integer` config links a bridge conveyor and
+/// the sim keeps ticking (the reported `configure_building(..,"int",packed)`
+/// hang; `ItemBridge.java:66-69`).
+#[test]
+fn bridge_configure_int_absolute_links_and_ticks() {
+    use crate::world::blocks::distribution::ItemBridgeBuild;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = runtime_sim();
+    let from = place(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
+    let belt = place(&mut sim, "conveyor", 9, 5);
+    let copper = item(&sim, "copper");
+    if let Some(mut items) = sim.ecs.0.get_mut::<ItemModule>(from) {
+        items.add(copper, 10, 10);
+    }
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Int(TilePos::new(8, 5).pack()),
+    );
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(from).map(|b| b.link),
+        Some(TilePos::new(8, 5).pack()),
+        "absolute packed int links the bridge"
+    );
+    // Must terminate: the G03 hang was on the next step after this configure.
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let dest = sim.grid.entity_at(TilePos::new(8, 5)).expect("dest bridge");
+    let belt_items = sim
+        .ecs
+        .0
+        .get::<ItemModule>(belt)
+        .map(|module| module.get(copper))
+        .unwrap_or(0);
+    assert!(
+        stored_item(&sim, dest, copper) + belt_items > 0,
+        "copper arrived at (8,5) or beyond (dest {}, belt {belt_items})",
+        stored_item(&sim, dest, copper)
+    );
+}
+
+/// PAR-0190: a relative `Point2` config links `(5,5)` to `(8,5)`
+/// (`ItemBridge.config(Point2.class)`, `ItemBridge.java:66-69`); the old bridge
+/// packed it as an absolute position and linked to tile (3,0).
+#[test]
+fn bridge_configure_point_relative() {
+    use crate::world::blocks::distribution::ItemBridgeBuild;
+
+    let mut sim = runtime_sim();
+    let from = place(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Point2(3, 0),
+    );
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(from).map(|b| b.link),
+        Some(TilePos::new(8, 5).pack())
+    );
+}
+
+/// PAR-0190: a `Point2[]` (relative points) config autolinks a power node
+/// (`PowerNode.config(Point2[].class)`, `PowerNode.java:97-109`).
+#[test]
+fn node_configure_point_array() {
+    use crate::world::modules::PowerModule;
+
+    let mut sim = runtime_sim();
+    let node = place(&mut sim, "power-node", 5, 5);
+    let _battery_a = place(&mut sim, "battery", 8, 5);
+    let _battery_b = place(&mut sim, "battery", 5, 8);
+    configure(
+        &mut sim,
+        5,
+        5,
+        crate::determinism::ConfigValue::Point2Array(vec![
+            TilePos::new(3, 0).pack(),
+            TilePos::new(0, 3).pack(),
+        ]),
+    );
+    let links = sim
+        .ecs
+        .0
+        .get::<PowerModule>(node)
+        .map(|module| module.links.len())
+        .unwrap_or(0);
+    assert_eq!(links, 2, "node linked both batteries");
+}
+
+/// H02 T6: `SimCommand::ConfigTap` runs `config_tap` and applies the returned
+/// configs in order (bridge tap-to-link through the sim command path).
+#[test]
+fn sim_config_tap_command_applies() {
+    use crate::sim::ConfigTapKind;
+    use crate::world::blocks::distribution::ItemBridgeBuild;
+
+    let mut sim = runtime_sim();
+    let from = place(&mut sim, "bridge-conveyor", 5, 5);
+    let _to = place(&mut sim, "bridge-conveyor", 8, 5);
+    sim.command(SimCommand::ConfigTap {
+        x: 5,
+        y: 5,
+        other_x: 8,
+        other_y: 5,
+    })
+    .expect("config tap");
+    assert_eq!(sim.last_config_tap, Some(ConfigTapKind::Consume));
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(from).map(|b| b.link),
+        Some(TilePos::new(8, 5).pack())
+    );
+    // Inverse tap: the reverse-link branch switches and clears the old link.
+    sim.command(SimCommand::ConfigTap {
+        x: 8,
+        y: 5,
+        other_x: 5,
+        other_y: 5,
+    })
+    .expect("config tap");
+    assert_eq!(sim.last_config_tap, Some(ConfigTapKind::Switch));
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(from).map(|b| b.link),
+        Some(-1)
+    );
+    let to = sim.grid.entity_at(TilePos::new(8, 5)).expect("dest");
+    assert_eq!(
+        sim.ecs.0.get::<ItemBridgeBuild>(to).map(|b| b.link),
+        Some(TilePos::new(5, 5).pack())
+    );
 }

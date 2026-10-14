@@ -93,7 +93,10 @@ impl ItemModule {
         self.items.get(item.index()).copied().unwrap_or(0)
     }
 
-    /// `ItemModule.add(item, amount)`; returns the amount accepted.
+    /// `ItemModule.add(item, amount)`; returns the amount accepted. Java's
+    /// `total` is a plain `int` (`ItemModule.java:245-251`), so the update
+    /// wraps: a save loaded with `fillItems`-scale stacks (`i32::MAX / 2`)
+    /// must not panic on the next deposit.
     pub fn add(&mut self, item: ItemId, amount: i32, capacity: i32) -> i32 {
         let Some(slot) = self.items.get_mut(item.index()) else {
             return 0;
@@ -101,18 +104,19 @@ impl ItemModule {
         let before = *slot;
         *slot = (*slot + amount).clamp(0, capacity);
         let accepted = *slot - before;
-        self.total += accepted;
+        self.total = self.total.wrapping_add(accepted);
         accepted
     }
 
-    /// `ItemModule.remove(item, amount)`; returns the amount removed.
+    /// `ItemModule.remove(item, amount)`; returns the amount removed. Wraps
+    /// like Java's `int total` (`ItemModule.java:265-270`).
     pub fn remove(&mut self, item: ItemId, amount: i32) -> i32 {
         let Some(slot) = self.items.get_mut(item.index()) else {
             return 0;
         };
         let removed = amount.min(*slot).max(0);
         *slot -= removed;
-        self.total -= removed;
+        self.total = self.total.wrapping_sub(removed);
         removed
     }
 

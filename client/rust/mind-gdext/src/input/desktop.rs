@@ -349,6 +349,10 @@ pub struct DesktopBridge {
     /// `Block.lastConfig` per block (`Block.java:827-832` `nextConfig`): the
     /// last submitted config, carried onto the next plan of that block.
     last_config: HashMap<u16, mind_core::world::config::ConfigValue>,
+    /// Tile of the building whose config panel is open
+    /// (`config.getSelected()`), or `None` when the panel is hidden or was
+    /// never opened (H02 T6 tap-to-link; H08 keeps this state).
+    pub config_selected: Option<(i32, i32)>,
     /// `schemX/schemY`: the start tile of an F/B selection drag
     /// (`InputHandler.schemX`; `-1` cleared).
     schem_start: Option<(i32, i32)>,
@@ -437,6 +441,7 @@ impl DesktopBridge {
             camera: None,
             selectable: Vec::new(),
             last_config: HashMap::new(),
+            config_selected: None,
             schem_start: None,
             schematic_origin: (0, 0),
             last_action: String::new(),
@@ -2288,6 +2293,26 @@ impl DesktopBridge {
         })
     }
 
+    /// `build.block.configurable` for the tap dispatch (H02 T6): whether the
+    /// panel may switch to the tapped building.
+    fn block_configurable_at(&self, x: i32, y: i32) -> bool {
+        let Some(host) = self.host.clone() else {
+            return false;
+        };
+        let guard = host.bind();
+        let Some(content) = guard.content_registry() else {
+            return false;
+        };
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        guard
+            .grid()
+            .block_at(TilePos::new(tx, ty))
+            .and_then(|block| content.block(block))
+            .is_some_and(|def| def.configurable)
+    }
+
     /// `build.block.synthetic()` (`Block.synthetic()` = `update || destructible`).
     fn block_synthetic_at(&self, x: i32, y: i32) -> bool {
         let Some(host) = self.host.clone() else {
@@ -2312,11 +2337,6 @@ impl DesktopBridge {
     /// Returns `true` when the tap was consumed (`InputHandler.tileTapped`
     /// returns `consumed`; `DesktopInput.java:701` gates shooting on it).
     fn tile_tapped(&mut self, x: i32, y: i32) -> bool {
-        // H02 owns the `checkConfigTap`/`onConfigureBuildTapped` tap-to-link
-        // branch at the top of this function (`world::config_tap::config_tap`
-        // is not on main: skipped, waiting for H02 T6). If both edit here,
-        // keep H02's link branch before these gates.
-        //
         // `if(build == null){ inv.hide(); config.hideConfig(); return false; }`
         if !self
             .host
@@ -2324,7 +2344,67 @@ impl DesktopBridge {
             .is_some_and(|host| host.bind().building_team(x, y).is_some())
         {
             self.effects.push(Effect::HidePanels);
+            self.config_selected = None;
             return false;
+        }
+        // `config.isShown() && config.getSelected().onConfigureBuildTapped(build)`
+        // (`InputHandler.java:1993-2005`; H02 T6, PAR-0220): the building whose
+        // panel is open reacts to the second tap (bridge/node/driver link). Java
+        // runs this for configurable and non-configurable buildings alike, before
+        // any `tapped()` handling.
+        if let Some((sx, sy)) = self.config_selected {
+            let (Ok(sx16), Ok(sy16), Ok(other_x), Ok(other_y)) = (
+                i16::try_from(sx),
+                i16::try_from(sy),
+                i16::try_from(x),
+                i16::try_from(y),
+            ) else {
+                self.config_selected = None;
+                return false;
+            };
+            let Some(mut host) = self.host.clone() else {
+                return false;
+            };
+            // Read-only preview (the guard drops at the end of the statement).
+            let preview = host
+                .bind()
+                .preview_config_tap(i32::from(sx16), i32::from(sy16), x, y);
+            if preview < 0 {
+                // The selected building is gone: forget the stale selection.
+                self.config_selected = None;
+            } else {
+                host.bind_mut().enqueue_sim_command(SimCommand::ConfigTap {
+                    x: sx16,
+                    y: sy16,
+                    other_x,
+                    other_y,
+                });
+                match preview {
+                    0 => {
+                        // Java `return false`: consumed, the panel stays on the
+                        // selected building (`inv.hide()` at the end).
+                        self.effects.push(Effect::HideInventory);
+                        return true;
+                    }
+                    1 => {
+                        // Java `deselect(); return false`.
+                        self.config_selected = None;
+                        self.effects.push(Effect::HidePanels);
+                        return true;
+                    }
+                    _ => {
+                        // Java `return true`: the panel agrees to switch. A
+                        // configurable, interactable target opens its own panel
+                        // below; every other building consumes the tap and
+                        // closes the panel (`config.hideConfig()`).
+                        self.config_selected = None;
+                        if !(self.block_configurable_at(x, y) && self.tile_interactable(x, y)) {
+                            self.effects.push(Effect::HidePanels);
+                            return true;
+                        }
+                    }
+                }
+            }
         }
         // `build.interactable(player.team())`: enemy buildings never open a
         // panel or inventory (IH:1980-1990).
@@ -2390,6 +2470,7 @@ impl DesktopBridge {
             return true;
         }
         if let Some(spec) = self.config_spec(x, y) {
+            self.config_selected = Some((x, y));
             self.effects.push(Effect::OpenBlockConfig {
                 x,
                 y,
@@ -2982,6 +3063,40 @@ impl DesktopBridge {
         // `SwitchBlock.configTapped` toggles on tap; it never opens a panel.
         if def.kind == BlockKind::SwitchBlock {
             return None;
+        }
+        // H02 T6: link blocks have no option list — the panel shows only the
+        // title, the current link and the close button. The link itself is made
+        // by tapping another block while this panel is open.
+        if matches!(
+            def.kind,
+            BlockKind::ItemBridge
+                | BlockKind::BufferedItemBridge
+                | BlockKind::LiquidBridge
+                | BlockKind::MassDriver
+                | BlockKind::PayloadMassDriver
+                | BlockKind::PowerNode
+                | BlockKind::LongPowerNode
+        ) {
+            let mut spec = serde_json::json!({
+                "title": format!("block.{}.name", def.name),
+                "block": def.name,
+                "x": x,
+                "y": y,
+                "text": false,
+                "multiline": false,
+                "color": false,
+                "options": [],
+                "link": true,
+            });
+            let current = serde_json::from_str::<serde_json::Value>(
+                guard.building_config_json(x, y).to_string().as_str(),
+            )
+            .ok()
+            .filter(|value| value.get("type").and_then(|kind| kind.as_str()) == Some("point"));
+            if let Some(current) = current {
+                spec["current"] = current;
+            }
+            return Some(spec.to_string());
         }
         // `Reconstructor.buildConfiguration` (`Reconstructor.java:215-240`):
         // with `showAllCommands = true` it lists every unit command (the held

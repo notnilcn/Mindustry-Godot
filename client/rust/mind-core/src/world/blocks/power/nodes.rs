@@ -15,8 +15,9 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::entities::comp::Building;
-use crate::world::behavior::BuildingBehavior;
+use crate::world::behavior::{BuildingBehavior, ConfigTapResult};
 use crate::world::block::TILE_SIZE;
+use crate::world::config::ConfigValue;
 use crate::world::modules::{PowerGraphId, PowerModule};
 use crate::world::{TilePos, WorldGrid};
 
@@ -51,6 +52,67 @@ impl BuildingBehavior for PowerNodeBehavior {
             });
         }
     }
+
+    /// `PowerNode.onConfigureBuildTapped` (`PowerNode.java:419-441`): link to
+    /// the tapped node/consumer; a double tap autolinks (`Point2[]`) or clears.
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        grid: &WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> ConfigTapResult {
+        if link_valid(world, grid, e, other, true)
+            && let Some(other_pos) = world.get::<Building>(other).map(|b| b.tile.pack())
+        {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(f64::from(other_pos)))]);
+        }
+        if e == other {
+            let links = world
+                .get::<PowerModule>(e)
+                .map(|module| module.links.len())
+                .unwrap_or(0);
+            if links == 0 {
+                let Some(e_tile) = world.get::<Building>(e).map(|b| b.tile) else {
+                    return ConfigTapResult::ConsumeAndDeselect(Vec::new());
+                };
+                let mut candidates = Vec::new();
+                get_potential_links(world, grid, e, &mut candidates);
+                let max_nodes = world
+                    .get::<PowerNodeConfig>(e)
+                    .map(|config| config.max_nodes as usize)
+                    .unwrap_or(0);
+                let mut points: Vec<i32> = Vec::new();
+                for link in candidates {
+                    if points.len() >= max_nodes {
+                        break;
+                    }
+                    let Some(link_tile) = world.get::<Building>(link).map(|b| b.tile) else {
+                        continue;
+                    };
+                    if !insulated(world, grid, e_tile, link_tile) {
+                        points.push(
+                            TilePos::new(
+                                (link_tile.x() as i32 - e_tile.x() as i32) as i16,
+                                (link_tile.y() as i32 - e_tile.y() as i32) as i16,
+                            )
+                            .pack(),
+                        );
+                    }
+                }
+                return ConfigTapResult::ConsumeAndDeselect(vec![(
+                    e,
+                    ConfigValue::Point2Array(points.into()),
+                )]);
+            }
+            // Clear all links: `configure(new Point2[0])`.
+            return ConfigTapResult::ConsumeAndDeselect(vec![(
+                e,
+                ConfigValue::Point2Array(Default::default()),
+            )]);
+        }
+        ConfigTapResult::SwitchAfter(Vec::new())
+    }
 }
 
 /// Circle/axis-aligned-rect overlap (Arc `Intersector.overlaps(Circle, Rect)`).
@@ -63,12 +125,24 @@ pub fn circle_rect_overlap(cx: f32, cy: f32, radius: f32, rect: [f32; 4]) -> boo
     dx * dx + dy * dy <= radius * radius
 }
 
-/// Pixel hitbox of a placed block (`Tile.getHitbox` shape; center + size).
+/// `Block.offset` of a building's block (`tile*8 + offset`, Java
+/// `Tile.drawx/drawy = worldx() + block().offset`, `Tile.java:175-181`).
+pub fn block_offset(world: &World, entity: Entity) -> Option<f32> {
+    let building = world.get::<Building>(entity)?;
+    world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.get(building.block))
+        .map(|instance| instance.def.offset)
+}
+
+/// Pixel hitbox of a placed block (`Tile.getHitbox`, `Tile.java:535-537`:
+/// centred on `drawx()/drawy()` with `block.size * tilesize`).
 pub fn hitbox(world: &World, entity: Entity) -> Option<[f32; 4]> {
     let building = world.get::<Building>(entity)?;
     let size = block_size(world, entity)? as f32;
-    let cx = (building.tile.x() as f32 + 0.5) * TILE_SIZE;
-    let cy = (building.tile.y() as f32 + 0.5) * TILE_SIZE;
+    let offset = block_offset(world, entity).unwrap_or(0.0);
+    let cx = building.tile.x() as f32 * TILE_SIZE + offset;
+    let cy = building.tile.y() as f32 * TILE_SIZE + offset;
     Some([
         cx - size * TILE_SIZE / 2.0,
         cy - size * TILE_SIZE / 2.0,
@@ -97,8 +171,9 @@ pub fn overlaps(world: &World, source: Entity, other: Entity, range_world: f32) 
     let Some(source_building) = world.get::<Building>(source) else {
         return false;
     };
-    let cx = (source_building.tile.x() as f32 + 0.5) * TILE_SIZE;
-    let cy = (source_building.tile.y() as f32 + 0.5) * TILE_SIZE;
+    let offset = block_offset(world, source).unwrap_or(0.0);
+    let cx = source_building.tile.x() as f32 * TILE_SIZE + offset;
+    let cy = source_building.tile.y() as f32 * TILE_SIZE + offset;
     let Some(target) = hitbox(world, other) else {
         return false;
     };

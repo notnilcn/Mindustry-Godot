@@ -26,6 +26,7 @@ pub mod cached;
 pub mod checksum;
 pub mod color_mapper;
 pub mod config;
+pub mod config_tap;
 pub mod construct;
 pub mod consumers;
 pub mod context;
@@ -159,6 +160,13 @@ pub struct WorldGrid {
     /// keeps the square map.
     pub sector_polygon: Option<SectorPolygon>,
 }
+
+/// `World.isGenerating()` mirror for `BuildingBehavior` hooks, which only see
+/// the ECS world (`CoreBlock.java:773-778` skips the core item clamp while the
+/// world is generating). `Sim::materialize_map_buildings` sets it around the
+/// `endMapLoad` proximity pass; absence means "not generating".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Resource)]
+pub struct WorldGenerating(pub bool);
 
 /// The generated-sector polygon (`Sector.rect` + tile corner count + generated
 /// size) the darkness term projects; H05 T3.

@@ -230,6 +230,7 @@ mod tests {
         };
         let mut moved = false;
         for _ in 0..600 {
+            harness.vel_update(unit);
             let mut ctx = AiCtx {
                 world: &mut harness.build.world,
                 grid: &harness.build.grid,

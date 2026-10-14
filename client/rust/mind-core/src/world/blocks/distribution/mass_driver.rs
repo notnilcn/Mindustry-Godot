@@ -22,7 +22,7 @@ use smallvec::SmallVec;
 
 use crate::content::ItemId;
 use crate::entities::comp::{Building, Pos};
-use crate::world::behavior::BuildingBehavior;
+use crate::world::behavior::{BuildingBehavior, ConfigTapResult};
 use crate::world::block::BlockTable;
 use crate::world::config::ConfigValue;
 use crate::world::modules::ItemModule;
@@ -500,6 +500,44 @@ impl BuildingBehavior for MassDriverBehavior {
         if let Some(mut driver) = world.get_mut::<MassDriverBuild>(e) {
             driver.link = link;
         }
+    }
+
+    /// `MassDriver.onConfigureBuildTapped` (`MassDriver.java:272-288`).
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        _grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> ConfigTapResult {
+        let (Some(a), Some(b)) = (world.get::<Building>(e), world.get::<Building>(other)) else {
+            return ConfigTapResult::SwitchAfter(Vec::new());
+        };
+        let link = world
+            .get::<MassDriverBuild>(e)
+            .map(|driver| driver.link)
+            .unwrap_or(-1);
+        if e == other {
+            // `if(link == -1) deselect(); configure(-1); return false;`
+            let value = vec![(e, ConfigValue::Number(-1.0))];
+            return if link == -1 {
+                ConfigTapResult::ConsumeAndDeselect(value)
+            } else {
+                ConfigTapResult::Consume(value)
+            };
+        }
+        let other_pos = b.tile.pack();
+        if link == other_pos {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(-1.0))]);
+        }
+        let same_team = world
+            .get::<crate::entities::comp::TeamComp>(e)
+            .zip(world.get::<crate::entities::comp::TeamComp>(other))
+            .is_some_and(|(x, y)| x.team == y.team);
+        if a.block == b.block && same_team && world_dst(world, other, e) <= self.range {
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(f64::from(other_pos)))]);
+        }
+        ConfigTapResult::SwitchAfter(Vec::new())
     }
 
     fn version(&self, _world: &World, _e: Entity) -> u8 {

@@ -589,6 +589,38 @@ impl FogControl {
     }
 }
 
+/// `static-fog-data` custom chunk (`FogControl.java:97`, `SaveVersion.
+/// addCustomChunk`): carries the fog bytes through a save. The host fills the
+/// mutex before writing and reads it back on load (`DecodedSave.static_fog`).
+pub struct StaticFogChunk(pub std::sync::Mutex<Option<Vec<u8>>>);
+
+impl crate::io::save::state::CustomChunk for StaticFogChunk {
+    fn write(&self, w: &mut crate::io::wire::WireWriter) -> crate::io::IoResult<()> {
+        let guard = self
+            .0
+            .lock()
+            .map_err(|_| crate::io::IoError::corrupt("static-fog-data lock poisoned"))?;
+        if let Some(bytes) = guard.as_ref() {
+            w.bytes(bytes);
+        }
+        Ok(())
+    }
+
+    fn read(&self, r: &mut crate::io::wire::WireReader, len: usize) -> crate::io::IoResult<()> {
+        let bytes = r.bytes(len)?.to_vec();
+        let mut guard = self
+            .0
+            .lock()
+            .map_err(|_| crate::io::IoError::corrupt("static-fog-data lock poisoned"))?;
+        *guard = Some(bytes);
+        Ok(())
+    }
+
+    fn should_write(&self) -> bool {
+        self.0.lock().map(|guard| guard.is_some()).unwrap_or(true)
+    }
+}
+
 /// Arc `FogControl.circle`: midpoint circle rasterization into `bits`.
 pub fn circle(bits: &mut FogBits, x: i32, y: i32, radius: i32, ww: u16, wh: u16) {
     let mut f = 1 - radius;
@@ -682,13 +714,14 @@ mod tests {
     #[test]
     fn static_fog_exploration_roundtrip() {
         let mut fog = FogControl::new();
-        let blocks = vec![source(8, 8, 3, 0)];
+        let blocks = vec![source(8, 8, 3, 0), source(24, 24, 3, 1)];
         fog.on_world_load(32, 32, true, true, &blocks);
         // Center discovered, far corner not.
         assert!(fog.is_discovered(0, 8, 8, true, true, false));
         assert!(!fog.is_discovered(0, 31, 31, true, true, false));
+        assert!(fog.is_discovered(1, 24, 24, true, true, false));
 
-        // RLE chunk round-trips through a fresh controller.
+        // RLE chunk round-trips through a fresh controller (both teams).
         let bytes = fog.write();
         let mut restored = FogControl::new();
         restored.read(&bytes);
@@ -697,6 +730,10 @@ mod tests {
         assert_eq!(
             restored.fog[0].as_ref().unwrap().static_data,
             fog.fog[0].as_ref().unwrap().static_data
+        );
+        assert_eq!(
+            restored.fog[1].as_ref().unwrap().static_data,
+            fog.fog[1].as_ref().unwrap().static_data
         );
     }
 

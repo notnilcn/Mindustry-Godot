@@ -395,6 +395,33 @@ fn unit_factory_body_matches_java() {
     assert_eq!(state.current_plan, 0);
 }
 
+/// H02 T6: `LiquidBridge` inherits `ItemBridge`'s save body
+/// (`ItemBridge.java:523-549`; `LiquidBridge.java:7`) without the buffered
+/// `ItemBuffer`.
+#[test]
+fn liquid_bridge_body_matches_java() {
+    use crate::world::blocks::distribution::ItemBridgeBuild;
+
+    let (mut world, e, inst) = spawn_block("bridge-conduit");
+    let link = TilePos::new(9, 4).pack();
+    let incoming = TilePos::new(5, 4).pack();
+    let mut bytes = Vec::new();
+    {
+        let mut w = WireWriter::new(&mut bytes);
+        w.i(link);
+        w.f(0.75);
+        w.b(1);
+        w.i(incoming);
+        w.bool(true);
+    }
+    assert_body_roundtrip(&mut world, &inst, e, &bytes, 1);
+    let state = world.get::<ItemBridgeBuild>(e).expect("state");
+    assert_eq!(state.link, link);
+    assert_eq!(state.warmup, 0.75);
+    assert_eq!(state.incoming.as_slice(), &[incoming]);
+    assert!(state.was_moved && state.moved);
+}
+
 /// The smoke helper also asserts the `WorldGrid` fixture compiles in this file.
 #[allow(dead_code)]
 fn _grid_fixture() -> WorldGrid {

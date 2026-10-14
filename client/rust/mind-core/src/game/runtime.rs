@@ -1044,6 +1044,15 @@ pub fn team_ai_system(world: &mut World) {
                 .active
                 .iter()
                 .filter_map(|team| {
+                    // `Logic.java:554` `if(rules.fillItems && data.cores.size > 0)`:
+                    // only teams whose rule sets `fillItems` are filled — the
+                    // campaign sets it on the wave team alone
+                    // (`apply_world_load_campaign_rules`), so the player core is
+                    // never refilled (its `getMaximumAccepted` is `i32::MAX / 2`
+                    // under `coreIncinerates`).
+                    if !rules.team_rule(team.0).fill_items {
+                        return None;
+                    }
                     let data = runtime.session.teams.get_or_null(*team)?;
                     // `var rules = data.team.rules(); if(rules.fillItems && ...)`
                     // (`Logic.java:553-554`): only teams whose rule sets
@@ -1785,8 +1794,11 @@ mod tests {
         );
         assert_eq!(slot_b, slot_a, "both clustered units share the order");
 
-        // The order drives the live movement system.
+        // The order drives the live movement system. T4: the first tick only
+        // writes `vel` (`VelComp.update` integrates at the start of the next
+        // tick), so run two ticks before reading the position.
         let before = world.get::<Pos>(a).expect("pos a").x;
+        unit_update_system(&mut world);
         unit_update_system(&mut world);
         let after = world.get::<Pos>(a).expect("pos a").x;
         assert!(

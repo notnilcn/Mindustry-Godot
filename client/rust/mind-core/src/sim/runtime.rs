@@ -94,6 +94,8 @@ pub struct ContentIndex {
     pub item_ids: std::collections::HashMap<String, u16>,
     /// Dense item id → name (id-indexed; `ContentRegistry::items` order).
     pub item_names: Vec<String>,
+    /// Dense item id → `Item.buildable` (`CoreBlock.incinerateNonBuildable`).
+    pub item_buildable: Vec<bool>,
     /// Block name → dense id (`ContentRegistry::block_id`).
     pub block_ids: std::collections::HashMap<String, u16>,
     /// Unit name → dense id (`ContentRegistry::unit_id`; `UnitCountObjective`).
@@ -221,6 +223,27 @@ impl SimRuntime {
             Wire::Float(value) => WorldConfigValue::Number(f64::from(*value)),
             Wire::Bytes(bytes) => WorldConfigValue::Bytes(bytes.iter().copied().collect()),
             Wire::Text(text) => WorldConfigValue::String(text.clone()),
+            Wire::Point2(x, y) => WorldConfigValue::Point2(*x, *y),
+            Wire::Point2Array(points) => {
+                WorldConfigValue::Point2Array(points.iter().copied().collect())
+            }
+            Wire::ContentId { kind, id } => {
+                let content_type = ContentType::ALL
+                    .iter()
+                    .copied()
+                    .find(|type_| *type_ as u8 == *kind)
+                    .ok_or(CommandError::UnknownContent(*id))?;
+                let Some(reference) = self.content.get_by_id(content_type, i32::from(*id)) else {
+                    return Err(CommandError::UnknownContent(*id));
+                };
+                match reference.type_ {
+                    ContentType::Item => WorldConfigValue::Item(ItemId::new(reference.id)),
+                    ContentType::Liquid => WorldConfigValue::Liquid(LiquidId::new(reference.id)),
+                    ContentType::Block => WorldConfigValue::Block(BlockId::new(reference.id)),
+                    ContentType::Unit => WorldConfigValue::Unit(UnitTypeId::new(reference.id)),
+                    other => WorldConfigValue::Content(other, reference.id),
+                }
+            }
             Wire::Content(name) => match self.content.by_name(name) {
                 Some(reference) => match reference.type_ {
                     ContentType::Item => WorldConfigValue::Item(ItemId::new(reference.id)),
@@ -672,6 +695,17 @@ impl SimRuntime {
             .get::<BuildingComp>(entity)
             .map(|comp| comp.rot)
             .unwrap_or(0);
+        // `tile.build.onDeconstructed(unit); tile.build.dead = true;`
+        // (`Build.java:50-53`), before the swap to the construct block. The
+        // per-kind hook may override the base liquid drop (`BuildingComp.java:
+        // 1480-1487`).
+        self.drop_deconstruct_liquid(world, grid, entity, def);
+        if let Some(inst) = world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.instance(previous))
+        {
+            inst.behavior.on_deconstructed(world, entity, None);
+        }
         let Some(sub) = self.construct_block(size) else {
             return self.break_block(world, grid, x, y).is_some();
         };
@@ -683,6 +717,68 @@ impl SimRuntime {
         state.set_deconstruct(previous, build_time, &requirements, cost_multiplier);
         world.entity_mut(entity).insert(state);
         true
+    }
+
+    /// `BuildingComp.onDeconstructed` (`BuildingComp.java:1478-1487`): a block
+    /// holding liquid drops `currentAmount / (size * size) * 2` on every
+    /// footprint tile unless the liquid is incinerable and the block does not
+    /// set `deconstructDropAllLiquid`.
+    fn drop_deconstruct_liquid(
+        &self,
+        world: &mut World,
+        grid: &WorldGrid,
+        entity: Entity,
+        def: &crate::content::registries::blocks::BlockDef,
+    ) {
+        let Some(module) = world.get::<crate::world::modules::LiquidModule>(entity) else {
+            return;
+        };
+        let amount = module.current();
+        let Some(liquid) = crate::world::blocks::liquid::current_liquid(module) else {
+            return;
+        };
+        if amount <= 0.0 {
+            return;
+        }
+        let incinerable = self
+            .content
+            .liquid(liquid)
+            .map(|liquid| liquid.incinerable)
+            .unwrap_or(false);
+        if incinerable && !def.deconstruct_drop_all_liquid {
+            return;
+        }
+        let Some(building) = world.get::<crate::entities::comp::Building>(entity) else {
+            return;
+        };
+        let anchor = building.tile;
+        let size = def.size.max(1);
+        let per_cell = amount / (size * size) as f32 * 2.0;
+        // The deposit rng is the live unit runtime's, like the fire/puddle pass.
+        let Some(mut runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        else {
+            return;
+        };
+        for oy in 0..size {
+            for ox in 0..size {
+                let tx = anchor.x() + ox as i16 + def.size_offset as i16;
+                let ty = anchor.y() + oy as i16 + def.size_offset as i16;
+                if !grid.tiles.in_bounds(tx as i32, ty as i32) {
+                    continue;
+                }
+                let _ = crate::combat::puddles::deposit(
+                    world,
+                    &grid.tiles,
+                    &self.content,
+                    tx,
+                    ty,
+                    liquid,
+                    per_cell,
+                    &mut runtime.rng,
+                );
+            }
+        }
+        world.insert_non_send(runtime);
     }
 
     /// Breaks the block at `(x, y)` through the real tile ops (`Tile.remove`).
@@ -912,10 +1008,17 @@ impl SimRuntime {
             building_io::apply_body(ecs, entity, decoded);
             spawned.push(entity);
         }
-        grid.generating = generating;
+        // Java `World.endMapLoad` (`World.java:220-236`) rebuilds every
+        // building's proximity while `generating` is still set, and only then
+        // clears it. Behaviors that only see the ECS world read the flag from
+        // `WorldGenerating`; `CoreBlock` skips its item clamp during the pass
+        // (`CoreBlock.java:773-778`), so a loaded save keeps its item stacks.
+        ecs.insert_resource(crate::world::WorldGenerating(true));
         for entity in &spawned {
             let _ = update_proximity(ecs, grid, &self.content, *entity);
         }
+        grid.generating = generating;
+        ecs.insert_resource(crate::world::WorldGenerating(generating));
         // `Drill.countOre` is grid-derived state the tile reader cannot carry:
         // without it a materialized drill has no `dominantItem` and never mines
         // (`SimRuntime::place` does the same after `Tile.setBlock`).
@@ -1151,6 +1254,7 @@ impl Sim {
             .iter()
             .map(|item| item.name.clone())
             .collect();
+        content_index.item_buildable = content.items().iter().map(|item| item.buildable).collect();
         for block in content.blocks() {
             content_index
                 .block_ids

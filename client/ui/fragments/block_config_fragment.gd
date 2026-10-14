@@ -55,12 +55,32 @@ func _rebuild() -> void:
 	# code-instantiated: config rows come from the `config_spec` JSON (item or
 	# liquid option list / logic code field / color picker) produced by
 	# `MindInput`; the count is runtime content, not authorable in the scene.
-	if bool(_config.get("color", false)):
+	if bool(_config.get("link", false)):
+		_build_link_panel()
+	elif bool(_config.get("color", false)):
 		_build_color_picker()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
 	else:
 		_build_options()
+
+
+## H02 T6: link blocks (bridges, conduits, drivers, power nodes) show no
+## option list; tapping another block of the kind while this panel is open
+## makes the link. The current link offset is rendered read-only.
+func _build_link_panel() -> void:
+	# code-instantiated: one current-link row driven by the spec's `current`
+	# value; it has no scene-authorable per-building shape.
+	var current: Variant = _config.get("current", null)
+	var label := Label.new()
+	if current is Dictionary and str(current.get("type", "")) == "point":
+		label.text = "(%s, %s)" % [str(current.get("x", 0)), str(current.get("y", 0))]
+	else:
+		label.text = _t("@none", "none")
+	body.add_child(label)
+	var row := HBoxContainer.new()
+	body.add_child(row)
+	_add_close_button(row)
 
 
 func _build_text_editor() -> void:
@@ -152,8 +172,17 @@ func _add_close_button(row: Container) -> void:
 	var close := Button.new()
 	close.text = "X"
 	close.tooltip_text = "close"
-	close.pressed.connect(func() -> void: visible = false)
+	close.pressed.connect(func() -> void: _close())
 	row.add_child(close)
+
+
+## Hides the panel and clears the input's `config.getSelected()` mirror
+## (`MindInput.close_block_config`; H02 T6).
+func _close() -> void:
+	visible = false
+	var input := get_node_or_null("/root/Spine/Input")
+	if input != null and input.has_method("close_block_config"):
+		input.call("close_block_config")
 
 
 func _submit(kind: String, value: String) -> void:
