@@ -45,8 +45,11 @@ impl BulletBehavior for FireBehavior {
         let Some(pos) = ctx.pos(b) else {
             return;
         };
-        let ts = crate::config::TILESIZE as f32;
-        let (tx, ty) = ((pos.0 / ts).floor() as i16, (pos.1 / ts).floor() as i16);
+        // `Vars.world.tileWorld(x, y)` = `World.toTile` (round), World.java:174.
+        let (tx, ty) = (
+            crate::world::WorldGrid::to_tile(pos.0) as i16,
+            crate::world::WorldGrid::to_tile(pos.1) as i16,
+        );
         let _ = crate::combat::fires::create(ctx.world, tx, ty, ctx.rng);
     }
 }

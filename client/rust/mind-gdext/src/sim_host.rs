@@ -2355,6 +2355,14 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(plans).to_string().as_str())
     }
 
+    /// Playtest seam (H01 T3): kills the unit with `EntitySeq == seq`; the
+    /// next tick's `resolve_deaths` runs the normal death path (respawn timer,
+    /// wreck for flyers, kill stats).
+    #[func]
+    pub fn debug_kill_unit(&mut self, seq: i64) -> bool {
+        self.sim.debug_kill_unit(seq)
+    }
+
     /// Playtest seam: kills a building (`Health.health = 0`); the next tick's
     /// `resolve_deaths` destroys it and pushes the ghost plan.
     #[func]
@@ -2615,6 +2623,10 @@ impl MindSimHost {
         let team = self
             .last_sector_rules()
             .map_or(1, |rules| rules.default_team);
+        // `PlayerComp.team` is set before the spawn attempt so a failed first
+        // spawn (no supported core yet) is retried by
+        // `update_player_respawn` every 60 ticks (PlayerComp.java:44-48).
+        self.sim.set_player_team(team);
         let spawned = self.sim.spawn_player_at_best_core(team).is_some();
         if spawned {
             log::info!("spawn_player_unit: core unit team {team} spawned");

@@ -1707,7 +1707,7 @@ mod tests {
             content.init().expect("init");
             content
         };
-        let mut unit_runtime = UnitRuntime::new(runtime_content, &grid, 2);
+        let mut unit_runtime = UnitRuntime::new(runtime_content, &grid, &world, 2, false);
         let a = unit_runtime
             .spawn(&mut world, "dagger", 2, 8.0, 8.0, 0.0)
             .expect("unit a");
@@ -1794,7 +1794,7 @@ mod tests {
             content
         };
         let mut world = World::new();
-        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, &world, 2, false));
 
         let campaign = campaign(&registry);
         let mut session = PlaySession::new(Rules {
@@ -1864,7 +1864,7 @@ mod tests {
             content
         };
         let mut world = World::new();
-        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, &world, 2, false));
         let campaign = campaign(&registry);
         let mut session = PlaySession::new(Rules {
             solar_multiplier: 1.0,
@@ -1915,7 +1915,7 @@ mod tests {
             content.init().expect("init");
             content
         };
-        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, &world, 2, false));
         let core_inst = table.get_named("core-shard").expect("core-shard").clone();
         let core = core_inst.spawn(
             &mut world,
@@ -1980,7 +1980,7 @@ mod tests {
             content.init().expect("init");
             content
         };
-        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, 2));
+        world.insert_non_send(UnitRuntime::new(runtime_content, &grid, &world, 2, false));
         let core_inst = table.get_named("core-shard").expect("core-shard").clone();
         let core = core_inst.spawn(
             &mut world,

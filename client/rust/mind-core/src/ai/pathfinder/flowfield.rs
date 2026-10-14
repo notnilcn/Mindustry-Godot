@@ -4,30 +4,32 @@
 //! `Flowfield` — the ground-AI cost field (plan 11 §3.7).
 //!
 //! Ported from `core/src/mindustry/ai/Pathfinder.java` (`Flowfield`,
-//! `PositionTarget`, `EnemyCoreField`). M0 computes complete weights with an
-//! exact Dijkstra pass; M3 moves the frontier into the deterministic incremental
-//! worker (`worker.rs`). The output is identical either way.
+//! `PositionTarget`, `EnemyCoreField`). Weights are Java's `int` costs
+//! (`Pathfinder.costTypes`); the frontier is a deterministic priority queue
+//! whose converged weights equal upstream's label-correcting `updateFrontier`
+//! (all costs are non-negative).
 
-use super::cost::Cost;
+use super::cost::{Cost, IMPASSABLE};
 use super::path_tile::PathTile;
 use super::queue::PathfindQueue;
 
-/// Unreachable node weight.
-pub const UNREACHABLE: f32 = f32::INFINITY;
+/// Unreachable node weight. The port tracks "not reached" with `i32::MAX`
+/// (Java's weight array is zero-initialized and uses the `searches` array
+/// instead, Pathfinder.java:497-521); `Pathfinder.impassable` (`-1`) is the
+/// cost-function sentinel, [`IMPASSABLE`].
+pub const UNREACHABLE: i32 = i32::MAX;
 
-/// Diagonal step weight (`Mathf.sqrt2`).
-const SQRT2: f32 = std::f32::consts::SQRT_2;
-
-/// Direction order (fixed so Dijkstra tie-breaks are deterministic).
+/// Direction order (`Geometry.d8`, Arc Geometry.java:25-34) so neighbour
+/// tie-breaks match `getTargetTile`; `advance` skips the diagonals (`d4`).
 const DIRS: [(i32, i32); 8] = [
     (1, 0),
-    (-1, 0),
-    (0, 1),
-    (0, -1),
     (1, 1),
-    (1, -1),
+    (0, 1),
     (-1, 1),
+    (-1, 0),
     (-1, -1),
+    (0, -1),
+    (1, -1),
 ];
 
 /// A cached flow field targeting a set of tiles (upstream `Flowfield`).
@@ -35,8 +37,12 @@ const DIRS: [(i32, i32); 8] = [
 pub struct Flowfield {
     /// Target tile indices (upstream `targets`).
     pub targets: Vec<usize>,
-    /// Complete traversal weights (`completeWeights`; `INF` = unreachable).
-    pub complete_weights: Vec<f32>,
+    /// Complete traversal weights (`completeWeights`; `-1` = unreachable).
+    pub complete_weights: Vec<i32>,
+    /// The cost function this field was built for (`Flowfield.cost`).
+    pub cost: Cost,
+    /// The pathing team (`Flowfield.team`).
+    pub team: u8,
     /// Whether the field finished computing.
     pub done: bool,
     /// Incremental frontier (M3 worker state; empty after `update`).
@@ -52,6 +58,8 @@ impl Flowfield {
         Self {
             targets: Vec::new(),
             complete_weights: vec![UNREACHABLE; len],
+            cost: Cost::Ground,
+            team: 0,
             done: false,
             frontier: PathfindQueue::new(),
             came_from: vec![usize::MAX; len],
@@ -61,16 +69,11 @@ impl Flowfield {
     /// Sets the targets and recomputes the field (`Flowfield.updateTargetPositions`
     /// and full frontier solve). Equivalent to [`begin_update`](Self::begin_update)
     /// followed by an unbounded [`advance`](Self::advance).
-    pub fn update(
-        &mut self,
-        tiles: &[PathTile],
-        width: i32,
-        height: i32,
-        cost: Cost,
-        diagonals: bool,
-    ) {
+    pub fn update(&mut self, tiles: &[PathTile], width: i32, height: i32, cost: Cost, team: u8) {
+        self.cost = cost;
+        self.team = team;
         self.begin_update(width, height);
-        let _ = self.advance(tiles, width, height, cost, diagonals, u32::MAX);
+        let _ = self.advance(tiles, width, height, team, u32::MAX);
     }
 
     /// Restarts the incremental solve: resets the working weights, clears the
@@ -88,8 +91,8 @@ impl Flowfield {
         }
         for &target in &self.targets {
             if target < len {
-                self.complete_weights[target] = 0.0;
-                self.frontier.add(target, 0.0);
+                self.complete_weights[target] = 0;
+                self.frontier.add(target, 0);
             }
         }
     }
@@ -98,13 +101,14 @@ impl Flowfield {
     /// and returns whether the field is complete. The persisted frontier and
     /// working weights make repeated budgeted calls converge on exactly the same
     /// weights as a single unbounded solve.
+    ///
+    /// Neighbours are `Geometry.d4` only, like upstream (`Pathfinder.java:505-520`).
     pub fn advance(
         &mut self,
         tiles: &[PathTile],
         width: i32,
         height: i32,
-        cost: Cost,
-        diagonals: bool,
+        team: u8,
         budget: u32,
     ) -> bool {
         if self.done {
@@ -116,8 +120,8 @@ impl Flowfield {
                 let x = (node as i32) % width;
                 let y = (node as i32) / width;
                 for (dx, dy) in DIRS {
-                    let diagonal = dx != 0 && dy != 0;
-                    if diagonal && !diagonals {
+                    // `Geometry.d4` only.
+                    if dx != 0 && dy != 0 {
                         continue;
                     }
                     let nx = x + dx;
@@ -126,19 +130,12 @@ impl Flowfield {
                         continue;
                     }
                     let next = (nx + ny * width) as usize;
-                    if !cost.passable(tiles[next]) {
+                    let other_cost = self.cost.cost(team, tiles[next]);
+                    if other_cost == IMPASSABLE {
                         continue;
                     }
-                    // No corner cutting: both orthogonal neighbors must be passable.
-                    if diagonal {
-                        let side_a = ((x + dx) + y * width) as usize;
-                        let side_b = (x + (y + dy) * width) as usize;
-                        if !cost.passable(tiles[side_a]) || !cost.passable(tiles[side_b]) {
-                            continue;
-                        }
-                    }
-                    let step = if diagonal { SQRT2 } else { 1.0 };
-                    let next_weight = self.complete_weights[node] + step;
+                    let next_weight = self.complete_weights[node].saturating_add(other_cost);
+                    // `weights[newPos] > cost + otherCost`
                     if next_weight < self.complete_weights[next] {
                         self.complete_weights[next] = next_weight;
                         self.came_from[next] = node;
@@ -148,8 +145,14 @@ impl Flowfield {
             }
             processed = processed.saturating_add(1);
             if processed >= budget {
-                // Budget exhausted; `done` stays false until the frontier drains.
-                return self.frontier.is_empty();
+                // Budget exhausted. An empty frontier means the solve already
+                // converged (Dijkstra with non-negative costs), so mark it done;
+                // otherwise `done` stays false until the frontier drains.
+                if self.frontier.is_empty() {
+                    self.done = true;
+                    return true;
+                }
+                return false;
             }
         }
         self.done = true;
@@ -166,39 +169,44 @@ impl Flowfield {
         self.targets.contains(&node)
     }
 
-    /// The next tile to step to from `node` (upstream `getTargetTile`), or `None`
-    /// when the field has no targets / the node is already there.
+    /// `Flowfield.passable` (Pathfinder.java:698-703) for this field's cost/team.
+    pub fn passable(&self, tiles: &[PathTile], node: usize) -> bool {
+        tiles
+            .get(node)
+            .is_some_and(|tile| self.cost.passable(self.team, *tile))
+    }
+
+    /// The next tile to step to from `node` (upstream `getTargetTile`,
+    /// Pathfinder.java:382-436), or `None` when the unit should stay (no
+    /// targets, already there, no cheaper passable neighbour, or the step would
+    /// enter a dangerous tile from a safe one on the ground cost).
     ///
-    /// A node outside the solved region (`INF` weight — e.g. the unit's rounded
-    /// tile is a solid wall) still descends to the cheapest passable neighbour,
-    /// exactly like Java (`cost < value` with `value == impassable`,
-    /// Pathfinder.java:407-436). Diagonals through a wall corner are skipped
-    /// (`!(point.x != 0 && point.y != 0 && (!passable(ax) || !passable(ay)))`);
-    /// the port's passability proxy is a finite weight (or a target).
+    /// `dangerous` is `Tile.dangerous()` per flat index (built with the packed
+    /// tiles); `diagonals` selects `Geometry.d8` over `d4`.
     pub fn get_target_tile(
         &self,
+        tiles: &[PathTile],
+        dangerous: &[bool],
         node: usize,
         width: i32,
         height: i32,
         diagonals: bool,
     ) -> Option<usize> {
-        if self.targets.is_empty() || node >= self.complete_weights.len() {
+        if self.targets.is_empty()
+            || node >= self.complete_weights.len()
+            || width <= 0
+            || height <= 0
+        {
             return None;
         }
         if self.is_target(node) {
             return None;
         }
-        let current = self.complete_weights[node];
+        let value = self.complete_weights[node];
         let x = (node as i32) % width;
         let y = (node as i32) / width;
-        let passable = |nx: i32, ny: i32| -> bool {
-            if nx < 0 || ny < 0 || nx >= width || ny >= height {
-                return false;
-            }
-            let index = (nx + ny * width) as usize;
-            self.is_target(index) || self.complete_weights[index].is_finite()
-        };
-        let mut best: Option<(usize, f32)> = None;
+        let mut current: Option<usize> = None;
+        let mut current_cost = 0i32;
         for (dx, dy) in DIRS {
             let diagonal = dx != 0 && dy != 0;
             if diagonal && !diagonals {
@@ -206,24 +214,41 @@ impl Flowfield {
             }
             let nx = x + dx;
             let ny = y + dy;
-            if !passable(nx, ny) {
+            if nx < 0 || ny < 0 || nx >= width || ny >= height {
                 continue;
             }
-            let next = (nx + ny * width) as usize;
-            let weight = self.complete_weights[next];
-            if !weight.is_finite() || (current.is_finite() && weight >= current) {
+            let packed = (nx + ny * width) as usize;
+            let cost = self.complete_weights[packed];
+            if cost >= value
+                || !self.passable(tiles, packed)
+                || (current.is_some() && cost >= current_cost)
+            {
                 continue;
             }
             // Diagonal corner trap (Pathfinder.java:429-431).
-            if diagonal && (!passable(x + dx, y) || !passable(x, y + dy)) {
-                continue;
+            if diagonal {
+                let side_a = ((x + dx) + y * width) as usize;
+                let side_b = (x + (y + dy) * width) as usize;
+                if !self.passable(tiles, side_a) || !self.passable(tiles, side_b) {
+                    continue;
+                }
             }
-            match best {
-                Some((_, best_weight)) if weight >= best_weight => {}
-                _ => best = Some((next, weight)),
-            }
+            current = Some(packed);
+            current_cost = cost;
         }
-        best.map(|(next, _)| next)
+        let next = current?;
+        // `if(current == null || tl == impassable ||
+        //   (path.cost == costTypes.get(costGround) && current.dangerous() && !tile.dangerous())) return tile;`
+        // (`tl == impassable` cannot be selected here: an unreached neighbour
+        // has weight `UNREACHABLE` and never compares below `value`.)
+        let _ = IMPASSABLE;
+        if self.cost == Cost::Ground
+            && dangerous.get(next).copied().unwrap_or(false)
+            && !dangerous.get(node).copied().unwrap_or(false)
+        {
+            return None;
+        }
+        Some(next)
     }
 }
 
@@ -232,22 +257,28 @@ mod tests {
     use super::super::path_tile::PathTile;
     use super::*;
 
+    fn tiles_flat(width: i32, height: i32) -> Vec<PathTile> {
+        vec![PathTile::default(); (width * height) as usize]
+    }
+
     #[test]
     fn converges_downhill_to_target() {
         // 16x1 corridor; target at the right end.
         let width = 16;
         let height = 1;
-        let tiles = vec![PathTile::default(); (width * height) as usize];
+        let tiles = tiles_flat(width, height);
+        let dangerous = vec![false; tiles.len()];
         let mut field = Flowfield::new(width, height);
         field.targets = vec![15];
-        field.update(&tiles, width, height, Cost::Ground, false);
+        field.update(&tiles, width, height, Cost::Ground, 0);
         assert!(field.done);
-        assert_eq!(field.complete_weights[15], 0.0);
-        assert_eq!(field.complete_weights[0], 15.0);
+        assert_eq!(field.complete_weights[15], 0);
+        assert_eq!(field.complete_weights[0], 15);
         // Steps strictly decrease until the target is reached.
         let mut node = 0usize;
         let mut steps = 0;
-        while let Some(next) = field.get_target_tile(node, width, height, false) {
+        while let Some(next) = field.get_target_tile(&tiles, &dangerous, node, width, height, false)
+        {
             assert!(field.complete_weights[next] < field.complete_weights[node]);
             node = next;
             steps += 1;
@@ -261,14 +292,83 @@ mod tests {
         // A solid wall at x=1 fully blocks the 3x3 grid's left column.
         let width = 3;
         let height = 3;
-        let mut tiles = vec![PathTile::default(); 9];
+        let mut tiles = tiles_flat(width, height);
         for y in 0..3 {
             tiles[(1 + y * width) as usize] = PathTile::from_parts(0, 0, true, false, false);
         }
+        let dangerous = vec![false; tiles.len()];
         let mut field = Flowfield::new(width, height);
         field.targets = vec![8]; // bottom-right
-        field.update(&tiles, width, height, Cost::Ground, true);
-        assert!(!field.complete_weights[0].is_finite());
-        assert!(field.complete_weights[8].is_finite());
+        field.update(&tiles, width, height, Cost::Ground, 0);
+        assert_eq!(field.complete_weights[0], UNREACHABLE);
+        assert_ne!(field.complete_weights[8], UNREACHABLE);
+        // No diagonal cut through the wall corner.
+        assert!(
+            field
+                .get_target_tile(&tiles, &dangerous, 0, width, height, true)
+                .is_none()
+        );
+    }
+
+    /// T15: a 9x5 grid with a 3x3 deep pool in the middle routes around it.
+    #[test]
+    fn flowfield_routes_around_deep_water() {
+        let width = 9;
+        let height = 5;
+        let mut tiles = tiles_flat(width, height);
+        // Deep pool at tiles (3..5, 1..3): deep + all-deep bits.
+        for y in 1..=3i32 {
+            for x in 3..=5i32 {
+                tiles[(x + y * width) as usize] = PathTile::from_bits(
+                    0, 0, false, false, false, false, true, false, false, true, false, true, true,
+                    false,
+                );
+            }
+        }
+        let dangerous = vec![false; tiles.len()];
+        let mut field = Flowfield::new(width, height);
+        field.targets = vec![(8 + 2 * width) as usize];
+        field.update(&tiles, width, height, Cost::Ground, 0);
+        assert!(field.done);
+        // Walk the downhill path from (0,2) and never enter a deep tile.
+        let mut node = (2 * width) as usize;
+        let mut steps = 0;
+        while let Some(next) = field.get_target_tile(&tiles, &dangerous, node, width, height, true)
+        {
+            assert!(!tiles[next].deep(), "path entered a deep tile at {next}");
+            node = next;
+            steps += 1;
+            assert!(steps <= (width * height) as usize, "path did not converge");
+        }
+        assert_eq!(node, (8 + 2 * width) as usize, "reached the target");
+    }
+
+    /// T15: `getTargetTile` refuses to step from a safe tile onto a dangerous
+    /// one on the ground cost (Pathfinder.java:434).
+    #[test]
+    fn get_target_tile_refuses_dangerous_step() {
+        let width = 4;
+        let height = 1;
+        let mut tiles = tiles_flat(width, height);
+        // A shallow damaging floor on the only downhill neighbour.
+        tiles[2] = PathTile::from_bits(
+            0, 0, false, false, false, false, true, false, false, false, true, false, false, false,
+        );
+        let mut dangerous = vec![false; tiles.len()];
+        dangerous[2] = true;
+        let mut field = Flowfield::new(width, height);
+        field.targets = vec![3];
+        field.update(&tiles, width, height, Cost::Ground, 0);
+        // From tile 1 (safe) the only downhill neighbour is the damaging tile.
+        assert_eq!(
+            field.get_target_tile(&tiles, &dangerous, 1, width, height, true),
+            None,
+            "staying is better than walking into a damaging floor"
+        );
+        // Standing on the dangerous tile itself, the unit keeps moving.
+        assert_eq!(
+            field.get_target_tile(&tiles, &dangerous, 2, width, height, true),
+            Some(3)
+        );
     }
 }

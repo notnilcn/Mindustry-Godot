@@ -68,9 +68,92 @@ impl PathTile {
         self.0 & BIT_DAMAGES != 0
     }
 
+    /// Whether the floor is liquid (`PathTile.liquid`).
+    pub const fn liquid(self) -> bool {
+        self.0 & BIT_LIQUID != 0
+    }
+
+    /// Whether legs cannot pass (`PathTile.legSolid`).
+    pub const fn leg_solid(self) -> bool {
+        self.0 & BIT_LEG_SOLID != 0
+    }
+
+    /// Whether a neighbour is a deep liquid (`PathTile.nearLiquid`).
+    pub const fn near_liquid(self) -> bool {
+        self.0 & BIT_NEAR_LIQUID != 0
+    }
+
+    /// Whether a neighbour is not liquid (`PathTile.nearGround`).
+    pub const fn near_ground(self) -> bool {
+        self.0 & BIT_NEAR_GROUND != 0
+    }
+
+    /// Whether a neighbour is solid (`PathTile.nearSolid`).
+    pub const fn near_solid(self) -> bool {
+        self.0 & BIT_NEAR_SOLID != 0
+    }
+
+    /// Whether a neighbour is leg-solid (`PathTile.nearLegSolid`).
+    pub const fn near_leg_solid(self) -> bool {
+        self.0 & BIT_NEAR_LEG_SOLID != 0
+    }
+
+    /// Whether the tile and its diagonal neighbours are all deep
+    /// (`PathTile.allDeep`).
+    pub const fn all_deep(self) -> bool {
+        self.0 & BIT_ALL_DEEP != 0
+    }
+
+    /// Whether a neighbour is deep (`PathTile.nearDeep`).
+    pub const fn near_deep(self) -> bool {
+        self.0 & BIT_NEAR_DEEP != 0
+    }
+
+    /// Whether the block is team-passable (`Block.teamPassable`; `AutoDoor`).
+    pub const fn team_passable(self) -> bool {
+        self.0 & BIT_TEAM_PASSABLE != 0
+    }
+
     /// Raw packed value.
     pub const fn raw(self) -> u32 {
         self.0
+    }
+
+    /// `PathTile.get(...)` (Pathfinder.java:267-282) with the upstream argument
+    /// order. Prefer [`pack_tile`] for world data.
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_bits(
+        health: u8,
+        team: u8,
+        solid: bool,
+        liquid: bool,
+        leg_solid: bool,
+        near_liquid: bool,
+        near_ground: bool,
+        near_solid: bool,
+        near_leg_solid: bool,
+        deep: bool,
+        damages: bool,
+        all_deep: bool,
+        near_deep: bool,
+        team_passable: bool,
+    ) -> Self {
+        let mut bits = (health as u32) & HEALTH_MASK;
+        bits |= ((team as u32) << TEAM_SHIFT) & (0xff << TEAM_SHIFT);
+        let flag = |on: bool, bit: u32| if on { bit } else { 0 };
+        bits |= flag(solid, BIT_SOLID);
+        bits |= flag(liquid, BIT_LIQUID);
+        bits |= flag(leg_solid, BIT_LEG_SOLID);
+        bits |= flag(near_liquid, BIT_NEAR_LIQUID);
+        bits |= flag(near_ground, BIT_NEAR_GROUND);
+        bits |= flag(near_solid, BIT_NEAR_SOLID);
+        bits |= flag(near_leg_solid, BIT_NEAR_LEG_SOLID);
+        bits |= flag(deep, BIT_DEEP);
+        bits |= flag(damages, BIT_DAMAGES);
+        bits |= flag(all_deep, BIT_ALL_DEEP);
+        bits |= flag(near_deep, BIT_NEAR_DEEP);
+        bits |= flag(team_passable, BIT_TEAM_PASSABLE);
+        Self(bits)
     }
 
     /// Builds a tile from explicit parts (test/port helper).
@@ -84,22 +167,181 @@ impl PathTile {
     }
 }
 
-/// Builds the world's packed pathfinding tiles for one team.
+/// Per-tile building facts `packTile` needs that the grid does not carry: the
+/// port keeps a building's team/health/kind on the ECS entity
+/// (`BuildingComp.team`/`.health`, `tile.block() instanceof CoreBlock`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TileBuilding {
+    /// `Tile.getTeamID()`: the building's team.
+    pub team: u8,
+    /// `BuildingComp.health`.
+    pub health: f32,
+    /// `tile.block() instanceof CoreBlock`.
+    pub core: bool,
+}
+
+/// Neighbour order (`Geometry.d4`).
+pub const D4: [(i32, i32); 4] = [(1, 0), (0, 1), (-1, 0), (0, -1)];
+/// Diagonal edge order (`Geometry.d8edge`).
+const D8_EDGE: [(i32, i32); 4] = [(1, 1), (-1, 1), (-1, -1), (1, -1)];
+
+/// Reads the live building on tile `(x, y)` (None when the tile is empty).
+pub fn building_at(
+    world: &bevy_ecs::world::World,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    x: i32,
+    y: i32,
+) -> Option<TileBuilding> {
+    let tile = grid.tiles.get(x, y);
+    let entity = tile.build?;
+    let team = world
+        .get::<crate::entities::comp::TeamComp>(entity)
+        .map(|comp| comp.team)
+        .unwrap_or(0);
+    let health = world
+        .get::<crate::entities::comp::Health>(entity)
+        .map(|health| health.health)
+        .unwrap_or(0.0);
+    Some(TileBuilding {
+        team,
+        health,
+        core: content
+            .block(tile.block)
+            .is_some_and(|def| def.kind == crate::content::BlockKind::CoreBlock),
+    })
+}
+
+/// `Pathfinder.packTile(Tile)` (Pathfinder.java:220-284).
 ///
-/// M0 encodes solid/health/team/damage bits from the block layer; floor
-/// attributes (liquid/deep/legSolid) are plan 06 floor data and land with M3.
-pub fn build_tiles(grid: &WorldGrid, content: &ContentRegistry, team: u8) -> Vec<PathTile> {
-    let mut tiles = Vec::with_capacity(grid.len());
-    for (_pos, index) in grid.iter_row_major() {
-        let tile = grid.tile_ref(index);
-        let block = tile.block;
-        let def = content.block(block);
-        let solid = def.map(|def| def.solid).unwrap_or(false);
-        let health = def
-            .map(|def| ((def.health as f32 / 40.0).min(80.0)) as u8)
-            .unwrap_or(0);
-        // Damaging floors come from plan 06 floor data (M3); block damage is 0.
-        tiles.push(PathTile::from_parts(health, team, solid, false, false));
+/// `tiles` is the array being built: like upstream, a solid tile ORs
+/// `BIT_NEAR_SOLID` into its four neighbours.
+pub fn pack_tile(
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    core_capture: bool,
+    x: i32,
+    y: i32,
+    building: Option<TileBuilding>,
+    tiles: &mut [PathTile],
+) -> PathTile {
+    let tile = grid.tiles.get(x, y);
+    let solid = tile.solid_full(content);
+    let deep = tile.is_deep(content);
+    let team_passable = content
+        .block(tile.block)
+        .is_some_and(|def| def.team_passable);
+    let mut near_liquid = false;
+    let mut near_solid = false;
+    let mut near_leg_solid = false;
+    let mut near_ground = false;
+    let mut all_deep = deep;
+    let mut near_deep = deep;
+
+    for (dx, dy) in D4 {
+        let (ox, oy) = (x + dx, y + dy);
+        if !grid.tiles.in_bounds(ox, oy) {
+            continue;
+        }
+        let other = grid.tiles.get(ox, oy);
+        let other_floor = content.block(other.floor);
+        let other_solid = other.solid_full(content);
+        let other_deep = other.is_deep(content);
+        if other_floor.is_some_and(|def| def.is_liquid) && other_deep {
+            near_liquid = true;
+        }
+        if other_solid
+            && !content
+                .block(other.block)
+                .is_some_and(|def| def.team_passable)
+        {
+            near_solid = true;
+        }
+        if !other_floor.is_some_and(|def| def.is_liquid) {
+            near_ground = true;
+        }
+        if other_deep {
+            near_deep = true;
+        } else {
+            all_deep = false;
+        }
+        if other.leg_solid(content) {
+            near_leg_solid = true;
+        }
+        // other tile is now near solid
+        if solid && !team_passable {
+            let index = grid.tiles.index(ox, oy);
+            if index < tiles.len() {
+                tiles[index].0 |= BIT_NEAR_SOLID;
+            }
+        }
+    }
+
+    // check diagonals for allDeep
+    if all_deep {
+        for (dx, dy) in D8_EDGE {
+            let (ox, oy) = (x + dx, y + dy);
+            if !grid.tiles.in_bounds(ox, oy) {
+                continue;
+            }
+            if !grid.tiles.get(ox, oy).is_deep(content) {
+                all_deep = false;
+                break;
+            }
+        }
+    }
+
+    // `tile.build == null || !solid || tile.block() instanceof CoreBlock ? 0
+    //  : Math.min((int)(tile.build.health / 40), 80)`
+    let (mut team, health) = match building {
+        Some(build) if solid && !build.core => {
+            let scaled = (build.health / 40.0) as i32;
+            (build.team, scaled.clamp(0, 80) as u8)
+        }
+        Some(build) => (build.team, 0),
+        None => (0, 0),
+    };
+    // `tid == 0 && tile.build != null && state.rules.coreCapture ? 255 : tid`
+    if team == 0 && building.is_some() && core_capture {
+        team = 255;
+    }
+
+    PathTile::from_bits(
+        health,
+        team,
+        solid,
+        content.block(tile.floor).is_some_and(|def| def.is_liquid) && !tile.solid(content),
+        tile.leg_solid(content),
+        near_liquid,
+        near_ground,
+        near_solid,
+        near_leg_solid,
+        deep,
+        content
+            .block(tile.floor)
+            .is_some_and(|def| crate::world::tile::floor_damages(def, content)),
+        all_deep,
+        near_deep,
+        team_passable,
+    )
+}
+
+/// Builds the world's packed pathfinding tiles (`WorldLoadEvent` loop,
+/// Pathfinder.java:124-128) from the live grid + ECS world.
+pub fn build_tiles(
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    world: &bevy_ecs::world::World,
+    core_capture: bool,
+) -> Vec<PathTile> {
+    let mut tiles = vec![PathTile::default(); grid.len()];
+    for y in 0..grid.height() {
+        for x in 0..grid.width() {
+            let building = building_at(world, grid, content, x, y);
+            let packed = pack_tile(grid, content, core_capture, x, y, building, &mut tiles);
+            let index = grid.tiles.index(x, y);
+            tiles[index] = packed;
+        }
     }
     tiles
 }
@@ -125,6 +367,62 @@ mod tests {
         // damages 1<<24.
         let expected = 80 | (3 << 8) | (1 << 16) | (1 << 23) | (1 << 24);
         assert_eq!(tile.raw(), expected);
+    }
+
+    /// T15: a solid tile ORs `BIT_NEAR_SOLID` into its four `d4` neighbours
+    /// (`Pathfinder.packTile`, Pathfinder.java:243-246).
+    #[test]
+    fn pack_tile_marks_neighbours_near_solid() {
+        let harness = crate::world::BuildHarness::new(16, 16, 1);
+        let wall = harness
+            .content
+            .block_id("copper-wall")
+            .expect("copper-wall");
+        let mut grid = harness.grid;
+        grid.tiles.get_mut(5, 5).block = wall;
+        let mut tiles = vec![PathTile::default(); grid.len()];
+        let packed = pack_tile(&grid, &harness.content, false, 5, 5, None, &mut tiles);
+        assert!(packed.solid(), "copper-wall packs the solid bit");
+        let index = |x: i32, y: i32| grid.tiles.index(x, y);
+        assert!(tiles[index(4, 5)].near_solid(), "west neighbour");
+        assert!(tiles[index(6, 5)].near_solid(), "east neighbour");
+        assert!(tiles[index(5, 4)].near_solid(), "north neighbour");
+        assert!(tiles[index(5, 6)].near_solid(), "south neighbour");
+        assert!(
+            !tiles[index(4, 4)].near_solid(),
+            "diagonals are not marked (d4 only)"
+        );
+    }
+
+    /// T15: the team bits are the building's team (`Tile.getTeamID`), `0` on
+    /// empty tiles, and `255` for derelict buildings under `coreCapture`.
+    #[test]
+    fn pack_tile_team_is_building_team() {
+        let mut harness = crate::world::BuildHarness::new(16, 16, 1);
+        harness.rules.default_team = 2;
+        let wall = harness
+            .content
+            .block_id("copper-wall")
+            .expect("copper-wall");
+        assert!(harness.place(5, 5, wall, 0, true));
+        let index = harness.grid.tiles.index(5, 5);
+        let tiles = build_tiles(&harness.grid, &harness.content, &harness.world, false);
+        assert_eq!(
+            tiles[index].team(),
+            2,
+            "the wall tile carries the building's team"
+        );
+        assert_eq!(
+            tiles[harness.grid.tiles.index(0, 0)].team(),
+            0,
+            "empty tiles are team 0"
+        );
+        // `rules.coreCapture`: a team-0 (derelict) building packs 255.
+        harness.rules.default_team = 0;
+        assert!(harness.break_block(5, 5, true));
+        assert!(harness.place(5, 6, wall, 0, true));
+        let captured = build_tiles(&harness.grid, &harness.content, &harness.world, true);
+        assert_eq!(captured[harness.grid.tiles.index(5, 6)].team(), 255);
     }
 
     #[test]

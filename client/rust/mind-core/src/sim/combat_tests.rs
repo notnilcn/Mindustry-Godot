@@ -381,13 +381,13 @@ fn bullets_pass_over_enemy_conveyor() {
     let conveyor_start = health(&sim, conveyor).expect("conveyor health");
     // Immobile enemy unit behind the wall: the dagger's primary target.
     let decoy = sim
-        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0 + 4.0, 180.0)
+        .spawn_live_unit("dagger", 1, 25.0 * 8.0, 10.0 * 8.0, 180.0)
         .expect("decoy");
     if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(decoy) {
         slot.kind = AiKind::Player;
     }
     let _ = sim
-        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0 + 4.0, 0.0)
+        .spawn_live_unit("dagger", 2, 10.0 * 8.0, 10.0 * 8.0, 0.0)
         .expect("dagger");
     for _ in 0..600 {
         sim.tick().expect("tick");
@@ -3838,6 +3838,356 @@ fn explosion_absorbed_polygon() {
     );
 }
 
+/// T1: `Building.set(tile.drawx(), tile.drawy())` (BuildingComp.java:126) with
+/// `drawx = tile.worldx() + block.offset` (Tile.java:166-177); the offset is
+/// `((size + 1) % 2) * tilesize / 2` (Block.java:774), so odd sizes (and 1x1)
+/// sit on the tile's `worldx` and even sizes shift `+4`.
+#[test]
+fn building_pos_uses_block_offset() {
+    let mut sim = live_sim(64);
+    let cases = [
+        ("duo", 10, 80.0),               // 1x1, offset 0
+        ("core-shard", 20, 160.0),       // 3x3, offset 0
+        ("mechanical-drill", 30, 244.0), // 2x2, offset 4
+        ("core-foundation", 40, 324.0),  // 4x4, offset 4
+    ];
+    for (name, tile, expected) in cases {
+        let entity = place(&mut sim, tile, tile, name, 1);
+        let pos = sim.ecs.0.get::<Pos>(entity).expect("pos");
+        assert_eq!(
+            (pos.x, pos.y),
+            (expected, expected),
+            "{name} at tile {tile} must sit at drawx/drawy"
+        );
+    }
+}
+
+/// T2: `AIController.updateWeapons` searches per mount
+/// (`findTarget(mountX, mountY, weapon.range(), bullet.collidesAir,
+/// bullet.collidesGround)`, AIController.java:216-222), so a ground-only weapon
+/// ignores the flyer the unit's main target search picked. The unit is the
+/// first content unit whose first weapon bullet does not collide air (printed
+/// by the test).
+#[test]
+fn ground_weapon_ignores_air_target_per_mount() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let name = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let content = &runtime.content;
+        content
+            .units()
+            .iter()
+            .find(|unit| {
+                unit.weapons.first().is_some_and(|weapon| {
+                    content
+                        .bullet(weapon.bullet.id)
+                        .is_some_and(|bullet| !bullet.collides_air && bullet.collides_ground)
+                })
+            })
+            .map(|unit| unit.name.clone())
+            .expect("a ground-only unit exists")
+    };
+    eprintln!("T2 ground-only unit: {name}");
+
+    let wall = place(&mut sim, 29, 25, "copper-wall", 1);
+    let unit = sim
+        .spawn_live_unit(&name, 2, 200.0, 200.0, 0.0)
+        .expect("ground-only unit");
+    // A flying enemy at the same distance as the wall (`hitSize/2` apart).
+    let flare = sim
+        .spawn_live_unit("flare", 1, 230.0, 200.0, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<crate::weapons::UnitWeapons>(unit)
+        .and_then(|weapons| weapons.mounts.first().and_then(|mount| mount.target));
+    assert_eq!(
+        target,
+        Some(wall),
+        "the ground-only mount searched its own target (the wall), not the flyer"
+    );
+}
+
+/// T2: the shoot/invalidate range adds the TARGET's `hitSize/2`
+/// (`mount.target.within(mountX, mountY, wrange + target.hitSize/2)`,
+/// AIController.java:239; `Units.invalidateTarget`, Units.java:151-157). A 3x3
+/// core-shard adds 12 px where the pre-T2 port added the shooter's `hitSize/2`.
+///
+/// The per-mount search radius is `weapon.range() + |shootY|` (a tighter gate
+/// than the shoot range), so the shoot gate is exercised with the mount target
+/// set directly on a non-`singleTarget` unit.
+#[test]
+fn dagger_engages_core_at_target_hitsize() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(64);
+    let (name, weapon_x, weapon_y, range, shooter_hit) = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let content = &runtime.content;
+        let def = content
+            .units()
+            .iter()
+            .find(|unit| {
+                !unit.single_target
+                    && !unit.flying
+                    && unit
+                        .weapons
+                        .first()
+                        .and_then(|weapon| content.bullet(weapon.bullet.id))
+                        .is_some_and(|bullet| bullet.collides_ground)
+            })
+            .expect("a non-singleTarget ground unit exists");
+        let weapon = def.weapons.first().expect("weapon");
+        (
+            def.name.clone(),
+            weapon.x,
+            weapon.y,
+            weapon.range(),
+            def.hit_size,
+        )
+    };
+    eprintln!(
+        "T2 hitSize unit: {name} range {range} weapon ({weapon_x}, {weapon_y}) hit {shooter_hit}"
+    );
+    let core = place(&mut sim, 20, 20, "core-shard", 1);
+    // core-shard Pos = (160, 160); hitSize = 24 -> the shoot/invalidate range is
+    // `range + 12`. `rotation 0` puts the mount at `unit - (weapon.y, weapon.x)`.
+    let target_dist = range + 12.0 - 4.0;
+    let unit = sim
+        .spawn_live_unit(
+            &name,
+            2,
+            160.0 + target_dist + weapon_y,
+            160.0 + weapon_x,
+            0.0,
+        )
+        .expect("unit");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    // Tick 1 runs the first (search) tick; the search radius is `range + |shootY|`.
+    sim.tick().expect("tick");
+    let set_target = |sim: &mut Sim, target: Option<Entity>| {
+        if let Some(mut weapons) = sim.ecs.0.get_mut::<crate::weapons::UnitWeapons>(unit)
+            && let Some(mount) = weapons.mounts.first_mut()
+        {
+            mount.target = target;
+        }
+    };
+    let mount_state = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::weapons::UnitWeapons>(unit)
+            .and_then(|weapons| {
+                weapons
+                    .mounts
+                    .first()
+                    .map(|mount| (mount.target, mount.shoot))
+            })
+    };
+    set_target(&mut sim, Some(core));
+    sim.tick().expect("tick");
+    let (target, shoot) = mount_state(&sim).expect("mounts");
+    assert_eq!(
+        target,
+        Some(core),
+        "the target survives the invalidate check"
+    );
+    assert!(shoot, "engages at range + target.hitSize/2 - 4");
+    // Move 5 px further: beyond `range + 12` -> invalidated and not shooting.
+    if let Some(mut pos) = sim.ecs.0.get_mut::<Pos>(unit) {
+        pos.x += 5.0;
+    }
+    set_target(&mut sim, Some(core));
+    sim.tick().expect("tick");
+    let (target, shoot) = mount_state(&sim).expect("mounts");
+    assert_eq!(
+        target, None,
+        "beyond range + target.hitSize/2 is invalidated"
+    );
+    assert!(!shoot, "does not shoot past range + target.hitSize/2");
+}
+
+/// T2: `FlyingAI.findTarget` keeps the in-range main target
+/// (FlyingAI.java:34-39): a flare whose main target (the core) is in range does
+/// not switch to a closer dagger.
+#[test]
+fn flying_mount_keeps_in_range_main_target() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(64);
+    let core = place(&mut sim, 20, 20, "core-shard", 1);
+    let dagger = place(&mut sim, 24, 20, "duo", 1);
+    let flare = sim
+        .spawn_live_unit("flare", 2, 200.0, 190.0, 180.0)
+        .expect("flare");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(flare) {
+        slot.kind = AiKind::Flying;
+    }
+    // A team-1 dagger (closer than the core) must not steal the mount target.
+    let bait = sim
+        .spawn_live_unit("dagger", 1, 175.0, 190.0, 180.0)
+        .expect("bait");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(bait) {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    for _ in 0..130 {
+        sim.tick().expect("tick");
+    }
+    let target = sim
+        .ecs
+        .0
+        .get::<crate::weapons::UnitWeapons>(flare)
+        .and_then(|weapons| weapons.mounts.first().and_then(|mount| mount.target));
+    assert!(
+        target == Some(core) || target == Some(dagger),
+        "the flare engaged a building ({target:?}), not the closer dagger"
+    );
+}
+
+/// T2: `autoDropBombs` (AIController.java:225-229): a horizon with no valid
+/// main target drops its bomb weapon on the ground unit below it
+/// (`Units.closestTarget(.., u -> !u.isFlying(), t -> true)`).
+#[test]
+fn horizon_auto_drops_bombs_on_conveyor() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        waves: true,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    // A concrete ground victim: a copper wall on a building tile.
+    let wall = place(&mut sim, 20, 20, "copper-wall", 1);
+    let before = health(&sim, wall).expect("wall health");
+    let horizon = sim
+        .spawn_live_unit("horizon", 2, 20.0 * 8.0, 20.0 * 8.0 - 14.0, 90.0)
+        .expect("horizon");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(horizon) {
+        slot.kind = AiKind::Flying;
+    }
+    for _ in 0..600 {
+        sim.tick().expect("tick");
+    }
+    let after = health(&sim, wall).unwrap_or(0.0);
+    eprintln!("T2 horizon bombs: wall {before} -> {after}");
+    assert!(after < before, "the horizon dropped bombs on the wall");
+}
+
+/// T2: a `!controllable` mount is never overwritten by the AI's main target
+/// (`if(!weapon.controllable || weapon.noAttack) continue;`,
+/// AIController.java:214).
+#[test]
+fn non_controllable_mount_not_overwritten() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+
+    let mut sim = live_sim(64);
+    let name = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let content = &runtime.content;
+        content
+            .units()
+            .iter()
+            .find(|unit| {
+                unit.weapons
+                    .iter()
+                    .any(|weapon| !weapon.controllable && !weapon.no_attack)
+            })
+            .map(|unit| unit.name.clone())
+            .expect("a unit with a non-controllable weapon exists")
+    };
+    eprintln!("T2 non-controllable weapon unit: {name}");
+    // The first such unit is naval (oxynoe): give it water so the
+    // environment pass does not kill it on land.
+    let water = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .block_id("deep-water")
+        .expect("deep-water");
+    for x in 11..=14 {
+        sim.grid.tiles.get_mut(x, 20).floor = water;
+    }
+    let _wall = place(&mut sim, 28, 20, "copper-wall", 1);
+    let unit = sim
+        .spawn_live_unit(&name, 2, 100.0, 160.0, 0.0)
+        .expect("unit");
+    // A close enemy unit so the AI main target is Some.
+    let bait = sim
+        .spawn_live_unit("dagger", 1, 120.0, 160.0, 180.0)
+        .expect("bait");
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(bait) {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    if let Some(mut slot) = sim.ecs.0.get_mut::<ControllerSlot>(unit) {
+        slot.kind = AiKind::Command;
+    }
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let weapons = sim
+        .ecs
+        .0
+        .get::<crate::weapons::UnitWeapons>(unit)
+        .expect("weapons");
+    let any_non_controllable = weapons
+        .weapons
+        .iter()
+        .zip(weapons.mounts.iter())
+        .filter(|(def, _)| !def.controllable)
+        .all(|(_, mount)| mount.target != Some(bait));
+    assert!(
+        any_non_controllable,
+        "a non-controllable mount was overwritten with the AI main target"
+    );
+}
+
 /// H02 T16: the duo aims at the intercept point for its 2.5 px/tick copper
 /// bullet, not at the target's current position (`Turret.targetPosition`,
 /// `Turret.java:459-479`; `Predict.intercept`, `Predict.java:27-52`).
@@ -4645,4 +4995,183 @@ fn explosion_waves_are_staggered() {
         previous = now;
     }
     assert_eq!(drops, 3, "three staggered waves (+0/+2/+4)");
+}
+
+/// T3: `PlayerComp.team` is set before the spawn attempt, so a player without
+/// a supported core retries `bestCore()` every 60 ticks
+/// (`PlayerComp.java:214-243`) instead of staying teamless forever.
+#[test]
+fn player_team_set_without_core_retries_spawn() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    sim.set_player_team(1);
+    for _ in 0..120 {
+        sim.tick().expect("tick");
+    }
+    assert!(sim.player_unit().is_none(), "no player unit without a core");
+    // Landing a core lets the next 60-tick window spawn the unit.
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let player = sim.player_unit().expect("player spawned at the new core");
+    let pos = sim.ecs.0.get::<Pos>(player).expect("pos");
+    assert_eq!((pos.x, pos.y), (160.0, 160.0), "spawned on the core");
+}
+
+/// T3/PAR-0175: the `unitClear` dock branch releases the possessed unit before
+/// the docked unit takes the player controller (`InputHandler.java:823-873`):
+/// exactly one entity keeps `comp::Player`.
+#[test]
+fn clear_unit_dock_releases_possessed_unit() {
+    use crate::ai::controller::{AiKind, ControllerSlot};
+    use crate::entities::comp::Player;
+
+    let mut sim = live_sim(48);
+    if let Some(mut rules) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+    {
+        // Team 1 must be the player team (`select_team_controller` gives
+        // `Command` only to the player's team; the rest get the AI branch).
+        rules.default_team = 1;
+    }
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    // The dockable types are the `core_unit_dock` units (Java: evoke, incite,
+    // emanate, UnitTypes.java:4355/4421/4500) - the shard's alpha is not one.
+    let dock_name = {
+        let runtime = sim.unit_runtime().expect("rt");
+        runtime
+            .content
+            .units()
+            .iter()
+            .find(|unit| unit.core_unit_dock)
+            .map(|unit| unit.name.clone())
+            .expect("a coreUnitDock unit exists")
+    };
+    eprintln!("T3 dock unit: {dock_name}");
+    let player = sim
+        .spawn_player_unit("alpha", 1, 160.0, 160.0, 90.0)
+        .expect("player alpha");
+    let dagger = sim
+        .spawn_live_unit("dagger", 1, 200.0, 160.0, 0.0)
+        .expect("dagger");
+    let dagger_seq = sim
+        .ecs
+        .0
+        .get::<crate::ecs::EntitySeq>(dagger)
+        .expect("seq")
+        .0 as i32;
+    // Force the dockable type so the dock branch is exercised on this map.
+    let dock_id = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_by_name(&dock_name)
+        .map(|def| def.id)
+        .expect("dock unit id");
+    if let Some(mut docked) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::unit::comp::DockedType>(dagger)
+    {
+        docked.0 = dock_id;
+    }
+    let _ = player;
+    assert!(sim.possess_unit(dagger_seq), "dagger possessed");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Player)
+    );
+    assert!(sim.clear_unit(), "unitClear ran the dock branch");
+    // Exactly one entity carries the Player marker, and the dagger is back on
+    // its team AI.
+    let players = sim
+        .ecs
+        .0
+        .iter_entities()
+        .filter(|entity| entity.get::<Player>().is_some())
+        .count();
+    assert_eq!(players, 1, "exactly one player entity");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ControllerSlot>(dagger)
+            .map(|slot| slot.kind),
+        Some(AiKind::Command),
+        "the possessed dagger went back to its team controller"
+    );
+}
+
+/// T3: `CoreBlock.playerSpawn` queues `spawnType.unlock()` in the campaign
+/// (`CoreBlock.java:121-123`) through H04 T2's `UnlockRef` pipeline.
+#[test]
+fn campaign_spawn_queues_unlock() {
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::{CampaignCoreQueues, CampaignRuntime, UnlockRef};
+    use crate::game::universe::Campaign;
+
+    let mut sim = live_sim(48);
+    let campaign = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    session.sector = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .planet_id("serpulo")
+        .map(|planet| (planet, 170));
+    assert!(session.is_campaign(), "the play session is a campaign run");
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+    let queues = crate::game::runtime::install_campaign_core_hooks(&mut sim.ecs.0);
+    assert!(
+        sim.ecs.0.get_resource::<CampaignCoreQueues>().is_some(),
+        "campaign hook queues installed"
+    );
+    let _core = place(&mut sim, 20, 20, "core-shard", 1);
+    let alpha = sim
+        .unit_runtime()
+        .expect("rt")
+        .content
+        .unit_id("alpha")
+        .expect("alpha");
+    sim.spawn_player_at_best_core(1).expect("player spawned");
+    let unlocked: Vec<UnlockRef> = queues.lock().expect("lock").unlocks.clone();
+    assert_eq!(unlocked, vec![UnlockRef::Unit(alpha)], "alpha queued once");
+    // A second spawn must not queue a duplicate.
+    sim.player_unit = None;
+    sim.spawn_player_at_best_core(1)
+        .expect("player spawned again");
+    let unlocked: Vec<UnlockRef> = queues.lock().expect("lock").unlocks.clone();
+    assert_eq!(unlocked, vec![UnlockRef::Unit(alpha)], "no duplicate");
 }

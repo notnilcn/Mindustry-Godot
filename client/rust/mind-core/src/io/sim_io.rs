@@ -1160,8 +1160,11 @@ impl SimIoHandler {
         sim.clear_world_for_load();
         sim.grid = save.grid.clone();
         let grid = sim.grid.clone();
-        if let Some(mut unit_runtime) = sim.ecs.0.get_non_send_mut::<UnitRuntime>() {
-            unit_runtime.reset(&grid);
+        let core_capture =
+            crate::game::runtime::rules_of(&sim.ecs.0).is_some_and(|rules| rules.core_capture);
+        if let Some(mut unit_runtime) = sim.ecs.0.remove_non_send::<UnitRuntime>() {
+            unit_runtime.reset(&grid, &sim.ecs.0, core_capture);
+            sim.ecs.0.insert_non_send(unit_runtime);
         }
         let materialized = sim.materialize_map_buildings(&save.pending);
         if materialized > 0 {

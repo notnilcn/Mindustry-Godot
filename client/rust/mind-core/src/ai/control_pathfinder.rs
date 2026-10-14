@@ -29,7 +29,6 @@ use crate::content::ContentRegistry;
 use crate::world::{TilePos, WorldGrid};
 
 use super::astar::{self, AstarScratch, UniformCost};
-use super::pathfinder::cost::Cost;
 use super::pathfinder::path_tile::{self, PathTile};
 
 /// `ControlPathfinder.clusterSize`.
@@ -92,6 +91,9 @@ pub struct ControlPathfinder {
     pub width: i32,
     /// Grid height in tiles.
     pub height: i32,
+    /// The pathing team the passability was built for
+    /// (`ControlPathfinder.team`; the ground cost is team-relative).
+    pub team: u8,
     /// Cluster columns (`ceil(width / CLUSTER_SIZE)`).
     pub cluster_w: i32,
     /// Cluster rows.
@@ -113,6 +115,30 @@ pub struct ControlPathfinder {
     pub updates: u64,
 }
 
+/// `ControlPathfinder.wallImpassableCap` (ControlPathfinder.java:25).
+pub const WALL_IMPASSABLE_CAP: i32 = 1_000_000;
+
+/// `ControlPathfinder.costGround` (ControlPathfinder.java:33-42): the control
+/// pathfinder has its OWN ground cost. A same-team or neutral solid block (and
+/// all-deep water) is `impassable`; a synthetic enemy block costs
+/// `wallImpassableCap`, i.e. it blocks routing (this differs from the AI
+/// flowfield's `Pathfinder.costGround`, where enemy walls are passable at
+/// `health * 5` so ground units shoot their way through).
+pub fn control_ground_cost(team: u8, tile: PathTile) -> i32 {
+    if tile.all_deep()
+        || (tile.solid() && ((tile.team() == team && !tile.team_passable()) || tile.team() == 0))
+    {
+        return crate::ai::pathfinder::cost::IMPASSABLE;
+    }
+    if tile.team() != team && tile.team() != 0 && tile.solid() {
+        return WALL_IMPASSABLE_CAP;
+    }
+    1 + if tile.near_solid() { 6 } else { 0 }
+        + if tile.near_liquid() { 8 } else { 0 }
+        + if tile.deep() { 6000 } else { 0 }
+        + if tile.damages() { 50 } else { 0 }
+}
+
 impl ControlPathfinder {
     /// Creates an empty pathfinder for a `width x height` grid.
     pub fn new(width: i32, height: i32) -> Self {
@@ -124,13 +150,24 @@ impl ControlPathfinder {
     }
 
     /// Rebuilds passability, clusters and portals from the world (`WorldLoadEvent`).
-    pub fn build(&mut self, grid: &WorldGrid, content: &ContentRegistry, team: u8) {
+    pub fn build(
+        &mut self,
+        grid: &WorldGrid,
+        content: &ContentRegistry,
+        world: &bevy_ecs::world::World,
+        team: u8,
+        core_capture: bool,
+    ) {
         self.width = grid.width();
         self.height = grid.height();
-        let tiles = path_tile::build_tiles(grid, content, team);
+        self.team = team;
+        let tiles = path_tile::build_tiles(grid, content, world, core_capture);
         self.passable = tiles
             .iter()
-            .map(|tile| Cost::Ground.passable(*tile))
+            .map(|tile| {
+                let cost = control_ground_cost(team, *tile);
+                cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP
+            })
             .collect();
         self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
@@ -149,12 +186,16 @@ impl ControlPathfinder {
     /// ([`Self::build`] spends ~1 s there on a 256² map; the
     /// [`Self::get_path_position`] field BFS never reads portals or edges).
     /// Used by the live `CommandAI` movement (PAR-0140).
-    pub fn rebuild_passability(&mut self, width: i32, height: i32, tiles: &[PathTile]) {
+    pub fn rebuild_passability(&mut self, width: i32, height: i32, tiles: &[PathTile], team: u8) {
         self.width = width;
         self.height = height;
+        self.team = team;
         self.passable = tiles
             .iter()
-            .map(|tile| Cost::Ground.passable(*tile))
+            .map(|tile| {
+                let cost = control_ground_cost(team, *tile);
+                cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP
+            })
             .collect();
         self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
@@ -634,7 +675,7 @@ mod tests {
         let mut grid = WorldGrid::new(width, height);
         grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
         let mut path = ControlPathfinder::new(width, height);
-        path.build(&grid, &content, 0);
+        path.build(&grid, &content, &bevy_ecs::world::World::new(), 0, false);
         path
     }
 
@@ -700,7 +741,7 @@ mod tests {
             grid.tiles.get_mut(8, y).block = wall;
         }
         let mut path = ControlPathfinder::new(16, 16);
-        path.build(&grid, &content, 0);
+        path.build(&grid, &content, &bevy_ecs::world::World::new(), 0, false);
         let result = path.get_path_position(TilePos::new(1, 1), TilePos::new(15, 15));
         assert!(result.unreachable);
     }
@@ -729,7 +770,7 @@ mod tests {
             }
         }
         let mut path = ControlPathfinder::new(width, height);
-        path.build(&grid, &content, 0);
+        path.build(&grid, &content, &bevy_ecs::world::World::new(), 0, false);
         path
     }
 
@@ -777,7 +818,7 @@ mod tests {
         grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
         grid.tiles.get_mut(5, 5).block = wall;
         let mut path = ControlPathfinder::new(16, 16);
-        path.build(&grid, &content, 0);
+        path.build(&grid, &content, &bevy_ecs::world::World::new(), 0, false);
         let hit = path.raycast_fast_avoid(0, 5, 10, 5);
         assert_eq!(hit.last().copied(), Some(TilePos::new(5, 5)));
     }

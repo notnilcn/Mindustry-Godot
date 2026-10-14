@@ -211,12 +211,12 @@ impl UnitWeapons {
 
 // ---- math helpers (`Angles`/`Mathf` subset, delta == 1) ----
 
-fn trnsx(angle_deg: f32, x: f32, y: f32) -> f32 {
+pub(crate) fn trnsx(angle_deg: f32, x: f32, y: f32) -> f32 {
     let r = angle_deg.to_radians();
     x * r.cos() + y * r.sin()
 }
 
-fn trnsy(angle_deg: f32, x: f32, y: f32) -> f32 {
+pub(crate) fn trnsy(angle_deg: f32, x: f32, y: f32) -> f32 {
     let r = angle_deg.to_radians();
     x * r.sin() - y * r.cos()
 }
@@ -377,11 +377,11 @@ pub fn update_weapon(
     let mount_x = unit_x + trnsx(unit_rotation - 90.0, weapon.x, weapon.y);
     let mount_y = unit_y + trnsy(unit_rotation - 90.0, weapon.x, weapon.y);
 
-    // Auto-targeting (requires `controllable = false`). The actual target
-    // *search* is plan 11's `TargetQueries`; this keeps the stored target and
-    // validates it against range, matching the `Weapon.update` control flow.
+    // Auto-targeting (`Weapon.update`, Weapon.java:324-349): requires
+    // `controllable = false`. Point-defense / repair-beam weapons run their own
+    // search in their modules; plain weapons search here on the retarget timer.
     if !weapon.controllable && weapon.auto_target {
-        {
+        let fired = {
             let mount = &mut mounts[index];
             mount.retarget -= delta;
             if mount.retarget <= 0.0 {
@@ -390,18 +390,88 @@ pub fn update_weapon(
                 } else {
                     weapon.target_switch_interval
                 };
+                true
+            } else {
+                false
             }
+        };
+        let generic = weapon.kind == WeaponKind::Weapon;
+        let team = ctx
+            .world
+            .get::<TeamComp>(unit)
+            .map(|comp| comp.team)
+            .unwrap_or(0);
+        if fired && generic {
+            // `Weapon.findTarget`: `Units.closestTarget(unit.team, x, y,
+            // range + |shootY|, ...)` from the mount position. The one-off
+            // `TargetQueries` build happens only on a retarget tick.
+            let queries = crate::combat::targeting::TargetQueries::build(ctx.world, ctx.content);
+            let range = weapon.range() + weapon.shoot_y.abs();
+            let (air, ground) = ctx
+                .content
+                .bullet(weapon.bullet.id)
+                .map(|bullet| (bullet.collides_air, bullet.collides_ground))
+                .unwrap_or((false, true));
+            mounts[index].target = queries.closest_target(
+                ctx.world, team, mount_x, mount_y, range, air, ground, true, true,
+            );
+        }
+        // `if(mount.target != null && checkTarget(unit, mount.target, mountX,
+        //  mountY, bullet.range)) mount.target = null;`
+        if !generic
+            && let Some(target) = mounts[index].target
+            && crate::sim::unit_runtime::invalidate_target_entity(
+                ctx.world,
+                ctx.content,
+                team,
+                target,
+                mount_x,
+                mount_y,
+                weapon.range() + weapon.shoot_y.abs(),
+            )
+        {
+            mounts[index].target = None;
         }
         let mut shoot = false;
         if let Some(target) = mounts[index].target
             && let Some((target_x, target_y)) = ctx.pos(target)
         {
-            let range = weapon.range() + weapon.shoot_y.abs();
+            let range = weapon.range()
+                + weapon.shoot_y.abs()
+                + crate::sim::unit_runtime::target_hit_size_of(ctx.world, ctx.content, target)
+                    / 2.0;
             let dst = ((target_x - mount_x).powi(2) + (target_y - mount_y).powi(2)).sqrt();
             shoot = can && dst <= range;
+            let (aim_x, aim_y) = if weapon.predict_target {
+                let src_vel = ctx
+                    .world
+                    .get::<Vel>(unit)
+                    .copied()
+                    .unwrap_or(Vel { x: 0.0, y: 0.0 });
+                let dst_vel = ctx
+                    .world
+                    .get::<Vel>(target)
+                    .copied()
+                    .unwrap_or(Vel { x: 0.0, y: 0.0 });
+                let (bullet_speed, keep_velocity) = ctx
+                    .content
+                    .bullet(weapon.bullet.id)
+                    .map(|bullet| (bullet.speed, bullet.keep_velocity))
+                    .unwrap_or((0.0, true));
+                crate::combat::targeting::intercept_positions(
+                    (mount_x, mount_y),
+                    (src_vel.x, src_vel.y),
+                    (target_x, target_y),
+                    (dst_vel.x, dst_vel.y),
+                    keep_velocity,
+                    bullet_speed,
+                )
+            } else {
+                (target_x, target_y)
+            };
             let mount = &mut mounts[index];
-            mount.aim_x = target_x;
-            mount.aim_y = target_y;
+            mount.aim_x = aim_x;
+            mount.aim_y = aim_y;
         }
         let mount = &mut mounts[index];
         mount.shoot = shoot;
@@ -917,11 +987,12 @@ mod tests {
         let mut harness = CombatHarness::new(32, 16, 7);
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(12, 8, wall, 0, true));
-        let (ux, uy) = CombatHarness::tile_center(4, 8);
+        // Java tile `worldx` (row 8): a tile-centre y rounds into the next row.
+        let (ux, uy) = CombatHarness::tile_origin(4, 8);
         let weapon =
             weapon_with_bullet(&harness, 5.0, ShootPatternSpec::plain(1, 0.0, 0.0), "fuse");
         let unit = harness.spawn_test_unit(ux, uy, 1, vec![weapon]);
-        harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+        harness.set_unit_aim(unit, 0, CombatHarness::tile_origin(12, 8));
         harness.set_unit_shoot(unit, 0, true);
         let before = harness.building_health_at(12, 8);
         for _ in 0..40 {

@@ -614,6 +614,13 @@ impl BuildHarness {
     pub fn tile_center(x: i32, y: i32) -> (f32, f32) {
         ((x as f32 + 0.5) * TILE_SIZE, (y as f32 + 0.5) * TILE_SIZE)
     }
+
+    /// `Tile.worldx()`/`worldy()` (Tile.java:166-171): the tile's corner-based
+    /// world coordinate. Use this (not `tile_center`) when the point must still
+    /// `World.toTile`-round into the same tile, e.g. a bullet row.
+    pub fn tile_origin(x: i32, y: i32) -> (f32, f32) {
+        (x as f32 * TILE_SIZE, y as f32 * TILE_SIZE)
+    }
 }
 
 #[cfg(test)]

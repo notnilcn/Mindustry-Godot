@@ -275,11 +275,11 @@ fn weapon_fire() -> Result<ScenarioOutput> {
         .ok_or_else(|| anyhow::anyhow!("copper-wall missing from content"))?;
     harness.build.rules.default_team = 1;
     assert!(harness.build.place(12, 8, wall, 0, true), "wall placed");
-    let (ux, uy) = tile_center(4, 8);
+    let (ux, uy) = tile_world(4, 8);
     let unit = harness
         .spawn("dagger", 0, ux, uy, 0.0)
         .ok_or_else(|| anyhow::anyhow!("dagger missing from content"))?;
-    let aim = tile_center(12, 8);
+    let aim = tile_world(12, 8);
     let mount_count = harness
         .unit_weapons(unit)
         .map(|w| w.mounts.len())
@@ -324,7 +324,7 @@ fn spawn_path_arrive() -> Result<ScenarioOutput> {
     let snap = harness
         .snapshot(entity)
         .ok_or_else(|| anyhow::anyhow!("unit despawned"))?;
-    let (tx, ty) = tile_center(60, 60);
+    let (tx, ty) = tile_world(60, 60);
     let distance = ((snap.x - tx).powi(2) + (snap.y - ty).powi(2)).sqrt();
     let arrived = distance <= snap.hit_size.max(4.0);
     let checksum = harness.checksum_hex();
@@ -349,9 +349,11 @@ fn spawn_path_arrive() -> Result<ScenarioOutput> {
     Ok(ScenarioOutput { report, dump })
 }
 
-fn tile_center(x: i32, y: i32) -> (f32, f32) {
+fn tile_world(x: i32, y: i32) -> (f32, f32) {
     let ts = mind_core::config::TILESIZE as f32;
-    ((x as f32 + 0.5) * ts, (y as f32 + 0.5) * ts)
+    // `Tile.worldx()` (Tile.java:166-171); the sim's building `Pos` and the
+    // AI's arrival points use the same convention.
+    (x as f32 * ts, y as f32 * ts)
 }
 
 /// `units_formation`: deterministic `UnitGroup` packing for a 10-unit squad.
@@ -503,7 +505,9 @@ fn base_build() -> Result<ScenarioOutput> {
     let registered = bases.for_resource(BaseResource::Item(copper)).len();
 
     // Enemy-core field for the path trace.
-    harness.pathfinder.rebuild(&harness.build.grid, content, 0);
+    harness
+        .pathfinder
+        .rebuild(&harness.build.grid, content, &harness.build.world, false);
     let enemy_core = TilePos::new(50, 50);
     let field = harness
         .pathfinder
@@ -592,6 +596,7 @@ fn base_build() -> Result<ScenarioOutput> {
 /// every ground-AI cost (plan 11 §7b M3).
 fn flowfield_costs() -> Result<ScenarioOutput> {
     use mind_core::ai::Cost;
+    use mind_core::ai::pathfinder::flowfield::UNREACHABLE;
     use mind_core::world::TilePos;
 
     let mut harness = UnitHarness::new(64, 64, 11);
@@ -627,35 +632,39 @@ fn flowfield_costs() -> Result<ScenarioOutput> {
         let reachable = field
             .complete_weights
             .iter()
-            .filter(|weight| weight.is_finite())
+            .filter(|weight| **weight != UNREACHABLE)
             .count();
         let far_weight = field.complete_weights[far];
         let barrier_weight = field.complete_weights[barrier];
         checksummer.part(&(cost.id() as u32));
         checksummer.part(&(reachable as u32));
-        checksummer.part(&far_weight);
+        checksummer.part(&(far_weight as u32));
         match cost {
-            // Ground-family costs detour through the gap and cannot enter walls.
-            Cost::Ground | Cost::Legs | Cost::Hover | Cost::Neoplasm => {
+            // Ground-family costs treat a team-0 solid block as impassable
+            // (`Pathfinder.java:53-62,85-91`), so the barrier stays unreached
+            // and the far corner is only reachable through the gap.
+            Cost::Ground | Cost::Hover | Cost::Neoplasm => {
                 pass &= reachable > 500;
-                pass &= far_weight.is_finite();
-                pass &= !barrier_weight.is_finite();
+                pass &= far_weight != UNREACHABLE;
+                pass &= barrier_weight == UNREACHABLE;
             }
-            Cost::None => {
+            // Legs step over solid blocks (`legSolid` is the impassable term,
+            // `Pathfinder.java:64-67`) and `none` is flat cost, so the frontier
+            // covers the whole map. Naval's frontier also covers it: the land
+            // cost is 7000+ but not `impassable`, and the frontier only skips
+            // `impassable` (`Pathfinder.java:517`); `Flowfield.passable`
+            // rejects the 6000+ tiles for *stepping*, not for reaching.
+            Cost::Legs | Cost::None | Cost::Naval => {
                 pass &= reachable == field.complete_weights.len();
-                pass &= barrier_weight.is_finite();
-            }
-            // No deep tiles on flat ground: only the target is passable.
-            Cost::Naval => {
-                pass &= reachable == 1;
+                pass &= far_weight != UNREACHABLE;
             }
         }
         entries.push(serde_json::json!({
             "cost": name,
             "id": cost.id(),
             "reachable": reachable,
-            "far_weight": if far_weight.is_finite() { round3(far_weight) } else { -1.0 },
-            "barrier_reachable": barrier_weight.is_finite(),
+            "far_weight": if far_weight != UNREACHABLE { far_weight as f64 } else { -1.0 },
+            "barrier_reachable": barrier_weight != UNREACHABLE,
         }));
     }
     let report = serde_json::json!({
@@ -746,7 +755,7 @@ fn rts_command_queue() -> Result<ScenarioOutput> {
     let arrived = mover
         .snapshot(unit)
         .map(|snap| {
-            let (tx, ty) = tile_center(60, 60);
+            let (tx, ty) = tile_world(60, 60);
             ((snap.x - tx).powi(2) + (snap.y - ty).powi(2)).sqrt() <= snap.hit_size.max(4.0)
         })
         .unwrap_or(false);
@@ -920,11 +929,10 @@ fn factory_output() -> Result<ScenarioOutput> {
     // no power graph, so mark the consumer satisfied as
     // `PowerGraph.distributePower` would (same as the
     // `placed_factory_produces_unit_through_update_buildings` unit test).
-    if let Some(mut power) =
-        harness
-            .build
-            .world
-            .get_mut::<mind_core::world::modules::PowerModule>(entity)
+    if let Some(mut power) = harness
+        .build
+        .world
+        .get_mut::<mind_core::world::modules::PowerModule>(entity)
     {
         power.status = 1.0;
     }
@@ -1081,7 +1089,7 @@ fn path_report(unit: &str, tx: i32, ty: i32, ticks: u64, json: bool) -> Result<i
                 "y": round3(snap.y),
             }));
             if arrived_at.is_none() {
-                let (cx, cy) = tile_center(tx, ty);
+                let (cx, cy) = tile_world(tx, ty);
                 let dist = ((snap.x - cx).powi(2) + (snap.y - cy).powi(2)).sqrt();
                 if dist <= snap.hit_size.max(4.0) {
                     arrived_at = Some(tick);
@@ -1188,7 +1196,7 @@ fn bench_path(ticks: u64, json: bool) -> Result<i32> {
     let harness = UnitHarness::new(size, size, 7);
     let content = harness.content();
     let mut pathfinder = ControlPathfinder::new(size, size);
-    pathfinder.build(&harness.build.grid, content, 0);
+    pathfinder.build(&harness.build.grid, content, &harness.build.world, 0, false);
 
     let goals: Vec<TilePos> = (0..32u64)
         .map(|i| {

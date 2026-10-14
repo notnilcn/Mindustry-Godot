@@ -573,7 +573,8 @@ mod tests {
         let mut harness = UnitHarness::new(64, 64, 7);
         let unit = harness.spawn("dagger", 0, 44.0, 44.0, 0.0).expect("dagger");
         let mut state = CommandAiState::new();
-        state.command_position((60.5) * ts, (60.5) * ts);
+        // A command target on the Java tile grid (`Tile.worldx()`): tile (60,60).
+        state.command_position(60.0 * ts, 60.0 * ts);
         let mut arrived = false;
         for _ in 0..1500 {
             let mut ctx = AiCtx {
@@ -590,7 +591,7 @@ mod tests {
         }
         assert!(arrived, "CommandAI default behavior reached the target");
         let snap = harness.snapshot(unit).expect("alive");
-        let dist = ((snap.x - (60.5) * ts).powi(2) + (snap.y - (60.5) * ts).powi(2)).sqrt();
+        let dist = ((snap.x - 60.0 * ts).powi(2) + (snap.y - 60.0 * ts).powi(2)).sqrt();
         assert!(dist <= snap.hit_size.max(4.0) + 0.001);
     }
 }

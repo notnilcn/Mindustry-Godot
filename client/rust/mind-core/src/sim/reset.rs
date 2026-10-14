@@ -65,12 +65,15 @@ impl super::Sim {
         // Live units/bullets are despawned above; clear the runtime's lists and
         // respawn window so the next world starts clean (`Groups.clear`).
         let grid = self.grid.clone();
+        let core_capture =
+            crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
         if let Some(mut runtime) = self
             .ecs
             .0
-            .get_non_send_mut::<super::unit_runtime::UnitRuntime>()
+            .remove_non_send::<super::unit_runtime::UnitRuntime>()
         {
-            runtime.reset(&grid);
+            runtime.reset(&grid, &self.ecs.0, core_capture);
+            self.ecs.0.insert_non_send(runtime);
         }
         self.time.clear();
         self.clock.reset();

@@ -329,7 +329,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/units/units_spawn_path_arrive.json",
       "owner_plan": "11",
-      "sha256": "db6e4ad0884002fad842c78e70d3fd6196a49283298fd9a0289936f49de012f9"
+      "sha256": "2556dd71a5c31db4b91a2cd2f48e4ef4995793dd345c01e40097783348d36278"
     },
     {
       "id": "harness_units_units_waves_difficulty",
@@ -343,7 +343,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/units/units_weapon_fire.json",
       "owner_plan": "11",
-      "sha256": "d019ffcb1e11bbb3ba613323bfff51e4490cdbbc01ded7f7a8a7a7ee43de36b8"
+      "sha256": "b8698c44e1e361f5fd9d2efa844ad33f70600cfc9e0a392d3b56abfdfb2da509"
     },
     {
       "id": "harness_units_wave_generate",

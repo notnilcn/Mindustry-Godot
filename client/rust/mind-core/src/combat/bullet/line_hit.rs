@@ -473,15 +473,10 @@ pub fn linecast_enemy(
 
     match (building, unit) {
         (Some(b), Some(u)) => {
-            let bpos = ctx
-                .world
-                .get::<crate::entities::comp::Building>(b)
-                .map(|comp| comp.tile);
+            let bpos = ctx.world.get::<Pos>(b).map(|pos| (pos.x, pos.y));
             let upos = ctx.world.get::<Pos>(u).map(|p| (p.x, p.y));
             match (bpos, upos) {
-                (Some(bp), Some((ux, uy))) => {
-                    let ts = crate::config::TILESIZE as f32;
-                    let (bx, by) = ((bp.x() as f32 + 0.5) * ts, (bp.y() as f32 + 0.5) * ts);
+                (Some((bx, by)), Some((ux, uy))) => {
                     let bd = (bx - x).powi(2) + (by - y).powi(2);
                     let ud = (ux - x).powi(2) + (uy - y).powi(2);
                     if bd <= ud { Some(b) } else { Some(u) }
