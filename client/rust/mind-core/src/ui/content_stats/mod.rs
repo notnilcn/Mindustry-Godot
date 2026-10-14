@@ -19,6 +19,7 @@
 //! * `Block.instantTransfer`/`maxConsecutive` have no port field yet, so the
 //!   `itemsMoved = Instant` branch is skipped.
 
+pub mod production;
 pub mod values;
 
 use serde::Serialize;
@@ -26,6 +27,7 @@ use serde::Serialize;
 use crate::assets::bundle::Bundle;
 use crate::content::load::ContentRegistry;
 use crate::content::{BlockId, ContentRef, ContentType, ItemId, LiquidId};
+use crate::world::block::BlockTable;
 
 /// `StatCat` (`StatCat.java`): declaration order is the display order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -773,6 +775,15 @@ pub struct StatCtx<'a> {
     pub registry: &'a ContentRegistry,
     /// Live bundle for labels (`Core.bundle`).
     pub bundle: &'a Bundle,
+    /// Runtime block table (family knobs + behaviors). `None` in pure-content
+    /// tests; family bodies that need family data then emit no rows.
+    pub blocks: Option<&'a BlockTable>,
+    /// Whether a world is loaded (`state.isGame()`); the live-map stat branches
+    /// (`StatValues.blocks`) show `@stat.showinmap` in the menu.
+    pub in_game: bool,
+    /// Active planet name (`state.getPlanet()`), for the Erekir-only rows
+    /// (`NuclearReactor` heat output).
+    pub planet: Option<&'a str>,
 }
 
 impl StatCtx<'_> {
@@ -829,11 +840,12 @@ impl StatCtx<'_> {
 
 /// `UnlockableContent.computeStats()` dispatch (`ContentInfoDialog.show`).
 ///
-/// Block/item/liquid have their base bodies here; unit/status/sector/planet
-/// return empty stats (family bodies land in T10b-T10e).
+/// Blocks run the base body plus every family override (T10a base, T10b-T10e
+/// families); item/liquid have their base bodies; unit/status/sector/planet
+/// return empty stats (family bodies land in T10d/T10e).
 pub fn content_stats(ctx: &StatCtx, content: ContentRef) -> Stats {
     match content.type_ {
-        ContentType::Block => block_stats(ctx, BlockId::new(content.id)),
+        ContentType::Block => production::family_block_stats(ctx, BlockId::new(content.id)),
         ContentType::Item => item_stats(ctx, ItemId::new(content.id)),
         ContentType::Liquid => liquid_stats(ctx, LiquidId::new(content.id)),
         _ => Stats::new(),
@@ -842,11 +854,22 @@ pub fn content_stats(ctx: &StatCtx, content: ContentRef) -> Stats {
 
 /// `Block.setStats` (`Block.java:644-678`) — the base every block family calls.
 pub fn block_stats(ctx: &StatCtx, id: BlockId) -> Stats {
+    block_stats_timed(ctx, id, -1.0)
+}
+
+/// [`block_stats`] with an explicit `Stats.timePeriod`.
+///
+/// Family bodies that set `stats.timePeriod` BEFORE `super.setStats()` in Java
+/// (`GenericCrafter`, `Separator`, `Fracker`, `ConsumeGenerator`, …
+/// `Stats.timePeriod` default is `-1`) must set it before the consumer rows are
+/// built, so the family passes it through here instead of assigning afterwards.
+pub fn block_stats_timed(ctx: &StatCtx, id: BlockId, time_period: f32) -> Stats {
     let Some(def) = ctx.registry.block(id) else {
         return Stats::new();
     };
     let mut stats = Stats::new();
     stats.use_categories = true;
+    stats.time_period = time_period;
 
     let size = def.size.to_string();
     stats.add(
@@ -1020,7 +1043,13 @@ mod tests {
     }
 
     fn ctx<'a>(registry: &'a ContentRegistry, bundle: &'a Bundle) -> StatCtx<'a> {
-        StatCtx { registry, bundle }
+        StatCtx {
+            registry,
+            bundle,
+            blocks: None,
+            in_game: false,
+            planet: None,
+        }
     }
 
     #[test]

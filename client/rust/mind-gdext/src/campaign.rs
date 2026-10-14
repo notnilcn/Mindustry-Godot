@@ -2391,9 +2391,16 @@ impl MindCampaign {
             return GString::from("{}");
         };
         let type_name = content.type_.name();
+        // The family stats read the runtime block table (kind data + behavior
+        // knobs). It is rebuilt per call — cheap next to dialog construction and
+        // never stale across a registry reload (H05 T10b).
+        let block_table = mind_core::world::block::BlockTable::build_default(registry).ok();
         let ctx = StatCtx {
             registry,
             bundle: &self.bundle,
+            blocks: block_table.as_ref(),
+            in_game: self.session.phase.is_game(),
+            planet: Some(self.session.rules.planet.as_str()),
         };
         let stats = compute_content_stats(&ctx, content);
         let categories: Vec<serde_json::Value> = stats

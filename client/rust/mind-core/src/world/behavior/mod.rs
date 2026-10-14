@@ -151,7 +151,12 @@ pub enum ConfigTapResult {
 }
 
 /// Per-block behavior surface (frozen by plan 08 §3.2).
-pub trait BuildingBehavior: Send + Sync {
+///
+/// `Any` is a supertrait so view-only consumers (the H05 content-info stats)
+/// can downcast a `dyn BuildingBehavior` to the concrete family behavior and
+/// read the same knobs the family `setStats` bodies read in Java — one source
+/// of truth, no duplicated per-block numbers.
+pub trait BuildingBehavior: Send + Sync + std::any::Any {
     /// Per-tick update (`Building.updateTile`).
     fn update_tile(&self, world: &mut World, e: Entity) {
         let _ = (world, e);

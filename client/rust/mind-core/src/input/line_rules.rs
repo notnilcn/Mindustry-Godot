@@ -126,7 +126,7 @@ fn power_range(name: &str) -> f32 {
 
 /// `BeamNode.range` per block (`Blocks.java:2671/2685`: beam-node 10,
 /// beam-tower 23; class default 5).
-fn beam_range(name: &str) -> i32 {
+pub(crate) fn beam_range(name: &str) -> i32 {
     match name {
         "beam-tower" => 23,
         _ => 10,
