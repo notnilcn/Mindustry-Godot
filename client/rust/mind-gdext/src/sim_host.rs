@@ -506,6 +506,9 @@ impl MindSimHost {
         // (logic globals, IO executor, audio sink). Must be re-run whenever a
         // fresh `Sim` replaces `self.sim`, or queued IO never drains.
         self.install_sim_seams();
+        // `InputHandler` world reset: clear the logic cutscene/HUD flags and
+        // message timers (`InputHandler.java:921-922`; H06 T3).
+        self.sim.reset_logic_presentation();
 
         // Live gameplay (the default spine world, custom maps and campaign
         // sectors) runs the plan-07 block stack so placed buildings execute their
@@ -1687,6 +1690,33 @@ impl MindSimHost {
         )
     }
 
+    /// `InputHandler.logicCutscene` state for the camera rig (plain Rust
+    /// forwarder; H06 T3).
+    pub fn logic_cutscene_state(&self) -> mind_core::logic::world::LogicCutscene {
+        self.sim.logic_cutscene()
+    }
+
+    /// Takes the pending `CutsceneI` shake request (camera rig poller).
+    pub fn take_logic_shake(&mut self) -> Option<(f32, f32)> {
+        self.sim.take_logic_shake()
+    }
+
+    /// Logic cutscene/HUD probe: `{"active","x","y","speed","zoom","hideHud"}`
+    /// (`x`/`y` in world pixels; H06 T3).
+    #[func]
+    pub fn logic_cutscene_json(&self) -> GString {
+        let cutscene = self.sim.logic_cutscene();
+        let value = serde_json::json!({
+            "active": cutscene.active,
+            "x": cutscene.pan.0,
+            "y": cutscene.pan.1,
+            "speed": cutscene.speed,
+            "zoom": cutscene.zoom,
+            "hideHud": cutscene.hide_hud,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
     /// Placeholder for a display command queue (awaits plan 16 rendering/05).
     #[func]
     pub fn logic_display_commands(&self, _x: i64, _y: i64) -> PackedInt64Array {
@@ -1975,6 +2005,7 @@ impl MindSimHost {
         self.sim = sim;
         self.player = Some(player);
         self.install_sim_seams();
+        self.sim.reset_logic_presentation();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();
@@ -2126,6 +2157,7 @@ impl MindSimHost {
         // The fresh `Sim` carries no IO executor; re-wire the seams so a queued
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
+        self.sim.reset_logic_presentation();
         self.world_dirty = true;
         self.world_loads += 1;
         self.emit_state();

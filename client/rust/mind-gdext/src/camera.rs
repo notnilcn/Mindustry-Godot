@@ -65,6 +65,8 @@ pub struct MindCamera2D {
     landing_block: String,
     /// Whether the `MindInput` cutscene lock is currently raised.
     cutscene_locked: bool,
+    /// Whether the `MindInput` logic-cutscene lock is currently raised (H06 T3).
+    logic_locked: bool,
 }
 
 #[godot_api]
@@ -86,6 +88,7 @@ impl ICamera2D for MindCamera2D {
             landing_core: None,
             landing_block: String::new(),
             cutscene_locked: false,
+            logic_locked: false,
             follow_target: None,
         }
     }
@@ -112,51 +115,75 @@ impl ICamera2D for MindCamera2D {
         }
         self.follow_world();
 
+        // H06 T3: adopt the world-processor cutscene state (`InputHandler`
+        // reads `logicCutscene`/`logicCamPan`/`logicCamSpeed`/
+        // `logicCutsceneZoom`; while `Renderer.isCutscene()` runs the zoom is
+        // forced to -1 and the pan is suppressed, `InputHandler.java:946-950`).
+        let logic = self
+            .host
+            .as_ref()
+            .map(|host| host.bind().logic_cutscene_state())
+            .unwrap_or_default();
+        let landing = self.cutscene.is_cutscene();
+        if landing {
+            self.camera.logic_cutscene_zoom = -1.0;
+        } else {
+            self.camera.logic_cutscene = logic.active;
+            self.camera.logic_cam_pan = logic.pan;
+            self.camera.logic_cam_speed = logic.speed;
+            self.camera.logic_cutscene_zoom = if logic.active { logic.zoom } else { -1.0 };
+        }
+
         // Java clamps its global `Time.delta` to `[0.0001, maxDeltaClient]`
         // (`ClientLauncher.java:84-87`, `Vars.java:181`); the port applies the
         // same clamp to the camera rig's frame delta (T3 step 1).
         let delta_frames = ((delta * 60.0) as f32).clamp(0.0001, 4.0);
-        // Possessed unit: the move axis drives the unit (`MindSimHost` uploads
-        // it each tick) and the camera follows the unit instead of panning
-        // (`DesktopInput.updateMovement` / `:283-289`).
-        let player = self
-            .host
-            .as_ref()
-            .and_then(|host| host.bind().player_unit_position());
-        let (axis_x, axis_y) = self.pan_axis();
-        let boost = self.boost_pressed();
-        if let Some((player_x, player_y)) = player {
-            self.follow_target = Some((player_x, player_y));
-            if self.pan_pressed() {
-                // Middle-mouse pan holds the lock off until released.
+        // `InputHandler.inputLocks` includes `logicCutscene`: while a logic
+        // cutscene runs the player follow and every pan path are skipped
+        // (`DesktopInput.java:276` `if(!locked)`).
+        if !self.camera.logic_cutscene {
+            // Possessed unit: the move axis drives the unit (`MindSimHost` uploads
+            // it each tick) and the camera follows the unit instead of panning
+            // (`DesktopInput.updateMovement` / `:283-289`).
+            let player = self
+                .host
+                .as_ref()
+                .and_then(|host| host.bind().player_unit_position());
+            let (axis_x, axis_y) = self.pan_axis();
+            let boost = self.boost_pressed();
+            if let Some((player_x, player_y)) = player {
+                self.follow_target = Some((player_x, player_y));
+                if self.pan_pressed() {
+                    // Middle-mouse pan holds the lock off until released.
+                    self.follow_target = None;
+                }
+            } else if axis_x != 0.0 || axis_y != 0.0 || self.pan_pressed() {
+                // Manual pan detaches the follow lock (`DesktopInput.panning`).
                 self.follow_target = None;
             }
-        } else if axis_x != 0.0 || axis_y != 0.0 || self.pan_pressed() {
-            // Manual pan detaches the follow lock (`DesktopInput.panning`).
-            self.follow_target = None;
-        }
-        if let Some((target_x, target_y)) = self.follow_target {
-            self.camera.follow(target_x, target_y, true, delta_frames);
-        }
-        if player.is_none() {
-            self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
-        }
+            if let Some((target_x, target_y)) = self.follow_target {
+                self.camera.follow(target_x, target_y, true, delta_frames);
+            }
+            if player.is_none() {
+                self.camera.pan_axis(axis_x, axis_y, delta_frames, boost);
+            }
 
-        if player.is_none()
-            && self.mouse_inside
-            && self.gameplay_active()
-            && let Some(viewport) = self.base().get_viewport()
-        {
-            let rect = viewport.get_visible_rect();
-            let mouse = viewport.get_mouse_position();
-            let margin = EDGE_MARGIN;
-            if mouse.x < rect.position.x + margin
-                || mouse.x > rect.position.x + rect.size.x - margin
-                || mouse.y < rect.position.y + margin
-                || mouse.y > rect.position.y + rect.size.y - margin
+            if player.is_none()
+                && self.mouse_inside
+                && self.gameplay_active()
+                && let Some(viewport) = self.base().get_viewport()
             {
-                self.camera.auto_pan(mouse.x, mouse.y);
-                self.follow_target = None;
+                let rect = viewport.get_visible_rect();
+                let mouse = viewport.get_mouse_position();
+                let margin = EDGE_MARGIN;
+                if mouse.x < rect.position.x + margin
+                    || mouse.x > rect.position.x + rect.size.x - margin
+                    || mouse.y < rect.position.y + margin
+                    || mouse.y > rect.position.y + rect.size.y - margin
+                {
+                    self.camera.auto_pan(mouse.x, mouse.y);
+                    self.follow_target = None;
+                }
             }
         }
         // `MobileInput.pan` clamp for the manual/edge pans: without it the port
@@ -164,9 +191,30 @@ impl ICamera2D for MindCamera2D {
         // near a window edge walked the camera to y=32870 on a 256x256 map).
         self.camera.clamp_position();
 
-        self.camera.step_logic_cutscene(delta_frames);
+        if !landing {
+            self.camera.step_logic_cutscene(delta_frames);
+        }
         self.camera
             .update(delta_frames, self.screenshake, self.view_tick);
+
+        // `CutsceneI shake` (`Renderer.shake(p1, p2 * 60)`): the pending request
+        // is consumed once (`InputHandler` forwards it the frame it arrives).
+        if let Some(mut host) = self.host.clone()
+            && let Some((intensity, duration)) = host.bind_mut().take_logic_shake()
+        {
+            self.camera.on_fx_event(&FxEvent::Shake {
+                intensity,
+                duration,
+            });
+        }
+        // `InputHandler.inputLocks` `logicCutscene` mirror (H06 T3).
+        let logic_active = self.camera.logic_cutscene;
+        let was_logic_locked = std::mem::replace(&mut self.logic_locked, logic_active);
+        if logic_active != was_logic_locked
+            && let Some(mut input) = self.input.clone()
+        {
+            input.bind_mut().set_logic_cutscene_lock(logic_active);
+        }
 
         // `Renderer.update` (PAR-0131): a landing cutscene replaces the display
         // scale with the animator's `zoomLaunch()` (0.02 -> 4, ending at the

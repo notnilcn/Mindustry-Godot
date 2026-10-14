@@ -759,6 +759,24 @@ impl MindInput {
         }
     }
 
+    /// `InputHandler.inputLocks`' `logicCutscene` entry (`InputHandler.java:86`):
+    /// the camera rig raises it while a world-processor cutscene is active
+    /// (H06 T3). Same bridge push as `set_cutscene_lock`.
+    #[func]
+    pub fn set_logic_cutscene_lock(&mut self, locked: bool) {
+        if self.locks.logic_cutscene == locked {
+            return;
+        }
+        self.locks.logic_cutscene = locked;
+        let any = self.locks.any();
+        if self.bridge.locked != any {
+            self.bridge.locked = any;
+            if let Some(mut host) = self.bridge.host.clone() {
+                host.bind_mut().set_input_locked(any);
+            }
+        }
+    }
+
     /// Replaces the lock set from a JSON list of lock names.
     #[func]
     pub fn set_locks(&mut self, json: GString) -> bool {

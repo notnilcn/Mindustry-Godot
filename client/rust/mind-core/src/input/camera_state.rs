@@ -213,7 +213,12 @@ impl CameraState {
     /// (`Time.delta`), `screenshake` the `0..=4` setting, `view_tick` the
     /// deterministic shake direction seed.
     pub fn update(&mut self, delta: f32, screenshake: i32, view_tick: u64) {
-        let base_target = if self.logic_cutscene && self.logic_cutscene_zoom >= 0.0 {
+        // `Renderer.java:156-161`: `float baseTarget = targetscale;
+        // if(input.logicCutscene) baseTarget = Mathf.lerp(minZoom, maxZoom,
+        // input.logicCutsceneZoom);` — with `pan` only, `logicCutsceneZoom` is
+        // `-1`, so the lerp goes below `minScale()` and clamps there (the
+        // camera zooms fully out).
+        let base_target = if self.logic_cutscene {
             lerp(MIN_ZOOM, MAX_ZOOM, self.logic_cutscene_zoom)
         } else {
             self.target_scale
@@ -557,6 +562,24 @@ mod tests {
         state.clear_logic_cutscene();
         assert!(!state.logic_cutscene);
         assert_eq!(state.logic_cutscene_zoom, -1.0);
+    }
+
+    #[test]
+    fn pan_only_cutscene_zooms_to_min_scale() {
+        // `Renderer.java:156-161` with `logicCutsceneZoom == -1` (a `cutscene
+        // pan` sets no zoom): the lerp goes below `minScale()` and clamps
+        // there, so the camera zooms fully out.
+        let mut state = rig();
+        state.set_logic_cutscene((40.0, 40.0), -1.0, 0.1);
+        for _ in 0..200 {
+            state.update(1.0, 0, 1);
+        }
+        assert!(
+            (state.camerascale - state.min_scale()).abs() < 1e-3,
+            "camerascale {} min {}",
+            state.camerascale,
+            state.min_scale()
+        );
     }
 
     #[test]

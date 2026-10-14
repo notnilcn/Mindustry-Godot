@@ -56,6 +56,11 @@ var _status_names := ""
 var _ui_hidden_warned := false
 ## Whether the 3 s game-over timer is in flight (T16).
 var _game_over_pending := false
+## Logic `setHud` hide latch (`HudFragment.shown() = shown && !logicHideHud`,
+## `HudFragment.java:1239`; H06 T3): 10-frame poll, previous visibility kept.
+var _logic_hud_tick := 0
+var _logic_hud_hidden := false
+var _logic_hud_prev_visible := true
 
 
 func _ready() -> void:
@@ -192,11 +197,37 @@ func _setup_status_style() -> void:
 
 func _process(delta: float) -> void:
 	_tick_banners(delta)
+	_logic_hud_tick += 1
+	if _logic_hud_tick >= 10:
+		_logic_hud_tick = 0
+		_update_logic_hud()
 	_accum += delta
 	if _accum < REFRESH_INTERVAL:
 		return
 	_accum = 0.0
 	refresh()
+
+
+## `HudFragment.shown() = shown && !logicHideHud` (`HudFragment.java:1239`):
+## a world-processor `setHud false` hides the whole HUD until `setHud true`.
+## Reads are 10-frame throttled; the pre-hide visibility is restored, and the
+## property is only touched when the flag actually flips.
+func _update_logic_hud() -> void:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("logic_cutscene_json"):
+		return
+	var parsed: Variant = JSON.parse_string(str(host.call("logic_cutscene_json")))
+	if typeof(parsed) != TYPE_DICTIONARY:
+		return
+	var hide := bool((parsed as Dictionary).get("hideHud", false))
+	if hide == _logic_hud_hidden:
+		return
+	_logic_hud_hidden = hide
+	if hide:
+		_logic_hud_prev_visible = visible
+		visible = false
+	else:
+		visible = _logic_hud_prev_visible
 
 
 ## Per-frame banner timers (core-attack countdown, near-point fade; Java runs

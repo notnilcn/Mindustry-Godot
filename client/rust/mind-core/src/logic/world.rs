@@ -354,6 +354,42 @@ impl LogicWorldEvent {
     }
 }
 
+/// `InputHandler.logicCutscene`/`logicCamPan`/`logicCamSpeed`/
+/// `logicCutsceneZoom`/`logicHideHud` (`InputHandler.java:86,921-922`).
+///
+/// `active` is the `logicCutscene` flag; `pan` is in world pixels
+/// (`World.unconv` applied), `speed` is the per-frame lerp alpha, `zoom` the
+/// `0..1` blend (`-1` keeps the gameplay target), `hide_hud` the `logicHideHud`
+/// flag and `shake` a host-consumed `Renderer.shake(p1, p2 * 60)` request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct LogicCutscene {
+    /// `logicCutscene`.
+    pub active: bool,
+    /// `logicCamPan` (world pixels).
+    pub pan: (f32, f32),
+    /// `logicCamSpeed`.
+    pub speed: f32,
+    /// `logicCutsceneZoom`.
+    pub zoom: f32,
+    /// `logicHideHud`.
+    pub hide_hud: bool,
+    /// Pending `Renderer.shake` `(intensity, duration ticks)`.
+    pub shake: Option<(f32, f32)>,
+}
+
+impl Default for LogicCutscene {
+    fn default() -> Self {
+        Self {
+            active: false,
+            pan: (0.0, 0.0),
+            speed: 0.1,
+            zoom: -1.0,
+            hide_hud: false,
+            shake: None,
+        }
+    }
+}
+
 /// Live rules + markers + event log for the privileged world instructions.
 #[derive(Resource, Debug, Clone)]
 pub struct LogicWorldState {
@@ -377,6 +413,8 @@ pub struct LogicWorldState {
     pub map_height: i32,
     /// Active weather content ids (`weatherset` state, `weathersense` reads).
     pub weather_active: std::collections::BTreeSet<u16>,
+    /// `CutsceneI` presentation state (camera/HUD; H06 T3).
+    pub cutscene: LogicCutscene,
     /// Deterministic sink log (append-only, ordered).
     pub events: Vec<LogicWorldEvent>,
 }
@@ -401,6 +439,7 @@ impl LogicWorldState {
             map_width: 0,
             map_height: 0,
             weather_active: std::collections::BTreeSet::new(),
+            cutscene: LogicCutscene::default(),
             events: Vec::new(),
         }
     }
@@ -1265,7 +1304,8 @@ pub fn run_flush_message(
     }
 }
 
-/// `CutsceneI` — emits a camera/HUD request (headless rendering is plan 16).
+/// `CutsceneI` — applies the camera/HUD state (`CutsceneI.run`,
+/// `J/logic/LExecutor.java:1350-1369`) and emits the event for tests.
 pub fn run_cutscene(
     exec: &mut Executor,
     world: &mut World,
@@ -1275,15 +1315,47 @@ pub fn run_cutscene(
     p3: VarRef,
     p4: VarRef,
 ) {
+    // `if(headless) return;` — nothing (including the `p1` writes) happens.
     let Some(mut state) = world.get_resource_mut::<LogicWorldState>() else {
         return;
     };
+    if state.headless {
+        return;
+    }
+    // Values for the emitted event (tests count it), read before the writes.
+    let (n1, n2, n3, n4) = (num(exec, p1), num(exec, p2), num(exec, p3), num(exec, p4));
+    match action {
+        CutsceneAction::Active => {
+            let active = state.cutscene.active;
+            exec.arena.get_mut(p1.id()).set_bool(active);
+        }
+        CutsceneAction::Pan => {
+            state.cutscene.active = true;
+            state.cutscene.pan = (num(exec, p1) as f32 * 8.0, num(exec, p2) as f32 * 8.0);
+            state.cutscene.speed = num(exec, p3) as f32;
+        }
+        CutsceneAction::Zoom => {
+            state.cutscene.active = true;
+            state.cutscene.zoom = (num(exec, p1) as f32).clamp(0.0, 1.0);
+        }
+        CutsceneAction::Stop => state.cutscene.active = false,
+        CutsceneAction::Shake => {
+            state.cutscene.shake = Some((num(exec, p1) as f32, num(exec, p2) as f32 * 60.0));
+        }
+        CutsceneAction::GetHud => {
+            let visible = !state.cutscene.hide_hud;
+            exec.arena.get_mut(p1.id()).set_bool(visible);
+        }
+        CutsceneAction::SetHud => {
+            state.cutscene.hide_hud = !bool_of(exec, p1);
+        }
+    }
     state.emit(LogicWorldEvent::Cutscene {
         action,
-        p1: num(exec, p1),
-        p2: num(exec, p2),
-        p3: num(exec, p3),
-        p4: num(exec, p4),
+        p1: n1,
+        p2: n2,
+        p3: n3,
+        p4: n4,
     });
 }
 

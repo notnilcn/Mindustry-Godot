@@ -2481,6 +2481,121 @@ fn spawnwave_positional_no_wave_advance() {
     );
 }
 
+/// H06 T3: `cutscene pan`/`cutscene active` set the InputHandler state
+/// (`J/logic/LExecutor.java:1350-1369`).
+#[test]
+fn cutscene_pan_sets_state() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    install_logic_world(&mut sim);
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "cutscene pan 10 20 0.05 0\ncutscene active a 0 0 0\nstop\n",
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let cutscene = sim.logic_cutscene();
+    assert!(cutscene.active, "pan activates the cutscene");
+    assert_eq!(cutscene.pan, (80.0, 160.0), "World.unconv applied");
+    assert!((cutscene.speed - 0.05).abs() < 1e-6);
+    assert_eq!(cutscene.zoom, -1.0, "pan-only keeps zoom -1");
+    let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let a = sim
+        .ecs
+        .0
+        .get::<crate::logic::blocks::LogicBlockState>(e)
+        .and_then(|state| {
+            state
+                .executor
+                .optional_var("a")
+                .map(|id| state.executor.arena.get(id).num())
+        });
+    assert_eq!(a, Some(1.0), "`cutscene active` wrote p1");
+}
+
+/// H06 T3: Ground Zero GZ-4 verbatim — the pan activates, the map area is
+/// expanded and the `wait 11` + `cutscene stop` end the cutscene.
+#[test]
+fn gz4_cutscene_runs_and_stops() {
+    let mut sim = Sim::new(3, 300, 300, BlockId::AIR, BlockId::AIR);
+    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+    sim.grid.fill(stone, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime");
+    install_campaign_session(&mut sim, test_rules());
+    install_logic_world(&mut sim);
+    {
+        let mut runtime = sim
+            .ecs
+            .0
+            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+            .expect("runtime");
+        runtime
+            .session
+            .rules
+            .objective_flags
+            .insert("mineOver".to_owned());
+        runtime
+            .session
+            .rules
+            .objective_flags
+            .insert("spawnOver".to_owned());
+    }
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "getflag mineOver \"mineOver\"\njump 0 equal mineOver false\nsetflag \"mineOver\" false\nsetrule mapArea 10 0 0 256 256\ngetflag end \"spawnOver\"\njump 4 equal end false\ncutscene pan 135 230 0.03 0\nwait 11\ncutscene stop 100 100 0.06 0\nstop\n",
+    );
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let cutscene = sim.logic_cutscene();
+    assert!(cutscene.active, "GZ-4 pan active after the wait starts");
+    assert_eq!(cutscene.pan, (1080.0, 1840.0));
+    {
+        let runtime = sim
+            .ecs
+            .0
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .expect("runtime");
+        assert!(runtime.session.rules.limit_map_area, "map area set");
+        assert_eq!(runtime.session.rules.limit_width, 256);
+        assert_eq!(runtime.session.rules.limit_height, 256);
+    }
+    // `wait 11` (seconds) then `cutscene stop`.
+    for _ in 0..11 * 60 + 10 {
+        sim.tick().expect("tick");
+    }
+    assert!(!sim.logic_cutscene().active, "stop ends the cutscene");
+}
+
+/// H06 T3: headless (`CutsceneI.run`: `if(headless) return;`) leaves no
+/// presentation state.
+#[test]
+fn cutscene_headless_noop() {
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::LogicWorldState::new());
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "cutscene pan 10 20 0.05 0\ncutscene active a 0 0 0\nstop\n",
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        sim.logic_cutscene(),
+        crate::logic::world::LogicCutscene::default()
+    );
+}
+
 /// `message announce 2 @wait` blocks until the announcement timer expires.
 #[test]
 fn message_wait_blocks_until_announcement_expires() {

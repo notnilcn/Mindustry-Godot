@@ -1121,11 +1121,10 @@ impl Sim {
                     y,
                 } => self.logic_spawn_wave_at(x, y),
                 // T5 adds SetBlock handling here.
-                e @ (LogicWorldEvent::Message { .. } | LogicWorldEvent::Cutscene { .. })
-                    if self.logic_ui_events.len() < 256 =>
-                {
+                e @ LogicWorldEvent::Message { .. } if self.logic_ui_events.len() < 256 => {
                     self.logic_ui_events.push(e);
                 }
+                // `CutsceneI` state lives in `LogicWorldState.cutscene` (T3).
                 _ => {}
             }
         }
@@ -1134,6 +1133,50 @@ impl Sim {
     /// Monotonic update counter (`GameState.updateId`).
     pub fn update_id(&self) -> u64 {
         self.state.update_id
+    }
+
+    /// `InputHandler.logicCutscene` presentation state (defaults when no live
+    /// `LogicWorldState`).
+    pub fn logic_cutscene(&self) -> crate::logic::world::LogicCutscene {
+        self.ecs
+            .0
+            .get_resource::<crate::logic::world::LogicWorldState>()
+            .map(|state| state.cutscene)
+            .unwrap_or_default()
+    }
+
+    /// Takes the pending `CutsceneI shake` request (`Renderer.shake(p1, p2 * 60)`).
+    pub fn take_logic_shake(&mut self) -> Option<(f32, f32)> {
+        self.ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()?
+            .cutscene
+            .shake
+            .take()
+    }
+
+    /// `InputHandler` world-reset half (`InputHandler.java:921-922`): clears the
+    /// logic cutscene/HUD flags and the message timers on a world load.
+    pub fn reset_logic_presentation(&mut self) {
+        if let Some(mut state) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::world::LogicWorldState>()
+        {
+            state.cutscene = crate::logic::world::LogicCutscene::default();
+        }
+        if let Some(mut messages) = self
+            .ecs
+            .0
+            .get_resource_mut::<crate::logic::world::MessageState>()
+        {
+            messages.has_announcement = false;
+            messages.has_toast = false;
+            messages.mission = None;
+            messages.announce_until = 0;
+            messages.toast_until = 0;
+        }
+        self.logic_ui_events.clear();
     }
 
     /// Current phase name (inspector/parity).
