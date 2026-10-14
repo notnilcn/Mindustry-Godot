@@ -1521,19 +1521,8 @@ impl Sim {
         if let Some(mut core_comp) = self.ecs.0.get_mut::<UnitCore>(entity) {
             core_comp.spawned_by_core = true;
         }
-        // `unit.impulse(0, 3)`: `vel += v / mass`, `mass = hitSize^2 * PI`.
-        let hit_size = {
-            let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
-            self.ecs
-                .0
-                .get::<UnitTypeComp>(entity)
-                .and_then(|comp| runtime.content.unit(comp.type_id))
-                .map_or(8.0, |def| def.hit_size)
-        };
-        let mass = (hit_size * hit_size * std::f32::consts::PI).max(0.0001);
-        if let Some(mut vel) = self.ecs.0.get_mut::<Vel>(entity) {
-            vel.y += 3.0 / mass;
-        }
+        // `unit.impulse(0, 3)` (`CoreBlock.playerSpawn`): `vel += v / mass`.
+        crate::entities::comp::unit::velocity::impulse(&mut self.ecs.0, entity, 0.0, 3.0);
         // `if(state.isCampaign() && player == Vars.player){ spawnType.unlock(); }`
         // (CoreBlock.java:121-123): queue the spawned unit type for the campaign
         // unlock pipeline (H04 T2's `UnlockRef`).
@@ -2292,12 +2281,34 @@ pub fn unit_update_system(world: &mut World) {
     // `Pathfinder.EnemyCoreField.getPositions` target sets, one per team per
     // tick (plan G01 §6.9: stable targets keep the `(team, cost)` field cache).
     let mut core_target_cache: BTreeMap<u8, Vec<TilePos>> = BTreeMap::new();
+    // `GameState.hasSpawns()` (`GameState.java:68-70`): `rules.waves &&
+    // ((rules.waveTeam has a core && rules.attackMode) || !rules.spawns.isEmpty())`.
+    // Snapshotted once per tick for the per-unit drop-zone push gate (T5).
+    let has_spawns = world
+        .get_resource::<CampaignRuntime>()
+        .is_some_and(|campaign| {
+            let rules = &campaign.session.rules;
+            rules.waves
+                && ((rules.attack_mode
+                    && has_core_of_team(world, &runtime.content, rules.wave_team))
+                    || !rules.spawns.is_empty())
+        });
     let entities = runtime.units.clone();
     for entity in entities {
         if world.get_entity(entity).is_err() {
             continue;
         }
         let before = world.get::<Pos>(entity).map(|pos| (pos.x, pos.y));
+        // `VelComp.update` is `@MethodPriority(-1)`, so the velocity model
+        // integrates `vel` (tile collisions + drag) before the controller runs.
+        // `before` is read first so the kind kinematics `delta` includes this
+        // tick's movement.
+        crate::entities::comp::unit::velocity::vel_update(
+            world,
+            &runtime.grid,
+            &runtime.content,
+            entity,
+        );
         let Some(slot) = world.get::<ControllerSlot>(entity).copied() else {
             continue;
         };
@@ -2575,12 +2586,8 @@ pub fn unit_update_system(world: &mut World) {
                             }
                         }
                         None => {
-                            if let Some(mut vel) =
-                                world.get_mut::<crate::entities::comp::Vel>(entity)
-                            {
-                                vel.x = 0.0;
-                                vel.y = 0.0;
-                            }
+                            // Java `CommandAI.defaultBehavior` idles without
+                            // touching `vel`; drag brings the unit to a stop.
                         }
                     }
                 }
@@ -2881,6 +2888,7 @@ pub fn unit_update_system(world: &mut World) {
                 &runtime.grid,
                 &runtime.content,
                 runtime.wave_spawner.get_spawns(),
+                has_spawns,
                 entity,
             );
 
@@ -5882,7 +5890,13 @@ mod tests {
             );
         }
         let (unit, id) = spawn_dagger(&mut sim, dagger, 12.0 * 8.0, 16.0 * 8.0, 1);
-        move_order(&mut sim, id, 28.0 * 8.0, 16.0 * 8.0);
+        // Destination north of the wall's top end (row 4): the straight line
+        // (12,16)->(28,4) crosses the wall at (20,10), so the order must route
+        // around the north end. (A destination *south* of the wall end made the
+        // unit round the corner at exactly its rounded-tile boundary, where the
+        // T4 `EntityCollisions` box is caught by the wall corner — recorded as
+        // the follow-up corner-jam item in the H01 summary.)
+        move_order(&mut sim, id, 28.0 * 8.0, 4.0 * 8.0);
         let mut done = false;
         for _ in 0..3000 {
             sim.tick().expect("tick");
@@ -6617,7 +6631,10 @@ mod msav_tests {
 
         let campaign = Campaign::from_registry(&content, &EmptyNeighborhood);
         let mut session = PlaySession::new(Rules {
-            waves: false,
+            // `waves: true`: the sector is not captured, so the wave-team
+            // daggers live (`Sector.isCaptured()` = `!waves && !attackMode`,
+            // `Sector.java:181-184`; `UnitComp.java:757`).
+            waves: true,
             default_team: 1,
             wave_team: 2,
             ..Rules::default()
@@ -6628,6 +6645,11 @@ mod msav_tests {
         // reports the sector loss when the core dies.
         session.sector = content.planet_id("serpulo").map(|planet| (planet, 170));
         session.teams.register_core(core, TeamId(1), &session.rules);
+        // The hand-built session does not decode the map's spawn overlays;
+        // `spawn_count` keeps `check_game_state`'s "no enemy spawns -> waves
+        // disabled" rule from flipping the sector to captured, which would kill
+        // the wave-team daggers (`Sector.isCaptured()` + `UnitComp.java:757`).
+        session.spawn_count = 1;
         sim.ecs
             .0
             .insert_resource(CampaignRuntime::new(session, campaign));

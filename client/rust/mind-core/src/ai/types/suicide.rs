@@ -89,6 +89,8 @@ mod tests {
             team: 0,
         };
         update_suicide(&mut ctx, a, &mut state);
+        // One `VelComp.update` pass: the controller only writes `vel` (T4).
+        harness.vel_update(a);
         let snap = harness.snapshot(a).expect("alive");
         assert!(snap.x > 40.0, "unit advanced through the wall line");
     }

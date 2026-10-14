@@ -113,7 +113,7 @@ pub fn update_missile(ctx: &mut AiCtx, unit: Entity, state: &mut MissileAi) -> b
         .unwrap_or(0.0);
     let rad = rotation.to_radians();
     let target_vel = (rad.cos() * speed, rad.sin() * speed);
-    let (mut pos, mut vel) = match (
+    let (pos, mut vel) = match (
         ctx.world.get::<Pos>(unit).copied(),
         ctx.world.get::<Vel>(unit).copied(),
     ) {
@@ -134,12 +134,8 @@ pub fn update_missile(ctx: &mut AiCtx, unit: Entity, state: &mut MissileAi) -> b
     if let Some(mut stored) = ctx.world.get_mut::<Vel>(unit) {
         *stored = vel;
     }
-    // `VelComp.update`: `move(vel.x * Time.delta, vel.y * Time.delta)`.
-    pos.x += vel.x;
-    pos.y += vel.y;
-    if let Some(mut stored) = ctx.world.get_mut::<Pos>(unit) {
-        *stored = pos;
-    }
+    // `VelComp.update` integrates `vel` on the next tick (the unit loop runs
+    // it before the controller); `MissileAI` only writes `vel`.
 
     // `var build = unit.buildOn();` — kill instantly on enemy building contact
     // unless the block is an `underBullets` block the missile was not aimed at
@@ -221,6 +217,8 @@ mod tests {
             team: 0,
         };
         update_missile(&mut ctx, a, &mut state);
+        // One `VelComp.update` pass: the controller only writes `vel` (T4).
+        harness.vel_update(a);
         let snap = harness.snapshot(a).expect("alive");
         assert!(snap.x > 40.0);
     }

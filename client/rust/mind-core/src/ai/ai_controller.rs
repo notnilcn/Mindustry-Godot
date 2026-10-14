@@ -234,33 +234,15 @@ impl AiCtx<'_> {
 
     /// Direct straight-line move (flying units and `SuicideAI`).
     pub fn move_direct(&mut self, unit: Entity, dest_x: f32, dest_y: f32, arrive: f32) -> bool {
-        let speed = self.pref_speed(unit);
-        let Some(mut pos) = self.world.get::<Pos>(unit).copied() else {
-            return false;
-        };
-        let mut vel = self
-            .world
-            .get::<Vel>(unit)
-            .copied()
-            .unwrap_or(Vel { x: 0.0, y: 0.0 });
-        let mut core = self
-            .world
-            .get::<UnitCore>(unit)
-            .copied()
-            .unwrap_or(UnitCore::new(0.0));
-        let arrived = super::types::ground::approach(
-            &mut pos, &mut vel, &mut core, speed, dest_x, dest_y, arrive,
-        );
-        if let Some(mut stored) = self.world.get_mut::<Pos>(unit) {
-            *stored = pos;
-        }
-        if let Some(mut stored) = self.world.get_mut::<Vel>(unit) {
-            *stored = vel;
-        }
-        if let Some(mut stored) = self.world.get_mut::<UnitCore>(unit) {
-            *stored = core;
-        }
-        arrived
+        super::types::ground::steer_to(
+            self.world,
+            self.grid,
+            self.content,
+            unit,
+            dest_x,
+            dest_y,
+            arrive,
+        )
     }
 
     /// `pathfind(dest)`: move toward a destination tile, respecting terrain for
@@ -415,6 +397,7 @@ mod tests {
         let a = harness.spawn("dagger", 0, 44.0, 44.0, 0.0).expect("a");
         let mut arrive_tick = None;
         for tick in 0..1500 {
+            harness.vel_update(a);
             {
                 let mut ctx = ctx(&mut harness, 0);
                 if ctx.pathfind(a, TilePos::new(60, 60), 8.0) {

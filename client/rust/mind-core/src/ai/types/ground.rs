@@ -8,9 +8,9 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
+use crate::entities::comp::Pos;
+use crate::entities::comp::unit::HitboxComp;
 use crate::entities::comp::unit::comp::{CrawlComp, LegsComp, WaterMoveComp};
-use crate::entities::comp::unit::{HitboxComp, UnitCore};
-use crate::entities::comp::{Pos, Vel};
 use crate::world::{TilePos, WorldGrid};
 
 use super::super::controller::UnitController;
@@ -94,38 +94,42 @@ pub fn normalize_angle(degrees: f32) -> f32 {
     a
 }
 
-/// Steers `pos`/`vel` toward `(dest_x, dest_y)` at up to `speed` units/tick.
+/// `AIController.moveTo`-style steering: adds `vel` toward `(dest_x, dest_y)` at
+/// up to `speed` units/tick through the Java velocity model
+/// (`UnitComp.movePref` -> `moveAt`/`rotateMove`), never moving `pos` itself
+/// (the next tick's `VelComp.update` integrates).
 ///
-/// Returns `true` when within `arrive` of the destination (velocity zeroed).
-/// The step is capped to the remaining distance so a unit never overshoots.
-pub fn approach(
-    pos: &mut Pos,
-    vel: &mut Vel,
-    core: &mut UnitCore,
-    speed: f32,
+/// Returns `true` when within `arrive` of the destination (no velocity
+/// change; drag stops the unit). The step is capped to the remaining distance
+/// so a unit never overshoots the final point — the `CommandAI` final-point
+/// brake; Java's `moveTo(.., arrive=true)` behaves the same way here.
+pub fn steer_to(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &crate::content::ContentRegistry,
+    entity: Entity,
     dest_x: f32,
     dest_y: f32,
     arrive: f32,
 ) -> bool {
+    let Some(pos) = world.get::<Pos>(entity).copied() else {
+        return false;
+    };
     let dx = dest_x - pos.x;
     let dy = dest_y - pos.y;
     let dist = (dx * dx + dy * dy).sqrt();
     if dist <= arrive {
-        vel.x = 0.0;
-        vel.y = 0.0;
         return true;
     }
-    let dir_x = dx / dist;
-    let dir_y = dy / dist;
+    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
     let step = speed.min(dist);
-    vel.x = dir_x * step;
-    vel.y = dir_y * step;
-    pos.x += vel.x;
-    pos.y += vel.y;
-    // Face movement (upstream `UnitComp.rotateMove` fallback).
-    if step > 0.0001 {
-        core.rotation = normalize_angle(dir_y.atan2(dir_x).to_degrees());
-    }
+    crate::entities::comp::unit::velocity::move_pref(
+        world,
+        content,
+        entity,
+        dx / dist * step,
+        dy / dist * step,
+    );
     false
 }
 
@@ -152,9 +156,6 @@ pub fn update_ground(
             .unwrap_or(0.0);
         (pos, hit_size)
     };
-    // `UnitComp.speed()` with floor/boost/status multipliers (PAR-0137).
-    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
-
     let current = TilePos::new(
         WorldGrid::to_tile(pos.x) as i16,
         WorldGrid::to_tile(pos.y) as i16,
@@ -183,27 +184,7 @@ pub fn update_ground(
         (dest, 0.0)
     };
 
-    let mut pos = pos;
-    let mut vel = world
-        .get::<Vel>(entity)
-        .copied()
-        .unwrap_or(Vel { x: 0.0, y: 0.0 });
-    let mut core = world
-        .get::<UnitCore>(entity)
-        .copied()
-        .unwrap_or(UnitCore::new(0.0));
-    let arrived =
-        approach(&mut pos, &mut vel, &mut core, speed, dest.0, dest.1, arrive) && current == target;
-    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
-        *stored = pos;
-    }
-    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
-        *stored = vel;
-    }
-    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
-        *stored = core;
-    }
-    arrived
+    steer_to(world, grid, content, entity, dest.0, dest.1, arrive) && current == target
 }
 
 /// `AIController.pathfind(field, stopAtTargetTile, avoidance)`
@@ -253,30 +234,24 @@ pub fn pathfind_field(
         return false;
     }
     let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
-    let mut vel = world
-        .get::<Vel>(entity)
-        .copied()
-        .unwrap_or(Vel { x: 0.0, y: 0.0 });
-    let mut core = world
-        .get::<UnitCore>(entity)
-        .copied()
-        .unwrap_or(UnitCore::new(0.0));
-    let mut pos = pos;
     // `movePref(vec.trns(angleTo(targetTile.worldx(), targetTile.worldy()), prefSpeed()))`:
-    // `Tile.worldx()` is the tile CORNER (`x * tilesize`), not the centre.
+    // `Tile.worldx()` is the tile CORNER (`x * tilesize`), not the centre. Java
+    // passes exactly `prefSpeed()` with no distance cap.
     let dest = (
         nx as f32 * crate::config::TILESIZE as f32,
         ny as f32 * crate::config::TILESIZE as f32,
     );
-    let _ = approach(&mut pos, &mut vel, &mut core, speed, dest.0, dest.1, 0.0);
-    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
-        *stored = pos;
-    }
-    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
-        *stored = vel;
-    }
-    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
-        *stored = core;
+    let dx = dest.0 - pos.x;
+    let dy = dest.1 - pos.y;
+    let dist = (dx * dx + dy * dy).sqrt();
+    if dist > 0.0001 {
+        crate::entities::comp::unit::velocity::move_pref(
+            world,
+            content,
+            entity,
+            dx / dist * speed,
+            dy / dist * speed,
+        );
     }
     true
 }

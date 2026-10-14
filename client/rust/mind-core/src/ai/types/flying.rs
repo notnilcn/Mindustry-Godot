@@ -3,7 +3,7 @@
 
 //! `FlyingAI` (plan 11 §4.2). Air units ignore terrain and steer directly toward
 //! their target; flag/core targeting and `randomWaveAI` come with M3/M6. The
-//! steering math is shared with [`super::ground::approach`].
+//! steering math is shared with [`super::ground::steer_to`].
 
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
@@ -14,7 +14,7 @@ use crate::world::TilePos;
 use crate::world::WorldGrid;
 
 use super::super::controller::UnitController;
-use super::ground::{DEFAULT_ARRIVE, approach, tile_center};
+use super::ground::{DEFAULT_ARRIVE, steer_to, tile_center};
 use super::missile::move_toward_angle;
 
 /// Flying controller state (`FlyingAI`).
@@ -63,40 +63,6 @@ fn angle_dist(a: f32, b: f32) -> f32 {
     180.0 - (d - 180.0).abs()
 }
 
-/// `UnitComp.movePref`/`moveAt`/`rotateMove` (`UnitComp.java:134-154`) with the
-/// current cross products missing: `vel += (target - vel).limit(accel * |vec|)`
-/// and, for non-omni units, facing `vec` at `rotateSpeed` degrees/tick.
-fn move_pref(
-    core: &mut UnitCore,
-    vel: &mut Vel,
-    omni: bool,
-    rotate_speed: f32,
-    accel: f32,
-    vec: (f32, f32),
-) {
-    let len = (vec.0 * vec.0 + vec.1 * vec.1).sqrt();
-    let target = if omni {
-        vec
-    } else {
-        // `moveAt(Tmp.v2.trns(rotation, vec.len()))`.
-        let rad = core.rotation.to_radians();
-        (rad.cos() * len, rad.sin() * len)
-    };
-    let max_delta = accel * len;
-    let dx = target.0 - vel.x;
-    let dy = target.1 - vel.y;
-    let dist = (dx * dx + dy * dy).sqrt();
-    if max_delta > 0.0 && dist > 0.0 {
-        let scale = dist.min(max_delta) / dist;
-        vel.x += dx * scale;
-        vel.y += dy * scale;
-    }
-    if !omni && len > 0.0001 {
-        core.rotation =
-            move_toward_angle(core.rotation, vec.1.atan2(vec.0).to_degrees(), rotate_speed);
-    }
-}
-
 fn unit_control(
     world: &World,
     content: &crate::content::ContentRegistry,
@@ -116,8 +82,7 @@ fn unit_control(
 
 /// `AIController.circleAttack` (`AIController.java:318-351`): steer around
 /// `target` at roughly `circle_length` distance, peeling away from overlapping
-/// same-layer units. Writes the moved position back (the port's movement
-/// helpers integrate `vel` per tick; upstream does it in `VelComp.update`).
+/// same-layer units. Only `vel`/`rotation` change; `VelComp.update` integrates.
 pub fn circle_attack(
     world: &mut World,
     grid: &WorldGrid,
@@ -132,16 +97,16 @@ pub fn circle_attack(
     ) else {
         return;
     };
-    let mut core = world
+    let core = world
         .get::<UnitCore>(entity)
         .copied()
         .unwrap_or(UnitCore::new(0.0));
-    let mut vel = world
+    let vel = world
         .get::<Vel>(entity)
         .copied()
         .unwrap_or(Vel { x: 0.0, y: 0.0 });
     let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
-    let (omni, rotate_speed, accel) = unit_control(world, content, entity);
+    let (omni, _, _) = unit_control(world, content, entity);
 
     // `vec.set(target).sub(unit)`.
     let (mut vx, mut vy) = (target_pos.x - pos.x, target_pos.y - pos.y);
@@ -170,20 +135,18 @@ pub fn circle_attack(
             } else {
                 (1.0, 0.0)
             };
-            move_pref(
-                &mut core,
-                &mut vel,
-                omni,
-                rotate_speed,
-                accel,
-                (-ux * speed, -uy * speed),
+            crate::entities::comp::unit::velocity::move_pref(
+                world,
+                content,
+                entity,
+                -ux * speed,
+                -uy * speed,
             );
             let still_close = len <= 60.0 * 0.5 + target_hit;
             if !still_close {
                 state.turning_away = false;
                 world.entity_mut(entity).insert(state);
             }
-            write_back(world, entity, &pos, &vel, &core);
             return;
         } else if len <= avoid_dist {
             state.turning_away = true;
@@ -212,8 +175,7 @@ pub fn circle_attack(
         vx = vx / vlen * speed;
         vy = vy / vlen * speed;
     }
-    move_pref(&mut core, &mut vel, omni, rotate_speed, accel, (vx, vy));
-    write_back(world, entity, &pos, &vel, &core);
+    crate::entities::comp::unit::velocity::move_pref(world, content, entity, vx, vy);
 }
 
 /// `AIController.moveTo(target, circleLength, 100f)` (keepDistance = flying)
@@ -264,16 +226,8 @@ pub fn move_to_point(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
-    let mut core = world
-        .get::<UnitCore>(entity)
-        .copied()
-        .unwrap_or(UnitCore::new(0.0));
-    let mut vel = world
-        .get::<Vel>(entity)
-        .copied()
-        .unwrap_or(Vel { x: 0.0, y: 0.0 });
     let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
-    let (omni, rotate_speed, accel) = unit_control(world, content, entity);
+    let (_, rotate_speed, _) = unit_control(world, content, entity);
 
     let (mut vx, mut vy) = (target_x - pos.x, target_y - pos.y);
     let dst = (vx * vx + vy * vy).sqrt();
@@ -298,12 +252,16 @@ pub fn move_to_point(
         vy = 0.0;
     }
     if vx.abs() > 0.0001 || vy.abs() > 0.0001 {
-        move_pref(&mut core, &mut vel, omni, rotate_speed, accel, (vx, vy));
+        crate::entities::comp::unit::velocity::move_pref(world, content, entity, vx, vy);
     }
     if look_at {
         // `unit.lookAt(target)`.
-        core.rotation = move_toward_angle(
-            core.rotation,
+        let rotation = world
+            .get::<UnitCore>(entity)
+            .map(|core| core.rotation)
+            .unwrap_or(0.0);
+        let looked = move_toward_angle(
+            rotation,
             ang_to(
                 &pos,
                 Pos {
@@ -313,8 +271,10 @@ pub fn move_to_point(
             ),
             rotate_speed,
         );
+        if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
+            stored.rotation = looked;
+        }
     }
-    write_back(world, entity, &pos, &vel, &core);
 }
 
 /// `AIController.circle(target, circleLength)` (AIController.java:353-365): with
@@ -332,16 +292,7 @@ pub fn circle_pos(
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
-    let mut core = world
-        .get::<UnitCore>(entity)
-        .copied()
-        .unwrap_or(UnitCore::new(0.0));
-    let mut vel = world
-        .get::<Vel>(entity)
-        .copied()
-        .unwrap_or(Vel { x: 0.0, y: 0.0 });
     let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
-    let (omni, rotate_speed, accel) = unit_control(world, content, entity);
 
     // `vec.set(target).sub(unit)`.
     let (mut vx, mut vy) = (target_x - pos.x, target_y - pos.y);
@@ -363,27 +314,12 @@ pub fn circle_pos(
         vy = vy / vlen * speed;
     }
     if vx.abs() > 0.0001 || vy.abs() > 0.0001 {
-        move_pref(&mut core, &mut vel, omni, rotate_speed, accel, (vx, vy));
+        crate::entities::comp::unit::velocity::move_pref(world, content, entity, vx, vy);
     }
-    write_back(world, entity, &pos, &vel, &core);
 }
 
 fn ang_to(from: &Pos, to: Pos) -> f32 {
     (to.y - from.y).atan2(to.x - from.x).to_degrees()
-}
-
-fn write_back(world: &mut World, entity: Entity, pos: &Pos, vel: &Vel, core: &UnitCore) {
-    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
-        stored.x = pos.x + vel.x;
-        stored.y = pos.y + vel.y;
-    }
-    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
-        stored.x = vel.x;
-        stored.y = vel.y;
-    }
-    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
-        stored.rotation = core.rotation;
-    }
 }
 
 impl FlyingAi {
@@ -413,41 +349,16 @@ pub fn update_flying(
     entity: Entity,
     target: TilePos,
 ) -> bool {
-    let (pos, hit_size) = {
-        let Some(pos) = world.get::<Pos>(entity).copied() else {
-            return false;
-        };
-        let hit_size = world
-            .get::<HitboxComp>(entity)
-            .map(|hitbox| hitbox.hit_size)
-            .unwrap_or(0.0);
-        (pos, hit_size)
-    };
-    // `UnitComp.speed()` (air floor = 1, so status/boost only; PAR-0137).
-    let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
+    if world.get::<Pos>(entity).is_none() {
+        return false;
+    }
+    let hit_size = world
+        .get::<HitboxComp>(entity)
+        .map(|hitbox| hitbox.hit_size)
+        .unwrap_or(0.0);
     let dest = tile_center(target.x() as i32, target.y() as i32);
     let arrive = hit_size.max(DEFAULT_ARRIVE);
-
-    let mut pos = pos;
-    let mut vel = world
-        .get::<Vel>(entity)
-        .copied()
-        .unwrap_or(Vel { x: 0.0, y: 0.0 });
-    let mut core = world
-        .get::<UnitCore>(entity)
-        .copied()
-        .unwrap_or(UnitCore::new(0.0));
-    let arrived = approach(&mut pos, &mut vel, &mut core, speed, dest.0, dest.1, arrive);
-    if let Some(mut stored) = world.get_mut::<Pos>(entity) {
-        *stored = pos;
-    }
-    if let Some(mut stored) = world.get_mut::<Vel>(entity) {
-        *stored = vel;
-    }
-    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
-        *stored = core;
-    }
-    arrived
+    steer_to(world, grid, content, entity, dest.0, dest.1, arrive)
 }
 
 #[cfg(test)]
