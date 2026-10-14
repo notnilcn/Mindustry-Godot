@@ -2870,6 +2870,278 @@ fn message_announce_drained() {
     assert_eq!(ok, Some(1.0));
 }
 
+/// H06 T6: `setprop` on an item stack SETS the count (`BuildingComp.setProp`,
+/// `BuildingComp.java:2210-2227`), not adds; re-applying is a no-op.
+#[test]
+fn setprop_item_sets_count() {
+    use crate::content::ContentRef;
+    use crate::logic::access::set_prop_content;
+    use crate::logic::value::LogicObject;
+
+    let mut sim = runtime_sim();
+    let container = place(&mut sim, "container", 5, 5);
+    let copper = item(&sim, "copper");
+    let target = LogicObject::Building(container);
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &target,
+        ContentRef::item(copper),
+        50.0
+    ));
+    assert_eq!(stored_item(&sim, container, copper), 50);
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &target,
+        ContentRef::item(copper),
+        10.0
+    ));
+    assert_eq!(stored_item(&sim, container, copper), 10, "set, not added");
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &target,
+        ContentRef::item(copper),
+        10.0
+    ));
+    assert_eq!(stored_item(&sim, container, copper), 10, "idempotent");
+
+    // A core accepts up to its capacity (`getMaximumAccepted`), not 99999.
+    let core = place(&mut sim, "core-shard", 10, 10);
+    let capacity = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::storage::core_block::CoreBuild>(core)
+        .map(|core| core.storage_capacity)
+        .expect("core build");
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &LogicObject::Building(core),
+        ContentRef::item(copper),
+        99999.0
+    ));
+    let stored = stored_item(&sim, core, copper);
+    assert!(
+        stored <= capacity,
+        "capacity-limited: {stored} <= {capacity}"
+    );
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &LogicObject::Building(core),
+        ContentRef::item(copper),
+        99999.0
+    ));
+    assert_eq!(stored_item(&sim, core, copper), stored, "stable on repeat");
+}
+
+/// H06 T6: `setprop @health u 0` kills the unit through the combat path
+/// (`UnitComp.setProp` health; `UnitComp.java:356-362`).
+#[test]
+fn setprop_unit_health_zero_kills() {
+    use crate::logic::LAccess;
+    use crate::logic::access::set_prop_num;
+    use crate::logic::value::LogicObject;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let unit = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    assert!(set_prop_num(
+        &mut sim.ecs.0,
+        &LogicObject::Unit(unit),
+        LAccess::Health,
+        0.0
+    ));
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.ecs.0.get_entity(unit).is_err(),
+        "the unit was destroyed by resolve_deaths"
+    );
+}
+
+/// H06 T6: `setprop` unit item stack + status duration + `@speed`/`@armor`
+/// dynamic status (`UnitComp.setProp`; the multipliers survive ticks).
+#[test]
+fn setprop_unit_stack_and_status() {
+    use crate::content::ContentRef;
+    use crate::entities::comp::unit::comp::{DynamicStatus, ItemsComp, StatusComp};
+    use crate::logic::LAccess;
+    use crate::logic::access::{set_prop_content, set_prop_num};
+    use crate::logic::value::LogicObject;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let unit = sim
+        .spawn_live_unit("dagger", 2, 100.0, 100.0, 0.0)
+        .expect("dagger");
+    let copper = item(&sim, "copper");
+    let wet = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .status_id("wet")
+        .expect("wet");
+    let dagger_speed = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_id("dagger")
+        .and_then(|id| sim.block_runtime().expect("runtime").content().unit(id))
+        .map(|def| def.speed)
+        .expect("dagger def");
+    let target = LogicObject::Unit(unit);
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &target,
+        ContentRef::item(copper),
+        20.0
+    ));
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ItemsComp>(unit)
+            .and_then(|items| items.item),
+        Some((copper, 20)),
+        "unit stack set"
+    );
+    assert!(set_prop_content(
+        &mut sim.ecs.0,
+        &target,
+        ContentRef::new(crate::content::ContentType::Status, wet.raw()),
+        3.0
+    ));
+    assert!(
+        (sim.ecs
+            .0
+            .get::<StatusComp>(unit)
+            .expect("status")
+            .get_duration(wet)
+            - 180.0)
+            .abs()
+            < 1e-3,
+        "3 s = 180 ticks"
+    );
+    // `@speed` -> `applyDynamicStatus().speedMultiplier = v / (speed * 60 / 8)`.
+    assert!(set_prop_num(&mut sim.ecs.0, &target, LAccess::Speed, 10.0));
+    let dynamic = sim
+        .ecs
+        .0
+        .get::<DynamicStatus>(unit)
+        .copied()
+        .expect("dynamic status");
+    assert!(
+        (dynamic.speed_multiplier - 10.0 / (dagger_speed * 60.0 / 8.0)).abs() < 1e-4,
+        "{:?}",
+        dynamic.speed_multiplier
+    );
+    assert!(set_prop_num(&mut sim.ecs.0, &target, LAccess::Armor, 5.0));
+    // A few ticks: the per-tick status update folds the dynamic multipliers in
+    // instead of resetting the override (the old bug).
+    for _ in 0..3 {
+        sim.tick().expect("tick");
+    }
+    let status = sim.ecs.0.get::<StatusComp>(unit).expect("status").clone();
+    assert!(
+        (status.armor_override - 5.0).abs() < 1e-4,
+        "armor override survives ticks: {}",
+        status.armor_override
+    );
+    assert!(
+        status.has_effect_of(
+            sim.block_runtime()
+                .expect("runtime")
+                .content()
+                .status_id("dynamic")
+                .expect("dynamic id")
+        )
+    );
+}
+
+/// H06 T6: extractionOutpost block 2 verbatim on a team-2 core linked as
+/// `nucleus1` -> `setprop @pyratite 99999` fills to the capacity limit.
+#[test]
+fn extraction_outpost_block2() {
+    use crate::logic::blocks::{LogicLink, logic_block};
+    use crate::logic::value::LogicObject;
+
+    let mut sim = runtime_sim();
+    install_campaign_session(&mut sim, test_rules());
+    let content = crate::world::harness::BuildHarness::load_content();
+    crate::logic::globals::GlobalVars::install_world(&mut sim.ecs.0, &content);
+    // Team-2 core-nucleus (its link name root is `nucleus`).
+    let core_id = sim.world_block_id("core-nucleus").expect("core-nucleus");
+    sim.command(SimCommand::Place {
+        x: 14,
+        y: 10,
+        block: core_id,
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("core placed");
+    let core = sim
+        .grid
+        .entity_at(TilePos::new(14, 10))
+        .expect("core entity");
+    // World processor at (10,10) with the core linked as a relative `(4, 0)`.
+    let code = "sensor result nucleus1 @team\njump 0 notEqual result 2\nsetprop @pyratite nucleus1 99999\nsetprop @metaglass nucleus1 99999\nsetprop @titanium nucleus1 99999\nsetprop @graphite nucleus1 99999\n";
+    let processor = sim
+        .world_block_id("world-processor")
+        .expect("world-processor");
+    sim.command(SimCommand::Place {
+        x: 10,
+        y: 10,
+        block: processor,
+        rotation: 0,
+        team: 1,
+        player: None,
+    })
+    .expect("processor placed");
+    let bytes = logic_block::compress(code, &[LogicLink::new("nucleus1", 4, 0)]);
+    configure(
+        &mut sim,
+        10,
+        10,
+        crate::determinism::ConfigValue::Bytes(bytes),
+    );
+    for _ in 0..4 {
+        sim.tick().expect("tick");
+    }
+    let entity = sim.grid.entity_at(TilePos::new(10, 10)).expect("entity");
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::logic::blocks::LogicBlockState>(entity)
+        .expect("state");
+    let d = state.executor.optional_var("nucleus1");
+    assert!(d.is_some(), "the link resolved to a variable");
+    assert!(
+        state
+            .executor
+            .arena
+            .get(d.expect("id"))
+            .value_obj()
+            .is_some_and(|obj| matches!(obj, LogicObject::Building(e) if *e == core)),
+        "nucleus1 binds the core"
+    );
+    let pyratite = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .item_id("pyratite")
+        .expect("pyratite");
+    let stored = stored_item(&sim, core, pyratite);
+    let capacity = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::storage::core_block::CoreBuild>(core)
+        .map(|core| core.storage_capacity)
+        .expect("core build");
+    assert!(stored > 0, "pyratite set on the core");
+    assert_eq!(stored, 99999.min(capacity), "capacity-limited set");
+}
+
 // ---- G06 T7 (sensor/control coverage) ----
 
 /// Ground Zero's `duoAmmo` objective: `sensor amount d @ammo` on a duo reads
