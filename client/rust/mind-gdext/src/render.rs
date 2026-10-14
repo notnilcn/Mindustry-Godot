@@ -48,6 +48,7 @@ mod env;
 mod floor;
 mod fog;
 mod g3d;
+mod hazards;
 mod light;
 mod links;
 mod load;
@@ -240,6 +241,10 @@ pub struct MindWorldRenderer {
     /// Cracks for `!drawDynamic` cached buildings (`Layer.blockCracks` band;
     /// H03 T18).
     cached_cracks: Option<Gd<cached_cracks::CachedCrackRenderer>>,
+    /// Puddles (`Layer.debris` band; H03 T7).
+    puddles: Option<Gd<hazards::PuddleRenderer>>,
+    /// Fires (`Layer.effect` band; H03 T7).
+    fires: Option<Gd<hazards::FireRenderer>>,
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
@@ -306,6 +311,8 @@ impl INode2D for MindWorldRenderer {
             units: None,
             building_cache: None,
             cached_cracks: None,
+            puddles: None,
+            fires: None,
             shadow: None,
             light: None,
             debug: None,
@@ -551,6 +558,25 @@ impl MindWorldRenderer {
             // fixed by the pipeline, not by content.
             cracks_band.clone().add_child(&node);
             self.cached_cracks = Some(node.clone());
+        }
+        // Puddles at the `Layer.debris` band (`PuddleComp.draw` targets
+        // `Layer.debris - 1`; the band table has no slot there; H03 T7).
+        if let Some(debris_band) = self.band_node_at(BandKey::base(Layer::Debris)) {
+            let mut node = hazards::PuddleRenderer::new_alloc();
+            node.set_name("PuddleRenderer");
+            // code-instantiated: one puddle pass; the node count is fixed by
+            // the pipeline, not by content.
+            debris_band.clone().add_child(&node);
+            self.puddles = Some(node.clone());
+        }
+        // Fires at `Layer.effect` (`FireComp.draw`; H03 T7).
+        if let Some(effect_band) = self.band_node_at(BandKey::base(Layer::Effect)) {
+            let mut node = hazards::FireRenderer::new_alloc();
+            node.set_name("FireRenderer");
+            // code-instantiated: one fire pass; the node count is fixed by the
+            // pipeline, not by content.
+            effect_band.clone().add_child(&node);
+            self.fires = Some(node.clone());
         }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
             && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))

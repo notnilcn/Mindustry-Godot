@@ -296,6 +296,36 @@ pub struct BlockStateDraw {
     pub damaged: bool,
 }
 
+/// Fire draw row (`FireComp.draw`; H03 T7).
+pub struct FireDraw {
+    /// World centre x (tile centre + `randomSeedRange(y, 2)` jitter).
+    pub x: f32,
+    /// World centre y (tile centre + `randomSeedRange(x, 2)` jitter).
+    pub y: f32,
+    /// `min((int)animation, frames - 1)`.
+    pub frame: i32,
+    /// `clamp(warmup / warmupDuration)`.
+    pub alpha: f32,
+}
+
+/// Puddle draw row (`PuddleComp.draw` / `Liquid.drawPuddle`; H03 T7).
+pub struct PuddleDraw {
+    /// World centre (`Puddle.x/y`).
+    pub x: f32,
+    /// World centre (`Puddle.x/y`).
+    pub y: f32,
+    /// Entity id (`Puddle.id`; seeds the sine phases and satellites).
+    pub id: i32,
+    /// `clamp(amount / (maxLiquid / 1.5))`.
+    pub f: f32,
+    /// `liquid.color.shiftValue(-0.05)`.
+    pub color: [f32; 4],
+    /// `tile.floor().isLiquid`.
+    pub on_liquid: bool,
+    /// `(lightColor, opacity)` when `lightColor.a > 0.001 && f > 0`.
+    pub light: Option<([f32; 4], f32)>,
+}
+
 /// Sim owner, fixed-step pump and input/API surface of the spine.
 #[derive(GodotClass)]
 #[class(base=Node)]
@@ -2957,6 +2987,48 @@ impl MindSimHost {
         created
     }
 
+    /// Playtest seam: deposits `amount` of `liquid` at `(x, y)`
+    /// (`Puddles.deposit`) through the live unit runtime rng. `false` when the
+    /// liquid is unknown, the deposit reacts/vaporizes, or there is no runtime.
+    #[func]
+    pub fn debug_deposit_puddle(&mut self, x: i32, y: i32, liquid: GString, amount: f64) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let Some(id) = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.liquid_id(liquid.to_string().as_str()))
+        else {
+            return false;
+        };
+        let Some(mut runtime) = self
+            .sim
+            .ecs
+            .0
+            .remove_non_send::<mind_core::sim::unit_runtime::UnitRuntime>()
+        else {
+            return false;
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            self.sim.ecs.0.insert_non_send(runtime);
+            return false;
+        };
+        let created = mind_core::combat::puddles::deposit(
+            &mut self.sim.ecs.0,
+            &self.sim.grid.tiles,
+            content,
+            tx,
+            ty,
+            id,
+            amount as f32,
+            &mut runtime.rng,
+        )
+        .is_some();
+        self.sim.ecs.0.insert_non_send(runtime);
+        created
+    }
+
     /// Playtest seam: force-spawns the player unit without the sector env gate
     /// (`CoreBlock.requestSpawn` refuses alpha when `rules.env` wrongly carries
     /// scorching — G01's recorded divergence). Lets input-path probes run on
@@ -3439,6 +3511,29 @@ impl MindSimHost {
                     opacity: 1.0,
                 }),
                 _ => {}
+            }
+        }
+        // Fires and puddles light the map (`FireComp.draw` -> `Drawf.light`,
+        // `Liquid.drawPuddle`; H03 T7).
+        let ticks = godot::classes::Time::singleton().get_ticks_msec() as f32 * 0.06;
+        for fire in self.fire_draws(rect) {
+            out.push(LightSource {
+                x: fire.x,
+                y: fire.y,
+                radius: 50.0 + mind_core::render::drawf::absin(ticks, 5.0, 5.0),
+                color: pal::LIGHT_FLAME,
+                opacity: 0.6 * fire.alpha,
+            });
+        }
+        for puddle in self.puddle_draws(rect) {
+            if let Some((color, opacity)) = puddle.light {
+                out.push(LightSource {
+                    x: puddle.x,
+                    y: puddle.y,
+                    radius: 30.0 * puddle.f,
+                    color,
+                    opacity,
+                });
             }
         }
         if rules.unit_light
@@ -5790,6 +5885,103 @@ impl MindSimHost {
             ));
         }
         out
+    }
+
+    /// Fires in `rect` (`FireComp.draw` view data; H03 T7), stable by entity
+    /// index. The tile centre gets Java's `randomSeedRange` jitter; `frame`
+    /// and `alpha` come from the sim's animation/warmup.
+    pub fn fire_draws(&self, rect: (f32, f32, f32, f32)) -> Vec<FireDraw> {
+        use mind_core::combat::fires::{FRAMES, FireState, WARMUP_DURATION};
+        use mind_core::render::drawf::random_seed_range;
+        let (x0, y0, w, h) = rect;
+        let (x1, y1) = (x0 + w, y0 + h);
+        let mut rows: Vec<(u32, FireDraw)> = Vec::new();
+        for entity_ref in self.sim.ecs.0.iter_entities() {
+            let Some(fire) = entity_ref.get::<FireState>() else {
+                continue;
+            };
+            let (tx, ty) = fire.tile;
+            let cx = f32::from(tx) * 8.0;
+            let cy = f32::from(ty) * 8.0;
+            // `Draw.rect(regions[...], x + randomSeedRange((int)y, 2), y + randomSeedRange((int)x, 2))`
+            // (`FireComp.java:104-106`): the fire's world coordinates seed the
+            // two axis offsets.
+            let x = cx + random_seed_range(i64::from(ty) * 8, 2.0);
+            let y = cy + random_seed_range(i64::from(tx) * 8, 2.0);
+            if x < x0 || y < y0 || x > x1 || y > y1 {
+                continue;
+            }
+            rows.push((
+                entity_ref.id().index_u32(),
+                FireDraw {
+                    x,
+                    y,
+                    frame: (fire.animation as i32).min(FRAMES as i32 - 1),
+                    alpha: (fire.warmup / WARMUP_DURATION).clamp(0.0, 1.0),
+                },
+            ));
+        }
+        rows.sort_by_key(|(index, _)| *index);
+        rows.into_iter().map(|(_, draw)| draw).collect()
+    }
+
+    /// Puddles in `rect` (`PuddleComp.draw`/`Liquid.drawPuddle` view data;
+    /// H03 T7), stable by entity index.
+    pub fn puddle_draws(&self, rect: (f32, f32, f32, f32)) -> Vec<PuddleDraw> {
+        use mind_core::combat::puddles::{MAX_LIQUID, PuddleState};
+        use mind_core::render::drawf::shift_value;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let (x0, y0, w, h) = rect;
+        let (x1, y1) = (x0 + w, y0 + h);
+        let mut rows: Vec<(u32, PuddleDraw)> = Vec::new();
+        for entity_ref in self.sim.ecs.0.iter_entities() {
+            let Some(puddle) = entity_ref.get::<PuddleState>() else {
+                continue;
+            };
+            let (tx, ty) = puddle.tile;
+            let x = f32::from(tx) * 8.0;
+            let y = f32::from(ty) * 8.0;
+            if x < x0 || y < y0 || x > x1 || y > y1 {
+                continue;
+            }
+            let Some(def) = content.liquid(puddle.liquid) else {
+                continue;
+            };
+            // `float f = Mathf.clamp(amount / (maxLiquid / 1.5f))`.
+            let f = (puddle.amount / (MAX_LIQUID / 1.5)).clamp(0.0, 1.0);
+            // `Tmp.c1.set(color).shiftValue(-0.05f)`.
+            let color = shift_value([def.color.r, def.color.g, def.color.b, def.color.a], -0.05);
+            let on_liquid = content
+                .block(self.sim.grid.tile(tx as i32, ty as i32).floor)
+                .is_some_and(mind_core::maps::filters::block_info::is_liquid);
+            let light = (def.light_color.a > 0.001 && f > 0.0).then(|| {
+                (
+                    [
+                        def.light_color.r,
+                        def.light_color.g,
+                        def.light_color.b,
+                        def.light_color.a,
+                    ],
+                    color[3] * f * 0.8,
+                )
+            });
+            rows.push((
+                entity_ref.id().index_u32(),
+                PuddleDraw {
+                    x,
+                    y,
+                    id: entity_ref.id().index_u32() as i32,
+                    f,
+                    color,
+                    on_liquid,
+                    light,
+                },
+            ));
+        }
+        rows.sort_by_key(|(index, _)| *index);
+        rows.into_iter().map(|(_, draw)| draw).collect()
     }
 
     /// The player team's rebuild ghosts (`TeamData.plans`, pushed by
