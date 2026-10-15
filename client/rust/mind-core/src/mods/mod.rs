@@ -914,4 +914,50 @@ mod tests {
             .expect("zip content parses");
         assert!(registry.item_id("test-mod-test-ingot").is_some());
     }
+
+    /// I07 T1 (PAR-0117): `Mods.setEnabled` writes `mod-<name>-enabled` /
+    /// `mod-<name>-failed` (`Mods.java:973-984`) and a fresh `SettingsStore`
+    /// load + `Mods.load` resolves the mod as `disabled`
+    /// (`LoadedMod.shouldBeEnabled`, `Mods.java:1297`, applied at
+    /// `Mods.java:576-578`).
+    #[test]
+    fn mods_enabled_state_round_trips_through_settings_file() {
+        use crate::io::fs::{NativeFs, Paths};
+
+        let root = std::env::temp_dir().join(format!(
+            "mind-core-mods-roundtrip-{}",
+            std::process::id()
+        ));
+        let paths = Paths::new(&root);
+
+        let fs = MockFs::new();
+        write_mod(&fs, "a", r#"{"name":"Alpha"}"#);
+        let mut settings = SettingsStore::new();
+        let mut mods = Mods::new(true, "/mods");
+        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        assert!(mods.get_mod("alpha").is_some());
+
+        mods.set_enabled("alpha", false, &mut settings);
+        // `setEnabled` clears the failed flag and requires a reload.
+        assert!(!settings.get_bool("mod-alpha-failed", true));
+        assert!(mods.requires_reload());
+        settings
+            .force_save(&NativeFs, &paths)
+            .expect("persist settings");
+
+        let fresh = SettingsStore::load(&NativeFs, &paths);
+        let mut reloaded = Mods::new(true, "/mods");
+        let report = reloaded
+            .load(&fs, Path::new("/mods"), &fresh)
+            .expect("reload");
+        let alpha = report
+            .mods
+            .iter()
+            .find(|m| m.name == "alpha")
+            .expect("alpha");
+        assert_eq!(alpha.state, ModState::Disabled);
+        assert!(!alpha.enabled);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
