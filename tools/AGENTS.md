@@ -42,3 +42,47 @@
 - Scripts and their README mentions stay in sync; adding a gate means editing `ci.sh`.
 - Generated outputs are gitignored: `client/bin/rust/`, `client/rust/target/parity/`, `client/scenarios/`, and `client/assets/version.properties`.
 - Environment overrides: `GODOT_BIN`, `GODOT_VERBOSE`, `MIND_HEADLESS_BIN`, `MIND_SERVER_HOST`, `MIND_SERVER_PORT`, `MIND_EXE`, `MINDY_SRC`, `MIND_JAVA_PARITY`, `PARITY_OUT_DIR`, `OPEN_GODOT_MCP_BIN`.
+
+## Export layout
+
+An exported build is the Godot binary (release template, PCK embedded via
+`binary_format/embed_pck=true`, the `libmind_gdext.so` GDExtension beside it) plus an
+`assets/` directory next to the binary:
+
+```
+client/bin/export/
+  Mindustry-Godot.x86_64        # release template + embedded PCK + GDExtension
+  libmind_gdext.so              # GDExtension (Godot exports it beside the binary)
+  assets/                       # runtime subset copied by tools/export.sh
+    sprites/ fonts/ bundles/ locales/ icons/ sounds/ music/ maps/ shaders/
+    baseparts/ cursors/ planets/ contributors sounds.index.json
+```
+
+`tools/export.sh --with-assets` (the default) runs `tools/pack.sh pack` when
+`assets/sprites/sprites.atlas.json` is missing, then copies exactly the entries listed in
+its `copy_runtime_assets` (each names its reader; never `assets/parity/`, `assets-raw/`,
+`assets/scripts/`, `assets/bloomshaders/` or `assets/cubemaps/`). At runtime the build
+finds that directory through `client/rust/mind-gdext/src/assets/loader.rs`:
+
+1. `ProjectSettings` `mindustry/assets_dir`;
+2. `--assets=<dir>` (user args after `--`);
+3. `MINDUSTRY_GODOT_ASSETS`;
+4. `res://assets` (in an exported build `res://` also falls back to the executable
+   directory, so this is the path the beside-the-binary copy normally takes);
+5. `<binary dir>/assets` (the export layout, reached directly when 4 is not);
+6. `<res://>/../assets` (editor/dev; also the logged fallback when nothing is valid).
+
+A candidate is valid when `sprites/sprites.atlas.json` exists; the loader logs the chosen
+root once (`[assets] assets root: \`…\` (source: …)`). The `export-smoke` CI job
+(`.github/workflows/ci.yml`; manual `workflow_dispatch` or nightly schedule) downloads
+Godot 4.7.2 and its export templates, runs `tools/build.sh --release`, `tools/pack.sh pack`
+and `tools/export.sh linux --verify`, then launches the export with
+`--headless --quit-after 300` and fails when the log mentions a missing manifest or the
+assets root was not resolved. Reproduce locally with:
+
+```bash
+tools/build.sh --release
+tools/pack.sh pack                       # skipped when assets/sprites/sprites.atlas.json exists
+tools/export.sh linux --verify
+client/bin/export/Mindustry-Godot.x86_64 --headless --quit-after 300
+```
