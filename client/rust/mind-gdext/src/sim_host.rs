@@ -226,6 +226,23 @@ pub struct LaserLink {
     pub block: BlockId,
 }
 
+/// One beam-node laser (`BeamNode.BeamNodeBuild.draw`, I02 T5). The endpoints
+/// are already inset (`BeamNode.java:225-231`).
+pub struct BeamLaserLink {
+    /// Beam start x (source centre + `size * 4 * d4`).
+    pub x1: f32,
+    /// Beam start y.
+    pub y1: f32,
+    /// Beam end x (destination centre - `4 * d4`).
+    pub x2: f32,
+    /// Beam end y.
+    pub y2: f32,
+    /// Source graph satisfaction (`setupColor`).
+    pub satisfaction: f32,
+    /// Source block id (`<name>-beam` region fallback).
+    pub block: BlockId,
+}
+
 /// One item-bridge link (`ItemBridge.draw`, G03 T7).
 pub struct BridgeLink {
     /// Source tile.
@@ -4299,6 +4316,112 @@ impl MindSimHost {
                     x2,
                     y2,
                     size2: other_def.size,
+                    satisfaction,
+                    block: tile.block,
+                });
+            }
+        }
+        out
+    }
+
+    /// `BeamNode.BeamNodeBuild.draw` links (`BeamNode.java:207-233`; I02 T5):
+    /// one row per drawn beam, already inset by `tilesize / 2` on the source
+    /// (by `size * d4`) and destination (by `d4`) sides, with the source
+    /// graph's satisfaction for `setupColor`.
+    pub fn beam_node_lasers(&self, rect: (f32, f32, f32, f32)) -> Vec<BeamLaserLink> {
+        use mind_core::entities::comp::Building;
+        use mind_core::world::blocks::power::nodes::BeamNodeState;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * POWER_GROW,
+            h: rect.3 + 2.0 * POWER_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if def.kind != BlockKind::BeamNode {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                continue;
+            };
+            // `team == Team.derelict` never draws (`BeamNode.java:213`).
+            if self.building_team(tile.x, tile.y) == Some(0) {
+                continue;
+            }
+            let Some(state) = self.sim.ecs.0.get::<BeamNodeState>(entity).copied() else {
+                continue;
+            };
+            let satisfaction = self
+                .sim
+                .ecs
+                .0
+                .get::<PowerModule>(entity)
+                .and_then(|module| {
+                    self.sim
+                        .ecs
+                        .0
+                        .get_resource::<PowerGrids>()
+                        .and_then(|grids| grids.graph(module.graph))
+                        .map(|graph| graph.get_satisfaction())
+                })
+                .unwrap_or(1.0);
+            let (x1, y1) = building_center(tile.x, tile.y, def);
+            // `Geometry.d4`: right, up, left, down.
+            const D4: [(f32, f32); 4] = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+            for (i, link) in state.links.iter().enumerate() {
+                let Some(other) = *link else {
+                    continue;
+                };
+                let Some(other_build) = self.sim.ecs.0.get::<Building>(other) else {
+                    continue;
+                };
+                let Some(other_def) = content.block(other_build.block) else {
+                    continue;
+                };
+                let (ox, oy) = building_center(
+                    i32::from(other_build.tile.x()),
+                    i32::from(other_build.tile.y()),
+                    other_def,
+                );
+                // Don't draw lasers for adjacent blocks (`dst > 1 + size/2`).
+                let dst = (i32::from(other_build.tile.x()) - tile.x)
+                    .abs()
+                    .max((i32::from(other_build.tile.y()) - tile.y).abs());
+                if dst <= 1 + def.size / 2 {
+                    continue;
+                }
+                // Beam-to-beam dedupe (`BeamNode.java:219-221`): the larger
+                // range draws; equal ranges break the tie by entity index.
+                if other_def.kind == BlockKind::BeamNode {
+                    let other_range = self
+                        .sim
+                        .ecs
+                        .0
+                        .get::<BeamNodeState>(other)
+                        .map(|state| state.range)
+                        .unwrap_or(0);
+                    if state.range < other_range
+                        || (state.range == other_range && entity.index() < other.index())
+                    {
+                        continue;
+                    }
+                }
+                let (dx, dy) = D4[i % 4];
+                let poff = 4.0;
+                out.push(BeamLaserLink {
+                    x1: x1 + poff * def.size as f32 * dx,
+                    y1: y1 + poff * def.size as f32 * dy,
+                    x2: ox - poff * dx,
+                    y2: oy - poff * dy,
                     satisfaction,
                     block: tile.block,
                 });
