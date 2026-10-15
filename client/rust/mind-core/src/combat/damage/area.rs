@@ -59,6 +59,7 @@ struct Target {
     dst: f32,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn targets_in_radius(
     world: &World,
     team: Option<u8>,
