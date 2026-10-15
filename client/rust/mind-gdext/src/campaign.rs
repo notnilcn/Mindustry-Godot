@@ -1370,7 +1370,7 @@ impl MindCampaign {
         }
         if playtest {
             self.playtesting_map = Some(path);
-        } else if self.live_setting_flag("savecreate") {
+        } else if settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
             // `Control.playMap`'s `savecreate` slot (`Control.java:418-420`):
             // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`.
             let name = format!("{} {}", header.name(), save_date_stamp());
