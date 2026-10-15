@@ -381,6 +381,47 @@ impl Planet {
         self.last_sector = sector;
     }
 
+    /// The planet-globe "new preset" reveal (`PlanetDialog.show`,
+    /// `PlanetDialog.java:270-288`): every assigned preset on this planet that
+    /// is unlocked, still hidden, requires unlock, is not always-unlocked and
+    /// has no base. Marks `info.shown` on each collected sector (Java
+    /// `preset.sector.info.shown = true` + `saveInfo()`, the save is the
+    /// caller's job) and returns the sector ids in content order.
+    pub fn new_presets(&mut self, registry: &ContentRegistry) -> Vec<u16> {
+        let mut out = Vec::new();
+        for def in registry.sectors() {
+            if def.removed || def.planet != self.id {
+                continue;
+            }
+            // `preset.sector.preset == preset`: the preset is assigned to this
+            // cell (`SectorPreset.initialize` remap already applied).
+            let Some(sector) = self.sectors.get(def.sector as usize) else {
+                continue;
+            };
+            if sector.preset != Some(def.id) {
+                continue;
+            }
+            let unlocked = super::tech_tree::content_unlocked(
+                registry,
+                crate::content::ContentRef::of(crate::content::ContentType::Sector, def.id),
+            );
+            if unlocked
+                && !sector.preset_always_unlocked
+                && !sector.info.info.shown
+                && sector.preset_require_unlock
+                && !sector.has_base()
+            {
+                out.push(sector.id);
+            }
+        }
+        for id in &out {
+            if let Some(sector) = self.sectors.get_mut(*id as usize) {
+                sector.info.info.shown = true;
+            }
+        }
+        out
+    }
+
     /// `Planet.applyRules(rules, customGame)`.
     pub fn apply_rules(
         &self,
@@ -701,5 +742,41 @@ mod tests {
         assert!(rules.hide_spawns);
         assert!(rules.derelict_repair);
         assert!(rules.core_destroy_clear);
+    }
+
+    /// I04 T8: the globe reveal collects unlocked, hidden, `requireUnlock`,
+    /// base-less presets in content order and marks them shown
+    /// (`PlanetDialog.java:270-288`; `saveInfo` is the caller's job).
+    #[test]
+    fn new_presets_marks_shown() {
+        let mut registry = registry();
+        // Unlock one normal preset; `groundZero` is `alwaysUnlocked` and must
+        // stay out of the reveal.
+        let preset_id = registry.sector_by_name("frozenForest").unwrap().id;
+        registry.sector_mut(preset_id).unwrap().unlock.unlocked = true;
+        let serpulo_def = registry.planet_by_name("serpulo").unwrap();
+        let mut serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
+
+        let first = serpulo.new_presets(&registry);
+        let cell = registry.sector(preset_id).unwrap().sector;
+        assert!(
+            first.contains(&cell),
+            "unlocked hidden preset is collected: {first:?}"
+        );
+        assert!(
+            serpulo.sectors[cell as usize].info.info.shown,
+            "collected presets are marked shown"
+        );
+        let ground_zero = registry.sector_by_name("groundZero").unwrap();
+        assert!(
+            !first.contains(&ground_zero.sector),
+            "alwaysUnlocked presets are not collected"
+        );
+
+        let second = serpulo.new_presets(&registry);
+        assert!(
+            !second.contains(&cell),
+            "a shown preset is not collected again"
+        );
     }
 }

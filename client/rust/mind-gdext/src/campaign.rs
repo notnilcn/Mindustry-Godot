@@ -4771,6 +4771,45 @@ impl MindCampaign {
         true
     }
 
+    /// The planet-globe reveal list (`PlanetDialog.java:270-288`): collects
+    /// this planet's unlocked, still-hidden presets, marks `info.shown` and
+    /// saves each sector record (`Sector.saveInfo`); the caller appends the
+    /// last sector, reverses and replays the reveal.
+    #[func]
+    pub fn take_new_presets(&mut self, planet: GString) -> PackedInt32Array {
+        let planet_name = planet.to_string();
+        let mut out = PackedInt32Array::new();
+        let Some(registry) = self.registry.take() else {
+            return out;
+        };
+        let Some(ids) = self.with_campaign_mut(|campaign, settings| {
+            let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+                return Vec::new();
+            };
+            let Some(planet) = campaign.planet_mut(planet_id) else {
+                return Vec::new();
+            };
+            let ids = planet.new_presets(&registry);
+            for id in &ids {
+                if let Some(sector) = planet.sectors.get(*id as usize) {
+                    let _ = sector.save_info(settings, &planet_name);
+                }
+            }
+            ids
+        }) else {
+            self.registry = Some(registry);
+            return out;
+        };
+        self.registry = Some(registry);
+        for id in ids {
+            out.push(id as i32);
+        }
+        if !out.is_empty() {
+            self.persist();
+        }
+        out
+    }
+
     /// Planet globe data for the sector view (plan 16 g3d seam): the
     /// `PlanetGrid` sector topology, the render-plane grid-line mesh
     /// (`MeshBuilder.buildPlanetGrid` at `outlineRad * radius`) and the
@@ -4845,6 +4884,20 @@ impl MindCampaign {
         out.set("outline", outline);
         out.set("cam_radius", def.cam_radius);
         out.set("start_sector", def.start_sector as i64);
+        // `Planet.maxZoom = 2f` (`Planet.java:56`); `Planet.getLastSector`
+        // (`Planet.java:312-317`) reads `<name>-last-sector` through
+        // `Core.settings`, clamped to the grid.
+        out.set("min_zoom", def.min_zoom);
+        out.set("max_zoom", 2.0f32);
+        let last_sector = settings_hub::with_settings(|settings| {
+            settings
+                .get_i32(
+                    &format!("{}-last-sector", def.name),
+                    def.start_sector as i32,
+                )
+                .clamp(0, def.sector_count.saturating_sub(1) as i32)
+        });
+        out.set("last_sector", last_sector as i64);
         out.set(
             "icon_color",
             Color::from_rgba(icon.r, icon.g, icon.b, icon.a),

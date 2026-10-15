@@ -49,6 +49,20 @@ var _sector_list: VBoxContainer = null
 ## closing it restores exactly what was showing before (the live game's HUD +
 ## world, or the standalone menu). Empty while nothing is covered.
 var _saved_layers: Dictionary = {}
+## `PlanetDialog.dragged`/`clicked` pair: a left-drag orbits the globe and the
+## release after a drag must not select a sector.
+var _dragged := false
+var _pressed_position := Vector2.ZERO
+## Whether the current left press started on the globe (not the rail/lists).
+var _press_on_globe := false
+## `PlanetDialog.newPresets` (`PlanetDialog.java:270-288`): sector ids to
+## reveal, reversed so the planet's last sector sits first; `_preset_show`
+## counts ticks (Arc `Time.delta`) and `_reveal_showed` is the one-shot
+## announcement flag.
+var _last_sector_id := -1
+var _new_presets: Array = []
+var _preset_show := 0.0
+var _reveal_showed := false
 
 const MENU_GROUP_PATH := "/root/Spine/Ui/UiRoot/MenuGroup"
 const MENU_BACKGROUND_PATH := "/root/Spine/Ui/MenuBackground"
@@ -86,6 +100,10 @@ func shown() -> void:
 			_show_planet(_boot_planet(based))
 	else:
 		_show_planet(_selected_planet)
+	# `PlanetDialog.show` (`:260-288`): zoom reset, camera to the last sector
+	# and the new-preset reveal collection. The chooser never reaches here.
+	if not chooser_shown:
+		_start_preset_reveal()
 	# `PlanetDialog.java:216-222`: after a Serpulo remap the one-time "Campaign
 	# Changes Notice" shows, but only when the chooser branch was not taken.
 	if not chooser_shown:
@@ -101,6 +119,68 @@ func hidden() -> void:
 	var view := _planet_view()
 	if view != null:
 		view.set_hover(-1)
+
+
+## `PlanetDialog.show` (`PlanetDialog.java:260-288`): reset the zoom, turn the
+## camera to the planet's last sector (`lookAt(getLastSector())`) and collect
+## this planet's new presets (`take_new_presets`); the collected list gets the
+## last sector appended and is reversed, then `_process` replays the reveal.
+func _start_preset_reveal() -> void:
+	_new_presets.clear()
+	_preset_show = 0.0
+	_reveal_showed = false
+	var view := _planet_view()
+	if view == null or _selected_planet.is_empty():
+		return
+	view.zoom = 1.0
+	view.zoom_target = 1.0
+	_last_sector_id = int(view.data.get("last_sector", -1))
+	var last_sector := _find_sector(_selected_planet, _last_sector_id)
+	if not last_sector.is_empty():
+		view.look_at_tile(view.view_tile(last_sector))
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("take_new_presets"):
+		return
+	var collected: Variant = campaign.call("take_new_presets", _selected_planet)
+	if not (collected is PackedInt32Array):
+		return
+	for id in collected as PackedInt32Array:
+		_new_presets.append(int(id))
+	if not _new_presets.is_empty():
+		_new_presets.append(_last_sector_id)
+		_new_presets.reverse()
+
+
+## `PlanetDialog.act` reveal loop (`PlanetDialog.java:986-1003`): while
+## `newPresets` is non-empty the camera slerps to the peeked sector (alpha
+## 0.11) and the target zoom is 0.75; after 20 ticks the unlock announcement
+## fires once (only when more than the last sector remains), and each entry is
+## popped after 144 ticks (Arc `Time.delta` = 60 fps ticks).
+func _process(delta: float) -> void:
+	if _new_presets.is_empty() or not visible:
+		return
+	var view := _planet_view()
+	if view == null:
+		return
+	_preset_show += delta * 60.0
+	var to_id := int(_new_presets[_new_presets.size() - 1])
+	var sector := _find_sector(_selected_planet, to_id)
+	if not sector.is_empty():
+		view.look_at_tile(view.view_tile(sector), 0.11)
+	view.zoom_target = 0.75
+	if _preset_show >= 20.0 and not _reveal_showed and _new_presets.size() > 1:
+		_reveal_showed = true
+		var ui := get_node_or_null("/root/MindUi")
+		if ui != null:
+			ui.call(
+				"announce",
+				"%s [accent]%s" % [MindIcons.glyph("lock-open"), _localized_sector(sector)],
+				2.0
+			)
+	if _preset_show > 144.0:
+		_new_presets.pop_back()
+		_reveal_showed = false
+		_preset_show = 0.0
 
 
 func _build() -> void:
@@ -620,6 +700,8 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 		_last_planet_written = planet_name
 	_selected_planet = planet_name
 	_chooser_active = false
+	# `PlanetDialog.viewPlanet` (`:893`): switching planets clears the reveal.
+	_new_presets.clear()
 	_clear_dimmed_footer()
 	set_title_text("")
 	_clear_root()
@@ -1372,25 +1454,73 @@ func _select_view_tile(tile: int) -> void:
 
 
 ## Empty-screen left clicks pick the sector under the cursor while the globe is
-## up; UI regions (rail, bottom bar) are excluded. Covered by another dialog
-## (not the stack top), events are ignored like an Arc modal (`Dialog.hit`).
+## up; UI regions (rail, bottom bar) are excluded. Left-drag orbits the globe
+## (`PlanetDialog.java:114-138`) and the wheel zooms (`:140-147`); both are
+## ignored while the new-preset reveal runs, and a release after a drag does
+## not select (Java's Arc `clicked` only fires on a tap). Covered by another
+## dialog (not the stack top), events are ignored like an Arc modal
+## (`Dialog.hit`).
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
 	if not is_top():
 		return
+	if event is InputEventKey:
+		_handle_reveal_escape(event as InputEventKey)
+		return
 	if event is InputEventMouseMotion:
 		var view := _planet_view()
-		if view != null and view.visible:
-			_update_hover(view, (event as InputEventMouseMotion).position)
+		if view == null or not view.visible:
+			return
+		var motion := event as InputEventMouseMotion
+		if motion.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			if not _press_on_globe:
+				return
+			# `dragged()`: ignored while the reveal shows a preset other than
+			# the planet's last sector; otherwise the drag clears the reveal
+			# (`newPresets.clear()`).
+			if not _new_presets.is_empty() and int(_new_presets[_new_presets.size() - 1]) != _last_sector_id:
+				return
+			_new_presets.clear()
+			_dragged = true
+			view.drag(motion.relative)
+			get_viewport().set_input_as_handled()
+			return
+		_update_hover(view, motion.position)
 		return
 	if not (event is InputEventMouseButton):
 		return
 	var click := event as InputEventMouseButton
-	if click.button_index != MOUSE_BUTTON_LEFT or not click.pressed:
+	if click.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var wheel_view := _planet_view()
+		if wheel_view == null or not wheel_view.visible:
+			return
+		if _over_ui(click.position):
+			return
+		# Arc scroll `amountY`: negative scrolling up (SDL `-wheel.y`), and
+		# `zoom + amountY / 10` means up zooms in (`PlanetDialog.java:144`).
+		wheel_view.scroll(-1.0 if click.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0)
+		get_viewport().set_input_as_handled()
+		return
+	if click.button_index != MOUSE_BUTTON_LEFT:
 		return
 	var mouse_view := _planet_view()
 	if mouse_view == null or not mouse_view.visible:
+		return
+	if click.pressed:
+		_pressed_position = click.position
+		_dragged = false
+		_press_on_globe = not _over_ui(click.position)
+		return
+	# Release: a drag must not select; a tap selects like `PlanetDialog.tap`.
+	if _dragged:
+		_dragged = false
+		_press_on_globe = false
+		return
+	if not _press_on_globe:
+		return
+	_press_on_globe = false
+	if click.position.distance_to(_pressed_position) > 4.0:
 		return
 	if _over_ui(click.position):
 		return
@@ -1401,6 +1531,19 @@ func _input(event: InputEvent) -> void:
 	# The rebuild clears the hover; Java keeps `hovered` on the sector under the
 	# pointer after the click (`selected = hovered`), so re-apply it.
 	_update_hover(mouse_view, click.position)
+	get_viewport().set_input_as_handled()
+
+
+## `PlanetDialog.java:92-96`: Escape during the reveal clears every entry but
+## the first (the planet's last sector); the dialog itself stays open.
+func _handle_reveal_escape(key: InputEventKey) -> void:
+	if not key.pressed or key.echo or key.keycode != KEY_ESCAPE:
+		return
+	if _new_presets.size() <= 1:
+		return
+	_new_presets.resize(1)
+	_preset_show = 0.0
+	_reveal_showed = false
 	get_viewport().set_input_as_handled()
 
 
