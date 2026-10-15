@@ -153,6 +153,7 @@ fn numi_of(exec: &Executor, v: VarRef) -> i32 {
 /// `DrawI` head: packs one command into the executor's graphics buffer.
 #[allow(clippy::too_many_arguments)]
 pub fn pack_draw(
+    world: &bevy_ecs::world::World,
     exec: &mut Executor,
     type_: u8,
     x: VarRef,
@@ -248,11 +249,16 @@ pub fn pack_draw(
             Some(LogicObject::Content(content)) => {
                 packed = ((content.id as i32) << 5) | (content.type_.ordinal() as i32 & 31);
             }
-            Some(LogicObject::Building(_)) => {
-                // `LogicDisplayBuild` source: `(rootDisplay.index << 5) | 30`.
-                // The display arena index is resolved at flush time (plan 16);
-                // pack the sentinel type here.
-                packed = DISPLAY_DRAW_TYPE;
+            Some(LogicObject::Building(display)) => {
+                // `LogicDisplayBuild` source: `(d.rootDisplay.index << 5) | 30`
+                // (`LExecutor.java:1005-1007`).
+                let root_index = world
+                    .get::<crate::logic::blocks::LogicDisplayState>(*display)
+                    .and_then(|state| state.root_display)
+                    .and_then(|root| world.get::<crate::logic::blocks::LogicDisplayState>(root))
+                    .map(|state| state.index)
+                    .unwrap_or(-1);
+                packed = (root_index << 5) | DISPLAY_DRAW_TYPE;
             }
             _ => {}
         }
@@ -318,6 +324,7 @@ mod tests {
     #[test]
     fn color_pack_expands_to_color_command() {
         let mut exec = Executor::new();
+        let world = bevy_ecs::world::World::new();
         let x = exec.arena.put_var("x");
         exec.arena
             .get_mut(x)
@@ -328,6 +335,7 @@ mod tests {
         let p3 = exec.arena.put_var("p3");
         let p4 = exec.arena.put_var("p4");
         pack_draw(
+            &world,
             &mut exec,
             COMMAND_COLOR_PACK,
             VarRef::Local(x),

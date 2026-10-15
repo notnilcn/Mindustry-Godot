@@ -17,7 +17,7 @@ pub mod message;
 pub mod switch;
 
 pub use canvas::{CanvasBehavior, CanvasBlockState};
-pub use display::{DisplayBehavior, LogicDisplayState};
+pub use display::{DisplayBehavior, LogicDisplayState, TileableDisplayBehavior};
 pub use logic_block::{LogicBlockBehavior, LogicBlockState};
 pub use memory::{MemSlot, MemoryBehavior, MemoryBlockState};
 pub use message::{MessageBehavior, MessageBlockState};

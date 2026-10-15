@@ -744,9 +744,8 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::MemoryBlock => Arc::new(crate::logic::blocks::MemoryBehavior),
         K::SwitchBlock => Arc::new(crate::logic::blocks::SwitchBehavior),
         K::MessageBlock => Arc::new(crate::logic::blocks::MessageBehavior),
-        K::LogicDisplay | K::TileableLogicDisplay => {
-            Arc::new(crate::logic::blocks::DisplayBehavior)
-        }
+        K::LogicDisplay => Arc::new(crate::logic::blocks::DisplayBehavior),
+        K::TileableLogicDisplay => Arc::new(crate::logic::blocks::TileableDisplayBehavior),
         K::CanvasBlock => Arc::new(crate::logic::blocks::CanvasBehavior),
         // Illuminator (PAR-0093): integer color config + revision-0 IO.
         K::LightBlock => Arc::new(light::LightBehavior),

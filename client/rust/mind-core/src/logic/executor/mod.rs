@@ -1160,7 +1160,7 @@ impl Instruction {
                 p3,
                 p4,
             } => {
-                draw::pack_draw(exec, *type_, *x, *y, *p1, *p2, *p3, *p4);
+                draw::pack_draw(world, exec, *type_, *x, *y, *p1, *p2, *p3, *p4);
             }
             Instruction::DrawFlush { target } => {
                 let target_obj = exec.arena.get(target.id()).value_obj().cloned();

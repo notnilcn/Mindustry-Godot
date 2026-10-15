@@ -330,7 +330,13 @@ pub fn flush_draw(world: &mut World, exec: &Executor, target: Option<&LogicObjec
     ) {
         return;
     }
-    let Some(mut state) = world.get_mut::<LogicDisplayState>(e) else {
+    // `TileableLogicDisplayBuild.draw`: a member forwards to the root's queue
+    // (`TileableLogicDisplay.java:255-261`).
+    let root = world
+        .get::<LogicDisplayState>(e)
+        .and_then(|state| state.root_display)
+        .unwrap_or(e);
+    let Some(mut state) = world.get_mut::<LogicDisplayState>(root) else {
         return;
     };
     let cap = crate::logic::executor::MAX_DISPLAY_BUFFER.saturating_sub(state.commands.len());
