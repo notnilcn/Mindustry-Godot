@@ -629,6 +629,30 @@ impl BlockKind {
             BlockKind::LegacyCommandCenter => "LegacyCommandCenter",
         }
     }
+
+    /// Whether the block's Java class extends `PayloadBlock`
+    /// (`J/world/blocks/payloads/PayloadBlock.java:17`): `UnitBlock` (unit
+    /// factories and reconstructors), `UnitAssembler`(+`Module`), the payload
+    /// mass driver, deconstructor, constructor, loader, unloader, source and
+    /// void. `PayloadConveyor`/`PayloadRouter` extend `Block`, not
+    /// `PayloadBlock`, so they are excluded. Read by the `factorycontrol` hint
+    /// (`HintsFragment.java:91-95`, `BuildingCommandEvent`).
+    pub const fn is_payload_block(self) -> bool {
+        matches!(
+            self,
+            BlockKind::UnitFactory
+                | BlockKind::Reconstructor
+                | BlockKind::UnitAssembler
+                | BlockKind::UnitAssemblerModule
+                | BlockKind::PayloadMassDriver
+                | BlockKind::PayloadDeconstructor
+                | BlockKind::Constructor
+                | BlockKind::PayloadLoader
+                | BlockKind::PayloadUnloader
+                | BlockKind::PayloadSource
+                | BlockKind::PayloadVoid
+        )
+    }
 }
 
 /// `BuildVisibility` variant tag (plan 02 §6.1; no runtime predicates in metadata).

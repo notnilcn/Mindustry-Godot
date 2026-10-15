@@ -8345,8 +8345,16 @@ fn hint_state_value(sim: &Sim, content: Option<&ContentRegistry>, team: u8) -> s
         .map(|record| record.threat as f64)
         .unwrap_or(0.0);
 
-    // `state.stats.destroyed` cores: not tracked per core block yet (T4b).
-    let cores_destroyed = 0i64;
+    // `state.stats.getDestroyed(...)` sum (`HintsFragment.java:285`,
+    // `serpuloCoreZone`): the session's counters are name-keyed since H09 T10.
+    let cores_destroyed = runtime
+        .map(|runtime| {
+            let stats = &runtime.session.stats;
+            i64::from(stats.get_destroyed("core-shard"))
+                + i64::from(stats.get_destroyed("core-foundation"))
+                + i64::from(stats.get_destroyed("core-nucleus"))
+        })
+        .unwrap_or(0);
     let boss: serde_json::Value =
         serde_json::from_str(&sim.boss_json()).unwrap_or(serde_json::Value::Null);
 

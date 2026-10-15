@@ -495,6 +495,55 @@ fn sim_command_commands_valid_buildings_only() {
     );
 }
 
+/// I04 T3: commanding a `PayloadBlockBuild` records the `factorycontrol` hint
+/// event (`HintsFragment.java:91-95`); a commandable non-payload building (the
+/// core, `CoreBlock.java:82`) does not.
+#[test]
+fn factory_command_records_hint() {
+    use crate::determinism::SimCommand;
+    use crate::world::TilePos;
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    let factory = sim
+        .world_block_id("ground-factory")
+        .expect("commandable payload block");
+    sim.apply(Command::Place {
+        x: 3,
+        y: 3,
+        block: BlockId::new(factory),
+    })
+    .expect("place factory");
+    sim.command(SimCommand::CommandBuilding {
+        positions: smallvec::smallvec![TilePos::new(3, 3).pack()],
+        x: 70.0,
+        y: 42.0,
+    })
+    .expect("command factory");
+    assert!(
+        sim.hint_events.events.contains("factorycontrol"),
+        "a commanded unit factory arms the factoryControl hint"
+    );
+
+    let mut sim = Sim::new(1, 16, 16, BlockId::AIR, BlockId::AIR);
+    let core = sim.world_block_id("core-shard").expect("core block");
+    sim.apply(Command::Place {
+        x: 6,
+        y: 6,
+        block: BlockId::new(core),
+    })
+    .expect("place core");
+    sim.command(SimCommand::CommandBuilding {
+        positions: smallvec::smallvec![TilePos::new(6, 6).pack()],
+        x: 1.0,
+        y: 1.0,
+    })
+    .expect("command core");
+    assert!(
+        !sim.hint_events.events.contains("factorycontrol"),
+        "a core is commandable but not a PayloadBlock"
+    );
+}
+
 #[test]
 fn sim_command_world_apply_is_deterministic() {
     use crate::input::plan::ClientPlan;

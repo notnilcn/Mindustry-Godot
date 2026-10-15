@@ -5293,3 +5293,68 @@ fn bastion_requires_core_zone() {
         "core-zone floor satisfies requiresCoreZone"
     );
 }
+
+/// I04 T3: the Reconstructor refuses a locked upgrade target for a non-AI team
+/// and arms `Trigger.cannotUpgrade` (`Reconstructor.java:252-257` ->
+/// `HintsFragment.java:84`); once the target is in the live unlocked set the
+/// payload is accepted again (`team.isAI() || upgrade.unlockedNowHost()`).
+#[test]
+fn locked_upgrade_blocks_and_fires_hint() {
+    use crate::content::PlanetId;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::PlaySession;
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+    use crate::world::blocks::payloads::{PayloadRef, dispatch_accept_payload};
+
+    let mut sim = runtime_sim();
+    let campaign = {
+        let content = sim.block_runtime().expect("runtime").content();
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        ..Rules::default()
+    });
+    session.phase = crate::game::State::Playing;
+    session.sector = Some((PlanetId::new(0), 170));
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    let recon = place(&mut sim, "additive-reconstructor", 4, 4);
+    let (dagger, mace_name) = {
+        let content = sim.block_runtime().expect("runtime").content();
+        let dagger = content.unit_id("dagger").expect("dagger");
+        let mace = content.unit_id("mace").expect("mace");
+        let name = content.unit(mace).expect("mace def").name.clone();
+        (dagger, name)
+    };
+    let payload = PayloadRef {
+        entity: None,
+        content: dagger.raw(),
+        is_block: false,
+    };
+    // The live unlocked set is empty: the dagger -> mace upgrade is locked.
+    assert!(
+        !dispatch_accept_payload(&sim.ecs.0, recon, recon, payload),
+        "a locked upgrade target is refused for a non-AI team"
+    );
+    sim.tick().expect("tick");
+    assert!(
+        sim.hint_events.events.contains("cannotupgrade"),
+        "the refusal fired Trigger.cannotUpgrade"
+    );
+
+    // Unlocking the target accepts it again.
+    sim.ecs
+        .0
+        .get_resource_mut::<CampaignRuntime>()
+        .expect("campaign")
+        .set_unlocked_content([mace_name]);
+    assert!(
+        dispatch_accept_payload(&sim.ecs.0, recon, recon, payload),
+        "an unlocked upgrade target is accepted"
+    );
+}
