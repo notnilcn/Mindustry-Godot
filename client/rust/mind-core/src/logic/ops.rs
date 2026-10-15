@@ -144,7 +144,7 @@ impl LogicOp {
     /// `LogicOp.func` (functional/labeled operators).
     pub const fn is_func(self) -> bool {
         use LogicOp::*;
-        matches!(self, Max | Min | Angle | AngleDiff | Len | Noise)
+        matches!(self, Max | Min | Angle | AngleDiff | Len | Noise | Logn)
     }
 
     /// `LogicOp.objFunction2 != null`.

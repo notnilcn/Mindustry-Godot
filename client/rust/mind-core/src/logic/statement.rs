@@ -795,6 +795,16 @@ const fn e_char(index: usize) -> EditorItem {
     }
 }
 
+const fn e_jump(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Jump,
+        index,
+        label: "",
+        label_before: true,
+        wide: false,
+    }
+}
+
 /// `LStatement.build(Table)` editor row for a statement's current values.
 ///
 /// Statements not yet transcribed fall back to one labelled text field per
@@ -929,6 +939,89 @@ pub fn editor_layout(name: &str, values: &[String]) -> Vec<EditorItem> {
             e_text("in"),
             e_field(1),
         ],
+        // `SetStatement.build` (`:656-661`).
+        "set" => vec![e_field(0), e_text("="), e_field(1)],
+        // `OperationStatement.rebuild` (`:685-737`): unary / "function" / binary.
+        "op" => {
+            let op = LogicOp::from_name(value(0)).unwrap_or(LogicOp::Add);
+            let mut out = vec![e_field(1), e_text("=")];
+            if op.is_unary() {
+                out.push(e_select(0));
+                out.push(e_field(2));
+            } else if op.is_func() {
+                out.push(e_select(0));
+                out.push(e_field(2));
+                out.push(e_field(3));
+            } else {
+                out.push(e_field(2));
+                out.push(e_select(0));
+                out.push(e_field(3));
+            }
+            out
+        }
+        // `SelectStatement.rebuild` (`:750-780`).
+        "select" => {
+            let op = ConditionOp::from_name(value(1)).unwrap_or(ConditionOp::NotEqual);
+            let mut out = vec![e_field(0), e_text("="), e_text("if")];
+            if op != ConditionOp::Always {
+                out.push(e_field(2));
+            }
+            out.push(e_select(1));
+            if op != ConditionOp::Always {
+                out.push(e_field(3));
+            }
+            out.push(e_text("then"));
+            out.push(e_field(4));
+            out.push(e_text("else"));
+            out.push(e_field(5));
+            out
+        }
+        // `WaitStatement.build` (`:787-790`).
+        "wait" => vec![e_field(0), e_text("seconds")],
+        // `StopStatement.build`/`EndStatement.build`: no rows (`:807`, `:913`).
+        "stop" | "end" => Vec::new(),
+        // `LookupStatement.build` (`:827-853`).
+        "lookup" => vec![
+            e_field(1),
+            e_text("-lookup"),
+            e_select(0),
+            e_text(" # "),
+            e_field(2),
+        ],
+        // `PackColorStatement.build` (`:860-881`).
+        "packcolor" => vec![
+            e_field(0),
+            e_text("="),
+            e_text("pack"),
+            e_field(1),
+            e_field(2),
+            e_field(3),
+            e_field(4),
+        ],
+        // `UnpackColorStatement.build` (`:888-909`).
+        "unpackcolor" => vec![
+            e_field(0),
+            e_field(1),
+            e_field(2),
+            e_field(3),
+            e_text("="),
+            e_text("unpack"),
+            e_field(4),
+        ],
+        // `JumpStatement.build` (`:946-968`).
+        "jump" => {
+            let op = ConditionOp::from_name(value(1)).unwrap_or(ConditionOp::NotEqual);
+            let mut out = vec![e_text("if")];
+            if op != ConditionOp::Always {
+                out.push(e_field(2));
+            }
+            out.push(e_select(1));
+            if op != ConditionOp::Always {
+                out.push(e_field(3));
+            }
+            out.push(e_jump(0));
+            out
+        }
         _ => generic(),
     }
 }
@@ -950,6 +1043,25 @@ pub fn editor_options(name: &str, index: usize) -> Vec<EditorOption> {
         ("radar" | "uradar", 3) => {
             enum_options("radarsort", RadarSort::ALL.iter().map(|v| v.name()))
         }
+        // `OperationStatement`'s op button (`LogicOp.symbol`/`selectTranslate`).
+        ("op", 0) => symbol_options(LogicOp::ALL.iter().map(|v| (v.name(), v.symbol()))),
+        // `JumpStatement.addOp` / `SelectStatement` (`ConditionOp.symbol`).
+        ("select" | "jump", 1) => {
+            symbol_options(ConditionOp::ALL.iter().map(|v| (v.name(), v.symbol())))
+        }
+        // `LookupStatement` (`GlobalVars.lookableContent`).
+        ("lookup", 0) => enum_options(
+            "contenttype",
+            [
+                ContentType::Block,
+                ContentType::Unit,
+                ContentType::Item,
+                ContentType::Liquid,
+                ContentType::Team,
+            ]
+            .into_iter()
+            .map(ContentType::name),
+        ),
         _ => {
             let Some(statement) = default_statement(name) else {
                 return Vec::new();
@@ -975,6 +1087,27 @@ fn enum_options<'a>(class: &str, names: impl Iterator<Item = &'a str>) -> Vec<Ed
             name: name.to_owned(),
             label: name.to_owned(),
             key: format!("{}.label.{}", class.to_lowercase(), name.to_lowercase()),
+        })
+        .collect()
+}
+
+/// `selectTranslate(symbol)` options (`LogicOp`/`ConditionOp` buttons): the
+/// symbol is the label, and `not`/`and`/`or`/`b-and`/`xor`/`flip`/`always`
+/// resolve through `name.token.<symbol>` (`LStatement.java:199-207`).
+fn symbol_options<'a, I>(pairs: I) -> Vec<EditorOption>
+where
+    I: Iterator<Item = (&'a str, &'a str)>,
+{
+    pairs
+        .map(|(name, symbol)| EditorOption {
+            name: name.to_owned(),
+            label: symbol.to_owned(),
+            key: match symbol {
+                "not" | "and" | "or" | "b-and" | "xor" | "flip" | "always" => {
+                    format!("name.token.{symbol}")
+                }
+                _ => String::new(),
+            },
         })
         .collect()
 }
@@ -1240,5 +1373,113 @@ mod tests {
             draw.iter()
                 .any(|o| o.name == "lineRect" && o.key == "graphicstype.label.linerect")
         );
+    }
+
+    #[test]
+    fn operation_flow_layouts_match_java() {
+        // `op` binary: dest = a op b (`LStatements.java:685-737`).
+        let add = layout("op", &["add", "r", "a", "b"]);
+        assert_eq!(
+            add.iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 1, ""),
+                (EditorKind::Text, 0, "="),
+                (EditorKind::Field, 2, ""),
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Field, 3, ""),
+            ]
+        );
+        // unary: op first, one operand.
+        let not = layout("op", &["not", "r", "a", "b"]);
+        assert_eq!((not[2].kind, not[2].index), (EditorKind::Select, 0));
+        assert_eq!((not[3].kind, not[3].index), (EditorKind::Field, 2));
+        assert_eq!(not.len(), 4);
+        // func: op first, two operands (`max`, and `logn` from `LogicOp.func`).
+        let max = layout("op", &["max", "r", "a", "b"]);
+        assert_eq!((max[2].kind, max[2].index), (EditorKind::Select, 0));
+        assert_eq!(max.len(), 5);
+        let logn = layout("op", &["logn", "r", "a", "b"]);
+        assert_eq!((logn[2].kind, logn[2].index), (EditorKind::Select, 0));
+        // `select`: result = if comp0 op comp1 then a else b.
+        let select = layout("select", &["r", "notEqual", "x", "false", "a", "b"]);
+        assert_eq!(
+            select.iter().map(|i| (i.kind, i.index)).collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 0),
+                (EditorKind::Text, 0),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 2),
+                (EditorKind::Select, 1),
+                (EditorKind::Field, 3),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 4),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 5),
+            ]
+        );
+        // `always` hides both operand fields.
+        let always = layout("select", &["r", "always", "x", "false", "a", "b"]);
+        assert_eq!(
+            always.iter().map(|i| (i.kind, i.index)).collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 0),
+                (EditorKind::Text, 0),
+                (EditorKind::Text, 0),
+                (EditorKind::Select, 1),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 4),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 5),
+            ]
+        );
+        // `wait`/`stop`/`end`.
+        assert_eq!(layout("wait", &["0.5"]).len(), 2);
+        assert!(layout("stop", &[]).is_empty());
+        assert!(layout("end", &[]).is_empty());
+        // `lookup`: result = lookup type # id (field order type, result, id).
+        let lookup = layout("lookup", &["item", "r", "0"]);
+        assert_eq!(
+            lookup.iter().map(|i| (i.kind, i.index)).collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 1),
+                (EditorKind::Text, 0),
+                (EditorKind::Select, 0),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 2),
+            ]
+        );
+        // `packcolor`/`unpackcolor` operand order.
+        let pack = layout("packcolor", &["r", "1", "0", "0", "1"]);
+        assert_eq!((pack[3].kind, pack[3].index), (EditorKind::Field, 1));
+        assert_eq!((pack[6].kind, pack[6].index), (EditorKind::Field, 4));
+        let unpack = layout("unpackcolor", &["r", "g", "b", "a", "c"]);
+        assert_eq!((unpack[6].kind, unpack[6].index), (EditorKind::Field, 4));
+        // `jump`: if value op compare + the target button (dest_index).
+        let jump = layout("jump", &["3", "notEqual", "x", "false"]);
+        assert_eq!((jump[0].kind, jump[0].label), (EditorKind::Text, "if"));
+        assert_eq!((jump[1].kind, jump[1].index), (EditorKind::Field, 2));
+        assert_eq!((jump[2].kind, jump[2].index), (EditorKind::Select, 1));
+        assert_eq!((jump[3].kind, jump[3].index), (EditorKind::Field, 3));
+        assert_eq!((jump[4].kind, jump[4].index), (EditorKind::Jump, 0));
+        // `LogicOp`/`ConditionOp` selects show symbols, not names.
+        let ops = editor_options("op", 0);
+        assert_eq!((ops[0].name.as_str(), ops[0].label.as_str()), ("add", "+"));
+        let conds = editor_options("select", 1);
+        assert!(
+            conds
+                .iter()
+                .any(|o| o.name == "notEqual" && o.label == "not" && o.key == "name.token.not")
+        );
+        assert!(
+            conds
+                .iter()
+                .any(|o| o.name == "always" && o.key == "name.token.always")
+        );
+        // `lookup` options are the lookable content types.
+        let lookup = editor_options("lookup", 0);
+        assert_eq!(lookup.len(), 5);
+        assert!(lookup.iter().any(|o| o.name == "team"));
     }
 }
