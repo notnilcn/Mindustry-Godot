@@ -1227,6 +1227,29 @@ impl Sim {
                 e @ LogicWorldEvent::Message { .. } if self.logic_ui_events.len() < 256 => {
                     self.logic_ui_events.push(e);
                 }
+                // `ucontrol payDrop`/`payTake` (T1): applied through the same
+                // helpers the player input uses.
+                LogicWorldEvent::Payload {
+                    carrier,
+                    kind,
+                    x,
+                    y,
+                    units: _,
+                } => {
+                    let carrier = bevy_ecs::entity::Entity::from_bits(carrier);
+                    match kind {
+                        0 => {
+                            let _ = self.payload_pickup_unit(carrier, x, y, None);
+                        }
+                        1 => {
+                            let _ = self.payload_pickup_build(carrier, x, y);
+                        }
+                        2 => {
+                            let _ = self.payload_drop(carrier, x, y);
+                        }
+                        _ => {}
+                    }
+                }
                 // `CutsceneI` state lives in `LogicWorldState.cutscene` (T3).
                 _ => {}
             }

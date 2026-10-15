@@ -1305,26 +1305,40 @@ impl Instruction {
                 }
             }
             Instruction::UnitBind { type_ } => {
+                // `if(!exec.privileged && !state.rules.logicUnitControl) return;`
+                if !exec.privileged
+                    && !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(
+                        world,
+                    ))
+                {
+                    return;
+                }
                 let selector = exec.arena.get(type_.id()).clone();
-                let type_id = match selector.value_obj() {
-                    Some(LogicObject::Content(c)) => Some(c.id),
+                let team = exec.team;
+                let privileged = exec.privileged;
+                let bound = match selector.value_obj() {
+                    Some(LogicObject::Content(c))
+                        if c.type_ == crate::content::ContentType::Unit =>
+                    {
+                        let index = c.id as usize;
+                        if exec.binds.len() <= index {
+                            exec.binds.resize(index + 1, 0);
+                        }
+                        let cursor = &mut exec.binds[index];
+                        unit_control::bind_next(world, c.id, team, cursor)
+                    }
+                    Some(LogicObject::Unit(unit))
+                        if unit_control::bind_object_ok(world, team, privileged, *unit) =>
+                    {
+                        Some(*unit)
+                    }
                     _ => None,
                 };
-                let bound = type_id.and_then(|id| {
-                    let index = id as usize;
-                    if exec.binds.len() <= index {
-                        exec.binds.resize(index + 1, 0);
-                    }
-                    let cursor = &mut exec.binds[index];
-                    let team = exec.team;
-                    unit_control::bind_next(world, id, team, cursor)
-                });
+                // `exec.unit.setconst(value)` (constants included).
                 let unit_var = exec.unit;
-                if !exec.is_constant(unit_var) {
-                    exec.arena
-                        .get_mut(unit_var)
-                        .set_obj(bound.map(LogicObject::Unit));
-                }
+                exec.arena
+                    .get_mut(unit_var)
+                    .set_const(bound.map(LogicObject::Unit));
             }
             Instruction::UnitControl {
                 type_,
@@ -1332,9 +1346,12 @@ impl Instruction {
                 p2,
                 p3,
                 p4,
-                p5: _,
+                p5,
             } => {
-                if !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(world))
+                if !exec.privileged
+                    && !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(
+                        world,
+                    ))
                 {
                     return;
                 }
@@ -1342,19 +1359,7 @@ impl Instruction {
                 let Some(LogicObject::Unit(unit)) = bound else {
                     return;
                 };
-                let privileged = exec.privileged;
-                let team = exec.team;
-                if unit_control::check_logic_ai(world, team, privileged, unit, Some(unit), true)
-                    .is_none()
-                {
-                    return;
-                }
-                unit_control::refresh_control_timer(world, unit);
-                let params: Vec<LVar> = [*p1, *p2, *p3, *p4]
-                    .iter()
-                    .map(|v| exec.arena.get(v.id()).clone())
-                    .collect();
-                unit_control::apply_control(world, unit, *type_, &params);
+                unit_control::apply_control(exec, world, unit, *type_, *p1, *p2, *p3, *p4, *p5);
             }
             Instruction::UnitLocate {
                 locate,
@@ -1732,6 +1737,9 @@ pub struct Executor {
     pub link_ids: IndexSet<i32>,
     /// Per-unit-type binding cursor (`LExecutor.binds`).
     pub binds: Vec<u32>,
+    /// `LExecutor.unitTimeouts`: last transfer tick per unit (entity keyed;
+    /// Java keys by unit id — same identity in a live run).
+    pub unit_timeouts: indexmap::IndexMap<Entity, f32>,
     /// `@queries` result arenas (deviation 3); index 0 is the privileged arena.
     pub queries: Vec<Vec<LogicObject>>,
     /// Global arena snapshot from the assembler (deviation 2).
@@ -1773,6 +1781,7 @@ impl Executor {
             links: Vec::new(),
             link_ids: IndexSet::new(),
             binds: Vec::new(),
+            unit_timeouts: indexmap::IndexMap::new(),
             queries: Vec::new(),
             globals: crate::logic::globals::GlobalVars::new(),
             global_mirrors: Vec::new(),

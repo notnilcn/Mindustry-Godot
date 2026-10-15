@@ -315,6 +315,20 @@ pub enum LogicWorldEvent {
     },
     /// `SyncI` (`LogicSyncEvent`).
     Sync(Box<LogicSyncEvent>),
+    /// `ucontrol payDrop`/`payTake`: applied by the owning `Sim` (the payload
+    /// stack lives behind the block runtime, which the VM cannot reach).
+    Payload {
+        /// Carrier unit (`Entity::to_bits`).
+        carrier: u64,
+        /// `0` = pick up a unit, `1` = pick up the building, `2` = drop.
+        kind: u8,
+        /// World x (unit position for the drop).
+        x: f32,
+        /// World y.
+        y: f32,
+        /// `payTake` `p1.bool()`: `true` targets units, `false` buildings.
+        units: bool,
+    },
     /// `ClientDataI` (`ClientLogicDataEvent`).
     ClientData(Box<ClientLogicDataEvent>),
     /// `FetchI` result summary.
@@ -373,6 +387,7 @@ impl LogicWorldEvent {
             LogicWorldEvent::LocalePrint { .. } => "localeprint",
             LogicWorldEvent::Sync(_) => "sync",
             LogicWorldEvent::ClientData(_) => "clientdata",
+            LogicWorldEvent::Payload { .. } => "payload",
             LogicWorldEvent::Fetch { .. } => "fetch",
             LogicWorldEvent::Query { .. } => "query",
         }

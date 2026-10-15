@@ -835,14 +835,14 @@ pub fn unit_control_gating() -> UnitGatingReport {
     let blocked = if !gate {
         true
     } else {
-        check_logic_ai(&mut world, 0, false, unit, Some(unit), true).is_none()
+        check_logic_ai(&mut world, 0, false, unit, Some(unit), true, None).is_none()
     };
     // Reset the slot and retry with the gate open.
     world.get_mut::<ControllerSlot>(unit).unwrap().kind = AiKind::Ground;
     world.insert_resource(LogicRulesRes(Box::new(GatingRules { control: true })));
     let gate = mind_core::logic::blocks::rules_ref(&world).logic_unit_control();
     let installed = gate
-        && check_logic_ai(&mut world, 0, false, unit, Some(unit), true).is_some()
+        && check_logic_ai(&mut world, 0, false, unit, Some(unit), true, None).is_some()
         && world.get::<ControllerSlot>(unit).unwrap().kind == AiKind::Logic;
 
     let mut cursor = 0u32;

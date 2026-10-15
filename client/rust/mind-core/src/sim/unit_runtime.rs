@@ -2863,6 +2863,7 @@ pub fn unit_update_system(world: &mut World) {
                     flying_find: false,
                     core_override: None,
                     should_shoot: true,
+                    ..Default::default()
                 },
             );
         } else if slot.kind == AiKind::Suicide {
@@ -2911,6 +2912,7 @@ pub fn unit_update_system(world: &mut World) {
                     flying_find: false,
                     core_override: None,
                     should_shoot: true,
+                    ..Default::default()
                 },
             );
             let mut state = crate::ai::types::suicide::SuicideAi {
@@ -3089,6 +3091,89 @@ pub fn unit_update_system(world: &mut World) {
                 *stored = state;
             } else if world.get_entity(entity).is_ok() {
                 world.entity_mut(entity).insert(state);
+            }
+        } else if slot.kind == AiKind::Logic {
+            // `LogicAI` (T1): `AIController.updateUnit` runs
+            // `updateTargeting()` (weapons) before `updateMovement()`.
+            //
+            // A bare `Logic` slot without the component (only reachable through
+            // a decoded fixture that sets the kind directly; Java cannot reach
+            // this state) is left inert.
+            if let Some(mut state) = world
+                .get::<crate::ai::types::logic::LogicAi>(entity)
+                .cloned()
+            {
+                let can_boost = world
+                    .get::<UnitTypeComp>(entity)
+                    .and_then(|comp| runtime.content.unit(comp.type_id))
+                    .is_some_and(|def| def.can_boost);
+                let should_shoot = state.shoot && !(can_boost && state.boost);
+                let explicit = matches!(
+                    state.aim_control,
+                    crate::logic::enums::LUnitControl::Target
+                        | crate::logic::enums::LUnitControl::Targetp
+                );
+                let pos_target = (state.aim_control == crate::logic::enums::LUnitControl::Target)
+                    .then_some(state.pos_target);
+                let main_target = if state.aim_control == crate::logic::enums::LUnitControl::Targetp
+                {
+                    state.main_target
+                } else {
+                    None
+                };
+                logic_ai_weapon_pass(
+                    world,
+                    &runtime.content,
+                    &queries,
+                    entity,
+                    team,
+                    main_target,
+                    pos_target,
+                    should_shoot,
+                    explicit,
+                );
+                let alive = {
+                    runtime.control_path();
+                    let UnitRuntime {
+                        content,
+                        grid,
+                        pathfinder,
+                        control_path,
+                        ..
+                    } = &mut runtime;
+                    let mut ctx = crate::ai::ai_controller::AiCtx {
+                        world,
+                        grid,
+                        content,
+                        pathfinder,
+                        team,
+                    };
+                    crate::ai::types::logic::update_logic(
+                        &mut ctx,
+                        entity,
+                        &mut state,
+                        control_path,
+                    )
+                };
+                if alive {
+                    if let Some(mut stored) =
+                        world.get_mut::<crate::ai::types::logic::LogicAi>(entity)
+                    {
+                        *stored = state;
+                    } else if world.get_entity(entity).is_ok() {
+                        world.entity_mut(entity).insert(state);
+                    }
+                } else {
+                    // `unit.resetController()` (the unit loop holds the
+                    // resolved def; `reset_controller`'s `with_content` cannot
+                    // see the `UnitRuntime` removed by this system).
+                    let def = world
+                        .get::<UnitTypeComp>(entity)
+                        .and_then(|comp| runtime.content.unit(comp.type_id));
+                    crate::logic::executor::unit_control::reset_controller_def(
+                        world, entity, def, team,
+                    );
+                }
             }
         } else if slot.kind == AiKind::NoAi {
             // `NoAI.updateUnit(){}`: the dummy never runs a controller (the
@@ -3952,7 +4037,7 @@ impl Sim {
     /// With no explicit `target`, resolves the candidate like
     /// `InputHandler.tryPickupPayload`: the closest unit to the cursor point
     /// within the carrier's reach (`carrier.hitSize * 2`).
-    fn payload_pickup_unit(
+    pub(crate) fn payload_pickup_unit(
         &mut self,
         carrier: Entity,
         x: f32,
@@ -4096,7 +4181,7 @@ impl Sim {
     }
 
     /// `InputHandler.requestBuildPayload` + `PayloadComp.canPickup(Building)`.
-    fn payload_pickup_build(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
+    pub(crate) fn payload_pickup_build(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
         let tx = WorldGrid::to_tile(x) as i16;
         let ty = WorldGrid::to_tile(y) as i16;
         let Some(build) = self
@@ -4200,7 +4285,7 @@ impl Sim {
     }
 
     /// `InputHandler.requestDropPayload` + `PayloadComp.dropLastPayload`.
-    fn payload_drop(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
+    pub(crate) fn payload_drop(&mut self, carrier: Entity, x: f32, y: f32) -> bool {
         // `InputHandler.tryDropPayload` -> `requestDropPayload(player,
         // player.x, player.y)`: the payload lands at the carrier, never the
         // cursor (`InputHandler.java:1058-1063`).
@@ -4643,6 +4728,7 @@ fn update_ground_ai(
             flying_find: false,
             core_override: core_in_range.then_some(core).flatten(),
             should_shoot: true,
+            ..Default::default()
         },
     );
     // `GroundAI.updateMovement` ends with `faceTarget()` (GroundAI.java:61).
@@ -4803,6 +4889,7 @@ fn update_flying_ai(
             flying_find: true,
             core_override: None,
             should_shoot: true,
+            ..Default::default()
         },
     );
 
@@ -5022,6 +5109,7 @@ fn update_flying_follow_ai(
             flying_find: true,
             core_override: None,
             should_shoot: true,
+            ..Default::default()
         },
     );
     if let Some(mut stored) = world.get_mut::<FlyingAiState>(entity) {
@@ -5303,6 +5391,7 @@ fn update_hug_ai(
             flying_find: false,
             core_override: core_in_range.then_some(core).flatten(),
             should_shoot: true,
+            ..Default::default()
         },
     );
     // `faceTarget()`.
@@ -5674,6 +5763,7 @@ pub(crate) fn update_ai_weapons_for(
             flying_find: false,
             core_override: None,
             should_shoot: true,
+            ..Default::default()
         },
     );
 }
@@ -5740,9 +5830,43 @@ fn command_ai_weapon_pass(
             flying_find: false,
             core_override: None,
             should_shoot,
+            ..Default::default()
         },
     );
     main_target
+}
+
+/// `LogicAI`'s `updateWeapons` pass (T1): `target()` returns `posTarget`/
+/// `mainTarget`, `invalid`/`checkTarget` return false, every mount uses the
+/// controller target, and `shouldShoot() = shoot && !(canBoost && boost)`.
+#[allow(clippy::too_many_arguments)]
+fn logic_ai_weapon_pass(
+    world: &mut World,
+    content: &ContentRegistry,
+    queries: &TargetQueries,
+    entity: Entity,
+    team: u8,
+    main_target: Option<Entity>,
+    pos_target: Option<(f32, f32)>,
+    should_shoot: bool,
+    explicit_target: bool,
+) {
+    update_ai_weapons(
+        world,
+        content,
+        queries,
+        entity,
+        team,
+        AiWeaponCtx {
+            main_target,
+            retarget: true,
+            flying_find: false,
+            core_override: None,
+            should_shoot,
+            explicit_target,
+            pos_target,
+        },
+    );
 }
 
 /// World-pixel center of a live building (`Pos`, else the tile's `worldx`).
@@ -5933,6 +6057,7 @@ impl Default for AiWeaponsState {
 }
 
 /// One `AIController.updateWeapons` pass (`AIController.java:172-257`).
+#[derive(Default)]
 pub(crate) struct AiWeaponCtx {
     /// The controller's main target (`AIController.target`).
     pub main_target: Option<Entity>,
@@ -5944,6 +6069,13 @@ pub(crate) struct AiWeaponCtx {
     pub core_override: Option<Entity>,
     /// `shouldShoot()` (`false` for a building `BuilderAI`; `true` otherwise).
     pub should_shoot: bool,
+    /// `LogicAI.target()` override: every controllable mount uses
+    /// `main_target` instead of the per-mount `findTarget` query, and
+    /// `invalid`/`checkTarget` return false so the target is never dropped.
+    pub explicit_target: bool,
+    /// `LogicAI.aimControl == target`: an aim point with no entity
+    /// (`posTarget`); `mount.target` stays null while aim/shoot use the point.
+    pub pos_target: Option<(f32, f32)>,
 }
 
 /// `AIController.target`: per-mount targets, aim and the shoot gate
@@ -5989,20 +6121,26 @@ pub(crate) fn update_ai_weapons(
         .copied()
         .unwrap_or_default();
     // `noTargetTime += Time.delta; if(invalid(target)){ ... target = null; }
-    //  else noTargetTime = 0f;`
-    let target = match ctx.main_target {
-        Some(target) => {
-            if invalidate_target(world, content, team, Some(target), pos.x, pos.y, f32::MAX) {
+    //  else noTargetTime = 0f;` — `LogicAI.invalid` always returns false, so an
+    // explicit-target pass never drops the target nor ages `noTargetTime`.
+    let target = if ctx.explicit_target || ctx.pos_target.is_some() {
+        state.no_target_time = 0.0;
+        ctx.main_target
+    } else {
+        match ctx.main_target {
+            Some(target) => {
+                if invalidate_target(world, content, team, Some(target), pos.x, pos.y, f32::MAX) {
+                    state.no_target_time += 1.0;
+                    None
+                } else {
+                    state.no_target_time = 0.0;
+                    Some(target)
+                }
+            }
+            None => {
                 state.no_target_time += 1.0;
                 None
-            } else {
-                state.no_target_time = 0.0;
-                Some(target)
             }
-        }
-        None => {
-            state.no_target_time += 1.0;
-            None
         }
     };
 
@@ -6047,6 +6185,11 @@ pub(crate) fn update_ai_weapons(
             // core while it is in range.
             mount_target = Some(core);
         } else if single_target {
+            mount_target = target;
+        } else if ctx.explicit_target {
+            // `LogicAI.findTarget` = `target(...)`: every mount uses the
+            // posTarget/mainTarget, never the per-mount query, and
+            // `LogicAI.checkTarget` always returns false.
             mount_target = target;
         } else {
             if ctx.retarget {
@@ -6102,7 +6245,26 @@ pub(crate) fn update_ai_weapons(
         }
         let mut shoot = false;
         let mut aim = None;
-        if let Some(chosen) = mount_target {
+        if let Some((px, py)) = ctx.pos_target {
+            // `LogicAI.aimControl == target`: `mount.target` is the `posTarget`
+            // object (no entity in the port); shoot when the point is in range,
+            // aim at the static-point intercept.
+            let dx = px - mount_x;
+            let dy = py - mount_y;
+            shoot = dx * dx + dy * dy <= wrange * wrange && ctx.should_shoot;
+            let (bullet_speed, keep_velocity) = content
+                .bullet(weapon.bullet.id)
+                .map(|bullet| (bullet.speed, bullet.keep_velocity))
+                .unwrap_or((0.0, true));
+            aim = Some(crate::combat::targeting::intercept_positions(
+                (pos.x, pos.y),
+                (src_vel.x, src_vel.y),
+                (px, py),
+                (0.0, 0.0),
+                keep_velocity,
+                bullet_speed,
+            ));
+        } else if let Some(chosen) = mount_target {
             let hit = target_hit_size(world, content, chosen);
             shoot = world.get::<Pos>(chosen).is_some_and(|tpos| {
                 let dx = tpos.x - mount_x;

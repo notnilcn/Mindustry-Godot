@@ -2257,6 +2257,12 @@ pub(super) fn install_logic_world(sim: &mut Sim) {
     sim.ecs
         .0
         .insert_resource(crate::logic::world::MessageState::default());
+    let content = crate::world::harness::BuildHarness::load_content();
+    sim.ecs
+        .0
+        .insert_resource(crate::logic::world::LogicContentIndex::from_content(
+            &content,
+        ));
 }
 
 /// Places a configurable world processor running `code`.

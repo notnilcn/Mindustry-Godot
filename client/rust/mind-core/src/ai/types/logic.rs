@@ -1,217 +1,200 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! `LogicAI` (plan 11 §4.2). The logic controller keeps its state across saves
-//! (`keepState = true`) and resets itself after [`LOGIC_TIMEOUT_TICKS`] without a
-//! live logic processor driving it (upstream `LogicAI` timeout semantics).
+//! `LogicAI`: the controller installed by `ubind`/`ucontrol`/`ulocate`
+//! (`core/src/mindustry/ai/types/LogicAI.java`, ported whole).
 //!
-//! Ported from `core/src/mindustry/ai/types/LogicAI.java`. Plan 13 owns the
-//! `LUnitControl` setter bridge; this module owns the timer/reset behavior and
-//! exposes the public state plan 13 writes.
+//! Java fields this keeps: `control`, `moveX/moveY/moveRad`, `controlTimer`,
+//! `targetTimer`, `controller`, `plan`, `execCache`, `aimControl`, `boost`,
+//! `mainTarget`, `shoot`, `posTarget`, `radars`. The movement body is
+//! `LogicAI.updateMovement`; the setters live in the logic executor
+//! (`logic::executor::unit_control`).
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
-use indexmap::IndexSet;
+use indexmap::{IndexMap, IndexSet};
 
 use super::super::ai_controller::AiCtx;
+use crate::entities::comp::Pos;
+use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+use crate::entities::comp::unit::weapon_mount::UnitWeapons;
 use crate::logic::enums::LUnitControl;
+use crate::sim::builder::{BuilderPlans, UnitBuildPlan};
 use crate::world::TilePos;
-use crate::world::plan::BuildPlan;
+use crate::world::WorldGrid;
 
-/// `LogicAI.timeout` at 60 Hz: 10 seconds (`Time.toSeconds(10)`).
+/// `LogicAI.logicControlTimeout`: 10 s at 60 Hz.
 pub const LOGIC_TIMEOUT_TICKS: f32 = 600.0;
 /// `LogicAI.updateMovement` radar-cache refresh period (40 ticks).
 pub const LOGIC_TARGET_TIMER: f32 = 40.0;
+/// `LogicAI.transferDelay`: 1.5 s at 60 Hz.
+pub const TRANSFER_DELAY_TICKS: f32 = 90.0;
+
+/// `UnitLocateI.Cache`: the per-instruction `ulocate` result.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LocateCache {
+    /// `cache.x` (tile coordinates).
+    pub x: f32,
+    /// `cache.y`.
+    pub y: f32,
+    /// `cache.found`.
+    pub found: bool,
+    /// `cache.build`.
+    pub build: Option<Entity>,
+}
 
 /// `LogicAI` controller state.
 ///
-/// The `LUnitControl` setter surface (plan 13's `unit_control`) writes these
-/// fields; the movement/behaviour body reads them. `target_id` holds the
-/// upstream `Teamc` object id (unit or building) because the bridge passes a
-/// numeric id, not an ECS handle.
-#[derive(Debug, Clone, PartialEq, Component)]
+/// `keepState() = true`: the component survives save/load; the executor's
+/// `ucontrol` setters write it and [`update_logic`] reads it.
+#[derive(Debug, Clone, Component)]
 pub struct LogicAi {
-    /// Bound unit.
-    pub unit: Option<Entity>,
-    /// Building position driving the controller (`controller.pos()`; `i32::MIN`
-    /// = none).
-    pub building: i32,
-    /// Ticks left before the controller invalidates itself.
-    pub timeout: f32,
-    /// Whether a processor is currently driving it.
-    pub controlled: bool,
-    /// Active `LUnitControl` mode (`LogicAI.control`).
+    /// `control`.
     pub control: LUnitControl,
-    /// `targetPos` (world pixels).
-    pub target_pos: (f32, f32),
-    /// `target` object id (`-1` = none).
-    pub target_id: i32,
-    /// `itemTarget` (world pixels).
-    pub item_target: (f32, f32),
-    /// `itemDropTarget` (world pixels).
-    pub item_drop_target: (f32, f32),
-    /// `itemAmount`.
-    pub item_amount: i32,
-    /// `unit.flag`.
-    pub flag: i32,
-    /// `boost`.
-    pub boost: bool,
-    /// `moving`.
-    pub moving: bool,
-    /// `mineTile` (packed `TilePos`; `i32::MIN` = none).
-    pub mine_tile: i32,
-    /// `buildPlan` (place or deconstruct).
-    pub build_plan: Option<BuildPlan>,
-    /// `targetTimer`: ticks until the per-instruction radar cache resets.
+    /// `moveX` (world pixels).
+    pub move_x: f32,
+    /// `moveY` (world pixels).
+    pub move_y: f32,
+    /// `moveRad` (`approach`).
+    pub move_rad: f32,
+    /// `controlTimer`.
+    pub control_timer: f32,
+    /// `targetTimer`.
     pub target_timer: f32,
-    /// `radars`: instruction keys refreshed this period (`checkTargetTimer`).
-    pub radars: IndexSet<i32>,
+    /// `controller`: the processor building driving this unit.
+    pub controller: Option<Entity>,
+    /// `plan`: the running `ucontrol build`/`deconstruct` plan.
+    pub plan: UnitBuildPlan,
+    /// `execCache`: per-instruction `ulocate` results, keyed by instruction
+    /// index in the owning executor's program.
+    pub exec_cache: IndexMap<u32, LocateCache>,
     /// `aimControl`.
     pub aim_control: LUnitControl,
+    /// `boost`.
+    pub boost: bool,
+    /// `mainTarget` (`targetp`).
+    pub main_target: Option<Entity>,
     /// `shoot`.
     pub shoot: bool,
-    /// `mainTarget`.
-    pub main_target: Option<Entity>,
+    /// `posTarget` (`target`), world pixels.
+    pub pos_target: (f32, f32),
+    /// `radars`: instruction keys seen since the last 40-tick clear.
+    pub radars: IndexSet<u32>,
 }
 
 impl Default for LogicAi {
     fn default() -> Self {
         Self {
-            unit: None,
-            building: i32::MIN,
-            timeout: LOGIC_TIMEOUT_TICKS,
-            controlled: false,
             control: LUnitControl::Idle,
-            target_pos: (0.0, 0.0),
-            target_id: -1,
-            item_target: (0.0, 0.0),
-            item_drop_target: (0.0, 0.0),
-            item_amount: 0,
-            flag: 0,
-            boost: false,
-            moving: false,
-            mine_tile: i32::MIN,
-            build_plan: None,
+            move_x: 0.0,
+            move_y: 0.0,
+            move_rad: 0.0,
+            control_timer: LOGIC_TIMEOUT_TICKS,
             target_timer: 0.0,
-            radars: IndexSet::new(),
+            controller: None,
+            plan: UnitBuildPlan::place(0, 0, 0, crate::content::BlockId::AIR),
+            exec_cache: IndexMap::new(),
             aim_control: LUnitControl::Stop,
-            shoot: false,
+            boost: false,
             main_target: None,
+            shoot: false,
+            pos_target: (0.0, 0.0),
+            radars: IndexSet::new(),
         }
     }
 }
 
 impl LogicAi {
-    /// Creates a logic controller bound to `unit` and processor `building`.
-    pub fn new(unit: Entity, building: i32) -> Self {
+    /// A fresh controller bound to `controller` (`new LogicAI()` +
+    /// `la.controller = exec.thisv.building()`).
+    pub fn new(controller: Option<Entity>) -> Self {
         Self {
-            unit: Some(unit),
-            building,
+            controller,
             ..Self::default()
         }
     }
 
-    /// Marks the controller as driven and refreshes the timeout
-    /// (`LogicAI.control`).
-    pub fn control(&mut self) {
-        self.controlled = true;
-        self.timeout = LOGIC_TIMEOUT_TICKS;
-    }
-
-    /// `LogicAI.checkTargetTimer`-adjacent expiration test.
-    pub fn expired(&self) -> bool {
-        self.timeout <= 0.0
-    }
-
-    /// Sets the packet-position fields (`LUnitControl` move family).
-    pub fn set_target_pos(&mut self, x: f32, y: f32) {
-        self.target_pos = (x, y);
-        self.target_id = -1;
-        self.moving = true;
-    }
-
-    /// `LogicAI.checkTargetTimer`: `true` the first time `key` is seen in the
-    /// current 40-tick period (per-instruction result cache gate).
-    pub fn check_target_timer(&mut self, key: i32) -> bool {
+    /// `LogicAI.checkTargetTimer`: `true` the first time `key` is seen since
+    /// the last 40-tick clear.
+    pub fn check_target_timer(&mut self, key: u32) -> bool {
         self.radars.insert(key)
-    }
-
-    /// Current move destination as a tile (`move`/`pathfind` families).
-    pub fn target_tile(&self) -> Option<TilePos> {
-        if self.moving {
-            Some(TilePos::new(
-                crate::world::WorldGrid::to_tile(self.target_pos.0) as i16,
-                crate::world::WorldGrid::to_tile(self.target_pos.1) as i16,
-            ))
-        } else {
-            None
-        }
-    }
-
-    /// Applies one `LUnitControl` setter (plan 13's `UnitControlI` bridge).
-    ///
-    /// `params` are the instruction operands in upstream order. Returns `false`
-    /// only for `unbind` (the controller should be released); the caller owns
-    /// the `Rules.logicUnitControl`/`logicUnitBuild` gating.
-    pub fn apply_control(&mut self, control: LUnitControl, params: &[f64]) -> bool {
-        self.control = control;
-        let f = |i: usize| params.get(i).copied().unwrap_or(0.0) as f32;
-        let id = |i: usize| params.get(i).copied().unwrap_or(-1.0) as i32;
-        match control {
-            LUnitControl::Idle | LUnitControl::Stop => {
-                self.moving = false;
-                self.target_id = -1;
-            }
-            LUnitControl::Move | LUnitControl::Approach | LUnitControl::Pathfind => {
-                self.set_target_pos(f(0), f(1));
-            }
-            LUnitControl::AutoPathfind => {
-                // Upstream picks the nearest enemy core; the target position is
-                // resolved by the movement body from `Rules`.
-                self.moving = true;
-            }
-            LUnitControl::Boost => self.boost = f(0) != 0.0,
-            LUnitControl::Flag => self.flag = id(0),
-            LUnitControl::Target => self.target_id = id(0),
-            LUnitControl::Targetp => self.set_target_pos(f(0), f(1)),
-            LUnitControl::ItemDrop => self.item_drop_target = (f(0), f(1)),
-            LUnitControl::ItemTake => self.item_target = (f(0), f(1)),
-            LUnitControl::PayDrop | LUnitControl::PayTake | LUnitControl::PayEnter => {
-                self.item_amount = id(2).max(0);
-            }
-            LUnitControl::Mine => {
-                self.mine_tile = TilePos::new(f(0) as i16, f(1) as i16).pack();
-            }
-            LUnitControl::Build => {
-                self.build_plan = Some(BuildPlan::place(
-                    f(0) as i32,
-                    f(1) as i32,
-                    f(2) as u8,
-                    crate::content::BlockId::new(id(3).max(0) as u16),
-                ));
-            }
-            LUnitControl::Deconstruct => {
-                self.build_plan = Some(BuildPlan::break_plan(f(0) as i32, f(1) as i32));
-            }
-            LUnitControl::Within | LUnitControl::GetBlock => {}
-            LUnitControl::Unbind => {
-                self.controlled = false;
-                self.moving = false;
-                self.target_id = -1;
-                return false;
-            }
-        }
-        true
     }
 }
 
-/// `LogicAI.updateMovement`: refresh the radar cache, count the control timeout
-/// down, and steer the unit for the active `LUnitControl` mode.
+/// `UnitComp.range()`: `type.maxRange > 0 ? maxRange : range` (world units).
+pub fn unit_range(ctx: &AiCtx, unit: Entity) -> f32 {
+    ctx.world
+        .get::<UnitTypeComp>(unit)
+        .and_then(|comp| ctx.content.unit(comp.type_id))
+        .map(|def| {
+            if def.max_range > 0.0 {
+                def.max_range
+            } else {
+                def.range
+            }
+        })
+        .unwrap_or(0.0)
+}
+
+/// `Unit.prefRotation()` (`UnitComp.java:197-208`).
+fn pref_rotation(ctx: &AiCtx, unit: Entity) -> f32 {
+    let Some(pos) = ctx.world.get::<Pos>(unit).copied() else {
+        return 0.0;
+    };
+    let def = ctx
+        .world
+        .get::<UnitTypeComp>(unit)
+        .and_then(|comp| ctx.content.unit(comp.type_id));
+    // `activelyBuilding() && type.rotateToBuilding` -> angle to the build plan
+    // target (`player_actively_building` returns the active plan's world
+    // position, `None` while not building).
+    if let Some(def) = def.as_ref()
+        && def.rotate_to_building
+        && let Some((tx, ty)) = crate::ai::types::player::player_actively_building(
+            ctx.world,
+            ctx.content,
+            unit,
+            (pos.x, pos.y),
+        )
+    {
+        return (ty - pos.y).atan2(tx - pos.x).to_degrees();
+    }
+    // `mineTile != null` -> angle to the mine tile (tile corner `worldx/y`).
+    if let Some(mine) = ctx
+        .world
+        .get::<crate::entities::comp::unit::comp::MinerComp>(unit)
+        .and_then(|comp| comp.mine_tile)
+    {
+        let ts = crate::config::TILESIZE as f32;
+        return (mine.y() as f32 * ts - pos.y)
+            .atan2(mine.x() as f32 * ts - pos.x)
+            .to_degrees();
+    }
+    // `moving() && type.omniMovement` -> velocity angle.
+    if let Some(vel) = ctx.world.get::<crate::entities::comp::Vel>(unit)
+        && def.as_ref().is_none_or(|def| def.omni_movement)
+        && (vel.x != 0.0 || vel.y != 0.0)
+    {
+        return vel.y.atan2(vel.x).to_degrees();
+    }
+    ctx.world
+        .get::<UnitCore>(unit)
+        .map(|core| core.rotation)
+        .unwrap_or(0.0)
+}
+
+/// `LogicAI.updateMovement` (`LogicAI.java:41-107`): radar-cache refresh,
+/// timeout count-down and the movement/look-at tail.
 ///
-/// Returns `false` once the controller should be reset (caller re-evaluates
-/// selection), matching upstream's `unit.resetController()` path.
-pub fn update_logic(ctx: &mut AiCtx, unit: Entity, state: &mut LogicAi) -> bool {
-    // `updateMovement` head: `targetTimer` / radar set.
+/// Returns `false` when the controller must reset (`unit.resetController()`).
+pub fn update_logic(
+    ctx: &mut AiCtx,
+    unit: Entity,
+    state: &mut LogicAi,
+    control_path: &mut crate::ai::ControlPathfinder,
+) -> bool {
+    // `if(targetTimer > 0f) targetTimer -= Time.delta; else { radars.clear();
+    //  targetTimer = 40f; }`
     if state.target_timer > 0.0 {
         state.target_timer -= 1.0;
     } else {
@@ -219,34 +202,208 @@ pub fn update_logic(ctx: &mut AiCtx, unit: Entity, state: &mut LogicAi) -> bool 
         state.target_timer = LOGIC_TARGET_TIMER;
     }
 
-    state.timeout -= 1.0;
-    if state.expired() {
-        ctx.stop_shooting(unit);
+    // `if(controlTimer > 0 && controller != null && controller.isValid())
+    //  controlTimer -= Time.delta; else { unit.resetController(); return; }`
+    let controller_valid = state
+        .controller
+        .is_some_and(|controller| ctx.world.get_entity(controller).is_ok());
+    if state.control_timer > 0.0 && controller_valid {
+        state.control_timer -= 1.0;
+    } else {
         return false;
     }
 
+    let flying = ctx.is_flying(unit);
+    let (mx, my, mrad) = (state.move_x, state.move_y, state.move_rad);
     match state.control {
         LUnitControl::Move => {
-            let (x, y) = state.target_pos;
-            ctx.move_direct(unit, x, y, 1.0);
+            crate::ai::types::flying::move_to_point_keep_distance(
+                ctx.world,
+                ctx.grid,
+                ctx.content,
+                unit,
+                mx,
+                my,
+                1.0,
+                30.0,
+                flying,
+                false,
+            );
         }
         LUnitControl::Approach => {
-            let (x, y) = state.target_pos;
-            ctx.move_direct(unit, x, y, 7.0);
+            crate::ai::types::flying::move_to_point_keep_distance(
+                ctx.world,
+                ctx.grid,
+                ctx.content,
+                unit,
+                mx,
+                my,
+                mrad - 7.0,
+                7.0,
+                true,
+                false,
+            );
         }
         LUnitControl::Pathfind => {
-            if ctx.is_flying(unit) {
-                let (x, y) = state.target_pos;
-                ctx.move_direct(unit, x, y, 1.0);
-            } else if let Some(tile) = state.target_tile() {
-                ctx.pathfind(unit, tile, 4.0);
+            if flying {
+                crate::ai::types::flying::move_to_point_keep_distance(
+                    ctx.world,
+                    ctx.grid,
+                    ctx.content,
+                    unit,
+                    mx,
+                    my,
+                    1.0,
+                    30.0,
+                    true,
+                    false,
+                );
+            } else {
+                let Some(pos) = ctx.world.get::<Pos>(unit).copied() else {
+                    return true;
+                };
+                let from = TilePos::new(
+                    WorldGrid::to_tile(pos.x) as i16,
+                    WorldGrid::to_tile(pos.y) as i16,
+                );
+                let to = TilePos::new(WorldGrid::to_tile(mx) as i16, WorldGrid::to_tile(my) as i16);
+                let result = control_path.get_path_position(from, to);
+                // `if(result.move)`.
+                if !result.unreachable {
+                    let (dest_x, dest_y) = match result.next {
+                        Some(tile) => (
+                            tile.x() as f32 * crate::config::TILESIZE as f32,
+                            tile.y() as f32 * crate::config::TILESIZE as f32,
+                        ),
+                        None => (mx, my),
+                    };
+                    // `Tmp.v2.epsilonEquals(result.dest, 4.1f) ? 30f : 0f`
+                    // (`Tmp.v2` is the requested destination).
+                    let near_final = (dest_x - mx).abs() <= 4.1 && (dest_y - my).abs() <= 4.1;
+                    crate::ai::types::flying::move_to_point_keep_distance(
+                        ctx.world,
+                        ctx.grid,
+                        ctx.content,
+                        unit,
+                        dest_x,
+                        dest_y,
+                        1.0,
+                        if near_final { 30.0 } else { 0.0 },
+                        true,
+                        false,
+                    );
+                }
             }
         }
-        // `autoPathfind` resolves the nearest enemy core through plan-12
-        // `TeamData`/the spawner; that host query is owned by plan 11/12.
-        LUnitControl::AutoPathfind | LUnitControl::Stop => {}
+        LUnitControl::AutoPathfind => {
+            let Some(pos) = ctx.world.get::<Pos>(unit).copied() else {
+                return true;
+            };
+            let team = ctx
+                .world
+                .get::<crate::entities::comp::TeamComp>(unit)
+                .map(|t| t.team)
+                .unwrap_or(0);
+            let range = unit_range(ctx, unit);
+            let core = crate::sim::unit_runtime::closest_enemy_core(ctx.world, team, pos.x, pos.y);
+            let core_close = core.is_some_and(|core| {
+                ctx.world.get::<Pos>(core).is_some_and(|cpos| {
+                    let dx = cpos.x - pos.x;
+                    let dy = cpos.y - pos.y;
+                    dx * dx + dy * dy <= (range * 0.5) * (range * 0.5)
+                })
+            });
+            if !core_close {
+                // Deviation: the spawner drop-zone stop needs the wave
+                // spawner list (`UnitRuntime.wave_spawner`), which is removed
+                // from the world while the unit loop runs; the core-walk half
+                // is exact.
+                if flying {
+                    if let Some(core) = core
+                        && let Some(cpos) = ctx.world.get::<Pos>(core).copied()
+                    {
+                        crate::ai::types::flying::move_to_point_keep_distance(
+                            ctx.world,
+                            ctx.grid,
+                            ctx.content,
+                            unit,
+                            cpos.x,
+                            cpos.y,
+                            range * 0.5,
+                            100.0,
+                            true,
+                            false,
+                        );
+                    }
+                } else if let Some(core) = core
+                    && let Some(cpos) = ctx.world.get::<Pos>(core).copied()
+                {
+                    ctx.pathfind(
+                        unit,
+                        TilePos::new(
+                            WorldGrid::to_tile(cpos.x) as i16,
+                            WorldGrid::to_tile(cpos.y) as i16,
+                        ),
+                        0.0,
+                    );
+                }
+            }
+        }
+        LUnitControl::Stop => {
+            // `unit.clearBuilding()`.
+            if let Some(mut plans) = ctx.world.get_mut::<BuilderPlans>(unit) {
+                plans.plans.clear();
+            }
+        }
         _ => {}
     }
+
+    // `if(unit.type.canBoost && !unit.type.flying)` elevation lerp. The port
+    // applies the same `shouldBoost = boost || unit.onSolid()` rule in
+    // `movement::update_kinematics` (`UnitComp.updateBoosting`), so mirror
+    // `LogicAI.boost` into `UnitCore.boosting` and let the shared pass lift.
+    let def = ctx
+        .world
+        .get::<UnitTypeComp>(unit)
+        .and_then(|comp| ctx.content.unit(comp.type_id));
+    if let Some(def) = def.as_ref()
+        && def.can_boost
+        && !def.flying
+        && let Some(mut core) = ctx.world.get_mut::<UnitCore>(unit)
+    {
+        core.boosting = state.boost;
+    }
+
+    // `if(!shoot || !unit.type.omniMovement) unit.lookAt(unit.prefRotation());
+    //  else if(unit.hasWeapons() && mounts.length > 0 &&
+    //  !mounts[0].weapon.ignoreRotation) unit.lookAt(mounts[0].aimX, aimY);`
+    let omni = def.as_ref().is_none_or(|def| def.omni_movement);
+    if !state.shoot || !omni {
+        let angle = pref_rotation(ctx, unit);
+        if let Some(mut core) = ctx.world.get_mut::<UnitCore>(unit) {
+            core.rotation = angle;
+        }
+    } else {
+        let ignore_rotation = def
+            .as_ref()
+            .and_then(|def| def.weapons.first())
+            .is_some_and(|weapon| weapon.ignore_rotation);
+        let mounts = ctx.world.get::<UnitWeapons>(unit);
+        if let Some(mounts) = mounts
+            && !mounts.mounts.is_empty()
+            && !ignore_rotation
+        {
+            let (ax, ay) = (mounts.mounts[0].aim_x, mounts.mounts[0].aim_y);
+            let angle = ctx
+                .world
+                .get::<Pos>(unit)
+                .map(|pos| (ay - pos.y).atan2(ax - pos.x).to_degrees());
+            if let (Some(angle), Some(mut core)) = (angle, ctx.world.get_mut::<UnitCore>(unit)) {
+                core.rotation = angle;
+            }
+        }
+    }
+
     true
 }
 
@@ -257,10 +414,12 @@ mod tests {
     use crate::ai::ai_controller::AiCtx;
 
     #[test]
-    fn logic_expires_after_timeout() {
+    fn logic_expires_after_control_timeout() {
         let mut harness = UnitHarness::new(32, 32, 1);
         let unit = harness.spawn("dagger", 0, 64.0, 64.0, 0.0).expect("dagger");
-        let mut state = LogicAi::new(unit, i32::MIN);
+        let processor = harness.spawn("dagger", 0, 100.0, 100.0, 0.0).expect("p2");
+        let mut control_path = crate::ai::ControlPathfinder::new(32, 32);
+        let mut state = LogicAi::new(Some(processor));
         let mut alive = true;
         for _ in 0..(LOGIC_TIMEOUT_TICKS as i32) {
             let mut ctx = AiCtx {
@@ -270,39 +429,36 @@ mod tests {
                 pathfinder: &mut harness.pathfinder,
                 team: 0,
             };
-            alive = update_logic(&mut ctx, unit, &mut state);
+            alive = update_logic(&mut ctx, unit, &mut state, &mut control_path);
         }
-        assert!(!alive, "logic controller invalidates after timeout");
-        // `control()` refreshes it.
-        state.control();
-        assert!(!state.expired());
+        assert!(alive, "controller still runs on the timeout tick itself");
+        let mut ctx = AiCtx {
+            world: &mut harness.build.world,
+            grid: &harness.build.grid,
+            content: &harness.build.content,
+            pathfinder: &mut harness.pathfinder,
+            team: 0,
+        };
+        assert!(
+            !update_logic(&mut ctx, unit, &mut state, &mut control_path),
+            "logic controller invalidates after timeout"
+        );
     }
 
     #[test]
-    fn apply_control_sets_movement_and_flag() {
-        let mut state = LogicAi::default();
-        assert!(state.apply_control(LUnitControl::Move, &[10.0, 20.0]));
-        assert_eq!(state.target_pos, (10.0, 20.0));
-        assert!(state.moving);
-        assert!(state.apply_control(LUnitControl::Flag, &[7.0]));
-        assert_eq!(state.flag, 7);
-        assert!(state.apply_control(LUnitControl::Stop, &[]));
-        assert!(!state.moving);
-        assert_eq!(state.target_id, -1);
-    }
-
-    #[test]
-    fn apply_control_build_and_mine_and_unbind() {
-        let mut state = LogicAi::default();
-        assert!(state.apply_control(LUnitControl::Mine, &[3.0, 4.0]));
-        assert_eq!(state.mine_tile, TilePos::new(3, 4).pack());
-        assert!(state.apply_control(LUnitControl::Build, &[5.0, 6.0, 1.0, 2.0]));
-        let plan = state.build_plan.as_ref().expect("build plan");
-        assert_eq!((plan.x, plan.y, plan.rotation), (5, 6, 1));
-        assert!(state.apply_control(LUnitControl::Deconstruct, &[8.0, 9.0]));
-        assert!(state.build_plan.as_ref().expect("break plan").breaking);
-        assert!(!state.apply_control(LUnitControl::Unbind, &[]));
-        assert!(!state.controlled);
+    fn logic_expires_without_a_controller() {
+        let mut harness = UnitHarness::new(32, 32, 1);
+        let unit = harness.spawn("dagger", 0, 64.0, 64.0, 0.0).expect("dagger");
+        let mut control_path = crate::ai::ControlPathfinder::new(32, 32);
+        let mut state = LogicAi::new(None);
+        let mut ctx = AiCtx {
+            world: &mut harness.build.world,
+            grid: &harness.build.grid,
+            content: &harness.build.content,
+            pathfinder: &mut harness.pathfinder,
+            team: 0,
+        };
+        assert!(!update_logic(&mut ctx, unit, &mut state, &mut control_path));
     }
 
     #[test]
@@ -311,47 +467,8 @@ mod tests {
         assert!(state.check_target_timer(7));
         assert!(!state.check_target_timer(7), "same instruction is cached");
         assert!(state.check_target_timer(8));
-        // The set clears once the 40-tick period elapses.
         state.target_timer = 0.0;
         state.radars.clear();
         assert!(state.check_target_timer(7));
-    }
-
-    #[test]
-    fn update_logic_moves_unit_toward_target() {
-        let mut harness = UnitHarness::new(64, 64, 1);
-        let unit = harness.spawn("dagger", 0, 64.0, 64.0, 0.0).expect("dagger");
-        let mut state = LogicAi::new(unit, i32::MIN);
-        state.control();
-        assert!(state.apply_control(LUnitControl::Move, &[160.0, 160.0]));
-        let before = harness
-            .build
-            .world
-            .get::<crate::entities::comp::Pos>(unit)
-            .unwrap()
-            .x;
-        for _ in 0..10 {
-            // `VelComp.update` first (the live loop's `@MethodPriority(-1)`);
-            // T4 controllers only write `vel`.
-            harness.vel_update(unit);
-            let mut ctx = AiCtx {
-                world: &mut harness.build.world,
-                grid: &harness.build.grid,
-                content: &harness.build.content,
-                pathfinder: &mut harness.pathfinder,
-                team: 0,
-            };
-            assert!(update_logic(&mut ctx, unit, &mut state));
-        }
-        let after = harness
-            .build
-            .world
-            .get::<crate::entities::comp::Pos>(unit)
-            .unwrap()
-            .x;
-        assert!(
-            after > before,
-            "unit moved toward the target ({before} -> {after})"
-        );
     }
 }
