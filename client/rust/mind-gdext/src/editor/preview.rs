@@ -331,6 +331,24 @@ impl MindPreview {
         }
         self.texture_for(path)
     }
+
+    /// `Map.getHighScore`'s settings key: `"hiscore" + file
+    /// nameWithoutExtension + steamid` (`Map.java:66-68`). `""` when the map is
+    /// unknown.
+    #[func]
+    pub fn map_high_score_key(&self, map_name: GString) -> GString {
+        match self.map_for_name(&map_name.to_string()) {
+            Some(map) => GString::from(
+                format!(
+                    "hiscore{}{}",
+                    map.file_stem().unwrap_or_else(|| map.name().to_owned()),
+                    map.steam_id().unwrap_or("")
+                )
+                .as_str(),
+            ),
+            None => GString::new(),
+        }
+    }
 }
 
 /// Plain metadata of one registered map (`maps_list` row fields).

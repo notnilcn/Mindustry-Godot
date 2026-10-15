@@ -669,6 +669,13 @@ impl MindUi {
         }
     }
 
+    /// `Core.settings.getInt(key, default)` for dynamic keys that have no
+    /// settings-table row (e.g. `Map.getHighScore`'s `hiscore<map>`).
+    #[func]
+    pub fn settings_get_int(&self, key: GString, default: i64) -> i64 {
+        self.settings.get_i32(&key.to_string(), default as i32) as i64
+    }
+
     /// Reads one known checkbox setting (`Core.settings.getBool(key)` with the
     /// row default; `false` for an unknown key). The HUD reads display toggles
     /// such as `showperformance`/`fps` through this.
