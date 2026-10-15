@@ -47,6 +47,22 @@ var _modified := false
 var _vars_popup: PopupPanel = null
 var _vars_rows: Array = []
 var _vars_timer := 0
+## Statement element nodes (parallel to `_statements`; `LCanvas.StatementElem`).
+var _row_nodes: Array = []
+## `index -> JumpButton` for the jump elements (`LCanvas.JumpButton`).
+var _jump_buttons: Dictionary = {}
+## Jump-curve + insertion overlay (`LCanvas.DragLayout.draw`, `JumpCurve`).
+var _overlay: Control = null
+## Drag-reorder state (`LCanvas.DragLayout`): dragged element, pointer origin
+## and the current insertion index.
+var _drag_index := -1
+var _drag_active := false
+var _drag_start := Vector2.ZERO
+var _drop_index := -1
+## Jump-target selection state (`LCanvas.JumpButton` touch drag).
+var _jump_selecting := -1
+var _jump_hover := -1
+var _jump_moved := false
 
 
 func _ready() -> void:
@@ -55,6 +71,8 @@ func _ready() -> void:
 	super._ready()
 	set_title_text(_t("@logic"))
 	_build()
+	# `LCanvas.DragLayout`/`JumpCurve` redraw every frame while visible.
+	set_process(true)
 
 
 func _build() -> void:
@@ -86,6 +104,15 @@ func _build() -> void:
 	var add := MindWidgets.icon_button("add", _t("@add"), "cleart")
 	add.pressed.connect(_open_add_dialog)
 	controls.add_child(add)
+
+	# code-instantiated: the jump-arrow and drop-line overlay sits above the
+	# statement list (`LCanvas.DragLayout.draw` + `JumpCurve`); it never takes
+	# mouse events.
+	_overlay = Control.new()
+	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_overlay)
+	_overlay.draw.connect(_draw_overlay)
 
 
 ## `LogicDialog.show`: loads the processor's program into the statement list.
@@ -140,12 +167,22 @@ func _rebuild_list() -> void:
 	if _list == null:
 		return
 	_list.clear()
+	_row_nodes.clear()
+	_jump_buttons.clear()
 	for index in _statements.size():
 		var row: Variant = _statements[index]
 		if not (row is Dictionary):
 			continue
-		_list.add(_statement_row(index, row)).grow_x_axis().pad(2)
+		var panel := _statement_row(index, row)
+		_list.add(panel).grow_x_axis().pad(2)
 		_list.row()
+		_row_nodes.append(panel)
+	# A rebuilt grid gets no deferred sort (dialogs call `sort_now` + a
+	# deferred repeat once the cells are added; `MindTable.sort_now`).
+	_list.sort_now()
+	_list.call_deferred("sort_now")
+	if _overlay != null:
+		_overlay.queue_redraw()
 
 
 ## One statement element: the header row (`LCanvas.StatementElem`) plus the
@@ -163,6 +200,11 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	column.add_child(box)
 	var label := Label.new()
 	label.text = "%d  %s" % [index, _t("lst." + str(row.get("bundle", name)))]
+	# `JumpStatement.build`: `jump -> <dest>` while a target is set.
+	if name == "jump" and _jump_target(row) >= 0:
+		label.text = "%d  %s -> %d" % [
+			index, _t("lst." + str(row.get("bundle", name))), _jump_target(row)
+		]
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(label)
 	var copy := MindWidgets.glyph_button("copy", "C", "clearNonei")
@@ -175,89 +217,186 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	delete.tooltip_text = _t("@delete")
 	delete.pressed.connect(_delete_statement.bind(index))
 	box.add_child(delete)
+	# `StatementElem`'s header drag: left-drag reorders, middle-click copies.
+	box.gui_input.connect(_header_input.bind(index, box))
 	column.add_child(_field_row(index, row))
 	return panel
 
 
-## The generic field builder (`LStatement.build(Table)`): the statement's
-## visible rows come from `MindLogic.editor_fields`, each rendered by its field
-## kind (text field, enum select or the `draw col` colour pencil).
+## `StatementElem`'s header `touchDown`/`touchDragged`/`touchUp`
+## (`LCanvas.java:465-513`): left-drag reorders (the drop lands at
+## `insertPosition`), middle-click copies.
+func _header_input(event: InputEvent, index: int, box: Control) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
+		_copy_statement(index)
+		box.accept_event()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_drag_index = index
+			_drag_active = false
+			_drag_start = event.position
+			box.accept_event()
+		else:
+			if _drag_active:
+				_finish_drag()
+			_drag_index = -1
+			_drag_active = false
+			if _overlay != null:
+				_overlay.queue_redraw()
+			box.accept_event()
+		return
+	if event is InputEventMouseMotion and _drag_index == index:
+		if not _drag_active and event.position.distance_to(_drag_start) > 8.0:
+			_drag_active = true
+		if _drag_active:
+			_drop_index = _drop_index_at(box.get_global_transform() * event.position)
+			if _overlay != null:
+				_overlay.queue_redraw()
+		box.accept_event()
+
+
+## The per-statement field row (`LStatement.build(Table)`): `MindLogic.editor_layout`
+## returns the exact Java item order (labels, "="/"linknum" separators, enum
+## selects, and the colour/align/char pencils).
 func _field_row(index: int, row: Dictionary) -> Control:
 	var fields_box := HBoxContainer.new()
+	# code-instantiated: the field row is rebuilt per statement on every list
+	# rebuild (`LCanvas.StatementElem` calls `st.build(t)`).
+	fields_box.add_theme_constant_override("separation", 4)
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return fields_box
 	var name := str(row.get("name", "noop"))
 	var values: Array = row.get("fields", [])
-	var metas: Variant = logic.call("statement_fields", name)
-	var visible: Variant = logic.call("editor_fields", name, PackedStringArray(values))
-	if not (metas is Array) or not (visible is Array):
+	# `SetRuleStatement.rebuild` normalizes `p1` to `@sharded` for team rules;
+	# Java mutates the statement at build time, so the dialog mirrors it.
+	var normalized: Variant = logic.call("editor_normalize", name, PackedStringArray(values))
+	if normalized is PackedStringArray and normalized != PackedStringArray(values):
+		values = Array(normalized)
+		row["fields"] = values
+		_statements[index] = row
+		_modified = true
+	var items: Variant = logic.call("editor_layout", name, PackedStringArray(values))
+	if not (items is Array):
 		return fields_box
-	# Conditional layouts (`DrawStatement`) put the discriminator first.
-	var discriminator := int(logic.call("editor_discriminator", name))
-	if discriminator >= 0 and discriminator < (metas as Array).size():
-		var disc_meta: Variant = (metas as Array)[discriminator]
-		var disc_options: Variant = (
-			(disc_meta as Dictionary).get("options", PackedStringArray())
-			if disc_meta is Dictionary
-			else PackedStringArray()
-		)
-		if disc_options is PackedStringArray and (disc_options as PackedStringArray).size() > 0:
-			var disc_value := str(values[discriminator]) if discriminator < values.size() else ""
-			var disc_button := MindWidgets.button(disc_value)
-			disc_button.theme_type_variation = "logict"
-			disc_button.custom_minimum_size = Vector2(120, 32)
-			disc_button.tooltip_text = name
-			disc_button.pressed.connect(
-				_open_select.bind(index, discriminator, disc_options, disc_button)
-			)
-			fields_box.add_child(disc_button)
-	for entry in visible:
+	for entry in items:
 		if not (entry is Dictionary):
 			continue
+		var kind := str((entry as Dictionary).get("kind", "field"))
 		var field_index := int((entry as Dictionary).get("index", -1))
-		var label_text := str((entry as Dictionary).get("label", ""))
-		if field_index < 0:
-			continue
-		var meta: Variant = (metas as Array)[field_index] if field_index < (metas as Array).size() else {}
-		var kind := str((meta as Dictionary).get("kind", "str")) if meta is Dictionary else "str"
-		var options: Variant = (meta as Dictionary).get("options", PackedStringArray()) if meta is Dictionary else PackedStringArray()
-		var value := str(values[field_index]) if field_index < values.size() else ""
-		var label := Label.new()
-		# `bundle("name.token." + desc)` with the raw label as the fallback.
-		var key := "name.token." + label_text
-		var resolved := _t(key)
-		label.text = label_text if resolved == key else resolved
-		label.tooltip_text = "%s.%s" % [name, label_text]
-		fields_box.add_child(label)
-		if kind == "enum" and options is PackedStringArray and (options as PackedStringArray).size() > 0:
-			var button := MindWidgets.button(value)
-			# `Styles.logict` (`DrawStatement`'s type button).
-			button.theme_type_variation = "logict"
-			button.custom_minimum_size = Vector2(120, 32)
-			button.tooltip_text = "%s.%s" % [name, label_text]
-			button.pressed.connect(_open_select.bind(index, field_index, options, button))
-			fields_box.add_child(button)
-		else:
-			var edit := LineEdit.new()
-			edit.text = value
-			edit.custom_minimum_size = Vector2(90, 32)
-			edit.tooltip_text = "%s.%s" % [name, label_text]
-			edit.text_submitted.connect(_set_field.bind(index, field_index))
-			edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
-			fields_box.add_child(edit)
-		if name == "draw" and str(values[0]) == "col" and label_text == "color":
-			var picker := ColorPickerButton.new()
-			picker.custom_minimum_size = Vector2(32, 32)
-			picker.color = _parse_color(value)
-			picker.color_changed.connect(_set_color.bind(index, field_index))
-			fields_box.add_child(picker)
+		var label := _field_label_text(str((entry as Dictionary).get("label", "")))
+		var label_before := bool((entry as Dictionary).get("label_before", true))
+		var value := ""
+		if field_index >= 0 and field_index < values.size():
+			value = str(values[field_index])
+		match kind:
+			"text":
+				if not label.is_empty():
+					fields_box.add_child(_field_label(label))
+			"field":
+				if label_before and not label.is_empty():
+					fields_box.add_child(_field_label(label))
+				var edit := LineEdit.new()
+				edit.text = value
+				edit.custom_minimum_size = Vector2(
+					240 if bool((entry as Dictionary).get("wide", false)) else 90, 32
+				)
+				edit.tooltip_text = "%s.%s" % [name, label]
+				edit.text_submitted.connect(_set_field.bind(index, field_index))
+				edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
+				fields_box.add_child(edit)
+				if not label_before and not label.is_empty():
+					fields_box.add_child(_field_label(label))
+			"select":
+				if label_before and not label.is_empty():
+					fields_box.add_child(_field_label(label))
+				var button := MindWidgets.button(_select_text(name, field_index, value))
+				# `Styles.logict`.
+				button.theme_type_variation = "logict"
+				button.custom_minimum_size = Vector2(120, 32)
+				button.tooltip_text = "%s.%s" % [name, label]
+				button.pressed.connect(_open_select.bind(index, field_index, name, button))
+				fields_box.add_child(button)
+			"color":
+				var picker := ColorPickerButton.new()
+				picker.custom_minimum_size = Vector2(40, 32)
+				picker.color = _parse_color(value)
+				picker.color_changed.connect(_set_color.bind(index, field_index))
+				fields_box.add_child(picker)
+			"align":
+				var align_button := MindWidgets.image_button("pencil", "logict")
+				align_button.custom_minimum_size = Vector2(40, 32)
+				align_button.tooltip_text = _field_label_text("align")
+				align_button.pressed.connect(_open_align_select.bind(index, field_index))
+				fields_box.add_child(align_button)
+			"char":
+				var char_button := MindWidgets.image_button("pencil", "logict")
+				char_button.custom_minimum_size = Vector2(40, 32)
+				char_button.tooltip_text = "%s.%s" % [name, label]
+				char_button.pressed.connect(_open_char_select.bind(index, field_index))
+				fields_box.add_child(char_button)
+			"jump":
+				var jump_button := MindWidgets.button(value)
+				jump_button.theme_type_variation = "logict"
+				jump_button.custom_minimum_size = Vector2(36, 32)
+				jump_button.tooltip_text = "%s.%s" % [name, label]
+				# `JumpButton`: press-drag-release onto a target element.
+				jump_button.gui_input.connect(_jump_button_input.bind(index, jump_button))
+				_jump_buttons[index] = jump_button
+				fields_box.add_child(jump_button)
 	return fields_box
 
 
-## `showSelect(button, values, current, getter)`: a popup of `logicTogglet`
-## buttons, 4 per row (`LStatement.java:233-253`).
-func _open_select(index: int, field_index: int, options: PackedStringArray, button: Button) -> void:
+## `bundle(desc)`: `name.token.<token>` with the raw token as the fallback.
+func _field_label_text(token: String) -> String:
+	if token.is_empty():
+		return ""
+	var key := "name.token." + token
+	var resolved := _t(key)
+	return token if resolved == key else resolved
+
+
+func _field_label(text: String) -> Label:
+	# code-instantiated: one label per field-row item (count is layout-driven).
+	var label := Label.new()
+	label.text = text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return label
+
+
+## The current option's display text for a select (`LStatement.bundle(Enum)`
+## then the symbol/name fallback).
+func _select_text(name: String, field_index: int, value: String) -> String:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return value
+	var options: Variant = logic.call("editor_options", name, field_index)
+	if options is Array:
+		for option in options:
+			if option is Dictionary and str((option as Dictionary).get("name", "")) == value:
+				return _option_text(option)
+	return value
+
+
+func _option_text(option: Variant) -> String:
+	var text := str((option as Dictionary).get("label", (option as Dictionary).get("name", "")))
+	var key := str((option as Dictionary).get("key", ""))
+	if not key.is_empty():
+		var resolved := _t(key)
+		if resolved != key:
+			text = resolved
+	return text
+
+
+## `showSelect`: a popup of `logicTogglet` buttons (`LStatement.java:233-253`).
+func _open_select(index: int, field_index: int, name: String, button: Button) -> void:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return
+	var options: Variant = logic.call("editor_options", name, field_index)
+	if not (options is Array):
+		return
 	var popup := PopupPanel.new()
 	# code-instantiated: one transient enum-select popup per open.
 	add_child(popup)
@@ -265,20 +404,110 @@ func _open_select(index: int, field_index: int, options: PackedStringArray, butt
 	grid.columns = 4
 	popup.add_child(grid)
 	var current := button.text
+	var unit_actions := _unit_actions_enabled()
 	for option in options:
+		if not (option is Dictionary):
+			continue
+		var option_name := str((option as Dictionary).get("name", ""))
+		# `UnitControlStatement` hides build/deconstruct when the rules disable them.
+		if name == "ucontrol" and not unit_actions and option_name in ["build", "deconstruct"]:
+			continue
 		var toggle := Button.new()
-		toggle.text = option
+		toggle.text = _option_text(option)
 		toggle.toggle_mode = true
 		toggle.theme_type_variation = "logicTogglet"
-		toggle.button_pressed = option == current
+		toggle.button_pressed = option_name == _current_field_value(index, field_index)
 		toggle.custom_minimum_size = Vector2(60, 38)
-		toggle.pressed.connect(_select_enum.bind(index, field_index, option, popup))
+		toggle.tooltip_text = "%s.%s" % [name.to_lower(), option_name.to_lower()]
+		toggle.pressed.connect(_select_enum.bind(index, field_index, option_name, popup))
 		grid.add_child(toggle)
 	popup.popup_centered()
 
 
-## A discriminator changed: commit, apply the Java type-change defaults and
-## rebuild the element (`DrawStatement.rebuild`).
+## `fieldAlignSelect` (`LStatement.java:259-268`): the nine align presets,
+## set as `@<name>` (`LStatement.afterRead` normalizes them).
+func _open_align_select(index: int, field_index: int) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient align-select popup per open.
+	add_child(popup)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	popup.add_child(grid)
+	var current := _current_field_value(index, field_index)
+	for align in [
+		"topLeft", "top", "topRight", "left", "center", "right", "bottomLeft", "bottom", "bottomRight"
+	]:
+		var toggle := Button.new()
+		toggle.text = _field_label_text(align)
+		toggle.toggle_mode = true
+		toggle.theme_type_variation = "logicTogglet"
+		toggle.button_pressed = current == "@" + align
+		toggle.custom_minimum_size = Vector2(100, 38)
+		toggle.pressed.connect(_select_enum.bind(index, field_index, "@" + align, popup))
+		grid.add_child(toggle)
+	popup.popup_centered()
+
+
+## `PrintCharStatement`'s pencil grid (`LStatements.java:290-311`).
+func _open_char_select(index: int, field_index: int) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient character-picker popup per open.
+	add_child(popup)
+	var grid := GridContainer.new()
+	grid.columns = 8
+	popup.add_child(grid)
+	for code in range(32, 127):
+		var toggle := Button.new()
+		toggle.text = String.chr(code)
+		toggle.theme_type_variation = "flatt"
+		toggle.custom_minimum_size = Vector2(32, 32)
+		toggle.pressed.connect(_select_enum.bind(index, field_index, str(code), popup))
+		grid.add_child(toggle)
+	popup.popup_centered()
+
+
+## The `JumpButton` target picker (`LCanvas.java:551-625`): pick a statement by
+## index; the drag variant lands with T9's curves.
+func _open_jump_select(index: int, field_index: int) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient jump-target popup per open.
+	add_child(popup)
+	var list := VBoxContainer.new()
+	popup.add_child(list)
+	for target in _statements.size():
+		var target_row: Dictionary = _statements[target]
+		var button := MindWidgets.button(
+			"%d  %s" % [target, _t("lst." + str(target_row.get("bundle", "noop")))]
+		)
+		button.theme_type_variation = "logict"
+		button.custom_minimum_size = Vector2(220, 32)
+		button.pressed.connect(_select_enum.bind(index, field_index, str(target), popup))
+		list.add_child(button)
+	popup.popup_centered()
+
+
+func _current_field_value(index: int, field_index: int) -> String:
+	if index < 0 or index >= _statements.size():
+		return ""
+	var values: Array = (_statements[index] as Dictionary).get("fields", [])
+	return str(values[field_index]) if field_index < values.size() else ""
+
+
+## The `logicUnitBuild`/`logicUnitDeconstruct` rules probe (T1's add-dialog
+## filter; `UnitControlStatement.build`).
+func _unit_actions_enabled() -> bool:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null:
+		return true
+	var parsed: Variant = JSON.parse_string(str(host.call("logic_rules_probe")))
+	if not (parsed is Dictionary):
+		return true
+	var info := parsed as Dictionary
+	return bool(info.get("logicUnitBuild", true)) or bool(info.get("logicUnitDeconstruct", true))
+
+
+## A select changed: commit, apply the Java change fixups and rebuild the
+## element (`DrawStatement.rebuild`, `rebuild(table)` in each `build`).
 func _select_enum(index: int, field_index: int, option: String, popup: PopupPanel) -> void:
 	popup.hide()
 	if not _commit_field_value(option, index, field_index):
@@ -355,21 +584,240 @@ func _commit_field_value(text: String, index: int, field_index: int) -> bool:
 	return true
 
 
-## `StatementElem.copy`: duplicates the element after itself.
+## `StatementElem.copy` (`LCanvas.java:516-538`): the duplicate lands after the
+## element; a copied `jump`'s target bumps when it pointed below (`:520-527`).
 func _copy_statement(index: int) -> void:
 	if index < 0 or index >= _statements.size():
 		return
-	_statements.insert(index + 1, (_statements[index] as Dictionary).duplicate(true))
+	var original: Dictionary = _statements[index]
+	var copied: Dictionary = original.duplicate(true)
+	_statements.insert(index + 1, copied)
+	if str(original.get("name", "")) == "jump":
+		var dest := _jump_target(original)
+		if dest > index:
+			(jump_fields(original))[0] = str(dest + 1)
+			original["fields"] = jump_fields(original)
+			(copied.get("fields", []) as Array)[0] = str(dest + 1)
 	_modified = true
 	_rebuild_list()
 
 
+## `StatementElem`'s delete button: dropped targets become `-1` and later
+## indices shift down (Java's `saveUI` recomputes `indexOf(dest)`).
 func _delete_statement(index: int) -> void:
 	if index < 0 or index >= _statements.size():
 		return
 	_statements.remove_at(index)
+	for row in _statements:
+		if not (row is Dictionary) or str((row as Dictionary).get("name", "")) != "jump":
+			continue
+		var fields := jump_fields(row)
+		if fields.is_empty():
+			continue
+		var dest := int(fields[0])
+		if dest == index:
+			fields[0] = "-1"
+		elif dest > index:
+			fields[0] = str(dest - 1)
+		(row as Dictionary)["fields"] = fields
 	_modified = true
 	_rebuild_list()
+
+
+## The `jump` row's `dest_index` (`-1` when unset/out of range).
+func _jump_target(row: Dictionary) -> int:
+	if str(row.get("name", "")) != "jump":
+		return -1
+	var fields: Array = row.get("fields", [])
+	if fields.is_empty():
+		return -1
+	var dest := int(fields[0])
+	return dest if dest >= 0 and dest < _statements.size() else -1
+
+
+func jump_fields(row: Variant) -> Array:
+	if row is Dictionary:
+		var fields: Variant = (row as Dictionary).get("fields", [])
+		if fields is Array and not (fields as Array).is_empty():
+			return fields
+	return [] as Array
+
+
+## `LCanvas.DragLayout.finishLayout`: drop the dragged element at
+## `insertPosition` and remap every `jump` target like Java's element refs do
+## (`JumpStatement.saveUI` recomputes `indexOf(dest)`).
+func _finish_drag() -> void:
+	var from := _drag_index
+	if from < 0 or from >= _statements.size():
+		return
+	var drop := clampi(_drop_index, 0, _statements.size())
+	var to := drop if drop <= from else drop - 1
+	if to != from:
+		for row in _statements:
+			if not (row is Dictionary) or str((row as Dictionary).get("name", "")) != "jump":
+				continue
+			var fields := jump_fields(row)
+			if fields.is_empty():
+				continue
+			var dest := int(fields[0])
+			if dest == from:
+				dest = to
+			elif to >= from and from < dest and dest <= to:
+				dest -= 1
+			elif to < from and to <= dest and dest < from:
+				dest += 1
+			fields[0] = str(dest)
+			(row as Dictionary)["fields"] = fields
+		var moved: Variant = _statements.pop_at(from)
+		_statements.insert(to, moved)
+		_modified = true
+	_drop_index = -1
+	_rebuild_list()
+
+
+## The insertion index for a global pointer position (`DragLayout.layout`'s
+## `insertPosition`).
+func _drop_index_at(global_pos: Vector2) -> int:
+	for i in _row_nodes.size():
+		var rect := (_row_nodes[i] as Control).get_global_rect()
+		if global_pos.y < rect.position.y + rect.size.y * 0.5:
+			return i
+	return _row_nodes.size()
+
+
+## The statement element under a global pointer position (`canvas.hovered`).
+func _row_at(global_pos: Vector2) -> int:
+	for i in _row_nodes.size():
+		if (_row_nodes[i] as Control).get_global_rect().has_point(global_pos):
+			return i
+	return -1
+
+
+## `JumpButton`'s touch handlers (`LCanvas.java:571-605`): press starts the
+## selection, dragging highlights the hovered element, release sets (or clears)
+## the target. A press-release without movement opens the target picker.
+func _jump_button_input(event: InputEvent, index: int, button: Control) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_jump_selecting = index
+			_jump_hover = -1
+			_jump_moved = false
+			button.accept_event()
+		else:
+			if _jump_moved:
+				if _jump_hover >= 0 and _jump_hover != index:
+					_set_jump_target(index, _jump_hover)
+				_rebuild_list()
+			else:
+				_open_jump_select(index, 0)
+			_jump_selecting = -1
+			_jump_hover = -1
+			if _overlay != null:
+				_overlay.queue_redraw()
+			button.accept_event()
+		return
+	if event is InputEventMouseMotion and _jump_selecting == index:
+		_jump_moved = true
+		_jump_hover = _row_at(button.get_global_transform() * event.position)
+		if _overlay != null:
+			_overlay.queue_redraw()
+		button.accept_event()
+
+
+## `JumpButton`'s setter: writes the `dest_index` field and rebuilds.
+func _set_jump_target(index: int, target: int) -> void:
+	if index < 0 or index >= _statements.size():
+		return
+	var row: Dictionary = _statements[index]
+	var fields: Array = row.get("fields", [])
+	if fields.is_empty():
+		return
+	fields[0] = str(target)
+	row["fields"] = fields
+	_statements[index] = row
+	_modified = true
+
+
+## `LCanvas.DragLayout.draw` + `JumpCurve.draw`: the drop line while dragging
+## and one trapezoid per `jump` from its button to the target's left edge
+## (`drawCurve`'s four-point trapezoid, `Pal.place`).
+func _draw_overlay() -> void:
+	if _overlay == null:
+		return
+	var place := Color8(0x63, 0x35, 0xf8)
+	if _drag_active and _drop_index >= 0 and not _row_nodes.is_empty():
+		var first := (_row_nodes[0] as Control).get_global_rect()
+		var y := 0.0
+		if _drop_index <= 0:
+			y = first.position.y - 3.0
+		elif _drop_index >= _row_nodes.size():
+			y = (_row_nodes[_row_nodes.size() - 1] as Control).get_global_rect().end.y + 3.0
+		else:
+			var above := (_row_nodes[_drop_index - 1] as Control).get_global_rect()
+			var below := (_row_nodes[_drop_index] as Control).get_global_rect()
+			y = (above.end.y + below.position.y) * 0.5
+		var left := first.position.x
+		var right := left + first.size.x
+		_overlay.draw_line(
+			_to_overlay(Vector2(left, y)),
+			_to_overlay(Vector2(right, y)),
+			Color(1, 1, 1, 0.7),
+			3.0
+		)
+	for info in _jump_spans():
+		var button: Control = _jump_buttons.get(info["jump"])
+		if button == null:
+			continue
+		var src := _to_overlay(button.get_global_rect().get_center())
+		var target_rect := (_row_nodes[int(info["target"])] as Control).get_global_rect()
+		var dst := _to_overlay(
+			Vector2(target_rect.position.x - 2.0, target_rect.position.y + target_rect.size.y * 0.5)
+		)
+		var h := 24.0 + 14.0 * float(info["lane"])
+		var dy := signf(dst.y - src.y) * h * 0.5
+		var points := PackedVector2Array(
+			[src, Vector2(src.x + h, src.y + dy), Vector2(src.x + h, dst.y - dy), dst]
+		)
+		_overlay.draw_polyline(points, place, 4.0)
+		_overlay.draw_rect(Rect2(dst - Vector2(4, 4), Vector2(8, 8)), place)
+	if _jump_selecting >= 0 and _jump_hover >= 0 and _jump_hover < _row_nodes.size():
+		var hovered := (_row_nodes[_jump_hover] as Control).get_global_rect()
+		_overlay.draw_rect(
+			Rect2(_to_overlay(hovered.position), hovered.size), Color(1, 1, 1, 0.25)
+		)
+
+
+func _to_overlay(global_pos: Vector2) -> Vector2:
+	return _overlay.get_global_transform().affine_inverse() * global_pos
+
+
+## The valid jump spans with greedy lane assignment so curves do not overlap
+## (`LCanvas.DragLayout.setJumpHeights`).
+func _jump_spans() -> Array:
+	var spans: Array = []
+	for i in _statements.size():
+		if not (_statements[i] is Dictionary):
+			continue
+		var dest := _jump_target(_statements[i])
+		if dest < 0 or dest == i or not _jump_buttons.has(i):
+			continue
+		if i >= _row_nodes.size() or dest >= _row_nodes.size():
+			continue
+		spans.append({"jump": i, "target": dest, "begin": mini(i, dest), "end": maxi(i, dest)})
+	spans.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["begin"]) < int(b["begin"]))
+	var lane_ends: Array = []
+	for span in spans:
+		var lane := -1
+		for li in lane_ends.size():
+			if int(lane_ends[li]) < int(span["begin"]):
+				lane = li
+				break
+		if lane < 0:
+			lane = lane_ends.size()
+			lane_ends.append(-1)
+		lane_ends[lane] = span["end"]
+		span["lane"] = lane
+	return spans
 
 
 ## `LogicDialog`'s `@edit` sub-dialog (`LogicDialog.java:141-190`): a popup with
@@ -546,6 +994,9 @@ func _open_globals_panel() -> void:
 ## The 15-frame variables refresh while the panel is shown
 ## (`LogicDialog.java:204-222`).
 func _process(_delta: float) -> void:
+	# `DragLayout`/`JumpCurve` repaint with the scroll position every frame.
+	if _overlay != null and is_visible_in_tree():
+		_overlay.queue_redraw()
 	if _vars_popup == null or not _vars_popup.visible:
 		return
 	_vars_timer += 1
