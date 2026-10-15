@@ -18,7 +18,7 @@ use indexmap::IndexMap;
 
 use crate::content::ContentRegistry;
 use crate::io::fs::{FileSystem, Paths};
-use crate::io::map::{MapIo, PreviewImage, encode_png};
+use crate::io::map::{BlockPalette, MapIo, PreviewImage, encode_png};
 use crate::maps::preview::{PreviewCache, PreviewQueue, preview_file, read_cache, write_cache};
 use crate::maps::{Map, MapError, Maps};
 
@@ -91,6 +91,11 @@ impl PreviewPipeline {
     }
 
     /// `Maps.createNewPreview`: generate pixels, then write the PNG (and cache).
+    ///
+    /// The cache carries the scan facts (`Map.spawns`/`Map.teams`) the generator
+    /// collected: Java's `MapIO.generatePreview(map)` fills the map header before
+    /// `Maps.writeCache` runs (`Maps.java:418-456`), so later `map_modes` reads
+    /// never rescan the file.
     pub fn create_new_preview(
         &mut self,
         fs: &dyn FileSystem,
@@ -98,11 +103,28 @@ impl PreviewPipeline {
         registry: &mut ContentRegistry,
         map: &Map,
     ) -> Result<(), MapError> {
+        let palette = BlockPalette::of(registry);
+        self.create_new_preview_with_palette(fs, paths, registry, map, palette)
+    }
+
+    /// [`Self::create_new_preview`] with the caller's [`BlockPalette`] (the
+    /// gdext side supplies the `sprites/block_colors.png` minimap colours).
+    pub fn create_new_preview_with_palette(
+        &mut self,
+        fs: &dyn FileSystem,
+        paths: &Paths,
+        registry: &mut ContentRegistry,
+        map: &Map,
+        palette: BlockPalette,
+    ) -> Result<(), MapError> {
         let bytes = fs.read(&map.file)?;
-        let image = MapIo::generate_preview(registry, &bytes)?;
+        let (image, facts) = MapIo::generate_preview_with_palette(palette, registry, &bytes)?;
         fs.write(&preview_file(paths, map), &encode_png(&image)?)?;
         // Cache failures are non-fatal upstream (the preview still loads).
-        if let Err(error) = write_cache(fs, paths, map) {
+        let mut scanned = map.clone();
+        scanned.spawns = facts.spawns;
+        scanned.teams = facts.teams;
+        if let Err(error) = write_cache(fs, paths, &scanned) {
             log::warn!(
                 "failed to write preview cache for `{}`: {error}",
                 map.name()
@@ -139,6 +161,11 @@ impl PreviewPipeline {
     /// The pending preview queue.
     pub fn queue(&self) -> &PreviewQueue {
         &self.queue
+    }
+
+    /// `Maps.createAllPreviews` batched: pop up to `max` queued map files.
+    pub fn take_queued(&mut self, max: usize) -> Vec<PathBuf> {
+        self.queue.take_up_to(max)
     }
 
     /// Number of generated previews.
@@ -211,5 +238,48 @@ mod tests {
         assert_eq!(pipeline.len(), 1);
         assert!(fs.exists(&preview_file(&paths, &map)));
         assert!(pipeline.texture_for(&map).is_some());
+    }
+
+    /// The cache written by `createNewPreview` must carry the scan facts
+    /// `MapIO.generatePreview` collected (`Maps.java:418-456`), so a later
+    /// `map_modes` never has to rescan the file.
+    #[test]
+    #[cfg(feature = "msav-import")]
+    fn create_new_preview_writes_scan_facts_into_cache() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+
+        let file = PathBuf::from(format!(
+            "{}/../../../assets/maps/default/caldera.msav",
+            env!("CARGO_MANIFEST_DIR")
+        ));
+        assert!(file.is_file(), "{} is missing", file.display());
+        let fs = crate::io::fs::NativeFs;
+        let paths = Paths::new(std::env::temp_dir().join("i06-t5-preview-facts"));
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content registry");
+        let map = Map::new(file, 0, 0, indexmap::IndexMap::new(), true, 0, -1);
+        let mut pipeline = PreviewPipeline::new();
+        pipeline
+            .create_new_preview(&fs, &paths, &mut registry, &map)
+            .expect("preview generation");
+        assert!(fs.exists(&preview_file(&paths, &map)));
+
+        let mut probe = map.clone();
+        read_cache(&fs, &paths, &mut probe).expect("cache written");
+        assert!(probe.spawns > 0, "caldera has spawn overlays");
+        assert!(probe.teams.contains(&1), "caldera has a player core team");
+    }
+
+    #[test]
+    fn take_queued_drains_in_batches() {
+        let mut pipeline = PreviewPipeline::new();
+        pipeline.queue_new_preview(&map("A", "/data/maps/a.msav"));
+        pipeline.queue_new_preview(&map("B", "/data/maps/b.msav"));
+        pipeline.queue_new_preview(&map("C", "/data/maps/c.msav"));
+        assert_eq!(pipeline.take_queued(2).len(), 2);
+        assert_eq!(pipeline.queue().entries().len(), 1);
+        assert_eq!(pipeline.take_queued(2).len(), 1);
+        assert!(pipeline.queue().is_empty());
     }
 }

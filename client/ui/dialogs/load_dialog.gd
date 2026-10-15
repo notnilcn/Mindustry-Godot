@@ -186,16 +186,28 @@ func _build_card(slot: Dictionary) -> Button:
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(body)
 
-	# code-instantiated: preview placeholder (no save texture is exposed yet).
-	var preview := Panel.new()
-	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	preview.custom_minimum_size = Vector2(160, 100)
-	body.add_child(preview)
-	# code-instantiated: `nomap` placeholder glyph is an icon-font run.
-	var map_icon := MindWidgets.glyph("map", 40)
-	map_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	preview.add_child(map_icon)
-	map_icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# `Saves.SaveSlot.previewTexture()`: the saved `<previews>/save_slot_<stem>.png`
+	# (`Saves.java:359-370`); the `nomap` glyph stays until one exists.
+	var texture := _save_preview_texture(slot)
+	if texture != null:
+		# code-instantiated: save preview textures come from the live slot store.
+		var image := MindBorderImage.new()
+		image.texture = texture
+		image.thickness = 3.0
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.custom_minimum_size = Vector2(160, 100)
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		body.add_child(image)
+	else:
+		# code-instantiated: `nomap` placeholder glyph is an icon-font run.
+		var preview := Panel.new()
+		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preview.custom_minimum_size = Vector2(160, 100)
+		body.add_child(preview)
+		var map_icon := MindWidgets.glyph("map", 40)
+		map_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preview.add_child(map_icon)
+		map_icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	# code-instantiated: metadata column lines come from the slot dictionary.
 	var meta := VBoxContainer.new()
@@ -229,6 +241,21 @@ func _format_millis(millis: int) -> String:
 	var sign := "-" if millis < 0 else ""
 	millis = absi(millis)
 	return "%s%d:%02d:%02d" % [sign, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000]
+
+
+## `Saves.SaveSlot.previewTexture()` for a slot row (`save_preview_texture`).
+func _save_preview_texture(slot: Dictionary) -> Texture2D:
+	var file := str(slot.get("file", ""))
+	var stem := file.get_file().get_basename()
+	if stem.is_empty():
+		stem = str(slot.get("name", ""))
+	if stem.is_empty():
+		return null
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("save_preview_texture"):
+		return null
+	var value: Variant = campaign.call("save_preview_texture", stem)
+	return value if value is Texture2D else null
 
 
 ## `SaveSlot.getDate` (`DateFormat.getDateTimeInstance()`, en-US medium:

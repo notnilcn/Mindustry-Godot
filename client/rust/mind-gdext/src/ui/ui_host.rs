@@ -679,7 +679,8 @@ impl MindUi {
     /// settings-table row (e.g. `Map.getHighScore`'s `hiscore<map>`).
     #[func]
     pub fn settings_get_int(&self, key: GString, default: i64) -> i64 {
-        self.settings.get_i32(&key.to_string(), default as i32) as i64
+        crate::settings_hub::with_settings(|store| store.get_i32(&key.to_string(), default as i32))
+            as i64
     }
 
     /// Reads one known checkbox setting (`Core.settings.getBool(key)` with the

@@ -16,7 +16,7 @@ use godot::builtin::{
     PackedInt32Array, PackedStringArray, PackedVector3Array, VarDictionary, Vector3,
 };
 use godot::classes::notify::NodeNotification;
-use godot::classes::{FileAccess, INode, Node, ProjectSettings, Time};
+use godot::classes::{FileAccess, INode, Node, ProjectSettings, Texture2D, Time};
 use godot::obj::Base;
 use godot::prelude::*;
 
@@ -1370,7 +1370,7 @@ impl MindCampaign {
         }
         if playtest {
             self.playtesting_map = Some(path);
-        } else if self.live_setting_flag("savecreate") {
+        } else if settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
             // `Control.playMap`'s `savecreate` slot (`Control.java:418-420`):
             // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`.
             let name = format!("{} {}", header.name(), save_date_stamp());
@@ -3389,11 +3389,30 @@ impl MindCampaign {
         }
         let total_playtime = self.saves.total_playtime;
         host.bind_mut().set_save_playtime(total_playtime);
+        // `Saves.SaveSlot.save` -> `savePreview()`: the slot's preview PNG,
+        // written from the live grid before the queued save lands at the IO
+        // boundary (`Saves.java:343-375`).
+        host.bind_mut()
+            .write_save_preview(GString::from(slot.as_str()));
         host.bind_mut().request_save(
             GString::from(format!("user://saves/{slot}.msav").as_str()),
             false,
         );
         true
+    }
+
+    /// `Saves.SaveSlot.previewTexture()`: decodes
+    /// `<user>/previews/save_slot_<name>.png` (`Saves.java:359-370`); null when
+    /// the file is missing (the dialog keeps its placeholder).
+    #[func]
+    pub fn save_preview_texture(&mut self, name: GString) -> Option<Gd<Texture2D>> {
+        use mind_core::io::map::decode_png;
+
+        let paths = Paths::new(crate::assets::loader::user_data_root());
+        let file = paths.preview_for_save(name.to_string().as_str());
+        let bytes = NativeFs.read(&file).ok()?;
+        let image = decode_png(&bytes).ok()?;
+        crate::editor::preview::bind_texture(&image)
     }
 
     /// Loads a named `user://saves/<name>.msav` slot at the next IO tick

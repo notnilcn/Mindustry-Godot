@@ -1982,6 +1982,38 @@ impl MindSimHost {
         self.sim.request_save(globalize(&path), as_map);
     }
 
+    /// `Saves.SaveSlot.savePreview`: writes `<user>/previews/save_slot_<name>.png`
+    /// from the live grid (`Saves.java:343-375`). Returns whether the PNG landed.
+    #[func]
+    pub fn write_save_preview(&mut self, name: GString) -> bool {
+        use mind_core::io::fs::{FileSystem, NativeFs, Paths};
+        use mind_core::io::map::{BlockPalette, encode_png, generate_preview_from_tiles};
+        use mind_core::world::map_source::EcsMapSource;
+
+        let paths = Paths::new(crate::assets::loader::user_data_root());
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            log::warn!("write_save_preview: no content registry");
+            return false;
+        };
+        // `Saves.savePreview` writes `renderer.minimap.getPixmap()`: the real
+        // per-block colours (`ContentLoader.loadColors`).
+        let mut palette = BlockPalette::of(registry);
+        palette.apply_block_colors(&crate::render::minimap::load_block_colors());
+        let source = EcsMapSource::new(&self.sim.grid, registry, &self.sim.ecs.0);
+        let image = generate_preview_from_tiles(&palette, &source);
+        let Ok(bytes) = encode_png(&image) else {
+            log::warn!("write_save_preview: PNG encode failed");
+            return false;
+        };
+        match NativeFs.write(&paths.preview_for_save(name.to_string().as_str()), &bytes) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("write_save_preview: {error}");
+                false
+            }
+        }
+    }
+
     /// Queues a load at the next `IoSet::Apply` boundary.
     #[func]
     pub fn request_load(&mut self, path: GString) {

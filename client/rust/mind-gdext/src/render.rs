@@ -55,7 +55,7 @@ mod light;
 mod links;
 mod load;
 mod menu;
-mod minimap;
+pub(crate) mod minimap;
 mod objective_markers;
 mod overlay_top;
 pub(crate) mod overlays;
