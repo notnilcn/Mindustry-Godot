@@ -495,6 +495,10 @@ fn mix_rgba(base: u32, target: u32, t: f32) -> u32 {
 
 /// Builds an `ArrayMesh` from rotated quads (two triangles each).
 pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
+    // I02 T2: an empty slice gets no mesh (see `atlas_bind::has_mesh_quads`).
+    if !super::atlas_bind::has_mesh_quads(quads) {
+        return None;
+    }
     let mut tool = SurfaceTool::new_gd();
     tool.begin(PrimitiveType::TRIANGLES);
     for quad in quads {

@@ -673,10 +673,14 @@ impl BlockRenderer {
                 // code-instantiated: one node per visible construct site (each
                 // carries its own u_uv/progress/time uniform set).
                 self.building_band.clone().add_child(&node);
+                // I02 T2: hidden until this site's mesh lands (a visible mesh
+                // node without a mesh errors in `mesh_get_surface_count`).
+                node.clone().set_visible(false);
                 self.construct_nodes.push(node.clone());
                 node
             };
             let Some(texture) = site.region.texture.clone() else {
+                node.clone().set_visible(false);
                 continue;
             };
             let Some(mesh) = build_unit_mesh(&[UnitQuad {
@@ -688,6 +692,7 @@ impl BlockRenderer {
                 uv: site.region.uv,
                 color: 0xffff_ffff,
             }]) else {
+                node.clone().set_visible(false);
                 continue;
             };
             // `u_texsize` is the atlas *page* size: `ResolvedRegion.texture` is

@@ -571,6 +571,10 @@ pub(crate) fn resolved_uv(
 
 /// Builds an `ArrayMesh` from quads (two triangles each).
 pub(crate) fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
+    // I02 T2: an empty slice gets no mesh (see `atlas_bind::has_mesh_quads`).
+    if !crate::render::atlas_bind::has_mesh_quads(quads) {
+        return None;
+    }
     let mut tool = SurfaceTool::new_gd();
     tool.begin(PrimitiveType::TRIANGLES);
     for quad in quads {

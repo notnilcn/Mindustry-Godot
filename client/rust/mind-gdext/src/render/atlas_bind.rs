@@ -178,8 +178,21 @@ impl RegionResolver {
     }
 }
 
+/// Whether a quad slice holds anything to draw (I02 T2). `SurfaceTool.commit()`
+/// with no vertices still returns a valid `ArrayMesh` with **0 surfaces**, so
+/// every mesh builder returns `None` for an empty slice and the passes keep
+/// their `MeshInstance2D` hidden instead of assigning an empty mesh (a visible
+/// mesh node with no mesh is what the `mesh_get_surface_count` errors come
+/// from; H03 T14).
+pub(crate) fn has_mesh_quads<T>(quads: &[T]) -> bool {
+    !quads.is_empty()
+}
+
 /// Builds an `ArrayMesh` from quads (two triangles each).
 pub fn build_mesh(quads: &[Quad], grow: f32, flip_v: bool) -> Option<Gd<ArrayMesh>> {
+    if !has_mesh_quads(quads) {
+        return None;
+    }
     let mut tool = SurfaceTool::new_gd();
     tool.begin(PrimitiveType::TRIANGLES);
     for quad in quads {
@@ -233,5 +246,21 @@ mod tests {
             variant_region_candidates("ice-wall"),
             ["ice-wall", "ice-wall1", "ice-wall2", "ice-wall3"]
         );
+    }
+
+    /// I02 T2: the builders return `None` for an empty slice, and the passes
+    /// read this helper to hide their node instead of assigning an empty mesh.
+    #[test]
+    fn empty_quad_slice_has_no_mesh_surface() {
+        assert!(!has_mesh_quads::<Quad>(&[]));
+        let quad = Quad {
+            cx: 0.0,
+            cy: 0.0,
+            w: 8.0,
+            h: 8.0,
+            uv: [0.0, 0.0, 1.0, 1.0],
+            color: 0xffff_ffff,
+        };
+        assert!(has_mesh_quads(std::slice::from_ref(&quad)));
     }
 }

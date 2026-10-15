@@ -67,6 +67,10 @@ impl LightRenderer {
         // code-instantiated: one composite quad for the whole light pass; the
         // node count is fixed by the pipeline, not by content.
         light_band.clone().add_child(&node);
+        // I02 T2: the node has no mesh until the first successful bake; a
+        // visible mesh node without a mesh draws the `mesh_get_surface_count`
+        // error.
+        node.clone().set_visible(false);
         Self {
             host,
             node,
@@ -114,7 +118,6 @@ impl LightRenderer {
             self.node.set_visible(false);
             return;
         }
-        self.node.set_visible(true);
 
         let revision = self.host.clone().bind().world_revision();
         let moved =
@@ -155,6 +158,7 @@ impl LightRenderer {
         };
 
         let Some(mut material) = self.material.clone() else {
+            self.node.set_visible(false);
             return;
         };
         let data = PackedByteArray::from(bytes);
@@ -166,9 +170,11 @@ impl LightRenderer {
             &data,
         );
         let Some(image) = image else {
+            self.node.set_visible(false);
             return;
         };
         let Some(texture) = ImageTexture::create_from_image(&image) else {
+            self.node.set_visible(false);
             return;
         };
         material.set_shader_parameter("u_texture", &texture.to_variant());
@@ -197,6 +203,10 @@ impl LightRenderer {
             // `u_texture`; without it the mesh item is skipped by the canvas
             // renderer (found in-engine during G03 T12).
             self.node.set_texture(&texture);
+            // I02 T2: show the composite only while it holds a mesh.
+            self.node.set_visible(true);
+        } else {
+            self.node.set_visible(false);
         }
         self.stats.rebuilds += 1;
         self.stats.lights = lights;

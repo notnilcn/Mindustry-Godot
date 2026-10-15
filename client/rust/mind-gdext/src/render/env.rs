@@ -44,6 +44,9 @@ impl EnvRenderer {
         // code-instantiated: one pooled mesh for the env fill; the quad count is
         // fixed by the pass, not content.
         band.clone().add_child(&node);
+        // I02 T2: hidden until the first mesh lands (a visible mesh node without
+        // a mesh errors in `mesh_get_surface_count`).
+        node.clone().set_visible(false);
         let mut registry = EnvRegistry::new();
         registry.add(UNDERWATER, "underwater");
         registry.add(mind_core::render::env::SCORCHING, "scorching");
@@ -79,7 +82,6 @@ impl EnvRenderer {
             self.node.set_visible(false);
             return;
         }
-        self.node.set_visible(true);
         let quad = Quad {
             cx: view.x,
             cy: view.y,
@@ -88,8 +90,13 @@ impl EnvRenderer {
             uv: [0.0, 0.0, 1.0, 1.0],
             color: to_bits(underwater::COLOR),
         };
-        if let Some(mesh) = build_mesh(&[quad], 0.0, false) {
-            self.node.set_mesh(&mesh.upcast::<Mesh>());
+        // I02 T2: assign the mesh first, then show the node.
+        match build_mesh(&[quad], 0.0, false) {
+            Some(mesh) => {
+                self.node.set_mesh(&mesh.upcast::<Mesh>());
+                self.node.set_visible(true);
+            }
+            None => self.node.set_visible(false),
         }
     }
 }
