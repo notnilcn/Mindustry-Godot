@@ -6,7 +6,8 @@
 use spacetimedb::{ConnectionId, Identity, Timestamp, table};
 
 /// One row per identity ever seen; created by `client_connected`, kept across
-/// sessions so usernames survive.
+/// sessions so usernames survive. `color` is the Java `player.color` value as
+/// `Color.rgba8888()` (settings `color-0`, `HostDialog.java:33`).
 #[table(accessor = player, public)]
 pub struct Player {
     #[primary_key]
@@ -15,6 +16,8 @@ pub struct Player {
     pub created_at: Timestamp,
     pub last_seen_at: Timestamp,
     pub protocol_version: u32,
+    /// `0xRRGGBBAA`; 0 = unset (the client applies its palette default).
+    pub color: u32,
 }
 
 /// One row per connection of an identity; `ended_at` closes it.

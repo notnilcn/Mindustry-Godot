@@ -328,6 +328,25 @@ impl ContentRegistry {
         }
     }
 
+    /// Deterministic hash over every named content entry, in `ContentType::ALL`
+    /// order and each type's registration order. The relay's `content_hash`
+    /// build gate compares it between host and joiner (I08 T4); enabled mods
+    /// change it because their entries are in the same registry.
+    pub fn content_hash(&self) -> u64 {
+        use crate::determinism::Hasher;
+        let mut hasher = Hasher::new();
+        for type_ in ContentType::ALL {
+            for entry in self.entries(type_) {
+                if let Some(name) = entry.name {
+                    hasher.write_u8(type_ as u8);
+                    hasher.write(name.as_bytes());
+                    hasher.write_u8(0);
+                }
+            }
+        }
+        hasher.finish().value()
+    }
+
     /// Ordered audit entries for one content type.
     pub fn entries(&self, type_: ContentType) -> Vec<ContentEntry<'_>> {
         let mut out = Vec::new();

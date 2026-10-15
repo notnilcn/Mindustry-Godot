@@ -388,6 +388,9 @@ pub struct MindSimHost {
     /// start (never mid-frame). Populated by `MindNet`/MCP via
     /// `enqueue_sim_command`/`apply_sim_command_json`.
     pending_commands: VecDeque<SimCommand>,
+    /// Relay mailbox installed by `MindNet` while a match is active (I08 T6):
+    /// `submit_player_command` pushes here; the relay drains it each frame.
+    relay_outbox: Option<std::sync::Arc<std::sync::Mutex<Vec<SimCommand>>>>,
     /// Plan-18 sim→client audio log; installed as an `AudioSinkRes` resource
     /// and drained by `/root/Spine/MindAudio` (plan 18 §3.3/§3.10).
     audio_log: SharedAudioLog,
@@ -456,6 +459,7 @@ impl INode for MindSimHost {
             input_locked: false,
             fx_host: None,
             pending_commands: VecDeque::new(),
+            relay_outbox: None,
             audio_log: SharedAudioLog::new(),
             sector_rules: None,
             sector_plans: Vec::new(),
@@ -950,9 +954,45 @@ impl MindSimHost {
     }
 
     /// Enqueues a canonical [`SimCommand`] to apply at the next tick start
-    /// (plan 21 §3.5). Rust-only seam used by the `MindNet` relay runtime.
+    /// (plan 21 §3.5). Rust-only seam used by the `MindNet` relay runtime for
+    /// foreign rows and predictions.
     pub fn enqueue_sim_command(&mut self, command: SimCommand) {
         self.pending_commands.push_back(command);
+    }
+
+    /// Single outbound seam for player actions (I08 T6): into the relay
+    /// mailbox when a match installed one, else the local command queue.
+    pub fn submit_player_command(&mut self, command: SimCommand) {
+        if let Some(outbox) = self.relay_outbox.as_ref()
+            && let Ok(mut queue) = outbox.lock()
+        {
+            queue.push(command);
+            return;
+        }
+        self.enqueue_sim_command(command);
+    }
+
+    /// Installs the relay mailbox (called by `MindNet` while a match is
+    /// active).
+    pub fn install_relay_outbox(
+        &mut self,
+        outbox: std::sync::Arc<std::sync::Mutex<Vec<SimCommand>>>,
+    ) {
+        self.relay_outbox = Some(outbox);
+    }
+
+    /// Removes the relay mailbox (single-player again).
+    pub fn clear_relay_outbox(&mut self) {
+        self.relay_outbox = None;
+    }
+
+    /// Runs `f` against the live content registry (relay name resolution and
+    /// the content hash; I08 T4/T6). `None` before a registry is installed.
+    pub fn with_registry<R>(
+        &self,
+        f: impl FnOnce(&mind_core::content::ContentRegistry) -> R,
+    ) -> Option<R> {
+        self.content_snapshot.as_ref().map(f)
     }
 
     /// MCP/dev helper: parse a small JSON command and enqueue it.
@@ -1127,6 +1167,123 @@ impl MindSimHost {
         true
     }
 
+    /// MCP/test helper: parse a small JSON command and route it through the
+    /// single outbound seam [`Self::submit_player_command`] (I08 T6), so the
+    /// relay path can be driven in-engine.
+    ///
+    /// Shape: `{"op":"place","x":1,"y":2,"block":<u16>,"rotation":0}`,
+    /// `{"op":"break","x":1,"y":2}`,
+    /// `{"op":"configure","x":1,"y":2,"content":<name>}` (or `"number"`/
+    /// `"bool"`/`"text"`),
+    /// `{"op":"rotate","x":1,"y":2,"direction":false}`,
+    /// `{"op":"delete_plans","positions":[...]}`.
+    #[func]
+    pub fn submit_player_command_json(&mut self, cmd_json: GString) -> bool {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&cmd_json.to_string()) else {
+            log::warn!("submit_player_command_json: invalid JSON");
+            return false;
+        };
+        let op = value.get("op").and_then(|v| v.as_str()).unwrap_or("");
+        let coord = |key: &str| {
+            value
+                .get(key)
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i16::try_from(v).ok())
+        };
+        let command = match op {
+            "place" => {
+                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                    return false;
+                };
+                SimCommand::Place {
+                    x,
+                    y,
+                    block: value.get("block").and_then(|v| v.as_u64()).unwrap_or(0) as u16,
+                    rotation: value
+                        .get("rotation")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0)
+                        .clamp(0, 3) as i8,
+                    team: value.get("team").and_then(|v| v.as_u64()).unwrap_or(0) as u8,
+                    player: Some(0),
+                }
+            }
+            "break" => {
+                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                    return false;
+                };
+                SimCommand::Break {
+                    x,
+                    y,
+                    player: Some(0),
+                }
+            }
+            "configure" => {
+                use mind_core::determinism::ConfigValue;
+                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                    return false;
+                };
+                let config = if let Some(name) = value.get("content").and_then(|v| v.as_str()) {
+                    ConfigValue::Content(name.to_string())
+                } else if let Some(number) = value.get("number").and_then(|v| v.as_f64()) {
+                    // `to_sim_config` (`command_emit.rs:268-277`): integral in
+                    // i32 range -> Int, otherwise Float.
+                    if number.fract() == 0.0
+                        && number >= f64::from(i32::MIN)
+                        && number <= f64::from(i32::MAX)
+                    {
+                        ConfigValue::Int(number as i32)
+                    } else {
+                        ConfigValue::Float(number as f32)
+                    }
+                } else if let Some(flag) = value.get("bool").and_then(|v| v.as_bool()) {
+                    ConfigValue::Bool(flag)
+                } else if let Some(text) = value.get("text").and_then(|v| v.as_str()) {
+                    ConfigValue::Text(text.to_string())
+                } else {
+                    log::warn!("submit_player_command_json: configure needs a value");
+                    return false;
+                };
+                SimCommand::Configure {
+                    x,
+                    y,
+                    value: config,
+                }
+            }
+            "rotate" => {
+                let (Some(x), Some(y)) = (coord("x"), coord("y")) else {
+                    return false;
+                };
+                SimCommand::Rotate {
+                    x,
+                    y,
+                    direction: value
+                        .get("direction")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                }
+            }
+            "delete_plans" => {
+                let positions: smallvec::SmallVec<[i32; 32]> = value
+                    .get("positions")
+                    .and_then(|v| v.as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .filter_map(|row| row.as_i64().map(|id| id as i32))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                SimCommand::DeletePlans { positions }
+            }
+            other => {
+                log::warn!("submit_player_command_json: unsupported op `{other}`");
+                return false;
+            }
+        };
+        self.submit_player_command(command);
+        true
+    }
+
     /// `state.rules.defaultTeam` of the live session (campaign rules, then the
     /// build guard resource). The RTS input layer filters selections by it
     /// (`player.team().id`; PAR-0140).
@@ -1249,6 +1406,49 @@ impl MindSimHost {
             }
         }
         out
+    }
+
+    /// FNV-1a-64 over the registered content names
+    /// (`ContentRegistry::content_hash`); the relay build gate compares it
+    /// between host and joiner (I08 T4). 0 when no registry is loaded.
+    #[func]
+    pub fn content_hash(&self) -> i64 {
+        self.content_snapshot
+            .as_ref()
+            .map(|registry| registry.content_hash() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Sets the sim tick counter (snapshot restore / late join, I08 T5; the
+    /// save-load path sets the same field at `sim_io.rs:1325`).
+    #[func]
+    pub fn set_sim_tick(&mut self, tick: i64) {
+        self.sim.state.tick = tick.max(0) as u64;
+    }
+
+    /// Saves the live world through the plan-05 IoSet handler and returns the
+    /// `.msav` bytes (I08 T4/T5 host snapshot encoder). `flush_io` runs the
+    /// save boundary without advancing the tick (`io_set.rs:227`), so the
+    /// bytes are ready when this returns; empty on failure.
+    #[func]
+    pub fn encode_snapshot(&mut self) -> PackedByteArray {
+        let relative = GString::from("user://mp/host-snapshot.msav");
+        let path = globalize(&relative);
+        if let Some(parent) = path.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
+            log::warn!("encode_snapshot: cannot create {}", parent.display());
+            return PackedByteArray::new();
+        }
+        self.sim.request_save(path.clone(), false);
+        self.sim.flush_io();
+        match std::fs::read(&path) {
+            Ok(bytes) => PackedByteArray::from(bytes.as_slice()),
+            Err(error) => {
+                log::warn!("encode_snapshot: read {} failed: {error}", path.display());
+                PackedByteArray::new()
+            }
+        }
     }
 
     /// Completed sim ticks.

@@ -14,12 +14,18 @@ signal host_requested(host_name: String, mode: String)
 const MODES := ["@mode.survival", "@mode.sandbox", "@mode.attack", "@mode.pvp", "@mode.editor"]
 ## Upstream `Core.settings.getInt("port", port)` default (`HostDialog.java:57`).
 const DEFAULT_PORT := 6567
+## Java `HostDialog.java:22-34`: name max 40; `name`/`color-0` shared settings.
+const NAME_SETTING := "name"
+const COLOR_SETTING := "color-0"
+const MAX_NAME_LENGTH := 40
 
 var _table: MindTable = null
 var _name_field: LineEdit = null
 var _port_field: LineEdit = null
 var _host_button: Button = null
 var _mode := "@mode.survival"
+var _color := Color.WHITE
+var _swatch_tint: ColorRect = null
 
 
 func _ready() -> void:
@@ -33,9 +39,32 @@ func _ready() -> void:
 func _build() -> void:
 	_table = content_table()
 	_table.add_theme_constant_override("separation", 6)
+	# code-instantiated: the name + colour row (`HostDialog.java:22-34`); the
+	# 300 px row width and final paddings land in I08 T12.
+	var name_row := HBoxContainer.new()
+	name_row.add_theme_constant_override("separation", 6)
+	name_row.add_child(MindWidgets.label(_t("@name")))
 	_name_field = MindWidgets.field(_t("@name"))
-	_name_field.max_length = 40
-	_table.add(_name_field).grow_x_axis().pad(4)
+	_name_field.max_length = MAX_NAME_LENGTH
+	# `HostDialog.java:24`: the field opens with the remembered name.
+	_name_field.text = _stored_name()
+	_name_field.text_changed.connect(_store_name)
+	_name_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_row.add_child(_name_field)
+	# code-instantiated: the square colour swatch is tinted at runtime by the
+	# colour chosen in the `picker` dialog (`HostDialog.java:28-34`).
+	var swatch := Button.new()
+	swatch.theme_type_variation = "squarei"
+	swatch.custom_minimum_size = Vector2(54, 54)
+	_swatch_tint = ColorRect.new()
+	_color = _stored_color()
+	_swatch_tint.color = _color
+	_swatch_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	swatch.add_child(_swatch_tint)
+	_swatch_tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	swatch.pressed.connect(_open_picker)
+	name_row.add_child(swatch)
+	_table.add(name_row).grow_x_axis().pad(4)
 	_table.row()
 	var row := HBoxContainer.new()
 	for mode in MODES:
@@ -73,6 +102,71 @@ func _select_mode(mode: String) -> void:
 	_mode = mode
 
 
+func _open_picker() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call("open_dialog", "picker", "{}")
+	var picker := get_tree().root.find_child("picker", true, false)
+	if picker != null and picker.has_signal("color_selected") and not picker.is_connected("color_selected", _on_color_selected):
+		picker.connect("color_selected", _on_color_selected)
+
+
+func _on_color_selected(color: Color) -> void:
+	_store_color(color)
+
+
+## `Core.settings.getString("name")` (`HostDialog.java:24`).
+func _stored_name() -> String:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_text"):
+		return ""
+	return str(ui.call("settings_get_text", NAME_SETTING, ""))
+
+
+## `Core.settings.getInt("color-0")` as `Color.rgba8888()`; unset (0) keeps the
+## palette default (`HostDialog.java:31`).
+func _stored_color() -> Color:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_int"):
+		return Color.WHITE
+	var rgba := int(ui.call("settings_get_int", COLOR_SETTING, 0))
+	if rgba == 0:
+		return Color.WHITE
+	return Color8((rgba >> 24) & 0xFF, (rgba >> 16) & 0xFF, (rgba >> 8) & 0xFF, rgba & 0xFF)
+
+
+## `HostDialog.java:24-27`: every name edit updates `player.name` and the
+## `name` setting immediately.
+func _store_name(text: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", NAME_SETTING, text)
+	_push_identity()
+
+
+## `HostDialog.java:31-33`: picking a colour updates `player.color` and the
+## `color-0` setting immediately.
+func _store_color(color: Color) -> void:
+	_color = color
+	if _swatch_tint != null:
+		_swatch_tint.color = color
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_int"):
+		ui.call("settings_put_int", COLOR_SETTING, color.to_rgba32())
+	_push_identity()
+
+
+## Pushes `player.name`/`player.color` to the relay identity reducers; the
+## facade queues them and sends on connect (I08 T2).
+func _push_identity() -> void:
+	if _name_field == null:
+		return
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net != null and net.has_method("set_player_identity"):
+		net.call("set_player_identity", _name_field.text, _color.to_rgba32())
+
+
 ## `HostDialog.portField.valid`: an integer in `1..=65535`.
 func _port_valid() -> bool:
 	if _port_field == null:
@@ -108,6 +202,7 @@ func _host() -> void:
 		if ui != null and ui.has_method("show_info"):
 			ui.call("show_info", _t("@noname"))
 		return
+	_push_identity()
 	host_requested.emit(host_name, _mode)
 	# `HostDialog.runHost` hides the dialog once the host call is dispatched.
 	if ui != null and ui.has_method("close_dialog"):

@@ -101,6 +101,9 @@ pub struct MindCampaign {
     /// `state.playtestingMap` (`Control.java:409`): the map a playtest start
     /// loaded, read by the editor's `resumeAfterPlaytest`.
     playtesting_map: Option<String>,
+    /// `Map.name` of the last `start_map_mode` custom game (I08 T4: the host
+    /// match id / server-browser label for non-campaign worlds).
+    current_map_name: Option<String>,
 }
 
 #[godot_api]
@@ -123,6 +126,7 @@ impl INode for MindCampaign {
             saving_finish_tick: None,
             unlocked_since_last_take: Vec::new(),
             playtesting_map: None,
+            current_map_name: None,
         }
     }
 
@@ -825,6 +829,7 @@ impl MindCampaign {
         sector: i32,
         loadout_json: GString,
     ) -> bool {
+        self.current_map_name = None;
         let planet_name = planet.to_string();
         if sector < 0 {
             return false;
@@ -1405,6 +1410,7 @@ impl MindCampaign {
         if !self.start_loaded_world(rules) {
             return false;
         }
+        self.current_map_name = Some(header.name().to_string());
         if playtest {
             self.playtesting_map = Some(path);
         } else if settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
@@ -1654,6 +1660,29 @@ impl MindCampaign {
     #[func]
     pub fn start_map(&mut self, name: GString) -> bool {
         self.start_map_mode(name, GString::from("survival"), false, GString::from(""))
+    }
+
+    /// Starts the session over a world loaded by `SimHost.load_map_world`
+    /// (I08 T5 join): the rules come from the host snapshot header and the
+    /// `Control.playMap` control half runs through [`Self::start_loaded_world`].
+    #[func]
+    pub fn start_joined_world(&mut self, rules_json: GString) -> bool {
+        let text = rules_json.to_string();
+        if text.trim().is_empty() {
+            log::warn!("start_joined_world: empty rules JSON");
+            return false;
+        }
+        let rules = match mind_core::io::json::JsonIo::read::<Rules>(&text) {
+            Ok(rules) => rules,
+            Err(error) => {
+                log::warn!("start_joined_world: bad rules JSON: {error}");
+                return false;
+            }
+        };
+        // A joined world is never a campaign sector; clear the custom-map name
+        // so a later host uses the live identity (I08 T4).
+        self.current_map_name = None;
+        self.start_loaded_world(rules)
     }
 
     /// Forces sector capture (`Logic.sectorCapture`), routing through the live
@@ -3308,6 +3337,16 @@ impl MindCampaign {
         dict.set(
             &GString::from("hasCore"),
             &(self.session.player_core_count() > 0).to_variant(),
+        );
+        // I08 T4: the live custom map's name (the host match id for
+        // non-campaign worlds); empty for campaign sectors and the menu.
+        dict.set(
+            &GString::from("mapName"),
+            &self
+                .current_map_name
+                .clone()
+                .unwrap_or_default()
+                .to_variant(),
         );
         if let Some((planet, sector)) = self.session.sector {
             let name = self

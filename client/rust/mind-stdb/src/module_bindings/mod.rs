@@ -166,6 +166,7 @@ pub mod send_match_command_reducer;
 pub mod sender_command_state_type;
 pub mod server_config_table;
 pub mod server_config_type;
+pub mod set_color_reducer;
 pub mod set_ready_reducer;
 pub mod set_rule_type;
 pub mod set_rules_type;
@@ -347,6 +348,7 @@ pub use send_match_command_reducer::send_match_command;
 pub use sender_command_state_type::SenderCommandState;
 pub use server_config_table::*;
 pub use server_config_type::ServerConfig;
+pub use set_color_reducer::set_color;
 pub use set_ready_reducer::set_ready;
 pub use set_rule_type::SetRule;
 pub use set_rules_type::SetRules;
@@ -567,6 +569,9 @@ pub enum Reducer {
         client_tick: u64,
         kind: CommandKind,
     },
+    SetColor {
+        color: u32,
+    },
     SetReady {
         match_id: u64,
         ready: bool,
@@ -633,6 +638,7 @@ impl __sdk::Reducer for Reducer {
             Reducer::SaveSectorInfo { .. } => "save_sector_info",
             Reducer::SendChat { .. } => "send_chat",
             Reducer::SendMatchCommand { .. } => "send_match_command",
+            Reducer::SetColor { .. } => "set_color",
             Reducer::SetReady { .. } => "set_ready",
             Reducer::SetUnlock { .. } => "set_unlock",
             Reducer::SetUsername { .. } => "set_username",
@@ -986,6 +992,11 @@ impl __sdk::Reducer for Reducer {
                 client_tick: client_tick.clone(),
                 kind: kind.clone(),
             }),
+            Reducer::SetColor { color } => {
+                __sats::bsatn::to_vec(&set_color_reducer::SetColorArgs {
+                    color: color.clone(),
+                })
+            }
             Reducer::SetReady { match_id, ready } => {
                 __sats::bsatn::to_vec(&set_ready_reducer::SetReadyArgs {
                     match_id: match_id.clone(),

@@ -24,6 +24,9 @@ pub trait MlogField: Clone {
     /// Java enum names in declaration order (editor `showSelect` options; empty
     /// for free-form fields).
     const OPTIONS: &'static [&'static str] = &[];
+    /// Java enum class name (editor `<class>.label.<name>` bundle keys;
+    /// `LStatement.bundle(Enum)` lowercases the simple class name).
+    const ENUM_CLASS: &'static str = "";
 }
 
 /// Statement field type tag (`LogicStatementProcessor` supports strings/enums/primitives).
@@ -73,6 +76,7 @@ impl MlogField for i32 {
 
 impl MlogField for ContentType {
     const KIND: FieldKind = FieldKind::Enum;
+    const ENUM_CLASS: &'static str = "ContentType";
     fn write(&self, out: &mut String) {
         out.push_str(self.name());
     }
@@ -120,6 +124,7 @@ macro_rules! logic_enum {
         impl MlogField for $name {
             const KIND: FieldKind = FieldKind::Enum;
             const OPTIONS: &'static [&'static str] = &[$( $java ),*];
+            const ENUM_CLASS: &'static str = stringify!($name);
             fn write(&self, out: &mut String) {
                 out.push_str(self.name());
             }
@@ -289,6 +294,35 @@ logic_enum!(
     }
 );
 
+impl LMarkerControl {
+    /// Parameter names (`LMarkerControl.params`, editor `fields` rows).
+    pub const fn params(self) -> &'static [&'static str] {
+        use LMarkerControl::*;
+        match self {
+            Remove => &[],
+            World | Minimap | Light | Autoscale => &["truefalse"],
+            Pos | EndPos => &["x", "y"],
+            DrawLayer => &["layer"],
+            Color => &["color"],
+            Radius => &["radius"],
+            Stroke => &["stroke"],
+            Outline => &["outline"],
+            Rotation => &["rotation"],
+            Shape => &["sides", "fill", "outline"],
+            Arc => &["start", "end"],
+            FlushText => &["fetch"],
+            FontSize => &["size"],
+            TextHeight => &["height"],
+            TextAlign | LineAlign => &["align"],
+            LabelFlags => &["background", "outline"],
+            Texture => &["printFlush", "name"],
+            TextureSize => &["width", "height"],
+            Posi | Uvi => &["index", "x", "y"],
+            Colori => &["index", "color"],
+        }
+    }
+}
+
 logic_enum!(
     /// `LUnitControl`.
     LUnitControl {
@@ -315,6 +349,28 @@ logic_enum!(
         Unbind => "unbind"
     }
 );
+
+impl LUnitControl {
+    /// Parameter names (`LUnitControl.params`, editor `fields` rows).
+    pub const fn params(self) -> &'static [&'static str] {
+        use LUnitControl::*;
+        match self {
+            Idle | Stop | AutoPathfind | PayDrop | PayEnter | Unbind => &[],
+            Move | Pathfind | Mine | Deconstruct => &["x", "y"],
+            Approach => &["x", "y", "radius"],
+            Boost => &["enable"],
+            Target => &["x", "y", "shoot"],
+            Targetp => &["unit", "shoot"],
+            ItemDrop => &["to", "amount"],
+            ItemTake => &["from", "item", "amount"],
+            PayTake => &["takeUnits"],
+            Flag => &["value"],
+            Build => &["x", "y", "block", "rotation", "config"],
+            GetBlock => &["x", "y", "type", "building", "floor"],
+            Within => &["x", "y", "radius", "result"],
+        }
+    }
+}
 
 logic_enum!(
     /// Logic-relevant `world/meta/BlockFlag` subset (`allLogic`).

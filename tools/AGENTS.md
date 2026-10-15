@@ -19,6 +19,7 @@
 | `version.sh` | Write `client/assets/version.properties` (upstream key set) from flags and git state. |
 | `mcp-smoke.sh` + `mcp_smoke.py` | In-engine MCP spine smoke over a stdio `open-godot-mcp` server; needs the editor already running. |
 | `parity-session.sh` | SSH/no-display session bootstrap for the parity workflow: Xvfb `:10` (optionally headless weston for Godot), Godot editor on bridge 6970, env summary; `--run` execs opencode at the workspace root, `--stop` tears down. |
+| `mp-local.sh` | Local SpacetimeDB harness for multiplayer work (I08): `up` starts the standalone server on 3000 (log `/tmp/opencode/stdb.log`, pidfile `/tmp/opencode/stdb.pid`), publishes the module with `server/build.sh` and prints the db address (`127.0.0.1:3000/mindustry`); `down` stops what `up` started; `status` reports the listener + server ping. |
 | `watch.sh` | Watch `client/rust/**` for `.rs`/`Cargo.toml` edits and re-run `build.sh`; ignores `client/rust/target/` and `client/bin/`. |
 
 ## Responsibilities
@@ -35,6 +36,7 @@
 `export.sh` resolves the Godot binary (`$GODOT_BIN` → `godot4` → `godot4-mono` → `godot`), derives the `<ver>.stable` templates directory (`~/.local/share/godot/export_templates/`; `GODOT_TEMPLATES_DIR` overrides), and fails with an install hint when it is absent. `--platform` selects the preset (`windows`→`Windows Desktop`, `linux`→`Linux/X11`), `--preset` overrides it, and `--out` selects the artifact path. `--with-assets` (default) peers the runtime subset of `assets/` to `<artifact dir>/assets/` (`sprites/` with `fallback/` and `block_colors.png`, `fonts/`, `bundles/`, `locales/`, `icons/`, `sounds/`, `music/`, `maps/`, `shaders/`, `baseparts/`, `cursors/`, `planets/`, `contributors`, `sounds.index.json`), running `tools/pack.sh pack` first when `assets/sprites/sprites.atlas.json` is missing; `--no-assets` skips the copy and `--assets-only DIR` copies it without running an export (no templates needed).
 - `mcp-smoke.sh` execs `python3 tools/mcp_smoke.py`, which spawns its own stdio `open-godot-mcp` server (bridge `ws://127.0.0.1:6970`) and drives `res://scenes/game.tscn` end-to-end. Flags: `--mcp-bin`, `--repo-root`, `--server-arg`, `--keep-running`, `--verbose`; `OPEN_GODOT_MCP_BIN` overrides binary discovery. Exits `0` pass, `1` assertion/tool failure, `2` bridge not connected.
 - `parity-session.sh` is the only script that manages displays: it starts Xvfb `:10` (the Java-leg display; sessions N >= 2 use `:(9+N)`) and the editor bridge, with runtime state under the gitignored `.opencode/parity-session/`. It never starts the Java client — the parity-eval skill does that per run.
+- `mp-local.sh` is the multiplayer local-server harness (I08 T1): `up` reuses a listener on `:3000` or starts `spacetime start` detached (`STDB_LOG`, `STDB_PID` override the log/pidfile), waits for the port, publishes `mindustry` through `server/build.sh` (which also regenerates `mind-stdb/src/module_bindings/`) and prints `127.0.0.1:3000/mindustry` — the address the client's `stdb-server` setting defaults to. `down` kills only the pid it started; `status` pings `spacetime server ping local`.
 
 ## Conventions
 

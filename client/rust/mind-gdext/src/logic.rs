@@ -59,7 +59,12 @@ fn dict(pairs: Vec<(&str, Variant)>) -> Dictionary<GString, Variant> {
     out
 }
 
-fn field_dict(name: &str, kind: FieldKind, options: &[&str]) -> Dictionary<GString, Variant> {
+fn field_dict(
+    name: &str,
+    kind: FieldKind,
+    options: &[&str],
+    enum_class: &str,
+) -> Dictionary<GString, Variant> {
     let mut list = PackedStringArray::new();
     for option in options {
         list.push(&GString::from(*option));
@@ -77,6 +82,7 @@ fn field_dict(name: &str, kind: FieldKind, options: &[&str]) -> Dictionary<GStri
             .to_variant(),
         ),
         ("options", list.to_variant()),
+        ("enum_class", GString::from(enum_class).to_variant()),
     ])
 }
 
@@ -115,7 +121,9 @@ impl MindLogic {
             return out;
         };
         for field in fields {
-            out.push(&field_dict(field.name, field.kind, field.options).to_variant());
+            out.push(
+                &field_dict(field.name, field.kind, field.options, field.enum_class).to_variant(),
+            );
         }
         out
     }
@@ -132,7 +140,9 @@ impl MindLogic {
         };
         let mut fields = Array::<Variant>::new();
         for field in &meta.fields {
-            fields.push(&field_dict(field.name, field.kind, field.options).to_variant());
+            fields.push(
+                &field_dict(field.name, field.kind, field.options, field.enum_class).to_variant(),
+            );
         }
         dict(vec![
             (
@@ -338,21 +348,36 @@ impl MindLogic {
         GString::from(mind_core::logic::statement::Statement::sanitize(&value.to_string()).as_str())
     }
 
-    /// Visible editor field rows for a statement's current values
-    /// (`LStatement.build(Table)`; `draw` uses `DrawStatement.rebuild`).
+    /// The editor row items for a statement's current values
+    /// (`LStatement.build(Table)`): `[{kind, index, label, label_before, wide}]`.
     #[func]
-    pub fn editor_fields(&self, name: GString, values: PackedStringArray) -> Array<Variant> {
+    pub fn editor_layout(&self, name: GString, values: PackedStringArray) -> Array<Variant> {
         let values: Vec<String> = values
             .as_slice()
             .iter()
             .map(|value| value.to_string())
             .collect();
         let mut out = Array::<Variant>::new();
-        for field in mind_core::logic::statement::editor_fields(&name.to_string(), &values) {
+        for item in mind_core::logic::statement::editor_layout(&name.to_string(), &values) {
             out.push(
                 &dict(vec![
-                    ("index", (field.index as i64).to_variant()),
-                    ("label", GString::from(field.label).to_variant()),
+                    (
+                        "kind",
+                        GString::from(match item.kind {
+                            mind_core::logic::statement::EditorKind::Text => "text",
+                            mind_core::logic::statement::EditorKind::Field => "field",
+                            mind_core::logic::statement::EditorKind::Select => "select",
+                            mind_core::logic::statement::EditorKind::Color => "color",
+                            mind_core::logic::statement::EditorKind::Align => "align",
+                            mind_core::logic::statement::EditorKind::Char => "char",
+                            mind_core::logic::statement::EditorKind::Jump => "jump",
+                        })
+                        .to_variant(),
+                    ),
+                    ("index", (item.index as i64).to_variant()),
+                    ("label", GString::from(item.label).to_variant()),
+                    ("label_before", item.label_before.to_variant()),
+                    ("wide", item.wide.to_variant()),
                 ])
                 .to_variant(),
             );
@@ -360,13 +385,26 @@ impl MindLogic {
         out
     }
 
-    /// The discriminator field the editor renders as its own select button
-    /// (`-1` when the statement has a fixed layout).
+    /// `showSelect` options for a select bound to field `index`
+    /// (`[{name, label, key}]`; `key` is the bundle key or empty).
     #[func]
-    pub fn editor_discriminator(&self, name: GString) -> i64 {
-        mind_core::logic::statement::editor_discriminator(&name.to_string())
-            .map(|index| index as i64)
-            .unwrap_or(-1)
+    pub fn editor_options(&self, name: GString, index: i64) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        if index < 0 {
+            return out;
+        }
+        for option in mind_core::logic::statement::editor_options(&name.to_string(), index as usize)
+        {
+            out.push(
+                &dict(vec![
+                    ("name", GString::from(option.name.as_str()).to_variant()),
+                    ("label", GString::from(option.label.as_str()).to_variant()),
+                    ("key", GString::from(option.key.as_str()).to_variant()),
+                ])
+                .to_variant(),
+            );
+        }
+        out
     }
 
     /// The value fixups a discriminator change applies (`DrawStatement`'s
@@ -379,6 +417,23 @@ impl MindLogic {
             .map(|value| value.to_string())
             .collect();
         mind_core::logic::statement::editor_type_change(&name.to_string(), &mut values);
+        let mut out = PackedStringArray::new();
+        for value in &values {
+            out.push(&GString::from(value.as_str()));
+        }
+        out
+    }
+
+    /// Build-time field fixups (`SetRuleStatement.rebuild`'s `p1` default),
+    /// returned as the (possibly changed) field list.
+    #[func]
+    pub fn editor_normalize(&self, name: GString, values: PackedStringArray) -> PackedStringArray {
+        let mut values: Vec<String> = values
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        mind_core::logic::statement::editor_normalize(&name.to_string(), &mut values);
         let mut out = PackedStringArray::new();
         for value in &values {
             out.push(&GString::from(value.as_str()));
