@@ -110,7 +110,7 @@ fn base_turret_rows(config_range: f32, activation_time: f32, ctx: &StatCtx, stat
 
 /// One `[lightgray]`-prefixed separator row inside an ammo panel
 /// (`StatValues.sep`).
-fn sep(rows: &mut Vec<Cell>, text: impl Into<String>) {
+pub(super) fn sep(rows: &mut Vec<Cell>, text: impl Into<String>) {
     rows.push(Cell::Row);
     rows.push(values::text(format!(
         "[lightgray]{}[lightgray]",
@@ -144,7 +144,7 @@ fn status_text(
 }
 
 /// One bullet's rows inside its gray panel (`StatValues.ammo` body).
-fn bullet_rows(ctx: &StatCtx, bullet: BulletId, nested: bool) -> Vec<Cell> {
+pub(super) fn bullet_rows(ctx: &StatCtx, bullet: BulletId, nested: bool) -> Vec<Cell> {
     let Some(def) = ctx.registry.bullet(bullet) else {
         return Vec::new();
     };

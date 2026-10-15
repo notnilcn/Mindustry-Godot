@@ -23,6 +23,7 @@ pub mod logistics;
 pub mod production;
 pub mod turret_ammo;
 pub mod unit_blocks;
+pub mod unit_stats;
 pub mod values;
 
 use serde::Serialize;
@@ -854,6 +855,9 @@ pub fn content_stats(ctx: &StatCtx, content: ContentRef) -> Stats {
         ContentType::Block => production::family_block_stats(ctx, BlockId::new(content.id)),
         ContentType::Item => item_stats(ctx, ItemId::new(content.id)),
         ContentType::Liquid => liquid_stats(ctx, LiquidId::new(content.id)),
+        ContentType::Unit => {
+            unit_stats::unit_stats(ctx, crate::content::UnitTypeId::new(content.id))
+        }
         _ => Stats::new(),
     }
 }
