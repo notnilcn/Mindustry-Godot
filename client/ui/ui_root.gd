@@ -160,6 +160,11 @@ func _on_escape() -> bool:
 		return true
 	if menu_group.visible:
 		return false
+	# The editor shell owns keys while it is open (`MapEditorDialog.doInput`);
+	# its Escape opens the editor menu, never the pause menu.
+	var editor_dialog := get_node_or_null("/root/Spine/Ui/EditorDialog")
+	if editor_dialog != null and (editor_dialog as Control).visible:
+		return false
 	# `Control.java:733-736`: Esc pauses the sim (`state.set(paused)`) when not
 	# in a network game and `pauseDisabled` is off.
 	var opened: bool = bool(ui.call("open_dialog", "paused", ""))

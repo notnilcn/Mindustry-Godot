@@ -19,6 +19,9 @@ var _start := Vector2i(-1, -1)
 var _last_tool := ""
 var _world_view: Node = null
 var _camera: Camera2D = null
+## Middle-drag pan (`MapView.pan` while the temporary `zoom` tool is active).
+var _panning := false
+var _pan_position := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -28,10 +31,33 @@ func _ready() -> void:
 	_world_view = get_node_or_null(^"ViewportContainer/SubViewport/EditorWorldView")
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if _editor != null and is_instance_valid(_editor):
+		_pan_keys(delta)
 		_drive_view()
 		queue_redraw()
+
+
+## `MapView.act`: WASD/arrows pan (`offset -= axis * 15 * delta / zoom`) unless a
+## text field has focus or Ctrl is held.
+func _pan_keys(delta: float) -> void:
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit:
+		return
+	if Input.is_key_pressed(KEY_CTRL):
+		return
+	var ax := 0.0
+	var ay := 0.0
+	if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
+		ax -= 1.0
+	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
+		ax += 1.0
+	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
+		ay -= 1.0
+	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
+		ay += 1.0
+	if ax != 0.0 or ay != 0.0:
+		_editor.call("map_view_pan", -ax * 15.0 * delta, -ay * 15.0 * delta)
 
 
 ## `MapView.draw`: the `EditorRenderer` is drawn into the view rect
@@ -76,7 +102,12 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion:
 		_cursor = _tile_at(event.position)
-		if _drawing:
+		# `MapView.pan` while the middle-drag `zoom` tool is active.
+		if _panning:
+			var delta: Vector2 = event.position - _pan_position
+			_pan_position = event.position
+			_editor.call("map_view_pan", delta.x, delta.y)
+		elif _drawing:
 			_drag_to(_cursor)
 		queue_redraw()
 		accept_event()
@@ -95,7 +126,45 @@ func _gui_input(event: InputEvent) -> void:
 				_begin(_tile_at(event.position), true)
 			else:
 				_end()
+		elif event.button_index == MOUSE_BUTTON_MIDDLE:
+			if event.pressed:
+				_begin_pan(event.position)
+			else:
+				_end_pan()
 		accept_event()
+
+
+## `MapView.touchDown`: middle swaps to the `zoom` tool until release.
+func _begin_pan(position: Vector2) -> void:
+	_panning = true
+	_pan_position = position
+	if _last_tool.is_empty():
+		_last_tool = str(_editor.call("tool"))
+		_editor.call("set_tool", "zoom")
+
+
+## `MapView.touchUp`: the temporary `zoom` tool is restored.
+func _end_pan() -> void:
+	_panning = false
+	if not _last_tool.is_empty():
+		_editor.call("set_tool", _last_tool)
+		_last_tool = ""
+
+
+## `MapView.act`: Shift or Alt swaps to the temporary `pick` tool until release.
+func _unhandled_input(event: InputEvent) -> void:
+	if _editor == null or not is_instance_valid(_editor):
+		return
+	var key := event as InputEventKey
+	if key == null or key.echo or (key.keycode != KEY_SHIFT and key.keycode != KEY_ALT):
+		return
+	if key.pressed:
+		if _last_tool.is_empty():
+			_last_tool = str(_editor.call("tool"))
+			_editor.call("set_tool", "pick")
+	elif not _last_tool.is_empty():
+		_editor.call("set_tool", _last_tool)
+		_last_tool = ""
 
 
 func _tile_at(position: Vector2) -> Vector2i:
