@@ -1388,3 +1388,27 @@ fn door_toggle_updates_flowfield() {
         "closing the door re-packs the solid bit"
     );
 }
+
+/// I01 T4: the packed pathfinder health is the LIVE `build.health`
+/// (`Pathfinder.packTile`, `Pathfinder.java:260-270`), re-packed on a tile
+/// change (`Pathfinder.java:150-154`). A damaged wall is therefore cheaper to
+/// path through (`costGround` = `1 + health * 5`) than a fresh one.
+#[test]
+fn damaged_wall_is_cheaper_to_path_through() {
+    use crate::sim::combat_tests::{live_sim, place};
+
+    let mut sim = live_sim(16);
+    let wall = place(&mut sim, 8, 8, "copper-wall", 2);
+    let index = sim.grid.tiles.index(8, 8);
+    let fresh = sim.unit_runtime().expect("runtime").pathfinder.tiles[index].health();
+    assert_eq!(fresh, 8, "copper-wall 320 hp packs as health/40 = 8");
+    if let Some(mut health) = sim.ecs.0.get_mut::<crate::entities::comp::Health>(wall) {
+        health.health = 80.0;
+    }
+    // Java re-packs on `TileChangeEvent` (`Pathfinder.java:150-154`); the live
+    // sim's equivalent trigger is any placement/break.
+    place(&mut sim, 8, 12, "copper-wall", 2);
+    let packed = sim.unit_runtime().expect("runtime").pathfinder.tiles[index].health();
+    assert_eq!(packed, 2, "80 hp packs as 2");
+    assert!(packed < fresh, "a damaged wall is cheaper to path through");
+}

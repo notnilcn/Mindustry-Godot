@@ -28,7 +28,7 @@ use std::collections::{BTreeMap, VecDeque};
 use crate::content::ContentRegistry;
 use crate::world::{TilePos, WorldGrid};
 
-use super::astar::{self, AstarScratch, UniformCost};
+use super::astar::{self, AstarScratch};
 use super::pathfinder::path_tile::{self, PathTile};
 
 /// `ControlPathfinder.clusterSize`.
@@ -100,6 +100,9 @@ pub struct ControlPathfinder {
     pub cluster_h: i32,
     /// Per-tile ground passability.
     pub passable: Vec<bool>,
+    /// Per-tile `ControlPathfinder.costGround` weight (`0` = impassable); the
+    /// A*/field step cost (`ControlPathfinder.java:33-42`, `tileCost`/`tcost`).
+    pub weights: Vec<i32>,
     /// All boundary portals.
     pub portals: Vec<Portal>,
     /// `cluster index -> portal indices` (shared between the two clusters).
@@ -162,13 +165,18 @@ impl ControlPathfinder {
         self.height = grid.height();
         self.team = team;
         let tiles = path_tile::build_tiles(grid, content, world, core_capture);
-        self.passable = tiles
+        self.weights = tiles
             .iter()
             .map(|tile| {
                 let cost = control_ground_cost(team, *tile);
-                cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP
+                if cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP {
+                    cost
+                } else {
+                    0
+                }
             })
             .collect();
+        self.passable = self.weights.iter().map(|weight| *weight > 0).collect();
         self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         let cluster_count = (self.cluster_w * self.cluster_h).max(0) as usize;
@@ -190,13 +198,18 @@ impl ControlPathfinder {
         self.width = width;
         self.height = height;
         self.team = team;
-        self.passable = tiles
+        self.weights = tiles
             .iter()
             .map(|tile| {
                 let cost = control_ground_cost(team, *tile);
-                cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP
+                if cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP {
+                    cost
+                } else {
+                    0
+                }
             })
             .collect();
+        self.passable = self.weights.iter().map(|weight| *weight > 0).collect();
         self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         let cluster_count = (self.cluster_w * self.cluster_h).max(0) as usize;
@@ -343,7 +356,11 @@ impl ControlPathfinder {
         self.inner_edges = edges;
     }
 
-    /// Shortest in-cluster distance between two tiles (`inner_astar`).
+    /// Shortest in-cluster distance between two tiles (`innerAstar`).
+    ///
+    /// Java's `innerAstar` steps at `tileCost(team, cost, current, next)` = the
+    /// DESTINATION tile's `costGround` weight (ControlPathfinder.java:637-645);
+    /// with every weight `>= 1` the returned length is the weighted distance.
     fn cluster_astar(&self, cluster: usize, from: TilePos, to: TilePos) -> Option<f32> {
         if from == to {
             return Some(0.0);
@@ -357,13 +374,15 @@ impl ControlPathfinder {
                 && self.passable[node]
                 && self.cluster_of_node(node) == cluster
         };
+        let weights = &self.weights;
+        let step_cost = |_from: usize, to: usize| weights.get(to).copied().unwrap_or(0) as f32;
         let mut scratch = AstarScratch::new();
         let path = astar::pathfind(
             self.width,
             self.height,
             start,
             end,
-            &UniformCost(1.0),
+            &step_cost,
             astar::manhattan,
             &passable,
             &mut scratch,
@@ -371,7 +390,13 @@ impl ControlPathfinder {
         if path.is_empty() {
             None
         } else {
-            Some(path.len() as f32)
+            // `innerAstar` returns the accumulated cost (`costs.get(current)`),
+            // not the step count.
+            Some(
+                path.iter()
+                    .map(|node| weights.get(*node).copied().unwrap_or(0) as f32)
+                    .sum(),
+            )
         }
     }
 
@@ -433,9 +458,27 @@ impl ControlPathfinder {
             }
         }
         cache.frontier.push_back(goal);
-        while let Some(tile) = cache.frontier.pop_front() {
+        // Weighted expansion (Java's `FieldCache` fields are `costGround`
+        // distances, ControlPathfinder.java:33-42): Dijkstra over the tile
+        // weights. The frontier is a min-heap keyed by accumulated cost; a
+        // stale entry (already-relaxed tile) is skipped.
+        let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(i32, usize)>> =
+            std::collections::BinaryHeap::new();
+        heap.push(std::cmp::Reverse((0, goal)));
+        while let Some(std::cmp::Reverse((cost, tile))) = heap.pop() {
             let x = (tile as i32) % width;
             let y = (tile as i32) / width;
+            let cluster = self.cluster_of(x, y);
+            let index =
+                (x % CLUSTER_SIZE) as usize + (y % CLUSTER_SIZE) as usize * CLUSTER_SIZE as usize;
+            let Some(weights) = cache.fields.get(&cluster) else {
+                continue;
+            };
+            match weights.get(index).copied() {
+                Some(existing) if existing < cost => continue,
+                None => continue,
+                _ => {}
+            }
             let base = self.field_cost(&cache, x, y);
             if base == FIELD_UNINIT {
                 continue;
@@ -450,15 +493,20 @@ impl ControlPathfinder {
                 if !self.passable.get(next).copied().unwrap_or(false) {
                     continue;
                 }
+                let step = self.weights.get(next).copied().unwrap_or(0);
+                if step <= 0 {
+                    continue;
+                }
+                let candidate = base.saturating_add(step);
                 let cluster = self.cluster_of(nx, ny);
                 Self::add_flow_cluster(&mut cache, cluster, cluster_count);
                 let index = (nx % CLUSTER_SIZE) as usize
                     + (ny % CLUSTER_SIZE) as usize * CLUSTER_SIZE as usize;
                 if let Some(weights) = cache.fields.get_mut(&cluster)
-                    && weights[index] == FIELD_UNINIT
+                    && (weights[index] == FIELD_UNINIT || candidate < weights[index])
                 {
-                    weights[index] = base + 1;
-                    cache.frontier.push_back(next);
+                    weights[index] = candidate;
+                    heap.push(std::cmp::Reverse((candidate, next)));
                 }
             }
         }
@@ -479,17 +527,18 @@ impl ControlPathfinder {
                 ..Default::default()
             };
         }
-        // Descend the flow field: from each tile step to the smallest-index
-        // neighbour one unit closer to the goal. `dist` strictly decreases, so
-        // the walk is acyclic and must reach the goal. The tie-break is fixed so
-        // the cached and uncached entry points agree byte-for-byte.
+        // Descend the flow field: from each tile step to the passable neighbour
+        // with the smallest weight (`costGround` distance to the goal). `dist`
+        // strictly decreases, so the walk is acyclic and must reach the goal.
+        // The tie-break is fixed so the cached and uncached entry points agree
+        // byte-for-byte.
         let mut path: Vec<usize> = Vec::new();
         let mut current = start;
         while current != end {
             let x = (current as i32) % width;
             let y = (current as i32) / width;
             let here = self.field_cost(cache, x, y);
-            let mut next: Option<usize> = None;
+            let mut next: Option<(usize, i32)> = None;
             for (dx, dy) in D4 {
                 let nx = x + dx;
                 let ny = y + dy;
@@ -500,15 +549,21 @@ impl ControlPathfinder {
                 if !self.passable.get(candidate).copied().unwrap_or(false) {
                     continue;
                 }
-                if self.field_cost(cache, nx, ny) != here - 1 {
+                let cost = self.field_cost(cache, nx, ny);
+                if cost == FIELD_UNINIT || cost >= here {
                     continue;
                 }
                 next = Some(match next {
-                    Some(existing) if existing < candidate => existing,
-                    _ => candidate,
+                    Some((existing, existing_cost))
+                        if existing_cost < cost
+                            || (existing_cost == cost && existing < candidate) =>
+                    {
+                        (existing, existing_cost)
+                    }
+                    _ => (candidate, cost),
                 });
             }
-            let Some(node) = next else {
+            let Some((node, _)) = next else {
                 // Reachable but the field has no descending neighbour; only
                 // possible if the field and passability disagree (defensive).
                 return PathfindResult {
@@ -614,12 +669,14 @@ impl ControlPathfinder {
             return PathfindResult::default();
         }
         let passable = |node: usize| self.passable.get(node).copied().unwrap_or(false);
+        let weights = &self.weights;
+        let step_cost = |_from: usize, to: usize| weights.get(to).copied().unwrap_or(0) as f32;
         let path = astar::pathfind(
             self.width,
             self.height,
             start,
             end,
-            &UniformCost(1.0),
+            &step_cost,
             astar::manhattan,
             &passable,
             &mut self.scratch,
@@ -855,16 +912,72 @@ mod tests {
                         "cached vs uncached mismatch seed={seed} {from:?}->{to:?}"
                     );
                     // The field path is a shortest path: same reachability and
-                    // same length as A* (tie-break between equal paths may differ).
+                    // same total `costGround` weight as A* (the two may pick
+                    // different equal-cost routes, so step counts can differ).
                     let astar = path.get_path_position_astar(from, to);
                     assert_eq!(cached.unreachable, astar.unreachable);
                     if !cached.unreachable {
-                        assert_eq!(cached.path.len(), astar.path.len());
                         assert_eq!(cached.path.last(), astar.path.last());
+                        let cost = |route: &[TilePos]| -> i64 {
+                            route
+                                .iter()
+                                .map(|pos| {
+                                    path.weights
+                                        [pos.x() as usize + pos.y() as usize * path.width as usize]
+                                        as i64
+                                })
+                                .sum()
+                        };
+                        assert_eq!(
+                            cost(&cached.path),
+                            cost(&astar.path),
+                            "field and A* disagree on the optimal cost seed={seed} {from:?}->{to:?}"
+                        );
                     }
                 }
             }
         }
+    }
+
+    /// I01 T4: the control path uses the weighted `costGround` (deep water is
+    /// `+6000`, ControlPathfinder.java:33-42), so a route around the deep water
+    /// beats the shorter straight line through it.
+    #[test]
+    fn control_path_prefers_shallow_over_deep() {
+        let content = crate::content::create_base_content(
+            &crate::content::MemoryBundle::new(),
+            &crate::content::MemoryUnlockStore::new(),
+            true,
+        )
+        .expect("content");
+        let deep = content.block_id("deep-water").expect("deep-water");
+        let mut grid = WorldGrid::new(24, 16);
+        grid.fill(crate::content::BlockId::AIR, crate::content::BlockId::AIR);
+        // A deep-water column x = 12, y = 0..12; only the bottom rows are dry.
+        for y in 0..13 {
+            grid.tiles.get_mut(12, y).floor = deep;
+        }
+        let mut path = ControlPathfinder::new(24, 16);
+        path.build(&grid, &content, &bevy_ecs::world::World::new(), 0, false);
+        let from = TilePos::new(6, 6);
+        let to = TilePos::new(18, 6);
+        let deep_at = |pos: &TilePos| grid.tiles.get(pos.x() as i32, pos.y() as i32).floor == deep;
+        let result = path.get_path_position(from, to);
+        assert!(!result.unreachable);
+        assert!(
+            result.path.iter().all(|pos| !deep_at(pos)),
+            "the cached field detours around deep water: {:?}",
+            result.path
+        );
+        let astar = path.get_path_position_astar(from, to);
+        assert!(!astar.unreachable);
+        assert!(
+            astar.path.iter().all(|pos| !deep_at(pos)),
+            "the A* baseline detours around deep water: {:?}",
+            astar.path
+        );
+        // The straight line between the two tiles crosses the deep column.
+        assert!(deep_at(&TilePos::new(12, 6)));
     }
 
     #[test]
