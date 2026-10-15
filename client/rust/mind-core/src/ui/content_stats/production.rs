@@ -58,6 +58,8 @@ pub fn family_block_stats(ctx: &StatCtx, id: BlockId) -> Stats {
     super::logistics::logistics_block_stats(ctx, id, def, &mut stats);
     // I04 T5: unit-factory and payload families.
     super::unit_blocks::unit_block_stats(ctx, id, def, &mut stats);
+    // I04 T6: turret + ammo families.
+    super::turret_ammo::turret_block_stats(ctx, id, def, &mut stats);
     stats
 }
 

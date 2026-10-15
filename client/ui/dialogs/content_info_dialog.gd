@@ -265,10 +265,15 @@ func _panel_cell(cell: Dictionary) -> Control:
 	box.content_margin_top = 2.0
 	box.content_margin_bottom = 2.0
 	panel.add_theme_stylebox_override("panel", box)
-	var inner := HBoxContainer.new()
-	inner.add_theme_constant_override("separation", 4)
+	# Nested cells may start their own rows (`Cell::Row`): the panel is a
+	# VBox of HBox lines so `_add_cell`'s row containers land below, not beside
+	# (ammo/upgrade panels broke when `inner` was a single HBox).
+	var inner := VBoxContainer.new()
+	inner.add_theme_constant_override("separation", 2)
 	panel.add_child(inner)
-	var line := inner
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 4)
+	inner.add_child(line)
 	for nested_variant in (cell.get("cells", []) as Array):
 		line = _add_cell(inner, line, nested_variant)
 	return panel

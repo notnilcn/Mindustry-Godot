@@ -21,6 +21,7 @@
 
 pub mod logistics;
 pub mod production;
+pub mod turret_ammo;
 pub mod unit_blocks;
 pub mod values;
 
