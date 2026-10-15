@@ -33,6 +33,8 @@ var _selected := -1
 var _pending_class_index := -1
 ## Set while the `@clear` confirm is pending (`@settings.clear.confirm`).
 var _pending_clear := false
+## The objective created by `@add` waiting for a canvas click (`canvas.query`).
+var _pending_query: Dictionary = {}
 ## The color picker's answer target (`Color` interpreter).
 var _pending_color_set: Callable = Callable()
 ## The list picker's answer target (content/team pickers).
@@ -66,6 +68,7 @@ func shown() -> void:
 	_classes = _read_classes()
 	_marker_classes = _read_marker_classes()
 	_objectives = _read_objectives()
+	_rebuild_layout()
 	_selected = -1
 	_build()
 
@@ -92,7 +95,12 @@ func _build() -> void:
 		_canvas.custom_minimum_size = Vector2(480.0, 320.0)
 		if _canvas.has_signal("node_selected"):
 			_canvas.node_selected.connect(_select_objective)
+		if _canvas.has_signal("node_moved"):
+			_canvas.node_moved.connect(_on_node_moved)
+		if _canvas.has_signal("query_placed"):
+			_canvas.query_placed.connect(_on_query_placed)
 		row.add_child(_canvas)
+		_canvas.call("set_selected", _selected)
 
 	# code-instantiated: the field panel is driven by the class descriptors.
 	var scroll := ScrollContainer.new()
@@ -105,7 +113,8 @@ func _build() -> void:
 	_rebuild_panel()
 
 
-## `@add`: the objective type picker (`getProvider(MapObjective.class)`).
+## `@add`: the objective type picker (`getProvider(MapObjective.class)`); the
+## picked class becomes the canvas query cursor (`canvas::query`).
 func _add_objective() -> void:
 	_pending_class_index = -1
 	_open_class_picker()
@@ -216,18 +225,95 @@ func _pick_class(tag: String, overlay: Control) -> void:
 			created["editorPos"] = old["editorPos"]
 		_objectives[_pending_class_index] = created
 		_selected = _pending_class_index
-	else:
-		_objectives.append(created)
-		_selected = _objectives.size() - 1
+		_pending_class_index = -1
+		_commit()
+		_build()
+		return
 	_pending_class_index = -1
+	# `@add` -> `canvas::query`: click the canvas to place it (`placeQuery`).
+	_pending_query = created
+	if _canvas != null:
+		_canvas.call("set_querying", true)
+		_notify("@editor.objectives")
+
+
+## `placeQuery`: `tilemap.createTile(queryX, queryY, query)` + append.
+func _on_query_placed(x: int, y: int) -> void:
+	_pending_query["editorPos"] = _pack_pos(x, y)
+	_objectives.append(_pending_query)
+	_pending_query = {}
+	_selected = _objectives.size() - 1
+	if _canvas != null:
+		_canvas.call("set_querying", false)
 	_commit()
 	_build()
+
+
+## `ObjectiveTile.Mover.touchUp` -> `moveTile`: write the snapped position.
+func _on_node_moved(index: int, x: int, y: int) -> void:
+	if index < 0 or index >= _objectives.size() or not (_objectives[index] is Dictionary):
+		return
+	_objectives[index]["editorPos"] = _pack_pos(x, y)
+	_commit()
+
+
+func _pack_pos(x: int, y: int) -> int:
+	var value := (x & 0xFFFF) | ((y & 0xFFFF) << 16)
+	if value >= 2147483648:
+		value -= 4294967296
+	return value
+
+
+func _has_pos(editor_pos: int) -> bool:
+	return editor_pos != _pack_pos(-999, -999)
+
+
+func _node_x(editor_pos: int) -> int:
+	var x := (editor_pos >> 16) & 0xFFFF
+	return x - 65536 if x > 32767 else x
+
+
+func _node_y(editor_pos: int) -> int:
+	var y := editor_pos & 0xFFFF
+	return y - 65536 if y > 32767 else y
+
+
+## `rebuildObjectives`: programmatic objectives (editorX == -999) get a grid
+## layout before the canvas draws them (`MapObjectivesDialog.java:601-631`).
+func _rebuild_layout() -> void:
+	var any_unplaced := false
+	for objective in _objectives:
+		if objective is Dictionary and not _has_pos(int(objective.get("editorPos", 0))):
+			any_unplaced = true
+			break
+	if not any_unplaced:
+		return
+	var width := 5 + 2
+	var len := _objectives.size() * width
+	var columns := _objectives.size()
+	var rows := 1
+	if len > 100:
+		rows = len / 100
+		columns = 100 / width
+	var index := 0
+	for y in rows:
+		for x in columns:
+			if index >= _objectives.size():
+				break
+			var objective: Dictionary = _objectives[index] \
+				if _objectives[index] is Dictionary else {}
+			objective["editorPos"] = _pack_pos(x * width, y)
+			index += 1
+	if index > 0:
+		_commit()
 
 
 func _select_objective(index: int) -> void:
 	if index < 0 or index >= _objectives.size():
 		return
 	_selected = index
+	if _canvas != null:
+		_canvas.call("set_selected", index)
 	_rebuild_panel()
 
 
@@ -879,6 +965,49 @@ func _team_id(name: String) -> int:
 		if str(team_row.get("name", "")) == name:
 			return int(team_row.get("id", -1))
 	return -1
+
+
+## `MapObjectivesDialog.doInput` (`:556-588`): Ctrl+C copies the objective under
+## the cursor, Ctrl+V pastes the clipboard at the cursor's tile.
+func _input(event: InputEvent) -> void:
+	if not visible or _canvas == null or not is_top():
+		return
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or not key.ctrl_pressed:
+		return
+	# Let focused text fields keep their own copy/paste.
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit:
+		return
+	if key.keycode == KEY_C:
+		_copy_under_cursor()
+		get_viewport().set_input_as_handled()
+	elif key.keycode == KEY_V:
+		_paste_at_cursor()
+		get_viewport().set_input_as_handled()
+
+
+func _copy_under_cursor() -> void:
+	var mouse: Vector2 = _canvas.call("cursor_position")
+	var index := int(_canvas.call("node_index_at", mouse))
+	if index < 0 or index >= _objectives.size():
+		return
+	DisplayServer.clipboard_set(JSON.stringify(_objectives[index]))
+	_notify("@copied")
+
+
+func _paste_at_cursor() -> void:
+	var parsed: Variant = JSON.parse_string(DisplayServer.clipboard_get())
+	if not (parsed is Dictionary) or not (parsed as Dictionary).has("class"):
+		return
+	var cell: Vector2i = _canvas.call("cursor_cell")
+	if not bool(_canvas.call("cell_valid", cell.x, cell.y)):
+		return
+	(parsed as Dictionary)["editorPos"] = _pack_pos(cell.x, cell.y)
+	_objectives.append(parsed)
+	_selected = _objectives.size() - 1
+	_commit()
+	_build()
 
 
 func _read_classes() -> Array:
