@@ -530,6 +530,49 @@ fn launch_item_capacity(world: &World, e: Entity) -> i32 {
     crate::world::blocks::distribution::transfer::item_capacity(world, e)
 }
 
+/// Launch-pad draw rows (`LaunchPadBuild.draw`, `LaunchPad.java:114-133`;
+/// H03 T13): `(entity index, x, y, block, progress)` with `progress =
+/// min(items.total / itemCapacity, launchCounter / launchTime)`.
+pub fn launch_pad_rows(world: &mut World) -> Vec<(u32, f32, f32, crate::content::BlockId, f32)> {
+    let mut rows: Vec<(u32, f32, f32, crate::content::BlockId, f32)> = Vec::new();
+    let mut query = world.query::<(
+        Entity,
+        &Building,
+        &crate::entities::comp::Pos,
+        &CampaignState,
+    )>();
+    for (entity, building, pos, state) in query.iter(world) {
+        let is_pad = world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| table.instance(building.block))
+            .is_some_and(|inst| {
+                matches!(
+                    inst.kind_data,
+                    crate::world::block_kind_data::BlockKindData::LaunchPad(_)
+                )
+            });
+        if !is_pad {
+            continue;
+        }
+        let launch_time = instance_launch_time(world, entity).max(f32::EPSILON);
+        let capacity = launch_item_capacity(world, entity).max(1) as f32;
+        let total = world
+            .get::<crate::world::modules::ItemModule>(entity)
+            .map(|items| items.total())
+            .unwrap_or(0) as f32;
+        let progress = (total / capacity).min(state.launch_time / launch_time);
+        rows.push((
+            entity.index().index(),
+            pos.x,
+            pos.y,
+            building.block,
+            progress,
+        ));
+    }
+    rows.sort_by_key(|(id, ..)| *id);
+    rows
+}
+
 /// Campaign launch target (plan 12 supplies the real destination/resource logic).
 pub trait LaunchTargetProvider: Send + Sync {
     /// Whether the launch can proceed.
