@@ -96,7 +96,17 @@ impl LightRenderer {
 
     /// Rebuilds the camera-sized light map when the world, the camera or the
     /// 4-frame cadence asks for it, then composites with `rules.ambient_light`.
-    pub fn update(&mut self, view: &CameraView, rules: &RulesRenderView, draw_light: bool) {
+    ///
+    /// `fx_lights` are the frame's `Drawf.light` prims from `MindFx` (H03 T16):
+    /// Java feeds the same requests into `renderer.lights` (`Drawf.java:301-
+    /// 304`), gated by `LightRenderer.enabled()` — exactly `active` here.
+    pub fn update(
+        &mut self,
+        view: &CameraView,
+        rules: &RulesRenderView,
+        draw_light: bool,
+        fx_lights: &[(f32, f32, f32, [f32; 4], f32)],
+    ) {
         let active =
             enabled(rules.lighting, rules.ambient_light[3], draw_light) && self.material.is_some();
         self.stats.visible = active;
@@ -129,6 +139,11 @@ impl LightRenderer {
                     source.color,
                     source.opacity,
                 );
+            }
+            // H03 T16: the FX system's `Drawf.light` requests (`Fx.light`
+            // prims from hit/shoot effects), same accumulator.
+            for (x, y, radius, color, opacity) in fx_lights {
+                self.accumulator.add(*x, *y, *radius, *color, *opacity);
             }
             let width = ((view.w / SCALING as f32).ceil() as i32).max(1);
             let height = ((view.h / SCALING as f32).ceil() as i32).max(1);

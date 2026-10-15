@@ -989,11 +989,18 @@ impl MindWorldRenderer {
         self.stats.stage_trace.push(String::from("env"));
         self.stats.stage_trace.push(String::from("markers"));
         let draw_light = self.draw_light;
+        // H03 T16: the FX system's collected `Drawf.light` requests feed the
+        // light pass (`LightRenderer.add` on the Java side).
+        let fx_lights: Vec<(f32, f32, f32, [f32; 4], f32)> = self
+            .base()
+            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+            .map(|fx| fx.bind().view_lights().to_vec())
+            .unwrap_or_default();
         if let Some(light) = self.light.as_mut() {
             // `Renderer.draw`: the light composite only runs when
             // `Rules.lighting` is set; the ambient alpha comes from the
             // `Rules` `ambientLight` alpha (never a hardcoded near-black).
-            light.update(&view, &self.rules, draw_light);
+            light.update(&view, &self.rules, draw_light, &fx_lights);
             let light_stats = light.stats();
             self.stats.light_rebuilds = light_stats.rebuilds;
             self.stats.light_circles = light_stats.lights;
