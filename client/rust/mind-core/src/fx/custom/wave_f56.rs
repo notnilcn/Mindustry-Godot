@@ -23,8 +23,8 @@ use super::super::container::EffectContainer;
 use super::super::data::{EffectData, ViewSnapshot};
 use super::FxEmit;
 
-/// `Vars.tilesize`.
-const TILESIZE: f32 = 32.0;
+/// `Vars.tilesize` (`Vars.java:135`; single source `config::TILESIZE`).
+const TILESIZE: f32 = crate::config::TILESIZE as f32;
 
 /// `Color.scarlet`.
 const SCARLET: Rgba = Rgba::new(1.0, 0.204, 0.11, 1.0);

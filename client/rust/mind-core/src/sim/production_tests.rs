@@ -1469,10 +1469,12 @@ fn plasma_bore_stops_when_ore_removed() {
     );
 }
 
-/// T13 (`Door.tapped`, `Door.java:148-154`): a tap toggles `open`; a second tap
-/// within 60 ticks is ignored (`origin().timer(timerToggle, 60f)`).
+/// T13 (`Door.tapped`, `Door.java:148-154`): `Door`'s **config body** applies
+/// immediately (`Door.java:38-58` has no throttle); the 60-tick `timerToggle`
+/// gate sits on the tap path only (`door_tap_allowed`; the timer semantics are
+/// covered by `behavior::defense::tests::door_tap_timer_gates_and_records`).
 #[test]
-fn door_toggles_and_throttles() {
+fn door_configs_apply_without_tap_throttle() {
     let mut sim = runtime_sim();
     let door = place(&mut sim, "door", 5, 5);
     let is_open = |sim: &Sim| {
@@ -1483,17 +1485,15 @@ fn door_toggles_and_throttles() {
             .unwrap_or(false)
     };
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(true));
-    assert!(is_open(&sim), "opened on the first tap");
+    assert!(is_open(&sim), "opened on the first config");
     for _ in 0..10 {
         sim.tick().expect("tick");
     }
     configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
-    assert!(is_open(&sim), "second toggle within 60 ticks ignored");
-    for _ in 0..60 {
-        sim.tick().expect("tick");
-    }
-    configure(&mut sim, 5, 5, crate::determinism::ConfigValue::Bool(false));
-    assert!(!is_open(&sim), "closed after the throttle");
+    assert!(
+        !is_open(&sim),
+        "a config is not a tap: no 60-tick gate (`Door.java:38-58`)"
+    );
 }
 
 /// H07 T2 (`Door.java:40`): a live door config plays `door` once at the door
