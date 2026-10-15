@@ -400,8 +400,8 @@ pub const EXPECTED_M5_DIALOGS: &[&str] = &[
 pub const EXPECTED_M7_DIALOGS: &[&str] = &["file_chooser"];
 
 /// Dialog names required by the round-I logic plan (I03): `canvas_edit`
-/// (`CanvasBlock.buildConfiguration`) and, once landed, `logic`.
-pub const EXPECTED_LOGIC_DIALOGS: &[&str] = &["canvas_edit"];
+/// (`CanvasBlock.buildConfiguration`) and `logic` (`LogicBlock.buildConfiguration`).
+pub const EXPECTED_LOGIC_DIALOGS: &[&str] = &["canvas_edit", "logic"];
 
 /// Dialog names required by I06 T8 (`MapEditorDialog`'s menu + `MapInfoDialog`
 /// hub; every editor sub-dialog is manifest-registered so `MindUi` can open it).

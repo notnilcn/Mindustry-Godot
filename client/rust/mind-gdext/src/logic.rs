@@ -273,6 +273,52 @@ impl MindLogic {
         }
     }
 
+    /// Parses `source` into editor rows
+    /// (`[{name, category, fields: [String]}]`; `[]` on a parse error).
+    ///
+    /// The inverse is [`Self::write_statements`] (`LogicDialog.show` loads the
+    /// canvas from the statement list; `LCanvas.save` writes it back).
+    #[func]
+    pub fn parse_statements(&self, source: GString, privileged: bool) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        let Ok(statements) = Assembler::read(&source.to_string(), privileged) else {
+            return out;
+        };
+        for statement in statements {
+            out.push(&statement_row(&statement).to_variant());
+        }
+        out
+    }
+
+    /// Serializes editor rows back to program text (one statement per line).
+    ///
+    /// Rows come from [`Self::parse_statements`] or [`Self::default_statement`];
+    /// a row whose name is unknown is skipped, mirroring `LAssembler`'s
+    /// malformed-input handling.
+    #[func]
+    pub fn write_statements(&self, statements: Array<Variant>) -> GString {
+        let mut out = String::new();
+        for value in statements.iter_shared() {
+            let Some(dict) = value.try_to::<Dictionary<GString, Variant>>().ok() else {
+                continue;
+            };
+            if let Some(line) = row_to_line(&dict) {
+                out.push_str(&line);
+                out.push('\n');
+            }
+        }
+        GString::from(out.as_str())
+    }
+
+    /// A default instance of `name` as an editor row (`{}` when unknown).
+    #[func]
+    pub fn default_statement_row(&self, name: GString) -> Dictionary<GString, Variant> {
+        match default_statement(&name.to_string()) {
+            Some(statement) => statement_row(&statement),
+            None => Dictionary::<GString, Variant>::new(),
+        }
+    }
+
     /// A minimal valid starter program (`set`/`op`/`jump`), for the editor.
     #[func]
     pub fn default_program(&self) -> GString {
@@ -288,4 +334,56 @@ impl MindLogic {
         }
         GString::from(out.as_str())
     }
+}
+
+/// One editor row: `{name, category, fields: [String]}`.
+fn statement_row(
+    statement: &mind_core::logic::statement::Statement,
+) -> Dictionary<GString, Variant> {
+    let mut fields = Array::<Variant>::new();
+    for value in statement.field_values() {
+        fields.push(&GString::from(value.as_str()).to_variant());
+    }
+    dict(vec![
+        (
+            "name",
+            GString::from(statement.registered_name()).to_variant(),
+        ),
+        (
+            "bundle",
+            GString::from(
+                mind_core::logic::statement::bundle_key(statement.registered_name()).as_str(),
+            )
+            .to_variant(),
+        ),
+        (
+            "category",
+            GString::from(statement.category().name()).to_variant(),
+        ),
+        ("fields", fields.to_variant()),
+    ])
+}
+
+/// Rebuilds a statement line from an editor row (`None` when unknown).
+fn row_to_line(row: &Dictionary<GString, Variant>) -> Option<String> {
+    let name = row
+        .get(&GString::from("name"))
+        .and_then(|value| value.try_to::<GString>().ok())?
+        .to_string();
+    let mut tokens: Vec<String> = vec![name];
+    if let Some(fields) = row
+        .get(&GString::from("fields"))
+        .and_then(|value| value.try_to::<Array<Variant>>().ok())
+    {
+        for value in fields.iter_shared() {
+            if let Ok(text) = value.try_to::<GString>() {
+                tokens.push(text.to_string());
+            }
+        }
+    }
+    let refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
+    let statement = mind_core::logic::statement::read_statement(&refs)?;
+    let mut out = String::new();
+    statement.write(&mut out);
+    Some(out)
 }

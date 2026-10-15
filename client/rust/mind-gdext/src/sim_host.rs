@@ -2274,6 +2274,49 @@ impl MindSimHost {
         out
     }
 
+    /// `LogicBuild.showEditDialog` -> `configure(bytes)` (I03 T7).
+    ///
+    /// Compresses the editor text with `relativeConnections`, returns
+    /// `"toolong:<len>"` past `maxCompressedLen`, and otherwise queues a
+    /// `Bytes` configure as the player (the campaign configure gate applies,
+    /// unlike the `logic_set_code` test seam).
+    #[func]
+    pub fn logic_configure_code(&mut self, x: i64, y: i64, code: GString) -> GString {
+        self.logic_last_error = String::new();
+        let code = code.to_string();
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return GString::from("noprocessor");
+        };
+        let Some(links) = world
+            .get::<mind_core::logic::blocks::LogicBlockState>(e)
+            .map(|state| state.relative_connections(world, e))
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return GString::from("noprocessor");
+        };
+        match mind_core::logic::blocks::logic_block::encode_for_config(&code, &links) {
+            Err(len) => {
+                self.logic_last_error = format!("toolong:{len}");
+                GString::from(format!("toolong:{len}").as_str())
+            }
+            Ok(bytes) => {
+                let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                    return GString::from("noprocessor");
+                };
+                self.pending_commands.push_back(SimCommand::Configure {
+                    x: tx,
+                    y: ty,
+                    value: mind_core::determinism::ConfigValue::Bytes(bytes),
+                });
+                GString::new()
+            }
+        }
+    }
+
     /// Runs a registered logic bench case (plan 13 §7d; not yet registered).
     #[func]
     pub fn logic_bench(&self, name: GString) -> Dictionary<GString, Variant> {
