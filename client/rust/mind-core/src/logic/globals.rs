@@ -213,6 +213,19 @@ impl GlobalVars {
         });
     }
 
+    /// The documented global entry names in declaration order
+    /// (`GlobalVarsDialog`; the `@logic.globals` list).
+    pub fn global_entries() -> Option<Vec<String>> {
+        let globals = Self::new();
+        Some(
+            globals
+                .entries
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect(),
+        )
+    }
+
     /// State-independent constants (`GlobalVars.init` minus content/audio).
     fn init_static(&mut self) {
         self.put_entry("the end", None, true);

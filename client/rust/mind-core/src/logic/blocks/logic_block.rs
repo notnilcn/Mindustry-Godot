@@ -564,6 +564,32 @@ pub fn reassemble_all_processors(world: &mut World) {
     }
 }
 
+/// `LogicBuild.drawConfigure`/`drawSelect` link list: every valid link as
+/// `(centre x, centre y, block size, link name)` (`LogicBlock.java:661-683`).
+pub fn overlay_links(world: &World, e: Entity) -> Vec<(f32, f32, i32, String)> {
+    let Some(state) = world.get::<LogicBlockState>(e) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for link in &state.links {
+        if !link.valid {
+            continue;
+        }
+        let Some(build) = build_at(world, link.x, link.y) else {
+            continue;
+        };
+        let size = block_size_of(world, build).unwrap_or(1);
+        let offset = ((size + 1) % 2) as f32 * 4.0;
+        out.push((
+            link.x as f32 * 8.0 + offset,
+            link.y as f32 * 8.0 + offset,
+            size,
+            link.name.clone(),
+        ));
+    }
+    out
+}
+
 /// `LogicBlock.findLinkName(block)`: lowest free `bname{n}` (`n >= 1`).
 pub fn find_link_name(links: &[LogicLink], bname: &str) -> String {
     let mut taken = IndexSet::new();
@@ -1036,6 +1062,51 @@ impl BuildingBehavior for LogicBlockBehavior {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `LogicBuild.drawConfigure`: a 2x2 link reports half-size 9
+    /// (`size * 4 + 1`, `LogicBlock.java:668`).
+    #[test]
+    fn overlay_links_report_half_sizes() {
+        let mut sim = crate::sim::Sim::new(
+            3,
+            32,
+            32,
+            crate::content::BlockId::AIR,
+            crate::content::BlockId::AIR,
+        );
+        let stone = crate::content::BlockId::new(sim.world_block_id("stone").expect("stone"));
+        sim.grid.fill(stone, crate::content::BlockId::AIR);
+        sim.install_block_runtime().expect("runtime");
+        let place = |sim: &mut crate::sim::Sim, name: &str, x: i16, y: i16| {
+            let id = sim.world_block_id(name).expect("block");
+            sim.command(crate::determinism::SimCommand::Place {
+                x,
+                y,
+                block: id,
+                rotation: 0,
+                team: 1,
+                player: None,
+            })
+            .expect("placed");
+            sim.grid
+                .entity_at(crate::world::TilePos::new(x, y))
+                .expect("entity")
+        };
+        let processor = place(&mut sim, "micro-processor", 10, 10);
+        place(&mut sim, "memory-bank", 14, 10);
+        sim.command(crate::determinism::SimCommand::Configure {
+            x: 10,
+            y: 10,
+            value: crate::determinism::ConfigValue::Int(crate::world::TilePos::new(14, 10).pack()),
+        })
+        .expect("configure");
+        let links = overlay_links(&sim.ecs.0, processor);
+        assert_eq!(links.len(), 1, "one link");
+        let (x, y, size, name) = &links[0];
+        assert_eq!(*size, 2, "memory-bank is 2x2");
+        assert_eq!((*x, *y), (116.0, 84.0), "2x2 centre");
+        assert!(name.starts_with("bank"), "link name: {name}");
+    }
 
     /// `LogicBuild.showEditDialog` gate: a program that compresses past
     /// `maxByteLen` is rejected with its length; short programs pass.

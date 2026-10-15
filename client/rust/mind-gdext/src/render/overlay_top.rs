@@ -198,9 +198,41 @@ impl INode2D for OverlayTop {
                     canvas::select(&mut base, tx, ty, r, color);
                 }
             }
-            // H06 T12 draws the logic config; nothing to draw until it lands
-            // (the variant carries no geometry yet).
-            Some(ConfigOverlay::Logic) | None => {}
+            // `LogicBuild.drawConfigure` (`LogicBlock.java:661-683`): the
+            // non-privileged link-range circles, one `Pal.place` square per
+            // valid link and the link names above them.
+            Some(ConfigOverlay::Logic { x, y, range, links }) => {
+                if let Some(range) = range {
+                    canvas::circles(
+                        &mut base,
+                        x,
+                        y,
+                        range,
+                        canvas::color_u32(to_bits(pal::PLACE)),
+                    );
+                }
+                let font = godot::classes::ThemeDb::singleton().get_fallback_font();
+                for (lx, ly, size, name) in &links {
+                    canvas::select(
+                        &mut base,
+                        *lx,
+                        *ly,
+                        *size as f32 * 4.0 + 1.0,
+                        canvas::color_u32(to_bits(pal::PLACE)),
+                    );
+                    if let Some(font) = &font {
+                        base.draw_string_ex(
+                            font,
+                            Vector2::new(*lx - 8.0, *ly - 10.0),
+                            &GString::from(name.as_str()),
+                        )
+                        .font_size(12)
+                        .modulate(Color::from_rgba(1.0, 1.0, 1.0, 0.7))
+                        .done();
+                    }
+                }
+            }
+            None => {}
         }
         // 3. Enemy-core build radius while placing (`:164-198`).
         let stroke = build_fade * 2.0;
@@ -270,8 +302,54 @@ impl INode2D for OverlayTop {
                     canvas::dash_circle(&mut base, x, y, range, color);
                 }
             }
-            Some(SelectOverlay::MessageText | SelectOverlay::LogicTag | SelectOverlay::None)
-            | None => {}
+            // `LogicBuild.drawSelect` (`LogicBlock.java:685-725`): one square
+            // per driven unit, the tag text above the block.
+            Some(SelectOverlay::LogicTag {
+                x,
+                y,
+                tag,
+                icon: _,
+                units,
+            }) => {
+                for (ux, uy, hit, rotation) in &units {
+                    canvas::select(
+                        &mut base,
+                        *ux,
+                        *uy,
+                        *hit,
+                        canvas::color_u32(to_bits(pal::PLACE)),
+                    );
+                    let _ = rotation;
+                }
+                if let Some(tag) = tag {
+                    let font = godot::classes::ThemeDb::singleton().get_fallback_font();
+                    if let Some(font) = font {
+                        base.draw_string_ex(
+                            &font,
+                            Vector2::new(x - 24.0, y + 8.0 + 2.0 - 1.0),
+                            &GString::from(tag.as_str()),
+                        )
+                        .font_size(12)
+                        .modulate(Color::from_rgba(1.0, 1.0, 1.0, 0.5))
+                        .done();
+                    }
+                }
+            }
+            // `MessageBlock.drawSelect`: the stored message above the block.
+            Some(SelectOverlay::MessageText { x, y, text }) => {
+                let font = godot::classes::ThemeDb::singleton().get_fallback_font();
+                if let Some(font) = font {
+                    base.draw_string_ex(
+                        &font,
+                        Vector2::new(x - 60.0, y - 8.0),
+                        &GString::from(text.as_str()),
+                    )
+                    .font_size(13)
+                    .modulate(Color::WHITE)
+                    .done();
+                }
+            }
+            Some(SelectOverlay::None) | None => {}
         }
     }
 }
