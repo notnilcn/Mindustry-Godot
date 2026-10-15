@@ -424,6 +424,23 @@ impl MindLogic {
         out
     }
 
+    /// Build-time field fixups (`SetRuleStatement.rebuild`'s `p1` default),
+    /// returned as the (possibly changed) field list.
+    #[func]
+    pub fn editor_normalize(&self, name: GString, values: PackedStringArray) -> PackedStringArray {
+        let mut values: Vec<String> = values
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        mind_core::logic::statement::editor_normalize(&name.to_string(), &mut values);
+        let mut out = PackedStringArray::new();
+        for value in &values {
+            out.push(&GString::from(value.as_str()));
+        }
+        out
+    }
+
     /// The built-in global entries (`GlobalVarsDialog`: `@logic.globals`).
     ///
     /// Rows are `{name, description}`; the description falls back to the

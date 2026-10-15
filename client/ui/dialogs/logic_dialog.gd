@@ -192,6 +192,14 @@ func _field_row(index: int, row: Dictionary) -> Control:
 		return fields_box
 	var name := str(row.get("name", "noop"))
 	var values: Array = row.get("fields", [])
+	# `SetRuleStatement.rebuild` normalizes `p1` to `@sharded` for team rules;
+	# Java mutates the statement at build time, so the dialog mirrors it.
+	var normalized: Variant = logic.call("editor_normalize", name, PackedStringArray(values))
+	if normalized is PackedStringArray and normalized != PackedStringArray(values):
+		values = Array(normalized)
+		row["fields"] = values
+		_statements[index] = row
+		_modified = true
 	var items: Variant = logic.call("editor_layout", name, PackedStringArray(values))
 	if not (items is Array):
 		return fields_box
