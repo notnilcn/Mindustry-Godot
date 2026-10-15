@@ -1660,23 +1660,16 @@ fn handle_reload(
         let ammo = peek_ammo_state(state, ctx.world, e);
         state.reload_counter += config.ammo_reload_multiplier(ammo, ctx.content) * eff;
         // `ReloadTurretBuild.updateCooling` (`coolant.efficiency > 0 &&
-        // efficiency > 0`): `getConsumed` picks the stored filter liquid,
-        // `coolant.update` drains it and the reload gains
+        // efficiency > 0`): `getConsumed` picks the module's CURRENT filter
+        // liquid first (`ConsumeLiquidFilter.java:57-71`), `coolant.update`
+        // drains it and the reload gains
         // `amount * edelta * heatCapacity * coolantMultiplier * ammoReloadMultiplier`.
         if config.uses_coolant() && eff > 0.0 {
             let consumed = ctx.world.get::<LiquidModule>(e).and_then(|liquids| {
-                config
-                    .coolant_liquids
-                    .iter()
-                    .copied()
-                    .filter(|l| liquids.get(*l) > 0.0)
-                    .max_by(|a, b| {
-                        liquids
-                            .get(*a)
-                            .partial_cmp(&liquids.get(*b))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    })
-                    .map(|l| (l, liquids.get(l)))
+                crate::world::update::consumed_liquid(liquids, &|liquid| {
+                    config.coolant_liquids.contains(&liquid)
+                })
+                .map(|l| (l, liquids.get(l)))
             });
             if let Some((liquid, stored)) = consumed {
                 let needed = config.coolant_amount * eff;

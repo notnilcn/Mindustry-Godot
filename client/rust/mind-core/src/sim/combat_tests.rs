@@ -141,6 +141,51 @@ fn shots_in(sim_setup: impl Fn(&mut Sim, Entity), ticks: usize) -> (i32, f32) {
 /// PAR-0087: a duo accepts water coolant (capacity 20) and fires faster
 /// while consuming it; slag/oil are rejected by the `ConsumeCoolant` filter.
 #[test]
+/// I01 T9: the coolant consumer reads `liquids.current()`
+/// (`ConsumeLiquidFilter.getConsumed`, `ConsumeLiquidFilter.java:57-71`), so a
+/// module holding water and cryofluid consumes the cryofluid (the last added).
+#[test]
+fn coolant_uses_current_liquid() {
+    use crate::world::blocks::defense::turrets::handle_liquid;
+    let mut sim = live_sim(16);
+    let duo = place(&mut sim, 5, 5, "duo", 1);
+    let (water, cryo) = {
+        let content = &sim.unit_runtime().expect("rt").content;
+        (
+            content.liquid_id("water").expect("water"),
+            content.liquid_id("cryofluid").expect("cryo"),
+        )
+    };
+    handle_liquid(&mut sim.ecs.0, duo, water, 100.0);
+    handle_liquid(&mut sim.ecs.0, duo, cryo, 100.0);
+    let (water_before, cryo_before) = {
+        let module = sim
+            .ecs
+            .0
+            .get::<crate::world::modules::LiquidModule>(duo)
+            .expect("module");
+        assert_eq!(module.current_liquid(), cryo, "cryofluid is current");
+        (module.get(water), module.get(cryo))
+    };
+    for _ in 0..240 {
+        sim.tick().expect("tick");
+    }
+    let module = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::LiquidModule>(duo)
+        .expect("module");
+    assert_eq!(
+        module.get(water),
+        water_before,
+        "the non-current liquid is untouched"
+    );
+    assert!(
+        module.get(cryo) < cryo_before,
+        "the current liquid is consumed"
+    );
+}
+
 fn duo_water_coolant_speeds_fire_and_drains() {
     use crate::world::blocks::defense::turrets::{accept_liquid, handle_liquid};
     let mut sim = live_sim(16);
