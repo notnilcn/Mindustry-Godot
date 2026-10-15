@@ -600,7 +600,7 @@ pub struct RasterGeometry {
 }
 
 /// View resource: root display entity → CPU raster (`LogicDisplayBuild.buffer`).
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Default, Clone, Resource)]
 pub struct LogicDisplayRasters {
     /// One raster per root display.
     pub rasters: IndexMap<Entity, DisplayRaster>,
@@ -753,6 +753,175 @@ pub fn process_display(world: &mut World, root: Entity, ctx: &dyn DisplayDrawCon
 /// `LogicDisplay.backgroundColor = Pal.darkerMetal`.
 fn display_background() -> Rgba {
     crate::content::registries::pal::DARKER_METAL.to_rgba8888()
+}
+
+/// One visible display row for the render pass (T13).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DisplayDrawRow {
+    /// Root display tile (the raster/texture key).
+    pub root_x: i16,
+    /// Root display tile y.
+    pub root_y: i16,
+    /// Whether the buffer quad is drawn at `(x, y)`.
+    pub draw_buffer: bool,
+    /// Draw centre x (world pixels).
+    pub x: f32,
+    /// Draw centre y (world pixels).
+    pub y: f32,
+    /// Draw width (world pixels).
+    pub w: f32,
+    /// Draw height (world pixels).
+    pub h: f32,
+    /// Whether this tile draws the tileable frame sprite.
+    pub frame: bool,
+    /// Frame centre x (world pixels).
+    pub frame_x: f32,
+    /// Frame centre y (world pixels).
+    pub frame_y: f32,
+    /// 8-neighbour mask (`TileableLogicDisplayBuild.bits`).
+    pub bits: u8,
+    /// `TileBitmask.values[bits]` (frame sprite suffix).
+    pub sprite: u8,
+}
+
+/// Whether a display's building centre lies inside the camera rect.
+fn display_visible(
+    world: &World,
+    e: Entity,
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+) -> bool {
+    let Some(building) = world.get::<crate::entities::comp::Building>(e) else {
+        return false;
+    };
+    let offset =
+        ((crate::logic::blocks::block_size_of(world, e).unwrap_or(1) + 1) % 2) as f32 * 4.0;
+    let x = f32::from(building.tile.x()) * 8.0 + offset;
+    let y = f32::from(building.tile.y()) * 8.0 + offset;
+    x >= min_x && x <= max_x && y >= min_y && y <= max_y
+}
+
+/// `LogicDisplayBuild.draw` selection for one camera rect (T13).
+///
+/// Processes every visible root (`process_display`) and returns the draw rows
+/// the render pass needs: one row per visible display tile with the buffer quad
+/// (`drawFull` for a rectangular tileable group) and the tileable frame sprite.
+pub fn display_rows(
+    world: &mut World,
+    ctx: &dyn DisplayDrawContext,
+    min_x: f32,
+    min_y: f32,
+    max_x: f32,
+    max_y: f32,
+) -> Vec<DisplayDrawRow> {
+    let mut displays: Vec<(u64, Entity)> = {
+        let mut query = world.query::<(Entity, &LogicDisplayState)>();
+        query
+            .iter(world)
+            .map(|(e, _)| {
+                let seq = world
+                    .get::<crate::ecs::EntitySeq>(e)
+                    .map(|seq| seq.0)
+                    .unwrap_or(u64::MAX);
+                (seq, e)
+            })
+            .collect()
+    };
+    displays.sort_by_key(|(seq, e)| (*seq, e.index().index()));
+    if displays.is_empty() {
+        return Vec::new();
+    }
+    // Process every root with at least one visible member.
+    let mut roots: Vec<(Entity, bool)> = Vec::new();
+    for (_, e) in &displays {
+        let root = world
+            .get::<LogicDisplayState>(*e)
+            .and_then(|state| state.root_display)
+            .unwrap_or(*e);
+        let visible = display_visible(world, *e, min_x, min_y, max_x, max_y);
+        match roots.iter_mut().find(|(candidate, _)| *candidate == root) {
+            Some(entry) => entry.1 |= visible,
+            None => roots.push((root, visible)),
+        }
+    }
+    for (root, visible) in roots {
+        if visible {
+            let _ = process_display(world, root, ctx);
+        }
+    }
+    let rasters = world
+        .get_resource::<LogicDisplayRasters>()
+        .cloned()
+        .unwrap_or_default();
+    let mut rows = Vec::new();
+    for (_, e) in displays {
+        if !display_visible(world, e, min_x, min_y, max_x, max_y) {
+            continue;
+        }
+        let Some(building) = world.get::<crate::entities::comp::Building>(e) else {
+            continue;
+        };
+        let offset =
+            ((crate::logic::blocks::block_size_of(world, e).unwrap_or(1) + 1) % 2) as f32 * 4.0;
+        let (cx, cy) = (
+            f32::from(building.tile.x()) * 8.0 + offset,
+            f32::from(building.tile.y()) * 8.0 + offset,
+        );
+        let state = world.get::<LogicDisplayState>(e);
+        let root = state.and_then(|state| state.root_display).unwrap_or(e);
+        let root_state = world.get::<LogicDisplayState>(root);
+        let Some(geometry) = rasters.geometry.get(&root).copied() else {
+            continue;
+        };
+        let scale = crate::logic::blocks::display_def_of(world, e)
+            .map(|def| def.scale_factor)
+            .filter(|scale| *scale > 0.0)
+            .unwrap_or(1.0);
+        let (root_x, root_y) = world
+            .get::<crate::entities::comp::Building>(root)
+            .map(|building| (building.tile.x(), building.tile.y()))
+            .unwrap_or((building.tile.x(), building.tile.y()));
+        let tileable = crate::logic::blocks::block_kind_of(world, e)
+            == Some(crate::content::BlockKind::TileableLogicDisplay);
+        let bits = state.map(|state| state.bits).unwrap_or(0);
+        let mut row = DisplayDrawRow {
+            root_x,
+            root_y,
+            draw_buffer: false,
+            x: cx,
+            y: cy,
+            w: geometry.width as f32 * scale * 0.25,
+            h: geometry.height as f32 * scale * 0.25,
+            frame: tileable,
+            frame_x: cx,
+            frame_y: cy,
+            bits,
+            sprite: crate::render::tile_bitmask::value(bits),
+        };
+        if tileable {
+            // `drawFull` (`TileableLogicDisplay.java:230-235`): the root draws
+            // the whole buffer once per frame; non-rectangular groups fall back
+            // to per-tile slices in the view pass.
+            let rectangular = root_state.is_some_and(|state| state.rectangular);
+            if rectangular
+                && root == e
+                && let Some(state) = root_state
+            {
+                let (tiles_w, tiles_h) = (state.tiles_width as f32, state.tiles_height as f32);
+                let rel_x = f32::from(building.tile.x()) - f32::from(root_x);
+                let rel_y = f32::from(building.tile.y()) - f32::from(root_y);
+                row.x = cx + 8.0 * (tiles_w - 1.0 - 2.0 * rel_x) / 2.0;
+                row.y = cy + 8.0 * (tiles_h - 1.0 - 2.0 * rel_y) / 2.0;
+                row.draw_buffer = true;
+            }
+        } else {
+            row.draw_buffer = true;
+        }
+        rows.push(row);
+    }
+    rows
 }
 
 #[cfg(test)]

@@ -413,6 +413,9 @@ pub struct MindSimHost {
     /// `World.loadMap`'s error key from the last failed `load_map_world`
     /// (`map.invalid`; `None` = the last load succeeded or none ran).
     last_map_error: Option<String>,
+    /// Content-name snapshot for the display rasterizer's icon lookup (T13);
+    /// built on the first `logic_display_sync`.
+    display_icon_names: Option<crate::display_context::IconNames>,
 }
 
 #[godot_api]
@@ -449,6 +452,7 @@ impl INode for MindSimHost {
             generated_loadout_placed: false,
             logic_last_error: String::new(),
             last_map_error: None,
+            display_icon_names: None,
         }
     }
 
@@ -1901,10 +1905,245 @@ impl MindSimHost {
         out
     }
 
-    /// Placeholder for a display command queue (awaits plan 16 rendering/05).
+    /// The queued draw commands of the display at `(x, y)`'s ROOT (T13).
+    ///
+    /// Returns the packed `DisplayCmd` queue the view-side rasterizer drains
+    /// (`LogicDisplay.build.commands`; a tileable member forwards to its root).
     #[func]
-    pub fn logic_display_commands(&self, _x: i64, _y: i64) -> PackedInt64Array {
-        PackedInt64Array::new()
+    pub fn logic_display_commands(&self, x: i64, y: i64) -> PackedInt64Array {
+        let mut out = PackedInt64Array::new();
+        let Ok(tx) = i16::try_from(x) else {
+            return out;
+        };
+        let Ok(ty) = i16::try_from(y) else {
+            return out;
+        };
+        let Some(e) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return out;
+        };
+        let root = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::logic::blocks::LogicDisplayState>(e)
+            .and_then(|state| state.root_display)
+            .unwrap_or(e);
+        let Some(state) = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::logic::blocks::LogicDisplayState>(root)
+        else {
+            return out;
+        };
+        for command in &state.commands {
+            out.push(*command as i64);
+        }
+        out
+    }
+
+    /// Display geometry/queue readback (`logic_display_state`; T13).
+    #[func]
+    pub fn logic_display_state(&self, x: i64, y: i64) -> Dictionary<GString, Variant> {
+        let mut out = Dictionary::<GString, Variant>::new();
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return out;
+        };
+        let Some(e) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return out;
+        };
+        let world = &self.sim.ecs.0;
+        let Some(state) = world.get::<mind_core::logic::blocks::LogicDisplayState>(e) else {
+            return out;
+        };
+        let root = state.root_display.unwrap_or(e);
+        let root_state = world
+            .get::<mind_core::logic::blocks::LogicDisplayState>(root)
+            .unwrap_or(state);
+        let (root_x, root_y) = world
+            .get::<mind_core::entities::comp::Building>(root)
+            .map(|building| (building.tile.x(), building.tile.y()))
+            .unwrap_or((tx, ty));
+        let tileable = mind_core::logic::blocks::block_kind_of(world, e)
+            == Some(mind_core::content::BlockKind::TileableLogicDisplay);
+        let frame = mind_core::logic::blocks::tileable_def_of(world, e)
+            .map(|def| def.frame_size)
+            .unwrap_or(6);
+        let (width, height) = if tileable {
+            (
+                root_state.tiles_width * 32 - frame * 2,
+                root_state.tiles_height * 32 - frame * 2,
+            )
+        } else {
+            (root_state.display_size, root_state.display_size)
+        };
+        out.set(&GString::from("root_x"), &i64::from(root_x).to_variant());
+        out.set(&GString::from("root_y"), &i64::from(root_y).to_variant());
+        out.set(&GString::from("width"), &i64::from(width).to_variant());
+        out.set(&GString::from("height"), &i64::from(height).to_variant());
+        out.set(
+            &GString::from("queued"),
+            &(root_state.commands.len() as i64).to_variant(),
+        );
+        out.set(
+            &GString::from("operations"),
+            &(root_state.operations as i64).to_variant(),
+        );
+        out.set(
+            &GString::from("rectangular"),
+            &root_state.rectangular.to_variant(),
+        );
+        out.set(&GString::from("tileable"), &tileable.to_variant());
+        out
+    }
+
+    /// RGBA of one raster pixel (`logic_display_pixel`; command space,
+    /// bottom-left origin). `-1` when the display or pixel is absent.
+    #[func]
+    pub fn logic_display_pixel(&self, x: i64, y: i64, px: i64, py: i64) -> i64 {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return -1;
+        };
+        let Some(e) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return -1;
+        };
+        let root = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::logic::blocks::LogicDisplayState>(e)
+            .and_then(|state| state.root_display)
+            .unwrap_or(e);
+        let rasters = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::logic::display_raster::LogicDisplayRasters>()
+            .and_then(|rasters| rasters.rasters.get(&root));
+        rasters
+            .and_then(|raster| raster.pixel(px as i32, py as i32))
+            .map(i64::from)
+            .unwrap_or(-1)
+    }
+
+    /// Processes the visible display roots and returns one row per visible
+    /// display for the render pass (T13).
+    ///
+    /// Rows: `{draw_buffer, x, y, w, h, root_x, root_y, frame, frame_x,
+    /// frame_y, bits, sprite}`. Processing drains each visible root's queue
+    /// into its CPU raster (`LogicDisplay.processCommands`).
+    #[func]
+    pub fn logic_display_sync(
+        &mut self,
+        min_x: f32,
+        min_y: f32,
+        max_x: f32,
+        max_y: f32,
+    ) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        if self.display_icon_names.is_none() {
+            self.display_icon_names = self
+                .sim
+                .block_runtime()
+                .map(|runtime| crate::display_context::IconNames::build(runtime.content()));
+        }
+        let assets = self
+            .base()
+            .try_get_node_as::<crate::assets::MindAssets>("/root/MindAssets");
+        let Some(names) = self.display_icon_names.as_ref() else {
+            return out;
+        };
+        let ctx = crate::display_context::AtlasIcons::new(assets, names);
+        let rows = mind_core::logic::display_raster::display_rows(
+            &mut self.sim.ecs.0,
+            &ctx,
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        );
+        for row in rows {
+            let mut dict = Dictionary::<GString, Variant>::new();
+            dict.set(
+                &GString::from("root_x"),
+                &i64::from(row.root_x).to_variant(),
+            );
+            dict.set(
+                &GString::from("root_y"),
+                &i64::from(row.root_y).to_variant(),
+            );
+            dict.set(&GString::from("draw_buffer"), &row.draw_buffer.to_variant());
+            dict.set(&GString::from("x"), &row.x.to_variant());
+            dict.set(&GString::from("y"), &row.y.to_variant());
+            dict.set(&GString::from("w"), &row.w.to_variant());
+            dict.set(&GString::from("h"), &row.h.to_variant());
+            dict.set(&GString::from("frame"), &row.frame.to_variant());
+            dict.set(&GString::from("frame_x"), &row.frame_x.to_variant());
+            dict.set(&GString::from("frame_y"), &row.frame_y.to_variant());
+            dict.set(&GString::from("bits"), &i64::from(row.bits).to_variant());
+            dict.set(
+                &GString::from("sprite"),
+                &i64::from(row.sprite).to_variant(),
+            );
+            out.push(&dict.to_variant());
+        }
+        out
+    }
+
+    /// RGBA8 bytes (row 0 = top) of the root raster at `(root_x, root_y)`.
+    #[func]
+    pub fn logic_display_image(&self, root_x: i64, root_y: i64) -> PackedByteArray {
+        let mut out = PackedByteArray::new();
+        let (Ok(tx), Ok(ty)) = (i16::try_from(root_x), i16::try_from(root_y)) else {
+            return out;
+        };
+        let Some(e) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return out;
+        };
+        let Some(raster) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::logic::display_raster::LogicDisplayRasters>()
+            .and_then(|rasters| rasters.rasters.get(&e))
+        else {
+            return out;
+        };
+        // The raster is stored top-row-first, but `canvas::draw_region` flips
+        // every region (negative height), so the upload is bottom-row-first:
+        // display y = 0 (the Java buffer's origin) ends up at the bottom.
+        let mut bytes: Vec<u8> = Vec::with_capacity(raster.pixels.len() * 4);
+        let width = raster.width as usize;
+        let height = raster.height as usize;
+        for row in (0..height).rev() {
+            for col in 0..width {
+                let Some(pixel) = raster.pixels.get(row * width + col) else {
+                    continue;
+                };
+                bytes.push(((pixel >> 24) & 0xff) as u8);
+                bytes.push(((pixel >> 16) & 0xff) as u8);
+                bytes.push(((pixel >> 8) & 0xff) as u8);
+                bytes.push((pixel & 0xff) as u8);
+            }
+        }
+        out.extend(bytes.iter().copied());
+        out
     }
 
     /// Runs a registered logic bench case (plan 13 §7d; not yet registered).
