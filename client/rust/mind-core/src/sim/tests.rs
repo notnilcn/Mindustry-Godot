@@ -208,6 +208,7 @@ fn sim_command_applies_unit_command_and_control() {
         command: 0,
         x: 50.0,
         y: 60.0,
+        queue: false,
     })
     .expect("unit command applies");
     assert_eq!(
@@ -222,6 +223,7 @@ fn sim_command_applies_unit_command_and_control() {
         command: 1,
         x: 0.0,
         y: 0.0,
+        queue: false,
     })
     .expect("command switch applies as a no-op when disallowed");
     assert_eq!(sim.unit_command_state(id).unwrap().command, before);
@@ -553,6 +555,7 @@ fn sim_command_unit_state_is_deterministic() {
             command: 0,
             x: 12.0,
             y: 34.0,
+            queue: false,
         })
         .unwrap();
         let (attack_x, attack_y) =
@@ -562,6 +565,7 @@ fn sim_command_unit_state_is_deterministic() {
             command: 0,
             x: attack_x,
             y: attack_y,
+            queue: false,
         })
         .unwrap();
     }

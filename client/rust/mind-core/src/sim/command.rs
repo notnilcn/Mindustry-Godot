@@ -133,11 +133,18 @@ impl UnitCommandRuntime {
     /// Applies a relay `UnitCommand` over `ids`.
     ///
     /// `command == 0` is the emitter's `commandUnits` marker: an implicit move
-    /// plus the wire-resolved target. Any other id is `setUnitCommand`: switch
-    /// the active command (no target is carried). Returns the number of units
-    /// whose state changed. The current wire form cannot carry `queue`, so
-    /// direct orders clear the queue (documented plan-15 §3.3.1 gap).
-    pub fn apply_unit_command(&mut self, ids: &[i32], command: u16, x: f32, y: f32) -> usize {
+    /// plus the wire-resolved target. `queue` appends the target to the unit's
+    /// command queue instead of replacing it (`commandUnits(..., queueCommand)`;
+    /// I01 T13). Any other id is `setUnitCommand`: switch the active command
+    /// (no target is carried). Returns the number of units whose state changed.
+    pub fn apply_unit_command(
+        &mut self,
+        ids: &[i32],
+        command: u16,
+        x: f32,
+        y: f32,
+        queue: bool,
+    ) -> usize {
         let runtime = self;
         let mut applied = 0usize;
         for &id in ids {
@@ -149,7 +156,7 @@ impl UnitCommandRuntime {
                 let target = resolve_wire_target(x, y);
                 if let Some(unit) = runtime.units.get_mut(&id) {
                     let state = &mut unit.state;
-                    command_units_apply_with_move(&mut [state], move_command, target, false);
+                    command_units_apply_with_move(&mut [state], move_command, target, queue);
                     applied += 1;
                 }
             } else {
@@ -372,7 +379,7 @@ mod tests {
         assert_eq!(runtime.len(), 1);
         // `CommandAI.init` selected the default command.
         assert!(runtime.state(id).and_then(|state| state.command).is_some());
-        let applied = runtime.apply_unit_command(&[id], 0, 12.0, 34.0);
+        let applied = runtime.apply_unit_command(&[id], 0, 12.0, 34.0, false);
         assert_eq!(applied, 1);
         assert_eq!(runtime.state(id).unwrap().target_pos, Some((12.0, 34.0)));
     }
@@ -460,14 +467,14 @@ mod tests {
         let mut first = UnitCommandRuntime::new();
         let a = first.spawn("dagger", 0).expect("dagger");
         let b = first.spawn("dagger", 1).expect("dagger");
-        first.apply_unit_command(&[a], 0, 5.0, 6.0);
-        first.apply_unit_command(&[b], 0, 9.0, 0.0);
+        first.apply_unit_command(&[a], 0, 5.0, 6.0, false);
+        first.apply_unit_command(&[b], 0, 9.0, 0.0, false);
 
         let mut second = UnitCommandRuntime::new();
         let a2 = second.spawn("dagger", 0).expect("dagger");
         let b2 = second.spawn("dagger", 1).expect("dagger");
-        second.apply_unit_command(&[a2], 0, 5.0, 6.0);
-        second.apply_unit_command(&[b2], 0, 9.0, 0.0);
+        second.apply_unit_command(&[a2], 0, 5.0, 6.0, false);
+        second.apply_unit_command(&[b2], 0, 9.0, 0.0, false);
 
         assert_eq!(first.checksum(), second.checksum());
     }

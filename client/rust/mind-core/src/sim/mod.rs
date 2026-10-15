@@ -636,13 +636,17 @@ impl Sim {
     /// position) and lands on the member's move target
     /// (`ControllerSlot.target`). Only default-team units whose controller is
     /// `CommandAI` accept (`isCommandable`) and only commands the unit type
-    /// allows (`CommandAI.command`, CommandAI.java:57-64).
-    ///
-    /// Every registered command id is accepted and stored on the unit
-    /// ([`crate::ai::controller::UnitCommandComp`]); non-move commands clear
-    /// the move target and wait for their controller dispatch
-    /// (`CommandAI.updateUnit`'s `commandController`, ported with the AI kinds).
-    fn apply_live_unit_command(&mut self, ids: &[i32], command: u16, x: f32, y: f32) -> usize {
+    /// allows (`CommandAI.command`, CommandAI.java:57-64). `queue` appends to
+    /// `CommandQueueComp` when a target already exists
+    /// (`commandUnits(..., queueCommand)`; I01 T13).
+    fn apply_live_unit_command(
+        &mut self,
+        ids: &[i32],
+        command: u16,
+        x: f32,
+        y: f32,
+        queue: bool,
+    ) -> usize {
         let command_id = crate::content::UnitCommandId::new(command);
         let Some(runtime) = self
             .ecs
@@ -770,18 +774,93 @@ impl Sim {
                 .entity_mut(entity)
                 .insert(crate::ai::controller::UnitCommandComp(command));
             crate::entities::comp::unit::miner::clear_mine_tile(&mut self.ecs.0, entity);
-            self.ecs
-                .0
-                .entity_mut(entity)
-                .insert(crate::ai::types::command::AttackTargetComp(attack_entity));
-            if let Some(mut slot) = self
+            // `commandUnits(..., queueCommand)` (`InputHandler.java:340-352`):
+            // a queued order appends when a target already exists
+            // (`CommandAI.commandQueue`); a direct order clears the queue and
+            // replaces the target.
+            let current_target = self
                 .ecs
                 .0
-                .get_mut::<crate::ai::controller::ControllerSlot>(entity)
-            {
-                slot.command = Some(command_id);
-                slot.target = order;
-                ordered += 1;
+                .get::<crate::ai::controller::ControllerSlot>(entity)
+                .and_then(|slot| slot.target);
+            let current_attack = self
+                .ecs
+                .0
+                .get::<crate::ai::types::command::AttackTargetComp>(entity)
+                .and_then(|comp| comp.0);
+            let apply_direct = !queue || (current_target.is_none() && current_attack.is_none());
+            if apply_direct {
+                self.ecs
+                    .0
+                    .entity_mut(entity)
+                    .insert(crate::ai::types::command::AttackTargetComp(attack_entity));
+                if let Some(mut queued) = self
+                    .ecs
+                    .0
+                    .get_mut::<crate::ai::types::command::CommandQueueComp>(entity)
+                {
+                    queued.0.clear();
+                }
+                if let Some(mut slot) = self
+                    .ecs
+                    .0
+                    .get_mut::<crate::ai::controller::ControllerSlot>(entity)
+                {
+                    slot.command = Some(command_id);
+                    slot.target = order;
+                    ordered += 1;
+                }
+            } else {
+                // Queued: `CommandAI.commandQueue(location)` — append only when
+                // the entry is not already present.
+                let entry = match (order, attack_entity) {
+                    (_, Some(target)) => {
+                        if self
+                            .ecs
+                            .0
+                            .get::<crate::entities::comp::unit::comp::UnitTypeComp>(target)
+                            .is_some()
+                        {
+                            self.ecs.0.get::<crate::ecs::EntitySeq>(target).map(|seq| {
+                                crate::ai::types::command::CommandQueueEntry::Unit(seq.0 as i32)
+                            })
+                        } else {
+                            self.ecs
+                                .0
+                                .get::<crate::entities::comp::Building>(target)
+                                .map(|building| {
+                                    crate::ai::types::command::CommandQueueEntry::Building(
+                                        building.tile.pack(),
+                                    )
+                                })
+                        }
+                    }
+                    (Some(tile), None) => {
+                        Some(crate::ai::types::command::CommandQueueEntry::Position(
+                            crate::world::WorldGrid::unconv(tile.x() as f32),
+                            crate::world::WorldGrid::unconv(tile.y() as f32),
+                        ))
+                    }
+                    (None, None) => None,
+                };
+                if let Some(entry) = entry {
+                    let mut queued = self
+                        .ecs
+                        .0
+                        .get_mut::<crate::ai::types::command::CommandQueueComp>(entity)
+                        .map(|queued| queued.0.clone())
+                        .unwrap_or_default();
+                    if !queued.contains(&entry)
+                        && queued.len() < crate::ai::types::command::MAX_COMMAND_QUEUE
+                    {
+                        queued.push(entry);
+                        self.ecs
+                            .0
+                            .entity_mut(entity)
+                            .insert(crate::ai::types::command::CommandQueueComp(queued));
+                        ordered += 1;
+                    }
+                }
             }
         }
         ordered
@@ -1667,12 +1746,18 @@ impl Sim {
                 command: unit_command,
                 x,
                 y,
+                queue,
             } => {
                 // Live units first (ids are `EntitySeq`; PAR-0140); the relay
                 // runtime keeps the wire-only/net bookkeeping path.
-                if self.apply_live_unit_command(units, *unit_command, *x, *y) == 0 {
-                    self.ensure_unit_commands()
-                        .apply_unit_command(units, *unit_command, *x, *y);
+                if self.apply_live_unit_command(units, *unit_command, *x, *y, *queue) == 0 {
+                    self.ensure_unit_commands().apply_unit_command(
+                        units,
+                        *unit_command,
+                        *x,
+                        *y,
+                        *queue,
+                    );
                 }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());

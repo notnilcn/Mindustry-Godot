@@ -1153,12 +1153,14 @@ fn sim_command_json(command: &mind_core::determinism::SimCommand) -> serde_json:
             command,
             x,
             y,
+            queue,
         } => serde_json::json!({
             "op": "unit_command",
             "units": units.to_vec(),
             "command": command,
             "x": x,
             "y": y,
+            "queue": queue,
         }),
         other => serde_json::json!({"op": other.op_name()}),
     }

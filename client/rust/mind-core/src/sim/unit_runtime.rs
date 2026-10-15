@@ -90,6 +90,64 @@ pub fn unit_by_id(world: &World, id: i32) -> Option<Entity> {
         .min_by_key(|entity| entity.index())
 }
 
+/// Pops the next queued waypoint onto the unit's target
+/// (`CommandAI.finishPath`: `targetPos = null` then the queue head,
+/// `CommandAI.java:476-490`; I01 T13).
+fn pop_live_command_queue(world: &mut World, grid: &WorldGrid, entity: Entity) {
+    use crate::ai::types::command::{AttackTargetComp, CommandQueueComp, CommandQueueEntry};
+    let next = {
+        let Some(mut queued) = world.get_mut::<CommandQueueComp>(entity) else {
+            return;
+        };
+        if queued.0.is_empty() {
+            return;
+        }
+        queued.0.remove(0)
+    };
+    match next {
+        CommandQueueEntry::Position(x, y) => {
+            let tile = TilePos::new(WorldGrid::to_tile(x) as i16, WorldGrid::to_tile(y) as i16);
+            if let Some(mut slot) = world.get_mut::<ControllerSlot>(entity) {
+                slot.target = Some(tile);
+            }
+        }
+        CommandQueueEntry::Unit(id) => {
+            let target = unit_by_id(world, id);
+            if let Some(mut stored) = world.get_mut::<AttackTargetComp>(entity) {
+                stored.0 = target;
+            } else {
+                world.entity_mut(entity).insert(AttackTargetComp(target));
+            }
+            let tile = target.and_then(|target| {
+                world.get::<crate::entities::comp::Pos>(target).map(|pos| {
+                    TilePos::new(
+                        WorldGrid::to_tile(pos.x) as i16,
+                        WorldGrid::to_tile(pos.y) as i16,
+                    )
+                })
+            });
+            if let Some(mut slot) = world.get_mut::<ControllerSlot>(entity) {
+                slot.target = tile;
+            }
+        }
+        CommandQueueEntry::Building(packed) => {
+            let pos = WorldGrid::unpack(packed);
+            let target = grid
+                .tiles
+                .getn(pos.x() as i32, pos.y() as i32)
+                .and_then(|tile| tile.build);
+            if let Some(mut stored) = world.get_mut::<AttackTargetComp>(entity) {
+                stored.0 = target;
+            } else {
+                world.entity_mut(entity).insert(AttackTargetComp(target));
+            }
+            if let Some(mut slot) = world.get_mut::<ControllerSlot>(entity) {
+                slot.target = Some(pos);
+            }
+        }
+    }
+}
+
 /// World pixels per tile (`config::TILESIZE`).
 const TILE_SIZE: f32 = crate::config::TILESIZE as f32;
 
@@ -2791,11 +2849,14 @@ pub fn unit_update_system(world: &mut World) {
                                 target,
                                 flying,
                             );
-                            if arrived
-                                && let Some(mut stored) = world.get_mut::<ControllerSlot>(entity)
-                            {
+                            if arrived {
                                 // `finishPath`: `targetPos = null`.
-                                stored.target = None;
+                                if let Some(mut stored) = world.get_mut::<ControllerSlot>(entity) {
+                                    stored.target = None;
+                                }
+                                // Then the next queued waypoint becomes the
+                                // target (`CommandAI.java:476-490`, I01 T13).
+                                pop_live_command_queue(world, &runtime.grid, entity);
                             }
                         }
                         None => {
@@ -6696,6 +6757,7 @@ mod tests {
             command: 0,
             x: 200.0,
             y: 200.0,
+            queue: false,
         })
         .expect("command");
         assert_eq!(
@@ -6727,6 +6789,121 @@ mod tests {
             after > before,
             "the ordered unit moves toward the target ({before} -> {after})"
         );
+    }
+
+    /// I01 T13: `commandUnits(..., queueCommand)` (middle mouse) appends to the
+    /// unit's command queue when a target already exists; the queue head is the
+    /// current target and the next waypoint is popped on arrival
+    /// (`CommandAI.commandQueue`/`finishPath`, `CommandAI.java:476-514`).
+    #[test]
+    fn queued_orders_execute_in_sequence() {
+        use crate::ai::types::command::CommandQueueEntry;
+
+        let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        install(&mut sim);
+        if let Some(mut rules) = sim
+            .ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+        {
+            rules.default_team = 1;
+        }
+        let dagger = sim
+            .unit_runtime()
+            .expect("runtime")
+            .content
+            .unit_by_name("dagger")
+            .expect("dagger")
+            .id
+            .get();
+        sim.command(SimCommand::SpawnUnit {
+            unit: dagger,
+            x: 32.0,
+            y: 32.0,
+            team: 1,
+        })
+        .expect("spawn");
+        let unit = sim.unit_runtime().expect("runtime").units[0];
+        let id = sim.ecs.0.get::<crate::ecs::EntitySeq>(unit).expect("seq").0 as i32;
+        let readback = |sim: &Sim| {
+            let slot = sim
+                .ecs
+                .0
+                .get::<crate::ai::controller::ControllerSlot>(unit)
+                .expect("slot");
+            (
+                slot.target,
+                sim.ecs
+                    .0
+                    .get::<crate::ai::types::command::CommandQueueComp>(unit)
+                    .map(|queued| queued.0.clone())
+                    .unwrap_or_default(),
+            )
+        };
+
+        // First queued order: no target exists, so it applies directly
+        // (`CommandAI.commandQueue` head rule). Target = the unit's own tile.
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![id],
+            command: 0,
+            x: 32.0,
+            y: 32.0,
+            queue: true,
+        })
+        .expect("first queued order");
+        let (target, queued) = readback(&sim);
+        assert_eq!(target, Some(TilePos::new(4, 4)), "head applies directly");
+        assert!(queued.is_empty(), "nothing queued yet");
+
+        // Second queued order: a target exists, so it appends.
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![id],
+            command: 0,
+            x: 128.0,
+            y: 128.0,
+            queue: true,
+        })
+        .expect("second queued order");
+        let (target, queued) = readback(&sim);
+        assert_eq!(target, Some(TilePos::new(4, 4)), "head unchanged");
+        assert_eq!(
+            queued,
+            vec![CommandQueueEntry::Position(128.0, 128.0)],
+            "second order appended"
+        );
+
+        // The unit already stands on the head: one tick arrives at it and pops
+        // the next waypoint (`CommandAI.finishPath`).
+        sim.tick().expect("tick");
+        let (target, queued) = readback(&sim);
+        assert_eq!(
+            target,
+            Some(TilePos::new(16, 16)),
+            "the queued waypoint becomes the target"
+        );
+        assert!(queued.is_empty(), "queue drained in order");
+
+        // A direct order clears a non-empty queue (`ai.commandQueue.clear()`).
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![id],
+            command: 0,
+            x: 64.0,
+            y: 64.0,
+            queue: true,
+        })
+        .expect("queued again");
+        assert_eq!(readback(&sim).1.len(), 1);
+        sim.command(SimCommand::UnitCommand {
+            units: smallvec::smallvec![id],
+            command: 0,
+            x: 96.0,
+            y: 96.0,
+            queue: false,
+        })
+        .expect("direct order");
+        let (target, queued) = readback(&sim);
+        assert_eq!(target, Some(TilePos::new(12, 12)), "direct order applied");
+        assert!(queued.is_empty(), "direct order clears the queue");
     }
 
     /// PAR-0140: the selectable snapshot lists live units by `EntitySeq` with
@@ -6883,6 +7060,7 @@ mod tests {
             command: 0,
             x,
             y,
+            queue: false,
         })
         .expect("command");
     }
@@ -7077,6 +7255,7 @@ mod tests {
             command: 0,
             x: 200.0,
             y: 200.0,
+            queue: false,
         })
         .expect("command");
         let target = |entity| {

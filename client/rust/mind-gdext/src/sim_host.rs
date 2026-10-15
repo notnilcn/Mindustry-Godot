@@ -1056,6 +1056,11 @@ impl MindSimHost {
                     command,
                     x,
                     y,
+                    // `queue` (I01 T13): append instead of replace.
+                    queue: value
+                        .get("queue")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
                 }
             }
             // `InputHandler.setUnitStance` (G01 T11): `units` + `stance` id in
