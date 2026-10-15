@@ -1801,6 +1801,60 @@ pub fn execute(
     }
 }
 
+/// Splits a `Block.draw` chain at its `DrawDefault` part (`DrawMulti` draws its
+/// parts in order, `DrawMulti.java`): everything before the default body draws
+/// *under* the base sprite (`DrawRegion("-bottom")`, `DrawLiquidTile`), the rest
+/// over it (I02 T7; H03 T8 deviation 4). A chain without a `DrawDefault` puts
+/// every part in the "over" list, because the caller emits the block sprite
+/// itself.
+pub fn split_chain_at_default(chain: &[DrawDesc]) -> (Vec<DrawDesc>, Vec<DrawDesc>) {
+    fn walk(
+        desc: &DrawDesc,
+        before: &mut Vec<DrawDesc>,
+        after: &mut Vec<DrawDesc>,
+        seen_default: &mut bool,
+        any_default: &mut bool,
+    ) {
+        match desc {
+            DrawDesc::Default => {
+                *seen_default = true;
+                *any_default = true;
+            }
+            DrawDesc::Multi(list) => {
+                for item in list {
+                    walk(item, before, after, seen_default, any_default);
+                }
+            }
+            other => {
+                if *seen_default {
+                    after.push(other.clone());
+                } else {
+                    before.push(other.clone());
+                }
+            }
+        }
+    }
+
+    let mut before = Vec::new();
+    let mut after = Vec::new();
+    let mut seen_default = false;
+    let mut any_default = false;
+    for desc in chain {
+        walk(
+            desc,
+            &mut before,
+            &mut after,
+            &mut seen_default,
+            &mut any_default,
+        );
+    }
+    if any_default {
+        (before, after)
+    } else {
+        (Vec::new(), before)
+    }
+}
+
 /// Executes a chain's **extra** descriptors, skipping the base block region
 /// (`Default` and an empty-suffix `Region`) that the sprite oracle already
 /// emitted through [`crate::render::list::build_entries`].
@@ -2305,5 +2359,48 @@ mod tests {
         // The block pass and the flame overlay pass must both appear.
         assert!(layers.contains(&Layer::Block.z().to_bits()));
         assert!(layers.contains(&(Layer::Block.z() + 0.01).to_bits()));
+    }
+
+    /// I02 T7: `DrawMulti` order - parts before `DrawDefault` draw under the
+    /// base sprite, parts after it over the sprite.
+    #[test]
+    fn chain_splits_at_draw_default() {
+        use super::split_chain_at_default;
+        let bottom = DrawDesc::Region {
+            suffix: "-bottom",
+            rotate_speed: 0.0,
+            rotation: 0.0,
+            spin: false,
+            building_rotate: false,
+            layer: 0.0,
+            color: None,
+            x: 0.0,
+            y: 0.0,
+        };
+        let top = DrawDesc::Region {
+            suffix: "-top",
+            rotate_speed: 0.0,
+            rotation: 0.0,
+            spin: false,
+            building_rotate: false,
+            layer: 0.0,
+            color: None,
+            x: 0.0,
+            y: 0.0,
+        };
+        let chain = vec![DrawDesc::Multi(vec![
+            bottom.clone(),
+            DrawDesc::Default,
+            top.clone(),
+        ])];
+        let (under, over) = split_chain_at_default(&chain);
+        assert_eq!(under, vec![bottom]);
+        assert_eq!(over, vec![top.clone()]);
+
+        // No `DrawDefault`: everything draws over the sprite (the caller emits
+        // the base region).
+        let (under, over) = split_chain_at_default(std::slice::from_ref(&top));
+        assert!(under.is_empty());
+        assert_eq!(over, vec![top.clone()]);
     }
 }

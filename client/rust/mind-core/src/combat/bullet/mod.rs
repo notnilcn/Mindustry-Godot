@@ -582,22 +582,35 @@ pub fn wall_collision(ctx: &mut CombatCtx<'_>, bullet: Entity, target: Entity) -
         return true;
     };
     // `Wall.*` knobs; every other block uses `Block.collision` (returns true).
-    let Some((lightning_chance, lightning_damage, lightning_length, chance_deflect)) = ctx
-        .world
-        .get_resource::<crate::world::block::BlockTable>()
-        .and_then(|table| table.instance(block))
-        .and_then(|inst| match &inst.kind_data {
-            crate::world::BlockKindData::Wall(def) => Some((
-                def.lightning_chance,
-                def.lightning_damage,
-                def.lightning_length,
-                def.chance_deflect,
-            )),
-            _ => None,
-        })
+    let Some((lightning_chance, lightning_damage, lightning_length, chance_deflect, flash_hit)) =
+        ctx.world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| table.instance(block))
+            .and_then(|inst| match &inst.kind_data {
+                crate::world::BlockKindData::Wall(def) => Some((
+                    def.lightning_chance,
+                    def.lightning_damage,
+                    def.lightning_length,
+                    def.chance_deflect,
+                    def.flash_hit,
+                )),
+                _ => None,
+            })
     else {
         return true;
     };
+
+    // `Wall.WallBuild.collision` (`Wall.java:164-166`): `hit = 1f` on every
+    // collision with a `flashHit` wall (phase walls), deflected or not; the
+    // renderer owns the decay (I02 T4).
+    if flash_hit
+        && let Some(tile) = ctx
+            .world
+            .get::<crate::entities::comp::Building>(target)
+            .map(|build| build.tile)
+    {
+        crate::world::events::push_wall_flash(ctx.world, tile.x(), tile.y());
+    }
 
     // `Wall.java:169-175`: `Lightning.create(team, lightningColor, damage, x, y,
     // bullet.rotation() + 180f, length)`; `lightningColor = Pal.surge`.

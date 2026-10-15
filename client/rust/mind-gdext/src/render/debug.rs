@@ -52,6 +52,8 @@ impl DebugCollisionRenderer {
         // code-instantiated: one pooled mesh for the debug overlay; the quad
         // count is data-driven from the visible solid tiles.
         band.clone().add_child(&node);
+        // I02 T2: hidden until the first mesh lands.
+        node.set_visible(false);
         Self {
             host,
             node,
@@ -72,7 +74,6 @@ impl DebugCollisionRenderer {
             self.node.set_visible(false);
             return;
         }
-        self.node.set_visible(true);
 
         let revision = self.host.clone().bind().world_revision();
         if revision == self.last_revision {
@@ -85,6 +86,7 @@ impl DebugCollisionRenderer {
             let host = host.bind();
             let world = host.grid();
             let Some(content) = host.content_registry() else {
+                self.node.set_visible(false);
                 return;
             };
             let size = TILESIZE as f32;
@@ -135,8 +137,15 @@ impl DebugCollisionRenderer {
             (quads, hitboxes)
         };
 
-        if let Some(mesh) = build_mesh(&quads, 0.0, false) {
-            self.node.set_mesh(&mesh.upcast::<Mesh>());
+        // I02 T2: no tiles -> no mesh, keep the node hidden (an empty
+        // `ArrayMesh` is still a draw call, and a mesh-less visible node is the
+        // `mesh_get_surface_count` error).
+        match build_mesh(&quads, 0.0, false) {
+            Some(mesh) => {
+                self.node.set_mesh(&mesh.upcast::<Mesh>());
+                self.node.set_visible(true);
+            }
+            None => self.node.set_visible(false),
         }
         self.stats.hitboxes = hitboxes;
     }

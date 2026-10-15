@@ -226,6 +226,23 @@ pub struct LaserLink {
     pub block: BlockId,
 }
 
+/// One beam-node laser (`BeamNode.BeamNodeBuild.draw`, I02 T5). The endpoints
+/// are already inset (`BeamNode.java:225-231`).
+pub struct BeamLaserLink {
+    /// Beam start x (source centre + `size * 4 * d4`).
+    pub x1: f32,
+    /// Beam start y.
+    pub y1: f32,
+    /// Beam end x (destination centre - `4 * d4`).
+    pub x2: f32,
+    /// Beam end y.
+    pub y2: f32,
+    /// Source graph satisfaction (`setupColor`).
+    pub satisfaction: f32,
+    /// Source block id (`<name>-beam` region fallback).
+    pub block: BlockId,
+}
+
 /// One item-bridge link (`ItemBridge.draw`, G03 T7).
 pub struct BridgeLink {
     /// Source tile.
@@ -1149,6 +1166,13 @@ impl MindSimHost {
                 .unwrap_or_else(|_| String::from("[]"))
                 .as_str(),
         )
+    }
+
+    /// I02 T4: drains the per-tick `flashHit` wall-collision log as
+    /// `[(tile_x, tile_y)]`. Rust-only seam for `render/blocks.rs`, which owns
+    /// the `hit` decay (`Wall.WallBuild.draw`, `Wall.java:146-161`).
+    pub fn drain_wall_flashes(&mut self) -> Vec<(i16, i16)> {
+        self.sim.drain_wall_flashes()
     }
 
     /// G01 T15: drains the per-tick building-damage log as
@@ -4400,6 +4424,112 @@ impl MindSimHost {
         out
     }
 
+    /// `BeamNode.BeamNodeBuild.draw` links (`BeamNode.java:207-233`; I02 T5):
+    /// one row per drawn beam, already inset by `tilesize / 2` on the source
+    /// (by `size * d4`) and destination (by `d4`) sides, with the source
+    /// graph's satisfaction for `setupColor`.
+    pub fn beam_node_lasers(&self, rect: (f32, f32, f32, f32)) -> Vec<BeamLaserLink> {
+        use mind_core::entities::comp::Building;
+        use mind_core::world::blocks::power::nodes::BeamNodeState;
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let view = CameraView {
+            x: rect.0 + rect.2 / 2.0,
+            y: rect.1 + rect.3 / 2.0,
+            w: rect.2 + 2.0 * POWER_GROW,
+            h: rect.3 + 2.0 * POWER_GROW,
+            zoom: 1.0,
+            team: self.player_team(),
+        };
+        let mut out = Vec::new();
+        for tile in visible_blocks(&self.sim.grid, content, &view) {
+            let Some(def) = content.block(tile.block) else {
+                continue;
+            };
+            if def.kind != BlockKind::BeamNode {
+                continue;
+            }
+            let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
+                continue;
+            };
+            // `team == Team.derelict` never draws (`BeamNode.java:213`).
+            if self.building_team(tile.x, tile.y) == Some(0) {
+                continue;
+            }
+            let Some(state) = self.sim.ecs.0.get::<BeamNodeState>(entity).copied() else {
+                continue;
+            };
+            let satisfaction = self
+                .sim
+                .ecs
+                .0
+                .get::<PowerModule>(entity)
+                .and_then(|module| {
+                    self.sim
+                        .ecs
+                        .0
+                        .get_resource::<PowerGrids>()
+                        .and_then(|grids| grids.graph(module.graph))
+                        .map(|graph| graph.get_satisfaction())
+                })
+                .unwrap_or(1.0);
+            let (x1, y1) = building_center(tile.x, tile.y, def);
+            // `Geometry.d4`: right, up, left, down.
+            const D4: [(f32, f32); 4] = [(1.0, 0.0), (0.0, 1.0), (-1.0, 0.0), (0.0, -1.0)];
+            for (i, link) in state.links.iter().enumerate() {
+                let Some(other) = *link else {
+                    continue;
+                };
+                let Some(other_build) = self.sim.ecs.0.get::<Building>(other) else {
+                    continue;
+                };
+                let Some(other_def) = content.block(other_build.block) else {
+                    continue;
+                };
+                let (ox, oy) = building_center(
+                    i32::from(other_build.tile.x()),
+                    i32::from(other_build.tile.y()),
+                    other_def,
+                );
+                // Don't draw lasers for adjacent blocks (`dst > 1 + size/2`).
+                let dst = (i32::from(other_build.tile.x()) - tile.x)
+                    .abs()
+                    .max((i32::from(other_build.tile.y()) - tile.y).abs());
+                if dst <= 1 + def.size / 2 {
+                    continue;
+                }
+                // Beam-to-beam dedupe (`BeamNode.java:219-221`): the larger
+                // range draws; equal ranges break the tie by entity index.
+                if other_def.kind == BlockKind::BeamNode {
+                    let other_range = self
+                        .sim
+                        .ecs
+                        .0
+                        .get::<BeamNodeState>(other)
+                        .map(|state| state.range)
+                        .unwrap_or(0);
+                    if state.range < other_range
+                        || (state.range == other_range && entity.index() < other.index())
+                    {
+                        continue;
+                    }
+                }
+                let (dx, dy) = D4[i % 4];
+                let poff = 4.0;
+                out.push(BeamLaserLink {
+                    x1: x1 + poff * def.size as f32 * dx,
+                    y1: y1 + poff * def.size as f32 * dy,
+                    x2: ox - poff * dx,
+                    y2: oy - poff * dy,
+                    satisfaction,
+                    block: tile.block,
+                });
+            }
+        }
+        out
+    }
+
     /// Item-bridge links in the (grown) visible rect (`ItemBridge.draw`,
     /// `ItemBridge.java:384-432`).
     pub fn bridge_links(&self, rect: (f32, f32, f32, f32)) -> Vec<BridgeLink> {
@@ -5863,11 +5993,13 @@ impl MindSimHost {
     /// `(center tile x, center tile y, world x, world y, size, java_color)`.
     /// Rust-only seam for the status pass (T14/PAR-0097).
     pub fn building_statuses(&self) -> Vec<(i32, i32, f32, f32, i32, u32)> {
-        use mind_core::world::status::BlockStatus;
         let Some(content) = self.content_snapshot.as_ref() else {
             return Vec::new();
         };
         let team = self.player_team();
+        // `BuildingComp.status()` reads `state.tick` (Vars.state): the sim tick
+        // drives the efficiency pulse (`BuildingComp.java:651`; I02 T3).
+        let tick = self.sim.tick_count();
         let mut out = Vec::new();
         for entity in self.sim.ecs.0.iter_entities() {
             let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
@@ -5885,18 +6017,14 @@ impl MindSimHost {
             if def.consumes.is_empty() {
                 continue;
             }
-            // `BlockStatus.forBlock`: `!enabled` -> logicDisable, efficiency
-            // `<= 0` -> noInput, else active. Java's pulse condition
-            // `((state.tick / 30) % 1) < efficiency` is always true (integer
-            // modulo 1), so the marker is simply `active`
-            // (`BuildingComp.java:638-652`).
-            let status = if !building.enabled {
-                BlockStatus::LogicDisable
-            } else if building.efficiency <= 0.0 {
-                BlockStatus::NoInput
-            } else {
-                BlockStatus::Active
-            };
+            // `BuildingComp.status()` (`BuildingComp.java:638-652`): logic
+            // disable, `noOutput` when `shouldConsume()` is false, `noInput`
+            // with no efficiency/production, else the 30-tick pulse
+            // `((tick / 30) % 1) < efficiency` (I02 T3; H01 T8 transcribed the
+            // per-family `shouldConsume()` overrides in
+            // `mind_core::world::status::java_block_status`).
+            let status =
+                mind_core::world::status::java_block_status(&self.sim.ecs.0, entity.id(), tick);
             let size = def.size.max(1);
             // `Building.tile` is the center tile; `Block.offset` recentres the
             // even-size sprites (same convention as `blocks.rs`).
@@ -7628,6 +7756,60 @@ impl MindSimHost {
             _ => None,
         }
     }
+
+    /// Pod and pad draw rows (`LaunchPayloadComp.draw` `LaunchPad.java:227-280`,
+    /// `LaunchPadBuild.draw` `:105-135`, `LandingPadBuild.draw`
+    /// `LandingPad.java:205-265`; H03 T13). Rust-only seam for `render/pods.rs`.
+    pub fn pad_draws(&mut self) -> Vec<PadDraw> {
+        let mut out = Vec::new();
+        let block_size = |snapshot: &Option<mind_core::content::ContentRegistry>,
+                          block: mind_core::content::BlockId| {
+            snapshot
+                .as_ref()
+                .and_then(|content| content.block(block))
+                .map(|def| def.size.max(1))
+                .unwrap_or(1)
+        };
+        for (id, x, y, time, lifetime, block, _team) in
+            mind_core::game::launch_payload::payload_rows(&mut self.sim.ecs.0)
+        {
+            out.push(PadDraw::Launch {
+                id,
+                x,
+                y,
+                time,
+                lifetime,
+                block,
+            });
+        }
+        for (id, x, y, block, _config, arriving, arriving_timer, cooldown) in
+            mind_core::game::landing_pad::landing_pad_rows(&mut self.sim.ecs.0)
+        {
+            out.push(PadDraw::Landing {
+                id,
+                x,
+                y,
+                size: block_size(&self.content_snapshot, block),
+                arriving: arriving.map(mind_core::content::ItemId::new),
+                arriving_timer,
+                cooldown,
+                block,
+            });
+        }
+        for (id, x, y, block, progress) in
+            mind_core::world::behavior::campaign::launch_pad_rows(&mut self.sim.ecs.0)
+        {
+            out.push(PadDraw::Pad {
+                id,
+                x,
+                y,
+                size: block_size(&self.content_snapshot, block),
+                progress,
+                block,
+            });
+        }
+        out
+    }
 }
 
 /// `UnitFactory.draw` preview numbers: `(unit, progress / plan.time)` for the
@@ -7669,6 +7851,60 @@ pub(crate) fn reconstructor_preview(
     });
     let fraction = (progress / construct_time.max(f32::EPSILON)).clamp(0.0, 1.0);
     (target, fraction, move_in >= 1.0)
+}
+
+/// One pod or pad draw row (`LaunchPad.java`/`LandingPad.java`; H03 T13).
+pub enum PadDraw {
+    /// Flying launch payload (`LaunchPayloadComp.draw`): `time`/`lifetime`
+    /// drive the `fin`/`fout` path.
+    Launch {
+        /// `LaunchPayload.id()` (view draw seed).
+        id: u32,
+        /// Pod centre x (`x`).
+        x: f32,
+        /// Pod centre y (`y`).
+        y: f32,
+        /// Ticks in flight.
+        time: f32,
+        /// Total flight time (120).
+        lifetime: f32,
+        /// Source pad block (`<block>-pod` region).
+        block: mind_core::content::BlockId,
+    },
+    /// Landing pad: an arriving pod or the cooldown pod (`LandingPadBuild.draw`).
+    Landing {
+        /// Entity index (view state key).
+        id: u32,
+        /// Pad centre x.
+        x: f32,
+        /// Pad centre y.
+        y: f32,
+        /// Pad size in tiles.
+        size: i32,
+        /// `arriving` item (`None` = nothing inbound).
+        arriving: Option<mind_core::content::ItemId>,
+        /// `arrivingTimer` (`0..=1`).
+        arriving_timer: f32,
+        /// `cooldown` (`0..=1`).
+        cooldown: f32,
+        /// Pad block (`<block>-pod` region).
+        block: mind_core::content::BlockId,
+    },
+    /// Idle launch pad: pod + corner progress lights (`LaunchPadBuild.draw`).
+    Pad {
+        /// Entity index (view state key).
+        id: u32,
+        /// Pad centre x.
+        x: f32,
+        /// Pad centre y.
+        y: f32,
+        /// Pad size in tiles.
+        size: i32,
+        /// `min(items.total/itemCapacity, launchCounter/launchTime)`.
+        progress: f32,
+        /// Pad block (`<block>-pod` / `<block>-light` regions).
+        block: mind_core::content::BlockId,
+    },
 }
 
 /// Unit factory / reconstructor build preview (`Drawf.construct`,

@@ -81,6 +81,19 @@ pub fn block_status(
     }
 }
 
+/// `((state.tick / 30f) % 1f) < efficiency` (`BuildingComp.java:651`): the
+/// active/noInput pulse of a running building. `state.tick` is a double, so the
+/// expression is the fractional position inside the current 30-tick window; a
+/// building at 40 % efficiency is `Active` for the first 40 % of every window
+/// and `NoInput` for the rest.
+pub fn status_pulse(tick: u64, efficiency: f32) -> BlockStatus {
+    if ((tick as f32 / 30.0) % 1.0) < efficiency {
+        BlockStatus::Active
+    } else {
+        BlockStatus::NoInput
+    }
+}
+
 /// `BuildingComp.status()` (`BuildingComp.java:638-652`) with the subclass
 /// overrides that matter for `AIController.targetFlagActive`'s flag set
 /// (`generator`, `factory`, `core`, `launchPad`, `storage`, `battery`,
@@ -174,11 +187,7 @@ pub fn java_block_status(
     if building.efficiency <= 0.0 {
         return BlockStatus::NoInput;
     }
-    if ((tick as f32 / 30.0) % 1.0) < building.efficiency {
-        BlockStatus::Active
-    } else {
-        BlockStatus::NoInput
-    }
+    status_pulse(tick, building.efficiency)
 }
 
 /// The port's turret kinds that extend Java `Turret` (and therefore inherit
@@ -208,7 +217,7 @@ mod tests {
         assert_eq!(BlockStatus::NoOutput.color(), 0xffd37f);
     }
 
-    /// The F6 marker colours are the Java `BlockStatus` values (T14/PAR-0097).
+    /// F6 marker colours are the Java `BlockStatus` values (T14/PAR-0097).
     #[test]
     fn java_marker_colors_match_blockstatus() {
         assert_eq!(BlockStatus::Active.java_color(), 0x5ce6_77ff);
@@ -217,6 +226,24 @@ mod tests {
         assert_eq!(BlockStatus::LogicDisable.java_color(), 0x8a73_c6ff);
         assert_eq!(BlockStatus::Inactive.java_color(), 0xbfbf_bfff);
         assert_eq!(BlockStatus::None.java_color(), 0xbfbf_bfff);
+    }
+
+    /// I02 T3 / `BuildingComp.status()`: the marker pulses per 30-tick window
+    /// (`((state.tick / 30f) % 1f) < efficiency`), it is not always `Active`.
+    #[test]
+    fn status_pulses_with_efficiency() {
+        // 40 % efficiency: active for the first 40 % of the 30-tick window.
+        assert_eq!(status_pulse(0, 0.4), BlockStatus::Active);
+        assert_eq!(status_pulse(6, 0.4), BlockStatus::Active); // 0.2
+        assert_eq!(status_pulse(15, 0.4), BlockStatus::NoInput); // 0.5
+        assert_eq!(status_pulse(29, 0.4), BlockStatus::NoInput);
+        // The window restarts every 30 ticks.
+        assert_eq!(status_pulse(30, 0.4), BlockStatus::Active);
+        assert_eq!(status_pulse(45, 0.4), BlockStatus::NoInput);
+        assert_eq!(status_pulse(60, 0.4), BlockStatus::Active);
+        // Full efficiency never leaves the active arm.
+        assert_eq!(status_pulse(17, 1.0), BlockStatus::Active);
+        assert_eq!(status_pulse(999, 1.0), BlockStatus::Active);
     }
 
     fn place(

@@ -383,6 +383,32 @@ impl RegionCache {
     }
 }
 
+/// `Fill.light` (`Fill.java:171-191`): a triangle fan with `center` at the
+/// hub and `edge` on the rim (`sides` rounded up to even by Arc).
+pub(crate) fn fill_light(
+    canvas: &mut Node2D,
+    x: f32,
+    y: f32,
+    sides: u32,
+    radius: f32,
+    center: Color,
+    edge: Color,
+) {
+    if radius <= 0.0 {
+        return;
+    }
+    let ring = drawf::poly_ring(x, y, sides.max(3), radius, 0.0);
+    let mut points = PackedVector2Array::new();
+    let mut colors = PackedColorArray::new();
+    points.push(Vector2::new(x, y));
+    colors.push(center);
+    for (px, py) in &ring {
+        points.push(Vector2::new(*px, *py));
+        colors.push(edge);
+    }
+    canvas.draw_polygon(&points, &colors);
+}
+
 /// `[(f32, f32)]` → `PackedVector2Array`.
 fn pack_points(pts: &[(f32, f32)]) -> PackedVector2Array {
     pts.iter()

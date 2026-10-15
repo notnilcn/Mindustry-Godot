@@ -479,17 +479,21 @@ func _current_map_id(campaign: Node) -> String:
 
 
 func _on_show_info(text: String) -> void:
-	_toast_label(text, 2.0)
+	# `UI.showInfoToast` (`UI.java:405-419`): top-centre, `Styles.black3`.
+	_toast_label(text, 2.0, "ok", true)
 
 
-func _on_toast(text: String, _icon: String) -> void:
+func _on_toast(text: String, icon: String) -> void:
 	# `HudFragment.showToast`: `if(state.isMenu()) return;` then uiNotify.
 	if menu_group.visible:
 		return
 	var ui := _ui()
 	if ui != null:
 		ui.call("play_ui_sound", "uiNotify")
-	_toast_label(text, 3.5)
+	# `showToast(Icon.warning, ..)` vs `showToast(text)` = `Icon.ok`
+	# (`HudFragment.java:745-753`).
+	var glyph := "warn" if icon in ["warning", "error", "warn"] else "ok"
+	_toast_label(text, 3.5, glyph)
 
 
 func _on_announce(text: String, duration: float) -> void:
@@ -530,18 +534,56 @@ func _announce_box(text: String, duration: float) -> void:
 	tween.tween_callback(box.queue_free)
 
 
-func _toast_label(text: String, duration: float) -> void:
-	# code-instantiated: toasts are transient, high-churn overlay labels.
-	# H03 T17: `UI.showInfoToast`/`HudFragment.showToast` labels parse markup;
-	# producers pass raw bundle/markup text, translated once here.
+func _toast_label(text: String, duration: float, icon: String = "ok", info: bool = false) -> void:
+	# code-instantiated: toasts are transient, high-churn overlay boxes.
+	# `HudFragment.showToast` (`HudFragment.java:753-776`): a `Tex.button` box,
+	# margin 12, `Icon.ok` + the text (wrap 280, centred), in a *top* container
+	# that slides in over 1 s (`Interp.fade`), waits and fades out.
+	# `UI.showInfoToast` (`UI.java:405-419`): the same top position with a
+	# `Styles.black3` box and `padTop(10)`.
+	# H03 T17: producers pass Java markup; translate once here.
+	var box := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	style.bg_color = MindStyles.BLACK_3 if info else MindStyles.GRAY_PANEL
+	style.set_corner_radius_all(4)
+	var margin := 4.0 if info else 12.0
+	style.content_margin_left = margin
+	style.content_margin_top = margin
+	style.content_margin_right = margin
+	style.content_margin_bottom = margin
+	box.add_theme_stylebox_override("panel", style)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 6)
+	if not info:
+		# `HudFragment.showToast`: `table.image(icon).pad(3)`.
+		var glyph := MindRichLabel.new()
+		glyph.text = MindIcons.glyph(icon)
+		MindIcons.apply_icon_font(glyph)
+		row.add_child(glyph)
 	var label := MindRichLabel.new()
 	label.text = MindWidgets.markup_text(text)
-	label.position = Vector2(24, 24)
-	overlay_layer.add_child(label)
+	if not info:
+		# `table.add(text).wrap().width(280f)`, centred.
+		label.custom_minimum_size = Vector2(280.0, 0.0)
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	row.add_child(label)
+	box.add_child(row)
+	# Top-centre (`container.top()` / `table.top()..padTop(10)`).
+	box.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	overlay_layer.add_child(box)
+	var top := 10.0
+	var slide := -box.get_combined_minimum_size().y - top
+	box.position.y = slide
 	var tween := create_tween()
+	# `Interp.fade` = `smoother`; TRS_QUAD/EASE_OUT is the port's stand-in.
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(box, "position:y", top, 1.0)
 	tween.tween_interval(duration)
-	tween.tween_property(label, "modulate:a", 0.0, 0.4)
-	tween.tween_callback(label.queue_free)
+	tween.tween_property(box, "modulate:a", 0.0, 0.4)
+	tween.tween_callback(box.queue_free)
 
 
 func _on_show_text(title: String, text: String) -> void:

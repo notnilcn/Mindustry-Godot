@@ -54,6 +54,8 @@ impl OverlayRenderer {
         // code-instantiated: one pooled mesh for the Voronoi edge set; the quad
         // count is data-driven from the protected cores.
         band.clone().add_child(&node);
+        // I02 T2: hidden until the first mesh lands.
+        node.clone().set_visible(false);
         Self {
             node,
             cores: Vec::new(),
@@ -117,9 +119,13 @@ impl OverlayRenderer {
             self.node.set_visible(false);
             return;
         }
-        self.node.set_visible(true);
-        if let Some(mesh) = build_mesh(&quads, 0.0, false) {
-            self.node.set_mesh(&mesh.upcast::<Mesh>());
+        // I02 T2: assign the mesh, then show the node.
+        match build_mesh(&quads, 0.0, false) {
+            Some(mesh) => {
+                self.node.set_mesh(&mesh.upcast::<Mesh>());
+                self.node.set_visible(true);
+            }
+            None => self.node.set_visible(false),
         }
     }
 }

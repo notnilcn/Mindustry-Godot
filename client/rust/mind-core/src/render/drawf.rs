@@ -203,6 +203,69 @@ pub fn construct_line_x(cx: f32, time: f32, size: f32) -> f32 {
     cx + sin_scl(time, 20.0, size / 2.0)
 }
 
+/// `Interp.pow5Out(fin) = 1 - (1 - fin)^5` (`Interp.java:124-136`).
+pub fn pow5_out(a: f32) -> f32 {
+    1.0 - (1.0 - a).powi(5)
+}
+
+/// `Interp.pow3In(fin) = fin^3` (`Interp.java:109-121`).
+pub fn pow3_in(a: f32) -> f32 {
+    a.powi(3)
+}
+
+/// `Interp.pow4In(fin) = fin^4` (`Interp.java:109-121`).
+pub fn pow4_in(a: f32) -> f32 {
+    a.powi(4)
+}
+
+/// `Mathf.slope(fin) = 1 - abs(fin - 0.5) * 2` (`Mathf.java:594-596`).
+pub fn slope(fin: f32) -> f32 {
+    1.0 - (fin - 0.5).abs() * 2.0
+}
+
+/// `Mathf.curve(f, from, to)` (`Mathf.java:608-616`): 0 below `from`, 1 above
+/// `to`, linear between.
+pub fn curve(f: f32, from: f32, to: f32) -> f32 {
+    if f < from {
+        0.0
+    } else if f > to {
+        1.0
+    } else {
+        (f - from) / (to - from)
+    }
+}
+
+/// `LaunchPayloadComp.draw` centre + rotation (`LaunchPad.java:252-262`):
+/// `cx = x + fin(pow2In) * (12 + seed(id+3, 4))`,
+/// `cy = y + fin(pow5In) * (100 + seed(id+2, 30))`,
+/// `rotation = fin * (130 + seed(id, 50))`. H03 T13.
+pub fn launch_pod_path(
+    x: f32,
+    y: f32,
+    fin: f32,
+    seed_cx: f32,
+    seed_cy: f32,
+    seed_rot: f32,
+) -> (f32, f32, f32) {
+    (
+        x + fin.powi(2) * (12.0 + seed_cx),
+        y + fin.powi(5) * (100.0 + seed_cy),
+        fin * (130.0 + seed_rot),
+    )
+}
+
+/// `LandingPadBuild.draw` arriving-pod centre + rotation
+/// (`LandingPad.java:220-230`): `cy = y + pow4In(1 - fin) * (100 +
+/// seed(id+2, 30))`, `rotation = (1 - fin) * (90 + seed(id, 50))`.
+pub fn landing_pod_path(x: f32, y: f32, fin: f32, seed_cy: f32, seed_rot: f32) -> (f32, f32, f32) {
+    let fout = 1.0 - fin;
+    (
+        x,
+        y + pow4_in(fout) * (100.0 + seed_cy),
+        fout * (90.0 + seed_rot),
+    )
+}
+
 /// `Mathf.absin(in, scl, mag) = (sin(in, scl * 2, mag) + mag) / 2`
 /// (`Mathf.java:78-80`). Note the `scl * 2` factor: the full period is
 /// `4 * PI * scl` ticks (`Drawf.java:343` uses it for the placement pulse).
@@ -593,5 +656,26 @@ mod tests {
         assert!((construct_line_x(80.0, quarter, size) - 90.0).abs() < 1e-4);
         let three_quarter = 20.0 * std::f32::consts::FRAC_PI_2 * 3.0;
         assert!((construct_line_x(80.0, three_quarter, size) - 70.0).abs() < 1e-4);
+    }
+
+    /// H03 T13 (`LaunchPayloadComp.draw`): `fin = 0.5` with zero seed ranges
+    /// gives `cx = x + 0.25 * 12 = x + 3`, `cy = y + 0.03125 * 100 = y +
+    /// 3.125`, `rotation = 65`.
+    #[test]
+    fn launch_pod_path_math() {
+        let (cx, cy, rotation) = launch_pod_path(0.0, 0.0, 0.5, 0.0, 0.0, 0.0);
+        assert!((cx - 3.0).abs() < 1e-4, "cx {cx}");
+        assert!((cy - 3.125).abs() < 1e-4, "cy {cy}");
+        assert!((rotation - 65.0).abs() < 1e-4, "rotation {rotation}");
+    }
+
+    /// H03 T13 (`LandingPadBuild.draw`): `fin = 1` (landed) puts the pod at
+    /// the pad centre with rotation 0.
+    #[test]
+    fn landing_pod_path_at_touchdown() {
+        let (cx, cy, rotation) = landing_pod_path(40.0, 80.0, 1.0, 0.0, 0.0);
+        assert!((cx - 40.0).abs() < 1e-4);
+        assert!((cy - 80.0).abs() < 1e-4);
+        assert!(rotation.abs() < 1e-4);
     }
 }

@@ -172,11 +172,18 @@ impl ShadowRenderer {
                 let mesh = mesh.upcast::<Mesh>();
                 self.shadow_node.set_mesh(&mesh);
                 self.dark_node.set_mesh(&mesh);
+                // I02 T2: show both composites only while they hold a mesh.
+                self.shadow_node.set_visible(true);
+                self.dark_node.set_visible(true);
             }
             self.shadow_node
                 .set_material(&shadow_material.upcast::<Material>());
             self.dark_node
                 .set_material(&dark_material.upcast::<Material>());
+        } else {
+            // I02 T2: a failed bake leaves no mesh; keep both nodes hidden.
+            self.shadow_node.set_visible(false);
+            self.dark_node.set_visible(false);
         }
         self.stats.shadow_rebuilds += 1;
         self.stats.darkness_rebuilds += 1;
@@ -229,6 +236,8 @@ fn make_quad_node(band: &Gd<Node2D>) -> Gd<MeshInstance2D> {
     // code-instantiated: one composite quad per shadow/darkness band; the node
     // count is fixed by the pipeline, not by content.
     band.clone().add_child(&node);
+    // I02 T2: hidden until the first bake assigns the mesh.
+    node.clone().set_visible(false);
     node
 }
 

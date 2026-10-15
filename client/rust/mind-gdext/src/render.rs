@@ -62,6 +62,7 @@ mod overlay_top;
 pub(crate) mod overlays;
 mod pixelate;
 mod plans;
+mod pods;
 mod shaders;
 mod shadow;
 mod shields;
@@ -255,6 +256,9 @@ pub struct MindWorldRenderer {
     block_extras: Option<Gd<block_extras::BlockExtras>>,
     /// `world/draw/*` extras, additive blend (`Layer.block` band; H03 T8).
     block_extras_add: Option<Gd<block_extras::BlockExtras>>,
+    /// `world/draw/*` extras before `DrawDefault`, under the base sprite
+    /// (`Layer.block` band, `z_index = -1`; I02 T7).
+    block_extras_under: Option<Gd<block_extras::BlockExtras>>,
     /// Unit factory/reconstructor build preview (`Layer.blockOver` band;
     /// H03 T9).
     unit_build: Option<Gd<unit_build::UnitBuildRenderer>>,
@@ -333,6 +337,7 @@ impl INode2D for MindWorldRenderer {
             block_extras: None,
             logic_displays: None,
             block_extras_add: None,
+            block_extras_under: None,
             unit_build: None,
             shadow: None,
             light: None,
@@ -533,6 +538,19 @@ impl MindWorldRenderer {
         group.upcast::<Node2D>()
     }
 
+    /// One pod/pad draw node in `band` (`PodsRenderer`; H03 T13).
+    fn spawn_pods_node(&self, mut band: Gd<Node2D>, mode: pods::PodMode, name: &str, z: i32) {
+        let mut node = pods::PodsRenderer::new_alloc();
+        node.set_name(name);
+        node.bind_mut().set_mode(mode);
+        if z != 0 {
+            node.set_z_index(z);
+        }
+        // code-instantiated: one pod pass per band; the node count is fixed by
+        // the pipeline, not by content.
+        band.add_child(&node);
+    }
+
     /// The group-composite material for a `res://shaders/<name>.gdshader`
     /// (H03 T11); `None` when the shader is missing, which leaves the flat
     /// branch in place.
@@ -624,6 +642,23 @@ impl MindWorldRenderer {
             effect_band.clone().add_child(&node);
             self.fires = Some(node.clone());
         }
+        // Pod engine glow/flares at `Layer.effect + 0.001` (H03 T13).
+        if let Some(effect_band) = self.band_node_at(BandKey::base(Layer::Effect)) {
+            self.spawn_pods_node(effect_band, pods::PodMode::Engine, "PodsEngine", 0);
+        }
+        // Pod dark copies at `Layer.flyingUnit + 1` (above the unit sprites).
+        if let Some(flying_band) = self.band_node_at(BandKey::base(Layer::FlyingUnit)) {
+            self.spawn_pods_node(flying_band, pods::PodMode::Shadow, "PodsShadow", 1);
+        }
+        // Pod/pad sprites at `Layer.weather - 1`: created before the weather
+        // nodes so they draw under the weather pass (H03 T13).
+        if let Some(weather_band) = self.band_node_at(BandKey::base(Layer::Weather)) {
+            self.spawn_pods_node(weather_band, pods::PodMode::Pod, "PodsLayer", 0);
+        }
+        // Pad pod/shadow/corner lights above the block meshes (H03 T13).
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
+            self.spawn_pods_node(block_band, pods::PodMode::PadStatic, "PadsStatic", 1);
+        }
         // `world/draw/*` extras over live buildings at `Layer.block`
         // (`BlockRenderer` + `execute_extras`; H03 T8): one normal node plus
         // one additive node (`CanvasItemMaterial` BLEND_MODE_ADD).
@@ -645,6 +680,16 @@ impl MindWorldRenderer {
             // code-instantiated: the additive half of the same pass.
             block_band.clone().add_child(&additive);
             self.block_extras_add = Some(additive.clone());
+            // `DrawMulti` parts before `DrawDefault` (`DrawRegion("-bottom")`,
+            // `DrawLiquidTile`) draw *under* the base sprite (I02 T7): one more
+            // node one z step down inside the band.
+            let mut under = block_extras::BlockExtras::new_alloc();
+            under.set_name("BlockExtrasUnder");
+            under.set_z_index(-1);
+            under.bind_mut().under = true;
+            // code-instantiated: the under-sprite third of the same pass.
+            block_band.clone().add_child(&under);
+            self.block_extras_under = Some(under.clone());
         }
         // Logic display buffers at `Layer.block + offset`
         // (`LogicDisplayBuild.draw`, I03 T13); one z step above the block

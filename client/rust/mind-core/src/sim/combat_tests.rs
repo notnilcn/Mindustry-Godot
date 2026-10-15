@@ -6416,6 +6416,59 @@ fn phase_wall_reflects_low_damage_bullet() {
     );
 }
 
+/// I02 T4: `Wall.WallBuild.collision` (`Wall.java:164-166`) — a `flashHit`
+/// wall (phase walls only, `Blocks.java:1759-1772`) logs a `WallFlashEvent`
+/// for its anchor tile on every collision, deflected or not; the renderer owns
+/// the `hit` decay. Non-`flashHit` walls log nothing.
+#[test]
+fn flash_hit_wall_logs_collision() {
+    let mut sim = live_sim(48);
+    let wall = place(&mut sim, 20, 20, "phase-wall", 1);
+    // Keep the wall alive across the volley so every bullet lands.
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(wall) {
+        health.max_health = 100_000.0;
+        health.health = 100_000.0;
+    }
+    let plain = place(&mut sim, 26, 20, "copper-wall", 1);
+    if let Some(mut health) = sim.ecs.0.get_mut::<Health>(plain) {
+        health.max_health = 100_000.0;
+        health.health = 100_000.0;
+    }
+    let def = {
+        let runtime = sim.unit_runtime().expect("rt");
+        let dagger = runtime.content.unit_by_name("dagger").expect("dagger");
+        dagger.weapons[0].bullet.id
+    };
+    for (wx, _entity) in [(20.0f32 * 8.0, wall), (26.0f32 * 8.0, plain)] {
+        sim.with_combat_ctx(|ctx| {
+            for i in 0..4 {
+                let spawn = crate::combat::BulletSpawn {
+                    def,
+                    team: 2,
+                    x: wx + 6.0,
+                    y: 20.0 * 8.0 - 3.0 + 2.0 * i as f32,
+                    angle: 180.0,
+                    ..crate::combat::BulletSpawn::default()
+                };
+                let _ = ctx.spawn(&spawn);
+            }
+        });
+        for _ in 0..4 {
+            sim.tick().expect("tick");
+        }
+    }
+    let flashes = sim.drain_wall_flashes();
+    assert!(
+        flashes.contains(&(20, 20)),
+        "the flashHit wall logged its hit: {flashes:?}"
+    );
+    assert!(
+        !flashes.iter().any(|(x, _)| *x == 26),
+        "a non-flashHit wall logs nothing: {flashes:?}"
+    );
+    assert!(sim.drain_wall_flashes().is_empty(), "the flash log drains");
+}
+
 /// H02 T12: `Wall.WallBuild.collision` (`Wall.java:169-175`) — a surge wall
 /// arcs `Lightning.create(..)` from a share of the hits it takes
 /// (`lightningChance = 0.05f`, `Blocks.java:1776`).
