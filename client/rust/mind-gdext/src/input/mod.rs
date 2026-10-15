@@ -1476,6 +1476,28 @@ impl MindInput {
         true
     }
 
+    /// Submits a raw byte config (`CanvasBlock.config(byte[])`; T14).
+    ///
+    /// The canvas editor packs the pixmap and sends the payload here; the
+    /// length check lives in the block's `configured` (`CanvasBlock.java:48-53`).
+    #[func]
+    pub fn configure_building_bytes(&mut self, x: i32, y: i32, data: PackedByteArray) -> bool {
+        let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let bytes: Vec<u8> = data.to_vec();
+        let config = ConfigValue::Bytes(bytes.into());
+        self.bridge
+            .record_last_config(i32::from(x), i32::from(y), config.clone());
+        self.bridge
+            .emit_action(mind_core::input::RemoteAction::Configure {
+                x,
+                y,
+                value: config,
+            });
+        true
+    }
+
     /// Withdraws/deposits an item at a block (`tryDropItems`/`requestItem`).
     #[func]
     pub fn transfer_item(&mut self, x: i32, y: i32, item: GString, amount: i64, deposit: bool) {

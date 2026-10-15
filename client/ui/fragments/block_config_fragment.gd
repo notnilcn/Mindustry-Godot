@@ -61,6 +61,8 @@ func _rebuild() -> void:
 		_build_color_picker()
 	elif bool(_config.get("logic", false)):
 		_build_logic_panel()
+	elif bool(_config.get("canvas", false)):
+		_build_canvas_panel()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
 	else:
@@ -81,6 +83,31 @@ func _build_logic_panel() -> void:
 	var row := HBoxContainer.new()
 	body.add_child(row)
 	_add_close_button(row)
+
+
+## `CanvasBlock.buildConfiguration` (`CanvasBlock.java:314-317`): one 40x40
+## `Icon.pencil` button opening `CanvasEditDialog`.
+func _build_canvas_panel() -> void:
+	# code-instantiated: Java builds this single pencil button per canvas at tap
+	# time; it has no scene-authorable per-building shape.
+	var pencil := MindWidgets.glyph_button("pencil", "edit", "cleari")
+	pencil.custom_minimum_size = Vector2(40, 40)
+	pencil.tooltip_text = _t("@edit", "edit")
+	pencil.pressed.connect(_open_canvas_dialog)
+	body.add_child(pencil)
+	var row := HBoxContainer.new()
+	body.add_child(row)
+	_add_close_button(row)
+
+
+## Opens the canvas editor (`CanvasEditDialog`; T14).
+func _open_canvas_dialog() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("open_dialog"):
+		return
+	var x := int(_config.get("x", 0))
+	var y := int(_config.get("y", 0))
+	ui.call("open_dialog", "canvas_edit", JSON.stringify({"x": x, "y": y}))
 
 
 ## Opens the logic editor dialog for this processor (T7). Until the dialog is

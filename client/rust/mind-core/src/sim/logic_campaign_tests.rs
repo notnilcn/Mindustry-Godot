@@ -2200,7 +2200,7 @@ fn display_sense_dimensions() {
 #[test]
 fn canvas_linear_pixels_roundtrip() {
     use crate::logic::blocks::canvas::CanvasBlockState;
-    let mut state = CanvasBlockState::new(12, 3);
+    let mut state = CanvasBlockState::new(12, 3, 8);
     // `ceil(12 * 12 * 3 / 8)` = 54 bytes.
     assert_eq!(state.data.len(), 54);
     state.set_pixel(0, 1);
@@ -2219,7 +2219,7 @@ fn canvas_linear_pixels_roundtrip() {
 #[test]
 fn canvas_write_out_of_range_ignored() {
     use crate::logic::blocks::canvas::CanvasBlockState;
-    let mut state = CanvasBlockState::new(8, 3);
+    let mut state = CanvasBlockState::new(8, 3, 8);
     state.set_pixel(-1, 1);
     state.set_pixel(64, 1);
     state.set_pixel(0, 8);
