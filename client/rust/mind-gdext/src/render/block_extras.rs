@@ -22,7 +22,9 @@ use godot::obj::{Base, NewGd};
 use godot::prelude::*;
 
 use mind_core::render::commands::{Blend, DrawCmd, FillKind, LineKind, ShapeKind};
-use mind_core::render::draw_desc::{DescDraw, execute_extras, vanilla_chain};
+use mind_core::render::draw_desc::{
+    DescDraw, execute_extras, split_chain_at_default, vanilla_chain,
+};
 use mind_core::render::drawf;
 use mind_core::render::ids::RegionIdTable;
 use mind_core::render::scan::{CameraView, visible_blocks};
@@ -95,6 +97,9 @@ pub struct BlockExtras {
     /// `true` on the additive-blend node (`BLEND_MODE_ADD`); it handles only
     /// `Blend::Additive` commands, the normal node every other blend.
     pub(crate) additive: bool,
+    /// `true` on the under-sprite node (`z_index = -1`): it runs only the chain
+    /// parts *before* `DrawDefault` (`-bottom`, `DrawLiquidTile`; I02 T7).
+    pub(crate) under: bool,
 }
 
 #[godot_api]
@@ -107,6 +112,7 @@ impl INode2D for BlockExtras {
             regions: RegionCache::new(),
             ids: RegionIdTable::new(),
             additive: false,
+            under: false,
         }
     }
 
@@ -177,8 +183,17 @@ impl INode2D for BlockExtras {
                 let Some(state) = host.block_draw_state(tile.x, tile.y) else {
                     continue;
                 };
+                // `DrawMulti` order (`DrawMulti.java`): parts before
+                // `DrawDefault` (`-bottom`, `DrawLiquidTile`) draw *under* the
+                // base sprite, the rest over it (I02 T7).
+                let (under_chain, over_chain) = split_chain_at_default(&chain);
+                let bucket_src = if self.under {
+                    &under_chain
+                } else {
+                    &over_chain
+                };
                 let mut descs: Vec<DescDraw> = Vec::new();
-                for desc in &chain {
+                for desc in bucket_src {
                     execute_extras(desc, &def.name, &state, &mut self.ids, &mut descs);
                 }
                 let (normal, additive) = bucket_by_blend(descs);

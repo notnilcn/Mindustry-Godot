@@ -256,6 +256,9 @@ pub struct MindWorldRenderer {
     block_extras: Option<Gd<block_extras::BlockExtras>>,
     /// `world/draw/*` extras, additive blend (`Layer.block` band; H03 T8).
     block_extras_add: Option<Gd<block_extras::BlockExtras>>,
+    /// `world/draw/*` extras before `DrawDefault`, under the base sprite
+    /// (`Layer.block` band, `z_index = -1`; I02 T7).
+    block_extras_under: Option<Gd<block_extras::BlockExtras>>,
     /// Unit factory/reconstructor build preview (`Layer.blockOver` band;
     /// H03 T9).
     unit_build: Option<Gd<unit_build::UnitBuildRenderer>>,
@@ -334,6 +337,7 @@ impl INode2D for MindWorldRenderer {
             block_extras: None,
             logic_displays: None,
             block_extras_add: None,
+            block_extras_under: None,
             unit_build: None,
             shadow: None,
             light: None,
@@ -676,6 +680,16 @@ impl MindWorldRenderer {
             // code-instantiated: the additive half of the same pass.
             block_band.clone().add_child(&additive);
             self.block_extras_add = Some(additive.clone());
+            // `DrawMulti` parts before `DrawDefault` (`DrawRegion("-bottom")`,
+            // `DrawLiquidTile`) draw *under* the base sprite (I02 T7): one more
+            // node one z step down inside the band.
+            let mut under = block_extras::BlockExtras::new_alloc();
+            under.set_name("BlockExtrasUnder");
+            under.set_z_index(-1);
+            under.bind_mut().under = true;
+            // code-instantiated: the under-sprite third of the same pass.
+            block_band.clone().add_child(&under);
+            self.block_extras_under = Some(under.clone());
         }
         // Logic display buffers at `Layer.block + offset`
         // (`LogicDisplayBuild.draw`, I03 T13); one z step above the block
