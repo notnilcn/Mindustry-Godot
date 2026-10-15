@@ -240,11 +240,15 @@ impl Mods {
     }
 
     /// Scans `dir`, parses metadata and resolves dependency states.
+    ///
+    /// Takes `&mut SettingsStore` because `loadMod` clears the failed-launch
+    /// skip: when [`Mods::skip_mod_loading`] is true every candidate is
+    /// disabled and marked failed (`Mods.java:1222-1227`).
     pub fn load(
         &mut self,
         fs: &dyn FileSystem,
         dir: &Path,
-        settings: &SettingsStore,
+        settings: &mut SettingsStore,
     ) -> Result<ModLoadReport, ModError> {
         self.mod_directory = dir.to_path_buf();
         self.mods.clear();
@@ -272,6 +276,17 @@ impl Mods {
                 log::warn!("[Mods] duplicate mod internal name `{internal}`; keeping the last");
             }
             by_name.insert(internal, candidate);
+        }
+
+        // `loadMod` (Mods.java:1222-1227): a previous failed launch disables the
+        // candidate and records whether it was enabled, so the Restore button
+        // can re-enable exactly the mods the skip disabled.
+        if self.skip_mod_loading(settings) {
+            for internal in by_name.keys() {
+                let was_enabled = settings.get_bool(&format!("mod-{internal}-enabled"), true);
+                settings.put_bool(&format!("mod-{internal}-enabled"), false);
+                settings.put_bool(&format!("mod-{internal}-failed"), was_enabled);
+            }
         }
 
         for (internal, state) in &resolved {
@@ -507,6 +522,24 @@ impl Mods {
         self.mods.iter().any(LoadedMod::has_content_errors)
     }
 
+    /// Records `count` failed content files for `mod_name`
+    /// (`Mods.handleContentError` -> `ContentParser.markError` ->
+    /// `mod.erroredContent.add`, `ContentParser.java:1073-1082`). Java has no
+    /// state transition here (`ModState.contentErrors` is only read by
+    /// `enabled()`), so the state is left alone.
+    pub fn note_content_failures(&mut self, mod_name: &str, count: usize) {
+        let Some(index) = self.get_mod(mod_name) else {
+            return;
+        };
+        let mod_ = &mut self.mods[index];
+        for _ in 0..count {
+            mod_.errored_content.push(crate::content::ContentRef::new(
+                crate::content::ContentType::Error,
+                0,
+            ));
+        }
+    }
+
     /// `Mods.getModStrings()` — enabled, non-hidden `name:version`, sorted.
     pub fn get_mod_strings(&self) -> Vec<String> {
         let mut out: Vec<String> = self
@@ -721,7 +754,9 @@ mod tests {
         settings.put_bool("mod-beta-enabled", false);
 
         let mut mods = Mods::new(true, "/mods");
-        let report = mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        let report = mods
+            .load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         let alpha = report
             .mods
             .iter()
@@ -745,10 +780,12 @@ mod tests {
             r#"{"name":"Broken","dependencies":["nope"]}"#,
         );
         write_mod(&fs, "cycle", r#"{"name":"Cycle","dependencies":["cycle"]}"#);
-        let settings = SettingsStore::new();
+        let mut settings = SettingsStore::new();
 
         let mut mods = Mods::new(true, "/mods");
-        let report = mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        let report = mods
+            .load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         let state = |name: &str| {
             report
                 .mods
@@ -780,9 +817,10 @@ mod tests {
     fn config_folder_path() {
         let fs = MockFs::new();
         write_mod(&fs, "a", r#"{"name":"Alpha"}"#);
-        let settings = SettingsStore::new();
+        let mut settings = SettingsStore::new();
         let mut mods = Mods::new(true, "/data/mods");
-        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         let index = mods.get_mod("alpha").expect("alpha");
         let mod_ = mods.mod_at(index).expect("mod");
         assert_eq!(
@@ -804,9 +842,10 @@ mod tests {
             "hidden",
             r#"{"name":"Hidden","version":"2.0","hidden":true}"#,
         );
-        let settings = SettingsStore::new();
+        let mut settings = SettingsStore::new();
         let mut mods = Mods::new(true, "/mods");
-        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         assert_eq!(mods.get_mod_strings(), vec!["alpha:1.0".to_owned()]);
 
         let mut server = vec!["alpha:1.0".to_owned(), "server-only:3.0".to_owned()];
@@ -825,7 +864,8 @@ mod tests {
         write_mod(&fs, "a", r#"{"name":"Alpha"}"#);
         let mut settings = SettingsStore::new();
         let mut mods = Mods::new(true, "/mods");
-        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         assert!(!mods.requires_reload());
         mods.set_enabled("alpha", false, &mut settings);
         assert!(mods.requires_reload());
@@ -841,9 +881,10 @@ mod tests {
     fn scriptless_mod_unaffected_by_load_scripts() {
         let fs = MockFs::new();
         write_mod(&fs, "a", r#"{"name":"Alpha"}"#);
-        let settings = SettingsStore::new();
+        let mut settings = SettingsStore::new();
         let mut mods = Mods::new(true, "/mods");
-        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         mods.load_scripts(&fs);
         let index = mods.get_mod("alpha").expect("alpha");
         assert_eq!(mods.mod_at(index).expect("m").state, ModState::Enabled);
@@ -857,9 +898,10 @@ mod tests {
         write_mod(&fs, "s", r#"{"name":"Scripted","minGameVersion":"146"}"#);
         fs.write(Path::new("/mods/s/scripts/main.js"), b"console.log('hi')")
             .expect("write script");
-        let settings = SettingsStore::new();
+        let mut settings = SettingsStore::new();
         let mut mods = Mods::new(false, "/mods");
-        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         let index = mods.get_mod("scripted").expect("scripted");
         assert!(mods.mod_at(index).expect("m").has_scripts);
         mods.load_scripts(&fs);
@@ -884,9 +926,9 @@ mod tests {
 
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../parity/mod_fixtures/zip");
         let fs = NativeFs;
-        let settings = SettingsStore::new();
+        let mut settings = SettingsStore::new();
         let mut mods = Mods::new(true, &dir);
-        let report = mods.load(&fs, &dir, &settings).expect("load zip mod");
+        let report = mods.load(&fs, &dir, &mut settings).expect("load zip mod");
         assert!(
             report
                 .mods
@@ -908,7 +950,7 @@ mod tests {
         let store = MemoryUnlockStore::new();
         let mut registry = create_base_content(&bundle, &store, true).expect("base content");
         registry.init().expect("init");
-        let mut provider = ModsContentProvider::new(files);
+        let mut provider = ModsContentProvider::new(files, &store);
         registry
             .create_mod_content(&mut provider)
             .expect("zip content parses");
@@ -924,17 +966,16 @@ mod tests {
     fn mods_enabled_state_round_trips_through_settings_file() {
         use crate::io::fs::{NativeFs, Paths};
 
-        let root = std::env::temp_dir().join(format!(
-            "mind-core-mods-roundtrip-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("mind-core-mods-roundtrip-{}", std::process::id()));
         let paths = Paths::new(&root);
 
         let fs = MockFs::new();
         write_mod(&fs, "a", r#"{"name":"Alpha"}"#);
         let mut settings = SettingsStore::new();
         let mut mods = Mods::new(true, "/mods");
-        mods.load(&fs, Path::new("/mods"), &settings).expect("load");
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
         assert!(mods.get_mod("alpha").is_some());
 
         mods.set_enabled("alpha", false, &mut settings);
@@ -945,10 +986,10 @@ mod tests {
             .force_save(&NativeFs, &paths)
             .expect("persist settings");
 
-        let fresh = SettingsStore::load(&NativeFs, &paths);
+        let mut fresh = SettingsStore::load(&NativeFs, &paths);
         let mut reloaded = Mods::new(true, "/mods");
         let report = reloaded
-            .load(&fs, Path::new("/mods"), &fresh)
+            .load(&fs, Path::new("/mods"), &mut fresh)
             .expect("reload");
         let alpha = report
             .mods
@@ -959,5 +1000,60 @@ mod tests {
         assert!(!alpha.enabled);
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// I07 T2 (PAR-0118): when the previous launch crashed and
+    /// `modcrashdisable` is true (`Mods.java:509-511`), `load` skips every
+    /// candidate: `mod-<name>-enabled` false, `mod-<name>-failed` = the old
+    /// enabled flag (`Mods.java:1222-1227`), state `disabled`.
+    #[test]
+    fn skip_mod_loading_disables_and_marks_failed() {
+        let fs = MockFs::new();
+        write_mod(&fs, "a", r#"{"name":"Alpha"}"#);
+        write_mod(&fs, "b", r#"{"name":"Beta"}"#);
+
+        let mut settings = SettingsStore::new();
+        settings.put_bool("mod-beta-enabled", false);
+        let mut mods = Mods::new(true, "/mods");
+        mods.set_failed_to_launch(true);
+        let report = mods
+            .load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
+        let state = |name: &str| {
+            report
+                .mods
+                .iter()
+                .find(|m| m.name == name)
+                .map(|m| m.state)
+                .expect("exists")
+        };
+        assert_eq!(state("alpha"), ModState::Disabled);
+        assert_eq!(state("beta"), ModState::Disabled);
+        assert!(!settings.get_bool("mod-alpha-enabled", true));
+        assert!(settings.get_bool("mod-alpha-failed", false), "was enabled");
+        assert!(!settings.get_bool("mod-beta-enabled", true));
+        assert!(
+            !settings.get_bool("mod-beta-failed", true),
+            "was already disabled, so it must not be marked failed"
+        );
+
+        // A clean launch is unaffected.
+        let mut settings = SettingsStore::new();
+        let mut mods = Mods::new(true, "/mods");
+        let report = mods
+            .load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
+        assert_eq!(report.mods.iter().filter(|m| m.enabled).count(), 2);
+        assert!(!settings.has("mod-alpha-failed"));
+
+        // `modcrashdisable=false` disables the skip (`skipModLoading`).
+        let mut settings = SettingsStore::new();
+        settings.put_bool("modcrashdisable", false);
+        let mut mods = Mods::new(true, "/mods");
+        mods.set_failed_to_launch(true);
+        let report = mods
+            .load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
+        assert!(report.mods.iter().all(|m| m.state == ModState::Enabled));
     }
 }

@@ -19,6 +19,9 @@ var _search: LineEdit = null
 var _banner: MindLabel = null
 var _errors_button: Button = null
 var _progress: ProgressBar = null
+## `@mods.restore` / `@mods.guide` (Java `ModsDialog` ctor shows one or the other).
+var _restore_button: Button = null
+var _guide_button: Button = null
 ## internal name -> remote version from the browser's `ModListing`s (updates).
 var _updates: Dictionary = {}
 ## internal name whose details block is expanded (`showMod`).
@@ -66,7 +69,11 @@ func _build() -> void:
 	_add_action_button(actions, "@mod.import.github", _open_browser)
 	_add_action_button(actions, "@mods.browser", _open_browser)
 	_add_action_button(actions, "@mods.openfolder", _open_folder)
-	_add_action_button(actions, "@mods.guide", _open_guide)
+	# Java `ModsDialog` ctor (:55-61): Restore replaces Guide while any mod is
+	# marked failed by the crash-skip (`mod-<name>-failed`).
+	_restore_button = _add_action_button(actions, "@mods.restore", _restore_failed)
+	_guide_button = _add_action_button(actions, "@mods.guide", _open_guide)
+	_restore_button.visible = false
 	root.add(actions).grow_x_axis().pad(4)
 	root.row()
 
@@ -112,6 +119,16 @@ func _refresh() -> void:
 		_list.add(MindWidgets.label(MindWidgets.markup("@mods.none"))).pad(8)
 		return
 	var entries: Array = mods.call("list")
+	# `ModsDialog` ctor: `mods.list().contains(LoadedMod::failed)` -> Restore.
+	var any_failed := false
+	for entry in entries:
+		if entry is Dictionary and bool(entry.get("failed", false)):
+			any_failed = true
+			break
+	if _restore_button != null:
+		_restore_button.visible = any_failed
+	if _guide_button != null:
+		_guide_button.visible = not any_failed
 	if entries.is_empty():
 		_list.add(MindWidgets.label(MindWidgets.markup("@mods.none"))).pad(8)
 		return
@@ -173,9 +190,16 @@ func _state_details(entry: Dictionary) -> String:
 
 
 ## Short description or the disabled/failed fallback (upstream `title1.table`).
+## Rows whose state hides the toggle (`hideDisabled` in `ModsDialog.setup`,
+## :248) keep their description; otherwise Java prints `@mod.failed` when the
+## crash-skip disabled the mod, else `@mod.disabled`.
 func _state_summary(entry: Dictionary, enabled: bool) -> String:
-	if not enabled:
-		return _t("@mod.disabled")
+	var hidden_state := str(entry.get("state", "")) in [
+		"unsupported", "incompatible", "missingDependencies",
+		"incompleteDependencies", "circularDependencies", "contentErrors",
+	]
+	if not enabled and not hidden_state:
+		return _t("@mod.failed") if bool(entry.get("failed", false)) else _t("@mod.disabled")
 	var description := str(entry.get("short_description", ""))
 	if not description.is_empty():
 		return description
@@ -206,7 +230,7 @@ func _add_mod_row(entry: Dictionary) -> void:
 	title.pressed.connect(_toggle_details.bind(name))
 	box.add_child(title)
 
-	var summary := MindWidgets.label(_state_summary(entry, enabled))
+	var summary := MindWidgets.label(MindWidgets.markup_text(_state_summary(entry, enabled)))
 	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(summary)
 
@@ -220,7 +244,7 @@ func _add_mod_row(entry: Dictionary) -> void:
 	toggle.theme_type_variation = "flatTogglet"
 	toggle.toggle_mode = true
 	toggle.button_pressed = enabled
-	toggle.text = _t("@mod.enabled") if enabled else _t("@mod.disabled")
+	toggle.text = MindWidgets.markup_text(_t("@mod.enabled")) if enabled else MindWidgets.markup_text(_t("@mod.disabled"))
 	toggle.disabled = not supported
 	toggle.pressed.connect(_set_enabled.bind(name, not enabled))
 	box.add_child(toggle)
@@ -291,6 +315,18 @@ func _set_enabled(name: String, enabled: bool) -> void:
 	var mods := _mods()
 	if mods != null:
 		mods.call("set_enabled", name, enabled)
+	_refresh()
+
+
+## `@mods.restore` (`ModsDialog.java:56-59`): re-enable every failed mod and
+## rebuild the list (a restart applies it; `setEnabled` sets requiresReload).
+func _restore_failed() -> void:
+	var mods := _mods()
+	if mods == null:
+		return
+	for entry in mods.call("list"):
+		if entry is Dictionary and bool(entry.get("failed", false)):
+			mods.call("set_enabled", str(entry.get("name", "")), true)
 	_refresh()
 
 
@@ -445,10 +481,11 @@ func _on_import_progress(_path: String, ratio: float) -> void:
 	_progress.value = ratio
 
 
-func _add_action_button(container: Container, text: String, callback: Callable) -> void:
+func _add_action_button(container: Container, text: String, callback: Callable) -> Button:
 	var button := MindWidgets.button(_t(text))
 	button.pressed.connect(callback)
 	container.add_child(button)
+	return button
 
 
 func _mods() -> Node:

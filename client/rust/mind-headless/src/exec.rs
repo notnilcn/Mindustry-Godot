@@ -1562,10 +1562,10 @@ fn cmd_mods_list(dir: &Path, json: bool, check: bool) -> anyhow::Result<i32> {
         paths::find_repo_root(None)?.join(dir)
     };
     let fs = NativeFs;
-    let settings = SettingsStore::new();
+    let mut settings = SettingsStore::new();
     let mut mods = Mods::new(true, &dir);
     let report = mods
-        .load(&fs, &dir, &settings)
+        .load(&fs, &dir, &mut settings)
         .with_context(|| format!("loading mods from `{}`", dir.display()))?;
 
     if json {
@@ -1624,10 +1624,10 @@ fn cmd_mods_content(
     mods.load_single(&fs, &dir, &settings)
         .with_context(|| format!("loading fixture `{fixture}`"))?;
     let files = mods.collect_content_files(&fs);
-    let mut provider = ModsContentProvider::new(files);
-
     let bundle = MemoryBundle::new();
     let store = MemoryUnlockStore::new();
+    let mut provider = ModsContentProvider::new(files, &store);
+
     let mut registry = create_base_content(&bundle, &store, true)
         .map_err(|error| anyhow!("base content: {error}"))?;
     registry
@@ -2019,10 +2019,10 @@ fn cmd_mods_error_isolation(fixture: &str, repo: Option<&Path>, json: bool) -> a
     mods.load_single(&fs, &dir, &SettingsStore::new())
         .with_context(|| format!("loading fixture `{fixture}`"))?;
     let files = mods.collect_content_files(&fs);
-    let mut provider = ModsContentProvider::new(files);
-
     let bundle = MemoryBundle::new();
     let store = MemoryUnlockStore::new();
+    let mut provider = ModsContentProvider::new(files, &store);
+
     let mut registry = create_base_content(&bundle, &store, true)
         .map_err(|error| anyhow!("base content: {error}"))?;
     registry
@@ -2111,13 +2111,13 @@ fn cmd_mods_bench(
                 paths::find_repo_root(None)?.join(dir)
             };
             let fs = NativeFs;
-            let settings = SettingsStore::new();
+            let mut settings = SettingsStore::new();
             let mut mod_count = 0;
             for _ in 0..runs {
                 let mut mods = Mods::new(true, &dir);
                 let start = Instant::now();
                 let report = mods
-                    .load(&fs, &dir, &settings)
+                    .load(&fs, &dir, &mut settings)
                     .with_context(|| format!("loading mods from `{}`", dir.display()))?;
                 samples.push(start.elapsed().as_nanos() as u64);
                 mod_count = report.mods.len();
@@ -2139,9 +2139,9 @@ fn cmd_mods_bench(
             let files = mods.collect_content_files(&fs);
             let file_count = files.len();
             for _ in 0..runs {
-                let mut provider = ModsContentProvider::new(files.clone());
                 let bundle = MemoryBundle::new();
                 let store = MemoryUnlockStore::new();
+                let mut provider = ModsContentProvider::new(files.clone(), &store);
                 let mut registry = create_base_content(&bundle, &store, true)
                     .map_err(|error| anyhow!("base content: {error}"))?;
                 registry.init().map_err(|error| anyhow!("init: {error}"))?;

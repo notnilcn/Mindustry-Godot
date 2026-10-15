@@ -20,6 +20,7 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::io::{NativeFs, Paths};
+use mind_core::mods::provider::{ModBootContent, ModContentFailure};
 use mind_core::mods::{ModListEntry, ModListing, Mods};
 use mind_core::version::BuildInfo;
 
@@ -34,6 +35,8 @@ const MODS_PATH: &str = "user://mods";
 pub struct MindMods {
     base: Base<GdNode>,
     mods: Mods,
+    /// `bootstrap()` ran at least once (autoloads `_ready` after scene init).
+    bootstrapped: bool,
 }
 
 #[godot_api]
@@ -42,6 +45,7 @@ impl INode for MindMods {
         MindMods {
             base,
             mods: Mods::new(false, PathBuf::new()),
+            bootstrapped: false,
         }
     }
 
@@ -68,6 +72,11 @@ impl MindMods {
             log::warn!("[mods] could not create `{}`: {error}", dir.display());
         }
         self.mods = Mods::new(false, dir.clone());
+        // `Vars.checkLaunch` -> `Mods.failedToLaunch`: a crashed previous launch
+        // disables mod loading for this boot (`Mods.java:509-511`, applied in
+        // `loadMod` at `:1222-1227`).
+        self.mods
+            .set_failed_to_launch(crate::platform::failed_to_launch());
         let load =
             settings_hub::with_settings(|settings| self.mods.load(&NativeFs, &dir, settings));
         match load {
@@ -94,11 +103,37 @@ impl MindMods {
     fn mod_import_progress(path: GString, ratio: f32);
 
     /// Serialized mod rows (`ModListEntry`), sorted like the dialog list.
+    /// `failed` carries `mod-<name>-failed` for the ModsDialog Restore button.
     #[func]
     pub fn list(&self) -> Array<VarDictionary> {
+        let failed: Vec<String> = settings_hub::with_settings(|settings| {
+            self.mods
+                .list()
+                .iter()
+                .filter(|mod_| mod_.failed(settings))
+                .map(|mod_| mod_.name.clone())
+                .collect()
+        });
         let mut out = Array::<VarDictionary>::new();
         for entry in &self.mods.report().mods {
-            out.push(&entry_to_dict(entry));
+            let mut row = entry_to_dict(entry);
+            row.set(
+                &"failed".to_variant(),
+                &failed.contains(&entry.name).to_variant(),
+            );
+            if let Some(mod_) = self.mods.list().iter().find(|m| m.name == entry.name) {
+                // `ScriptsUnsupported` / outdated reason text for the dialog row
+                // (`ModsDialog.getStateDetails` reads the state reason).
+                let reason = mod_
+                    .unsupported_reason
+                    .as_ref()
+                    .map(|reason| reason.message())
+                    .unwrap_or("");
+                if !reason.is_empty() {
+                    row.set(&"reason".to_variant(), &reason.to_variant());
+                }
+            }
+            out.push(&row);
         }
         out
     }
@@ -198,6 +233,75 @@ impl MindMods {
         self.mods.requires_reload()
     }
 
+    /// `Mods.skipModLoading()` (`Mods.java:509-511`): this boot disabled mod
+    /// loading because the previous launch failed (`@mods.initfailed`).
+    #[func]
+    pub fn skipped_mod_loading(&self) -> bool {
+        settings_hub::with_settings(|settings| self.mods.skip_mod_loading(settings))
+    }
+
+    /// Whether [`MindMods::bootstrap`] ran (`false` while the main scene is
+    /// instantiated before the autoloads' `_ready`).
+    pub fn is_bootstrapped(&self) -> bool {
+        self.bootstrapped
+    }
+
+    /// Collects the enabled mods' boot content: JSON content files + patch sets
+    /// (`Mods.buildFiles`/`loadModPatches`). The caller caches the result for
+    /// the session (mod changes require a restart; Java exits to reload).
+    pub fn collect_boot_content(&mut self) -> ModBootContent {
+        mind_core::content::boot::collect_boot_content(&mut self.mods, &NativeFs)
+    }
+
+    /// Builds the enabled mods' asset overlay (`Mods.packSprites` +
+    /// `DataBundleLoader` + sound overrides) and hands it to `MindAssets`
+    /// (I07 T4 bundles / T5 sprites+sounds). No-op until the asset autoload has
+    /// loaded; `MindSimHost` retries after content boot when autoload order put
+    /// `MindAssets` second.
+    pub fn push_asset_overlay(&mut self) {
+        let Some(mut assets) = crate::content_boot::assets_node() else {
+            return;
+        };
+        if !assets.bind().can_accept_mod_overlay() {
+            return;
+        }
+        let overlay = {
+            let handle = &assets;
+            let atlas_has = |name: &str| handle.bind().has_region(GString::from(name));
+            self.mods.build_overlay(&NativeFs, &atlas_has)
+        };
+        for warning in &overlay.warnings {
+            log::warn!("[mods] {warning}");
+        }
+        assets.bind_mut().apply_mod_overlay(&overlay);
+    }
+
+    /// Records per-file content failures on the owning mods
+    /// (`Mods.handleContentError` -> `LoadedMod.erroredContent`) and logs them.
+    pub fn record_content_failures(&mut self, failures: &[ModContentFailure]) {
+        for failure in failures {
+            log::warn!(
+                "[mods] {}: {} ({})",
+                failure.mod_name,
+                failure.message,
+                failure.path
+            );
+        }
+        let mut counts: Vec<(String, usize)> = Vec::new();
+        for failure in failures {
+            match counts
+                .iter_mut()
+                .find(|(name, _)| name == &failure.mod_name)
+            {
+                Some((_, count)) => *count += 1,
+                None => counts.push((failure.mod_name.clone(), 1)),
+            }
+        }
+        for (name, count) in counts {
+            self.mods.note_content_failures(&name, count);
+        }
+    }
+
     /// Whether any enabled mod ships scripts (OD1: surfaced, not run).
     #[func]
     pub fn has_scripts(&self) -> bool {
@@ -238,13 +342,30 @@ impl MindMods {
     }
 
     /// Rescans the mods directory (still requires a reload for content).
+    /// `Mods.reload` (`Mods.java:787-796`): when a reload is required the client
+    /// shows `@mods.reloadexit` and exits; the Godot port quits the tree.
     #[func]
     pub fn reload(&mut self) {
-        let dir = mods_dir();
-        settings_hub::with_settings(|settings| {
-            self.mods.load(&NativeFs, &dir, settings).ok();
-        });
-        let _ = self.base_mut().emit_signal("mods_changed", &[]);
+        if !self.mods.requires_reload() {
+            return;
+        }
+        if let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") {
+            let _ = ui.call(
+                "show_info",
+                &[GString::from("@mods.reloadexit").to_variant()],
+            );
+        }
+        log::info!("[mods] exiting to reload mods");
+        // Java waits for the info dialog to be hidden (`showInfoOnHidden`);
+        // the port's `show_info` is a toast, so quit on the next frame.
+        self.base_mut().call_deferred("quit_for_reload", &[]);
+    }
+
+    /// Deferred `Core.app.exit()` half of [`MindMods::reload`].
+    #[func]
+    fn quit_for_reload(&mut self) {
+        let mut tree = self.base().get_tree();
+        tree.quit();
     }
 
     /// Globalized mods directory (for the file chooser/import UI).

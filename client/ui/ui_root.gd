@@ -30,6 +30,10 @@ var _theme_applied := false
 var _uiscale_prompt: Dictionary = {}
 var _uiscale_countdown := 0.0
 var _uiscale_shown_seconds := -1
+## `Vars.finishLaunch` ran (the first `set_menu_visible(true)`).
+var _launch_finished := false
+## `@mods.initfailed` shown for this boot (`Control.java:75-80`, once).
+var _mod_init_failure_shown := false
 ## The active transient prompt root (`showConfirm`/`showTextInput`/`showText`).
 var _active_prompt: Control = null
 ## Current centred announce box (`UI.announce` replaces the last one).
@@ -53,6 +57,7 @@ func _ready() -> void:
 	_apply_ui_scale()
 	_boot()
 	_check_uiscale_changed()
+	_check_mod_init_failure()
 	# G07 T13: `UI.java:146` hooks a global click sound on every clickable
 	# element; BaseButton covers Button/CheckBox/TextureButton.
 	get_tree().node_added.connect(_on_node_added)
@@ -269,6 +274,35 @@ func set_menu_visible(menu_visible: bool) -> void:
 	var loading := loading_layer.get_node_or_null("loading")
 	if loading != null and loading.has_method("hide_loading"):
 		loading.call("hide_loading")
+	if menu_visible and not _launch_finished:
+		_launch_finished = true
+		# `Vars.finishLaunch` (ClientLauncher.java:253): the main menu is up, so
+		# the launch succeeded — drop the crash marker and record lastBuild.
+		var platform := get_node_or_null("/root/Spine/MindPlatform")
+		if platform != null and platform.has_method("finish_launch"):
+			platform.call("finish_launch")
+
+
+## `Control.java:75-80`: after the client load, a boot that skipped mod loading
+## shows `@mods.initfailed` (`ui.showInfo`, deferred four ticks upstream).
+func _check_mod_init_failure() -> void:
+	if _mod_init_failure_shown:
+		return
+	var mods := get_node_or_null("/root/MindMods")
+	if mods == null:
+		return
+	if not bool(mods.call("skipped_mod_loading")):
+		return
+	if mods.call("list").is_empty():
+		return
+	_mod_init_failure_shown = true
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var ui := _ui()
+	if ui != null:
+		ui.call("show_info", "@mods.initfailed")
 
 
 func _ui() -> Node:
