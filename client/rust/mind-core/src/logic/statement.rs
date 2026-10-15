@@ -23,6 +23,8 @@ pub struct StatementField {
     pub kind: FieldKind,
     /// Java enum names for `FieldKind::Enum` fields (editor `showSelect`).
     pub options: &'static [&'static str],
+    /// Java enum class name for `FieldKind::Enum` fields (editor labels).
+    pub enum_class: &'static str,
 }
 
 /// Static metadata for one registered statement (plan 14 add-dialog + build halves).
@@ -105,6 +107,7 @@ macro_rules! define_statements {
                                     name: stringify!($f),
                                     kind: <$t as MlogField>::KIND,
                                     options: <$t as MlogField>::OPTIONS,
+                                    enum_class: <$t as MlogField>::ENUM_CLASS,
                                 }
                             ),*
                         ],
@@ -667,88 +670,313 @@ pub fn bundle_key(name: &str) -> String {
     }
 }
 
-/// One visible editor field row (`LStatement.fields(table, desc, value, setter)`).
+/// How one editor row item renders (`LStatement.build(Table)`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct EditorField {
-    /// Index into [`Statement::field_values`]/[`Statement::fields`].
+pub enum EditorKind {
+    /// Static label: `bundle(desc)` (`name.token.<label>`, raw fallback).
+    Text,
+    /// Text field (`LStatement.field`).
+    Field,
+    /// Enum select button (`LStatement.showSelect`).
+    Select,
+    /// Colour pencil (`LStatement.col`).
+    Color,
+    /// Alignment pencil (`LStatement.fieldAlignSelect`).
+    Align,
+    /// Character picker (`PrintCharStatement`'s glyph grid).
+    Char,
+    /// Statement target (`JumpStatement`'s `JumpButton`).
+    Jump,
+}
+
+/// One item in a statement's editor row, in `build(Table)` order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorItem {
+    /// Item kind.
+    pub kind: EditorKind,
+    /// Field index in `Statement::field_values` (`0` for [`EditorKind::Text`]).
     pub index: usize,
-    /// Label token: the bundle key is `name.token.<label>`.
+    /// Label token: `name.token.<label>` with the token as fallback.
     pub label: &'static str,
+    /// Label before the editor (`fields(desc, ...)`) or after it (`nameAfterField`).
+    pub label_before: bool,
+    /// Wide field (`LCanvas.getTargetWidth() - Scl.scl(20f)`).
+    pub wide: bool,
 }
 
-/// `LStatement.build(Table)` field rows for a statement's current values.
+/// One option of an editor enum select (`LStatement.showSelect`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EditorOption {
+    /// Serialized value (`Enum.name()`; `true`/`false` for bool toggles).
+    pub name: String,
+    /// Display fallback (`Enum.name()`, `LogicOp.symbol`, ...).
+    pub label: String,
+    /// Bundle key (`<class>.label.<name>`, `name.token.<token>`); empty = none.
+    pub key: String,
+}
+
+const fn e_text(label: &'static str) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Text,
+        index: 0,
+        label,
+        label_before: true,
+        wide: false,
+    }
+}
+
+const fn e_field(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Field,
+        index,
+        label: "",
+        label_before: true,
+        wide: false,
+    }
+}
+
+const fn e_labeled(index: usize, label: &'static str) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Field,
+        index,
+        label,
+        label_before: true,
+        wide: false,
+    }
+}
+
+const fn e_wide(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Field,
+        index,
+        label: "",
+        label_before: true,
+        wide: true,
+    }
+}
+
+const fn e_select(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Select,
+        index,
+        label: "",
+        label_before: true,
+        wide: false,
+    }
+}
+
+const fn e_color(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Color,
+        index,
+        label: "",
+        label_before: true,
+        wide: false,
+    }
+}
+
+const fn e_align(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Align,
+        index,
+        label: "",
+        label_before: true,
+        wide: false,
+    }
+}
+
+const fn e_char(index: usize) -> EditorItem {
+    EditorItem {
+        kind: EditorKind::Char,
+        index,
+        label: "",
+        label_before: true,
+        wide: false,
+    }
+}
+
+/// `LStatement.build(Table)` editor row for a statement's current values.
 ///
-/// Statements without a conditional layout list every field with its own name
-/// as the label (Java's single-variant `build` methods); `draw` transcribes
-/// `DrawStatement.rebuild` (`LStatements.java`, per-`GraphicsType` rows).
-pub fn editor_fields(name: &str, values: &[String]) -> Vec<EditorField> {
-    let field = |index: usize, label: &'static str| EditorField { index, label };
-    let all = || {
+/// Statements not yet transcribed fall back to one labelled text field per
+/// serialized field (the generic builder).
+pub fn editor_layout(name: &str, values: &[String]) -> Vec<EditorItem> {
+    let generic = || -> Vec<EditorItem> {
         default_statement(name)
-            .map(|statement| statement.fields())
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-            .map(|(index, field)| EditorField {
-                index,
-                label: field.name,
+            .map(|statement| {
+                statement
+                    .fields()
+                    .iter()
+                    .enumerate()
+                    .map(|(index, field)| e_labeled(index, field.name))
+                    .collect()
             })
-            .collect()
+            .unwrap_or_default()
     };
-    if name != "draw" {
-        return all();
-    }
-    // `DrawStatement`: `type, x, y, p1, p2, p3, p4`.
-    let type_ = values.first().map(String::as_str).unwrap_or("clear");
-    match type_ {
-        "clear" => vec![field(1, "r"), field(2, "g"), field(3, "b")],
-        "color" => vec![field(1, "r"), field(2, "g"), field(3, "b"), field(4, "a")],
-        "col" => vec![field(1, "color")],
-        "stroke" => vec![field(1, "stroke")],
-        "line" => vec![field(1, "x"), field(2, "y"), field(3, "x2"), field(4, "y2")],
-        "rect" | "lineRect" => vec![
-            field(1, "x"),
-            field(2, "y"),
-            field(3, "width"),
-            field(4, "height"),
+    let value = |index: usize| values.get(index).map(String::as_str).unwrap_or("");
+    match name {
+        // `ReadStatement.build` (`LStatements.java:66-71`).
+        "read" => vec![
+            e_text("read"),
+            e_field(0),
+            e_text("="),
+            e_field(1),
+            e_text("at"),
+            e_field(2),
         ],
-        "poly" | "linePoly" => vec![
-            field(1, "x"),
-            field(2, "y"),
-            field(3, "sides"),
-            field(4, "radius"),
-            field(5, "rotation"),
+        // `WriteStatement.build` (`:96-101`).
+        "write" => vec![
+            e_text("write"),
+            e_field(0),
+            e_text("to"),
+            e_field(1),
+            e_text("at"),
+            e_field(2),
         ],
-        "triangle" => vec![
-            field(1, "x"),
-            field(2, "y"),
-            field(3, "x2"),
-            field(4, "y2"),
-            field(5, "x3"),
-            field(6, "y3"),
+        // `DrawStatement.rebuild` (`:133-260`).
+        "draw" => {
+            let mut out = vec![e_select(0)];
+            match value(0) {
+                "clear" => out.extend([e_labeled(1, "r"), e_labeled(2, "g"), e_labeled(3, "b")]),
+                "color" => out.extend([
+                    e_labeled(1, "r"),
+                    e_labeled(2, "g"),
+                    e_labeled(3, "b"),
+                    e_labeled(4, "a"),
+                ]),
+                "col" => {
+                    out.push(e_labeled(1, "color"));
+                    out.push(e_color(1));
+                }
+                "stroke" => out.push(e_field(1)),
+                "line" => out.extend([
+                    e_labeled(1, "x"),
+                    e_labeled(2, "y"),
+                    e_labeled(3, "x2"),
+                    e_labeled(4, "y2"),
+                ]),
+                "rect" | "lineRect" => out.extend([
+                    e_labeled(1, "x"),
+                    e_labeled(2, "y"),
+                    e_labeled(3, "width"),
+                    e_labeled(4, "height"),
+                ]),
+                "poly" | "linePoly" => out.extend([
+                    e_labeled(1, "x"),
+                    e_labeled(2, "y"),
+                    e_labeled(3, "sides"),
+                    e_labeled(4, "radius"),
+                    e_labeled(5, "rotation"),
+                ]),
+                "triangle" => out.extend([
+                    e_labeled(1, "x"),
+                    e_labeled(2, "y"),
+                    e_labeled(3, "x2"),
+                    e_labeled(4, "y2"),
+                    e_labeled(5, "x3"),
+                    e_labeled(6, "y3"),
+                ]),
+                "image" => out.extend([
+                    e_labeled(1, "x"),
+                    e_labeled(2, "y"),
+                    e_labeled(3, "image"),
+                    e_labeled(4, "size"),
+                    e_labeled(5, "rotation"),
+                ]),
+                "print" => {
+                    out.extend([e_labeled(1, "x"), e_labeled(2, "y"), e_labeled(3, "align")]);
+                    out.push(e_align(3));
+                }
+                "translate" | "scale" => out.extend([e_labeled(1, "x"), e_labeled(2, "y")]),
+                "rotate" => out.push(e_labeled(3, "angle")),
+                _ => return generic(),
+            }
+            out
+        }
+        // `PrintStatement.build`/`FormatStatement.build` (`:267-269`, `:328-330`).
+        "print" | "format" => vec![e_wide(0)],
+        // `PrintCharStatement.build` (`:288-321`).
+        "printchar" => vec![e_text("char"), e_field(0), e_char(0)],
+        // `DrawFlushStatement.build`/`PrintFlushStatement.build` (`:349-351`, `:370-372`).
+        "drawflush" | "printflush" => vec![e_text("to"), e_field(0)],
+        // `GetLinkStatement.build` (`:391-402`).
+        "getlink" => vec![e_field(0), e_text("="), e_text("linknum"), e_field(1)],
+        // `ControlStatement.rebuild` (`:422-455`).
+        "control" => {
+            let mut out = vec![e_text("set"), e_select(0), e_text("of"), e_field(1)];
+            let access = LAccess::from_name(value(0)).unwrap_or(LAccess::Enabled);
+            for (i, &param) in access.params().iter().enumerate() {
+                out.push(e_labeled(2 + i, param));
+            }
+            out
+        }
+        // `RadarStatement.build` (`:466-521`).
+        "radar" => vec![
+            e_field(6),
+            e_text("="),
+            e_labeled(4, "from"),
+            e_select(0),
+            e_select(1),
+            e_select(2),
+            e_labeled(5, "order"),
+            e_text("sort"),
+            e_select(3),
         ],
-        "image" => vec![
-            field(1, "x"),
-            field(2, "y"),
-            field(3, "image"),
-            field(4, "size"),
-            field(5, "rotation"),
+        // `SensorStatement.build` (`:532-648`).
+        "sensor" => vec![
+            e_field(0),
+            e_text("="),
+            e_field(2),
+            e_text("in"),
+            e_field(1),
         ],
-        "print" => vec![field(1, "x"), field(2, "y"), field(3, "align")],
-        "translate" | "scale" => vec![field(1, "x"), field(2, "y")],
-        "rotate" => vec![field(3, "angle")],
-        _ => all(),
+        _ => generic(),
     }
 }
 
-/// The discriminator field the editor shows as its own select button before
-/// the conditional rows (`DrawStatement.rebuild`'s type button); `None` when
-/// the statement has a fixed layout.
-pub fn editor_discriminator(name: &str) -> Option<usize> {
-    match name {
-        "draw" => Some(0),
-        _ => None,
+/// `showSelect` options for a select bound to field `index` of `name`.
+pub fn editor_options(name: &str, index: usize) -> Vec<EditorOption> {
+    match (name, index) {
+        // `DrawStatement`'s type button.
+        ("draw", 0) => enum_options("graphicstype", GraphicsType::ALL.iter().map(|v| v.name())),
+        // `ControlStatement` (`LAccess.controls`, `:432-434`).
+        ("control", 0) => enum_options(
+            "laccess",
+            LAccess::controls().into_iter().map(LAccess::name),
+        ),
+        // `RadarStatement` targets/sort (`:475-505`).
+        ("radar" | "uradar", 0..=2) => {
+            enum_options("radartarget", RadarTarget::ALL.iter().map(|v| v.name()))
+        }
+        ("radar" | "uradar", 3) => {
+            enum_options("radarsort", RadarSort::ALL.iter().map(|v| v.name()))
+        }
+        _ => {
+            let Some(statement) = default_statement(name) else {
+                return Vec::new();
+            };
+            let Some(field) = statement.fields().get(index).cloned() else {
+                return Vec::new();
+            };
+            if field.options.is_empty() {
+                return Vec::new();
+            }
+            enum_options(
+                &field.enum_class.to_lowercase(),
+                field.options.iter().copied(),
+            )
+        }
     }
+}
+
+/// `<class>.label.<name>` options (`LStatement.bundle(Enum)` fallback = the name).
+fn enum_options<'a>(class: &str, names: impl Iterator<Item = &'a str>) -> Vec<EditorOption> {
+    names
+        .map(|name| EditorOption {
+            name: name.to_owned(),
+            label: name.to_owned(),
+            key: format!("{}.label.{}", class.to_lowercase(), name.to_lowercase()),
+        })
+        .collect()
 }
 
 /// The value fixups `DrawStatement` applies when the type button changes
@@ -858,5 +1086,159 @@ mod tests {
         let mut out = String::new();
         st.write(&mut out);
         assert_eq!(out, "set result 0");
+    }
+
+    fn layout(name: &str, values: &[&str]) -> Vec<EditorItem> {
+        let values: Vec<String> = values.iter().map(|v| (*v).to_owned()).collect();
+        editor_layout(name, &values)
+    }
+
+    #[test]
+    fn io_block_layouts_match_java() {
+        // `read`: bundle("read") value = target at address (`LStatements.java:67-89`).
+        let read = layout("read", &["out", "cell", "0"]);
+        assert_eq!(
+            read.iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Text, 0, "read"),
+                (EditorKind::Field, 0, ""),
+                (EditorKind::Text, 0, "="),
+                (EditorKind::Field, 1, ""),
+                (EditorKind::Text, 0, "at"),
+                (EditorKind::Field, 2, ""),
+            ]
+        );
+        // `write`: bundle("write") input to target at address.
+        let write = layout("write", &["in", "cell", "0"]);
+        assert_eq!(
+            write.iter().map(|i| i.label).collect::<Vec<_>>(),
+            vec!["write", "", "to", "", "at", ""]
+        );
+        // `getlink`: output = linknum address.
+        let getlink = layout("getlink", &["result", "0"]);
+        assert_eq!(
+            getlink
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 0, ""),
+                (EditorKind::Text, 0, "="),
+                (EditorKind::Text, 0, "linknum"),
+                (EditorKind::Field, 1, ""),
+            ]
+        );
+        // `sensor`: to = type in from (field order to, from, type).
+        let sensor = layout("sensor", &["result", "block1", "@copper"]);
+        assert_eq!(
+            sensor.iter().map(|i| (i.kind, i.index)).collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 0),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 2),
+                (EditorKind::Text, 0),
+                (EditorKind::Field, 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn control_layout_uses_access_params() {
+        // `control shoot`: select + of + target + x/y/shoot (`:422-455`).
+        let control = layout("control", &["shoot", "turret1", "0", "0", "0", "0"]);
+        assert_eq!((control[1].kind, control[1].index), (EditorKind::Select, 0));
+        assert_eq!((control[3].kind, control[3].index), (EditorKind::Field, 1));
+        assert_eq!(
+            control[4..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(2, "x"), (3, "y"), (4, "shoot")]
+        );
+        // `control enabled`: one param (`LAccess.params`).
+        let enabled = layout("control", &["enabled", "switch1", "0", "0", "0", "0"]);
+        assert_eq!(
+            enabled[4..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(2, "to")]
+        );
+    }
+
+    #[test]
+    fn radar_layout_matches_java() {
+        // `RadarStatement.build`: output = from + 3 targets + order + sort (`:466-521`).
+        let radar = layout(
+            "radar",
+            &["enemy", "any", "any", "distance", "turret1", "1", "out"],
+        );
+        assert_eq!((radar[0].kind, radar[0].index), (EditorKind::Field, 6));
+        assert_eq!(radar[1].label, "=");
+        assert_eq!((radar[2].index, radar[2].label), (4, "from"));
+        assert_eq!(
+            radar[3..6].iter().map(|i| i.kind).collect::<Vec<_>>(),
+            vec![EditorKind::Select; 3]
+        );
+        assert_eq!((radar[6].index, radar[6].label), (5, "order"));
+        assert_eq!(radar[7].label, "sort");
+        assert_eq!((radar[8].kind, radar[8].index), (EditorKind::Select, 3));
+    }
+
+    #[test]
+    fn draw_layout_still_matches() {
+        let clear = layout("draw", &["clear", "0", "0", "0", "0", "0", "0"]);
+        assert_eq!(
+            clear
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Field, 1, "r"),
+                (EditorKind::Field, 2, "g"),
+                (EditorKind::Field, 3, "b"),
+            ]
+        );
+        let poly = layout("draw", &["poly", "0", "0", "0", "0", "0", "0"]);
+        assert_eq!(
+            poly[1..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, "x"),
+                (2, "y"),
+                (3, "sides"),
+                (4, "radius"),
+                (5, "rotation")
+            ]
+        );
+        let col = layout("draw", &["col", "%ff0000", "0", "0", "0", "0", "0"]);
+        assert_eq!((col[1].index, col[1].label), (1, "color"));
+        assert_eq!((col[2].kind, col[2].index), (EditorKind::Color, 1));
+        let print = layout("draw", &["print", "0", "0", "@center", "0", "0", "0"]);
+        assert_eq!((print[3].index, print[3].label), (3, "align"));
+        assert_eq!((print[4].kind, print[4].index), (EditorKind::Align, 3));
+    }
+
+    #[test]
+    fn editor_select_options_match_java() {
+        // `LAccess.controls` only (params > 0).
+        let control = editor_options("control", 0);
+        assert!(control.iter().any(|o| o.name == "shoot"));
+        assert!(control.iter().any(|o| o.name == "shootp"));
+        assert!(control.iter().any(|o| o.name == "enabled"));
+        assert!(!control.iter().any(|o| o.name == "health"));
+        assert!(control.iter().all(|o| o.key.starts_with("laccess.label.")));
+        // `GraphicsType` labels come from the class bundle key.
+        let draw = editor_options("draw", 0);
+        assert_eq!(draw.len(), 16);
+        assert!(
+            draw.iter()
+                .any(|o| o.name == "lineRect" && o.key == "graphicstype.label.linerect")
+        );
     }
 }

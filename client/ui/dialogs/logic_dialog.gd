@@ -179,85 +179,137 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	return panel
 
 
-## The generic field builder (`LStatement.build(Table)`): the statement's
-## visible rows come from `MindLogic.editor_fields`, each rendered by its field
-## kind (text field, enum select or the `draw col` colour pencil).
+## The per-statement field row (`LStatement.build(Table)`): `MindLogic.editor_layout`
+## returns the exact Java item order (labels, "="/"linknum" separators, enum
+## selects, and the colour/align/char pencils).
 func _field_row(index: int, row: Dictionary) -> Control:
 	var fields_box := HBoxContainer.new()
+	# code-instantiated: the field row is rebuilt per statement on every list
+	# rebuild (`LCanvas.StatementElem` calls `st.build(t)`).
+	fields_box.add_theme_constant_override("separation", 4)
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return fields_box
 	var name := str(row.get("name", "noop"))
 	var values: Array = row.get("fields", [])
-	var metas: Variant = logic.call("statement_fields", name)
-	var visible: Variant = logic.call("editor_fields", name, PackedStringArray(values))
-	if not (metas is Array) or not (visible is Array):
+	var items: Variant = logic.call("editor_layout", name, PackedStringArray(values))
+	if not (items is Array):
 		return fields_box
-	# Conditional layouts (`DrawStatement`) put the discriminator first.
-	var discriminator := int(logic.call("editor_discriminator", name))
-	if discriminator >= 0 and discriminator < (metas as Array).size():
-		var disc_meta: Variant = (metas as Array)[discriminator]
-		var disc_options: Variant = (
-			(disc_meta as Dictionary).get("options", PackedStringArray())
-			if disc_meta is Dictionary
-			else PackedStringArray()
-		)
-		if disc_options is PackedStringArray and (disc_options as PackedStringArray).size() > 0:
-			var disc_value := str(values[discriminator]) if discriminator < values.size() else ""
-			var disc_button := MindWidgets.button(disc_value)
-			disc_button.theme_type_variation = "logict"
-			disc_button.custom_minimum_size = Vector2(120, 32)
-			disc_button.tooltip_text = name
-			disc_button.pressed.connect(
-				_open_select.bind(index, discriminator, disc_options, disc_button)
-			)
-			fields_box.add_child(disc_button)
-	for entry in visible:
+	for entry in items:
 		if not (entry is Dictionary):
 			continue
+		var kind := str((entry as Dictionary).get("kind", "field"))
 		var field_index := int((entry as Dictionary).get("index", -1))
-		var label_text := str((entry as Dictionary).get("label", ""))
-		if field_index < 0:
-			continue
-		var meta: Variant = (metas as Array)[field_index] if field_index < (metas as Array).size() else {}
-		var kind := str((meta as Dictionary).get("kind", "str")) if meta is Dictionary else "str"
-		var options: Variant = (meta as Dictionary).get("options", PackedStringArray()) if meta is Dictionary else PackedStringArray()
-		var value := str(values[field_index]) if field_index < values.size() else ""
-		var label := Label.new()
-		# `bundle("name.token." + desc)` with the raw label as the fallback.
-		var key := "name.token." + label_text
-		var resolved := _t(key)
-		label.text = label_text if resolved == key else resolved
-		label.tooltip_text = "%s.%s" % [name, label_text]
-		fields_box.add_child(label)
-		if kind == "enum" and options is PackedStringArray and (options as PackedStringArray).size() > 0:
-			var button := MindWidgets.button(value)
-			# `Styles.logict` (`DrawStatement`'s type button).
-			button.theme_type_variation = "logict"
-			button.custom_minimum_size = Vector2(120, 32)
-			button.tooltip_text = "%s.%s" % [name, label_text]
-			button.pressed.connect(_open_select.bind(index, field_index, options, button))
-			fields_box.add_child(button)
-		else:
-			var edit := LineEdit.new()
-			edit.text = value
-			edit.custom_minimum_size = Vector2(90, 32)
-			edit.tooltip_text = "%s.%s" % [name, label_text]
-			edit.text_submitted.connect(_set_field.bind(index, field_index))
-			edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
-			fields_box.add_child(edit)
-		if name == "draw" and str(values[0]) == "col" and label_text == "color":
-			var picker := ColorPickerButton.new()
-			picker.custom_minimum_size = Vector2(32, 32)
-			picker.color = _parse_color(value)
-			picker.color_changed.connect(_set_color.bind(index, field_index))
-			fields_box.add_child(picker)
+		var label := _field_label_text(str((entry as Dictionary).get("label", "")))
+		var label_before := bool((entry as Dictionary).get("label_before", true))
+		var value := ""
+		if field_index >= 0 and field_index < values.size():
+			value = str(values[field_index])
+		match kind:
+			"text":
+				if not label.is_empty():
+					fields_box.add_child(_field_label(label))
+			"field":
+				if label_before and not label.is_empty():
+					fields_box.add_child(_field_label(label))
+				var edit := LineEdit.new()
+				edit.text = value
+				edit.custom_minimum_size = Vector2(
+					240 if bool((entry as Dictionary).get("wide", false)) else 90, 32
+				)
+				edit.tooltip_text = "%s.%s" % [name, label]
+				edit.text_submitted.connect(_set_field.bind(index, field_index))
+				edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
+				fields_box.add_child(edit)
+				if not label_before and not label.is_empty():
+					fields_box.add_child(_field_label(label))
+			"select":
+				if label_before and not label.is_empty():
+					fields_box.add_child(_field_label(label))
+				var button := MindWidgets.button(_select_text(name, field_index, value))
+				# `Styles.logict`.
+				button.theme_type_variation = "logict"
+				button.custom_minimum_size = Vector2(120, 32)
+				button.tooltip_text = "%s.%s" % [name, label]
+				button.pressed.connect(_open_select.bind(index, field_index, name, button))
+				fields_box.add_child(button)
+			"color":
+				var picker := ColorPickerButton.new()
+				picker.custom_minimum_size = Vector2(40, 32)
+				picker.color = _parse_color(value)
+				picker.color_changed.connect(_set_color.bind(index, field_index))
+				fields_box.add_child(picker)
+			"align":
+				var align_button := MindWidgets.image_button("pencil", "logict")
+				align_button.custom_minimum_size = Vector2(40, 32)
+				align_button.tooltip_text = _field_label_text("align")
+				align_button.pressed.connect(_open_align_select.bind(index, field_index))
+				fields_box.add_child(align_button)
+			"char":
+				var char_button := MindWidgets.image_button("pencil", "logict")
+				char_button.custom_minimum_size = Vector2(40, 32)
+				char_button.tooltip_text = "%s.%s" % [name, label]
+				char_button.pressed.connect(_open_char_select.bind(index, field_index))
+				fields_box.add_child(char_button)
+			"jump":
+				var jump_button := MindWidgets.button(value)
+				jump_button.theme_type_variation = "logict"
+				jump_button.custom_minimum_size = Vector2(36, 32)
+				jump_button.tooltip_text = "%s.%s" % [name, label]
+				jump_button.pressed.connect(_open_jump_select.bind(index, field_index))
+				fields_box.add_child(jump_button)
 	return fields_box
 
 
-## `showSelect(button, values, current, getter)`: a popup of `logicTogglet`
-## buttons, 4 per row (`LStatement.java:233-253`).
-func _open_select(index: int, field_index: int, options: PackedStringArray, button: Button) -> void:
+## `bundle(desc)`: `name.token.<token>` with the raw token as the fallback.
+func _field_label_text(token: String) -> String:
+	if token.is_empty():
+		return ""
+	var key := "name.token." + token
+	var resolved := _t(key)
+	return token if resolved == key else resolved
+
+
+func _field_label(text: String) -> Label:
+	# code-instantiated: one label per field-row item (count is layout-driven).
+	var label := Label.new()
+	label.text = text
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	return label
+
+
+## The current option's display text for a select (`LStatement.bundle(Enum)`
+## then the symbol/name fallback).
+func _select_text(name: String, field_index: int, value: String) -> String:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return value
+	var options: Variant = logic.call("editor_options", name, field_index)
+	if options is Array:
+		for option in options:
+			if option is Dictionary and str((option as Dictionary).get("name", "")) == value:
+				return _option_text(option)
+	return value
+
+
+func _option_text(option: Variant) -> String:
+	var text := str((option as Dictionary).get("label", (option as Dictionary).get("name", "")))
+	var key := str((option as Dictionary).get("key", ""))
+	if not key.is_empty():
+		var resolved := _t(key)
+		if resolved != key:
+			text = resolved
+	return text
+
+
+## `showSelect`: a popup of `logicTogglet` buttons (`LStatement.java:233-253`).
+func _open_select(index: int, field_index: int, name: String, button: Button) -> void:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return
+	var options: Variant = logic.call("editor_options", name, field_index)
+	if not (options is Array):
+		return
 	var popup := PopupPanel.new()
 	# code-instantiated: one transient enum-select popup per open.
 	add_child(popup)
@@ -265,20 +317,110 @@ func _open_select(index: int, field_index: int, options: PackedStringArray, butt
 	grid.columns = 4
 	popup.add_child(grid)
 	var current := button.text
+	var unit_actions := _unit_actions_enabled()
 	for option in options:
+		if not (option is Dictionary):
+			continue
+		var option_name := str((option as Dictionary).get("name", ""))
+		# `UnitControlStatement` hides build/deconstruct when the rules disable them.
+		if name == "ucontrol" and not unit_actions and option_name in ["build", "deconstruct"]:
+			continue
 		var toggle := Button.new()
-		toggle.text = option
+		toggle.text = _option_text(option)
 		toggle.toggle_mode = true
 		toggle.theme_type_variation = "logicTogglet"
-		toggle.button_pressed = option == current
+		toggle.button_pressed = option_name == _current_field_value(index, field_index)
 		toggle.custom_minimum_size = Vector2(60, 38)
-		toggle.pressed.connect(_select_enum.bind(index, field_index, option, popup))
+		toggle.tooltip_text = "%s.%s" % [name.to_lower(), option_name.to_lower()]
+		toggle.pressed.connect(_select_enum.bind(index, field_index, option_name, popup))
 		grid.add_child(toggle)
 	popup.popup_centered()
 
 
-## A discriminator changed: commit, apply the Java type-change defaults and
-## rebuild the element (`DrawStatement.rebuild`).
+## `fieldAlignSelect` (`LStatement.java:259-268`): the nine align presets,
+## set as `@<name>` (`LStatement.afterRead` normalizes them).
+func _open_align_select(index: int, field_index: int) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient align-select popup per open.
+	add_child(popup)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	popup.add_child(grid)
+	var current := _current_field_value(index, field_index)
+	for align in [
+		"topLeft", "top", "topRight", "left", "center", "right", "bottomLeft", "bottom", "bottomRight"
+	]:
+		var toggle := Button.new()
+		toggle.text = _field_label_text(align)
+		toggle.toggle_mode = true
+		toggle.theme_type_variation = "logicTogglet"
+		toggle.button_pressed = current == "@" + align
+		toggle.custom_minimum_size = Vector2(100, 38)
+		toggle.pressed.connect(_select_enum.bind(index, field_index, "@" + align, popup))
+		grid.add_child(toggle)
+	popup.popup_centered()
+
+
+## `PrintCharStatement`'s pencil grid (`LStatements.java:290-311`).
+func _open_char_select(index: int, field_index: int) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient character-picker popup per open.
+	add_child(popup)
+	var grid := GridContainer.new()
+	grid.columns = 8
+	popup.add_child(grid)
+	for code in range(32, 127):
+		var toggle := Button.new()
+		toggle.text = String.chr(code)
+		toggle.theme_type_variation = "flatt"
+		toggle.custom_minimum_size = Vector2(32, 32)
+		toggle.pressed.connect(_select_enum.bind(index, field_index, str(code), popup))
+		grid.add_child(toggle)
+	popup.popup_centered()
+
+
+## The `JumpButton` target picker (`LCanvas.java:551-625`): pick a statement by
+## index; the drag variant lands with T9's curves.
+func _open_jump_select(index: int, field_index: int) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient jump-target popup per open.
+	add_child(popup)
+	var list := VBoxContainer.new()
+	popup.add_child(list)
+	for target in _statements.size():
+		var target_row: Dictionary = _statements[target]
+		var button := MindWidgets.button(
+			"%d  %s" % [target, _t("lst." + str(target_row.get("bundle", "noop")))]
+		)
+		button.theme_type_variation = "logict"
+		button.custom_minimum_size = Vector2(220, 32)
+		button.pressed.connect(_select_enum.bind(index, field_index, str(target), popup))
+		list.add_child(button)
+	popup.popup_centered()
+
+
+func _current_field_value(index: int, field_index: int) -> String:
+	if index < 0 or index >= _statements.size():
+		return ""
+	var values: Array = (_statements[index] as Dictionary).get("fields", [])
+	return str(values[field_index]) if field_index < values.size() else ""
+
+
+## The `logicUnitBuild`/`logicUnitDeconstruct` rules probe (T1's add-dialog
+## filter; `UnitControlStatement.build`).
+func _unit_actions_enabled() -> bool:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null:
+		return true
+	var parsed: Variant = JSON.parse_string(str(host.call("logic_rules_probe")))
+	if not (parsed is Dictionary):
+		return true
+	var info := parsed as Dictionary
+	return bool(info.get("logicUnitBuild", true)) or bool(info.get("logicUnitDeconstruct", true))
+
+
+## A select changed: commit, apply the Java change fixups and rebuild the
+## element (`DrawStatement.rebuild`, `rebuild(table)` in each `build`).
 func _select_enum(index: int, field_index: int, option: String, popup: PopupPanel) -> void:
 	popup.hide()
 	if not _commit_field_value(option, index, field_index):

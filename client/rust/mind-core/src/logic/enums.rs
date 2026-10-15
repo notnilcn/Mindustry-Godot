@@ -24,6 +24,9 @@ pub trait MlogField: Clone {
     /// Java enum names in declaration order (editor `showSelect` options; empty
     /// for free-form fields).
     const OPTIONS: &'static [&'static str] = &[];
+    /// Java enum class name (editor `<class>.label.<name>` bundle keys;
+    /// `LStatement.bundle(Enum)` lowercases the simple class name).
+    const ENUM_CLASS: &'static str = "";
 }
 
 /// Statement field type tag (`LogicStatementProcessor` supports strings/enums/primitives).
@@ -73,6 +76,7 @@ impl MlogField for i32 {
 
 impl MlogField for ContentType {
     const KIND: FieldKind = FieldKind::Enum;
+    const ENUM_CLASS: &'static str = "ContentType";
     fn write(&self, out: &mut String) {
         out.push_str(self.name());
     }
@@ -120,6 +124,7 @@ macro_rules! logic_enum {
         impl MlogField for $name {
             const KIND: FieldKind = FieldKind::Enum;
             const OPTIONS: &'static [&'static str] = &[$( $java ),*];
+            const ENUM_CLASS: &'static str = stringify!($name);
             fn write(&self, out: &mut String) {
                 out.push_str(self.name());
             }
