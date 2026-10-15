@@ -100,6 +100,11 @@ pub enum SimCommand {
         x: f32,
         /// Target y.
         y: f32,
+        /// Whether the order appends to the unit's command queue
+        /// (`InputHandler.commandUnits(..., queueCommand)`; middle mouse
+        /// `Binding.commandQueue`) instead of replacing the target. Direct
+        /// orders clear the queue (I01 T13).
+        queue: bool,
     },
     /// Replace the match rules (plan 12 owns the typed payload).
     SetRules {
@@ -306,8 +311,8 @@ pub struct LogHeader {
 }
 
 impl LogHeader {
-    /// Current `.simlog` format version.
-    pub const FORMAT: u32 = 1;
+    /// Current `.simlog` format version (kept in step with [`SIMLOG_FORMAT`]).
+    pub const FORMAT: u32 = 2;
 
     /// Creates a header for a build/seed/map.
     pub fn new(seed: u64, map: impl Into<String>) -> Self {
@@ -368,7 +373,10 @@ impl CommandLog {
 /// compact form consumed by plan 21/23 (plan 05 §6.4).
 pub const SIMLOG_MAGIC: [u8; 4] = *b"MGSM";
 /// Binary `.simlog` format version (append-only; never renumber).
-pub const SIMLOG_FORMAT: u32 = 1;
+///
+/// v2 (I01 T13) appends the `UnitCommand.queue` byte; v1 logs are rejected by
+/// the version check below.
+pub const SIMLOG_FORMAT: u32 = 2;
 
 /// Errors from decoding a binary `.simlog`.
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
@@ -546,6 +554,7 @@ fn encode_command(out: &mut Vec<u8>, command: &SimCommand) {
             command,
             x,
             y,
+            queue,
         } => {
             put_u8(out, 3);
             put_u32(out, units.len() as u32);
@@ -555,6 +564,8 @@ fn encode_command(out: &mut Vec<u8>, command: &SimCommand) {
             put_u16(out, *command);
             put_f32(out, *x);
             put_f32(out, *y);
+            // v2 (I01 T13): the queue flag is the appended byte.
+            put_u8(out, u8::from(*queue));
         }
         SimCommand::SetRules { json } => {
             put_u8(out, 4);
@@ -851,11 +862,14 @@ fn decode_command(cur: &mut Cursor<'_>) -> Result<SimCommand, CommandLogError> {
             let command = cur.u16()?;
             let x = cur.f32()?;
             let y = cur.f32()?;
+            // Appended in format 2 (`I01 T13`).
+            let queue = cur.u8()? != 0;
             Ok(SimCommand::UnitCommand {
                 units,
                 command,
                 x,
                 y,
+                queue,
             })
         }
         4 => Ok(SimCommand::SetRules {
@@ -1119,6 +1133,7 @@ mod tests {
                 command: 9,
                 x: 1.5,
                 y: -2.25,
+                queue: true,
             },
         );
         log.push(

@@ -328,6 +328,10 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
         .get::<BuilderPlans>(unit)
         .is_some_and(|plans| !plans.plans.is_empty());
 
+    // `boolean moving = false;` (BuilderAI.java:64) — the boost tail below
+    // consumes it.
+    let mut moving = false;
+
     if let Some(following) = state.following {
         // `if(following != null)`: try to follow and mimic someone.
         state.retreat_timer = 0.0;
@@ -379,6 +383,7 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
                     100.0,
                     false,
                 );
+                moving = true;
             }
         }
     }
@@ -426,6 +431,8 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
                 plans.plans.pop_front();
             }
             state.last_plan = None;
+            // Java falls through to the boost tail (BuilderAI.java:231-233).
+            apply_builder_boosting(ctx, unit, &def, moving);
             return;
         }
         if !hold {
@@ -438,6 +445,8 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
             let dx = tx - pos.x;
             let dy = ty - pos.y;
             let within = dx * dx + dy * dy <= range * range;
+            // `moving = !unit.within(req.tile(), range)` (BuilderAI.java:130).
+            moving = !within;
             if !within {
                 crate::ai::types::flying::move_to_point(
                     ctx.world,
@@ -452,6 +461,8 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
                 );
             }
         }
+        // Java falls through to the boost tail (BuilderAI.java:231-233).
+        apply_builder_boosting(ctx, unit, &def, moving);
         return;
     }
 
@@ -466,6 +477,13 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
             .get::<crate::entities::comp::unit::comp::UnitTypeComp>(assist)
             .and_then(|comp| ctx.content.unit(comp.type_id))
             .map_or(0.0, |def| def.hit_size);
+        // `moving = !unit.within(assistFollowing, hitSize + hitSize/2 + 65)`
+        // (BuilderAI.java:145).
+        moving = ctx.world.get::<Pos>(unit).is_some_and(|pos| {
+            let dx = apos.x - pos.x;
+            let dy = apos.y - pos.y;
+            dx * dx + dy * dy > (assist_hit + def.hit_size / 2.0 + 65.0).powi(2)
+        });
         crate::ai::types::flying::move_to_point(
             ctx.world,
             ctx.grid,
@@ -582,5 +600,129 @@ pub fn update_builder_ai(ctx: &mut AiCtx, unit: Entity, state: &mut BuilderAiSta
     } else {
         // `blocks.addLast(blocks.removeFirst())`: try something else next time.
         rotate_head(ctx, team);
+    }
+
+    // `if(!unit.type.flying) unit.updateBoosting(unit.type.boostWhenBuilding ||
+    // moving || floorOn().isDuct || floorOn().damageTaken > 0f ||
+    // floorOn().isDeep())` (BuilderAI.java:231-233).
+    apply_builder_boosting(ctx, unit, &def, moving);
+}
+
+/// `BuilderAI.updateUnit` boost tail (`BuilderAI.java:231-233`): a non-flying
+/// builder boosts while `boostWhenBuilding`, moving, on a duct/damaged/deep
+/// floor. Like the MinerAI port (`miner.rs`), the per-kind floor terms are
+/// limited to deep floors (the port has no duct/damage floor data yet).
+fn apply_builder_boosting(
+    ctx: &mut AiCtx,
+    unit: Entity,
+    def: &crate::content::registries::units::UnitTypeDef,
+    moving: bool,
+) {
+    // `UnitComp.updateBoosting`: `if(!type.canBoost || dead) return;`.
+    if def.flying || !def.can_boost {
+        return;
+    }
+    let deep = ctx
+        .world
+        .get::<Pos>(unit)
+        .and_then(|pos| {
+            ctx.grid.tiles.getn(
+                crate::world::WorldGrid::to_tile(pos.x),
+                crate::world::WorldGrid::to_tile(pos.y),
+            )
+        })
+        .and_then(|tile| {
+            ctx.world
+                .get_resource::<crate::world::block::BlockTable>()
+                .and_then(|table| {
+                    crate::world::behavior::environment::floor_meta(table, tile.floor)
+                })
+        })
+        .is_some_and(|meta| meta.is_deep);
+    let boosting = def.boost_when_building || moving || deep;
+    if let Some(mut core) = ctx
+        .world
+        .get_mut::<crate::entities::comp::unit::comp::UnitCore>(unit)
+    {
+        core.boosting = boosting;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai::UnitHarness;
+    use crate::ai::ai_controller::AiCtx;
+
+    /// T16 check 3 (`BuilderAI.java:231-233`): the non-flying builder boost tail
+    /// sets `boosting` while the unit is `moving` (a far-away plan), skips
+    /// units without `canBoost`, and never touches flying units.
+    #[test]
+    fn builder_boost_tail_follows_moving() {
+        let mut harness = UnitHarness::new(32, 32, 1);
+        let unit = harness.spawn("stell", 0, 64.0, 64.0, 0.0).expect("stell");
+        let mut def = harness
+            .build
+            .content
+            .unit_by_name("stell")
+            .expect("stell")
+            .clone();
+        def.flying = false;
+        def.can_boost = true;
+        def.boost_when_building = false;
+
+        let run = |harness: &mut UnitHarness,
+                   def: &crate::content::registries::units::UnitTypeDef,
+                   moving: bool| {
+            let mut ctx = AiCtx {
+                world: &mut harness.build.world,
+                grid: &harness.build.grid,
+                content: &harness.build.content,
+                pathfinder: &mut harness.pathfinder,
+                team: 0,
+            };
+            apply_builder_boosting(&mut ctx, unit, def, moving);
+            harness
+                .build
+                .world
+                .get::<crate::entities::comp::unit::comp::UnitCore>(unit)
+                .expect("core")
+                .boosting
+        };
+
+        // `boostWhenBuilding` false and standing still: no boost.
+        assert!(!run(&mut harness, &def, false), "idle does not boost");
+        assert!(run(&mut harness, &def, true), "moving boosts");
+
+        // `UnitComp.updateBoosting` skips units without `canBoost` (the flag
+        // keeps its previous value).
+        let mut no_boost_def = def.clone();
+        no_boost_def.can_boost = false;
+        if let Some(mut core) = harness
+            .build
+            .world
+            .get_mut::<crate::entities::comp::unit::comp::UnitCore>(unit)
+        {
+            core.boosting = false;
+        }
+        assert!(
+            !run(&mut harness, &no_boost_def, true),
+            "non-canBoost units stay grounded"
+        );
+
+        // Flying units are excluded by the `!unit.type.flying` guard.
+        let mut flying_def = def.clone();
+        flying_def.flying = true;
+        if let Some(mut core) = harness
+            .build
+            .world
+            .get_mut::<crate::entities::comp::unit::comp::UnitCore>(unit)
+        {
+            core.boosting = false;
+        }
+        assert!(
+            !run(&mut harness, &flying_def, true),
+            "flying builders are untouched by the tail"
+        );
     }
 }

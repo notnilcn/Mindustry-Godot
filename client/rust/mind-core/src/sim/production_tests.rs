@@ -409,6 +409,84 @@ fn power_source_powers_consumer() {
     assert!(efficiency > 0.0, "drill became efficient: {efficiency}");
 }
 
+/// T14 (PAR-0286): breaking and re-placing a power building keeps the consumer
+/// on the powered graph. The split (`PowerGraph.remove`) must run while the
+/// removed building's proximity still lists its neighbours, and the re-placed
+/// building merges back (`Building.updatePowerGraph`).
+#[test]
+fn power_source_replacement_keeps_consumer_powered() {
+    let mut sim = runtime_sim();
+    set_floor(&mut sim, 8, 5, "ore-copper");
+    // Report staging order: machine -> power-node -> power-source.
+    let drill = place(&mut sim, "laser-drill", 8, 5);
+    let _node = place(&mut sim, "power-node", 6, 5);
+    let _source = place(&mut sim, "power-source", 5, 5);
+    for _ in 0..30 {
+        sim.tick().expect("tick");
+    }
+    let satisfaction = |sim: &Sim, entity| -> f32 {
+        let graph = sim
+            .ecs
+            .0
+            .get::<crate::world::modules::PowerModule>(entity)
+            .map(|module| module.graph)
+            .unwrap_or_default();
+        sim.ecs
+            .0
+            .resource::<crate::world::blocks::power::PowerGrids>()
+            .graph(graph)
+            .map(|graph| graph.get_satisfaction())
+            .unwrap_or(0.0)
+    };
+    assert_eq!(satisfaction(&sim, drill), 1.0, "drill powered before");
+
+    // A large multiblock (adjacent to the drill) breaks and is re-placed: it
+    // must rejoin the powered graph.
+    let battery = place(&mut sim, "battery-large", 6, 8);
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        satisfaction(&sim, battery),
+        1.0,
+        "battery powered before the break"
+    );
+    sim.command(SimCommand::Break {
+        x: 6,
+        y: 8,
+        player: None,
+    })
+    .expect("break battery");
+    sim.tick().expect("tick");
+    let battery = place(&mut sim, "battery-large", 6, 8);
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        satisfaction(&sim, battery),
+        1.0,
+        "battery stays powered after the replacement"
+    );
+
+    // The report's simple case: break + re-place the source itself.
+    sim.command(SimCommand::Break {
+        x: 5,
+        y: 5,
+        player: None,
+    })
+    .expect("break source");
+    sim.tick().expect("tick");
+    let _replacement = place(&mut sim, "power-source", 5, 5);
+    for _ in 0..2 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        satisfaction(&sim, drill),
+        1.0,
+        "drill stays powered after the source replacement"
+    );
+}
+
 /// §10 sweep (laser/airblast drills): the ore footprint is centred on
 /// `Building.tile` (`Drill.countOre` over `Tile.getLinkedTilesAs`, offset
 /// `-(size-1)/2`), so ore under the left column of a 3x3 counts and a tile

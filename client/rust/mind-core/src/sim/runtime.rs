@@ -498,8 +498,11 @@ impl SimRuntime {
                 .get::<crate::entities::comp::TeamComp>(old)
                 .map(|team| team.team)
                 .unwrap_or(team);
-            let _ = remove_from_proximity(world, old, &self.content);
+            // `BuildingComp.removeFromProximity` runs `onProximityRemoved` ->
+            // `powerGraphRemoved` FIRST, while `proximity` still lists the
+            // neighbours the graph split walks (I01 T14).
             self.remove_power_graph(world, grid, old);
+            let _ = remove_from_proximity(world, old, &self.content);
             if old_block != BlockId::AIR
                 && let Some(mut counter) = world.get_resource_mut::<BlockCounter>()
             {
@@ -975,8 +978,11 @@ impl SimRuntime {
         team: u8,
         block: BlockId,
     ) {
-        let _ = remove_from_proximity(world, entity, &self.content);
+        // `BuildingComp.removeFromProximity` runs `onProximityRemoved` ->
+        // `powerGraphRemoved` FIRST, while `proximity` still lists the
+        // neighbours the graph split walks (I01 T14).
         self.remove_power_graph(world, grid, entity);
+        let _ = remove_from_proximity(world, entity, &self.content);
         self.facing_drills.retain(|drill| *drill != entity);
         self.thermal_generators
             .retain(|generator| *generator != entity);

@@ -3,15 +3,12 @@
 
 //! `AssemblerAI` (plan 11 §4.2, dispatched in H01 T13). Assembler drones hover
 //! at an arranged spot and face a locked angle; they never pathfind. Ported
-//! from `core/src/mindustry/ai/types/AssemblerAI.java`.
-//!
-//! The block half (`UnitAssemblerBuild.updateTile` arranging `targetPos`/
-//! `targetAngle` per drone) is not wired in the port's `AssemblerBehavior` yet:
-//! a dispatched drone with the default zero target holds still and keeps its
-//! rotation, matching Java before the first arrangement. See the H01 T13
-//! summary for the seam request.
+//! from `core/src/mindustry/ai/types/AssemblerAI.java`. The assembler block
+//! arranges `targetPos`/`targetAngle` and reads [`in_position_world`] for its
+//! efficiency term (`UnitAssembler.java:509-517`, I01 T11).
 
 use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 
 use crate::entities::comp::Pos;
 use crate::entities::comp::unit::comp::UnitCore;
@@ -61,7 +58,14 @@ pub fn update_assembler(ctx: &mut AiCtx, unit: Entity, state: &AssemblerAi) {
 /// `AssemblerAI.inPosition()`: within 10 px of `targetPos` and facing within
 /// 15 degrees of `targetAngle` (the assembler's efficiency term).
 pub fn in_position(ctx: &AiCtx, unit: Entity, state: &AssemblerAi) -> bool {
-    let Some(pos) = ctx.world.get::<Pos>(unit).copied() else {
+    in_position_world(ctx.world, unit, state)
+}
+
+/// [`in_position`] over a plain [`World`] — the assembler block's
+/// `updateTile` efficiency term (`UnitAssembler.java:516-517`) runs outside
+/// the unit controller dispatch and has no [`AiCtx`].
+pub fn in_position_world(world: &World, unit: Entity, state: &AssemblerAi) -> bool {
+    let Some(pos) = world.get::<Pos>(unit).copied() else {
         return false;
     };
     let dx = state.target_x - pos.x;
@@ -69,8 +73,7 @@ pub fn in_position(ctx: &AiCtx, unit: Entity, state: &AssemblerAi) -> bool {
     if dx * dx + dy * dy > 100.0 {
         return false;
     }
-    let rotation = ctx
-        .world
+    let rotation = world
         .get::<UnitCore>(unit)
         .map(|core| core.rotation)
         .unwrap_or(0.0);
