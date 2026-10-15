@@ -6830,3 +6830,180 @@ fn assembly_drone_dispatches() {
         "the drone faces the arranged angle ({rotation})"
     );
 }
+
+/// I01 T12: every turret carries the detached `block` unit proxy
+/// (`TurretBuild.unit = UnitTypes.block.create(team)`, `Turret.java:297`),
+/// positioned on the turret each tick (`unit.tile(this)`, `Turret.java:535-537`)
+/// and dropped with the building. The proxy is never in the live unit list, so
+/// it is never saved.
+#[test]
+fn turret_has_block_unit() {
+    use crate::ecs::EntitySeq;
+    use crate::entities::comp::unit::comp::{BlockUnitComp, UnitTypeComp};
+    use crate::entities::comp::{Building, TeamComp};
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    let unit = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .expect("turret state")
+        .block_unit
+        .expect("block unit proxy");
+    // `UnitTypes.block`.
+    let runtime = sim.unit_runtime().expect("runtime");
+    let type_id = sim
+        .ecs
+        .0
+        .get::<UnitTypeComp>(unit)
+        .expect("proxy type")
+        .type_id;
+    assert_eq!(
+        runtime.content.unit(type_id).expect("block def").name,
+        "block"
+    );
+    // `unit.tile(this)`: the proxy sits on the turret's tile.
+    let block_tile = sim
+        .ecs
+        .0
+        .get::<Building>(duo)
+        .expect("building")
+        .tile
+        .pack();
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<BlockUnitComp>(unit)
+            .expect("block unit comp")
+            .tile,
+        block_tile
+    );
+    // Team + position follow the turret.
+    let (bx, by) = sim
+        .ecs
+        .0
+        .get::<Pos>(duo)
+        .map(|pos| (pos.x, pos.y))
+        .expect("turret pos");
+    let (ux, uy) = sim
+        .ecs
+        .0
+        .get::<Pos>(unit)
+        .map(|pos| (pos.x, pos.y))
+        .expect("proxy pos");
+    assert_eq!((ux, uy), (bx, by), "proxy sits on the turret");
+    assert_eq!(sim.ecs.0.get::<TeamComp>(unit).expect("proxy team").team, 1);
+    assert!(
+        !runtime.units.contains(&unit),
+        "the proxy is detached (never saved / never unit-updated)"
+    );
+    let _ = sim.ecs.0.get::<EntitySeq>(unit).expect("proxy seq");
+
+    // Removing the turret removes the proxy.
+    sim.command(SimCommand::Break {
+        x: 20,
+        y: 20,
+        player: None,
+    })
+    .expect("break");
+    sim.tick().expect("tick");
+    assert!(
+        sim.ecs.0.get_entity(unit).is_err(),
+        "proxy despawned with the turret"
+    );
+}
+
+/// I01 T12 (`Turret.java:571-600`): a possessed turret aims at the player's
+/// cursor and fires on the shoot button (`controlled()` -> `targetPos.set(
+/// unit.aimX(), unit.aimY()); canShoot = unit.isShooting()`).
+#[test]
+fn controlled_turret_shoots_at_aim() {
+    use crate::ecs::EntitySeq;
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    feed(&mut sim, duo, "copper", 10);
+    sim.set_player_team(1);
+    let unit = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .expect("turret state")
+        .block_unit
+        .expect("block unit proxy");
+    let seq = sim.ecs.0.get::<EntitySeq>(unit).expect("proxy seq").0 as i32;
+    assert!(sim.possess_unit(seq), "player possesses the turret proxy");
+    assert_eq!(sim.player_unit(), Some(unit));
+
+    // Aim east of the turret (its default rotation is 90/south) and hold fire.
+    let (bx, by) = sim
+        .ecs
+        .0
+        .get::<Pos>(duo)
+        .map(|pos| (pos.x, pos.y))
+        .expect("turret pos");
+    let before = sim.unit_runtime().expect("runtime").bullets_created;
+    for _ in 0..120 {
+        sim.set_player_control(0.0, 0.0, true, bx + 120.0, by, false, false);
+        sim.tick().expect("tick");
+    }
+    let after = sim.unit_runtime().expect("runtime").bullets_created;
+    assert!(
+        after > before,
+        "the controlled turret fired ({before} -> {after})"
+    );
+    let rotation = sim
+        .ecs
+        .0
+        .get::<TurretState>(duo)
+        .expect("turret state")
+        .rotation;
+    assert!(
+        (rotation.rem_euclid(360.0)).abs() < 5.0
+            || (rotation.rem_euclid(360.0) - 360.0).abs() < 5.0,
+        "the turret turned toward the cursor ({rotation})"
+    );
+
+    // Releasing the control stops the player-driven fire (the turret drops the
+    // `Player` marker).
+    sim.clear_unit();
+    assert!(sim.player_unit().is_none());
+}
+
+/// I01 T12 (`CoreBlock.java:619-637`): Ctrl-click on the own core clears the
+/// player's unit and respawns it at that core (`player.clearUnit();
+/// player.deathTimer = deathDelay + 1; requestSpawn(player)`).
+#[test]
+fn core_control_select_respawns() {
+    let mut sim = live_sim(48);
+    let core = place(&mut sim, 10, 10, "core-shard", 1);
+    let alpha = sim
+        .spawn_player_unit("alpha", 1, 200.0, 200.0, 0.0)
+        .expect("alpha");
+    assert_eq!(sim.player_unit(), Some(alpha));
+
+    sim.command(SimCommand::BuildingControlSelect { x: 10, y: 10 })
+        .expect("control select");
+    sim.tick().expect("tick");
+    let player = sim.player_unit().expect("respawned player");
+    assert_ne!(player, alpha, "the old unit was released");
+    let (cx, cy) = sim
+        .ecs
+        .0
+        .get::<Pos>(core)
+        .map(|pos| (pos.x, pos.y))
+        .expect("core pos");
+    let (px, py) = sim
+        .ecs
+        .0
+        .get::<Pos>(player)
+        .map(|pos| (pos.x, pos.y))
+        .expect("player pos");
+    assert!(
+        (px - cx).abs() < 1.0 && (py - cy).abs() < 1.0,
+        "respawned at the selected core ({px}, {py}) vs ({cx}, {cy})"
+    );
+}

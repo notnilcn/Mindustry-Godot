@@ -119,7 +119,12 @@ pub(crate) fn line_units(
     let mut units: Vec<Entity> = ctx
         .world
         .iter_entities()
-        .filter(|entity| entity.contains::<Unit>())
+        .filter(|entity| {
+            entity.contains::<Unit>()
+                // Detached `block` unit proxies are not in `Groups.unit`
+                // (I01 T12).
+                && !entity.contains::<crate::entities::comp::unit::comp::BlockUnitComp>()
+        })
         .map(|entity| entity.id())
         .collect();
     units.sort_by_key(|entity| {

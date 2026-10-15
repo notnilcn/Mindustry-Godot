@@ -11,7 +11,7 @@
 //! `dst2`, ties broken by entity index — so combat goldens are unchanged.
 
 use bevy_ecs::entity::Entity;
-use bevy_ecs::query::With;
+use bevy_ecs::query::{With, Without};
 use bevy_ecs::world::World;
 
 use crate::ai::BlockIndexer;
@@ -36,7 +36,13 @@ impl TargetQueries {
         indexer.rebuild(world, content);
 
         let mut units: Vec<Entity> = {
-            let mut query = world.query_filtered::<Entity, With<Unit>>();
+            // Detached `block` unit proxies (possessed turrets, I01 T12) are
+            // never in Java's `Groups.unit` (`Turret.java:297` creates without
+            // `add()`), so they are not targets.
+            let mut query = world.query_filtered::<Entity, (
+                With<Unit>,
+                Without<crate::entities::comp::unit::comp::BlockUnitComp>,
+            )>();
             query.iter(world).collect()
         };
         units.sort_unstable_by_key(|entity| entity.index());

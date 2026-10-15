@@ -1307,6 +1307,20 @@ impl MindSimHost {
         out
     }
 
+    /// `InputHandler.selectedUnit()`'s ControlBlock branch
+    /// (`InputHandler.java:2159-2161`, I01 T12): the detached `block` unit of an
+    /// own controllable turret at `(x, y)` as its sim `EntitySeq`. `None` when
+    /// the tile holds no turret, the team differs, or the turret is the
+    /// player's own unit already. Rust-only seam (`#[func]`-free, like
+    /// `building_team`); the desktop input calls it through `bind()`.
+    pub fn control_block_unit_id(&self, x: i32, y: i32) -> Option<i32> {
+        if !self.sim.grid.tiles.in_bounds(x, y) {
+            return None;
+        }
+        self.sim
+            .control_block_unit_id(TilePos::new(x as i16, y as i16))
+    }
+
     /// Building state at `(x, y)` (debug seam: `{block, enabled, efficiency,
     /// potential_efficiency, optional_efficiency, time_scale}` plus
     /// `{item, liquid, accumulator, emitted}` for sandbox sources/voids).

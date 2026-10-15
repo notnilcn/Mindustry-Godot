@@ -58,7 +58,7 @@ impl UnitBlockSeq {
     }
 }
 
-fn next_unit_seq(world: &mut World) -> u64 {
+pub(crate) fn next_unit_seq(world: &mut World) -> u64 {
     if !world.contains_resource::<UnitBlockSeq>() {
         world.insert_resource(UnitBlockSeq(UnitBlockSeq::BASE));
     }

@@ -31,6 +31,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 use smallvec::SmallVec;
 
+use crate::ai::types::player::PlayerInput;
 use crate::audio::math::AudioRng;
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
 use crate::combat::targeting::TargetQueries;
@@ -38,7 +39,8 @@ use crate::content::registries::bullets::BulletDef;
 use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, ItemId, LiquidId};
-use crate::entities::comp::{Health, Pos};
+use crate::entities::comp::unit::comp::UnitCore;
+use crate::entities::comp::{Health, Pos, TeamComp};
 use crate::weapons::pattern::{self, ShotBuffer};
 use crate::world::PayloadRef;
 use crate::world::blocks::payloads::PayloadKind;
@@ -384,6 +386,9 @@ pub struct TurretState {
     pub build_plans: SmallVec<[BuildPlan; 4]>,
     /// `BuildTurretBuild.following`-equivalent: the plan currently being built.
     pub build_target: Option<(i32, i32)>,
+    /// The detached `block` unit proxy (`TurretBuild.unit`; `Turret.java:297`).
+    /// Never added to `UnitRuntime.units`, so it is never saved (I01 T12).
+    pub block_unit: Option<Entity>,
 }
 
 /// One continuous/laser beam bullet entry (`Turret.BulletEntry`).
@@ -472,6 +477,7 @@ impl TurretState {
             build_warmup: 0.0,
             build_plans: SmallVec::new(),
             build_target: None,
+            block_unit: None,
         }
     }
 }
@@ -1556,6 +1562,45 @@ fn update_turret(
         state.total_ammo = state.payloads.iter().map(|stack| stack.count).sum();
     }
 
+    // `TurretBuild.updateTile`: `unit.tile(this); unit.rotation(rotation);
+    // unit.team(team);` (`Turret.java:535-537`) — keep the detached proxy on
+    // the turret (I01 T12).
+    if let Some(unit) = state.block_unit
+        && ctx.world.get_entity(unit).is_ok()
+    {
+        if let Some(mut pos) = ctx.world.get_mut::<Pos>(unit) {
+            pos.x = x;
+            pos.y = y;
+        }
+        if let Some(mut core) = ctx.world.get_mut::<UnitCore>(unit) {
+            core.rotation = state.rotation;
+        }
+        if let Some(mut unit_team) = ctx.world.get_mut::<TeamComp>(unit) {
+            unit_team.team = team;
+        }
+        if let Some(building) = ctx.world.get::<crate::entities::comp::Building>(e) {
+            let packed = building.tile.pack();
+            ctx.world
+                .entity_mut(unit)
+                .insert(crate::entities::comp::unit::comp::BlockUnitComp { tile: packed });
+        }
+    }
+
+    // `TurretBuild.controlled()` = `unit.isPlayer()` (`Turret.java:448-450`):
+    // the proxy carries the `Player` marker while possessed; the player's aim
+    // and shoot button come from the shared input resource
+    // (`PlayerInput.aim_x/aim_y/shooting`).
+    let controlled = state.block_unit.is_some_and(|unit| {
+        ctx.world
+            .get::<crate::entities::comp::Player>(unit)
+            .is_some()
+    });
+    let player_aim = ctx
+        .world
+        .get_resource::<PlayerInput>()
+        .map(|input| (input.aim_x, input.aim_y, input.shooting))
+        .unwrap_or((0.0, 0.0, false));
+
     // Target validation + shooting intent.
     // `Turret.updateTile` (`Turret.java:540-542`): the logic cooldown ticks
     // down at the top of the update while active.
@@ -1570,7 +1615,11 @@ fn update_turret(
     //  logicControlled() ? logicShooting : target != null)`
     // (`Turret.java:555`; the port has no player-controlled turret yet).
     state.is_shooting = config.always_shooting
-        || if logic_controlled {
+        || if controlled {
+            // `unit.controller() instanceof Player ? unit.isShooting()`
+            // (`Turret.java:555`).
+            player_aim.2
+        } else if logic_controlled {
             state.logic_shooting
         } else {
             state.target.is_some()
@@ -1683,7 +1732,12 @@ fn update_turret(
     // `Predict.intercept`); logic control drives firing and keeps whatever aim
     // point logic last set (`validateTarget` holds a null target while
     // `logicControlled()`).
-    let can_shoot = if state.logic_control_time > 0.0 {
+    let can_shoot = if controlled {
+        // `Turret.java:575-582` player behavior: `targetPos.set(unit.aimX(),
+        // unit.aimY()); canShoot = unit.isShooting();`.
+        state.target_pos = (player_aim.0, player_aim.1);
+        player_aim.2
+    } else if state.logic_control_time > 0.0 {
         state.logic_shooting
     } else {
         let Some(target) = state.target else {

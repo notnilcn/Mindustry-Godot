@@ -1041,6 +1041,33 @@ impl Sim {
             .get_resource::<crate::world::limits::BlockCounter>()
     }
 
+    /// Whether `entity` is a core of the player's team — the
+    /// `CoreBlock.canControlSelect` team gate (I01 T12).
+    fn is_own_core(&self, entity: Entity) -> bool {
+        let Some(team) = self.player_team else {
+            return false;
+        };
+        if self
+            .ecs
+            .0
+            .get::<crate::entities::comp::TeamComp>(entity)
+            .map(|comp| comp.team)
+            != Some(team)
+        {
+            return false;
+        }
+        self.ecs
+            .0
+            .get::<crate::entities::comp::Building>(entity)
+            .map(|building| building.block)
+            .is_some_and(|block| {
+                self.block_runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.content().block(block))
+                    .is_some_and(|def| def.kind == crate::content::BlockKind::CoreBlock)
+            })
+    }
+
     /// Applies a live block placement for an explicit team.
     ///
     /// `Command::Place` carries only the default team; the campaign AI queue
@@ -1803,7 +1830,17 @@ impl Sim {
                 }
             }
             SimCommand::BuildingControlSelect { x, y } => {
-                self.control_building = Some(TilePos::new(*x, *y));
+                let pos = TilePos::new(*x, *y);
+                self.control_building = Some(pos);
+                // `InputHandler.unitBuildingControlSelect(unit, build)`
+                // (`InputHandler.java:1016-1031`) -> `CoreBlock.onControlSelect`:
+                // Ctrl-click on an own core respawns the player there (I01 T12).
+                if let Some(core) = self.grid.entity_at(pos)
+                    && self.player_unit.is_some()
+                    && self.is_own_core(core)
+                {
+                    let _ = self.control_select_core(core);
+                }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());
             }

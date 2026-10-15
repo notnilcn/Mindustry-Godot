@@ -150,6 +150,20 @@ impl WorldHooks for SimHooks {
         }
         Some(entity)
     }
+
+    /// `BuildingComp.onRemoved` (`BuildingComp.java:1145-1150`): dispatch the
+    /// block behavior's removal hook (the turret's detached `block` unit proxy
+    /// is dropped here, I01 T12).
+    fn on_removed(&self, world: &mut World, entity: Entity) {
+        if let Some(behavior) = world.get_resource::<BlockTable>().and_then(|table| {
+            world
+                .get::<crate::entities::comp::Building>(entity)
+                .and_then(|building| table.instance(building.block))
+                .map(|inst| inst.behavior.clone())
+        }) {
+            behavior.on_removed(world, entity);
+        }
+    }
 }
 
 /// The live building runtime attached to a [`Sim`].
