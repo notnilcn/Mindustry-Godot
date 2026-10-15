@@ -1,0 +1,12 @@
+Mindustry has crashed. How unfortunate.
+Version: custom build
+Date: October 14, 2026 06:10:42 PM
+OS: Linux x64 (x86_64)
+Runtime Version: 4.7.2-stable (official)
+Runtime Available Memory: 11777mb
+Cores: 16
+Mods: none (vanilla)
+
+
+panicked at mind-core/src/world/building_io.rs:402:17:
+attempt to add with overflow
