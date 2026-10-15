@@ -5439,11 +5439,13 @@ impl MindSimHost {
     /// `(center tile x, center tile y, world x, world y, size, java_color)`.
     /// Rust-only seam for the status pass (T14/PAR-0097).
     pub fn building_statuses(&self) -> Vec<(i32, i32, f32, f32, i32, u32)> {
-        use mind_core::world::status::BlockStatus;
         let Some(content) = self.content_snapshot.as_ref() else {
             return Vec::new();
         };
         let team = self.player_team();
+        // `BuildingComp.status()` reads `state.tick` (Vars.state): the sim tick
+        // drives the efficiency pulse (`BuildingComp.java:651`; I02 T3).
+        let tick = self.sim.tick_count();
         let mut out = Vec::new();
         for entity in self.sim.ecs.0.iter_entities() {
             let Some(building) = entity.get::<mind_core::entities::comp::Building>() else {
@@ -5461,18 +5463,14 @@ impl MindSimHost {
             if def.consumes.is_empty() {
                 continue;
             }
-            // `BlockStatus.forBlock`: `!enabled` -> logicDisable, efficiency
-            // `<= 0` -> noInput, else active. Java's pulse condition
-            // `((state.tick / 30) % 1) < efficiency` is always true (integer
-            // modulo 1), so the marker is simply `active`
-            // (`BuildingComp.java:638-652`).
-            let status = if !building.enabled {
-                BlockStatus::LogicDisable
-            } else if building.efficiency <= 0.0 {
-                BlockStatus::NoInput
-            } else {
-                BlockStatus::Active
-            };
+            // `BuildingComp.status()` (`BuildingComp.java:638-652`): logic
+            // disable, `noOutput` when `shouldConsume()` is false, `noInput`
+            // with no efficiency/production, else the 30-tick pulse
+            // `((tick / 30) % 1) < efficiency` (I02 T3; H01 T8 transcribed the
+            // per-family `shouldConsume()` overrides in
+            // `mind_core::world::status::java_block_status`).
+            let status =
+                mind_core::world::status::java_block_status(&self.sim.ecs.0, entity.id(), tick);
             let size = def.size.max(1);
             // `Building.tile` is the center tile; `Block.offset` recentres the
             // even-size sprites (same convention as `blocks.rs`).
