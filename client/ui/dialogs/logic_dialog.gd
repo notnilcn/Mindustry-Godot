@@ -13,6 +13,11 @@
 
 extends MindDialog
 
+## `LogicDialog.show(code, null, true, consumer)`: `MapGenerateDialog`'s
+## `LogicFilter` code option has no world tile; the edited code is echoed back
+## through this signal instead of a processor write.
+signal code_edited(code: String)
+
 ## `LCategory` colours (`Pal`; `LCategory.java:16-22`).
 const CATEGORY_COLORS := {
 	"io": Color8(0xa0, 0x8a, 0x8a),
@@ -31,6 +36,9 @@ var _code := ""
 ## Editor target (`MapProcessorsDialog`'s name button /
 ## `LogicBuild.showEditDialog(true)`): read/write through `MindEditor`.
 var _editor_mode := false
+## Standalone `show(code, null, true, consumer)` mode (`MapGenerateDialog`'s
+## `LogicFilter` code option): no tile; the code is echoed via `code_edited`.
+var _filter_mode := false
 ## `[{name, category, fields: [String]}]`.
 var _statements: Array = []
 var _list: MindTable = null
@@ -80,16 +88,22 @@ func _build() -> void:
 
 ## `LogicDialog.show`: loads the processor's program into the statement list.
 ## `context.editor` targets an editor world tile (`MindEditor`,
-## `MapProcessorsDialog`'s name button -> `showEditDialog(true)`); otherwise
-## the live sim (`LogicBlock` config).
+## `MapProcessorsDialog`'s name button -> `showEditDialog(true)`);
+## `context.filter` is the standalone `show(code, null, true, consumer)` mode
+## (the map-generate `LogicFilter` code option); otherwise the live sim
+## (`LogicBlock` config).
 func shown() -> void:
 	_x = int(_context.get("x", 0))
 	_y = int(_context.get("y", 0))
 	_editor_mode = bool(_context.get("editor", false))
+	_filter_mode = bool(_context.get("filter", false))
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return
-	if _editor_mode:
+	if _filter_mode:
+		_privileged = bool(_context.get("privileged", true))
+		_code = str(_context.get("code", ""))
+	elif _editor_mode:
 		var editor := get_node_or_null("/root/Spine/MindEditor")
 		if editor == null:
 			return
@@ -307,6 +321,12 @@ func _save() -> void:
 	if logic == null:
 		return
 	var code := str(logic.call("write_statements", _statements))
+	if _filter_mode:
+		# `modified.get(result)`: the generate dialog owns the filter JSON.
+		_code = code
+		_modified = false
+		code_edited.emit(code)
+		return
 	var error := ""
 	if _editor_mode:
 		var editor := get_node_or_null("/root/Spine/MindEditor")
