@@ -20,10 +20,13 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 stretch = true
+show_behind_parent = true
 
 [node name="SubViewport" type="SubViewport" parent="ViewportContainer" unique_id=1638892624]
 handle_input_locally = false
 size = Vector2i(1152, 648)
 render_target_update_mode = 4
 
-[node name="EditorWorldView" type="Node2D" parent="ViewportContainer/SubViewport" unique_id=1855288005]
+[node name="Camera2D" type="Camera2D" parent="ViewportContainer/SubViewport" unique_id=1047283911]
+
+[node name="EditorWorldView" type="MindEditorRenderer" parent="ViewportContainer/SubViewport" unique_id=1855288005]

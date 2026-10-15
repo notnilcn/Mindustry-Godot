@@ -17,16 +17,58 @@ var _drawing := false
 var _last := Vector2i(-1, -1)
 var _start := Vector2i(-1, -1)
 var _last_tool := ""
+var _world_view: Node = null
+var _camera: Camera2D = null
 
 
 func _ready() -> void:
 	_editor = get_node_or_null(editor_path)
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	_camera = get_node_or_null(^"ViewportContainer/SubViewport/Camera2D")
+	_world_view = get_node_or_null(^"ViewportContainer/SubViewport/EditorWorldView")
 
 
 func _process(_delta: float) -> void:
 	if _editor != null and is_instance_valid(_editor):
+		_drive_view()
 		queue_redraw()
+
+
+## `MapView.draw`: the `EditorRenderer` is drawn into the view rect
+## `(centerx - sclwidth/2, centery - sclheight/2, sclwidth, sclheight)`; the
+## `SubViewport` camera mirrors that projection (`project`/`unproject` math).
+func _drive_view() -> void:
+	if _camera == null or _world_view == null:
+		return
+	var status: Dictionary = _editor.call("status")
+	var map_w := int(status.get("width", 0))
+	var map_h := int(status.get("height", 0))
+	if map_w <= 0 or map_h <= 0:
+		return
+	var state: Dictionary = _editor.call("map_view_state")
+	var zoom := float(state.get("zoom", 1.0))
+	var offset_x := float(state.get("offset_x", 0.0))
+	var offset_y := float(state.get("offset_y", 0.0))
+	var view := minf(size.x, size.y)
+	var scl_w := view * zoom
+	var scl_h := scl_w * float(map_h) / float(map_w)
+	# View-pixel position of the world origin (tile 0,0 = world 0,0).
+	var origin_x := offset_x * zoom - scl_w / 2.0 + size.x / 2.0
+	var origin_y := offset_y * zoom - scl_h / 2.0 + size.y / 2.0
+	var scale_px := scl_w / float(map_w) / 8.0
+	_camera.position = Vector2(
+		(size.x / 2.0 - origin_x) / scale_px,
+		(size.y / 2.0 - origin_y) / scale_px,
+	)
+	_camera.zoom = Vector2(scale_px, scale_px)
+	# Visible world-pixel rect for the chunked editor renderer.
+	_world_view.call(
+		"set_view_rect",
+		-origin_x / scale_px,
+		-origin_y / scale_px,
+		size.x / scale_px,
+		size.y / scale_px,
+	)
 
 
 func _gui_input(event: InputEvent) -> void:

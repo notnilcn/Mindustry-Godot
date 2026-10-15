@@ -147,7 +147,14 @@ impl BlockPalette {
     }
 
     /// `Block.mapColor.rgba()` with the deterministic R9 fallback.
+    ///
+    /// Air keeps Java's default `mapColor` `(0,0,0,1)` — the `black` sentinel
+    /// `MapIO.generatePreview`'s `CachedTile.setBlock` skips — instead of the
+    /// grey fallback, so air walls never overwrite a floor pixel.
     pub fn map_color(&self, id: u16) -> u32 {
+        if id == 0 {
+            return BLACK;
+        }
         self.get(&self.map_colors, id)
             .flatten()
             .unwrap_or_else(|| fallback_color(id))
@@ -408,13 +415,17 @@ impl WorldContext for PreviewContext {
 
     fn set_block(&mut self, index: usize, block: u16) {
         self.block_ids[index] = block;
-        // `CachedTile.setBlock`: wall color + floor shading behind it.
-        let x = (index % self.image.width as usize) as u32;
-        let y = (index / self.image.width as usize) as u32;
+        // `CachedTile.setBlock` (`MapIO.java:95-103`): wall colour + floor
+        // shading, both on the flipped image row (`floors.height - 1 - y`); the
+        // shade goes one row below the wall (`- y + 1`).
+        let width = self.image.width as usize;
+        let x = (index % width) as u32;
+        let y = (index / width) as u32;
+        let row = self.image.height - 1 - y;
         let color = color_for(&self.palette, block, 0, 0, 0);
         if color != BLACK && color != 0 {
-            self.image.set(x, y, color);
-            self.floors.set(x, y, SHADE);
+            self.image.set(x, row, color);
+            self.floors.set(x, row + 1, SHADE);
         }
     }
 
@@ -790,5 +801,49 @@ mod tests {
 
         assert_eq!(sink.blocks.get(&(0, 0)), Some(&(wall, 0, 0)));
         assert_eq!(sink.floors.get(&(1, 0)), Some(&stone));
+    }
+
+    /// `MapIO.generatePreview` end-to-end against the real atlas colours:
+    /// air walls must not overwrite floor pixels (air `mapColor` is the black
+    /// sentinel), and walls draw on their flipped row (`height - 1 - y`).
+    #[test]
+    #[cfg(feature = "msav-import")]
+    fn map_preview_matches_java_rows_and_colors() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::io::save::SaveIo;
+        use crate::io::save::state::SaveReadState;
+
+        let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+        let colors = std::fs::read(format!("{root}/assets/sprites/block_colors.png"))
+            .expect("assets/sprites/block_colors.png");
+        let row: Vec<u32> = {
+            let image = decode_png(&colors).expect("block_colors.png decodes");
+            (0..image.width).map(|x| image.get(x, 0)).collect()
+        };
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content registry");
+        let mut palette = BlockPalette::of(&registry);
+        palette.apply_block_colors(&row);
+
+        let bytes = std::fs::read(format!("{root}/assets/maps/default/archipelago.msav"))
+            .expect("archipelago.msav");
+        let mut context = PreviewContext::new(palette);
+        let mut state = SaveReadState {
+            preview: true,
+            context: Some(&mut context),
+            content: Some(&mut registry),
+            ..SaveReadState::default()
+        };
+        SaveIo::load_bytes(&bytes, &mut state).expect("archipelago loads");
+        let image = context.image();
+
+        // (250,250) deep-water floor, air wall: the floor colour survives
+        // (`shipped block_colors`: deep-water `3d4980ff`).
+        assert_eq!(image.get(250, 499 - 250), 0x3d4980ff, "deep-water floor");
+        // (10,249) grass floor (its northern neighbour is air: no shade).
+        assert_eq!(image.get(10, 499 - 249), 0x548449ff, "grass floor");
+        // (250,10) shrubs wall on its flipped row (`70bb67ff`).
+        assert_eq!(image.get(250, 499 - 10), 0x70bb67ff, "shrubs wall");
     }
 }

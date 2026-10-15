@@ -30,6 +30,11 @@ var _hidden: Dictionary = {}
 var _slots: Array = []
 ## Registered map names (`SaveMeta` map lookup), filled lazily.
 var _map_names: Dictionary = {}
+## Pending card-action prompt targets (`confirm_result`/`text_input_result`).
+var _pending_delete := ""
+var _pending_rename := ""
+## Pending export slot stem (`file_chosen`).
+var _pending_export := ""
 
 
 func _ready() -> void:
@@ -38,6 +43,28 @@ func _ready() -> void:
 	full_dialog = true
 	super._ready()
 	_build()
+	_connect_prompts()
+	_connect_chooser()
+
+
+## `LoadDialog` `modifyButton`'s prompts answer through the shared `MindUi`
+## signals (`show_confirm`/`show_text_input`).
+func _connect_prompts() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	if ui.has_signal("confirm_result") and not ui.is_connected("confirm_result", _on_confirm):
+		ui.connect("confirm_result", _on_confirm)
+	if ui.has_signal("text_input_result") and not ui.is_connected("text_input_result", _on_text_input):
+		ui.connect("text_input_result", _on_text_input)
+
+
+func _connect_chooser() -> void:
+	var chooser := get_node_or_null("/root/Spine/Ui/UiRoot/DialogLayer/file_chooser")
+	if chooser == null or not chooser.has_signal("file_chosen"):
+		return
+	if not chooser.is_connected("file_chosen", _on_file_chosen):
+		chooser.connect("file_chosen", _on_file_chosen)
 
 
 func shown() -> void:
@@ -174,10 +201,20 @@ func _build_card(slot: Dictionary) -> Button:
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.add_child(name_label)
-	title.add_child(_icon_action("save", "emptyTogglei", bool(slot.get("autosave", false))))
-	title.add_child(_icon_action("trash", "emptyi", false))
-	title.add_child(_icon_action("pencil", "emptyi", false))
-	title.add_child(_icon_action("export", "emptyi", false))
+	# `modifyButton`: `Icon.save` autosave toggle, `Icon.trash` delete,
+	# `Icon.pencil` rename, `Icon.export` (`LoadDialog.java:105-145`).
+	var autosave := _icon_action("save", "emptyTogglei", bool(slot.get("autosave", false)))
+	autosave.toggled.connect(func(pressed: bool) -> void: _set_slot_autosave(slot, pressed))
+	title.add_child(autosave)
+	var delete_button := _icon_action("trash", "emptyi", false)
+	delete_button.pressed.connect(func() -> void: _delete_slot(slot))
+	title.add_child(delete_button)
+	var rename_button := _icon_action("pencil", "emptyi", false)
+	rename_button.pressed.connect(func() -> void: _rename_slot(slot))
+	title.add_child(rename_button)
+	var export_button := _icon_action("export", "emptyi", false)
+	export_button.pressed.connect(func() -> void: _export_slot(slot))
+	title.add_child(export_button)
 
 	# code-instantiated: preview/meta row is per-slot presentation data.
 	var body := HBoxContainer.new()
@@ -186,16 +223,28 @@ func _build_card(slot: Dictionary) -> Button:
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(body)
 
-	# code-instantiated: preview placeholder (no save texture is exposed yet).
-	var preview := Panel.new()
-	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	preview.custom_minimum_size = Vector2(160, 100)
-	body.add_child(preview)
-	# code-instantiated: `nomap` placeholder glyph is an icon-font run.
-	var map_icon := MindWidgets.glyph("map", 40)
-	map_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	preview.add_child(map_icon)
-	map_icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# `Saves.SaveSlot.previewTexture()`: the saved `<previews>/save_slot_<stem>.png`
+	# (`Saves.java:359-370`); the `nomap` glyph stays until one exists.
+	var texture := _save_preview_texture(slot)
+	if texture != null:
+		# code-instantiated: save preview textures come from the live slot store.
+		var image := MindBorderImage.new()
+		image.texture = texture
+		image.thickness = 3.0
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.custom_minimum_size = Vector2(160, 100)
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		body.add_child(image)
+	else:
+		# code-instantiated: `nomap` placeholder glyph is an icon-font run.
+		var preview := Panel.new()
+		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preview.custom_minimum_size = Vector2(160, 100)
+		body.add_child(preview)
+		var map_icon := MindWidgets.glyph("map", 40)
+		map_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preview.add_child(map_icon)
+		map_icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	# code-instantiated: metadata column lines come from the slot dictionary.
 	var meta := VBoxContainer.new()
@@ -229,6 +278,21 @@ func _format_millis(millis: int) -> String:
 	var sign := "-" if millis < 0 else ""
 	millis = absi(millis)
 	return "%s%d:%02d:%02d" % [sign, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000]
+
+
+## `Saves.SaveSlot.previewTexture()` for a slot row (`save_preview_texture`).
+func _save_preview_texture(slot: Dictionary) -> Texture2D:
+	var file := str(slot.get("file", ""))
+	var stem := file.get_file().get_basename()
+	if stem.is_empty():
+		stem = str(slot.get("name", ""))
+	if stem.is_empty():
+		return null
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("save_preview_texture"):
+		return null
+	var value: Variant = campaign.call("save_preview_texture", stem)
+	return value if value is Texture2D else null
 
 
 ## `SaveSlot.getDate` (`DateFormat.getDateTimeInstance()`, en-US medium:
@@ -300,12 +364,119 @@ func _load_slot(slot: Dictionary) -> void:
 	campaign_call("load_slot", [stem])
 
 
+## `LoadDialog.addSetup`'s `@save.import`: `FileChooser.open("msav")` with the
+## `.msav` filter; the chosen file goes through `MindCampaign.import_save`.
 func _open_import() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui == null:
 		return
-	# Upstream `FileChooser.open("msav")`; the chooser owns the `.msav` flow.
-	ui.call("open_dialog", "file_chooser", JSON.stringify({"open": true}))
+	_connect_chooser()
+	ui.call("open_dialog", "file_chooser", JSON.stringify({"open": true, "extensions": ["msav"]}))
+
+
+func _on_file_chosen(path: String) -> void:
+	if not _pending_export.is_empty():
+		var stem := _pending_export
+		_pending_export = ""
+		_close_chooser()
+		if not bool(campaign_call("export_save_slot", [stem, path])):
+			_notify(_t("@editor.errorsave"))
+		return
+	_close_chooser()
+	# `SaveIO.isSaveValid` -> `getMeta` sector check -> `Saves.importSave`
+	# (`LoadDialog.java:198-216`); errors keep the dialog open.
+	var result := str(campaign_call("import_save", [path]))
+	match result:
+		"":
+			_refresh_slots()
+			_rebuild_list()
+		"invalid":
+			_notify(_t("@save.import.invalid"))
+		"nocampaign":
+			_notify(_t("@save.nocampaign"))
+		_:
+			var message := result.trim_prefix("fail:")
+			_notify(_fmt("@save.import.fail", [message]))
+	_rebuild_list()
+
+
+func _close_chooser() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("close_dialog"):
+		ui.call("close_dialog", "file_chooser")
+
+
+## The file stem used by the main `save_slot`/`load_slot` calls.
+func _slot_stem(slot: Dictionary) -> String:
+	var file := str(slot.get("file", ""))
+	var stem := file.get_file().get_basename()
+	if stem.is_empty():
+		stem = str(slot.get("name", ""))
+	return stem
+
+
+## `Icon.save`: `slot.setAutosave(!slot.isAutosave())`.
+func _set_slot_autosave(slot: Dictionary, on: bool) -> void:
+	campaign_call("set_slot_autosave", [_slot_stem(slot), on])
+
+
+## `Icon.trash`: `ui.showConfirm("@confirm", "@save.delete.confirm", ...)`.
+func _delete_slot(slot: Dictionary) -> void:
+	_pending_delete = _slot_stem(slot)
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("show_confirm"):
+		ui.call("show_confirm", _t("@save.delete.confirm"))
+
+
+## `Icon.pencil`: `ui.showTextInput("@save.rename", "@save.rename.text", ...)`.
+func _rename_slot(slot: Dictionary) -> void:
+	_pending_rename = _slot_stem(slot)
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("show_text_input"):
+		ui.call("show_text_input", _t("@save.rename"), _t("@save.rename.text"), 64, str(slot.get("name", "")), false, false)
+
+
+## `Icon.export`: `FileChooser.export(slot.getName(), "msav", slot::exportFile)`;
+## a save with embedded assets must be loaded first (`@save.export.needsload`).
+func _export_slot(slot: Dictionary) -> void:
+	if bool(slot.get("external_assets", false)):
+		_notify(_t("@save.export.needsload"))
+		return
+	_pending_export = _slot_stem(slot)
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("open_dialog"):
+		return
+	_connect_chooser()
+	ui.call("open_dialog", "file_chooser", JSON.stringify({"open": false, "extensions": ["msav"]}))
+
+
+func _on_confirm(confirmed: bool) -> void:
+	if not confirmed or _pending_delete.is_empty():
+		_pending_delete = ""
+		return
+	var stem := _pending_delete
+	_pending_delete = ""
+	if bool(campaign_call("delete_save_slot", [stem])):
+		_refresh_slots()
+		_rebuild_list()
+
+
+func _on_text_input(text: String) -> void:
+	if _pending_rename.is_empty() or text.strip_edges().is_empty():
+		_pending_rename = ""
+		return
+	var stem := _pending_rename
+	_pending_rename = ""
+	if bool(campaign_call("rename_save_slot", [stem, text])):
+		_refresh_slots()
+		_rebuild_list()
+
+
+## `ui.showErrorMessage` via the shared `show_text` prompt (`@error.title`).
+func _notify(text: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("show_text"):
+		ui.call("show_text", MindWidgets.markup_text(_t("@error.title")), MindWidgets.markup_text(text))
 
 
 func _close() -> void:

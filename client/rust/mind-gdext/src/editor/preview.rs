@@ -13,6 +13,7 @@
 //! rest of the editor shell); this class compiles and is exercisable from
 //! GDScript without any live-world dependency.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use godot::builtin::{Array, GString, PackedByteArray, VarDictionary};
@@ -26,11 +27,14 @@ use mind_core::editor::preview::PreviewPipeline;
 use mind_core::game::gamemode::{Gamemode, MapView};
 use mind_core::game::waves::WaveMapHooks;
 use mind_core::io::fs::{FileSystem, NativeFs, Paths};
-use mind_core::io::map::{MapIo, PreviewFacts, PreviewImage, decode_png};
+use mind_core::io::map::{BlockPalette, MapIo, PreviewFacts, PreviewImage, decode_png};
 use mind_core::maps::preview::read_cache;
 use mind_core::maps::{Map, Maps, preview_file};
 
 use crate::assets::loader::{globalize_path, load_map_registry, user_data_root};
+
+/// `Maps.createAllPreviews` in small per-frame batches (the menu must not stall).
+const PREVIEWS_PER_FRAME: usize = 2;
 
 /// `MindPreview` — map preview textures + `EditorMapsDialog` provider rows.
 #[derive(GodotClass)]
@@ -43,8 +47,13 @@ pub struct MindPreview {
     root: PathBuf,
     /// Lazily built content registry (preview generation + map scans).
     content: Option<ContentRegistry>,
+    /// Registry palette with the real `sprites/block_colors.png` minimap
+    /// colours applied (`ContentLoader.loadColors`); built with `content`.
+    palette: Option<BlockPalette>,
     /// Per-map scan facts (`Map.spawns`/`Map.teams`), memoized.
     facts: std::collections::HashMap<PathBuf, PreviewFacts>,
+    /// Pending batched generation queue (`Maps.previewList`).
+    pending: VecDeque<PathBuf>,
 }
 
 #[godot_api]
@@ -56,12 +65,18 @@ impl INode for MindPreview {
             maps: Maps::new(),
             root: user_data_root(),
             content: None,
+            palette: None,
             facts: std::collections::HashMap::new(),
+            pending: VecDeque::new(),
         }
     }
 
     fn ready(&mut self) {
         self.bootstrap();
+    }
+
+    fn process(&mut self, _delta: f64) {
+        self.pump_previews();
     }
 
     fn on_notification(&mut self, what: NodeNotification) {
@@ -110,7 +125,8 @@ impl MindPreview {
     }
 
     /// Lazily builds the content registry used for preview generation and map
-    /// scans (same lifecycle as `MindEditor`/`MindCampaign`).
+    /// scans (same lifecycle as `MindEditor`/`MindCampaign`), plus its palette
+    /// with the atlas minimap colours (`ContentLoader.loadColors`).
     fn ensure_content(&mut self) -> bool {
         if self.content.is_some() {
             return true;
@@ -121,6 +137,9 @@ impl MindPreview {
                     log::warn!("MindPreview content lifecycle failed: {error}");
                     return false;
                 }
+                let mut palette = BlockPalette::of(&registry);
+                palette.apply_block_colors(&crate::render::minimap::load_block_colors());
+                self.palette = Some(palette);
                 self.content = Some(registry);
                 true
             }
@@ -176,10 +195,82 @@ impl MindPreview {
             }
         }
     }
+
+    /// One `_process` tick of the batched `Maps.createAllPreviews`.
+    ///
+    /// Generates up to [`PREVIEWS_PER_FRAME`] queued previews, emits
+    /// `previews_changed` when a batch landed and stops processing when the
+    /// queue drains.
+    fn pump_previews(&mut self) {
+        let mut created = 0usize;
+        for _ in 0..PREVIEWS_PER_FRAME {
+            let Some(file) = self.pending.pop_front() else {
+                break;
+            };
+            if self.generate_preview_for(&file) {
+                created += 1;
+            }
+        }
+        if created > 0 {
+            let _ = self.base_mut().emit_signal("previews_changed", &[]);
+        }
+        if self.pending.is_empty() {
+            self.base_mut().set_process(false);
+        }
+    }
+
+    /// One `Maps.createNewPreview`: generate + write the PNG and its cache.
+    fn generate_preview_for(&mut self, file: &PathBuf) -> bool {
+        let Some(map) = self
+            .maps
+            .all()
+            .iter()
+            .find(|map| map.file == *file)
+            .cloned()
+        else {
+            return false;
+        };
+        if !self.ensure_content() {
+            return false;
+        }
+        let paths = self.paths();
+        let Some(palette) = self.palette.clone() else {
+            return false;
+        };
+        let Some(registry) = self.content.as_mut() else {
+            return false;
+        };
+        if let Err(error) = self
+            .pipeline
+            .create_new_preview_with_palette(&NativeFs, &paths, registry, &map, palette)
+        {
+            log::warn!(
+                "MindPreview generation of `{}` failed: {error}",
+                map.file.display()
+            );
+            return false;
+        }
+        // Memoize the scan facts the fresh cache holds (`Map.spawns`/`teams`).
+        let mut probe = map.clone();
+        if read_cache(&NativeFs, &paths, &mut probe).is_ok() {
+            self.facts.insert(
+                map.file.clone(),
+                PreviewFacts {
+                    spawns: probe.spawns,
+                    teams: probe.teams,
+                },
+            );
+        }
+        true
+    }
 }
 
 #[godot_api]
 impl MindPreview {
+    /// Emitted when one batched `Maps.createAllPreviews` generation lands.
+    #[signal]
+    fn previews_changed();
+
     /// Data root used for `maps/` + `previews/` (defaults to `user://`).
     #[func]
     pub fn data_root(&self) -> GString {
@@ -198,6 +289,33 @@ impl MindPreview {
     #[func]
     pub fn refresh(&mut self) -> i64 {
         self.reload() as i64
+    }
+
+    /// `Maps.loadPreviews` + the batched `createAllPreviews`: queues every map
+    /// whose preview PNG or cache is missing/broken, then `_process` generates
+    /// [`PREVIEWS_PER_FRAME`] per frame and emits `previews_changed` per batch.
+    /// Returns the queued count.
+    #[func]
+    pub fn generate_previews(&mut self) -> i64 {
+        if !self.ensure_content() {
+            return 0;
+        }
+        let paths = self.paths();
+        self.pipeline.load_previews(&NativeFs, &paths, &self.maps);
+        let queued = self.pipeline.take_queued(usize::MAX);
+        let mut added = 0i64;
+        for file in queued {
+            // A second `generate_previews` before the queue drains must not
+            // enqueue the same file twice.
+            if !self.pending.contains(&file) {
+                self.pending.push_back(file);
+                added += 1;
+            }
+        }
+        if !self.pending.is_empty() {
+            self.base_mut().set_process(true);
+        }
+        added
     }
 
     /// `CustomGameDialog`/`EditorMapsDialog` provider rows:
@@ -365,7 +483,7 @@ fn map_row_fields(map: &Map) -> (String, String, bool, String, String, i32, i32)
 }
 
 /// Binds a [`PreviewImage`] to a Godot `Texture2D` (RGBA8).
-fn bind_texture(image: &PreviewImage) -> Option<Gd<Texture2D>> {
+pub(crate) fn bind_texture(image: &PreviewImage) -> Option<Gd<Texture2D>> {
     let data = PackedByteArray::from(image.rgba.as_slice());
     let godot_image = Image::create_from_data(
         image.width as i32,

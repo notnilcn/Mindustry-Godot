@@ -47,11 +47,15 @@ const ERROR_REGION: &str = "env-error";
 
 /// A resolved atlas region (plan-03 page texture + normalized UVs).
 #[derive(Clone)]
-struct ResolvedRegion {
+pub(crate) struct ResolvedRegion {
     /// Manifest page index.
     page: i32,
     /// Page texture (absent when no atlas is loaded — placeholder tint).
     texture: Option<Gd<Texture2D>>,
+    /// Natural region width in atlas pixels (`TextureRegion.width`).
+    pub w: f32,
+    /// Natural region height in atlas pixels.
+    pub h: f32,
     /// Normalized `u0`.
     u0: f32,
     /// Normalized `v0`.
@@ -64,41 +68,158 @@ struct ResolvedRegion {
 
 /// One baked quad (positions + UVs + tint).
 #[derive(Clone, Copy)]
-struct Quad {
+pub(crate) struct Quad {
     /// Center x in world pixels.
-    cx: f32,
+    pub cx: f32,
     /// Center y in world pixels.
-    cy: f32,
+    pub cy: f32,
     /// Quad width.
-    w: f32,
+    pub w: f32,
     /// Quad height.
-    h: f32,
+    pub h: f32,
     /// Normalized `u0`.
-    u0: f32,
+    pub u0: f32,
     /// Normalized `v0`.
-    v0: f32,
+    pub v0: f32,
     /// Normalized `u1`.
-    u1: f32,
+    pub u1: f32,
     /// Normalized `v1`.
-    v1: f32,
+    pub v1: f32,
     /// RGBA8888 tint.
-    color: u32,
+    pub color: u32,
     /// Overlay sprites need the y-flip camera's v swap (round 18).
-    v_flip: bool,
+    pub v_flip: bool,
 }
 
 /// A quad before its region is resolved.
-struct PendingQuad {
-    region: String,
-    cx: f32,
-    cy: f32,
-    w: f32,
-    h: f32,
-    color: u32,
+pub(crate) struct PendingQuad {
+    pub region: String,
+    pub cx: f32,
+    pub cy: f32,
+    pub w: f32,
+    pub h: f32,
+    pub color: u32,
     /// Plain floors pick a per-tile texture variant (`Floor.variant`).
-    variant: bool,
+    pub variant: bool,
     /// Overlay floors need the v swap (see [`Quad::v_flip`]).
-    v_flip: bool,
+    pub v_flip: bool,
+}
+
+/// Region-name → atlas geometry resolver shared by the world and editor
+/// floor passes (plan-03 atlas binding + the `error`-region fallback).
+pub(crate) struct RegionAtlas {
+    assets: Option<Gd<MindAssets>>,
+    regions: HashMap<String, Option<ResolvedRegion>>,
+    variant_counts: HashMap<String, usize>,
+    /// Regions that fell back to `error`/placeholder.
+    pub missing: u64,
+}
+
+impl RegionAtlas {
+    /// A resolver over the client's atlas (`None` = placeholder tint).
+    pub fn new(assets: Option<Gd<MindAssets>>) -> Self {
+        Self {
+            assets,
+            regions: HashMap::new(),
+            variant_counts: HashMap::new(),
+            missing: 0,
+        }
+    }
+
+    /// Resolves a region name to atlas geometry (cached; `error` fallback).
+    pub fn resolve(&mut self, name: &str) -> Option<ResolvedRegion> {
+        if let Some(cached) = self.regions.get(name) {
+            return cached.clone();
+        }
+        let resolved = self.lookup(name);
+        self.regions.insert(name.to_owned(), resolved.clone());
+        resolved
+    }
+
+    /// `Floor.variantRegions.len()`: the numbered atlas variants
+    /// (`name1..nameN`) when present, else the bare region (one variant).
+    fn variant_count(&mut self, name: &str) -> usize {
+        if let Some(count) = self.variant_counts.get(name) {
+            return *count;
+        }
+        let count = match self.assets.clone() {
+            Some(assets) => {
+                let assets = assets.bind();
+                if !assets.region_geometry(GString::from(name)).is_empty() {
+                    1
+                } else {
+                    let mut count = 0usize;
+                    for index in 1..=4 {
+                        let candidate = format!("{name}{index}");
+                        if assets
+                            .region_geometry(GString::from(candidate.as_str()))
+                            .is_empty()
+                        {
+                            break;
+                        }
+                        count = index;
+                    }
+                    count
+                }
+            }
+            None => 1,
+        }
+        .max(1);
+        self.variant_counts.insert(name.to_owned(), count);
+        count
+    }
+
+    /// `Floor.drawMain` plain-floor variant: `variant(x, y, count)` picks the
+    /// numbered region with Arc `Mathf.randomSeed(Point2.pack(x, y), 0, count-1)`.
+    pub fn resolve_variant(&mut self, name: &str, x: i32, y: i32) -> Option<ResolvedRegion> {
+        let count = self.variant_count(name);
+        if count <= 1 {
+            return self.resolve(name);
+        }
+        let index = random_seed_int(pack_point2(x, y), 0, count as i32 - 1);
+        self.resolve(&format!("{name}{}", index + 1))
+    }
+
+    fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
+        let assets = self.assets.clone()?;
+        let assets = assets.bind();
+        let mut geometry = region_geometry_with_variants(&assets, name);
+        if geometry.is_empty() && name != ERROR_REGION {
+            log::warn!("floor region missing: `{name}`");
+            self.missing += 1;
+            geometry = assets.region_geometry(GString::from(ERROR_REGION));
+            if geometry.is_empty() {
+                geometry = assets.region_geometry(GString::from("error"));
+            }
+        }
+        if geometry.len() < 5 {
+            return None;
+        }
+        let slice = geometry.as_slice();
+        let page = slice[4];
+        let texture = assets
+            .page_texture(page as i64)
+            .map(|texture| texture.upcast::<Texture2D>());
+        let (width, height) = texture
+            .as_ref()
+            .map(|texture| {
+                (
+                    texture.get_width().max(1) as f32,
+                    texture.get_height().max(1) as f32,
+                )
+            })
+            .unwrap_or((1.0, 1.0));
+        Some(ResolvedRegion {
+            page,
+            texture,
+            w: slice[2] as f32,
+            h: slice[3] as f32,
+            u0: slice[0] as f32 / width,
+            v0: slice[1] as f32 / height,
+            u1: (slice[0] + slice[2]) as f32 / width,
+            v1: (slice[1] + slice[3]) as f32 / height,
+        })
+    }
 }
 
 /// Per-chunk baked nodes (`Vec` indexed by `CacheLayerId.id()`).
@@ -121,7 +242,7 @@ pub struct FloorStats {
 /// The floor pass: bake and attach per-chunk meshes to the floor band nodes.
 pub struct FloorRenderer {
     host: Gd<MindSimHost>,
-    assets: Option<Gd<MindAssets>>,
+    atlas: RegionAtlas,
     /// Floor band `Node2D` per `CacheLayerId.id()`.
     band_nodes: Vec<Gd<Node2D>>,
     grid: FloorChunkGrid,
@@ -130,10 +251,6 @@ pub struct FloorRenderer {
     dims: (i32, i32),
     /// Last `MindSimHost::world_revision` seen.
     revision: i64,
-    /// Region-name → resolved geometry (never strings per frame).
-    regions: HashMap<String, Option<ResolvedRegion>>,
-    /// Floor region name → variant count (`Floor.variantRegions.len()`).
-    variant_counts: HashMap<String, usize>,
     /// Chunk linear index → baked nodes.
     chunks: BTreeMap<usize, ChunkMeshes>,
     stats: FloorStats,
@@ -150,12 +267,10 @@ impl FloorRenderer {
         Self {
             revision: i64::MIN,
             host,
-            assets,
+            atlas: RegionAtlas::new(assets),
             band_nodes,
             grid: FloorChunkGrid::new(width, height),
             dims: (width, height),
-            regions: HashMap::new(),
-            variant_counts: HashMap::new(),
             chunks: BTreeMap::new(),
             stats: FloorStats::default(),
         }
@@ -163,7 +278,10 @@ impl FloorRenderer {
 
     /// Current counters.
     pub fn stats(&self) -> FloorStats {
-        self.stats
+        FloorStats {
+            missing_regions: self.atlas.missing,
+            ..self.stats
+        }
     }
 
     /// Rebuilds the chunks that are dirty and in view (plan 16 §3.5
@@ -220,7 +338,14 @@ impl FloorRenderer {
             }
         }
 
-        let used = self.used_layers(cx, cy);
+        let used = {
+            let host = self.host.clone();
+            let host = host.bind();
+            match host.content_registry() {
+                Some(content) => chunk_used_layers(host.grid(), content, cx, cy),
+                None => SmallVec::new(),
+            }
+        };
         self.grid.set_used_layers(cx, cy, used.clone());
 
         let mut meshes = ChunkMeshes::default();
@@ -234,39 +359,6 @@ impl FloorRenderer {
             .insert(lin(cx, cy, self.grid.chunks_x()), meshes);
         self.grid.mark_baked(cx, cy);
         self.stats.mesh_rebuilds += 1;
-    }
-
-    /// `FloorRenderer.cacheChunk` used-set (border + accessibility rule).
-    fn used_layers(&self, cx: i32, cy: i32) -> SmallVec<[CacheLayerId; 9]> {
-        let host = self.host.clone();
-        let host = host.bind();
-        let world = host.grid();
-        let Some(content) = host.content_registry() else {
-            return SmallVec::new();
-        };
-        let mut used: SmallVec<[CacheLayerId; 9]> = SmallVec::new();
-        let min_x = (cx * CHUNK_SIZE - 1).max(0);
-        let min_y = (cy * CHUNK_SIZE - 1).max(0);
-        let max_x = ((cx + 1) * CHUNK_SIZE + 1).min(world.width());
-        let max_y = ((cy + 1) * CHUNK_SIZE + 1).min(world.height());
-        for ty in min_y..max_y {
-            for tx in min_x..max_x {
-                let tile = world.tile(tx, ty);
-                let Some(block) = content.block(tile.block) else {
-                    continue;
-                };
-                let wall = block_cache_layer(block) != CacheLayerId::Normal;
-                if wall {
-                    push_unique(&mut used, block_cache_layer(block));
-                }
-                let accessible = !wall || is_accessible(world, content, tx, ty);
-                if accessible && let Some(floor) = content.block(tile.floor) {
-                    push_unique(&mut used, floor_cache_layer(floor));
-                }
-            }
-        }
-        used.sort_by_key(|layer| layer.id());
-        used
     }
 
     /// Builds the `MeshInstance2D` nodes for one `(chunk, CacheLayer)`.
@@ -286,11 +378,13 @@ impl FloorRenderer {
                         Some(content) => tile_quads(world, content, tile, layer),
                         None => SmallVec::new(),
                     };
+                    // Collect first; region resolution (a `&mut self.atlas`
+                    // borrow) must not nest inside the host bind.
                     for quad in quads {
                         let resolved = if quad.variant {
-                            self.resolve_variant(&quad.region, tx, ty)
+                            self.atlas.resolve_variant(&quad.region, tx, ty)
                         } else {
-                            self.resolve(&quad.region)
+                            self.atlas.resolve(&quad.region)
                         };
                         let (page, texture, uv) = resolved_uv(&resolved);
                         let entry = groups.entry(page).or_insert((texture, Vec::new()));
@@ -339,99 +433,38 @@ impl FloorRenderer {
         }
         nodes
     }
+}
 
-    /// Resolves a region name to atlas geometry (cached; `error` fallback).
-    fn resolve(&mut self, name: &str) -> Option<ResolvedRegion> {
-        if let Some(cached) = self.regions.get(name) {
-            return cached.clone();
-        }
-        let resolved = self.lookup(name);
-        self.regions.insert(name.to_owned(), resolved.clone());
-        resolved
-    }
-
-    /// `Floor.variantRegions.len()`: the numbered atlas variants
-    /// (`name1..nameN`) when present, else the bare region (one variant).
-    fn variant_count(&mut self, name: &str) -> usize {
-        if let Some(count) = self.variant_counts.get(name) {
-            return *count;
-        }
-        let count = match self.assets.clone() {
-            Some(assets) => {
-                let assets = assets.bind();
-                if !assets.region_geometry(GString::from(name)).is_empty() {
-                    1
-                } else {
-                    let mut count = 0usize;
-                    for index in 1..=4 {
-                        let candidate = format!("{name}{index}");
-                        if assets
-                            .region_geometry(GString::from(candidate.as_str()))
-                            .is_empty()
-                        {
-                            break;
-                        }
-                        count = index;
-                    }
-                    count
-                }
+/// `FloorRenderer.cacheChunk` used-set (border + accessibility rule).
+pub(crate) fn chunk_used_layers(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    cx: i32,
+    cy: i32,
+) -> SmallVec<[CacheLayerId; 9]> {
+    let mut used: SmallVec<[CacheLayerId; 9]> = SmallVec::new();
+    let min_x = (cx * CHUNK_SIZE - 1).max(0);
+    let min_y = (cy * CHUNK_SIZE - 1).max(0);
+    let max_x = ((cx + 1) * CHUNK_SIZE + 1).min(world.width());
+    let max_y = ((cy + 1) * CHUNK_SIZE + 1).min(world.height());
+    for ty in min_y..max_y {
+        for tx in min_x..max_x {
+            let tile = world.tile(tx, ty);
+            let Some(block) = content.block(tile.block) else {
+                continue;
+            };
+            let wall = block_cache_layer(block) != CacheLayerId::Normal;
+            if wall {
+                push_unique(&mut used, block_cache_layer(block));
             }
-            None => 1,
-        }
-        .max(1);
-        self.variant_counts.insert(name.to_owned(), count);
-        count
-    }
-
-    /// `Floor.drawMain` plain-floor variant: `variant(x, y, count)` picks the
-    /// numbered region with Arc `Mathf.randomSeed(Point2.pack(x, y), 0, count-1)`.
-    fn resolve_variant(&mut self, name: &str, x: i32, y: i32) -> Option<ResolvedRegion> {
-        let count = self.variant_count(name);
-        if count <= 1 {
-            return self.resolve(name);
-        }
-        let index = random_seed_int(pack_point2(x, y), 0, count as i32 - 1);
-        self.resolve(&format!("{name}{}", index + 1))
-    }
-
-    fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
-        let assets = self.assets.clone()?;
-        let assets = assets.bind();
-        let mut geometry = region_geometry_with_variants(&assets, name);
-        if geometry.is_empty() && name != ERROR_REGION {
-            log::warn!("floor region missing: `{name}`");
-            self.stats.missing_regions += 1;
-            geometry = assets.region_geometry(GString::from(ERROR_REGION));
-            if geometry.is_empty() {
-                geometry = assets.region_geometry(GString::from("error"));
+            let accessible = !wall || is_accessible(world, content, tx, ty);
+            if accessible && let Some(floor) = content.block(tile.floor) {
+                push_unique(&mut used, floor_cache_layer(floor));
             }
         }
-        if geometry.len() < 5 {
-            return None;
-        }
-        let slice = geometry.as_slice();
-        let page = slice[4];
-        let texture = assets
-            .page_texture(page as i64)
-            .map(|texture| texture.upcast::<Texture2D>());
-        let (width, height) = texture
-            .as_ref()
-            .map(|texture| {
-                (
-                    texture.get_width().max(1) as f32,
-                    texture.get_height().max(1) as f32,
-                )
-            })
-            .unwrap_or((1.0, 1.0));
-        Some(ResolvedRegion {
-            page,
-            texture,
-            u0: slice[0] as f32 / width,
-            v0: slice[1] as f32 / height,
-            u1: (slice[0] + slice[2]) as f32 / width,
-            v1: (slice[1] + slice[3]) as f32 / height,
-        })
     }
+    used.sort_by_key(|layer| layer.id());
+    used
 }
 
 /// `cacheChunkLayer` draw decision for one tile/layer (base floor, then the
@@ -441,7 +474,7 @@ impl FloorRenderer {
 /// then `drawOverlay` -> `OverlayFloor.drawBase` (the ore overlay, per-tile
 /// variant) into the same normal layer; the port emits both quads in that
 /// order. Walls stay a separate cache layer.
-fn tile_quads(
+pub(crate) fn tile_quads(
     world: &WorldGrid,
     content: &ContentRegistry,
     tile: &Tile,
@@ -522,7 +555,9 @@ fn tile_quads(
 }
 
 /// The page/UV tuple for a resolved (or placeholder) region.
-fn resolved_uv(resolved: &Option<ResolvedRegion>) -> (i32, Option<Gd<Texture2D>>, [f32; 4]) {
+pub(crate) fn resolved_uv(
+    resolved: &Option<ResolvedRegion>,
+) -> (i32, Option<Gd<Texture2D>>, [f32; 4]) {
     match resolved {
         Some(region) => (
             region.page,
@@ -535,7 +570,7 @@ fn resolved_uv(resolved: &Option<ResolvedRegion>) -> (i32, Option<Gd<Texture2D>>
 }
 
 /// Builds an `ArrayMesh` from quads (two triangles each).
-fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
+pub(crate) fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
     let mut tool = SurfaceTool::new_gd();
     tool.begin(PrimitiveType::TRIANGLES);
     for quad in quads {
@@ -566,7 +601,7 @@ fn build_mesh(quads: &[Quad], grow: f32) -> Option<Gd<ArrayMesh>> {
 }
 
 /// RGBA8888 → `Color`.
-fn color_from(rgba: u32) -> Color {
+pub(crate) fn color_from(rgba: u32) -> Color {
     Color::from_rgba8(
         ((rgba >> 24) & 0xff) as u8,
         ((rgba >> 16) & 0xff) as u8,

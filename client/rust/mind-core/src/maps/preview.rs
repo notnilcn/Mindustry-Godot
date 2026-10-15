@@ -152,6 +152,13 @@ impl PreviewQueue {
     pub fn take(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.entries)
     }
+
+    /// Removes up to `max` entries from the front of the queue
+    /// (`Maps.createAllPreviews`; the port batches it across frames).
+    pub fn take_up_to(&mut self, max: usize) -> Vec<PathBuf> {
+        let count = max.min(self.entries.len());
+        self.entries.drain(..count).collect()
+    }
 }
 
 #[cfg(test)]
@@ -202,5 +209,25 @@ mod tests {
         // A corrupt cache is an error the caller re-queues on.
         fs.write(&cache_file(&paths, &map), b"\x00").unwrap();
         assert!(read_cache(&fs, &paths, &mut loaded).is_err());
+    }
+
+    #[test]
+    fn preview_queue_batches() {
+        let mut queue = PreviewQueue::new();
+        for name in ["a", "b", "c"] {
+            queue.queue(&Map::new(
+                PathBuf::from(format!("/data/maps/{name}.msav")),
+                4,
+                4,
+                indexmap::IndexMap::new(),
+                true,
+                1,
+                -1,
+            ));
+        }
+        assert_eq!(queue.take_up_to(2).len(), 2);
+        assert_eq!(queue.entries().len(), 1);
+        assert_eq!(queue.take_up_to(2).len(), 1);
+        assert!(queue.is_empty());
     }
 }

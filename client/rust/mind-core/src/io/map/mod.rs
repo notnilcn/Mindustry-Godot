@@ -102,6 +102,20 @@ impl MapIo {
         bytes: &[u8],
     ) -> Result<(PreviewImage, PreviewFacts), IoError> {
         let palette = BlockPalette::of(registry);
+        Self::generate_preview_with_palette(palette, registry, bytes)
+    }
+
+    /// [`Self::generate_preview_with_facts`] with a caller-supplied palette.
+    ///
+    /// The gdext side applies the real per-block minimap colours from
+    /// `sprites/block_colors.png` (`ContentLoader.loadColors`,
+    /// `BlockPalette::apply_block_colors`); the default palette falls back to
+    /// the deterministic id-derived greys (R9).
+    pub fn generate_preview_with_palette(
+        palette: BlockPalette,
+        registry: &mut ContentRegistry,
+        bytes: &[u8],
+    ) -> Result<(PreviewImage, PreviewFacts), IoError> {
         let mut context = PreviewContext::new(palette);
         let mut state = SaveReadState {
             preview: true,

@@ -5,7 +5,7 @@
 ##
 ## Custom-game map browser (`MapListDialog`, `displayType = true`): a search row
 ## over a grid of map tiles. Each tile shows a mode-icon row, the map name, a
-## divider, a preview placeholder and the map type. The rows come from the live
+## divider, the generated preview and the map type. The rows come from the live
 ## `MindPreview` registry plus the read-model built-ins; choosing a map opens
 ## `map_play` and emits `map_chosen`.
 
@@ -14,9 +14,9 @@ extends MindDialog
 ## Emitted when a custom map is chosen.
 signal map_chosen(name: String)
 
-const TILE_SIZE := Vector2(200.0, 214.0)
+const TILE_SIZE := Vector2(200.0, 288.0)
 const NAME_WIDTH := 182.0
-const PREVIEW_SIZE := Vector2(180.0, 110.0)
+const PREVIEW_SIZE := Vector2(180.0, 180.0)
 const COLUMN_WIDTH := 230.0
 
 var _column: VBoxContainer = null
@@ -27,6 +27,8 @@ var _search := ""
 var _show_custom := true
 var _show_builtin := true
 var _show_modded := true
+## Coalesces `previews_changed` batches into one grid rebuild per frame.
+var _preview_refresh_queued := false
 
 
 func _ready() -> void:
@@ -43,11 +45,39 @@ func shown() -> void:
 	_rebuild()
 
 
-## Reloads the live `MindPreview` registry (editor-saved custom maps).
+## Reloads the live `MindPreview` registry (editor-saved custom maps) and asks
+## it for the missing previews (`Maps.loadPreviews` + `createAllPreviews`);
+## batches land through `previews_changed`.
 func _refresh_registry() -> void:
 	var preview := get_node_or_null("/root/Spine/MindPreview")
-	if preview != null and preview.has_method("refresh"):
+	if preview == null:
+		return
+	if preview.has_method("refresh"):
 		preview.call("refresh")
+	_connect_previews(preview)
+	if preview.has_method("generate_previews"):
+		preview.call("generate_previews")
+
+
+func _connect_previews(preview: Node) -> void:
+	if not preview.has_signal("previews_changed"):
+		return
+	if not preview.is_connected("previews_changed", Callable(self, "_on_previews_changed")):
+		preview.connect("previews_changed", Callable(self, "_on_previews_changed"))
+
+
+## A generated preview batch landed (`Maps.createAllPreviews`); refresh the
+## tiles once per frame while batches keep arriving.
+func _on_previews_changed() -> void:
+	if _preview_refresh_queued:
+		return
+	_preview_refresh_queued = true
+	call_deferred("_rebuild_after_previews")
+
+
+func _rebuild_after_previews() -> void:
+	_preview_refresh_queued = false
+	_rebuild()
 
 
 ## The live registry rows (`MindPreview.maps_list`). The read-model built-ins
@@ -220,21 +250,36 @@ func _build_map_tile(map: Dictionary) -> Button:
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(name_label)
 
-	# code-instantiated: divider between the map name and the preview placeholder.
+	# code-instantiated: divider between the map name and the preview area.
 	var divider := HSeparator.new()
 	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	column.add_child(divider)
 
-	# code-instantiated: the preview is a placeholder until map textures exist.
-	var preview := PanelContainer.new()
-	preview.theme_type_variation = "smallPane"
-	preview.custom_minimum_size = PREVIEW_SIZE
-	preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var preview_glyph := MindWidgets.glyph("map", 48)
-	preview_glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	preview.add_child(preview_glyph)
-	column.add_child(preview)
+	# `button.stack(new Image(map.safeTexture()), new BorderImage(map.safeTexture()))`
+	# (`MapListDialog.java:200-201`): the generated preview under a border; the
+	# `nomap` glyph stays until the batched generation lands.
+	var texture := _preview_texture(map_name)
+	if texture != null:
+		# code-instantiated: the preview texture comes from the map registry.
+		var image := MindBorderImage.new()
+		image.texture = texture
+		image.thickness = 3.0
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.custom_minimum_size = PREVIEW_SIZE
+		image.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		column.add_child(image)
+	else:
+		# code-instantiated: the `nomap` placeholder until map textures exist.
+		var preview := PanelContainer.new()
+		preview.theme_type_variation = "smallPane"
+		preview.custom_minimum_size = PREVIEW_SIZE
+		preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var preview_glyph := MindWidgets.glyph("map", 48)
+		preview_glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preview.add_child(preview_glyph)
+		column.add_child(preview)
 
 	var type_label := MindWidgets.label(_t("@custom") if bool(map.get("custom", false)) else _t("@builtin"))
 	type_label.add_theme_color_override("default_color", Color.GRAY)
@@ -243,6 +288,15 @@ func _build_map_tile(map: Dictionary) -> Button:
 	column.add_child(type_label)
 
 	return tile
+
+
+## `map.safeTexture()` (`MapPreviewLoader` + the cached `<previews>/<stem>_v2.png`).
+func _preview_texture(map_name: String) -> Texture2D:
+	var preview := get_node_or_null("/root/Spine/MindPreview")
+	if preview == null or not preview.has_method("texture_for_name"):
+		return null
+	var value: Variant = preview.call("texture_for_name", map_name)
+	return value if value is Texture2D else null
 
 
 func _choose_map(map_name: String) -> void:
