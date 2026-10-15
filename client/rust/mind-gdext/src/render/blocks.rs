@@ -10,9 +10,14 @@
 //! set comes from `mind_core::render::scan::visible_blocks`; this module owns
 //! only the Godot mesh build and the `processBlocks`-style early-out.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-use godot::classes::{Material, Mesh, MeshInstance2D, Node2D, Shader, ShaderMaterial, Texture2D};
+use godot::classes::canvas_item_material::BlendMode;
+use godot::classes::{
+    CanvasItemMaterial, Image, ImageTexture, Material, Mesh, MeshInstance2D, Node2D, Shader,
+    ShaderMaterial, Texture2D,
+};
+use godot::obj::NewGd;
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
@@ -88,6 +93,15 @@ pub struct BlockRenderer {
     /// Construct sites were drawn last frame: their progress animates without
     /// a world-revision bump, so keep rebuilding while any are visible.
     animating: bool,
+    /// `Wall.WallBuild.hit` per `flashHit` wall anchor tile (`Wall.java:29,
+    /// 146-161`; I02 T4). Set from the sim's wall-collision log, decayed here
+    /// (`hit = clamp(hit - delta/10)`, only while the sim runs).
+    wall_hits: HashMap<(i32, i32), f32>,
+    /// Additive white `Fill.rect` flash overlay node (no texture: the quads
+    /// carry the colour).
+    flash_node: Gd<MeshInstance2D>,
+    /// Tick of the last `update` (flash-decay delta).
+    last_tick: f64,
     stats: BlockStats,
 }
 
@@ -111,6 +125,26 @@ impl BlockRenderer {
         building_band: Gd<Node2D>,
         shaders: &ShaderRegistry,
     ) -> Self {
+        // `Wall.WallBuild.draw` (`Wall.java:146-161`): `Fill.rect` in
+        // `flashColor` (white) with `Blending.additive` over the wall sprite.
+        let mut flash_node = MeshInstance2D::new_alloc();
+        flash_node.set_name("BlockWallFlash");
+        let mut flash_material = CanvasItemMaterial::new_gd();
+        flash_material.set_blend_mode(BlendMode::ADD);
+        flash_node.set_material(&flash_material.upcast::<Material>());
+        // A `MeshInstance2D` without a texture is skipped by this project's
+        // canvas renderer (found in-engine, I02 T4), so the solid `Fill.rect`
+        // overlay carries a 1x1 white texel: the vertex colour with alpha
+        // `hit * 0.5` still does the tint.
+        if let Some(texture) = white_texel() {
+            flash_node.set_texture(&texture);
+        }
+        // code-instantiated: one pooled additive mesh for every flashing wall;
+        // the quad count is data-driven (I02 T2 hides it without a mesh).
+        band_node.clone().add_child(&flash_node);
+        flash_node.set_visible(false);
+        // Above the pooled block-sprite meshes in the same band.
+        flash_node.set_z_index(1);
         Self {
             host,
             band_node,
@@ -122,6 +156,9 @@ impl BlockRenderer {
             last_key: None,
             last_revision: i64::MIN,
             animating: false,
+            wall_hits: HashMap::new(),
+            flash_node,
+            last_tick: 0.0,
             stats: BlockStats::default(),
         }
     }
@@ -145,7 +182,34 @@ impl BlockRenderer {
 
     /// Rebuilds the dynamic block meshes when the visible set changed.
     pub fn update(&mut self, view: &CameraView) {
-        if !self.needs_rebuild(view) {
+        // I02 T4: `Wall.WallBuild.hit` is view state. Drain the sim's
+        // wall-collision log and decay every active hit first, so a flash keeps
+        // redrawing without a world-revision bump (`needs_rebuild` early-out).
+        let tick = self.host.clone().bind().get_tick() as f64;
+        // `Wall.java:159-160` decays `hit` per frame with `Time.delta / 10`;
+        // one tick is 1/60 s, so `hit -= dt / 600`. A gap longer than the whole
+        // 600-tick flash only has to zero it.
+        let dt = if self.last_tick > 0.0 {
+            (tick - self.last_tick).clamp(0.0, 600.0) as f32
+        } else {
+            0.0
+        };
+        self.last_tick = tick;
+        let flashes = self.host.clone().bind_mut().drain_wall_flashes();
+        for (x, y) in flashes {
+            self.wall_hits.insert((i32::from(x), i32::from(y)), 1.0);
+        }
+        if !self.wall_hits.is_empty() {
+            // `Wall.java:159-160`: `hit = clamp(hit - Time.delta / 10)` while
+            // not paused; one tick is 1/60 s, so `hit -= dt / 600`.
+            self.wall_hits.retain(|_, hit| {
+                *hit = (*hit - dt / 600.0).max(0.0);
+                *hit >= 0.001
+            });
+        }
+        let flashing = !self.wall_hits.is_empty();
+        let changed = self.needs_rebuild(view);
+        if !changed && !flashing {
             return;
         }
 
@@ -165,6 +229,8 @@ impl BlockRenderer {
         let mut seen = HashSet::new();
         let mut dynamic = 0i64;
         let mut animating = false;
+        // `Wall.WallBuild.draw` flash quads (`Wall.java:146-161`; I02 T4).
+        let mut flash_quads: Vec<UnitQuad> = Vec::new();
         {
             let host = self.host.clone();
             let host = host.bind();
@@ -462,6 +528,24 @@ impl BlockRenderer {
                 match resolved {
                     Some((region, uv)) => {
                         push(&region, uv, anchor_x, anchor_y, w, w, rot, 0xffff_ffff, 1.0);
+                        // `Wall.WallBuild.draw` (`Wall.java:146-161`): while
+                        // `hit >= 0.001`, a white (`flashColor`) additive
+                        // `Fill.rect(x, y, size*tilesize, size*tilesize)` with
+                        // alpha `hit * 0.5` covers the wall. The pass owns the
+                        // decay (`wall_hits`), the sim only logs collisions.
+                        if let Some(hit) = self.wall_hits.get(&(tile.x, tile.y)) {
+                            let alpha = (hit.clamp(0.0, 1.0) * 0.5 * 255.0) as u32;
+                            flash_quads.push(UnitQuad {
+                                cx: anchor_x,
+                                cy: anchor_y,
+                                w,
+                                h: w,
+                                rot: 0.0,
+                                uv: [0.0, 0.0, 1.0, 1.0],
+                                color: 0xffff_ff00 | alpha,
+                            });
+                            animating = true;
+                        }
                         if is_belt
                             && let Some((belt_rot, items)) = host.conveyor_items(tile.x, tile.y)
                             && !items.is_empty()
@@ -628,6 +712,15 @@ impl BlockRenderer {
 
         self.apply_groups(groups);
         self.apply_construct_sites(sites);
+        // I02 T4: the additive wall-flash overlay (a solid white quad per
+        // flashing wall, no texture: the vertex colour carries it).
+        match build_unit_mesh(&flash_quads) {
+            Some(mesh) => {
+                self.flash_node.set_mesh(&mesh.upcast::<Mesh>());
+                self.flash_node.set_visible(true);
+            }
+            None => self.flash_node.set_visible(false),
+        }
         self.stats.dynamic_sprites = dynamic;
         self.stats.mesh_rebuilds += 1;
         self.stats.missing_regions = self.resolver.missing();
@@ -762,6 +855,16 @@ impl BlockRenderer {
             node.set_visible(false);
         }
     }
+}
+
+/// A 1x1 white `ImageTexture` for the wall-flash overlay (I02 T4). A
+/// `MeshInstance2D` without a texture is skipped by this project's canvas
+/// renderer (verified in-engine), so the solid `Fill.rect` overlay samples this
+/// texel and keeps its alpha in the vertex colour.
+pub(crate) fn white_texel() -> Option<Gd<Texture2D>> {
+    let data = PackedByteArray::from([255u8, 255, 255, 255]);
+    let image = Image::create_from_data(1, 1, false, godot::classes::image::Format::RGBA8, &data)?;
+    ImageTexture::create_from_image(&image).map(|texture| texture.upcast::<Texture2D>())
 }
 
 /// Whether the block's sprite follows `Building.rotation` (`rotate` blocks

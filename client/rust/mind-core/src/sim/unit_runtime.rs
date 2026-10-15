@@ -1058,6 +1058,10 @@ impl Sim {
         self.ecs
             .0
             .insert_resource(crate::world::events::BuildDamageLog::default());
+        // `flashHit` wall-collision log (I02 T4): drained by the block pass.
+        self.ecs
+            .0
+            .insert_resource(crate::world::events::WallFlashLog::default());
         let wave_team = crate::game::rules::Rules::default().wave_team;
         let core_capture =
             crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);

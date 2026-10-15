@@ -147,6 +147,11 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::any()),
         solid: Some(true),
         destructible: Some(true),
+        // `Wall.init()` (`Wall.java:73-79`): `if(!flashHit){ drawCached = true;
+        // drawDynamic = false; }` — phase walls stay dynamic so their hit flash
+        // draws above the sprite (I02 T4).
+        draw_cached: Some(false),
+        draw_dynamic: Some(true),
         ..spec("phase-wall", BlockKind::Wall)
     })?;
 
@@ -161,6 +166,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         env_enabled: Some(EnvMask::any()),
         solid: Some(true),
         destructible: Some(true),
+        // See `phase-wall` above (`Wall.java:73-79`; I02 T4).
+        draw_cached: Some(false),
+        draw_dynamic: Some(true),
         ..spec("phase-wall-large", BlockKind::Wall)
     })?;
 

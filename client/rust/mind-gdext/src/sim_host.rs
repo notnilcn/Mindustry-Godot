@@ -1142,6 +1142,13 @@ impl MindSimHost {
         )
     }
 
+    /// I02 T4: drains the per-tick `flashHit` wall-collision log as
+    /// `[(tile_x, tile_y)]`. Rust-only seam for `render/blocks.rs`, which owns
+    /// the `hit` decay (`Wall.WallBuild.draw`, `Wall.java:146-161`).
+    pub fn drain_wall_flashes(&mut self) -> Vec<(i16, i16)> {
+        self.sim.drain_wall_flashes()
+    }
+
     /// G01 T15: drains the per-tick building-damage log as
     /// `[[tile_x, tile_y, team], ...]`; G03 filters by the player team and
     /// forwards to `MindMinimap.add_indicator`.

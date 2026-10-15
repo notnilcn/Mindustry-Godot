@@ -213,6 +213,9 @@ pub struct WallDef {
     pub lightning_length: i32,
     /// `Wall.chanceDeflect` (`-1` = disabled).
     pub chance_deflect: f32,
+    /// `Wall.flashHit`: the wall draws a white additive overlay while `hit`
+    /// decays after a bullet collision (`Wall.java:29,146-161`; I02 T4).
+    pub flash_hit: bool,
 }
 
 impl Default for WallDef {
@@ -224,6 +227,7 @@ impl Default for WallDef {
             lightning_damage: 20.0,
             lightning_length: 17,
             chance_deflect: -1.0,
+            flash_hit: false,
         }
     }
 }
@@ -766,6 +770,7 @@ impl BlockKindData {
             "phase-wall" | "phase-wall-large" => {
                 if let BlockKindData::Wall(def) = self {
                     def.chance_deflect = 10.0;
+                    def.flash_hit = true;
                 }
             }
             // `Blocks.java:1774-1785`: surge walls arc lightning

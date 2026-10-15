@@ -141,6 +141,34 @@ pub struct BuildDamageLog(pub Vec<BuildDamageEvent>);
 /// Cap for [`BuildDamageLog`] when nobody drains it (plan G01 T15).
 pub const MAX_BUILD_DAMAGE_LOG: usize = 4096;
 
+/// One bullet collision against a `flashHit` wall (`Wall.WallBuild.collision`
+/// sets `hit = 1`, `Wall.java:164-166`). Carries the wall's tile; the renderer
+/// owns the `hit` decay (`draw()`), so nothing about the flash is sim state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WallFlashEvent {
+    /// Wall anchor tile x.
+    pub x: i16,
+    /// Wall anchor tile y.
+    pub y: i16,
+}
+
+/// Undrained `WallFlashEvent`s for the current tick (I02 T4). Bounded at
+/// [`MAX_WALL_FLASH_LOG`] entries.
+#[derive(Debug, Default, bevy_ecs::prelude::Resource)]
+pub struct WallFlashLog(pub Vec<WallFlashEvent>);
+
+/// Cap for [`WallFlashLog`] when nobody drains it (I02 T4).
+pub const MAX_WALL_FLASH_LOG: usize = 1024;
+
+/// Pushes one wall-flash event (no-op when absent or full).
+pub fn push_wall_flash(world: &mut bevy_ecs::world::World, x: i16, y: i16) {
+    if let Some(mut log) = world.get_resource_mut::<WallFlashLog>()
+        && log.0.len() < MAX_WALL_FLASH_LOG
+    {
+        log.0.push(WallFlashEvent { x, y });
+    }
+}
+
 /// Pushes one event into the log (no-op when absent or full).
 pub fn push_build_damage(world: &mut bevy_ecs::world::World, event: BuildDamageEvent) {
     if let Some(mut log) = world.get_resource_mut::<BuildDamageLog>()

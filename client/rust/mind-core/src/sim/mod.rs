@@ -920,6 +920,22 @@ impl Sim {
             .unwrap_or_default()
     }
 
+    /// Drains the per-tick `WallFlashEvent` log (I02 T4): one entry per bullet
+    /// collision against a `flashHit` wall (`Wall.WallBuild.collision`,
+    /// `Wall.java:164-166`); the renderer owns the `hit` decay.
+    pub fn drain_wall_flashes(&mut self) -> Vec<(i16, i16)> {
+        self.ecs
+            .0
+            .get_resource_mut::<crate::world::events::WallFlashLog>()
+            .map(|mut log| {
+                std::mem::take(&mut log.0)
+                    .into_iter()
+                    .map(|event| (event.x, event.y))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     fn runtime_place(
         &mut self,
         x: i16,
