@@ -27,19 +27,40 @@ use super::preview::PreviewPipeline;
 
 /// [`MapSource`] view of the live editor grid (writes the `map` region).
 ///
-/// Buildings are reported only when a tile carries an ECS entity; the editor
-/// harness that does not spawn buildings thus writes a plain tile map.
+/// Buildings are reported only when a tile carries an ECS entity; with an ECS
+/// attached ([`Self::with_ecs`]) the building chunks come from the tile's
+/// `BuildingComp` entity (the editor's [`super::EditorWorldHooks`]), so a drawn
+/// core keeps its team/rotation in the saved map.
 pub struct EditorMapSource<'a> {
     /// The grid being written.
     pub grid: &'a WorldGrid,
     /// Content registry (`shouldSaveData` classification).
     pub content: &'a ContentRegistry,
+    /// The editor ECS world (building entities), when available.
+    pub ecs: Option<&'a bevy_ecs::world::World>,
 }
 
 impl<'a> EditorMapSource<'a> {
-    /// Wraps a grid and registry.
+    /// Wraps a grid and registry (no ECS: the building chunk is empty).
     pub fn new(grid: &'a WorldGrid, content: &'a ContentRegistry) -> Self {
-        Self { grid, content }
+        Self {
+            grid,
+            content,
+            ecs: None,
+        }
+    }
+
+    /// Wraps a grid, registry and the editor ECS.
+    pub fn with_ecs(
+        grid: &'a WorldGrid,
+        content: &'a ContentRegistry,
+        ecs: &'a bevy_ecs::world::World,
+    ) -> Self {
+        Self {
+            grid,
+            content,
+            ecs: Some(ecs),
+        }
     }
 }
 
@@ -70,8 +91,20 @@ impl MapSource for EditorMapSource<'_> {
 
     fn is_center(&self, index: usize) -> bool {
         // Without ECS access the only observable center is a tile carrying no
-        // entity; plan 07 supplies exact multiblock centers when it lands.
-        self.grid.tiles.geti(index).build.is_none()
+        // entity; with the editor ECS the `Building.tile` decides (the same
+        // check as `world::map_source::EcsMapSource`).
+        let Some(entity) = self.grid.tiles.geti(index).build else {
+            return true;
+        };
+        let Some(ecs) = self.ecs else {
+            return true;
+        };
+        let width = self.width() as usize;
+        ecs.get::<crate::entities::comp::building::Building>(entity)
+            .is_some_and(|building| {
+                building.tile.x() as usize == index % width
+                    && building.tile.y() as usize == index / width
+            })
     }
 
     fn should_save_data(&self, index: usize) -> bool {
@@ -90,10 +123,27 @@ impl MapSource for EditorMapSource<'_> {
 
     fn write_building(
         &self,
-        _index: usize,
-        _chunk: &mut crate::io::wire::WireWriter,
+        index: usize,
+        chunk: &mut crate::io::wire::WireWriter,
     ) -> crate::io::IoResult<()> {
-        Ok(())
+        let Some(entity) = self.grid.tiles.geti(index).build else {
+            return Err(crate::io::IoError::corrupt(
+                "missing building at center tile",
+            ));
+        };
+        let Some(ecs) = self.ecs else {
+            return Ok(());
+        };
+        if ecs
+            .get::<crate::entities::comp::building::Building>(entity)
+            .is_none()
+        {
+            return Ok(());
+        }
+        // Java tile-entity chunk (`SaveVersion.writeMap` -> `Building.writeAll`):
+        // the per-kind revision + `writeBase` with its embedded base version —
+        // the same writer the live `EcsMapSource` path uses.
+        crate::world::building_io::write_all_java(ecs, entity, chunk, false)
     }
 }
 
@@ -113,6 +163,36 @@ pub fn save_editor_map(
 ) -> Result<(), MapError> {
     fold_dialog_tags(&mut map_tags)?;
     let source = EditorMapSource::new(grid, content);
+    crate::maps::write_map_source(
+        fs,
+        file,
+        &source,
+        content,
+        base_tags,
+        map_tags,
+        embed_assets,
+    )
+}
+
+/// [`save_editor_map`] with the editor's ECS world.
+///
+/// `Maps.saveMap` writes the live buildings (team/rotation/health/modules and
+/// exact multiblock centers); [`EditorMapSource`] has no ECS access, so its
+/// `write_building` is empty. The live editor passes its ECS here so a saved
+/// map keeps its cores ([`crate::world::map_source::EcsMapSource`]).
+#[allow(clippy::too_many_arguments)]
+pub fn save_editor_map_with_ecs(
+    fs: &dyn FileSystem,
+    file: &Path,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    ecs: &bevy_ecs::world::World,
+    base_tags: StringMap,
+    mut map_tags: StringMap,
+    embed_assets: bool,
+) -> Result<(), MapError> {
+    fold_dialog_tags(&mut map_tags)?;
+    let source = EditorMapSource::with_ecs(grid, content, ecs);
     crate::maps::write_map_source(
         fs,
         file,
@@ -454,5 +534,61 @@ mod tests {
         assert_eq!(imported.name(), "E2E");
         assert_eq!(imported_maps.len(), 1);
         assert_eq!(image.rgba, image2.rgba, "preview pixels are deterministic");
+    }
+
+    /// `save_editor_map_with_ecs` keeps the editor's building entities
+    /// (`Maps.saveMap` writes the live teams; `EditorMapSource` alone writes an
+    /// empty building chunk, so a saved core loses its team).
+    #[test]
+    fn editor_save_with_ecs_keeps_core_team() {
+        use crate::content::test_support::test_registry;
+        use crate::ecs::MindWorld;
+        use crate::editor::EditorGrid;
+        use crate::editor::context::EditorContext;
+        use crate::editor::grid::WorldEditorGrid;
+        use crate::io::fs::MockFs;
+        use crate::io::save::SaveIo;
+        use crate::io::save::state::SaveReadState;
+        use crate::world::{NoopRenderHooks, WorldGrid};
+
+        let mut content = test_registry();
+        let core = content.block_id("core-shard").unwrap();
+        let mut grid = WorldGrid::new(16, 16);
+        grid.begin_map_load();
+        let mut ecs = MindWorld::new();
+        let hooks = crate::editor::EditorWorldHooks::new();
+        {
+            let mut editor =
+                WorldEditorGrid::new(&mut grid, &content, &mut ecs.0, &hooks, &NoopRenderHooks);
+            editor.set_block(8, 8, core, crate::game::team::SHARDED.0, 0);
+        }
+        grid.end_map_load(&content);
+
+        let fs = MockFs::new();
+        let file = std::path::PathBuf::from("/data/maps/editor-core.msav");
+        let base = editor_base_tags(16, 16, "editor-core");
+        let mut tags = StringMap::new();
+        tags.insert("name".to_owned(), "editor-core".to_owned());
+        save_editor_map_with_ecs(&fs, &file, &grid, &content, &ecs.0, base, tags, false)
+            .expect("editor save");
+
+        let bytes = fs.read(&file).unwrap();
+        let mut loaded = WorldGrid::new(0, 0);
+        loaded.begin_map_load();
+        let pending = {
+            let mut context = EditorContext::new(&mut loaded, &content);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut content),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("saved map loads");
+            context.take_pending_buildings()
+        };
+        loaded.end_map_load(&content);
+        assert!(
+            pending.iter().any(|(_, base)| base.team == 1),
+            "the saved map keeps the core's team"
+        );
     }
 }

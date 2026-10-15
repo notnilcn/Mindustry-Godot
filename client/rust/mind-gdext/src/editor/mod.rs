@@ -37,17 +37,16 @@ use mind_core::ecs::MindWorld;
 use mind_core::editor::draw_op::DrawOperation;
 use mind_core::editor::grid::WorldEditorGrid;
 use mind_core::editor::lifecycle::try_catch_map_error;
-use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map};
-use mind_core::editor::playtest::{EditorPlayState, PlaytestOutcome};
-use mind_core::editor::{BRUSH_SIZES, EditorTool, MapEditor};
+use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map_with_ecs};
+use mind_core::editor::playtest::EditorPlayState;
+use mind_core::editor::{BRUSH_SIZES, EditorTool, EditorWorldHooks, MapEditor};
 use mind_core::game::play::PlaySession;
-use mind_core::game::rules_event::RulesEpoch;
 use mind_core::game::team::Team;
 use mind_core::io::fs::{FileSystem, NativeFs};
 use mind_core::io::map::MapIo;
 use mind_core::maps::Map;
 use mind_core::maps::filters::block_info;
-use mind_core::world::{NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, WorldGrid};
+use mind_core::world::{NoopRenderHooks, WorldGrid};
 
 mod editor_renderer;
 mod map_view;
@@ -94,7 +93,7 @@ pub struct MindEditor {
     grid: WorldGrid,
     content: Option<ContentRegistry>,
     ecs: MindWorld,
-    hooks: NoopWorldHooks,
+    hooks: EditorWorldHooks,
     render: NoopRenderHooks,
     file: Option<PathBuf>,
     last_error_key: Option<String>,
@@ -102,7 +101,6 @@ pub struct MindEditor {
     view: MapViewDriver,
     play: EditorPlayState,
     play_session: PlaySession,
-    rules_epoch: RulesEpoch,
     /// Monotonic tile-edit counter (`MindEditorRenderer` invalidation).
     tiles_rev: u64,
 }
@@ -119,7 +117,7 @@ impl INode for MindEditor {
             grid: WorldGrid::new(0, 0),
             content: None,
             ecs: MindWorld::new(),
-            hooks: NoopWorldHooks,
+            hooks: EditorWorldHooks::new(),
             render: NoopRenderHooks,
             file: None,
             last_error_key: None,
@@ -127,7 +125,6 @@ impl INode for MindEditor {
             view: MapViewDriver::new(),
             play: EditorPlayState::new(),
             play_session: PlaySession::default(),
-            rules_epoch: RulesEpoch::default(),
             tiles_rev: 0,
         }
     }
@@ -990,11 +987,12 @@ impl MindEditor {
             self.grid.tiles.height as u16,
             &name,
         );
-        match save_editor_map(
+        match save_editor_map_with_ecs(
             &NativeFs,
             &file,
             &self.grid,
             content,
+            &self.ecs.0,
             base,
             self.editor.tags.clone(),
             true,
@@ -1058,6 +1056,22 @@ impl MindEditor {
                 ("error", GString::from("noname").to_variant()),
             ]);
         }
+        // `MapEditorDialog.save` -> `handleSaveBuiltin`: a built-in map is
+        // never overwritten (`ui.showErrorMessage("@editor.save.overwrite")`,
+        // `MapEditorDialog.java:442-445`).
+        if let Some(current) = self.file.as_ref() {
+            let user_maps = PathBuf::from(
+                ProjectSettings::singleton()
+                    .globalize_path("user://maps")
+                    .to_string(),
+            );
+            if !current.starts_with(&user_maps) {
+                return dict(vec![
+                    ("ok", false.to_variant()),
+                    ("error", GString::from("overwrite").to_variant()),
+                ]);
+            }
+        }
         let dir = PathBuf::from(
             ProjectSettings::singleton()
                 .globalize_path("user://maps")
@@ -1078,11 +1092,12 @@ impl MindEditor {
             self.grid.tiles.height as u16,
             &name,
         );
-        match save_editor_map(
+        match save_editor_map_with_ecs(
             &NativeFs,
             &file,
             &self.grid,
             content,
+            &self.ecs.0,
             base,
             self.editor.tags.clone(),
             false,
@@ -1135,63 +1150,40 @@ impl MindEditor {
         ])
     }
 
-    /// `MapEditorDialog.playtest()`: save first, then (Shift) auto-pick a valid
-    /// gamemode and replay the map. Without Shift the caller opens
-    /// `MapPlayDialog` (returns `dialog: true`).
+    /// `MapEditorDialog.playtest()`: save first, then open `MapPlayDialog` in
+    /// playtesting mode (`dialog: true`). Java's Shift shortcut (auto-pick a
+    /// gamemode and play immediately) is not exposed by the facade.
     #[func]
     pub fn playtest(&mut self) -> VarDictionary {
         let name = self.editor.tags.get("name").cloned().unwrap_or_default();
         if name.trim().is_empty() {
-            self.last_error_key = Some("@editor.save.noname".to_owned());
-            self.last_error_message = Some("playtest requires a map name".to_owned());
             return dict(vec![
                 ("ok", false.to_variant()),
                 ("error", GString::from("noname").to_variant()),
             ]);
         }
-        let _ = self.save();
-        let Some(path) = self.file.clone() else {
-            self.last_error_key = Some("@editor.errorsave".to_owned());
-            self.last_error_message = Some("playtest could not save the map".to_owned());
+        // `MapEditorDialog.playtest` aborts when `save()` returns null (builtin
+        // maps refuse the overwrite); the save error reaches the caller.
+        let saved = self.save();
+        if !saved
+            .get("ok")
+            .and_then(|value| value.try_to::<bool>().ok())
+            .unwrap_or(false)
+        {
+            let error = saved
+                .get("error")
+                .and_then(|value| value.try_to::<GString>().ok())
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "save".to_owned());
             return dict(vec![
                 ("ok", false.to_variant()),
-                ("error", GString::from("@editor.errorsave").to_variant()),
+                ("error", GString::from(error.as_str()).to_variant()),
             ]);
-        };
-        let fs = NativeFs;
-        let header = match MapIo::create_map(&fs, &path, true) {
-            Ok(header) => header,
-            Err(error) => {
-                self.last_error_key = Some("@editor.errorload".to_owned());
-                self.last_error_message = Some(error.to_string());
-                return dict(vec![("ok", false.to_variant())]);
-            }
-        };
-        let map = Map::from_header(&header, true);
-        let outcome = self.play.playtest(
-            &mut self.editor,
-            &mut self.play_session,
-            &map,
-            &NoopMapGenHooks,
-            &mut self.rules_epoch,
-            true,
-        );
-        match outcome {
-            PlaytestOutcome::Dialog => dict(vec![
-                ("ok", true.to_variant()),
-                ("dialog", true.to_variant()),
-            ]),
-            PlaytestOutcome::Playing { mode, events } => dict(vec![
-                ("ok", true.to_variant()),
-                ("dialog", false.to_variant()),
-                ("mode", GString::from(mode.name()).to_variant()),
-                (
-                    "phase",
-                    GString::from(self.play_session.phase.name()).to_variant(),
-                ),
-                ("events", (events.len() as i64).to_variant()),
-            ]),
         }
+        dict(vec![
+            ("ok", true.to_variant()),
+            ("dialog", true.to_variant()),
+        ])
     }
 
     /// `MapEditorDialog.resumeEditing()`: return to the menu with the pre-playtest
