@@ -103,7 +103,14 @@ pub struct GlobalVars {
     pub logic_to_content: [Vec<Option<u16>>; 4],
     /// `contentIdToLogicId` per type (`-1` = absent).
     pub content_to_logic: [Vec<i32>; 4],
+    /// `Content.emojiChar()` icon codes per dense id
+    /// (`[Block, Unit, Item, Liquid]`; `0` = no icon).
+    pub icon_codes: [Vec<u32>; 4],
 }
+
+/// The shipped `assets/icons/icons.properties` (content icon codes;
+/// `Iconc`/`Content.emojiChar` parity ABI).
+const ICON_PROPERTIES: &str = include_str!("../../assets/icons.properties");
 
 /// The shipped `logicids.dat` (copied from the Java assets; `GlobalVars.init`).
 const LOGIC_IDS: &[u8] = include_bytes!("../../assets/logicids.dat");
@@ -149,6 +156,7 @@ impl GlobalVars {
             rand: ArcRand::new(0),
             logic_to_content: std::array::from_fn(|_| Vec::new()),
             content_to_logic: std::array::from_fn(|_| Vec::new()),
+            icon_codes: std::array::from_fn(|_| Vec::new()),
         };
         globals.init_static();
         // Plan 18 seeds the full `Sounds` table unconditionally, so `@sfx-*`
@@ -336,6 +344,30 @@ impl GlobalVars {
                 self.put_content(&key, type_, entry.id, false);
             }
         }
+        // `Content.emojiChar()` -> `Iconc` code by content name
+        // (`icons.properties`); the PrintCharI table.
+        {
+            let iconc = crate::assets::icons::Iconc::from_properties(ICON_PROPERTIES);
+            for (slot, type_) in [
+                (0usize, ContentType::Block),
+                (1, ContentType::Unit),
+                (2, ContentType::Item),
+                (3, ContentType::Liquid),
+            ] {
+                for entry in content.entries(type_) {
+                    let Some(name) = entry.name else { continue };
+                    let Some(code) = iconc.code(name) else {
+                        continue;
+                    };
+                    let table = &mut self.icon_codes[slot];
+                    let index = entry.id as usize;
+                    if table.len() <= index {
+                        table.resize(index + 1, 0);
+                    }
+                    table[index] = code;
+                }
+            }
+        }
         for entry in content.entries(ContentType::Status) {
             let Some(name) = entry.name else { continue };
             let key = format!("@status-{name}");
@@ -403,6 +435,18 @@ impl GlobalVars {
         let mut globals = Self::new();
         globals.init_content(content);
         globals
+    }
+
+    /// `Content.emojiChar()` icon code for a content record (0 when absent).
+    pub fn content_icon_code(&self, type_: ContentType, id: u16) -> u32 {
+        let slot = match type_ {
+            ContentType::Block => 0,
+            ContentType::Unit => 1,
+            ContentType::Item => 2,
+            ContentType::Liquid => 3,
+            _ => return 0,
+        };
+        self.icon_codes[slot].get(id as usize).copied().unwrap_or(0)
     }
 
     /// Registers a content constant object under `name`.
@@ -586,12 +630,66 @@ impl GlobalVars {
 pub struct LogicContentInfo {
     /// `names[type as usize][dense id]`; empty string = no such record.
     names: Vec<Vec<String>>,
+    /// `rows[type as usize][dense id]` (the content `sense` tables).
+    rows: Vec<Vec<ContentSenseRow>>,
+}
+
+/// Host-injected client identity used by the `GlobalVars` update
+/// (`@clientLocale`/`@clientName`; `GlobalVars.java:211-216` reads
+/// `player.locale()`/`player.name()`).
+///
+/// The gdext host fills this from the settings store; core defaults to
+/// `"en"`/`""`.
+#[derive(Clone, Debug, Default, PartialEq, bevy_ecs::prelude::Resource)]
+pub struct LogicClientInfo {
+    /// `player.locale()`.
+    pub locale: String,
+    /// `player.name()`.
+    pub name: String,
+}
+
+/// Scalar rows of the content `sense` tables
+/// (`Block.sense`, `UnitType.sense`, `Item.sense`, `Liquid.sense`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct ContentSenseRow {
+    /// `health`/`maxHealth`.
+    pub health: f32,
+    /// Unit `armor` / block `armor`.
+    pub armor: f32,
+    /// Block `solid`.
+    pub solid: bool,
+    /// Block `size` / unit `hitSize / 8`.
+    pub size: f32,
+    /// `itemCapacity`.
+    pub item_capacity: f32,
+    /// `liquidCapacity`.
+    pub liquid_capacity: f32,
+    /// Buffered power capacity (`consPower.capacity`).
+    pub power_capacity: f32,
+    /// `UnitType.maxRange` (raw, matching `World.conv(maxRange)`).
+    pub range: f32,
+    /// `type.speed * 60 / 8`.
+    pub speed: f32,
+    /// `type.flying`.
+    pub flying: bool,
+    /// `payloadCapacity / tilesize²`.
+    pub payload_capacity: f32,
+    /// Packed RGBA8888 (`Color.toDoubleBits`).
+    pub color: u32,
+}
+
+/// Packs an `Rgba` (0..1) into RGBA8888 with Java's truncation
+/// (`Color.rgba8888`).
+fn pack_rgba(color: crate::content::Rgba) -> u32 {
+    let c = |v: f32| (v.clamp(0.0, 1.0) * 255.0) as u32;
+    (c(color.r) << 24) | (c(color.g) << 16) | (c(color.b) << 8) | c(color.a)
 }
 
 impl Default for LogicContentInfo {
     fn default() -> Self {
         Self {
             names: vec![Vec::new(); ContentType::ALL.len()],
+            rows: vec![Vec::new(); ContentType::ALL.len()],
         }
     }
 }
@@ -615,7 +713,96 @@ impl LogicContentInfo {
                 }
             }
         }
+        // Block rows (`Block.sense(LAccess)`, J/world/Block.java:1674-1708).
+        {
+            let rows = &mut info.rows[ContentType::Block as usize];
+            for def in content.blocks() {
+                let index = def.id.raw() as usize;
+                if rows.len() <= index {
+                    rows.resize(index + 1, ContentSenseRow::default());
+                }
+                let power_capacity =
+                    def.consumes
+                        .iter()
+                        .find_map(|c| match &c.consume {
+                            crate::content::registries::blocks::Consume::Power {
+                                buffered, ..
+                            } if *buffered > 0.0 => Some(*buffered),
+                            _ => None,
+                        })
+                        .unwrap_or(0.0);
+                rows[index] = ContentSenseRow {
+                    health: def.health as f32,
+                    armor: def.armor,
+                    solid: def.solid,
+                    size: def.size as f32,
+                    item_capacity: def.item_capacity as f32,
+                    liquid_capacity: def.liquid_capacity,
+                    power_capacity,
+                    color: def.map_color.map(pack_rgba).unwrap_or(0),
+                    ..ContentSenseRow::default()
+                };
+            }
+        }
+        // Unit rows (`UnitType.sense`, J/type/UnitType.java:1430-1449).
+        {
+            let rows = &mut info.rows[ContentType::Unit as usize];
+            let tile_payload = (crate::config::TILESIZE * crate::config::TILESIZE) as f32;
+            for def in content.units() {
+                let index = def.id.raw() as usize;
+                if rows.len() <= index {
+                    rows.resize(index + 1, ContentSenseRow::default());
+                }
+                rows[index] = ContentSenseRow {
+                    health: def.health,
+                    armor: def.armor,
+                    size: def.hit_size / crate::world::block::TILE_SIZE,
+                    item_capacity: def.item_capacity.max(0) as f32,
+                    range: def.max_range,
+                    speed: def.speed * 60.0 / crate::world::block::TILE_SIZE,
+                    flying: def.flying,
+                    payload_capacity: if def.payload_capacity > 0.0 {
+                        def.payload_capacity / tile_payload
+                    } else {
+                        0.0
+                    },
+                    ..ContentSenseRow::default()
+                };
+            }
+        }
+        // Item/Liquid rows (`Item.sense`/`Liquid.sense`: color only).
+        {
+            let rows = &mut info.rows[ContentType::Item as usize];
+            for def in content.items() {
+                let index = def.id.raw() as usize;
+                if rows.len() <= index {
+                    rows.resize(index + 1, ContentSenseRow::default());
+                }
+                rows[index] = ContentSenseRow {
+                    color: pack_rgba(def.color),
+                    ..ContentSenseRow::default()
+                };
+            }
+        }
+        {
+            let rows = &mut info.rows[ContentType::Liquid as usize];
+            for def in content.liquids() {
+                let index = def.id.raw() as usize;
+                if rows.len() <= index {
+                    rows.resize(index + 1, ContentSenseRow::default());
+                }
+                rows[index] = ContentSenseRow {
+                    color: pack_rgba(def.color),
+                    ..ContentSenseRow::default()
+                };
+            }
+        }
         info
+    }
+
+    /// Scalar sense row for a content record, when known.
+    pub fn row(&self, type_: ContentType, id: u16) -> Option<&ContentSenseRow> {
+        self.rows.get(type_ as usize)?.get(id as usize)
     }
 
     /// Name for a content record (`Content.name`), when known.

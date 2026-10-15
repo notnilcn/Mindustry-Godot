@@ -1993,17 +1993,21 @@ impl Executor {
     }
 
     fn append_print_char(&mut self, value: &LVar) {
-        // `PrintCharI.run`: content appends `(char)cont.emojiChar()`; the port
-        // has no emoji table, so the content branch appends nothing (deviation).
-        let text = if value.is_obj {
-            String::new()
+        // `PrintCharI.run` (`J/logic/LExecutor.java`): content appends
+        // `(char)cont.emojiChar()` (0 -> U+0000); non-content objects append
+        // nothing.
+        let code = if value.is_obj {
+            match value.value_obj() {
+                Some(LogicObject::Content(c)) => self.globals.content_icon_code(c.type_, c.id),
+                _ => return,
+            }
         } else {
             // Java casts `(char)Math.floor(value.numval)`.
-            match char::from_u32(value.num().floor() as u32) {
-                Some(ch) => ch.to_string(),
-                None => String::new(),
-            }
+            value.num().floor() as u32
         };
+        let text = char::from_u32(code)
+            .map(|ch| ch.to_string())
+            .unwrap_or_default();
         push_text(&mut self.text_buffer, &text);
     }
 

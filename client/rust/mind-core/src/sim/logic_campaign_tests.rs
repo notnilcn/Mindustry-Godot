@@ -1260,3 +1260,185 @@ fn logic_explosion_air_only() {
     );
     assert_events_drained(&sim);
 }
+
+// ---- I03 T3: sensor/fetch/printchar tables (PAR-0218) ----
+
+/// The content `sense` tables (`Block/UnitType/Item/Liquid.sense`).
+#[test]
+fn content_sense_table() {
+    let mut sim = campaign_sim();
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "sensor h @dagger @health\nsensor n @copper @name\nsensor c @copper @color\nstop\n",
+    );
+    tick(&mut sim, 5);
+    let dagger_health = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_by_name("dagger")
+        .expect("dagger")
+        .health;
+    assert_eq!(processor_num(&sim, 10, 10, "h"), Some(dagger_health as f64));
+    assert_eq!(
+        processor_obj(&sim, 10, 10, "n"),
+        Some(LogicObject::Str("copper".to_owned()))
+    );
+    let color = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .item_id("copper")
+        .and_then(|id| sim.block_runtime().expect("runtime").content().item(id))
+        .expect("copper")
+        .color;
+    let expected = crate::logic::globals::rgba_u8_to_double_bits(
+        (color.r * 255.0) as i32,
+        (color.g * 255.0) as i32,
+        (color.b * 255.0) as i32,
+        (color.a * 255.0) as i32,
+    );
+    assert_eq!(processor_num(&sim, 10, 10, "c"), Some(expected));
+    assert_events_drained(&sim);
+}
+
+/// `BuildingComp.senseObject` has no `name`/`id` row: both read null.
+#[test]
+fn building_name_and_id_are_null() {
+    let mut sim = campaign_sim();
+    let container = place(&mut sim, "container", 12, 12);
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "fetch build b @sharded 0 @container\nsensor n b @name\nsensor i b @id\nstop\n",
+    );
+    tick(&mut sim, 5);
+    assert_eq!(
+        processor_obj(&sim, 10, 10, "b"),
+        Some(LogicObject::Building(container))
+    );
+    assert_eq!(processor_obj(&sim, 10, 10, "n"), None, "@name is null");
+    assert_eq!(processor_obj(&sim, 10, 10, "i"), None, "@id is null");
+    assert_events_drained(&sim);
+}
+
+/// Unit `@range` (`range()/8`) and `@armor` (the type armor, or the override).
+#[test]
+fn unit_range_and_armor() {
+    let mut sim = campaign_sim();
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "sensor a @mace @armor\nsensor r @mace @range\nstop\n",
+    );
+    tick(&mut sim, 5);
+    let def = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .unit_by_name("mace")
+        .expect("mace")
+        .clone();
+    assert_eq!(processor_num(&sim, 10, 10, "a"), Some(def.armor as f64));
+    let range = if def.max_range > 0.0 {
+        def.max_range
+    } else {
+        def.range
+    };
+    assert_eq!(processor_num(&sim, 10, 10, "r"), Some((range / 8.0) as f64));
+    assert_events_drained(&sim);
+}
+
+/// A liquid turret's `@ammo` is `totalAmmo` (0), not the liquid amount
+/// (`Turret.sense`; liquid turrets never increment `totalAmmo`).
+#[test]
+fn liquid_turret_ammo_is_total_ammo() {
+    let mut sim = campaign_sim();
+    let wave = place(&mut sim, "wave", 12, 12);
+    let water = sim
+        .block_runtime()
+        .expect("runtime")
+        .content()
+        .liquid_id("water")
+        .expect("water");
+    sim.ecs
+        .0
+        .get_mut::<crate::world::modules::LiquidModule>(wave)
+        .expect("liquids")
+        .add(water, 100.0, 100.0);
+    let links = [LogicLink::new("wave1", 2, 2)];
+    place_linked_world_processor(&mut sim, 10, 10, "sensor a wave1 @ammo\nstop\n", &links);
+    tick(&mut sim, 5);
+    assert_eq!(processor_num(&sim, 10, 10, "a"), Some(0.0));
+    assert_events_drained(&sim);
+}
+
+/// `fetch core`/`fetch coreCount` read the team's live core list.
+#[test]
+fn fetch_core_and_count() {
+    let mut sim = campaign_sim();
+    let core = place(&mut sim, "core-shard", 20, 20);
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "fetch core c @sharded 0 @air\nfetch coreCount k @sharded 0 @air\nstop\n",
+    );
+    tick(&mut sim, 5);
+    assert_eq!(
+        processor_obj(&sim, 10, 10, "c"),
+        Some(LogicObject::Building(core))
+    );
+    assert_eq!(processor_num(&sim, 10, 10, "k"), Some(1.0));
+    assert_events_drained(&sim);
+}
+
+/// `fetch player`/`fetch playerCount` return the local player unit at index 0.
+#[test]
+fn fetch_player() {
+    let mut sim = campaign_sim();
+    place(&mut sim, "core-shard", 20, 20);
+    let player = sim
+        .spawn_player_unit("alpha", 1, 80.0, 80.0, 0.0)
+        .expect("player");
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "fetch player p @sharded 0 @air\nfetch playerCount n @sharded 0 @air\nstop\n",
+    );
+    tick(&mut sim, 5);
+    assert_eq!(
+        processor_obj(&sim, 10, 10, "p"),
+        Some(LogicObject::Unit(player))
+    );
+    assert_eq!(processor_num(&sim, 10, 10, "n"), Some(1.0));
+    assert_events_drained(&sim);
+}
+
+/// `printchar @copper` appends `(char)cont.emojiChar()` — the icons.properties
+/// code for copper.
+#[test]
+fn printchar_content_emoji() {
+    const ICONS: &str = include_str!("../../assets/icons.properties");
+    let expected = ICONS
+        .lines()
+        .find_map(|line| {
+            let (code, rest) = line.split_once('=')?;
+            let (name, _) = rest.split_once('|').unwrap_or((rest, ""));
+            (name == "copper").then(|| code.trim().parse::<u32>().ok())?
+        })
+        .expect("copper has an icon code");
+    let mut sim = campaign_sim();
+    place_world_processor(&mut sim, 10, 10, "printchar @copper\nstop\n");
+    tick(&mut sim, 3);
+    let e = sim.grid.entity_at(TilePos::new(10, 10)).expect("processor");
+    let state = sim.ecs.0.get::<LogicBlockState>(e).expect("state");
+    let got = state.executor.text_buffer.chars().next().map(|c| c as u32);
+    assert_eq!(got, Some(expected), "the copper icon char is in the buffer");
+    assert_events_drained(&sim);
+}

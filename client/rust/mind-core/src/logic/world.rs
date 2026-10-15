@@ -455,6 +455,9 @@ pub struct LogicWorldState {
     pub weather_active: std::collections::BTreeSet<u16>,
     /// `CutsceneI` presentation state (camera/HUD; H06 T3).
     pub cutscene: LogicCutscene,
+    /// The local player's unit (`TeamData.players[0].unit`; transient, set by
+    /// `Sim::update_logic_globals`, read by `fetch player`).
+    pub player_unit: Option<bevy_ecs::entity::Entity>,
     /// Deterministic sink log (append-only, ordered).
     pub events: Vec<LogicWorldEvent>,
 }
@@ -480,6 +483,7 @@ impl LogicWorldState {
             map_height: 0,
             weather_active: std::collections::BTreeSet::new(),
             cutscene: LogicCutscene::default(),
+            player_unit: None,
             events: Vec::new(),
         }
     }
@@ -879,9 +883,62 @@ pub fn run_fetch(
                 (false, builds.len() as f64, None)
             }
         }
-        // Core/player lists need plan 11/12 `TeamData` caches (deferred).
-        FetchType::Core | FetchType::Player => (true, 0.0, None),
-        FetchType::CoreCount | FetchType::PlayerCount => (false, 0.0, None),
+        // `FetchI` core list: `data.cores` in registration order (live session),
+        // else every core building of the team in `EntitySeq` order.
+        FetchType::Core | FetchType::CoreCount => {
+            let mut cores: Vec<Entity> = if let Some(mut runtime) =
+                world.get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+            {
+                runtime
+                    .session
+                    .teams
+                    .cores(crate::ecs::TeamId(team_id))
+                    .to_vec()
+            } else {
+                Vec::new()
+            };
+            cores.retain(|core| world.get_entity(*core).is_ok());
+            if cores.is_empty() {
+                let mut query = world.query_filtered::<
+                    (Entity, &TeamComp, &crate::world::blocks::storage::CoreBuild),
+                    With<Building>,
+                >();
+                cores = query
+                    .iter(world)
+                    .filter(|(_, t, _)| t.team == team_id)
+                    .map(|(e, _, _)| e)
+                    .collect();
+                cores.sort_by_key(|e| (seq_of(world, *e), e.index()));
+            }
+            if type_ == FetchType::Core {
+                let value = if i < 0 {
+                    None
+                } else {
+                    cores.get(i as usize).copied()
+                };
+                (true, 0.0, value.map(LogicObject::Building))
+            } else {
+                (false, cores.len() as f64, None)
+            }
+        }
+        // `FetchI` player list: the single local player unit, index 0, own team
+        // only (`TeamData.players`; the port has one local player).
+        FetchType::Player | FetchType::PlayerCount => {
+            let player = world
+                .get_resource::<LogicWorldState>()
+                .and_then(|state| state.player_unit);
+            let player = player.filter(|unit| {
+                world
+                    .get::<TeamComp>(*unit)
+                    .is_some_and(|t| t.team == team_id)
+            });
+            if type_ == FetchType::Player {
+                let value = if i == 0 { player } else { None };
+                (true, 0.0, value.map(LogicObject::Unit))
+            } else {
+                (false, if player.is_some() { 1.0 } else { 0.0 }, None)
+            }
+        }
     };
 
     if is_obj {

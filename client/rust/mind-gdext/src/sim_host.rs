@@ -636,6 +636,17 @@ impl MindSimHost {
         if let Some(registry) = self.content_snapshot.as_ref() {
             mind_core::logic::globals::GlobalVars::install_world(&mut self.sim.ecs.0, registry);
         }
+        // `@clientLocale`/`@clientName` from the shared settings store
+        // (`GlobalVars.java:211-216` reads `player.locale()`/`player.name()`).
+        let info = mind_core::logic::globals::LogicClientInfo {
+            locale: crate::settings_hub::with_settings(|store| {
+                store.get_string(mind_core::io::settings::KEY_LOCALE, "en")
+            }),
+            name: crate::settings_hub::with_settings(|store| {
+                store.get_string(mind_core::io::settings::KEY_PLAYER_NAME, "")
+            }),
+        };
+        self.sim.ecs.0.insert_resource(info);
     }
 
     /// Wires the host seams that live on the `Sim` value: the content-initialized

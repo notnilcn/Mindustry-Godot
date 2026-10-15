@@ -247,6 +247,7 @@ use crate::entities::comp::{Building, Health, Pos, TeamComp, Unit};
 use crate::logic::blocks::{
     LogicBlockState, build_at, display_def_of, logic_def_of, memory_def_of,
 };
+use crate::logic::globals::LogicClientInfo;
 use crate::logic::value::LVar;
 use crate::world::block::BlockTable;
 use crate::world::config::{ConfigKind, ConfigValue};
@@ -303,15 +304,80 @@ pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
     match target {
         LogicObject::Building(e) => sense_building(world, *e, a),
         LogicObject::Unit(e) => sense_unit(world, *e, a),
-        LogicObject::Content(c) => match a {
-            // `Block/Item/Liquid/UnitType.sense(@id)` = `getLogicId()`.
-            LAccess::Id => Sensed::Num(
-                world
-                    .get_resource::<crate::logic::globals::GlobalVars>()
-                    .map(|globals| globals.lookup_logic_id(*c) as f64)
-                    .unwrap_or(-1.0),
-            ),
-            _ => Sensed::Num(1.0),
+        LogicObject::Content(c) => sense_content_accessor(world, *c, a),
+        _ => Sensed::Obj(None),
+    }
+}
+
+/// `Block/UnitType/Item/Liquid.sense(LAccess)` (`J/world/Block.java:1674-1708`,
+/// `J/type/UnitType.java:1430-1449`, `Item.java:148-152`, `Liquid.java:171-175`).
+///
+/// `@name` is the object sense for every content type (Java `senseObject`);
+/// the numeric rows come from [`crate::logic::globals::ContentSenseRow`]; every
+/// other accessor is Java's `NaN` -> null.
+fn sense_content_accessor(world: &World, c: ContentRef, a: LAccess) -> Sensed {
+    // `@id` = `getLogicId()` (the global id table).
+    if a == LAccess::Id {
+        return Sensed::Num(
+            world
+                .get_resource::<crate::logic::globals::GlobalVars>()
+                .map(|globals| globals.lookup_logic_id(c) as f64)
+                .unwrap_or(-1.0),
+        );
+    }
+    let Some(info) = world.get_resource::<crate::logic::globals::LogicContentInfo>() else {
+        return Sensed::Obj(None);
+    };
+    if a == LAccess::Name {
+        return match info.name(c.type_, c.id) {
+            Some(name) => Sensed::Obj(Some(LogicObject::Str(name.to_owned()))),
+            None => Sensed::Obj(None),
+        };
+    }
+    let Some(row) = info.row(c.type_, c.id) else {
+        return Sensed::Obj(None);
+    };
+    let number = |v: f32| Sensed::Num(v as f64);
+    match c.type_ {
+        // `Block.sense` (`Block.java:1674-1690`).
+        ContentType::Block => match a {
+            LAccess::Color => Sensed::Num(crate::logic::globals::rgba_u8_to_double_bits(
+                ((row.color >> 24) & 0xff) as i32,
+                ((row.color >> 16) & 0xff) as i32,
+                ((row.color >> 8) & 0xff) as i32,
+                (row.color & 0xff) as i32,
+            )),
+            LAccess::Health | LAccess::MaxHealth => number(row.health),
+            LAccess::Armor => number(row.armor),
+            LAccess::Solid => number(if row.solid { 1.0 } else { 0.0 }),
+            LAccess::Size => number(row.size),
+            LAccess::ItemCapacity => number(row.item_capacity),
+            LAccess::LiquidCapacity => number(row.liquid_capacity),
+            LAccess::PowerCapacity => number(row.power_capacity),
+            _ => Sensed::Obj(None),
+        },
+        // `UnitType.sense` (`UnitType.java:1430-1443`).
+        ContentType::Unit => match a {
+            LAccess::Health | LAccess::MaxHealth => number(row.health),
+            LAccess::Armor => number(row.armor),
+            // `World.conv(maxRange)` = maxRange / tilesize.
+            LAccess::Range => number(row.range / 8.0),
+            LAccess::Size => number(row.size),
+            LAccess::Flying => number(if row.flying { 1.0 } else { 0.0 }),
+            LAccess::ItemCapacity => number(row.item_capacity),
+            LAccess::Speed => number(row.speed),
+            LAccess::PayloadCapacity => number(row.payload_capacity),
+            _ => Sensed::Obj(None),
+        },
+        // `Item.sense`/`Liquid.sense` (`Item.java:148-152`).
+        ContentType::Item | ContentType::Liquid => match a {
+            LAccess::Color => Sensed::Num(crate::logic::globals::rgba_u8_to_double_bits(
+                ((row.color >> 24) & 0xff) as i32,
+                ((row.color >> 16) & 0xff) as i32,
+                ((row.color >> 8) & 0xff) as i32,
+                (row.color & 0xff) as i32,
+            )),
+            _ => Sensed::Obj(None),
         },
         _ => Sensed::Obj(None),
     }
@@ -319,11 +385,38 @@ pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
 
 /// Content-count sense (`Senseable.sense(Content)`).
 pub fn sense_content(world: &World, target: &LogicObject, c: crate::content::ContentRef) -> f64 {
+    // `Block.sense(Content)` (`Block.java:1692-1706`): the item requirement
+    // times `rules.buildCostMultiplier` (0 with `infiniteResources`).
+    if let LogicObject::Content(block) = target
+        && block.type_ == ContentType::Block
+        && c.type_ == ContentType::Item
+    {
+        let rules = crate::game::runtime::rules_of(world);
+        let infinite = rules.is_some_and(|rules| rules.infinite_resources);
+        if infinite {
+            return 0.0;
+        }
+        let multiplier = rules
+            .map(|rules| rules.build_cost_multiplier)
+            .unwrap_or(1.0);
+        return world
+            .get_resource::<BlockTable>()
+            .and_then(|table| table.get(BlockId::new(block.id)))
+            .map(|inst| {
+                inst.def
+                    .requirements
+                    .iter()
+                    .filter(|stack| stack.item.raw() == c.id)
+                    .map(|stack| (stack.amount as f64 * multiplier as f64).round())
+                    .sum()
+            })
+            .unwrap_or(0.0);
+    }
     let LogicObject::Building(e) = target else {
         if let LogicObject::Unit(e) = target {
             return unit_content_count(world, *e, c);
         }
-        return 0.0;
+        return f64::NAN;
     };
     match c.type_ {
         ContentType::Item => world
@@ -334,18 +427,79 @@ pub fn sense_content(world: &World, target: &LogicObject, c: crate::content::Con
             .get::<LiquidModule>(*e)
             .map(|m| m.get(crate::content::LiquidId::new(c.id)) as f64)
             .unwrap_or(0.0),
-        _ => 0.0,
+        ContentType::Unit | ContentType::Block => world
+            .get::<crate::entities::comp::unit::comp::UnitPayloads>(*e)
+            .map(|payloads| {
+                payloads
+                    .stack
+                    .iter()
+                    .filter(|payload| match (payload, c.type_) {
+                        (
+                            crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                                type_id, ..
+                            },
+                            ContentType::Unit,
+                        ) => type_id.raw() == c.id,
+                        (
+                            crate::entities::comp::unit::comp::CarriedPayload::Build {
+                                block, ..
+                            },
+                            ContentType::Block,
+                        ) => block.raw() == c.id,
+                        _ => false,
+                    })
+                    .count() as f64
+            })
+            .unwrap_or(0.0),
+        _ => f64::NAN,
     }
 }
 
+/// `UnitComp.sense(Content)` (`UnitComp.java:331-353`): the held item's stack
+/// amount, payload counts by unit/block type, or a status duration in seconds.
 fn unit_content_count(world: &World, e: Entity, c: crate::content::ContentRef) -> f64 {
-    if c.type_ == ContentType::Item {
-        world
-            .get::<ItemModule>(e)
-            .map(|m| m.get(crate::content::ItemId::new(c.id)) as f64)
-            .unwrap_or(0.0)
-    } else {
-        0.0
+    match c.type_ {
+        ContentType::Item => world
+            .get::<crate::entities::comp::unit::comp::ItemsComp>(e)
+            .and_then(|items| items.item)
+            .filter(|(item, _)| item.raw() == c.id)
+            .map(|(_, amount)| amount as f64)
+            .unwrap_or(0.0),
+        ContentType::Unit | ContentType::Block => world
+            .get::<crate::entities::comp::unit::comp::UnitPayloads>(e)
+            .map(|payloads| {
+                payloads
+                    .stack
+                    .iter()
+                    .filter(|payload| match (payload, c.type_) {
+                        (
+                            crate::entities::comp::unit::comp::CarriedPayload::Unit {
+                                type_id, ..
+                            },
+                            ContentType::Unit,
+                        ) => type_id.raw() == c.id,
+                        (
+                            crate::entities::comp::unit::comp::CarriedPayload::Build {
+                                block, ..
+                            },
+                            ContentType::Block,
+                        ) => block.raw() == c.id,
+                        _ => false,
+                    })
+                    .count() as f64
+            })
+            .unwrap_or(0.0),
+        ContentType::Status => world
+            .get::<crate::entities::comp::unit::comp::StatusComp>(e)
+            .and_then(|statuses| {
+                statuses
+                    .statuses
+                    .iter()
+                    .find(|entry| entry.effect.raw() == c.id)
+                    .map(|entry| (entry.duration / 60.0) as f64)
+            })
+            .unwrap_or(0.0),
+        _ => f64::NAN,
     }
 }
 
@@ -504,7 +658,8 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
         | LAccess::Shooting
         | LAccess::Boosting
         | LAccess::Mining => Sensed::Num(0.0),
-        LAccess::Id => Sensed::Num(e.index().index() as f64),
+        // `BuildingComp.sense(id)`: not in the table -> `NaN` (null).
+        LAccess::Id => Sensed::Num(f64::NAN),
         LAccess::Type => match world.get::<Building>(e) {
             Some(b) => Sensed::Obj(Some(LogicObject::Content(
                 crate::content::ContentRef::block(b.block),
@@ -518,8 +673,14 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|i| LogicObject::Content(crate::content::ContentRef::item(i))),
         ),
         LAccess::Controlled => Sensed::Num(0.0),
+        // `configSenseable() ? config() : null` (a later task's building config).
         LAccess::Config => Sensed::Obj(None),
-        LAccess::Name => Sensed::Obj(def.as_ref().map(|d| LogicObject::Str(d.name.clone()))),
+        // `BuildingComp.senseObject(name)`/`(id)` fall through to `noSensed`
+        // (Java: null / NaN) — a building has no name or logic id.
+        LAccess::Name => Sensed::Obj(None),
+        // `payloadCount`/`payloadType` (unit payloads live with plan 08 state).
+        LAccess::PayloadCount => Sensed::Num(0.0),
+        LAccess::PayloadType => Sensed::Obj(None),
         // Java `BuildingComp.sense` default: `NaN` → null through `setnum`.
         _ => Sensed::Obj(None),
     }
@@ -588,16 +749,103 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .unwrap_or(0.0),
         ),
         LAccess::Armor => {
-            // `armorOverride >= 0 ? armorOverride : armor`; the base type armor
-            // is not projected onto the unit (remaining T7 row in the summary).
-            let value = world
+            // `armorOverride >= 0 ? armorOverride : armor`
+            // (`StatusComp.armorOverride`; the base type armor from the content
+            // sense row).
+            let override_value = world
                 .get::<crate::entities::comp::unit::StatusComp>(e)
-                .filter(|s| s.armor_override >= 0.0)
-                .map(|s| s.armor_override as f64)
-                .unwrap_or(0.0);
+                .map(|s| s.armor_override)
+                .filter(|v| *v >= 0.0);
+            let value = match override_value {
+                Some(v) => v as f64,
+                None => unit_def_of(world, e)
+                    .map(|def| def.armor as f64)
+                    .unwrap_or(0.0),
+            };
             Sensed::Num(value)
         }
-        LAccess::Range | LAccess::Shooting => Sensed::Num(0.0),
+        // `range() / tilesize` (`UnitComp.range()` = maxRange > 0 ? maxRange :
+        // range).
+        LAccess::Range => Sensed::Num(
+            unit_def_of(world, e)
+                .map(|def| {
+                    (if def.max_range > 0.0 {
+                        def.max_range
+                    } else {
+                        def.range
+                    }) as f64
+                        / 8.0
+                })
+                .unwrap_or(0.0),
+        ),
+        // `isShooting()`: any mount firing (`AIController.updateWeapons` sets
+        // `mount.shoot`; the port has no separate `isShooting` mirror).
+        LAccess::Shooting => Sensed::Num(
+            if world
+                .get::<crate::entities::comp::unit::weapon_mount::WeaponsComp>(e)
+                .is_some_and(|weapons| weapons.mounts.iter().any(|mount| mount.shoot))
+            {
+                1.0
+            } else {
+                0.0
+            },
+        ),
+        // `aimX()/aimY()`: `mounts[0].aimX`, else the unit position.
+        LAccess::ShootX | LAccess::ShootY => {
+            let aim = world
+                .get::<crate::entities::comp::unit::weapon_mount::WeaponsComp>(e)
+                .and_then(|weapons| weapons.mounts.first())
+                .map(|mount| (mount.aim_x, mount.aim_y))
+                .or_else(|| pos.map(|p| (p.x, p.y)));
+            Sensed::Num(
+                aim.map(|(ax, ay)| {
+                    if a == LAccess::ShootX {
+                        (ax / 8.0) as f64
+                    } else {
+                        (ay / 8.0) as f64
+                    }
+                })
+                .unwrap_or(0.0),
+            )
+        }
+        // `isBuilding() ? buildPlan().x : -1`.
+        LAccess::BuildX | LAccess::BuildY => {
+            let plan = world
+                .get::<crate::sim::builder::BuilderPlans>(e)
+                .and_then(|plans| plans.plans.front());
+            Sensed::Num(
+                plan.map(|plan| {
+                    if a == LAccess::BuildX {
+                        plan.x as f64
+                    } else {
+                        plan.y as f64
+                    }
+                })
+                .unwrap_or(-1.0),
+            )
+        }
+        LAccess::Flag => Sensed::Num(core.map(|c| c.flag).unwrap_or(0.0)),
+        // `payloads().size` / `payloadUsed()/64` / `payloadCapacity/64`.
+        LAccess::PayloadCount => Sensed::Num(
+            world
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(e)
+                .map(|payloads| payloads.stack.len() as f64)
+                .unwrap_or(0.0),
+        ),
+        LAccess::TotalPayload => Sensed::Num(
+            world
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(e)
+                .and_then(|payloads| {
+                    unit_content(world).map(|content| payloads.payload_used(content) / 64.0)
+                })
+                .unwrap_or(0.0) as f64,
+        ),
+        LAccess::PayloadCapacity => Sensed::Num(
+            world
+                .get::<crate::entities::comp::unit::comp::PayloadComp>(e)
+                .map(|payload| (payload.capacity / 64.0) as f64)
+                .unwrap_or(0.0),
+        ),
         // `controlled`: `ctrlProcessor = 1`, `ctrlPlayer = 2`, `ctrlCommand = 3`
         // (GlobalVars.java:21-24), command only while a command is set.
         LAccess::Controlled => {
@@ -660,9 +908,70 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .and_then(|m| m.first())
                 .map(|i| LogicObject::Content(crate::content::ContentRef::item(i))),
         ),
+        // `controller instanceof LogicAI log ? log.controller : this`.
+        LAccess::Controller => {
+            let value = match crate::entities::comp::unit::ai_kind_of(world, e) {
+                Some(crate::ai::AiKind::Logic) => world
+                    .get::<crate::ai::types::logic::LogicAi>(e)
+                    .and_then(|ai| ai.controller),
+                _ => Some(e),
+            };
+            Sensed::Obj(value.map(LogicObject::Building))
+        }
+        // `@name` is the player name for the player unit, else null.
+        LAccess::Name => {
+            let is_player = crate::entities::comp::unit::ai_kind_of(world, e)
+                == Some(crate::ai::AiKind::Player);
+            if !is_player {
+                return Sensed::Obj(None);
+            }
+            world
+                .get_resource::<LogicClientInfo>()
+                .filter(|info| !info.name.is_empty())
+                .map(|info| Sensed::Obj(Some(LogicObject::Str(info.name.clone()))))
+                .unwrap_or(Sensed::Obj(None))
+        }
+        // `payloads().peek() instanceof UnitPayload ? unit.type : block`.
+        LAccess::PayloadType => {
+            let value = world
+                .get::<crate::entities::comp::unit::comp::UnitPayloads>(e)
+                .and_then(|payloads| payloads.stack.last().copied())
+                .map(|payload| match payload {
+                    crate::entities::comp::unit::comp::CarriedPayload::Unit { type_id, .. } => {
+                        LogicObject::Content(crate::content::ContentRef::new(
+                            ContentType::Unit,
+                            type_id.raw(),
+                        ))
+                    }
+                    crate::entities::comp::unit::comp::CarriedPayload::Build { block, .. } => {
+                        LogicObject::Content(crate::content::ContentRef::block(block))
+                    }
+                });
+            Sensed::Obj(value)
+        }
+        // `isBuilding() && !buildPlan().breaking ? buildPlan().tile().build : null`.
+        LAccess::Building => {
+            let plan = world
+                .get::<crate::sim::builder::BuilderPlans>(e)
+                .and_then(|plans| plans.plans.front());
+            let value = plan.filter(|plan| !plan.breaking).and_then(|plan| {
+                world
+                    .get_resource::<crate::world::WorldGrid>()
+                    .and_then(|grid| grid.tiles.getn(plan.x as i32, plan.y as i32))
+                    .and_then(|tile| tile.build)
+            });
+            Sensed::Obj(value.map(LogicObject::Building))
+        }
         // Java `UnitComp.senseObject` default: null.
         _ => Sensed::Obj(None),
     }
+}
+
+/// Unit type def of a unit entity (`Unit.type`).
+fn unit_def_of(world: &World, e: Entity) -> Option<crate::content::registries::units::UnitTypeDef> {
+    world
+        .get::<crate::entities::comp::unit::comp::UnitTypeComp>(e)
+        .and_then(|t| unit_content(world).and_then(|content| content.unit(t.type_id).cloned()))
 }
 
 /// `Settable.setProp` numeric dispatch; returns whether the accessor was applied.

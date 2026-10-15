@@ -1144,6 +1144,7 @@ impl Sim {
             state.tick = self.state.tick + 1;
             state.map_width = self.grid.width();
             state.map_height = self.grid.height();
+            state.player_unit = self.player_unit;
         }
         if self
             .ecs
@@ -1172,6 +1173,12 @@ impl Sim {
                     .map(|rules| rules.default_team)
             })
             .unwrap_or(crate::ecs::TeamId::SHARDED.0);
+        let (client_locale, client_name) = self
+            .ecs
+            .0
+            .get_resource::<crate::logic::globals::LogicClientInfo>()
+            .map(|info| (Some(info.locale.clone()), Some(info.name.clone())))
+            .unwrap_or_else(|| (Some("en".to_owned()), Some("player".to_owned())));
         let update = crate::logic::globals::GlobalUpdate {
             // Java increments `state.tick` before `logicVars.update()`
             // (Logic.java:526-546), so processors see tick N during tick N.
@@ -1182,10 +1189,10 @@ impl Sim {
             map_height: self.grid.height(),
             server: true,
             client: false,
-            // The port has no player-name/locale settings in core; Java reads
-            // `player.locale()` / `player.name()` (GlobalVars.java:211-216).
-            client_locale: Some("en".to_owned()),
-            client_name: Some("player".to_owned()),
+            // `GlobalVars.java:211-216`: `player.locale()` / `player.name()`
+            // from the host-injected [`crate::logic::globals::LogicClientInfo`].
+            client_locale,
+            client_name,
             client_team,
             client_mobile: false,
             client_music_playing: false,

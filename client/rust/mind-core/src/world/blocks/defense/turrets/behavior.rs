@@ -160,10 +160,9 @@ impl BuildingBehavior for TurretBehavior {
                     .get::<crate::world::modules::PowerModule>(e)
                     .map(|p| p.status as f64)
                     .unwrap_or(0.0),
-                TurretAmmo::Liquid(_) => world
-                    .get::<crate::world::modules::LiquidModule>(e)
-                    .map(|m| m.current() as f64)
-                    .unwrap_or(0.0),
+                // `Turret.sense(ammo)` = `totalAmmo`; liquid turrets never
+                // increment it (`LiquidTurret` keeps its own liquid module).
+                TurretAmmo::Liquid(_) => state.total_ammo as f64,
                 _ => state.total_ammo as f64,
             }),
             LAccess::AmmoCapacity => Sensed::Num(match cfg.ammo {
@@ -180,10 +179,11 @@ impl BuildingBehavior for TurretBehavior {
             } else {
                 1.0
             }),
-            LAccess::Heat => Sensed::Num(if state.heat_req > 0.0 {
-                state.heat_req as f64
-            } else {
-                f64::NAN
+            // `PowerTurret.sense(heat)` only: item/liquid turrets fall through
+            // to the base table (`NaN` -> null).
+            LAccess::Heat => Sensed::Num(match cfg.ammo {
+                TurretAmmo::Power(_) if state.heat_req > 0.0 => state.heat_req as f64,
+                _ => f64::NAN,
             }),
             LAccess::CurrentAmmoType => match &cfg.ammo {
                 TurretAmmo::Item(_) => state
