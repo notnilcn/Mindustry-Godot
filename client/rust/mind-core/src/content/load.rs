@@ -166,6 +166,45 @@ pub struct ContentRegistry {
     bullet_names: BTreeMap<String, BulletId>,
 }
 
+impl Clone for ContentRegistry {
+    /// Clones the records for a second owner (host runtime installs; I07 T4).
+    /// The mod error sink is dropped: it only routes the booting registry's
+    /// `init` sweeps (`Mods.handleContentError`).
+    fn clone(&self) -> Self {
+        Self {
+            items: self.items.clone(),
+            blocks: self.blocks.clone(),
+            bullets: self.bullets.clone(),
+            liquids: self.liquids.clone(),
+            statuses: self.statuses.clone(),
+            units: self.units.clone(),
+            unit_commands: self.unit_commands.clone(),
+            unit_stances: self.unit_stances.clone(),
+            weathers: self.weathers.clone(),
+            sectors: self.sectors.clone(),
+            planets: self.planets.clone(),
+            teams: self.teams.clone(),
+            errors: self.errors.clone(),
+            names: self.names.clone(),
+            last_added: self.last_added,
+            current_mod: self.current_mod.clone(),
+            phases: self.phases,
+            arr_epoch: self.arr_epoch,
+            headless: self.headless,
+            mod_error_sink: None,
+            tech: self.tech.clone(),
+            tech_reports: self.tech_reports.clone(),
+            loadouts: self.loadouts.clone(),
+            items_serpulo: self.items_serpulo.clone(),
+            items_erekir: self.items_erekir.clone(),
+            items_erekir_only: self.items_erekir_only.clone(),
+            temporary_mapper: self.temporary_mapper.clone(),
+            region_audit: self.region_audit.clone(),
+            bullet_names: self.bullet_names.clone(),
+        }
+    }
+}
+
 impl ContentRegistry {
     /// Empty registry. `headless` skips `loadIcon()`/`load()` (plan 00 flag).
     pub fn new(headless: bool) -> Self {

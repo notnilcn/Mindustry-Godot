@@ -2281,6 +2281,22 @@ impl Sim {
         &self.content
     }
 
+    /// Extends the sim's block name/id table with blocks the base table lacks
+    /// (mod content, I07 T4). The registry appends mod blocks after the vanilla
+    /// ones, so registering in registry order keeps ids identical to
+    /// `ContentRegistry` ids (the parity ABI).
+    pub fn sync_blocks_from_content(
+        &mut self,
+        registry: &crate::content::ContentRegistry,
+    ) -> Result<(), ContentError> {
+        for def in registry.blocks() {
+            if !self.content.contains(&def.name) {
+                self.content.register(&def.name)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Block name for a resolved id (fallback `?<id>` for unknown ids).
     pub fn block_name_of(&self, block: BlockId) -> String {
         match self.content.name(block) {
