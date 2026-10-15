@@ -1595,7 +1595,8 @@ impl BuildingBehavior for ItemIncineratorBehavior {
 
 // --- G04 T3a: per-kind save IO -------------------------------------------------
 // Java body: BeamDrill.java:414-433 — `f time, f warmup` gated on
-// revision >= 1 (`BeamDrillState.progress` is Java `time`).
+// revision >= 1 (the shared `DrillState.progress` is Java `time`; the unused
+// `BeamDrillState` was deleted by I01 T8).
 
 #[cfg(test)]
 mod tests {

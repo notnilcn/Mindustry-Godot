@@ -13,7 +13,7 @@ pub mod weather;
 
 pub use base::{BaseEntity, DefId, Local, Pos, Remote, SimId, TeamComp, Vel};
 pub use building::{
-    BeamDrillState, Building, CampaignState, CrafterState, DoorState, DrillState, IncineratorState,
+    Building, CampaignState, CrafterState, DoorState, DrillState, IncineratorState,
     LandingPadState, PumpState, RadarState, SandboxState, Timers, WallState,
 };
 pub use health::{Health, hp};

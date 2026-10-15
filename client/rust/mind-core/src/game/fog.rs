@@ -68,6 +68,15 @@ impl FogBits {
         self.len
     }
 
+    /// Number of set bits (debug readbacks: I01 T15 fog counts).
+    pub fn count_set_bits(&self) -> usize {
+        self.words
+            .iter()
+            .map(|word| word.count_ones() as usize)
+            .sum::<usize>()
+            .min(self.len)
+    }
+
     /// Whether the array has no bits.
     pub fn is_empty(&self) -> bool {
         self.len == 0

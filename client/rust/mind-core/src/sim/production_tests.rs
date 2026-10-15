@@ -5169,3 +5169,43 @@ fn beam_node_links_battery_in_line() {
         "the insulated wall broke the beam link"
     );
 }
+
+/// I01 T7: `core-bastion`/`core-citadel`/`core-acropolis` set
+/// `requiresCoreZone = true` (`Blocks.java:3198,3218,3236`), so the upgrade
+/// branch of `CoreBlock.canPlaceOn` (`CoreBlock.java:202`) needs every footprint
+/// floor to allow core placement.
+#[test]
+fn bastion_requires_core_zone() {
+    let mut sim = runtime_sim();
+    // API staging skips `canPlaceOn`; the player-form query below runs it.
+    place_team(&mut sim, 10, 10, "core-shard", 0, 1);
+    // Skip the item requirement so only the core-zone rule decides.
+    sim.ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+        .expect("build rules")
+        .infinite_resources = true;
+    // Player-form query (visible + core radius; no unit overlap).
+    let flags = crate::world::build::PlaceFlags {
+        check_visible: true,
+        check_core_radius: true,
+        check_units: false,
+    };
+    // Stone floor everywhere (no core zone): the upgrade is rejected.
+    assert!(
+        !place_query(&sim, 10, 10, "core-bastion", 0, 1, flags),
+        "core-bastion needs the core zone under its footprint"
+    );
+    // A core-zone floor under the whole 4x4 footprint accepts it.
+    let zone = BlockId::new(sim.world_block_id("core-zone").expect("core-zone"));
+    for x in 9..13 {
+        for y in 9..13 {
+            sim.grid.tiles.get_mut(x, y).floor = zone;
+        }
+    }
+
+    assert!(
+        place_query(&sim, 10, 10, "core-bastion", 0, 1, flags),
+        "core-zone floor satisfies requiresCoreZone"
+    );
+}

@@ -844,18 +844,13 @@ impl BuildingBehavior for NuclearReactorBehavior {
                 (state.heat - delta / self.ambient_cooldown_time.max(f32::EPSILON)).max(0.0);
         }
 
-        // Coolant removal: `maxUsed = min(currentAmount, heat / coolantPower)`.
+        // Coolant removal: `maxUsed = min(liquids.currentAmount(), heat /
+        // coolantPower)` then `liquids.remove(liquids.current(), maxUsed)`
+        // (`NuclearReactor.java:131-133`) - the CURRENT liquid, not a scan.
         if state.heat > 0.0 && self.coolant_power > 0.0 {
             let (current, liquid) = world
                 .get::<LiquidModule>(e)
-                .and_then(|module| {
-                    module
-                        .liquids
-                        .iter()
-                        .enumerate()
-                        .find(|(_, amount)| **amount > 0.0)
-                        .map(|(index, amount)| (*amount, LiquidId::new(index as u16)))
-                })
+                .map(|module| (module.current_liquid_amount(), module.current_liquid()))
                 .unwrap_or((0.0, LiquidId::WATER));
             let max_used = current.min(state.heat / self.coolant_power);
             state.heat -= max_used * self.coolant_power;

@@ -31,6 +31,10 @@ pub struct SaveReadState<'a> {
     pub entities: Option<&'a mut dyn EntitySink>,
     /// Map-markers consumer (plan 12 `MapMarkers::read`); `None` skips.
     pub markers: Option<&'a mut dyn MarkersSink>,
+    /// Byte length of a legacy `markers` region (I01 T8 measurement; `None`
+    /// when the save version has no markers region). The shipped presets carry
+    /// an empty UBJson map (2 bytes).
+    pub markers_region_len: Option<usize>,
     /// Custom-chunk registry (plan 20 mods); unknown names are skipped.
     pub custom_chunks: Option<&'a indexmap::IndexMap<String, std::sync::Arc<dyn CustomChunk>>>,
     /// True when generating a map preview (`SaveReadState.preview`).
@@ -97,6 +101,7 @@ impl Default for SaveReadState<'_> {
             content: None,
             entities: None,
             markers: None,
+            markers_region_len: None,
             custom_chunks: None,
             preview: false,
             rule_string: None,

@@ -562,14 +562,23 @@ fn consumer_efficiency(
             .get::<PowerModule>(entity)
             .map(|module| module.status)
             .unwrap_or(0.0),
-        K::Coolant { amount, .. } => {
+        K::Coolant {
+            amount,
+            allow_liquid,
+            allow_gas,
+        } => {
             if pass_delta <= 0.000_000_1 {
                 return 0.0;
             }
             let Some(module) = world.get::<LiquidModule>(entity) else {
                 return 0.0;
             };
-            match first_available_liquid(module) {
+            let traits = world.get_resource::<crate::world::modules::LiquidTraits>();
+            let consumed = consumed_liquid(module, &|liquid| {
+                traits
+                    .is_some_and(|traits| traits.coolant_accepts(liquid, *allow_liquid, *allow_gas))
+            });
+            match consumed {
                 Some(liquid) => (module.get(liquid) / (amount * pass_delta)).min(1.0),
                 None => 0.0,
             }
@@ -600,9 +609,27 @@ fn consumer_update(
                 }
             }
         }
-        K::Coolant { amount, .. } => {
-            if let Some(mut module) = world.get_mut::<LiquidModule>(entity)
-                && let Some(liquid) = first_available_liquid(&module)
+        K::Coolant {
+            amount,
+            allow_liquid,
+            allow_gas,
+        } => {
+            // Pick under an immutable borrow first (the traits resource and
+            // the module cannot be borrowed at once), then remove.
+            let consumed = {
+                let Some(module) = world.get::<LiquidModule>(entity) else {
+                    return;
+                };
+                consumed_liquid(module, &|liquid| {
+                    world
+                        .get_resource::<crate::world::modules::LiquidTraits>()
+                        .is_some_and(|traits| {
+                            traits.coolant_accepts(liquid, *allow_liquid, *allow_gas)
+                        })
+                })
+            };
+            if let (Some(liquid), Some(mut module)) =
+                (consumed, world.get_mut::<LiquidModule>(entity))
             {
                 module.remove(liquid, amount * edelta);
             }
@@ -610,14 +637,22 @@ fn consumer_update(
     }
 }
 
-/// First liquid present in the module (liquid-id order), matching
-/// `ConsumeLiquidFilter.getConsumed`'s `current` + content-order scan.
-fn first_available_liquid(module: &LiquidModule) -> Option<LiquidId> {
+/// `ConsumeLiquidFilter.getConsumed` (`ConsumeLiquidFilter.java:57-71`): the
+/// module's **current** liquid when it matches and has an amount, else the
+/// first matching liquid in content order.
+pub(crate) fn consumed_liquid(
+    module: &LiquidModule,
+    matches: &dyn Fn(LiquidId) -> bool,
+) -> Option<LiquidId> {
+    let current = module.current_liquid();
+    if matches(current) && module.current_liquid_amount() > 0.0 {
+        return Some(current);
+    }
     module
         .liquids
         .iter()
         .enumerate()
-        .find(|(_, amount)| **amount > 0.0)
+        .find(|(index, amount)| **amount > 0.0 && matches(LiquidId::new(*index as u16)))
         .map(|(index, _)| LiquidId::new(index as u16))
 }
 

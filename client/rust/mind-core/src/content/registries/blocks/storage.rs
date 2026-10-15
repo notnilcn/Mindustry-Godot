@@ -121,6 +121,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         core_unit: Some("evoke"),
         // `Blocks.java:3197` `coreBastion.incinerateNonBuildable = true`.
         incinerate_non_buildable: Some(true),
+        // `Blocks.java:3198` `coreBastion.requiresCoreZone = true`.
+        requires_core_zone: Some(true),
         ..spec("core-bastion", BlockKind::CoreBlock)
     })?;
 
@@ -151,6 +153,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         core_unit: Some("incite"),
         // `Blocks.java:3216` `coreCitadel.incinerateNonBuildable = true`.
         incinerate_non_buildable: Some(true),
+        // `Blocks.java:3218` `coreCitadel.requiresCoreZone = true`.
+        requires_core_zone: Some(true),
         ..spec("core-citadel", BlockKind::CoreBlock)
     })?;
 
@@ -182,6 +186,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         core_unit: Some("emanate"),
         // `Blocks.java:3234` `coreAcropolis.incinerateNonBuildable = true`.
         incinerate_non_buildable: Some(true),
+        // `Blocks.java:3236` `coreAcropolis.requiresCoreZone = true`.
+        requires_core_zone: Some(true),
         ..spec("core-acropolis", BlockKind::CoreBlock)
     })?;
 
