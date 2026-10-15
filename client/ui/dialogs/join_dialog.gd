@@ -11,6 +11,12 @@ extends MindDialog
 signal connect_requested(address: String)
 signal join_requested(match_id: int)
 
+## Java `JoinDialog.java:341`/`:349`: name and colour persist in the shared
+## settings store (`Core.settings "name"` / `"color-0"`), max 40 chars.
+const NAME_SETTING := "name"
+const COLOR_SETTING := "color-0"
+const MAX_NAME_LENGTH := 40
+
 ## Player color shown in the header swatch (upstream `player.color()`).
 var _color := Color.WHITE
 var _table: MindTable = null
@@ -50,7 +56,10 @@ func _build_header() -> void:
 	header.add_theme_constant_override("separation", 6)
 	header.add_child(MindWidgets.label(_t("@name")))
 	_name_field = MindWidgets.field(_t("@name"))
-	_name_field.max_length = 40
+	_name_field.max_length = MAX_NAME_LENGTH
+	# `JoinDialog.java:341`: the field opens with the remembered name.
+	_name_field.text = _stored_name()
+	_name_field.text_changed.connect(_store_name)
 	_name_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(_name_field)
 	# code-instantiated: the square color swatch is tinted at runtime by the
@@ -59,6 +68,7 @@ func _build_header() -> void:
 	swatch.theme_type_variation = "squarei"
 	swatch.custom_minimum_size = Vector2(54, 54)
 	_swatch_tint = ColorRect.new()
+	_color = _stored_color()
 	_swatch_tint.color = _color
 	_swatch_tint.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	swatch.add_child(_swatch_tint)
@@ -266,6 +276,7 @@ func _public_matches() -> Array:
 
 ## `JoinDialog.safeConnect` intent: join the picked public match.
 func _join(match_id: int) -> void:
+	_push_identity()
 	join_requested.emit(match_id)
 	_close()
 
@@ -281,9 +292,58 @@ func _open_picker() -> void:
 
 
 func _on_color_selected(color: Color) -> void:
+	_store_color(color)
+
+
+## `Core.settings.getString("name")` (`JoinDialog.java:341`).
+func _stored_name() -> String:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_text"):
+		return ""
+	return str(ui.call("settings_get_text", NAME_SETTING, ""))
+
+
+## `Core.settings.getInt("color-0")` as `Color.rgba8888()`; unset (0) keeps the
+## palette default (`JoinDialog.java:349`).
+func _stored_color() -> Color:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_int"):
+		return Color.WHITE
+	var rgba := int(ui.call("settings_get_int", COLOR_SETTING, 0))
+	if rgba == 0:
+		return Color.WHITE
+	return Color8((rgba >> 24) & 0xFF, (rgba >> 16) & 0xFF, (rgba >> 8) & 0xFF, rgba & 0xFF)
+
+
+## `JoinDialog.java:342-346`: every name edit updates `player.name` and the
+## `name` setting immediately.
+func _store_name(text: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", NAME_SETTING, text)
+	_push_identity()
+
+
+## `JoinDialog.java:348-354`: picking a colour updates `player.color()` and the
+## `color-0` setting immediately.
+func _store_color(color: Color) -> void:
 	_color = color
 	if _swatch_tint != null:
-		_swatch_tint.color = _color
+		_swatch_tint.color = color
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_int"):
+		ui.call("settings_put_int", COLOR_SETTING, color.to_rgba32())
+	_push_identity()
+
+
+## Pushes `player.name`/`player.color` to the relay identity reducers; the
+## facade queues them and sends on connect (I08 T2).
+func _push_identity() -> void:
+	if _name_field == null:
+		return
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net != null and net.has_method("set_player_identity"):
+		net.call("set_player_identity", _name_field.text, _color.to_rgba32())
 
 
 func _toggle_add() -> void:
@@ -303,11 +363,13 @@ func _submit_add() -> void:
 	if _ip_field != null:
 		address = _ip_field.text.strip_edges()
 	if not address.is_empty():
+		_push_identity()
 		connect_requested.emit(address)
 	_hide_add()
 
 
 func _connect_to(address: String) -> void:
+	_push_identity()
 	connect_requested.emit(address)
 
 

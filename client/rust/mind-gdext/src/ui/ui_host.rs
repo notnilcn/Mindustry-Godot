@@ -833,6 +833,17 @@ impl MindUi {
         true
     }
 
+    /// `Core.settings.put(key, value)` for an integer value (dynamic keys such
+    /// as `color-0`; Java `HostDialog.java:33` stores `Color.rgba()`).
+    #[func]
+    pub fn settings_put_int(&mut self, key: GString, value: i64) -> bool {
+        crate::settings_hub::with_settings(|store| {
+            store.put_i32(&key.to_string(), value as i32);
+        });
+        self.persist_settings();
+        true
+    }
+
     /// `Control.java:640` `uiscalechanged`: whether the UI scale was changed
     /// since the last confirmed boot.
     #[func]

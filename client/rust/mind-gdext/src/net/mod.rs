@@ -91,6 +91,9 @@ pub struct MindNet {
     online_mode: bool,
     /// Last `session_changed` payload, so transitions emit exactly once.
     last_session_state: SessionState,
+    /// Java `player.name` + `player.color` (`0xRRGGBBAA`), pushed by
+    /// [`Self::set_player_identity`] and re-sent on every connect.
+    desired_identity: Option<(String, u32)>,
 }
 
 #[godot_api]
@@ -128,6 +131,7 @@ impl INode for MindNet {
             last_checksum_tick: 0,
             online_mode: false,
             last_session_state: SessionState::Offline,
+            desired_identity: None,
         }
     }
 
@@ -143,11 +147,13 @@ impl INode for MindNet {
     }
 
     fn process(&mut self, _delta: f64) {
+        let mut connected_now = false;
         if let Some(connector) = self.connector.as_mut() {
             connector.pump();
             for event in connector.drain_events() {
                 match event {
                     ConnectorEvent::Connected { identity } => {
+                        connected_now = true;
                         self.session.set_local_identity(identity.identity);
                         self.checksum_monitor.set_local(identity.identity);
                         if let Some(runtime) = self.runtime.as_mut() {
@@ -168,6 +174,9 @@ impl INode for MindNet {
             self.drain_snapshots();
             self.drain_relay();
             self.maybe_publish_checksum();
+        }
+        if connected_now && self.push_identity() {
+            log::info!("MindNet: player identity pushed after connect");
         }
         self.notify_session_state();
     }
@@ -435,6 +444,17 @@ impl MindNet {
         let result = self.session.set_ready(connector, ready).is_ok();
         self.notify_session_state();
         result
+    }
+
+    /// Java `HostDialog`/`JoinDialog` identity: `player.name`/`player.color`
+    /// follow the `name`/`color-0` settings (`HostDialog.java:22-34`,
+    /// `JoinDialog.java:342-354`). Stores the desired values and pushes the
+    /// `set_username`/`set_color` reducers now (when connected) and again on
+    /// every future connect. `color` is `0xRRGGBBAA` as a signed 32-bit int.
+    #[func]
+    pub fn set_player_identity(&mut self, name: GString, color: i64) -> bool {
+        self.desired_identity = Some((name.to_string(), color as i32 as u32));
+        self.push_identity()
     }
 
     /// Session state name (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -718,6 +738,31 @@ impl MindNet {
             return false;
         }
         true
+    }
+
+    /// Pushes the stored player identity through the identity reducers when
+    /// the client is connected. `false` when nothing was stored or the link
+    /// is down (the values stay queued for the next connect).
+    fn push_identity(&mut self) -> bool {
+        let Some((name, color)) = self.desired_identity.clone() else {
+            return false;
+        };
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        if !connector.is_connected() {
+            return false;
+        }
+        let mut ok = true;
+        if let Err(error) = connector.set_username(&name) {
+            log::warn!("MindNet.set_username failed: {error}");
+            ok = false;
+        }
+        if let Err(error) = connector.set_color(color) {
+            log::warn!("MindNet.set_color failed: {error}");
+            ok = false;
+        }
+        ok
     }
 
     /// Emits `session_changed` when the session state differs from the last
