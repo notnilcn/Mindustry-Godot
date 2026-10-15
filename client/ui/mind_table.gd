@@ -227,6 +227,11 @@ func _grid() -> Dictionary:
 	var rows := {}
 	var order: Array = []
 	for entry in _cells:
+		# Visible-only layout, like every Container and Arc's `Table` (a hidden
+		# cell must not reserve space; the collapsers depend on this).
+		var control: Control = entry.control
+		if is_instance_valid(control) and not control.visible:
+			continue
 		var r: int = entry.row
 		if not rows.has(r):
 			rows[r] = []

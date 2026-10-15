@@ -13,9 +13,48 @@
 use crate::content::ContentRegistry;
 use crate::game::spawn_group::{ItemStack, NEVER, SpawnGroup};
 use crate::math::rand_arc::ArcRand;
+use crate::world::MapGenHooks;
 
 /// Wave format version (`Waves.waveVersion`).
 pub const WAVE_VERSION: i32 = 7;
+
+/// [`MapGenHooks`] backed by the vanilla wave table (`Vars.waves.get()`).
+///
+/// `Map.rules(base)` fills an empty `rules.spawns` from the hooks
+/// (`Map.java:110`); the custom-game path (`Control.playMap`) uses the built-in
+/// table, exactly like `Vars.waves` does upstream. The runtime wave descriptor
+/// is converted into the persisted `Rules.spawns` shape through the same JSON
+/// codec the wave spawner reads it back with (`groups_from_rules`).
+#[derive(Debug, Clone)]
+pub struct WaveMapHooks {
+    groups: Vec<crate::io::json::SpawnGroup>,
+}
+
+impl WaveMapHooks {
+    /// Builds the hooks with the 28-group vanilla table.
+    pub fn new() -> Self {
+        let mut waves = Waves::new();
+        Self {
+            groups: waves
+                .get()
+                .iter()
+                .filter_map(|group| serde_json::from_value(group.to_json()).ok())
+                .collect(),
+        }
+    }
+}
+
+impl Default for WaveMapHooks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MapGenHooks for WaveMapHooks {
+    fn wave_groups(&self) -> Vec<crate::io::json::SpawnGroup> {
+        self.groups.clone()
+    }
+}
 
 /// The built-in wave table (`Waves.get()`).
 #[derive(Debug, Default)]
@@ -588,6 +627,19 @@ mod tests {
         let mut waves = Waves::new();
         let _ = waves.get();
         assert!(table_units_registered(&registry, &waves));
+    }
+
+    /// The `MapGenHooks` adapter hands `Map.rules` the same 28-group table the
+    /// vanilla game uses (`Vars.waves.get()`, `Map.java:110`).
+    #[test]
+    fn wave_map_hooks_expose_the_builtin_table() {
+        let hooks = WaveMapHooks::new();
+        let groups = MapGenHooks::wave_groups(&hooks);
+        assert_eq!(groups.len(), 28, "28 upstream groups");
+        assert_eq!(groups[0].type_, "dagger");
+        assert_eq!(groups[0].end, 10);
+        assert_eq!(groups[27].type_, "toxopid");
+        assert_eq!(groups[27].shields, 1000.0);
     }
 
     #[test]

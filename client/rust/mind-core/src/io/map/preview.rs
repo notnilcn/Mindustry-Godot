@@ -290,6 +290,15 @@ pub fn generate_preview_from_tiles(palette: &BlockPalette, map: &dyn MapSource) 
     image
 }
 
+/// `MapIO.generatePreview`'s scan facts (`Map.spawns` + `Map.teams`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PreviewFacts {
+    /// Spawn-overlay count (`Map.spawns`).
+    pub spawns: u32,
+    /// Teams with a core building (`Map.teams`).
+    pub teams: std::collections::BTreeSet<u8>,
+}
+
 /// The preview world consumer (`MapIO.generatePreview(Map)` `CachedTile`).
 ///
 /// Drives the standard v1 map read with `preview = true`; pixels + teams +
@@ -306,6 +315,8 @@ pub struct PreviewContext {
     /// Spawn overlay count.
     pub spawns: u32,
     generating: bool,
+    /// Legacy/v2 tile-entity chunk layout (`set_legacy_entities`).
+    legacy_entities: bool,
 }
 
 impl PreviewContext {
@@ -321,6 +332,15 @@ impl PreviewContext {
             teams: std::collections::BTreeSet::new(),
             spawns: 0,
             generating: false,
+            legacy_entities: false,
+        }
+    }
+
+    /// The scan facts of this preview (`Map.spawns`/`Map.teams`).
+    pub fn facts(&self) -> PreviewFacts {
+        PreviewFacts {
+            spawns: self.spawns,
+            teams: self.teams.clone(),
         }
     }
 
@@ -410,13 +430,34 @@ impl WorldContext for PreviewContext {
 
     fn read_building(
         &mut self,
-        _index: usize,
+        index: usize,
         reader: &mut WireReader,
-        _version: u8,
+        version: u8,
     ) -> IoResult<()> {
-        // Previews skip entity payloads but must consume the chunk.
+        // `MapIO.generatePreview`'s `CachedTile.onReadBuilding`: the base
+        // carries the team, so a core's team lands in `Map.teams`
+        // (`MapIO.java:134-140`); the body is skipped as before.
+        let mut decoded = crate::world::building_io::DecodedBase::default();
+        if self.legacy_entities {
+            crate::world::building_io::read_base_legacy(&mut decoded, reader)?;
+        } else {
+            crate::world::building_io::read_base(&mut decoded, reader, version)?;
+        }
+        if self
+            .block_ids
+            .get(index)
+            .copied()
+            .is_some_and(|block| self.palette.kind(block) == Some(BlockKind::CoreBlock))
+        {
+            self.teams.insert(decoded.team);
+        }
         reader.skip_to_end();
         Ok(())
+    }
+
+    fn set_legacy_entities(&mut self, legacy: bool) {
+        // The reader selects this for legacy `MSAV` and native v2 chunks.
+        self.legacy_entities = legacy;
     }
 
     fn on_read_building(&mut self, _index: usize) {}

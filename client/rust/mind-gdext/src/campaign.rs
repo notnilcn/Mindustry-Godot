@@ -16,7 +16,7 @@ use godot::builtin::{
     PackedInt32Array, PackedStringArray, PackedVector3Array, VarDictionary, Vector3,
 };
 use godot::classes::notify::NodeNotification;
-use godot::classes::{FileAccess, INode, Node, ProjectSettings};
+use godot::classes::{FileAccess, INode, Node, ProjectSettings, Time};
 use godot::obj::Base;
 use godot::prelude::*;
 
@@ -29,6 +29,7 @@ use mind_core::content::{
 };
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
+use mind_core::game::gamemode::Gamemode;
 use mind_core::game::map_objectives::MapObjectivesRuntime;
 use mind_core::game::objectives::{CampaignObjectiveContext, Objective, ObjectiveContext};
 use mind_core::game::planet::EmptyNeighborhood;
@@ -45,6 +46,7 @@ use mind_core::game::saves::{
 use mind_core::game::schematics::Schematics;
 use mind_core::game::tech_tree::{self, SettingsUnlockStore};
 use mind_core::game::universe::{Campaign, TurnContext, launch_plan};
+use mind_core::game::waves::WaveMapHooks;
 use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
 use mind_core::io::fs::{NativeFs, Paths};
@@ -96,6 +98,9 @@ pub struct MindCampaign {
     /// Content names unlocked since the last `take_unlocked_content` (H05's
     /// `hudfrag.showUnlock` popup; `Control.java:160-174`).
     unlocked_since_last_take: Vec<String>,
+    /// `state.playtestingMap` (`Control.java:409`): the map a playtest start
+    /// loaded, read by the editor's `resumeAfterPlaytest`.
+    playtesting_map: Option<String>,
 }
 
 #[godot_api]
@@ -117,6 +122,7 @@ impl INode for MindCampaign {
             last_pump_tick: 0,
             saving_finish_tick: None,
             unlocked_since_last_take: Vec::new(),
+            playtesting_map: None,
         }
     }
 
@@ -1259,23 +1265,175 @@ impl MindCampaign {
         self.runtime_installed && !events.is_empty()
     }
 
-    /// Starts a custom map by name (`Logic.playMap`).
+    /// Starts a custom map with a gamemode, applying the map's own rules
+    /// (`Control.playMap`, `Control.java:400-426`).
+    ///
+    /// `map` is a map display name or file path (the `MindPreview` registry
+    /// rows); `mode` is a `Gamemode` name; `rules_json` is empty for the map's
+    /// own `applyRules(mode)` or the edited rules JSON from the Custom Rules
+    /// dialog; `playtest` records the map for the editor's
+    /// `resumeAfterPlaytest` path. Returns `false` (with an `@map.invalid` /
+    /// `map.nospawn*` error shown) when the map is unknown, the world fails to
+    /// load, or the map fails `World.loadMap`'s core checks
+    /// (`World.java:366-390`).
     #[func]
-    pub fn start_map(&mut self, name: GString) -> bool {
-        let mut rules = self.session.rules.clone();
-        rules.mode_name = Some(name.to_string());
-        rules.sector = None;
+    pub fn start_map_mode(
+        &mut self,
+        map: GString,
+        mode: GString,
+        playtest: bool,
+        rules_json: GString,
+    ) -> bool {
+        let map_name = map.to_string();
+        let mode_name = mode.to_string();
+        let Some(header) = self.resolve_map(&map_name) else {
+            log::warn!("start_map_mode: unknown map `{map_name}`");
+            self.show_error("@map.invalid");
+            return false;
+        };
+        let Some(mode_id) = Gamemode::from_name(&mode_name) else {
+            log::warn!("start_map_mode: unknown mode `{mode_name}`");
+            self.show_error("@map.invalid");
+            return false;
+        };
+        if self.campaign.is_none() {
+            log::warn!("start_map_mode: campaign unavailable");
+            self.show_error("@map.invalid");
+            return false;
+        }
+        let path = header.file.display().to_string();
+        // `logic.reset(); world.loadMap(map, rules)` (`Control.java:405-406`).
+        let loaded = self
+            .host()
+            .map(|mut host| host.bind_mut().load_map_world(GString::from(path.as_str())))
+            .unwrap_or(false);
+        if !loaded {
+            self.show_error("@map.invalid");
+            return false;
+        }
+        let rules_text = rules_json.to_string();
+        let rules = if rules_text.trim().is_empty() {
+            let hooks = WaveMapHooks::new();
+            header.apply_rules(mode_id, &hooks)
+        } else {
+            match mind_core::io::json::JsonIo::read::<Rules>(&rules_text) {
+                Ok(rules) => rules,
+                Err(error) => {
+                    log::warn!("start_map_mode: bad rules JSON: {error}");
+                    self.show_error("@map.invalid");
+                    return false;
+                }
+            }
+        };
+        // `World.loadMap`'s validity checks (`World.java:366-390`). `checkRules`
+        // is the requested mode set; the pvp/attack branches read
+        // `state.rules`, which `Control.java:407` still holds as the map's own
+        // rules at that point (the load assigned them).
+        let map_rules = self
+            .host()
+            .and_then(|host| host.bind().last_sector_rules().cloned())
+            .unwrap_or_default();
+        let core_teams = self
+            .host()
+            .map(|host| host.bind().core_teams())
+            .unwrap_or_default();
+        let cores_of = |team: u8| {
+            self.host()
+                .map(|host| host.bind().player_core_blocks(team))
+                .unwrap_or(0)
+        };
+        if !rules.pvp && cores_of(rules.default_team) == 0 {
+            let team = mind_core::game::team::Team::get(rules.default_team).colored_name();
+            log::warn!(
+                "start_map_mode: `{map_name}` has no core for team {}",
+                rules.default_team
+            );
+            self.show_error_key("map.nospawn", &[team.as_str()]);
+            self.set_menu_visible(true);
+            return false;
+        } else if rules.pvp && core_teams.len() < 2 {
+            log::warn!("start_map_mode: `{map_name}` has fewer than two core teams");
+            self.show_error("@map.nospawn.pvp");
+            self.set_menu_visible(true);
+            return false;
+        } else if rules.attack_mode && cores_of(map_rules.wave_team) == 0 {
+            let team = mind_core::game::team::Team::get(map_rules.wave_team).colored_name();
+            log::warn!("start_map_mode: `{map_name}` has no core for the wave team");
+            self.show_error_key("map.nospawn.attack", &[team.as_str()]);
+            self.set_menu_visible(true);
+            return false;
+        }
+        // `rules.retainContentFields(oldRules); state.rules = rules` happens
+        // inside `play_map` (invariant 6), then `logic.play()` + `Trigger.newGame`.
+        if !self.start_loaded_world(rules) {
+            return false;
+        }
+        if playtest {
+            self.playtesting_map = Some(path);
+        } else if self.live_setting_flag("savecreate") {
+            // `Control.playMap`'s `savecreate` slot (`Control.java:418-420`):
+            // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`.
+            let name = format!("{} {}", header.name(), save_date_stamp());
+            if !self.save_slot(GString::from(name.as_str())) {
+                log::warn!("start_map_mode: savecreate slot `{name}` failed");
+            }
+        }
+        true
+    }
+
+    /// `Control.playMap`'s control half over an already-loaded world
+    /// (`Control.java:407-426`): adopts `rules` as the session rules, runs the
+    /// play flow, installs the session runtime and spawns the player. Factored
+    /// so I08's host/join paths reuse it.
+    pub fn start_loaded_world(&mut self, rules: Rules) -> bool {
+        let Some(campaign) = self.campaign.clone() else {
+            log::warn!("start_loaded_world: campaign unavailable");
+            return false;
+        };
         let events = play_map(&mut self.session, rules, None, |_| false, &mut self.epoch);
-        let started = !events.is_empty();
-        // `Control.playMap` fires `Trigger.newGame` like `playNewSector`
-        // (`Control.java:415,589`): the core drops in unless
-        // `skipcoreanimation` or a PvP rule set.
-        if started
-            && events
-                .iter()
-                .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame))
+        if events.is_empty() {
+            return false;
+        }
+        let mut installed = false;
+        if let Some(mut host) = self.host() {
+            let mut runtime = CampaignRuntime::new(self.session.clone(), campaign);
+            if let Some(registry) = self.registry.take() {
+                runtime.set_unlocked_content(collect_unlocked(&registry));
+                host.bind_mut().install_campaign_runtime(runtime);
+                // A custom map has no save to resume: the launch path applies
+                // the loadout (`Logic.play` starting items; `Logic.java:277-285`).
+                let sync = host.bind_mut().sync_campaign_session(&registry, true);
+                self.registry = Some(registry);
+                if sync.is_some() {
+                    let taken = host.bind_mut().take_campaign_runtime();
+                    if let Some(runtime) = taken {
+                        self.session = runtime.session.clone();
+                        host.bind_mut().put_campaign_runtime(runtime);
+                    }
+                    installed = true;
+                }
+            }
+        }
+        // `Trigger.newGame` (`Control.java:198-222`): spawn the player at the
+        // best core so `player.unit()` is live after the launch.
+        if installed
+            && let Some(mut host) = self.host()
+            && !host.bind_mut().spawn_player_unit()
+        {
+            log::warn!("start_loaded_world: player unit spawn failed");
+        }
+        // The core drops in with the 160-tick landing cutscene unless
+        // `skipcoreanimation` or a PvP rule set (PAR-0131).
+        let new_game = events
+            .iter()
+            .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame));
+        if installed
+            && new_game
             && !settings_hub::with_settings(|store| store.get_bool("skipcoreanimation", false))
             && !self.session.rules.pvp
+            // Read the core position in its own statement: a `host.bind()`
+            // temporary in the let-chain would stay borrowed across the camera
+            // call below (re-entrant `bind_mut` panic).
             && let Some((core_x, core_y, core_block)) = self.host().and_then(|host| {
                 let guard = host.bind();
                 guard
@@ -1298,7 +1456,167 @@ impl MindCampaign {
                 audio.call("play_landing", &[]);
             }
         }
-        started
+        self.runtime_installed = installed;
+        if let Some(host) = self.host() {
+            self.last_pump_tick = host.bind().get_tick().max(0) as u64;
+        }
+        installed
+    }
+
+    /// The map recorded by the last playtest start (`state.playtestingMap`);
+    /// the editor's `resumeAfterPlaytest` reads it. `""` when the last start
+    /// was not a playtest.
+    #[func]
+    pub fn playtesting_map(&self) -> GString {
+        GString::from(self.playtesting_map.as_deref().unwrap_or(""))
+    }
+
+    /// `Planet.applyRules(rules, true)` over a rules JSON (`CustomRulesDialog`'s
+    /// planet buttons, `CustomRulesDialog.java:287-306` / `Planet.java:286-306`).
+    /// Returns the updated rules JSON (the input unchanged on failure).
+    #[func]
+    pub fn apply_planet_rules(&mut self, planet: GString, rules_json: GString) -> GString {
+        let text = rules_json.to_string();
+        let Ok(mut rules) = serde_json::from_str::<Rules>(&text) else {
+            return rules_json;
+        };
+        let Some(registry) = self.registry.as_ref() else {
+            return rules_json;
+        };
+        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+            return rules_json;
+        };
+        let record = mind_core::game::planet::Planet::from_def(registry, def, 0.0);
+        let is_game = self.session.phase.is_game();
+        record.apply_rules(registry, &mut rules, true, is_game);
+        match serde_json::to_string(&rules) {
+            Ok(json) => GString::from(json.as_str()),
+            Err(_) => rules_json,
+        }
+    }
+
+    /// `Planets.<name>.defaultEnv` as a bitmask (`CustomRulesDialog`'s Erekir
+    /// checks). `0` for an unknown planet.
+    #[func]
+    pub fn planet_default_env(&self, planet: GString) -> i64 {
+        let Some(registry) = self.registry.as_ref() else {
+            return 0;
+        };
+        registry
+            .planet_by_name(&planet.to_string())
+            .map(|def| {
+                i64::from(mind_core::game::planet::Planet::from_def(registry, def, 0.0).default_env)
+            })
+            .unwrap_or(0)
+    }
+
+    /// `Vars.defaultEnv` (`Vars.java:65`): `terrestrial | spores | groundOil |
+    /// groundWater | oxygen` = 233. Used by `@rules.anyenv`.
+    #[func]
+    pub fn default_env(&self) -> i64 {
+        use mind_core::content::EnvFlag;
+        i64::from(
+            mind_core::game::planet::env_bit(EnvFlag::Terrestrial)
+                | mind_core::game::planet::env_bit(EnvFlag::Spores)
+                | mind_core::game::planet::env_bit(EnvFlag::GroundOil)
+                | mind_core::game::planet::env_bit(EnvFlag::GroundWater)
+                | mind_core::game::planet::env_bit(EnvFlag::Oxygen),
+        )
+    }
+
+    /// Planets the rules dialog may switch to (`content.planets().select(p ->
+    /// p.accessible && p.visible && p.isLandable())`,
+    /// `CustomRulesDialog.java:287`): `[{name}]` in content order.
+    #[func]
+    pub fn rules_planets(&self) -> Array<VarDictionary> {
+        let mut out = Array::<VarDictionary>::new();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        for def in registry.planets() {
+            if !def.accessible || !def.visible || def.sectors.is_empty() {
+                continue;
+            }
+            let mut row = VarDictionary::new();
+            row.set(&GString::from("name"), &def.name.as_str().to_variant());
+            out.push(&row);
+        }
+        out
+    }
+
+    /// Resolves a map display name or file path through the map registry rows
+    /// (`MindPreview`'s `Maps.load` sources).
+    fn resolve_map(&self, name: &str) -> Option<mind_core::maps::Map> {
+        let maps = crate::assets::loader::load_map_registry(self.paths.root());
+        maps.by_name(name).cloned().or_else(|| {
+            maps.all()
+                .iter()
+                .find(|map| map.file.display().to_string() == name)
+                .cloned()
+        })
+    }
+
+    /// `UI.showErrorMessage(text)` (`UI.java:495-508`): a modal error prompt.
+    /// The port has no dedicated error dialog; `show_text` with the
+    /// `@error.title` header is the same shape. The argument is a bundle key
+    /// (`@`-prefixed like the Java call sites).
+    fn show_error(&self, message: &str) {
+        let text = self.bundle.get(message.trim_start_matches('@')).to_owned();
+        self.show_error_text(&text);
+    }
+
+    /// [`Self::show_error`] with a bundle key formatted against `args`
+    /// (`Core.bundle.format`).
+    fn show_error_key(&self, key: &str, args: &[&str]) {
+        let text = self.bundle.format(key.trim_start_matches('@'), args);
+        self.show_error_text(&text);
+    }
+
+    fn show_error_text(&self, text: &str) {
+        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
+            log::warn!("error shown with no UI available: {text}");
+            return;
+        };
+        let title = self.bundle.get("error.title").to_owned();
+        // `Dialog.add(text)` parses markup upstream; the prompt labels take
+        // BBCode, so render both through `UI.formatIcons` first.
+        let render = |raw: &str| -> String {
+            self.base()
+                .get_node_or_null("/root/MindAssets")
+                .and_then(|mut assets| {
+                    assets
+                        .call("markup_text", &[GString::from(raw).to_variant()])
+                        .try_to::<GString>()
+                        .ok()
+                })
+                .map(|rendered| rendered.to_string())
+                .unwrap_or_else(|| raw.to_owned())
+        };
+        let title = render(&title);
+        let text = render(text);
+        ui.call(
+            "show_text",
+            &[
+                GString::from(title.as_str()).to_variant(),
+                GString::from(text.as_str()).to_variant(),
+            ],
+        );
+    }
+
+    /// `Core.scene` menu restore for an invalid map (`World.loadMap` posts
+    /// `state.set(State.menu)`, `World.java:391`).
+    fn set_menu_visible(&self, visible: bool) {
+        let Some(mut ui_root) = self.base().get_node_or_null("/root/Spine/Ui/UiRoot") else {
+            return;
+        };
+        ui_root.call("set_menu_visible", &[visible.to_variant()]);
+    }
+
+    /// Starts a custom map by name (`Logic.playMap`, survival rules).
+    /// Superseded by [`Self::start_map_mode`] for the map-play dialog.
+    #[func]
+    pub fn start_map(&mut self, name: GString) -> bool {
+        self.start_map_mode(name, GString::from("survival"), false, GString::from(""))
     }
 
     /// Forces sector capture (`Logic.sectorCapture`), routing through the live
@@ -1617,21 +1935,62 @@ impl MindCampaign {
     }
 
     /// Applies a rules JSON blob; campaign edits require `allowEditRules`.
+    ///
+    /// `PausedDialog`'s live edit (`PausedDialog.java:20-37`):
+    /// `rulesDialog.hidden(() -> { Vars.state.rules = toEdit; Call.setRules(toEdit); })`.
+    /// While a match runs the runtime session is authoritative (`pump_runtime`
+    /// mirrors it back), so the accepted rules are written into the live
+    /// `CampaignRuntime` and its world state is re-derived
+    /// (`CampaignRuntime.rules_world_dirty`).
     #[func]
     pub fn set_rules_json(&mut self, json: GString) -> bool {
-        let Ok(incoming) = serde_json::from_str::<mind_core::game::rules::Rules>(&json.to_string())
-        else {
-            return false;
+        // `JsonIo::read` coerces whole floats (`1.0` -> `1`), so a rules blob
+        // round-tripped through GDScript's JSON parses like Arc's reader.
+        let incoming = match mind_core::io::json::JsonIo::read::<Rules>(&json.to_string()) {
+            Ok(rules) => rules,
+            Err(error) => {
+                log::warn!("set_rules_json: rules JSON did not parse: {error}");
+                return false;
+            }
         };
         let is_campaign = self.session.is_campaign();
-        apply_set_rules(
+        if let Err(error) = apply_set_rules(
             &mut self.session.rules,
-            incoming,
+            incoming.clone(),
             is_campaign,
             None,
             &mut self.epoch,
-        )
-        .is_ok()
+        ) {
+            log::warn!("set_rules_json: rejected: {error}");
+            return false;
+        }
+        // Mirror into the runtime copy (`Call.setRules`); the facade session is
+        // refreshed by the next pump.
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                let runtime_is_campaign = runtime.session.is_campaign();
+                let accepted = match apply_set_rules(
+                    &mut runtime.session.rules,
+                    incoming,
+                    runtime_is_campaign,
+                    None,
+                    &mut self.epoch,
+                ) {
+                    Ok(_) => true,
+                    Err(error) => {
+                        log::warn!("set_rules_json: runtime rejected: {error}");
+                        false
+                    }
+                };
+                if accepted {
+                    runtime.rules_world_dirty = true;
+                }
+                host.bind_mut().put_campaign_runtime(runtime);
+                return accepted;
+            }
+        }
+        true
     }
 
     /// Researches a content name, spending the active sector's real stored items
@@ -3567,6 +3926,85 @@ impl MindCampaign {
         out
     }
 
+    /// Writes one `CampaignRules` field for a planet and persists it
+    /// (`campaign_rules_dialog.gd`'s `set_campaign_rule(planet, key, value)`;
+    /// Java `PlanetDialog.rules`). Re-applies the planet rules on the live
+    /// session when the edited planet is the one being played.
+    #[func]
+    pub fn set_campaign_rule(&mut self, planet: GString, key: GString, value: Variant) -> bool {
+        let planet_name = planet.to_string();
+        let key = key.to_string();
+        let Some(campaign) = self.campaign.as_ref() else {
+            return false;
+        };
+        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+            return false;
+        };
+        let Some(record) = campaign.planet(planet_id) else {
+            return false;
+        };
+        let Ok(mut json) = serde_json::to_value(&record.campaign_rules) else {
+            return false;
+        };
+        let Some(object) = json.as_object_mut() else {
+            return false;
+        };
+        let value = if let Ok(flag) = value.try_to::<bool>() {
+            serde_json::Value::Bool(flag)
+        } else if let Ok(number) = value.try_to::<f64>() {
+            serde_json::Value::from(number)
+        } else if let Ok(text) = value.try_to::<GString>() {
+            serde_json::Value::String(text.to_string())
+        } else {
+            log::warn!("set_campaign_rule: unsupported value type for `{key}`");
+            return false;
+        };
+        object.insert(key.clone(), value);
+        let Ok(rules) = serde_json::from_value::<CampaignRules>(json) else {
+            return false;
+        };
+        let Some(updated) = self.with_campaign_mut(|campaign, _settings| {
+            let Some(record) = campaign.planet_mut(planet_id) else {
+                return false;
+            };
+            record.campaign_rules = rules.clone();
+            true
+        }) else {
+            return false;
+        };
+        if !updated {
+            return false;
+        }
+        // Re-apply on the played planet (`Planet.applyRules(state.rules)`).
+        if self
+            .session
+            .sector
+            .is_some_and(|(played, _)| played == planet_id)
+            && let Some(registry) = self.registry.take()
+        {
+            let applied = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.planet(planet_id))
+                .map(|record| record.apply_rules(&registry, &mut self.session.rules, false, true));
+            if let Some(applied) = applied {
+                if applied.rts_swapped {
+                    log::info!("campaign rule `{key}` triggered the RTS-AI swap");
+                }
+                if let Some(mut host) = self.host() {
+                    let taken = host.bind_mut().take_campaign_runtime();
+                    if let Some(mut runtime) = taken {
+                        runtime.session.rules = self.session.rules.clone();
+                        host.bind_mut().put_campaign_runtime(runtime);
+                    }
+                }
+            }
+            self.registry = Some(registry);
+        }
+        self.persist();
+        true
+    }
+
     /// The active planet's `CampaignRules` as JSON (GAP-11).
     #[func]
     pub fn get_campaign_rules_json(&self) -> GString {
@@ -4411,6 +4849,29 @@ fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
         .collect()
+}
+
+/// `new SimpleDateFormat("MMM dd h:mm")` (`Control.playMap`'s `savecreate`
+/// slot name, `Control.java:419`): short month, zero-padded day, 12-hour clock.
+fn save_date_stamp() -> String {
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let dict = Time::singleton().get_datetime_dict_from_system();
+    let read = |key: &str| {
+        dict.get(key)
+            .and_then(|value| value.try_to::<i64>().ok())
+            .unwrap_or(0)
+    };
+    let month = read("month").clamp(1, 12) as usize;
+    let day = read("day");
+    let hour = read("hour");
+    let minute = read("minute");
+    let hour12 = match hour % 12 {
+        0 => 12,
+        other => other,
+    };
+    format!("{} {day:02} {hour12}:{minute:02}", MONTHS[month - 1])
 }
 
 /// Renders one stat value's cells for the `content_info_json` payload: Text

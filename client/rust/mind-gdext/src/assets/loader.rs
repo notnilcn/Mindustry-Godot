@@ -94,3 +94,41 @@ pub fn resolve_assets_dir() -> String {
 fn atlas_exists(dir: &str) -> bool {
     FileAccess::file_exists(&format!("{dir}/sprites/sprites.atlas.json"))
 }
+
+/// Resolves a `res://`/`user://` virtual path to an OS path (absolute strings
+/// pass through `ProjectSettings.globalize_path` unchanged).
+pub fn globalize_path(path: &str) -> std::path::PathBuf {
+    std::path::PathBuf::from(
+        ProjectSettings::singleton()
+            .globalize_path(path)
+            .to_string(),
+    )
+}
+
+/// The built-in map directory (`<assets>/maps`) as an OS path
+/// (`Maps.defaultMapDirectory`).
+pub fn assets_maps_dir() -> std::path::PathBuf {
+    globalize_path(&resolve_assets_dir()).join("maps")
+}
+
+/// The session data root (`user://` globalized) that holds `maps/`,
+/// `previews/`, `saves/` and `config/`.
+pub fn user_data_root() -> std::path::PathBuf {
+    globalize_path("user://")
+}
+
+/// Loads the map registry from the built-in folder plus the data root's
+/// `maps/` (`Maps.load`, `Maps.java:200-260`).
+pub fn load_map_registry(root: &std::path::Path) -> mind_core::maps::Maps {
+    use mind_core::io::fs::{FileSystem, NativeFs, Paths};
+
+    let mut maps = mind_core::maps::Maps::new();
+    let custom = Paths::new(root).maps();
+    let sources = mind_core::maps::MapSources {
+        builtin_dir: Some(assets_maps_dir()),
+        custom_dir: NativeFs.exists(&custom).then_some(custom),
+        use_default_folder: true,
+    };
+    maps.load(&NativeFs, &sources);
+    maps
+}

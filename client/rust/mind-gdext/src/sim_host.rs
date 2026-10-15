@@ -410,6 +410,9 @@ pub struct MindSimHost {
     /// Last `logic_set_code` failure (`""` when none; H06 T1) — `"toolong:<len>"`
     /// mirrors `LogicBuild.showEditDialog`'s error message.
     logic_last_error: String,
+    /// `World.loadMap`'s error key from the last failed `load_map_world`
+    /// (`map.invalid`; `None` = the last load succeeded or none ran).
+    last_map_error: Option<String>,
 }
 
 #[godot_api]
@@ -445,6 +448,7 @@ impl INode for MindSimHost {
             pending_launch: None,
             generated_loadout_placed: false,
             logic_last_error: String::new(),
+            last_map_error: None,
         }
     }
 
@@ -2299,6 +2303,75 @@ impl MindSimHost {
         self.load_sector_world(&planet_name, sector, true)
     }
 
+    /// Loads a custom map file into the sim (`Control.playMap`'s world half,
+    /// `Control.java:400-426`): the grid, buildings and cores of `path`, with
+    /// no sector preset/generator fallback.
+    ///
+    /// `path` is an absolute path, a `res://`/`user://` path, or a bare map
+    /// name registered with `MindPreview`. Returns `false` (and sets
+    /// `last_map_error` to `map.invalid`) when the file is missing or fails to
+    /// decode, exactly like `World.loadMap`'s error branch
+    /// (`World.java:355-364`).
+    #[func]
+    pub fn load_map_world(&mut self, path: GString) -> bool {
+        self.last_map_error = None;
+        let Some(resolved) = self.resolve_map_path(&path) else {
+            log::warn!("load_map_world: unknown map `{path}`");
+            self.last_map_error = Some(String::from("map.invalid"));
+            return false;
+        };
+        // A new world invalidates the previous campaign runtime.
+        self.sim.ecs.0.remove_resource::<CampaignRuntime>();
+        // Resume metadata is per load; clear before this load decides.
+        self.sector_resume = None;
+        // The loadout placement flag is per load (H05 T4).
+        self.generated_loadout_placed = false;
+        let Some(mut registry) = self.content_snapshot.take() else {
+            log::warn!("load_map_world: content registry unavailable");
+            self.last_map_error = Some(String::from("map.invalid"));
+            return false;
+        };
+        let Some(loaded) = load_grid_file(&resolved, &mut registry) else {
+            self.content_snapshot = Some(registry);
+            self.last_map_error = Some(String::from("map.invalid"));
+            return false;
+        };
+        self.finish_world_load(registry, loaded, WorldLoadExtras::default())
+    }
+
+    /// Resolves a `load_map_world` path argument: absolute paths as-is,
+    /// `res://`/`user://` through `ProjectSettings.globalize_path`, and a bare
+    /// map name through the `MindPreview` registry rows (`path` key).
+    fn resolve_map_path(&self, path: &GString) -> Option<String> {
+        let raw = path.to_string();
+        if raw.starts_with("res://") || raw.starts_with("user://") {
+            return Some(
+                ProjectSettings::singleton()
+                    .globalize_path(&raw)
+                    .to_string(),
+            );
+        }
+        if std::path::Path::new(&raw).is_absolute() {
+            return Some(raw);
+        }
+        if raw.is_empty() {
+            return None;
+        }
+        let mut preview = self.base().get_node_or_null("/root/Spine/MindPreview")?;
+        let resolved = preview
+            .call("map_path", &[GString::from(raw.as_str()).to_variant()])
+            .try_to::<GString>()
+            .ok()?;
+        (!resolved.is_empty()).then(|| resolved.to_string())
+    }
+
+    /// `map.invalid` (or `None`) from the last failed `load_map_world`
+    /// (`World.loadMap`'s `ui.showErrorMessage("@map.invalid")` branch).
+    #[func]
+    pub fn last_map_error(&self) -> GString {
+        GString::from(self.last_map_error.as_deref().unwrap_or(""))
+    }
+
     /// Shared `World.loadSector` build: `use_save` selects the resume source
     /// (the lost-sector replay reloads fresh with `false`).
     fn load_sector_world(&mut self, planet_name: &str, sector: i32, use_save: bool) -> bool {
@@ -2357,14 +2430,8 @@ impl MindSimHost {
             mind_core::maps::generators::planet::SectorRect,
             usize,
         )> = None;
-        let (grid, rules, pending_buildings, plans, save) = match loaded {
-            Some(loaded) => (
-                loaded.grid,
-                loaded.rules,
-                loaded.pending_buildings,
-                loaded.plans,
-                loaded.save,
-            ),
+        let loaded = match loaded {
+            Some(loaded) => loaded,
             None => match generated_sector {
                 Some(generated) => {
                     let mind_core::maps::planet::GeneratedSector {
@@ -2375,7 +2442,13 @@ impl MindSimHost {
                         sides,
                     } = generated;
                     generated_ctx = Some((generator, rect, sides));
-                    (grid, Some(rules), Vec::new(), Vec::new(), None)
+                    LoadedGrid {
+                        grid,
+                        rules: Some(rules),
+                        pending_buildings: Vec::new(),
+                        plans: Vec::new(),
+                        save: None,
+                    }
                 }
                 None => {
                     self.content_snapshot = Some(registry);
@@ -2387,31 +2460,15 @@ impl MindSimHost {
         // A resume save only counts when the save file supplied the world (a
         // failed decode falls back to the generator; a preset map is not a
         // resume).
-        let resume_from_save = resume_file && save.is_some();
-        self.sector_spawns = count_spawns(&grid, &registry);
-        self.sector_rules = rules;
-        self.sector_plans = plans;
-        // `Vars.bases` (PAR-0139): load before the registry moves into the
-        // content snapshot; the resource is inserted once the sim exists.
-        let base_catalog = load_base_catalog(&registry);
-        self.content_snapshot = Some(registry);
-
-        // Reuse a fresh sim and swap in the loaded/generated grid; a new
-        // iteration keeps no ECS entities from the previous world.
-        let mut sim = Sim::new(1, grid.width(), grid.height(), BlockId::AIR, BlockId::AIR);
-        sim.grid = grid;
+        let resume_from_save = resume_file && loaded.save.is_some();
         // H05 T3: a generated sector is bounded by its projected polygon
         // (`World.getDarkness` sector term, `World.java:505-529`); presets and
         // saves of preset sectors keep the square map. A resumed generated
-        // sector needs the same polygon as a fresh generation.
-        if let Some((_, rect, sides)) = &generated_ctx {
-            sim.grid.sector_polygon = Some(mind_core::world::SectorPolygon {
-                rotation: rect.rotation,
-                sides: *sides as i32,
-                size: sim.grid.tiles.width,
-            });
+        // sector needs the same polygon as a fresh generation. Only
+        // `(rotation, sides)` are decided here: the size is the loaded grid's.
+        let polygon = if let Some((_, rect, sides)) = &generated_ctx {
+            Some((rect.rotation, *sides as i32))
         } else if resume_from_save
-            && let Some(registry) = self.content_snapshot.as_ref()
             && let Some(def) = registry.planet_by_name(planet_name)
             && def
                 .sectors
@@ -2430,9 +2487,101 @@ impl MindSimHost {
                 .get(sector as usize)
                 .map(|tile| tile.corners.len())
                 .unwrap_or(0);
+            Some((rect.rotation, sides as i32))
+        } else {
+            None
+        };
+        // H05 T4: a generated sector places its launch loadout during the world
+        // load (`Schematics.placeLaunchLoadout` runs inside `generate()`;
+        // T5/T6 add the enemy base and ruins to the same pass). The closure
+        // runs from the shared tail once the fresh sim is live.
+        let generated_loadout: Option<GeneratedLoadout> =
+            generated_ctx.take().map(|(generator, _, _)| {
+                let planet = planet_name.to_owned();
+                Box::new(move |host: &mut MindSimHost| {
+                    let mut generator = generator;
+                    if let Some(loadout) = host.resolve_generated_loadout(&planet) {
+                        let bases = host
+                            .sim
+                            .ecs
+                            .0
+                            .get_resource::<mind_core::game::runtime::BaseCatalog>()
+                            .map(|catalog| catalog.0.clone());
+                        let mut rules = host.sector_rules.take().unwrap_or_default();
+                        // `state.rules.defaultTeam` (`Schematics.placeLaunchLoadout`):
+                        // the fresh sim has no `CampaignRuntime`/`BuildRules` yet, so
+                        // the load's own rules carry the team.
+                        let player_team = rules.default_team;
+                        let wave_team = rules.wave_team;
+                        if let Some(content) = host.content_snapshot.as_ref() {
+                            let mut ctx = mind_core::maps::generators::planet::StructureCtx {
+                                sim: &mut host.sim,
+                                content,
+                                bases: bases.as_deref(),
+                                loadout: Some(&loadout),
+                                rules: &mut rules,
+                                player_team,
+                                wave_team,
+                            };
+                            generator.place_structures(&mut ctx);
+                            host.generated_loadout_placed = true;
+                        }
+                        host.sector_rules = Some(rules);
+                    }
+                    host.pending_launch = None;
+                    host.sim.refresh_unit_runtime();
+                }) as GeneratedLoadout
+            });
+        let loaded_ok = self.finish_world_load(
+            registry,
+            loaded,
+            WorldLoadExtras {
+                polygon,
+                generated_loadout,
+                resume: resume_from_save,
+            },
+        );
+        if loaded_ok {
+            log::info!("loaded campaign sector `{planet_name}:{sector}`");
+        }
+        loaded_ok
+    }
+
+    /// Shared world-load tail of `load_sector_world`/`load_map_world`
+    /// (`World.loadMap`'s building half): swaps the grid into a fresh `Sim`,
+    /// installs the live runtimes and materializes the map's buildings. The
+    /// sector-only steps (polygon, launch loadout, resume metadata) arrive via
+    /// [`WorldLoadExtras`] so the two callers cannot drift.
+    fn finish_world_load(
+        &mut self,
+        registry: ContentRegistry,
+        loaded: LoadedGrid,
+        extras: WorldLoadExtras,
+    ) -> bool {
+        let resume_from_save = extras.resume && loaded.save.is_some();
+        let LoadedGrid {
+            grid,
+            rules,
+            pending_buildings,
+            plans,
+            save,
+        } = loaded;
+        self.sector_spawns = count_spawns(&grid, &registry);
+        self.sector_rules = rules;
+        self.sector_plans = plans;
+        // `Vars.bases` (PAR-0139): load before the registry moves into the
+        // content snapshot; the resource is inserted once the sim exists.
+        let base_catalog = load_base_catalog(&registry);
+        self.content_snapshot = Some(registry);
+
+        // Reuse a fresh sim and swap in the loaded/generated grid; a new
+        // iteration keeps no ECS entities from the previous world.
+        let mut sim = Sim::new(1, grid.width(), grid.height(), BlockId::AIR, BlockId::AIR);
+        sim.grid = grid;
+        if let Some((rotation, sides)) = extras.polygon {
             sim.grid.sector_polygon = Some(mind_core::world::SectorPolygon {
-                rotation: rect.rotation,
-                sides: sides as i32,
+                rotation,
+                sides,
                 size: sim.grid.tiles.width,
             });
         }
@@ -2458,48 +2607,16 @@ impl MindSimHost {
                     catalog,
                 )));
         }
-        // H05 T4: a generated sector places its launch loadout during the
-        // world load (`Schematics.placeLaunchLoadout` runs inside `generate()`;
-        // T5/T6 add the enemy base and ruins to the same pass).
-        if let Some((generator, _, _)) = generated_ctx.as_mut() {
-            if let Some(loadout) = self.resolve_generated_loadout(planet_name) {
-                let bases = self
-                    .sim
-                    .ecs
-                    .0
-                    .get_resource::<mind_core::game::runtime::BaseCatalog>()
-                    .map(|catalog| catalog.0.clone());
-                let mut rules = self.sector_rules.take().unwrap_or_default();
-                // `state.rules.defaultTeam` (`Schematics.placeLaunchLoadout`):
-                // the fresh sim has no `CampaignRuntime`/`BuildRules` yet, so
-                // the load's own rules carry the team.
-                let player_team = rules.default_team;
-                let wave_team = rules.wave_team;
-                let content = self.content_snapshot.as_ref();
-                if let Some(content) = content {
-                    let mut ctx = mind_core::maps::generators::planet::StructureCtx {
-                        sim: &mut self.sim,
-                        content,
-                        bases: bases.as_deref(),
-                        loadout: Some(&loadout),
-                        rules: &mut rules,
-                        player_team,
-                        wave_team,
-                    };
-                    generator.place_structures(&mut ctx);
-                    self.generated_loadout_placed = true;
-                }
-                self.sector_rules = Some(rules);
-            }
-            self.pending_launch = None;
-            self.sim.refresh_unit_runtime();
+        // H05 T4: the generated-sector launch loadout (`load_sector_world`).
+        if let Some(generated_loadout) = extras.generated_loadout {
+            generated_loadout(self);
         }
         // `World.loadMap`'s building half: the reader decoded the map's tile
         // entities into the pending queue while the grid was built, so spawn
         // the ECS buildings (cores included) the campaign runtime/teams read.
         let materialized = self.sim.materialize_map_buildings(&pending_buildings);
         if materialized > 0 {
-            log::info!("load_sector: materialized {materialized} map building(s)");
+            log::info!("world load: materialized {materialized} map building(s)");
         }
         // T2: the save's world entities (units/fires/puddles) restore into the
         // live runtime; the resume metadata (wavetime/tick/stats/markers) is
@@ -2526,9 +2643,9 @@ impl MindSimHost {
         // `request_save`/`request_load` drains at the next `IoSet` boundary.
         self.install_sim_seams();
         self.sim.reset_logic_presentation();
-        // Sector map locales (`state.mapLocales`, from the save/map `locales`
-        // meta tag; H06 T4). Preset maps without the tag fall back to the
-        // global bundle in `run_locale_print`.
+        // Map locales (`state.mapLocales`, from the save/map `locales` meta
+        // tag; H06 T4). Preset maps without the tag fall back to the global
+        // bundle in `run_locale_print`.
         let map_locales = save
             .as_ref()
             .and_then(|save| save.tags.get("locales"))
@@ -2548,7 +2665,6 @@ impl MindSimHost {
         self.world_loads += 1;
         self.emit_state();
         self.emit_world_changed();
-        log::info!("loaded campaign sector `{planet_name}:{sector}`");
         true
     }
 
@@ -2628,6 +2744,29 @@ impl MindSimHost {
                         .is_some_and(|def| def.kind == BlockKind::CoreBlock)
             })
             .count()
+    }
+
+    /// Distinct teams holding a core in the live world
+    /// (`state.teams.getActive().count(TeamData::hasCore)`, `World.java:369-373`).
+    pub fn core_teams(&self) -> Vec<u8> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut teams: Vec<u8> = self
+            .sim
+            .ecs
+            .entities_by_seq()
+            .into_iter()
+            .filter(|(_, _, comp)| {
+                content
+                    .block(comp.block)
+                    .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+            })
+            .map(|(_, _, comp)| comp.team.0)
+            .collect();
+        teams.sort_unstable();
+        teams.dedup();
+        teams
     }
 
     /// `Control.playSector`'s lost-sector replay (`Control.java:456-537`): the
@@ -7579,6 +7718,23 @@ struct LoadedGrid {
     save: Option<mind_core::io::sim_io::DecodedSave>,
 }
 
+/// Sector-only inputs of the shared [`MindSimHost::finish_world_load`] tail;
+/// the map path leaves every one unset.
+#[derive(Default)]
+struct WorldLoadExtras {
+    /// Generated-sector polygon `(rotation, sides)` (`World.getDarkness`,
+    /// `World.java:505-529`); the size is the loaded grid's width.
+    polygon: Option<(f32, i32)>,
+    /// `Schematics.placeLaunchLoadout` for a generated sector, run once the
+    /// fresh sim + runtimes are live (H05 T4).
+    generated_loadout: Option<GeneratedLoadout>,
+    /// The save supplied the world: stash the resume metadata + saved tick.
+    resume: bool,
+}
+
+/// The deferred generated-sector loadout step (`H05 T4`).
+type GeneratedLoadout = Box<dyn FnOnce(&mut MindSimHost)>;
+
 /// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
 fn sector_save_path(planet_name: &str, sector: u16) -> String {
     let root = ProjectSettings::singleton()
@@ -7676,7 +7832,7 @@ fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGr
     let mut save = match mind_core::io::sim_io::decode_save_bytes(bytes.as_slice(), registry) {
         Ok(save) => save,
         Err(error) => {
-            log::warn!("load_sector: `{path}` failed: {error}");
+            log::warn!("load_map_file: `{path}` failed: {error}");
             return None;
         }
     };
