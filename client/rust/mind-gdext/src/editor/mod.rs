@@ -49,9 +49,11 @@ use mind_core::maps::Map;
 use mind_core::maps::filters::block_info;
 use mind_core::world::{NoopMapGenHooks, NoopRenderHooks, NoopWorldHooks, WorldGrid};
 
+mod editor_renderer;
 mod map_view;
 pub mod preview;
 
+pub use editor_renderer::MindEditorRenderer;
 use map_view::{MapViewDriver, brush_polygon};
 pub use preview::MindPreview;
 
@@ -101,6 +103,8 @@ pub struct MindEditor {
     play: EditorPlayState,
     play_session: PlaySession,
     rules_epoch: RulesEpoch,
+    /// Monotonic tile-edit counter (`MindEditorRenderer` invalidation).
+    tiles_rev: u64,
 }
 
 #[godot_api]
@@ -124,6 +128,7 @@ impl INode for MindEditor {
             play: EditorPlayState::new(),
             play_session: PlaySession::default(),
             rules_epoch: RulesEpoch::default(),
+            tiles_rev: 0,
         }
     }
 
@@ -184,6 +189,26 @@ impl MindEditor {
     fn clear_error(&mut self) {
         self.last_error_key = None;
         self.last_error_message = None;
+    }
+
+    /// Marks the tile grid as changed (editor-renderer invalidation).
+    fn mark_tiles_changed(&mut self) {
+        self.tiles_rev = self.tiles_rev.wrapping_add(1);
+    }
+
+    /// Read-only grid for the editor renderer (crate-internal view seam).
+    pub(crate) fn grid_ref(&self) -> &WorldGrid {
+        &self.grid
+    }
+
+    /// Read-only content registry for the editor renderer.
+    pub(crate) fn content_ref(&self) -> Option<&ContentRegistry> {
+        self.content.as_ref()
+    }
+
+    /// Read-only ECS (building teams/rotations) for the editor renderer.
+    pub(crate) fn ecs_ref(&self) -> &MindWorld {
+        &self.ecs
     }
 }
 
@@ -359,6 +384,7 @@ impl MindEditor {
     /// Undoes one operation.
     #[func]
     pub fn undo(&mut self) {
+        self.mark_tiles_changed();
         let Some(content) = self.content.as_ref() else {
             return;
         };
@@ -375,6 +401,7 @@ impl MindEditor {
     /// Redoes one operation.
     #[func]
     pub fn redo(&mut self) {
+        self.mark_tiles_changed();
         let Some(content) = self.content.as_ref() else {
             return;
         };
@@ -405,6 +432,12 @@ impl MindEditor {
     #[func]
     pub fn set_tag(&mut self, key: GString, value: GString) {
         self.editor.tags.insert(key.to_string(), value.to_string());
+    }
+
+    /// Monotonic tile-edit counter (`MindEditorRenderer` invalidation).
+    #[func]
+    pub fn tiles_revision(&self) -> i64 {
+        self.tiles_rev as i64
     }
 
     /// Concise editor status for the inspector / MCP oracle.
@@ -547,6 +580,7 @@ impl MindEditor {
     /// `begin_new` / `beginEditSize`: a fresh stone-floored `width x height` map.
     #[func]
     pub fn begin_new(&mut self, width: i32, height: i32) -> bool {
+        self.mark_tiles_changed();
         let Some(content) = self.content.as_ref() else {
             return false;
         };
@@ -570,6 +604,7 @@ impl MindEditor {
     /// `begin_edit_map`: loads a `.msav` into the editor.
     #[func]
     pub fn begin_edit_map(&mut self, file: GString) -> bool {
+        self.mark_tiles_changed();
         let path = Self::native_path(&file.to_string());
         let fs = NativeFs;
         let header = match MapIo::create_map(&fs, &path, true) {
@@ -603,6 +638,7 @@ impl MindEditor {
     /// `begin_edit_image`: imports a color-mapped PNG map (≤800 per axis).
     #[func]
     pub fn begin_edit_image(&mut self, file: GString) -> bool {
+        self.mark_tiles_changed();
         let path = Self::native_path(&file.to_string());
         let fs = NativeFs;
         let bytes = match fs.read(&path) {
@@ -648,6 +684,7 @@ impl MindEditor {
     /// `MapResizeDialog` OK: resize + shift (clears the op stack).
     #[func]
     pub fn resize_map(&mut self, width: i32, height: i32, shift_x: i32, shift_y: i32) -> bool {
+        self.mark_tiles_changed();
         let Some(content) = self.content.as_ref() else {
             return false;
         };
@@ -702,6 +739,7 @@ impl MindEditor {
     /// clear the op stack.
     #[func]
     pub fn apply_filters(&mut self) -> bool {
+        self.mark_tiles_changed();
         let Some(content) = self.content.as_ref() else {
             return false;
         };
@@ -723,6 +761,7 @@ impl MindEditor {
     /// and reports deferred until that host is wired in-engine.
     #[func]
     pub fn sector_generate(&mut self, planet: GString, sector: i64, seed: i64) -> bool {
+        self.mark_tiles_changed();
         self.editor.tags.insert(
             "sector".to_owned(),
             format!("{}:{}:{}", planet, sector, seed),
@@ -1159,6 +1198,7 @@ impl MindEditor {
     /// rules restored.
     #[func]
     pub fn resume_editing(&mut self) -> bool {
+        self.mark_tiles_changed();
         self.play
             .resume_editing(&mut self.editor, &mut self.play_session);
         true
@@ -1303,6 +1343,7 @@ impl MindEditor {
     /// (`MapView.touchDown` press; `Zoom`/`Line` are handled by the caller).
     #[func]
     pub fn map_view_touch(&mut self, tile_x: i32, tile_y: i32) -> bool {
+        self.mark_tiles_changed();
         let tool = self.editor.tool;
         if tool == EditorTool::Line {
             return true;
@@ -1337,6 +1378,7 @@ impl MindEditor {
     /// (`MapView.touchDragged` + `Bresenham2.line`).
     #[func]
     pub fn map_view_drag(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) -> bool {
+        self.mark_tiles_changed();
         let tool = self.editor.tool;
         if !tool.draggable() {
             return false;
@@ -1367,6 +1409,7 @@ impl MindEditor {
     /// `MapView.touchUp`: `editor.flushOp()`.
     #[func]
     pub fn map_view_flush(&mut self) {
+        self.mark_tiles_changed();
         self.editor.flush_op();
     }
 
@@ -1375,6 +1418,7 @@ impl MindEditor {
     /// Draws a line with the current draw block (`dev_draw_line`).
     #[func]
     pub fn dev_draw_line(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) -> bool {
+        self.mark_tiles_changed();
         let Some(content) = self.content.as_ref() else {
             return false;
         };

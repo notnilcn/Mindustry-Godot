@@ -47,7 +47,7 @@ mod canvas;
 mod command_overlay;
 mod debug;
 mod env;
-mod floor;
+pub(crate) mod floor;
 mod fog;
 mod g3d;
 mod hazards;

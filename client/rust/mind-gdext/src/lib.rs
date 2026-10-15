@@ -33,7 +33,7 @@ pub use assets::MindAssets;
 pub use audio::MindAudio;
 pub use camera::MindCamera2D;
 pub use campaign::MindCampaign;
-pub use editor::{MindEditor, MindPreview};
+pub use editor::{MindEditor, MindEditorRenderer, MindPreview};
 pub use fx::MindFx;
 pub use input::MindInput;
 pub use logic::MindLogic;
