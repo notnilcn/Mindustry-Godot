@@ -30,10 +30,12 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::content::{
-    BlockDef, BlockKind, BuildVisibility, ContentRegistry, MemoryBundle, MemoryUnlockStore,
+    BlockDef, BlockKind, BuildVisibility, Category, ContentRegistry, MemoryBundle,
+    MemoryUnlockStore,
 };
 use mind_core::determinism::Checksummer;
 use mind_core::ecs::MindWorld;
+use mind_core::editor::banned;
 use mind_core::editor::draw_op::DrawOperation;
 use mind_core::editor::grid::WorldEditorGrid;
 use mind_core::editor::lifecycle::try_catch_map_error;
@@ -431,6 +433,116 @@ impl MindEditor {
     #[func]
     pub fn set_tag(&mut self, key: GString, value: GString) {
         self.editor.tags.insert(key.to_string(), value.to_string());
+    }
+
+    // --- banned content (`BannedContentDialog`) ---
+
+    /// Parses `"block"`/`"unit"` (everything else means blocks).
+    fn ban_kind(kind: &str) -> banned::BanKind {
+        if kind == "unit" {
+            banned::BanKind::Unit
+        } else {
+            banned::BanKind::Block
+        }
+    }
+
+    /// `BannedContentDialog` picker payload `{categories, rows}`.
+    ///
+    /// Rows are every content type entry passing Java's `pred` (`Block::canBeBuilt`,
+    /// `BannedContentDialog.java:36`; `!UnitType.isHidden()`, `:37`) in content-id
+    /// order, `{name, id, category, ui_icon}`. `categories` is the block filter
+    /// row (`Category.values()`, `:73`) and empty for units.
+    #[func]
+    pub fn bannable_content_json(&self, kind: GString) -> GString {
+        let empty = "{\"categories\":[],\"rows\":[]}";
+        let Some(content) = self.content.as_ref() else {
+            return GString::from(empty);
+        };
+        let kind = Self::ban_kind(&kind.to_string());
+        let rows: Vec<serde_json::Value> = match kind {
+            banned::BanKind::Block => content
+                .blocks()
+                .iter()
+                .filter(|def| {
+                    !matches!(
+                        def.build_visibility,
+                        BuildVisibility::Hidden | BuildVisibility::DebugOnly
+                    )
+                })
+                .map(|def| {
+                    serde_json::json!({
+                        "name": def.name,
+                        "id": def.id.raw(),
+                        "category": def.category.name(),
+                        "ui_icon": format!("block-{}-ui", def.name),
+                    })
+                })
+                .collect(),
+            banned::BanKind::Unit => content
+                .units()
+                .iter()
+                .filter(|unit| !unit.is_hidden())
+                .map(|unit| {
+                    serde_json::json!({
+                        "name": unit.name,
+                        "id": unit.id.raw(),
+                        "category": "",
+                        "ui_icon": format!("unit-{}-ui", unit.name),
+                    })
+                })
+                .collect(),
+        };
+        let categories: Vec<&str> = match kind {
+            banned::BanKind::Block => Category::ALL
+                .iter()
+                .map(|category| category.name())
+                .collect(),
+            banned::BanKind::Unit => Vec::new(),
+        };
+        let payload = serde_json::json!({ "categories": categories, "rows": rows });
+        GString::from(
+            serde_json::to_string(&payload)
+                .unwrap_or_else(|_| empty.to_owned())
+                .as_str(),
+        )
+    }
+
+    /// The map's banned set for `kind` from the `rules` tag
+    /// (`state.rules.bannedBlocks`/`bannedUnits`), as a JSON array.
+    #[func]
+    pub fn banned_names_json(&self, kind: GString) -> GString {
+        let kind = Self::ban_kind(&kind.to_string());
+        let tag = self.editor.tags.get("rules").cloned().unwrap_or_default();
+        let names = banned::names_from_tag_json(&tag, kind);
+        GString::from(
+            serde_json::to_string(&names)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// Replaces the banned set in the `rules` tag, preserving every other key
+    /// (`BannedContentDialog` mutates the live `ObjectSet`; `CustomRulesDialog.java:189,210`).
+    #[func]
+    pub fn set_banned_names_json(&mut self, kind: GString, names_json: GString) -> bool {
+        let kind = Self::ban_kind(&kind.to_string());
+        let names: Vec<String> = match serde_json::from_str(&names_json.to_string()) {
+            Ok(names) => names,
+            Err(_) => return false,
+        };
+        let tag = self.editor.tags.get("rules").cloned().unwrap_or_default();
+        match banned::apply_to_tag_json(&tag, kind, &names) {
+            Ok(updated) => {
+                self.editor.tags.insert("rules".to_owned(), updated);
+                self.clear_error();
+                true
+            }
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                false
+            }
+        }
     }
 
     /// Monotonic tile-edit counter (`MindEditorRenderer` invalidation).
