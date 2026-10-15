@@ -877,6 +877,81 @@ impl MindEditor {
         }
     }
 
+    /// `WaveInfoDialog.showUnits`: unit rows (`{name, health}`) for the pickers
+    /// and the health sort; icons are omitted.
+    #[func]
+    pub fn wave_units_json(&self) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let rows: Vec<serde_json::Value> = content
+            .units()
+            .iter()
+            .map(|unit| {
+                serde_json::json!({
+                    "name": unit.name,
+                    "health": unit.health,
+                })
+            })
+            .collect();
+        GString::from(serde_json::to_string(&rows).unwrap_or_default().as_str())
+    }
+
+    /// `WaveInfoDialog.showEffects`: the status-effect names (`content.statusEffects()`).
+    #[func]
+    pub fn wave_effects_json(&self) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let names: Vec<&str> = content
+            .statuses()
+            .iter()
+            .map(|status| status.name.as_str())
+            .collect();
+        GString::from(serde_json::to_string(&names).unwrap_or_default().as_str())
+    }
+
+    /// `WaveInfoDialog`'s `@waves.random`: `groups = Waves.generate(1f / 10f)`.
+    #[func]
+    pub fn randomize_waves(&mut self) -> bool {
+        let groups = mind_core::game::waves::Waves::generate(0.1);
+        let values: Vec<serde_json::Value> = groups.iter().map(|group| group.to_json()).collect();
+        let json = serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_owned());
+        self.set_waves_json(GString::from(json.as_str()))
+    }
+
+    /// `WaveInfoDialog`'s spawn picker (`spawner.getSpawns()`): the map's
+    /// spawn-overlay tiles packed `Point2.pack(x, y)`.
+    #[func]
+    pub fn spawn_points_json(&self) -> GString {
+        let Some(spawn) = self
+            .content
+            .as_ref()
+            .and_then(|content| content.block_id("spawn"))
+        else {
+            return GString::from("[]");
+        };
+        let mut packed: Vec<i32> = Vec::new();
+        for y in 0..self.grid.height() {
+            for x in 0..self.grid.width() {
+                if self.grid.tile(x, y).overlay == spawn {
+                    packed.push(mind_core::math::rand_arc::pack_point2(x, y) as i32);
+                }
+            }
+        }
+        GString::from(serde_json::to_string(&packed).unwrap_or_default().as_str())
+    }
+
+    /// `WaveInfoDialog`'s `@settings.reset`: the vanilla wave table
+    /// (`JsonIO.copy(waves.get())`).
+    #[func]
+    pub fn default_waves_json(&self) -> GString {
+        let mut waves = mind_core::game::waves::Waves::default();
+        let values: Vec<serde_json::Value> =
+            waves.get().iter().map(|group| group.to_json()).collect();
+        GString::from(serde_json::to_string(&values).unwrap_or_default().as_str())
+    }
+
     /// `WaveGraph.rebuild`: the counts/health series for the `spawns` tag.
     #[func]
     pub fn wave_graph(&self, from: i64, to: i64) -> VarDictionary {

@@ -408,6 +408,7 @@ pub const EXPECTED_LOGIC_DIALOGS: &[&str] = &["canvas_edit", "logic"];
 pub const EXPECTED_EDITOR_DIALOGS: &[&str] = &[
     "editor_menu",
     "editor_map",
+    "list_select",
     "editor_import",
     "editor_export",
     "map_info",
