@@ -287,6 +287,12 @@ pub fn apply_health(world: &mut World, entity: Entity, amount: f32) {
         return;
     }
     if let Some(mut shield) = world.get_mut::<ShieldComp>(entity) {
+        // `ShieldComp.rawDamage` (`ShieldComp.java:57-63`): `hadShields =
+        // shield > 0.0001f; if(hadShields) shieldAlpha = 1f;` — set on every
+        // shielded hit, even when the hit is fully absorbed (H03 T15).
+        if shield.shield > 0.0001 {
+            shield.shield_alpha = 1.0;
+        }
         let absorbed = shield.shield.max(0.0).min(amount);
         shield.shield -= absorbed;
         amount -= absorbed;
@@ -348,5 +354,94 @@ mod tests {
             30.0,
         );
         assert!(dealt > 0.0);
+    }
+
+    /// H03 T15 (`ShieldComp.rawDamage`): a hit on a unit holding shield sets
+    /// `shieldAlpha = 1`; a shield-less unit keeps 0.
+    #[test]
+    fn shield_hit_sets_shield_alpha() {
+        use crate::entities::comp::Health;
+        use crate::entities::comp::unit::comp::ShieldComp;
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let shielded = harness
+            .build
+            .world
+            .spawn((
+                Health::new(10.0),
+                ShieldComp {
+                    shield: 5.0,
+                    ..Default::default()
+                },
+            ))
+            .id();
+        apply_health(&mut harness.build.world, shielded, 3.0);
+        let shield = harness
+            .build
+            .world
+            .get::<ShieldComp>(shielded)
+            .expect("shield comp");
+        assert_eq!(shield.shield_alpha, 1.0);
+        assert!(
+            (shield.shield - 2.0).abs() < 1e-4,
+            "shield {}",
+            shield.shield
+        );
+
+        let bare = harness
+            .build
+            .world
+            .spawn((Health::new(10.0), ShieldComp::default()))
+            .id();
+        apply_health(&mut harness.build.world, bare, 3.0);
+        assert_eq!(
+            harness
+                .build
+                .world
+                .get::<ShieldComp>(bare)
+                .expect("shield comp")
+                .shield_alpha,
+            0.0
+        );
+    }
+
+    /// H03 T15 (`ShieldComp.update`): `shieldAlpha` decays `1/15` per tick and
+    /// clamps at 0.
+    #[test]
+    fn shield_alpha_decays_in_fifteen_updates() {
+        use crate::combat::damage::status::update_unit_status;
+        use crate::entities::comp::Health;
+        use crate::entities::comp::unit::comp::ShieldComp;
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let unit = harness
+            .build
+            .world
+            .spawn((
+                Health::new(10.0),
+                ShieldComp {
+                    shield: 5.0,
+                    shield_alpha: 1.0,
+                },
+            ))
+            .id();
+        for _ in 0..14 {
+            update_unit_status(&mut harness.build.world, &harness.build.content, unit);
+        }
+        let alpha = harness
+            .build
+            .world
+            .get::<ShieldComp>(unit)
+            .expect("shield comp")
+            .shield_alpha;
+        assert!((alpha - 1.0 / 15.0).abs() < 1e-5, "alpha {alpha}");
+        update_unit_status(&mut harness.build.world, &harness.build.content, unit);
+        let alpha = harness
+            .build
+            .world
+            .get::<ShieldComp>(unit)
+            .expect("shield comp")
+            .shield_alpha;
+        // Java leaves float residue on the exact 15th step (`-= 1/15` fifteen
+        // times); the clamp semantics are "fades to ~0".
+        assert!(alpha < 1e-6, "alpha {alpha}");
     }
 }

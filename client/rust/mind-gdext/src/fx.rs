@@ -66,6 +66,9 @@ pub struct MindFx {
     env: Option<EnvFxInput>,
     /// `FxSink` → atlas texture cache (`RegionKey.0` → region, `None` = missing).
     region_cache: HashMap<&'static str, Option<Gd<Texture2D>>>,
+    /// Frame's `PrimKind::Light` prims `(x, y, radius, rgba, opacity)`,
+    /// collected instead of drawn (H03 T16); forwarded to the light pass.
+    view_lights: Vec<(f32, f32, f32, [f32; 4], f32)>,
 }
 
 #[godot_api]
@@ -89,6 +92,7 @@ impl INode2D for MindFx {
             next_turret_handle: 1,
             env: None,
             region_cache: HashMap::new(),
+            view_lights: Vec::new(),
         }
     }
 
@@ -106,6 +110,8 @@ impl INode2D for MindFx {
     fn draw(&mut self) {
         let mut program = std::mem::take(&mut self.program);
         program.clear();
+        // H03 T16: this frame's light prims are re-collected from scratch.
+        self.view_lights.clear();
         let snapshot = EmptySnapshot;
         for state in self.pool.iter_live() {
             let def = registry().get(state.def);
@@ -147,6 +153,27 @@ impl MindFx {
         } else {
             None
         };
+        // H03 T16: `Drawf.light` -> `renderer.lights` (Java `LightRenderer.add`
+        // gates on `enabled()`); the prims are collected for the light pass
+        // (`MindWorldRenderer` forwards them to `LightRenderer`) and never
+        // drawn as debug discs (`PrimKind::Light` below is unreachable).
+        if let PrimKind::Light {
+            x,
+            y,
+            radius,
+            color,
+            opacity,
+        } = &prim.kind
+        {
+            self.view_lights.push((
+                *x,
+                *y,
+                *radius,
+                [color.r, color.g, color.b, color.a],
+                *opacity,
+            ));
+            return false;
+        }
         let mut base = self.base_mut();
         match &prim.kind {
             PrimKind::Circle {
@@ -270,18 +297,9 @@ impl MindFx {
                 );
                 true
             }
-            PrimKind::Light {
-                x,
-                y,
-                radius,
-                color,
-                opacity,
-            } => {
-                // Plan 16 owns the additive light FBO; draw a faint debug disc.
-                let mut c = to_color(*color);
-                c.a *= opacity.clamp(0.0, 1.0);
-                base.draw_circle(Vector2::new(*x, *y), *radius, c);
-                true
+            PrimKind::Light { .. } => {
+                // Unreachable: collected before `base_mut()` above (H03 T16).
+                false
             }
             PrimKind::Region {
                 x,
@@ -518,6 +536,34 @@ impl MindFx {
     /// install_fx_sink`); `FxBus` is `Send + Sync` (internal mutex).
     pub fn bus_handle(&self) -> Arc<FxBus> {
         self.bus.clone()
+    }
+
+    /// The last drawn frame's `PrimKind::Light` prims, as
+    /// `(x, y, radius, rgba, opacity)` (`Drawf.light` -> `renderer.lights`;
+    /// H03 T16). Rust-only; `MindWorldRenderer` feeds them to `LightRenderer`.
+    pub fn view_lights(&self) -> &[(f32, f32, f32, [f32; 4], f32)] {
+        &self.view_lights
+    }
+
+    /// View-side effect spawn (H03 T10): status particles, landing dust and
+    /// walk ripples derived from the unit view state. Not the sim `FxBus`
+    /// (that stays the deterministic tick path); respects `effects`.
+    pub fn spawn_view_effect(
+        &mut self,
+        effect: EffectId,
+        x: f32,
+        y: f32,
+        rotation: f32,
+        color: Rgba,
+    ) {
+        if !self.settings.effects || effect == EffectId::NONE {
+            return;
+        }
+        let def = registry().get(effect);
+        let snapshot = EmptySnapshot;
+        self.pool
+            .spawn(def, x, y, rotation, color, EffectData::None, &snapshot);
+        self.base_mut().queue_redraw();
     }
 
     /// Drains the bus and advances the view pools by one tick.

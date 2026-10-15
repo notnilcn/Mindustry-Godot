@@ -856,6 +856,7 @@ impl Sim {
                         self.ecs.0.entity_mut(entity).insert(
                             crate::entities::comp::unit::comp::ShieldComp {
                                 shield: unit.shield,
+                                ..Default::default()
                             },
                         );
                     }
@@ -2152,10 +2153,10 @@ mod tests {
         sim.ecs.0.entity_mut(entity).insert(ItemsComp {
             item: Some((copper, 10)),
         });
-        sim.ecs
-            .0
-            .entity_mut(entity)
-            .insert(ShieldComp { shield: 20.0 });
+        sim.ecs.0.entity_mut(entity).insert(ShieldComp {
+            shield: 20.0,
+            ..Default::default()
+        });
         sim.ecs.0.entity_mut(entity).insert(StatusComp {
             statuses: vec![StatusEntry::new(wet, 120.0)],
             damage_times: vec![0.0],

@@ -470,8 +470,14 @@ func _on_announce(text: String, duration: float) -> void:
 
 func _on_unlock(_name: String) -> void:
 	var ui := get_node_or_null("/root/MindUi")
-	if ui != null:
-		ui.call("toast", MindWidgets.markup("@unlocked"), "lock-open")
+	if ui == null:
+		return
+	# H03 T17: pass the raw bundle text; the toast label translates markup.
+	var text := "@unlocked"
+	var assets := get_node_or_null("/root/MindAssets")
+	if assets != null and assets.has_method("bundle_get"):
+		text = str(assets.call("bundle_get", "unlocked"))
+	ui.call("toast", text, "lock-open")
 
 
 func _on_wave_event() -> void:

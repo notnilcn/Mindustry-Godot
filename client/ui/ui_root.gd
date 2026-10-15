@@ -474,7 +474,9 @@ func _announce_box(text: String, duration: float) -> void:
 	box.add_theme_stylebox_override("panel", style)
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var label := MindRichLabel.new()
-	label.text = "[center]" + text
+	# H03 T17: producers pass Java markup; translate once here
+	# (`UI.announce` label parses markup; `UI.java:636-652`).
+	label.text = "[center]" + MindWidgets.markup_text(text)
 	box.add_child(label)
 	# Centred on the viewport (`setPosition(0, 0, Align.center)`).
 	box.set_anchors_preset(Control.PRESET_CENTER)
@@ -491,7 +493,10 @@ func _announce_box(text: String, duration: float) -> void:
 
 func _toast_label(text: String, duration: float) -> void:
 	# code-instantiated: toasts are transient, high-churn overlay labels.
-	var label := MindWidgets.label(text)
+	# H03 T17: `UI.showInfoToast`/`HudFragment.showToast` labels parse markup;
+	# producers pass raw bundle/markup text, translated once here.
+	var label := MindRichLabel.new()
+	label.text = MindWidgets.markup_text(text)
 	label.position = Vector2(24, 24)
 	overlay_layer.add_child(label)
 	var tween := create_tween()

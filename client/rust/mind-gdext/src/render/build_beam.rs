@@ -8,13 +8,15 @@
 //!
 //! `BuilderComp.buildAlpha = lerpDelta(buildAlpha, activelyBuilding() ? 1 : 0,
 //! 0.15)` (line 85); the emitted geometry is `Drawf.buildBeam`'s filled
-//! triangles (`Drawf.java:131-157`) at the buildbeam shader's base alpha
-//! (`0.37`, `client/shaders/buildbeam.gdshader`). T17 replaces this with the
-//! real screen-texture composite.
+//! triangles (`Drawf.java:131-157`). With `animatedshields` on (the H03 T11
+//! `CanvasGroup` composite), the CPU alpha is `buildAlpha` and the group
+//! shader (`buildbeam_group.gdshader`) applies Java's
+//! `0.37 + abs(sin(u_time / 15)) * 0.05 + stripe` modulation; off, the flat
+//! path bakes `* 0.37` in.
 
 use godot::builtin::{PackedVector2Array, Vector2};
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{INode2D, Node2D, Time};
+use godot::classes::{CanvasGroup, INode2D, Material, Node, Node2D, ShaderMaterial, Time};
 use godot::obj::Base;
 use godot::prelude::*;
 
@@ -41,6 +43,14 @@ pub struct BuildBeamOverlay {
     /// `BuilderComp.lastActive`: the plan (and its block size) drawn while the
     /// alpha fades out.
     last_active: Option<(UnitBuildPlan, i32, bool)>,
+    /// `animatedshields` setting, re-read every frame.
+    animated: bool,
+    /// `None` until the first frame's setting read installs/clears the parent
+    /// `CanvasGroup` material.
+    last_animated: Option<bool>,
+    /// Group-composite material (`buildbeam_group.gdshader`), installed by
+    /// `build_floor`.
+    material: Option<Gd<ShaderMaterial>>,
 }
 
 #[godot_api]
@@ -51,6 +61,9 @@ impl INode2D for BuildBeamOverlay {
             host: None,
             build_alpha: 0.0,
             last_active: None,
+            animated: false,
+            last_animated: None,
+            material: None,
         }
     }
 
@@ -91,6 +104,7 @@ impl INode2D for BuildBeamOverlay {
         } else if self.build_alpha <= 0.01 {
             self.last_active = None;
         }
+        self.sync_group_material();
         self.base_mut().queue_redraw();
     }
 
@@ -127,6 +141,7 @@ impl INode2D for BuildBeamOverlay {
             pal::ACCENT
         };
         let alpha = self.build_alpha;
+        let animated = self.animated;
         let half = size as f32 * 4.0;
         let construct_site = host
             .bind()
@@ -145,9 +160,10 @@ impl INode2D for BuildBeamOverlay {
                 canvas::color_f4(drawf::with_alpha(color, alpha)),
             );
         }
-        // `Drawf.buildBeam(px, py, tx, ty, 8*size/2)` filled triangles at the
-        // buildbeam shader's base alpha.
-        let beam_color = canvas::color_f4(drawf::with_alpha(color, alpha * 0.37));
+        // `Drawf.buildBeam` filled triangles. With the animated composite the
+        // shader applies the base alpha/stripe; the flat path bakes `* 0.37`.
+        let beam_scale = if animated { 1.0 } else { 0.37 };
+        let beam_color = canvas::color_f4(drawf::with_alpha(color, alpha * beam_scale));
         for tri in drawf::build_beam_tris(px, py, tx, ty, half) {
             canvas::fill_tri(&mut base, tri, beam_color);
         }
@@ -171,6 +187,101 @@ impl BuildBeamOverlay {
             .base()
             .try_get_node_as::<MindSimHost>("/root/Spine/SimHost");
         self.base_mut().queue_redraw();
+    }
+
+    /// Installs the `buildbeam_group` material (called from
+    /// `MindWorldRenderer::build_floor`; a hot reload recreates the pass).
+    pub(crate) fn set_group_material(&mut self, material: Option<Gd<ShaderMaterial>>) {
+        self.material = material;
+    }
+
+    /// `animatedshields` setting (shared by the shield and build-beam gates,
+    /// `Renderer.java:403-414`; desktop default true).
+    fn animated_setting(&self) -> bool {
+        self.base()
+            .try_get_node_as::<Node>("/root/MindUi")
+            .map(|mut ui| {
+                ui.call(
+                    "settings_get_bool",
+                    &[GString::from("animatedshields").to_variant()],
+                )
+                .booleanize()
+            })
+            .unwrap_or(true)
+    }
+
+    /// Applies/clears the parent `CanvasGroup`'s beam material from the
+    /// setting and refreshes its per-frame uniforms
+    /// (`Shaders.BuildBeamShader.apply`).
+    fn sync_group_material(&mut self) {
+        let animated = self.animated_setting();
+        self.animated = animated;
+        let Some(parent) = self
+            .base()
+            .get_parent()
+            .and_then(|parent| parent.try_cast::<CanvasGroup>().ok())
+        else {
+            return;
+        };
+        if self.last_animated != Some(animated) {
+            let mut parent = parent;
+            match (&self.material, animated) {
+                (Some(material), true) => {
+                    parent.set_material(&material.clone().upcast::<Material>());
+                }
+                _ => parent.set_material(Gd::<Material>::null_arg()),
+            }
+            self.last_animated = Some(animated);
+        }
+        if !animated {
+            return;
+        }
+        let Some(material) = self.material.clone() else {
+            return;
+        };
+        let Some((x, y, w, h)) = self.visible_rect() else {
+            return;
+        };
+        let mut material = material;
+        material.set_shader_parameter("u_dp", &1.0f32.to_variant());
+        material.set_shader_parameter(
+            "u_time",
+            &(Time::singleton().get_ticks_msec() as f32 * 0.06).to_variant(),
+        );
+        material.set_shader_parameter("u_offset", &Vector2::new(x, y).to_variant());
+        material.set_shader_parameter("u_texsize", &Vector2::new(w, h).to_variant());
+        material.set_shader_parameter(
+            "u_invsize",
+            &Vector2::new(1.0 / w.max(1.0), 1.0 / h.max(1.0)).to_variant(),
+        );
+    }
+
+    /// World-space visible rect `(min x, min y, w, h)` from the camera
+    /// transform (the group shader's `u_offset`/`u_texsize`).
+    fn visible_rect(&self) -> Option<(f32, f32, f32, f32)> {
+        let camera = self
+            .base()
+            .try_get_node_as::<godot::classes::Camera2D>("/root/Spine/World/Camera2D")?;
+        let viewport = self.base().get_viewport()?;
+        let rect = viewport.get_visible_rect();
+        let inverse = camera.get_canvas_transform().affine_inverse();
+        let corners = [
+            inverse * rect.position,
+            inverse * (rect.position + Vector2::new(rect.size.x, 0.0)),
+            inverse * rect.position + rect.size,
+            inverse * (rect.position + Vector2::new(0.0, rect.size.y)),
+        ];
+        let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+        let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+        let max_x = corners
+            .iter()
+            .map(|p| p.x)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let max_y = corners
+            .iter()
+            .map(|p| p.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        Some((min_x, min_y, max_x - min_x, max_y - min_y))
     }
 
     /// `size = plan.breaking ? tile.block().size : plan.block.size`

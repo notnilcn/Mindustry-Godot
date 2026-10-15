@@ -172,6 +172,123 @@ pub struct UnitViewState {
     pub last_health: f32,
     /// Whether `last_health` has been seeded (the first frame never flashes).
     pub first: bool,
+    /// `UnitComp.wasFlying` mirror (`elevation >= 0.09` last frame; H03 T10).
+    pub was_flying: bool,
+    /// Last-seen world position (walk-splash distance; H03 T10).
+    pub last_x: f32,
+    /// Last-seen world position (walk-splash distance; H03 T10).
+    pub last_y: f32,
+    /// `UnitComp.splashTimer` mirror: distance walked since the last
+    /// `walkEffect` (`UnitComp.java:735-745`; H03 T10).
+    pub splash: f32,
+    /// Whether `last_x/last_y` were seeded (the first frame emits no splash).
+    pub pos_seeded: bool,
+}
+
+/// One view-side effect spawn request (H03 T10): `(effect, x, y, rotation,
+/// color)` fed to `MindFx::spawn_view_effect`.
+pub type ViewEffect = (
+    crate::content::EffectId,
+    f32,
+    f32,
+    f32,
+    crate::content::Rgba,
+);
+
+/// Per-frame view inputs for [`advance_unit_fx`] (H03 T10).
+pub struct UnitFxInput {
+    /// World x (`Unit.x`).
+    pub x: f32,
+    /// World y (`Unit.y`).
+    pub y: f32,
+    /// `UnitCore.elevation` (`0..=1`).
+    pub elevation: f32,
+    /// `UnitType.hitSize`.
+    pub hit_size: f32,
+    /// `UnitType.hovering` (walk effects are skipped for hovering units).
+    pub hovering: bool,
+    /// `UnitType.emitWalkEffect`.
+    pub emit_walk_effect: bool,
+    /// `floorOn().isLiquid` (the walk effect is `Fx.ripple` on liquid floors).
+    pub floor_is_liquid: bool,
+    /// `tile.getFloorColor()` (walk/land effect tint).
+    pub floor_color: crate::content::Rgba,
+    /// `Fx.unitLand` (resolved once by the caller).
+    pub unit_land: crate::content::EffectId,
+    /// `floor.walkEffect` for liquid floors (`Fx.ripple`).
+    pub ripple: crate::content::EffectId,
+}
+
+/// `UnitComp.update`'s view half (H03 T10): advances `wasFlying`/`splashTimer`
+/// and appends the status-particle, landing-dust and walk-ripple spawns.
+///
+/// * statuses (`StatusEffect.update`, `StatusEffect.java:164-167`):
+///   `chanceDelta(effectChance)` = `rand() < chance * delta`; the offset is a
+///   random direction scaled by `Mathf.range(hitSize/2)`.
+/// * landing (`UnitComp.java:727-734`): on a `isFlying()` true->false
+///   transition, `Fx.unitLand.at(x, y, floor.isLiquid ? 1 : 0.5, floorColor)`.
+/// * walk (`UnitComp.java:736-745`): `splashTimer += dst(delta)`, emitting
+///   `floor.walkEffect` (`Fx.ripple` on liquid floors) every
+///   `7 + hitSize/8` px at rotation `hitSize/8`.
+pub fn advance_unit_fx(
+    state: &mut UnitViewState,
+    input: &UnitFxInput,
+    statuses: &[(crate::content::EffectId, f32, crate::content::Rgba)],
+    delta_ticks: f32,
+    rand: &mut dyn FnMut() -> f32,
+    out: &mut Vec<ViewEffect>,
+) {
+    for (effect, chance, color) in statuses {
+        if rand() < chance * delta_ticks {
+            let angle = rand() * std::f32::consts::TAU;
+            let length = (rand() * 2.0 - 1.0) * input.hit_size / 2.0;
+            out.push((
+                *effect,
+                input.x + angle.cos() * length,
+                input.y + angle.sin() * length,
+                0.0,
+                *color,
+            ));
+        }
+    }
+
+    // `isFlying() = elevation >= 0.09f` (`UnitComp.java:83-85`).
+    let flying = input.elevation >= 0.09;
+    if state.was_flying && !flying {
+        out.push((
+            input.unit_land,
+            input.x,
+            input.y,
+            if input.floor_is_liquid { 1.0 } else { 0.5 },
+            input.floor_color,
+        ));
+    }
+    state.was_flying = flying;
+
+    // `isGrounded() = elevation < 0.001f` (`UnitComp.java:80-82`).
+    if !input.hovering && input.elevation < 0.001 && input.emit_walk_effect {
+        if state.pos_seeded {
+            let dx = input.x - state.last_x;
+            let dy = input.y - state.last_y;
+            state.splash += (dx * dx + dy * dy).sqrt();
+            if state.splash >= 7.0 + input.hit_size / 8.0 {
+                if input.floor_is_liquid {
+                    out.push((
+                        input.ripple,
+                        input.x,
+                        input.y,
+                        input.hit_size / 8.0,
+                        input.floor_color,
+                    ));
+                }
+                state.splash = 0.0;
+            }
+        } else {
+            state.pos_seeded = true;
+        }
+    }
+    state.last_x = input.x;
+    state.last_y = input.y;
 }
 
 /// Per-frame view advance (`HealthComp.java:9,26,75`, `ItemsComp.java:18`):
@@ -356,6 +473,118 @@ mod tests {
         );
         advance_view(&mut state, 8.0, false, 4.5);
         assert_eq!(state.hit_time, 0.0);
+    }
+
+    /// H03 T10 (`UnitComp.splashTimer`): `hitSize 8` -> threshold 8; walking
+    /// 3 px/frame emits `walkEffect` on the frame that crosses it and resets.
+    #[test]
+    fn walk_splash_threshold() {
+        use crate::content::{EffectId, Rgba};
+        let input = |x: f32| UnitFxInput {
+            x,
+            y: 0.0,
+            elevation: 0.0,
+            hit_size: 8.0,
+            hovering: false,
+            emit_walk_effect: true,
+            floor_is_liquid: true,
+            floor_color: Rgba::default(),
+            unit_land: EffectId::NONE,
+            ripple: EffectId(9),
+        };
+        let mut state = UnitViewState::default();
+        let mut rand = || 0.5f32;
+        let mut out = Vec::new();
+        // First frame seeds the position.
+        advance_unit_fx(&mut state, &input(0.0), &[], 1.0, &mut rand, &mut out);
+        assert!(out.is_empty(), "seed frame emits nothing");
+        advance_unit_fx(&mut state, &input(3.0), &[], 1.0, &mut rand, &mut out);
+        assert!(out.is_empty(), "3 px < 8");
+        advance_unit_fx(&mut state, &input(6.0), &[], 1.0, &mut rand, &mut out);
+        assert!(out.is_empty(), "6 px < 8");
+        advance_unit_fx(&mut state, &input(9.0), &[], 1.0, &mut rand, &mut out);
+        assert_eq!(out.len(), 1, "9 px >= threshold");
+        let (effect, x, y, rotation, _) = out[0];
+        assert_eq!(effect, EffectId(9));
+        assert!((x - 9.0).abs() < 1e-4 && y.abs() < 1e-4);
+        assert!((rotation - 1.0).abs() < 1e-4, "hitSize/8: {rotation}");
+        assert!(state.splash.abs() < 1e-4, "timer resets");
+    }
+
+    /// H03 T10 (`StatusEffect.update`): `chanceDelta(effectChance)` gates the
+    /// spawn, random direction, `Mathf.range(hitSize/2)` offset length.
+    #[test]
+    fn status_particles_roll_chance_and_offset() {
+        use crate::content::{EffectId, Rgba};
+        let input = UnitFxInput {
+            x: 100.0,
+            y: 50.0,
+            elevation: 0.0,
+            hit_size: 8.0,
+            hovering: true,
+            emit_walk_effect: false,
+            floor_is_liquid: false,
+            floor_color: Rgba::default(),
+            unit_land: EffectId::NONE,
+            ripple: EffectId(9),
+        };
+        let statuses = [(EffectId(7), 0.5, Rgba::default())];
+        let mut state = UnitViewState::default();
+        // Rolls in order: chance 0.1 (< 0.5) emits, angle 0.25 turn, length
+        // (0.75*2-1)*hitSize/2 = +2.
+        let rolls = [0.1f32, 0.25, 0.75];
+        let mut index = 0usize;
+        let mut rand = move || {
+            let value = rolls[index % rolls.len()];
+            index += 1;
+            value
+        };
+        let mut out = Vec::new();
+        advance_unit_fx(&mut state, &input, &statuses, 1.0, &mut rand, &mut out);
+        assert_eq!(out.len(), 1);
+        let (effect, x, y, rotation, _) = out[0];
+        assert_eq!(effect, EffectId(7));
+        assert!((x - 100.0).abs() < 1e-3, "angle 0.25 turn -> +y: x {x}");
+        assert!((y - 52.0).abs() < 1e-3, "length 2 along +y: y {y}");
+        assert_eq!(rotation, 0.0);
+        // Chance 0.9 with delta 1 fails the roll for chance 0.5... (0.9 < 0.5
+        // is false): no spawn.
+        let mut rand = || 0.9f32;
+        let mut out = Vec::new();
+        advance_unit_fx(&mut state, &input, &statuses, 1.0, &mut rand, &mut out);
+        assert!(out.is_empty());
+    }
+
+    /// H03 T10 (`UnitComp.java:727-734`): a flying -> grounded transition emits
+    /// `Fx.unitLand` once with `isLiquid ? 1 : 0.5`.
+    #[test]
+    fn landing_transition_emits_unit_land_once() {
+        use crate::content::{EffectId, Rgba};
+        let mut input = UnitFxInput {
+            x: 10.0,
+            y: 20.0,
+            elevation: 1.0,
+            hit_size: 8.0,
+            hovering: false,
+            emit_walk_effect: false,
+            floor_is_liquid: true,
+            floor_color: Rgba::default(),
+            unit_land: EffectId(5),
+            ripple: EffectId(9),
+        };
+        let mut state = UnitViewState::default();
+        let mut rand = || 0.0f32;
+        let mut out = Vec::new();
+        advance_unit_fx(&mut state, &input, &[], 1.0, &mut rand, &mut out);
+        assert!(out.is_empty(), "airborne frame emits nothing");
+        input.elevation = 0.0;
+        advance_unit_fx(&mut state, &input, &[], 1.0, &mut rand, &mut out);
+        assert_eq!(out.len(), 1, "landed");
+        assert_eq!(out[0].0, EffectId(5));
+        assert!((out[0].3 - 1.0).abs() < 1e-4, "liquid floor -> rotation 1");
+        let mut out = Vec::new();
+        advance_unit_fx(&mut state, &input, &[], 1.0, &mut rand, &mut out);
+        assert!(out.is_empty(), "no repeat while grounded");
     }
 
     #[test]

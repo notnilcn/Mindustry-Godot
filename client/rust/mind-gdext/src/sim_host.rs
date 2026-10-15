@@ -62,6 +62,20 @@ pub struct UnitDraw {
     pub is_player: bool,
     /// Absolute health (`Health.health`).
     pub health: f32,
+    /// Active status effects with view parameters `(effect, chance, color)`
+    /// (`StatusEffect.update` particles; H03 T10).
+    pub statuses: Vec<(mind_core::content::EffectId, f32, mind_core::content::Rgba)>,
+    /// `isGrounded()` = `elevation < 0.001` (`UnitComp.java:80-82`; H03 T10).
+    pub grounded: bool,
+    /// `UnitType.hovering` (walk-effect gate; H03 T10).
+    pub hovering: bool,
+    /// `UnitType.emitWalkEffect` (H03 T10).
+    pub emit_walk_effect: bool,
+    /// `floorOn().isLiquid` (walk effect is `Fx.ripple` on liquid floors;
+    /// H03 T10).
+    pub floor_is_liquid: bool,
+    /// `tile.getFloorColor()` (`Floor.mapColor`; H03 T10).
+    pub floor_color: mind_core::content::Rgba,
 }
 
 /// `MechComp` walk state resolved for drawing (`drawMech`).
@@ -4330,6 +4344,40 @@ impl MindSimHost {
                     .get::<Health>(*entity)
                     .map(|health| health.health)
                     .unwrap_or(0.0);
+                // H03 T10: active status effects with their view parameters
+                // (`StatusEffect.effect/effectChance/color`).
+                let statuses = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::StatusComp>(*entity)
+                    .map(|comp| {
+                        comp.statuses
+                            .iter()
+                            .filter_map(|entry| content.status(entry.effect))
+                            .filter(|def| {
+                                def.effect != mind_core::content::EffectId::NONE
+                                    && def.effect_chance > 0.0
+                            })
+                            .map(|def| (def.effect, def.effect_chance, def.color))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // H03 T10: floor under the unit (`floorOn()`).
+                let (floor_is_liquid, floor_color) = {
+                    let tile = self
+                        .sim
+                        .grid
+                        .tiles
+                        .getn(WorldGrid::to_tile(pos.x), WorldGrid::to_tile(pos.y));
+                    let floor = tile.and_then(|tile| content.block(tile.floor));
+                    (
+                        floor.map(|def| def.is_liquid).unwrap_or(false),
+                        floor
+                            .and_then(|def| def.map_color)
+                            .unwrap_or(mind_core::content::Rgba::WHITE),
+                    )
+                };
                 Some(UnitDraw {
                     x: pos.x,
                     y: pos.y,
@@ -4348,6 +4396,12 @@ impl MindSimHost {
                     item,
                     is_player,
                     health,
+                    statuses,
+                    grounded: core.elevation < 0.001,
+                    hovering: def.hovering,
+                    emit_walk_effect: def.emit_walk_effect,
+                    floor_is_liquid,
+                    floor_color,
                 })
             })
             .collect()
@@ -5065,9 +5119,14 @@ impl MindSimHost {
         };
         let mut out = Vec::new();
         for entity in self.sim.ecs.0.iter_entities() {
-            let Some(_shield) = entity.get::<ShieldComp>() else {
+            let Some(shield) = entity.get::<ShieldComp>() else {
                 continue;
             };
+            // `UnitType.draw`: `if(unit.shieldAlpha > 0) drawShield(unit)`
+            // (`UnitType.java:1555-1556`; H03 T15). Transient per-hit flash.
+            if shield.shield_alpha <= 0.0 {
+                continue;
+            }
             let Some(pos) = entity.get::<Pos>() else {
                 continue;
             };
@@ -5085,8 +5144,11 @@ impl MindSimHost {
                 pos.x,
                 pos.y,
                 def.hit_size * 1.3,
-                0.55, // `shieldAlpha` default (`UnitType.shieldAlpha`)
+                shield.shield_alpha,
                 team,
+                // `UnitType.drawShield` lerps the rim toward white by
+                // `clamp(hitTime / 2)`: `hitTime` is view-only state owned by
+                // the unit renderer, so the port passes 0 (deviation).
                 0.0,
             ));
         }
@@ -6718,6 +6780,144 @@ impl MindSimHost {
             None => GString::from("null"),
         }
     }
+
+    // ---- H03 T9: unit factory / reconstructor build preview seam ----
+
+    /// `UnitFactory.draw` / `Reconstructor.draw` construct-preview state at
+    /// `(x, y)` (`Drawf.construct`, `UnitFactory.java:380-397`,
+    /// `Reconstructor.java:287-317`; H03 T9). `None` for any other block kind.
+    pub fn unit_build_draw(&self, x: i32, y: i32) -> Option<UnitBuildDraw> {
+        use mind_core::content::BlockKind;
+        use mind_core::entities::comp::Building;
+        use mind_core::world::blocks::units::{ReconstructorBuild, UnitFactoryBuild};
+        let tile = self.tile_at(x, y)?;
+        let entity = tile.build?;
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(tile.block)?;
+        let size = def.size.max(1);
+        // `Building.x/y` = the footprint centre (`Tile.drawx + Block.offset`).
+        let cx = (x + (size - 1) / 2) as f32 * 8.0 + def.offset;
+        let cy = (y + (size - 1) / 2) as f32 * 8.0 + def.offset;
+        let rotation = self.building_rotation(x, y);
+        let efficiency = self
+            .sim
+            .ecs
+            .0
+            .get::<Building>(entity)
+            .map(|building| building.efficiency)
+            .unwrap_or(0.0);
+        match def.kind {
+            BlockKind::UnitFactory => {
+                let state = self.sim.ecs.0.get::<UnitFactoryBuild>(entity)?;
+                let (unit, fraction) =
+                    factory_preview(&def.unit_plans, state.current_plan, state.progress);
+                Some(UnitBuildDraw {
+                    reconstructor: false,
+                    cx,
+                    cy,
+                    size,
+                    rotation,
+                    unit,
+                    payload: None,
+                    fraction,
+                    // `UnitFactory.updateTile`: `speedScl` targets 1 while
+                    // `efficiency > 0 && currentPlan != -1`.
+                    working: efficiency > 0.0 && unit.is_some(),
+                })
+            }
+            BlockKind::Reconstructor => {
+                let state = self.sim.ecs.0.get::<ReconstructorBuild>(entity)?;
+                let (unit, fraction, arrived) = reconstructor_preview(
+                    &def.reconstructor_upgrades,
+                    state.payload,
+                    state.progress,
+                    def.construct_time,
+                    state.move_in,
+                );
+                Some(UnitBuildDraw {
+                    reconstructor: true,
+                    cx,
+                    cy,
+                    size,
+                    rotation,
+                    unit,
+                    payload: state.payload,
+                    fraction,
+                    // `Reconstructor.updateTile`: `valid` = the payload arrived
+                    // (`moveInPayload()`) with a valid upgrade and
+                    // `efficiency > 0`.
+                    working: efficiency > 0.0 && arrived && unit.is_some(),
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// `UnitFactory.draw` preview numbers: `(unit, progress / plan.time)` for the
+/// selected plan (`UnitFactory.java:380-397`; H03 T9). Pure so it is testable
+/// without a Godot host.
+pub(crate) fn factory_preview(
+    plans: &[mind_core::content::registries::blocks::UnitPlanDef],
+    current_plan: i32,
+    progress: f32,
+) -> (Option<mind_core::content::UnitTypeId>, f32) {
+    let plan = usize::try_from(current_plan)
+        .ok()
+        .and_then(|index| plans.get(index));
+    let unit = plan.map(|plan| plan.unit);
+    let fraction = plan
+        .map(|plan| (progress / plan.time.max(f32::EPSILON)).clamp(0.0, 1.0))
+        .unwrap_or(0.0);
+    (unit, fraction)
+}
+
+/// `Reconstructor.draw` preview numbers: `(upgrade target`,
+/// `progress / constructTime`, arrived)` (`Reconstructor.java:287-317`;
+/// H03 T9). Pure so it is testable without a Godot host.
+pub(crate) fn reconstructor_preview(
+    upgrades: &[(
+        mind_core::content::UnitTypeId,
+        mind_core::content::UnitTypeId,
+    )],
+    payload: Option<mind_core::content::UnitTypeId>,
+    progress: f32,
+    construct_time: f32,
+    move_in: f32,
+) -> (Option<mind_core::content::UnitTypeId>, f32, bool) {
+    let target = payload.and_then(|from| {
+        upgrades
+            .iter()
+            .find(|(source, _)| *source == from)
+            .map(|(_, target)| *target)
+    });
+    let fraction = (progress / construct_time.max(f32::EPSILON)).clamp(0.0, 1.0);
+    (target, fraction, move_in >= 1.0)
+}
+
+/// Unit factory / reconstructor build preview (`Drawf.construct`,
+/// `Drawf.java:586-603`; H03 T9). Rust-only seam for `render/unit_build.rs`.
+pub struct UnitBuildDraw {
+    /// `true`: reconstructor (payload upgrade); `false`: unit factory.
+    pub reconstructor: bool,
+    /// Block centre world x (`Building.x`).
+    pub cx: f32,
+    /// Block centre world y (`Building.y`).
+    pub cy: f32,
+    /// `Block.size` in tiles (`Drawf.construct` line size = `size*8 - 4`).
+    pub size: i32,
+    /// `Building.rotation` (`0..=3`; drawn as `rotation * 90`).
+    pub rotation: u8,
+    /// Unit being constructed: the factory plan's unit or the reconstructor
+    /// upgrade target (`None` = nothing to preview).
+    pub unit: Option<mind_core::content::UnitTypeId>,
+    /// Reconstructor payload unit (`Reconstructor.draw` icon at
+    /// `1 - progress/constructTime`; the port tracks no payload rotation).
+    pub payload: Option<mind_core::content::UnitTypeId>,
+    /// `progress / plan.time` (factory) or `progress / constructTime`.
+    pub fraction: f32,
+    /// `efficiency > 0` with a valid plan/payload (Java `speedScl` target).
+    pub working: bool,
 }
 
 /// `OverlayRenderer.drawTop` inputs (H03 T5).
@@ -7900,5 +8100,75 @@ mod tests {
         } else {
             assert!(commands.is_empty());
         }
+    }
+
+    /// H03 T9: the factory preview fraction is `progress / plan.time` on a
+    /// live placed `ground-factory` (half progress -> 0.5), and the
+    /// reconstructor preview resolves the upgrade target with
+    /// `progress / constructTime`.
+    #[test]
+    fn unit_build_preview_fractions() {
+        use mind_core::content::BlockId;
+        use mind_core::determinism::SimCommand;
+        use mind_core::world::TilePos;
+        use mind_core::world::blocks::units::UnitFactoryBuild;
+
+        fn some<T>(value: Option<T>, what: &str) -> T {
+            match value {
+                Some(value) => value,
+                None => panic!("{what} missing"),
+            }
+        }
+
+        let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
+        let stone = BlockId::new(some(sim.world_block_id("stone"), "stone"));
+        sim.grid.fill(stone, BlockId::AIR);
+        if let Err(error) = sim.install_block_runtime() {
+            panic!("runtime: {error}");
+        }
+        let factory = some(sim.world_block_id("ground-factory"), "ground-factory");
+        if let Err(error) = sim.command(SimCommand::Place {
+            x: 10,
+            y: 10,
+            block: factory,
+            rotation: 0,
+            team: 1,
+            player: None,
+        }) {
+            panic!("place: {error}");
+        }
+        let entity = some(sim.grid.entity_at(TilePos::new(10, 10)), "entity");
+        let def = some(
+            sim.block_runtime().map(|runtime| runtime.content()),
+            "runtime",
+        );
+        let def = some(def.block(BlockId::new(factory)), "def");
+        let plans = def.unit_plans.clone();
+        let plan_time = some(plans.first(), "plan").time;
+        {
+            let mut state = some(sim.ecs.0.get_mut::<UnitFactoryBuild>(entity), "state");
+            state.current_plan = 0;
+            state.progress = plan_time / 2.0;
+        }
+        let state = some(sim.ecs.0.get::<UnitFactoryBuild>(entity), "state");
+        let (unit, fraction) = factory_preview(&plans, state.current_plan, state.progress);
+        assert_eq!(unit, plans.first().map(|plan| plan.unit));
+        assert!((fraction - 0.5).abs() < 1e-6, "fraction {fraction}");
+        let Some(unit) = unit else {
+            panic!("plan unit missing");
+        };
+
+        // Reconstructor: `(from -> to)` upgrades, payload arrived at half
+        // progress.
+        let nova = some(
+            sim.block_runtime()
+                .and_then(|runtime| runtime.content().unit_id("nova")),
+            "nova",
+        );
+        let (target, fraction, arrived) =
+            reconstructor_preview(&[(unit, nova)], Some(unit), 60.0, 120.0, 1.0);
+        assert_eq!(target, Some(nova));
+        assert!((fraction - 0.5).abs() < 1e-6, "fraction {fraction}");
+        assert!(arrived);
     }
 }

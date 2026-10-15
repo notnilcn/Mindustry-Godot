@@ -24,7 +24,7 @@ use crate::content::{ContentRegistry, StatusId};
 use crate::determinism::SimRng;
 use crate::ecs::EntitySeq;
 use crate::entities::comp::unit::UnitTypeComp;
-use crate::entities::comp::unit::comp::{StatusComp, StatusEntry};
+use crate::entities::comp::unit::comp::{ShieldComp, StatusComp, StatusEntry};
 use crate::entities::comp::{Health, Pos, TeamComp};
 
 use super::armor::apply_armor_opt;
@@ -246,6 +246,14 @@ pub fn update_statuses(world: &mut World, content: &ContentRegistry) {
 /// `damage`/`intervalDamage` are applied, and the transient multipliers are
 /// recomputed for the movement/weapons/damage consumers.
 pub fn update_unit_status(world: &mut World, content: &ContentRegistry, entity: Entity) {
+    // `ShieldComp.update` (`ShieldComp.java:84-87`): `shieldAlpha -=
+    // Time.delta / 15f; if(shieldAlpha < 0) shieldAlpha = 0f;` — the port's
+    // fixed step is one tick (H03 T15).
+    if let Some(mut shield) = world.get_mut::<ShieldComp>(entity)
+        && shield.shield_alpha > 0.0
+    {
+        shield.shield_alpha = (shield.shield_alpha - 1.0 / 15.0).max(0.0);
+    }
     let Some(mut comp) = world.get::<StatusComp>(entity).cloned() else {
         return;
     };

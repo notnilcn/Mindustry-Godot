@@ -424,6 +424,10 @@ impl ItemsComp {
 pub struct ShieldComp {
     /// Current shield points (`shield`).
     pub shield: f32,
+    /// `ShieldComp.shieldAlpha` view mirror (1.0 on a shielded hit, decays
+    /// `delta / 15` per tick; `transient` upstream — never serialized or
+    /// checksummed; H03 T15).
+    pub shield_alpha: f32,
 }
 
 /// One active status effect (`StatusEntry`).

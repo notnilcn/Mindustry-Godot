@@ -16,9 +16,10 @@ use godot::builtin::{
 };
 use godot::classes::notify::{CanvasItemNotification, NodeNotification};
 use godot::classes::{
-    Camera2D, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D, Viewport,
+    Camera2D, CanvasGroup, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D,
+    ShaderMaterial, Viewport,
 };
-use godot::obj::{Base, WithBaseField};
+use godot::obj::{Base, NewGd, WithBaseField};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
@@ -64,6 +65,7 @@ mod shaders;
 mod shadow;
 mod shields;
 mod status;
+mod unit_build;
 mod unit_overlays;
 mod units;
 mod weather;
@@ -250,6 +252,9 @@ pub struct MindWorldRenderer {
     block_extras: Option<Gd<block_extras::BlockExtras>>,
     /// `world/draw/*` extras, additive blend (`Layer.block` band; H03 T8).
     block_extras_add: Option<Gd<block_extras::BlockExtras>>,
+    /// Unit factory/reconstructor build preview (`Layer.blockOver` band;
+    /// H03 T9).
+    unit_build: Option<Gd<unit_build::UnitBuildRenderer>>,
     shadow: Option<ShadowRenderer>,
     light: Option<LightRenderer>,
     debug: Option<DebugCollisionRenderer>,
@@ -320,6 +325,7 @@ impl INode2D for MindWorldRenderer {
             fires: None,
             block_extras: None,
             block_extras_add: None,
+            unit_build: None,
             shadow: None,
             light: None,
             debug: None,
@@ -504,6 +510,30 @@ impl MindWorldRenderer {
             .cloned()
     }
 
+    /// A `CanvasGroup` under `band` for the animated-shield/build-beam
+    /// effect-buffer composite (`Renderer.java:403-414`; H03 T11). The pass
+    /// inside toggles the group's material from the `animatedshields` setting.
+    fn canvas_group(&self, mut band: Gd<Node2D>, name: &str) -> Gd<Node2D> {
+        let mut group = CanvasGroup::new_alloc();
+        group.set_name(name);
+        group.set_fit_margin(0.0);
+        group.set_clear_margin(0.0);
+        // code-instantiated: effect-buffer composite for the animated-shield
+        // look; one per pass, fixed by the pipeline.
+        band.add_child(&group);
+        group.upcast::<Node2D>()
+    }
+
+    /// The group-composite material for a `res://shaders/<name>.gdshader`
+    /// (H03 T11); `None` when the shader is missing, which leaves the flat
+    /// branch in place.
+    fn group_material(&self, shader_name: &str) -> Option<Gd<ShaderMaterial>> {
+        let shader = self.shaders.get(shader_name)?;
+        let mut material = ShaderMaterial::new_gd();
+        material.set_shader(&shader);
+        Some(material)
+    }
+
     /// Constructs the plan-16 floor + dynamic block passes.
     fn build_floor(&mut self) {
         let Some(host) = self.host.clone() else {
@@ -607,6 +637,17 @@ impl MindWorldRenderer {
             block_band.clone().add_child(&additive);
             self.block_extras_add = Some(additive.clone());
         }
+        // Unit factory / reconstructor build preview at `Layer.blockOver`
+        // (`UnitFactory.draw` -> `Drawf.construct`; H03 T9).
+        if let Some(over_band) = self.band_node_at(BandKey::base(Layer::BlockOver)) {
+            let mut node = unit_build::UnitBuildRenderer::new_alloc();
+            node.set_name("UnitBuildRenderer");
+            node.bind_mut().set_shader(self.shaders.get("unitbuild"));
+            // code-instantiated: one build-preview pass; the node count is
+            // fixed by the pipeline, not by content.
+            over_band.clone().add_child(&node);
+            self.unit_build = Some(node.clone());
+        }
         if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block))
             && let Some(building_band) = self.band_node_at(BandKey::base(Layer::BlockBuilding))
         {
@@ -644,10 +685,16 @@ impl MindWorldRenderer {
         }
         // Shield domes/bubbles at `Layer.shields` (`ForceProjector.drawShield`).
         if let Some(shield_band) = self.band_node_at(BandKey::base(Layer::Shields)) {
-            let node = shields::ShieldRenderer::new_alloc();
+            // H03 T11: the pass lives inside a `CanvasGroup`; with
+            // `animatedshields` on it stamps opaque fills and the group's
+            // `shield_group` material composites them (`Renderer.java:403-414`).
+            let mut group = self.canvas_group(shield_band, "ShieldGroup");
+            let mut node = shields::ShieldRenderer::new_alloc();
+            node.bind_mut()
+                .set_group_material(self.group_material("shield_group"));
             // code-instantiated: one shield pass; the node count is fixed by
             // the pipeline, not by content.
-            shield_band.clone().add_child(&node);
+            group.add_child(&node);
             self.shields = Some(node.clone());
         }
         // Weather (`WeatherStateComp.draw`, `Weather.java:326-341`): `drawOver`
@@ -711,11 +758,16 @@ impl MindWorldRenderer {
         }
         // Build-beam fan at `Layer.buildBeam` (`BuilderComp.drawBuilding`; G03 T3).
         if let Some(beam_band) = self.band_node_at(BandKey::base(Layer::BuildBeam)) {
+            // H03 T11: same `CanvasGroup` composite as the shields, with
+            // `buildbeam_group` (`Renderer.java:409-414`).
+            let mut group = self.canvas_group(beam_band, "BuildBeamGroup");
             let mut node = build_beam::BuildBeamOverlay::new_alloc();
             node.set_name("BuildBeamOverlay");
+            node.bind_mut()
+                .set_group_material(self.group_material("buildbeam_group"));
             // code-instantiated: one beam pass; the node count is fixed by the
             // pipeline, not by content.
-            beam_band.clone().add_child(&node);
+            group.add_child(&node);
             self.build_beam = Some(node.clone());
         }
         // Power lasers + bridge links at `Layer.power` (`PowerNode.draw` /
@@ -899,11 +951,25 @@ impl MindWorldRenderer {
         }
         self.stats.mesh_rebuilds = mesh_rebuilds;
         self.stats.stage_trace.push(String::from("blocks"));
+        // H03 T10: unit view effects (status particles, landing dust, walk
+        // ripples) are collected by the unit pass and forwarded to `MindFx`
+        // after its borrow ends.
+        let mut view_effects = Vec::new();
         if let Some(units) = self.units.as_mut() {
-            units.update();
+            view_effects = units.update();
             let unit_stats = units.stats();
             self.stats.unit_sprites = unit_stats.sprites;
             self.stats.missing_regions += unit_stats.missing_regions as i64;
+        }
+        if !view_effects.is_empty()
+            && let Some(mut fx) = self
+                .base()
+                .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+        {
+            let mut fx = fx.bind_mut();
+            for (effect, x, y, rotation, color) in view_effects {
+                fx.spawn_view_effect(effect, x, y, rotation, color);
+            }
         }
         self.stats.stage_trace.push(String::from("units"));
         if let Some(shadow) = self.shadow.as_mut() {
@@ -923,11 +989,18 @@ impl MindWorldRenderer {
         self.stats.stage_trace.push(String::from("env"));
         self.stats.stage_trace.push(String::from("markers"));
         let draw_light = self.draw_light;
+        // H03 T16: the FX system's collected `Drawf.light` requests feed the
+        // light pass (`LightRenderer.add` on the Java side).
+        let fx_lights: Vec<(f32, f32, f32, [f32; 4], f32)> = self
+            .base()
+            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+            .map(|fx| fx.bind().view_lights().to_vec())
+            .unwrap_or_default();
         if let Some(light) = self.light.as_mut() {
             // `Renderer.draw`: the light composite only runs when
             // `Rules.lighting` is set; the ambient alpha comes from the
             // `Rules` `ambientLight` alpha (never a hardcoded near-black).
-            light.update(&view, &self.rules, draw_light);
+            light.update(&view, &self.rules, draw_light, &fx_lights);
             let light_stats = light.stats();
             self.stats.light_rebuilds = light_stats.rebuilds;
             self.stats.light_circles = light_stats.lights;
