@@ -547,6 +547,8 @@ impl MindCampaign {
         // T2: produced/dumped content unlocks (`UnlockableContent.unlock()` ->
         // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
         // the registry, persist the unlock, then run `checkAutoUnlocks()`.
+        let mut unlocked_block = false;
+        let mut unlocked_content: Vec<ContentRef> = Vec::new();
         if !runtime.pending_unlocks.is_empty()
             && let Some(registry) = registry.as_mut()
         {
@@ -580,6 +582,7 @@ impl MindCampaign {
                     }
                 });
                 if unlocked {
+                    unlocked_content.push(content);
                     newly.push(name);
                 }
             }
@@ -595,6 +598,10 @@ impl MindCampaign {
                     auto.len()
                 );
                 for content in auto {
+                    if content.type_ == ContentType::Block {
+                        unlocked_block = true;
+                    }
+                    unlocked_content.push(content);
                     if let Some(name) = tech_tree::content_name(registry, content) {
                         newly.push(name);
                     }
@@ -623,6 +630,19 @@ impl MindCampaign {
             dirty = true;
         }
         self.registry = registry;
+
+        if unlocked_block {
+            // `UnlockEvent` with a block reached the facade: the placement
+            // palette rebuilds (`PlacementFragment.java:92-96`).
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
+        if let Some(registry) = self.registry.as_ref() {
+            // `Control.java:160-165`: each drained unlock shows the toast when
+            // `showUnlock()` is true.
+            for content in &unlocked_content {
+                self.push_unlock_toast(registry, *content);
+            }
+        }
 
         if !replacements.is_empty() {
             let replaced = host.bind_mut().apply_capture_replacements(&replacements);
@@ -731,12 +751,30 @@ impl MindCampaign {
         if !unlocked.is_empty() {
             log::info!("campaign capture auto-unlocked {} content", unlocked.len());
         }
+        for content in &unlocked {
+            // `Control.java:160-165` (`UnlockEvent`) half.
+            self.push_unlock_toast(registry, *content);
+        }
+        if unlocked
+            .iter()
+            .any(|content| content.type_ == ContentType::Block)
+        {
+            // `UnlockEvent` with a block: the palette rebuilds on capture
+            // unlocks (`PlacementFragment.java:92-96`).
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
     }
 
     /// Emitted on the first capture of a planet's last sector (campaign
     /// victory); the UI opens `campaign_complete`.
     #[signal]
     fn campaign_complete();
+
+    /// Emitted when an unlock performed during play includes a block
+    /// (`UnlockEvent`; `J/ui/fragments/PlacementFragment.java:92-96` rebuilds
+    /// the palette). Never emitted while a host bind is held.
+    #[signal]
+    fn block_unlocked();
 
     /// Primes the host's sector-generation extras from the campaign record
     /// (`Sector.threat`/`hasEnemyBase`/`hasBase`) so the next `load_sector` of
@@ -2139,6 +2177,7 @@ impl MindCampaign {
             });
         }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
+        let mut unlocked_content: Vec<ContentRef> = result.unlocked.clone();
         if !result.unlocked.is_empty()
             && let Some(campaign_ref) = self.campaign.as_ref()
         {
@@ -2147,6 +2186,7 @@ impl MindCampaign {
                 let mut store = SettingsUnlockStore::new(settings);
                 tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx)
             });
+            unlocked_content.extend(unlocked.iter().copied());
             log::info!("research auto-unlocked {} content", unlocked.len());
         }
         self.registry = Some(registry);
@@ -2157,7 +2197,42 @@ impl MindCampaign {
             self.persist();
             self.invalidate_ui_block_catalog();
         }
+        if let Some(registry) = self.registry.as_ref() {
+            // Each unlock fires an `UnlockEvent` (`Control.java:160-165`):
+            // toast for `showUnlock()` content, palette rebuild for blocks.
+            for content in &unlocked_content {
+                self.push_unlock_toast(registry, *content);
+            }
+            if unlocked_content
+                .iter()
+                .any(|content| content.type_ == ContentType::Block)
+            {
+                // No host bind is held here.
+                let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+            }
+        }
         changed
+    }
+
+    /// Emits an `unlock` for the toast when the content `showUnlock()`s.
+    ///
+    /// `Control.java:160-165` (`UnlockEvent` -> `hudfrag.showUnlock`); the
+    /// default is true (`UnlockableContent.java:242`) and `StatusEffect` is the
+    /// only `false` override (`StatusEffect.java:140`), so status unlocks are
+    /// skipped. No HUD present (tests) is a no-op.
+    fn push_unlock_toast(&self, registry: &ContentRegistry, content: ContentRef) {
+        if content.type_ == ContentType::Status {
+            return;
+        }
+        let Some(name) = tech_tree::content_name(registry, content) else {
+            return;
+        };
+        let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+            return;
+        };
+        if hud.has_method("push_unlock") {
+            hud.call("push_unlock", &[GString::from(name.as_str()).to_variant()]);
+        }
     }
 
     /// `ResearchDialog.rebuildItems` inventory for `planets` (Java
@@ -2760,6 +2835,7 @@ impl MindCampaign {
             blocks: block_table.as_ref(),
             in_game: self.session.phase.is_game(),
             planet: Some(self.session.rules.planet.as_str()),
+            campaign: self.session.is_campaign(),
         };
         let stats = compute_content_stats(&ctx, content);
         let categories: Vec<serde_json::Value> = stats
@@ -2870,10 +2946,23 @@ impl MindCampaign {
     /// and other-planet content is hidden (`Block.environmentBuildable` reads
     /// the active planet's `shownPlanets`). Custom games expose the full
     /// build-menu inventory, mirroring `unlockedNowHost`'s
-    /// `!state.isCampaign()` branch, with the same planet filter.
+    /// `!state.is_campaign()` branch, with the same planet filter.
+    ///
+    /// The campaign planet comes from the LOADED world's rules when one exists:
+    /// Java's `state.rules` is the loaded world's from `World.loadSector` on,
+    /// while the facade session only flips in `start_sector` — which the UI can
+    /// call a frame after the world load, so `WorldLoadEvent`'s posted rebuild
+    /// (`PlacementFragment.java:78-84`) would otherwise read the old planet.
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
-        let planet = self.session.rules.planet.clone();
+        // Read the loaded rules into one owned string; never hold the host
+        // bind across the catalog build below.
+        let loaded_planet = self.host().and_then(|host| {
+            host.bind()
+                .last_sector_rules()
+                .map(|rules| rules.planet.clone())
+        });
+        let planet = loaded_planet.unwrap_or_else(|| self.session.rules.planet.clone());
         let is_campaign = self.session.is_campaign();
         let catalog = match self.registry.as_ref() {
             Some(registry) => {

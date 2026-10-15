@@ -63,6 +63,13 @@ var _logic_hud_hidden := false
 var _logic_hud_prev_visible := true
 
 
+## Unlock-toast state (`Control.java:160-165` -> `HudFragment.showUnlock`,
+## `HudFragment.java:786-871`). The live box (Java `lastUnlockTable`) and its
+## icon grid (`lastUnlockLayout`); `null` while none is on screen.
+var _unlock_box: PanelContainer = null
+var _unlock_grid: GridContainer = null
+
+
 func _ready() -> void:
 	_hud = get_node_or_null("/root/MindHud")
 	_localize_banners()
@@ -302,6 +309,12 @@ func refresh() -> void:
 	if _hud == null:
 		_set_placeholder()
 		return
+	# `HudFragment.showUnlock`'s `table.update`: entering the menu drops the
+	# live unlock box (`lastUnlockTable/lastUnlockLayout = null`).
+	if _unlock_box != null and is_instance_valid(_unlock_box) and _in_menu():
+		_unlock_box.queue_free()
+		_unlock_box = null
+		_unlock_grid = null
 	var status := str(_hud.get("status_text"))
 	if status_label != null:
 		# Java's `makeStatusTable` labelWrap cell is centred in the wavepane table
@@ -472,16 +485,137 @@ func _on_announce(text: String, duration: float) -> void:
 		ui.call("announce", text, duration)
 
 
-func _on_unlock(_name: String) -> void:
-	var ui := get_node_or_null("/root/MindUi")
-	if ui == null:
+## `HudFragment.showUnlock(content)` (`HudFragment.java:786-871`): a top-centre
+## `Tex.button` box (margin 12) holding the content icon (48 px = `8 * 6`,
+## pad 2) and `@unlocked`; slides in over 1 s (`Interp.fade`), holds 2.5 s and
+## slides back out. Unlocks that arrive while the box lives merge into it as a
+## 3-column icon grid (`col = 3`, cap = `col * col - 1` = 8; the 9th cell is
+## `Icon.add`, later unlocks are dropped; cell size `48 / min(n + 1, 3)`).
+func _on_unlock(name: String) -> void:
+	# `if(state.isMenu()) return;`
+	if _in_menu():
 		return
-	# H03 T17: pass the raw bundle text; the toast label translates markup.
-	var text := "@unlocked"
-	var assets := get_node_or_null("/root/MindAssets")
-	if assets != null and assets.has_method("bundle_get"):
-		text = str(assets.call("bundle_get", "unlocked"))
-	ui.call("toast", text, "lock-open")
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		# `Sounds.uiNotify.play()` (`UI.java:146`).
+		ui.call("play_ui_sound", "uiNotify")
+	if _unlock_box != null and is_instance_valid(_unlock_box):
+		_merge_unlock_icon(name)
+		return
+	_build_unlock_box(name)
+
+
+## `state.isMenu()` through the UI root's menu group.
+func _in_menu() -> bool:
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	return ui_root != null and ui_root.get("menu_group") != null and bool(ui_root.menu_group.visible)
+
+
+## First unlock: builds the box, its 48 px icon cell and the slide-in/out tween
+## (`HudFragment.java:792-826`; the Java `scheduleToast` 3.5 s slot shared with
+## other toasts is not ported: the port shows it at once when no box lives).
+func _build_unlock_box(name: String) -> void:
+	var layer := get_node_or_null("/root/Spine/Ui/UiRoot/OverlayLayer")
+	if layer == null:
+		layer = self
+	# code-instantiated: unlock toasts are transient, high-churn overlay boxes.
+	var box := PanelContainer.new()
+	var style := StyleBoxFlat.new()
+	# `new Table(Tex.button)`: the dark gray panel with margin 12.
+	style.bg_color = MindStyles.GRAY_PANEL
+	style.set_corner_radius_all(4)
+	style.content_margin_left = 12.0
+	style.content_margin_top = 12.0
+	style.content_margin_right = 12.0
+	style.content_margin_bottom = 12.0
+	box.add_theme_stylebox_override("panel", style)
+	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	# `table.add(in).padRight(8)`: the icon table becomes the merge grid.
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_child(_unlock_icon(name, 48.0))
+	row.add_child(grid)
+	var label := MindRichLabel.new()
+	label.text = MindWidgets.markup("@unlocked")
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	row.add_child(label)
+	box.add_child(row)
+	# `container.top()`: top-centre, translated down by its own height, then
+	# `Actions.translateBy(0, -table.getPrefHeight(), 1f, Interp.fade)`.
+	box.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	box.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	layer.add_child(box)
+	var slide := -box.get_combined_minimum_size().y
+	box.position.y = slide
+	_unlock_box = box
+	_unlock_grid = grid
+	var tween := create_tween()
+	tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tween.tween_property(box, "position:y", 0.0, 1.0)
+	tween.tween_interval(2.5)
+	tween.tween_property(box, "position:y", slide, 1.0)
+	tween.tween_callback(func() -> void:
+		# `lastUnlockTable = null; lastUnlockLayout = null;` before removal.
+		if _unlock_box == box:
+			_unlock_box = null
+			_unlock_grid = null
+		box.queue_free())
+
+
+## Merge half (`HudFragment.java:828-869`): re-flow the grid at the Java cell
+## size and append the new icon (or the `Icon.add` placeholder at the cap).
+func _merge_unlock_icon(name: String) -> void:
+	var grid: GridContainer = _unlock_grid
+	if grid == null or not is_instance_valid(grid):
+		return
+	# `int cap = col * col - 1` (8); `if(esize > cap) return;`.
+	var cap := 8
+	var count := grid.get_child_count()
+	if count > cap:
+		return
+	# `float size = 48f / Math.min(elements.size + 1, col)`.
+	var cell := 48.0 / minf(float(count + 1), 3.0)
+	for child in grid.get_children():
+		if child is Control:
+			(child as Control).custom_minimum_size = Vector2(cell, cell)
+	if count < cap:
+		grid.add_child(_unlock_icon(name, cell))
+	else:
+		# `else lastUnlockLayout.image(Icon.add)`.
+		var add := MindWidgets.glyph("add", int(cell), Color.WHITE)
+		add.custom_minimum_size = Vector2(cell, cell)
+		grid.add_child(add)
+
+
+## `new Image(content.uiIcon)`: the content's `<type>-<name>-ui` atlas region
+## (48 px cell, `Scaling.fit`), pad 2 (`in.add(image).size(8 * 6).pad(2)`); the
+## lock glyph stands in when no region exists (`UnlockableContent.uiIcon`).
+func _unlock_icon(name: String, size: float) -> Control:
+	# code-instantiated: unlock icons are content-driven (atlas lookup).
+	var cell := MarginContainer.new()
+	for side in ["left", "top", "right", "bottom"]:
+		cell.add_theme_constant_override("margin_" + side, 2)
+	cell.custom_minimum_size = Vector2(size, size)
+	cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var texture: Texture2D = null
+	for type_name in ["block", "item", "unit", "liquid", "status"]:
+		texture = MindWidgets.icon_texture("%s-%s-ui" % [type_name, name])
+		if texture != null:
+			break
+	if texture != null:
+		var image := TextureRect.new()
+		image.texture = texture
+		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		image.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		cell.add_child(image)
+	else:
+		var glyph := MindWidgets.glyph("lock", int(maxf(size - 4.0, 8.0)), Color.WHITE)
+		cell.add_child(glyph)
+	return cell
 
 
 func _on_wave_event() -> void:

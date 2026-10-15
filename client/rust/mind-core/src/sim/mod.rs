@@ -1236,6 +1236,18 @@ impl Sim {
         {
             self.hint_events.events.insert("fire");
         }
+        // `Trigger.cannotUpgrade` (I04 T3 `HintsFragment.java:84`): a
+        // Reconstructor refused a locked upgrade target for a non-AI team
+        // (`Reconstructor.java:252-257`). The marker uses interior mutability
+        // (the `accept_payload` hook only has `&World`), so clear it here.
+        if self
+            .ecs
+            .0
+            .get_resource::<crate::world::blocks::units::behavior::CannotUpgradeFired>()
+            .is_some_and(|fired| fired.0.swap(false, std::sync::atomic::Ordering::Relaxed))
+        {
+            self.hint_events.events.insert("cannotupgrade");
+        }
         // World-processor UI events (announce/toast/cutscene) are drained here so
         // the log never grows unbounded (T4; T5/T6 extend the match).
         self.drain_logic_events();
@@ -2033,16 +2045,23 @@ impl Sim {
                     let Some(block) = self.grid.block_at(pos) else {
                         continue;
                     };
-                    let commandable = self
+                    let (commandable, payload_block) = self
                         .ensure_world_apply()
                         .content()
                         .block(block)
-                        .is_some_and(|def| def.commandable);
+                        .map(|def| (def.commandable, def.kind.is_payload_block()))
+                        .unwrap_or((false, false));
                     if !commandable {
                         continue;
                     }
+                    // `BuildingCommandEvent` with a `PayloadBlockBuild`
+                    // (`HintsFragment.java:91-95`): the factoryControl hint
+                    // event (`InputHandler.java:491` is the command site).
                     self.ensure_world_apply()
                         .apply_command_building(pos, *x, *y);
+                    if payload_block {
+                        self.hint_events.events.insert("factorycontrol");
+                    }
                 }
                 self.commands_applied = self.commands_applied.wrapping_add(1);
                 return Ok(());

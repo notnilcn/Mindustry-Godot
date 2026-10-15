@@ -388,6 +388,7 @@ pub const EXPECTED_M5_DIALOGS: &[&str] = &[
     "planet",
     "research",
     "schematics",
+    "schematic_info",
     "sector_select",
     "launch_loadout",
     "loadout",
@@ -436,6 +437,7 @@ pub fn expected_pause(name: &str) -> Option<bool> {
         | "canvas_edit"
         | "picker"
         | "content"
+        | "schematic_info"
         | "custom"
         | "custom_rules"
         | "discord"

@@ -385,6 +385,7 @@ impl LiquidBridgeBehavior {
             buffered: false,
             buffer_capacity: 0,
             speed: 0.0,
+            displayed_speed: 0.0,
             no_accept_disabled: false,
         }
     }

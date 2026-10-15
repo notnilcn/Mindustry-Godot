@@ -1446,6 +1446,11 @@ impl Sim {
             .0
             .insert_resource(LiquidTraits::from_content(&content));
         self.ecs.0.insert_resource(PowerGrids::new());
+        // I04 T3: the reconstructor's `Trigger.cannotUpgrade` marker (`&World`
+        // hook, interior mutability); drained by `Sim::tick`.
+        self.ecs
+            .0
+            .init_resource::<crate::world::blocks::units::behavior::CannotUpgradeFired>();
         // The live per-team block counter (`Build.validPlace` limits + the
         // runtime checksum) is a world resource so scheduled systems (the
         // campaign team AI) can read it (PAR-0139 round 2).

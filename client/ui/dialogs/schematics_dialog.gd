@@ -2,26 +2,39 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/ui/dialogs/SchematicsDialog.java (plan 14 M5).
 ##
-## Schematic library: search + list + detail/preview panel over the live
-## `MindCampaign` schematic read models. Edit/export/delete are wired to the
-## campaign facade (WS2 contract), Import reads the clipboard through
-## `import_schematic`, and the icon picker reuses `icon_select_dialog`.
+## Schematic library per `SchematicsDialog`: search field, `Tags:` row (tag
+## toggles + edit pencil), and one 200 px card per schematic with a 50 px
+## action row (info/export/edit/delete), the `SchematicImage` preview and the
+## top `black3` name badge. The Back + Import buttons live in the bottom row.
+## Cards in a match start placement (`control.input.useSchematic`); in the menu
+## the info button opens `schematic_info`.
+##
+## `Schematics.all` hides the vanilla launch loadouts (`schematic_views`), and
+## every action addresses the view's real `index` field.
 
 extends MindDialog
 
 ## Emitted when a schematic action is requested (`export`/`delete`/`edit`).
 signal schematic_action(index: int, action: String)
 
+## `SchematicsDialog.ignoreSymbols` (`Pattern.compile` of the symbol class).
+const IGNORE_SYMBOLS := "[`~!@#$%^&*()\\-_=+{}|;:'\",<.>/?]"
+
+## `SchematicsDialog.tagh` (tag button height).
+const TAG_HEIGHT := 42.0
+
 var _field: LineEdit = null
 var _list: MindTable = null
-var _detail: MindTable = null
 var _tags_row: HBoxContainer = null
 var _tags: Array = []
 var _selected_tags: Array = []
-var _selected := 0
+## First visible schematic's view index (`firstSchematic`; Enter uses it).
+var _first_index := -1
 var _pending_delete := -1
 var _pending_rename := -1
 var _pending_icon := -1
+## True while the tag text prompt is open (`showAllTags` pencil half).
+var _pending_tag := false
 
 
 func _ready() -> void:
@@ -31,6 +44,15 @@ func _ready() -> void:
 	super._ready()
 	_build()
 	add_close_button()
+	# `buttons.button("@schematic.import", Icon.download, this::showImport)`:
+	# the import button follows Back in the bottom row.
+	var import := MindWidgets.button("")
+	import.custom_minimum_size = Vector2(200.0, 54.0)
+	apply_pane_button(import, PANE_OUTLINE_GRAY)
+	build_button_content(import, MindWidgets.glyph("download", 20), _t("@schematic.import"))
+	import.pressed.connect(_import)
+	if buttons != null:
+		buttons.add_child(import)
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
 		if ui.has_signal("confirm_result") and not ui.is_connected("confirm_result", _on_confirm):
@@ -42,8 +64,11 @@ func _ready() -> void:
 func shown() -> void:
 	refresh_campaign_views()
 	_load_tags()
+	# `shown(() -> { searchField.setText(search = ""); setup(); })`.
+	if _field != null:
+		_field.text = ""
+	_rebuild_tags()
 	_rebuild_list()
-	_rebuild_detail()
 
 
 ## `SchematicsDialog` tags (`Core.settings` JSON `schematic-tags`).
@@ -59,46 +84,48 @@ func _load_tags() -> void:
 				_tags.append(str(tag))
 
 
+func _save_tags() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", "schematic-tags", JSON.stringify(_tags))
+
+
 func _build() -> void:
 	var root := content_table()
+	# `cont.table(s -> { s.image(Icon.zoom); s.add(searchField).growX() })`.
 	var search_row := HBoxContainer.new()
 	search_row.add_theme_constant_override("separation", 4)
-	_field = MindWidgets.field(_t("@search"))
+	search_row.add_child(MindWidgets.glyph("zoom", 22))
+	_field = MindWidgets.field(_t("@schematic.search"))
+	_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `searchField.changed(() -> { search = searchField.getText(); rebuildPane.run(); })`.
 	_field.text_changed.connect(func(_text: String) -> void: _rebuild_list())
+	# `Binding.chat` with the field focused -> use/inspect the first match.
+	_field.text_submitted.connect(func(_text: String) -> void: _search_submit())
 	search_row.add_child(_field)
-	# code-instantiated: the import entry button is parameterized by the clipboard.
-	var import := MindWidgets.icon_button("download", _t("@schematic.import"), "defaultt")
-	import.pressed.connect(_import)
-	search_row.add_child(import)
 	root.add(search_row).grow_x_axis().pad(4)
 	root.row()
-	# `SchematicsDialog`: `@schematic.tags` label + one toggle per tag.
+	# `cont.table(in -> { in.left(); in.add("@schematic.tags"); pane(toggles); button(Icon.pencilSmall, showAllTags) })`.
 	_tags_row = HBoxContainer.new()
 	_tags_row.add_theme_constant_override("separation", 2)
 	root.add(_tags_row).grow_x_axis().pad(2)
 	root.row()
-	# Full-width card pane (`cols = max(screenW / 230, 1)`), then the detail
-	# panel with the per-schematic actions.
+	# `cont.pane(t -> ...)` with `cols = max(screenW / 230, 1)`.
 	_list = MindTable.new()
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	root.add(_list).grow_x_axis().grow_y_axis()
 	root.row()
-	_detail = MindTable.new()
-	_detail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.add(_detail).grow_x_axis()
 	_rebuild_tags()
 	_rebuild_list()
-	_rebuild_detail()
 
 
-## Tags row (`@schematic.tags` + toggles; `showAllTags` editor deferred).
+## `rebuildTags` (`SchematicsDialog.java:86-116`): `@schematic.tags` label, one
+## toggle per saved tag (checked while selected) and the edit pencil.
 func _rebuild_tags() -> void:
 	if _tags_row == null:
 		return
 	for child in _tags_row.get_children():
 		child.queue_free()
-	if _tags.is_empty():
-		return
 	# code-instantiated: the tag label/toggles follow the settings tag list.
 	_tags_row.add_child(MindWidgets.label(_t("@schematic.tags")))
 	for tag in _tags:
@@ -106,8 +133,13 @@ func _rebuild_tags() -> void:
 		button.theme_type_variation = "togglet"
 		button.toggle_mode = true
 		button.button_pressed = _selected_tags.has(tag)
+		button.custom_minimum_size = Vector2(0, TAG_HEIGHT)
 		button.pressed.connect(_toggle_tag.bind(str(tag)))
 		_tags_row.add_child(button)
+	var pencil := MindWidgets.glyph_button("pencil", _t("@schematic.edittags"), "emptyi")
+	pencil.custom_minimum_size = Vector2(TAG_HEIGHT, TAG_HEIGHT)
+	pencil.pressed.connect(_edit_tags)
+	_tags_row.add_child(pencil)
 
 
 func _toggle_tag(tag: String) -> void:
@@ -115,22 +147,33 @@ func _toggle_tag(tag: String) -> void:
 		_selected_tags.erase(tag)
 	else:
 		_selected_tags.append(tag)
-	_rebuild_tags()
 	_rebuild_list()
 
 
+## `showAllTags` pencil: the port adds a tag through the shared text prompt
+## (Java opens a per-tag editor dialog; the toggles themselves are shared).
+func _edit_tags() -> void:
+	_pending_tag = true
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("show_text_input", _t("@schematic.edittags"), _t("@schematic.tags"), 24, "", false, false)
+
+
+## `rebuildPane` (`SchematicsDialog.java:118-224`).
 func _rebuild_list() -> void:
+	if _list == null:
+		return
 	_list.clear_children()
-	var needle := _field.text.to_lower() if _field != null else ""
+	var search := _field.text if _field != null else ""
+	var needle := _strip_symbols(search.to_lower())
 	var schematics := campaign_section("schematics")
-	# `cols = max((int)(screenW / 230), 1)` (SchematicsDialog.java:129-150).
+	# `cols = max((int)(screenW / 230), 1)`.
 	var cols := maxi(int(get_viewport_rect().size.x / 230.0), 1)
 	var shown := 0
-	for index in schematics.size():
-		var schematic: Dictionary = schematics[index]
-		var name := str(schematic.get("name", ""))
-		if not needle.is_empty() and not name.to_lower().contains(needle):
-			continue
+	_first_index = -1
+	for row_variant in schematics:
+		var schematic: Dictionary = row_variant
+		# `selectedTags.any() && !s.labels.containsAll(selectedTags)`.
 		var labels: Array = schematic.get("labels", [])
 		var tagged := true
 		for tag in _selected_tags:
@@ -139,136 +182,174 @@ func _rebuild_list() -> void:
 				break
 		if not tagged:
 			continue
-		# code-instantiated: one SchematicImage card per library entry.
-		var button := Button.new()
-		button.theme_type_variation = "togglet"
-		button.custom_minimum_size = Vector2(200.0, 200.0)
-		button.pressed.connect(_on_card_pressed.bind(index))
-		var image := MindSchematicImage.new()
-		image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		image.setup(schematic)
-		button.add_child(image)
-		button.mouse_entered.connect(func() -> void: image.set_hovered(true))
-		button.mouse_exited.connect(func() -> void: image.set_hovered(false))
-		# code-instantiated: name badge (`Styles.black3` label over the image).
-		var badge := PanelContainer.new()
-		var box := StyleBoxFlat.new()
-		box.bg_color = MindStyles.BLACK_3
-		badge.add_theme_stylebox_override("panel", box)
-		badge.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-		badge.offset_top = -26.0
-		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var label := MindWidgets.label("[center]%s[/center]" % name)
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		badge.add_child(label)
-		button.add_child(badge)
-		_list.add(button).pad(4)
+		# `!search.isEmpty() && !ignoreSymbols(name).contains(searchString)`.
+		if not needle.is_empty() and not _strip_symbols(str(schematic.get("name", "")).to_lower()).contains(needle):
+			continue
+		if _first_index < 0:
+			_first_index = int(schematic.get("index", -1))
+		_list.add(_build_card(schematic)).pad(4)
 		shown += 1
 		if shown % cols == 0:
 			_list.row()
 	if shown == 0:
-		var key := "@none.found" if (not needle.is_empty() or not _selected_tags.is_empty()) else "@none"
-		_list.add(MindWidgets.label(_t(key))).pad(8)
+		# `@none.found` when filtering, plain `@none` (light gray) otherwise.
+		if not needle.is_empty() or not _selected_tags.is_empty():
+			_list.add(MindWidgets.label(_t("@none.found")))
+		else:
+			var none := MindWidgets.label(_t("@none"))
+			none.modulate = Color.LIGHT_GRAY
+			_list.add(none)
 		_list.row()
 	_list.call_deferred("sort_now")
 
 
-## Card click: in game `control.input.useSchematic(s)` + hide (Java
-## `SchematicsDialog.java:190-205`); in the menu it selects the detail panel.
+## One card (`SchematicsDialog.java:150-205`): a flat button with the `pane`
+## background holding the 50 px action row and the 200 px image stack.
+func _build_card(schematic: Dictionary) -> Button:
+	var index := int(schematic.get("index", -1))
+	# code-instantiated: one card per filtered schematic row.
+	var button := Button.new()
+	button.theme_type_variation = "flati"
+	button.custom_minimum_size = Vector2(200.0, 250.0)
+	var pane := _pane_box(Color(0, 0, 0, 1), PANE_OUTLINE_GRAY)
+	button.add_theme_stylebox_override("normal", pane)
+	button.add_theme_stylebox_override("hover", pane)
+	button.add_theme_stylebox_override("pressed", pane)
+	button.pressed.connect(_on_card_pressed.bind(index))
+	var column := VBoxContainer.new()
+	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	column.add_theme_constant_override("separation", 0)
+	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# `b.table(buttons -> { buttons.left(); buttons.defaults().size(50f); ... }).growX().height(50f)`.
+	var actions := HBoxContainer.new()
+	actions.add_theme_constant_override("separation", 0)
+	actions.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for action in [
+		{"icon": "info", "tooltip": "@info.title", "action": "info"},
+		{"icon": "upload", "tooltip": "@editor.export", "action": "export"},
+		{"icon": "pencil", "tooltip": "@schematic.edit", "action": "edit"},
+		{"icon": "trash", "tooltip": "@save.delete", "action": "delete"},
+	]:
+		# code-instantiated: fixed upstream action row (four card buttons).
+		var action_button := MindWidgets.glyph_button(
+			str(action.get("icon", "")), _t(str(action.get("tooltip", ""))), "emptyi"
+		)
+		action_button.custom_minimum_size = Vector2(50.0, 50.0)
+		action_button.pressed.connect(_on_card_action.bind(index, str(action.get("action", ""))))
+		actions.add_child(action_button)
+	column.add_child(actions)
+	# `b.stack(new SchematicImage(s), new Table(n -> { n.top(); black3 badge })).size(200f)`.
+	var stack := Control.new()
+	stack.custom_minimum_size = Vector2(200.0, 200.0)
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var image := MindSchematicImage.new()
+	image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	image.setup(schematic)
+	stack.add_child(image)
+	var badge := PanelContainer.new()
+	var box := StyleBoxFlat.new()
+	box.bg_color = MindStyles.BLACK_3
+	box.content_margin_left = 4.0
+	box.content_margin_right = 4.0
+	badge.add_theme_stylebox_override("panel", box)
+	badge.set_anchors_preset(Control.PRESET_TOP_WIDE)
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	# `label.setEllipsis(true)`, `maxWidth(200f - 8f)`, centred, top.
+	var name_label := Label.new()
+	name_label.text = str(schematic.get("name", ""))
+	name_label.custom_minimum_size = Vector2(192.0, 0)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.clip_text = true
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.add_child(name_label)
+	stack.add_child(badge)
+	column.add_child(stack)
+	button.add_child(column)
+	button.mouse_entered.connect(func() -> void: image.set_hovered(true))
+	button.mouse_exited.connect(func() -> void: image.set_hovered(false))
+	return button
+
+
+## Card press (`SchematicsDialog.java:190-205`): menu -> info; in game ->
+## `control.input.useSchematic(s)` + hide (or `@schematic.disabled`).
 func _on_card_pressed(index: int) -> void:
-	_selected = index
-	if _in_game() and _use_schematic(index):
-		var ui := get_node_or_null("/root/MindUi")
-		if ui != null:
-			ui.call("close_dialog", "schematics")
+	if index < 0:
 		return
-	_rebuild_list()
-	_rebuild_detail()
+	if not _in_game():
+		_open_info(index)
+		return
+	if not _use_schematic(index):
+		show_toast(_t("@schematic.disabled"))
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "schematics")
 
 
-## `state.isGame()` (the dialog is open in the running match).
+## Card action row press: never falls through as a card press (the buttons stop
+## the event; Java `sel[0].childrenPressed()`).
+func _on_card_action(index: int, action: String) -> void:
+	match action:
+		"info":
+			_open_info(index)
+		"export":
+			_export(index)
+		"edit":
+			_edit(index)
+		"delete":
+			_delete(index)
+	schematic_action.emit(index, action)
+
+
+## Enter in the search field (`Binding.chat`): in game use the first match, in
+## the menu open its info (`SchematicsDialog.java:122-133`).
+func _search_submit() -> void:
+	if _first_index < 0:
+		return
+	if not _in_game():
+		_open_info(_first_index)
+		return
+	if not _use_schematic(_first_index):
+		show_toast(_t("@schematic.disabled"))
+		return
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "schematics")
+
+
+## `showInfo(schematic)` -> the `schematic_info` dialog.
+func _open_info(index: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("open_dialog"):
+		ui.call("open_dialog", "schematic_info", JSON.stringify({"index": index}))
+
+
+## `state.isGame()` (the dialog is open in the running match). `should_pause`
+## turns the port's phase into `paused`, which is still a game
+## (`custom_rules_dialog` uses the same `!= "menu"` test).
 func _in_game() -> bool:
 	var host := get_node_or_null("/root/Spine/SimHost")
-	return host != null and host.has_method("get_state") and str(host.call("get_state")) == "playing"
+	return host != null and host.has_method("get_state") and str(host.call("get_state")) != "menu"
 
 
-## `control.input.useSchematic(s)` (G08 T6b); toasts `@schematic.disabled` when
-## the rules/placement state refuses (`!rules.schematicsAllowed`).
+## `control.input.useSchematic(s)` (G08 T6b).
 func _use_schematic(index: int) -> bool:
 	var input := get_node_or_null("/root/Spine/Input")
 	if input == null or not input.has_method("use_schematic"):
 		return false
-	var used := bool(input.call("use_schematic", index))
-	if not used:
-		show_toast(_t("@schematic.disabled"))
-	return used
+	return bool(input.call("use_schematic", index))
 
 
-func _select(index: int) -> void:
-	_selected = index
-	_rebuild_list()
-	_rebuild_detail()
+## `SchematicsDialog.ignoreSymbols`: strip the symbol class from a name.
+func _strip_symbols(value: String) -> String:
+	var regex := RegEx.new()
+	if regex.compile(IGNORE_SYMBOLS) != OK:
+		return value
+	return regex.sub(value, "", true)
 
 
-func _rebuild_detail() -> void:
-	_detail.clear_children()
-	var schematics := campaign_section("schematics")
-	if schematics.is_empty():
-		return
-	var schematic: Dictionary = schematics[clampi(_selected, 0, schematics.size() - 1)]
-	_detail.add(MindWidgets.styled_label(str(schematic.get("name", "")), "techLabel")).grow_x_axis().pad(6)
-	_detail.row()
-	_detail.add(MindWidgets.label("%dx%d  tiles: %d" % [
-		int(schematic.get("width", 0)), int(schematic.get("height", 0)),
-		(schematic.get("tiles", []) as Array).size()
-	])).pad(2)
-	_detail.row()
-	var requirements: Array = schematic.get("requirements", [])
-	for requirement in requirements:
-		_detail.add(MindWidgets.label("%s x%d" % [str(requirement[0]), int(requirement[1])])).pad(1)
-		_detail.row()
-	var buttons := HBoxContainer.new()
-	# code-instantiated: the action row is parameterized by the selected schematic.
-	for action in ["edit", "export", "icon", "delete"]:
-		var button := MindWidgets.button(_t(_action_label(action)))
-		button.pressed.connect(_on_action.bind(_selected, action))
-		buttons.add_child(button)
-	if bool(schematic.get("has_core", false)):
-		# Core schematics are launch loadouts: open the capacity editor too.
-		var configure := MindWidgets.button(_t("@configure"))
-		configure.pressed.connect(_open_loadout.bind(_selected))
-		buttons.add_child(configure)
-	_detail.add(buttons).pad(4)
-
-
-## Action -> bundle label (`SchematicsDialog` import/export/edit flows).
-func _action_label(action: String) -> String:
-	match action:
-		"edit":
-			return "@edit"
-		"export":
-			return "@editor.export"
-		"icon":
-			return "@schematic.icontag"
-		"delete":
-			return "@save.delete"
-	return action
-
-
-func _on_action(index: int, action: String) -> void:
-	schematic_action.emit(index, action)
-	match action:
-		"edit":
-			_edit(index)
-		"export":
-			_export(index)
-		"icon":
-			_open_icon_select(index)
-		"delete":
-			_delete(index)
-
-
-# --- Facade actions (WS2 contract) -------------------------------------------
+# --- Facade actions ----------------------------------------------------------
 
 ## `SchematicsDialog.showExport` -> `@copy.clipboard` half.
 func _export(index: int) -> void:
@@ -292,12 +373,22 @@ func _import() -> void:
 		show_toast(_t("@none"))
 		return
 	refresh_campaign_views()
-	_selected = int(result)
 	_rebuild_list()
-	_rebuild_detail()
 
 
+## `@schematic.delete.confirm`; mod-provided schematics show the removal note
+## (`mod.item.remove`) instead of the confirm.
 func _delete(index: int) -> void:
+	var schematics := campaign_section("schematics")
+	var mod_name := ""
+	for row_variant in schematics:
+		var row: Dictionary = row_variant
+		if int(row.get("index", -1)) == index:
+			mod_name = str(row.get("mod_name", ""))
+			break
+	if not mod_name.is_empty():
+		show_toast(MindWidgets.markup_format("@mod.item.remove", [mod_name]))
+		return
 	_pending_delete = index
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
@@ -308,19 +399,14 @@ func _edit(index: int) -> void:
 	_pending_rename = index
 	var name := ""
 	var schematics := campaign_section("schematics")
-	if index >= 0 and index < schematics.size():
-		name = str((schematics[index] as Dictionary).get("name", ""))
+	for row_variant in schematics:
+		var row: Dictionary = row_variant
+		if int(row.get("index", -1)) == index:
+			name = str(row.get("name", ""))
+			break
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
 		ui.call("show_text_input", _t("@schematic.edit"), _t("@name"), 64, name, false, false)
-
-
-## Opens the capacity editor for a core schematic (launch/schematics flow).
-func _open_loadout(index: int) -> void:
-	var ui := get_node_or_null("/root/MindUi")
-	if ui == null:
-		return
-	ui.call("open_dialog", "loadout", JSON.stringify({"index": index}))
 
 
 ## `SchematicsDialog` icon tag picker (`IconSelectDialog`).
@@ -345,13 +431,21 @@ func _on_confirm(confirmed: bool) -> void:
 	_pending_delete = -1
 	if bool(campaign_call("delete_schematic", [index])):
 		refresh_campaign_views()
-		_selected = 0
 		_rebuild_list()
-		_rebuild_detail()
 
 
 func _on_text_input(text: String) -> void:
-	if _pending_rename < 0 or text.is_empty():
+	if _pending_tag:
+		_pending_tag = false
+		if not text.is_empty() and not _tags.has(text):
+			_tags.append(text)
+			_save_tags()
+			_rebuild_tags()
+			_rebuild_list()
+		return
+	if _pending_rename < 0:
+		return
+	if text.is_empty():
 		_pending_rename = -1
 		return
 	var index := _pending_rename
@@ -359,7 +453,6 @@ func _on_text_input(text: String) -> void:
 	if bool(campaign_call("rename_schematic", [index, text])):
 		refresh_campaign_views()
 		_rebuild_list()
-		_rebuild_detail()
 
 
 func _on_icon_selected(region_name: String) -> void:
@@ -373,4 +466,3 @@ func _on_icon_selected(region_name: String) -> void:
 	if bool(campaign_call("set_schematic_icon", [index, region_name])):
 		refresh_campaign_views()
 		_rebuild_list()
-		_rebuild_detail()
