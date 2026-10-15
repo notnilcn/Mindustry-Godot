@@ -588,6 +588,27 @@ impl MindAssets {
         self.iconc.len() as i64
     }
 
+    /// Every `Iconc` name in file order (`Iconc.codes` iteration for the
+    /// locales `@locales.addicon` gallery).
+    #[func]
+    pub fn icon_names(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for name in self.iconc.names() {
+            out.push(&GString::from(name));
+        }
+        out
+    }
+
+    /// The `Iconc` texture target for a name (`Icon.icons` region; e.g.
+    /// `deepwater` -> `floor-deepwater`); empty when the table has no entry.
+    #[func]
+    pub fn icon_texture(&self, name: GString) -> GString {
+        match self.iconc.texture(&name.to_string()) {
+            Some(texture) => GString::from(texture),
+            None => GString::new(),
+        }
+    }
+
     /// Number of loaded dynamic fonts.
     #[func]
     pub fn fonts_loaded(&self) -> i64 {

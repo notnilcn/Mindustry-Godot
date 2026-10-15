@@ -49,8 +49,16 @@ func hidden() -> void:
 
 
 func _build() -> void:
+	if cont != null:
+		# Pickers are re-opened with new contexts; never stack old tables.
+		for child in cont.get_children():
+			cont.remove_child(child)
+			child.queue_free()
 	var root := content_table()
 	var scroll := ScrollContainer.new()
+	# The dialog shell sizes `cont` from its children's minimums; without this
+	# the picker renders collapsed (0-height) for large item lists.
+	scroll.custom_minimum_size = Vector2(520.0, 320.0)
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

@@ -133,6 +133,14 @@ impl Iconc {
         &self.all
     }
 
+    /// Every content name in file order (`Iconc.codes` iteration order).
+    pub fn names(&self) -> Vec<&str> {
+        self.all
+            .chars()
+            .filter_map(|ch| self.by_code.get(&(ch as u32)).map(String::as_str))
+            .collect()
+    }
+
     /// Number of icons.
     pub fn len(&self) -> usize {
         self.by_name.len()

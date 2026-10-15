@@ -47,6 +47,13 @@ var _prop_name: LineEdit = null
 var _prop_value: TextEdit = null
 var _pending_locale_delete := ""
 var _pending_icon_target := ""
+## `viewPropertyDialog(key)` state (`@locales.viewproperty`).
+var _view_key := ""
+var _view_body: VBoxContainer = null
+var _view_search: LineEdit = null
+## `addIconDialog` gallery state (`@locales.addicon`).
+var _icon_body: VBoxContainer = null
+var _icon_search := ""
 ## Unsaved-changes guard, the deleted-locale confirm and the save-on-close
 ## prompt all answer through `confirm_result`; `_pending_*` selects the action.
 var _apply_from_prompt := false
@@ -66,6 +73,8 @@ func _ready() -> void:
 	add_button(_t("@edit"), _edit_dialog, "edit", 210.0)
 	add_button("?", _show_info, "", 60.0)
 	_connect_prompts()
+	# `resized(this::buildMain)` (`MapLocalesDialog.java:93`).
+	resized.connect(_build_main)
 
 
 func shown() -> void:
@@ -268,8 +277,8 @@ func _property_card(key: String, value: String, status: Status) -> Control:
 	name_field.text = key
 	name_field.max_length = 64
 	name_field.custom_minimum_size.x = CARD_WIDTH - 125.0
-	name_field.text_submitted.connect(func(text: String) -> void: _rename_property(key, text))
-	name_field.focus_exited.connect(func() -> void: _rename_property(key, name_field.text))
+	name_field.text_submitted.connect(func(text: String) -> void: _rename_property(card, key, text))
+	name_field.focus_exited.connect(func() -> void: _rename_property(card, key, name_field.text))
 	header.add_child(name_field)
 	var remove := MindWidgets.icon_button("cancel", "", "emptyi")
 	remove.custom_minimum_size = Vector2(SMALL, SMALL)
@@ -359,11 +368,13 @@ func _add_property() -> void:
 
 
 ## The name field: duplicate keys tint the card `f25555`; otherwise rename.
-func _rename_property(old_key: String, new_key: String) -> void:
+func _rename_property(card: Control, old_key: String, new_key: String) -> void:
 	if new_key.is_empty() or new_key == old_key:
 		return
 	var props := _selected_props()
 	if props.has(new_key):
+		# `MapLocalesDialog.java:247-251`: refuse and tint the card red.
+		card.modulate = Color("f25555")
 		return
 	if _apply_to_all:
 		for locale in _locales.keys():
@@ -457,8 +468,8 @@ func _edit_dialog() -> void:
 	])
 
 
-## `propEditDialog`: add-to-other / rollback (view-in-all-locales and
-## `@locales.addicon` are still missing).
+## `propEditDialog`: add-to-other / view-in-all-locales / `@locales.addicon`
+## / rollback (`:376-423`).
 func _property_edit_dialog(key: String, value: String) -> void:
 	_overlay("@edit", [
 		["@locales.addtoother", "add", func() -> void:
@@ -469,6 +480,13 @@ func _property_edit_dialog(key: String, value: String) -> void:
 			_mark_dirty()
 			_build_main()
 			_close_overlay()],
+		["@locales.viewproperty", "zoom", func() -> void:
+			_close_overlay()
+			_view_property_dialog(key)],
+		["@locales.addicon", "image", func() -> void:
+			_pending_icon_target = key
+			_close_overlay()
+			_add_icon_dialog()],
 		["@locales.rollback", "undo", func() -> void:
 			var saved: Dictionary = _last_saved.get(_selected_locale, {})
 			if saved.has(key):
@@ -476,46 +494,194 @@ func _property_edit_dialog(key: String, value: String) -> void:
 				_mark_dirty()
 				_build_main()
 			_close_overlay()],
-		["@locales.addicon", "image", func() -> void:
-			_pending_icon_target = key
-			_connect_icon_select()
-			_close_overlay()
-			var ui := get_node_or_null("/root/MindUi")
-			if ui != null:
-				ui.call("open_dialog", "icon_select", "{}")],
 	])
 
 
-## `filterDialog`: show-correct/missing/same + search-by-name/value.
-func _filter_dialog() -> void:
-	var panel := _overlay("@locales.filter", [])
+## `viewPropertyDialog(key)` (`:483-578`): the property across every locale,
+## with its own search row, status filter and editable cards.
+func _view_property_dialog(key: String) -> void:
+	_view_key = key
+	_close_overlay()
+	# code-instantiated: the cross-locale view has no static scene.
+	var overlay := ColorRect.new()
+	overlay.name = "LocalesView"
+	overlay.color = Color(0, 0, 0, 0.8)
+	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
+	add_child(overlay)
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	overlay.add_child(center)
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = "defaultDialog"
+	center.add_child(panel)
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 6)
+	panel.add_child(box)
+	box.add_child(MindWidgets.label(_format_bundle("@locales.viewing", key)))
+	var search_row := HBoxContainer.new()
+	search_row.add_theme_constant_override("separation", 8)
+	var filter := MindWidgets.icon_button("filter", "", "emptyi")
+	filter.custom_minimum_size = Vector2(SMALL, SMALL)
+	filter.pressed.connect(func() -> void: _filter_dialog(_build_prop_view))
+	search_row.add_child(filter)
+	_view_search = MindWidgets.field(_t("@locales.searchvalue" if _search_by_value else "@locales.searchlocale"))
+	_view_search.text = _search
+	_view_search.max_length = 64
+	_view_search.custom_minimum_size.x = 250.0
+	_view_search.text_changed.connect(func(text: String) -> void:
+		_search = text
+		_build_prop_view())
+	search_row.add_child(_view_search)
+	var clear := MindWidgets.icon_button("cancel", "", "emptyi")
+	clear.custom_minimum_size = Vector2(SMALL, SMALL)
+	clear.pressed.connect(func() -> void:
+		_search = ""
+		if _view_search != null:
+			_view_search.text = ""
+		_build_prop_view())
+	search_row.add_child(clear)
+	box.add_child(search_row)
+	# code-instantiated: one card per locale (data-driven).
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(CARD_WIDTH + 20.0, 320.0)
+	box.add_child(scroll)
+	_view_body = VBoxContainer.new()
+	_view_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_view_body.add_theme_constant_override("separation", 6)
+	scroll.add_child(_view_body)
+	var back := MindWidgets.button(_t("@back"))
+	back.pressed.connect(func() -> void:
+		# `dialog.hidden(this::buildMain)` (`:506`).
+		var view := get_node_or_null("LocalesView")
+		if view != null:
+			view.queue_free()
+		_build_main())
+	box.add_child(back)
+	_build_prop_view()
+
+
+## `buildPropView(key)` (`:511-578`): the per-locale cards of `_view_key`.
+func _build_prop_view() -> void:
+	if _view_body == null:
+		return
+	for child in _view_body.get_children():
+		_view_body.remove_child(child)
+		child.queue_free()
+	var shown := 0
+	for name in _available_locales():
+		var locale := str(name)
+		if not _locales.has(locale):
+			continue
+		var props: Dictionary = _locales[locale] if _locales[locale] is Dictionary else {}
+		var value: Variant = props.get(_view_key)
+		# `getPropertyStatus`: a null value is `missing` in the view (`:330`).
+		var status := Status.MISSING if value == null \
+			else _property_status(_view_key, str(value), locale, true)
+		if status == Status.CORRECT and not _show_correct:
+			continue
+		if status == Status.MISSING and not _show_missing:
+			continue
+		if status == Status.SAME and not _show_same:
+			continue
+		if status != Status.MISSING and not _search.is_empty():
+			var needle := str(value).to_lower() if _search_by_value \
+				else LANGUAGE_SCRIPT.get_display_name(locale).to_lower()
+			if not needle.contains(_search.to_lower()):
+				continue
+		_view_body.add_child(_view_card(locale, value, status))
+		shown += 1
+	if shown == 0:
+		_view_body.add_child(MindWidgets.label(_t("@empty")))
+
+
+func _view_card(locale: String, value: Variant, status: Status) -> Control:
+	var card := PanelContainer.new()
+	card.theme_type_variation = "whitePane"
+	card.custom_minimum_size.x = CARD_WIDTH
+	var box := VBoxContainer.new()
+	card.add_child(box)
+	var head := MindWidgets.label(LANGUAGE_SCRIPT.get_display_name(locale))
+	head.add_theme_color_override("font_color", Color("ffd37f"))
+	box.add_child(head)
+	if status == Status.MISSING:
+		# `@add` seeds `moai` (Java quirk) and swaps in the area.
+		var add := MindWidgets.icon_button("add", _t("@add"))
+		add.pressed.connect(func() -> void:
+			props_put_view(locale, "moai")
+			_build_prop_view())
+		box.add_child(add)
+	else:
+		var area := TextEdit.new()
+		area.text = str(value)
+		area.custom_minimum_size = Vector2(CARD_WIDTH, 140.0)
+		area.text_changed.connect(func() -> void:
+			props_put_view(locale, area.text))
+		box.add_child(area)
+	card.modulate = _status_color(status)
+	return card
+
+
+## `locales.get(name).put(key, v); saved = false`.
+func props_put_view(locale: String, value: String) -> void:
+	if not _locales.has(locale) or not (_locales[locale] is Dictionary):
+		_locales[locale] = {}
+	_locales[locale][_view_key] = value
+	_mark_dirty()
+
+
+## `filterDialog(hidden)` (`:580-617`): show-correct/missing/same +
+## search-by-name/value; `after` rebuilds the caller's view on close.
+func _filter_dialog(after: Callable = Callable()) -> void:
+	var rebuild := func() -> void:
+		if after.is_valid():
+			after.call()
+		else:
+			_build_main()
+	# Java stacks the filter above its caller; the named overlay does not
+	# close the view dialog underneath (`_overlay` closes the default slot).
+	var panel := _overlay_named("@locales.filter", "LocalesFilter")
 	panel.add_child(MindWidgets.check(_t("@locales.showcorrect"), _show_correct,
 		func(pressed: bool) -> void:
 			_show_correct = pressed
-			_build_main()))
+			rebuild.call()))
 	panel.add_child(MindWidgets.check(_t("@locales.showmissing"), _show_missing,
 		func(pressed: bool) -> void:
 			_show_missing = pressed
-			_build_main()))
+			rebuild.call()))
 	panel.add_child(MindWidgets.check(_t("@locales.showsame"), _show_same,
 		func(pressed: bool) -> void:
 			_show_same = pressed
-			_build_main()))
+			rebuild.call()))
 	panel.add_child(MindWidgets.check(_t("@locales.byvalue"), _search_by_value,
 		func(pressed: bool) -> void:
 			_search_by_value = pressed
 			if _search_field != null:
 				_search_field.placeholder_text = _t("@locales.searchvalue" if pressed else "@locales.searchname")
-			_build_main()))
+			if _view_search != null:
+				_view_search.placeholder_text = _t("@locales.searchvalue" if pressed else "@locales.searchlocale")
+			rebuild.call()))
+	var back := MindWidgets.button(_t("@back"))
+	back.pressed.connect(func() -> void:
+		var node := get_node_or_null("LocalesFilter")
+		if node != null:
+			node.queue_free()
+		rebuild.call())
+	panel.add_child(back)
 
 
 ## A dialog-local overlay panel (`BaseDialog` sub-dialogs upstream; the
 ## `custom_rules_dialog._overlay_open` shape).
 func _overlay(title_key: String, rows: Array) -> VBoxContainer:
 	_close_overlay()
+	return _overlay_named(title_key, "LocalesOverlay", rows)
+
+
+## A named overlay that leaves other overlays in place (stacked sub-dialogs).
+func _overlay_named(title_key: String, node_name: String, rows: Array = []) -> VBoxContainer:
 	# code-instantiated: per-action popup panels have no static scene.
 	var overlay := ColorRect.new()
-	overlay.name = "LocalesOverlay"
+	overlay.name = node_name
 	overlay.color = Color(0, 0, 0, 0.8)
 	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
 	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -750,3 +916,186 @@ func _notify(key: String) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("show_info"):
 		ui.call("show_info", _t(key))
+
+
+## `Core.bundle.format(key, args)` for the `@locales.viewing` title.
+func _format_bundle(key: String, arg: String) -> String:
+	var assets := get_node_or_null("/root/MindAssets")
+	if assets != null and assets.has_method("bundle_format"):
+		return str(assets.call("bundle_format", key.trim_prefix("@"), PackedStringArray([arg])))
+	return "%s %s" % [_t(key), arg]
+
+
+## `addIconDialog(cons)` (`:619-706`): the full `Iconc` gallery, then every
+## content icon (`item/block/liquid/status/unit`) and the base teams.
+func _add_icon_dialog() -> void:
+	var box := _overlay_named("@locales.addicon", "LocalesIcons")
+	var search_row := HBoxContainer.new()
+	search_row.add_theme_constant_override("separation", 8)
+	var field := MindWidgets.field(_t("@search"))
+	field.custom_minimum_size.x = 250.0
+	field.max_length = 64
+	field.text_changed.connect(func(text: String) -> void:
+		# `v.replace(" ", "").toLowerCase()` (`:623`).
+		_icon_search = text.replace(" ", "").to_lower()
+		_build_icon_table())
+	search_row.add_child(field)
+	var clear := MindWidgets.icon_button("cancel", "", "emptyi")
+	clear.custom_minimum_size = Vector2(SMALL, SMALL)
+	clear.pressed.connect(func() -> void:
+		field.text = ""
+		_icon_search = ""
+		_build_icon_table())
+	search_row.add_child(clear)
+	box.add_child(search_row)
+	# code-instantiated: one button per icon/content entry (data-driven).
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(720.0, 380.0)
+	box.add_child(scroll)
+	_icon_body = VBoxContainer.new()
+	_icon_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(_icon_body)
+	var back := MindWidgets.button(_t("@back"))
+	back.pressed.connect(func() -> void:
+		var node := get_node_or_null("LocalesIcons")
+		if node != null:
+			node.queue_free())
+	box.add_child(back)
+	_build_icon_table()
+
+
+## `iconsTable(table, search, dialog, cons)` (`:644-706`).
+func _build_icon_table() -> void:
+	if _icon_body == null:
+		return
+	for child in _icon_body.get_children():
+		_icon_body.remove_child(child)
+		child.queue_free()
+	var search := _icon_search
+	var added := 0
+	# `Iconc.codes` in file order (names whose char resolves).
+	var assets := get_node_or_null("/root/MindAssets")
+	var icon_names: PackedStringArray = PackedStringArray()
+	if assets != null and assets.has_method("icon_names"):
+		icon_names = assets.call("icon_names")
+	var entries: Array = []
+	for icon_name in icon_names:
+		var name := str(icon_name)
+		if search.is_empty() or name.to_lower().contains(search):
+			entries.append(name)
+	added += _icon_section(entries, "icon")
+	# `contentIcons = {item, block, liquid, status, unit}` (`:37`).
+	for type_name in ["item", "block", "liquid", "status", "unit"]:
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host == null or not host.has_method("content_list"):
+			break
+		# `content_list` is a `PackedStringArray`, not a GDScript `Array`.
+		var content: Variant = host.call("content_list", type_name)
+		var content_entries: Array = []
+		if content is PackedStringArray:
+			for content_name in content:
+				var name := str(content_name)
+				if _content_search_ok(name, search):
+					content_entries.append(name)
+		added += _icon_section(content_entries, str(type_name))
+	# `Team.baseTeams` with `team-<name>` regions.
+	var teams: Array = []
+	for row_value in get_node_or_null("/root/Spine/MindEditor").call("palette_teams"):
+		var team_row: Dictionary = row_value
+		var name := str(team_row.get("name", ""))
+		if _content_search_ok(name, search):
+			teams.append(name)
+	added += _icon_section(teams, "team")
+	if added == 0:
+		_icon_body.add_child(MindWidgets.label(_t("@empty")))
+
+
+func _content_search_ok(name: String, search: String) -> bool:
+	return search.is_empty() or name.to_lower().contains(search)
+
+
+## One grid section; returns the number of rendered tiles.
+func _icon_section(names: Array, kind: String) -> int:
+	if names.is_empty():
+		return 0
+	var grid := GridContainer.new()
+	grid.columns = 12
+	grid.add_theme_constant_override("h_separation", 2)
+	grid.add_theme_constant_override("v_separation", 2)
+	for icon_name in names:
+		var name := str(icon_name)
+		var button := _gallery_button(name, kind)
+		button.pressed.connect(func() -> void: _insert_icon_char(_icon_char(name)))
+		grid.add_child(button)
+	_icon_body.add_child(grid)
+	return names.size()
+
+
+## One gallery tile: the Iconc/`uiIcon` texture when resolvable, else the glyph.
+func _gallery_button(name: String, kind: String) -> Button:
+	var candidates := _region_candidates(kind, name)
+	var button: Button = null
+	if not candidates.is_empty():
+		button = MindWidgets.image_button_first(candidates, "flati")
+		button.expand_icon = true
+		button.add_theme_constant_override("icon_max_width", 32)
+	if button == null or button.icon == null:
+		# code-instantiated: one icon-font glyph tile per gallery entry.
+		button = Button.new()
+		button.theme_type_variation = "flati"
+		var glyph := _icon_char(name)
+		if glyph.is_empty():
+			button.text = name.substr(0, 2)
+		else:
+			var label := Label.new()
+			label.text = glyph
+			MindIcons.apply_icon_font(label)
+			label.add_theme_font_size_override("font_size", 24)
+			label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			button.add_child(label)
+	button.custom_minimum_size = Vector2(44.0, 44.0)
+	button.tooltip_text = name
+	return button
+
+
+## The `Icon.icons`/`uiIcon` region names per gallery kind.
+func _region_candidates(kind: String, name: String) -> PackedStringArray:
+	match kind:
+		"icon":
+			# `Icon.icons.get(key)` texture (`Iconc` `<name>|<texture>` pair).
+			var assets := get_node_or_null("/root/MindAssets")
+			if assets != null and assets.has_method("icon_texture"):
+				var texture := str(assets.call("icon_texture", name))
+				if not texture.is_empty():
+					return PackedStringArray([texture])
+		"item":
+			return PackedStringArray(["item-%s" % name, name])
+		"block":
+			return PackedStringArray(["block-%s-ui" % name, "block-%s-full" % name, name])
+		"liquid":
+			return PackedStringArray(["liquid-%s-ui" % name, "liquid-%s" % name])
+		"unit":
+			return PackedStringArray(["unit-%s-ui" % name, name])
+		"status":
+			return PackedStringArray(["status-%s" % name, name])
+		"team":
+			return PackedStringArray(["team-%s" % name])
+	return PackedStringArray()
+
+
+## `cons.get(res)`: append the chosen glyph to the pending property.
+func _insert_icon_char(glyph: String) -> void:
+	if glyph.is_empty() or _pending_icon_target.is_empty():
+		return
+	var props := _selected_props()
+	if props.has(_pending_icon_target):
+		props[_pending_icon_target] = str(props[_pending_icon_target]) + glyph
+		_mark_dirty()
+		_build_main()
+	var node := get_node_or_null("LocalesIcons")
+	if node != null:
+		node.queue_free()
+	_pending_icon_target = ""

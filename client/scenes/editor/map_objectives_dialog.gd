@@ -904,8 +904,17 @@ func _open_content_picker(content_type_name: String, setter: Callable) -> void:
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if host == null or not host.has_method("content_list"):
 		return
-	var items: Variant = host.call("content_list", content_type_name)
-	if not (items is Array):
+	# `content_list` is a `PackedStringArray` (the `is Array` guard never fired).
+	var listed: Variant = host.call("content_list", content_type_name)
+	var items: Array = []
+	if listed is PackedStringArray:
+		for name in listed:
+			items.append(str(name))
+	elif listed is Array:
+		items = listed
+	else:
+		return
+	if items.is_empty():
 		return
 	_open_list_picker(items, setter)
 
