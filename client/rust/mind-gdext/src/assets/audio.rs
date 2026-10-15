@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use godot::classes::{AudioStream, AudioStreamMp3, AudioStreamOggVorbis, FileAccess};
 use godot::prelude::*;
 
+use mind_core::assets::overlay::OverlaySound;
 use mind_core::assets::sounds::{MusicEntry, Musics, SoundEntry, Sounds};
 
 /// Audio registry + lazy stream cache for one asset root.
@@ -21,6 +22,8 @@ pub struct AudioRegistry {
     musics: Musics,
     streams: HashMap<String, Gd<AudioStream>>,
     music_streams: HashMap<String, Gd<AudioStream>>,
+    /// Mod `sounds/` overrides by logical name (I07 T5; decoded lazily).
+    mod_sounds: HashMap<String, Vec<u8>>,
 }
 
 impl AudioRegistry {
@@ -67,10 +70,28 @@ impl AudioRegistry {
         self.musics.len()
     }
 
+    /// Adds mod `sounds/` overrides (`Mods.packSprites` sound half). Entries
+    /// replace a base sound/logic-var by logical name and decode lazily.
+    pub fn add_mod_sounds(&mut self, sounds: &[OverlaySound]) {
+        for sound in sounds {
+            self.mod_sounds
+                .insert(sound.name.clone(), sound.bytes.clone());
+            // A cached base stream must not shadow the override.
+            self.streams.remove(&sound.name);
+        }
+    }
+
     /// Lazily decodes and caches a sound's stream (`None` for dummies/missing).
+    /// Mod overrides win over the base index (`SoundControl` by-name lookup).
     pub fn sound_stream(&mut self, name: &str) -> Option<Gd<AudioStream>> {
         if let Some(stream) = self.streams.get(name) {
             return Some(stream.clone());
+        }
+        if let Some(bytes) = self.mod_sounds.get(name) {
+            let data = PackedByteArray::from(bytes.as_slice());
+            let stream = decode_bytes(&data)?;
+            self.streams.insert(name.to_owned(), stream.clone());
+            return Some(stream);
         }
         let file = self.sounds.get(name)?.file.clone()?;
         let stream = decode_stream(&self.assets_dir, &file)?;
@@ -97,11 +118,15 @@ fn decode_stream(assets_dir: &str, file: &str) -> Option<Gd<AudioStream>> {
         return None;
     }
     let bytes = FileAccess::get_file_as_bytes(&path);
-    if file.ends_with(".ogg") {
-        AudioStreamOggVorbis::load_from_buffer(&bytes).map(|stream| stream.upcast::<AudioStream>())
-    } else if file.ends_with(".mp3") {
-        AudioStreamMp3::load_from_buffer(&bytes).map(|stream| stream.upcast::<AudioStream>())
-    } else {
-        None
-    }
+    decode_bytes(&bytes)
+}
+
+/// Decodes in-memory `.ogg`/`.mp3` bytes (mod sound bytes are carried by
+/// `OverlaySound`; `mind-core` stays Godot-free).
+fn decode_bytes(bytes: &PackedByteArray) -> Option<Gd<AudioStream>> {
+    AudioStreamOggVorbis::load_from_buffer(bytes)
+        .map(|stream| stream.upcast::<AudioStream>())
+        .or_else(|| {
+            AudioStreamMp3::load_from_buffer(bytes).map(|stream| stream.upcast::<AudioStream>())
+        })
 }
