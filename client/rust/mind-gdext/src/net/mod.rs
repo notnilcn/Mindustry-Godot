@@ -28,11 +28,12 @@ use mind_stdb::commands::CommandSender;
 use mind_stdb::module_bindings::{
     AllMatchesTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode, MatchPlayerState,
     MatchStatus, MemberRole, MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor,
-    MyMatchPlayerStatesTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
+    MyMatchPlayerStatesTableAccessor, MyMatchSnapshotChunksTableAccessor,
+    MyMatchSnapshotRequestsTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
     MyMatchTableAccessor, MyMatchesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind, Visibility,
 };
 use mind_stdb::rows::RowView;
-use mind_stdb::snapshot::{SNAPSHOT_FORMAT, SnapshotHeader};
+use mind_stdb::snapshot::{DynamicSnapshot, SNAPSHOT_FORMAT, SnapshotHeader};
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
     ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, RowChange, SessionState,
@@ -89,6 +90,14 @@ struct HostedWorld {
     rules_json: String,
 }
 
+/// An in-flight joiner snapshot load (I08 T5): the newest host snapshot's
+/// chunks are reassembled and applied to the live world.
+struct JoinLoad {
+    target_snapshot_id: u64,
+    expected_chunks: u16,
+    chunks: std::collections::BTreeMap<u16, Vec<u8>>,
+}
+
 /// A secondary `Connector` used to browse one server address without touching
 /// the active match connection (I08 T3): the lobby wave (`all_matches`) only,
 /// pumped once per frame by `pump_probes`.
@@ -132,6 +141,10 @@ pub struct MindNet {
     /// Lobby-wave `my_matches` rows: the host's match id arrives here before
     /// the game wave exists (I08 T4).
     my_matches_binder: Option<TableBinder<MyMatchesTableAccessor>>,
+    /// Snapshot-wave chunk rows for the joiner's download (I08 T5).
+    snapshot_chunks_binder: Option<TableBinder<MyMatchSnapshotChunksTableAccessor>>,
+    /// Host-only pending snapshot requests (I08 T5).
+    snapshot_requests_binder: Option<TableBinder<MyMatchSnapshotRequestsTableAccessor>>,
     public_matches: std::collections::BTreeMap<u64, RelayMatch>,
     token_append: Option<String>,
     token_store_path: Option<std::path::PathBuf>,
@@ -162,6 +175,14 @@ pub struct MindNet {
     /// `host_current_world` asked for a start; the `my_matches` row drives
     /// `start_match(true)` once the match id is known (I08 T4).
     pending_host_start: bool,
+    /// A join is loading the host snapshot (I08 T5): drives the request and
+    /// the apply once every chunk arrived.
+    pending_join: bool,
+    /// In-flight joiner snapshot download state.
+    join_load: Option<JoinLoad>,
+    /// Match id the current `runtime`/`sender` were built for; a new match
+    /// rebuilds both (leave → re-host/join must not keep the old id).
+    relay_match_id: u64,
 }
 
 #[godot_api]
@@ -185,6 +206,8 @@ impl INode for MindNet {
             snapshots_binder: None,
             public_matches_binder: None,
             my_matches_binder: None,
+            snapshot_chunks_binder: None,
+            snapshot_requests_binder: None,
             public_matches: std::collections::BTreeMap::new(),
             token_append: None,
             token_store_path: None,
@@ -204,6 +227,9 @@ impl INode for MindNet {
             probes: std::collections::BTreeMap::new(),
             hosted: None,
             pending_host_start: false,
+            pending_join: false,
+            join_load: None,
+            relay_match_id: 0,
         }
     }
 
@@ -245,6 +271,8 @@ impl INode for MindNet {
             self.drain_player_states();
             self.drain_checksums();
             self.drain_snapshots();
+            self.drain_snapshot_chunks();
+            self.drain_snapshot_requests();
             self.drain_relay();
             self.maybe_publish_checksum();
         }
@@ -330,6 +358,11 @@ impl MindNet {
             Some(connector.bind::<MyMatchSnapshotsTableAccessor>("my_match_snapshots"));
         self.public_matches_binder = Some(connector.bind::<AllMatchesTableAccessor>("all_matches"));
         self.my_matches_binder = Some(connector.bind::<MyMatchesTableAccessor>("my_matches"));
+        self.snapshot_chunks_binder =
+            Some(connector.bind::<MyMatchSnapshotChunksTableAccessor>("my_match_snapshot_chunks"));
+        self.snapshot_requests_binder = Some(
+            connector.bind::<MyMatchSnapshotRequestsTableAccessor>("my_match_snapshot_requests"),
+        );
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -604,7 +637,8 @@ impl MindNet {
     }
 
     /// Joins `match_id`; readiness/loading follows the view. Goes online on
-    /// demand first (I08 T1).
+    /// demand first (I08 T1); the real build/content/mods identity travels
+    /// with the join so the server's build gates work (I08 T5).
     #[func]
     pub fn join_match(&mut self, match_id: i64, password: GString) -> bool {
         if match_id <= 0 {
@@ -617,6 +651,9 @@ impl MindNet {
             let value = password.to_string();
             (!value.is_empty()).then_some(value)
         };
+        let build_id = mind_stdb::MIND_VERSION.to_string();
+        let content_hash = self.content_hash();
+        let mods = self.mod_strings();
         let Some(connector) = self.connector.as_mut() else {
             return false;
         };
@@ -624,19 +661,27 @@ impl MindNet {
             connector,
             match_id as u64,
             password,
-            "",
-            0,
+            &build_id,
+            content_hash,
             MemberRole::Player,
-            Vec::new(),
+            mods,
         ) {
             Ok(()) => {
+                self.pending_join = true;
+                self.join_load = None;
+                self.snapshot_progress = 0.0;
+                // Ask the host for a fresh snapshot immediately: the game-wave
+                // subscription can race the join commit and miss metadata rows
+                // that already exist (I08 T5). `request_snapshot` subscribes
+                // the snapshot wave and enters `snapshot_sync`.
+                self.request_snapshot();
                 self.ensure_relay();
                 self.notify_session_state();
                 true
             }
             Err(error) => {
                 // Java shows the join rejection through the kick/dialog path;
-                // until T5/T9 map the reasons, the message is shown verbatim.
+                // until T9 maps the reasons, the message is shown verbatim.
                 self.show_error("@connectfail", &error.to_string());
                 false
             }
@@ -650,6 +695,14 @@ impl MindNet {
             return false;
         };
         let result = self.session.leave(connector).is_ok();
+        if result {
+            // The relay runtime/sender are scoped to the old match id.
+            self.runtime = None;
+            self.sender = None;
+            self.relay_match_id = 0;
+            self.pending_join = false;
+            self.join_load = None;
+        }
         self.notify_session_state();
         result
     }
@@ -1304,11 +1357,18 @@ impl MindNet {
             .show_error_key(GString::from(key), GString::from(detail));
     }
 
-    /// Creates the relay runtime/sender once a match id is known.
+    /// Creates the relay runtime/sender once a match id is known. A different
+    /// match id rebuilds both (leave → re-host/join), so commands never carry
+    /// a stale match (I08 T5).
     fn ensure_relay(&mut self) {
         let Some(match_id) = self.session.match_id() else {
             return;
         };
+        if self.relay_match_id != match_id {
+            self.relay_match_id = match_id;
+            self.runtime = None;
+            self.sender = None;
+        }
         if self.runtime.is_none()
             && let Some(connector) = self.connector.as_mut()
         {
@@ -1468,7 +1528,9 @@ impl MindNet {
         }
     }
 
-    /// Tracks the newest snapshot metadata and progress (plan M4/M5).
+    /// Tracks the newest snapshot metadata and progress (plan M4/M5). A
+    /// pending join requests a fresh host snapshot and targets the newest
+    /// available one (I08 T5).
     fn drain_snapshots(&mut self) {
         let Some(binder) = self.snapshots_binder.as_ref() else {
             return;
@@ -1481,9 +1543,173 @@ impl MindNet {
                 newest = Some((row.snapshot_id, row.chunk_count));
             }
         }
-        if let Some((id, chunks)) = newest {
-            log::debug!("MindNet: snapshot {id} available ({chunks} chunks)");
+        let Some((id, chunks)) = newest else {
+            return;
+        };
+        log::debug!("MindNet: snapshot {id} available ({chunks} chunks)");
+        if !self.pending_join || self.session.is_host() {
+            return;
         }
+        // The join requested a fresh snapshot; this row is its metadata (or a
+        // fresher republication). Track the newest one and wait for chunks.
+        let newer_target = self
+            .join_load
+            .as_ref()
+            .map(|load| load.target_snapshot_id < id)
+            .unwrap_or(true);
+        if !newer_target {
+            return;
+        }
+        self.join_load = Some(JoinLoad {
+            target_snapshot_id: id,
+            expected_chunks: chunks,
+            chunks: std::collections::BTreeMap::new(),
+        });
+        self.snapshot_progress = 0.0;
+        log::info!("MindNet: loading snapshot {id} ({chunks} chunks)");
+    }
+
+    /// Collects the joiner's snapshot chunks and applies the reassembled blob
+    /// once every chunk arrived (`snapshot_progress` tracks the fraction;
+    /// I08 T5).
+    fn drain_snapshot_chunks(&mut self) {
+        let Some(binder) = self.snapshot_chunks_binder.as_ref() else {
+            return;
+        };
+        let mut rows = Vec::new();
+        for change in binder.drain() {
+            if let RowChange::Insert(row) | RowChange::Update { new: row, .. } = change {
+                rows.push((row.snapshot_id, row.chunk_index, row.data));
+            }
+        }
+        if rows.is_empty() {
+            return;
+        }
+        let blob = {
+            let Some(load) = self.join_load.as_mut() else {
+                return;
+            };
+            for (snapshot_id, index, data) in rows {
+                if snapshot_id == load.target_snapshot_id {
+                    load.chunks.entry(index).or_insert(data);
+                }
+            }
+            let received = load.chunks.len() as u16;
+            self.snapshot_progress = if load.expected_chunks == 0 {
+                1.0
+            } else {
+                f32::from(received) / f32::from(load.expected_chunks)
+            };
+            if load.expected_chunks == 0 || received < load.expected_chunks {
+                return;
+            }
+            let indexed: Vec<(u16, Vec<u8>)> = load
+                .chunks
+                .iter()
+                .map(|(index, data)| (*index, data.clone()))
+                .collect();
+            mind_stdb::snapshot::reassemble(&indexed, load.expected_chunks as usize)
+        };
+        let Some(blob) = blob else {
+            log::warn!("MindNet: snapshot chunks did not reassemble");
+            return;
+        };
+        self.apply_join_snapshot(&blob);
+    }
+
+    /// The host answers every pending snapshot request with a fresh snapshot
+    /// (`snapshot.rs` `my_match_snapshot_requests`; I08 T5).
+    fn drain_snapshot_requests(&mut self) {
+        let Some(binder) = self.snapshot_requests_binder.as_ref() else {
+            return;
+        };
+        let mut requested = false;
+        for change in binder.drain() {
+            if matches!(change, RowChange::Insert(_) | RowChange::Update { .. }) {
+                requested = true;
+            }
+        }
+        if requested && self.session.is_host() && self.session.match_id().is_some() {
+            log::info!("MindNet: snapshot request received; publishing a fresh snapshot");
+            self.publish_world_snapshot();
+        }
+    }
+
+    /// Applies a reassembled host snapshot (I08 T5): writes the save under
+    /// `user://mp/`, loads it (I06 T1 `load_map_world`), starts the session
+    /// with the header rules, sets the snapshot tick, skips relayed commands
+    /// the blob already includes and shows the world.
+    fn apply_join_snapshot(&mut self, blob: &[u8]) -> bool {
+        let Ok(snapshot) = DynamicSnapshot::decode(blob) else {
+            log::warn!("MindNet: snapshot decode failed");
+            return false;
+        };
+        let header = snapshot.header;
+        let Some(match_id) = self.session.match_id() else {
+            return false;
+        };
+        let relative = format!("user://mp/join-{match_id}.msav");
+        let path = std::path::PathBuf::from(
+            ProjectSettings::singleton()
+                .globalize_path(&relative)
+                .to_string(),
+        );
+        if let Some(parent) = path.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
+            log::warn!("MindNet: cannot create {}", parent.display());
+            return false;
+        }
+        if let Err(error) = std::fs::write(&path, &snapshot.body) {
+            log::warn!("MindNet: snapshot save write failed: {error}");
+            return false;
+        }
+        let loaded = self
+            .sim_host
+            .as_mut()
+            .map(|host| {
+                host.bind_mut()
+                    .load_map_world(GString::from(relative.as_str()))
+            })
+            .unwrap_or(false);
+        if !loaded {
+            log::warn!("MindNet: snapshot world load failed");
+            return false;
+        }
+        let started = self
+            .base()
+            .try_get_node_as::<crate::MindCampaign>("/root/Spine/MindCampaign")
+            .map(|mut campaign| {
+                campaign
+                    .bind_mut()
+                    .start_joined_world(GString::from(header.rules_json.as_str()))
+            })
+            .unwrap_or(false);
+        if !started {
+            log::warn!("MindNet: joined session start failed");
+            return false;
+        }
+        if let Some(host) = self.sim_host.as_mut() {
+            host.bind_mut().set_sim_tick(header.sim_tick as i64);
+        }
+        if let Some(runtime) = self.runtime.as_mut() {
+            runtime.skip_through(header.command_id);
+        }
+        // Java: the state leaves the menu when the world is live.
+        if let Some(mut ui_root) = self.base().get_node_or_null("/root/Spine/Ui/UiRoot") {
+            ui_root.call("set_menu_visible", &[false.to_variant()]);
+        }
+        self.pending_join = false;
+        self.join_load = None;
+        self.snapshot_progress = 1.0;
+        self.session.exit_snapshot_sync();
+        self.notify_session_state();
+        log::info!(
+            "MindNet: snapshot applied (tick {}, command {})",
+            header.sim_tick,
+            header.command_id
+        );
+        true
     }
 
     /// Mirrors public `all_matches` rows for the join-dialog browser.

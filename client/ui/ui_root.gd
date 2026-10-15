@@ -34,6 +34,8 @@ var _uiscale_shown_seconds := -1
 var _launch_finished := false
 ## `@mods.initfailed` shown for this boot (`Control.java:75-80`, once).
 var _mod_init_failure_shown := false
+## I08 T5: whether the join's `@connecting` loading overlay is up.
+var _join_loading_shown := false
 ## The active transient prompt root (`showConfirm`/`showTextInput`/`showText`).
 var _active_prompt: Control = null
 ## Current centred announce box (`UI.announce` replaces the last one).
@@ -177,6 +179,7 @@ func _on_escape() -> bool:
 
 func _process(delta: float) -> void:
 	_drain_logic_messages()
+	_refresh_join_loading()
 	if _uiscale_prompt.is_empty():
 		return
 	_uiscale_countdown -= delta
@@ -480,6 +483,26 @@ func _current_map_id(campaign: Node) -> String:
 func _on_show_info(text: String) -> void:
 	# `UI.showInfoToast` (`UI.java:405-419`): top-centre, `Styles.black3`.
 	_toast_label(text, 2.0, "ok", true)
+
+
+## `NetClient`: the loading fragment shows `@connecting` while a join loads the
+## host snapshot; progress follows `MindNet.snapshot_progress()` (I08 T5).
+func _refresh_join_loading() -> void:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	var loading := loading_layer.get_node_or_null("loading")
+	if net == null or loading == null:
+		return
+	var state := str(net.call("session_state"))
+	var syncing := state == "loading" or state == "snapshot_sync"
+	if syncing:
+		var progress := 0.0
+		if net.has_method("snapshot_progress"):
+			progress = float(net.call("snapshot_progress"))
+		loading.call("set_progress", progress, _t("@connecting"))
+		_join_loading_shown = true
+	elif _join_loading_shown:
+		_join_loading_shown = false
+		loading.call("hide_loading")
 
 
 func _on_toast(text: String, icon: String) -> void:

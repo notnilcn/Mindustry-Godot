@@ -1624,6 +1624,29 @@ impl MindCampaign {
         self.start_map_mode(name, GString::from("survival"), false, GString::from(""))
     }
 
+    /// Starts the session over a world loaded by `SimHost.load_map_world`
+    /// (I08 T5 join): the rules come from the host snapshot header and the
+    /// `Control.playMap` control half runs through [`Self::start_loaded_world`].
+    #[func]
+    pub fn start_joined_world(&mut self, rules_json: GString) -> bool {
+        let text = rules_json.to_string();
+        if text.trim().is_empty() {
+            log::warn!("start_joined_world: empty rules JSON");
+            return false;
+        }
+        let rules = match mind_core::io::json::JsonIo::read::<Rules>(&text) {
+            Ok(rules) => rules,
+            Err(error) => {
+                log::warn!("start_joined_world: bad rules JSON: {error}");
+                return false;
+            }
+        };
+        // A joined world is never a campaign sector; clear the custom-map name
+        // so a later host uses the live identity (I08 T4).
+        self.current_map_name = None;
+        self.start_loaded_world(rules)
+    }
+
     /// Forces sector capture (`Logic.sectorCapture`), routing through the live
     /// runtime when one is installed so events and bookkeeping stay in sync.
     #[func]

@@ -1256,6 +1256,13 @@ impl MindSimHost {
             .unwrap_or(0)
     }
 
+    /// Sets the sim tick counter (snapshot restore / late join, I08 T5; the
+    /// save-load path sets the same field at `sim_io.rs:1325`).
+    #[func]
+    pub fn set_sim_tick(&mut self, tick: i64) {
+        self.sim.state.tick = tick.max(0) as u64;
+    }
+
     /// Saves the live world through the plan-05 IoSet handler and returns the
     /// `.msav` bytes (I08 T4/T5 host snapshot encoder). `flush_io` runs the
     /// save boundary without advancing the tick (`io_set.rs:227`), so the

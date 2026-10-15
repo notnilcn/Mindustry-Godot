@@ -98,6 +98,14 @@ impl RelayRuntime {
         self.stream.order_error().map(|error| format!("{error:?}"))
     }
 
+    /// Marks every relayed command up to and including `command_id` as already
+    /// applied: a loaded snapshot contains their effects, so the joiner skips
+    /// the historical rows the game wave replays (I08 T5).
+    pub fn skip_through(&mut self, command_id: u64) {
+        self.applied_command_id = self.applied_command_id.max(command_id);
+        self.in_flight.clear();
+    }
+
     /// Drains rows and returns foreign commands to apply at the next tick.
     ///
     /// Own echoes are skipped (prediction already applied) but advance the
@@ -106,6 +114,10 @@ impl RelayRuntime {
         let rows: Vec<MatchCommand> = self.stream.drain();
         let mut out = Vec::new();
         for row in rows {
+            if row.command_id <= self.applied_command_id {
+                // Already reflected (snapshot watermark or an earlier drain).
+                continue;
+            }
             self.applied_command_id = self.applied_command_id.max(row.command_id);
             self.applied = self.applied.saturating_add(1);
             if Some(row.sender) == self.local {
