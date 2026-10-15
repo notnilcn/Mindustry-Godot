@@ -21,6 +21,8 @@ pub struct StatementField {
     pub name: &'static str,
     /// Field kind.
     pub kind: FieldKind,
+    /// Java enum names for `FieldKind::Enum` fields (editor `showSelect`).
+    pub options: &'static [&'static str],
 }
 
 /// Static metadata for one registered statement (plan 14 add-dialog + build halves).
@@ -98,7 +100,13 @@ macro_rules! define_statements {
                 match self {
                     $(
                         Statement::$variant { .. } => vec![
-                            $( StatementField { name: stringify!($f), kind: <$t as MlogField>::KIND } ),*
+                            $(
+                                StatementField {
+                                    name: stringify!($f),
+                                    kind: <$t as MlogField>::KIND,
+                                    options: <$t as MlogField>::OPTIONS,
+                                }
+                            ),*
                         ],
                     )*
                 }
@@ -656,6 +664,114 @@ pub fn bundle_key(name: &str) -> String {
         "status" => "applystatus".to_owned(),
         "message" => "flushmessage".to_owned(),
         other => other.to_owned(),
+    }
+}
+
+/// One visible editor field row (`LStatement.fields(table, desc, value, setter)`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EditorField {
+    /// Index into [`Statement::field_values`]/[`Statement::fields`].
+    pub index: usize,
+    /// Label token: the bundle key is `name.token.<label>`.
+    pub label: &'static str,
+}
+
+/// `LStatement.build(Table)` field rows for a statement's current values.
+///
+/// Statements without a conditional layout list every field with its own name
+/// as the label (Java's single-variant `build` methods); `draw` transcribes
+/// `DrawStatement.rebuild` (`LStatements.java`, per-`GraphicsType` rows).
+pub fn editor_fields(name: &str, values: &[String]) -> Vec<EditorField> {
+    let field = |index: usize, label: &'static str| EditorField { index, label };
+    let all = || {
+        default_statement(name)
+            .map(|statement| statement.fields())
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+            .map(|(index, field)| EditorField {
+                index,
+                label: field.name,
+            })
+            .collect()
+    };
+    if name != "draw" {
+        return all();
+    }
+    // `DrawStatement`: `type, x, y, p1, p2, p3, p4`.
+    let type_ = values.first().map(String::as_str).unwrap_or("clear");
+    match type_ {
+        "clear" => vec![field(1, "r"), field(2, "g"), field(3, "b")],
+        "color" => vec![field(1, "r"), field(2, "g"), field(3, "b"), field(4, "a")],
+        "col" => vec![field(1, "color")],
+        "stroke" => vec![field(1, "stroke")],
+        "line" => vec![field(1, "x"), field(2, "y"), field(3, "x2"), field(4, "y2")],
+        "rect" | "lineRect" => vec![
+            field(1, "x"),
+            field(2, "y"),
+            field(3, "width"),
+            field(4, "height"),
+        ],
+        "poly" | "linePoly" => vec![
+            field(1, "x"),
+            field(2, "y"),
+            field(3, "sides"),
+            field(4, "radius"),
+            field(5, "rotation"),
+        ],
+        "triangle" => vec![
+            field(1, "x"),
+            field(2, "y"),
+            field(3, "x2"),
+            field(4, "y2"),
+            field(5, "x3"),
+            field(6, "y3"),
+        ],
+        "image" => vec![
+            field(1, "x"),
+            field(2, "y"),
+            field(3, "image"),
+            field(4, "size"),
+            field(5, "rotation"),
+        ],
+        "print" => vec![field(1, "x"), field(2, "y"), field(3, "align")],
+        "translate" | "scale" => vec![field(1, "x"), field(2, "y")],
+        "rotate" => vec![field(3, "angle")],
+        _ => all(),
+    }
+}
+
+/// The discriminator field the editor shows as its own select button before
+/// the conditional rows (`DrawStatement.rebuild`'s type button); `None` when
+/// the statement has a fixed layout.
+pub fn editor_discriminator(name: &str) -> Option<usize> {
+    match name {
+        "draw" => Some(0),
+        _ => None,
+    }
+}
+
+/// The value fixups `DrawStatement` applies when the type button changes
+/// (`LStatements.java` `showSelect` callback).
+pub fn editor_type_change(name: &str, values: &mut [String]) {
+    if name != "draw" {
+        return;
+    }
+    let type_ = values.first().map(String::as_str).unwrap_or("").to_owned();
+    let mut set = |index: usize, value: &str| {
+        if let Some(slot) = values.get_mut(index) {
+            *slot = value.to_owned();
+        }
+    };
+    match type_.as_str() {
+        "color" => set(4, "255"),
+        "image" => {
+            set(3, "@copper");
+            set(4, "32");
+            set(5, "0");
+        }
+        "print" => set(3, "@bottomLeft"),
+        _ => {}
     }
 }
 

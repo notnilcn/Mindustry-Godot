@@ -21,6 +21,9 @@ pub trait MlogField: Clone {
     fn write(&self, out: &mut String);
     /// Parses a token exactly like Java `Enum.valueOf`/`String.valueOf`.
     fn parse(token: &str) -> Result<Self, ()>;
+    /// Java enum names in declaration order (editor `showSelect` options; empty
+    /// for free-form fields).
+    const OPTIONS: &'static [&'static str] = &[];
 }
 
 /// Statement field type tag (`LogicStatementProcessor` supports strings/enums/primitives).
@@ -116,6 +119,7 @@ macro_rules! logic_enum {
 
         impl MlogField for $name {
             const KIND: FieldKind = FieldKind::Enum;
+            const OPTIONS: &'static [&'static str] = &[$( $java ),*];
             fn write(&self, out: &mut String) {
                 out.push_str(self.name());
             }

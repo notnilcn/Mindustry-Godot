@@ -143,8 +143,9 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	return panel
 
 
-## The generic field builder (`LStatement.fields`, `LStatement.java:233-287`):
-## one labelled text field per `StatementField`, in serialization order.
+## The generic field builder (`LStatement.build(Table)`): the statement's
+## visible rows come from `MindLogic.editor_fields`, each rendered by its field
+## kind (text field, enum select or the `draw col` colour pencil).
 func _field_row(index: int, row: Dictionary) -> Control:
 	var fields_box := HBoxContainer.new()
 	var logic := get_node_or_null("/root/Spine/MindLogic")
@@ -153,26 +154,138 @@ func _field_row(index: int, row: Dictionary) -> Control:
 	var name := str(row.get("name", "noop"))
 	var values: Array = row.get("fields", [])
 	var metas: Variant = logic.call("statement_fields", name)
-	if not (metas is Array):
+	var visible: Variant = logic.call("editor_fields", name, PackedStringArray(values))
+	if not (metas is Array) or not (visible is Array):
 		return fields_box
-	for field_index in (metas as Array).size():
-		var meta: Variant = (metas as Array)[field_index]
-		if not (meta is Dictionary):
+	# Conditional layouts (`DrawStatement`) put the discriminator first.
+	var discriminator := int(logic.call("editor_discriminator", name))
+	if discriminator >= 0 and discriminator < (metas as Array).size():
+		var disc_meta: Variant = (metas as Array)[discriminator]
+		var disc_options: Variant = (
+			(disc_meta as Dictionary).get("options", PackedStringArray())
+			if disc_meta is Dictionary
+			else PackedStringArray()
+		)
+		if disc_options is PackedStringArray and (disc_options as PackedStringArray).size() > 0:
+			var disc_value := str(values[discriminator]) if discriminator < values.size() else ""
+			var disc_button := MindWidgets.button(disc_value)
+			disc_button.theme_type_variation = "logict"
+			disc_button.custom_minimum_size = Vector2(120, 32)
+			disc_button.tooltip_text = name
+			disc_button.pressed.connect(
+				_open_select.bind(index, discriminator, disc_options, disc_button)
+			)
+			fields_box.add_child(disc_button)
+	for entry in visible:
+		if not (entry is Dictionary):
 			continue
-		var field_name := str((meta as Dictionary).get("name", ""))
-		var label := Label.new()
-		label.text = field_name
-		label.tooltip_text = "%s.%s" % [name, field_name]
-		fields_box.add_child(label)
+		var field_index := int((entry as Dictionary).get("index", -1))
+		var label_text := str((entry as Dictionary).get("label", ""))
+		if field_index < 0:
+			continue
+		var meta: Variant = (metas as Array)[field_index] if field_index < (metas as Array).size() else {}
+		var kind := str((meta as Dictionary).get("kind", "str")) if meta is Dictionary else "str"
+		var options: Variant = (meta as Dictionary).get("options", PackedStringArray()) if meta is Dictionary else PackedStringArray()
 		var value := str(values[field_index]) if field_index < values.size() else ""
-		var edit := LineEdit.new()
-		edit.text = value
-		edit.custom_minimum_size = Vector2(90, 32)
-		edit.tooltip_text = "%s.%s" % [name, field_name]
-		edit.text_submitted.connect(_set_field.bind(index, field_index))
-		edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
-		fields_box.add_child(edit)
+		var label := Label.new()
+		# `bundle("name.token." + desc)` with the raw label as the fallback.
+		var key := "name.token." + label_text
+		var resolved := _t(key)
+		label.text = label_text if resolved == key else resolved
+		label.tooltip_text = "%s.%s" % [name, label_text]
+		fields_box.add_child(label)
+		if kind == "enum" and options is PackedStringArray and (options as PackedStringArray).size() > 0:
+			var button := MindWidgets.button(value)
+			# `Styles.logict` (`DrawStatement`'s type button).
+			button.theme_type_variation = "logict"
+			button.custom_minimum_size = Vector2(120, 32)
+			button.tooltip_text = "%s.%s" % [name, label_text]
+			button.pressed.connect(_open_select.bind(index, field_index, options, button))
+			fields_box.add_child(button)
+		else:
+			var edit := LineEdit.new()
+			edit.text = value
+			edit.custom_minimum_size = Vector2(90, 32)
+			edit.tooltip_text = "%s.%s" % [name, label_text]
+			edit.text_submitted.connect(_set_field.bind(index, field_index))
+			edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
+			fields_box.add_child(edit)
+		if name == "draw" and str(values[0]) == "col" and label_text == "color":
+			var picker := ColorPickerButton.new()
+			picker.custom_minimum_size = Vector2(32, 32)
+			picker.color = _parse_color(value)
+			picker.color_changed.connect(_set_color.bind(index, field_index))
+			fields_box.add_child(picker)
 	return fields_box
+
+
+## `showSelect(button, values, current, getter)`: a popup of `logicTogglet`
+## buttons, 4 per row (`LStatement.java:233-253`).
+func _open_select(index: int, field_index: int, options: PackedStringArray, button: Button) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: one transient enum-select popup per open.
+	add_child(popup)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	popup.add_child(grid)
+	var current := button.text
+	for option in options:
+		var toggle := Button.new()
+		toggle.text = option
+		toggle.toggle_mode = true
+		toggle.theme_type_variation = "logicTogglet"
+		toggle.button_pressed = option == current
+		toggle.custom_minimum_size = Vector2(60, 38)
+		toggle.pressed.connect(_select_enum.bind(index, field_index, option, popup))
+		grid.add_child(toggle)
+	popup.popup_centered()
+
+
+## A discriminator changed: commit, apply the Java type-change defaults and
+## rebuild the element (`DrawStatement.rebuild`).
+func _select_enum(index: int, field_index: int, option: String, popup: PopupPanel) -> void:
+	popup.hide()
+	if not _commit_field_value(option, index, field_index):
+		return
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null or index < 0 or index >= _statements.size():
+		return
+	var row: Dictionary = _statements[index]
+	var name := str(row.get("name", "noop"))
+	var values: Array = row.get("fields", [])
+	var changed: Variant = logic.call("apply_type_change", name, PackedStringArray(values))
+	if changed is PackedStringArray:
+		var list: Array = []
+		for value in (changed as PackedStringArray):
+			list.append(str(value))
+		row["fields"] = list
+		_statements[index] = row
+	_modified = true
+	_rebuild_list()
+
+
+## `col(table, x, res -> ...)`: the colour picker commits `%rrggbb[aa]`.
+func _set_color(color: Color, index: int, field_index: int) -> void:
+	var alpha := color.a >= 1.0
+	var packed := "%02x%02x%02x" % [
+		int(color.r * 255.0), int(color.g * 255.0), int(color.b * 255.0)
+	]
+	if not alpha:
+		packed += "%02x" % int(color.a * 255.0)
+	_commit_field_value("%" + packed, index, field_index)
+
+
+func _parse_color(value: String) -> Color:
+	var text := value.trim_prefix("%")
+	if text.length() < 6:
+		return Color.WHITE
+	var r := ("0x" + text.substr(0, 2)).hex_to_int()
+	var g := ("0x" + text.substr(2, 2)).hex_to_int()
+	var b := ("0x" + text.substr(4, 2)).hex_to_int()
+	var a := 255
+	if text.length() >= 8:
+		a = ("0x" + text.substr(6, 2)).hex_to_int()
+	return Color8(r, g, b, a)
 
 
 ## `field(table, value, setter)`: `setter.get(sanitize(text))`.
@@ -186,23 +299,24 @@ func _commit_field(index: int, field_index: int, edit: LineEdit) -> void:
 	_commit_field_value(edit.text, index, field_index)
 
 
-func _commit_field_value(text: String, index: int, field_index: int) -> void:
+func _commit_field_value(text: String, index: int, field_index: int) -> bool:
 	if index < 0 or index >= _statements.size():
-		return
+		return false
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
-		return
+		return false
 	var sanitized := str(logic.call("sanitize", text))
 	var row: Dictionary = _statements[index]
 	var values: Array = row.get("fields", [])
 	if field_index >= values.size():
-		return
+		return false
 	if str(values[field_index]) == sanitized:
-		return
+		return false
 	values[field_index] = sanitized
 	row["fields"] = values
 	_statements[index] = row
 	_modified = true
+	return true
 
 
 ## `StatementElem.copy`: duplicates the element after itself.

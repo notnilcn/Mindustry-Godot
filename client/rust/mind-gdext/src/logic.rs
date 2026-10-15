@@ -59,7 +59,11 @@ fn dict(pairs: Vec<(&str, Variant)>) -> Dictionary<GString, Variant> {
     out
 }
 
-fn field_dict(name: &str, kind: FieldKind) -> Dictionary<GString, Variant> {
+fn field_dict(name: &str, kind: FieldKind, options: &[&str]) -> Dictionary<GString, Variant> {
+    let mut list = PackedStringArray::new();
+    for option in options {
+        list.push(&GString::from(*option));
+    }
     dict(vec![
         ("name", GString::from(name).to_variant()),
         (
@@ -72,6 +76,7 @@ fn field_dict(name: &str, kind: FieldKind) -> Dictionary<GString, Variant> {
             })
             .to_variant(),
         ),
+        ("options", list.to_variant()),
     ])
 }
 
@@ -110,7 +115,7 @@ impl MindLogic {
             return out;
         };
         for field in fields {
-            out.push(&field_dict(field.name, field.kind).to_variant());
+            out.push(&field_dict(field.name, field.kind, field.options).to_variant());
         }
         out
     }
@@ -127,7 +132,7 @@ impl MindLogic {
         };
         let mut fields = Array::<Variant>::new();
         for field in &meta.fields {
-            fields.push(&field_dict(field.name, field.kind).to_variant());
+            fields.push(&field_dict(field.name, field.kind, field.options).to_variant());
         }
         dict(vec![
             (
@@ -324,6 +329,54 @@ impl MindLogic {
     #[func]
     pub fn sanitize(&self, value: GString) -> GString {
         GString::from(mind_core::logic::statement::Statement::sanitize(&value.to_string()).as_str())
+    }
+
+    /// Visible editor field rows for a statement's current values
+    /// (`LStatement.build(Table)`; `draw` uses `DrawStatement.rebuild`).
+    #[func]
+    pub fn editor_fields(&self, name: GString, values: PackedStringArray) -> Array<Variant> {
+        let values: Vec<String> = values
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        let mut out = Array::<Variant>::new();
+        for field in mind_core::logic::statement::editor_fields(&name.to_string(), &values) {
+            out.push(
+                &dict(vec![
+                    ("index", (field.index as i64).to_variant()),
+                    ("label", GString::from(field.label).to_variant()),
+                ])
+                .to_variant(),
+            );
+        }
+        out
+    }
+
+    /// The discriminator field the editor renders as its own select button
+    /// (`-1` when the statement has a fixed layout).
+    #[func]
+    pub fn editor_discriminator(&self, name: GString) -> i64 {
+        mind_core::logic::statement::editor_discriminator(&name.to_string())
+            .map(|index| index as i64)
+            .unwrap_or(-1)
+    }
+
+    /// The value fixups a discriminator change applies (`DrawStatement`'s
+    /// `showSelect` callback), returned as the new field list.
+    #[func]
+    pub fn apply_type_change(&self, name: GString, values: PackedStringArray) -> PackedStringArray {
+        let mut values: Vec<String> = values
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        mind_core::logic::statement::editor_type_change(&name.to_string(), &mut values);
+        let mut out = PackedStringArray::new();
+        for value in &values {
+            out.push(&GString::from(value.as_str()));
+        }
+        out
     }
 
     /// A minimal valid starter program (`set`/`op`/`jump`), for the editor.
