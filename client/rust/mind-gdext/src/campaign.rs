@@ -548,6 +548,7 @@ impl MindCampaign {
         // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
         // the registry, persist the unlock, then run `checkAutoUnlocks()`.
         let mut unlocked_block = false;
+        let mut unlocked_content: Vec<ContentRef> = Vec::new();
         if !runtime.pending_unlocks.is_empty()
             && let Some(registry) = registry.as_mut()
         {
@@ -581,6 +582,7 @@ impl MindCampaign {
                     }
                 });
                 if unlocked {
+                    unlocked_content.push(content);
                     newly.push(name);
                 }
             }
@@ -599,6 +601,7 @@ impl MindCampaign {
                     if content.type_ == ContentType::Block {
                         unlocked_block = true;
                     }
+                    unlocked_content.push(content);
                     if let Some(name) = tech_tree::content_name(registry, content) {
                         newly.push(name);
                     }
@@ -632,6 +635,13 @@ impl MindCampaign {
             // `UnlockEvent` with a block reached the facade: the placement
             // palette rebuilds (`PlacementFragment.java:92-96`).
             let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
+        if let Some(registry) = self.registry.as_ref() {
+            // `Control.java:160-165`: each drained unlock shows the toast when
+            // `showUnlock()` is true.
+            for content in &unlocked_content {
+                self.push_unlock_toast(registry, *content);
+            }
         }
 
         if !replacements.is_empty() {
@@ -740,6 +750,10 @@ impl MindCampaign {
         });
         if !unlocked.is_empty() {
             log::info!("campaign capture auto-unlocked {} content", unlocked.len());
+        }
+        for content in &unlocked {
+            // `Control.java:160-165` (`UnlockEvent`) half.
+            self.push_unlock_toast(registry, *content);
         }
         if unlocked
             .iter()
@@ -2163,10 +2177,7 @@ impl MindCampaign {
             });
         }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
-        let mut unlocked_blocks = result
-            .unlocked
-            .iter()
-            .any(|content| content.type_ == ContentType::Block);
+        let mut unlocked_content: Vec<ContentRef> = result.unlocked.clone();
         if !result.unlocked.is_empty()
             && let Some(campaign_ref) = self.campaign.as_ref()
         {
@@ -2175,12 +2186,7 @@ impl MindCampaign {
                 let mut store = SettingsUnlockStore::new(settings);
                 tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx)
             });
-            if unlocked
-                .iter()
-                .any(|content| content.type_ == ContentType::Block)
-            {
-                unlocked_blocks = true;
-            }
+            unlocked_content.extend(unlocked.iter().copied());
             log::info!("research auto-unlocked {} content", unlocked.len());
         }
         self.registry = Some(registry);
@@ -2191,12 +2197,42 @@ impl MindCampaign {
             self.persist();
             self.invalidate_ui_block_catalog();
         }
-        if unlocked_blocks {
-            // `UnlockEvent` with a block: the placement palette rebuilds
-            // (`PlacementFragment.java:92-96`). No host bind is held here.
-            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        if let Some(registry) = self.registry.as_ref() {
+            // Each unlock fires an `UnlockEvent` (`Control.java:160-165`):
+            // toast for `showUnlock()` content, palette rebuild for blocks.
+            for content in &unlocked_content {
+                self.push_unlock_toast(registry, *content);
+            }
+            if unlocked_content
+                .iter()
+                .any(|content| content.type_ == ContentType::Block)
+            {
+                // No host bind is held here.
+                let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+            }
         }
         changed
+    }
+
+    /// Emits an `unlock` for the toast when the content `showUnlock()`s.
+    ///
+    /// `Control.java:160-165` (`UnlockEvent` -> `hudfrag.showUnlock`); the
+    /// default is true (`UnlockableContent.java:242`) and `StatusEffect` is the
+    /// only `false` override (`StatusEffect.java:140`), so status unlocks are
+    /// skipped. No HUD present (tests) is a no-op.
+    fn push_unlock_toast(&self, registry: &ContentRegistry, content: ContentRef) {
+        if content.type_ == ContentType::Status {
+            return;
+        }
+        let Some(name) = tech_tree::content_name(registry, content) else {
+            return;
+        };
+        let Some(mut hud) = self.base().get_node_or_null("/root/MindHud") else {
+            return;
+        };
+        if hud.has_method("push_unlock") {
+            hud.call("push_unlock", &[GString::from(name.as_str()).to_variant()]);
+        }
     }
 
     /// `ResearchDialog.rebuildItems` inventory for `planets` (Java
