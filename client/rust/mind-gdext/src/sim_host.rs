@@ -7613,6 +7613,26 @@ impl MindSimHost {
                 targets,
             });
         }
+        if def.kind == BlockKind::LogicBlock {
+            // `LogicBlock.drawConfigure` (`LogicBlock.java:661-683`).
+            let privileged = def.privileged;
+            // `LogicBlock.range` lives on the family knobs (`LogicBlockDef`).
+            let range = (!privileged)
+                .then(|| {
+                    mind_core::logic::blocks::logic_def_of(&self.sim.ecs.0, entity)
+                        .map(|def| def.range)
+                        .unwrap_or(0.0)
+                })
+                .filter(|range| *range > 0.0);
+            let links =
+                mind_core::logic::blocks::logic_block::overlay_links(&self.sim.ecs.0, entity);
+            return Some(ConfigOverlay::Logic {
+                x: cx,
+                y: cy,
+                range,
+                links,
+            });
+        }
         Some(ConfigOverlay::Generic {
             x: cx,
             y: cy,
@@ -7650,6 +7670,61 @@ impl MindSimHost {
         if team != self.player_team() {
             return SelectOverlay::None;
         }
+        if def.is_some_and(|def| def.kind == BlockKind::MessageBlock) {
+            // `MessageBlock.drawSelect`: the stored message above the block.
+            let text = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::logic::blocks::MessageBlockState>(entity)
+                .map(|state| state.message.clone())
+                .unwrap_or_default();
+            if !text.is_empty() {
+                return SelectOverlay::MessageText { x: cx, y: cy, text };
+            }
+        }
+        if def.is_some_and(|def| def.kind == BlockKind::LogicBlock) {
+            // `LogicBuild.drawSelect` (`LogicBlock.java:685-725`).
+            let (tag, icon) = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::logic::blocks::LogicBlockState>(entity)
+                // The icon tag needs `Fonts.unicodeToName`, which the port has
+                // not ported; the tag text is drawn, the icon is deferred.
+                .map(|state| (state.tag.clone(), None))
+                .unwrap_or((None, None));
+            let mut units = Vec::new();
+            for unit in self.sim.ecs.0.iter_entities() {
+                let Some(ai) = unit.get::<mind_core::ai::types::logic::LogicAi>() else {
+                    continue;
+                };
+                if ai.controller != Some(entity) {
+                    continue;
+                }
+                let Some(pos) = unit.get::<mind_core::entities::comp::Pos>() else {
+                    continue;
+                };
+                let hit = unit
+                    .get::<mind_core::entities::comp::unit::comp::HitboxComp>()
+                    .map(|hitbox| hitbox.hit_size)
+                    .unwrap_or(0.0);
+                let rotation = unit
+                    .get::<mind_core::entities::comp::unit::comp::UnitCore>()
+                    .map(|core| core.rotation)
+                    .unwrap_or(0.0);
+                units.push((pos.x, pos.y, hit, rotation));
+            }
+            if tag.is_some() || icon.is_some() || !units.is_empty() {
+                return SelectOverlay::LogicTag {
+                    x: cx,
+                    y: cy,
+                    tag,
+                    icon,
+                    units,
+                };
+            }
+        }
         if let Some((range, kind, color)) = self.block_place_range(tile.block) {
             return SelectOverlay::Range {
                 x: cx,
@@ -7660,6 +7735,69 @@ impl MindSimHost {
             };
         }
         SelectOverlay::None
+    }
+
+    /// Debug probe for the logic overlays (I03 T11): the config overlay and
+    /// the hover select overlay of the building at `(x, y)` as JSON.
+    #[func]
+    pub fn overlay_probe(&self, x: i32, y: i32) -> GString {
+        let config = match self.config_overlay(x, y) {
+            Some(ConfigOverlay::Logic { x, y, range, links }) => serde_json::json!({
+                "kind": "logic",
+                "x": x,
+                "y": y,
+                "range": range,
+                "links": links
+                    .iter()
+                    .map(|(lx, ly, size, name)| serde_json::json!({
+                        "x": lx, "y": ly, "size": size, "name": name,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            Some(ConfigOverlay::Generic { x, y, size }) => serde_json::json!({
+                "kind": "generic", "x": x, "y": y, "size": size,
+            }),
+            Some(ConfigOverlay::PowerNodeLinks { x, y, .. }) => serde_json::json!({
+                "kind": "power-node", "x": x, "y": y,
+            }),
+            Some(ConfigOverlay::BridgeLink { x, y, .. }) => serde_json::json!({
+                "kind": "bridge", "x": x, "y": y,
+            }),
+            None => serde_json::Value::Null,
+        };
+        let select = match self.select_overlay(x, y) {
+            SelectOverlay::LogicTag {
+                x,
+                y,
+                tag,
+                icon,
+                units,
+            } => serde_json::json!({
+                "kind": "logic-tag",
+                "x": x,
+                "y": y,
+                "tag": tag,
+                "icon": icon,
+                "units": units
+                    .iter()
+                    .map(|(ux, uy, hit, rotation)| serde_json::json!({
+                        "x": ux, "y": uy, "hit": hit, "rotation": rotation,
+                    }))
+                    .collect::<Vec<_>>(),
+            }),
+            SelectOverlay::MessageText { x, y, text } => serde_json::json!({
+                "kind": "message", "x": x, "y": y, "text": text,
+            }),
+            SelectOverlay::Range { x, y, range, .. } => serde_json::json!({
+                "kind": "range", "x": x, "y": y, "range": range,
+            }),
+            SelectOverlay::None => serde_json::Value::Null,
+        };
+        GString::from(
+            serde_json::json!({"config": config, "select": select})
+                .to_string()
+                .as_str(),
+        )
     }
 
     /// Debug probe for the placement range lookup (`Block.drawPlace` /
@@ -7975,8 +8113,18 @@ pub(crate) enum ConfigOverlay {
         range: i32,
         targets: Vec<(f32, f32, bool)>,
     },
-    /// Logic blocks (`LogicBlock.drawConfigure`); H06 T12 fills the drawing.
-    Logic,
+    /// `LogicBuild.drawConfigure` (`LogicBlock.java:661-683`): the non-privileged
+    /// link-range circles, one `Pal.place` square per valid link and the link
+    /// names above them.
+    Logic {
+        /// Building centre x/y (world px).
+        x: f32,
+        y: f32,
+        /// `LogicBlock.range` circles (non-privileged only; `None` = none).
+        range: Option<f32>,
+        /// Valid links: `(centre x, centre y, block size, link name)`.
+        links: Vec<(f32, f32, i32, String)>,
+    },
 }
 
 /// `Building.drawSelect` dispatch (`OverlayRenderer.java:213-229`).
@@ -7991,10 +8139,28 @@ pub(crate) enum SelectOverlay {
         color: u32,
         circles: bool,
     },
-    /// Message block text; H06 T12 fills the drawing.
-    MessageText,
-    /// Logic tag (processor link display); H06 T12 fills the drawing.
-    LogicTag,
+    /// `MessageBlock.drawSelect` (`MessageBlock.java`): the stored message
+    /// above the block.
+    MessageText {
+        /// Building centre x/y (world px).
+        x: f32,
+        y: f32,
+        /// The message text.
+        text: String,
+    },
+    /// `LogicBuild.drawSelect` (`LogicBlock.java:685-725`): the world-processor
+    /// tag/icon and one square per unit this processor drives.
+    LogicTag {
+        /// Building centre x/y (world px).
+        x: f32,
+        y: f32,
+        /// World-processor tag text (drawn above the block).
+        tag: Option<String>,
+        /// World-processor icon tag name (`Fonts.unicodeToName`).
+        icon: Option<String>,
+        /// Driven units: `(x, y, hit size, rotation)` (`LogicAI.controller == e`).
+        units: Vec<(f32, f32, f32, f32)>,
+    },
     /// No overlay.
     None,
 }
