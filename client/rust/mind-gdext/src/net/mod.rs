@@ -32,13 +32,20 @@ use mind_stdb::module_bindings::{
 use mind_stdb::rows::RowView;
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
-    ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, RowChange, StdbMode,
-    parse_player_suffix_from,
+    ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, RowChange, SessionState,
+    StdbMode, parse_player_suffix_from,
 };
 
+use crate::settings_hub;
 use crate::sim_host::MindSimHost;
 
 use self::relay::RelayRuntime;
+
+/// `stdb-server` setting default: the local harness (`tools/mp-local.sh up`)
+/// publishes `mindustry` to a single-node server on 3000.
+const DEFAULT_SERVER_ADDRESS: &str = "127.0.0.1:3000/mindustry";
+/// Settings key for the multiplayer server address (`host[:port][/db]`).
+const SERVER_SETTING_KEY: &str = "stdb-server";
 
 /// Multiplayer autoload: session + relay pump ownership (plan §3.15).
 #[derive(GodotClass)]
@@ -79,6 +86,11 @@ pub struct MindNet {
     checksum_monitor: ChecksumMonitor,
     snapshot_progress: f32,
     last_checksum_tick: u64,
+    /// Connector was built for online play (boot `--db`/`--pN` or
+    /// [`Self::ensure_online`]); single-player boots stay offline.
+    online_mode: bool,
+    /// Last `session_changed` payload, so transitions emit exactly once.
+    last_session_state: SessionState,
 }
 
 #[godot_api]
@@ -114,6 +126,8 @@ impl INode for MindNet {
             checksum_monitor: ChecksumMonitor::new(),
             snapshot_progress: 0.0,
             last_checksum_tick: 0,
+            online_mode: false,
+            last_session_state: SessionState::Offline,
         }
     }
 
@@ -129,33 +143,33 @@ impl INode for MindNet {
     }
 
     fn process(&mut self, _delta: f64) {
-        let Some(connector) = self.connector.as_mut() else {
-            return;
-        };
-        connector.pump();
-        for event in connector.drain_events() {
-            match event {
-                ConnectorEvent::Connected { identity } => {
-                    self.session.set_local_identity(identity.identity);
-                    self.checksum_monitor.set_local(identity.identity);
-                    if let Some(runtime) = self.runtime.as_mut() {
-                        runtime.set_local_identity(identity.identity);
+        if let Some(connector) = self.connector.as_mut() {
+            connector.pump();
+            for event in connector.drain_events() {
+                match event {
+                    ConnectorEvent::Connected { identity } => {
+                        self.session.set_local_identity(identity.identity);
+                        self.checksum_monitor.set_local(identity.identity);
+                        if let Some(runtime) = self.runtime.as_mut() {
+                            runtime.set_local_identity(identity.identity);
+                        }
                     }
+                    ConnectorEvent::Disconnected { .. } => self.session.on_disconnected(),
+                    ConnectorEvent::Resync => self.session.on_resync(),
+                    _ => {}
                 }
-                ConnectorEvent::Disconnected { .. } => self.session.on_disconnected(),
-                ConnectorEvent::Resync => self.session.on_resync(),
-                _ => {}
             }
+            self.drain_match_rows();
+            self.drain_members_rows();
+            self.drain_state_rows();
+            self.drain_public_matches();
+            self.drain_player_states();
+            self.drain_checksums();
+            self.drain_snapshots();
+            self.drain_relay();
+            self.maybe_publish_checksum();
         }
-        self.drain_match_rows();
-        self.drain_members_rows();
-        self.drain_state_rows();
-        self.drain_public_matches();
-        self.drain_player_states();
-        self.drain_checksums();
-        self.drain_snapshots();
-        self.drain_relay();
-        self.maybe_publish_checksum();
+        self.notify_session_state();
     }
 
     fn exit_tree(&mut self) {
@@ -207,6 +221,7 @@ impl MindNet {
             log::info!("MindNet offline (single-player default)");
         }
         self.connector = Some(connector);
+        self.online_mode = online;
         self.sim_host = self
             .base()
             .try_get_node_as::<MindSimHost>("../SimHost")
@@ -233,12 +248,43 @@ impl MindNet {
         self.public_matches_binder = Some(connector.bind::<AllMatchesTableAccessor>("all_matches"));
     }
 
-    /// Session state changed (`offline`/`in_lobby`/`in_game`/...).
+    /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
+    /// Emitted from [`Self::notify_session_state`] whenever the state differs
+    /// from the last emitted one.
     #[signal]
     fn session_changed(state: GString);
 
+    /// Goes online on demand (I08 T1): with the boot connector offline, builds
+    /// the Online connector from the `stdb-server` setting
+    /// (`host[:port][/db]`, default [`DEFAULT_SERVER_ADDRESS`] — the local
+    /// `tools/mp-local.sh` harness) and opens the browser session. Idempotent
+    /// once online; `false` when the address is invalid or the connection
+    /// cannot be opened (the failure is shown as Java's `@connectfail`,
+    /// `Net.java:133`).
+    #[func]
+    pub fn ensure_online(&mut self) -> bool {
+        if self.online_mode {
+            return true;
+        }
+        let address = settings_hub::with_settings(|settings| {
+            settings.get_string(SERVER_SETTING_KEY, DEFAULT_SERVER_ADDRESS)
+        });
+        let default_db = self.db_name.to_string();
+        let Some((host, db_name)) = parse_server_address(&address, &default_db) else {
+            self.show_error("@connectfail", &format!("invalid stdb-server `{address}`"));
+            return false;
+        };
+        if !self.open_online(&host, &db_name) {
+            return false;
+        }
+        self.session.open_browser();
+        self.notify_session_state();
+        log::info!("MindNet.ensure_online: browsing `{host}/{db_name}`");
+        true
+    }
+
     /// Creates a match and enters the lobby as host (returns 0; id arrives via
-    /// the `my_match` view).
+    /// the `my_match` view). Goes online on demand first (I08 T1).
     #[func]
     pub fn create_match(
         &mut self,
@@ -249,6 +295,9 @@ impl MindNet {
         max_players: i64,
         rules_json: GString,
     ) -> i64 {
+        if !self.ensure_online() {
+            return 0;
+        }
         let params = HostParams {
             map_id: map_id.to_string(),
             map_seed: seed.max(0) as u64,
@@ -266,10 +315,13 @@ impl MindNet {
         match self.session.host(connector, &params) {
             Ok(()) => {
                 self.ensure_relay();
+                self.notify_session_state();
                 self.session.match_id().unwrap_or(0) as i64
             }
             Err(error) => {
-                log::warn!("MindNet.create_match failed: {error}");
+                // Java `HostDialog.runHost` (`HostDialog.java:80-99`): failures
+                // show `@server.error`.
+                self.show_error("@server.error", &error.to_string());
                 0
             }
         }
@@ -277,13 +329,14 @@ impl MindNet {
 
     /// Direct-connect (`JoinDialog.connect`): rebuilds the connector against
     /// `address` (`host[:port][/db]`, scheme optional) and enters the public
-    /// match browser. Returns `false` for an invalid address or an active match.
+    /// match browser. Goes online on demand (I08 T1); returns `false` for an
+    /// invalid address or an active match.
     #[func]
     pub fn connect_to(&mut self, address: GString) -> bool {
         let requested = address.to_string();
         let default_db = self.db_name.to_string();
         let Some((host, db_name)) = parse_server_address(&requested, &default_db) else {
-            log::warn!("MindNet.connect_to: invalid address `{requested}`");
+            self.show_error("@connectfail", &format!("invalid address `{requested}`"));
             return false;
         };
         if !matches!(
@@ -293,31 +346,11 @@ impl MindNet {
             log::warn!("MindNet.connect_to: a match is already active");
             return false;
         }
-        if let Some(connector) = self.connector.as_mut() {
-            connector.disconnect();
-        }
-        self.runtime = None;
-        self.sender = None;
-        self.remote_players.clear();
-        self.public_matches.clear();
-        let config = ConnectionConfig {
-            host: host.clone(),
-            db_name: db_name.clone(),
-            token_append: self.token_append.clone(),
-            token_store_path: self.token_store_path.clone(),
-            mode: StdbMode::Online,
-            ..ConnectionConfig::default()
-        };
-        let mut connector = Connector::new(config);
-        self.attach_binders(&mut connector);
-        if let Err(error) = connector.connect() {
-            log::warn!("MindNet.connect_to failed: {error}");
+        if !self.open_online(&host, &db_name) {
             return false;
         }
-        self.connector = Some(connector);
-        self.host = GString::from(host.as_str());
-        self.db_name = GString::from(db_name.as_str());
         self.session.open_browser();
+        self.notify_session_state();
         log::info!("MindNet.connect_to: browsing `{host}/{db_name}`");
         true
     }
@@ -333,10 +366,14 @@ impl MindNet {
         GString::from(format!("[{}]", entries.join(",")).as_str())
     }
 
-    /// Joins `match_id`; readiness/loading follows the view.
+    /// Joins `match_id`; readiness/loading follows the view. Goes online on
+    /// demand first (I08 T1).
     #[func]
     pub fn join_match(&mut self, match_id: i64, password: GString) -> bool {
         if match_id <= 0 {
+            return false;
+        }
+        if !self.ensure_online() {
             return false;
         }
         let password = {
@@ -357,10 +394,13 @@ impl MindNet {
         ) {
             Ok(()) => {
                 self.ensure_relay();
+                self.notify_session_state();
                 true
             }
             Err(error) => {
-                log::warn!("MindNet.join_match failed: {error}");
+                // Java shows the join rejection through the kick/dialog path;
+                // until T5/T9 map the reasons, the message is shown verbatim.
+                self.show_error("@connectfail", &error.to_string());
                 false
             }
         }
@@ -372,7 +412,9 @@ impl MindNet {
         let Some(connector) = self.connector.as_mut() else {
             return false;
         };
-        self.session.leave(connector).is_ok()
+        let result = self.session.leave(connector).is_ok();
+        self.notify_session_state();
+        result
     }
 
     /// Starts the lobby (host only).
@@ -390,7 +432,9 @@ impl MindNet {
         let Some(connector) = self.connector.as_mut() else {
             return false;
         };
-        self.session.set_ready(connector, ready).is_ok()
+        let result = self.session.set_ready(connector, ready).is_ok();
+        self.notify_session_state();
+        result
     }
 
     /// Session state name (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -572,6 +616,7 @@ impl MindNet {
             Ok(()) => {
                 self.session.enter_snapshot_sync();
                 self.snapshot_progress = 0.0;
+                self.notify_session_state();
                 true
             }
             Err(error) => {
@@ -637,6 +682,71 @@ impl MindNet {
 }
 
 impl MindNet {
+    /// (Re)builds the connector for `host`/`db_name` in Online mode, attaches
+    /// every binder and opens the link. Clears the per-match mirrors. Returns
+    /// `false` when the socket cannot be opened now (the connector still
+    /// schedules its retry); the failure is shown as `@connectfail`
+    /// (`Net.java:133`).
+    fn open_online(&mut self, host: &str, db_name: &str) -> bool {
+        if let Some(connector) = self.connector.as_mut() {
+            connector.disconnect();
+        }
+        self.runtime = None;
+        self.sender = None;
+        self.remote_players.clear();
+        self.public_matches.clear();
+        let config = ConnectionConfig {
+            host: host.to_string(),
+            db_name: db_name.to_string(),
+            token_append: self.token_append.clone(),
+            token_store_path: self.token_store_path.clone(),
+            mode: StdbMode::Online,
+            ..ConnectionConfig::default()
+        };
+        let mut connector = Connector::new(config);
+        self.attach_binders(&mut connector);
+        self.connector = Some(connector);
+        self.host = GString::from(host);
+        self.db_name = GString::from(db_name);
+        self.online_mode = true;
+        let error = self
+            .connector
+            .as_mut()
+            .and_then(|connector| connector.connect().err().map(|error| error.to_string()));
+        if let Some(error) = error {
+            self.show_error("@connectfail", &error);
+            return false;
+        }
+        true
+    }
+
+    /// Emits `session_changed` when the session state differs from the last
+    /// emitted one. Every state mutation funnels through here, and `process()`
+    /// calls it once per frame so row-driven transitions (match status,
+    /// disconnect) are covered too.
+    fn notify_session_state(&mut self) {
+        let state = self.session.state();
+        if state != self.last_session_state {
+            self.last_session_state = state;
+            self.base_mut().emit_signal(
+                "session_changed",
+                &[GString::from(state.name()).to_variant()],
+            );
+        }
+    }
+
+    /// Shows a bundle-keyed error through `MindUi.show_error_key`
+    /// (`Net.java:133` connection failures; `HostDialog.java:80-99` host
+    /// failures). Falls back to the log when `/root/MindUi` is absent.
+    fn show_error(&self, key: &str, detail: &str) {
+        log::warn!("MindNet: {key} {detail}");
+        let Some(mut ui) = self.base().try_get_node_as::<crate::MindUi>("/root/MindUi") else {
+            return;
+        };
+        ui.bind_mut()
+            .show_error_key(GString::from(key), GString::from(detail));
+    }
+
     /// Creates the relay runtime/sender once a match id is known.
     fn ensure_relay(&mut self) {
         let Some(match_id) = self.session.match_id() else {
@@ -939,7 +1049,7 @@ fn parse_server_address(address: &str, default_db: &str) -> Option<(String, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::parse_server_address;
+    use super::{DEFAULT_SERVER_ADDRESS, parse_server_address};
 
     #[test]
     fn server_address_parsing() {
@@ -960,5 +1070,22 @@ mod tests {
         );
         assert_eq!(parse_server_address("   ", "mindustry"), None);
         assert_eq!(parse_server_address("bad host", "mindustry"), None);
+        // `stdb-server` setting shapes (I08 T1): host:port/db and host/db.
+        assert_eq!(
+            parse_server_address("127.0.0.1:3000/mindustry", "mindustry"),
+            Some(("http://127.0.0.1:3000".to_string(), "mindustry".to_string()))
+        );
+        assert_eq!(
+            parse_server_address("db.example.com/prod", "mindustry"),
+            Some(("http://db.example.com:3000".to_string(), "prod".to_string()))
+        );
+    }
+
+    #[test]
+    fn default_server_address_parses() {
+        assert_eq!(
+            parse_server_address(DEFAULT_SERVER_ADDRESS, "other"),
+            Some(("http://127.0.0.1:3000".to_string(), "mindustry".to_string()))
+        );
     }
 }

@@ -60,6 +60,9 @@ pub struct MindUi {
     pause_depth: u32,
     /// Whether the game was already paused before the governor took over.
     was_paused: bool,
+    /// Lazily loaded bundle for facade error text ([`Self::show_error_key`]);
+    /// the same reader the campaign facade uses (`Core.bundle`).
+    bundle: Option<mind_core::assets::bundle::Bundle>,
 }
 
 #[godot_api]
@@ -87,6 +90,7 @@ impl INode for MindUi {
             pause_flags: HashMap::new(),
             pause_depth: 0,
             was_paused: false,
+            bundle: None,
         }
     }
 
@@ -376,6 +380,23 @@ impl MindUi {
         let _ = self
             .base_mut()
             .emit_signal("show_text", &[title.to_variant(), text.to_variant()]);
+    }
+
+    /// Shows a bundle-keyed error modal with one `{0}` argument
+    /// (`Net.java:133` `ui.showText("", Core.bundle.format("connectfail", e))`).
+    /// The key takes a leading `@` like Java call sites; the text is rendered
+    /// through `MindAssets.markup_text` the same way the campaign facade does.
+    #[func]
+    pub fn show_error_key(&mut self, key: GString, detail: GString) {
+        let raw = self.format_key(key.to_string().as_str(), &detail.to_string());
+        let rendered = self.render_markup(&raw);
+        let _ = self.base_mut().emit_signal(
+            "show_text",
+            &[
+                GString::new().to_variant(),
+                GString::from(rendered.as_str()).to_variant(),
+            ],
+        );
     }
 
     /// Shows a confirm prompt (`UI.showConfirm`); completes via [`Self::resolve_confirm`].
@@ -1067,6 +1088,33 @@ impl MindUi {
         // vsync/fpscap at build time) and `UI.updateMargins`.
         self.apply_window_settings();
         self.update_margins();
+    }
+
+    /// Formats bundle `key` (leading `@` optional) against one `{0}` argument
+    /// (`Core.bundle.format`). Loads the bundle on first use.
+    fn format_key(&mut self, key: &str, detail: &str) -> String {
+        let bundle = self.bundle.get_or_insert_with(|| {
+            crate::assets::bundle::load_bundle(
+                &crate::assets::loader::resolve_assets_dir(),
+                &crate::assets::loader::resolve_locale(),
+            )
+        });
+        bundle.format(key.trim_start_matches('@'), &[detail])
+    }
+
+    /// Renders Java markup through `MindAssets.markup_text` when the autoload
+    /// is up (the campaign facade's error path does the same); raw fallback.
+    fn render_markup(&self, raw: &str) -> String {
+        self.base()
+            .get_node_or_null("/root/MindAssets")
+            .and_then(|mut assets| {
+                assets
+                    .call("markup_text", &[GString::from(raw).to_variant()])
+                    .try_to::<GString>()
+                    .ok()
+            })
+            .map(|rendered| rendered.to_string())
+            .unwrap_or_else(|| raw.to_owned())
     }
 
     /// Calls a JSON read-model method on the live campaign facade, if present.
