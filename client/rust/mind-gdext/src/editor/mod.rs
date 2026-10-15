@@ -188,9 +188,11 @@ impl MindEditor {
         self.last_error_message = None;
     }
 
-    /// Marks the tile grid as changed (editor-renderer invalidation).
+    /// Marks the tile grid as changed (editor-renderer invalidation;
+    /// `EditorTile.setBlock`'s `ui.editor.resetSaved()`).
     fn mark_tiles_changed(&mut self) {
         self.tiles_rev = self.tiles_rev.wrapping_add(1);
+        self.editor.saved = false;
     }
 
     /// Read-only grid for the editor renderer (crate-internal view seam).
