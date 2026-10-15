@@ -2154,6 +2154,15 @@ impl MindSimHost {
                 &GString::from("pixels"),
                 &i64::from(row.pixels).to_variant(),
             );
+            dict.set(
+                &GString::from("bpp"),
+                &i64::from(row.bits_per_pixel).to_variant(),
+            );
+            let mut palette = PackedInt64Array::new();
+            for color in &row.palette {
+                palette.push(i64::from(*color));
+            }
+            dict.set(&GString::from("palette"), &palette.to_variant());
             dict.set(&GString::from("invalidated"), &row.invalidated.to_variant());
             out.push(&dict.to_variant());
         }
@@ -2176,6 +2185,9 @@ impl MindSimHost {
         else {
             return out;
         };
+        let palette = mind_core::logic::blocks::canvas_def_of(&self.sim.ecs.0, e)
+            .map(|def| def.palette)
+            .unwrap_or_default();
         let Some(mut state) = self
             .sim
             .ecs
@@ -2189,7 +2201,7 @@ impl MindSimHost {
         let mut bytes: Vec<u8> = Vec::with_capacity((pixels * 4) as usize);
         for row in (0..size).rev() {
             for col in 0..size {
-                let pixel = state.pixel_rgba(row * size + col);
+                let pixel = state.pixel_rgba(row * size + col, &palette);
                 bytes.push(((pixel >> 24) & 0xff) as u8);
                 bytes.push(((pixel >> 16) & 0xff) as u8);
                 bytes.push(((pixel >> 8) & 0xff) as u8);
@@ -2198,6 +2210,37 @@ impl MindSimHost {
         }
         state.invalidated = false;
         out.extend(bytes.iter().copied());
+        out
+    }
+
+    /// Palette indices of the canvas at `(x, y)`, one byte per pixel
+    /// (linear `pos = y * size + x`, `CanvasBuild.getPixel`).
+    #[func]
+    pub fn logic_canvas_pixels(&self, x: i64, y: i64) -> PackedByteArray {
+        let mut out = PackedByteArray::new();
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return out;
+        };
+        let Some(e) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return out;
+        };
+        let Some(state) = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::logic::blocks::CanvasBlockState>(e)
+        else {
+            return out;
+        };
+        let pixels = state.canvas_size.max(0) * state.canvas_size.max(0);
+        for pos in 0..pixels {
+            let index = state.get_byte(pos * i32::from(state.bits_per_pixel));
+            out.push((index.clamp(0, 255)) as u8);
+        }
         out
     }
 
@@ -2243,6 +2286,49 @@ impl MindSimHost {
         }
         out.extend(bytes.iter().copied());
         out
+    }
+
+    /// `LogicBuild.showEditDialog` -> `configure(bytes)` (I03 T7).
+    ///
+    /// Compresses the editor text with `relativeConnections`, returns
+    /// `"toolong:<len>"` past `maxCompressedLen`, and otherwise queues a
+    /// `Bytes` configure as the player (the campaign configure gate applies,
+    /// unlike the `logic_set_code` test seam).
+    #[func]
+    pub fn logic_configure_code(&mut self, x: i64, y: i64, code: GString) -> GString {
+        self.logic_last_error = String::new();
+        let code = code.to_string();
+        let world = &self.sim.ecs.0;
+        let Some(e) =
+            mind_core::logic::blocks::logic_block::processor_at(world, x as i32, y as i32)
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return GString::from("noprocessor");
+        };
+        let Some(links) = world
+            .get::<mind_core::logic::blocks::LogicBlockState>(e)
+            .map(|state| state.relative_connections(world, e))
+        else {
+            self.logic_last_error = "noprocessor".to_owned();
+            return GString::from("noprocessor");
+        };
+        match mind_core::logic::blocks::logic_block::encode_for_config(&code, &links) {
+            Err(len) => {
+                self.logic_last_error = format!("toolong:{len}");
+                GString::from(format!("toolong:{len}").as_str())
+            }
+            Ok(bytes) => {
+                let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+                    return GString::from("noprocessor");
+                };
+                self.pending_commands.push_back(SimCommand::Configure {
+                    x: tx,
+                    y: ty,
+                    value: mind_core::determinism::ConfigValue::Bytes(bytes),
+                });
+                GString::new()
+            }
+        }
     }
 
     /// Runs a registered logic bench case (plan 13 §7d; not yet registered).
@@ -8071,7 +8157,12 @@ fn config_to_json(value: &mind_core::world::config::ConfigValue) -> serde_json::
             .unwrap_or(serde_json::Value::Null),
         V::Bool(flag) => serde_json::Value::Bool(*flag),
         V::Building(_) => json!({"type": "building"}),
-        V::Bytes(bytes) => json!({"type": "bytes", "len": bytes.len()}),
+        V::Bytes(bytes) => json!({
+            "type": "bytes",
+            "len": bytes.len(),
+            // The canvas editor reads the packed payload (`CanvasEditDialog`).
+            "data": bytes.iter().copied().collect::<Vec<u8>>()
+        }),
         V::String(text) => json!({"type": "string", "value": text}),
     }
 }

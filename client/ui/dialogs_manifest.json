@@ -53,7 +53,9 @@
     {"name": "banned_content", "scene": "res://scenes/editor/banned_content_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "map_assets", "scene": "res://scenes/editor/data/map_assets_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "file_chooser", "scene": "res://scenes/ui/dialogs/file_chooser_dialog.tscn", "pause": false, "menu_openable": false, "args": ["open:Bool"]},
-    {"name": "widget_gallery", "scene": "res://scenes/ui/dialogs/widget_gallery.tscn", "pause": false, "menu_openable": false, "args": []}
+    {"name": "widget_gallery", "scene": "res://scenes/ui/dialogs/widget_gallery.tscn", "pause": false, "menu_openable": false, "args": []},
+    {"name": "canvas_edit", "scene": "res://scenes/ui/dialogs/canvas_edit_dialog.tscn", "pause": false, "menu_openable": false, "args": ["x:Int", "y:Int"]},
+    {"name": "logic", "scene": "res://scenes/ui/dialogs/logic_dialog.tscn", "pause": true, "menu_openable": false, "args": ["x:Int", "y:Int"]}
   ],
   "fragments": [
     {"name": "menu", "scene": "res://scenes/ui/fragments/menu_fragment.tscn", "group": "menu"},

@@ -34,6 +34,35 @@ impl ConstructBehavior {
 }
 
 impl BuildingBehavior for ConstructBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `ConstructBlock.sense` (`ConstructBlock.java:214-221`).
+            LAccess::Progress => Sensed::Num(
+                world
+                    .get::<ConstructState>(e)
+                    .map(|state| f64::from(state.progress.clamp(0.0, 1.0)))
+                    .unwrap_or(f64::NAN),
+            ),
+            LAccess::Breaking => Sensed::Num(
+                if world
+                    .get::<ConstructState>(e)
+                    .is_some_and(|state| state.active_deconstruct)
+                {
+                    1.0
+                } else {
+                    0.0
+                },
+            ),
+            _ => return None,
+        })
+    }
     fn version(&self, _world: &World, _e: Entity) -> u8 {
         // `ConstructBuild.version() = 1`.
         1

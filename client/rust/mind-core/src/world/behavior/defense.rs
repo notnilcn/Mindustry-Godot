@@ -168,6 +168,24 @@ pub fn update_other_bits(world: &mut World, e: Entity) {
 pub struct DoorBehavior;
 
 impl BuildingBehavior for DoorBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `Door.sense(enabled)` (`Door.java:88-91`).
+            LAccess::Enabled => Sensed::Num(if world.get::<DoorState>(e)?.open {
+                1.0
+            } else {
+                0.0
+            }),
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<DoorState>(e).is_none() {
             world.entity_mut(e).insert(DoorState::default());

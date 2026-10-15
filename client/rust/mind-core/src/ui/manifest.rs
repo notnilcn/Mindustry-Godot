@@ -399,6 +399,10 @@ pub const EXPECTED_M5_DIALOGS: &[&str] = &[
 /// Dialog names required by plan 14 M7 (file chooser; chat/console are fragments).
 pub const EXPECTED_M7_DIALOGS: &[&str] = &["file_chooser"];
 
+/// Dialog names required by the round-I logic plan (I03): `canvas_edit`
+/// (`CanvasBlock.buildConfiguration`) and `logic` (`LogicBlock.buildConfiguration`).
+pub const EXPECTED_LOGIC_DIALOGS: &[&str] = &["canvas_edit", "logic"];
+
 /// Dialog names required by I06 T8 (`MapEditorDialog`'s menu + `MapInfoDialog`
 /// hub; every editor sub-dialog is manifest-registered so `MindUi` can open it).
 pub const EXPECTED_EDITOR_DIALOGS: &[&str] = &[
@@ -544,6 +548,12 @@ mod tests {
             assert!(
                 manifest.dialog(name).is_some(),
                 "editor dialog '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        for name in EXPECTED_LOGIC_DIALOGS {
+            assert!(
+                manifest.dialog(name).is_some(),
+                "logic dialog '{name}' missing from dialogs_manifest.json"
             );
         }
         for name in [

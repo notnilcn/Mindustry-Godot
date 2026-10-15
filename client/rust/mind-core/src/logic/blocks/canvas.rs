@@ -41,13 +41,15 @@ pub struct CanvasBlockState {
     pub bits_per_pixel: u8,
     /// Canvas width/height in pixels.
     pub canvas_size: i32,
+    /// `CanvasBlock.palette.length` (the `setPixel` index guard).
+    pub palette_len: usize,
     /// `CanvasBuild.invalidated` (the view rebuilds its texture).
     pub invalidated: bool,
 }
 
 impl CanvasBlockState {
-    /// Creates an empty canvas for a `canvasSize`/`bpp`.
-    pub fn new(canvas_size: i32, bits_per_pixel: u8) -> Self {
+    /// Creates an empty canvas for a `canvasSize`/`bpp`/palette size.
+    pub fn new(canvas_size: i32, bits_per_pixel: u8, palette_len: usize) -> Self {
         let pixels = (canvas_size.max(0) as usize) * (canvas_size.max(0) as usize);
         let bytes = (pixels * bits_per_pixel as usize).div_ceil(8);
         Self {
@@ -55,6 +57,7 @@ impl CanvasBlockState {
             blending: 0,
             bits_per_pixel,
             canvas_size,
+            palette_len,
             invalidated: true,
         }
     }
@@ -71,7 +74,7 @@ impl CanvasBlockState {
     /// `CanvasBuild.setPixel(pos, index)` (`:143-149`).
     pub fn set_pixel(&mut self, pos: i32, index: i32) {
         let pixels = self.canvas_size.max(0) * self.canvas_size.max(0);
-        if pos < 0 || pos >= pixels || index < 0 || index >= PALETTE.len() as i32 {
+        if pos < 0 || pos >= pixels || index < 0 || index >= self.palette_len as i32 {
             return;
         }
         self.set_byte(pos * i32::from(self.bits_per_pixel), index);
@@ -107,17 +110,15 @@ impl CanvasBlockState {
     }
 
     /// `CanvasBlock.makePixmap`: pixel `i` as RGBA8888 (row 0 = top).
-    pub fn pixel_rgba(&self, pos: i32) -> u32 {
+    pub fn pixel_rgba(&self, pos: i32, palette: &[u32]) -> u32 {
         let index = self.get_byte(pos * i32::from(self.bits_per_pixel)).max(0) as usize;
-        PALETTE
-            .get(index.min(PALETTE.len() - 1))
-            .copied()
-            .unwrap_or(0)
+        let len = palette.len().max(1);
+        palette.get(index.min(len - 1)).copied().unwrap_or(0)
     }
 }
 
 /// One visible canvas row for the render pass (T14).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct CanvasDrawRow {
     /// Canvas tile x (texture key).
     pub x: i16,
@@ -133,6 +134,10 @@ pub struct CanvasDrawRow {
     pub blending: u8,
     /// Canvas pixels per axis (`canvasSize`).
     pub pixels: i32,
+    /// `CanvasBlock.bitsPerPixel`.
+    pub bits_per_pixel: u8,
+    /// `CanvasBlock.palette` (RGBA8888; the editor's colour buttons).
+    pub palette: Vec<u32>,
     /// Whether the canvas was invalidated since the last texture upload.
     pub invalidated: bool,
 }
@@ -190,6 +195,8 @@ pub fn canvas_rows(
             size: block_size as f32 * 8.0 - pad,
             blending: blend,
             pixels: def.canvas_size.max(0),
+            bits_per_pixel: def.bits_per_pixel,
+            palette: def.palette.clone(),
             invalidated: world
                 .get::<CanvasBlockState>(e)
                 .is_some_and(|state| state.invalidated),
@@ -205,9 +212,11 @@ pub struct CanvasBehavior;
 impl BuildingBehavior for CanvasBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         let def = canvas_def_of(world, e).unwrap_or_default();
-        world
-            .entity_mut(e)
-            .insert(CanvasBlockState::new(def.canvas_size, def.bits_per_pixel));
+        world.entity_mut(e).insert(CanvasBlockState::new(
+            def.canvas_size,
+            def.bits_per_pixel,
+            def.palette.len(),
+        ));
     }
 
     fn configured(

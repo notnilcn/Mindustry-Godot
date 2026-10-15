@@ -44,6 +44,20 @@ func row() -> void:
 	_current_row += 1
 
 
+## Removes every cell and child, resetting the row cursor (dialogs that
+## rebuild their rows; freed controls otherwise stay in `_cells` and break
+## `_grid`).
+func clear() -> void:
+	for entry in _cells:
+		var control: Control = entry["control"]
+		if is_instance_valid(control):
+			remove_child(control)
+			control.queue_free()
+	_cells.clear()
+	_current_row = 0
+	queue_sort()
+
+
 ## Returns the cell whose flags apply to subsequent `add` calls (`defaults()`).
 func defaults() -> MindCell:
 	if _defaults == null:

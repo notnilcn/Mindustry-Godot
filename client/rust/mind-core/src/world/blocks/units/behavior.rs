@@ -212,6 +212,34 @@ impl UnitFactoryBehavior {
 }
 
 impl BuildingBehavior for UnitFactoryBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `UnitFactory.sense` (`UnitFactory.java:278-282`).
+            LAccess::Progress => {
+                let state = world.get::<UnitFactoryBuild>(e)?;
+                let plan = state.current_plan;
+                let time = self
+                    .factory
+                    .plans
+                    .get(usize::try_from(plan).unwrap_or(usize::MAX))
+                    .map(|plan| plan.time)
+                    .unwrap_or(0.0);
+                Sensed::Num(if time > 0.0 {
+                    f64::from((state.progress / time).clamp(0.0, 1.0))
+                } else {
+                    0.0
+                })
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         let mut state = UnitFactoryBuild::new();
         // `UnitFactoryBuild.created()`: auto-set to the first plan.
@@ -476,6 +504,26 @@ fn consume_items(world: &mut World, e: Entity, reconstructor: &Reconstructor) {
 }
 
 impl BuildingBehavior for ReconstructorBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `Reconstructor.sense(progress)` (`Reconstructor.java:370-373`):
+            // the build fraction.
+            LAccess::Progress => {
+                let state = world.get::<UnitFactoryBuild>(e)?;
+                let time = self.reconstructor.construct_time.max(1.0);
+                Sensed::Num(f64::from((state.progress / time).clamp(0.0, 1.0)))
+            }
+            _ => return None,
+        })
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(ReconstructorBuild::default());
     }

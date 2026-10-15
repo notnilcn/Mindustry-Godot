@@ -65,6 +65,25 @@ impl PayloadDeconstructorBehavior {
 }
 
 impl BuildingBehavior for PayloadDeconstructorBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `PayloadDeconstructor.sense(progress)`.
+            LAccess::Progress => Sensed::Num(
+                world
+                    .get::<crate::world::blocks::payloads::payload_deconstructor::PayloadDeconstructorBuild>(e)
+                    .map(|state| f64::from(state.progress))
+                    .unwrap_or(f64::NAN),
+            ),
+            _ => return None,
+        })
+    }
     fn update_batch(
         &self,
         world: &mut bevy_ecs::world::World,

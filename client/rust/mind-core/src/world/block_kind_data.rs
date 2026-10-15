@@ -492,6 +492,9 @@ pub struct CanvasDef {
     pub padding: f32,
     /// `CanvasBlock.bitsPerPixel`.
     pub bits_per_pixel: u8,
+    /// `CanvasBlock.palette` (RGBA8888; 8 entries for `canvas`, the 16-colour
+    /// woodspark palette for `large-canvas`, `Blocks.java:6965-6983`).
+    pub palette: Vec<u32>,
 }
 
 /// Typed family data for one block (plan 07 §6.1).
@@ -1060,8 +1063,32 @@ impl BlockKindData {
                     def.max_dimensions = 16;
                 }
             }
-            "canvas" => self.set_canvas(12, 3.5, 3),
-            "large-canvas" => self.set_canvas(24, 3.5, 4),
+            "canvas" => self.set_canvas(12, 3.5, 3, &crate::logic::blocks::canvas::PALETTE),
+            // `Blocks.java:6965-6983`: the woodspark 16-colour palette
+            // (`setPaletteFromString`).
+            "large-canvas" => self.set_canvas(
+                24,
+                3.5,
+                4,
+                &[
+                    0x452b_3fff,
+                    0x8a58_65ff,
+                    0xe08d_51ff,
+                    0xfabf_61ff,
+                    0xf5ee_b0ff,
+                    0x2c5e_3bff,
+                    0x609c_4fff,
+                    0xc6cc_54ff,
+                    0x78c2_d6ff,
+                    0x5479_b0ff,
+                    0x5654_6eff,
+                    0x839f_a6ff,
+                    0xe0d3_c8ff,
+                    0xf05b_5bff,
+                    0x8f32_5fff,
+                    0xeb6c_98ff,
+                ],
+            ),
             _ => {}
         }
     }
@@ -1163,11 +1190,12 @@ impl BlockKindData {
         }
     }
 
-    fn set_canvas(&mut self, canvas_size: i32, padding: f32, bits_per_pixel: u8) {
+    fn set_canvas(&mut self, canvas_size: i32, padding: f32, bits_per_pixel: u8, palette: &[u32]) {
         if let BlockKindData::Canvas(def) = self {
             def.canvas_size = canvas_size;
             def.padding = padding;
             def.bits_per_pixel = bits_per_pixel;
+            def.palette = palette.to_vec();
         }
     }
 

@@ -3169,6 +3169,18 @@ impl DesktopBridge {
         if def.kind == BlockKind::SwitchBlock {
             return None;
         }
+        // `CanvasBlock.buildConfiguration` (`CanvasBlock.java:314-317`): one
+        // pencil button opening `CanvasEditDialog`.
+        if def.kind == BlockKind::CanvasBlock {
+            let spec = serde_json::json!({
+                "title": format!("block.{}.name", def.name),
+                "block": def.name,
+                "x": x,
+                "y": y,
+                "canvas": true,
+            });
+            return Some(spec.to_string());
+        }
         // `LogicBlock.buildConfiguration` (`LogicBlock.java:736-739`): one
         // pencil button opening the logic editor; `shouldShowConfigure` is
         // `accessible()` (`LogicBlock.java:734`), so an inaccessible world

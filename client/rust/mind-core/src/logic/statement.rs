@@ -114,6 +114,24 @@ macro_rules! define_statements {
                     )*
                 }
             }
+
+            /// Encoded field values in serialization order (the editor's field
+            /// texts; `read_statement([name, ..values])` rebuilds the statement).
+            pub fn field_values(&self) -> Vec<String> {
+                match self {
+                    $(
+                        Statement::$variant { $( $f ),* } => vec![
+                            $(
+                                {
+                                    let mut text = String::new();
+                                    MlogField::write($f, &mut text);
+                                    text
+                                }
+                            ),*
+                        ],
+                    )*
+                }
+            }
         }
 
         /// Field names + kinds in serialization order.
@@ -620,6 +638,24 @@ impl Statement {
     pub fn write(&self, out: &mut String) {
         out.push_str(self.registered_name());
         self.write_fields(out);
+    }
+}
+
+/// `lst.<key>` bundle stem for a registered statement name
+/// (`LStatement.name()` = the Java class name without `Statement`; the write
+/// token differs for these; `noop`/`clientdata` have no bundle row).
+pub fn bundle_key(name: &str) -> String {
+    match name {
+        "op" => "operation".to_owned(),
+        "ubind" => "unitbind".to_owned(),
+        "ucontrol" => "unitcontrol".to_owned(),
+        "uradar" => "unitradar".to_owned(),
+        "ulocate" => "unitlocate".to_owned(),
+        "spawn" => "spawnunit".to_owned(),
+        "bullet" => "spawnbullet".to_owned(),
+        "status" => "applystatus".to_owned(),
+        "message" => "flushmessage".to_owned(),
+        other => other.to_owned(),
     }
 }
 

@@ -252,6 +252,29 @@ impl ConveyorBehavior {
 }
 
 impl BuildingBehavior for ConveyorBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `Conveyor.sense(progress)` (`Conveyor.java:436-442`): the last
+            // item's longitudinal position.
+            LAccess::Progress => {
+                let state = world.get::<ConveyorBuild>(e)?;
+                let len = state.len as usize;
+                Sensed::Num(if len == 0 {
+                    0.0
+                } else {
+                    f64::from(state.ys[len.saturating_sub(1)])
+                })
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<ConveyorBuild>(e).is_none() {
             world.entity_mut(e).insert(ConveyorBuild::default());

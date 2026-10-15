@@ -71,6 +71,26 @@ mod tests {
         }
     }
 
+    /// The editor path (I03 T7): `field_values` -> `read_statement([name,
+    /// ..values])` rebuilds the same statement, for every registered statement.
+    #[test]
+    fn field_values_roundtrip() {
+        for meta in all_statements() {
+            let st = crate::logic::statement::default_statement(meta.registered_name)
+                .unwrap_or_else(|| panic!("missing default for {}", meta.registered_name));
+            let values = st.field_values();
+            let mut tokens: Vec<&str> = vec![meta.registered_name];
+            tokens.extend(values.iter().map(String::as_str));
+            let read = read_statement(&tokens)
+                .unwrap_or_else(|| panic!("field_values read failed: {}", meta.registered_name));
+            assert_eq!(
+                read, st,
+                "field_values roundtrip mismatch for {}",
+                meta.registered_name
+            );
+        }
+    }
+
     #[test]
     fn missing_trailing_fields_keep_defaults() {
         let st = read_statement(&["read", "out"]).unwrap();

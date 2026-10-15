@@ -38,6 +38,29 @@ fn linked_core(world: &World, e: Entity) -> Option<Entity> {
 }
 
 impl BuildingBehavior for StorageBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `StorageBlock.sense(itemCapacity)` (`StorageBlock.java:113-116`):
+            // a linked storage reports its core's capacity.
+            LAccess::ItemCapacity => {
+                let core = world
+                    .get::<StorageBuild>(e)
+                    .and_then(|state| state.linked_core)?;
+                let capacity = world
+                    .get::<crate::world::blocks::storage::core_block::CoreBuild>(core)?
+                    .storage_capacity;
+                Sensed::Num(f64::from(capacity))
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<StorageBuild>(e).is_none() {
             world.entity_mut(e).insert(StorageBuild::default());

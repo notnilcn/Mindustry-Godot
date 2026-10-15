@@ -453,6 +453,26 @@ pub fn sense_content(world: &World, target: &LogicObject, c: crate::content::Con
         }
         return f64::NAN;
     };
+    // `CoreBlock.sense(Content)` (`CoreBlock.java:612-615`): a unit type sense
+    // on a core returns the team's count of that type.
+    if c.type_ == ContentType::Unit
+        && crate::logic::blocks::block_kind_of(world, *e)
+            == Some(crate::content::BlockKind::CoreBlock)
+    {
+        let team = entity_team(world, *e).unwrap_or(0);
+        return world
+            .iter_entities()
+            .filter(|entity| {
+                entity.contains::<crate::entities::comp::unit::UnitTypeComp>()
+                    && entity
+                        .get::<TeamComp>()
+                        .is_some_and(|comp| comp.team == team)
+                    && entity
+                        .get::<crate::entities::comp::unit::UnitTypeComp>()
+                        .is_some_and(|unit| unit.type_id.raw() == c.id)
+            })
+            .count() as f64;
+    }
     match c.type_ {
         ContentType::Item => world
             .get::<ItemModule>(*e)
