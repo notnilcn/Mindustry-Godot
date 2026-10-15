@@ -390,6 +390,7 @@ pub const EXPECTED_M5_DIALOGS: &[&str] = &[
     "schematics",
     "schematic_info",
     "sector_select",
+    "sector_stats",
     "launch_loadout",
     "loadout",
     "custom",
@@ -460,6 +461,7 @@ pub fn expected_pause(name: &str) -> Option<bool> {
         | "palette"
         | "save"
         | "sector_select"
+        | "sector_stats"
         | "traces"
         | "editor"
         | "research_root_select" => false,

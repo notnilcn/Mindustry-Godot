@@ -3098,6 +3098,48 @@ impl MindCampaign {
             0,
             &loadout_of,
         );
+        // T10: `SaveSlot.getPlayTime` (`Saves.java:385-386`) — the stats dialog
+        // reads `meta.timePlayed` from the sector's save slot (one scan; the
+        // live slot's in-memory accumulation is not added, deviation).
+        let stems: std::collections::HashMap<u16, String> = campaign
+            .planet(active)
+            .map(|planet| {
+                planet
+                    .sectors
+                    .iter()
+                    .filter_map(|sector| sector.save.clone().map(|save| (sector.id, save)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !stems.is_empty() {
+            let saved = list_slot_files(&NativeFs, &self.save_paths());
+            for view in &mut views.sectors {
+                if let Some(stem) = stems.get(&view.id)
+                    && let Some(slot) = saved.iter().find(|slot| slot.index() == *stem)
+                    && let Some(meta) = slot.meta.as_ref()
+                {
+                    view.stats.playtime_ms = meta.time_played;
+                }
+            }
+        }
+        // The live registry boots with the empty `MemoryBundle`, so the
+        // builder's `SectorPreset.isHidden()` proxy (`unlock.description`) is
+        // always true here. Java reads the description from `Core.bundle`
+        // (`UnlockableContent.java:91`); resolve the stats description key the
+        // same way `localized_content_description` does so a bundle-less
+        // preset keeps no row.
+        for view in &mut views.sectors {
+            if view.stats.preset_description_key.is_some() {
+                continue;
+            }
+            let Some(preset) = view.preset.as_deref() else {
+                continue;
+            };
+            let key = format!("sector.{preset}.description");
+            if self.bundle.get(&key) != key {
+                view.stats.preset_description_key = Some(key);
+            }
+        }
         // The map-registry dialogs read `maps` from the same endpoint; keep the
         // built-in rows the fixture path feeds them.
         views.maps = mind_core::ui::campaign::default_map_entries();
@@ -3807,6 +3849,43 @@ impl MindCampaign {
         let _ = NativeFs.delete(&backup);
         self.persist();
         log::info!("abandoned campaign sector `{planet_name}:{sector_id}`");
+        true
+    }
+
+    /// `PlanetDialog.abandonSectorConfirm`: an off-play sector loses its items,
+    /// base and production in the record (`saveInfo` + persist); the played
+    /// sector routes through the existing played-sector clear.
+    #[func]
+    pub fn abandon_sector_at(&mut self, planet: GString, sector: i32) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let planet_name = planet.to_string();
+        let sector_id = sector as u16;
+        let Some(planet_id) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet_by_name(&planet_name))
+            .map(|def| def.id)
+        else {
+            return false;
+        };
+        if self.session.sector == Some((planet_id, sector_id)) {
+            return self.abandon_sector();
+        }
+        let Some(true) = self.with_campaign_mut(|campaign, settings| {
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
+                return false;
+            };
+            record.info.info.items.clear();
+            record.info.info.has_core = false;
+            record.info.info.production.clear();
+            let _ = record.save_info(settings, &planet_name);
+            true
+        }) else {
+            return false;
+        };
+        self.persist();
         true
     }
 

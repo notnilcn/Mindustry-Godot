@@ -1172,7 +1172,7 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 		stats_button.theme_type_variation = "cleart"
 		stats_button.custom_minimum_size = Vector2(0.0, 40.0)
 		build_button_content(stats_button, MindWidgets.glyph("info", 20), _t("@stats"))
-		stats_button.pressed.connect(func() -> void: _show_sector_stats(sector))
+		stats_button.pressed.connect(func() -> void: _open_sector_stats(int(sector.get("id", -1))))
 		column.add_child(stats_button)
 
 	var action := _sector_action(sector)
@@ -1353,38 +1353,6 @@ func _sector_state_labels(sector: Dictionary) -> PackedStringArray:
 	return out
 
 
-## `PlanetDialog.showStats`: the sector's attempts/wave/threat, resources,
-## lockdown notice and production/export/import/stored rows, shown through the
-## `full_text` dialog titled with the sector name.
-func _show_sector_stats(sector: Dictionary) -> void:
-	var stats: Dictionary = sector.get("stats", {})
-	var lines := PackedStringArray()
-	if int(stats.get("playtime_ms", 0)) > 0:
-		lines.append("%s [color=#ffd37f]%s[/color]" % [_t("@sectors.time"), format_time_ms(int(stats.get("playtime_ms", 0)))])
-	if int(stats.get("attempts", 0)) > 0:
-		lines.append("%s [color=#ffd37f]%d[/color]" % [_t("@sectors.attempts"), int(stats.get("attempts", 0))])
-	if int(stats.get("wave", 0)) > 0:
-		lines.append("%s [color=#ffd37f]%d[/color]" % [_t("@sectors.wave"), int(stats.get("wave", 0))])
-	if bool(sector.get("attacked", false)) or not bool(sector.get("has_base", false)):
-		var threat := str(sector.get("threat_band", "low"))
-		lines.append("%s [color=#ffd37f]%s[/color]" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
-	if bool(sector.get("frozen", false)):
-		lines.append(_tm("@sector.lockdown"))
-	for key in ["production", "export", "import"]:
-		var line := _stat_line("@sectors.%s" % key, stats.get(key, []))
-		if not line.is_empty():
-			lines.append(line)
-	var stored := _stat_line("@sectors.stored", stats.get("stored", []))
-	if not stored.is_empty():
-		lines.append(stored)
-	var ui := get_node_or_null("/root/MindUi")
-	if ui != null:
-		ui.call(
-			"open_dialog", "full_text",
-			JSON.stringify({"title": _localized_sector(sector), "text": "\n".join(lines)})
-		)
-
-
 ## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then the
 ## other `defaultContentIcons` types).
 func _content_icon(content_name: String) -> Texture2D:
@@ -1395,15 +1363,16 @@ func _content_icon(content_name: String) -> Texture2D:
 	return null
 
 
-## `label item amount` line for a `[[name, value]]` stats list ("" when empty).
-func _stat_line(label_key: String, values: Array) -> String:
-	var parts := PackedStringArray()
-	for entry in values:
-		if entry is Array and (entry as Array).size() >= 2:
-			parts.append("%s %s" % [str(entry[0]), str(entry[1])])
-	if parts.is_empty():
-		return ""
-	return "%s %s" % [_t(label_key), ", ".join(parts)]
+## `PlanetDialog` `@stats`: the sector stats window (round-I I04 T10,
+## `PlanetDialog.java:1026-1171`).
+func _open_sector_stats(sector_id: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call(
+		"open_dialog", "sector_stats",
+		JSON.stringify({"planet": _selected_planet, "sector": sector_id})
+	)
 
 
 ## `PlanetDialog` action label/icon/behavior for the selected sector
