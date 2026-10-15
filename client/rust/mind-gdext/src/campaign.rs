@@ -2280,6 +2280,33 @@ impl MindCampaign {
         self.localized_content_name("sector", &name)
     }
 
+    /// Localized preset name for a planet-local sector index (H03 T17: Java's
+    /// sector-lost toast passes `state.getSector().name()`, `Control.java`).
+    /// Falls back to the internal preset name / an empty string.
+    #[func]
+    pub fn sector_name_localized(&self, planet: GString, sector: i64) -> GString {
+        let Some(registry) = self.registry.as_ref() else {
+            return GString::new();
+        };
+        let Some(campaign) = self.campaign.as_ref() else {
+            return GString::new();
+        };
+        let Ok(sector) = u16::try_from(sector) else {
+            return GString::new();
+        };
+        let Some(planet_id) = registry.planet_id(&planet.to_string()) else {
+            return GString::new();
+        };
+        let Some(cell) = campaign.sector(planet_id, sector) else {
+            return GString::new();
+        };
+        let name = match cell.preset {
+            Some(preset) => self.sector_localized_name(registry, preset),
+            None => cell.preset_name.clone().unwrap_or_default(),
+        };
+        GString::from(name.as_str())
+    }
+
     /// `Planet.localizedName`.
     fn planet_localized_name(&self, registry: &ContentRegistry, id: PlanetId) -> String {
         let name = registry

@@ -426,7 +426,23 @@ impl MindHud {
                 );
             }
             if self.last_had_core && !has_core && campaign_mode {
-                let text = self.bundle.format("sector.lost", &[sector_name.as_str()]);
+                // H03 T17: `state.getSector().name()` is the localized preset
+                // name (`Control.java` sector-lost toast), not the internal
+                // `groundZero`.
+                let localized = campaign
+                    .call(
+                        "sector_name_localized",
+                        &[
+                            GString::from(dict_string(&state, "planet").as_str()).to_variant(),
+                            dict_i64(&state, "sector").to_variant(),
+                        ],
+                    )
+                    .try_to::<GString>()
+                    .ok()
+                    .map(|name| name.to_string())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| sector_name.clone());
+                let text = self.bundle.format("sector.lost", &[localized.as_str()]);
                 self.push_toast(GString::from(text.as_str()), GString::from("warning"));
                 let _ = self.base_mut().emit_signal(
                     "sector_event",

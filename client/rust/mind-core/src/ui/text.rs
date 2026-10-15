@@ -477,6 +477,16 @@ mod tests {
         assert_eq!(render_markup("#ff0000aa", &iconc()), "#ff0000aa");
     }
 
+    /// H03 T17: `[[` escapes a literal bracket (`showui = ... Press
+    /// [accent][[{0}][] to show UI.`) so `[C]` renders as accent text.
+    #[test]
+    fn markup_double_bracket_escape() {
+        assert_eq!(
+            render_markup("[accent][[C][] to show UI.", &iconc()),
+            "[color=#ffd37fff][lb]C][/color] to show UI."
+        );
+    }
+
     #[test]
     fn markup_sky_tag_renders_credits_blurb() {
         // `credits.text` uses `[royal]` and `[sky]`; arc registers `SKY` from

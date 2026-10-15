@@ -130,8 +130,8 @@ func _finish_landing() -> void:
 		for item in resources:
 			parts.append(":%s:" % str(item))
 		text += "\n[lightgray]%s[white] %s" % [_bundle("sectors.resources"), " ".join(parts)]
-	# The toast label expects translated BBCode (`MindRichLabel`).
-	ui.call("announce", MindWidgets.markup(text), 5.0)
+	# The toast label translates raw markup (`MindRichLabel`; H03 T17).
+	ui.call("announce", text, 5.0)
 
 
 ## `SectorInfo.resources` item names from the live campaign sector row.
