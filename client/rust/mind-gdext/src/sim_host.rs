@@ -5485,6 +5485,22 @@ impl MindSimHost {
         mind_core::sim::builder::unit_overlap_at(&self.sim.ecs.0, content, pos, block)
     }
 
+    /// `Door.DoorBuild.tapped`'s 60-tick timer (`Door.java:149`):
+    /// `origin().timer(timerToggle, 60f)`. Returns whether the tap may toggle;
+    /// consumes the origin door's slot when it fires. The caller checks
+    /// `building_has_unit_overlap` first (Java short-circuit order).
+    #[func]
+    pub fn door_tap_allowed(&mut self, x: i32, y: i32) -> bool {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let pos = mind_core::world::TilePos::new(tx, ty);
+        let Some(entity) = self.sim.grid.entity_at(pos) else {
+            return false;
+        };
+        mind_core::world::behavior::defense::tap_allowed(&mut self.sim.ecs.0, entity)
+    }
+
     /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)
     /// over the host's content snapshot.
     ///
