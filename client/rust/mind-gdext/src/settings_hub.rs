@@ -38,10 +38,13 @@ pub fn init(paths: &Paths) {
     let _ = HUB.get_or_init(|| Mutex::new(SettingsStore::load(&NativeFs, paths)));
 }
 
-/// Runs `f` on the shared store. A poisoned lock (a panic while a facade held
-/// it) degrades to the inner store instead of cascading panics.
+/// Runs `f` on the shared store. Before [`init`] runs, the first call loads the
+/// default data dir's file (`Vars.java:503 settings.load()`); a poisoned lock
+/// (a panic while a facade held it) degrades to the inner store instead of
+/// cascading panics.
 pub fn with_settings<R>(f: impl FnOnce(&mut SettingsStore) -> R) -> R {
-    let mutex = HUB.get_or_init(|| Mutex::new(SettingsStore::new()));
+    let mutex =
+        HUB.get_or_init(|| Mutex::new(SettingsStore::load(&NativeFs, &Paths::resolve(None))));
     let mut guard = match mutex.lock() {
         Ok(guard) => guard,
         Err(poisoned) => poisoned.into_inner(),
@@ -83,6 +86,8 @@ mod tests {
         let root = temp_root();
         let paths = Paths::new(&root);
         init(&paths);
+        // The hub may already be live from another path; force the test root.
+        reload(&paths);
 
         with_settings(|store| store.put_bool("feature", true));
         // A second closure sees the first write without a reload.
