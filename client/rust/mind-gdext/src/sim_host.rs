@@ -6413,11 +6413,56 @@ impl MindSimHost {
         self.sim.fog_sources(team)
     }
 
-    /// Fog probe (`FogControl.isVisibleTile`/`isDiscovered`) for playtests and
-    /// the H03 fog renderer: `{fog, staticFog, visible, discovered, teams:[id]}`.
-    /// Reports `{"fog":false}` without a `CampaignRuntime`.
+    /// Fog controller state + counts, **no per-tile data** (I01 T15): the
+    /// callable-with-no-arguments readback. `{fog, staticFog, teams:[id],
+    /// sources:<live source count>, discovered:<set static bits>}`. Reports
+    /// `{"fog":false}` without a `CampaignRuntime`.
+    ///
+    /// The T15 stall was a script error from calling the old 3-argument probe
+    /// with no arguments (break-on-error wedges the frame loop); keep this
+    /// entry cheap so a playtest can always probe the fog state.
     #[func]
-    pub fn fog_debug_json(&self, team: i32, x: i32, y: i32) -> GString {
+    pub fn fog_debug_json(&self) -> GString {
+        let Some(rules) = mind_core::game::runtime::rules_of(&self.sim.ecs.0) else {
+            return GString::from("{\"fog\":false}");
+        };
+        let mut teams: Vec<u8> = Vec::new();
+        let mut discovered = 0usize;
+        if let Some(fog) = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::fog::FogControl>()
+        {
+            for (id, data) in fog.fog.iter().enumerate() {
+                if let Some(data) = data {
+                    teams.push(id as u8);
+                    discovered += data.static_data.count_set_bits();
+                }
+            }
+        }
+        let sources = self.sim.fog_sources(0).len().max(
+            self.sim
+                .ecs
+                .0
+                .get_resource::<mind_core::game::fog::FogControl>()
+                .map_or(0, |fog| fog.fog.iter().flatten().count()),
+        );
+        let value = serde_json::json!({
+            "fog": rules.fog,
+            "staticFog": rules.static_fog,
+            "teams": teams,
+            "discoveredTiles": discovered,
+            "sources": sources,
+        });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Single-tile fog probe (`FogControl.isVisibleTile`/`isDiscovered`):
+    /// `{fog, staticFog, visible, discovered, teams:[id]}` (the pre-T15 3-arg
+    /// readback, renamed).
+    #[func]
+    pub fn fog_debug_tile_json(&self, team: i32, x: i32, y: i32) -> GString {
         let Some(rules) = mind_core::game::runtime::rules_of(&self.sim.ecs.0) else {
             return GString::from("{\"fog\":false}");
         };
@@ -6442,6 +6487,34 @@ impl MindSimHost {
             "discovered": self.sim.fog_discovered(team, x, y),
             "teams": teams,
         });
+        GString::from(value.to_string().as_str())
+    }
+
+    /// Bounded per-tile fog rect probe (I01 T15): visibility + discovery for
+    /// `w x h` tiles from `(x, y)`, clamped to 64x64 so a probe can never
+    /// walk a whole large map.
+    #[func]
+    pub fn fog_debug_json_rect(&self, team: i32, x: i32, y: i32, w: i32, h: i32) -> GString {
+        let team = (team & 0xFF) as u8;
+        let w = w.clamp(0, 64);
+        let h = h.clamp(0, 64);
+        let mut rows: Vec<serde_json::Value> = Vec::with_capacity(h as usize);
+        for ty in y..y.saturating_add(h) {
+            let mut row: Vec<u8> = Vec::with_capacity(w as usize);
+            for tx in x..x.saturating_add(w) {
+                let visible = self.sim.fog_visible_tile(team, tx, ty);
+                let discovered = self.sim.fog_discovered(team, tx, ty);
+                row.push(match (visible, discovered) {
+                    (true, _) => 1,
+                    (false, true) => 2,
+                    (false, false) => 0,
+                });
+            }
+            rows.push(serde_json::Value::Array(
+                row.into_iter().map(serde_json::Value::from).collect(),
+            ));
+        }
+        let value = serde_json::json!({ "x": x, "y": y, "w": w, "h": h, "rows": rows });
         GString::from(value.to_string().as_str())
     }
 
