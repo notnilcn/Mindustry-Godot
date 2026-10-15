@@ -12,6 +12,7 @@ pub struct Player {
     pub created_at: __sdk::Timestamp,
     pub last_seen_at: __sdk::Timestamp,
     pub protocol_version: u32,
+    pub color: u32,
 }
 
 impl __sdk::InModule for Player {
@@ -27,6 +28,7 @@ pub struct PlayerCols {
     pub created_at: __sdk::__query_builder::Col<Player, __sdk::Timestamp>,
     pub last_seen_at: __sdk::__query_builder::Col<Player, __sdk::Timestamp>,
     pub protocol_version: __sdk::__query_builder::Col<Player, u32>,
+    pub color: __sdk::__query_builder::Col<Player, u32>,
 }
 
 impl __sdk::__query_builder::HasCols for Player {
@@ -38,6 +40,7 @@ impl __sdk::__query_builder::HasCols for Player {
             created_at: __sdk::__query_builder::Col::new(table_name, "created_at"),
             last_seen_at: __sdk::__query_builder::Col::new(table_name, "last_seen_at"),
             protocol_version: __sdk::__query_builder::Col::new(table_name, "protocol_version"),
+            color: __sdk::__query_builder::Col::new(table_name, "color"),
         }
     }
 }

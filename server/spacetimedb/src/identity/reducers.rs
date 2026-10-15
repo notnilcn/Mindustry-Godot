@@ -38,6 +38,22 @@ pub fn set_username(ctx: &ReducerContext, username: String) -> Result<(), String
     }
 }
 
+/// Sets the caller's player colour (`0xRRGGBBAA`, Java `player.color`);
+/// `HostDialog.java:33` persists it as the `color-0` setting.
+#[reducer]
+pub fn set_color(ctx: &ReducerContext, color: u32) -> Result<(), String> {
+    match ctx.db.player().identity().find(ctx.sender()) {
+        Some(player) => {
+            ctx.db.player().identity().update(Player { color, ..player });
+            Ok(())
+        }
+        None => {
+            log::warn!("set_color rejected: no player row for caller");
+            Err("no player row for caller".to_string())
+        }
+    }
+}
+
 /// Creates a named profile owned by the caller. Profile names are not unique
 /// (plan 12 owns selection semantics); the auto-increment ID is the identity.
 #[reducer]

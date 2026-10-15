@@ -983,4 +983,19 @@ mod tests {
             report.errors
         );
     }
+
+    /// I08 T4: the relay `content_hash` is stable across boots of the same
+    /// bundle and changes when a content name changes.
+    #[test]
+    fn content_hash_stable_and_name_sensitive() {
+        let bundle = bundle_file();
+        let registry = boot(&bundle.keys);
+        let hash = registry.content_hash();
+        assert_ne!(hash, 0);
+        assert_eq!(hash, boot(&bundle.keys).content_hash());
+        let mut renamed = boot(&bundle.keys);
+        let first = renamed.blocks.first_mut().expect("blocks registered");
+        first.name = format!("{}-renamed", first.name);
+        assert_ne!(renamed.content_hash(), hash);
+    }
 }

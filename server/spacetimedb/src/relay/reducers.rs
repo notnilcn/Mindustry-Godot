@@ -17,7 +17,9 @@ use super::tables::{
     RelayMatch, RelayMember, SenderCommandState, SetRule, SetRules, Visibility, match_command,
     match_state, relay_match, relay_member, sender_command_state,
 };
-use crate::admin::{player_ban, server_config_or_default, whitelist_entry};
+use crate::admin::{
+    AdminIdentity, admin_identity as _, player_ban, server_config_or_default, whitelist_entry,
+};
 use crate::main::audit::audit;
 use crate::main::global::{DEFAULT_MAX_PLAYERS, MAX_RULES_JSON, PROTOCOL_VERSION};
 use crate::main::tables::AuditKind;
@@ -122,6 +124,16 @@ pub fn create_match(
             name,
             version: String::new(),
             content_hash: 0,
+        });
+    }
+    // Hosting grants the creator admin (`HostDialog.runHost` sets
+    // `player.admin = true`; `J/ui/dialogs/HostDialog.java:96`), so the host's
+    // global moderation actions (ban/grant) work like Java's (I08 T4/T9).
+    if ctx.db.admin_identity().identity().find(ctx.sender()).is_none() {
+        ctx.db.admin_identity().insert(AdminIdentity {
+            identity: ctx.sender(),
+            granted_by: ctx.sender(),
+            granted_at: now,
         });
     }
     audit(

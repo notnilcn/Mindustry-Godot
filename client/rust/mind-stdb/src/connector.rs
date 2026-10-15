@@ -46,8 +46,8 @@ use crate::module_bindings::{
     publish_match_state as _, publish_snapshot as _, publish_ui_event as _,
     relay_configQueryTableAccess, report_plan_snapshot as _, report_player_state as _,
     request_snapshot as _, save_schematic as _, save_sector_info as _, send_chat as _,
-    send_match_command as _, server_configQueryTableAccess, set_ready as _, set_unlock as _,
-    set_username as _, start_match as _,
+    send_match_command as _, server_configQueryTableAccess, set_color as _, set_ready as _,
+    set_unlock as _, set_username as _, start_match as _,
 };
 use crate::token::{FileTokenStore, TokenStore};
 use crate::waves::{SubscriptionWaves, WaveName};
@@ -429,6 +429,14 @@ impl Connector {
         self.reducer_conn()?
             .reducers
             .set_username(username.to_string())
+            .map_err(send_error)
+    }
+
+    /// Calls the `set_color` reducer (Java `player.color`, `0xRRGGBBAA`).
+    pub fn set_color(&mut self, color: u32) -> Result<(), ConnectorError> {
+        self.reducer_conn()?
+            .reducers
+            .set_color(color)
             .map_err(send_error)
     }
 

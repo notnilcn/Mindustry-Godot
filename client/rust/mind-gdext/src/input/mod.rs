@@ -1435,11 +1435,12 @@ impl MindInput {
             let Some(mut host) = self.bridge.host.clone() else {
                 return false;
             };
-            host.bind_mut().enqueue_sim_command(SimCommand::Configure {
-                x,
-                y,
-                value: config,
-            });
+            host.bind_mut()
+                .submit_player_command(SimCommand::Configure {
+                    x,
+                    y,
+                    value: config,
+                });
             return true;
         }
         let config = match kind.as_str() {

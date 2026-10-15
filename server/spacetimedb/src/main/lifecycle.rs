@@ -55,6 +55,7 @@ pub fn client_connected(ctx: &ReducerContext) {
                 created_at: now,
                 last_seen_at: now,
                 protocol_version: PROTOCOL_VERSION,
+                color: 0,
             });
             log::info!("new player connected: {identity}");
         }

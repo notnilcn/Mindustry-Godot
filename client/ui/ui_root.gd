@@ -34,6 +34,8 @@ var _uiscale_shown_seconds := -1
 var _launch_finished := false
 ## `@mods.initfailed` shown for this boot (`Control.java:75-80`, once).
 var _mod_init_failure_shown := false
+## I08 T5: whether the join's `@connecting` loading overlay is up.
+var _join_loading_shown := false
 ## The active transient prompt root (`showConfirm`/`showTextInput`/`showText`).
 var _active_prompt: Control = null
 ## Current centred announce box (`UI.announce` replaces the last one).
@@ -177,6 +179,7 @@ func _on_escape() -> bool:
 
 func _process(delta: float) -> void:
 	_drain_logic_messages()
+	_refresh_join_loading()
 	if _uiscale_prompt.is_empty():
 		return
 	_uiscale_countdown -= delta
@@ -440,21 +443,16 @@ func _on_join_requested(match_id: int) -> void:
 		net.call("join_match", match_id, "")
 
 
-## `HostDialog.runHost`: hosts the currently loaded state; the lobby metadata
-## comes from the live campaign sector or the custom map's `Rules.mode_name`
-## (seed/max-players match `HostParams::default()`).
-func _on_host_requested(_host_name: String, mode: String) -> void:
+## `HostDialog.runHost`: hosts the currently loaded world (`MindNet.host_current_world`
+## picks up the live map/rules; I08 T4) instead of creating a bare lobby.
+func _on_host_requested(host_name: String, _mode: String) -> void:
 	var net := get_node_or_null("/root/Spine/MindNet")
-	if net == null or not net.has_method("create_match"):
+	if net == null or not net.has_method("host_current_world"):
 		return
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
-	var rules := "{}"
-	if campaign != null and campaign.has_method("get_rules_json"):
-		rules = str(campaign.call("get_rules_json"))
-	var gamemode := mode.trim_prefix("@mode.")
-	if gamemode.is_empty():
-		gamemode = "survival"
-	net.call("create_match", _current_map_id(campaign), 1, gamemode, "public", 8, rules)
+	# The live world's rules carry the gamemode (`HostDialog.java:80-99` hosts
+	# the current state; the dialog's mode row is presentational).
+	net.call("host_current_world", host_name, _current_map_id(campaign), 1)
 
 
 ## Hosted-state map id: `planet/sector` for a live campaign sector, the custom
@@ -467,6 +465,10 @@ func _current_map_id(campaign: Node) -> String:
 			var planet := str(dict.get("planet", ""))
 			if bool(dict.get("campaign", false)) and not planet.is_empty():
 				return "%s-%d" % [planet, int(dict.get("sector", 0))]
+			# I08 T4: the live custom map's name (non-campaign worlds).
+			var map_name := str(dict.get("mapName", ""))
+			if not map_name.is_empty():
+				return map_name
 	if campaign != null and campaign.has_method("get_rules_json"):
 		var parsed: Variant = JSON.parse_string(str(campaign.call("get_rules_json")))
 		if parsed is Dictionary:
@@ -481,6 +483,26 @@ func _current_map_id(campaign: Node) -> String:
 func _on_show_info(text: String) -> void:
 	# `UI.showInfoToast` (`UI.java:405-419`): top-centre, `Styles.black3`.
 	_toast_label(text, 2.0, "ok", true)
+
+
+## `NetClient`: the loading fragment shows `@connecting` while a join loads the
+## host snapshot; progress follows `MindNet.snapshot_progress()` (I08 T5).
+func _refresh_join_loading() -> void:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	var loading := loading_layer.get_node_or_null("loading")
+	if net == null or loading == null:
+		return
+	var state := str(net.call("session_state"))
+	var syncing := state == "loading" or state == "snapshot_sync"
+	if syncing:
+		var progress := 0.0
+		if net.has_method("snapshot_progress"):
+			progress = float(net.call("snapshot_progress"))
+		loading.call("set_progress", progress, _t("@connecting"))
+		_join_loading_shown = true
+	elif _join_loading_shown:
+		_join_loading_shown = false
+		loading.call("hide_loading")
 
 
 func _on_toast(text: String, icon: String) -> void:
