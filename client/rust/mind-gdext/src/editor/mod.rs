@@ -1202,6 +1202,87 @@ impl MindEditor {
         self.begin_edit_map(path)
     }
 
+    /// `EditorMapsDialog.tryImportMap` (`EditorMapsDialog.java:55-98`): rejects
+    /// images, generates `unknown<N>` for nameless maps and reports name
+    /// conflicts. Returns `""` on success, `"image"`, `"exists:<name>"` (a
+    /// built-in), `"overwrite:<name>"` (a custom map; re-call with `overwrite`)
+    /// or `"error"`.
+    #[func]
+    pub fn import_map(&mut self, path: GString, overwrite: bool) -> GString {
+        let native = ProjectSettings::singleton().globalize_path(&path);
+        let from = std::path::PathBuf::from(native.to_string());
+        if !NativeFs.exists(&from) || MapIo::is_image(&NativeFs, &from) {
+            return GString::from("image");
+        }
+        let Ok(header) = MapIo::create_map(&NativeFs, &from, true) else {
+            return GString::from("error");
+        };
+        let root = crate::assets::loader::user_data_root();
+        let paths = mind_core::io::fs::Paths::new(&root);
+        let dir = paths.maps();
+        let mut maps = crate::assets::loader::load_map_registry(&root);
+        // Java's fallback loop returns `unknown<first free index + 1>`
+        // (`while(maps.byName(result + number++) != null);`).
+        let mut name = header.name.trim().to_owned();
+        if name.is_empty() {
+            let mut number = 0i32;
+            loop {
+                let candidate = format!("unknown{number}");
+                number += 1;
+                if !maps
+                    .all()
+                    .iter()
+                    .any(|map| map.name().eq_ignore_ascii_case(&candidate))
+                {
+                    break;
+                }
+            }
+            name = format!("unknown{number}");
+        }
+        if let Some(conflict) = maps
+            .all()
+            .iter()
+            .find(|map| map.name().eq_ignore_ascii_case(&name))
+            .cloned()
+        {
+            if !conflict.custom {
+                return GString::from(format!("exists:{name}").as_str());
+            }
+            if !overwrite {
+                return GString::from(format!("overwrite:{name}").as_str());
+            }
+            let _ = maps.remove_map(&NativeFs, &paths, conflict.name());
+        }
+        match maps.import_map(&NativeFs, &dir, &from) {
+            Ok(_) => {
+                self.clear_error();
+                GString::new()
+            }
+            Err(error) => {
+                log::warn!("import_map `{}`: {error}", from.display());
+                GString::from("error")
+            }
+        }
+    }
+
+    /// `EditorMapsDialog.showMap`'s `@delete`: removes a custom map and its
+    /// preview/cache (`Maps.removeMap`). Returns false for built-in/unknown
+    /// maps (the button is disabled for those).
+    #[func]
+    pub fn delete_map(&mut self, name: GString) -> bool {
+        let root = crate::assets::loader::user_data_root();
+        let paths = mind_core::io::fs::Paths::new(&root);
+        let mut maps = crate::assets::loader::load_map_registry(&root);
+        let wanted = name.to_string();
+        let Some(map) = maps.all().iter().find(|map| map.name() == wanted).cloned() else {
+            return false;
+        };
+        if !map.custom {
+            return false;
+        }
+        maps.remove_map(&NativeFs, &paths, map.name()).is_ok()
+    }
+
     /// `MapEditorDialog.tryExit()`: always requires the unsaved-changes confirm.
     #[func]
     pub fn try_exit(&mut self) -> bool {

@@ -37,6 +37,7 @@
     {"name": "custom", "scene": "res://scenes/ui/dialogs/custom_game_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
     {"name": "map_play", "scene": "res://scenes/ui/dialogs/map_play_dialog.tscn", "pause": false, "menu_openable": false, "args": ["map:Str"]},
     {"name": "editor_maps", "scene": "res://scenes/ui/dialogs/editor_maps_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
+    {"name": "editor_map", "scene": "res://scenes/ui/dialogs/editor_map_dialog.tscn", "pause": false, "menu_openable": false, "args": ["map:Str"]},
     {"name": "editor_menu", "scene": "res://scenes/ui/dialogs/editor_menu_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "editor_import", "scene": "res://scenes/ui/dialogs/editor_import_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "editor_export", "scene": "res://scenes/ui/dialogs/editor_export_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
