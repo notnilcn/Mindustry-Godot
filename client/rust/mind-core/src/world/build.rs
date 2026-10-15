@@ -318,9 +318,10 @@ pub fn valid_place_query(
         }
     }
     // (c)/(d) Darkness (`Build.java:229`) + shallows (`Build.java:230`).
+    // `!type.ignoreBuildDarkness` (floors/static walls/ore removers skip it).
     let dark = (get_wall_darkness(grid, content, x, y) as f32)
         .max(crate::world::darkness::get_darkness(grid, content, x, y));
-    if dark >= 3.0 {
+    if !def.ignore_build_darkness && dark >= 3.0 {
         return false;
     }
     // `requiresWater` is not a `BlockDef` field; no Serpulo block sets it
@@ -404,7 +405,8 @@ pub fn valid_place_query(
             if check_team != team && check_team != 0 {
                 return false;
             }
-            if !floor.placeable_on {
+            // `!check.floor().placeableOn && !type.ignoreBuildDarkness`.
+            if !floor.placeable_on && !def.ignore_build_darkness {
                 return false;
             }
             // `!checkVisible && checkCoreRadius && !check.block().alwaysReplace`.
@@ -1045,6 +1047,45 @@ mod tests {
         assert!(!valid_place_at(
             &content, &table, &rules, &counter, &grid, wall, 0, 0, 4, 4, true
         ));
+    }
+
+    /// I01 T8: `Block.ignoreBuildDarkness` (`Block.java:377`) skips the border
+    /// darkness gate (`Build.java:229`).
+    #[test]
+    fn env_blocks_ignore_build_darkness() {
+        let content = crate::content::test_support::test_registry();
+        let table = BlockTable::build_default(&content).expect("table");
+        let rules = BuildRules::default();
+        let counter = BlockCounter::new();
+        let mut grid = WorldGrid::new(64, 64);
+        grid.fill(BlockId::AIR, BlockId::AIR);
+        grid.limit_area = Some((10, 10, 20, 20));
+        // Tile (10,15) is the limit border: darkness 4 (the existing test).
+        let wall = content.block_id("copper-wall").expect("copper-wall");
+        assert!(!valid_place_at(
+            &content, &table, &rules, &counter, &grid, wall, 0, 0, 10, 15, true
+        ));
+        // `remove-wall` clears `ignoreBuildDarkness` -> the dark tile is
+        // placeable (`RemoveWall.java:19`).
+        let remover = content.block_id("remove-wall").expect("remove-wall");
+        assert!(
+            content.block(remover).expect("def").ignore_build_darkness,
+            "remove-wall sets the flag"
+        );
+        assert!(valid_place_at(
+            &content, &table, &rules, &counter, &grid, remover, 0, 0, 10, 15, true
+        ));
+        // Every floor kind ships the flag (`Floor.java:116`).
+        let floor = content.block_id("core-zone").expect("core-zone");
+        assert!(content.block(floor).expect("def").ignore_build_darkness);
+        // `stone-wall` (StaticWall) ships it too.
+        let static_wall = content.block_id("stone-wall").expect("stone-wall");
+        assert!(
+            content
+                .block(static_wall)
+                .expect("def")
+                .ignore_build_darkness
+        );
     }
 
     /// T5: the map-area limit rect + border darkness block placement

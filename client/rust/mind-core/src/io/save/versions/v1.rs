@@ -306,11 +306,12 @@ pub(crate) fn read_legacy_regions(
         read_legacy_entities(wire, state, version)
     })?;
     if version >= 8 {
-        // Upstream markers are UBJson `IntMap` bytes (`JsonIO.writeBytes`;
-        // deviation 5: UBJson is not ported), so the region is skipped even
-        // when a sink is present — the native binary sink would mis-parse it
-        // and fail the whole load (e.g. the groundZero preset map reload).
-        skip_legacy_region(&mut wire, REGION_MARKERS)?;
+        // Upstream markers are UBJson `IntMap` bytes (`JsonIO.writeBytes`);
+        // the native v1 binary sink would mis-parse them, so the region is
+        // skipped and its byte length recorded. Every shipped preset carries an
+        // empty map - `serpulo_preset_markers_regions_are_empty` is the guard
+        // (I01 T8); a non-empty region needs the UBJson decode.
+        state.markers_region_len = Some(skip_legacy_region(&mut wire, REGION_MARKERS)?);
     }
     if version >= 7 {
         // `LegacyRegionSaveVersion` (<= 6) has no custom-chunk region.
@@ -332,14 +333,15 @@ pub(crate) fn read_legacy_regions(
 
 /// Skips one legacy region (`i32` length + payload) without parsing it.
 #[cfg(feature = "msav-import")]
-fn skip_legacy_region(wire: &mut WireReader, name: &str) -> Result<(), IoError> {
+fn skip_legacy_region(wire: &mut WireReader, name: &str) -> Result<usize, IoError> {
     let length = wire.i()?;
     if length < 0 {
         return Err(IoError::corrupt(format!(
             "region \"{name}\" has a negative length"
         )));
     }
-    wire.skip(length as usize)
+    wire.skip(length as usize)?;
+    Ok(length as usize)
 }
 
 /// One legacy region: `i32` length + body, with the payload fully consumed.

@@ -1258,6 +1258,8 @@ pub struct BlockSpec {
     pub incinerate_non_buildable: Option<bool>,
     /// `CoreBlock.requiresCoreZone`. Default false.
     pub requires_core_zone: Option<bool>,
+    /// `Block.ignoreBuildDarkness`. Default false.
+    pub ignore_build_darkness: Option<bool>,
     /// Updates each tick.
     pub update: Option<bool>,
     /// Destructible.
@@ -1423,6 +1425,7 @@ impl Default for BlockSpec {
             floating: None,
             incinerate_non_buildable: None,
             requires_core_zone: None,
+            ignore_build_darkness: None,
             update: None,
             destructible: None,
             save_data: None,
@@ -1578,10 +1581,14 @@ impl BlockSpec {
             BlockKind::RemoveWall => {
                 spec.placeable_liquid = Some(true);
                 spec.in_editor = Some(false);
+                // `RemoveWall.java:19`.
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::RemoveOre => {
                 spec.placeable_liquid = Some(true);
                 spec.in_editor = Some(false);
+                // `RemoveOre.java:19` (`OverlayFloor` already sets it).
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::Cliff => {
                 spec.solid = Some(true);
@@ -1599,6 +1606,8 @@ impl BlockSpec {
                 spec.placeable_liquid = Some(true);
                 spec.ore_threshold = Some(0.828);
                 spec.ore_scale = Some(24.0);
+                // `Floor.java:116`: `ignoreBuildDarkness = true` (every floor).
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::EmptyFloor => {
                 spec.placeable_liquid = Some(true);
@@ -1606,21 +1615,29 @@ impl BlockSpec {
                 spec.solid = Some(true);
                 spec.ore_threshold = Some(0.828);
                 spec.ore_scale = Some(24.0);
+                // `EmptyFloor extends Floor`.
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::OverlayFloor => {
                 spec.placeable_liquid = Some(true);
                 spec.ore_threshold = Some(0.828);
                 spec.ore_scale = Some(24.0);
+                // `OverlayFloor extends Floor`.
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::OreBlock => {
                 spec.placeable_liquid = Some(true);
                 spec.ore_threshold = Some(0.828);
                 spec.ore_scale = Some(24.0);
+                // `OreBlock extends OverlayFloor extends Floor`.
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::StaticWall => {
                 spec.solid = Some(true);
                 spec.placeable_liquid = Some(true);
                 spec.cache_layer = Some(CacheLayerId::Walls);
+                // `StaticWall.java:35`.
+                spec.ignore_build_darkness = Some(true);
             }
             BlockKind::StaticProp => {
                 spec.draw_cached = Some(true);
@@ -2069,6 +2086,11 @@ pub struct BlockDef {
     /// Erekir cores, `Blocks.java:3198,3218,3236`): the upgrade branch of
     /// `canPlaceOn` requires every footprint floor to allow core placement.
     pub requires_core_zone: bool,
+    /// `Block.ignoreBuildDarkness` (`Block.java:377`; true for floors, static
+    /// walls, remove-wall/remove-ore, `Floor.java:116`, `StaticWall.java:35`,
+    /// `RemoveWall.java:19`, `RemoveOre.java:19`): skips the darkness gate and
+    /// the solid-floor gate of `Build.validPlace` (`Build.java:229,257`).
+    pub ignore_build_darkness: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
@@ -2458,6 +2480,7 @@ impl BlockDef {
             deconstruct_drop_all_liquid: false,
             incinerate_non_buildable: spec.incinerate_non_buildable.unwrap_or(false),
             requires_core_zone: spec.requires_core_zone.unwrap_or(false),
+            ignore_build_darkness: spec.ignore_build_darkness.unwrap_or(false),
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             core_unit: spec.core_unit,
             flags: spec.flags,

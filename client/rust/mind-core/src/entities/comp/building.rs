@@ -166,17 +166,6 @@ pub struct DrillState {
     pub invert_time: f32,
 }
 
-/// `BeamDrill` build state.
-#[derive(Debug, Clone, Default, PartialEq, Component)]
-pub struct BeamDrillState {
-    /// Drill progress (`progress`).
-    pub progress: f32,
-    /// Warmup (`warmup`).
-    pub warmup: f32,
-    /// Last item count (`lastItemCount`).
-    pub last_item_count: i32,
-}
-
 /// `Wall` build state.
 #[derive(Debug, Clone, Default, PartialEq, Component)]
 pub struct WallState {
