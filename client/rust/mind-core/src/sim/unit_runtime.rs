@@ -1047,6 +1047,9 @@ impl Sim {
 
     /// Installs the live unit runtime over a prebuilt content registry.
     pub fn install_unit_runtime_from(&mut self, content: ContentRegistry) {
+        // A loaded world carries door `open` state; mirror `checkSolid` into the
+        // grid before the pathfinder packs it.
+        crate::world::sync_dynamic_solid(&mut self.grid, &self.ecs.0);
         // The content-backed status applier must exist before anything can
         // apply a status (`StatusApplier` resource; NEW-1): install it while
         // the registry is still owned here, then move it into the runtime.
@@ -1211,6 +1214,9 @@ impl Sim {
 
     /// Re-snapshots the live grid into the unit runtime (map load/tile change).
     pub fn refresh_unit_runtime(&mut self) {
+        // `Tile.solid()`'s `checkSolid` term is mirrored into the grid before
+        // anything packs/collides against it (`world::sync_dynamic_solid`).
+        crate::world::sync_dynamic_solid(&mut self.grid, &self.ecs.0);
         let grid = self.grid.clone();
         let core_capture =
             crate::game::runtime::rules_of(&self.ecs.0).is_some_and(|rules| rules.core_capture);
@@ -4413,7 +4419,7 @@ fn core_spawn_position(
                 if ox * ox + oy * oy > 9 {
                     continue;
                 }
-                if grid.tiles.getc(tx + ox, ty + oy).solid(content) {
+                if grid.tiles.getc(tx + ox, ty + oy).solid_full(content) {
                     blocked = true;
                     break;
                 }

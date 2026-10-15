@@ -276,9 +276,12 @@ pub fn unit_can_pass(
         return true;
     }
     let solid = |x: i32, y: i32| -> bool {
+        // `EntityCollisions.solid(x, y)`: `tile == null || tile.solid()`
+        // (EntityCollisions.java:139-142) — the full predicate, including the
+        // live `checkSolid` term (closed doors).
         grid.tiles
             .getn(x, y)
-            .is_none_or(|tile| crate::ai::pathfinder::path_tile::is_solid(content, tile.block))
+            .is_none_or(|tile| tile.solid_full(content))
     };
     // `WaterMoveComp.solidity`/`WaterCrawlComp.solidity` -> `waterSolid`
     // (WaterMoveComp.java:65-67).

@@ -296,6 +296,10 @@ pub struct MindWorldRenderer {
     rules_poll: u32,
     lod: Lod,
     draw_light: bool,
+    /// `Renderer.java:435` `settings.getBool("drawhitboxes")`, polled with
+    /// `drawlight` on the 30-frame cadence; the API flag (`set_draw_hitboxes`)
+    /// is an additive MCP test seam.
+    draw_hitboxes_setting: bool,
     draw_hitboxes: bool,
     shaders: ShaderRegistry,
     /// Whether the plan-19 editor view is mounted (suspends the main bands).
@@ -353,6 +357,7 @@ impl INode2D for MindWorldRenderer {
             rules_poll: 0,
             lod: Lod::default(),
             draw_light: true,
+            draw_hitboxes_setting: false,
             draw_hitboxes: false,
             shaders: ShaderRegistry::new(),
             editor_view_active: false,
@@ -921,6 +926,18 @@ impl MindWorldRenderer {
                     .booleanize()
                 })
                 .unwrap_or(true);
+            // `Renderer.java:435`: the debug hitbox pass is settings-gated too.
+            self.draw_hitboxes_setting = self
+                .base()
+                .try_get_node_as::<Node>("/root/MindUi")
+                .map(|mut ui| {
+                    ui.call(
+                        "settings_get_bool",
+                        &[GString::from("drawhitboxes").to_variant()],
+                    )
+                    .booleanize()
+                })
+                .unwrap_or(false);
         }
         self.stats.stage_trace.push(String::from("process_blocks"));
         // `mesh_rebuilds` is cumulative per pass; each pass reports its own boot
@@ -1008,7 +1025,7 @@ impl MindWorldRenderer {
         self.stats.stage_trace.push(String::from("light"));
         self.stats.stage_trace.push(String::from("darkness"));
         self.stats.stage_trace.push(String::from("bloom"));
-        let draw_hitboxes = self.draw_hitboxes;
+        let draw_hitboxes = self.draw_hitboxes || self.draw_hitboxes_setting;
         if let Some(debug) = self.debug.as_mut() {
             debug.update(&view, draw_hitboxes);
             self.stats.debug_hitboxes = debug.stats().hitboxes;

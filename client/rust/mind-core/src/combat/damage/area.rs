@@ -31,6 +31,11 @@ pub struct DamageOptions {
     /// Whether the damage comes from a bullet (`BuildDamageEvent` emission,
     /// G01 T15).
     pub source_is_bullet: bool,
+    /// `Damage.damage(.., air, ground)` (`Damage.java:509-511`): flying units
+    /// are hit only when `air`.
+    pub air: bool,
+    /// Grounded units and every building are hit only when `ground`.
+    pub ground: bool,
 }
 
 impl Default for DamageOptions {
@@ -40,6 +45,8 @@ impl Default for DamageOptions {
             armor_multiplier: 1.0,
             scaled: false,
             source_is_bullet: false,
+            air: true,
+            ground: true,
         }
     }
 }
@@ -52,6 +59,7 @@ struct Target {
     dst: f32,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn targets_in_radius(
     world: &World,
     team: Option<u8>,
@@ -59,6 +67,8 @@ fn targets_in_radius(
     y: f32,
     radius: f32,
     scaled: bool,
+    air: bool,
+    ground: bool,
 ) -> Vec<Target> {
     let radius2 = radius * radius;
     let mut targets: Vec<Target> = Vec::new();
@@ -67,6 +77,28 @@ fn targets_in_radius(
             continue;
         };
         if entity_ref.get::<Health>().is_none() {
+            continue;
+        }
+        // `UnitComp.checkTarget(air, ground)` (`UnitComp.java:76-78`):
+        // `(isGrounded() && ground) || (isFlying() && air)`, where grounded is
+        // `elevation < 0.001` and flying is `elevation >= 0.09`. Buildings are
+        // only reached through the `ground` half (`Damage.java:549-556`).
+        if entity_ref
+            .get::<crate::entities::comp::unit::comp::UnitTypeComp>()
+            .is_some()
+        {
+            if !(air || ground) {
+                continue;
+            }
+            let elevation = entity_ref
+                .get::<crate::entities::comp::unit::comp::UnitCore>()
+                .map(|core| core.elevation)
+                .unwrap_or(0.0);
+            let hit = (elevation >= 0.09 && air) || (elevation < 0.001 && ground);
+            if !hit {
+                continue;
+            }
+        } else if !ground {
             continue;
         }
         // `source_team` is the attacker's team: its allies are not damaged
@@ -146,7 +178,16 @@ pub fn damage_area(
     if radius <= 0.0 || damage <= 0.0 {
         return 0.0;
     }
-    let targets = targets_in_radius(world, team, x, y, radius, opts.scaled);
+    let targets = targets_in_radius(
+        world,
+        team,
+        x,
+        y,
+        radius,
+        opts.scaled,
+        opts.air,
+        opts.ground,
+    );
     let mut total = 0.0f32;
     for target in targets {
         // Unit falloff `lerp(1 - dist/radius, 1, 0.4)` (Damage.damage).
@@ -337,6 +378,76 @@ mod tests {
         // A building outside the radius is untouched.
         let far = harness.damage_buildings(center.0 + 200.0, center.1, 8.0, 50.0);
         assert_eq!(far, 0.0);
+    }
+
+    /// I01 T6: `Damage.damage(.., air, ground, ..)` hits a unit only when
+    /// `(isFlying() && air) || (isGrounded() && ground)`
+    /// (`UnitComp.checkTarget`, `UnitComp.java:76-78`).
+    #[test]
+    fn ground_only_splash_spares_flyers() {
+        use crate::content::BlockId;
+        use crate::entities::comp::Health;
+        use crate::entities::comp::unit::comp::{UnitCore, UnitTypeComp};
+
+        let mut sim = crate::sim::Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let ground = sim
+            .spawn_live_unit("dagger", 2, 64.0, 64.0, 0.0)
+            .expect("dagger");
+        let flyer = sim
+            .spawn_live_unit("flare", 2, 72.0, 64.0, 0.0)
+            .expect("flare");
+        let elevation = |sim: &crate::sim::Sim, e| {
+            sim.ecs
+                .0
+                .get::<UnitCore>(e)
+                .map_or(0.0, |core| core.elevation)
+        };
+        assert!(sim.ecs.0.get::<UnitTypeComp>(flyer).is_some());
+        assert!(elevation(&sim, flyer) >= 0.09, "flare is flying");
+        assert!(elevation(&sim, ground) < 0.001, "dagger is grounded");
+        let content = crate::world::harness::BuildHarness::load_content();
+        let health =
+            |sim: &crate::sim::Sim, e| sim.ecs.0.get::<Health>(e).map_or(0.0, |h| h.health);
+        let (ground_hp, flyer_hp) = (health(&sim, ground), health(&sim, flyer));
+
+        // Ground-only splash (e.g. a `collidesAir = false` bullet).
+        let applied = damage_area(
+            &mut sim.ecs.0,
+            &content,
+            Some(1),
+            64.0,
+            64.0,
+            48.0,
+            100.0,
+            DamageOptions {
+                air: false,
+                ground: true,
+                ..DamageOptions::default()
+            },
+        );
+        assert!(applied > 0.0);
+        assert!(health(&sim, ground) < ground_hp, "the grounded unit is hit");
+        assert_eq!(health(&sim, flyer), flyer_hp, "the flyer is spared");
+
+        // Air-only splash: the flyer takes it, the ground unit does not.
+        let applied = damage_area(
+            &mut sim.ecs.0,
+            &content,
+            Some(1),
+            72.0,
+            64.0,
+            48.0,
+            100.0,
+            DamageOptions {
+                air: true,
+                ground: false,
+                ..DamageOptions::default()
+            },
+        );
+        assert!(applied > 0.0);
+        assert!(health(&sim, flyer) < flyer_hp, "the flyer is hit");
     }
 
     #[test]

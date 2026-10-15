@@ -17,9 +17,12 @@ use crate::world::WorldGrid;
 
 use super::area::damage_entity;
 
-/// Converts a world pixel to a tile coordinate (floor; tile centers are `x.5`).
+/// Converts a world pixel to a tile coordinate exactly like
+/// `World.toTile(v) = Math.round(v / tilesize)` (`J/core/World.java:174-176`;
+/// the port helper is [`WorldGrid::to_tile`], used by `collide_bullet` since
+/// H01 T1). Tile centres are `tile * 8`.
 fn to_tile(value: f32) -> i32 {
-    (value / crate::config::TILESIZE as f32).floor() as i32
+    WorldGrid::to_tile(value)
 }
 
 /// `Damage.linecast`: first building entity on the ray, or `None`.
@@ -195,7 +198,9 @@ mod tests {
         for x in 12..=14 {
             assert!(harness.place(x, 8, wall, 0, true));
         }
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        // `Tile.worldx()` is `x * tilesize` (tile_origin): the point must round
+        // back into tile (4, 8) under `World.toTile` (I01 T3).
+        let (x, y) = CombatHarness::tile_origin(4, 8);
         let (first, total) = collide_line(
             &mut harness.build.world,
             &harness.build.content,
@@ -220,7 +225,34 @@ mod tests {
         let mut harness = CombatHarness::new(48, 16, 3);
         let wall = harness.content().block_id("copper-wall").expect("wall");
         assert!(harness.place(12, 8, wall, 0, true));
-        let (x, y) = CombatHarness::tile_center(4, 8);
+        let (x, y) = CombatHarness::tile_origin(4, 8);
         assert!(linecast(&harness.build.grid, 1, x, y, 0.0, 200.0).is_some());
+    }
+
+    /// I01 T3: `World.toTile` rounds (`Math.round(v / 8)`), so a laser ending at
+    /// `8 * 10 + 4.1 = 84.1` reaches tile 11 (floor would stop at 10).
+    #[test]
+    fn collide_line_rounds_like_world_to_tile() {
+        let mut harness = CombatHarness::new(48, 16, 3);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(11, 8, wall, 0, true));
+        let (x, y) = CombatHarness::tile_origin(4, 8);
+        assert_eq!((x, y), (32.0, 64.0));
+        let (first, total) = collide_line(
+            &mut harness.build.world,
+            &harness.build.content,
+            &harness.build.grid,
+            1,
+            x,
+            y,
+            0.0,
+            84.1 - x,
+            -1,
+            40.0,
+            false,
+            1.0,
+        );
+        assert!(first.is_some(), "the rounded endpoint reaches tile 11");
+        assert_eq!(total, 40.0);
     }
 }

@@ -59,6 +59,9 @@ pub struct ItemAmmo {
     pub bullet: BulletId,
     /// Ammo units added per item (`BulletType.ammoMultiplier`).
     pub ammo_multiplier: i32,
+    /// `BulletType.rangeChange` of the fired bullet (`Turret.range()`,
+    /// `Turret.java:348-353`).
+    pub range_change: f32,
 }
 
 /// One resolved liquid-ammo entry (`LiquidTurret.ammoTypes`).
@@ -70,15 +73,19 @@ pub struct LiquidAmmo {
     pub bullet: BulletId,
     /// `BulletType.ammoMultiplier` (liquid units per shot = `1/multiplier`).
     pub ammo_multiplier: f32,
+    /// `BulletType.rangeChange` of the fired bullet.
+    pub range_change: f32,
 }
 
 /// One payload-ammo entry (`PayloadAmmoTurret.ammoTypes`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PayloadAmmo {
     /// Accepted payload content (block or unit).
     pub content: PayloadContent,
     /// Bullet fired when this payload is consumed.
     pub bullet: BulletId,
+    /// `BulletType.rangeChange` of the fired bullet.
+    pub range_change: f32,
 }
 
 /// Payload content key (block or unit) for `PayloadAmmoTurret`.
@@ -498,6 +505,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.speed = 3.5;
         def.lifetime = 60.0;
         def.damage = 18.0;
+        // `Blocks.java:3295`: `rangeChange = 16f`.
+        def.range_change = 16.0;
         def.ammo_multiplier = 4.0;
         def.reload_multiplier = 0.8;
         def.hit_size = 4.0;
@@ -704,23 +713,24 @@ fn config_for_inner(
     let bullet = |n: &str| names.get(n).copied();
     let item_ammo = |item_name: &str, bullet_name: &str| -> Option<ItemAmmo> {
         let id = bullet(bullet_name)?;
-        let mult = content
-            .bullet(id)
-            .map(|d| d.ammo_multiplier as i32)
-            .unwrap_or(1);
+        let def = content.bullet(id);
+        let mult = def.map(|d| d.ammo_multiplier as i32).unwrap_or(1);
         Some(ItemAmmo {
             item: item(item_name)?,
             bullet: id,
             ammo_multiplier: mult.max(1),
+            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
         })
     };
     let liquid_ammo = |liquid_name: &str, bullet_name: &str| -> Option<LiquidAmmo> {
         let id = bullet(bullet_name)?;
-        let mult = content.bullet(id).map(|d| d.ammo_multiplier).unwrap_or(1.0);
+        let def = content.bullet(id);
+        let mult = def.map(|d| d.ammo_multiplier).unwrap_or(1.0);
         Some(LiquidAmmo {
             liquid: liquid(liquid_name)?,
             bullet: id,
             ammo_multiplier: mult.max(0.001),
+            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
         })
     };
 
@@ -1092,6 +1102,72 @@ fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> Option<Bull
             })
             .map(|entry| entry.bullet),
     }
+}
+
+/// `TurretBuild.peekAmmo().rangeChange` (`BulletType.rangeChange`).
+///
+/// Mirrors [`peek_ammo_state`]'s selection: the last item entry, the most-filled
+/// liquid entry, or the first stocked payload entry. `Power` turrets hold only
+/// the bullet id, so their `rangeChange` reads `0` (no vanilla power turret sets
+/// one).
+pub fn peek_ammo_range_change(world: &World, e: Entity) -> f32 {
+    let Some(state) = world.get::<TurretState>(e) else {
+        return 0.0;
+    };
+    peek_ammo_range_change_of(state, world, e)
+}
+
+/// [`peek_ammo_range_change`] for callers that already hold the dispatched
+/// state (the turret pass takes `TurretState` out of the entity for the
+/// duration of `update_turret`).
+pub fn peek_ammo_range_change_of(state: &TurretState, world: &World, e: Entity) -> f32 {
+    match &state.config.ammo {
+        // `peekAmmo()` returns the bullet of the last stack (`peek_ammo_state`);
+        // its `rangeChange` comes from the matching config entry.
+        TurretAmmo::Item(ammo) => state
+            .ammo
+            .last()
+            .and_then(|entry| ammo.iter().find(|config| config.bullet == entry.bullet))
+            .map_or(0.0, |config| config.range_change),
+        TurretAmmo::Liquid(ammo) => {
+            let Some(liquids) = world.get::<LiquidModule>(e) else {
+                return 0.0;
+            };
+            let mut best: Option<(f32, f32)> = None;
+            for entry in ammo {
+                let amount = liquids.get(entry.liquid);
+                if amount > 0.0 && best.is_none_or(|(current, _)| amount > current) {
+                    best = Some((amount, entry.range_change));
+                }
+            }
+            best.map_or(0.0, |(_, change)| change)
+        }
+        TurretAmmo::Power(_) => 0.0,
+        TurretAmmo::Payload(ammo) => ammo
+            .iter()
+            .find(|entry| {
+                state
+                    .payloads
+                    .iter()
+                    .any(|stack| stack.content == entry.content && stack.count > 0)
+            })
+            .map_or(0.0, |entry| entry.range_change),
+    }
+}
+
+/// `Turret.TurretBuild.range()` (`Turret.java:348-353`): `range +
+/// peekAmmo().rangeChange`, the range used by targeting, the range circle, the
+/// fog radius and the logic `@range` sensor.
+pub fn turret_range(world: &World, e: Entity) -> f32 {
+    world
+        .get::<TurretState>(e)
+        .map_or(0.0, |state| state.config.range)
+        + peek_ammo_range_change(world, e)
+}
+
+/// [`turret_range`] for callers that already hold the dispatched state.
+pub fn turret_range_of(state: &TurretState, world: &World, e: Entity) -> f32 {
+    state.config.range + peek_ammo_range_change_of(state, world, e)
 }
 
 /// `TurretBuild.hasAmmo`, including the "swap a usable entry to the back" rule.
@@ -1550,7 +1626,7 @@ fn update_turret(
         state.logic_shooting
     } else {
         target_position(ctx, e, state, x, y, target);
-        within_target_range(ctx, target, x, y, config.range)
+        within_target_range(ctx, target, x, y, turret_range_of(state, ctx.world, e))
     };
 
     // Turn toward the aim point.
@@ -1871,12 +1947,15 @@ fn find_target(
     targets: &TargetQueries,
 ) {
     let config = &state.config;
+    // The dispatched state is out of the world during this pass, so the
+    // range comes from the state handle (`turret_range_of`).
+    let range = turret_range_of(state, ctx.world, e);
     state.target = targets.closest_target(
         ctx.world,
         team,
         x,
         y,
-        config.range,
+        range,
         config.target_air,
         config.target_ground,
         config.target_blocks,
@@ -2003,6 +2082,28 @@ mod tests {
             .spawn_test_turret(name, tx, ty, 1)
             .unwrap_or_else(|| panic!("turret `{name}`"));
         (turret, target)
+    }
+
+    #[test]
+    fn duo_graphite_range_is_176() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let (turret, _) = turret_at(&mut harness, "duo");
+        assert_eq!(
+            turret_range(&harness.build.world, turret),
+            160.0,
+            "base range"
+        );
+        let graphite = harness.content().item_id("graphite").expect("graphite");
+        handle_item(&mut harness.build.world, turret, graphite);
+        assert_eq!(
+            turret_range(&harness.build.world, turret),
+            176.0,
+            "graphite rangeChange 16"
+        );
+        let silicon = harness.content().item_id("silicon").expect("silicon");
+        handle_item(&mut harness.build.world, turret, silicon);
+        // `peekAmmo()` is the last stack; silicon has no rangeChange.
+        assert_eq!(turret_range(&harness.build.world, turret), 160.0);
     }
 
     #[test]

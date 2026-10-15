@@ -4156,6 +4156,72 @@ impl MindSimHost {
         self.sim.clear_player_build_plans();
     }
 
+    /// `updatePick`'s `tryBlock`/`tryConfig` (`PlacementFragment.java:141-143`):
+    /// the hovered building's block (a `ConstructBuild` resolves to its
+    /// `current`) and its config, copied only for `copyConfig` blocks
+    /// (`ItemBridge.copyConfig = false`, `ItemBridge.java:60`). Rust-only seam
+    /// for the middle-click pick.
+    pub fn pick_target_at(
+        &self,
+        x: i32,
+        y: i32,
+    ) -> Option<(BlockId, Option<mind_core::world::config::ConfigValue>)> {
+        let entity = self.tile_at(x, y)?.build?;
+        let block = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)
+            .map(|building| building.block)?;
+        let effective = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::ConstructState>(entity)
+            .map_or(block, |state| state.current);
+        let def = self.content_registry()?.block(block)?;
+        let copy = !matches!(
+            def.kind,
+            BlockKind::ItemBridge | BlockKind::BufferedItemBridge
+        );
+        let config = if copy {
+            let value = mind_core::world::config::read_config(&self.sim.ecs.0, entity);
+            (!matches!(value, mind_core::world::config::ConfigValue::None)).then_some(value)
+        } else {
+            None
+        };
+        Some((effective, config))
+    }
+
+    /// `updatePick`'s plan override (`PlacementFragment.java:145-154`): the
+    /// player unit's queued non-breaking plan whose `Block.bounds(plan.x,
+    /// plan.y)` contains the world point, with its carried config.
+    pub fn player_plan_at_world(
+        &self,
+        wx: f32,
+        wy: f32,
+    ) -> Option<(BlockId, mind_core::world::config::ConfigValue)> {
+        let registry = self.content_registry()?;
+        for plan in self.sim.player_build_plans() {
+            if plan.breaking || plan.block == BlockId::AIR {
+                continue;
+            }
+            let Some(def) = registry.block(plan.block) else {
+                continue;
+            };
+            // `Block.bounds(x, y)`: centre `x*tilesize + offset`, edge
+            // `size*tilesize` (`Block.java` `bounds`; tilesize 8).
+            let offset = ((def.size + 1) % 2) as f32 * 4.0;
+            let half = def.size as f32 * 4.0;
+            let cx = f32::from(plan.x) * 8.0 + offset;
+            let cy = f32::from(plan.y) * 8.0 + offset;
+            if wx >= cx - half && wx < cx + half && wy >= cy - half && wy < cy + half {
+                return Some((plan.block, plan.config.clone()));
+            }
+        }
+        None
+    }
+
     /// `HintsFragment` poll (`HintsFragment.java:74-102`): event sets + the
     /// per-frame predicate inputs for the hint driver (T4a/T4b).
     #[func]

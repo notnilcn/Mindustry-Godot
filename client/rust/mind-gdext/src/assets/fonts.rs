@@ -56,6 +56,20 @@ impl FontSet {
         }
     }
 
+    /// `Fonts.loadExtraFonts` (`Fonts.java:101-119`): for a Japanese locale the
+    /// default font's data is overridden with `font_jp.woff` (a FontFile has no
+    /// `setOverride` in Godot, so the JP font becomes the default and keeps the
+    /// same fallback chain set by [`Self::register_content_icons`]).
+    ///
+    /// Java does this for `Locale.getDefault().getLanguage().equals("ja")` only
+    /// (not zh/ko); `Locale.setDefault` was set to the chosen locale at
+    /// `Vars.java:555`.
+    pub fn apply_locale_fonts(&mut self, locale: &str) {
+        if mind_core::assets::locale::language(locale) == "ja" && self.def_jp.is_some() {
+            self.def = self.def_jp.clone();
+        }
+    }
+
     /// `Fonts.loadContentIcons` + `registerIcon`: builds the content-icon
     /// bitmap font from the UI atlas page and chains it (then `icon.ttf`) as
     /// fallbacks of the default font, so every label using the theme font

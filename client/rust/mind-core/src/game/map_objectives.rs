@@ -58,10 +58,17 @@ pub trait ObjectiveLocale {
     fn map_locale(&self, _key: &str) -> Option<String> {
         None
     }
-    /// `state.rules.defaultTeam.items().get(item)` — the live stored count the
-    /// `Item`/`CoreItem` objective text shows. Defaults to 0 (headless/no live
-    /// team), matching a fresh sector core.
+    /// `state.rules.defaultTeam.items().get(item)` — the stored count the
+    /// `Item` objective text shows. Defaults to 0 (headless/no live team),
+    /// matching a fresh sector core.
     fn item_count(&self, _item: &str) -> i32 {
+        0
+    }
+    /// `state.stats.coreItemCount.get(item, 0)` — the delivered-to-core count
+    /// `CoreItemObjective.text()` shows (`MapObjectives.java:410`). Bumped only
+    /// by `CoreBuild.handleItem` (`CoreBlock.java:886-890`); `handleStack`
+    /// (player/unit deposits) does not count. Defaults to 0.
+    fn core_item_count(&self, _item: &str) -> i32 {
         0
     }
     /// `UnlockableContent.localizedName` for an item (`item.<name>.name`).
@@ -596,13 +603,13 @@ fn objective_text(objective: &MapObjective, locale: &dyn ObjectiveLocale) -> Opt
         }
         MapObjective::CoreItem(o) => {
             let item = o.item.as_deref().unwrap_or("");
-            // `CoreItemObjective.text()` (`MapObjectives.java:410`): same order;
-            // the port reads the core's stored count until `stats.coreItemCount`
-            // lands.
+            // `CoreItemObjective.text()` (`MapObjectives.java:410`): the
+            // delivered-to-core count (`stats.coreItemCount`), not the stored
+            // count (`ObjectiveEnv::core_item_count` is the same stat).
             Some(locale.format(
                 "objective.coreitem",
                 &[
-                    &locale.item_count(item).to_string(),
+                    &locale.core_item_count(item).to_string(),
                     &o.amount.to_string(),
                     &format!(":{}: ", item),
                     &locale.item_name(item),
@@ -1054,5 +1061,47 @@ mod tests {
         let locale = NoLocale;
         let text = runtime.text(0, &locale).unwrap();
         assert_eq!(text, "objective.capture");
+    }
+
+    /// Locale whose delivered (`coreItemCount`) and stored (`items()`) counts
+    /// differ, like a core holding 1643 copper that has received 3 by conveyor.
+    struct SplitCountLocale {
+        delivered: i32,
+        stored: i32,
+    }
+
+    impl ObjectiveLocale for SplitCountLocale {
+        fn fetch_text(&self, text: &str) -> String {
+            text.to_owned()
+        }
+        fn format(&self, key: &str, args: &[&str]) -> String {
+            format!("{key} {}", args.join(" "))
+        }
+        fn get(&self, key: &str) -> String {
+            key.to_owned()
+        }
+        fn item_count(&self, _item: &str) -> i32 {
+            self.stored
+        }
+        fn core_item_count(&self, _item: &str) -> i32 {
+            self.delivered
+        }
+    }
+
+    #[test]
+    fn core_item_objective_text_uses_delivered_count() {
+        let runtime = MapObjectivesRuntime::from_data(parse(
+            r#"[{"class":"CoreItem","item":"copper","amount":5}]"#,
+        ));
+        let locale = SplitCountLocale {
+            delivered: 3,
+            stored: 1643,
+        };
+        let text = runtime.text(0, &locale).unwrap();
+        assert_eq!(text, "objective.coreitem 3 5 :copper:  copper");
+        assert!(
+            !text.contains("1643"),
+            "CoreItem text must not read the stored count: {text}"
+        );
     }
 }

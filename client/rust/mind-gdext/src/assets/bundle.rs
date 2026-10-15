@@ -12,6 +12,10 @@ use mind_core::assets::bundle::{Bundle, locale_chain, parse_properties};
 use mind_core::assets::icons::Iconc;
 
 /// Loads `assets/bundles/*` for `locale` with `global.properties` merged.
+///
+/// The `router` locale applies Java's transform (`Vars.java:556-564`): every
+/// non-space character of the English bundle becomes `Iconc.blockRouter`
+/// (`icons.properties` `router`, code `0xF88E`) before the global merge.
 pub fn load_bundle(assets_dir: &str, locale: &str) -> Bundle {
     let mut layers = Vec::new();
     for suffix in locale_chain(locale) {
@@ -22,6 +26,17 @@ pub fn load_bundle(assets_dir: &str, locale: &str) -> Bundle {
         }
     }
     let mut bundle = Bundle::from_layers(layers);
+    if locale == "router"
+        && let Some(glyph) = load_iconc(assets_dir).get("router")
+    {
+        let english_path = format!("{assets_dir}/bundles/bundle.properties");
+        if FileAccess::file_exists(&english_path) {
+            let english = Bundle::from_layers(vec![parse_properties(
+                &FileAccess::get_file_as_string(&english_path).to_string(),
+            )]);
+            bundle.router_transform(&english, glyph);
+        }
+    }
     let global = format!("{assets_dir}/bundles/global.properties");
     if FileAccess::file_exists(&global) {
         let text = FileAccess::get_file_as_string(&global).to_string();

@@ -59,6 +59,7 @@ use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::ui::content_stats::{Cell, StatCtx, content_stats as compute_content_stats};
 use mind_core::world::modules::ItemModule;
 
+use crate::settings_hub;
 use crate::sim_host::MindSimHost;
 
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.
@@ -76,7 +77,6 @@ pub struct MindCampaign {
     session: PlaySession,
     campaign: Option<Campaign>,
     registry: Option<ContentRegistry>,
-    settings: SettingsStore,
     paths: Paths,
     saves: Saves,
     epoch: RulesEpoch,
@@ -106,7 +106,6 @@ impl INode for MindCampaign {
             session: PlaySession::default(),
             campaign: None,
             registry: None,
-            settings: SettingsStore::new(),
             paths: Paths::new(std::env::temp_dir()),
             saves: Saves::new(),
             epoch: RulesEpoch::new(),
@@ -193,7 +192,9 @@ impl MindCampaign {
             .globalize_path("user://")
             .to_string();
         self.paths = Paths::new(root);
-        self.settings = SettingsStore::load(&NativeFs, &self.paths);
+        // One shared store (`Core.settings`, PAR-0164): the `MindUi` autoload
+        // initializes it before the scene; this call is the idempotent fallback.
+        settings_hub::init(&self.paths);
         // Keep the live bundle for `Core.bundle`-sourced text (unlock
         // descriptions) that the empty-`MemoryBundle` registry lacks.
         self.bundle = crate::assets::bundle::load_bundle(
@@ -202,8 +203,11 @@ impl MindCampaign {
         );
 
         let bundle = MemoryBundle::new();
-        let store = SettingsUnlockStore::new(&mut self.settings);
-        match create_base_content(&bundle, &store, true) {
+        let content = settings_hub::with_settings(|settings| {
+            let store = SettingsUnlockStore::new(settings);
+            create_base_content(&bundle, &store, true)
+        });
+        match content {
             Ok(mut registry) => {
                 // The facade reads database tabs and derived block/unit fields
                 // (`ContentLoader.init`/`postInit` sweeps), so run the same
@@ -217,16 +221,17 @@ impl MindCampaign {
                 // planets read sector info (`Sector.loadInfo` after remap).
                 self.saves = Saves::new();
                 if run_saves_load {
-                    self.saves
-                        .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+                    settings_hub::with_settings(|settings| {
+                        self.saves.load(&NativeFs, &self.paths, &registry, settings);
+                    });
                 }
                 if self.saves.had_serpulo_remaps
-                    && let Err(error) = self.settings.force_save(&NativeFs, &self.paths)
+                    && let Err(error) = settings_hub::save(&self.paths)
                 {
                     log::warn!("sector remap settings flush failed: {error}");
                 }
                 let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
-                campaign.load_all(&self.settings);
+                settings_hub::with_settings(|settings| campaign.load_all(settings));
                 // `Saves.load` assigns sector save files; reflect them on the
                 // runtime sectors so launches take the resume branch (C-3).
                 for planet in campaign.planets.values_mut() {
@@ -273,40 +278,6 @@ impl MindCampaign {
             return false;
         }
         ui.call("has_dialog", &[]).try_to::<bool>().unwrap_or(false)
-    }
-
-    /// Live boolean setting from the `MindUi` store (the settings page writes
-    /// there; this facade's copy is a boot-time snapshot), falling back to
-    /// this facade's copy.
-    fn live_setting_flag(&self, key: &str) -> bool {
-        let fallback = self.settings.get_bool(key, false);
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
-            return fallback;
-        };
-        if !ui.has_method("settings_get_flag") {
-            return fallback;
-        }
-        ui.call("settings_get_flag", &[GString::from(key).to_variant()])
-            .try_to::<bool>()
-            .unwrap_or(fallback)
-    }
-
-    /// Live boolean setting with an explicit default (`Core.settings.getBool(key,
-    /// default)`; `LaunchLoadoutDialog.getMax` for `maxresources`, default true).
-    fn live_setting_flag_default(&self, key: &str, default: bool) -> bool {
-        let fallback = self.settings.get_bool(key, default);
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
-            return fallback;
-        };
-        if !ui.has_method("settings_get_flag_default") {
-            return fallback;
-        }
-        ui.call(
-            "settings_get_flag_default",
-            &[GString::from(key).to_variant(), default.to_variant()],
-        )
-        .try_to::<bool>()
-        .unwrap_or(fallback)
     }
 
     /// Loads the schematic library (`Schematics.load`: vanilla loadouts plus
@@ -373,28 +344,6 @@ impl MindCampaign {
         out
     }
 
-    /// Live `saveinterval` (`Core.settings.getInt`): read from the `MindUi`
-    /// settings store so a mid-session slider change takes effect, falling back
-    /// to this facade's boot-time copy.
-    fn live_save_interval_seconds(&self) -> i32 {
-        let fallback = self
-            .settings
-            .get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
-        let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
-            return fallback;
-        };
-        if !ui.has_method("settings_get_i32") {
-            return fallback;
-        }
-        ui.call(
-            "settings_get_i32",
-            &[GString::from(KEY_SAVE_INTERVAL).to_variant()],
-        )
-        .try_to::<i64>()
-        .map(|value| value as i32)
-        .unwrap_or(fallback)
-    }
-
     /// Persists campaign/universe/unlock state to `user://config/settings.bin`.
     ///
     /// Mirrors the live runtime campaign first: while a sector runs the runtime
@@ -403,12 +352,12 @@ impl MindCampaign {
     /// `Vars.universe`/`planet.sectors`; `Universe.save()` `Universe.java:293`).
     fn persist(&mut self) {
         self.mirror_runtime_campaign();
-        if let Some(campaign) = self.campaign.as_ref()
-            && let Err(error) = campaign.save_all(&mut self.settings)
+        if let Some(campaign) = self.campaign.as_mut()
+            && let Err(error) = settings_hub::with_settings(|settings| campaign.save_all(settings))
         {
             log::warn!("campaign save_all failed: {error}");
         }
-        if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
+        if let Err(error) = settings_hub::save(&self.paths) {
             log::warn!("campaign settings flush failed: {error}");
         }
     }
@@ -420,6 +369,8 @@ impl MindCampaign {
     ///
     /// `f` runs with the runtime taken out of the host, so it must not call
     /// back into Godot (H-environment §3: no held `bind_mut` across calls).
+    /// It receives the one shared settings store (`Core.settings`, PAR-0164);
+    /// the closure must not call back into the hub (the lock is not re-entrant).
     fn with_campaign_mut<R>(
         &mut self,
         f: impl FnOnce(&mut Campaign, &mut SettingsStore) -> R,
@@ -427,14 +378,15 @@ impl MindCampaign {
         if let Some(mut host) = self.host() {
             let taken = host.bind_mut().take_campaign_runtime();
             if let Some(mut runtime) = taken {
-                let out = f(&mut runtime.campaign, &mut self.settings);
+                let out =
+                    settings_hub::with_settings(|settings| f(&mut runtime.campaign, settings));
                 self.campaign = Some(runtime.campaign.clone());
                 host.bind_mut().put_campaign_runtime(runtime);
                 return Some(out);
             }
         }
         let mut campaign = self.campaign.take()?;
-        let out = f(&mut campaign, &mut self.settings);
+        let out = settings_hub::with_settings(|settings| f(&mut campaign, settings));
         self.campaign = Some(campaign);
         Some(out)
     }
@@ -480,11 +432,10 @@ impl MindCampaign {
             is_campaign: runtime.session.is_campaign(),
         };
         let saves_result = if delta_ticks > 0 {
-            self.saves.update_policy(
-                saves_update,
-                &self.settings,
-                self.live_save_interval_seconds(),
-            )
+            settings_hub::with_settings(|store| {
+                let interval = store.get_i32(KEY_SAVE_INTERVAL, DEFAULT_SAVE_INTERVAL_SECONDS);
+                self.saves.update_policy(saves_update, store, interval)
+            })
         } else {
             SavesUpdateResult::default()
         };
@@ -613,17 +564,26 @@ impl MindCampaign {
                 let Some(name) = name else {
                     continue;
                 };
-                let mut store = SettingsUnlockStore::new(&mut self.settings);
-                if let Some(fields) = tech_tree::unlock_fields_mut(registry, content)
-                    && fields.unlock(&name, &mut store)
-                {
+                let unlocked = settings_hub::with_settings(|settings| {
+                    let mut store = SettingsUnlockStore::new(settings);
+                    if let Some(fields) = tech_tree::unlock_fields_mut(registry, content)
+                        && fields.unlock(&name, &mut store)
+                    {
+                        true
+                    } else {
+                        false
+                    }
+                });
+                if unlocked {
                     newly.push(name);
                 }
             }
             if !newly.is_empty() {
-                let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
-                let mut store = SettingsUnlockStore::new(&mut self.settings);
-                let auto = tech_tree::check_auto_unlocks(registry, &mut store, &ctx);
+                let auto = settings_hub::with_settings(|settings| {
+                    let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
+                    let mut store = SettingsUnlockStore::new(settings);
+                    tech_tree::check_auto_unlocks(registry, &mut store, &ctx)
+                });
                 log::info!(
                     "campaign unlock: {} produced, {} auto-unlocked",
                     newly.len(),
@@ -650,7 +610,9 @@ impl MindCampaign {
                     .map(|planet| planet.name.clone())
                     .unwrap_or_default();
                 if let Some(sector) = runtime.campaign.sector(planet, sector_id) {
-                    let _ = sector.save_info(&mut self.settings, &planet_name);
+                    settings_hub::with_settings(|settings| {
+                        let _ = sector.save_info(settings, &planet_name);
+                    });
                 }
             }
             dirty = true;
@@ -682,7 +644,9 @@ impl MindCampaign {
                     )),
                     current_wave: runtime.session.wave,
                 };
-                let report = campaign.run_turn(registry, &mut self.settings, &ctx, &mut rand);
+                let report = settings_hub::with_settings(|settings| {
+                    campaign.run_turn(registry, settings, &ctx, &mut rand)
+                });
                 log::info!(
                     "campaign turn {} ({} event(s))",
                     report.turn,
@@ -754,9 +718,11 @@ impl MindCampaign {
         let Some(registry) = registry else {
             return;
         };
-        let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
-        let mut store = SettingsUnlockStore::new(&mut self.settings);
-        let unlocked = tech_tree::check_auto_unlocks(registry, &mut store, &ctx);
+        let unlocked = settings_hub::with_settings(|settings| {
+            let ctx = CampaignObjectiveContext::new(registry, &runtime.campaign);
+            let mut store = SettingsUnlockStore::new(settings);
+            tech_tree::check_auto_unlocks(registry, &mut store, &ctx)
+        });
         if !unlocked.is_empty() {
             log::info!("campaign capture auto-unlocked {} content", unlocked.len());
         }
@@ -867,15 +833,18 @@ impl MindCampaign {
             preset_id.and_then(|preset| registry.sector(preset).map(|def| def.name.clone()));
         if let Some(preset) = preset_id
             && let Some(name) = preset_name.as_deref()
-            && let Some(fields) = tech_tree::unlock_fields_mut(
-                &mut registry,
-                ContentRef::of(ContentType::Sector, preset),
-            )
         {
-            fields.quiet_unlock(name, &mut SettingsUnlockStore::new(&mut self.settings));
+            settings_hub::with_settings(|settings| {
+                if let Some(fields) = tech_tree::unlock_fields_mut(
+                    &mut registry,
+                    ContentRef::of(ContentType::Sector, preset),
+                ) {
+                    fields.quiet_unlock(name, &mut SettingsUnlockStore::new(settings));
+                }
+            });
         }
         if let Some(planet) = campaign.planet_mut(planet_id) {
-            planet.set_last_sector(&mut self.settings, sector_id);
+            settings_hub::with_settings(|settings| planet.set_last_sector(settings, sector_id));
         }
 
         // `Control.playSector`'s branch selection (`Control.java:449-470`): the
@@ -1140,7 +1109,9 @@ impl MindCampaign {
                                 &mut runtime.session,
                             );
                             record.info.info.has_core = true;
-                            let _ = record.save_info(&mut self.settings, &planet_name);
+                            settings_hub::with_settings(|settings| {
+                                let _ = record.save_info(settings, &planet_name);
+                            });
                             // Keep the session team inventory equal to the core
                             // module, like a fresh launch (`sync_session_with_sim`).
                             let item_count = registry.items().len();
@@ -1217,7 +1188,7 @@ impl MindCampaign {
             .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame));
         if installed
             && new_game
-            && !self.live_setting_flag("skipcoreanimation")
+            && !settings_hub::with_settings(|store| store.get_bool("skipcoreanimation", false))
             && !self.session.rules.pvp
             // Read the core position in its own statement: a `host.bind()`
             // temporary in the let-chain would stay borrowed across the camera
@@ -1263,17 +1234,17 @@ impl MindCampaign {
             if has_save {
                 // `World.loadSector` -> `SaveSlot.load`: the resumed slot is
                 // current, so the save policy pumps against it.
-                self.saves.set_current_by_file(&mut self.settings, &file);
+                settings_hub::with_settings(|settings| {
+                    self.saves.set_current_by_file(settings, &file);
+                });
             } else {
                 // `Control.playNewSector` -> `Saves.saveSector`: create the
                 // sector's autosave slot and make it current; the world write is
                 // queued at the IO seam.
-                self.saves.prepare_sector_slot(
-                    &mut self.settings,
-                    &self.paths,
-                    &planet_name,
-                    sector_id,
-                );
+                settings_hub::with_settings(|settings| {
+                    self.saves
+                        .prepare_sector_slot(settings, &self.paths, &planet_name, sector_id);
+                });
                 if let Some(mut host) = self.host() {
                     let path = format!("user://saves/{save_name}.msav");
                     host.bind_mut()
@@ -1303,7 +1274,7 @@ impl MindCampaign {
             && events
                 .iter()
                 .any(|event| matches!(event, mind_core::game::play::PlayEvent::NewGame))
-            && !self.live_setting_flag("skipcoreanimation")
+            && !settings_hub::with_settings(|store| store.get_bool("skipcoreanimation", false))
             && !self.session.rules.pvp
             && let Some((core_x, core_y, core_block)) = self.host().and_then(|host| {
                 let guard = host.bind();
@@ -1721,9 +1692,10 @@ impl MindCampaign {
             self.registry = Some(registry);
             return false;
         }
-        let mut store = SettingsUnlockStore::new(&mut self.settings);
-        let outcome =
-            tech_tree::spend(&mut registry, node_ref, &mut items, &mut store, &ctx, false);
+        let outcome = settings_hub::with_settings(|settings| {
+            let mut store = SettingsUnlockStore::new(settings);
+            tech_tree::spend(&mut registry, node_ref, &mut items, &mut store, &ctx, false)
+        });
         let Ok(result) = outcome else {
             self.registry = Some(registry);
             return false;
@@ -1812,9 +1784,11 @@ impl MindCampaign {
         if !result.unlocked.is_empty()
             && let Some(campaign_ref) = self.campaign.as_ref()
         {
-            let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
-            let mut store = SettingsUnlockStore::new(&mut self.settings);
-            let unlocked = tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx);
+            let unlocked = settings_hub::with_settings(|settings| {
+                let ctx = CampaignObjectiveContext::new(&registry, campaign_ref);
+                let mut store = SettingsUnlockStore::new(settings);
+                tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx)
+            });
             log::info!("research auto-unlocked {} content", unlocked.len());
         }
         self.registry = Some(registry);
@@ -2539,8 +2513,13 @@ impl MindCampaign {
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
         let catalog = if self.session.is_campaign() {
-            let store = SettingsUnlockStore::new(&mut self.settings);
-            mind_core::ui::campaign::block_catalog_unlocked_for(&store, &self.session.rules.planet)
+            settings_hub::with_settings(|settings| {
+                let store = SettingsUnlockStore::new(settings);
+                mind_core::ui::campaign::block_catalog_unlocked_for(
+                    &store,
+                    &self.session.rules.planet,
+                )
+            })
         } else {
             mind_core::ui::campaign::block_catalog_for(&self.session.rules.planet)
         };
@@ -3109,7 +3088,7 @@ impl MindCampaign {
         let current = self.saves.get_current().cloned();
         let should_save = current
             .as_ref()
-            .is_some_and(|slot| slot.is_autosave(&self.settings))
+            .is_some_and(|slot| settings_hub::with_settings(|store| slot.is_autosave(store)))
             && !self.session.game_over
             && self.session.phase != State::Menu;
         let mut queued = false;
@@ -3245,12 +3224,12 @@ impl MindCampaign {
             sector.info.info = record.clone();
         }
         let key = mind_core::game::sector::info_key(&planet_name, sector_id);
-        if let Err(error) = self.settings.put_json(&key, &record) {
+        if let Err(error) = settings_hub::with_settings(|store| store.put_json(&key, &record)) {
             log::warn!("sector record persist failed: {error}");
         }
         // `put_json` only marks the store dirty; flush so the record is on disk
         // before any restart (the capture path calls this after `pump_runtime`).
-        if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
+        if let Err(error) = settings_hub::save(&self.paths) {
             log::warn!("sector record flush failed: {error}");
         }
     }
@@ -3262,12 +3241,13 @@ impl MindCampaign {
     /// consumes the notice flag once and reports whether to show it.
     #[func]
     pub fn take_serpulo_remaps_notice(&mut self) -> bool {
-        if !self.saves.had_serpulo_remaps || self.settings.get_bool("serpulo-remaps-notice", false)
-        {
+        let noticed =
+            settings_hub::with_settings(|store| store.get_bool("serpulo-remaps-notice", false));
+        if !self.saves.had_serpulo_remaps || noticed {
             return false;
         }
-        self.settings.put_bool("serpulo-remaps-notice", true);
-        if let Err(error) = self.settings.force_save(&NativeFs, &self.paths) {
+        settings_hub::with_settings(|store| store.put_bool("serpulo-remaps-notice", true));
+        if let Err(error) = settings_hub::save(&self.paths) {
             log::warn!("remap notice flush failed: {error}");
         }
         true
@@ -3371,8 +3351,9 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return false;
         };
-        self.saves
-            .load(&NativeFs, &self.paths, registry, &mut self.settings);
+        settings_hub::with_settings(|settings| {
+            self.saves.load(&NativeFs, &self.paths, registry, settings);
+        });
         match self.saves.delete_all(&NativeFs) {
             Ok(()) => {
                 log::info!(
@@ -3398,12 +3379,14 @@ impl MindCampaign {
         self.with_campaign_mut(|campaign, settings| {
             campaign.universe.clear_loadout_info(settings);
         });
-        let cleared = {
-            let mut store = SettingsUnlockStore::new(&mut self.settings);
+        let cleared = settings_hub::with_settings(|settings| {
+            let mut store = SettingsUnlockStore::new(settings);
             registry.clear_unlocks(&mut store, None)
-        };
+        });
         tech_tree::reset_all(&mut registry);
-        self.settings.remove("unlocks");
+        settings_hub::with_settings(|store| {
+            store.remove("unlocks");
+        });
         self.registry = Some(registry);
         self.push_campaign_to_runtime();
         self.persist();
@@ -3430,14 +3413,16 @@ impl MindCampaign {
         self.with_campaign_mut(|campaign, settings| {
             campaign.universe.clear_loadout_info(settings);
         });
-        let cleared = {
-            let mut store = SettingsUnlockStore::new(&mut self.settings);
+        let cleared = settings_hub::with_settings(|settings| {
+            let mut store = SettingsUnlockStore::new(settings);
             registry.clear_unlocks(&mut store, Some(planet_id))
-        };
+        });
         if let Some(tree) = tree {
             tech_tree::reset_tree(&mut registry, tree);
         }
-        self.settings.remove("unlocks");
+        settings_hub::with_settings(|store| {
+            store.remove("unlocks");
+        });
         self.registry = Some(registry);
         self.push_campaign_to_runtime();
         self.persist();
@@ -3517,8 +3502,9 @@ impl MindCampaign {
 
         // Re-list saves (a slot may have been written this session) and drop
         // the matching sector slots.
-        self.saves
-            .load(&NativeFs, &self.paths, &registry, &mut self.settings);
+        settings_hub::with_settings(|settings| {
+            self.saves.load(&NativeFs, &self.paths, &registry, settings);
+        });
         if let Err(error) = self.saves.delete_sectors(&NativeFs, &registry, only) {
             log::warn!("clear campaign saves: {error}");
         }
@@ -3544,7 +3530,9 @@ impl MindCampaign {
             let mut row = VarDictionary::new();
             row.set(
                 &GString::from("name"),
-                &slot.name(&self.settings).as_str().to_variant(),
+                &settings_hub::with_settings(|store| slot.name(store))
+                    .as_str()
+                    .to_variant(),
             );
             row.set(
                 &GString::from("file"),
@@ -3553,7 +3541,7 @@ impl MindCampaign {
             row.set(&GString::from("sector"), &slot.is_sector().to_variant());
             row.set(
                 &GString::from("autosave"),
-                &slot.is_autosave(&self.settings).to_variant(),
+                &settings_hub::with_settings(|store| slot.is_autosave(store)).to_variant(),
             );
             // `SaveSlot.getMap/mode/getWave/getPlayTime/getDate` meta reads;
             // the dialog resolves `map_name` against the map registry
@@ -3665,7 +3653,11 @@ impl MindCampaign {
         for value in self
             .campaign
             .as_mut()
-            .map(|campaign| campaign.universe.get_launch_resources(&self.settings))
+            .map(|campaign| {
+                settings_hub::with_settings(|settings| {
+                    campaign.universe.get_launch_resources(settings)
+                })
+            })
             .unwrap_or_default()
         {
             out.push(*value);
@@ -3682,10 +3674,9 @@ impl MindCampaign {
             .campaign
             .as_mut()
             .map(|campaign| {
-                campaign
-                    .universe
-                    .get_launch_resources(&self.settings)
-                    .to_vec()
+                settings_hub::with_settings(|settings| {
+                    campaign.universe.get_launch_resources(settings).to_vec()
+                })
             })
             .unwrap_or_default();
         let Some(registry) = self.registry.as_ref() else {
@@ -3852,7 +3843,9 @@ impl MindCampaign {
             let Some(campaign) = self.campaign.as_mut() else {
                 return GString::from("{}");
             };
-            let launch_seq = campaign.universe.get_launch_resources(&self.settings);
+            let launch_seq = settings_hub::with_settings(|settings| {
+                campaign.universe.get_launch_resources(settings)
+            });
             for (index, item) in registry.items().iter().enumerate() {
                 if registry
                     .planet(planet_id)
@@ -3871,7 +3864,7 @@ impl MindCampaign {
         let preset_loadout = destination_preset
             .map(|preset| Self::preset_launch_loadout(registry, planet_id, preset))
             .unwrap_or_default();
-        let max = self.live_setting_flag_default("maxresources", true);
+        let max = settings_hub::with_settings(|store| store.get_bool("maxresources", true));
         let all_items: Vec<String> = registry
             .items()
             .iter()
@@ -3907,20 +3900,24 @@ impl MindCampaign {
             if let Some(mut host) = self.host() {
                 let taken = host.bind_mut().take_campaign_runtime();
                 if let Some(mut runtime) = taken {
-                    persist_resources = runtime
-                        .campaign
-                        .universe
-                        .update_launch_resources(&mut self.settings, std::mem::take(&mut dense))
-                        .is_ok();
+                    persist_resources = settings_hub::with_settings(|settings| {
+                        runtime
+                            .campaign
+                            .universe
+                            .update_launch_resources(settings, std::mem::take(&mut dense))
+                            .is_ok()
+                    });
                     host.bind_mut().put_campaign_runtime(runtime);
                     updated = true;
                 }
             }
             if !updated && let Some(campaign) = self.campaign.as_mut() {
-                persist_resources = campaign
-                    .universe
-                    .update_launch_resources(&mut self.settings, dense)
-                    .is_ok();
+                persist_resources = settings_hub::with_settings(|settings| {
+                    campaign
+                        .universe
+                        .update_launch_resources(settings, dense)
+                        .is_ok()
+                });
             }
         }
 
@@ -4189,7 +4186,7 @@ impl MindCampaign {
     /// the UI is about to delete.
     #[func]
     pub fn clear_in_memory(&mut self) {
-        self.settings.clear();
+        settings_hub::with_settings(|store| store.clear());
         self.campaign = None;
         self.registry = None;
         self.saves = Saves::new();
@@ -4212,6 +4209,8 @@ impl MindCampaign {
             "destroyed": stats.buildings_destroyed,
             "deconstructed": stats.buildings_deconstructed,
             "waves": self.session.rules.waves,
+            // `stats.coreItemCount` keyed by item name (`CoreItemObjective.text()`).
+            "coreItems": stats.core_item_count,
         });
         GString::from(value.to_string().as_str())
     }

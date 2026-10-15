@@ -1673,11 +1673,12 @@ pub fn run_explosion(
         let Some(runtime) = world.remove_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
             return;
         };
-        // The port's `damage_area` targets units and buildings uniformly; the
-        // air/ground filters are not modelled there (H06 T8 deviation).
-        let _ = (air_v, ground_v);
         let opts = crate::combat::damage::area::DamageOptions {
             pierce_armor: pierce_v,
+            // `LExecutor`'s `explosion` instruction passes its own air/ground
+            // flags (`Damage.damage(..., air, ground, ...)`, Damage.java:509).
+            air: air_v,
+            ground: ground_v,
             ..Default::default()
         };
         crate::combat::damage::area::damage_area(

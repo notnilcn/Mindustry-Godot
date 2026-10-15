@@ -298,6 +298,15 @@ pub trait BuildingBehavior: Send + Sync + std::any::Any {
         let _ = (world, e, previous);
     }
 
+    /// `Building.checkSolid()` (`BuildingComp.java:1739-1741`, default `false`):
+    /// whether a non-solid block still blocks units/pathing on its tiles
+    /// (`Tile.solid()`'s last term). Only `Door` overrides it today
+    /// (`Door.java:142-145`: `!open`).
+    fn check_solid(&self, world: &World, e: Entity) -> bool {
+        let _ = (world, e);
+        false
+    }
+
     /// `Building.onProximityAdded()`.
     fn on_proximity_added(&self, world: &mut World, e: Entity) {
         let _ = (world, e);

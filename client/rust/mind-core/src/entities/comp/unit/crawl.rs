@@ -128,7 +128,8 @@ fn scan_tiles(
                 continue;
             }
             let tile = grid.tile(tx, ty);
-            if tile.solid(content) {
+            // `CrawlComp.java:71`: `t.solid()` (full predicate).
+            if tile.solid_full(content) {
                 solids += 1;
             }
             if let Some(table) = table

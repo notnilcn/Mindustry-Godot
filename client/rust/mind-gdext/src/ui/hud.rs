@@ -497,9 +497,27 @@ impl MindHud {
                     serde_json::from_str::<std::collections::HashMap<String, i32>>(&json).ok()
                 })
                 .unwrap_or_default();
+            // `CoreItemObjective.text()` shows `stats.coreItemCount` (delivered
+            // by conveyors), which `game_stats_json` carries as `coreItems`.
+            let core_delivered = self
+                .campaign_node
+                .clone()
+                .and_then(|mut node| {
+                    node.call("game_stats_json", &[])
+                        .try_to::<GString>()
+                        .ok()
+                        .map(|json| json.to_string())
+                })
+                .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+                .and_then(|value| value.get("coreItems").cloned())
+                .and_then(|value| {
+                    serde_json::from_value::<std::collections::HashMap<String, i32>>(value).ok()
+                })
+                .unwrap_or_default();
             let locale = HudLocale {
                 bundle: &self.bundle,
                 core_items: &core_items,
+                core_delivered: &core_delivered,
             };
             for index in 0..runtime.len() {
                 if !runtime.qualified(index) {
@@ -631,6 +649,9 @@ struct HudLocale<'a> {
     /// Live stored item counts (`state.rules.defaultTeam.items()`, read from the
     /// core's item module) keyed by content name.
     core_items: &'a std::collections::HashMap<String, i32>,
+    /// `state.stats.coreItemCount` — items delivered to the core by conveyors
+    /// (`CoreItemObjective.text()`, `MapObjectives.java:410`).
+    core_delivered: &'a std::collections::HashMap<String, i32>,
 }
 
 impl ObjectiveLocale for HudLocale<'_> {
@@ -651,6 +672,10 @@ impl ObjectiveLocale for HudLocale<'_> {
 
     fn item_count(&self, item: &str) -> i32 {
         *self.core_items.get(item).unwrap_or(&0)
+    }
+
+    fn core_item_count(&self, item: &str) -> i32 {
+        *self.core_delivered.get(item).unwrap_or(&0)
     }
 
     fn item_name(&self, item: &str) -> String {

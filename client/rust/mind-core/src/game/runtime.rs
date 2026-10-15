@@ -1818,10 +1818,9 @@ fn turret_enemy_stats(
                     y: row.y,
                     health,
                     dps,
-                    // Java `t.range()` adds the ammo's `rangeChange` when
-                    // present (`Turret.java:347-353`); the port does not model
-                    // `BulletType.rangeChange` yet.
-                    range: config.range,
+                    // Java `t.range()` adds the loaded ammo's `rangeChange`
+                    // (`Turret.java:348-353`).
+                    range: crate::world::blocks::defense::turrets::turret_range(world, row.entity),
                     target_air: config.target_air,
                     target_ground: config.target_ground,
                     air: false,

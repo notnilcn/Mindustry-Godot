@@ -1222,3 +1222,41 @@ fn objective_completion_script_runs_live() {
     );
     assert_events_drained(&sim);
 }
+
+/// I01 T6: the `explosion` instruction passes its own air/ground flags
+/// (`LStatements.ExplosionI` -> `Damage.damage(..., air, ground, ...)`,
+/// Damage.java:509-511), so an air-only explosion spares grounded units.
+#[test]
+fn logic_explosion_air_only() {
+    use crate::entities::comp::Health;
+
+    let mut sim = campaign_sim();
+    // Crux units (team 2) at tile (20,20): one grounded, one flying.
+    let ground = sim
+        .spawn_live_unit("dagger", 2, 20.0 * 8.0, 20.0 * 8.0, 0.0)
+        .expect("dagger");
+    let flyer = sim
+        .spawn_live_unit("flare", 2, 21.0 * 8.0, 20.0 * 8.0, 0.0)
+        .expect("flare");
+    let health = |sim: &Sim, e| sim.ecs.0.get::<Health>(e).map_or(0.0, |h| h.health);
+    let (ground_hp, flyer_hp) = (health(&sim, ground), health(&sim, flyer));
+    // Sharded (team 1) explosion, air only: `explosion team x y radius damage
+    // air ground pierce effect` (statement.rs `Explosion`).
+    place_world_processor(
+        &mut sim,
+        4,
+        4,
+        "explosion 1 20 20 5 500 true false false false\nstop\n",
+    );
+    tick(&mut sim, 10);
+    assert!(
+        health(&sim, flyer) < flyer_hp,
+        "the flyer takes an air-only explosion"
+    );
+    assert_eq!(
+        health(&sim, ground),
+        ground_hp,
+        "the grounded unit is spared by an air-only explosion"
+    );
+    assert_events_drained(&sim);
+}

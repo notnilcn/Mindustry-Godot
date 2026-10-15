@@ -924,6 +924,10 @@ fn create_splash_damage(ctx: &mut CombatCtx<'_>, bullet: Entity, x: f32, y: f32)
         armor_multiplier: def.armor_multiplier,
         scaled: def.scaled_splash_damage,
         source_is_bullet: true,
+        // `Damage.damage(.., collidesAir, collidesGround, ..)`
+        // (`BulletType.java:608`).
+        air: def.collides_air,
+        ground: def.collides_ground,
     };
     let _ = super::damage::area::damage_area(
         ctx.world,

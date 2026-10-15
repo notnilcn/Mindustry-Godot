@@ -55,6 +55,8 @@ pub struct MindAssets {
     cutout_textures: HashMap<String, Gd<ImageTexture>>,
     /// Locale bundle (`Core.bundle`).
     bundle: Bundle,
+    /// Active locale resolved at boot (`Vars.locale`).
+    locale: String,
     /// Content icon code table (`Iconc`).
     iconc: Iconc,
     /// Selectable locales (`assets/locales`).
@@ -82,6 +84,7 @@ impl INode for MindAssets {
             loose_textures: HashMap::new(),
             cutout_textures: HashMap::new(),
             bundle: Bundle::new(),
+            locale: String::from("en"),
             iconc: Iconc::default(),
             locales: Vec::new(),
             fonts: FontSet::default(),
@@ -169,10 +172,12 @@ impl MindAssets {
         self.index = index;
         self.pages = pages;
         let locale = resolve_locale();
+        self.locale = locale.clone();
         self.bundle = load_bundle(&self.assets_dir, &locale);
         self.iconc = load_iconc(&self.assets_dir);
         self.locales = load_locales(&self.assets_dir);
         self.fonts = FontSet::load(&self.assets_dir);
+        self.fonts.apply_locale_fonts(&locale);
         self.fonts
             .register_content_icons(&self.iconc, &self.index, &self.pages);
         self.audio = AudioRegistry::load(&self.assets_dir);
@@ -465,6 +470,13 @@ impl MindAssets {
     #[func]
     pub fn markup_text(&self, raw: GString) -> GString {
         GString::from(mind_core::ui::text::render_markup(&raw.to_string(), &self.iconc).as_str())
+    }
+
+    /// Active locale resolved at boot (`Vars.locale`; `locale` setting or the
+    /// resolved `default`, `Vars.java:536-555`).
+    #[func]
+    pub fn locale(&self) -> GString {
+        GString::from(self.locale.as_str())
     }
 
     /// Selectable locales (`assets/locales`).
