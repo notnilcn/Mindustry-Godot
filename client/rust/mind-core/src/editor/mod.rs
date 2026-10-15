@@ -59,6 +59,12 @@ pub const BRUSH_SIZES: [f32; 9] = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 9.0, 15.0, 20.0
 /// (no behavior/module state — the editor never updates buildings).
 pub struct EditorWorldHooks {
     seq: std::sync::atomic::AtomicU64,
+    /// Logic-family placements: `block -> (ipt, privileged)`, seeded from the
+    /// content registry by the host. `LogicBlockBehavior::create_state` is not
+    /// reachable here (the editor ECS holds no behaviors), so the same
+    /// `LogicBlockState` shape is created inline; Java's editor keeps a live
+    /// `LogicBuild` for every drawn processor (`MapProcessorsDialog.setup`).
+    logic_seeds: Mutex<IndexMap<BlockId, (i32, bool)>>,
 }
 
 impl EditorWorldHooks {
@@ -66,6 +72,20 @@ impl EditorWorldHooks {
     pub fn new() -> Self {
         Self {
             seq: std::sync::atomic::AtomicU64::new(0),
+            logic_seeds: Mutex::new(IndexMap::new()),
+        }
+    }
+
+    /// Seeds logic-block state creation: `(block, ipt, privileged)` rows built
+    /// from the content registry at boot (`LogicBlockBehavior.create_state`).
+    pub fn set_logic_seeds(&self, seeds: impl IntoIterator<Item = (BlockId, i32, bool)>) {
+        let mut guard = self
+            .logic_seeds
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        guard.clear();
+        for (block, ipt, privileged) in seeds {
+            guard.insert(block, (ipt, privileged));
         }
     }
 }
@@ -84,25 +104,34 @@ impl WorldHooks for EditorWorldHooks {
         // `TeamComp` + the plan-07 `BuildingComp` marker) so the map save writes
         // a full `writeAll` chunk and a drawn core keeps its team.
         let tile = crate::world::TilePos::new(request.x, request.y);
-        Some(
-            world
-                .spawn((
-                    crate::ecs::EntitySeq(seq),
-                    crate::ecs::BuildingComp {
-                        pos: tile,
-                        block: request.block,
-                        team: crate::ecs::TeamId(request.team),
-                        rot: request.rot,
-                    },
-                    crate::entities::comp::building::Building::new(
-                        tile,
-                        request.block,
-                        request.rot,
-                    ),
-                    crate::entities::comp::base::TeamComp { team: request.team },
-                ))
-                .id(),
-        )
+        let entity = world
+            .spawn((
+                crate::ecs::EntitySeq(seq),
+                crate::ecs::BuildingComp {
+                    pos: tile,
+                    block: request.block,
+                    team: crate::ecs::TeamId(request.team),
+                    rot: request.rot,
+                },
+                crate::entities::comp::building::Building::new(tile, request.block, request.rot),
+                crate::entities::comp::base::TeamComp { team: request.team },
+            ))
+            .id();
+        // `LogicBlockBehavior.create_state`: a drawn logic block carries its
+        // tag/icon (`MapProcessorsDialog` renames and icon-selects them).
+        let seed = self
+            .logic_seeds
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .get(&request.block)
+            .copied();
+        if let Some((ipt, privileged)) = seed {
+            let mut state = crate::logic::blocks::logic_block::LogicBlockState::new(ipt);
+            state.executor.privileged = privileged;
+            state.executor.build = Some(entity);
+            world.entity_mut(entity).insert(state);
+        }
+        Some(entity)
     }
 }
 
@@ -969,6 +998,53 @@ mod tests {
 
     fn stone(content: &ContentRegistry) -> BlockId {
         content.block_id("stone").unwrap()
+    }
+
+    #[test]
+    fn editor_hooks_seed_logic_state() {
+        let content = crate::content::test_support::test_registry();
+        let hooks = EditorWorldHooks::new();
+        let processor = content.block_id("world-processor").unwrap_or_default();
+        hooks.set_logic_seeds([(processor, 8, true)]);
+        let mut world = bevy_ecs::world::World::new();
+        let e = hooks
+            .new_building(
+                &mut world,
+                NewBuilding {
+                    block: processor,
+                    x: 2,
+                    y: 3,
+                    team: 1,
+                    rot: 0,
+                },
+            )
+            .unwrap();
+        let state = world
+            .get::<crate::logic::blocks::logic_block::LogicBlockState>(e)
+            .unwrap();
+        assert_eq!(state.ipt, 8);
+        assert!(state.executor.privileged);
+        assert_eq!(state.executor.build, Some(e));
+        assert_eq!(state.tag, None);
+        // Non-seeded blocks stay bare (`EditorWorldHooks` shape unchanged).
+        let wall = content.block_id("stone-wall").unwrap_or_default();
+        let bare = hooks
+            .new_building(
+                &mut world,
+                NewBuilding {
+                    block: wall,
+                    x: 5,
+                    y: 5,
+                    team: 1,
+                    rot: 0,
+                },
+            )
+            .unwrap();
+        assert!(
+            world
+                .get::<crate::logic::blocks::logic_block::LogicBlockState>(bare)
+                .is_none()
+        );
     }
 
     #[test]

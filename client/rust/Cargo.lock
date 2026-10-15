@@ -1769,6 +1769,7 @@ dependencies = [
 name = "mind-gdext"
 version = "0.1.0"
 dependencies = [
+ "bevy_ecs",
  "godot",
  "indexmap 2.14.2",
  "log",

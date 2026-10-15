@@ -7,6 +7,10 @@
 
 extends Control
 
+## Emitted on a left click over one objective node (`MapObjectivesCanvas`
+## tile selection -> `MapObjectivesDialog`'s field editors).
+signal node_selected(index: int)
+
 ## `MapObjectivesCanvas.{objWidth, objHeight, bounds}` in placement units.
 const OBJ_WIDTH := 5
 const OBJ_HEIGHT := 2
@@ -27,12 +31,32 @@ func _ready() -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			# Left click selects a node; the pan drag needs a miss (or MMB).
+			var hit := _node_at(event.position)
+			if hit >= 0:
+				node_selected.emit(hit)
+				return
+			_dragging = true
+		elif event.button_index == MOUSE_BUTTON_MIDDLE:
 			_dragging = event.pressed
+		elif event.button_index == MOUSE_BUTTON_LEFT:
+			_dragging = false
 		queue_redraw()
 	elif event is InputEventMouseMotion and _dragging:
 		_pan += event.relative
 		queue_redraw()
+
+
+## Index of the node whose rect contains `point`, or `-1`. Nodes paint in
+## order, so the top-most (last) hit wins.
+func _node_at(point: Vector2) -> int:
+	var objectives := _objectives()
+	for index in range(objectives.size() - 1, -1, -1):
+		var value: Dictionary = objectives[index] if objectives[index] is Dictionary else {}
+		if _node_rect(int(value.get("editorPos", 0))).has_point(point):
+			return index
+	return -1
 
 
 func _draw() -> void:

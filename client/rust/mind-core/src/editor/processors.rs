@@ -81,22 +81,31 @@ where
     entries
 }
 
-/// `MapProcessorsDialog` Add button: first non-synthetic tile becomes a
-/// world-processor. Returns the chosen tile and whether one was found.
-pub fn add_processor(grid: &mut WorldGrid, content: &ContentRegistry) -> Option<(i32, i32)> {
-    let processor = content.block_id("world-processor")?;
+/// `MapProcessorsDialog` Add button scan: the first non-synthetic tile
+/// (`for(y) for(x)` order matches `Tiles::geti` row-major). The caller places
+/// the processor through the world ops so a live building + `LogicBlockState`
+/// is created (`EditorTile.setBlock` -> `Block.newBuilding()`).
+pub fn free_processor_tile(grid: &WorldGrid, content: &ContentRegistry) -> Option<(i32, i32)> {
     for index in 0..grid.tiles.len() {
         let tile = grid.tiles.geti(index);
         let synthetic = content
             .block(tile.block)
             .is_some_and(crate::maps::filters::block_info::synthetic);
         if !synthetic {
-            let (x, y) = (tile.x as i32, tile.y as i32);
-            grid.tiles.get_mut(x, y).block = processor;
-            return Some((x, y));
+            return Some((tile.x as i32, tile.y as i32));
         }
     }
     None
+}
+
+/// `MapProcessorsDialog` Add button: first non-synthetic tile becomes a
+/// world-processor (raw tile write; hosts that need a live building use
+/// [`free_processor_tile`] + a world-ops place). Returns the chosen tile.
+pub fn add_processor(grid: &mut WorldGrid, content: &ContentRegistry) -> Option<(i32, i32)> {
+    let processor = content.block_id("world-processor")?;
+    let (x, y) = free_processor_tile(grid, content)?;
+    grid.tiles.get_mut(x, y).block = processor;
+    Some((x, y))
 }
 
 /// Truncates a candidate tag to `LogicBlock.maxNameLength`.
@@ -149,6 +158,9 @@ mod tests {
     fn add_and_remove_processor() {
         let content = test_registry();
         let mut grid = WorldGrid::new(4, 4);
+        // The free-tile scan writes nothing (`free_processor_tile`).
+        assert_eq!(free_processor_tile(&grid, &content), Some((0, 0)));
+        assert_eq!(grid.tiles.getn(0, 0).map(|t| t.block), Some(BlockId::AIR));
         let position = add_processor(&mut grid, &content);
         assert!(position.is_some());
         let entries = processor_entries(&grid, &content, |_, _| (None, '\0'));

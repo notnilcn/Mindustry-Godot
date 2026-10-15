@@ -30,23 +30,28 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::content::{
-    BlockDef, BlockKind, BuildVisibility, ContentRegistry, MemoryBundle, MemoryUnlockStore,
+    BlockDef, BlockId, BlockKind, BuildVisibility, Category, ContentRegistry, GeneratorKind,
+    MemoryBundle, MemoryUnlockStore,
 };
 use mind_core::determinism::Checksummer;
 use mind_core::ecs::MindWorld;
+use mind_core::editor::EditorGrid as _;
+use mind_core::editor::banned;
 use mind_core::editor::draw_op::DrawOperation;
 use mind_core::editor::grid::WorldEditorGrid;
 use mind_core::editor::lifecycle::try_catch_map_error;
 use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map_with_ecs};
+use mind_core::editor::objectives::{FieldFlags, FieldKind};
 use mind_core::editor::playtest::EditorPlayState;
 use mind_core::editor::{BRUSH_SIZES, EditorTool, EditorWorldHooks, MapEditor};
 use mind_core::game::play::PlaySession;
 use mind_core::game::team::Team;
 use mind_core::io::fs::{FileSystem, NativeFs};
 use mind_core::io::map::MapIo;
+use mind_core::logic::blocks::LogicBlockState;
 use mind_core::maps::Map;
 use mind_core::maps::filters::block_info;
-use mind_core::world::{NoopRenderHooks, WorldGrid};
+use mind_core::world::{BlockKindData, BlockTable, NoopRenderHooks, WorldGrid};
 
 mod editor_renderer;
 mod map_view;
@@ -161,6 +166,29 @@ impl MindEditor {
                     log::warn!("MindEditor content boot failed: {error}");
                 }
             }
+        }
+        // Logic-block placements carry `LogicBlockState`
+        // (`LogicBlockBehavior.create_state`; the editor ECS holds no behavior
+        // table, so the seeds come from the runtime `BlockTable`). The table
+        // also becomes an ECS resource so `logic_def_of`/`privileged_of`
+        // resolve for editor processors (`logic_get_state`,
+        // `logic_configure_code`).
+        if let Some(content) = self.content.as_ref()
+            && let Ok(table) = BlockTable::build_default(content)
+        {
+            let mut seeds = Vec::new();
+            for def in content.blocks() {
+                if def.kind != BlockKind::LogicBlock {
+                    continue;
+                }
+                if let Some(instance) = table.get(def.id)
+                    && let BlockKindData::Logic(logic) = &instance.kind_data
+                {
+                    seeds.push((def.id, logic.ipt, logic.privileged));
+                }
+            }
+            self.hooks.set_logic_seeds(seeds);
+            self.ecs.0.insert_resource(table);
         }
         let blocks = self.palette_blocks(GString::new()).len();
         log::info!("MindEditor ready ({blocks} editor blocks)");
@@ -431,6 +459,116 @@ impl MindEditor {
     #[func]
     pub fn set_tag(&mut self, key: GString, value: GString) {
         self.editor.tags.insert(key.to_string(), value.to_string());
+    }
+
+    // --- banned content (`BannedContentDialog`) ---
+
+    /// Parses `"block"`/`"unit"` (everything else means blocks).
+    fn ban_kind(kind: &str) -> banned::BanKind {
+        if kind == "unit" {
+            banned::BanKind::Unit
+        } else {
+            banned::BanKind::Block
+        }
+    }
+
+    /// `BannedContentDialog` picker payload `{categories, rows}`.
+    ///
+    /// Rows are every content type entry passing Java's `pred` (`Block::canBeBuilt`,
+    /// `BannedContentDialog.java:36`; `!UnitType.isHidden()`, `:37`) in content-id
+    /// order, `{name, id, category, ui_icon}`. `categories` is the block filter
+    /// row (`Category.values()`, `:73`) and empty for units.
+    #[func]
+    pub fn bannable_content_json(&self, kind: GString) -> GString {
+        let empty = "{\"categories\":[],\"rows\":[]}";
+        let Some(content) = self.content.as_ref() else {
+            return GString::from(empty);
+        };
+        let kind = Self::ban_kind(&kind.to_string());
+        let rows: Vec<serde_json::Value> = match kind {
+            banned::BanKind::Block => content
+                .blocks()
+                .iter()
+                .filter(|def| {
+                    !matches!(
+                        def.build_visibility,
+                        BuildVisibility::Hidden | BuildVisibility::DebugOnly
+                    )
+                })
+                .map(|def| {
+                    serde_json::json!({
+                        "name": def.name,
+                        "id": def.id.raw(),
+                        "category": def.category.name(),
+                        "ui_icon": format!("block-{}-ui", def.name),
+                    })
+                })
+                .collect(),
+            banned::BanKind::Unit => content
+                .units()
+                .iter()
+                .filter(|unit| !unit.is_hidden())
+                .map(|unit| {
+                    serde_json::json!({
+                        "name": unit.name,
+                        "id": unit.id.raw(),
+                        "category": "",
+                        "ui_icon": format!("unit-{}-ui", unit.name),
+                    })
+                })
+                .collect(),
+        };
+        let categories: Vec<&str> = match kind {
+            banned::BanKind::Block => Category::ALL
+                .iter()
+                .map(|category| category.name())
+                .collect(),
+            banned::BanKind::Unit => Vec::new(),
+        };
+        let payload = serde_json::json!({ "categories": categories, "rows": rows });
+        GString::from(
+            serde_json::to_string(&payload)
+                .unwrap_or_else(|_| empty.to_owned())
+                .as_str(),
+        )
+    }
+
+    /// The map's banned set for `kind` from the `rules` tag
+    /// (`state.rules.bannedBlocks`/`bannedUnits`), as a JSON array.
+    #[func]
+    pub fn banned_names_json(&self, kind: GString) -> GString {
+        let kind = Self::ban_kind(&kind.to_string());
+        let tag = self.editor.tags.get("rules").cloned().unwrap_or_default();
+        let names = banned::names_from_tag_json(&tag, kind);
+        GString::from(
+            serde_json::to_string(&names)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// Replaces the banned set in the `rules` tag, preserving every other key
+    /// (`BannedContentDialog` mutates the live `ObjectSet`; `CustomRulesDialog.java:189,210`).
+    #[func]
+    pub fn set_banned_names_json(&mut self, kind: GString, names_json: GString) -> bool {
+        let kind = Self::ban_kind(&kind.to_string());
+        let names: Vec<String> = match serde_json::from_str(&names_json.to_string()) {
+            Ok(names) => names,
+            Err(_) => return false,
+        };
+        let tag = self.editor.tags.get("rules").cloned().unwrap_or_default();
+        match banned::apply_to_tag_json(&tag, kind, &names) {
+            Ok(updated) => {
+                self.editor.tags.insert("rules".to_owned(), updated);
+                self.clear_error();
+                true
+            }
+            Err(error) => {
+                self.last_error_key = Some("@editor.errorload".to_owned());
+                self.last_error_message = Some(error.to_string());
+                false
+            }
+        }
     }
 
     /// Monotonic tile-edit counter (`MindEditorRenderer` invalidation).
@@ -760,15 +898,153 @@ impl MindEditor {
     /// and reports deferred until that host is wired in-engine.
     #[func]
     pub fn sector_generate(&mut self, planet: GString, sector: i64, seed: i64) -> bool {
+        let planet_name = planet.to_string();
+        let Ok(sector_id) = u16::try_from(sector) else {
+            self.last_error_key = Some("@editor.sectorgenerate".to_owned());
+            self.last_error_message = Some(format!("invalid sector {sector}"));
+            return false;
+        };
+        let seed_offset = seed.max(0) as u64;
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        // `World.loadSector` -> `PlanetGenerator.generate` (the structure
+        // passes stay sim-side; the editor gets the generated terrain).
+        let extras = mind_core::game::planet::static_gen_extras(content, &planet_name, sector_id);
+        let Some(generated) = mind_core::maps::planet::generate_sector_with_seed(
+            &planet_name,
+            sector_id,
+            content,
+            extras,
+            seed_offset,
+        ) else {
+            self.last_error_key = Some("@editor.sectorgenerate".to_owned());
+            self.last_error_message = Some(format!("no generator for `{planet_name}`"));
+            return false;
+        };
+        let generated_rules = generated.rules.clone();
+        // `editor.load(() -> world.loadSector(...))` + `logic.reset()`: the
+        // generated grid replaces the editor world and its entities.
+        self.grid = generated.grid;
+        self.ecs = MindWorld::new();
+        // Java writes the generated `state.rules`; the port's editor keeps the
+        // map rules in the `rules` tag, and clears `sector` + the extra filters
+        // (`state.rules.sector = null`, `editor.tags.put("genfilters", "{}")`).
+        if let Ok(json) = mind_core::io::json::JsonIo::write(&generated_rules) {
+            self.editor.tags.insert("rules".to_owned(), json);
+        }
+        self.editor
+            .tags
+            .insert("genfilters".to_owned(), "{}".to_owned());
+        self.editor.tags.shift_remove("sector");
+        self.file = None;
+        self.editor.saved = false;
         self.mark_tiles_changed();
-        self.editor.tags.insert(
-            "sector".to_owned(),
-            format!("{}:{}:{}", planet, sector, seed),
+        self.clear_error();
+        true
+    }
+
+    /// `SectorGenerateDialog`'s planet picker (`:39-41`): every planet with a
+    /// generator, non-empty sectors and `accessible`.
+    #[func]
+    pub fn sector_planets_json(&self) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let rows: Vec<serde_json::Value> = content
+            .planets()
+            .iter()
+            .filter(|def| {
+                def.generator != GeneratorKind::None && !def.sectors.is_empty() && def.accessible
+            })
+            .map(|def| {
+                serde_json::json!({
+                    "name": def.name,
+                    "sectors": def.sectors.len(),
+                })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// `Sector.getSize()` for the picker's `[ NxN ]` label
+    /// (`Sector.java:203-205`); `0` when the planet/cell is unknown.
+    #[func]
+    pub fn sector_size(&self, planet: GString, sector: i64) -> i64 {
+        let Some(content) = self.content.as_ref() else {
+            return 0;
+        };
+        let Ok(sector_id) = u16::try_from(sector) else {
+            return 0;
+        };
+        mind_core::maps::planet::sector_size(&planet.to_string(), sector_id, content)
+            .map(|size| size as i64)
+            .unwrap_or(0)
+    }
+
+    /// `MapObjectivesDialog`'s type table
+    /// (`MapObjectives.allObjectiveTypes` + `#[derive(ObjectiveFields)]`):
+    /// every objective class with its editor field descriptors. The
+    /// `kind`/`flags` tags are the GDScript ABI (`content:item`, `vec2i`,
+    /// `seq:int`, flags `second`/`tilepos`/`multiline`/`logiccode`/
+    /// `researchable`/`synthetic`/`hidden`).
+    #[func]
+    pub fn objective_classes_json(&self) -> GString {
+        let rows: Vec<serde_json::Value> = mind_core::editor::objectives::all_class_tags()
+            .iter()
+            .map(|tag| {
+                let fields: Vec<serde_json::Value> =
+                    mind_core::editor::objectives::class_fields(tag)
+                        .iter()
+                        .map(|field| {
+                            serde_json::json!({
+                                "name": field.name,
+                                "kind": objective_kind_tag(&field.kind),
+                                "flags": objective_flag_tags(field.flags),
+                            })
+                        })
+                        .collect();
+                serde_json::json!({ "tag": tag, "fields": fields })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// A fresh objective of class `tag` with Java's provider defaults
+    /// (`MapObjectivesDialog`'s `getProvider(MapObjective.class)`, `:213-240`)
+    /// plus the canvas default `editorPos`.
+    #[func]
+    pub fn objective_default_json(&self, tag: GString) -> GString {
+        let tag = tag.to_string();
+        let mut map = serde_json::Map::new();
+        map.insert("class".to_owned(), serde_json::Value::String(tag.clone()));
+        let fields = mind_core::editor::objectives::class_fields(&tag);
+        if fields.is_empty() {
+            return GString::from("{}");
+        }
+        for field in fields {
+            map.insert(
+                field.name.to_owned(),
+                mind_core::editor::objectives::provider_default(&field.kind, self.content.as_ref()),
+            );
+        }
+        map.insert(
+            "editorPos".to_owned(),
+            serde_json::Value::from(mind_core::io::json::objectives::default_editor_pos()),
         );
-        self.last_error_key = Some("@editor.sectorgenerate".to_owned());
-        self.last_error_message =
-            Some("sector generation awaits the plan-06 load_sector host".to_owned());
-        false
+        GString::from(
+            serde_json::to_string(&serde_json::Value::Object(map))
+                .unwrap_or_else(|_| "{}".to_owned())
+                .as_str(),
+        )
     }
 
     /// `MapObjectivesDialog`: the objectives JSON (`MapInfoDialog` route).
@@ -1040,6 +1316,185 @@ impl MindEditor {
             ]));
         }
         out
+    }
+
+    /// Editor building entity at `(x, y)` carrying `LogicBlockState`.
+    fn logic_entity_at(&self, x: i64, y: i64) -> Option<bevy_ecs::entity::Entity> {
+        let (Ok(xi), Ok(yi)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let entity = self
+            .grid
+            .entity_at(mind_core::world::TilePos::new(xi, yi))?;
+        self.ecs
+            .0
+            .get::<LogicBlockState>(entity)
+            .is_some()
+            .then_some(entity)
+    }
+
+    /// `MapProcessorsDialog` `@add`: the first non-synthetic tile becomes a
+    /// `world-processor` (`MapProcessorsDialog.java:33-56`); false when the
+    /// whole map is synthetic (`@editor.worldprocessors.nospace`).
+    #[func]
+    pub fn add_processor(&mut self) -> bool {
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        let Some(processor) = content.block_id("world-processor") else {
+            return false;
+        };
+        let Some((x, y)) = mind_core::editor::processors::free_processor_tile(&self.grid, content)
+        else {
+            return false;
+        };
+        let team = Team::get(1).id;
+        let mut world = WorldEditorGrid::new(
+            &mut self.grid,
+            content,
+            &mut self.ecs.0,
+            &self.hooks,
+            &self.render,
+        );
+        world.set_block(x, y, processor, team, 0);
+        self.mark_tiles_changed();
+        true
+    }
+
+    /// `MapProcessorsDialog` rename: `log.tag = tag` directly (the Java
+    /// comment bypasses privileged configure checks, `:100-105`).
+    #[func]
+    pub fn rename_processor(&mut self, x: i64, y: i64, tag: GString) -> bool {
+        let Some(entity) = self.logic_entity_at(x, y) else {
+            return false;
+        };
+        let clamped = mind_core::editor::processors::clamp_tag(&tag.to_string());
+        let Some(mut state) = self.ecs.0.get_mut::<LogicBlockState>(entity) else {
+            return false;
+        };
+        state.tag = (!clamped.is_empty()).then_some(clamped);
+        true
+    }
+
+    /// `MapProcessorsDialog` icon select: `log.iconTag = (char)ic` (`:86-90`);
+    /// `0` clears the icon (`Icon.none`).
+    #[func]
+    pub fn set_processor_icon(&mut self, x: i64, y: i64, code: i64) -> bool {
+        let Some(entity) = self.logic_entity_at(x, y) else {
+            return false;
+        };
+        let Some(mut state) = self.ecs.0.get_mut::<LogicBlockState>(entity) else {
+            return false;
+        };
+        state.icon_tag = u32::try_from(code)
+            .ok()
+            .and_then(char::from_u32)
+            .unwrap_or('\0');
+        true
+    }
+
+    /// `MapProcessorsDialog` delete (`:116-134`): a processor surrounded by
+    /// walls/static blocks becomes `stone-wall` (the port does not track
+    /// `floor().wall`, `editor/processors.rs`), else air. Confirmation is the
+    /// caller's.
+    #[func]
+    pub fn delete_processor(&mut self, x: i64, y: i64) -> bool {
+        let (Ok(xi), Ok(yi)) = (i16::try_from(x), i16::try_from(y)) else {
+            return false;
+        };
+        let (xi, yi) = (xi as i32, yi as i32);
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        if self.grid.tiles.getn(xi, yi).is_none() {
+            return false;
+        }
+        let mut surrounded = true;
+        for (dx, dy) in [(0, -1), (1, 0), (0, 1), (-1, 0)] {
+            let Some(neighbor) = self.grid.tiles.getn(xi + dx, yi + dy) else {
+                continue; // map edge: `Tile.nearby` null counts as surrounded
+            };
+            let def = content.block(neighbor.block);
+            let wall = def.is_some_and(|def| def.privileged || block_info::is_static(def));
+            if !wall {
+                surrounded = false;
+                break;
+            }
+        }
+        let replacement = if surrounded {
+            content.block_id("stone-wall").unwrap_or(BlockId::AIR)
+        } else {
+            BlockId::AIR
+        };
+        let mut world = WorldEditorGrid::new(
+            &mut self.grid,
+            content,
+            &mut self.ecs.0,
+            &self.hooks,
+            &self.render,
+        );
+        world.set_block(xi, yi, replacement, 0, 0);
+        self.mark_tiles_changed();
+        true
+    }
+
+    /// `LogicDialog.show` for an editor processor
+    /// (`MapProcessorsDialog`'s name button -> `showEditDialog(true)`): the
+    /// normalized program (`LAssembler.read` -> `write`) and privilege.
+    #[func]
+    pub fn logic_get_state(&self, x: i64, y: i64) -> VarDictionary {
+        let Some(entity) = self.logic_entity_at(x, y) else {
+            return VarDictionary::new();
+        };
+        let Some(state) = self.ecs.0.get::<LogicBlockState>(entity) else {
+            return VarDictionary::new();
+        };
+        let privileged = state.executor.privileged;
+        let code = mind_core::logic::Assembler::read(&state.code, privileged)
+            .map(|statements| mind_core::logic::Assembler::write(&statements))
+            .unwrap_or_else(|_| state.code.clone());
+        dict(vec![
+            ("code", GString::from(code.as_str()).to_variant()),
+            ("privileged", privileged.to_variant()),
+            ("ipt", (state.ipt as i64).to_variant()),
+            (
+                "tag",
+                match &state.tag {
+                    Some(tag) => GString::from(tag.as_str()).to_variant(),
+                    None => Variant::nil(),
+                },
+            ),
+        ])
+    }
+
+    /// `LogicBuild.showEditDialog(true)`'s configure half for an editor
+    /// processor: stores the compressed program + links in the editor's
+    /// `LogicBlockState` (the editor does not run processors). Returns the
+    /// `SimHost.logic_configure_code` error convention (`""` ok, `toolong:<n>`).
+    #[func]
+    pub fn logic_configure_code(&mut self, x: i64, y: i64, code: GString) -> GString {
+        let Some(entity) = self.logic_entity_at(x, y) else {
+            return GString::from("noprocessor");
+        };
+        let Some(state) = self.ecs.0.get::<LogicBlockState>(entity) else {
+            return GString::from("noprocessor");
+        };
+        let links = state.relative_connections(&self.ecs.0, entity);
+        let code = code.to_string();
+        let bytes = match mind_core::logic::blocks::logic_block::encode_for_config(&code, &links) {
+            Ok(bytes) => bytes,
+            Err(len) => return GString::from(format!("toolong:{len}").as_str()),
+        };
+        let Some(mut state) = self.ecs.0.entity_mut(entity).take::<LogicBlockState>() else {
+            return GString::from("noprocessor");
+        };
+        let result = state.read_compressed(&mut self.ecs.0, entity, &bytes, true);
+        self.ecs.0.entity_mut(entity).insert(state);
+        if result.is_ok() {
+            GString::new()
+        } else {
+            GString::from("invalid")
+        }
     }
 
     /// `MapAssetsDialog.assets()`: the loaded data-asset records.
@@ -1796,6 +2251,44 @@ impl MindEditor {
         );
         out
     }
+}
+
+/// GDScript tag for one objective field kind (`FieldKind`).
+fn objective_kind_tag(kind: &FieldKind) -> String {
+    match kind {
+        FieldKind::String => "string".to_owned(),
+        FieldKind::Bool => "bool".to_owned(),
+        FieldKind::Byte => "byte".to_owned(),
+        FieldKind::Int => "int".to_owned(),
+        FieldKind::Float => "float".to_owned(),
+        FieldKind::Content(content_type) => format!("content:{}", content_type.name()),
+        FieldKind::Team => "team".to_owned(),
+        FieldKind::Color => "color".to_owned(),
+        FieldKind::Vec2F => "vec2f".to_owned(),
+        FieldKind::Vec2I => "vec2i".to_owned(),
+        FieldKind::Objective(_) => "objective".to_owned(),
+        FieldKind::Seq(inner) => format!("seq:{}", objective_kind_tag(inner)),
+        FieldKind::Map(inner) => format!("map:{}", objective_kind_tag(inner)),
+    }
+}
+
+/// GDScript tags for one objective field's annotation flags (`FieldFlags`).
+fn objective_flag_tags(flags: FieldFlags) -> Vec<&'static str> {
+    let mut tags = Vec::new();
+    for (flag, tag) in [
+        (FieldFlags::SECOND, "second"),
+        (FieldFlags::TILE_POS, "tilepos"),
+        (FieldFlags::MULTILINE, "multiline"),
+        (FieldFlags::LOGIC_CODE, "logiccode"),
+        (FieldFlags::RESEARCHABLE, "researchable"),
+        (FieldFlags::SYNTHETIC, "synthetic"),
+        (FieldFlags::HIDDEN, "hidden"),
+    ] {
+        if flags.contains(flag) {
+            tags.push(tag);
+        }
+    }
+    tags
 }
 
 /// Builds one palette/`block_info` row.

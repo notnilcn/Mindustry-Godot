@@ -78,30 +78,60 @@ pub struct GeneratedSector {
     pub sides: usize,
 }
 
+/// `PlanetGenerator.getSectorSize(sector)` for one cell — the editor's
+/// `[ NxN ]` size label (`Sector.getSize`, `Sector.java:203-205`). `None` for
+/// an unknown planet or one without a generator.
+pub fn sector_size(planet: &str, sector: u16, content: &ContentRegistry) -> Option<i32> {
+    let def = content.planet_by_name(planet)?;
+    let planet_grid = PlanetGrid::create(def.sector_tiles as usize);
+    let rect = make_rect(&planet_grid, sector as usize, def.radius);
+    let generator = generator_for(planet, 0)?;
+    Some(sector_size_of(generator.as_ref(), rect.radius))
+}
+
+/// `PlanetGenerator.getSectorSize` math (`generate_sector` shares it).
+fn sector_size_of(generator: &dyn WorldGenerator, radius: f32) -> i32 {
+    generator
+        .sector_size_scl()
+        .map(|size_scl| {
+            let res = (radius * size_scl) as i32;
+            if res % 2 == 0 { res } else { res + 1 }
+        })
+        .unwrap_or(128)
+}
+
 /// Generates one campaign sector's tile grid (`Control.playNewSector` world
 /// half + `PlanetGenerator.generate`). Returns `None` for an unknown planet.
 ///
-/// `PlanetGenerator.generate`: `rand.setSeed(sec.id + params.seedOffset +
-/// baseSeed)` with `World.loadSector`'s default `seedOffset = 0`; the tile
-/// position projects through the sector's own rect and the size comes from
-/// `getSectorSize(sector)` (`PlanetGenerator.java:173-196`).
+/// `World.loadSector`'s default `seedOffset = 0`; callers that take a seed use
+/// [`generate_sector_with_seed`] (`SectorGenerateDialog`'s seed field).
 pub fn generate_sector(
     planet: &str,
     sector: u16,
     content: &ContentRegistry,
     extras: SectorGenExtras,
 ) -> Option<GeneratedSector> {
+    generate_sector_with_seed(planet, sector, content, extras, 0)
+}
+
+/// [`generate_sector`] with `WorldParams.seedOffset` set (`SectorGenerateDialog`
+/// `params.seedOffset = seed`, `:98-99`).
+///
+/// `PlanetGenerator.generate`: `rand.setSeed(sec.id + params.seedOffset +
+/// baseSeed)`; the tile position projects through the sector's own rect and the
+/// size comes from `getSectorSize(sector)` (`PlanetGenerator.java:173-196`).
+pub fn generate_sector_with_seed(
+    planet: &str,
+    sector: u16,
+    content: &ContentRegistry,
+    extras: SectorGenExtras,
+    seed_offset: u64,
+) -> Option<GeneratedSector> {
     let def = content.planet_by_name(planet)?;
     let planet_grid = PlanetGrid::create(def.sector_tiles as usize);
     let rect = make_rect(&planet_grid, sector as usize, def.radius);
     let mut generator = generator_for(planet, 0)?;
-    let size = generator
-        .sector_size_scl()
-        .map(|size_scl| {
-            let res = (rect.radius * size_scl) as i32;
-            if res % 2 == 0 { res } else { res + 1 }
-        })
-        .unwrap_or(128);
+    let size = sector_size_of(generator.as_ref(), rect.radius);
     let tile_v = planet_grid
         .tiles
         .get(sector as usize)
@@ -122,7 +152,7 @@ pub fn generate_sector(
         rect: Some(rect),
     });
     let params = WorldParams {
-        seed_offset: 0,
+        seed_offset,
         width: size,
         height: size,
         ..WorldParams::default()
@@ -175,6 +205,30 @@ mod tests {
         assert!(
             generate_sector("does-not-exist", 0, &content, SectorGenExtras::default()).is_none()
         );
+    }
+
+    #[test]
+    fn sector_size_matches_generation_and_seed_shifts() {
+        // `SectorGenerateDialog`'s `[ NxN ]` label: `sector_size` is the grid
+        // width the generator produces (`Sector.getSize`).
+        let content = content();
+        for planet in ["serpulo", "erekir"] {
+            let generated = generate_sector(planet, 0, &content, SectorGenExtras::default())
+                .expect("generated");
+            assert_eq!(
+                sector_size(planet, 0, &content),
+                Some(generated.grid.tiles.width)
+            );
+        }
+        assert_eq!(sector_size("does-not-exist", 0, &content), None);
+        // `WorldParams.seedOffset = seed`: a different seed changes the terrain.
+        let a = generate_sector_with_seed("serpulo", 1, &content, SectorGenExtras::default(), 0)
+            .expect("a");
+        let b = generate_sector_with_seed("serpulo", 1, &content, SectorGenExtras::default(), 7)
+            .expect("b");
+        let floors_a: Vec<BlockId> = a.grid.tiles.iter().map(|tile| tile.floor).collect();
+        let floors_b: Vec<BlockId> = b.grid.tiles.iter().map(|tile| tile.floor).collect();
+        assert_ne!(floors_a, floors_b, "seed 7 differs from seed 0");
     }
 
     #[test]

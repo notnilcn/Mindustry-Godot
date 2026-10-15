@@ -28,6 +28,9 @@ var _x := 0
 var _y := 0
 var _privileged := false
 var _code := ""
+## Editor target (`MapProcessorsDialog`'s name button /
+## `LogicBuild.showEditDialog(true)`): read/write through `MindEditor`.
+var _editor_mode := false
 ## `[{name, category, fields: [String]}]`.
 var _statements: Array = []
 var _list: MindTable = null
@@ -76,17 +79,34 @@ func _build() -> void:
 
 
 ## `LogicDialog.show`: loads the processor's program into the statement list.
+## `context.editor` targets an editor world tile (`MindEditor`,
+## `MapProcessorsDialog`'s name button -> `showEditDialog(true)`); otherwise
+## the live sim (`LogicBlock` config).
 func shown() -> void:
 	_x = int(_context.get("x", 0))
 	_y = int(_context.get("y", 0))
-	var host := get_node_or_null("/root/Spine/SimHost")
+	_editor_mode = bool(_context.get("editor", false))
 	var logic := get_node_or_null("/root/Spine/MindLogic")
-	if host == null or logic == null:
+	if logic == null:
 		return
-	var state: Variant = host.call("logic_get_state", _x, _y)
-	if state is Dictionary:
-		_privileged = bool(state.get("privileged", false))
-	_code = str(host.call("logic_get_code", _x, _y))
+	if _editor_mode:
+		var editor := get_node_or_null("/root/Spine/MindEditor")
+		if editor == null:
+			return
+		var state: Variant = editor.call("logic_get_state", _x, _y)
+		if state is Dictionary:
+			_privileged = bool(state.get("privileged", false))
+			_code = str(state.get("code", ""))
+		else:
+			_code = ""
+	else:
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host == null:
+			return
+		var state: Variant = host.call("logic_get_state", _x, _y)
+		if state is Dictionary:
+			_privileged = bool(state.get("privileged", false))
+		_code = str(host.call("logic_get_code", _x, _y))
 	var parsed: Variant = logic.call("parse_statements", _code, _privileged)
 	_statements = parsed if parsed is Array else []
 	_modified = false
@@ -284,11 +304,20 @@ func _load_from_clipboard() -> void:
 ## `LCanvas.save` -> `LogicBuild.showEditDialog`'s consumer.
 func _save() -> void:
 	var logic := get_node_or_null("/root/Spine/MindLogic")
-	var host := get_node_or_null("/root/Spine/SimHost")
-	if logic == null or host == null:
+	if logic == null:
 		return
 	var code := str(logic.call("write_statements", _statements))
-	var error := str(host.call("logic_configure_code", _x, _y, code))
+	var error := ""
+	if _editor_mode:
+		var editor := get_node_or_null("/root/Spine/MindEditor")
+		if editor == null:
+			return
+		error = str(editor.call("logic_configure_code", _x, _y, code))
+	else:
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host == null:
+			return
+		error = str(host.call("logic_configure_code", _x, _y, code))
 	if error.is_empty():
 		_code = code
 		_modified = false

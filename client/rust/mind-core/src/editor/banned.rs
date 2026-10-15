@@ -10,6 +10,7 @@
 
 use indexmap::IndexSet;
 
+use crate::io::IoError;
 use crate::io::IoResult;
 use crate::io::json::JsonIo;
 use crate::io::json::rules::Rules;
@@ -111,6 +112,59 @@ pub fn rules_json(rules: &Rules) -> IoResult<String> {
     JsonIo::write(rules)
 }
 
+/// The `Rules` JSON key backing `kind` (`Rules.bannedBlocks`/`bannedUnits`).
+pub fn tag_key(kind: BanKind) -> &'static str {
+    match kind {
+        BanKind::Block => "bannedBlocks",
+        BanKind::Unit => "bannedUnits",
+    }
+}
+
+/// Reads the banned names from a raw `rules` tag JSON (`editor.tags["rules"]`).
+///
+/// Missing, non-object or non-array values yield an empty list (`BannedContentDialog`
+/// over a fresh `Rules`). Names keep their stored order (`ObjectSet` iteration).
+pub fn names_from_tag_json(tag: &str, kind: BanKind) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(tag) else {
+        return Vec::new();
+    };
+    value
+        .get(tag_key(kind))
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Replaces the banned set inside a raw `rules` tag JSON, preserving every
+/// other key (`BannedContentDialog` mutates the live `state.rules` set; the
+/// port keeps the map `rules` tag as the source of truth, `MapEditorDialog.save`).
+///
+/// An empty tag starts a fresh object (`MapInfoDialog` on a map with no rules).
+pub fn apply_to_tag_json(tag: &str, kind: BanKind, names: &[String]) -> IoResult<String> {
+    let trimmed = tag.trim();
+    let mut value: serde_json::Value = if trimmed.is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        serde_json::from_str(trimmed)?
+    };
+    let Some(object) = value.as_object_mut() else {
+        return Err(IoError::corrupt("rules tag is not a JSON object"));
+    };
+    let entries = serde_json::Value::Array(
+        names
+            .iter()
+            .map(|name| serde_json::Value::String(name.clone()))
+            .collect(),
+    );
+    object.insert(tag_key(kind).to_owned(), entries);
+    Ok(serde_json::to_string(&value)?)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +204,39 @@ mod tests {
         apply_selection(&mut banned, &["gamma".to_owned()]);
         assert_eq!(banned.len(), 1);
         assert!(banned.contains("gamma"));
+    }
+
+    #[test]
+    fn tag_json_round_trip_preserves_other_keys() {
+        // A map rules tag with unrelated keys + GDScript-style floats.
+        let tag = r#"{"waves":true,"winWave":20.0,"mode":"sandbox","bannedBlocks":["router"]}"#;
+        assert_eq!(
+            names_from_tag_json(tag, BanKind::Block),
+            vec!["router".to_owned()]
+        );
+        assert!(names_from_tag_json(tag, BanKind::Unit).is_empty());
+
+        let updated = apply_to_tag_json(
+            tag,
+            BanKind::Unit,
+            &["dagger".to_owned(), "mace".to_owned()],
+        )
+        .unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&updated).unwrap();
+        assert_eq!(parsed["bannedUnits"][1], "mace");
+        assert_eq!(parsed["bannedBlocks"][0], "router", "other set untouched");
+        assert_eq!(parsed["winWave"], 20.0, "unknown/other keys preserved");
+        assert_eq!(parsed["mode"], "sandbox");
+
+        // An empty tag starts a fresh object; a non-object tag is rejected.
+        let fresh = apply_to_tag_json("", BanKind::Block, &["conveyor".to_owned()]).unwrap();
+        let fresh_parsed: serde_json::Value = serde_json::from_str(&fresh).unwrap();
+        assert_eq!(fresh_parsed["bannedBlocks"][0], "conveyor");
+        assert!(apply_to_tag_json("[]", BanKind::Block, &[]).is_err());
+        assert_eq!(
+            names_from_tag_json("not json", BanKind::Block),
+            Vec::<String>::new()
+        );
+        assert_eq!(names_from_tag_json("", BanKind::Unit), Vec::<String>::new());
     }
 }

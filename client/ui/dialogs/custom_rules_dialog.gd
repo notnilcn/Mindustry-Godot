@@ -1219,65 +1219,37 @@ func _open_loadout() -> void:
 	_finish_overlay(panel)
 
 
-## `@bannedblocks`/`@bannedunits`: the compact ban list editor for the rules
-## `bannedBlocks`/`bannedUnits` sets.
+## `current.button("@bannedblocks", ..., () -> bannedBlocks.show(rules.bannedBlocks))`
+## (`CustomRulesDialog.java:189`): the two-pane `BannedContentDialog` edits the
+## working `_rules` copy; edits come back through `banned_edited`.
 func _open_banned_blocks() -> void:
-	_open_banned("block", "bannedBlocks", func() -> Array:
-		return editor_content_list("block")
-	)
+	_open_banned("block")
 
 
+## `CustomRulesDialog.java:210`: the unit ban picker.
 func _open_banned_units() -> void:
-	_open_banned("unit", "bannedUnits", func() -> Array:
-		return editor_content_list("unit")
-	)
+	_open_banned("unit")
 
 
-func _open_banned(_kind: String, field: String, all_names: Callable) -> void:
-	var panel := _overlay_open("@%s" % field.to_lower(), 420.0)
-	var banned: Array = _rules.get(field, [])
-	panel.add(MindWidgets.label(_t("@%s" % field.to_lower()))).left()
-	panel.row()
-	for name_variant in banned:
-		var name := str(name_variant)
-		var row := MindWidgets.table()
-		row.add(MindWidgets.label(name)).left().set_pad_right(6)
-		var remove_button := _wide_button("@cancel", "cancel", Callable())
-		remove_button.pressed.connect(func() -> void:
-			banned.erase(name)
-			_rules[field] = banned
-			_close_overlay()
-			_open_banned(_kind, field, all_names)
-		)
-		row.add(remove_button).left()
-		panel.add(row).left().grow_x_axis().pad(2)
-		panel.row()
-	var add_field := MindWidgets.field(_t("@players.search"))
-	panel.add(add_field).left().grow_x_axis().pad(2)
-	panel.row()
-	var add_button := _wide_button("@add", "add", Callable())
-	add_button.pressed.connect(func() -> void:
-		var name := add_field.text.strip_edges()
-		if name.is_empty():
-			return
-		if not banned.has(name):
-			banned.append(name)
-		_rules[field] = banned
-		_close_overlay()
-		_open_banned(_kind, field, all_names)
-	)
-	panel.add(add_button).left()
-	panel.row()
-	_finish_overlay(panel)
+func _open_banned(kind: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("open_dialog"):
+		return
+	ui.call("open_dialog", "banned_content", JSON.stringify({"kind": kind, "rules": _rules}))
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root == null or not ui_root.has_method("dialog"):
+		return
+	var dialog: Node = ui_root.call("dialog", "banned_content")
+	if dialog != null and dialog.has_signal("banned_edited") \
+			and not dialog.is_connected("banned_edited", _on_banned_edited):
+		dialog.connect("banned_edited", _on_banned_edited)
 
 
-## `MindEditor` content list for the ban pickers.
-func editor_content_list(kind: String) -> Array:
-	var host := get_node_or_null("/root/Spine/SimHost")
-	if host == null or not host.has_method("content_list"):
-		return []
-	var names: Variant = host.call("content_list", kind)
-	return names if names is Array else []
+## `rules.bannedBlocks`/`bannedUnits` edited live by the ban dialog.
+func _on_banned_edited(json: String) -> void:
+	var parsed: Variant = JSON.parse_string(json)
+	if parsed is Dictionary:
+		_rules = parsed
 
 
 ## `@rules.weather`: weather-entry editor (`CustomRulesDialog.weatherDialog`).
