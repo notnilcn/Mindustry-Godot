@@ -2052,7 +2052,9 @@ impl DesktopBridge {
     /// `InputHandler.selectedUnit()` (`InputHandler.java:2148-2163`):
     /// `Units.closest(player.team(), mouseX, mouseY, 40, u -> u.isAI() &&
     /// u.playerControllable)`, accepted only when the hitbox grown by 6 on each
-    /// side contains the cursor.
+    /// side contains the cursor; else the ControlBlock branch
+    /// (`InputHandler.java:2159-2161`): the own turret's `block` unit under the
+    /// cursor (`MindSimHost::control_block_unit_id`; I01 T12).
     fn selected_unit_for_control(&self) -> Option<i32> {
         let (wx, wy) = self.aim_world()?;
         let team = self.player_team();
@@ -2066,20 +2068,28 @@ impl DesktopBridge {
                 let dst2 = dx * dx + dy * dy;
                 (dst2 <= CONTROL_RADIUS * CONTROL_RADIUS).then_some((dst2, unit))
             })
-            .min_by(|a, b| a.0.total_cmp(&b.0))?;
-        let unit = best.1;
-        let half = unit.hit_size / 2.0 + CONTROL_HITBOX_GROW;
-        ((unit.x - wx).abs() <= half && (unit.y - wy).abs() <= half).then_some(unit.id)
+            .min_by(|a, b| a.0.total_cmp(&b.0));
+        if let Some((_, unit)) = best {
+            let half = unit.hit_size / 2.0 + CONTROL_HITBOX_GROW;
+            if (unit.x - wx).abs() <= half && (unit.y - wy).abs() <= half {
+                return Some(unit.id);
+            }
+        }
+        // `build instanceof ControlBlock cont && cont.canControl() && build.team
+        // == player.team() && cont.unit() != player.unit() && cont.unit().isAI()`
+        // -> `cont.unit()`; the sim resolves the turret's proxy `block` unit.
+        if let (Some(host), Some((x, y))) = (self.host.clone(), self.cursor_tile())
+            && let Some(id) = host.bind().control_block_unit_id(x, y)
+        {
+            return Some(id);
+        }
+        None
     }
 
     /// `InputHandler.selectedControlBuild()` (`InputHandler.java:2165-2171`):
     /// a same-team building with `canControlSelect(player.unit())` under the
     /// cursor — `CoreBlock` (core respawn) and the `PayloadConveyor`/
     /// `PayloadRouter` family (enter payload).
-    ///
-    /// Turrets are `ControlBlock`s, NOT `canControlSelect`; the port routes
-    /// them through `selected_unit_for_control`'s ControlBlock branch, which
-    /// needs H01's block-unit model (skipped, recorded).
     fn selected_control_build(&self) -> Option<(i32, i32)> {
         let (x, y) = self.cursor_tile()?;
         let kind = self.block_kind_at(x, y)?;

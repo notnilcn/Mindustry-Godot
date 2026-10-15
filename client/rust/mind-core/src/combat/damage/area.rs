@@ -79,6 +79,14 @@ fn targets_in_radius(
         if entity_ref.get::<Health>().is_none() {
             continue;
         }
+        // Detached `block` unit proxies (possessed turrets, I01 T12) are never
+        // in Java's `Groups.unit`, so area damage skips them.
+        if entity_ref
+            .get::<crate::entities::comp::unit::comp::BlockUnitComp>()
+            .is_some()
+        {
+            continue;
+        }
         // `UnitComp.checkTarget(air, ground)` (`UnitComp.java:76-78`):
         // `(isGrounded() && ground) || (isFlying() && air)`, where grounded is
         // `elevation < 0.001` and flying is `elevation >= 0.09`. Buildings are

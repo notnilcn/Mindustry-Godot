@@ -19,6 +19,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::{ItemId, LiquidId};
+use crate::entities::comp::{Pos, TeamComp};
 use crate::world::behavior::{BuildingBehavior, PayloadRef};
 use crate::world::{BuildingReader, BuildingWriter};
 
@@ -31,6 +32,11 @@ use super::{
 pub struct TurretBehavior {
     /// Resolved turret knobs (shared with the harness).
     pub config: Arc<TurretConfig>,
+    /// The `block` unit proxy (`TurretBuild.unit`; `Turret.java:297`),
+    /// resolved from content at registration. The proxy is a detached entity
+    /// (never in `UnitRuntime.units`, never saved) that carries the player's
+    /// control for a possessed turret (I01 T12).
+    pub block_unit: Option<Arc<crate::content::registries::units::UnitTypeDef>>,
 }
 
 impl TurretBehavior {
@@ -38,15 +44,59 @@ impl TurretBehavior {
     pub fn new(config: TurretConfig) -> Self {
         Self {
             config: Arc::new(config),
+            block_unit: None,
         }
+    }
+
+    /// Attaches the `block` unit def (`UnitTypes.block`; live registration).
+    pub fn with_block_unit(
+        mut self,
+        def: Arc<crate::content::registries::units::UnitTypeDef>,
+    ) -> Self {
+        self.block_unit = Some(def);
+        self
     }
 }
 
 impl BuildingBehavior for TurretBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
-        world
-            .entity_mut(e)
-            .insert(TurretState::new(self.config.clone()));
+        let mut state = TurretState::new(self.config.clone());
+        // `TurretBuild`: `public BlockUnitc unit = (BlockUnitc)UnitTypes.block.create(team);`
+        // (`Turret.java:297`) — positioned on the turret every update
+        // (`unit.tile(this)`, `Turret.java:440-445`) and never added to
+        // `Groups.unit`, so it is never saved or updated by the unit pass.
+        if let Some(def) = self.block_unit.as_ref() {
+            let team = world.get::<TeamComp>(e).map(|team| team.team).unwrap_or(0);
+            let (x, y) = world
+                .get::<Pos>(e)
+                .map(|pos| (pos.x, pos.y))
+                .unwrap_or_default();
+            let tile = world
+                .get::<crate::entities::comp::Building>(e)
+                .map(|building| building.tile.pack())
+                .unwrap_or(i32::MIN);
+            let seq = crate::world::blocks::units::behavior::next_unit_seq(world);
+            let unit = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+                world, seq, def, team, x, y, 0.0,
+            );
+            world
+                .entity_mut(unit)
+                .insert(crate::entities::comp::unit::comp::BlockUnitComp { tile });
+            state.block_unit = Some(unit);
+        }
+        world.entity_mut(e).insert(state);
+    }
+
+    /// `TurretBuild` has no explicit `onRemoved`; the proxy is dropped with the
+    /// building in the port (it is never in `Groups.unit`).
+    fn on_removed(&self, world: &mut World, e: Entity) {
+        if let Some(unit) = world
+            .get::<TurretState>(e)
+            .and_then(|state| state.block_unit)
+            && world.get_entity(unit).is_ok()
+        {
+            let _ = world.despawn(unit);
+        }
     }
 
     fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {

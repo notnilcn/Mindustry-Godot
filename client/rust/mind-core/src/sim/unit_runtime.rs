@@ -1634,12 +1634,19 @@ impl Sim {
             .map(|(entity, _, _, _)| *entity)
     }
 
-    /// `CoreBlock.playerSpawn` (`CoreBlock.java:95-125`): spawn the core's
-    /// `unitType` at the core with reloaded mounts, `spawnedByCore` set and the
-    /// upward impulse; `None` when the core unit type does not support the
-    /// sector env.
+    /// `CoreBlock.playerSpawn` (`CoreBlock.java:95-125`) at the best core
+    /// (`PlayerComp.bestCore`). See [`Self::spawn_player_at_core`].
     pub fn spawn_player_at_best_core(&mut self, team: u8) -> Option<Entity> {
         let core = self.best_core_for_player(team)?;
+        self.spawn_player_at_core(team, core)
+    }
+
+    /// `CoreBlock.requestSpawn(player)` (`CoreBlock.java:639-643`): spawn the
+    /// core's `unitType` at the core with reloaded mounts, `spawnedByCore` set
+    /// and the upward impulse; `None` when the core unit type does not support
+    /// the sector env. Used by the best-core respawn and by
+    /// `CoreBlock.onControlSelect` (I01 T12).
+    pub fn spawn_player_at_core(&mut self, team: u8, core: Entity) -> Option<Entity> {
         let (x, y) = self.ecs.0.get::<Pos>(core).map(|pos| (pos.x, pos.y))?;
         let (name, env): (String, i32) = {
             let runtime = self.ecs.0.get_non_send::<UnitRuntime>()?;
@@ -2003,6 +2010,57 @@ impl Sim {
         self.player_unit = None;
         let _ = self.spawn_player_at_best_core(team);
         true
+    }
+
+    /// `CoreBlock.canControlSelect(player)`/`onControlSelect(player)`
+    /// (`CoreBlock.java:619-637`): Ctrl-click on an own core clears the player's
+    /// unit and respawns it at that core (`player.clearUnit();
+    /// player.deathTimer = Player.deathDelay + 1; requestSpawn(player)` ->
+    /// `Call.playerSpawn(tile, player)`). I01 T12.
+    pub fn control_select_core(&mut self, core: Entity) -> bool {
+        let Some(team) = self.player_team else {
+            return false;
+        };
+        // `canControlSelect(unit)` = `unit.isPlayer()`: the player must hold a
+        // unit to control-select with.
+        if self.player_unit.is_none() {
+            return false;
+        }
+        if let Some(current) = self.player_unit {
+            self.release_unit_to_ai(current, team);
+            self.player_unit = None;
+        }
+        // `player.deathTimer = Player.deathDelay + 1` (60 + 1) guards the retry
+        // window while `requestSpawn` spawns immediately.
+        self.player_death_timer = 61.0;
+        if self.spawn_player_at_core(team, core).is_some() {
+            self.player_death_timer = 0.0;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// `InputHandler.selectedUnit()`'s ControlBlock branch
+    /// (`InputHandler.java:2159-2161`): the detached `block` unit of an own
+    /// controllable turret on `pos` (`TurretBuild.unit`; I01 T12). `None` when
+    /// the tile holds no turret, the team differs, or the turret is the
+    /// player's own unit already.
+    pub fn control_block_unit_id(&self, pos: TilePos) -> Option<i32> {
+        let entity = self.grid.entity_at(pos)?;
+        let team = self.player_team?;
+        if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(team) {
+            return None;
+        }
+        let state = self
+            .ecs
+            .0
+            .get::<crate::world::blocks::defense::turrets::TurretState>(entity)?;
+        let unit = state.block_unit?;
+        if self.player_unit == Some(unit) || self.ecs.0.get_entity(unit).is_err() {
+            return None;
+        }
+        self.ecs.0.get::<EntitySeq>(unit).map(|seq| seq.0 as i32)
     }
 
     /// The controlled player unit entity, if any.

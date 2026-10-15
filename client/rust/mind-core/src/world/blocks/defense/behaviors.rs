@@ -689,11 +689,22 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
 
     let names = content.bullet_names();
     if !names.is_empty() {
+        // `TurretBuild.unit = (BlockUnitc)UnitTypes.block.create(team)`
+        // (`Turret.java:297`; I01 T12): the proxy unit every turret carries so
+        // a player can control it (`canControl()` = `playerControllable`).
+        let block_unit = content
+            .unit_id("block")
+            .and_then(|id| content.unit(id))
+            .map(|def| Arc::new(def.clone()));
         for name in TURRET_BLOCKS {
             if let Some(config) = config_for(content, name, names)
                 && ammo_in_content(&config, content)
             {
-                registry.register_named(name, Arc::new(TurretBehavior::new(config)));
+                let mut behavior = TurretBehavior::new(config);
+                if let Some(def) = block_unit.clone() {
+                    behavior = behavior.with_block_unit(def);
+                }
+                registry.register_named(name, Arc::new(behavior));
             }
         }
     }

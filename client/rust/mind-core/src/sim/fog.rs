@@ -481,9 +481,12 @@ pub(crate) fn collect_fog_sources(
     let mut unit_entities: Vec<Entity> = world
         .iter_entities()
         .filter(|entity| {
+            // Detached `block` unit proxies (possessed turrets, I01 T12) are
+            // never added to Java's `Groups.unit`, so they reveal no fog.
             entity.contains::<UnitTypeComp>()
                 && entity.contains::<Pos>()
                 && entity.contains::<TeamComp>()
+                && !entity.contains::<crate::entities::comp::unit::comp::BlockUnitComp>()
         })
         .map(|entity| entity.id())
         .collect();
