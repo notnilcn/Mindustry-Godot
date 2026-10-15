@@ -2860,26 +2860,50 @@ impl MindCampaign {
 
     /// Placement-palette catalog JSON (`PlacementFragment.getUnlockedByCategory`).
     ///
-    /// Campaign games filter through the settings-backed unlock store: only
-    /// blocks whose `<name>-unlocked` bit is set (or that `check_auto_unlocks`
-    /// grants at boot) and whose `BuildVisibility` is buildable survive, empty
-    /// categories are dropped, and other-planet content is hidden
-    /// (`Block.environmentBuildable` reads the active planet's `shownPlanets`).
-    /// Custom games expose the full build-menu inventory, mirroring
-    /// `unlockedNowHost`'s `!state.isCampaign()` branch, with the same planet
-    /// filter.
+    /// Built over the live session registry — the one content boot filled,
+    /// mods included — because Java reads the global `Vars.content.blocks()`
+    /// (`PlacementFragment.java:771-781`); the base-content helpers are only
+    /// the no-session fallback. Campaign games filter through the
+    /// settings-backed unlock store: only blocks whose `<name>-unlocked` bit is
+    /// set (or that `check_auto_unlocks` grants at boot) and whose
+    /// `BuildVisibility` is buildable survive, empty categories are dropped,
+    /// and other-planet content is hidden (`Block.environmentBuildable` reads
+    /// the active planet's `shownPlanets`). Custom games expose the full
+    /// build-menu inventory, mirroring `unlockedNowHost`'s
+    /// `!state.isCampaign()` branch, with the same planet filter.
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
-        let catalog = if self.session.is_campaign() {
-            settings_hub::with_settings(|settings| {
-                let store = SettingsUnlockStore::new(settings);
-                mind_core::ui::campaign::block_catalog_unlocked_for(
-                    &store,
-                    &self.session.rules.planet,
-                )
-            })
-        } else {
-            mind_core::ui::campaign::block_catalog_for(&self.session.rules.planet)
+        let planet = self.session.rules.planet.clone();
+        let is_campaign = self.session.is_campaign();
+        let catalog = match self.registry.as_ref() {
+            Some(registry) => {
+                if is_campaign {
+                    settings_hub::with_settings(|settings| {
+                        let store = SettingsUnlockStore::new(settings);
+                        mind_core::ui::campaign::block_catalog_from(
+                            registry,
+                            Some(&store),
+                            Some(planet.as_str()),
+                        )
+                    })
+                } else {
+                    mind_core::ui::campaign::block_catalog_from(
+                        registry,
+                        None,
+                        Some(planet.as_str()),
+                    )
+                }
+            }
+            None => {
+                if is_campaign {
+                    settings_hub::with_settings(|settings| {
+                        let store = SettingsUnlockStore::new(settings);
+                        mind_core::ui::campaign::block_catalog_unlocked_for(&store, planet.as_str())
+                    })
+                } else {
+                    mind_core::ui::campaign::block_catalog_for(planet.as_str())
+                }
+            }
         };
         GString::from(
             serde_json::to_string(&catalog)

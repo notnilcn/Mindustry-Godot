@@ -430,10 +430,7 @@ fn tech_node_auto_unlocks(
 /// Shared catalog builder; `store` enables the unlock/visibility filter and
 /// `planet` overrides the default Serpulo `environmentBuildable` context.
 fn block_catalog_with(store: Option<&dyn UnlockStore>, planet: Option<&str>) -> BlockCatalogView {
-    use crate::content::registries::blocks::BuildVisibility;
-    use crate::content::{
-        Category, MemoryBundle, MemoryUnlockStore, PlanetId, create_base_content,
-    };
+    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
 
     let empty = MemoryUnlockStore::new();
     let store_ref: &dyn UnlockStore = match store {
@@ -448,6 +445,23 @@ fn block_catalog_with(store: Option<&dyn UnlockStore>, planet: Option<&str>) -> 
     if registry.init().is_err() || registry.post_init().is_err() {
         return BlockCatalogView::empty();
     }
+    block_catalog_from(&registry, store, planet)
+}
+
+/// Catalog over a caller-supplied registry: the live session registry in the
+/// client, so mod content is in the palette exactly like Java's
+/// `PlacementFragment.getUnlockedByCategory` reads the global
+/// `Vars.content.blocks()` (`PlacementFragment.java:771-781`). `store` enables
+/// the unlock/visibility filter and `planet` overrides the default Serpulo
+/// `environmentBuildable` context.
+pub fn block_catalog_from(
+    registry: &ContentRegistry,
+    store: Option<&dyn UnlockStore>,
+    planet: Option<&str>,
+) -> BlockCatalogView {
+    use crate::content::registries::blocks::BuildVisibility;
+    use crate::content::{Category, PlanetId};
+
     // `State.getPlanet()` falls back to the rules planet (`serpulo` by default).
     let planet: Option<PlanetId> = planet
         .and_then(|name| registry.planet_id(name))
@@ -503,7 +517,7 @@ fn block_catalog_with(store: Option<&dyn UnlockStore>, planet: Option<&str>) -> 
             // not model `alwaysUnlocked` for them).
             if let Some(node_ref) = block.unlock.tech_node
                 && !block.unlock.unlocked()
-                && !tech_node_auto_unlocks(&registry, node_ref)
+                && !tech_node_auto_unlocks(registry, node_ref)
             {
                 continue;
             }
@@ -1918,6 +1932,55 @@ mod tests {
         let erekir_full = block_catalog_for("erekir");
         assert!(has(&erekir_full, "core-bastion"));
         assert!(!has(&erekir_full, "duo"));
+    }
+
+    /// I07 T6 (PAR-0115): the client builds the palette over the live session
+    /// registry (`Vars.content.blocks()`, `PlacementFragment.java:771-781`), so
+    /// an enabled mod's block reaches the sandbox placement palette.
+    #[test]
+    fn block_catalog_from_lists_live_mod_content() {
+        use crate::content::boot::{build_registry_with_mods, collect_boot_content};
+        use crate::content::{MemoryBundle, MemoryUnlockStore};
+        use crate::io::SettingsStore;
+        use crate::io::fs::NativeFs;
+        use crate::mods::Mods;
+        use std::path::Path;
+
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../parity/mod_fixtures/allkinds");
+        let fs = NativeFs;
+        let mut mods = Mods::new(true, &dir);
+        mods.load_single(&fs, &dir, &SettingsStore::new())
+            .expect("load allkinds");
+        let boot = collect_boot_content(&mut mods, &fs);
+        let (registry, report) =
+            build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
+                .expect("boot with mods");
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+
+        let catalog = block_catalog_from(&registry, None, Some("serpulo"));
+        let mod_blocks = catalog
+            .categories
+            .iter()
+            .flat_map(|category| category.blocks.iter())
+            .filter(|block| block.name.starts_with("all-kinds-"))
+            .map(|block| block.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            mod_blocks,
+            vec!["all-kinds-all-wall"],
+            "the modded block is in the live-registry palette"
+        );
+
+        // The base-content builder stays mod-free (the no-session fallback).
+        let base = block_catalog_for("serpulo");
+        assert!(
+            !base.categories.iter().any(|category| category
+                .blocks
+                .iter()
+                .any(|block| block.name == "all-kinds-all-wall")),
+            "base content has no mod blocks"
+        );
     }
 
     #[test]
