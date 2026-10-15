@@ -344,8 +344,9 @@ pub(crate) fn no_unit_overlap(
     let Some(def) = content.block(block) else {
         return true;
     };
-    if !def.solid {
-        // `(!type.solid && !type.solidifes)` short-circuits the query.
+    if !def.solid && !def.solidifies {
+        // `(!type.solid && !type.solidifes)` short-circuits the query
+        // (`Build.java:178-180`).
         return true;
     }
     !unit_overlap_at(world, content, pos, block)

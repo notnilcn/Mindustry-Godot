@@ -4209,6 +4209,8 @@ impl MindCampaign {
             "destroyed": stats.buildings_destroyed,
             "deconstructed": stats.buildings_deconstructed,
             "waves": self.session.rules.waves,
+            // `stats.coreItemCount` keyed by item name (`CoreItemObjective.text()`).
+            "coreItems": stats.core_item_count,
         });
         GString::from(value.to_string().as_str())
     }

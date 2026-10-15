@@ -214,7 +214,8 @@ fn scan_tiles(
             let tx = WorldGrid::to_tile(x + dx as f32 * tile_size);
             let ty = WorldGrid::to_tile(y + dy as f32 * tile_size);
             let out_of_bounds = tx < 0 || ty < 0 || tx >= grid.width() || ty >= grid.height();
-            if out_of_bounds || grid.tile(tx, ty).solid(content) {
+            // `TankComp.java:77`: `t == null || t.solid()`.
+            if out_of_bounds || grid.tile(tx, ty).solid_full(content) {
                 solids += 1;
             }
             let tile = if out_of_bounds {

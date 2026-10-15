@@ -1293,3 +1293,122 @@ fn rules_world_dirty_rederives_limit_area() {
         .expect("runtime");
     assert!(!runtime.rules_world_dirty, "flag cleared");
 }
+
+/// I01 T2: a closed door is solid for ground units (`DoorBuild.checkSolid()`,
+/// `Door.java:142-145`), mirrored into `Tile.dynamic_solid` by
+/// `world::sync_dynamic_solid`.
+#[test]
+fn closed_door_blocks_ground_unit() {
+    use crate::ai::types::ground::unit_can_pass;
+    use crate::sim::combat_tests::{live_sim, place};
+
+    let mut sim = live_sim(16);
+    place(&mut sim, 8, 8, "door", 2);
+    // `DoorBuild.open = false` on creation (`Door.java:67`).
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 6.0 * 8.0, 8.0 * 8.0, 0.0)
+        .expect("dagger");
+    let runtime = sim.unit_runtime().expect("runtime");
+    assert!(
+        sim.grid.tiles.get(8, 8).solid_full(&runtime.content),
+        "Tile.solid() is true for a closed door"
+    );
+    assert!(
+        !unit_can_pass(&sim.ecs.0, &sim.grid, &runtime.content, dagger, 8, 8),
+        "EntityCollisions.solid rejects a ground unit on the closed door tile"
+    );
+}
+
+/// I01 T2: opening the door clears the packed solid bit for the live grid and
+/// the pathfinder (`Door.java:56` `pathfinder.updateTile`).
+#[test]
+fn open_door_lets_unit_pass() {
+    use crate::ai::types::ground::unit_can_pass;
+    use crate::determinism::SimCommand;
+    use crate::sim::combat_tests::{live_sim, place};
+
+    let mut sim = live_sim(16);
+    place(&mut sim, 8, 8, "door", 2);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, 6.0 * 8.0, 8.0 * 8.0, 0.0)
+        .expect("dagger");
+    sim.command(SimCommand::Configure {
+        x: 8,
+        y: 8,
+        value: crate::determinism::ConfigValue::Bool(true),
+    })
+    .expect("configure open");
+    let runtime = sim.unit_runtime().expect("runtime");
+    assert!(
+        !sim.grid.tiles.get(8, 8).dynamic_solid,
+        "an open door is not dynamically solid"
+    );
+    assert!(
+        unit_can_pass(&sim.ecs.0, &sim.grid, &runtime.content, dagger, 8, 8),
+        "an open door is walkable"
+    );
+}
+
+/// I01 T2: a toggle re-packs the pathfinder tiles so flow fields use the new
+/// solidity.
+#[test]
+fn door_toggle_updates_flowfield() {
+    use crate::determinism::SimCommand;
+    use crate::sim::combat_tests::{live_sim, place};
+
+    let mut sim = live_sim(16);
+    place(&mut sim, 8, 8, "door", 2);
+    let index = sim.grid.tiles.index(8, 8);
+    assert!(
+        sim.unit_runtime().expect("runtime").pathfinder.tiles[index].solid(),
+        "a closed door packs the pathfinder solid bit"
+    );
+    sim.command(SimCommand::Configure {
+        x: 8,
+        y: 8,
+        value: crate::determinism::ConfigValue::Bool(true),
+    })
+    .expect("configure open");
+    assert!(
+        !sim.unit_runtime().expect("runtime").pathfinder.tiles[index].solid(),
+        "an open door clears the pathfinder solid bit"
+    );
+    // `Door.tapped` throttles a second toggle within 60 ticks (`Door.java:148-154`).
+    for _ in 0..61 {
+        sim.tick().expect("tick");
+    }
+    sim.command(SimCommand::Configure {
+        x: 8,
+        y: 8,
+        value: crate::determinism::ConfigValue::Bool(false),
+    })
+    .expect("configure close");
+    assert!(
+        sim.unit_runtime().expect("runtime").pathfinder.tiles[index].solid(),
+        "closing the door re-packs the solid bit"
+    );
+}
+
+/// I01 T4: the packed pathfinder health is the LIVE `build.health`
+/// (`Pathfinder.packTile`, `Pathfinder.java:260-270`), re-packed on a tile
+/// change (`Pathfinder.java:150-154`). A damaged wall is therefore cheaper to
+/// path through (`costGround` = `1 + health * 5`) than a fresh one.
+#[test]
+fn damaged_wall_is_cheaper_to_path_through() {
+    use crate::sim::combat_tests::{live_sim, place};
+
+    let mut sim = live_sim(16);
+    let wall = place(&mut sim, 8, 8, "copper-wall", 2);
+    let index = sim.grid.tiles.index(8, 8);
+    let fresh = sim.unit_runtime().expect("runtime").pathfinder.tiles[index].health();
+    assert_eq!(fresh, 8, "copper-wall 320 hp packs as health/40 = 8");
+    if let Some(mut health) = sim.ecs.0.get_mut::<crate::entities::comp::Health>(wall) {
+        health.health = 80.0;
+    }
+    // Java re-packs on `TileChangeEvent` (`Pathfinder.java:150-154`); the live
+    // sim's equivalent trigger is any placement/break.
+    place(&mut sim, 8, 12, "copper-wall", 2);
+    let packed = sim.unit_runtime().expect("runtime").pathfinder.tiles[index].health();
+    assert_eq!(packed, 2, "80 hp packs as 2");
+    assert!(packed < fresh, "a damaged wall is cheaper to path through");
+}

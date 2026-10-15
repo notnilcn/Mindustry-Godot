@@ -476,6 +476,39 @@ pub fn block_has_building(content: &ContentRegistry, block: BlockId) -> bool {
         .is_some_and(|def| has_building_kind(def.kind))
 }
 
+/// Re-derives every tile's [`crate::world::tile::Tile::dynamic_solid`] mirror
+/// from the live `Building.checkSolid()` (`Tile.solid()`'s
+/// `build != null && build.checkSolid()` term, `Tile.java:462-464`).
+///
+/// Java reads the building pointer directly; the port's [`WorldGrid`] has no
+/// ECS access, so the flag is mirrored here. Call it before any consumer of
+/// `Tile::solid_full` runs (the sim calls it from
+/// `Sim::refresh_unit_runtime`/`install_unit_runtime_from` and after a live
+/// `configure`, so a door toggle reaches both the pathfinder packing and the
+/// unit collision predicate). Returns whether any flag changed.
+pub fn sync_dynamic_solid(grid: &mut WorldGrid, world: &World) -> bool {
+    use crate::entities::comp::Building;
+
+    let table = world.get_resource::<crate::world::block::BlockTable>();
+    let mut changed = false;
+    let len = grid.tiles.len();
+    for index in 0..len {
+        let tile = grid.tiles.geti(index);
+        let dynamic = match (tile.build, table) {
+            (Some(entity), Some(table)) => world
+                .get::<Building>(entity)
+                .and_then(|building| table.instance(building.block))
+                .is_some_and(|inst| inst.behavior.check_solid(world, entity)),
+            _ => false,
+        };
+        if tile.dynamic_solid != dynamic {
+            grid.tiles.geti_mut(index).dynamic_solid = dynamic;
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// World hooks resource (plan 07/16 inject real implementations).
 #[derive(Resource)]
 pub struct WorldHooksRes(pub Box<dyn WorldHooks>);
