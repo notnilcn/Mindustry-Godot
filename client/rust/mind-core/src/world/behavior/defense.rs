@@ -232,25 +232,16 @@ impl BuildingBehavior for DoorBehavior {
             ConfigValue::None => false,
             _ => return,
         };
-        // `Door.tapped` (`Door.java:148-154`): `origin().timer(timerToggle, 60f)`
-        // rejects a repeated tap within 60 ticks. The port compares `BuildClock`
-        // sim time (the door has no `updateTile` to tick a countdown).
-        let now = crate::world::update::build_time(world);
-        let throttled = world
-            .get::<DoorState>(e)
-            .and_then(|state| state.last_toggle)
-            .is_some_and(|last| now - last < 60.0);
-        if throttled {
-            return;
-        }
-        if let Some(mut state) = world.get_mut::<DoorState>(e) {
-            state.last_toggle = Some(now);
-        }
+        // `Door`'s config body (`Door.java:38-58`) has no throttle; the 60-tick
+        // `timerToggle` gate belongs to `DoorBuild.tapped` only (see
+        // [`tap_allowed`]). The body emits the sound + ring effect keyed on the
+        // state BEFORE the change, then applies it.
+        let was_open = world.get::<DoorState>(e).is_some_and(|state| state.open);
         set_open(world, e, open);
-        // `Door.java:40`: `doorSound.at(base)` on a live config application.
-        // Java gates on `!world.isGenerating()`; the port never plays from the
-        // map/save read paths (they write `DoorState` directly), so reaching
-        // here already means a live configure.
+        // `Door.java:39-42`: `doorSound.at(base)` + `base.effect()` on a live
+        // config application. Java gates on `!world.isGenerating()`; the port
+        // never reaches this path from map/save reads (they write `DoorState`
+        // directly).
         if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
             crate::audio::sim::emit_world_sound(
                 world,
@@ -261,6 +252,7 @@ impl BuildingBehavior for DoorBehavior {
                 1.0,
                 0.0,
             );
+            emit_door_fx(world, e, was_open, x, y);
         }
     }
 
@@ -295,6 +287,66 @@ fn chain_of(world: &World, e: Entity) -> SmallVec<[Entity; 6]> {
         .map(|state| state.chained.clone())
         .filter(|chain| !chain.is_empty())
         .unwrap_or_else(|| SmallVec::from_iter([e]))
+}
+
+/// `DoorBuild.origin()` (`Door.java:106-108`): the first door of the chain.
+fn origin_of(world: &World, e: Entity) -> Entity {
+    world
+        .get::<DoorState>(e)
+        .and_then(|state| state.chained.first().copied())
+        .unwrap_or(e)
+}
+
+/// `DoorBuild.tapped`'s timer gate (`Door.java:148-154`):
+/// `origin().timer(timerToggle, 60f)`. Arc's `timer` consumes the slot when it
+/// fires, so a tap is rejected for 60 ticks after the last accepted one. The
+/// caller checks the `Units.anyEntities(tile) && open` clause first (Java
+/// short-circuit order: a unit in an open door must not consume the slot).
+pub fn tap_allowed(world: &mut World, e: Entity) -> bool {
+    let origin = origin_of(world, e);
+    let now = crate::world::update::build_time(world);
+    let Some(mut state) = world.get_mut::<DoorState>(origin) else {
+        return false;
+    };
+    if state.last_toggle.is_some_and(|last| now - last < 60.0) {
+        return false;
+    }
+    state.last_toggle = Some(now);
+    true
+}
+
+/// `DoorBuild.effect()` (`Door.java:110-112`): `(open ? closefx : openfx)
+/// .at(this, size)` through the live unit runtime's FX sink. `door-large`
+/// swaps in the `*large` pair (`Blocks.java:1794-1796`; the vanilla `Door`s are
+/// the only configured doors, so `size > 1` covers both).
+fn emit_door_fx(world: &World, e: Entity, was_open: bool, x: f32, y: f32) {
+    use crate::content::registries::fx_meta::EffectRef;
+    let Some(fx) = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .map(|runtime| runtime.fx.clone())
+    else {
+        return;
+    };
+    let Some(size) = world
+        .get::<Building>(e)
+        .and_then(|building| world.get_resource::<BlockTable>()?.get(building.block))
+        .map(|instance| instance.def.size)
+    else {
+        return;
+    };
+    let id = match (was_open, size > 1) {
+        (true, false) => crate::content::EffectId::DOORCLOSE,
+        (false, false) => crate::content::EffectId::DOOROPEN,
+        (true, true) => crate::content::EffectId::DOORCLOSELARGE,
+        (false, true) => crate::content::EffectId::DOOROPENLARGE,
+    };
+    fx.effect(
+        &EffectRef::Named(id),
+        x,
+        y,
+        size as f32,
+        crate::content::Rgba::WHITE,
+    );
 }
 
 /// Rebuilds a door's connectivity group (`DoorBuild.updateChained`).
@@ -602,5 +654,42 @@ mod tests {
         // East neighbor => bit 0.
         assert_eq!(world.get::<WallState>(first).unwrap().autotile_bits, 1);
         assert_eq!(D8.len(), 8);
+    }
+
+    #[test]
+    fn door_config_applies_without_tap_gate() {
+        // `Door`'s config body (`Door.java:38-58`) has no `timerToggle` gate;
+        // only `DoorBuild.tapped` throttles (`Door.java:149`).
+        let (mut world, table, content) = setup();
+        let entity = spawn_named(&mut world, &table, &content, "door", 0, 4, 4);
+        world.insert_resource(table);
+        DoorBehavior.configured(&mut world, entity, None, ConfigValue::Bool(true));
+        DoorBehavior.configured(&mut world, entity, None, ConfigValue::Bool(false));
+        assert_eq!(
+            DoorBehavior.config(&world, entity),
+            ConfigValue::Bool(false)
+        );
+    }
+
+    #[test]
+    fn door_tap_timer_gates_and_records() {
+        // `origin().timer(timerToggle, 60f)` (`Door.java:149`): fires at most
+        // once per 60 ticks and consumes the slot.
+        let (mut world, table, content) = setup();
+        let entity = spawn_named(&mut world, &table, &content, "door", 0, 4, 4);
+        world.insert_resource(table);
+        world.insert_resource(crate::world::update::BuildClock { time: 100.0 });
+        assert!(tap_allowed(&mut world, entity));
+        assert!(!tap_allowed(&mut world, entity));
+        world
+            .get_resource_mut::<crate::world::update::BuildClock>()
+            .expect("clock")
+            .time = 159.0;
+        assert!(!tap_allowed(&mut world, entity));
+        world
+            .get_resource_mut::<crate::world::update::BuildClock>()
+            .expect("clock")
+            .time = 160.0;
+        assert!(tap_allowed(&mut world, entity));
     }
 }

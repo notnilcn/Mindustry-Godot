@@ -76,7 +76,14 @@ pub fn update_unit_step_audio(
         let extend = mech_walk_extend(mech.walk_time, stride, false);
         let base = mech_walk_extend(mech.walk_time, stride, true);
         let extend_scl = base % 1.0;
-        if extend_scl < walk_extension && base % 2.0 > 1.0 && elevation < 0.09 {
+        // `MechComp.java:40`: `... && !isFlying() && !inFogTo(player.team())` -
+        // an enemy unit inside the viewer's fog is silent (I02 T10; H07 T3
+        // landed the step before fog existed).
+        if extend_scl < walk_extension
+            && base % 2.0 > 1.0
+            && elevation < 0.09
+            && !in_fog_to_player(world, x, y)
+        {
             // `-Mathf.sign(extend)`: `sign(0) = 1`, so `extend >= 0 -> -1`.
             let side = if extend < 0.0 { 1.0 } else { -1.0 };
             let width = def.hit_size / 2.0 * side;
@@ -113,6 +120,31 @@ pub fn update_unit_step_audio(
     if let Some(mut state) = world.get_mut::<UnitStepAudio>(entity) {
         state.walk_extension = walk_extension;
         state.splash_timer = splash_timer;
+    }
+}
+
+/// `UnitComp.inFogTo(player.team())` (`UnitComp.java:232-240`) through the live
+/// fog resource: true when the tile is hidden from the local player's team
+/// (`FogControl.isVisibleTile`). No fog session -> never in fog (I02 T10).
+fn in_fog_to_player(world: &World, x: f32, y: f32) -> bool {
+    let Some(rules) = crate::game::runtime::rules_of(world) else {
+        return false;
+    };
+    if !rules.fog {
+        return false;
+    }
+    let viewer = rules.default_team;
+    let is_ai = rules.team_is_ai(
+        viewer,
+        world
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .is_some(),
+    );
+    let tx = WorldGrid::to_tile(x);
+    let ty = WorldGrid::to_tile(y);
+    match world.get_resource::<crate::game::fog::FogControl>() {
+        Some(fog) => !fog.is_visible_tile(viewer, tx, ty, true, is_ai),
+        None => false,
     }
 }
 
@@ -155,6 +187,57 @@ mod tests {
         sim.install_block_runtime().expect("block runtime");
         sim.install_unit_runtime().expect("unit runtime");
         sim
+    }
+
+    /// I02 T10: `MechComp.java:40` gates the mech step sound with
+    /// `!inFogTo(player.team())` - the same enemy unit walks silently while
+    /// the viewer's fog hides it and steps again once the fog is off.
+    #[test]
+    fn step_sounds_respect_fog() {
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::game::play::PlaySession;
+        use crate::game::rules::Rules;
+        use crate::game::runtime::CampaignRuntime;
+        use crate::game::universe::Campaign;
+
+        let mut sim = step_sim(64);
+        let campaign = {
+            let content = &sim.unit_runtime().expect("rt").content;
+            Campaign::from_registry(content, &EmptyNeighborhood)
+        };
+        let mut rules = Rules {
+            default_team: 1,
+            ..Rules::default()
+        };
+        rules.fog = true;
+        rules.static_fog = true;
+        sim.ecs
+            .0
+            .insert_resource(CampaignRuntime::new(PlaySession::new(rules), campaign));
+        sim.reset_fog();
+        let log = SharedAudioLog::new();
+        sim.ecs.0.insert_resource(AudioSinkRes::new(log.clone()));
+
+        // Enemy inside the (undiscovered) fog: silent.
+        let enemy = sim
+            .spawn_live_unit("dagger", 2, 128.0, 128.0, 0.0)
+            .expect("enemy dagger");
+        sim.tick().expect("tick");
+        assert!(
+            !sim.fog_visible_tile(1, 16, 16),
+            "the enemy tile is hidden from team 1"
+        );
+        walk(&mut sim, enemy, 1.9, 0.0, 100);
+        let steps = step_events(&log, crate::audio::SoundId::MECH_STEP_SMALL);
+        assert!(steps.is_empty(), "enemy steps in fog: {steps:?}");
+
+        // Same unit, fog off: the step sound plays.
+        if let Some(mut runtime) = sim.ecs.0.get_resource_mut::<CampaignRuntime>() {
+            runtime.session.rules.fog = false;
+        }
+        walk(&mut sim, enemy, 1.9, 0.0, 100);
+        let steps = step_events(&log, crate::audio::SoundId::MECH_STEP_SMALL);
+        assert!(!steps.is_empty(), "steps with fog off: {steps:?}");
     }
 
     /// Drives the step hook directly (no pathfinder): moves the unit `dx, dy`
