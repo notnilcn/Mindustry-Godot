@@ -22,6 +22,7 @@ mod net;
 pub mod platform;
 mod render;
 mod settings;
+mod settings_hub;
 mod sim_host;
 mod stdb;
 mod tile_grid;

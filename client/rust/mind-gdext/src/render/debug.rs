@@ -47,7 +47,8 @@ pub struct DebugCollisionRenderer {
 impl DebugCollisionRenderer {
     /// Builds the pass over the `Layer::OverlayUi` band.
     pub fn new(host: Gd<MindSimHost>, band: Gd<Node2D>) -> Self {
-        let node = MeshInstance2D::new_alloc();
+        let mut node = MeshInstance2D::new_alloc();
+        node.set_name("DebugCollision");
         // code-instantiated: one pooled mesh for the debug overlay; the quad
         // count is data-driven from the visible solid tiles.
         band.clone().add_child(&node);
