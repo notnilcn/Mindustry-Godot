@@ -1728,7 +1728,7 @@ impl DesktopBridge {
         let mut guard = host.bind_mut();
         for batch in batches {
             for command in batch.commands {
-                guard.enqueue_sim_command(command);
+                guard.submit_player_command(command);
             }
         }
     }
@@ -2490,12 +2490,13 @@ impl DesktopBridge {
                 // The selected building is gone: forget the stale selection.
                 self.config_selected = None;
             } else {
-                host.bind_mut().enqueue_sim_command(SimCommand::ConfigTap {
-                    x: sx16,
-                    y: sy16,
-                    other_x,
-                    other_y,
-                });
+                host.bind_mut()
+                    .submit_player_command(SimCommand::ConfigTap {
+                        x: sx16,
+                        y: sy16,
+                        other_x,
+                        other_y,
+                    });
                 match preview {
                     0 => {
                         // Java `return false`: consumed, the panel stays on the
@@ -3408,7 +3409,7 @@ impl DesktopBridge {
         };
         let mut guard = host.bind_mut();
         for command in commands {
-            guard.enqueue_sim_command(command.clone());
+            guard.submit_player_command(command.clone());
         }
     }
 }

@@ -183,6 +183,13 @@ pub struct MindNet {
     /// Match id the current `runtime`/`sender` were built for; a new match
     /// rebuilds both (leave → re-host/join must not keep the old id).
     relay_match_id: u64,
+    /// Player-command mailbox installed into `MindSimHost` while a match is
+    /// active (I08 T6); drained every frame into `send_player_command`.
+    relay_outbox: Option<std::sync::Arc<std::sync::Mutex<Vec<mind_core::determinism::SimCommand>>>>,
+    /// Member rows by identity hex (sender team/slot resolution, I08 T6).
+    members: std::collections::BTreeMap<String, mind_stdb::module_bindings::RelayMember>,
+    /// Relay kinds already reported as "no sim equivalent" (log once).
+    unmapped_kinds: std::collections::BTreeSet<String>,
 }
 
 #[godot_api]
@@ -230,6 +237,9 @@ impl INode for MindNet {
             pending_join: false,
             join_load: None,
             relay_match_id: 0,
+            relay_outbox: None,
+            members: std::collections::BTreeMap::new(),
+            unmapped_kinds: std::collections::BTreeSet::new(),
         }
     }
 
@@ -273,6 +283,7 @@ impl INode for MindNet {
             self.drain_snapshots();
             self.drain_snapshot_chunks();
             self.drain_snapshot_requests();
+            self.drain_outbox();
             self.drain_relay();
             self.maybe_publish_checksum();
         }
@@ -702,6 +713,12 @@ impl MindNet {
             self.relay_match_id = 0;
             self.pending_join = false;
             self.join_load = None;
+            // Back to single-player command routing (I08 T6).
+            if let Some(host) = self.sim_host.as_mut() {
+                host.bind_mut().clear_relay_outbox();
+            }
+            self.relay_outbox = None;
+            self.members.clear();
         }
         self.notify_session_state();
         result
@@ -1359,7 +1376,8 @@ impl MindNet {
 
     /// Creates the relay runtime/sender once a match id is known. A different
     /// match id rebuilds both (leave → re-host/join), so commands never carry
-    /// a stale match (I08 T5).
+    /// a stale match (I08 T5). While a match is active, `MindSimHost` holds the
+    /// player-command mailbox (I08 T6).
     fn ensure_relay(&mut self) {
         let Some(match_id) = self.session.match_id() else {
             return;
@@ -1372,10 +1390,24 @@ impl MindNet {
         if self.runtime.is_none()
             && let Some(connector) = self.connector.as_mut()
         {
-            self.runtime = Some(RelayRuntime::subscribe(connector, match_id));
+            let mut runtime = RelayRuntime::subscribe(connector, match_id);
+            // The Connected event may have fired before this match existed
+            // (online-on-demand boot); seed the identity now so own echoes are
+            // recognized (I08 T6).
+            if let Some(identity) = connector.local_identity() {
+                runtime.set_local_identity(identity.identity);
+            }
+            self.runtime = Some(runtime);
         }
         if self.sender.is_none() {
             self.sender = Some(CommandSender::new(match_id));
+        }
+        if self.relay_outbox.is_none() {
+            let outbox = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            if let Some(host) = self.sim_host.as_mut() {
+                host.bind_mut().install_relay_outbox(outbox.clone());
+            }
+            self.relay_outbox = Some(outbox);
         }
     }
 
@@ -1419,8 +1451,11 @@ impl MindNet {
             match change {
                 RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
                     members.push(row.debug_json());
+                    self.members.insert(row.identity.to_hex().to_string(), row);
                 }
-                RowChange::Delete(_) => {}
+                RowChange::Delete(row) => {
+                    self.members.remove(&row.identity.to_hex().to_string());
+                }
             }
         }
         if !members.is_empty() {
@@ -1448,7 +1483,19 @@ impl MindNet {
         let Some(runtime) = self.runtime.as_mut() else {
             return;
         };
-        let commands = runtime.drain();
+        let commands = {
+            let Some(host) = self.sim_host.as_ref() else {
+                return;
+            };
+            let guard = host.bind();
+            let content = SimHostContent(&guard);
+            let default_team = guard.player_team();
+            let origin = MemberOrigin {
+                members: &self.members,
+                default_team,
+            };
+            runtime.drain(&content, &origin)
+        };
         self.queue_depth = runtime.queue_depth() as i64;
         self.last_checksum = self
             .sim_host
@@ -1459,6 +1506,73 @@ impl MindNet {
             let mut host = host.bind_mut();
             for command in commands {
                 host.enqueue_sim_command(command);
+            }
+        }
+    }
+
+    /// Drains the player-command mailbox into the relay (I08 T6): each command
+    /// maps to a relay kind, `Immediate` kinds are also applied locally as
+    /// predictions, and everything sends through the match `CommandSender`.
+    fn drain_outbox(&mut self) {
+        let Some(outbox) = self.relay_outbox.as_ref() else {
+            return;
+        };
+        let commands: Vec<mind_core::determinism::SimCommand> = {
+            let Ok(mut queue) = outbox.lock() else {
+                return;
+            };
+            std::mem::take(&mut *queue)
+        };
+        for command in commands {
+            self.send_player_command(command);
+        }
+    }
+
+    /// Relays one player action (`MindNet` side of the single outbound seam).
+    fn send_player_command(&mut self, command: mind_core::determinism::SimCommand) {
+        let kind = {
+            let Some(host) = self.sim_host.as_ref() else {
+                return;
+            };
+            let guard = host.bind();
+            let content = SimHostContent(&guard);
+            relay::sim_to_kind(&command, &content)
+        };
+        let Some(kind) = kind else {
+            // No relay equivalent (`ConfigTap`, `SpawnUnit`): apply locally and
+            // report the kind once (I08 T6).
+            let name = command.op_name().to_string();
+            if self.unmapped_kinds.insert(name.clone()) {
+                log::info!("MindNet: `{name}` has no relay equivalent; applied locally only");
+            }
+            if let Some(host) = self.sim_host.as_mut() {
+                host.bind_mut().enqueue_sim_command(command);
+            }
+            return;
+        };
+        if mind_stdb::commands::predict_policy(&kind) == mind_stdb::PredictPolicy::Immediate {
+            // Prediction: the action applies locally now; the echo advances the
+            // watermark (I08 T6).
+            if let Some(host) = self.sim_host.as_mut() {
+                host.bind_mut().enqueue_sim_command(command);
+            }
+        }
+        let tick = self.sim_tick();
+        let Some(connector) = self.connector.as_mut() else {
+            return;
+        };
+        let Some(sender) = self.sender.as_mut() else {
+            return;
+        };
+        let mut transport = StdbTransport::new(connector);
+        match sender.send(&mut transport, tick, kind) {
+            Ok(seq) => {
+                if let Some(runtime) = self.runtime.as_mut() {
+                    runtime.on_prediction(seq);
+                }
+            }
+            Err(error) => {
+                log::warn!("MindNet.send_player_command failed: {error}");
             }
         }
     }
@@ -1767,6 +1881,69 @@ impl MindNet {
                 log::warn!("MindNet: publish_checksum failed: {error}");
             }
         }
+    }
+}
+
+/// Content-name resolution adapter over the live `MindSimHost` registry
+/// (I08 T6).
+struct SimHostContent<'a>(&'a MindSimHost);
+
+impl relay::RelayContent for SimHostContent<'_> {
+    fn block_id(&self, name: &str) -> Option<u16> {
+        self.0
+            .with_registry(|registry| registry.block_id(name).map(|id| id.raw()))
+            .flatten()
+    }
+
+    fn block_name(&self, id: u16) -> Option<String> {
+        self.0
+            .with_registry(|registry| {
+                registry
+                    .entries(mind_core::content::ContentType::Block)
+                    .into_iter()
+                    .find(|entry| entry.id == id)
+                    .and_then(|entry| entry.name.map(str::to_string))
+            })
+            .flatten()
+    }
+
+    fn item_id(&self, name: &str) -> Option<u16> {
+        self.0
+            .with_registry(|registry| registry.item_id(name).map(|id| id.raw()))
+            .flatten()
+    }
+
+    fn item_name(&self, id: u16) -> Option<String> {
+        self.0
+            .with_registry(|registry| {
+                registry
+                    .entries(mind_core::content::ContentType::Item)
+                    .into_iter()
+                    .find(|entry| entry.id == id)
+                    .and_then(|entry| entry.name.map(str::to_string))
+            })
+            .flatten()
+    }
+}
+
+/// Sender team/slot resolution from the match member table (I08 T6).
+struct MemberOrigin<'a> {
+    members: &'a std::collections::BTreeMap<String, mind_stdb::module_bindings::RelayMember>,
+    default_team: u8,
+}
+
+impl relay::RelayOrigin for MemberOrigin<'_> {
+    fn team_for(&self, sender: mind_stdb::Identity) -> u8 {
+        self.members
+            .get(&sender.to_hex().to_string())
+            .and_then(|member| member.team)
+            .unwrap_or(self.default_team)
+    }
+
+    fn player_for(&self, _sender: mind_stdb::Identity) -> Option<i32> {
+        // The member table has no player slot; the port uses slot 0 for the
+        // acting player like the local path (`desktop.rs:2955`).
+        Some(0)
     }
 }
 
