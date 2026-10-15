@@ -13,6 +13,7 @@
 //! are append-only parity/mod ABI. `ContentType` member order, content names,
 //! bundle keys and sprite region names are never renamed (`ctype/AGENTS.md`).
 
+pub mod boot;
 pub mod bundle;
 pub mod category;
 pub mod color;

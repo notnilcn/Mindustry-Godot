@@ -31,7 +31,6 @@ use godot::prelude::*;
 
 use mind_core::content::{
     BlockDef, BlockKind, BuildVisibility, ContentRegistry, MemoryBundle, MemoryUnlockStore,
-    create_base_content,
 };
 use mind_core::determinism::Checksummer;
 use mind_core::ecs::MindWorld;
@@ -107,33 +106,14 @@ pub struct MindEditor {
 #[godot_api]
 impl INode for MindEditor {
     fn init(base: Base<Node>) -> Self {
-        let content =
-            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
-                Ok(mut registry) => {
-                    if let Err(error) = registry.init() {
-                        log::warn!("MindEditor content init failed: {error}");
-                        None
-                    } else if let Err(error) = registry.post_init() {
-                        log::warn!("MindEditor content post_init failed: {error}");
-                        None
-                    } else {
-                        Some(registry)
-                    }
-                }
-                Err(error) => {
-                    log::warn!("MindEditor content boot failed: {error}");
-                    None
-                }
-            };
-        let mut editor = MapEditor::new();
-        if let Some(registry) = content.as_ref() {
-            editor.reset(registry);
-        }
+        // The content registry builds in `bootstrap()`: the main scene is
+        // instantiated before the autoloads' `_ready`, and the boot path reads
+        // `.mods` from the `MindMods` autoload (empty until then).
         Self {
             base,
-            editor,
+            editor: MapEditor::new(),
             grid: WorldGrid::new(0, 0),
-            content,
+            content: None,
             ecs: MindWorld::new(),
             hooks: NoopWorldHooks,
             render: NoopRenderHooks,
@@ -163,6 +143,23 @@ impl MindEditor {
     /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {
+        // I07 T4: the one content boot path (base content + enabled mods);
+        // Java `ClientLauncher.java:166-189`. Runs here, not in `init`, because
+        // the main scene instantiates before the autoloads' `_ready`.
+        if self.content.is_none() {
+            match crate::content_boot::build_registry(
+                &MemoryBundle::new(),
+                &MemoryUnlockStore::new(),
+            ) {
+                Ok(registry) => {
+                    self.editor.reset(&registry);
+                    self.content = Some(registry);
+                }
+                Err(error) => {
+                    log::warn!("MindEditor content boot failed: {error}");
+                }
+            }
+        }
         let blocks = self.palette_blocks(GString::new()).len();
         log::info!("MindEditor ready ({blocks} editor blocks)");
     }

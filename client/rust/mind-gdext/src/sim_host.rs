@@ -119,7 +119,7 @@ use mind_core::audio::{AudioSinkRes, SharedAudioLog};
 use mind_core::command::Command;
 use mind_core::content::{
     BlockId, BlockKind, ContentRegistry, ContentType, ItemId, MemoryBundle, MemoryUnlockStore,
-    UnitCommandId, UnitStanceId, UnitTypeId, content_counts, create_base_content,
+    UnitCommandId, UnitStanceId, UnitTypeId, content_counts,
 };
 use mind_core::determinism::SimCommand;
 use mind_core::ecs::BuildingComp;
@@ -547,19 +547,28 @@ impl MindSimHost {
     /// idempotent (resource inserts overwrite, `set_io_handler` replaces) and
     /// the sim `init` already provided a fresh world.
     fn bootstrap(&mut self) {
-        self.content_snapshot =
-            match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
-                .and_then(|mut registry| {
-                    registry.init()?;
-                    registry.post_init()?;
-                    Ok(registry)
-                }) {
-                Ok(registry) => Some(registry),
-                Err(error) => {
-                    log::warn!("content snapshot unavailable: {error}");
-                    None
-                }
-            };
+        // I07 T4: the one content boot path (base content + enabled mods'
+        // content/bundles/patches); Java `ClientLauncher.java:166-189`.
+        self.content_snapshot = match crate::content_boot::build_registry(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+        ) {
+            Ok(registry) => Some(registry),
+            Err(error) => {
+                log::warn!("content snapshot unavailable: {error}");
+                None
+            }
+        };
+        // I07 T4: the mods' asset overlay (bundles now; sprites/sounds T5).
+        crate::content_boot::push_asset_overlay();
+        // I07 T4: the sim's block name/id table starts from vanilla
+        // (`Blocks::new`); mod blocks extend it with identical registry ids so
+        // the API/command entry points can address them.
+        if let Some(registry) = self.content_snapshot.as_ref()
+            && let Err(error) = self.sim.sync_blocks_from_content(registry)
+        {
+            log::warn!("mod block table sync failed: {error}");
+        }
 
         // Plan-13 M7 + plan 04 §3.10 + plan-18: wire the per-sim host seams
         // (logic globals, IO executor, audio sink). Must be re-run whenever a
@@ -2441,6 +2450,13 @@ impl MindSimHost {
             FixedStepRunner::for_rate(sim.config().fixed_hz, sim.config().max_ticks_per_frame);
         self.sim = sim;
         self.player = None;
+        // I07 T4: give the fresh sim the mod-extended block table before any
+        // entity/placement work (`Blocks::new` is vanilla-only).
+        if let Some(registry) = self.content_snapshot.as_ref()
+            && let Err(error) = self.sim.sync_blocks_from_content(registry)
+        {
+            log::warn!("load_sector: mod block table sync failed: {error}");
+        }
         // H06 T20: resolve `@content` constants from the point the globals
         // exist — before the map/save processors are decoded below — exactly
         // like `Vars.logicVars` at content init (`Vars.java:369`).
@@ -4743,19 +4759,34 @@ impl MindSimHost {
     /// run. Idempotent; returns `false` when the content snapshot is unavailable
     /// or the table fails to build.
     fn install_live_block_runtime(&mut self) -> bool {
-        if !self.sim.has_block_runtime()
-            && let Err(error) = self.sim.install_block_runtime()
-        {
-            log::warn!("live block runtime install failed: {error}");
-            return false;
+        // I07 T4: install over the host's content snapshot (base + mods) so
+        // runtime placement/config lookups address the same registry the
+        // command entry points do. Without a snapshot, fall back to vanilla.
+        if !self.sim.has_block_runtime() {
+            let result = match self.content_snapshot.as_ref() {
+                Some(content) => self.sim.install_block_runtime_from(
+                    mind_core::sim::runtime::SimRuntimeConfig::default(),
+                    content.clone(),
+                ),
+                None => self.sim.install_block_runtime(),
+            };
+            if let Err(error) = result {
+                log::warn!("live block runtime install failed: {error}");
+                return false;
+            }
         }
         // EV-0048: the live unit/combat runtime rides on the same content/world;
         // a failed install keeps buildings working but leaves units inert.
-        if !self.sim.has_unit_runtime()
-            && let Err(error) = self.sim.install_unit_runtime()
-        {
-            log::warn!("live unit runtime install failed: {error}");
-            return false;
+        if !self.sim.has_unit_runtime() {
+            match self.content_snapshot.as_ref() {
+                Some(content) => self.sim.install_unit_runtime_from(content.clone()),
+                None => {
+                    if let Err(error) = self.sim.install_unit_runtime() {
+                        log::warn!("live unit runtime install failed: {error}");
+                        return false;
+                    }
+                }
+            }
         }
         true
     }
@@ -7855,6 +7886,7 @@ pub fn building_bar_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mind_core::content::create_base_content;
     use mind_core::world::TilePos;
 
     fn base_registry() -> ContentRegistry {

@@ -7,7 +7,7 @@
 use std::path::Path;
 
 use crate::content::parser_hooks::{ContentErrors, ModContentProvider};
-use crate::content::{ContentError, ContentRegistry, ModId};
+use crate::content::{ContentError, ContentRegistry, ModId, UnlockStore};
 use crate::io::{FileSystem, SettingsStore};
 
 use super::discovery::{ModRoot, find_meta, resolve_folder_root};
@@ -27,6 +27,27 @@ pub struct ModContentFile {
     pub type_: crate::content::ContentType,
     /// Raw JSON text.
     pub json: String,
+}
+
+/// One failed content file with its mod attribution (I07 T4); feeds
+/// `LoadedMod.erroredContent` (`Mods.markError`, `ContentParser.java:1073-1082`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModContentFailure {
+    /// Internal mod name.
+    pub mod_name: String,
+    /// Root-relative file path.
+    pub path: String,
+    /// Parser error message.
+    pub message: String,
+}
+
+/// Content + patch data the enabled mods contribute at boot (I07 T4).
+#[derive(Debug, Clone, Default)]
+pub struct ModBootContent {
+    /// `content/<kind>/**.json` files in dependency + contentOrder order.
+    pub files: Vec<ModContentFile>,
+    /// Per-mod `patches/**.json` sets (`Mods.loadModPatches` order).
+    pub patches: Vec<crate::mods::patch::ModPatchSet>,
 }
 
 impl Mods {
@@ -139,24 +160,28 @@ fn file_stem(path: &str) -> Option<String> {
 }
 
 /// `Mods.loadContent` provider: parses JSON content files into the registry.
-pub struct ModsContentProvider {
+pub struct ModsContentProvider<'a> {
     files: Vec<ModContentFile>,
-    parser: ContentJsonParser,
+    parser: ContentJsonParser<'a>,
     errors: Vec<ContentError>,
+    failures: Vec<ModContentFailure>,
 }
 
-impl ModsContentProvider {
-    /// Builds a provider from a collected file list.
-    pub fn new(files: Vec<ModContentFile>) -> Self {
+impl<'a> ModsContentProvider<'a> {
+    /// Builds a provider from a collected file list; `store` is the host's
+    /// unlock store (`Core.settings`), so `<name>-unlocked` applies to mod
+    /// content exactly like Java's single global `Core.settings` (I07 T6).
+    pub fn new(files: Vec<ModContentFile>, store: &'a dyn UnlockStore) -> Self {
         Self {
             files,
-            parser: ContentJsonParser::new(),
+            parser: ContentJsonParser::with_store(store),
             errors: Vec::new(),
+            failures: Vec::new(),
         }
     }
 
     /// The parser (bundle entries + warnings).
-    pub fn parser(&self) -> &ContentJsonParser {
+    pub fn parser(&self) -> &ContentJsonParser<'_> {
         &self.parser
     }
 
@@ -164,9 +189,14 @@ impl ModsContentProvider {
     pub fn errors(&self) -> &[ContentError] {
         &self.errors
     }
+
+    /// Per-mod failures collected during the last `load_content` (I07 T4).
+    pub fn mod_failures(&self) -> &[ModContentFailure] {
+        &self.failures
+    }
 }
 
-impl ModContentProvider for ModsContentProvider {
+impl ModContentProvider for ModsContentProvider<'_> {
     fn load_content(&mut self, registry: &mut ContentRegistry) -> Result<(), ContentErrors> {
         let mut errors = Vec::new();
         let previous = registry.current_mod().cloned();
@@ -176,6 +206,11 @@ impl ModContentProvider for ModsContentProvider {
                 .parser
                 .parse(registry, &file.path, &file.stem, &file.json, file.type_)
             {
+                self.failures.push(ModContentFailure {
+                    mod_name: file.mod_name.clone(),
+                    path: file.path.clone(),
+                    message: error.message.clone(),
+                });
                 errors.push(ContentError::Parse(error.message));
             }
         }
@@ -237,7 +272,8 @@ mod tests {
             .expect("load single");
         let files = mods.collect_content_files(&fs);
         assert_eq!(files.len(), 2, "one item + one block");
-        let mut provider = ModsContentProvider::new(files);
+        let store = crate::content::settings_store::MemoryUnlockStore::new();
+        let mut provider = ModsContentProvider::new(files, &store);
 
         let mut registry = boot();
         let items_before = registry.items().len();
@@ -337,7 +373,8 @@ mod tests {
         mods.load_single(&fs, Path::new("/mods/basic"), &settings)
             .expect("load");
         let files = mods.collect_content_files(&fs);
-        let mut provider = ModsContentProvider::new(files);
+        let store = crate::content::settings_store::MemoryUnlockStore::new();
+        let mut provider = ModsContentProvider::new(files, &store);
         let mut registry = boot();
         let errors = registry
             .create_mod_content(&mut provider)
