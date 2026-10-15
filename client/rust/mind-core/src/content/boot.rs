@@ -70,6 +70,13 @@ pub fn build_registry_with_mods(
         .post_init()
         .map_err(|error| format!("content post-init: {error}"))?;
 
+    // `Blocks.java` turret `ammo(...)` tables: the anonymous ammo bullets join
+    // the registry so placed turrets resolve a live `TurretBehavior`
+    // (PAR-0086, `sim::runtime::load_vanilla_content` does the same for the
+    // harness). Without this the live client registers no turret behaviors and
+    // placed turrets lose their `TurretState` (I01 T16 finding).
+    crate::world::blocks::defense::turrets::install_turret_ammo(&mut registry);
+
     for set in &boot.patches {
         if set.assets.is_empty() {
             continue;
@@ -94,6 +101,33 @@ mod tests {
     use crate::io::SettingsStore;
     use crate::io::fs::NativeFs;
     use std::path::Path;
+
+    /// I01 T16 finding: the live boot path must install the turret ammo
+    /// bullets — without them `defense::register` skips every turret and a
+    /// placed turret has no `TurretState` (live-client regression).
+    #[test]
+    fn live_boot_installs_turret_behaviors() {
+        let (registry, _) = build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &ModBootContent::default(),
+        )
+        .expect("boot");
+        let behaviors = crate::world::blocks::default_registry(&registry);
+        // The defense family registers turrets BY NAME
+        // (`BehaviorRegistry::register_named`); `BlockTable::build_default`
+        // resolves the name against content.
+        for name in ["duo", "scatter", "foreshadow"] {
+            assert!(
+                behaviors.get_named(name).is_some(),
+                "`{name}` has its turret behavior after the live boot"
+            );
+        }
+        // The ammo bullets themselves joined the registry (the gate
+        // `ammo_in_content` checks).
+        assert!(registry.bullet_by_name("duo_copper").is_some());
+    }
 
     /// I07 T4 (PAR-0115 part 1): `parity/mod_fixtures/allkinds` through the one
     /// boot path — the modded block/item/unit register with `is_modded()` and
