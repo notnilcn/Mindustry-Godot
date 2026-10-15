@@ -523,10 +523,15 @@ pub(crate) fn building_fog_radius(world: &World, def: &BlockDef, e: Entity) -> f
     if let Some(state) = world.get::<crate::entities::comp::building::RadarState>(e) {
         return def.fog_radius as f32 * state.progress * state.smooth_efficiency;
     }
-    // `Turret.fogRadius()` (`Turret.java:426-428`). The ammo `rangeChange` term
-    // is not carried by `BulletDef` yet (H02 range_change), so it is ignored.
+    // `Turret.fogRadius()` (`Turret.java:426-428`): `(range + (hasAmmo ?
+    // peekAmmo().rangeChange : 0)) / tilesize * fogRadiusMultiplier`.
     if let Some(state) = world.get::<crate::world::blocks::defense::turrets::TurretState>(e) {
-        return state.config.range / 8.0 * state.config.fog_radius_multiplier;
+        let range = if crate::world::blocks::defense::turrets::has_ammo(world, e) {
+            crate::world::blocks::defense::turrets::turret_range(world, e)
+        } else {
+            state.config.range
+        };
+        return range / 8.0 * state.config.fog_radius_multiplier;
     }
     // Cores: `init_self` folds `CoreBlock.java:158-159` into `def.fog_radius`.
     def.fog_radius as f32

@@ -213,6 +213,10 @@ pub struct BulletDef {
     pub optimal_life_fract: f32,
     /// Multiplied by turret reload speed to get the final shoot speed.
     pub reload_multiplier: f32,
+    /// `BulletType.rangeChange` (`BulletType.java`): added to the firing
+    /// turret's range while this ammo is loaded (`Turret.TurretBuild.range()`,
+    /// `Turret.java:348-353`).
+    pub range_change: f32,
     /// Ammo created per item/liquid.
     pub ammo_multiplier: f32,
     /// Whether the ammo multiplier shows in stats.
@@ -635,6 +639,7 @@ impl BulletDef {
             laser_bullet: false,
             optimal_life_fract: 0.0,
             reload_multiplier: 1.0,
+            range_change: 0.0,
             ammo_multiplier: 2.0,
             display_ammo_multiplier: true,
             recoil: 0.0,
@@ -1243,6 +1248,7 @@ impl BulletDef {
             laser_bullet,
             optimal_life_fract,
             reload_multiplier,
+            range_change,
             ammo_multiplier,
             display_ammo_multiplier,
             recoil,
@@ -1666,6 +1672,8 @@ pub struct BulletSpec {
     pub optimal_life_fract: Option<f32>,
     /// Reload multiplier.
     pub reload_multiplier: Option<f32>,
+    /// `BulletType.rangeChange`.
+    pub range_change: Option<f32>,
     /// Ammo multiplier.
     pub ammo_multiplier: Option<f32>,
     /// Display ammo multiplier.

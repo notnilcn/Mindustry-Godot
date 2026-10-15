@@ -555,6 +555,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     add("breach_tungsten", BulletKind::Basic, &|def| {
         def.speed = 8.0;
         def.damage = 95.0;
+        // `Blocks.java:4417`: `rangeChange = 40f`.
+        def.range_change = 40.0;
         def.width = 13.0;
         def.height = 19.0;
         def.hit_size = 7.0;
@@ -567,6 +569,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     add("breach_carbide", BulletKind::Basic, &|def| {
         def.speed = 12.0;
         def.damage = 325.0 / 0.75;
+        // `Blocks.java:4435`: `rangeChange = 7f * 8f`.
+        def.range_change = 56.0;
         def.width = 15.0;
         def.height = 21.0;
         def.hit_size = 7.0;
@@ -643,6 +647,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.speed = 3.25;
         def.lifetime = 140.0;
         def.damage = 700.0;
+        // `Blocks.java:4713`: `rangeChange = 10f * 8f`.
+        def.range_change = 80.0;
         def.splash_damage = 750.0;
         def.splash_damage_radius = 36.0;
         def.scaled_splash_damage = true;
@@ -671,6 +677,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.speed = 2.5;
         def.lifetime = 190.0;
         def.damage = 300.0;
+        // `Blocks.java:4775`: `rangeChange = 8f`.
+        def.range_change = 8.0;
         def.splash_damage = 180.0;
         def.splash_damage_radius = 110.0;
         def.scaled_splash_damage = true;
@@ -708,6 +716,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     });
     add("disperse_thorium", BulletKind::Basic, &|def| {
         def.speed = 9.5;
+        // `Blocks.java:4904`: `rangeChange = -120f` (shorter while thorium is loaded).
+        def.range_change = -120.0;
         def.lifetime = 34.0;
         def.damage = 90.0;
         def.ammo_multiplier = 1.0;
@@ -735,6 +745,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.speed = 6.0;
         def.lifetime = 34.0;
         def.damage = 65.0;
+        // `Blocks.java:4958`: `rangeChange = 8f * 3f`.
+        def.range_change = 24.0;
         def.ammo_multiplier = 3.0;
         def.reload_multiplier = 0.75;
         def.lightning = 3;
@@ -873,7 +885,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     });
 
     // `sublimate` (`ContinuousLiquidTurret`; `ContinuousFlameBulletType` ammo).
-    // Deviation: `rangeChange` (cyanogen) folds into the resolved beam `length`.
+    // `rangeChange` (cyanogen) now rides the def; the ammo `length` carries the
+    // Java `r + rangeChange` beam length (`Blocks.java:4647`).
     add("sublimate_ozone", BulletKind::ContinuousFlame, &|def| {
         def.damage = 60.0;
         def.length = 130.0;
@@ -886,6 +899,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     add("sublimate_cyanogen", BulletKind::ContinuousFlame, &|def| {
         def.damage = 130.0;
         def.length = 200.0;
+        // `Blocks.java:4646-4647`: `rangeChange = 70f; length = r + rangeChange`.
+        def.range_change = 70.0;
         def.knockback = 2.0;
         def.pierce_cap = 3;
         def.building_damage_multiplier = 0.3;
@@ -1110,23 +1125,24 @@ pub fn config_for(
     let bullet = |n: &str| names.get(n).copied();
     let item_ammo = |item_name: &str, bullet_name: &str| -> Option<ItemAmmo> {
         let id = bullet(bullet_name)?;
-        let mult = content
-            .bullet(id)
-            .map(|d| d.ammo_multiplier as i32)
-            .unwrap_or(1);
+        let def = content.bullet(id);
+        let mult = def.map(|d| d.ammo_multiplier as i32).unwrap_or(1);
         Some(ItemAmmo {
             item: content.item_id(item_name)?,
             bullet: id,
             ammo_multiplier: mult.max(1),
+            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
         })
     };
     let liquid_ammo = |liquid_name: &str, bullet_name: &str| -> Option<LiquidAmmo> {
         let id = bullet(bullet_name)?;
-        let mult = content.bullet(id).map(|d| d.ammo_multiplier).unwrap_or(1.0);
+        let def = content.bullet(id);
+        let mult = def.map(|d| d.ammo_multiplier).unwrap_or(1.0);
         Some(LiquidAmmo {
             liquid: content.liquid_id(liquid_name)?,
             bullet: id,
             ammo_multiplier: mult.max(0.001),
+            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
         })
     };
     let power =
@@ -1667,12 +1683,14 @@ pub fn config_for(
         // Harness fixture: `PayloadAmmoTurret` fed a build payload fires `fuse`.
         "test-payload" => {
             let block = content.block_id("copper-wall")?;
+            let fuse = bullet("fuse")?;
             let ammo = vec![PayloadAmmo {
                 content: PayloadContent {
                     kind: PayloadKind::Build,
                     id: block.raw(),
                 },
-                bullet: bullet("fuse")?,
+                bullet: fuse,
+                range_change: content.bullet(fuse).map(|d| d.range_change).unwrap_or(0.0),
             }];
             let mut c = base_config(TurretKind::PayloadAmmo, TurretAmmo::Payload(ammo));
             c.range = 160.0;
