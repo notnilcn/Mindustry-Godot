@@ -282,11 +282,7 @@ const ITEM_DEPOSIT_COOLDOWN_MS: u64 = 500;
 /// `settings.getBool("console")` (default false, `SettingsMenuDialog.java:566`):
 /// the F8 console toggle is gated on it (`ConsoleFragment.java:43`).
 fn console_setting_enabled() -> bool {
-    let store = mind_core::io::SettingsStore::load(
-        &mind_core::io::NativeFs,
-        &mind_core::io::Paths::resolve(None),
-    );
-    store.get_bool("console", false)
+    crate::settings_hub::with_settings(|store| store.get_bool("console", false))
 }
 
 /// Parses a selectable-unit snapshot (`[{id,type,x,y,team,commandable}]`).

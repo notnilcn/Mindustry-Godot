@@ -54,8 +54,6 @@ pub struct MindUi {
     block_catalog_cache: Option<String>,
     /// Rust console command registry (plan 14 M7, deviation OD1).
     console: mind_core::ui::console::ConsoleRegistry,
-    /// Plan-04 settings KV store behind the settings dialog.
-    settings: SettingsStore,
     /// Manifest `pause` flags keyed by dialog name (plan 14 §3.4).
     pause_flags: HashMap<String, bool>,
     /// Reference count of currently-open pause dialogs.
@@ -86,7 +84,6 @@ impl INode for MindUi {
             campaign_fixture: None,
             block_catalog_cache: None,
             console: mind_core::ui::console::ConsoleRegistry::with_defaults(),
-            settings: SettingsStore::new(),
             pause_flags: HashMap::new(),
             pause_depth: 0,
             was_paused: false,
@@ -533,9 +530,10 @@ impl MindUi {
             return json;
         }
         if self.block_catalog_cache.is_none() {
-            let mut settings = SettingsStore::load(&NativeFs, &Paths::new(Self::user_root()));
-            let store = SettingsUnlockStore::new(&mut settings);
-            let catalog = mind_core::ui::campaign::block_catalog_unlocked(&store);
+            let catalog = crate::settings_hub::with_settings(|settings| {
+                let store = SettingsUnlockStore::new(settings);
+                mind_core::ui::campaign::block_catalog_unlocked(&store)
+            });
             let json = serde_json::to_string(&catalog).unwrap_or_else(|_| String::from("{}"));
             self.block_catalog_cache = Some(json);
         }
@@ -626,7 +624,9 @@ impl MindUi {
         let Some(rows) = settings::table_rows(&category.to_string()) else {
             return GString::from("[]");
         };
-        let values: Vec<serde_json::Value> = rows.iter().map(|row| self.row_json(row)).collect();
+        let values: Vec<serde_json::Value> = crate::settings_hub::with_settings(|store| {
+            rows.iter().map(|row| row_json(store, row)).collect()
+        });
         json_string(&serde_json::Value::Array(values))
     }
 
@@ -643,13 +643,15 @@ impl MindUi {
                 let Ok(enabled) = value.try_to::<bool>() else {
                     return false;
                 };
-                self.settings.put_bool(&key, enabled);
+                crate::settings_hub::with_settings(|store| store.put_bool(&key, enabled));
             }
             SettingKind::Slider { min, max, .. } => {
                 let Ok(number) = value.try_to::<i32>() else {
                     return false;
                 };
-                self.settings.put_i32(&key, number.clamp(min, max));
+                crate::settings_hub::with_settings(|store| {
+                    store.put_i32(&key, number.clamp(min, max));
+                });
             }
         }
         self.persist_settings();
@@ -664,7 +666,10 @@ impl MindUi {
     pub fn settings_get_i32(&self, key: GString) -> i64 {
         let name = key.to_string();
         match settings::all_rows().find(|row| row.key == name) {
-            Some(row) => self.settings.get_i32(&name, row.default_i32()) as i64,
+            Some(row) => {
+                crate::settings_hub::with_settings(|store| store.get_i32(&name, row.default_i32()))
+                    as i64
+            }
             None => 0,
         }
     }
@@ -676,7 +681,9 @@ impl MindUi {
     pub fn settings_get_bool(&self, key: GString) -> bool {
         let name = key.to_string();
         match settings::all_rows().find(|row| row.key == name) {
-            Some(row) => self.settings.get_bool(&name, row.default_bool()),
+            Some(row) => crate::settings_hub::with_settings(|store| {
+                store.get_bool(&name, row.default_bool())
+            }),
             None => false,
         }
     }
@@ -687,9 +694,11 @@ impl MindUi {
         let Some(rows) = settings::table_rows(&category.to_string()) else {
             return false;
         };
-        for row in rows {
-            self.settings.remove(row.key);
-        }
+        crate::settings_hub::with_settings(|store| {
+            for row in rows {
+                store.remove(row.key);
+            }
+        });
         self.persist_settings();
         true
     }
@@ -698,14 +707,16 @@ impl MindUi {
     /// the remembered `preferredlaseropacity` (default 100) and persist.
     #[func]
     pub fn toggle_power_lines(&mut self) {
-        let current = self.settings.get_i32("lasersopacity", 100);
-        if current == 0 {
-            let preferred = self.settings.get_i32("preferredlaseropacity", 100);
-            self.settings.put_i32("lasersopacity", preferred);
-        } else {
-            self.settings.put_i32("preferredlaseropacity", current);
-            self.settings.put_i32("lasersopacity", 0);
-        }
+        crate::settings_hub::with_settings(|store| {
+            let current = store.get_i32("lasersopacity", 100);
+            if current == 0 {
+                let preferred = store.get_i32("preferredlaseropacity", 100);
+                store.put_i32("lasersopacity", preferred);
+            } else {
+                store.put_i32("preferredlaseropacity", current);
+                store.put_i32("lasersopacity", 0);
+            }
+        });
         self.persist_settings();
     }
 
@@ -715,8 +726,11 @@ impl MindUi {
     pub fn toggle_fullscreen(&mut self) {
         use godot::classes::DisplayServer;
         use godot::classes::display_server::WindowMode;
-        let full = self.settings.get_bool("fullscreen", false);
-        self.settings.put_bool("fullscreen", !full);
+        let full = crate::settings_hub::with_settings(|store| {
+            let full = store.get_bool("fullscreen", false);
+            store.put_bool("fullscreen", !full);
+            full
+        });
         self.persist_settings();
         let mut display = DisplayServer::singleton();
         display.window_set_mode(if full {
@@ -730,37 +744,41 @@ impl MindUi {
     /// `<name>-hint-done` flag (an imported Java profile carries its own).
     #[func]
     pub fn hint_finished(&self, name: GString) -> bool {
-        self.settings.get_bool(&format!("{name}-hint-done"), false)
+        crate::settings_hub::with_settings(|store| {
+            store.get_bool(&format!("{name}-hint-done"), false)
+        })
     }
 
     /// `HintsFragment.DefaultHint.finish`: `Core.settings.put(name +
     /// "-hint-done", true)`.
     #[func]
     pub fn hint_finish(&mut self, name: GString) -> bool {
-        self.settings.put_bool(&format!("{name}-hint-done"), true);
+        crate::settings_hub::with_settings(|store| {
+            store.put_bool(&format!("{name}-hint-done"), true);
+        });
         self.persist_settings();
         true
     }
 
     /// `Core.settings.getBool(key, false)` for arbitrary (campaign) flags such
-    /// as `campaignselect` (`PlanetDialog.java:183`). The store merges only
-    /// changed keys on save (`e0b6089`), so facade reads stay consistent.
+    /// as `campaignselect` (`PlanetDialog.java:183`). One store (`Core.settings`)
+    /// means a write through any facade is visible here at once (PAR-0164).
     #[func]
     pub fn settings_get_flag(&self, key: GString) -> bool {
-        self.settings.get_bool(&key.to_string(), false)
+        crate::settings_hub::with_settings(|store| store.get_bool(&key.to_string(), false))
     }
 
     /// `Core.settings.getBool(key, default)` for arbitrary (campaign) flags such
     /// as `maxresources` (default true; `LaunchLoadoutDialog.java:222-228`).
     #[func]
     pub fn settings_get_flag_default(&self, key: GString, default: bool) -> bool {
-        self.settings.get_bool(&key.to_string(), default)
+        crate::settings_hub::with_settings(|store| store.get_bool(&key.to_string(), default))
     }
 
     /// `Core.settings.put(key, value)` for a boolean flag.
     #[func]
     pub fn settings_put_flag(&mut self, key: GString, value: bool) -> bool {
-        self.settings.put_bool(&key.to_string(), value);
+        crate::settings_hub::with_settings(|store| store.put_bool(&key.to_string(), value));
         self.persist_settings();
         true
     }
@@ -769,18 +787,18 @@ impl MindUi {
     /// `lastplanet` (`PlanetDialog.java:84`).
     #[func]
     pub fn settings_get_text(&self, key: GString, default: GString) -> GString {
-        GString::from(
-            self.settings
-                .get_string(&key.to_string(), &default.to_string())
-                .as_str(),
-        )
+        let text = crate::settings_hub::with_settings(|store| {
+            store.get_string(&key.to_string(), &default.to_string())
+        });
+        GString::from(text.as_str())
     }
 
     /// `Core.settings.put(key, value)` for a string value.
     #[func]
     pub fn settings_put_text(&mut self, key: GString, value: GString) -> bool {
-        self.settings
-            .put_string(&key.to_string(), &value.to_string());
+        crate::settings_hub::with_settings(|store| {
+            store.put_string(&key.to_string(), &value.to_string());
+        });
         self.persist_settings();
         true
     }
@@ -789,13 +807,13 @@ impl MindUi {
     /// since the last confirmed boot.
     #[func]
     pub fn uiscale_changed(&self) -> bool {
-        self.settings.get_bool("uiscalechanged", false)
+        crate::settings_hub::with_settings(|store| store.get_bool("uiscalechanged", false))
     }
 
     /// Sets the `uiscalechanged` boot-confirmation flag (`Control.java`).
     #[func]
     pub fn set_uiscale_changed(&mut self, changed: bool) -> bool {
-        self.settings.put_bool("uiscalechanged", changed);
+        crate::settings_hub::with_settings(|store| store.put_bool("uiscalechanged", changed));
         self.persist_settings();
         true
     }
@@ -829,21 +847,21 @@ impl MindUi {
     /// `@settings.cleardata`: clears the settings store while keeping
     /// `usid`/`uuid` keys, wipes the game data trees and exits (`Core.app.exit`).
     fn clear_game_data(&mut self) -> bool {
-        let preserved: Vec<(String, SettingValue)> = self
-            .settings
-            .keys()
-            .filter(|key| key.contains("usid") || key.contains("uuid"))
-            .filter_map(|key| {
-                self.settings
-                    .get(key)
-                    .cloned()
-                    .map(|value| (key.to_owned(), value))
-            })
-            .collect();
-        self.settings.clear();
-        for (key, value) in preserved {
-            self.settings.put(&key, value);
-        }
+        crate::settings_hub::with_settings(|store| {
+            let preserved_keys: Vec<String> = store
+                .keys()
+                .filter(|key| key.contains("usid") || key.contains("uuid"))
+                .map(str::to_owned)
+                .collect();
+            let preserved: Vec<(String, SettingValue)> = preserved_keys
+                .into_iter()
+                .filter_map(|key| store.get(&key).cloned().map(|value| (key, value)))
+                .collect();
+            store.clear();
+            for (key, value) in preserved {
+                store.put(&key, value);
+            }
+        });
 
         // Drop the campaign facade's in-memory state before wiping the files;
         // its `exit_tree` persist would otherwise rewrite the deleted store.
@@ -927,7 +945,9 @@ impl MindUi {
             Ok(report) => {
                 let _ =
                     mind_core::io::data_archive::delete_files(&NativeFs, &user.join("previews"));
-                self.settings = SettingsStore::load(&NativeFs, &paths);
+                // `importData` reloads the one store before exiting; every
+                // facade reads through the hub from here on (PAR-0164).
+                crate::settings_hub::reload(&paths);
                 // Rebuild the campaign facade from the imported settings before
                 // quitting: its `exit_tree` persist would otherwise write the
                 // pre-import store back (`importData` reloads settings).
@@ -1033,7 +1053,7 @@ impl MindUi {
             self.mobile,
             self.mobile_preview
         );
-        self.settings = SettingsStore::load(&NativeFs, &Paths::resolve(None));
+        crate::settings_hub::init(&Paths::resolve(None));
     }
 
     /// Calls a JSON read-model method on the live campaign facade, if present.
@@ -1053,36 +1073,13 @@ impl MindUi {
         Some(text)
     }
 
-    /// One settings row as JSON (current store value + model default/bounds).
-    fn row_json(&self, row: &settings::SettingRow) -> serde_json::Value {
-        match row.kind {
-            SettingKind::Check => serde_json::json!({
-                "key": row.key,
-                "kind": "check",
-                "value": self.settings.get_bool(row.key, row.default_bool()),
-                "default": row.default_bool(),
-            }),
-            SettingKind::Slider { min, max, step } => serde_json::json!({
-                "key": row.key,
-                "kind": "slider",
-                "value": self.settings.get_i32(row.key, row.default_i32()),
-                "default": row.default_i32(),
-                "min": min,
-                "max": max,
-                "step": step,
-                "format": format_tag(row.format),
-            }),
-        }
-    }
-
-    /// Atomically writes the settings store (writes are small; no debounce pump
+    /// Atomically writes the shared store (writes are small; no debounce pump
     /// exists in this node).
     fn persist_settings(&mut self) {
-        if let Err(error) = self.settings.force_save(&NativeFs, &Paths::resolve(None)) {
+        if let Err(error) = crate::settings_hub::save(&Paths::resolve(None)) {
             log::warn!("[ui] settings save failed: {error}");
         }
     }
-
     /// Resolves the sim owner the governor drives, if present.
     fn sim_host(&self) -> Option<Gd<GdNode>> {
         self.base().get_node_or_null(SIM_HOST_PATH)
@@ -1134,6 +1131,29 @@ fn json_string(value: &serde_json::Value) -> GString {
             log::warn!("[ui] settings JSON encode failed: {error}");
             GString::from("[]")
         }
+    }
+}
+
+/// One settings row as JSON (current store value + model default/bounds); the
+/// caller holds the shared store (`MindUi.settings_rows_json`).
+fn row_json(store: &SettingsStore, row: &settings::SettingRow) -> serde_json::Value {
+    match row.kind {
+        SettingKind::Check => serde_json::json!({
+            "key": row.key,
+            "kind": "check",
+            "value": store.get_bool(row.key, row.default_bool()),
+            "default": row.default_bool(),
+        }),
+        SettingKind::Slider { min, max, step } => serde_json::json!({
+            "key": row.key,
+            "kind": "slider",
+            "value": store.get_i32(row.key, row.default_i32()),
+            "default": row.default_i32(),
+            "min": min,
+            "max": max,
+            "step": step,
+            "format": format_tag(row.format),
+        }),
     }
 }
 
