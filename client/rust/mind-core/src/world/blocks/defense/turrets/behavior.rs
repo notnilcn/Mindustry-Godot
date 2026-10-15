@@ -220,6 +220,72 @@ impl BuildingBehavior for TurretBehavior {
             _ => return None,
         })
     }
+
+    /// `TurretBuild.control` (`Turret.java:522-540`): `control shoot` sets the
+    /// aim point + the 120-tick cooldown; `control shootp` follows a unit/
+    /// building target through `targetPosition`.
+    fn logic_control(
+        &self,
+        world: &mut World,
+        e: Entity,
+        a: crate::logic::LAccess,
+        p: &[crate::logic::LVar; 4],
+    ) -> bool {
+        use crate::logic::LAccess;
+        use crate::logic::value::conv;
+        match a {
+            // `control(LAccess.shoot, p1, p2, p3, p4)`:
+            // `targetPos.set(World.unconv(p1), World.unconv(p2));
+            //  logicControlTime = logicControlCooldown;
+            //  logicShooting = !Mathf.zero(p3);`
+            LAccess::Shoot => {
+                let x = conv(p[0].numf());
+                let y = conv(p[1].numf());
+                let shooting = p[2].num() != 0.0;
+                if let Some(mut state) = world.get_mut::<TurretState>(e) {
+                    state.target_pos = (x, y);
+                    state.logic_control_time =
+                        crate::world::blocks::defense::turrets::LOGIC_CONTROL_COOLDOWN;
+                    state.logic_shooting = shooting;
+                    return true;
+                }
+                false
+            }
+            // `control(LAccess.shootp, Object p1, p2, ...)`:
+            //  `logicControlTime = logicControlCooldown;
+            //   logicShooting = !Mathf.zero(p2);
+            //   if(p1 instanceof Posc pos) targetPosition(pos);`
+            LAccess::Shootp => {
+                let shooting = p[1].num() != 0.0;
+                let target = match p[0].value_obj() {
+                    Some(crate::logic::value::LogicObject::Unit(unit)) => Some(*unit),
+                    Some(crate::logic::value::LogicObject::Building(build)) => Some(*build),
+                    _ => None,
+                };
+                let aim = {
+                    let Some(state) = world.get::<TurretState>(e) else {
+                        return false;
+                    };
+                    target.and_then(|target| {
+                        crate::world::blocks::defense::turrets::logic_target_position(
+                            world, e, state, target,
+                        )
+                    })
+                };
+                if let Some(mut state) = world.get_mut::<TurretState>(e) {
+                    if let Some((x, y)) = aim {
+                        state.target_pos = (x, y);
+                    }
+                    state.logic_control_time =
+                        crate::world::blocks::defense::turrets::LOGIC_CONTROL_COOLDOWN;
+                    state.logic_shooting = shooting;
+                    return true;
+                }
+                false
+            }
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]

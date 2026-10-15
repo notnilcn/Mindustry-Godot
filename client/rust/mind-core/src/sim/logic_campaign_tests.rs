@@ -1442,3 +1442,92 @@ fn printchar_content_emoji() {
     assert_eq!(got, Some(expected), "the copper icon char is in the buffer");
     assert_events_drained(&sim);
 }
+
+// ---- I03 T4: logic-controlled turrets (PAR-0223) ----
+
+/// `control shoot` aims the turret at the logic point and fires.
+#[test]
+fn control_shoot_aims_duo() {
+    let mut sim = campaign_sim();
+    let duo = place(&mut sim, "duo", 18, 18);
+    feed_turret(&mut sim, duo, "copper", 10);
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "getblock building d 18 18\ncontrol shoot d 23 18 1\nstop\n",
+    );
+    tick(&mut sim, 40);
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
+        .expect("turret");
+    let cone = state.config.shoot_cone;
+    let rotation = state.rotation;
+    let bullets = sim.unit_runtime().expect("runtime").bullets.len();
+    assert!(
+        crate::weapons::angle_dist(rotation, 0.0) < cone,
+        "aims east at the logic point: {rotation}"
+    );
+    assert!(bullets > 0, "fired at the logic point");
+    // `stop` + the 120-tick cooldown ends logic control: no more shots.
+    let bytes = crate::logic::blocks::logic_block::compress("stop\n", &[]);
+    configure(
+        &mut sim,
+        10,
+        10,
+        crate::determinism::ConfigValue::Bytes(bytes),
+    );
+    tick(&mut sim, 100);
+    let after_cooldown = sim.unit_runtime().expect("runtime").bullets.len();
+    tick(&mut sim, 200);
+    let later = sim.unit_runtime().expect("runtime").bullets.len();
+    assert!(
+        later <= after_cooldown,
+        "no new bullets after the logic cooldown ({after_cooldown} -> {later})"
+    );
+    assert_events_drained(&sim);
+}
+
+/// `control shootp` follows a unit target through `targetPosition`.
+#[test]
+fn control_shootp_tracks_unit() {
+    let mut sim = campaign_sim();
+    let duo = place(&mut sim, "duo", 18, 18);
+    feed_turret(&mut sim, duo, "copper", 10);
+    // A team-2 core lets the target dagger spawn under the unit cap.
+    let core = sim.world_block_id("core-shard").expect("core");
+    sim.command(crate::determinism::SimCommand::Place {
+        x: 20,
+        y: 20,
+        block: core,
+        rotation: 0,
+        team: 2,
+        player: None,
+    })
+    .expect("enemy core");
+    let target = sim
+        .spawn_live_unit("dagger", 2, 22.0 * 8.0, 18.0 * 8.0, 0.0)
+        .expect("dagger");
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "getblock building d 18 18\nfetch unit u @crux 0 @dagger\ncontrol shootp d u 1\nstop\n",
+    );
+    tick(&mut sim, 10);
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::defense::turrets::TurretState>(duo)
+        .expect("turret");
+    let (tx, ty) = entity_pos(&sim, target);
+    let (aim_x, aim_y) = state.target_pos;
+    let (dx, dy) = (aim_x - tx, aim_y - ty);
+    assert!(
+        dx * dx + dy * dy <= 6.0 * 6.0,
+        "aim follows the target ({aim_x},{aim_y}) vs ({tx},{ty})"
+    );
+    assert_events_drained(&sim);
+}

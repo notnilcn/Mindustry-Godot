@@ -1379,6 +1379,28 @@ pub fn control(
         return false;
     }
     match a {
+        // `ControlI` on a turret: `TurretBuild.control` overrides
+        // (`Turret.java:522-540`) — `shoot` (numeric) and `shootp` (object).
+        LAccess::Shoot | LAccess::Shootp => {
+            let Some(block) = world.get::<Building>(e).map(|b| b.block) else {
+                return false;
+            };
+            let Some(inst) = world
+                .get_resource::<BlockTable>()
+                .and_then(|table| table.get(block))
+                .cloned()
+            else {
+                return false;
+            };
+            let empty = LVar::new("");
+            let params4: [LVar; 4] = std::array::from_fn(|i| {
+                params
+                    .get(i)
+                    .map(|p| (*p).clone())
+                    .unwrap_or_else(|| empty.clone())
+            });
+            inst.behavior.logic_control(world, e, a, &params4)
+        }
         LAccess::Enabled => {
             let enabled = params.first().map(|p| p.as_bool()).unwrap_or(false);
             if let Some(mut b) = world.get_mut::<Building>(e) {
