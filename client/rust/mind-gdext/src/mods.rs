@@ -19,9 +19,11 @@ use godot::classes::{INode, Json, Node as GdNode, ProjectSettings};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
-use mind_core::io::{NativeFs, SettingsStore};
+use mind_core::io::{NativeFs, Paths};
 use mind_core::mods::{ModListEntry, ModListing, Mods};
 use mind_core::version::BuildInfo;
+
+use crate::settings_hub;
 
 /// Mods directory in Godot user space (`<data>/mods/`).
 const MODS_PATH: &str = "user://mods";
@@ -32,7 +34,6 @@ const MODS_PATH: &str = "user://mods";
 pub struct MindMods {
     base: Base<GdNode>,
     mods: Mods,
-    settings: SettingsStore,
 }
 
 #[godot_api]
@@ -41,7 +42,6 @@ impl INode for MindMods {
         MindMods {
             base,
             mods: Mods::new(false, PathBuf::new()),
-            settings: SettingsStore::new(),
         }
     }
 
@@ -68,7 +68,9 @@ impl MindMods {
             log::warn!("[mods] could not create `{}`: {error}", dir.display());
         }
         self.mods = Mods::new(false, dir.clone());
-        match self.mods.load(&NativeFs, &dir, &self.settings) {
+        let load =
+            settings_hub::with_settings(|settings| self.mods.load(&NativeFs, &dir, settings));
+        match load {
             Ok(report) => {
                 log::info!("mods loaded: {} mod(s)", report.mods.len());
             }
@@ -118,7 +120,10 @@ impl MindMods {
     #[func]
     pub fn set_enabled(&mut self, name: GString, enabled: bool) {
         let target = name.to_string();
-        self.mods.set_enabled(&target, enabled, &mut self.settings);
+        settings_hub::with_settings(|settings| {
+            self.mods.set_enabled(&target, enabled, settings);
+        });
+        self.persist_settings();
         let _ = self.base_mut().emit_signal("mods_changed", &[]);
     }
 
@@ -135,9 +140,10 @@ impl MindMods {
             "mod_import_progress",
             &[path.to_variant(), 0.0f32.to_variant()],
         );
-        let result = self
-            .mods
-            .import_mod(&NativeFs, &source, false, &mut self.settings);
+        let result = settings_hub::with_settings(|settings| {
+            self.mods.import_mod(&NativeFs, &source, false, settings)
+        });
+        self.persist_settings();
         let _ = self.base_mut().emit_signal(
             "mod_import_progress",
             &[path.to_variant(), 1.0f32.to_variant()],
@@ -235,7 +241,9 @@ impl MindMods {
     #[func]
     pub fn reload(&mut self) {
         let dir = mods_dir();
-        self.mods.load(&NativeFs, &dir, &self.settings).ok();
+        settings_hub::with_settings(|settings| {
+            self.mods.load(&NativeFs, &dir, settings).ok();
+        });
         let _ = self.base_mut().emit_signal("mods_changed", &[]);
     }
 
@@ -286,7 +294,7 @@ impl MindMods {
             );
             out.set(
                 &"failed".to_variant(),
-                &mod_.failed(&self.settings).to_variant(),
+                &settings_hub::with_settings(|settings| mod_.failed(settings)).to_variant(),
             );
             let reason = mod_
                 .unsupported_reason
@@ -409,6 +417,14 @@ impl MindMods {
                 )
             })
             .unwrap_or_default()
+    }
+
+    /// Flushes the shared settings store after an enable/import write
+    /// (`Core.settings` `mod-<name>-enabled` flags; I05 T1).
+    fn persist_settings(&self) {
+        if let Err(error) = settings_hub::save(&Paths::resolve(None)) {
+            log::warn!("[mods] settings save failed: {error}");
+        }
     }
 }
 

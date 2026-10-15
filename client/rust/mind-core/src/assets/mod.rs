@@ -23,6 +23,7 @@ pub mod content_regions;
 pub mod file_tree;
 pub mod generated;
 pub mod icons;
+pub mod locale;
 pub mod overlay;
 pub mod regions;
 pub mod sounds;

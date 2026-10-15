@@ -17,6 +17,8 @@
 
 use indexmap::IndexMap;
 
+use crate::util::strings::strip_colors;
+
 /// Parses a `.properties` text into an ordered key→value map.
 ///
 /// Faithful port of the Arc `PropertiesUtils.load` line-oriented state machine
@@ -222,6 +224,29 @@ impl Bundle {
         }
     }
 
+    /// The `router` locale transform (`Vars.java:556-564`): every non-space
+    /// character of the English bundle's value is replaced by the router glyph
+    /// (`Iconc.blockRouter`), so the game renders as router icons.
+    ///
+    /// Java iterates `bundle.getKeys()`, reads the value from the plain English
+    /// bundle (`defBundle.get(s)`) and writes it back into this bundle, then
+    /// merges `global.properties` afterwards (the caller keeps that order).
+    pub fn router_transform(&mut self, english: &Bundle, glyph: char) {
+        let keys: Vec<String> = self.keys().map(str::to_owned).collect();
+        for key in keys {
+            let source = english.get(&key).to_owned();
+            let masked = router_mask(&strip_colors(&source), glyph);
+            for layer in &mut self.layers {
+                if layer.contains_key(&key) {
+                    layer.insert(key.clone(), masked.clone());
+                }
+            }
+            if self.global.contains_key(&key) {
+                self.global.insert(key.clone(), masked.clone());
+            }
+        }
+    }
+
     /// Raw value lookup: global overlay, then each layer, skipping empty values.
     pub fn get_or_null(&self, key: &str) -> Option<&str> {
         if let Some(value) = self.global.get(key)
@@ -354,6 +379,21 @@ impl IntFormat {
     }
 }
 
+/// `Vars.java:560` `replaceAll("\\S", router)`: every non-whitespace character
+/// becomes the router glyph. Java's `\s` is ASCII-only
+/// (`[ \t\n\x0B\f\r]`), so Unicode spaces are replaced too.
+fn router_mask(text: &str, glyph: char) -> String {
+    text.chars()
+        .map(|ch| {
+            if matches!(ch, ' ' | '\t' | '\n' | '\u{0b}' | '\u{0c}' | '\r') {
+                ch
+            } else {
+                glyph
+            }
+        })
+        .collect()
+}
+
 /// Builds the candidate-locale bundle file suffixes, most specific first
 /// (`pt_BR` → `bundle_pt_BR`, `bundle_pt`, `bundle`).
 pub fn locale_chain(locale: &str) -> Vec<String> {
@@ -445,6 +485,44 @@ mod tests {
         );
         assert_eq!(locale_chain("en"), vec!["bundle_en", "bundle"]);
         assert_eq!(locale_chain("router"), vec!["bundle"]);
+    }
+
+    /// `Vars.java:538-564`: the candidate chain, the `router` transform and the
+    /// `global.properties` merge order.
+    #[test]
+    fn bundle_fallback_chain() {
+        // `pt_BR` walks pt_BR -> pt -> bundle (`I18NBundle.getCandidateLocales`).
+        assert_eq!(
+            locale_chain("pt_BR"),
+            vec!["bundle_pt_BR", "bundle_pt", "bundle"]
+        );
+        assert_eq!(
+            locale_chain("zh_TW"),
+            vec!["bundle_zh_TW", "bundle_zh", "bundle"]
+        );
+        assert_eq!(locale_chain("default"), vec!["bundle"]);
+        assert_eq!(locale_chain("router"), vec!["bundle"]);
+
+        // The router transform replaces non-space characters with the glyph and
+        // strips color markup first (`Strings.stripColors`).
+        let english =
+            Bundle::from_layers(vec![parse_properties("a=Copper [red]Wall\nb=two words\n")]);
+        let mut router = english.clone();
+        router.router_transform(&english, '\u{f88e}');
+        assert_eq!(
+            router.get("a"),
+            "\u{f88e}\u{f88e}\u{f88e}\u{f88e}\u{f88e}\u{f88e} \u{f88e}\u{f88e}\u{f88e}\u{f88e}"
+        );
+        assert_eq!(
+            router.get("b"),
+            "\u{f88e}\u{f88e}\u{f88e} \u{f88e}\u{f88e}\u{f88e}\u{f88e}\u{f88e}"
+        );
+
+        // `global.properties` merges after the transform and still wins.
+        let mut router = english.clone();
+        router.router_transform(&english, '\u{f88e}');
+        router.merge_global(parse_properties("a=global\n"));
+        assert_eq!(router.get("a"), "global");
     }
 
     #[test]

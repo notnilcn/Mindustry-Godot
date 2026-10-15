@@ -374,6 +374,10 @@ func _on_skip_wave() -> void:
 func _refresh_core_items() -> void:
 	if core_items == null or _hud == null:
 		return
+	# `HudFragment.java:594`: the table is gated on `settings.getBool("coreitems")`.
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_get_bool"):
+		core_items.visible = bool(ui.call("settings_get_bool", "coreitems"))
 	var parsed: Variant = JSON.parse_string(str(_hud.call("core_items_json")))
 	if parsed is Dictionary:
 		core_items.update_items(parsed)

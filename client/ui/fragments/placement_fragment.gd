@@ -819,19 +819,215 @@ func close_palette() -> void:
 	_ensure_loaded()
 
 
+## `blockSelect[0..9]` action names -> the Java `Category.all` digit index
+## (`PlacementFragment.java:60-74`).
+const DIGIT_ACTIONS := {
+	"block_select_01": 0, "block_select_02": 1, "block_select_03": 2,
+	"block_select_04": 3, "block_select_05": 4, "block_select_06": 5,
+	"block_select_07": 6, "block_select_08": 7, "block_select_09": 8,
+	"block_select_10": 9,
+}
+
+## `blockSelect[10..13]` arrow actions -> the `gridUpdate` direction index.
+const ARROW_ACTIONS := {
+	"block_select_left": 10, "block_select_right": 11,
+	"block_select_up": 12, "block_select_down": 13,
+}
+
+## `Time.timeSinceMillis(blockSelectSeqMillis) > 400` combo window.
+const BLOCK_SELECT_COMBO_MS := 400
+
+## `PlacementFragment.blockSelectEnd`/`blockSelectSeq`/`blockSelectSeqMillis`
+## (`:55-57`); the window is wall-clock.
+var _block_select_end := true
+var _block_select_seq := 0
+var _block_select_ms := 0
+## `PlacementFragment.selectedBlocks`: category name -> remembered block name.
+var _selected_blocks: Dictionary = {}
+
+
+## `PlacementFragment.gridUpdate` (`:177-273`) hotkey half. The digits, arrows
+## and category cycles are dispatched as `MindInput` hotkeys (the Java fragment
+## owns them; `DesktopInput` only routes the binding edges here) and run only
+## outside command mode (`:745`).
 func _on_hotkey(action: String) -> void:
-	if action != "category_prev" and action != "category_next":
+	if not _command_mode:
+		var digit := int(DIGIT_ACTIONS.get(action, -1))
+		if digit >= 0:
+			_block_select_digit(digit)
+			return
+		var arrow := int(ARROW_ACTIONS.get(action, -1))
+		if arrow >= 0:
+			_block_select_arrow(arrow)
+			return
+		if action == "category_prev" or action == "category_next":
+			_category_step(-1 if action == "category_prev" else 1)
+			return
+	if action == "pick":
+		# `updatePick`'s `currentCategory = input.block.category` (`:166-168`).
+		_sync_category_to_selected()
+
+
+## `gridUpdate` digits (`PlacementFragment.java:208-236`): the first number of a
+## combo picks `Category.all[i]`, the second/third pick the block index
+## (`X,1,0` == `X,0`).
+func _block_select_digit(digit: int) -> void:
+	var now := Time.get_ticks_msec()
+	if _block_select_end or now - _block_select_ms > BLOCK_SELECT_COMBO_MS:
+		var index := _category_index_by_ordinal(digit)
+		if index < 0:
+			# Empty category (`!getUnlockedByCategory(Category.all[i]).isEmpty()`).
+			return
+		# `if(input.block != null) input.block = getSelectedBlock(currentCategory)`.
+		_select_category(index, not _block_selected_name().is_empty())
+		_block_select_end = false
+		_block_select_seq = 0
+		_block_select_ms = now
+		return
+	var target := digit
+	if _block_select_seq == 0:
+		_block_select_seq = digit + 1
+	else:
+		target += (_block_select_seq - (0 if digit != 9 else 1)) * 10
+		_block_select_end = true
+	var entry := _current_entry()
+	var names := _block_names(entry)
+	if target >= names.size():
+		return
+	# `selectedBlocks.put(currentCategory, input.block)`.
+	_selected_blocks[str(entry.get("name", ""))] = names[target]
+	_select_block_by_name(names[target])
+	_block_select_ms = Time.get_ticks_msec()
+
+
+## `gridUpdate` arrows (`PlacementFragment.java:189-207`): the grid position of
+## the current selection in the category's (unlock-filtered) list.
+func _block_select_arrow(arrow: int) -> void:
+	var entry := _current_entry()
+	var names := _block_names(entry)
+	var count := names.size()
+	if count <= 0:
+		return
+	var at := names.find(_block_selected_name())
+	if at < 0:
+		return
+	var target := at
+	match arrow:
+		10:
+			target = (at - 1 + count) % count
+		11:
+			target = (at + 1) % count
+		12:
+			target = at - 4 if at > 3 else count - count % 4 + at
+			if target >= count:
+				target -= 4
+		13:
+			target = at + 4 if at < count - 4 else at % 4
+	_selected_blocks[str(entry.get("name", ""))] = names[target]
+	_select_block_by_name(names[target])
+
+
+## `PlacementFragment.categoryPrev/Next` (`:240-258`): cycle the non-empty
+## categories and select `getSelectedBlock(new)` even with no prior pick.
+func _category_step(delta: int) -> void:
+	var list: Array = _catalog.get("categories", [])
+	if list.is_empty():
 		return
 	if panel == null or not panel.visible:
 		open_palette()
-	var count := int(_catalog.get("categories", []).size())
-	if count <= 0:
-		return
-	var delta := -1 if action == "category_prev" else 1
-	_selected_category = wrapi(_selected_category + delta, 0, count)
-	_sync_category()
+	_selected_category = wrapi(_selected_category + delta, 0, list.size())
 	_build_categories()
 	_rebuild()
+	var remembered := _get_selected_block(_current_entry())
+	if not remembered.is_empty():
+		_select_block_by_name(remembered)
+
+
+## `updatePick`'s category switch for a successful middle-click pick: the rail
+## follows the picked block's category (`:166-168`).
+func _sync_category_to_selected() -> void:
+	var name := _block_selected_name()
+	if name.is_empty():
+		return
+	var list: Array = _catalog.get("categories", [])
+	for index in list.size():
+		var entry: Dictionary = list[index]
+		if not _block_names(entry).has(name):
+			continue
+		_selected_category = index
+		_selected_blocks[str(entry.get("name", ""))] = name
+		_build_categories()
+		_rebuild()
+		return
+
+
+## `control.input.block` as reported by the sim host (`""` when none).
+func _block_selected_name() -> String:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("selected_block"):
+		return ""
+	var name := str(host.call("selected_block"))
+	return "" if name == "air" else name
+
+
+## The live catalogue entry for `_selected_category`.
+func _current_entry() -> Dictionary:
+	var list: Array = _catalog.get("categories", [])
+	if list.is_empty() or _selected_category < 0 or _selected_category >= list.size():
+		return {}
+	return list[_selected_category] as Dictionary
+
+
+## Article names of one catalogue entry, in content order
+## (`getUnlockedByCategory` order).
+func _block_names(entry: Dictionary) -> PackedStringArray:
+	var out := PackedStringArray()
+	for block_variant in entry.get("blocks", []):
+		out.append(str((block_variant as Dictionary).get("name", "")))
+	return out
+
+
+## Catalogue index of the entry with `Category.ordinal() == ordinal` (`-1` when
+## the category is empty and therefore absent).
+func _category_index_by_ordinal(ordinal: int) -> int:
+	var list: Array = _catalog.get("categories", [])
+	for index in list.size():
+		if int((list[index] as Dictionary).get("ordinal", -1)) == ordinal:
+			return index
+	return -1
+
+
+## `PlacementFragment.getSelectedBlock` (`:775-777`): the remembered block of
+## the category, else its first block (the catalogue is unlock-filtered, so the
+## head is the first unlocked block).
+func _get_selected_block(entry: Dictionary) -> String:
+	if entry.is_empty():
+		return ""
+	var name := str(entry.get("name", ""))
+	if _selected_blocks.has(name):
+		return str(_selected_blocks[name])
+	var names := _block_names(entry)
+	return names[0] if not names.is_empty() else ""
+
+
+## Selects a block by content name through `MindInput` (`control.input.block`).
+func _select_block_by_name(name: String) -> void:
+	if name.is_empty():
+		return
+	_select_block(get_node_or_null("/root/Spine/SimHost"), name)
+
+
+## Switches the visible category and re-selects its remembered block
+## (rail click `:730-736`, digit first number `:213-218`).
+func _select_category(index: int, select_block: bool) -> void:
+	_selected_category = index
+	_build_categories()
+	_rebuild()
+	if not select_block:
+		return
+	var remembered := _get_selected_block(_current_entry())
+	if not remembered.is_empty():
+		_select_block_by_name(remembered)
 
 
 func _ensure_loaded() -> void:
@@ -855,7 +1051,6 @@ func _load_catalog() -> void:
 		if parsed is Dictionary:
 			_catalog = parsed
 	_build_categories()
-	_sync_category()
 	_rebuild()
 
 
@@ -906,19 +1101,10 @@ func _build_categories() -> void:
 		categories.add_child(button)
 
 
+## Rail click (`PlacementFragment.java:730-736`): switch the category and, when
+## a block is already picked, re-select that category's remembered block.
 func _select(index: int) -> void:
-	_selected_category = index
-	_sync_category()
-	_build_categories()
-	_rebuild()
-
-
-## Mirrors the visible category into `MindInput` so the `1`..`0` block-select
-## binds pick from the same category the player sees.
-func _sync_category() -> void:
-	var input := get_node_or_null("/root/Spine/Input")
-	if input != null and input.has_method("set_catalog_category"):
-		input.call("set_catalog_category", _selected_category)
+	_select_category(index, not _block_selected_name().is_empty())
 
 
 ## Selects a block through `MindInput` so the placement rotation/state stay in
@@ -977,6 +1163,8 @@ func _rebuild() -> void:
 		if button.icon == null:
 			button.text = label
 		button.pressed.connect(func() -> void:
+			# `selectedBlocks.put(currentCategory, input.block)` (`:307`).
+			_selected_blocks[str(category.get("name", ""))] = name
 			_select_block(host, name))
 		blocks.add_child(button)
 		_block_buttons[name] = button

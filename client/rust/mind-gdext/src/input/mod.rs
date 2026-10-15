@@ -28,7 +28,6 @@ use mind_core::input::{
     BindingState, BindingValue, FocusState, InputLocks, KeyBindTable, RawEvent, ids,
     key_display_name,
 };
-use mind_core::io::{NativeFs, Paths, SettingsStore};
 use mind_core::world::config::ConfigValue;
 
 use crate::camera::MindCamera2D;
@@ -353,28 +352,26 @@ impl MindInput {
         self.bridge.set_catalog(categories);
     }
 
-    /// `settings.getBool("commandmodehold", true)` from the plan-04 store.
+    /// `settings.getBool("commandmodehold", true)` from the one shared store
+    /// (`Core.settings`; PAR-0164).
     fn read_command_mode_hold() -> bool {
-        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
-        store.get_bool("commandmodehold", true)
+        crate::settings_hub::with_settings(|store| store.get_bool("commandmodehold", true))
     }
 
     /// `settings.getBool("blockreplace", true)` (`InputHandler.updateLine`:
     /// junction/bridge replacement + `handlePlacementLine`).
     fn read_block_replace() -> bool {
-        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
-        store.get_bool("blockreplace", true)
+        crate::settings_hub::with_settings(|store| store.get_bool("blockreplace", true))
     }
 
     /// `settings.getBool("buildautopause", false)` (`SettingsMenuDialog.java:411`).
     fn read_build_autopause() -> bool {
-        let store = SettingsStore::load(&NativeFs, &Paths::resolve(None));
-        store.get_bool("buildautopause", false)
+        crate::settings_hub::with_settings(|store| store.get_bool("buildautopause", false))
     }
 
     /// Re-reads the hold setting when a command-mode key edge arrives so a live
     /// settings-dialog change applies on the next tap (`MindUi.settings_set`
-    /// persists the store).
+    /// persists the shared store).
     fn refresh_command_mode_hold(&mut self, raw: &RawEvent) {
         let code = match raw {
             RawEvent::KeyDown { code } | RawEvent::KeyUp { code } => code,
