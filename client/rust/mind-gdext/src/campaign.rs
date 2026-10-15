@@ -1345,7 +1345,7 @@ impl MindCampaign {
             let hooks = WaveMapHooks::new();
             header.apply_rules(mode_id, &hooks)
         } else {
-            match serde_json::from_str::<Rules>(&rules_text) {
+            match mind_core::io::json::JsonIo::read::<Rules>(&rules_text) {
                 Ok(rules) => rules,
                 Err(error) => {
                     log::warn!("start_map_mode: bad rules JSON: {error}");
@@ -1964,21 +1964,62 @@ impl MindCampaign {
     }
 
     /// Applies a rules JSON blob; campaign edits require `allowEditRules`.
+    ///
+    /// `PausedDialog`'s live edit (`PausedDialog.java:20-37`):
+    /// `rulesDialog.hidden(() -> { Vars.state.rules = toEdit; Call.setRules(toEdit); })`.
+    /// While a match runs the runtime session is authoritative (`pump_runtime`
+    /// mirrors it back), so the accepted rules are written into the live
+    /// `CampaignRuntime` and its world state is re-derived
+    /// (`CampaignRuntime.rules_world_dirty`).
     #[func]
     pub fn set_rules_json(&mut self, json: GString) -> bool {
-        let Ok(incoming) = serde_json::from_str::<mind_core::game::rules::Rules>(&json.to_string())
-        else {
-            return false;
+        // `JsonIo::read` coerces whole floats (`1.0` -> `1`), so a rules blob
+        // round-tripped through GDScript's JSON parses like Arc's reader.
+        let incoming = match mind_core::io::json::JsonIo::read::<Rules>(&json.to_string()) {
+            Ok(rules) => rules,
+            Err(error) => {
+                log::warn!("set_rules_json: rules JSON did not parse: {error}");
+                return false;
+            }
         };
         let is_campaign = self.session.is_campaign();
-        apply_set_rules(
+        if let Err(error) = apply_set_rules(
             &mut self.session.rules,
-            incoming,
+            incoming.clone(),
             is_campaign,
             None,
             &mut self.epoch,
-        )
-        .is_ok()
+        ) {
+            log::warn!("set_rules_json: rejected: {error}");
+            return false;
+        }
+        // Mirror into the runtime copy (`Call.setRules`); the facade session is
+        // refreshed by the next pump.
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                let runtime_is_campaign = runtime.session.is_campaign();
+                let accepted = match apply_set_rules(
+                    &mut runtime.session.rules,
+                    incoming,
+                    runtime_is_campaign,
+                    None,
+                    &mut self.epoch,
+                ) {
+                    Ok(_) => true,
+                    Err(error) => {
+                        log::warn!("set_rules_json: runtime rejected: {error}");
+                        false
+                    }
+                };
+                if accepted {
+                    runtime.rules_world_dirty = true;
+                }
+                host.bind_mut().put_campaign_runtime(runtime);
+                return accepted;
+            }
+        }
+        true
     }
 
     /// Researches a content name, spending the active sector's real stored items
@@ -3895,6 +3936,85 @@ impl MindCampaign {
             out.push(&row);
         }
         out
+    }
+
+    /// Writes one `CampaignRules` field for a planet and persists it
+    /// (`campaign_rules_dialog.gd`'s `set_campaign_rule(planet, key, value)`;
+    /// Java `PlanetDialog.rules`). Re-applies the planet rules on the live
+    /// session when the edited planet is the one being played.
+    #[func]
+    pub fn set_campaign_rule(&mut self, planet: GString, key: GString, value: Variant) -> bool {
+        let planet_name = planet.to_string();
+        let key = key.to_string();
+        let Some(campaign) = self.campaign.as_ref() else {
+            return false;
+        };
+        let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+            return false;
+        };
+        let Some(record) = campaign.planet(planet_id) else {
+            return false;
+        };
+        let Ok(mut json) = serde_json::to_value(&record.campaign_rules) else {
+            return false;
+        };
+        let Some(object) = json.as_object_mut() else {
+            return false;
+        };
+        let value = if let Ok(flag) = value.try_to::<bool>() {
+            serde_json::Value::Bool(flag)
+        } else if let Ok(number) = value.try_to::<f64>() {
+            serde_json::Value::from(number)
+        } else if let Ok(text) = value.try_to::<GString>() {
+            serde_json::Value::String(text.to_string())
+        } else {
+            log::warn!("set_campaign_rule: unsupported value type for `{key}`");
+            return false;
+        };
+        object.insert(key.clone(), value);
+        let Ok(rules) = serde_json::from_value::<CampaignRules>(json) else {
+            return false;
+        };
+        let Some(updated) = self.with_campaign_mut(|campaign, _settings| {
+            let Some(record) = campaign.planet_mut(planet_id) else {
+                return false;
+            };
+            record.campaign_rules = rules.clone();
+            true
+        }) else {
+            return false;
+        };
+        if !updated {
+            return false;
+        }
+        // Re-apply on the played planet (`Planet.applyRules(state.rules)`).
+        if self
+            .session
+            .sector
+            .is_some_and(|(played, _)| played == planet_id)
+            && let Some(registry) = self.registry.take()
+        {
+            let applied = self
+                .campaign
+                .as_ref()
+                .and_then(|campaign| campaign.planet(planet_id))
+                .map(|record| record.apply_rules(&registry, &mut self.session.rules, false, true));
+            if let Some(applied) = applied {
+                if applied.rts_swapped {
+                    log::info!("campaign rule `{key}` triggered the RTS-AI swap");
+                }
+                if let Some(mut host) = self.host() {
+                    let taken = host.bind_mut().take_campaign_runtime();
+                    if let Some(mut runtime) = taken {
+                        runtime.session.rules = self.session.rules.clone();
+                        host.bind_mut().put_campaign_runtime(runtime);
+                    }
+                }
+            }
+            self.registry = Some(registry);
+        }
+        self.persist();
+        true
     }
 
     /// The active planet's `CampaignRules` as JSON (GAP-11).

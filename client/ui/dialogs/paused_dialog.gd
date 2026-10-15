@@ -20,6 +20,8 @@ var _save_button: Button = null
 var _load_button: Button = null
 var _host_button: Button = null
 var _quit_button: Button = null
+## `PausedDialog`'s bottom-left `Icon.book` rules button (`PausedDialog.java:20-37`).
+var _rules_button: Button = null
 var _pending_quit := false
 var _pending_abandon := false
 
@@ -100,6 +102,83 @@ func _build() -> void:
 	_host_button.disabled = _net_active()
 	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 450.0)
 	_quit_button.name = "quit"
+	_build_rules_button()
+
+
+## `stack(cont, new Table(t -> t.bottom().left().button(Icon.book, ...)
+## .size(70f).tooltip("@customize")))` (`PausedDialog.java:20-37`): the rules
+## entry sits in the bottom-left corner of the (fill-parent) dialog.
+func _build_rules_button() -> void:
+	# code-instantiated: the corner entry has no static scene (visibility is
+	# rule- and net-dependent).
+	_rules_button = MindWidgets.icon_button("book", "")
+	_rules_button.name = "customize"
+	_rules_button.custom_minimum_size = Vector2(70.0, 70.0)
+	_rules_button.tooltip_text = _t("@customize")
+	_rules_button.anchor_left = 0.0
+	_rules_button.anchor_top = 1.0
+	_rules_button.anchor_right = 0.0
+	_rules_button.anchor_bottom = 1.0
+	_rules_button.offset_left = 12.0
+	_rules_button.offset_top = -82.0
+	_rules_button.offset_right = 82.0
+	_rules_button.offset_bottom = -12.0
+	_rules_button.pressed.connect(_open_rules)
+	add_child(_rules_button)
+	_rules_button.visible = false
+
+
+## `rulesDialog.hidden(() -> { Vars.state.rules = toEdit; Call.setRules(toEdit); })`:
+## the dialog edits a copy; the live rules are written on close.
+func _open_rules() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if ui == null or campaign == null:
+		return
+	var rules: Variant = JSON.parse_string(str(campaign.call("get_rules_json")))
+	if not (rules is Dictionary):
+		return
+	var current: Dictionary = rules
+	ui.call(
+		"open_dialog",
+		"custom_rules",
+		JSON.stringify({"rules": current, "reset": current, "show_rule_edit": false})
+	)
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root == null or not ui_root.has_method("dialog"):
+		return
+	var rules_dialog: Node = ui_root.call("dialog", "custom_rules")
+	if rules_dialog == null or not rules_dialog.has_signal("rules_edited"):
+		return
+	var callback := Callable(self, "_on_rules_edited")
+	if rules_dialog.is_connected("rules_edited", callback):
+		rules_dialog.disconnect("rules_edited", callback)
+	rules_dialog.connect("rules_edited", callback)
+
+
+func _on_rules_edited(json: String) -> void:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("set_rules_json"):
+		campaign.call("set_rules_json", json)
+
+
+## `visible(() -> state.rules.allowEditRules && (net.server() || !net.active()))`.
+func _refresh_rules_button() -> void:
+	if _rules_button == null:
+		return
+	var enabled := false
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("get_rules_json"):
+		var rules: Variant = JSON.parse_string(str(campaign.call("get_rules_json")))
+		if rules is Dictionary:
+			enabled = bool((rules as Dictionary).get("allowEditRules", false))
+	if enabled:
+		var net := get_node_or_null("/root/Spine/MindNet")
+		if net != null and net.has_method("session_state"):
+			var state := str(net.call("session_state"))
+			# `net.server()` hosts; an inactive client is offline play.
+			enabled = state == "offline" or state == "hosting" or state == "host"
+	_rules_button.visible = enabled
 
 
 ## A centered two-entry row of the dialog's own button column.
@@ -148,6 +227,7 @@ func _set_button_text(button: Button, value: String) -> void:
 func shown() -> void:
 	_refresh_campaign_buttons()
 	_refresh_host_button()
+	_refresh_rules_button()
 
 
 ## `PausedDialog.rebuild`: `@objective` needs a preset description; `@abandon`

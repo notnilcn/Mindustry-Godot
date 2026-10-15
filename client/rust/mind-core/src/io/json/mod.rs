@@ -130,6 +130,38 @@ pub fn quote_bare_keys(text: &str) -> String {
 /// `JsonIO` static API (`write`, `read`, `read_into`, `copy`, `print`).
 pub struct JsonIo;
 
+/// Arc's `Json.readValue` coercion: a number written as a whole float (`1.0`)
+/// reads into an integer field. GDScript's `JSON.stringify` writes every number
+/// as a float, so the Godot-built rules blobs need this. Floats with a
+/// fractional part, non-finite values and out-of-range wholes are left alone.
+pub fn coerce_whole_floats(value: &mut Value) {
+    match value {
+        Value::Array(items) => {
+            for item in items {
+                coerce_whole_floats(item);
+            }
+        }
+        Value::Object(map) => {
+            for (_, item) in map.iter_mut() {
+                coerce_whole_floats(item);
+            }
+        }
+        Value::Number(number) => {
+            let Some(float) = number.as_f64() else {
+                return;
+            };
+            if !float.is_finite() || float.fract() != 0.0 {
+                return;
+            }
+            let Ok(whole) = i64::try_from(float as i128) else {
+                return;
+            };
+            *number = serde_json::Number::from(whole);
+        }
+        _ => {}
+    }
+}
+
 impl JsonIo {
     /// `JsonIO.write`: compact JSON with upstream field order.
     pub fn write<T: Serialize>(value: &T) -> IoResult<String> {
@@ -138,12 +170,22 @@ impl JsonIo {
 
     /// `JsonIO.read`: strips the legacy prefix, then parses. Arc's lenient
     /// `Json` text (bare keys/strings, what Java writes into save meta
-    /// `rules`) is accepted by retrying through [`quote_bare_keys`].
+    /// `rules`) is accepted by retrying through [`quote_bare_keys`]; whole
+    /// floats are coerced to integers like Arc's `Json.readValue(int.class)`
+    /// (GDScript's `JSON.stringify` writes every number as a float).
     pub fn read<T: DeserializeOwned>(string: &str) -> IoResult<T> {
         let text = strip_legacy_prefix(string);
-        match serde_json::from_str(&text) {
+        let parsed = match serde_json::from_str::<Value>(&text) {
             Ok(value) => Ok(value),
-            Err(strict) => serde_json::from_str(&quote_bare_keys(&text)).map_err(|_| strict.into()),
+            Err(strict) => serde_json::from_str::<Value>(&quote_bare_keys(&text))
+                .map_err(|_| crate::io::IoError::from(strict)),
+        };
+        match parsed {
+            Ok(mut value) => {
+                coerce_whole_floats(&mut value);
+                Ok(serde_json::from_value(value)?)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -152,15 +194,18 @@ impl JsonIo {
     ///
     /// Arc's lenient `Json` text (bare keys/strings; the authored maps' `rules`
     /// tag) goes through [`quote_bare_keys`] like [`Self::read`], so a map
-    /// overlay never silently falls back to `Rules::default()`.
+    /// overlay never silently falls back to `Rules::default()`; whole floats
+    /// are coerced to integers for Arc's numeric coercion.
     pub fn read_into<T: Serialize + DeserializeOwned>(base: T, string: &str) -> IoResult<T> {
         let mut base_value = serde_json::to_value(&base)?;
         let text = strip_legacy_prefix(string);
-        let overlay: Value = match serde_json::from_str::<Value>(&text) {
+        let mut overlay: Value = match serde_json::from_str::<Value>(&text) {
             Ok(value) => value,
             Err(strict) => serde_json::from_str::<Value>(&quote_bare_keys(&text))
                 .map_err(|_| crate::io::IoError::from(strict))?,
         };
+        coerce_whole_floats(&mut overlay);
+        coerce_whole_floats(&mut base_value);
         merge_values(&mut base_value, overlay);
         Ok(serde_json::from_value(base_value)?)
     }
@@ -245,6 +290,24 @@ mod tests {
         let out = JsonIo::read_into(base, r#"{"inner":{"a":9},"future":true}"#).unwrap();
         assert_eq!(out.name, "base");
         assert_eq!(out.inner, Inner { a: 9, b: 2 });
+    }
+
+    /// Arc's `Json.readValue` coercion: a whole float (`1.0`) reads into an
+    /// integer field, so a rules blob round-tripped through GDScript (which
+    /// stringifies every number as a float) still parses.
+    #[test]
+    fn read_coerces_whole_floats_for_integer_fields() {
+        #[derive(serde::Serialize, serde::Deserialize, PartialEq, Debug, Default)]
+        struct Holder {
+            team: u8,
+            #[serde(default)]
+            index: i32,
+            value: f32,
+        }
+        let holder: Holder = JsonIo::read(r#"{"team": 1.0, "index": -2.0, "value": 1.5}"#).unwrap();
+        assert_eq!(holder.team, 1);
+        assert_eq!(holder.index, -2);
+        assert_eq!(holder.value, 1.5);
     }
 
     /// The authored maps' `rules` tag is Arc-lenient text (bare keys/strings);
