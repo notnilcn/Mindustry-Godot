@@ -1144,6 +1144,7 @@ impl Sim {
             state.tick = self.state.tick + 1;
             state.map_width = self.grid.width();
             state.map_height = self.grid.height();
+            state.player_unit = self.player_unit;
         }
         if self
             .ecs
@@ -1172,6 +1173,12 @@ impl Sim {
                     .map(|rules| rules.default_team)
             })
             .unwrap_or(crate::ecs::TeamId::SHARDED.0);
+        let (client_locale, client_name) = self
+            .ecs
+            .0
+            .get_resource::<crate::logic::globals::LogicClientInfo>()
+            .map(|info| (Some(info.locale.clone()), Some(info.name.clone())))
+            .unwrap_or_else(|| (Some("en".to_owned()), Some("player".to_owned())));
         let update = crate::logic::globals::GlobalUpdate {
             // Java increments `state.tick` before `logicVars.update()`
             // (Logic.java:526-546), so processors see tick N during tick N.
@@ -1182,10 +1189,10 @@ impl Sim {
             map_height: self.grid.height(),
             server: true,
             client: false,
-            // The port has no player-name/locale settings in core; Java reads
-            // `player.locale()` / `player.name()` (GlobalVars.java:211-216).
-            client_locale: Some("en".to_owned()),
-            client_name: Some("player".to_owned()),
+            // `GlobalVars.java:211-216`: `player.locale()` / `player.name()`
+            // from the host-injected [`crate::logic::globals::LogicClientInfo`].
+            client_locale,
+            client_name,
             client_team,
             client_mobile: false,
             client_music_playing: false,
@@ -1198,6 +1205,45 @@ impl Sim {
     /// Drains the world-processor side-effect log once per tick
     /// (`LogicWorldState.events`; the T5/T6 half of `LExecutor`'s host sinks).
     fn drain_logic_events(&mut self) {
+        // `MapObjectives.completed` -> `LExecutor.runLogicScript`
+        // (`MapObjectives.java:213`): a privileged, loop-free script over the
+        // LIVE world, up to `SCRIPT_DEFAULT_MAX_INSTRUCTIONS`.
+        for code in self.take_pending_logic_scripts() {
+            let _ = crate::logic::script::run_logic_script_in(
+                &code,
+                crate::logic::script::SCRIPT_DEFAULT_MAX_INSTRUCTIONS,
+                false,
+                &mut self.ecs.0,
+            );
+        }
+        self.drain_logic_world_events();
+        // A script may emit world events and complete another objective: one
+        // more pass (bounded by the objectives themselves having no cycles).
+        for code in self.take_pending_logic_scripts() {
+            let _ = crate::logic::script::run_logic_script_in(
+                &code,
+                crate::logic::script::SCRIPT_DEFAULT_MAX_INSTRUCTIONS,
+                false,
+                &mut self.ecs.0,
+            );
+        }
+        self.drain_logic_world_events();
+    }
+
+    /// Takes the queued objective `completionLogicCode` scripts.
+    fn take_pending_logic_scripts(&mut self) -> Vec<String> {
+        self.ecs
+            .0
+            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+            .map(|mut runtime| {
+                std::mem::take(&mut runtime.session.objectives.pending_logic_scripts)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Drains the [`crate::logic::world::LogicWorldState`] event log into the
+    /// sim's host handlers.
+    fn drain_logic_world_events(&mut self) {
         let events = match self
             .ecs
             .0
@@ -1233,6 +1279,29 @@ impl Sim {
                 // T5 adds SetBlock handling here.
                 e @ LogicWorldEvent::Message { .. } if self.logic_ui_events.len() < 256 => {
                     self.logic_ui_events.push(e);
+                }
+                // `ucontrol payDrop`/`payTake` (T1): applied through the same
+                // helpers the player input uses.
+                LogicWorldEvent::Payload {
+                    carrier,
+                    kind,
+                    x,
+                    y,
+                    units: _,
+                } => {
+                    let carrier = bevy_ecs::entity::Entity::from_bits(carrier);
+                    match kind {
+                        0 => {
+                            let _ = self.payload_pickup_unit(carrier, x, y, None);
+                        }
+                        1 => {
+                            let _ = self.payload_pickup_build(carrier, x, y);
+                        }
+                        2 => {
+                            let _ = self.payload_drop(carrier, x, y);
+                        }
+                        _ => {}
+                    }
                 }
                 // `CutsceneI` state lives in `LogicWorldState.cutscene` (T3).
                 _ => {}

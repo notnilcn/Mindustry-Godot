@@ -70,6 +70,27 @@ pub const fn is_logic_controllable(unit: &UnitTypeDef) -> bool {
     unit.logic_controllable
 }
 
+/// Java `UnitController.isLogicControllable()` for a live unit
+/// (`UnitComp.checkLogicAI`): every `AIController` returns `true`
+/// (`AIController.java:82-84`), the player returns `false`
+/// (`PlayerComp.java:174-176`), and `CommandAI` returns `!hasCommand()`
+/// (`CommandAI.java:108-110,562-564`, `targetPos == null` — the live
+/// `ControllerSlot.target`).
+pub fn unit_is_logic_controllable(
+    world: &bevy_ecs::world::World,
+    unit: bevy_ecs::entity::Entity,
+) -> bool {
+    use crate::ai::controller::ControllerSlot;
+    let Some(slot) = world.get::<ControllerSlot>(unit) else {
+        return false;
+    };
+    match slot.kind {
+        AiKind::Player => false,
+        AiKind::Command => slot.target.is_none(),
+        _ => true,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

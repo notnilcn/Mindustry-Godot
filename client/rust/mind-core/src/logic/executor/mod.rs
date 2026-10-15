@@ -1286,18 +1286,79 @@ impl Instruction {
                 output,
             } => {
                 let base = exec.arena.get(radar.id()).value_obj().cloned();
-                let (base_x, base_y, team) = base_team_pos(world, base.as_ref());
-                let order = exec.arena.get(sort_order.id()).as_bool();
-                let found = radar::find(
-                    &radar::candidates(world),
-                    team,
-                    *targets,
-                    *sort,
-                    order,
-                    base_x,
-                    base_y,
-                );
                 let output = output.id();
+                let Some(base) = base else {
+                    if !exec.is_constant(output) {
+                        exec.arena.get_mut(output).set_obj(None);
+                    }
+                    return;
+                };
+                // `Ranged` + team + building-privilege gates (`RadarI.run`).
+                let Some(src) = radar::source(world, &base, exec.team, exec.privileged) else {
+                    if !exec.is_constant(output) {
+                        exec.arena.get_mut(output).set_obj(None);
+                    }
+                    return;
+                };
+                let order = exec.arena.get(sort_order.id()).as_bool();
+                let key = (exec.arena.get(exec.counter).num - 1.0).max(0.0) as u32;
+                let tick = world
+                    .get_resource::<crate::logic::world::LogicWorldState>()
+                    .map(|state| state.tick as f32)
+                    .unwrap_or(0.0);
+                let recompute = if src.unit {
+                    // `uradar`: `UnitControlI.checkLogicAI(exec, base, true)` +
+                    // the per-instruction 40-tick `checkTargetTimer` gate.
+                    if unit_control::check_logic_ai(
+                        world,
+                        exec.team,
+                        exec.privileged,
+                        src.entity,
+                        Some(src.entity),
+                        true,
+                        exec.build,
+                    )
+                    .is_none()
+                    {
+                        if !exec.is_constant(output) {
+                            exec.arena.get_mut(output).set_obj(None);
+                        }
+                        return;
+                    }
+                    unit_control::refresh_control_timer(world, src.entity);
+                    world
+                        .get_mut::<crate::ai::types::logic::LogicAi>(src.entity)
+                        .is_some_and(|mut ai| ai.check_target_timer(key))
+                } else {
+                    // Building sources refresh on a fixed 30-tick interval (or
+                    // when the source changed).
+                    match exec.radar_cache.get(&key) {
+                        Some((cached_tick, cached_base, _)) => {
+                            *cached_base != Some(src.entity) || tick - *cached_tick >= 30.0
+                        }
+                        None => true,
+                    }
+                };
+                let found = if recompute {
+                    let found = radar::find(
+                        &radar::candidates(world),
+                        src.team,
+                        *targets,
+                        *sort,
+                        order,
+                        src.x,
+                        src.y,
+                        src.range,
+                        Some(src.entity),
+                    );
+                    exec.radar_cache
+                        .insert(key, (tick, Some(src.entity), found));
+                    found
+                } else {
+                    exec.radar_cache
+                        .get(&key)
+                        .and_then(|(_, _, target)| *target)
+                };
                 if !exec.is_constant(output) {
                     exec.arena
                         .get_mut(output)
@@ -1305,26 +1366,40 @@ impl Instruction {
                 }
             }
             Instruction::UnitBind { type_ } => {
+                // `if(!exec.privileged && !state.rules.logicUnitControl) return;`
+                if !exec.privileged
+                    && !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(
+                        world,
+                    ))
+                {
+                    return;
+                }
                 let selector = exec.arena.get(type_.id()).clone();
-                let type_id = match selector.value_obj() {
-                    Some(LogicObject::Content(c)) => Some(c.id),
+                let team = exec.team;
+                let privileged = exec.privileged;
+                let bound = match selector.value_obj() {
+                    Some(LogicObject::Content(c))
+                        if c.type_ == crate::content::ContentType::Unit =>
+                    {
+                        let index = c.id as usize;
+                        if exec.binds.len() <= index {
+                            exec.binds.resize(index + 1, 0);
+                        }
+                        let cursor = &mut exec.binds[index];
+                        unit_control::bind_next(world, c.id, team, cursor)
+                    }
+                    Some(LogicObject::Unit(unit))
+                        if unit_control::bind_object_ok(world, team, privileged, *unit) =>
+                    {
+                        Some(*unit)
+                    }
                     _ => None,
                 };
-                let bound = type_id.and_then(|id| {
-                    let index = id as usize;
-                    if exec.binds.len() <= index {
-                        exec.binds.resize(index + 1, 0);
-                    }
-                    let cursor = &mut exec.binds[index];
-                    let team = exec.team;
-                    unit_control::bind_next(world, id, team, cursor)
-                });
+                // `exec.unit.setconst(value)` (constants included).
                 let unit_var = exec.unit;
-                if !exec.is_constant(unit_var) {
-                    exec.arena
-                        .get_mut(unit_var)
-                        .set_obj(bound.map(LogicObject::Unit));
-                }
+                exec.arena
+                    .get_mut(unit_var)
+                    .set_const(bound.map(LogicObject::Unit));
             }
             Instruction::UnitControl {
                 type_,
@@ -1332,9 +1407,12 @@ impl Instruction {
                 p2,
                 p3,
                 p4,
-                p5: _,
+                p5,
             } => {
-                if !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(world))
+                if !exec.privileged
+                    && !unit_control::logic_unit_control_enabled(crate::logic::blocks::rules_ref(
+                        world,
+                    ))
                 {
                     return;
                 }
@@ -1342,19 +1420,7 @@ impl Instruction {
                 let Some(LogicObject::Unit(unit)) = bound else {
                     return;
                 };
-                let privileged = exec.privileged;
-                let team = exec.team;
-                if unit_control::check_logic_ai(world, team, privileged, unit, Some(unit), true)
-                    .is_none()
-                {
-                    return;
-                }
-                unit_control::refresh_control_timer(world, unit);
-                let params: Vec<LVar> = [*p1, *p2, *p3, *p4]
-                    .iter()
-                    .map(|v| exec.arena.get(v.id()).clone())
-                    .collect();
-                unit_control::apply_control(world, unit, *type_, &params);
+                unit_control::apply_control(exec, world, unit, *type_, *p1, *p2, *p3, *p4, *p5);
             }
             Instruction::UnitLocate {
                 locate,
@@ -1617,37 +1683,6 @@ impl Instruction {
     }
 }
 
-/// Base `(x, y, team)` for a radar/locate instruction.
-fn base_team_pos(world: &World, base: Option<&LogicObject>) -> (f32, f32, u8) {
-    match base {
-        Some(LogicObject::Building(e)) => {
-            let pos = world.get::<crate::entities::comp::Pos>(*e);
-            let team = world
-                .get::<crate::entities::comp::TeamComp>(*e)
-                .map(|t| t.team)
-                .unwrap_or(0);
-            (
-                pos.map(|p| p.x).unwrap_or(0.0),
-                pos.map(|p| p.y).unwrap_or(0.0),
-                team,
-            )
-        }
-        Some(LogicObject::Unit(e)) => {
-            let pos = world.get::<crate::entities::comp::Pos>(*e);
-            let team = world
-                .get::<crate::entities::comp::TeamComp>(*e)
-                .map(|t| t.team)
-                .unwrap_or(0);
-            (
-                pos.map(|p| p.x).unwrap_or(0.0),
-                pos.map(|p| p.y).unwrap_or(0.0),
-                team,
-            )
-        }
-        _ => (0.0, 0.0, 0),
-    }
-}
-
 fn set_output_num(exec: &mut Executor, var: VarRef, value: f64) {
     let id = var.id();
     if !exec.is_constant(id) {
@@ -1732,6 +1767,12 @@ pub struct Executor {
     pub link_ids: IndexSet<i32>,
     /// Per-unit-type binding cursor (`LExecutor.binds`).
     pub binds: Vec<u32>,
+    /// `LExecutor.unitTimeouts`: last transfer tick per unit (entity keyed;
+    /// Java keys by unit id — same identity in a live run).
+    pub unit_timeouts: indexmap::IndexMap<Entity, f32>,
+    /// `RadarI` per-instruction cache `(tick, source, target)` (building
+    /// sources refresh every 30 ticks).
+    pub radar_cache: indexmap::IndexMap<u32, (f32, Option<Entity>, Option<Entity>)>,
     /// `@queries` result arenas (deviation 3); index 0 is the privileged arena.
     pub queries: Vec<Vec<LogicObject>>,
     /// Global arena snapshot from the assembler (deviation 2).
@@ -1773,6 +1814,8 @@ impl Executor {
             links: Vec::new(),
             link_ids: IndexSet::new(),
             binds: Vec::new(),
+            unit_timeouts: indexmap::IndexMap::new(),
+            radar_cache: indexmap::IndexMap::new(),
             queries: Vec::new(),
             globals: crate::logic::globals::GlobalVars::new(),
             global_mirrors: Vec::new(),
@@ -1984,17 +2027,21 @@ impl Executor {
     }
 
     fn append_print_char(&mut self, value: &LVar) {
-        // `PrintCharI.run`: content appends `(char)cont.emojiChar()`; the port
-        // has no emoji table, so the content branch appends nothing (deviation).
-        let text = if value.is_obj {
-            String::new()
+        // `PrintCharI.run` (`J/logic/LExecutor.java`): content appends
+        // `(char)cont.emojiChar()` (0 -> U+0000); non-content objects append
+        // nothing.
+        let code = if value.is_obj {
+            match value.value_obj() {
+                Some(LogicObject::Content(c)) => self.globals.content_icon_code(c.type_, c.id),
+                _ => return,
+            }
         } else {
             // Java casts `(char)Math.floor(value.numval)`.
-            match char::from_u32(value.num().floor() as u32) {
-                Some(ch) => ch.to_string(),
-                None => String::new(),
-            }
+            value.num().floor() as u32
         };
+        let text = char::from_u32(code)
+            .map(|ch| ch.to_string())
+            .unwrap_or_default();
         push_text(&mut self.text_buffer, &text);
     }
 

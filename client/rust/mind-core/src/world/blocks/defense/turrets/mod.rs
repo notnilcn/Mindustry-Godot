@@ -1170,6 +1170,60 @@ pub fn turret_range_of(state: &TurretState, world: &World, e: Entity) -> f32 {
     state.config.range + peek_ammo_range_change_of(state, world, e)
 }
 
+/// `Turret.logicControlCooldown` (`60 * 2` ticks).
+pub const LOGIC_CONTROL_COOLDOWN: f32 = 120.0;
+
+/// `TurretBuild.targetPosition(Posc)` for the logic `shootp` path: the same
+/// intercept math as [`target_position`], sourced from the world alone (the
+/// logic VM has no `CombatCtx`).
+pub fn logic_target_position(
+    world: &World,
+    e: Entity,
+    state: &TurretState,
+    target: Entity,
+) -> Option<(f32, f32)> {
+    let (x, y) = position(world, e)?;
+    let (tx, ty) = position(world, target)?;
+    let speed = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .and_then(|runtime| {
+            peek_ammo_state(state, world, e)
+                .and_then(|id| runtime.content.bullet(id))
+                .map(|def| def.speed)
+        })
+        .unwrap_or(0.0);
+    let delta = world
+        .get::<crate::entities::comp::Vel>(target)
+        .copied()
+        .unwrap_or(crate::entities::comp::Vel { x: 0.0, y: 0.0 });
+    let config = &state.config;
+    let offset = if config.accurate_delay && !config.move_while_charging {
+        (
+            delta.x * config.shoot.first_shot_delay,
+            delta.y * config.shoot.first_shot_delay,
+        )
+    } else {
+        (0.0, 0.0)
+    };
+    let aim = if config.predict_target && speed >= 0.01 {
+        crate::combat::targeting::intercept_positions(
+            (x, y),
+            (0.0, 0.0),
+            (tx + offset.0, ty + offset.1),
+            (delta.x, delta.y),
+            true,
+            speed,
+        )
+    } else {
+        (tx, ty)
+    };
+    Some(if aim.0 == 0.0 && aim.1 == 0.0 {
+        (tx, ty)
+    } else {
+        aim
+    })
+}
+
 /// `TurretBuild.hasAmmo`, including the "swap a usable entry to the back" rule.
 pub fn has_ammo(world: &World, e: Entity) -> bool {
     let Some(state) = world.get::<TurretState>(e) else {
@@ -1503,10 +1557,24 @@ fn update_turret(
     }
 
     // Target validation + shooting intent.
-    if state.target.is_some() && !validate_target(ctx, e, state) {
+    // `Turret.updateTile` (`Turret.java:540-542`): the logic cooldown ticks
+    // down at the top of the update while active.
+    if state.logic_control_time > 0.0 {
+        state.logic_control_time -= 1.0;
+    }
+    let logic_controlled = state.logic_control_time > 0.0;
+    if state.target.is_some() && !logic_controlled && !validate_target(ctx, e, state) {
         state.target = None;
     }
-    state.is_shooting = config.always_shooting || state.target.is_some() || state.logic_shooting;
+    // `isShooting = alwaysShooting || (isControlled() ? unit.isShooting() :
+    //  logicControlled() ? logicShooting : target != null)`
+    // (`Turret.java:555`; the port has no player-controlled turret yet).
+    state.is_shooting = config.always_shooting
+        || if logic_controlled {
+            state.logic_shooting
+        } else {
+            state.target.is_some()
+        };
 
     // Warmup.
     let mut warmup_target =
@@ -1609,22 +1677,18 @@ fn update_turret(
         find_target(ctx, e, state, team, x, y, targets);
         state.target_timer = config.target_interval;
     }
-    if state.target.is_none() {
-        return;
-    }
-    let Some(target) = state.target else {
-        return;
-    };
 
     // `Turret.updateTile` (`Turret.java:571-605`): with a valid target the aim
     // point is re-derived every tick (`targetPosition` leads through
-    // `Predict.intercept`) and firing is gated by
-    // `within(target, range() + target.hitSize()/1.9f)`.
+    // `Predict.intercept`); logic control drives firing and keeps whatever aim
+    // point logic last set (`validateTarget` holds a null target while
+    // `logicControlled()`).
     let can_shoot = if state.logic_control_time > 0.0 {
-        // `logicControlled()` (`Turret.java:581-583`): logic drives firing and
-        // the aim point is whatever logic last set; no re-aim.
         state.logic_shooting
     } else {
+        let Some(target) = state.target else {
+            return;
+        };
         target_position(ctx, e, state, x, y, target);
         within_target_range(ctx, target, x, y, turret_range_of(state, ctx.world, e))
     };

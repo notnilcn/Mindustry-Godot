@@ -25,7 +25,6 @@ use crate::io::json::objectives::{
     DestroyUnitsObjective, FlagObjective, ItemObjective, MapObjective,
     MapObjectives as ObjectiveData, TimerObjective, UnitCountObjective,
 };
-use crate::logic::script::{SCRIPT_DEFAULT_MAX_INSTRUCTIONS, run_logic_script};
 
 use super::rules::Rules;
 
@@ -165,6 +164,10 @@ pub struct MapObjectivesRuntime {
     dep_finished: Vec<bool>,
     /// `TimerObjective.countup`, indexed parallel to `data.all`.
     countup: Vec<f32>,
+    /// `completionLogicCode` scripts queued by [`Self::complete`], drained by
+    /// `Sim::drain_logic_events` against the live world (`MapObjectives.java:213`
+    /// -> `LExecutor.runLogicScript`).
+    pub pending_logic_scripts: Vec<String>,
 }
 
 impl MapObjectivesRuntime {
@@ -190,6 +193,7 @@ impl MapObjectivesRuntime {
             completed,
             dep_finished: vec![false; len],
             countup,
+            pending_logic_scripts: Vec::new(),
         }
     }
 
@@ -360,8 +364,11 @@ impl MapObjectivesRuntime {
         // written later carry it (T4).
         self.data.all[index].common_mut().completed = true;
 
-        if let Some(code) = logic_code.as_deref() {
-            let _ = run_logic_script(code, SCRIPT_DEFAULT_MAX_INSTRUCTIONS, false);
+        if let Some(code) = logic_code {
+            // `MapObjectives.java:213`: the completion script runs privileged
+            // against the LIVE world; queue it for the sim's drain pass (this
+            // struct has no `World`).
+            self.pending_logic_scripts.push(code);
         }
         true
     }

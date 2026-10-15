@@ -223,11 +223,42 @@ pub fn move_to_point(
     smooth: f32,
     look_at: bool,
 ) {
+    move_to_point_keep_distance(
+        world,
+        grid,
+        content,
+        entity,
+        target_x,
+        target_y,
+        circle_length,
+        smooth,
+        true,
+        look_at,
+    );
+}
+
+/// [`move_to_point`] with the explicit `keepDistance` flag: a point closer
+/// than `circle_length - smooth/2` backs away when `keep_distance` is set
+/// (`AIController.moveTo`'s rotate-180 branch), otherwise the velocity is
+/// zeroed. `LogicAI` uses `keep_distance = unit.isFlying()` for `move`/
+/// `pathfind` and `true` for `approach`.
+#[allow(clippy::too_many_arguments)]
+pub fn move_to_point_keep_distance(
+    world: &mut World,
+    grid: &WorldGrid,
+    content: &crate::content::ContentRegistry,
+    entity: Entity,
+    target_x: f32,
+    target_y: f32,
+    circle_length: f32,
+    smooth: f32,
+    keep_distance: bool,
+    look_at: bool,
+) {
     let Some(pos) = world.get::<Pos>(entity).copied() else {
         return;
     };
     let speed = crate::entities::comp::unit::movement::unit_speed(world, grid, content, entity);
-    let (_, rotate_speed, _) = unit_control(world, content, entity);
 
     let (mut vx, mut vy) = (target_x - pos.x, target_y - pos.y);
     let dst = (vx * vx + vy * vy).sqrt();
@@ -244,36 +275,60 @@ pub fn move_to_point(
         vy = 0.0;
     }
     if length < -0.5 {
-        // `keepDistance`: rotate the vector 180 degrees.
-        vx = -vx;
-        vy = -vy;
+        if keep_distance {
+            // `keepDistance`: rotate the vector 180 degrees.
+            vx = -vx;
+            vy = -vy;
+        } else {
+            vx = 0.0;
+            vy = 0.0;
+        }
     } else if length < 0.0 {
         vx = 0.0;
         vy = 0.0;
     }
-    if vx.abs() > 0.0001 || vy.abs() > 0.0001 {
-        crate::entities::comp::unit::velocity::move_pref(world, content, entity, vx, vy);
-    }
-    if look_at {
-        // `unit.lookAt(target)`.
-        let rotation = world
-            .get::<UnitCore>(entity)
-            .map(|core| core.rotation)
-            .unwrap_or(0.0);
-        let looked = move_toward_angle(
-            rotation,
-            ang_to(
-                &pos,
-                Pos {
-                    x: target_x,
-                    y: target_y,
-                },
-            ),
-            rotate_speed,
-        );
-        if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
-            stored.rotation = looked;
+    // `if(vec.isNaN() || vec.isInfinite() || vec.isZero()) return;`
+    if (vx.is_nan() || vy.is_nan() || vx.is_infinite() || vy.is_infinite())
+        || (vx == 0.0 && vy == 0.0)
+    {
+        if look_at {
+            look_at_point(world, entity, &pos, target_x, target_y, content);
         }
+        return;
+    }
+    crate::entities::comp::unit::velocity::move_pref(world, content, entity, vx, vy);
+    if look_at {
+        look_at_point(world, entity, &pos, target_x, target_y, content);
+    }
+}
+
+/// The trailing `unit.lookAt(target)` of [`move_to_point`].
+fn look_at_point(
+    world: &mut World,
+    entity: Entity,
+    pos: &Pos,
+    target_x: f32,
+    target_y: f32,
+    content: &crate::content::ContentRegistry,
+) {
+    let (_, rotate_speed, _) = unit_control(world, content, entity);
+    let rotation = world
+        .get::<UnitCore>(entity)
+        .map(|core| core.rotation)
+        .unwrap_or(0.0);
+    let looked = move_toward_angle(
+        rotation,
+        ang_to(
+            pos,
+            Pos {
+                x: target_x,
+                y: target_y,
+            },
+        ),
+        rotate_speed,
+    );
+    if let Some(mut stored) = world.get_mut::<UnitCore>(entity) {
+        stored.rotation = looked;
     }
 }
 
