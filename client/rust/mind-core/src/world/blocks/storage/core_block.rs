@@ -180,6 +180,25 @@ fn emit_core_burn(world: &World, e: Entity) {
 }
 
 impl BuildingBehavior for CoreBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `CoreBlock.sense(itemCapacity)` (`CoreBlock.java:607-610`).
+            LAccess::ItemCapacity => Sensed::Num(
+                world
+                    .get::<crate::world::blocks::storage::core_block::CoreBuild>(e)
+                    .map(|state| f64::from(state.storage_capacity))
+                    .unwrap_or(0.0),
+            ),
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         let cap = item_capacity(world, e);
         if world.get::<CoreBuild>(e).is_none() {

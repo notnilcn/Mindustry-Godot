@@ -67,6 +67,34 @@ pub struct ForceProjectorBehavior {
 }
 
 impl BuildingBehavior for ForceProjectorBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `ForceProjector.sense` (`ForceProjector.java:285-289`).
+            LAccess::Heat => Sensed::Num(
+                world
+                    .get::<crate::world::blocks::defense::shields::ForceProjectorState>(e)
+                    .map(|state| f64::from(state.buildup))
+                    .unwrap_or(f64::NAN),
+            ),
+            LAccess::Shield => {
+                let state =
+                    world.get::<crate::world::blocks::defense::shields::ForceProjectorState>(e)?;
+                Sensed::Num(if state.broken {
+                    0.0
+                } else {
+                    f64::from((state.shield_health - state.buildup).max(0.0))
+                })
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(self.state.clone());
     }
@@ -218,6 +246,28 @@ pub struct MendProjectorBehavior {
 }
 
 impl BuildingBehavior for MendProjectorBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `MendProjector.sense(progress)` (`MendProjector.java:126-129`).
+            LAccess::Progress => {
+                let state =
+                    world.get::<crate::world::blocks::defense::shields::MendProjectorState>(e)?;
+                Sensed::Num(if state.reload > 0.0 {
+                    f64::from((state.charge / state.reload).clamp(0.0, 1.0))
+                } else {
+                    0.0
+                })
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(self.state.clone());
     }
@@ -445,6 +495,34 @@ pub struct ShockwaveTowerBehavior {
 }
 
 impl BuildingBehavior for ShockwaveTowerBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `ShockwaveTower.sense` (`ShockwaveTower.java:109-115`).
+            LAccess::Progress => {
+                let state = world
+                    .get::<crate::world::blocks::defense::projectors::ShockwaveTowerState>(e)?;
+                Sensed::Num(if state.reload > 0.0 {
+                    f64::from((state.reload_counter / state.reload).clamp(0.0, 1.0))
+                } else {
+                    0.0
+                })
+            }
+            LAccess::Heat => Sensed::Num(
+                world
+                    .get::<crate::world::blocks::heat::HeatState>(e)
+                    .map(|state| state.heat as f64)
+                    .unwrap_or(f64::NAN),
+            ),
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(self.state.clone());
     }

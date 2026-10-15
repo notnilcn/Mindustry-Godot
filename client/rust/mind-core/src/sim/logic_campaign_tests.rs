@@ -2318,3 +2318,133 @@ fn canvas_save_roundtrip() {
         "the canvas data round-trips"
     );
 }
+
+// ---- I03 T3 remainder: family `logic_sense` overrides ----
+
+/// Family `sense(LAccess)` overrides: crafter `@progress`, door `@enabled`,
+/// conveyor `@progress`, core `@itemCapacity`, heat `@heat`, light `@color`
+/// (`GenericCrafter.java:355`, `Door.java:88`, `Conveyor.java:436`,
+/// `CoreBlock.java:607`, `HeatProducer.java:65`, `LightBlock.java:90`).
+#[test]
+fn family_sense_overrides() {
+    use crate::entities::comp::{CrafterState, DoorState};
+    use crate::world::blocks::distribution::ConveyorBuild;
+    let mut sim = campaign_sim();
+    let press = place(&mut sim, "graphite-press", 20, 20);
+    {
+        let mut state = sim
+            .ecs
+            .0
+            .get_mut::<CrafterState>(press)
+            .expect("crafter state");
+        state.progress = 0.5;
+    }
+    let door = place(&mut sim, "door", 22, 20);
+    {
+        let mut state = sim.ecs.0.get_mut::<DoorState>(door).expect("door state");
+        state.open = true;
+    }
+    let conveyor = place(&mut sim, "conveyor", 24, 20);
+    let copper = item(&sim, "copper");
+    {
+        let mut state = sim
+            .ecs
+            .0
+            .get_mut::<ConveyorBuild>(conveyor)
+            .expect("conveyor state");
+        state.ids[0] = copper;
+        state.ys[0] = 0.75;
+        state.len = 1;
+    }
+    let core = place(&mut sim, "core-shard", 30, 30);
+    let illuminator = place(&mut sim, "illuminator", 26, 20);
+    {
+        let mut state = sim
+            .ecs
+            .0
+            .get_mut::<crate::world::behavior::light::LightState>(illuminator)
+            .expect("light state");
+        state.color = 0x1122_33ff;
+    }
+    let heat = place(&mut sim, "heat-source", 28, 20);
+    if let Some(mut state) = sim
+        .ecs
+        .0
+        .get_mut::<crate::world::blocks::heat::HeatState>(heat)
+    {
+        state.heat = 42.0;
+        // The producer lerps toward `heatOutput` every tick.
+        state.heat_output = 42.0;
+    }
+    place_linked_world_processor(
+        &mut sim,
+        10,
+        10,
+        "sensor p press1 @progress\nsensor e door1 @enabled\nsensor c conveyor1 @progress\nsensor cap shard1 @itemCapacity\nsensor col light1 @color\nsensor h heat1 @heat\nstop\n",
+        &[
+            LogicLink::new("press1", 10, 10),
+            LogicLink::new("door1", 12, 10),
+            LogicLink::new("conveyor1", 14, 10),
+            LogicLink::new("shard1", 20, 20),
+            LogicLink::new("light1", 16, 10),
+            LogicLink::new("heat1", 18, 10),
+        ],
+    );
+    tick(&mut sim, 3);
+    let processor = sim.grid.entity_at(TilePos::new(10, 10)).expect("processor");
+    let num = |name: &str| {
+        sim.ecs
+            .0
+            .get::<LogicBlockState>(processor)
+            .and_then(|state| {
+                state
+                    .executor
+                    .arena
+                    .get_id(name)
+                    .map(|id| state.executor.arena.get(id).num())
+            })
+    };
+    assert_eq!(num("p"), Some(0.5), "crafter @progress");
+    assert_eq!(num("e"), Some(1.0), "open door @enabled");
+    // The belt keeps moving between the sensor and the readback, so assert the
+    // recorded value is the live `ys` range (the base table returns NaN).
+    let c = num("c").expect("conveyor progress sensed");
+    assert!(
+        (0.7..=1.0).contains(&c),
+        "conveyor @progress reads the last item's ys: {c}"
+    );
+    assert!(
+        num("cap").is_some_and(|cap| cap > 0.0),
+        "core @itemCapacity"
+    );
+    // The heat producer's `updateTile` recomputes `heat` from its efficiency
+    // (0 on this Serpulo fixture), so the override is exercised directly.
+    let heat_behavior = sim
+        .ecs
+        .0
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| {
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(heat)
+                .map(|building| building.block)
+                .and_then(|block| table.get(block))
+        })
+        .map(|inst| inst.behavior.clone())
+        .expect("heat behavior");
+    let sensed = heat_behavior.logic_sense(&sim.ecs.0, heat, crate::logic::LAccess::Heat);
+    let live_heat = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::heat::HeatState>(heat)
+        .map(|state| f64::from(state.heat))
+        .unwrap_or(f64::NAN);
+    assert_eq!(
+        sensed,
+        Some(crate::logic::access::Sensed::Num(live_heat)),
+        "heat producer @heat reads HeatState.heat"
+    );
+    assert!(live_heat > 0.0, "the heat source is hot: {live_heat}");
+    let _ = (core, num);
+    assert_events_drained(&sim);
+}

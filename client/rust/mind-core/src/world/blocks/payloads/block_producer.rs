@@ -151,6 +151,25 @@ pub fn producer_tick(world: &mut World, e: Entity, build_speed: f32) -> Option<P
 }
 
 impl BuildingBehavior for BlockProducerBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `BlockProducer.sense(progress)` (`BlockProducer.java:176-179`).
+            LAccess::Progress => Sensed::Num(
+                world
+                    .get::<crate::world::blocks::payloads::block_producer::BlockProducerBuild>(e)
+                    .map(|state| f64::from(state.progress))
+                    .unwrap_or(f64::NAN),
+            ),
+            _ => return None,
+        })
+    }
     fn update_batch(
         &self,
         world: &mut bevy_ecs::world::World,

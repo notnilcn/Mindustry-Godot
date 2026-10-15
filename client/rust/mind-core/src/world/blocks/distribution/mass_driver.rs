@@ -315,6 +315,23 @@ fn deliver_bolt(world: &mut World, data_entity: Entity) {
 }
 
 impl BuildingBehavior for MassDriverBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `MassDriver.sense(progress)` (`MassDriver.java:230-233`).
+            LAccess::Progress => {
+                let state = world.get::<MassDriverBuild>(e)?;
+                Sensed::Num(f64::from((1.0 - state.reload_counter).clamp(0.0, 1.0)))
+            }
+            _ => return None,
+        })
+    }
     fn update_batch(
         &self,
         world: &mut bevy_ecs::world::World,

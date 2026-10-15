@@ -41,6 +41,22 @@ pub struct HeatProducerBehavior {
 }
 
 impl BuildingBehavior for HeatProducerBehavior {
+    /// `HeatProducer/HeatConsumer/HeatConductor.sense(heat)` (`HeatProducer.java:65-68`,
+    /// `HeatConductor.java:94-97`, `HeatCrafter.java:82-85`).
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            LAccess::Heat => Sensed::Num(world.get::<HeatState>(e)?.heat as f64),
+            _ => return None,
+        })
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         crate::world::behavior::production::CrafterBehavior.create_state(world, e);
         match world.get_mut::<HeatState>(e) {
@@ -152,6 +168,22 @@ pub struct HeatCrafterBehavior {
 }
 
 impl BuildingBehavior for HeatCrafterBehavior {
+    /// `HeatProducer/HeatConsumer/HeatConductor.sense(heat)` (`HeatProducer.java:65-68`,
+    /// `HeatConductor.java:94-97`, `HeatCrafter.java:82-85`).
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            LAccess::Heat => Sensed::Num(world.get::<HeatState>(e)?.heat as f64),
+            _ => return None,
+        })
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         crate::world::behavior::production::CrafterBehavior.create_state(world, e);
         if world.get::<HeatCrafter>(e).is_none() {
@@ -250,6 +282,22 @@ pub struct HeatConductorBehavior {
 }
 
 impl BuildingBehavior for HeatConductorBehavior {
+    /// `HeatProducer/HeatConsumer/HeatConductor.sense(heat)` (`HeatProducer.java:65-68`,
+    /// `HeatConductor.java:94-97`, `HeatCrafter.java:82-85`).
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            LAccess::Heat => Sensed::Num(world.get::<HeatState>(e)?.heat as f64),
+            _ => return None,
+        })
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<HeatConductor>(e).is_none() {
             world.entity_mut(e).insert(HeatConductor {

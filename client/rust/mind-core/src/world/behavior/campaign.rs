@@ -387,6 +387,24 @@ pub fn landing_pad_fake(world: &World, e: Entity) -> bool {
 pub struct LaunchPadBehavior;
 
 impl BuildingBehavior for LaunchPadBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `LaunchPad.sense(progress)` (`LaunchPad.java:98-101`).
+            LAccess::Progress => {
+                let state = world.get::<CampaignState>(e)?;
+                let launch_time = instance_launch_time(world, e).max(1.0);
+                Sensed::Num(f64::from((state.launch_time / launch_time).clamp(0.0, 1.0)))
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<CampaignState>(e).is_none() {
             world.entity_mut(e).insert(CampaignState::default());

@@ -42,6 +42,29 @@ impl Default for LightState {
 pub struct LightBehavior;
 
 impl BuildingBehavior for LightBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `LightBlock.sense(color)` (`LightBlock.java:90-93`): the
+            // illuminator's own color as `Color.toDoubleBits`.
+            LAccess::Color => {
+                let state = world.get::<LightState>(e)?;
+                Sensed::Num(crate::logic::globals::rgba_u8_to_double_bits(
+                    ((state.color >> 24) & 0xff) as i32,
+                    ((state.color >> 16) & 0xff) as i32,
+                    ((state.color >> 8) & 0xff) as i32,
+                    (state.color & 0xff) as i32,
+                ))
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(LightState::default());
     }

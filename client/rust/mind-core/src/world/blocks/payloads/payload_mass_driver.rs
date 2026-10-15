@@ -201,6 +201,27 @@ impl PayloadMassDriverBehavior {
 }
 
 impl BuildingBehavior for PayloadMassDriverBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `PayloadMassDriver.sense(progress)` (`PayloadMassDriver.java:340-343`).
+            LAccess::Progress => {
+                let state = world.get::<PayloadDriverBuild>(e)?;
+                let reload = self.reload.max(1e-6);
+                Sensed::Num(f64::from(
+                    (1.0 - state.reload_counter / reload).clamp(0.0, 1.0),
+                ))
+            }
+            _ => return None,
+        })
+    }
+
     fn update_batch(
         &self,
         world: &mut bevy_ecs::world::World,

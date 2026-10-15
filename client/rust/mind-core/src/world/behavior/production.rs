@@ -106,6 +106,41 @@ fn next_bounded(state: &mut u64, bound: u32) -> u32 {
 pub struct CrafterBehavior;
 
 impl BuildingBehavior for CrafterBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `GenericCrafter.sense` (`GenericCrafter.java:355-361`) and the
+            // identical `Separator.sense` (`Separator.java:171-174`).
+            LAccess::Progress => Sensed::Num(
+                world
+                    .get::<CrafterState>(e)
+                    .map(|state| f64::from(state.progress.clamp(0.0, 1.0)))
+                    .unwrap_or(f64::NAN),
+            ),
+            LAccess::TotalLiquids => {
+                // `if(sensor == totalLiquids && outputLiquid != null)`.
+                let output = instance(world, e)
+                    .and_then(|inst| crafter_knobs(&inst.kind_data))
+                    .and_then(|def| def.output_liquids.first().copied());
+                match output {
+                    Some((liquid, _)) => Sensed::Num(
+                        world
+                            .get::<crate::world::modules::LiquidModule>(e)
+                            .map(|module| module.get(crate::content::LiquidId::new(liquid)) as f64)
+                            .unwrap_or(0.0),
+                    ),
+                    None => return None,
+                }
+            }
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<CrafterState>(e).is_some() {
             return;
@@ -534,6 +569,26 @@ impl DrillBehavior {
 }
 
 impl BuildingBehavior for DrillBehavior {
+    fn logic_sense(
+        &self,
+        world: &World,
+        e: Entity,
+        a: crate::logic::LAccess,
+    ) -> Option<crate::logic::access::Sensed> {
+        use crate::logic::LAccess;
+        use crate::logic::access::Sensed;
+        Some(match a {
+            // `Drill.sense(progress)` (`Drill.java:333-336`): the raw
+            // tick progress.
+            LAccess::Progress => Sensed::Num(
+                world
+                    .get::<DrillState>(e)
+                    .map(|state| f64::from(state.progress))
+                    .unwrap_or(f64::NAN),
+            ),
+            _ => return None,
+        })
+    }
     fn create_state(&self, world: &mut World, e: Entity) {
         if world.get::<DrillState>(e).is_none() {
             world.entity_mut(e).insert(DrillState::default());
