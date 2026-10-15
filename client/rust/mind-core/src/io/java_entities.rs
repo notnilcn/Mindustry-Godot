@@ -350,6 +350,7 @@ pub(crate) fn supports_java_class(class_id: u8) -> bool {
 /// (`Sim::reset_loaded_controllers`).
 pub(crate) fn read_java_unit(
     class_id: u8,
+    id: i32,
     r: &mut WireReader,
     content: &ContentRegistry,
 ) -> IoResult<Option<DecodedUnit>> {
@@ -480,6 +481,9 @@ pub(crate) fn read_java_unit(
         // (`apply_decoded_entities`): the upstream chunk carries the real
         // `spawnedByCore` flag, so the v1/v2 name fallback must not run.
         revision: 3,
+        // `SaveVersion.writeEntity` wrote the real `entity.id()`; the unit
+        // chunk restores it (I01 T10).
+        saved_id: id,
         name,
         team,
         x,
@@ -746,10 +750,11 @@ mod tests {
             w.f(200.0); // y
         }
         let mut r = WireReader::new(&out);
-        let unit = read_java_unit(4, &mut r, &registry)
+        let unit = read_java_unit(4, 7, &mut r, &registry)
             .expect("decode")
             .expect("dagger decoded");
         assert_eq!(unit.name, "dagger");
+        assert_eq!(unit.saved_id, 7, "chunk id carried (I01 T10)");
         assert_eq!(unit.team, 2);
         assert_eq!((unit.x, unit.y), (100.0, 200.0));
         assert_eq!(unit.rotation, 90.0);
@@ -772,14 +777,14 @@ mod tests {
         }
         let mut r = WireReader::new(&out);
         assert!(
-            read_java_unit(4, &mut r, &registry)
+            read_java_unit(4, 0, &mut r, &registry)
                 .expect("decode")
                 .is_none()
         );
         // Unknown class id: skipped before any read.
         let mut r = WireReader::new(&out);
         assert!(
-            read_java_unit(1, &mut r, &registry)
+            read_java_unit(1, 0, &mut r, &registry)
                 .expect("decode")
                 .is_none()
         );

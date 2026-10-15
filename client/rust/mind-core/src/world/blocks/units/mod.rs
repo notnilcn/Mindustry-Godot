@@ -710,12 +710,26 @@ pub struct UnitCargoLoader {
 }
 
 /// `UnitTransportSourceBuild` runtime state (`buildProgress`/`unit`).
-#[derive(Debug, Clone, Default, PartialEq, bevy_ecs::component::Component)]
+#[derive(Debug, Clone, PartialEq, bevy_ecs::component::Component)]
 pub struct CargoLoaderState {
     /// Accumulated build progress (`buildProgress`).
     pub build_progress: f32,
     /// Currently tethered unit (`unit`; `None` = ready to build).
     pub unit: Option<bevy_ecs::entity::Entity>,
+    /// Unit id read from the save body, resolved on the next `updateTile`
+    /// (`readUnitId`; `UnitCargoLoader.java:86,98-103`). `-1` = none.
+    pub read_unit_id: i32,
+}
+
+impl Default for CargoLoaderState {
+    fn default() -> Self {
+        Self {
+            build_progress: 0.0,
+            unit: None,
+            // Java initializes `readUnitId = -1` (`UnitCargoLoader.java:86`).
+            read_unit_id: -1,
+        }
+    }
 }
 
 impl CargoLoaderState {

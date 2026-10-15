@@ -70,6 +70,26 @@ use super::runtime::{RuntimeError, load_vanilla_content};
 /// uniqueness, but distinct ranges keep debug dumps readable).
 pub const UNIT_SEQ_BASE: u64 = 1_000_000_000;
 
+/// Finds the live unit whose [`EntitySeq`] equals `id` (`Groups.unit.getByID`;
+/// `EntityGroup.java:42-44`). Saved unit chunks carry this id (I01 T10), so the
+/// cargo loader can re-tether its unit after a load.
+///
+/// Units only: entities without [`UnitTypeComp`] (buildings, bullets, weather)
+/// never match. Duplicate ids (possible only in legacy saves) resolve to the
+/// lowest ECS entity index for determinism.
+pub fn unit_by_id(world: &World, id: i32) -> Option<Entity> {
+    if id < 0 {
+        return None;
+    }
+    let target = id as u32 as u64;
+    world
+        .iter_entities()
+        .filter(|entity| entity.get::<UnitTypeComp>().is_some())
+        .filter(|entity| entity.get::<EntitySeq>().is_some_and(|seq| seq.0 == target))
+        .map(|entity| entity.id())
+        .min_by_key(|entity| entity.index())
+}
+
 /// World pixels per tile (`config::TILESIZE`).
 const TILE_SIZE: f32 = crate::config::TILESIZE as f32;
 

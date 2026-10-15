@@ -330,6 +330,13 @@ impl Sim {
         Ok(sim)
     }
 
+    /// Raises the P0 building sequence allocator so its next value is at least
+    /// `next` (`EntityGroup.checkNextId`; I01 T10 restores saved unit ids and
+    /// the whole `EntitySeq` space must stay collision-free).
+    pub(crate) fn bump_entity_seq(&mut self, next: u64) {
+        self.entity_seq.bump_to(next);
+    }
+
     /// Applies one command to the simulation. Commands are applied *before* the
     /// tick they are stamped with executes (`ScenarioPlayer` enforces the stamping).
     ///

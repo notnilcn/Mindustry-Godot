@@ -63,6 +63,13 @@ impl EntitySequencer {
     pub fn peek(&self) -> u64 {
         self.next
     }
+
+    /// Raises the allocator so the next value is at least `next`
+    /// (`EntityGroup.checkNextId`: `lastId = Math.max(lastId, id + 1)`;
+    /// I01 T10 restores saved entity ids and must not collide with them).
+    pub fn bump_to(&mut self, next: u64) {
+        self.next = self.next.max(next);
+    }
 }
 
 /// Thin wrapper over a `bevy_ecs::World` with the P0 helpers.

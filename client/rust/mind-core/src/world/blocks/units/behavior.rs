@@ -38,9 +38,29 @@ use super::{
 #[derive(Debug, Default, bevy_ecs::prelude::Resource)]
 pub struct UnitBlockSeq(pub u64);
 
+impl UnitBlockSeq {
+    /// First entity sequence a block-produced unit gets.
+    pub const BASE: u64 = 1_500_000;
+
+    /// Raises the allocator past the restored unit id `past`
+    /// (`EntityGroup.checkNextId`, I01 T10): after a load, block outputs must
+    /// not reuse an id a saved unit already owns. Inserts the resource when
+    /// absent, so the next block spawn keeps the [`Self::BASE`] floor.
+    pub fn bump_past(world: &mut World, past: Option<u64>) {
+        let Some(past) = past else {
+            return;
+        };
+        let mut seq = world
+            .remove_resource::<UnitBlockSeq>()
+            .unwrap_or(UnitBlockSeq(Self::BASE));
+        seq.0 = seq.0.max(past.saturating_add(1)).max(Self::BASE);
+        world.insert_resource(seq);
+    }
+}
+
 fn next_unit_seq(world: &mut World) -> u64 {
     if !world.contains_resource::<UnitBlockSeq>() {
-        world.insert_resource(UnitBlockSeq(1_500_000));
+        world.insert_resource(UnitBlockSeq(UnitBlockSeq::BASE));
     }
     let mut seq = world.resource_mut::<UnitBlockSeq>();
     let value = seq.0;
@@ -958,6 +978,15 @@ impl BuildingBehavior for CargoLoaderBehavior {
         let Some(mut state) = world.entity_mut(e).take::<super::CargoLoaderState>() else {
             return;
         };
+        // `UnitCargoLoaderBuild.updateTile` (`UnitCargoLoader.java:98-103`):
+        // a unit id read from the save body re-tethers the unit on the next
+        // update. Single-player/server always clears the pending id
+        // (`unit != null || !net.client()`); the net-client keep-branch is
+        // I08's relay concern.
+        if state.read_unit_id != -1 {
+            state.unit = crate::sim::unit_runtime::unit_by_id(world, state.read_unit_id);
+            state.read_unit_id = -1;
+        }
         let unit_alive = state.unit.is_some_and(|unit| {
             world
                 .get::<crate::entities::comp::unit::UnitCore>(unit)
@@ -989,6 +1018,29 @@ impl BuildingBehavior for CargoLoaderBehavior {
             state.unit = Some(manifold);
         }
         world.entity_mut(e).insert(state);
+    }
+
+    /// `UnitCargoLoaderBuild.write` (`UnitCargoLoader.java:174-178`):
+    /// `write.i(unit == null ? -1 : unit.id)` after `super.write`. The port's
+    /// unit id is the [`crate::ecs::EntitySeq`] written by the unit chunk
+    /// (`SaveVersion.writeEntity`), so the body is the same `i32`.
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        let id = world
+            .get::<super::CargoLoaderState>(e)
+            .and_then(|state| state.unit)
+            .and_then(|unit| world.get::<crate::ecs::EntitySeq>(unit))
+            .map(|seq| seq.0 as i32)
+            .unwrap_or(-1);
+        w.i(id);
+    }
+
+    /// `UnitCargoLoaderBuild.read` (`UnitCargoLoader.java:181-185`):
+    /// `readUnitId = read.i()`; `updateTile` resolves it via `unit_by_id`.
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, _revision: u8) {
+        let id = r.i().unwrap_or(-1);
+        if let Some(mut state) = world.get_mut::<super::CargoLoaderState>(e) {
+            state.read_unit_id = id;
+        }
     }
 }
 

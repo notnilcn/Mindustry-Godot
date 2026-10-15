@@ -104,6 +104,10 @@ impl Sim {
 pub(crate) struct DecodedUnit {
     /// Chunk revision the unit was read from.
     pub(crate) revision: u16,
+    /// Saved entity id (chunk header; Java `writeWorldEntities` writes
+    /// `entity.id()` after the class id). Restored onto the respawned unit by
+    /// `apply_decoded_entities` (I01 T10). Negative = no id.
+    pub(crate) saved_id: i32,
     /// Content unit name (`UnitType.name`).
     pub(crate) name: String,
     /// Team id.
@@ -183,7 +187,7 @@ impl EntitySink for LiveEntitySink {
         &mut self,
         class_id: u8,
         _custom_name: Option<&str>,
-        _id: i32,
+        id: i32,
         content: Option<&ContentRegistry>,
         r: &mut WireReader,
     ) -> IoResult<()> {
@@ -197,6 +201,7 @@ impl EntitySink for LiveEntitySink {
                 }
                 let mut decoded = DecodedUnit {
                     revision,
+                    saved_id: id,
                     name: r.str()?,
                     team: r.ub()?,
                     x: r.f()?,
@@ -342,7 +347,8 @@ impl EntitySink for LiveEntitySink {
                 let Some(content) = content else {
                     return Ok(());
                 };
-                if let Some(unit) = crate::io::java_entities::read_java_unit(other, r, content)? {
+                if let Some(unit) = crate::io::java_entities::read_java_unit(other, id, r, content)?
+                {
                     self.units.push(unit);
                 }
             }
@@ -428,6 +434,8 @@ impl EntitySource for LiveEntitySource<'_> {
             let health = world.get::<Health>(entity).map(|h| h.health).unwrap_or(0.0);
             scratch.write_chunk(w, |chunk| {
                 chunk.ub(SIM_UNIT_CLASS_ID);
+                // `SaveVersion.writeEntity`: `out.i(entity.id())` — the entity
+                // id is part of the chunk header and restored on load (I01 T10).
                 chunk.i(seq as i32);
                 chunk.us(SIM_UNIT_REVISION);
                 chunk.str(&name)?;
@@ -811,6 +819,10 @@ impl Sim {
         // `reset_loaded_controllers` can run Java's `UnitComp.afterRead` once
         // the session rules reach the world.
         self.loaded_unit_entities.clear();
+        // I01 T10: `(entity, saved id)` pairs, restored after the spawn pass
+        // (`SaveVersion.readWorldEntities` checks every id before reassigning
+        // duplicates).
+        let mut spawned: Vec<(Entity, i32)> = Vec::new();
         let default_team = self
             .ecs
             .0
@@ -835,6 +847,7 @@ impl Sim {
                 self.spawn_live_unit(&unit.name, unit.team, unit.x, unit.y, unit.rotation)
             {
                 self.loaded_unit_entities.push(entity);
+                spawned.push((entity, unit.saved_id));
                 if unit.health > 0.0
                     && let Some(mut health) = self.ecs.0.get_mut::<Health>(entity)
                 {
@@ -946,6 +959,7 @@ impl Sim {
                 }
             }
         }
+        self.restore_unit_ids(&spawned);
         // Fires and puddles (`Groups.fires`/`Groups.puddles` recreate from
         // their chunks; the tile-slot caches re-register on the next update
         // pass). Accumulator fields are transient upstream and start zeroed.
@@ -987,6 +1001,51 @@ impl Sim {
                 },
             ));
         }
+    }
+
+    /// Restores the saved `EntitySeq` ids onto the respawned units
+    /// (`SaveVersion.readWorldEntities`, `SaveVersion.java:495-528`):
+    /// `EntityGroup.checkNextId(id); entity.id(id); if(used.add(id)) add();
+    /// else reassign(nextId())`. The advanced ids guarantee that later unit
+    /// spawns (`UnitRuntime.seq`, block outputs) never collide with a restored
+    /// unit, so `unit_by_id` stays unambiguous (I01 T10).
+    fn restore_unit_ids(&mut self, spawned: &[(Entity, i32)]) {
+        if spawned.is_empty() {
+            return;
+        }
+        let mut used: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        let mut max_id: Option<u64> = None;
+        let mut reassign: Vec<Entity> = Vec::new();
+        for (entity, saved_id) in spawned {
+            if *saved_id >= 0 && used.insert(*saved_id as u64) {
+                if let Some(mut seq) = self.ecs.0.get_mut::<EntitySeq>(*entity) {
+                    seq.0 = *saved_id as u64;
+                }
+                max_id = Some(max_id.map_or(*saved_id as u64, |max| max.max(*saved_id as u64)));
+            } else {
+                // Duplicate id (or none saved): `EntityGroup.nextId()`.
+                reassign.push(*entity);
+            }
+        }
+        // Duplicates take the ids right after the highest restored one; the
+        // allocators then continue past all of them (`EntityGroup.lastId`).
+        let mut next = max_id.map_or(0, |max| max.saturating_add(1));
+        for entity in reassign {
+            if let Some(mut seq) = self.ecs.0.get_mut::<EntitySeq>(entity) {
+                seq.0 = next;
+            }
+            next = next.wrapping_add(1);
+        }
+        if let Some(mut runtime) = self.ecs.0.remove_non_send::<UnitRuntime>() {
+            next = next.max(runtime.seq);
+            runtime.seq = next;
+            self.ecs.0.insert_non_send(runtime);
+        }
+        // Block-output spawns (`UnitBlockSeq`) share the id space; the bump
+        // inserts the resource (with its base floor) when absent.
+        crate::world::blocks::units::behavior::UnitBlockSeq::bump_past(&mut self.ecs.0, max_id);
+        // Future P0 building placements (`Command::Place`).
+        self.bump_entity_seq(next);
     }
 
     /// `UnitComp.afterRead` (`UnitComp.java:585-593`): every unit read from a
@@ -1715,6 +1774,7 @@ mod tests {
             .expect("content");
         let unit = |name: &str, revision: u16, spawned_by_core: bool| DecodedUnit {
             revision,
+            saved_id: -1,
             name: name.to_owned(),
             team: 1,
             x: 100.0,
@@ -1837,6 +1897,7 @@ mod tests {
             .expect("content");
         let unit = |name: &str, team: u8, controller: Option<AiKind>| DecodedUnit {
             revision: 3,
+            saved_id: -1,
             name: name.to_owned(),
             team,
             x: 100.0,
@@ -1960,6 +2021,7 @@ mod tests {
             entities: LiveEntitySink {
                 units: vec![DecodedUnit {
                     revision: 3,
+                    saved_id: -1,
                     name: "dagger".to_owned(),
                     team: 1,
                     x: 100.0,
@@ -2586,6 +2648,231 @@ mod tests {
             "puddle amount resumes ({} <= {})",
             puddles[0].amount,
             puddle_before.amount
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// I01 T10: the unit's `EntitySeq` (written as the chunk id,
+    /// `SaveVersion.writeEntity`: `out.i(entity.id())`) survives a save/load;
+    /// `unit_by_id` resolves it and the allocators move past the restored ids
+    /// (`EntityGroup.checkNextId`).
+    #[test]
+    fn unit_ids_round_trip_through_save() {
+        let sim_seq = |sim: &Sim, entity| sim.ecs.0.get::<EntitySeq>(entity).map(|seq| seq.0);
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let first = sim
+            .spawn_live_unit("dagger", 2, 40.0, 40.0, 0.0)
+            .expect("first dagger");
+        let second = sim
+            .spawn_live_unit("flare", 2, 48.0, 40.0, 0.0)
+            .expect("flare");
+        let first_seq = sim_seq(&sim, first).expect("first seq");
+        let second_seq = sim_seq(&sim, second).expect("second seq");
+        assert_ne!(first_seq, second_seq, "distinct ids");
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("unit-ids");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one load response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        // Every restored unit kept its saved id, in saved order.
+        let restored: Vec<(u64, String)> = sim
+            .unit_runtime()
+            .expect("runtime")
+            .units
+            .iter()
+            .copied()
+            .filter_map(|entity| {
+                let seq = sim.ecs.0.get::<EntitySeq>(entity)?.0;
+                let name = sim
+                    .unit_runtime()?
+                    .content
+                    .unit(sim.ecs.0.get::<UnitTypeComp>(entity)?.type_id)?
+                    .name
+                    .clone();
+                Some((seq, name))
+            })
+            .collect();
+        assert_eq!(
+            restored,
+            vec![
+                (first_seq, "dagger".to_owned()),
+                (second_seq, "flare".to_owned())
+            ],
+            "ids and order survive"
+        );
+        assert_eq!(
+            crate::sim::unit_runtime::unit_by_id(&sim.ecs.0, first_seq as i32)
+                .and_then(|entity| sim_seq(&sim, entity)),
+            Some(first_seq),
+            "unit_by_id resolves the saved id"
+        );
+
+        // The allocators moved past the restored ids: a new spawn cannot reuse
+        // either id (`EntityGroup.checkNextId`).
+        let max = first_seq.max(second_seq);
+        let third = sim
+            .spawn_live_unit("dagger", 2, 56.0, 40.0, 0.0)
+            .expect("third dagger");
+        let third_seq = sim_seq(&sim, third).expect("third seq");
+        assert!(third_seq > max, "allocator bumped ({third_seq} > {max})");
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// I01 T10: `UnitCargoLoaderBuild`'s save body (the tethered unit id,
+    /// `UnitCargoLoader.java:174-185`) re-tethers the unit after a load through
+    /// `readUnitId` + `Groups.unit.getByID` (here `unit_by_id`).
+    #[test]
+    fn cargo_loader_relinks_unit_after_load() {
+        let sim_seq = |sim: &Sim, entity| sim.ecs.0.get::<EntitySeq>(entity).map(|seq| seq.0);
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        // Place on team 1: derelict (team 0) buildings are disabled by
+        // `checkAllowUpdate` and would never reach `updateTile`.
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+        let loader = sim
+            .content()
+            .id("unit-cargo-loader")
+            .expect("unit-cargo-loader");
+        sim.apply(Command::Place {
+            x: 8,
+            y: 8,
+            block: loader,
+        })
+        .expect("place loader");
+        let loader_entity = sim.grid.tile(8, 8).build.expect("loader entity");
+        let manifold = sim
+            .spawn_live_unit("manifold", 2, 64.0, 64.0, 90.0)
+            .expect("manifold");
+        let manifold_seq = sim_seq(&sim, manifold).expect("manifold seq");
+        {
+            let mut state = sim
+                .ecs
+                .0
+                .get_mut::<crate::world::blocks::units::CargoLoaderState>(loader_entity)
+                .expect("loader state");
+            state.unit = Some(manifold);
+        }
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("cargo-loader-relink");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let loader_entity = sim.grid.tile(8, 8).build.expect("loader respawned");
+        let state = sim
+            .ecs
+            .0
+            .get::<crate::world::blocks::units::CargoLoaderState>(loader_entity)
+            .expect("loader state");
+        assert_eq!(
+            state.read_unit_id, -1,
+            "pending read id resolved on updateTile"
+        );
+        let relinked = state.unit.expect("unit relinked after load");
+        assert_eq!(
+            sim_seq(&sim, relinked),
+            Some(manifold_seq),
+            "relinked to the saved unit id"
+        );
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// I01 T10: the cargo loader body stays stream-aligned with the following
+    /// building — a save holding a loader and a drill restores BOTH bodies
+    /// (H02 T13 recorded the unimplemented body as a "misreads the following
+    /// building" blocker).
+    #[test]
+    fn save_with_cargo_loader_reads_next_building() {
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+        let loader = sim
+            .content()
+            .id("unit-cargo-loader")
+            .expect("unit-cargo-loader");
+        let drill = sim
+            .content()
+            .id("mechanical-drill")
+            .expect("mechanical-drill");
+        sim.apply(Command::Place {
+            x: 8,
+            y: 8,
+            block: loader,
+        })
+        .expect("place loader");
+        sim.apply(Command::Place {
+            x: 12,
+            y: 12,
+            block: drill,
+        })
+        .expect("place drill");
+        let drill_entity = sim.grid.tile(12, 12).build.expect("drill entity");
+        {
+            let mut state = sim
+                .ecs
+                .0
+                .get_mut::<crate::entities::comp::building::DrillState>(drill_entity)
+                .expect("drill state");
+            state.progress = 77.5;
+        }
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("cargo-loader-next-building");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let drill_entity = sim.grid.tile(12, 12).build.expect("drill respawned");
+        let state = sim
+            .ecs
+            .0
+            .get::<crate::entities::comp::building::DrillState>(drill_entity)
+            .expect("drill state survived the loader body");
+        assert!(
+            (state.progress - 77.5).abs() < 1e-6,
+            "drill body aligned after the loader body: {}",
+            state.progress
         );
 
         let _ = std::fs::remove_file(&path);
