@@ -1412,3 +1412,36 @@ fn damaged_wall_is_cheaper_to_path_through() {
     assert_eq!(packed, 2, "80 hp packs as 2");
     assert!(packed < fresh, "a damaged wall is cheaper to path through");
 }
+
+/// I07 T4: the sim's vanilla `Blocks` table syncs with a content registry
+/// without changing any id (base content: every name already present, so the
+/// call is a pure id-preserving no-op).
+#[test]
+fn sync_blocks_from_content_preserves_base_ids() {
+    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+
+    let registry =
+        create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).expect("base");
+    let mut sim = crate::sim::Sim::new(
+        1,
+        8,
+        8,
+        crate::content::BlockId::AIR,
+        crate::content::BlockId::AIR,
+    );
+    let before: Vec<String> = registry
+        .blocks()
+        .iter()
+        .map(|def| def.name.clone())
+        .collect();
+    sim.sync_blocks_from_content(&registry).expect("sync");
+    assert_eq!(sim.content().len(), registry.blocks().len());
+    for (id, name) in before.iter().enumerate() {
+        assert_eq!(
+            sim.content()
+                .name(crate::content::BlockId::new(id as u16))
+                .expect("id"),
+            name
+        );
+    }
+}

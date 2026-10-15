@@ -19,6 +19,7 @@ pub mod classmap_gen;
 
 use serde_json::{Map, Value};
 
+use crate::content::UnlockStore;
 use crate::content::bundle::MemoryBundle;
 use crate::content::parser_hooks::ContentParseError;
 use crate::content::registries::blocks::{StackSpec, stack};
@@ -54,11 +55,12 @@ pub struct ModWarning {
 
 /// `ContentParser` equivalent. One instance per parser scope (mod-content load
 /// or restricted patch-content load).
-pub struct ContentJsonParser {
+pub struct ContentJsonParser<'a> {
     /// Bundle entries registered from JSON `name`/`description` keys.
     pub bundle: MemoryBundle,
-    /// Unlock store (headless memory store; plan 04 backs the real one).
-    pub store: MemoryUnlockStore,
+    /// Unlock store the registry consults for `<name>-unlocked`
+    /// (`Core.settings` in the client; the harness/tests pass a memory store).
+    pub store: &'a dyn UnlockStore,
     /// Accumulated warnings (unknown fields, ignored values).
     pub warnings: Vec<ModWarning>,
     /// Whether type resolution through the ClassMap is allowed.
@@ -71,18 +73,29 @@ pub struct ContentJsonParser {
     classmap: ClassTagMap,
 }
 
-impl Default for ContentJsonParser {
+impl Default for ContentJsonParser<'static> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ContentJsonParser {
-    /// Parser with default permissions (mod-content load).
+/// Process-wide empty store for parsers that only need class defaults.
+pub(crate) fn empty_store() -> &'static MemoryUnlockStore {
+    static EMPTY: std::sync::OnceLock<MemoryUnlockStore> = std::sync::OnceLock::new();
+    EMPTY.get_or_init(MemoryUnlockStore::new)
+}
+
+impl<'a> ContentJsonParser<'a> {
+    /// Parser with default permissions (mod-content load) and no host unlocks.
     pub fn new() -> Self {
+        Self::with_store(empty_store())
+    }
+
+    /// Parser bound to the host's unlock store (`Core.settings`).
+    pub fn with_store(store: &'a dyn UnlockStore) -> Self {
         Self {
             bundle: MemoryBundle::new(),
-            store: MemoryUnlockStore::new(),
+            store,
             warnings: Vec::new(),
             allow_class_resolution: true,
             allow_asset_loading: true,
@@ -235,7 +248,7 @@ impl ContentJsonParser {
             .get("color")
             .and_then(parse_color)
             .unwrap_or(Rgba::WHITE);
-        let mut item = Item::new(&name, color, &self.bundle, &self.store);
+        let mut item = Item::new(&name, color, &self.bundle, self.store);
         if let Some(hardness) = field_i32(object, "hardness") {
             item.hardness = hardness;
         }
@@ -353,7 +366,7 @@ impl ContentJsonParser {
             self.warn(file, "`consumes` merging lands in M3; ignored for now");
         }
 
-        let def = BlockDef::from_spec(spec, registry, &self.bundle, &self.store)
+        let def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
         registry
             .add_block(def)
@@ -376,7 +389,7 @@ impl ContentJsonParser {
             .get("color")
             .and_then(parse_color)
             .unwrap_or(Rgba::WHITE);
-        let mut liquid = Liquid::new(&name, color, &self.bundle, &self.store);
+        let mut liquid = Liquid::new(&name, color, &self.bundle, self.store);
         for (field, target) in [
             ("temperature", &mut liquid.temperature),
             ("heatCapacity", &mut liquid.heat_capacity),
@@ -454,7 +467,7 @@ impl ContentJsonParser {
     ) -> Result<ContentRef, ContentParseError> {
         let name = self.locate_name(registry, ContentType::Status, stem, object);
         self.read_bundle(object, ContentType::Status, &name);
-        let mut status = StatusEffect::new(&name, &self.bundle, &self.store);
+        let mut status = StatusEffect::new(&name, &self.bundle, self.store);
         for (field, target) in [
             ("damageMultiplier", &mut status.damage_multiplier),
             ("healthMultiplier", &mut status.health_multiplier),
@@ -548,7 +561,7 @@ impl ContentJsonParser {
                     .unwrap_or(WeatherKind::Plain)
             })
             .unwrap_or(WeatherKind::Plain);
-        let mut weather = WeatherDef::new(&name, kind, &self.bundle, &self.store);
+        let mut weather = WeatherDef::new(&name, kind, &self.bundle, self.store);
         for (field, target) in [
             ("duration", &mut weather.duration),
             ("opacityMultiplier", &mut weather.opacity_multiplier),
@@ -651,7 +664,7 @@ impl ContentJsonParser {
             .get("team")
             .and_then(Value::as_str)
             .unwrap_or(name.as_str());
-        let entry = TeamEntry::new(&name, team, &self.bundle, &self.store);
+        let entry = TeamEntry::new(&name, team, &self.bundle, self.store);
         self.warn_unknown(file, "team", object, TEAM_FIELDS);
         let id = registry
             .add_team(entry)
@@ -680,7 +693,7 @@ impl ContentJsonParser {
             ContentParseError::new(format!("{file}: unknown planet `{planet_raw}`"))
         })?;
         let index = field_i32(object, "sector").unwrap_or(0);
-        let mut sector = SectorPresetDef::new(&name, planet, index, &self.bundle, &self.store);
+        let mut sector = SectorPresetDef::new(&name, planet, index, &self.bundle, self.store);
         if let Some(value) = field_i32(object, "captureWave") {
             sector.capture_wave = value;
         }
@@ -729,7 +742,7 @@ impl ContentJsonParser {
             .and_then(Value::as_str)
             .and_then(|raw| self.resolve_planet(registry, raw));
         let radius = field_f32(object, "radius").unwrap_or(1.0);
-        let mut planet = PlanetDef::new(&name, parent, radius, &self.bundle, &self.store);
+        let mut planet = PlanetDef::new(&name, parent, radius, &self.bundle, self.store);
         if let Some(size) = field_i32(object, "sectorSize") {
             planet = planet.with_sector_grid(size.clamp(0, 255) as u8);
         }
@@ -897,7 +910,7 @@ impl ContentJsonParser {
             spec.abilities = abilities;
         }
 
-        let def = UnitTypeDef::from_spec(&spec, registry, &self.bundle, &self.store)
+        let def = UnitTypeDef::from_spec(&spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
         let unit_id = registry
             .add_unit(def)
@@ -1971,7 +1984,10 @@ mod tests {
         folder: ContentType,
         stem: &str,
         json: &str,
-    ) -> (ContentJsonParser, Result<ContentRef, ContentParseError>) {
+    ) -> (
+        ContentJsonParser<'static>,
+        Result<ContentRef, ContentParseError>,
+    ) {
         reg.set_current_mod(Some(crate::content::ModId(String::from("mods"))));
         let mut parser = ContentJsonParser::new();
         let result = parser.parse(reg, "test.json", stem, json, folder);

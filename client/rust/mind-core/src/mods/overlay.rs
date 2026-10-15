@@ -138,6 +138,33 @@ impl Mods {
                     }
                 }
             }
+
+            // Sound/music overrides (`Sounds.load`/`Musics.load` read mod files
+            // by file stem; `DataAssetLoader` merges them into the asset dirs).
+            for dir in ["sounds", "music"] {
+                let Ok(files) = mod_.root.walk(fs, dir) else {
+                    continue;
+                };
+                for path in files {
+                    let Some(file_name) = path.rsplit('/').next() else {
+                        continue;
+                    };
+                    let Some((name, ext)) = file_name.rsplit_once('.') else {
+                        continue;
+                    };
+                    if !matches!(ext, "ogg" | "mp3") {
+                        continue;
+                    }
+                    let Ok(bytes) = mod_.root.read(fs, &path) else {
+                        continue;
+                    };
+                    overlay.sounds.push(OverlaySound {
+                        path: path.clone(),
+                        name: name.to_owned(),
+                        bytes,
+                    });
+                }
+            }
         }
         overlay
     }
@@ -325,5 +352,21 @@ mod tests {
                 .map(String::as_str),
             Some("Hello")
         );
+    }
+
+    /// I07 T5: mod `sounds/` and `music/` files become named overlay entries.
+    #[test]
+    fn sound_overlay_by_name() {
+        let fs = MockFs::new();
+        write_mod(&fs, r#"{"name":"MyMod","minGameVersion":"146"}"#);
+        fs.write(Path::new("/mods/m/sounds/boom.ogg"), b"a")
+            .expect("sound");
+        fs.write(Path::new("/mods/m/music/theme.ogg"), b"b")
+            .expect("music");
+        let mut mods = load(&fs);
+        let overlay = mods.build_overlay(&fs, &no_atlas);
+        let names: Vec<&str> = overlay.sounds().iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"boom"), "{names:?}");
+        assert!(names.contains(&"theme"), "{names:?}");
     }
 }

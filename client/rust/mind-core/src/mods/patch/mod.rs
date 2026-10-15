@@ -2303,6 +2303,34 @@ pub fn load_mod_patches(
     fs: &dyn FileSystem,
 ) -> Vec<String> {
     let mut warnings = Vec::new();
+    for set in collect_mod_patches(mods, fs) {
+        let mut patcher = DataPatcher::new();
+        if let Err(error) = patcher.apply(registry, &set.assets) {
+            warnings.push(format!(
+                "Failed to apply patches from mod {}: {error}",
+                set.mod_name
+            ));
+        }
+        warnings.extend(set.warnings);
+    }
+    warnings
+}
+
+/// One mod's `patches/**.json` files (sorted) for the I07 T4 boot path.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModPatchSet {
+    /// Internal mod name.
+    pub mod_name: String,
+    /// Patch assets in sorted path order.
+    pub assets: Vec<PatchAsset>,
+    /// Unreadable files reported by the walk.
+    pub warnings: Vec<String>,
+}
+
+/// Collects each enabled, non-hidden mod's patch files in dependency order
+/// (`Mods.loadModPatches` file half).
+pub fn collect_mod_patches(mods: &mut Mods, fs: &dyn FileSystem) -> Vec<ModPatchSet> {
+    let mut sets = Vec::new();
     for index in mods.ordered_mods() {
         let Some(mod_) = mods.mod_at(index) else {
             continue;
@@ -2326,23 +2354,21 @@ pub fn load_mod_patches(
             continue;
         }
         paths.sort();
-        let mut assets = Vec::new();
+        let mut set = ModPatchSet {
+            mod_name: mod_.name.clone(),
+            ..ModPatchSet::default()
+        };
         for path in paths {
             let Ok(json) = mod_.root.read_to_string(fs, &path) else {
-                warnings.push(format!("mod `{}`: could not read `{path}`", mod_.name));
+                set.warnings
+                    .push(format!("mod `{}`: could not read `{path}`", mod_.name));
                 continue;
             };
-            assets.push(PatchAsset { name: path, json });
+            set.assets.push(PatchAsset { name: path, json });
         }
-        let mut patcher = DataPatcher::new();
-        if let Err(error) = patcher.apply(registry, &assets) {
-            warnings.push(format!(
-                "Failed to apply patches from mod {}: {error}",
-                mod_.name
-            ));
-        }
+        sets.push(set);
     }
-    warnings
+    sets
 }
 
 /// Parses a top-level patch type name (`block`/`item`/… all nine kinds).
