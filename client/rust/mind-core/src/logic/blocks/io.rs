@@ -20,6 +20,7 @@ use crate::logic::executor::Executor;
 use crate::logic::value::{LVar, LogicObject, VarRef};
 use crate::world::TilePos;
 
+use super::canvas::CanvasBlockState;
 use super::display::LogicDisplayState;
 use super::memory::MemoryBlockState;
 use super::message::MessageBlockState;
@@ -249,6 +250,13 @@ fn read_building(world: &World, exec: &Executor, e: Entity, position: &LVar) -> 
             };
             CellValue::Num(state.read_char(position.numi()))
         }
+        Some(BlockKind::CanvasBlock) => {
+            // `CanvasBuild.read`: the LINEAR pixel position (`CanvasBlock.java:283-285`).
+            let Some(state) = world.get::<CanvasBlockState>(e) else {
+                return CellValue::Obj(None);
+            };
+            CellValue::Num(state.get_pixel(position.numi()))
+        }
         Some(BlockKind::LogicBlock) => {
             let Some(state) = world.get::<LogicBlockState>(e) else {
                 return CellValue::Obj(None);
@@ -309,6 +317,12 @@ pub fn write_target(
             {
                 let cell = value.clone();
                 cell.apply(state.executor.arena.get_mut(id));
+            }
+        }
+        Some(BlockKind::CanvasBlock) => {
+            // `CanvasBuild.write`: `setPixel(pos, value)` (`CanvasBlock.java:293-295`).
+            if let Some(mut state) = world.get_mut::<CanvasBlockState>(e) {
+                state.set_pixel(position.numi(), value.num().round() as i32);
             }
         }
         _ => {}

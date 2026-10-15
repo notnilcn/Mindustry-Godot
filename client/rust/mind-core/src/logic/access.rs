@@ -262,6 +262,14 @@ pub fn entity_team(world: &World, e: Entity) -> Option<u8> {
 /// (`LogicDisplay.java:117-124`); the tileable override subtracts the frame
 /// (`TileableLogicDisplay.java:143-148`, `frameSize * 2` per axis).
 fn display_dimension(world: &World, e: Entity, horizontal: bool) -> f64 {
+    // `CanvasBlock.CanvasBuild.sense`: `displayWidth/Height = canvasSize`
+    // (`CanvasBlock.java:297-302`).
+    if crate::logic::blocks::block_kind_of(world, e) == Some(crate::content::BlockKind::CanvasBlock)
+    {
+        return crate::logic::blocks::canvas_def_of(world, e)
+            .map(|def| def.canvas_size as f64)
+            .unwrap_or(0.0);
+    }
     if crate::logic::blocks::block_kind_of(world, e)
         == Some(crate::content::BlockKind::TileableLogicDisplay)
     {

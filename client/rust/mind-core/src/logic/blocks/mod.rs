@@ -711,12 +711,13 @@ mod integration_tests {
             .get_mut::<CanvasBlockState>(ce)
             .expect("canvas state");
         assert_eq!(state.bits_per_pixel, 3);
-        state.set_pixel(0, 0, 5);
-        state.set_pixel(1, 0, 3);
-        assert_eq!(state.get_pixel(0, 0), 5.0);
-        assert_eq!(state.get_pixel(1, 0), 3.0);
-        assert!(state.get_pixel(-1, 0).is_nan());
-        assert!(state.get_pixel(12, 0).is_nan());
+        // Linear positions (`CanvasBlock.java:143-155`).
+        state.set_pixel(0, 5);
+        state.set_pixel(1, 3);
+        assert_eq!(state.get_pixel(0), 5.0);
+        assert_eq!(state.get_pixel(1), 3.0);
+        assert!(state.get_pixel(-1).is_nan());
+        assert!(state.get_pixel(12 * 12).is_nan());
     }
 
     #[test]

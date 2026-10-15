@@ -2192,3 +2192,129 @@ fn display_sense_dimensions() {
     let _ = (plain, member, root);
     assert_events_drained(&sim);
 }
+
+// ---- I03 T14: canvas blocks ----
+
+/// `CanvasBuild.getPixel`/`setPixel` use the LINEAR pixel position with
+/// LSB-first bit packing (`CanvasBlock.java:143-195`).
+#[test]
+fn canvas_linear_pixels_roundtrip() {
+    use crate::logic::blocks::canvas::CanvasBlockState;
+    let mut state = CanvasBlockState::new(12, 3);
+    // `ceil(12 * 12 * 3 / 8)` = 54 bytes.
+    assert_eq!(state.data.len(), 54);
+    state.set_pixel(0, 1);
+    assert_eq!(state.get_pixel(0), 1.0);
+    state.set_pixel(143, 7);
+    assert_eq!(state.get_pixel(143), 7.0);
+    // Out of range reads are NaN.
+    assert!(state.get_pixel(144).is_nan());
+    assert!(state.get_pixel(-1).is_nan());
+    // Neighbouring pixels are untouched.
+    assert_eq!(state.get_pixel(1), 0.0);
+}
+
+/// `CanvasBuild.setPixel` ignores out-of-range positions and palette indices
+/// (`CanvasBlock.java:143-149`).
+#[test]
+fn canvas_write_out_of_range_ignored() {
+    use crate::logic::blocks::canvas::CanvasBlockState;
+    let mut state = CanvasBlockState::new(8, 3);
+    state.set_pixel(-1, 1);
+    state.set_pixel(64, 1);
+    state.set_pixel(0, 8);
+    state.set_pixel(0, -1);
+    assert_eq!(state.get_pixel(0), 0.0);
+    state.set_pixel(63, 7);
+    assert_eq!(state.get_pixel(63), 7.0);
+}
+
+/// `CanvasBuild.read`/`write`: a program writes a palette index and reads it
+/// back (`CanvasBlock.java:283-295`).
+#[test]
+fn canvas_logic_read_write() {
+    use crate::logic::blocks::canvas::CanvasBlockState;
+    let mut sim = campaign_sim();
+    let canvas = place(&mut sim, "canvas", 20, 20);
+    place_linked_world_processor(
+        &mut sim,
+        10,
+        10,
+        "write 3 canvas1 10\nread r canvas1 10\nstop\n",
+        &[LogicLink::new("canvas1", 10, 10)],
+    );
+    tick(&mut sim, 3);
+    let state = sim
+        .ecs
+        .0
+        .get::<CanvasBlockState>(canvas)
+        .expect("canvas state");
+    assert_eq!(state.get_pixel(10), 3.0, "write 3 c 10");
+    let r = sim
+        .ecs
+        .0
+        .get::<LogicBlockState>(sim.grid.entity_at(TilePos::new(10, 10)).expect("processor"))
+        .and_then(|state| {
+            state
+                .executor
+                .arena
+                .get_id("r")
+                .map(|id| state.executor.arena.get(id).num())
+        });
+    assert_eq!(r, Some(3.0), "read r c 10");
+    // A palette-out-of-range write is ignored (`index >= palette.length`).
+    place_linked_world_processor(
+        &mut sim,
+        10,
+        12,
+        "write 9 canvas2 11\nstop\n",
+        &[LogicLink::new("canvas2", 10, 10)],
+    );
+    tick(&mut sim, 3);
+    let state = sim
+        .ecs
+        .0
+        .get::<CanvasBlockState>(canvas)
+        .expect("canvas state");
+    assert_eq!(state.get_pixel(11), 0.0, "index 9 is out of the palette");
+    assert_events_drained(&sim);
+}
+
+/// Canvas save body: `i(len) + bytes`, with the length check on read
+/// (`CanvasBlock.java:331-349`).
+#[test]
+fn canvas_save_roundtrip() {
+    use crate::io::entity::{EntityReader, EntityWriter};
+    use crate::logic::blocks::canvas::CanvasBlockState;
+    use crate::world::block::BlockTable;
+    let mut sim = campaign_sim();
+    let a = place(&mut sim, "canvas", 20, 20);
+    let b = place(&mut sim, "canvas", 22, 20);
+    {
+        let mut state = sim.ecs.0.get_mut::<CanvasBlockState>(a).expect("state");
+        state.set_pixel(5, 2);
+        state.set_pixel(70, 6);
+    }
+    let behavior = sim
+        .ecs
+        .0
+        .get_resource::<BlockTable>()
+        .and_then(|table| {
+            sim.ecs
+                .0
+                .get::<crate::entities::comp::Building>(a)
+                .map(|building| building.block)
+                .and_then(|block| table.get(block))
+        })
+        .map(|inst| inst.behavior.clone())
+        .expect("behavior");
+    let mut buf: Vec<u8> = Vec::new();
+    behavior.write(&sim.ecs.0, a, &mut EntityWriter::new(&mut buf));
+    let mut reader = EntityReader::new(&buf);
+    behavior.read(&mut sim.ecs.0, b, &mut reader, 0);
+    assert_eq!(
+        sim.ecs.0.get::<CanvasBlockState>(a).map(|s| s.data.clone()),
+        sim.ecs.0.get::<CanvasBlockState>(b).map(|s| s.data.clone()),
+        "the canvas data round-trips"
+    );
+}

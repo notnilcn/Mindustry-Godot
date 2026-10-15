@@ -61,6 +61,8 @@ pub(crate) struct LogicDisplayRenderer {
     node: Option<Gd<Node2D>>,
     /// Root tile → (texture, width, height).
     textures: HashMap<(i32, i32), (Gd<ImageTexture>, i32, i32)>,
+    /// Canvas tile → (texture, canvas size in pixels).
+    canvas_textures: HashMap<(i32, i32), (Gd<ImageTexture>, i32)>,
     /// Cached draw list: `(texture, centre x, centre y, w, h)`.
     cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32)>,
     regions: RegionCache,
@@ -74,6 +76,7 @@ impl INode2D for LogicDisplayRenderer {
             host: None,
             node: None,
             textures: HashMap::new(),
+            canvas_textures: HashMap::new(),
             cmds: Vec::new(),
             regions: RegionCache::new(),
         }
@@ -115,6 +118,7 @@ impl LogicDisplayRenderer {
             .try_get_node_as::<MindSimHost>("/root/Spine/SimHost");
         self.node = Some(self.to_gd().upcast::<Node2D>());
         self.textures.clear();
+        self.canvas_textures.clear();
         self.cmds.clear();
         self.base_mut().queue_redraw();
     }
@@ -150,8 +154,62 @@ impl LogicDisplayRenderer {
             );
             self.update_texture(&host, key);
         }
-        // Rebuild the draw list (resolves frame regions through the cache).
+        // Canvases (`CanvasBlock.draw`; T14): one texture per canvas tile.
         let mut cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32)> = Vec::new();
+        let canvases = host.bind().logic_canvas_sync(min_x, min_y, max_x, max_y);
+        for value in canvases.iter_shared() {
+            let Some(dict) = value.try_to::<Row>().ok() else {
+                continue;
+            };
+            let key = (dict_i64(&dict, "x") as i32, dict_i64(&dict, "y") as i32);
+            let pixels = dict_i64(&dict, "pixels") as i32;
+            if pixels <= 0 {
+                continue;
+            }
+            // `if(texture == null || invalidated) updateTexture()`
+            // (`CanvasBlock.java:267-269`).
+            let invalidated = dict_bool(&dict, "invalidated");
+            let exists = self
+                .canvas_textures
+                .get(&key)
+                .is_some_and(|(_, old)| *old == pixels);
+            if invalidated || !exists {
+                let bytes: PackedByteArray = host
+                    .bind_mut()
+                    .logic_canvas_image(i64::from(key.0), i64::from(key.1));
+                if bytes.len() < (pixels as usize) * (pixels as usize) * 4 {
+                    continue;
+                }
+                let Some(image) =
+                    Image::create_from_data(pixels, pixels, false, Format::RGBA8, &bytes)
+                else {
+                    continue;
+                };
+                match self.canvas_textures.get(&key) {
+                    Some((texture, old)) if *old == pixels => {
+                        let mut texture = texture.clone();
+                        texture.update(&image);
+                    }
+                    _ => {
+                        let Some(texture) = ImageTexture::create_from_image(&image) else {
+                            continue;
+                        };
+                        self.canvas_textures.insert(key, (texture, pixels));
+                    }
+                }
+            }
+            if let Some((texture, _)) = self.canvas_textures.get(&key) {
+                let world_size = dict_f32(&dict, "size").max(1.0);
+                cmds.push((
+                    texture.clone().upcast::<Texture2D>(),
+                    dict_f32(&dict, "cx"),
+                    dict_f32(&dict, "cy"),
+                    world_size,
+                    world_size,
+                ));
+            }
+        }
+        // Rebuild the display draw list (resolves frame regions through the cache).
         for row in &rows {
             if dict_bool(row, "draw_buffer") {
                 let key = (

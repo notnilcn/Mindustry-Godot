@@ -2102,6 +2102,86 @@ impl MindSimHost {
         out
     }
 
+    /// Canvas draw rows for the render pass (T14).
+    ///
+    /// Rows: `{x, y, cx, cy, size, blending, invalidated}`.
+    #[func]
+    pub fn logic_canvas_sync(
+        &self,
+        min_x: f32,
+        min_y: f32,
+        max_x: f32,
+        max_y: f32,
+    ) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for row in mind_core::logic::blocks::canvas::canvas_rows(
+            &self.sim.ecs.0,
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        ) {
+            let mut dict = Dictionary::<GString, Variant>::new();
+            dict.set(&GString::from("x"), &i64::from(row.x).to_variant());
+            dict.set(&GString::from("y"), &i64::from(row.y).to_variant());
+            dict.set(&GString::from("cx"), &row.cx.to_variant());
+            dict.set(&GString::from("cy"), &row.cy.to_variant());
+            dict.set(&GString::from("size"), &row.size.to_variant());
+            dict.set(
+                &GString::from("blending"),
+                &i64::from(row.blending).to_variant(),
+            );
+            dict.set(
+                &GString::from("pixels"),
+                &i64::from(row.pixels).to_variant(),
+            );
+            dict.set(&GString::from("invalidated"), &row.invalidated.to_variant());
+            out.push(&dict.to_variant());
+        }
+        out
+    }
+
+    /// RGBA8 canvas pixels (bottom-row-first) for the canvas at `(x, y)`.
+    ///
+    /// Clears the canvas's `invalidated` flag (the view uploaded it).
+    #[func]
+    pub fn logic_canvas_image(&mut self, x: i64, y: i64) -> PackedByteArray {
+        let mut out = PackedByteArray::new();
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return out;
+        };
+        let Some(e) = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))
+        else {
+            return out;
+        };
+        let Some(mut state) = self
+            .sim
+            .ecs
+            .0
+            .get_mut::<mind_core::logic::blocks::CanvasBlockState>(e)
+        else {
+            return out;
+        };
+        let size = state.canvas_size.max(0);
+        let pixels = size * size;
+        let mut bytes: Vec<u8> = Vec::with_capacity((pixels * 4) as usize);
+        for row in (0..size).rev() {
+            for col in 0..size {
+                let pixel = state.pixel_rgba(row * size + col);
+                bytes.push(((pixel >> 24) & 0xff) as u8);
+                bytes.push(((pixel >> 16) & 0xff) as u8);
+                bytes.push(((pixel >> 8) & 0xff) as u8);
+                bytes.push((pixel & 0xff) as u8);
+            }
+        }
+        state.invalidated = false;
+        out.extend(bytes.iter().copied());
+        out
+    }
+
     /// RGBA8 bytes (row 0 = top) of the root raster at `(root_x, root_y)`.
     #[func]
     pub fn logic_display_image(&self, root_x: i64, root_y: i64) -> PackedByteArray {
