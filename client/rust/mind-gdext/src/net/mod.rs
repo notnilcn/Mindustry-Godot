@@ -15,6 +15,8 @@
 
 pub mod relay;
 
+use std::net::ToSocketAddrs;
+
 use godot::classes::notify::NodeNotification;
 use godot::classes::{INode, Node, Os, ProjectSettings};
 use godot::obj::{Base, Singleton};
@@ -33,7 +35,7 @@ use mind_stdb::rows::RowView;
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
     ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, RowChange, SessionState,
-    StdbMode, parse_player_suffix_from,
+    StdbMode, WaveName, parse_player_suffix_from,
 };
 
 use crate::settings_hub;
@@ -46,6 +48,48 @@ use self::relay::RelayRuntime;
 const DEFAULT_SERVER_ADDRESS: &str = "127.0.0.1:3000/mindustry";
 /// Settings key for the multiplayer server address (`host[:port][/db]`).
 const SERVER_SETTING_KEY: &str = "stdb-server";
+/// Per-server browser probes kept alive at once (`JoinDialog` server rows).
+const PROBE_LIMIT: usize = 6;
+/// A probe that has not reached the lobby wave within this window fails.
+const PROBE_TIMEOUT_SECS: u64 = 5;
+/// Idle probes are dropped after this window (the dialog polls each frame).
+const PROBE_IDLE_SECS: u64 = 30;
+
+/// State of one short-lived browser probe (`ping_server`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProbeState {
+    /// WebSocket handshake / subscription in flight.
+    Connecting,
+    /// Lobby wave applied; `ping_ms` and `matches` are live.
+    Ready,
+    /// Connect failed or the lobby wave timed out.
+    Failed,
+}
+
+impl ProbeState {
+    /// Stable debug name for the dialog JSON.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Connecting => "connecting",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+/// A secondary `Connector` used to browse one server address without touching
+/// the active match connection (I08 T3): the lobby wave (`all_matches`) only,
+/// pumped once per frame by `pump_probes`.
+struct ServerProbe {
+    connector: Connector,
+    matches_binder: Option<TableBinder<AllMatchesTableAccessor>>,
+    started: std::time::Instant,
+    /// Lobby-subscription round trip once [`ProbeState::Ready`]; -1 before.
+    ping_ms: i64,
+    state: ProbeState,
+    matches: std::collections::BTreeMap<u64, RelayMatch>,
+    last_used: std::time::Instant,
+}
 
 /// Multiplayer autoload: session + relay pump ownership (plan §3.15).
 #[derive(GodotClass)]
@@ -94,6 +138,9 @@ pub struct MindNet {
     /// Java `player.name` + `player.color` (`0xRRGGBBAA`), pushed by
     /// [`Self::set_player_identity`] and re-sent on every connect.
     desired_identity: Option<(String, u32)>,
+    /// Per-address short-lived browser probes (`ping_server`), keyed by the
+    /// normalized `host/db` address.
+    probes: std::collections::BTreeMap<String, ServerProbe>,
 }
 
 #[godot_api]
@@ -132,6 +179,7 @@ impl INode for MindNet {
             online_mode: false,
             last_session_state: SessionState::Offline,
             desired_identity: None,
+            probes: std::collections::BTreeMap::new(),
         }
     }
 
@@ -178,6 +226,7 @@ impl INode for MindNet {
         if connected_now && self.push_identity() {
             log::info!("MindNet: player identity pushed after connect");
         }
+        self.pump_probes();
         self.notify_session_state();
     }
 
@@ -373,6 +422,71 @@ impl MindNet {
             .map(RowView::debug_json)
             .collect();
         GString::from(format!("[{}]", entries.join(",")).as_str())
+    }
+
+    /// Pings `address` through a short-lived browser connector and returns the
+    /// lobby-subscription round trip in ms (Java `net.pingHost`,
+    /// `JoinDialog.java:245-252`). The STDB connect is asynchronous, so the
+    /// first call starts the probe and returns -1; poll
+    /// [`Self::server_probe_json`] until `state` leaves `connecting`
+    /// (`failed` keeps -1). The relay has no init-ping packet, so the measured
+    /// round trip is connect + lobby subscription.
+    #[func]
+    pub fn ping_server(&mut self, address: GString) -> i64 {
+        let Some(key) = self.ensure_probe(&address.to_string()) else {
+            return -1;
+        };
+        self.probes
+            .get(&key)
+            .map(|probe| probe.ping_ms)
+            .unwrap_or(-1)
+    }
+
+    /// One join-dialog server row's probe state:
+    /// `{"address","state","ping_ms","matches":[RelayMatch...]}`; `state` is
+    /// `none` for an invalid address.
+    #[func]
+    pub fn server_probe_json(&mut self, address: GString) -> GString {
+        let Some(key) = self.ensure_probe(&address.to_string()) else {
+            return GString::from("{\"state\":\"none\"}");
+        };
+        let Some(probe) = self.probes.get(&key) else {
+            return GString::from("{\"state\":\"none\"}");
+        };
+        let matches: Vec<serde_json::Value> = probe
+            .matches
+            .values()
+            .filter_map(|row| serde_json::from_str(&row.debug_json()).ok())
+            .collect();
+        let json = serde_json::json!({
+            "address": key,
+            "state": probe.state.name(),
+            "ping_ms": probe.ping_ms,
+            "matches": matches,
+        });
+        GString::from(json.to_string().as_str())
+    }
+
+    /// The active connector's address in normalized `host[:port]/db` form
+    /// (no scheme); the join dialog compares it before reconnecting.
+    #[func]
+    pub fn current_server_address(&self) -> GString {
+        let host = self.host.to_string();
+        let host = host
+            .trim_start_matches("http://")
+            .trim_start_matches("https://");
+        GString::from(format!("{host}/{}", self.db_name).as_str())
+    }
+
+    /// Drops `address`'s probe so the next poll opens a fresh connector (Java
+    /// `Server.refresh` re-pings, `JoinDialog.java:280-292`).
+    #[func]
+    pub fn refresh_server(&mut self, address: GString) -> bool {
+        let Some(key) = self.probe_key(&address.to_string()) else {
+            return false;
+        };
+        self.probes.remove(&key);
+        true
     }
 
     /// Joins `match_id`; readiness/loading follows the view. Goes online on
@@ -704,10 +818,18 @@ impl MindNet {
 impl MindNet {
     /// (Re)builds the connector for `host`/`db_name` in Online mode, attaches
     /// every binder and opens the link. Clears the per-match mirrors. Returns
-    /// `false` when the socket cannot be opened now (the connector still
-    /// schedules its retry); the failure is shown as `@connectfail`
-    /// (`Net.java:133`).
+    /// `false` when the address is unreachable or the socket cannot be opened
+    /// now (the connector still schedules its retry); the failure is shown as
+    /// `@connectfail` (`Net.java:133`).
     fn open_online(&mut self, host: &str, db_name: &str) -> bool {
+        // `DbConnectionBuilder::build` runs `block_on` on the calling thread
+        // (`spacetimedb-sdk-2.10.1/src/db_connection.rs:979`), so connecting to
+        // a black-holed address would freeze the frame loop for the OS connect
+        // timeout. Gate on a bounded TCP probe first.
+        if !probe_reachable(host) {
+            self.show_error("@connectfail", &format!("unreachable `{host}`"));
+            return false;
+        }
         if let Some(connector) = self.connector.as_mut() {
             connector.disconnect();
         }
@@ -763,6 +885,107 @@ impl MindNet {
             ok = false;
         }
         ok
+    }
+
+    /// Normalizes `address` (`host[:port][/db]`, scheme optional) to the
+    /// probe key form `http(s)://host:port/db`.
+    fn probe_key(&self, address: &str) -> Option<String> {
+        let default_db = self.db_name.to_string();
+        let (host, db_name) = parse_server_address(address, &default_db)?;
+        Some(format!("{host}/{db_name}"))
+    }
+
+    /// Ensures a probe exists for `address` (starting one when missing, LRU
+    /// eviction at [`PROBE_LIMIT`]) and returns its key.
+    fn ensure_probe(&mut self, address: &str) -> Option<String> {
+        let key = self.probe_key(address)?;
+        if let Some(probe) = self.probes.get_mut(&key) {
+            probe.last_used = std::time::Instant::now();
+            return Some(key);
+        }
+        while self.probes.len() >= PROBE_LIMIT {
+            let Some(oldest) = self
+                .probes
+                .iter()
+                .min_by_key(|(_, probe)| probe.last_used)
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            self.probes.remove(&oldest);
+        }
+        let default_db = self.db_name.to_string();
+        let (host, db_name) = parse_server_address(address, &default_db)?;
+        // Same blocking-connect gate as `open_online`: an unreachable address
+        // becomes a failed probe without ever touching the SDK.
+        let reachable = probe_reachable(&host);
+        let config = ConnectionConfig {
+            host,
+            db_name,
+            token_append: self.token_append.clone(),
+            token_store_path: self.token_store_path.clone(),
+            mode: StdbMode::Online,
+            ..ConnectionConfig::default()
+        };
+        let mut connector = Connector::new(config);
+        let matches_binder = Some(connector.bind::<AllMatchesTableAccessor>("all_matches"));
+        let failed = !reachable || connector.connect().is_err();
+        self.probes.insert(
+            key.clone(),
+            ServerProbe {
+                connector,
+                matches_binder,
+                started: std::time::Instant::now(),
+                ping_ms: -1,
+                state: if failed {
+                    ProbeState::Failed
+                } else {
+                    ProbeState::Connecting
+                },
+                matches: std::collections::BTreeMap::new(),
+                last_used: std::time::Instant::now(),
+            },
+        );
+        Some(key)
+    }
+
+    /// Pumps every browser probe once per frame and drops idle ones.
+    fn pump_probes(&mut self) {
+        for probe in self.probes.values_mut() {
+            probe.connector.pump();
+            for event in probe.connector.drain_events() {
+                if matches!(
+                    event,
+                    ConnectorEvent::ConnectError { .. } | ConnectorEvent::Disconnected { .. }
+                ) && probe.state == ProbeState::Connecting
+                {
+                    probe.state = ProbeState::Failed;
+                }
+            }
+            if let Some(binder) = probe.matches_binder.as_ref() {
+                for change in binder.drain() {
+                    match change {
+                        RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
+                            probe.matches.insert(row.match_id, row);
+                        }
+                        RowChange::Delete(row) => {
+                            probe.matches.remove(&row.match_id);
+                        }
+                    }
+                }
+            }
+            if probe.state == ProbeState::Connecting {
+                if probe.connector.is_applied(WaveName::Lobby) {
+                    probe.ping_ms =
+                        probe.started.elapsed().as_millis().min(i64::MAX as u128) as i64;
+                    probe.state = ProbeState::Ready;
+                } else if probe.started.elapsed().as_secs() >= PROBE_TIMEOUT_SECS {
+                    probe.state = ProbeState::Failed;
+                }
+            }
+        }
+        self.probes
+            .retain(|_, probe| probe.last_used.elapsed().as_secs() < PROBE_IDLE_SECS);
     }
 
     /// Emits `session_changed` when the session state differs from the last
@@ -1090,6 +1313,30 @@ fn parse_server_address(address: &str, default_db: &str) -> Option<(String, Stri
         format!("{scheme}{authority}:3000")
     };
     Some((host, db))
+}
+
+/// Bounded reachability gate for the SDK's blocking WebSocket connect: parses
+/// the authority out of a host URL and tries each resolved address with a
+/// 400 ms TCP connect. Unreachable addresses never reach
+/// `DbConnectionBuilder::build` (which `block_on`s the caller).
+fn probe_reachable(host: &str) -> bool {
+    let authority = host
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let authority = authority.split('/').next().unwrap_or(authority);
+    let Some((name, port)) = authority.rsplit_once(':') else {
+        return false;
+    };
+    let Ok(port) = port.parse::<u16>() else {
+        return false;
+    };
+    let Ok(addresses) = (name, port).to_socket_addrs() else {
+        return false;
+    };
+    addresses.into_iter().any(|address| {
+        std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(400))
+            .is_ok()
+    })
 }
 
 #[cfg(test)]

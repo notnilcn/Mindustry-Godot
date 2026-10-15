@@ -1,10 +1,14 @@
 ## SPDX-License-Identifier: GPL-3.0-only
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-## Source: core/src/mindustry/ui/dialogs/JoinDialog.java (plan 14 §3.4, M3).
+## Source: core/src/mindustry/ui/dialogs/JoinDialog.java (plan 14 §3.4, I08 T3).
 ##
-## Direct-connect + server list. Local rows come from the dialog context; the
-## global section lists the public `all_matches` rows through `MindNet`, whose
-## `connect_to`/`join_match` calls `UiRoot` wires from the two intents below.
+## Server browser over SpacetimeDB addresses. Saved servers persist under the
+## Java `servers` settings JSON (`JoinDialog.java:691`/`:774`) as
+## `[{"ip": "...", "port": N}]`; each server row probes its address through
+## `MindNet.ping_server`/`server_probe_json` and lists the public `all_matches`
+## rows (Java's `net.pingHost` + `setupServer`). "Community" is the active
+## server's match list: the port never fetches the Java community URLs because
+## they serve Java servers the relay cannot talk to (I08 deviation).
 
 extends MindDialog
 
@@ -16,6 +20,16 @@ signal join_requested(match_id: int)
 const NAME_SETTING := "name"
 const COLOR_SETTING := "color-0"
 const MAX_NAME_LENGTH := 40
+## Java `Core.settings.getJson("servers")` key and the add-panel `ip` memory.
+const SERVERS_SETTING := "servers"
+const IP_SETTING := "ip"
+## The local relay address (`tools/mp-local.sh up`); Java's LAN discovery has
+## no STDB equivalent, so "local" is the default server (`JoinDialog.java:418-424`).
+const DEFAULT_SERVER_ADDRESS := "127.0.0.1:3000/mindustry"
+const DEFAULT_DB_NAME := "mindustry"
+const DEFAULT_PORT := 3000
+## Probe rows re-poll every N frames (the transport is async).
+const PROBE_POLL_FRAMES := 10
 
 ## Player color shown in the header swatch (upstream `player.color()`).
 var _color := Color.WHITE
@@ -25,8 +39,19 @@ var _swatch_tint: ColorRect = null
 var _search_field: LineEdit = null
 var _add_panel: Control = null
 var _ip_field: LineEdit = null
-var _local_list: MindTable = null
+var _local_body: Control = null
+var _remote_body: Control = null
 var _global_list: MindTable = null
+## Persisted servers (`[{"ip": String, "port": int}]`, Java `Server` shape).
+var _servers: Array = []
+## Signature of the last rendered probe state; rows rebuild when it changes.
+var _server_signature := ""
+## Add-panel target: -1 = append, else the server index being edited.
+var _editing_index := -1
+## Pending delete confirmation target (Java `ui.showConfirm("@confirm", "@server.delete", ...)`).
+var _pending_delete := -1
+var _server_search := ""
+var _poll_counter := 0
 
 
 func _ready() -> void:
@@ -34,7 +59,25 @@ func _ready() -> void:
 	should_pause = false
 	full_dialog = true
 	super._ready()
+	_load_servers()
 	_build()
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_signal("confirm_result") and not ui.is_connected("confirm_result", _on_confirm_result):
+		ui.connect("confirm_result", _on_confirm_result)
+
+
+func _process(_delta: float) -> void:
+	if not visible:
+		return
+	_poll_counter = (_poll_counter + 1) % PROBE_POLL_FRAMES
+	if _poll_counter != 0:
+		return
+	# The probes are async: poll, and rebuild the rows only when the rendered
+	# state actually changed.
+	var signature := _poll_server_signature()
+	if signature != _server_signature:
+		_server_signature = signature
+		_rebuild_servers()
 
 
 func _build() -> void:
@@ -79,7 +122,7 @@ func _build_header() -> void:
 	_table.row()
 
 
-## Inline add-server form, revealed by the `@server.add` button (`JoinDialog.add`).
+## Inline add/edit-server form (`JoinDialog.add`, `JoinDialog.java:77-112`).
 func _build_add_panel() -> void:
 	# code-instantiated: the inline add-server form is revealed by `@server.add`
 	# and toggled at runtime.
@@ -92,6 +135,8 @@ func _build_add_panel() -> void:
 	_ip_field = MindWidgets.field(_t("@joingame.ip"))
 	_ip_field.max_length = 100
 	_ip_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `JoinDialog.java:81-83`: the field remembers the last address typed.
+	_ip_field.text_changed.connect(_store_ip)
 	ip_row.add_child(_ip_field)
 	_add_panel.add_child(ip_row)
 	var actions := HBoxContainer.new()
@@ -110,20 +155,18 @@ func _build_add_panel() -> void:
 ## The three server groups (`JoinDialog.section`): local, remote, global.
 func _build_sections() -> void:
 	var local := _add_section("@servers.local", false)
-	# code-instantiated: local discovery rows are data-driven from the plan-21
-	# host list.
-	_local_list = MindTable.new()
-	_local_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	local.add_child(_local_list)
-	_rebuild_local()
+	# code-instantiated: the local section body is the default relay server row
+	# (plain containers; `MindTable` only places its own direct children).
+	_local_body = local
 
 	var remote := _add_section("@servers.remote", false)
-	# code-instantiated: placeholder for the persisted-server list once loaded.
-	remote.add_child(MindWidgets.space(0, 4))
+	# code-instantiated: remote rows rebuild from the persisted `servers` list.
+	_remote_body = remote
+	_rebuild_servers()
 
 	var global := _add_section("@servers.global", true)
-	# code-instantiated: public match rows come from the `all_matches` view via
-	# `MindNet.get_public_matches_json`; rebuilt on every `shown()`.
+	# code-instantiated: the community body lists the active server's public
+	# `all_matches` rows; it is Java's community list minus the remote fetch.
 	_global_list = MindTable.new()
 	_global_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	global.add_child(_global_list)
@@ -156,16 +199,19 @@ func _add_section(label_key: String, with_search: bool) -> Control:
 	_table.row()
 
 	if with_search:
-		# code-instantiated: the community search/refresh row is data-driven.
+		# code-instantiated: the community search/refresh row is data-driven
+		# (`JoinDialog.java:417-424`).
 		var search_row := HBoxContainer.new()
 		search_row.add_theme_constant_override("separation", 6)
 		search_row.add_child(MindWidgets.label(_t("@search")))
 		_search_field = MindWidgets.field(_t("@search"))
 		_search_field.max_length = 50
 		_search_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_search_field.text_changed.connect(_on_search_changed)
 		search_row.add_child(_search_field)
 		var zoom := MindWidgets.icon_button("zoom", "", "emptyi")
 		zoom.custom_minimum_size = Vector2(54, 54)
+		zoom.pressed.connect(_rebuild_public)
 		search_row.add_child(zoom)
 		_table.add(search_row).grow_x_axis().pad(4)
 		_table.row()
@@ -181,70 +227,141 @@ func _toggle_section(body: Control, glyph: Label) -> void:
 
 
 func shown() -> void:
-	_rebuild_local()
+	_rebuild_servers()
 	_rebuild_public()
 
 
-## Local group body: the discovered hosts, or the `@hosts.none` empty state with
-## a refresh control (`JoinDialog.finishLocalHosts`).
-func _rebuild_local() -> void:
-	if _local_list == null:
-		return
-	_local_list.clear_children()
-	var servers: Array = _context.get("servers", [])
-	if servers.is_empty():
-		# code-instantiated: empty-state row carries the refresh control.
-		var empty := HBoxContainer.new()
-		empty.add_theme_constant_override("separation", 6)
-		var empty_label := MindWidgets.styled_label(_tm("@hosts.none"), "outlineLabel")
-		# Without autowrap the rich label reports its text width, so it is not
-		# squeezed to zero when the parent cell is momentarily narrow.
-		empty_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-		empty_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		empty.add_child(empty_label)
-		var refresh := MindWidgets.icon_button("refresh", "", "emptyi")
-		refresh.custom_minimum_size = Vector2(70, 70)
-		refresh.pressed.connect(_rebuild_local)
-		empty.add_child(refresh)
-		_local_list.add(empty).grow_x_axis().pad(4)
-		_local_list.row()
-		_local_list.sort_now()
-		_local_list.call_deferred("sort_now")
-		return
-	for entry in servers:
-		# code-instantiated: remembered server rows come from the plan-21 list.
-		var button := MindWidgets.button(str(entry))
-		button.pressed.connect(_connect_to.bind(str(entry)))
-		_local_list.add(button).grow_x_axis().pad(3)
-		_local_list.row()
-	_local_list.sort_now()
-	_local_list.call_deferred("sort_now")
+## Rebuilds both server sections from the live probe data (one container row
+## per entry).
+func _rebuild_servers() -> void:
+	if _local_body != null:
+		_clear_container(_local_body)
+		_build_server_row(_local_body, DEFAULT_SERVER_ADDRESS, -1)
+	if _remote_body != null:
+		_clear_container(_remote_body)
+		for index in _servers.size():
+			var entry: Dictionary = _servers[index]
+			_build_server_row(_remote_body, str(entry.get("ip", "")), index)
+	# the section bodies grew/shrank; re-place the dialog table
+	call_deferred("_resort_tables")
 
 
-## Global group body: the public `all_matches` rows (`MindNet` browser), or the
-## `@hosts.none` empty state with a refresh control (`JoinDialog.finishLocalHosts`).
+## Removes + frees every child of a container (immediate rebuilds must not
+## stack deferred frees).
+func _clear_container(container: Node) -> void:
+	for child in container.get_children():
+		container.remove_child(child)
+		child.queue_free()
+
+
+## Polls every server row's probe and returns one signature over their rendered
+## state (`server_probe_json`).
+func _poll_server_signature() -> String:
+	var signature := ""
+	for address in [DEFAULT_SERVER_ADDRESS] + _server_addresses():
+		signature += "%s=%s;" % [address, _probe_json(address)]
+	return signature
+
+
+## The address of every persisted server, in list order.
+func _server_addresses() -> Array:
+	var addresses := []
+	for entry in _servers:
+		addresses.append(str((entry as Dictionary).get("ip", "")))
+	return addresses
+
+
+## One address's probe state as compact JSON (empty when `MindNet` is absent).
+func _probe_json(address: String) -> String:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net == null or not net.has_method("server_probe_json"):
+		return "{}"
+	return str(net.call("server_probe_json", address))
+
+
+## One server row: address header + Java's action buttons (`JoinDialog.java:150-204`)
+## followed by the probe content (`@server.refreshing`/`@host.invalid`/matches).
+func _build_server_row(parent: Control, address: String, index: int) -> void:
+	# code-instantiated: one server row per saved server plus the local default;
+	# rows rebuild whenever a probe's state changes.
+	var row := VBoxContainer.new()
+	row.add_theme_constant_override("separation", 2)
+	var header := HBoxContainer.new()
+	header.add_theme_constant_override("separation", 4)
+	var label := MindWidgets.styled_label(address, "outlineLabel")
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	label.add_theme_color_override("default_color", MindStyles.ACCENT)
+	header.add_child(label)
+	if index >= 0:
+		header.add_child(_row_action("up-open", _move_server.bind(index, -1)))
+		header.add_child(_row_action("down-open", _move_server.bind(index, 1)))
+	header.add_child(_row_action("refresh", _refresh_server.bind(address)))
+	if index >= 0:
+		header.add_child(_row_action("pencil", _edit_server.bind(index)))
+		header.add_child(_row_action("trash", _remove_server.bind(index)))
+	row.add_child(header)
+	_build_server_content(row, address)
+	parent.add_child(row)
+
+
+## One row action button (`Styles.emptyi` + icon glyph).
+func _row_action(icon: String, action: Callable) -> Button:
+	# code-instantiated: per-server row action buttons (reorder/refresh/edit/remove).
+	var button := MindWidgets.icon_button(icon, "", "emptyi")
+	button.custom_minimum_size = Vector2(40, 40)
+	button.pressed.connect(action)
+	return button
+
+
+## Appends one server's probe content to its row.
+func _build_server_content(parent: Control, address: String) -> void:
+	var parsed: Variant = JSON.parse_string(_probe_json(address))
+	if not (parsed is Dictionary):
+		return
+	var probe: Dictionary = parsed
+	var state := str(probe.get("state", "none"))
+	var ping := int(probe.get("ping_ms", -1))
+	var matches: Array = probe.get("matches", [])
+	match state:
+		"ready":
+			if ping > 0:
+				# `buildServer` shows `host.ping + "ms"` under the host info.
+				parent.add_child(MindWidgets.styled_label("%dms" % ping, "outlineLabel"))
+			if matches.is_empty():
+				parent.add_child(MindWidgets.styled_label(_tm("@hosts.none"), "outlineLabel"))
+			else:
+				for match_variant in matches:
+					if not (match_variant is Dictionary):
+						continue
+					var match: Dictionary = match_variant
+					var match_id := int(match.get("match_id", 0))
+					if match_id <= 0:
+						continue
+					var label := "%s  %s  %d/%d" % [
+						str(match.get("map_id", "")),
+						str(match.get("mode_name", "")),
+						int(match.get("player_count", 0)),
+						int(match.get("max_players", 0)),
+					]
+					var button := MindWidgets.button(label)
+					button.pressed.connect(_join_on_server.bind(address, match_id))
+					parent.add_child(button)
+		"connecting":
+			# `refreshServer`: `@server.refreshing` while the ping is in flight.
+			parent.add_child(MindWidgets.styled_label(_tm("@server.refreshing"), "outlineLabel"))
+		_:
+			# `refreshServer` failure: `@host.invalid`.
+			parent.add_child(MindWidgets.styled_label(_tm("@host.invalid"), "outlineLabel"))
+
+
+## Global group body: the active server's public `all_matches` rows, filtered by
+## the community search field.
 func _rebuild_public() -> void:
 	if _global_list == null:
 		return
 	_global_list.clear_children()
 	var matches := _public_matches()
-	if matches.is_empty():
-		# code-instantiated: empty-state row carries the refresh control.
-		var empty := HBoxContainer.new()
-		empty.add_theme_constant_override("separation", 6)
-		var empty_label := MindWidgets.styled_label(_tm("@hosts.none"), "outlineLabel")
-		empty_label.autowrap_mode = TextServer.AUTOWRAP_OFF
-		empty_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		empty.add_child(empty_label)
-		var refresh := MindWidgets.icon_button("refresh", "", "emptyi")
-		refresh.custom_minimum_size = Vector2(70, 70)
-		refresh.pressed.connect(_rebuild_public)
-		empty.add_child(refresh)
-		_global_list.add(empty).grow_x_axis().pad(4)
-		_global_list.row()
-		_global_list.sort_now()
-		_global_list.call_deferred("sort_now")
-		return
 	for row_variant in matches:
 		# code-instantiated: public match rows come from the server view.
 		var row: Dictionary = row_variant
@@ -257,9 +374,25 @@ func _rebuild_public() -> void:
 			int(row.get("player_count", 0)),
 			int(row.get("max_players", 0)),
 		]
+		if not _server_search.is_empty() and not label.to_lower().contains(_server_search):
+			continue
 		var button := MindWidgets.button(label)
 		button.pressed.connect(_join.bind(match_id))
 		_global_list.add(button).grow_x_axis().pad(3)
+		_global_list.row()
+	if _global_list.get_child_count() == 0:
+		# code-instantiated: empty-state row carries the refresh control.
+		var empty := HBoxContainer.new()
+		empty.add_theme_constant_override("separation", 6)
+		var empty_label := MindWidgets.styled_label(_tm("@hosts.none"), "outlineLabel")
+		empty_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+		empty_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		empty.add_child(empty_label)
+		var refresh := MindWidgets.icon_button("refresh", "", "emptyi")
+		refresh.custom_minimum_size = Vector2(70, 70)
+		refresh.pressed.connect(_rebuild_public)
+		empty.add_child(refresh)
+		_global_list.add(empty).grow_x_axis().pad(4)
 		_global_list.row()
 	_global_list.sort_now()
 	_global_list.call_deferred("sort_now")
@@ -274,11 +407,47 @@ func _public_matches() -> Array:
 	return parsed if parsed is Array else []
 
 
+func _on_search_changed(text: String) -> void:
+	# `JoinDialog.java:419-421`: trim, collapse spaces, lowercase.
+	_server_search = " ".join(text.strip_edges().to_lower().split(" ", false))
+	_rebuild_public()
+
+
 ## `JoinDialog.safeConnect` intent: join the picked public match.
 func _join(match_id: int) -> void:
 	_push_identity()
 	join_requested.emit(match_id)
 	_close()
+
+
+## Clicking a match under a server row: connect to that server first unless the
+## active connector already points there (`JoinDialog.java:150-158`).
+func _join_on_server(address: String, match_id: int) -> void:
+	if match_id <= 0:
+		return
+	_push_identity()
+	var net := get_node_or_null("/root/Spine/MindNet")
+	var current := ""
+	if net != null and net.has_method("current_server_address"):
+		current = str(net.call("current_server_address"))
+	if current != _normalized_address(address):
+		connect_requested.emit(address)
+	join_requested.emit(match_id)
+	_close()
+
+
+## Normalizes an address to `host[:port]/db` (no scheme), matching
+## `MindNet.current_server_address` and the Rust parser defaults.
+func _normalized_address(address: String) -> String:
+	var value := address.strip_edges().trim_prefix("http://").trim_prefix("https://")
+	var parts := value.split("/", false, 1)
+	var authority := parts[0]
+	var db := DEFAULT_DB_NAME
+	if parts.size() > 1 and not parts[1].is_empty():
+		db = parts[1].split("/", false, 1)[0]
+	if not authority.contains(":"):
+		authority += ":%d" % DEFAULT_PORT
+	return "%s/%s" % [authority, db]
 
 
 func _open_picker() -> void:
@@ -346,31 +515,131 @@ func _push_identity() -> void:
 		net.call("set_player_identity", _name_field.text, _color.to_rgba32())
 
 
+## `JoinDialog.java:83`: the add panel remembers the address field.
+func _store_ip(text: String) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", IP_SETTING, text)
+
+
 func _toggle_add() -> void:
-	if _add_panel != null:
-		_add_panel.visible = not _add_panel.visible
-		if _add_panel.visible and _ip_field != null:
-			_ip_field.grab_focus()
+	if _add_panel == null:
+		return
+	if _add_panel.visible:
+		_hide_add()
+		return
+	_editing_index = -1
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_get_text"):
+		_ip_field.text = str(ui.call("settings_get_text", IP_SETTING, ""))
+	_add_panel.visible = true
+	if _ip_field != null:
+		_ip_field.grab_focus()
+
+
+func _edit_server(index: int) -> void:
+	if index < 0 or index >= _servers.size() or _add_panel == null:
+		return
+	_editing_index = index
+	_ip_field.text = str((_servers[index] as Dictionary).get("ip", ""))
+	_add_panel.visible = true
+	_ip_field.grab_focus()
 
 
 func _hide_add() -> void:
 	if _add_panel != null:
 		_add_panel.visible = false
+	_editing_index = -1
 
 
+## `JoinDialog.java:92-101` OK handler: append or replace, save, rebuild rows.
 func _submit_add() -> void:
 	var address := ""
 	if _ip_field != null:
 		address = _ip_field.text.strip_edges()
-	if not address.is_empty():
-		_push_identity()
-		connect_requested.emit(address)
+	if address.is_empty():
+		return
+	if _editing_index >= 0 and _editing_index < _servers.size():
+		var entry: Dictionary = _servers[_editing_index]
+		entry["ip"] = address
+	else:
+		_servers.append({"ip": address, "port": 0})
+	_save_servers()
+	_rebuild_servers()
 	_hide_add()
 
 
-func _connect_to(address: String) -> void:
-	_push_identity()
-	connect_requested.emit(address)
+## Java `moveRemote` (`JoinDialog.java:206-222`): reorder and persist.
+func _move_server(index: int, sign: int) -> void:
+	var target := index + sign
+	if target < 0 or target >= _servers.size():
+		return
+	var entry: Variant = _servers[index]
+	_servers.remove_at(index)
+	_servers.insert(target, entry)
+	_save_servers()
+	_rebuild_servers()
+
+
+## Java confirm flow (`JoinDialog.java:194-202`) then remove + persist.
+func _remove_server(index: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("show_confirm"):
+		_delete_server(index)
+		return
+	_pending_delete = index
+	ui.call("show_confirm", _t("@server.delete"))
+
+
+func _on_confirm_result(confirmed: bool) -> void:
+	var index := _pending_delete
+	_pending_delete = -1
+	if confirmed:
+		_delete_server(index)
+
+
+func _delete_server(index: int) -> void:
+	if index < 0 or index >= _servers.size():
+		return
+	_servers.remove_at(index)
+	_save_servers()
+	_rebuild_servers()
+
+
+## `JoinDialog.refresh` row action: drop the probe so the next poll re-pings.
+func _refresh_server(address: String) -> void:
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net != null and net.has_method("refresh_server"):
+		net.call("refresh_server", address)
+	# force the next poll to rebuild the rows
+	_server_signature = ""
+
+
+## `loadServers` (`JoinDialog.java:689-694`): `Core.settings.getJson("servers")`.
+func _load_servers() -> void:
+	_servers.clear()
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_text"):
+		return
+	var text := str(ui.call("settings_get_text", SERVERS_SETTING, ""))
+	if text.is_empty():
+		return
+	var parsed: Variant = JSON.parse_string(text)
+	if not (parsed is Array):
+		return
+	for entry in parsed:
+		if entry is Dictionary and not str((entry as Dictionary).get("ip", "")).is_empty():
+			_servers.append({
+				"ip": str(entry.get("ip", "")),
+				"port": int(entry.get("port", 0)),
+			})
+
+
+## `saveServers` (`JoinDialog.java:773-775`): `Core.settings.putJson`.
+func _save_servers() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("settings_put_text"):
+		ui.call("settings_put_text", SERVERS_SETTING, JSON.stringify(_servers))
 
 
 func _show_info() -> void:
