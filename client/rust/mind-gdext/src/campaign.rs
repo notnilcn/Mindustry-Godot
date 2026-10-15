@@ -547,6 +547,7 @@ impl MindCampaign {
         // T2: produced/dumped content unlocks (`UnlockableContent.unlock()` ->
         // `UnlockEvent` -> `Control.java:160-174`). Resolve the queued refs on
         // the registry, persist the unlock, then run `checkAutoUnlocks()`.
+        let mut unlocked_block = false;
         if !runtime.pending_unlocks.is_empty()
             && let Some(registry) = registry.as_mut()
         {
@@ -595,6 +596,9 @@ impl MindCampaign {
                     auto.len()
                 );
                 for content in auto {
+                    if content.type_ == ContentType::Block {
+                        unlocked_block = true;
+                    }
                     if let Some(name) = tech_tree::content_name(registry, content) {
                         newly.push(name);
                     }
@@ -623,6 +627,12 @@ impl MindCampaign {
             dirty = true;
         }
         self.registry = registry;
+
+        if unlocked_block {
+            // `UnlockEvent` with a block reached the facade: the placement
+            // palette rebuilds (`PlacementFragment.java:92-96`).
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
 
         if !replacements.is_empty() {
             let replaced = host.bind_mut().apply_capture_replacements(&replacements);
@@ -731,12 +741,26 @@ impl MindCampaign {
         if !unlocked.is_empty() {
             log::info!("campaign capture auto-unlocked {} content", unlocked.len());
         }
+        if unlocked
+            .iter()
+            .any(|content| content.type_ == ContentType::Block)
+        {
+            // `UnlockEvent` with a block: the palette rebuilds on capture
+            // unlocks (`PlacementFragment.java:92-96`).
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
+        }
     }
 
     /// Emitted on the first capture of a planet's last sector (campaign
     /// victory); the UI opens `campaign_complete`.
     #[signal]
     fn campaign_complete();
+
+    /// Emitted when an unlock performed during play includes a block
+    /// (`UnlockEvent`; `J/ui/fragments/PlacementFragment.java:92-96` rebuilds
+    /// the palette). Never emitted while a host bind is held.
+    #[signal]
+    fn block_unlocked();
 
     /// Primes the host's sector-generation extras from the campaign record
     /// (`Sector.threat`/`hasEnemyBase`/`hasBase`) so the next `load_sector` of
@@ -2139,6 +2163,10 @@ impl MindCampaign {
             });
         }
         // Newly unlocked content may auto-unlock dependent zero-cost nodes.
+        let mut unlocked_blocks = result
+            .unlocked
+            .iter()
+            .any(|content| content.type_ == ContentType::Block);
         if !result.unlocked.is_empty()
             && let Some(campaign_ref) = self.campaign.as_ref()
         {
@@ -2147,6 +2175,12 @@ impl MindCampaign {
                 let mut store = SettingsUnlockStore::new(settings);
                 tech_tree::check_auto_unlocks(&mut registry, &mut store, &ctx)
             });
+            if unlocked
+                .iter()
+                .any(|content| content.type_ == ContentType::Block)
+            {
+                unlocked_blocks = true;
+            }
             log::info!("research auto-unlocked {} content", unlocked.len());
         }
         self.registry = Some(registry);
@@ -2156,6 +2190,11 @@ impl MindCampaign {
         if changed {
             self.persist();
             self.invalidate_ui_block_catalog();
+        }
+        if unlocked_blocks {
+            // `UnlockEvent` with a block: the placement palette rebuilds
+            // (`PlacementFragment.java:92-96`). No host bind is held here.
+            let _ = self.base_mut().emit_signal("block_unlocked", &[]);
         }
         changed
     }
@@ -2868,15 +2907,26 @@ impl MindCampaign {
     /// Custom games expose the full build-menu inventory, mirroring
     /// `unlockedNowHost`'s `!state.isCampaign()` branch, with the same planet
     /// filter.
+    ///
+    /// The campaign planet comes from the LOADED world's rules when one exists:
+    /// Java's `state.rules` is the loaded world's from `World.loadSector` on,
+    /// while the facade session only flips in `start_sector` — which the UI can
+    /// call a frame after the world load, so `WorldLoadEvent`'s posted rebuild
+    /// (`PlacementFragment.java:78-84`) would otherwise read the old planet.
     #[func]
     pub fn block_catalog_json(&mut self) -> GString {
+        // Read the loaded rules into one owned string; never hold the host
+        // bind across the catalog build below.
+        let loaded_planet = self.host().and_then(|host| {
+            host.bind()
+                .last_sector_rules()
+                .map(|rules| rules.planet.clone())
+        });
         let catalog = if self.session.is_campaign() {
+            let planet = loaded_planet.unwrap_or_else(|| self.session.rules.planet.clone());
             settings_hub::with_settings(|settings| {
                 let store = SettingsUnlockStore::new(settings);
-                mind_core::ui::campaign::block_catalog_unlocked_for(
-                    &store,
-                    &self.session.rules.planet,
-                )
+                mind_core::ui::campaign::block_catalog_unlocked_for(&store, &planet)
             })
         } else {
             mind_core::ui::campaign::block_catalog_for(&self.session.rules.planet)

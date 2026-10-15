@@ -647,6 +647,12 @@ impl MindSimHost {
     #[signal]
     fn world_changed();
 
+    /// Emitted once per world load (`WorldLoadEvent`; `World.loadMap` end).
+    /// The placement palette resets its category/selection and re-reads the
+    /// catalogue (`J/ui/fragments/PlacementFragment.java:78-84`).
+    #[signal]
+    fn world_loaded();
+
     /// Installs the content-initialized logic globals (`GlobalVars`) on the sim.
     ///
     /// `LAssembler.var` resolves constants from the global `Vars.logicVars`
@@ -2674,6 +2680,7 @@ impl MindSimHost {
         self.world_loads += 1;
         self.emit_state();
         self.emit_world_changed();
+        self.emit_world_loaded();
         true
     }
 
@@ -3172,6 +3179,7 @@ impl MindSimHost {
         self.world_loads += 1;
         self.emit_state();
         self.emit_world_changed();
+        self.emit_world_loaded();
         true
     }
 
@@ -5675,6 +5683,11 @@ impl MindSimHost {
             self.revision = self.revision.wrapping_add(1);
             let _ = self.base_mut().emit_signal("world_changed", &[]);
         }
+    }
+
+    /// Emits the `world_loaded` signal (`WorldLoadEvent`; `World.loadMap`).
+    fn emit_world_loaded(&mut self) {
+        let _ = self.base_mut().emit_signal("world_loaded", &[]);
     }
 
     /// Captures the viewport texture to a PNG.
