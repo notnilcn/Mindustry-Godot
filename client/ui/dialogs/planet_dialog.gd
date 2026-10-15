@@ -49,6 +49,23 @@ var _sector_list: VBoxContainer = null
 ## closing it restores exactly what was showing before (the live game's HUD +
 ## world, or the standalone menu). Empty while nothing is covered.
 var _saved_layers: Dictionary = {}
+## `PlanetDialog.dragged`/`clicked` pair: a left-drag orbits the globe and the
+## release after a drag must not select a sector.
+var _dragged := false
+var _pressed_position := Vector2.ZERO
+## Whether the current left press started on the globe (not the rail/lists).
+var _press_on_globe := false
+## Pending rename/icon targets for the sector panel's pencil and icon picker.
+var _rename_target := -1
+var _icon_target := -1
+## `PlanetDialog.newPresets` (`PlanetDialog.java:270-288`): sector ids to
+## reveal, reversed so the planet's last sector sits first; `_preset_show`
+## counts ticks (Arc `Time.delta`) and `_reveal_showed` is the one-shot
+## announcement flag.
+var _last_sector_id := -1
+var _new_presets: Array = []
+var _preset_show := 0.0
+var _reveal_showed := false
 
 const MENU_GROUP_PATH := "/root/Spine/Ui/UiRoot/MenuGroup"
 const MENU_BACKGROUND_PATH := "/root/Spine/Ui/MenuBackground"
@@ -65,6 +82,12 @@ func _ready() -> void:
 	_add_space_backdrop()
 	_build()
 	_show_select()
+	# `ui.showTextInput` result for the sector rename pencil (`PlanetDialog.java:
+	# 1200-1206`); the load dialog keeps the same always-connected pattern.
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_signal("text_input_result") \
+			and not ui.is_connected("text_input_result", _on_text_input_result):
+		ui.connect("text_input_result", _on_text_input_result)
 
 
 func shown() -> void:
@@ -86,6 +109,10 @@ func shown() -> void:
 			_show_planet(_boot_planet(based))
 	else:
 		_show_planet(_selected_planet)
+	# `PlanetDialog.show` (`:260-288`): zoom reset, camera to the last sector
+	# and the new-preset reveal collection. The chooser never reaches here.
+	if not chooser_shown:
+		_start_preset_reveal()
 	# `PlanetDialog.java:216-222`: after a Serpulo remap the one-time "Campaign
 	# Changes Notice" shows, but only when the chooser branch was not taken.
 	if not chooser_shown:
@@ -101,6 +128,68 @@ func hidden() -> void:
 	var view := _planet_view()
 	if view != null:
 		view.set_hover(-1)
+
+
+## `PlanetDialog.show` (`PlanetDialog.java:260-288`): reset the zoom, turn the
+## camera to the planet's last sector (`lookAt(getLastSector())`) and collect
+## this planet's new presets (`take_new_presets`); the collected list gets the
+## last sector appended and is reversed, then `_process` replays the reveal.
+func _start_preset_reveal() -> void:
+	_new_presets.clear()
+	_preset_show = 0.0
+	_reveal_showed = false
+	var view := _planet_view()
+	if view == null or _selected_planet.is_empty():
+		return
+	view.zoom = 1.0
+	view.zoom_target = 1.0
+	_last_sector_id = int(view.data.get("last_sector", -1))
+	var last_sector := _find_sector(_selected_planet, _last_sector_id)
+	if not last_sector.is_empty():
+		view.look_at_tile(view.view_tile(last_sector))
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("take_new_presets"):
+		return
+	var collected: Variant = campaign.call("take_new_presets", _selected_planet)
+	if not (collected is PackedInt32Array):
+		return
+	for id in collected as PackedInt32Array:
+		_new_presets.append(int(id))
+	if not _new_presets.is_empty():
+		_new_presets.append(_last_sector_id)
+		_new_presets.reverse()
+
+
+## `PlanetDialog.act` reveal loop (`PlanetDialog.java:986-1003`): while
+## `newPresets` is non-empty the camera slerps to the peeked sector (alpha
+## 0.11) and the target zoom is 0.75; after 20 ticks the unlock announcement
+## fires once (only when more than the last sector remains), and each entry is
+## popped after 144 ticks (Arc `Time.delta` = 60 fps ticks).
+func _process(delta: float) -> void:
+	if _new_presets.is_empty() or not visible:
+		return
+	var view := _planet_view()
+	if view == null:
+		return
+	_preset_show += delta * 60.0
+	var to_id := int(_new_presets[_new_presets.size() - 1])
+	var sector := _find_sector(_selected_planet, to_id)
+	if not sector.is_empty():
+		view.look_at_tile(view.view_tile(sector), 0.11)
+	view.zoom_target = 0.75
+	if _preset_show >= 20.0 and not _reveal_showed and _new_presets.size() > 1:
+		_reveal_showed = true
+		var ui := get_node_or_null("/root/MindUi")
+		if ui != null:
+			ui.call(
+				"announce",
+				"%s [accent]%s" % [MindIcons.glyph("lock-open"), _localized_sector(sector)],
+				2.0
+			)
+	if _preset_show > 144.0:
+		_new_presets.pop_back()
+		_reveal_showed = false
+		_preset_show = 0.0
 
 
 func _build() -> void:
@@ -620,6 +709,8 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 		_last_planet_written = planet_name
 	_selected_planet = planet_name
 	_chooser_active = false
+	# `PlanetDialog.viewPlanet` (`:893`): switching planets clears the reveal.
+	_new_presets.clear()
 	_clear_dimmed_footer()
 	set_title_text("")
 	_clear_root()
@@ -967,7 +1058,7 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 
 	var title_row := HBoxContainer.new()
 	title_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	title_row.add_theme_constant_override("separation", 6)
+	title_row.add_theme_constant_override("separation", 4)
 	# Java: panel top 514 -> title glyphs 528-552 -> divider 557 (`Styles.black6`
 	# table with a 40 px title cell); heights sampled from the reference frame.
 	title_row.custom_minimum_size = Vector2(0.0, 41.0)
@@ -978,11 +1069,29 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_row.add_child(title)
 	var preset := str(sector.get("preset", ""))
-	if not preset.is_empty():
-		var icon := MindWidgets.image("sector-%s" % preset)
-		icon.custom_minimum_size = Vector2(20.0, 20.0)
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		title_row.add_child(icon)
+	var sector_id := int(sector.get("id", -1))
+	# `PlanetDialog.java:1195-1210`: the rename pencil exists for numbered
+	# sectors and presets without `requireUnlock`.
+	if preset.is_empty() or not bool(sector.get("require_unlock", true)):
+		var spacer := Control.new()
+		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_row.add_child(spacer)
+		# code-instantiated: data-driven per-sector rename pencil (`pencilSmall`).
+		var pencil := MindWidgets.glyph_button("pencil", "", "clearNonei")
+		pencil.custom_minimum_size = Vector2(40.0, 40.0)
+		pencil.tooltip_text = _t("@sectors.rename")
+		pencil.pressed.connect(func() -> void: _rename_sector(sector_id))
+		title_row.add_child(pencil)
+	# `PlanetDialog.java:1211-1226`: the marker icon button, always present.
+	# code-instantiated: data-driven per-sector icon button.
+	var icon_button := Button.new()
+	icon_button.theme_type_variation = "clearNonei"
+	icon_button.custom_minimum_size = Vector2(40.0, 40.0)
+	icon_button.tooltip_text = _t("@sector.changeicon")
+	icon_button.add_child(_sector_icon_content(sector))
+	icon_button.pressed.connect(func() -> void: _open_sector_icon_dialog(sector_id))
+	title_row.add_child(icon_button)
 
 	var divider := ColorRect.new()
 	divider.color = MindStyles.ACCENT
@@ -1093,6 +1202,109 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	return panel
 
 
+## `PlanetDialog.java:1211-1226`: the marker icon control inside the sector
+## panel's icon button — `contentIcon.uiIcon` else the chosen accessible glyph
+## else `Icon.noneSmall`.
+func _sector_icon_content(sector: Dictionary) -> Control:
+	var content_icon := _opt(sector, "content_icon")
+	if not content_icon.is_empty():
+		var texture := _content_icon(content_icon)
+		if texture != null:
+			# code-instantiated: per-sector marker image inside the icon button.
+			var image := TextureRect.new()
+			image.texture = texture
+			image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			return image
+	var icon_name := _opt(sector, "icon")
+	if icon_name.is_empty():
+		icon_name = "none"
+	var glyph := MindWidgets.glyph(icon_name, 26)
+	glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return glyph
+
+
+## `PlanetDialog.java:1200-1206`: `ui.showTextInput("@sectors.rename", "@name",
+## 32, sector.name(), v -> sector.setName(v))`.
+func _rename_sector(sector_id: int) -> void:
+	var sector := _find_sector(_selected_planet, sector_id)
+	if sector.is_empty():
+		return
+	_rename_target = sector_id
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("show_text_input"):
+		ui.call(
+			"show_text_input", _t("@sectors.rename"), _t("@name"), 32,
+			_localized_sector(sector), false, false
+		)
+
+
+## `Sector.setName` result: `updateSelected` + `rebuildList` after the write.
+func _on_text_input_result(text: String) -> void:
+	if _rename_target < 0:
+		return
+	var sector_id := _rename_target
+	_rename_target = -1
+	if text.strip_edges().is_empty():
+		return
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("set_sector_name"):
+		return
+	if bool(campaign.call("set_sector_name", _selected_planet, sector_id, text)):
+		_show_planet(_selected_planet)
+
+
+## `PlanetDialog.java:1223-1283`: the fill-parent marker picker (`Icon.none`,
+## `accessibleIcons`, five `defaultContentIcons` sections) in `icon_select`'s
+## sector mode.
+func _open_sector_icon_dialog(sector_id: int) -> void:
+	_icon_target = sector_id
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null:
+		return
+	if root != null and root.has_method("dialog"):
+		var dialog: Node = root.call("dialog", "icon_select")
+		if dialog != null and dialog.has_signal("sector_icon_selected") \
+				and not dialog.sector_icon_selected.is_connected(_on_sector_icon_selected):
+			dialog.sector_icon_selected.connect(_on_sector_icon_selected)
+	var sector := _find_sector(_selected_planet, sector_id)
+	ui.call(
+		"open_dialog", "icon_select",
+		JSON.stringify({
+			"mode": "sector",
+			"icon": _opt(sector, "icon"),
+			"content_icon": _opt(sector, "content_icon"),
+		})
+	)
+
+
+## The picker's choice: Java writes one half and nulls the other; the write path
+## refreshes the panel and list (`updateSelected` + `rebuildList`).
+func _on_sector_icon_selected(icon_name: String, content_icon: String) -> void:
+	if _icon_target < 0:
+		return
+	var sector_id := _icon_target
+	_icon_target = -1
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "icon_select")
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("set_sector_icon"):
+		return
+	if bool(campaign.call("set_sector_icon", _selected_planet, sector_id, icon_name, content_icon)):
+		_show_planet(_selected_planet)
+
+
+## Optional string field of a read-model row (`null` -> "").
+func _opt(row: Dictionary, key: String) -> String:
+	var value: Variant = row.get(key, null)
+	return "" if value == null else str(value)
+
+
 ## `requirement.<kind>` argument localization: `sector.<name>.name` for
 ## capture/onsector, `planet.<name>.name` for onplanet, content name lookup for
 ## research/produce (`updateSelected` prints the name; the locked-parent `???`
@@ -1173,10 +1385,10 @@ func _show_sector_stats(sector: Dictionary) -> void:
 		)
 
 
-## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then
-## `liquid-<name>-ui`).
+## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then the
+## other `defaultContentIcons` types).
 func _content_icon(content_name: String) -> Texture2D:
-	for prefix in ["item", "liquid", "block"]:
+	for prefix in ["item", "liquid", "block", "unit", "status"]:
 		var texture := MindWidgets.icon_texture("%s-%s-ui" % [prefix, content_name])
 		if texture != null:
 			return texture
@@ -1372,25 +1584,73 @@ func _select_view_tile(tile: int) -> void:
 
 
 ## Empty-screen left clicks pick the sector under the cursor while the globe is
-## up; UI regions (rail, bottom bar) are excluded. Covered by another dialog
-## (not the stack top), events are ignored like an Arc modal (`Dialog.hit`).
+## up; UI regions (rail, bottom bar) are excluded. Left-drag orbits the globe
+## (`PlanetDialog.java:114-138`) and the wheel zooms (`:140-147`); both are
+## ignored while the new-preset reveal runs, and a release after a drag does
+## not select (Java's Arc `clicked` only fires on a tap). Covered by another
+## dialog (not the stack top), events are ignored like an Arc modal
+## (`Dialog.hit`).
 func _input(event: InputEvent) -> void:
 	if not visible:
 		return
 	if not is_top():
 		return
+	if event is InputEventKey:
+		_handle_reveal_escape(event as InputEventKey)
+		return
 	if event is InputEventMouseMotion:
 		var view := _planet_view()
-		if view != null and view.visible:
-			_update_hover(view, (event as InputEventMouseMotion).position)
+		if view == null or not view.visible:
+			return
+		var motion := event as InputEventMouseMotion
+		if motion.button_mask & MOUSE_BUTTON_MASK_LEFT:
+			if not _press_on_globe:
+				return
+			# `dragged()`: ignored while the reveal shows a preset other than
+			# the planet's last sector; otherwise the drag clears the reveal
+			# (`newPresets.clear()`).
+			if not _new_presets.is_empty() and int(_new_presets[_new_presets.size() - 1]) != _last_sector_id:
+				return
+			_new_presets.clear()
+			_dragged = true
+			view.drag(motion.relative)
+			get_viewport().set_input_as_handled()
+			return
+		_update_hover(view, motion.position)
 		return
 	if not (event is InputEventMouseButton):
 		return
 	var click := event as InputEventMouseButton
-	if click.button_index != MOUSE_BUTTON_LEFT or not click.pressed:
+	if click.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+		var wheel_view := _planet_view()
+		if wheel_view == null or not wheel_view.visible:
+			return
+		if _over_ui(click.position):
+			return
+		# Arc scroll `amountY`: negative scrolling up (SDL `-wheel.y`), and
+		# `zoom + amountY / 10` means up zooms in (`PlanetDialog.java:144`).
+		wheel_view.scroll(-1.0 if click.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0)
+		get_viewport().set_input_as_handled()
+		return
+	if click.button_index != MOUSE_BUTTON_LEFT:
 		return
 	var mouse_view := _planet_view()
 	if mouse_view == null or not mouse_view.visible:
+		return
+	if click.pressed:
+		_pressed_position = click.position
+		_dragged = false
+		_press_on_globe = not _over_ui(click.position)
+		return
+	# Release: a drag must not select; a tap selects like `PlanetDialog.tap`.
+	if _dragged:
+		_dragged = false
+		_press_on_globe = false
+		return
+	if not _press_on_globe:
+		return
+	_press_on_globe = false
+	if click.position.distance_to(_pressed_position) > 4.0:
 		return
 	if _over_ui(click.position):
 		return
@@ -1401,6 +1661,19 @@ func _input(event: InputEvent) -> void:
 	# The rebuild clears the hover; Java keeps `hovered` on the sector under the
 	# pointer after the click (`selected = hovered`), so re-apply it.
 	_update_hover(mouse_view, click.position)
+	get_viewport().set_input_as_handled()
+
+
+## `PlanetDialog.java:92-96`: Escape during the reveal clears every entry but
+## the first (the planet's last sector); the dialog itself stays open.
+func _handle_reveal_escape(key: InputEventKey) -> void:
+	if not key.pressed or key.echo or key.keycode != KEY_ESCAPE:
+		return
+	if _new_presets.size() <= 1:
+		return
+	_new_presets.resize(1)
+	_preset_show = 0.0
+	_reveal_showed = false
 	get_viewport().set_input_as_handled()
 
 

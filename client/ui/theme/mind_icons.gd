@@ -24,6 +24,8 @@ const CODES := {
 	"cancel": 59413,
 	"chart-bar": 59417,
 	"chat": 59504,
+	"command-attack": 59502,
+	"command-rally": 59500,
 	"copy": 59508,
 	"crafting": 59440,
 	"defense": 59469,
@@ -68,6 +70,7 @@ const CODES := {
 	"mode-pvp": 59489,
 	"mode-survival": 59499,
 	"music": 59402,
+	"none": 59496,
 	"ok": 59392,
 	"paste": 59474,
 	"pause": 59398,
@@ -106,11 +109,26 @@ const CODES := {
 }
 
 
-## Glyph string for an icon alias (empty when unknown).
+## Java `Iconc` field names stored in `SectorInfo.icon`/schematics tags ->
+## the css aliases in [constant CODES].
+const JAVA_ALIASES := {
+	"commandAttack": "command-attack",
+	"commandRally": "command-rally",
+	"modePvp": "mode-pvp",
+	"modeSurvival": "mode-survival",
+	"warning": "warn",
+}
+
+
+## Glyph string for an icon alias (empty when unknown). Java `Iconc` field
+## names resolve through [constant JAVA_ALIASES].
 static func glyph(name: String) -> String:
-	if not CODES.has(name):
+	var key := name
+	if not CODES.has(key):
+		key = str(JAVA_ALIASES.get(name, ""))
+	if not CODES.has(key):
 		return ""
-	return char(int(CODES[name]))
+	return char(int(CODES[key]))
 
 
 ## The `MindAssets` autoload (null in a bare test host).
