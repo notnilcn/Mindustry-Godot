@@ -25,7 +25,7 @@ use godot::builtin::{
     Array, GString, PackedInt64Array, PackedVector2Array, VarDictionary, Variant, Vector2,
 };
 use godot::classes::notify::NodeNotification;
-use godot::classes::{INode, Node, ProjectSettings};
+use godot::classes::{INode, Node, ProjectSettings, Texture2D};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
@@ -47,9 +47,10 @@ use mind_core::editor::{BRUSH_SIZES, EditorTool, EditorWorldHooks, MapEditor};
 use mind_core::game::play::PlaySession;
 use mind_core::game::team::Team;
 use mind_core::io::fs::{FileSystem, NativeFs};
-use mind_core::io::map::MapIo;
+use mind_core::io::map::{BlockPalette, MapIo};
 use mind_core::logic::blocks::LogicBlockState;
 use mind_core::maps::Map;
+use mind_core::maps::filters::BlockPredicate;
 use mind_core::maps::filters::block_info;
 use mind_core::world::{BlockKindData, BlockTable, NoopRenderHooks, WorldGrid};
 
@@ -106,6 +107,9 @@ pub struct MindEditor {
     view: MapViewDriver,
     play: EditorPlayState,
     play_session: PlaySession,
+    /// Minimap palette with `sprites/block_colors.png` applied, lazily built
+    /// for the generate-dialog preview (`ContentLoader.loadColors`).
+    palette: Option<BlockPalette>,
     /// Monotonic tile-edit counter (`MindEditorRenderer` invalidation).
     tiles_rev: u64,
 }
@@ -130,6 +134,7 @@ impl INode for MindEditor {
             view: MapViewDriver::new(),
             play: EditorPlayState::new(),
             play_session: PlaySession::default(),
+            palette: None,
             tiles_rev: 0,
         }
     }
@@ -865,9 +870,10 @@ impl MindEditor {
     /// Stores the `genfilters` tag from the generate dialog.
     #[func]
     pub fn set_filters_json(&mut self, json: GString) -> bool {
-        self.editor
-            .tags
-            .insert("genfilters".to_owned(), json.to_string());
+        // GDScript JSON round-trips turn integral numbers into floats; restore
+        // the `int` fields before the tag keeps an unparsable `"seed": 0.0`.
+        let normalized = mind_core::maps::filters::normalize_filter_numbers(&json.to_string());
+        self.editor.tags.insert("genfilters".to_owned(), normalized);
         self.clear_error();
         true
     }
@@ -891,6 +897,95 @@ impl MindEditor {
         );
         self.clear_error();
         true
+    }
+
+    /// `MapGenerateDialog.rebuildFilters`: one row per tag filter with its
+    /// `FilterOption` descriptors and the resolved values (`filter.options()`
+    /// plus each option's getter, class defaults merged).
+    #[func]
+    pub fn filter_options_json(&self) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let tag = self
+            .editor
+            .tags
+            .get("genfilters")
+            .cloned()
+            .unwrap_or_default();
+        GString::from(mind_core::maps::filters::filter_options_json(content, &tag).as_str())
+    }
+
+    /// `MapGenerateDialog.showAdd`: `Maps.allFilterTypes` rows (class tag,
+    /// `simpleName`, icon block, `isPost`).
+    #[func]
+    pub fn filter_types_json(&self) -> GString {
+        GString::from(mind_core::maps::filters::filter_types_json().as_str())
+    }
+
+    /// `Maps.addDefaultOres` as a `genfilters` JSON fragment (the `@add`
+    /// picker's "Default Ores" row).
+    #[func]
+    pub fn default_ores_json(&self) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let filters = mind_core::maps::filters::default_ore_filters(content);
+        GString::from(mind_core::maps::filters::write_filters(content, &filters).as_str())
+    }
+
+    /// `FilterOption.BlockOption` picker rows: every block the named predicate
+    /// accepts (`content.blocks()` + `Boolf<Block>`), in content-id order.
+    #[func]
+    pub fn filter_blocks_json(&self, predicate: GString) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let Some(predicate) = BlockPredicate::from_name(&predicate.to_string()) else {
+            return GString::from("[]");
+        };
+        let rows: Vec<serde_json::Value> = content
+            .blocks()
+            .iter()
+            .filter(|def| predicate.test(content, def.id))
+            .map(|def| {
+                serde_json::json!({
+                    "name": def.name,
+                    "id": def.id.raw(),
+                    "ui_icon": format!("block-{}-ui", def.name),
+                })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// `MapGenerateDialog.update()`: the live filter preview over the editor
+    /// grid, colored with the map-preview palette (`MapIO.colorFor`).
+    #[func]
+    pub fn generate_preview_texture(&mut self) -> Option<Gd<Texture2D>> {
+        if self.palette.is_none() {
+            let content = self.content.as_ref()?;
+            let mut palette = BlockPalette::of(content);
+            palette.apply_block_colors(&crate::render::minimap::load_block_colors());
+            self.palette = Some(palette);
+        }
+        let snapshot = mind_core::editor::generate::EditorSnapshot::capture(&self.grid);
+        let tag = self.editor.tags.get("genfilters").cloned();
+        let content = self.content.as_ref()?;
+        let palette = self.palette.as_ref()?;
+        let mut filters = mind_core::editor::generate::filters_from_tag(content, tag.as_deref());
+        let image = mind_core::editor::generate::generate_preview_with_palette(
+            &snapshot,
+            &mut filters,
+            content,
+            palette,
+            0,
+        );
+        preview::bind_texture(&image)
     }
 
     /// `SectorGenerateDialog.apply`: generation is owned by the planet/sector

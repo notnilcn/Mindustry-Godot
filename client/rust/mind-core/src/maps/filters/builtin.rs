@@ -21,7 +21,8 @@ use crate::determinism::SimRng;
 use crate::world::tiles::Tiles;
 
 use super::{
-    GenerateFilter, GenerateInput, filter_chance, filter_noise, filter_noise_xy, filter_rnoise_oct,
+    BlockPredicate, FilterOption, GenerateFilter, GenerateInput, filter_chance, filter_noise,
+    filter_noise_xy, filter_rnoise_oct,
 };
 
 fn block_name(registry: &ContentRegistry, id: BlockId) -> String {
@@ -469,7 +470,7 @@ impl FilterJson {
 
 /// Implements the shared `GenerateFilter` surface for a concrete filter.
 macro_rules! impl_filter {
-    ($ty:ty, $simple:literal, $tag:literal, $buffered:literal) => {
+    ($ty:ty, $simple:literal, $tag:literal, $buffered:literal, $icon:literal, $options:expr) => {
         impl GenerateFilter for $ty {
             fn simple_name(&self) -> &'static str {
                 $simple
@@ -477,6 +478,14 @@ macro_rules! impl_filter {
 
             fn class_tag(&self) -> &'static str {
                 $tag
+            }
+
+            fn icon_block(&self) -> Option<&'static str> {
+                Some($icon)
+            }
+
+            fn options(&self) -> Vec<FilterOption> {
+                $options
             }
 
             fn seed(&self) -> i32 {
@@ -592,7 +601,23 @@ impl NoiseFilter {
     }
 }
 
-impl_filter!(NoiseFilter, "noise", "noise", false);
+impl_filter!(
+    NoiseFilter,
+    "noise",
+    "noise",
+    false,
+    "pebbles",
+    vec![
+        FilterOption::slider("scale", "scl", 1.0, 500.0, 0.00001),
+        FilterOption::slider("threshold", "threshold", 0.0, 1.0, 0.00001),
+        FilterOption::slider("octaves", "octaves", 1.0, 10.0, 0.00001),
+        FilterOption::slider("falloff", "falloff", 0.0, 1.0, 0.00001),
+        FilterOption::slider("tilt", "tilt", -4.0, 4.0, 0.00001),
+        FilterOption::block("target", "target", BlockPredicate::AnyOptional),
+        FilterOption::block("floor", "floor", BlockPredicate::FloorsOptional),
+        FilterOption::block("wall", "block", BlockPredicate::WallsOptional),
+    ]
+);
 
 /// `ScatterFilter`.
 #[derive(Debug, Clone)]
@@ -654,7 +679,19 @@ impl ScatterFilter {
     }
 }
 
-impl_filter!(ScatterFilter, "scatter", "scatter", false);
+impl_filter!(
+    ScatterFilter,
+    "scatter",
+    "scatter",
+    false,
+    "boulder",
+    vec![
+        FilterOption::slider("chance", "chance", 0.0, 1.0, 0.00001),
+        FilterOption::block("flooronto", "flooronto", BlockPredicate::FloorsOptional),
+        FilterOption::block("floor", "floor", BlockPredicate::FloorsOptional),
+        FilterOption::block("block", "block", BlockPredicate::WallsOresOptional),
+    ]
+);
 
 /// `TerrainFilter`.
 #[derive(Debug, Clone)]
@@ -737,7 +774,24 @@ impl TerrainFilter {
     }
 }
 
-impl_filter!(TerrainFilter, "terrain", "terrain", false);
+impl_filter!(
+    TerrainFilter,
+    "terrain",
+    "terrain",
+    false,
+    "stone-wall",
+    vec![
+        FilterOption::slider("scale", "scl", 1.0, 500.0, 0.00001),
+        FilterOption::slider("mag", "magnitude", 0.0, 2.0, 0.00001),
+        FilterOption::slider("threshold", "threshold", 0.0, 1.0, 0.00001),
+        FilterOption::slider("circle-scale", "circleScl", 0.0, 3.0, 0.00001),
+        FilterOption::slider("octaves", "octaves", 1.0, 10.0, 0.00001),
+        FilterOption::slider("falloff", "falloff", 0.0, 1.0, 0.00001),
+        FilterOption::slider("tilt", "tilt", -4.0, 4.0, 0.00001),
+        FilterOption::block("floor", "floor", BlockPredicate::FloorsOptional),
+        FilterOption::block("wall", "block", BlockPredicate::WallsOnly),
+    ]
+);
 
 /// `DistortFilter` (buffered).
 #[derive(Debug, Clone)]
@@ -781,7 +835,17 @@ impl DistortFilter {
     }
 }
 
-impl_filter!(DistortFilter, "distort", "distort", true);
+impl_filter!(
+    DistortFilter,
+    "distort",
+    "distort",
+    true,
+    "tendrils",
+    vec![
+        FilterOption::slider("scale", "scl", 1.0, 200.0, 0.00001),
+        FilterOption::slider("mag", "mag", 0.5, 100.0, 0.00001),
+    ]
+);
 
 /// `RiverNoiseFilter`.
 #[derive(Debug, Clone)]
@@ -872,7 +936,24 @@ impl RiverNoiseFilter {
     }
 }
 
-impl_filter!(RiverNoiseFilter, "rivernoise", "riverNoise", false);
+impl_filter!(
+    RiverNoiseFilter,
+    "rivernoise",
+    "riverNoise",
+    false,
+    "shallow-water",
+    vec![
+        FilterOption::slider("scale", "scl", 1.0, 500.0, 0.00001),
+        FilterOption::slider("threshold", "threshold", -1.0, 1.0, 0.00001),
+        FilterOption::slider("threshold2", "threshold2", -1.0, 1.0, 0.00001),
+        FilterOption::slider("octaves", "octaves", 1.0, 10.0, 0.00001),
+        FilterOption::slider("falloff", "falloff", 0.0, 1.0, 0.00001),
+        FilterOption::block("target", "target", BlockPredicate::AnyOptional),
+        FilterOption::block("block", "block", BlockPredicate::WallsOptional),
+        FilterOption::block("floor", "floor", BlockPredicate::FloorsOptional),
+        FilterOption::block("floor2", "floor2", BlockPredicate::FloorsOptional),
+    ]
+);
 
 /// `OreFilter`.
 #[derive(Debug, Clone)]
@@ -947,7 +1028,22 @@ impl OreFilter {
     }
 }
 
-impl_filter!(OreFilter, "ore", "ore", false);
+impl_filter!(
+    OreFilter,
+    "ore",
+    "ore",
+    false,
+    "ore-copper",
+    vec![
+        FilterOption::slider("scale", "scl", 1.0, 500.0, 0.00001),
+        FilterOption::slider("threshold", "threshold", 0.0, 1.0, 0.00001),
+        FilterOption::slider("octaves", "octaves", 1.0, 10.0, 0.00001),
+        FilterOption::slider("falloff", "falloff", 0.0, 1.0, 0.00001),
+        FilterOption::slider("tilt", "tilt", -4.0, 4.0, 0.00001),
+        FilterOption::block("ore", "ore", BlockPredicate::OresOnly),
+        FilterOption::block("target", "target", BlockPredicate::OresFloorsOptional),
+    ]
+);
 
 /// `OreMedianFilter` (buffered).
 #[derive(Debug, Clone)]
@@ -1031,7 +1127,17 @@ impl OreMedianFilter {
     }
 }
 
-impl_filter!(OreMedianFilter, "oremedian", "oreMedian", true);
+impl_filter!(
+    OreMedianFilter,
+    "oremedian",
+    "oreMedian",
+    true,
+    "ore-lead",
+    vec![
+        FilterOption::slider("radius", "radius", 1.0, 12.0, 0.00001),
+        FilterOption::slider("percentile", "percentile", 0.0, 1.0, 0.00001),
+    ]
+);
 
 /// `MedianFilter` (buffered).
 #[derive(Debug, Clone)]
@@ -1091,7 +1197,17 @@ impl MedianFilter {
     }
 }
 
-impl_filter!(MedianFilter, "median", "median", true);
+impl_filter!(
+    MedianFilter,
+    "median",
+    "median",
+    true,
+    "spore-pine",
+    vec![
+        FilterOption::slider("radius", "radius", 1.0, 10.0, 0.00001),
+        FilterOption::slider("percentile", "percentile", 0.0, 1.0, 0.00001),
+    ]
+);
 
 /// `BlendFilter` (buffered).
 #[derive(Debug, Clone)]
@@ -1169,7 +1285,19 @@ impl BlendFilter {
     }
 }
 
-impl_filter!(BlendFilter, "blend", "blend", true);
+impl_filter!(
+    BlendFilter,
+    "blend",
+    "blend",
+    true,
+    "sand-floor",
+    vec![
+        FilterOption::slider("radius", "radius", 1.0, 10.0, 0.00001),
+        FilterOption::block("block", "block", BlockPredicate::AnyOptional),
+        FilterOption::block("floor", "floor", BlockPredicate::AnyOptional),
+        FilterOption::block("ignore", "ignore", BlockPredicate::AnyOptional),
+    ]
+);
 
 /// `MirrorFilter`.
 #[derive(Debug, Clone)]
@@ -1248,7 +1376,17 @@ impl MirrorFilter {
     }
 }
 
-impl_filter!(MirrorFilter, "mirror", "mirror", false);
+impl_filter!(
+    MirrorFilter,
+    "mirror",
+    "mirror",
+    false,
+    "metal-floor-5",
+    vec![
+        FilterOption::int_slider("angle", "angle", 0.0, 360.0, 15.0),
+        FilterOption::toggle("rotate", "rotate"),
+    ]
+);
 
 /// `ClearFilter`.
 #[derive(Debug, Clone)]
@@ -1313,7 +1451,18 @@ impl ClearFilter {
     }
 }
 
-impl_filter!(ClearFilter, "clear", "clear", false);
+impl_filter!(
+    ClearFilter,
+    "clear",
+    "clear",
+    false,
+    "snow",
+    vec![
+        FilterOption::block("target", "target", BlockPredicate::AnyOptional),
+        FilterOption::block("replacement", "replace", BlockPredicate::AnyOptional),
+        FilterOption::block("ignore", "ignore", BlockPredicate::AnyOptional),
+    ]
+);
 
 /// `CoreSpawnFilter` (post; needs plan 12's team/rules + plan 07's buildings).
 #[derive(Debug, Clone)]
@@ -1336,6 +1485,9 @@ impl GenerateFilter for CoreSpawnFilter {
     }
     fn class_tag(&self) -> &'static str {
         "coreSpawn"
+    }
+    fn icon_block(&self) -> Option<&'static str> {
+        Some("core-shard")
     }
     fn is_post(&self) -> bool {
         true
@@ -1387,6 +1539,14 @@ impl GenerateFilter for EnemySpawnFilter {
     }
     fn class_tag(&self) -> &'static str {
         "enemySpawn"
+    }
+    fn icon_block(&self) -> Option<&'static str> {
+        Some("spawn")
+    }
+    fn options(&self) -> Vec<FilterOption> {
+        vec![FilterOption::int_slider(
+            "amount", "amount", 1.0, 10.0, 0.00001,
+        )]
     }
     fn is_post(&self) -> bool {
         true
@@ -1460,6 +1620,15 @@ impl GenerateFilter for SpawnPathFilter {
     fn class_tag(&self) -> &'static str {
         "spawnPath"
     }
+    fn icon_block(&self) -> Option<&'static str> {
+        Some("core-zone")
+    }
+    fn options(&self) -> Vec<FilterOption> {
+        vec![
+            FilterOption::int_slider("radius", "radius", 1.0, 20.0, 1.0),
+            FilterOption::block("wall", "block", BlockPredicate::WallsOnly),
+        ]
+    }
     fn is_post(&self) -> bool {
         true
     }
@@ -1505,6 +1674,15 @@ impl GenerateFilter for LogicFilter {
     }
     fn class_tag(&self) -> &'static str {
         "logic"
+    }
+    fn icon_block(&self) -> Option<&'static str> {
+        Some("micro-processor")
+    }
+    fn options(&self) -> Vec<FilterOption> {
+        vec![
+            FilterOption::custom("code", "code", "logiccode"),
+            FilterOption::toggle("loop", "loop"),
+        ]
     }
     fn is_post(&self) -> bool {
         true
