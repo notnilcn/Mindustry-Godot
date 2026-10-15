@@ -654,6 +654,7 @@ impl MindUi {
                 });
             }
         }
+        self.apply_row_change(&key);
         self.persist_settings();
         true
     }
@@ -1054,6 +1055,10 @@ impl MindUi {
             self.mobile_preview
         );
         crate::settings_hub::init(&Paths::resolve(None));
+        // Boot application of the window rows (`SettingsMenuDialog` applies
+        // vsync/fpscap at build time) and `UI.updateMargins`.
+        self.apply_window_settings();
+        self.update_margins();
     }
 
     /// Calls a JSON read-model method on the live campaign facade, if present.
@@ -1073,6 +1078,69 @@ impl MindUi {
         Some(text)
     }
 
+    /// Applies one settings row change (`SettingsMenuDialog` `checkPref`/
+    /// `sliderPref` listeners live in the dialog upstream; the port applies the
+    /// window rows here and leaves the per-frame readers to their owners).
+    /// Called after every `settings_set` and once at boot.
+    fn apply_row_change(&mut self, key: &str) {
+        match key {
+            "vsync" | "fpscap" | "fullscreen" => self.apply_window_settings(),
+            "uiEdgePadding" => self.update_margins(),
+            _ => {}
+        }
+    }
+
+    /// `checkPref("vsync", true, Core.graphics::setVSync)` +
+    /// `sliderPref("fpscap", 240, 10, 245, 5, ...)` + `Control.java:690-694`
+    /// fullscreen: the three window-level rows.
+    fn apply_window_settings(&self) {
+        use godot::classes::display_server::{VSyncMode, WindowMode};
+        use godot::classes::{DisplayServer, Engine};
+        let (fullscreen, vsync, fpscap) = crate::settings_hub::with_settings(|store| {
+            (
+                store.get_bool("fullscreen", false),
+                store.get_bool("vsync", true),
+                store.get_i32("fpscap", 240),
+            )
+        });
+        let mut display = DisplayServer::singleton();
+        display.window_set_vsync_mode(if vsync {
+            VSyncMode::ENABLED
+        } else {
+            VSyncMode::DISABLED
+        });
+        // `ClientLauncher.java:220`: `limitFps = targetfps > 0 && <= 240`; the
+        // 245 row stop means unlimited (`setting.fpscap.none`).
+        Engine::singleton().set_max_fps(if (1..=240).contains(&fpscap) {
+            fpscap
+        } else {
+            0
+        });
+        display.window_set_mode(if fullscreen {
+            WindowMode::FULLSCREEN
+        } else {
+            WindowMode::WINDOWED
+        });
+    }
+
+    /// `UI.updateMargins` (`UI.java:253-270`): safe insets (0 on desktop) plus
+    /// the custom `uiEdgePadding` on the long edges of the current orientation.
+    fn update_margins(&mut self) {
+        let padding =
+            crate::settings_hub::with_settings(|store| store.get_i32("uiEdgePadding", 0).max(0));
+        let size = self
+            .base()
+            .get_viewport()
+            .map(|viewport| viewport.get_visible_rect().size)
+            .unwrap_or_default();
+        let (left, right, top, bottom) = if size.y > size.x {
+            (0, 0, padding, padding)
+        } else {
+            (padding, padding, 0, 0)
+        };
+        self.set_margins(left, right, top, bottom);
+    }
+
     /// Atomically writes the shared store (writes are small; no debounce pump
     /// exists in this node).
     fn persist_settings(&mut self) {
@@ -1080,6 +1148,7 @@ impl MindUi {
             log::warn!("[ui] settings save failed: {error}");
         }
     }
+
     /// Resolves the sim owner the governor drives, if present.
     fn sim_host(&self) -> Option<Gd<GdNode>> {
         self.base().get_node_or_null(SIM_HOST_PATH)
