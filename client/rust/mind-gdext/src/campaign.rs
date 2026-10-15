@@ -1500,6 +1500,79 @@ impl MindCampaign {
         GString::from(self.playtesting_map.as_deref().unwrap_or(""))
     }
 
+    /// `Planet.applyRules(rules, true)` over a rules JSON (`CustomRulesDialog`'s
+    /// planet buttons, `CustomRulesDialog.java:287-306` / `Planet.java:286-306`).
+    /// Returns the updated rules JSON (the input unchanged on failure).
+    #[func]
+    pub fn apply_planet_rules(&mut self, planet: GString, rules_json: GString) -> GString {
+        let text = rules_json.to_string();
+        let Ok(mut rules) = serde_json::from_str::<Rules>(&text) else {
+            return rules_json;
+        };
+        let Some(registry) = self.registry.as_ref() else {
+            return rules_json;
+        };
+        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+            return rules_json;
+        };
+        let record = mind_core::game::planet::Planet::from_def(registry, def, 0.0);
+        let is_game = self.session.phase.is_game();
+        record.apply_rules(registry, &mut rules, true, is_game);
+        match serde_json::to_string(&rules) {
+            Ok(json) => GString::from(json.as_str()),
+            Err(_) => rules_json,
+        }
+    }
+
+    /// `Planets.<name>.defaultEnv` as a bitmask (`CustomRulesDialog`'s Erekir
+    /// checks). `0` for an unknown planet.
+    #[func]
+    pub fn planet_default_env(&self, planet: GString) -> i64 {
+        let Some(registry) = self.registry.as_ref() else {
+            return 0;
+        };
+        registry
+            .planet_by_name(&planet.to_string())
+            .map(|def| {
+                i64::from(mind_core::game::planet::Planet::from_def(registry, def, 0.0).default_env)
+            })
+            .unwrap_or(0)
+    }
+
+    /// `Vars.defaultEnv` (`Vars.java:65`): `terrestrial | spores | groundOil |
+    /// groundWater | oxygen` = 233. Used by `@rules.anyenv`.
+    #[func]
+    pub fn default_env(&self) -> i64 {
+        use mind_core::content::EnvFlag;
+        i64::from(
+            mind_core::game::planet::env_bit(EnvFlag::Terrestrial)
+                | mind_core::game::planet::env_bit(EnvFlag::Spores)
+                | mind_core::game::planet::env_bit(EnvFlag::GroundOil)
+                | mind_core::game::planet::env_bit(EnvFlag::GroundWater)
+                | mind_core::game::planet::env_bit(EnvFlag::Oxygen),
+        )
+    }
+
+    /// Planets the rules dialog may switch to (`content.planets().select(p ->
+    /// p.accessible && p.visible && p.isLandable())`,
+    /// `CustomRulesDialog.java:287`): `[{name}]` in content order.
+    #[func]
+    pub fn rules_planets(&self) -> Array<VarDictionary> {
+        let mut out = Array::<VarDictionary>::new();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        for def in registry.planets() {
+            if !def.accessible || !def.visible || def.sectors.is_empty() {
+                continue;
+            }
+            let mut row = VarDictionary::new();
+            row.set(&GString::from("name"), &def.name.as_str().to_variant());
+            out.push(&row);
+        }
+        out
+    }
+
     /// Resolves a map display name or file path through the map registry rows
     /// (`MindPreview`'s `Maps.load` sources).
     fn resolve_map(&self, name: &str) -> Option<mind_core::maps::Map> {
