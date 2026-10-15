@@ -7204,6 +7204,60 @@ impl MindSimHost {
             _ => None,
         }
     }
+
+    /// Pod and pad draw rows (`LaunchPayloadComp.draw` `LaunchPad.java:227-280`,
+    /// `LaunchPadBuild.draw` `:105-135`, `LandingPadBuild.draw`
+    /// `LandingPad.java:205-265`; H03 T13). Rust-only seam for `render/pods.rs`.
+    pub fn pad_draws(&mut self) -> Vec<PadDraw> {
+        let mut out = Vec::new();
+        let block_size = |snapshot: &Option<mind_core::content::ContentRegistry>,
+                          block: mind_core::content::BlockId| {
+            snapshot
+                .as_ref()
+                .and_then(|content| content.block(block))
+                .map(|def| def.size.max(1))
+                .unwrap_or(1)
+        };
+        for (id, x, y, time, lifetime, block, _team) in
+            mind_core::game::launch_payload::payload_rows(&mut self.sim.ecs.0)
+        {
+            out.push(PadDraw::Launch {
+                id,
+                x,
+                y,
+                time,
+                lifetime,
+                block,
+            });
+        }
+        for (id, x, y, block, _config, arriving, arriving_timer, cooldown) in
+            mind_core::game::landing_pad::landing_pad_rows(&mut self.sim.ecs.0)
+        {
+            out.push(PadDraw::Landing {
+                id,
+                x,
+                y,
+                size: block_size(&self.content_snapshot, block),
+                arriving: arriving.map(mind_core::content::ItemId::new),
+                arriving_timer,
+                cooldown,
+                block,
+            });
+        }
+        for (id, x, y, block, progress) in
+            mind_core::world::behavior::campaign::launch_pad_rows(&mut self.sim.ecs.0)
+        {
+            out.push(PadDraw::Pad {
+                id,
+                x,
+                y,
+                size: block_size(&self.content_snapshot, block),
+                progress,
+                block,
+            });
+        }
+        out
+    }
 }
 
 /// `UnitFactory.draw` preview numbers: `(unit, progress / plan.time)` for the
@@ -7245,6 +7299,60 @@ pub(crate) fn reconstructor_preview(
     });
     let fraction = (progress / construct_time.max(f32::EPSILON)).clamp(0.0, 1.0);
     (target, fraction, move_in >= 1.0)
+}
+
+/// One pod or pad draw row (`LaunchPad.java`/`LandingPad.java`; H03 T13).
+pub enum PadDraw {
+    /// Flying launch payload (`LaunchPayloadComp.draw`): `time`/`lifetime`
+    /// drive the `fin`/`fout` path.
+    Launch {
+        /// `LaunchPayload.id()` (view draw seed).
+        id: u32,
+        /// Pod centre x (`x`).
+        x: f32,
+        /// Pod centre y (`y`).
+        y: f32,
+        /// Ticks in flight.
+        time: f32,
+        /// Total flight time (120).
+        lifetime: f32,
+        /// Source pad block (`<block>-pod` region).
+        block: mind_core::content::BlockId,
+    },
+    /// Landing pad: an arriving pod or the cooldown pod (`LandingPadBuild.draw`).
+    Landing {
+        /// Entity index (view state key).
+        id: u32,
+        /// Pad centre x.
+        x: f32,
+        /// Pad centre y.
+        y: f32,
+        /// Pad size in tiles.
+        size: i32,
+        /// `arriving` item (`None` = nothing inbound).
+        arriving: Option<mind_core::content::ItemId>,
+        /// `arrivingTimer` (`0..=1`).
+        arriving_timer: f32,
+        /// `cooldown` (`0..=1`).
+        cooldown: f32,
+        /// Pad block (`<block>-pod` region).
+        block: mind_core::content::BlockId,
+    },
+    /// Idle launch pad: pod + corner progress lights (`LaunchPadBuild.draw`).
+    Pad {
+        /// Entity index (view state key).
+        id: u32,
+        /// Pad centre x.
+        x: f32,
+        /// Pad centre y.
+        y: f32,
+        /// Pad size in tiles.
+        size: i32,
+        /// `min(items.total/itemCapacity, launchCounter/launchTime)`.
+        progress: f32,
+        /// Pad block (`<block>-pod` / `<block>-light` regions).
+        block: mind_core::content::BlockId,
+    },
 }
 
 /// Unit factory / reconstructor build preview (`Drawf.construct`,
