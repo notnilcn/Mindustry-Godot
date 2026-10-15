@@ -9,6 +9,7 @@
     {"name": "controls", "scene": "res://scenes/ui/dialogs/keybind_dialog.tscn", "pause": false, "menu_openable": true, "args": []},
     {"name": "database", "scene": "res://scenes/ui/dialogs/database_dialog.tscn", "pause": true, "menu_openable": true, "args": []},
     {"name": "content", "scene": "res://scenes/ui/dialogs/content_info_dialog.tscn", "pause": false, "menu_openable": false, "args": ["content:Str"]},
+    {"name": "schematic_info", "scene": "res://scenes/ui/dialogs/schematic_info_dialog.tscn", "pause": false, "menu_openable": false, "args": ["index:Int"]},
     {"name": "icon_select", "scene": "res://scenes/ui/dialogs/icon_select_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "palette", "scene": "res://scenes/ui/dialogs/palette_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "picker", "scene": "res://scenes/ui/dialogs/color_picker.tscn", "pause": false, "menu_openable": false, "args": []},

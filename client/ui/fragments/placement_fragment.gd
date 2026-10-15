@@ -102,6 +102,25 @@ func _ready() -> void:
 		and not input.is_connected("selection_changed", Callable(self, "_on_selection_changed"))
 	):
 		input.connect("selection_changed", Callable(self, "_on_selection_changed"))
+	# `WorldLoadEvent` / `UnlockEvent`-with-a-block rebuild the palette
+	# (`PlacementFragment.java:78-96`); both posts are deferred like Java's
+	# `Core.app.post`.
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if (
+		host != null
+		and host.has_signal("world_loaded")
+		and not host.is_connected("world_loaded", Callable(self, "_on_world_loaded"))
+	):
+		host.connect("world_loaded", Callable(self, "_on_world_loaded"), CONNECT_DEFERRED)
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if (
+		campaign != null
+		and campaign.has_signal("block_unlocked")
+		and not campaign.is_connected("block_unlocked", Callable(self, "_on_block_unlocked"))
+	):
+		campaign.connect(
+			"block_unlocked", Callable(self, "_on_block_unlocked"), CONNECT_DEFERRED
+		)
 	_refresh_input_bar()
 	_ensure_loaded()
 
@@ -111,6 +130,24 @@ func _ready() -> void:
 ## the block table (`mainStack` swap at `:443-453`).
 func _on_selection_changed(_units_json: String) -> void:
 	_command_dirty = true
+
+
+## `Events.on(WorldLoadEvent)` (`PlacementFragment.java:78-84`, posted): the
+## category resets to the distribution fallback, `control.input.block = null`,
+## the per-category memory clears (`selectedBlocks`) and the catalogue re-reads
+## even while the HUD is hidden.
+func _on_world_loaded() -> void:
+	_selected_category = -1
+	_selected_blocks.clear()
+	_select_block_by_name("air")
+	_load_catalog()
+
+
+## `Events.on(UnlockEvent)` when the content is a `Block`
+## (`PlacementFragment.java:92-96`): re-read the catalogue so the new block
+## appears in its category.
+func _on_block_unlocked() -> void:
+	_load_catalog()
 
 
 ## Campaign-gated icon-row visibility, change-cached per frame (`hud.campaign`

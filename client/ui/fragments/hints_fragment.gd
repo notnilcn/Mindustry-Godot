@@ -144,7 +144,7 @@ func _hint_shown(hint_name: String, state: Dictionary, hints: Dictionary) -> boo
 			return serpulo and int(hints.get("team_units", 0)) > 2 and not dead
 		"unitSelectControl":
 			return serpulo and int(hints.get("team_units", 0)) > 3 and not dead \
-				and (preset != "fungalPass" or not bool(hints.get("fungal_pass_saved", false)))
+				and preset != "fungalPass" and not bool(hints.get("fungal_pass_saved", false))
 		"launch":
 			return (preset == "groundZero" or preset == "onset") and bool(state.get("captured", false))
 		"schematicSelect":
@@ -222,9 +222,10 @@ func _hint_complete(hint_name: String, state: Dictionary, hints: Dictionary) -> 
 		"unitControl":
 			return not bool(hints.get("player_dead", true)) and not bool(hints.get("player_spawned_by_core", true))
 		"unitSelectControl":
-			# `commandMode && selectedUnits > 0` (the CommandAI/targetPos clause
-			# needs the unit command readback; eased - see the commit).
-			return _input_command_mode() and _selection_size() > 0
+			# `commandMode && selectedUnits > 0 && first CommandAI.targetPos
+			# != null` (`HintsFragment.java:199-203`).
+			return _input_command_mode() and _selection_size() > 0 \
+				and _first_selection_has_target()
 		"launch":
 			return _dialog_shown("planet")
 		"schematicSelect":
@@ -248,7 +249,8 @@ func _hint_complete(hint_name: String, state: Dictionary, hints: Dictionary) -> 
 		"guardian":
 			return int(_boss_root(hints).get("count", 0)) == 0
 		"cannotUpgrade":
-			# `Trigger.cannotUpgrade` has no firing site in the port yet.
+			# `complete: () -> false` (`HintsFragment.java:266-269`): the hint is
+			# only ever dismissed manually.
 			return false
 		"factoryControl":
 			return _has_event(hints, "factorycontrol")
@@ -475,6 +477,30 @@ func _selection_size() -> int:
 		return 0
 	var parsed: Variant = JSON.parse_string(str(input.call("selection_json")))
 	return (parsed as Array).size() if parsed is Array else 0
+
+
+## `selectedUnits.first().controller() instanceof CommandAI ai && ai.targetPos
+## != null` (`HintsFragment.java:199-203`): the first selected unit id
+## (`selection_json` order) must have a live command target row
+## (`SimHost.command_targets_json` merges the move target and attack target).
+func _first_selection_has_target() -> bool:
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null or not input.has_method("selection_json"):
+		return false
+	var selection: Variant = JSON.parse_string(str(input.call("selection_json")))
+	if not (selection is Array) or (selection as Array).is_empty():
+		return false
+	var first_id := int((selection as Array)[0])
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("command_targets_json"):
+		return false
+	var targets: Variant = JSON.parse_string(str(host.call("command_targets_json")))
+	if not (targets is Array):
+		return false
+	for row_variant in targets as Array:
+		if row_variant is Dictionary and int((row_variant as Dictionary).get("id", -1)) == first_id:
+			return true
+	return false
 
 
 func _dialog_shown(name: String) -> bool:

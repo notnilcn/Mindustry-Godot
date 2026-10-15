@@ -50,6 +50,14 @@ var selected_tile := -1
 ## Hovered grid tile index (-1 = none); drives the grid `u_mouse` and the label
 ## (`PlanetDialog.hovered`).
 var hover_tile := -1
+## `PlanetDialog.state.camPos`: the direction from the planet centre to the
+## camera (planet space). Only direction matters — `_process` scales it by the
+## camera distance (`PlanetRenderer.java:64-66`); drag rotates it.
+var cam_pos := Vector3(0.0, CAM_LENGTH, 0.1)
+## Lerped camera zoom (`PlanetDialog.state.zoom`); `zoom_target` is the value
+## the wheel and the reveal set (`PlanetDialog.zoom`).
+var zoom := 1.0
+var zoom_target := 1.0
 
 var _tiles := PackedVector3Array()
 var _corners := PackedVector3Array()
@@ -318,23 +326,70 @@ func _opt(row: Dictionary, key: String) -> String:
 ## Centers the camera on a tile and highlights its hex (`PlanetDialog.lookAt`).
 ## `u_mouse` stays at the origin (the planet is not hovered), so the sector grid
 ## fades out exactly like `Planet.renderSectors` with a ray that misses
-## (`Shaders.planetGrid.mouse.lerp(Vec3.Zero)`).
+## (`Shaders.planetGrid.mouse.lerp(Vec3.Zero)`). Selecting does NOT move the
+## camera (`PlanetDialog.updateSelected`); the show/reveal paths call
+## `look_at_tile`.
 func focus_tile(tile: int) -> void:
 	selected_tile = tile
 	if not _sectors.is_empty():
 		_rebuild_markers()
-	var direction := Vector3.FORWARD
-	if tile >= 0 and tile < _tiles.size():
-		direction = _tiles[tile].normalized()
-	var radius := float(data.get("radius", 1.0))
-	var cam_radius := float(data.get("cam_radius", 0.0))
-	camera.position = direction * ((radius + cam_radius) * CAM_LENGTH)
-	camera.look_at(Vector3.ZERO, Vector3.UP)
-	_update_atmosphere_camera()
 	if _grid_material != null:
 		_grid_material.set_shader_parameter("u_mouse", Vector3.ZERO)
 	set_hover(-1)
 	_rebuild_highlight()
+
+
+## `PlanetDialog.lookAt(sector)` (exact, alpha 1) / `lookAt(sector, alpha)`
+## (slerp): turns `cam_pos` toward the sector's grid tile, keeping the length
+## (`Planet.java:692-694`, `PlanetDialog.java:395-408`).
+func look_at_tile(tile: int, alpha := 1.0) -> void:
+	if tile < 0 or tile >= _tiles.size():
+		return
+	var target := _tiles[tile].normalized()
+	cam_pos = target if alpha >= 1.0 else cam_pos.slerp(target, alpha)
+
+
+## `PlanetDialog.java:114-138` (`dragged`): orbit the camera by a screen-space
+## drag delta. `relative` is Godot's mouse-motion delta in the same y-down
+## screen basis as Arc's `mx - lastX`/`my - lastY`; `cx / 9 * speed` around the
+## camera up axis, `cy / 10` degrees of vertical travel clamped to 1..179.
+func drag(relative: Vector2) -> void:
+	var up_v := rad_to_deg(cam_pos.angle_to(Vector3.UP))
+	var speed := 1.0 - absf(up_v - 90.0) / 90.0
+	var cam_up := camera.basis.y.normalized()
+	var cam_dir := -camera.basis.z
+	cam_pos = cam_pos.rotated(cam_up, deg_to_rad(relative.x / 9.0 * speed))
+	var amount := relative.y / 10.0
+	amount = clampf(up_v + amount, 1.0, 179.0) - up_v
+	var axis := cam_up.rotated(cam_dir, PI * 0.5)
+	cam_pos = cam_pos.rotated(axis.normalized(), deg_to_rad(amount))
+
+
+## `PlanetDialog.java:140-147` (`scrolled`): the wheel moves the target zoom
+## within `planet.minZoom`/`planet.maxZoom`.
+func scroll(amount_y: float) -> void:
+	var min_zoom := float(data.get("min_zoom", 0.5))
+	var max_zoom := float(data.get("max_zoom", 2.0))
+	zoom_target = clampf(zoom_target + amount_y / 10.0, min_zoom, max_zoom)
+
+
+## `PlanetRenderer.java:64-66`: the camera sits at
+## `(radius + camRadius) * camLength + (zoom - 1) * (radius + camRadius) * 2`
+## along `cam_pos`, looking at the planet centre; `state.zoom` lerps toward the
+## target every frame (`PlanetDialog.java:1022`).
+func _process(delta: float) -> void:
+	if data.is_empty():
+		return
+	# Arc `Time.delta` is tick-scaled (1.0 at 60 fps), so Java's
+	# `lerpDelta(state.zoom, zoom, 0.4f)` is a 0.4 per-frame factor; raise it to
+	# `delta * 60` so the speed is framerate-independent.
+	zoom = lerp(zoom, zoom_target, 1.0 - pow(1.0 - 0.4, delta * 60.0))
+	var radius := float(data.get("radius", 1.0))
+	var cam_radius := float(data.get("cam_radius", 0.0))
+	var distance := (radius + cam_radius) * CAM_LENGTH + (zoom - 1.0) * (radius + cam_radius) * 2.0
+	camera.position = cam_pos.normalized() * distance
+	camera.look_at(Vector3.ZERO, Vector3.UP)
+	_update_atmosphere_camera()
 
 
 ## Clears the selected sector highlight/icon without moving the camera

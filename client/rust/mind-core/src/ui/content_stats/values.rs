@@ -249,6 +249,37 @@ pub fn display_item_percent(
     cells
 }
 
+/// `StatValues.displayItem(item, amount, timePeriod, showName)` (the timed
+/// overload, `StatValues.java:310-315`): 32 px item icon with the raw amount
+/// outline, then `name\n[lightgray]<amount / (timePeriod / 60)><perSecond>`
+/// (`Strings.autoFixed(..., 3)`).
+pub fn display_item_timed(
+    ctx: &StatCtx,
+    item: ItemId,
+    amount: f32,
+    time_period: f32,
+    show_name: bool,
+) -> Vec<Cell> {
+    let mut cells = Vec::new();
+    let Some(name) = ctx.registry.item(item).map(|def| def.name.clone()) else {
+        return cells;
+    };
+    cells.push(item_icon(&name, amount as i32, 32));
+    let rate = crate::ui::stat_display::auto_fixed(amount / (time_period / 60.0), 3);
+    let name_prefix = if show_name {
+        format!("{}\n", ctx.item_name(&name))
+    } else {
+        String::new()
+    };
+    let label = format!(
+        "{name_prefix}[lightgray]{rate}{}",
+        ctx.unit_label(StatUnit::PerSecond)
+    );
+    cells.push(text(label));
+    cells.push(Cell::Space { w: 5.0 });
+    cells
+}
+
 /// Which floors `StatValues.drillables` accepts: `Drill.setStats` filters
 /// `Floor && !wallOre`, `BeamDrill.setStats` `(Floor && wallOre) || StaticWall`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

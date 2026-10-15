@@ -5,7 +5,7 @@
     "planets": 7,
     "sectors": 272,
     "research": 223,
-    "schematics": 4,
+    "schematics": 1,
     "loadouts": 1,
     "maps": 0
   },
@@ -110,7 +110,7 @@
       ],
       "has_core": true,
       "labels": [],
-      "file": null,
+      "file": "fixture-loadout.msch",
       "mod_name": null,
       "requirements": [
         [
@@ -121,116 +121,9 @@
           "lead",
           800
         ]
-      ]
-    },
-    {
-      "index": 1,
-      "name": "basicFoundation",
-      "description": "",
-      "width": 4,
-      "height": 4,
-      "tiles": [
-        {
-          "block": "core-foundation",
-          "x": 1,
-          "y": 1,
-          "rotation": 0,
-          "size": 4,
-          "rotate": false
-        }
       ],
-      "has_core": true,
-      "labels": [],
-      "file": null,
-      "mod_name": null,
-      "requirements": [
-        [
-          "copper",
-          3000
-        ],
-        [
-          "lead",
-          3000
-        ],
-        [
-          "silicon",
-          2000
-        ]
-      ]
-    },
-    {
-      "index": 2,
-      "name": "basicNucleus",
-      "description": "m",
-      "width": 5,
-      "height": 5,
-      "tiles": [
-        {
-          "block": "core-nucleus",
-          "x": 2,
-          "y": 2,
-          "rotation": 0,
-          "size": 5,
-          "rotate": false
-        }
-      ],
-      "has_core": true,
-      "labels": [],
-      "file": null,
-      "mod_name": null,
-      "requirements": [
-        [
-          "copper",
-          8000
-        ],
-        [
-          "lead",
-          8000
-        ],
-        [
-          "thorium",
-          4000
-        ],
-        [
-          "silicon",
-          5000
-        ]
-      ]
-    },
-    {
-      "index": 3,
-      "name": "basicBastion",
-      "description": "you do not exist\n",
-      "width": 4,
-      "height": 4,
-      "tiles": [
-        {
-          "block": "core-bastion",
-          "x": 1,
-          "y": 1,
-          "rotation": 0,
-          "size": 4,
-          "rotate": false
-        }
-      ],
-      "has_core": true,
-      "labels": [],
-      "file": null,
-      "mod_name": null,
-      "requirements": [
-        [
-          "graphite",
-          1000
-        ],
-        [
-          "silicon",
-          1000
-        ],
-        [
-          "beryllium",
-          800
-        ]
-      ]
+      "power_consumption": -0.0,
+      "power_production": -0.0
     }
   ],
   "sample_sector": {
@@ -318,5 +211,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "91f5a9a8f79530e6"
+  "checksum": "65a3cbaaaead4c4c"
 }

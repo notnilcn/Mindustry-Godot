@@ -19,7 +19,11 @@
 //! * `Block.instantTransfer`/`maxConsecutive` have no port field yet, so the
 //!   `itemsMoved = Instant` branch is skipped.
 
+pub mod logistics;
 pub mod production;
+pub mod turret_ammo;
+pub mod unit_blocks;
+pub mod unit_stats;
 pub mod values;
 
 use serde::Serialize;
@@ -784,6 +788,9 @@ pub struct StatCtx<'a> {
     /// Active planet name (`state.getPlanet()`), for the Erekir-only rows
     /// (`NuclearReactor` heat output).
     pub planet: Option<&'a str>,
+    /// `state.isCampaign()`: the `unlockedNow()` branches show lock icons for
+    /// content that is not unlocked (outside a campaign everything is shown).
+    pub campaign: bool,
 }
 
 impl StatCtx<'_> {
@@ -848,6 +855,9 @@ pub fn content_stats(ctx: &StatCtx, content: ContentRef) -> Stats {
         ContentType::Block => production::family_block_stats(ctx, BlockId::new(content.id)),
         ContentType::Item => item_stats(ctx, ItemId::new(content.id)),
         ContentType::Liquid => liquid_stats(ctx, LiquidId::new(content.id)),
+        ContentType::Unit => {
+            unit_stats::unit_stats(ctx, crate::content::UnitTypeId::new(content.id))
+        }
         _ => Stats::new(),
     }
 }
@@ -1049,6 +1059,7 @@ mod tests {
             blocks: None,
             in_game: false,
             planet: None,
+            campaign: false,
         }
     }
 

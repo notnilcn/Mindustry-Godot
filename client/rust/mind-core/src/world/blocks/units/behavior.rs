@@ -426,6 +426,35 @@ impl BuildingBehavior for UnitFactoryBehavior {
 // Reconstructor
 // ---------------------------------------------------------------------------
 
+/// `Trigger.cannotUpgrade` (`HintsFragment.java:84`, `Reconstructor.java:
+/// 252-257`): a Reconstructor refused a locked upgrade target for a non-AI
+/// team. Interior mutability because the `accept_payload` hook only gets
+/// `&World`; drained by `Sim::tick` into `hint_events.events` (the
+/// `FireCreated` pattern).
+#[derive(Debug, Default, bevy_ecs::resource::Resource)]
+pub struct CannotUpgradeFired(pub std::sync::atomic::AtomicBool);
+
+/// `UnlockableContent.unlockedNowHost()` (`UnlockableContent.java:269-277`):
+/// outside a campaign everything is unlocked; in one, the live unlocked set
+/// (`CampaignRuntime.unlocked_content`) must contain the unit.
+fn unit_unlocked_now_host(world: &World, name: &str) -> bool {
+    let Some(runtime) = world.get_resource::<crate::game::runtime::CampaignRuntime>() else {
+        return true;
+    };
+    !runtime.session.is_campaign() || runtime.unlocked_content.contains(name)
+}
+
+/// `Team.isAI()` (`Team.java:112-114`) for the building's team.
+fn team_is_ai(world: &World, team: u8) -> bool {
+    let is_campaign = world
+        .get_resource::<crate::game::runtime::CampaignRuntime>()
+        .is_some_and(|runtime| runtime.session.is_campaign());
+    let rules = crate::game::runtime::rules_of(world)
+        .cloned()
+        .unwrap_or_default();
+    rules.team_is_ai(team, is_campaign)
+}
+
 /// `ReconstructorBuild` behavior (`Reconstructor.updateTile`/`acceptPayload`).
 pub struct ReconstructorBehavior {
     /// Resolved upgrade pairs + construct time.
@@ -716,7 +745,23 @@ impl BuildingBehavior for ReconstructorBehavior {
             return false;
         }
         let unit = UnitTypeId::new(payload.content);
-        if self.reconstructor.can_upgrade(unit).is_none() {
+        let Some(target) = self.reconstructor.can_upgrade(unit) else {
+            return false;
+        };
+        // `Reconstructor.acceptPayload` (`Reconstructor.java:247-262`): a
+        // locked upgrade target is refused for a non-AI team and flashes the
+        // research overlay (`Trigger.cannotUpgrade`); AI teams upgrade
+        // regardless (`team.isAI() || upgrade.unlockedNowHost()`).
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        let unlocked = self
+            .units
+            .get(&target.raw())
+            .is_some_and(|def| unit_unlocked_now_host(world, &def.name));
+        if !unlocked && !team_is_ai(world, team) {
+            if let Some(fired) = world.get_resource::<CannotUpgradeFired>() {
+                // `Events.fire(Trigger.cannotUpgrade)`.
+                fired.0.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
             return false;
         }
         let Some(state) = world.get::<ReconstructorBuild>(e) else {
