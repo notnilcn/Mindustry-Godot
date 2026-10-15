@@ -13,9 +13,9 @@ use std::path::Path;
 
 pub use header::MapHeader;
 pub use preview::{
-    BlockPalette, ColorMapper, FnColorMapper, ImageTileSink, PreviewContext, PreviewImage,
-    color_for, decode_png, encode_png, generate_preview_from_tiles, read_image, team_color,
-    write_image,
+    BlockPalette, ColorMapper, FnColorMapper, ImageTileSink, PreviewContext, PreviewFacts,
+    PreviewImage, color_for, decode_png, encode_png, generate_preview_from_tiles, read_image,
+    team_color, write_image,
 };
 
 use super::fs::{FileSystem, SAVE_EXTENSION};
@@ -91,6 +91,16 @@ impl MapIo {
         registry: &mut ContentRegistry,
         bytes: &[u8],
     ) -> Result<PreviewImage, IoError> {
+        Ok(Self::generate_preview_with_facts(registry, bytes)?.0)
+    }
+
+    /// [`Self::generate_preview`] plus the scan facts it collects on the way
+    /// (`Map.spawns` + `Map.teams`; `Maps.createNewPreview` writes them into the
+    /// map + preview cache after generating, `Maps.java:230-245`).
+    pub fn generate_preview_with_facts(
+        registry: &mut ContentRegistry,
+        bytes: &[u8],
+    ) -> Result<(PreviewImage, PreviewFacts), IoError> {
         let palette = BlockPalette::of(registry);
         let mut context = PreviewContext::new(palette);
         let mut state = SaveReadState {
@@ -100,7 +110,8 @@ impl MapIo {
             ..SaveReadState::default()
         };
         SaveIo::load_bytes(bytes, &mut state)?;
-        Ok(context.image())
+        let facts = context.facts();
+        Ok((context.image(), facts))
     }
 
     /// Preview pixels from a live tile source (`MapIO.generatePreview(Tiles)`).

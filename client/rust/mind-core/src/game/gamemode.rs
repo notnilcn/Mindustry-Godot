@@ -61,6 +61,11 @@ impl Gamemode {
         }
     }
 
+    /// Inverse of [`Self::name`] (`Gamemode.valueOf`); unknown names are `None`.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|mode| mode.name() == name)
+    }
+
     /// `Gamemode.hidden` — editor is withheld from the normal mode list.
     pub const fn hidden(self) -> bool {
         matches!(self, Gamemode::Editor)
@@ -188,6 +193,11 @@ mod tests {
 
     #[test]
     fn mode_round_trips_through_rules() {
+        for mode in Gamemode::ALL {
+            assert_eq!(Gamemode::from_name(mode.name()), Some(mode));
+        }
+        assert_eq!(Gamemode::from_name("editor"), Some(Gamemode::Editor));
+        assert_eq!(Gamemode::from_name("nope"), None);
         for mode in Gamemode::ALL {
             let mut rules = Rules::default();
             mode.apply(&mut rules);

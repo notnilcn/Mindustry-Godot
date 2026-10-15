@@ -9,9 +9,6 @@
 
 extends MindDialog
 
-## Emitted with `(mode, playtest)` when the player starts a map.
-signal play_requested(mode: String, playtest: bool)
-
 ## `Gamemode` names in menu order (plan 12).
 const MODES := ["survival", "sandbox", "attack", "pvp", "editor"]
 
@@ -86,30 +83,17 @@ func _open_rules() -> void:
 ## `control.playMap(map, rules, playtesting)` + `ui.custom.hide()`: starts the
 ## selected map with the chosen gamemode/rules and shows the game view.
 func _play(mode: String, playtest: bool) -> void:
-	play_requested.emit(mode, playtest)
-	var started := false
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	var started := false
 	if campaign != null and not _map_name.is_empty():
-		# `start_map_mode` applies the gamemode + custom rules + playtest flag in
-		# one call; the two-step fallback keeps the dialog usable until it lands.
-		if campaign.has_method("start_map_mode"):
-			started = bool(campaign.call("start_map_mode", _map_name, mode, playtest, _rules_json))
-		elif campaign.has_method("start_map"):
-			_apply_rules(campaign)
-			started = bool(campaign.call("start_map", _map_name))
+		# `start_map_mode` loads the world, applies the gamemode + custom rules
+		# and starts the session in one call (`Control.playMap`).
+		started = bool(campaign.call("start_map_mode", _map_name, mode, playtest, _rules_json))
 	_close_stack()
 	if started:
 		var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 		if ui_root != null and ui_root.has_method("set_menu_visible"):
 			ui_root.call("set_menu_visible", false)
-
-
-## Applies the dialog's `rules` JSON through the existing `set_rules_json` seam
-## (the custom-rules dialog does not produce rules yet).
-func _apply_rules(campaign: Node) -> void:
-	if _rules_json.is_empty() or not campaign.has_method("set_rules_json"):
-		return
-	campaign.call("set_rules_json", _rules_json)
 
 
 func _close_stack() -> void:

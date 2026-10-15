@@ -15,6 +15,7 @@ use indexmap::IndexMap;
 
 use crate::content::ContentRegistry;
 use crate::content::EnvFlag;
+use crate::game::gamemode::{Gamemode, MapView};
 use crate::io::json::{JsonIo, Rules};
 use crate::util::strings::strip_colors;
 use crate::world::MapGenHooks;
@@ -256,6 +257,21 @@ impl Map {
         }
         Ok(())
     }
+
+    /// `Map.applyRules(mode)` (`Map.java:87-94`): the gamemode preset with the
+    /// map's own `rules` tag applied over it.
+    pub fn apply_rules(&self, mode: Gamemode, hooks: &dyn MapGenHooks) -> Rules {
+        let mut out = Rules::default();
+        mode.apply(&mut out);
+        self.rules(out, hooks)
+    }
+
+    /// `Gamemode.valid(map)` input (`Gamemode.java:17-37`): the spawn/appearance
+    /// facts `MapIO.generatePreview` fills in. Zero until a preview or a
+    /// `preview-cache` read supplied them.
+    pub fn map_view(&self) -> MapView {
+        MapView::new(self.spawns as usize, self.teams.len())
+    }
 }
 
 #[cfg(test)]
@@ -387,5 +403,145 @@ mod tests {
         assert!(!map.build_lt_83());
         map.tags.insert("genfilters".to_owned(), "[]".to_owned());
         assert_eq!(map.genfilters_json(), Some("[]"));
+    }
+
+    /// `Map.applyRules(Gamemode.sandbox)` (`Map.java:87-94`,
+    /// `Gamemode.java:20-25`): the preset lands on a default ruleset and the
+    /// map's missing `spawns` fall back to the hooks' wave table.
+    #[test]
+    fn apply_rules_sandbox_sets_infinite_resources() {
+        use crate::io::json::SpawnGroup;
+
+        struct Hooks;
+        impl MapGenHooks for Hooks {
+            fn wave_groups(&self) -> Vec<SpawnGroup> {
+                vec![SpawnGroup {
+                    type_: "dagger".to_owned(),
+                    ..SpawnGroup::default()
+                }]
+            }
+        }
+
+        let map = Map::new(
+            PathBuf::from("/maps/caldera.msav"),
+            16,
+            16,
+            tags(&[("name", "Caldera")]),
+            false,
+            1,
+            100,
+        );
+        let rules = map.apply_rules(Gamemode::Sandbox, &Hooks);
+        assert!(rules.infinite_resources);
+        assert!(rules.allow_edit_rules);
+        assert!(rules.waves);
+        assert!(!rules.wave_timer);
+        assert_eq!(rules.planet, "serpulo");
+        assert_eq!(rules.spawns.len(), 1, "empty spawns use the hook table");
+        assert_eq!(rules.spawns[0].type_, "dagger");
+    }
+
+    /// `Map.rules(base)` overlay order: the map's own `rules` tag wins over the
+    /// gamemode preset (`Map.java:101-115`).
+    #[test]
+    fn apply_rules_keeps_map_tag_overrides() {
+        let map = Map::new(
+            PathBuf::from("/maps/mine.msav"),
+            16,
+            16,
+            tags(&[
+                ("name", "Mine"),
+                ("rules", r#"{"waveTimer": true, "waveSpacing": 0.5}"#),
+            ]),
+            true,
+            1,
+            100,
+        );
+        let rules = map.apply_rules(Gamemode::Sandbox, &NoopMapGenHooks);
+        assert!(rules.infinite_resources, "preset survives the overlay");
+        assert!(rules.wave_timer, "map tag overrides the sandbox preset");
+        assert_eq!(rules.wave_spacing, 0.5);
+    }
+
+    /// `Gamemode.valid(map)` reads the preview scan facts (`Map.java:37-40`,
+    /// `Gamemode.java:17-37`).
+    #[test]
+    fn map_view_reads_scan_facts() {
+        let mut map = Map::new(
+            PathBuf::from("/maps/mine.msav"),
+            16,
+            16,
+            tags(&[("name", "Mine")]),
+            true,
+            1,
+            100,
+        );
+        assert!(!Gamemode::Survival.valid(map.map_view()));
+        assert!(!Gamemode::Attack.valid(map.map_view()));
+        map.spawns = 4;
+        map.teams.insert(1);
+        map.teams.insert(2);
+        assert!(Gamemode::Survival.valid(map.map_view()));
+        assert!(Gamemode::Attack.valid(map.map_view()));
+        assert!(Gamemode::Pvp.valid(map.map_view()));
+    }
+
+    /// A built-in custom map loads through the same reader `load_map_world`
+    /// uses and materializes its player core (`Control.playMap`'s world half).
+    #[test]
+    #[cfg(feature = "msav-import")]
+    fn caldera_map_loads_with_player_core() {
+        use crate::content::{
+            BlockId, BlockKind, MemoryBundle, MemoryUnlockStore, create_base_content,
+        };
+        use crate::ecs::BuildingComp;
+        use crate::editor::context::EditorContext;
+        use crate::io::save::SaveIo;
+        use crate::io::save::state::SaveReadState;
+        use crate::sim::Sim;
+        use crate::world::WorldGrid;
+
+        let store = MemoryUnlockStore::new();
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &store, true).expect("content registry");
+        let path = format!(
+            "{}/../../../assets/maps/default/caldera.msav",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        let bytes = std::fs::read(&path).unwrap_or_else(|error| panic!("{path}: {error}"));
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let pending = {
+            let mut context = EditorContext::new(&mut grid, &registry);
+            let mut state = SaveReadState {
+                context: Some(&mut context),
+                content: Some(&mut registry),
+                ..SaveReadState::default()
+            };
+            SaveIo::load_bytes(&bytes, &mut state).expect("caldera.msav loads");
+            context.take_pending_buildings()
+        };
+        grid.end_map_load(&registry);
+
+        let mut sim = Sim::new(1, 1, 1, BlockId::AIR, BlockId::AIR);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("block runtime");
+        assert!(
+            sim.materialize_map_buildings(&pending) > 0,
+            "the map spawns buildings"
+        );
+        let core_count = sim
+            .ecs
+            .0
+            .iter_entities()
+            .filter(|entity| {
+                entity.get::<BuildingComp>().is_some_and(|comp| {
+                    registry
+                        .block(comp.block)
+                        .is_some_and(|def| def.kind == BlockKind::CoreBlock)
+                })
+            })
+            .count();
+        assert!(core_count >= 1, "caldera.msav has a player core");
     }
 }
