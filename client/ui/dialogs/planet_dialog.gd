@@ -55,6 +55,9 @@ var _dragged := false
 var _pressed_position := Vector2.ZERO
 ## Whether the current left press started on the globe (not the rail/lists).
 var _press_on_globe := false
+## Pending rename/icon targets for the sector panel's pencil and icon picker.
+var _rename_target := -1
+var _icon_target := -1
 ## `PlanetDialog.newPresets` (`PlanetDialog.java:270-288`): sector ids to
 ## reveal, reversed so the planet's last sector sits first; `_preset_show`
 ## counts ticks (Arc `Time.delta`) and `_reveal_showed` is the one-shot
@@ -79,6 +82,12 @@ func _ready() -> void:
 	_add_space_backdrop()
 	_build()
 	_show_select()
+	# `ui.showTextInput` result for the sector rename pencil (`PlanetDialog.java:
+	# 1200-1206`); the load dialog keeps the same always-connected pattern.
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_signal("text_input_result") \
+			and not ui.is_connected("text_input_result", _on_text_input_result):
+		ui.connect("text_input_result", _on_text_input_result)
 
 
 func shown() -> void:
@@ -1049,7 +1058,7 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 
 	var title_row := HBoxContainer.new()
 	title_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	title_row.add_theme_constant_override("separation", 6)
+	title_row.add_theme_constant_override("separation", 4)
 	# Java: panel top 514 -> title glyphs 528-552 -> divider 557 (`Styles.black6`
 	# table with a 40 px title cell); heights sampled from the reference frame.
 	title_row.custom_minimum_size = Vector2(0.0, 41.0)
@@ -1060,11 +1069,29 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_row.add_child(title)
 	var preset := str(sector.get("preset", ""))
-	if not preset.is_empty():
-		var icon := MindWidgets.image("sector-%s" % preset)
-		icon.custom_minimum_size = Vector2(20.0, 20.0)
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		title_row.add_child(icon)
+	var sector_id := int(sector.get("id", -1))
+	# `PlanetDialog.java:1195-1210`: the rename pencil exists for numbered
+	# sectors and presets without `requireUnlock`.
+	if preset.is_empty() or not bool(sector.get("require_unlock", true)):
+		var spacer := Control.new()
+		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_row.add_child(spacer)
+		# code-instantiated: data-driven per-sector rename pencil (`pencilSmall`).
+		var pencil := MindWidgets.glyph_button("pencil", "", "clearNonei")
+		pencil.custom_minimum_size = Vector2(40.0, 40.0)
+		pencil.tooltip_text = _t("@sectors.rename")
+		pencil.pressed.connect(func() -> void: _rename_sector(sector_id))
+		title_row.add_child(pencil)
+	# `PlanetDialog.java:1211-1226`: the marker icon button, always present.
+	# code-instantiated: data-driven per-sector icon button.
+	var icon_button := Button.new()
+	icon_button.theme_type_variation = "clearNonei"
+	icon_button.custom_minimum_size = Vector2(40.0, 40.0)
+	icon_button.tooltip_text = _t("@sector.changeicon")
+	icon_button.add_child(_sector_icon_content(sector))
+	icon_button.pressed.connect(func() -> void: _open_sector_icon_dialog(sector_id))
+	title_row.add_child(icon_button)
 
 	var divider := ColorRect.new()
 	divider.color = MindStyles.ACCENT
@@ -1175,6 +1202,109 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	return panel
 
 
+## `PlanetDialog.java:1211-1226`: the marker icon control inside the sector
+## panel's icon button — `contentIcon.uiIcon` else the chosen accessible glyph
+## else `Icon.noneSmall`.
+func _sector_icon_content(sector: Dictionary) -> Control:
+	var content_icon := _opt(sector, "content_icon")
+	if not content_icon.is_empty():
+		var texture := _content_icon(content_icon)
+		if texture != null:
+			# code-instantiated: per-sector marker image inside the icon button.
+			var image := TextureRect.new()
+			image.texture = texture
+			image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			return image
+	var icon_name := _opt(sector, "icon")
+	if icon_name.is_empty():
+		icon_name = "none"
+	var glyph := MindWidgets.glyph(icon_name, 26)
+	glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return glyph
+
+
+## `PlanetDialog.java:1200-1206`: `ui.showTextInput("@sectors.rename", "@name",
+## 32, sector.name(), v -> sector.setName(v))`.
+func _rename_sector(sector_id: int) -> void:
+	var sector := _find_sector(_selected_planet, sector_id)
+	if sector.is_empty():
+		return
+	_rename_target = sector_id
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("show_text_input"):
+		ui.call(
+			"show_text_input", _t("@sectors.rename"), _t("@name"), 32,
+			_localized_sector(sector), false, false
+		)
+
+
+## `Sector.setName` result: `updateSelected` + `rebuildList` after the write.
+func _on_text_input_result(text: String) -> void:
+	if _rename_target < 0:
+		return
+	var sector_id := _rename_target
+	_rename_target = -1
+	if text.strip_edges().is_empty():
+		return
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("set_sector_name"):
+		return
+	if bool(campaign.call("set_sector_name", _selected_planet, sector_id, text)):
+		_show_planet(_selected_planet)
+
+
+## `PlanetDialog.java:1223-1283`: the fill-parent marker picker (`Icon.none`,
+## `accessibleIcons`, five `defaultContentIcons` sections) in `icon_select`'s
+## sector mode.
+func _open_sector_icon_dialog(sector_id: int) -> void:
+	_icon_target = sector_id
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null:
+		return
+	if root != null and root.has_method("dialog"):
+		var dialog: Node = root.call("dialog", "icon_select")
+		if dialog != null and dialog.has_signal("sector_icon_selected") \
+				and not dialog.sector_icon_selected.is_connected(_on_sector_icon_selected):
+			dialog.sector_icon_selected.connect(_on_sector_icon_selected)
+	var sector := _find_sector(_selected_planet, sector_id)
+	ui.call(
+		"open_dialog", "icon_select",
+		JSON.stringify({
+			"mode": "sector",
+			"icon": _opt(sector, "icon"),
+			"content_icon": _opt(sector, "content_icon"),
+		})
+	)
+
+
+## The picker's choice: Java writes one half and nulls the other; the write path
+## refreshes the panel and list (`updateSelected` + `rebuildList`).
+func _on_sector_icon_selected(icon_name: String, content_icon: String) -> void:
+	if _icon_target < 0:
+		return
+	var sector_id := _icon_target
+	_icon_target = -1
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "icon_select")
+	var campaign := campaign_node()
+	if campaign == null or not campaign.has_method("set_sector_icon"):
+		return
+	if bool(campaign.call("set_sector_icon", _selected_planet, sector_id, icon_name, content_icon)):
+		_show_planet(_selected_planet)
+
+
+## Optional string field of a read-model row (`null` -> "").
+func _opt(row: Dictionary, key: String) -> String:
+	var value: Variant = row.get(key, null)
+	return "" if value == null else str(value)
+
+
 ## `requirement.<kind>` argument localization: `sector.<name>.name` for
 ## capture/onsector, `planet.<name>.name` for onplanet, content name lookup for
 ## research/produce (`updateSelected` prints the name; the locked-parent `???`
@@ -1255,10 +1385,10 @@ func _show_sector_stats(sector: Dictionary) -> void:
 		)
 
 
-## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then
-## `liquid-<name>-ui`).
+## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then the
+## other `defaultContentIcons` types).
 func _content_icon(content_name: String) -> Texture2D:
-	for prefix in ["item", "liquid", "block"]:
+	for prefix in ["item", "liquid", "block", "unit", "status"]:
 		var texture := MindWidgets.icon_texture("%s-%s-ui" % [prefix, content_name])
 		if texture != null:
 			return texture

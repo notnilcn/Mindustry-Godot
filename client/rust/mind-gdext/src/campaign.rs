@@ -4810,6 +4810,69 @@ impl MindCampaign {
         out
     }
 
+    /// `Sector.setName` (`Sector.java:164-167`): stores the display name in the
+    /// sector's info record and persists (`saveInfo`); an empty name clears it.
+    #[func]
+    pub fn set_sector_name(&mut self, planet: GString, sector: i32, name: GString) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let planet_name = planet.to_string();
+        let display = name.to_string();
+        let display = (!display.is_empty()).then_some(display);
+        let Some(true) = self.with_campaign_mut(|campaign, settings| {
+            let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+                return false;
+            };
+            let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+                return false;
+            };
+            record.info.info.name = display.clone();
+            let _ = record.save_info(settings, &planet_name);
+            true
+        }) else {
+            return false;
+        };
+        self.persist();
+        true
+    }
+
+    /// Sector marker icon (`PlanetDialog.java:1223-1283`): an accessible
+    /// `info.icon` (`Iconc` field name) or an `info.contentIcon` content name;
+    /// the unused half is stored as `None` (both empty = `Icon.none`).
+    #[func]
+    pub fn set_sector_icon(
+        &mut self,
+        planet: GString,
+        sector: i32,
+        icon: GString,
+        content_icon: GString,
+    ) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let planet_name = planet.to_string();
+        let icon = icon.to_string();
+        let content_icon = content_icon.to_string();
+        let Some(true) = self.with_campaign_mut(|campaign, settings| {
+            let Some(planet_id) = campaign.planet_id_by_name(&planet_name) else {
+                return false;
+            };
+            let Some(record) = campaign.sector_mut(planet_id, sector as u16) else {
+                return false;
+            };
+            record.info.info.icon = (!icon.is_empty()).then_some(icon.clone());
+            record.info.info.content_icon =
+                (!content_icon.is_empty()).then_some(content_icon.clone());
+            let _ = record.save_info(settings, &planet_name);
+            true
+        }) else {
+            return false;
+        };
+        self.persist();
+        true
+    }
+
     /// Planet globe data for the sector view (plan 16 g3d seam): the
     /// `PlanetGrid` sector topology, the render-plane grid-line mesh
     /// (`MeshBuilder.buildPlanetGrid` at `outlineRad * radius`) and the
