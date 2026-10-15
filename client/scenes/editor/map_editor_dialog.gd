@@ -57,11 +57,26 @@ func _process(_delta: float) -> void:
 func show_dialog() -> void:
 	visible = true
 	_refresh()
+	# The shell is full-screen below the UiRoot layers (editor dialogs draw
+	# above it via `UiRoot.z_index`), so the standalone menu must be hidden
+	# while it is open (`ui.menu.hide()` parity).
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root != null and ui_root.has_method("set_menu_visible"):
+		ui_root.call("set_menu_visible", false)
 
 
 ## Hides the editor dialog.
 func hide_dialog() -> void:
 	visible = false
+
+
+## `MapEditorDialog.build()` (`:606`): the first tool-grid button is
+## `Icon.menu` -> `menu.show()`. Escape does the same (`doInput` `:750-754`);
+## it does not exit the editor.
+func _open_menu() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("open_dialog"):
+		ui.call("open_dialog", "editor_menu", "")
 
 
 ## Closing the editor returns to the editor map list (`EditorMapsDialog.openin`
@@ -72,6 +87,10 @@ func _exit_to_maps() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("open_dialog"):
 		ui.call("open_dialog", "editor_maps", "{}")
+	# Back on the menu path: restore the standalone menu behind the dialog.
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root != null and ui_root.has_method("set_menu_visible"):
+		ui_root.call("set_menu_visible", true)
 
 
 ## `MapEditorDialog.tryExit` (`MapEditorDialog.java:789-795`): always
@@ -110,7 +129,7 @@ func _t(key: String) -> String:
 
 
 func _bind_toolbar() -> void:
-	$LeftTools/BackButton.pressed.connect(_confirm_exit)
+	$LeftTools/MenuButton.pressed.connect(_open_menu)
 	var tools := {
 		"ZoomButton": "zoom",
 		"PickButton": "pick",
@@ -267,13 +286,13 @@ func _unhandled_input(event: InputEvent) -> void:
 				_toggle_grid()
 			KEY_1, KEY_2, KEY_3, KEY_4, KEY_5:
 				_call("set_tool_mode", _number_index(key))
+		get_viewport().set_input_as_handled()
 		accept_event()
 		return
 	match key:
 		KEY_ESCAPE:
-			# T8 replaces this with the editor menu (`doInput`: Escape opens
-			# `menu`); until then Escape takes the same confirm-first path.
-			_confirm_exit()
+			# `MapEditorDialog.doInput`: Escape opens the menu; it does not exit.
+			_open_menu()
 		KEY_V:
 			_select_tool("zoom")
 		KEY_I:
@@ -292,6 +311,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			_rotate(1)
 		_:
 			return
+	# `MapEditorDialog.doInput` consumes its keys; UiRoot's Escape handler would
+	# otherwise open the pause menu behind the editor shell.
+	get_viewport().set_input_as_handled()
 	accept_event()
 
 

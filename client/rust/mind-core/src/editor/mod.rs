@@ -40,13 +40,71 @@ pub use tool::EditorTool;
 
 use std::sync::{Arc, Mutex};
 
+use bevy_ecs::entity::Entity;
+use bevy_ecs::world::World;
 use indexmap::IndexMap;
 
 use crate::content::{BlockDef, BlockId, ContentRegistry};
 use crate::maps::filters::block_info;
+use crate::world::{NewBuilding, WorldHooks};
 
 /// Brush-size table (`MapEditor.brushSizes`).
 pub const BRUSH_SIZES: [f32; 9] = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0, 9.0, 15.0, 20.0];
+
+/// Editor `WorldHooks` (`EditorTile.setBlock` -> `Block.newBuilding()`).
+///
+/// Upstream's editor tiles own a live `Building`, so a drawn core carries its
+/// team and a save round-trips it (`Maps.saveMap`). The port's editor grid is
+/// backed by the same ECS; this hook creates the bare `BuildingComp` entity
+/// (no behavior/module state — the editor never updates buildings).
+pub struct EditorWorldHooks {
+    seq: std::sync::atomic::AtomicU64,
+}
+
+impl EditorWorldHooks {
+    /// A fresh sequence.
+    pub fn new() -> Self {
+        Self {
+            seq: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+impl Default for EditorWorldHooks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WorldHooks for EditorWorldHooks {
+    fn new_building(&self, world: &mut World, request: NewBuilding) -> Option<Entity> {
+        let seq = self.seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // Java `EditorTile.setBlock` -> `Block.newBuilding()`: the tile owns a
+        // live building. The port mirrors the live entity shape (`Building` +
+        // `TeamComp` + the plan-07 `BuildingComp` marker) so the map save writes
+        // a full `writeAll` chunk and a drawn core keeps its team.
+        let tile = crate::world::TilePos::new(request.x, request.y);
+        Some(
+            world
+                .spawn((
+                    crate::ecs::EntitySeq(seq),
+                    crate::ecs::BuildingComp {
+                        pos: tile,
+                        block: request.block,
+                        team: crate::ecs::TeamId(request.team),
+                        rot: request.rot,
+                    },
+                    crate::entities::comp::building::Building::new(
+                        tile,
+                        request.block,
+                        request.rot,
+                    ),
+                    crate::entities::comp::base::TeamComp { team: request.team },
+                ))
+                .id(),
+        )
+    }
+}
 
 /// Editor-relevant classification of one block (`Block`/`Floor` predicates).
 ///
@@ -270,7 +328,8 @@ impl MapEditor {
             brush_size: 1.0,
             rotation: 0,
             draw_block: BlockId::AIR,
-            draw_team: 0,
+            // `MapEditor.drawTeam = Team.sharded` (`MapEditor.java:34`).
+            draw_team: crate::game::team::SHARDED.0,
             show_terrain: true,
             show_floor: true,
             show_buildings: true,

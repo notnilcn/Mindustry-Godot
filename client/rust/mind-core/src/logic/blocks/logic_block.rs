@@ -252,6 +252,25 @@ impl LogicBlockState {
                 i += 1;
             }
         }
+        if removed {
+            // `if(oldSize > entity.links.size){ if(lbuild.block.autoResetEnabled
+            // && lbuild.lastDisabler == entity) lbuild.enabled = true; }`
+            // (`LogicBlock.java:99-103`).
+            let auto_reset = world
+                .get::<Building>(target)
+                .and_then(|building| {
+                    world
+                        .get_resource::<crate::world::block::BlockTable>()
+                        .and_then(|table| table.get(building.block))
+                })
+                .is_some_and(|inst| inst.def.auto_reset_enabled);
+            if auto_reset
+                && let Some(mut building) = world.get_mut::<Building>(target)
+                && building.last_disabler == Some(e)
+            {
+                building.enabled = true;
+            }
+        }
         if !removed {
             let name = self.find_link_name_for(world, target);
             let (x, y) = world
@@ -679,11 +698,24 @@ impl BuildingBehavior for LogicBlockBehavior {
                 }
             }
             ConfigValue::Number(number) => {
-                if !accessible || !privileged {
+                // `LogicBlock.config(Integer pos)` (`LogicBlock.java:85-114`):
+                // a packed tile position toggles that building's link. The
+                // `Character` icon-tag config is editor-only (no UI input path,
+                // `LogicBlock.java:80-84`) and has no wire form in the port
+                // (`ConfigValue` has no char variant); it stays deferred.
+                if !accessible || number.fract() != 0.0 {
                     return;
                 }
-                if let Some(mut state) = world.get_mut::<LogicBlockState>(e) {
-                    state.icon_tag = char::from_u32(number as u32).unwrap_or('\0');
+                if number < f64::from(i32::MIN) || number > f64::from(i32::MAX) {
+                    return;
+                }
+                let pos = crate::world::TilePos::from_pack(number as i32);
+                let Some(target) = build_at(world, i32::from(pos.x()), i32::from(pos.y())) else {
+                    return;
+                };
+                if let Some(mut state) = world.entity_mut(e).take::<LogicBlockState>() {
+                    state.toggle_link(world, e, target);
+                    world.entity_mut(e).insert(state);
                 }
             }
             ConfigValue::Point2(x, y) => {
@@ -715,6 +747,61 @@ impl BuildingBehavior for LogicBlockBehavior {
             return ConfigValue::Bytes(Default::default());
         };
         ConfigValue::Bytes(state.compressed_config(world, e).into())
+    }
+
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        _grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> crate::world::behavior::ConfigTapResult {
+        use crate::world::behavior::ConfigTapResult;
+        let privileged = privileged_of(world, e);
+        let accessible = super::accessible(privileged, super::rules_ref(world));
+        // `if(this == other || !accessible()){ deselect(); return false; }`
+        // (`LogicBlock.java:761-763`).
+        if e == other || !accessible {
+            return ConfigTapResult::ConsumeAndDeselect(Vec::new());
+        }
+        // `if(validLink(other)){ configure(other.pos()); return false; }`
+        // (`LogicBlock.java:765-768`).
+        if valid_link(world, e, privileged, Some(other)) {
+            let packed = world
+                .get::<Building>(other)
+                .map(|building| building.tile.pack())
+                .unwrap_or(0);
+            return ConfigTapResult::Consume(vec![(e, ConfigValue::Number(f64::from(packed)))]);
+        }
+        // `return super.onConfigureBuildTapped(other);` -> `self() != other`
+        // switches the panel to the tapped building.
+        ConfigTapResult::SwitchAfter(Vec::new())
+    }
+
+    fn on_proximity_removed(&self, world: &mut World, e: Entity) {
+        // `LogicBuild.removeFromProximity()` (`LogicBlock.java:454-462`):
+        // re-enable every linked building this processor disabled. The port
+        // resolves the link list here (not `executor.links`) so a processor
+        // removed before its first `updateCode` still re-enables its targets.
+        let links: Vec<Entity> = world
+            .get::<LogicBlockState>(e)
+            .map(|state| {
+                state
+                    .links
+                    .iter()
+                    .filter(|link| link.valid)
+                    .filter_map(|link| build_at(world, link.x, link.y))
+                    .collect()
+            })
+            .unwrap_or_default();
+        for link in links {
+            let reenable = world
+                .get::<Building>(link)
+                .is_some_and(|building| !building.enabled && building.last_disabler == Some(e));
+            if reenable && let Some(mut building) = world.get_mut::<Building>(link) {
+                building.enabled = true;
+            }
+        }
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {

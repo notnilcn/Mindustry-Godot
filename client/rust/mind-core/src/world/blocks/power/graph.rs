@@ -419,6 +419,11 @@ pub fn read_cheating(world: &World, entity: Entity) -> bool {
 #[derive(Debug, Resource)]
 pub struct PowerGrids {
     graphs: Vec<Option<(u32, PowerGraph)>>,
+    /// Next generation to hand out per slot. Bumped when a slot is freed, so a
+    /// reused slot never produces a handle that aliases a stale one (the old
+    /// `alloc` read the freed slot's generation from the `None` entry and
+    /// always reset it to 0 — I01 T14).
+    generations: Vec<u32>,
     free_slots: Vec<u32>,
     /// Reusable BFS scratch.
     pub scratch: PowerScratch,
@@ -436,6 +441,7 @@ impl PowerGrids {
     pub fn new() -> Self {
         Self {
             graphs: Vec::new(),
+            generations: Vec::new(),
             free_slots: Vec::new(),
             scratch: PowerScratch::default(),
             next_graph_id: 0,
@@ -488,16 +494,16 @@ impl PowerGrids {
         let graph = PowerGraph::new(debug_id);
         let slot = match self.free_slots.pop() {
             Some(slot) => {
-                let generation = self.graphs[slot as usize]
-                    .as_ref()
-                    .map(|(generation, _)| generation.wrapping_add(1))
-                    .unwrap_or(0);
+                // The generation was bumped by `free`; a reused slot never
+                // re-handles a previous incarnation's id.
+                let generation = self.generations.get(slot as usize).copied().unwrap_or(0);
                 self.graphs[slot as usize] = Some((generation, graph));
                 slot
             }
             None => {
                 let slot = self.graphs.len() as u32;
                 self.graphs.push(Some((0, graph)));
+                self.generations.push(0);
                 slot
             }
         };
@@ -516,6 +522,9 @@ impl PowerGrids {
                 .is_some_and(|(generation, _)| *generation == id.generation)
         {
             *slot = None;
+            if let Some(generation) = self.generations.get_mut(id.slot as usize) {
+                *generation = id.generation.wrapping_add(1);
+            }
             self.free_slots.push(id.slot);
         }
     }

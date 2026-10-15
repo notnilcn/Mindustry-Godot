@@ -399,6 +399,26 @@ pub const EXPECTED_M5_DIALOGS: &[&str] = &[
 /// Dialog names required by plan 14 M7 (file chooser; chat/console are fragments).
 pub const EXPECTED_M7_DIALOGS: &[&str] = &["file_chooser"];
 
+/// Dialog names required by I06 T8 (`MapEditorDialog`'s menu + `MapInfoDialog`
+/// hub; every editor sub-dialog is manifest-registered so `MindUi` can open it).
+pub const EXPECTED_EDITOR_DIALOGS: &[&str] = &[
+    "editor_menu",
+    "editor_map",
+    "editor_import",
+    "editor_export",
+    "map_info",
+    "map_resize",
+    "map_generate",
+    "wave_info",
+    "map_objectives",
+    "map_locales",
+    "map_processors",
+    "map_load",
+    "sector_generate",
+    "banned_content",
+    "map_assets",
+];
+
 /// Pause flag for a dialog from `UI.init()` (§3.4).
 pub fn expected_pause(name: &str) -> Option<bool> {
     Some(match name {
@@ -518,6 +538,12 @@ mod tests {
             assert!(
                 manifest.dialog(name).is_some(),
                 "M7 dialog '{name}' missing from dialogs_manifest.json"
+            );
+        }
+        for name in EXPECTED_EDITOR_DIALOGS {
+            assert!(
+                manifest.dialog(name).is_some(),
+                "editor dialog '{name}' missing from dialogs_manifest.json"
             );
         }
         for name in [

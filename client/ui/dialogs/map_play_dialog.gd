@@ -19,6 +19,9 @@ var _map_name := ""
 var _mode := "survival"
 ## Working rules JSON (`MapPlayDialog.rules`); empty = the map's own rules.
 var _rules_json := ""
+## `MapPlayDialog.show(map, playtesting)`: the editor's Playtest route returns
+## to the editor after play (`MapEditorDialog.playtest`).
+var _playtest := false
 var _mode_buttons: Array[Button] = []
 var _button_modes: Array[String] = []
 
@@ -37,6 +40,7 @@ func set_context_json(json_text: String) -> void:
 	if MODES.has(requested):
 		_mode = requested
 	_rules_json = str(ctx.get("rules", ""))
+	_playtest = bool(ctx.get("playtest", false))
 
 
 ## `MapPlayDialog.show(map)`: rebuild the body for the current map (the map may
@@ -126,7 +130,7 @@ func _build() -> void:
 
 	clear_buttons()
 	add_button(_t("@back"), _close_pressed, "left", 210.0)
-	add_button(_t("@play"), func() -> void: _play(_mode, false), "play", 210.0)
+	add_button(_t("@play"), func() -> void: _play(_mode, _playtest), "play", 210.0)
 
 
 ## `Gamemode.valid(map)` per visible mode (`Gamemode.all`, `MindPreview.map_modes`).
@@ -230,6 +234,12 @@ func _play(mode: String, playtest: bool) -> void:
 		started = bool(campaign.call("start_map_mode", _map_name, mode, playtest, _rules_json))
 	_close_stack()
 	if started:
+		# `MapEditorDialog.playtest`'s `playListener = this::hide`: a playtest
+		# returns to the editor, so hide the shell while the map plays.
+		if playtest:
+			var editor_dialog := get_node_or_null("/root/Spine/Ui/EditorDialog")
+			if editor_dialog != null and editor_dialog.has_method("hide_dialog"):
+				editor_dialog.call("hide_dialog")
 		var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 		if ui_root != null and ui_root.has_method("set_menu_visible"):
 			ui_root.call("set_menu_visible", false)

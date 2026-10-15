@@ -51,6 +51,15 @@ pub enum AttackTarget {
 #[derive(bevy_ecs::component::Component, Debug, Clone, Copy, Default, PartialEq)]
 pub struct AttackTargetComp(pub Option<bevy_ecs::entity::Entity>);
 
+/// Live unit waypoint queue (`CommandAI.commandQueue`; I01 T13).
+///
+/// The relay `CommandAiState` owns the queue for wire-only units; a live unit
+/// keeps it beside `ControllerSlot`/`AttackTargetComp`, and the command
+/// dispatch pops the next waypoint on arrival (mirroring
+/// `CommandAI.finishPath`, `CommandAI.java:476-490`).
+#[derive(bevy_ecs::component::Component, Debug, Clone, Default, PartialEq)]
+pub struct CommandQueueComp(pub Vec<CommandQueueEntry>);
+
 impl AttackTarget {
     /// Serialized kind byte (`TypeIO.writeController` entityType).
     pub const fn kind(self) -> u8 {
@@ -152,12 +161,13 @@ impl CommandAiState {
         self.stop_at_target = true;
     }
 
-    /// Appends a waypoint, capped at [`MAX_COMMAND_QUEUE`].
+    /// Appends a waypoint, capped at [`MAX_COMMAND_QUEUE`] and deduplicated
+    /// (`CommandAI.commandQueue`: `!commandQueue.contains(location)`).
     ///
     /// Mirrors `CommandAI.commandQueue`/`addCommand`: the head of the queue is
     /// the current target. Returns `true` when appended.
     pub fn command_queue(&mut self, entry: CommandQueueEntry) -> bool {
-        if self.command_queue.len() >= MAX_COMMAND_QUEUE {
+        if self.command_queue.len() >= MAX_COMMAND_QUEUE || self.command_queue.contains(&entry) {
             return false;
         }
         self.command_queue.push(entry);

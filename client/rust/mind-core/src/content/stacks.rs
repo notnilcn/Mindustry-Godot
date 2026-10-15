@@ -192,10 +192,13 @@ impl ItemSeq {
     }
 }
 
-/// `PayloadSeq`: dense id-indexed payload counts (per block/unit space).
+/// `PayloadSeq` (Java `mindustry.type.PayloadSeq`): an insertion-ordered
+/// content→count container for block/unit payloads, with Java's save format
+/// (negated entry count, then per entry `b type ordinal`, `s id`, `i amount`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct PayloadSeq {
-    counts: Vec<i32>,
+    entries: indexmap::IndexMap<ContentRef, i32>,
+    total: i32,
 }
 
 impl PayloadSeq {
@@ -204,38 +207,92 @@ impl PayloadSeq {
         Self::default()
     }
 
-    /// Sequence with `len` zeroed slots.
-    pub fn with_len(len: usize) -> Self {
-        Self {
-            counts: vec![0; len],
-        }
-    }
-
-    /// Number of slots.
-    pub fn len(&self) -> usize {
-        self.counts.len()
-    }
-
-    /// Whether there are no slots.
+    /// `PayloadSeq.isEmpty`.
     pub fn is_empty(&self) -> bool {
-        self.counts.is_empty()
+        self.total == 0
     }
 
-    /// Resizes to hold `len` payloads.
-    pub fn resize(&mut self, len: usize) {
-        self.counts.resize(len, 0);
+    /// `PayloadSeq.any`.
+    pub fn any(&self) -> bool {
+        self.total > 0
     }
 
-    /// Count for a raw index.
-    pub fn get_index(&self, index: usize) -> i32 {
-        self.counts.get(index).copied().unwrap_or(0)
+    /// `PayloadSeq.total`.
+    pub fn total(&self) -> i32 {
+        self.total
     }
 
-    /// Adds to a raw index; out-of-range payloads are ignored.
-    pub fn add_index(&mut self, index: usize, amount: i32) {
-        if let Some(slot) = self.counts.get_mut(index) {
-            *slot = slot.saturating_add(amount);
+    /// `PayloadSeq.add`: increments the entry and the total (`null` content is
+    /// a no-op upstream; the port never passes one).
+    pub fn add(&mut self, content: ContentRef, amount: i32) {
+        *self.entries.entry(content).or_insert(0) += amount;
+        self.total += amount;
+    }
+
+    /// `PayloadSeq.remove`.
+    pub fn remove(&mut self, content: ContentRef, amount: i32) {
+        self.add(content, -amount);
+    }
+
+    /// `PayloadSeq.clear`.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.total = 0;
+    }
+
+    /// `PayloadSeq.get`.
+    pub fn get(&self, content: ContentRef) -> i32 {
+        self.entries.get(&content).copied().unwrap_or(0)
+    }
+
+    /// `PayloadSeq.contains(block, amount)`.
+    pub fn contains(&self, content: ContentRef, amount: i32) -> bool {
+        self.get(content) >= amount
+    }
+
+    /// Serialized (nonzero or not) entries in insertion order.
+    pub fn entries(&self) -> impl Iterator<Item = (ContentRef, i32)> + '_ {
+        self.entries
+            .iter()
+            .map(|(content, amount)| (*content, *amount))
+    }
+
+    /// `PayloadSeq.write`: `s -size`, then `b contentType.ordinal()`,
+    /// `s id`, `i amount` per entry. The negated count marks the new format
+    /// (the `>= 0` arm is the legacy block-only list).
+    pub fn write(&self, w: &mut crate::io::wire::WireWriter) {
+        w.s(-(self.entries.len() as i16));
+        for (content, amount) in &self.entries {
+            w.b(content.type_.ordinal() as i8);
+            w.s(content.id as i16);
+            w.i(*amount);
         }
+    }
+
+    /// `PayloadSeq.read`: replaces the sequence. The legacy (`>= 0`) arm holds
+    /// block ids only; the new format carries the content-type ordinal. Ids are
+    /// kept raw like the rest of the port's save readers (mod id mapping is the
+    /// temporary mapper's job elsewhere).
+    pub fn read(&mut self, r: &mut crate::io::wire::WireReader) -> crate::io::IoResult<()> {
+        self.clear();
+        let amount = r.s()?;
+        if amount >= 0 {
+            for _ in 0..amount {
+                let id = r.s()? as u16;
+                let count = r.i()?;
+                self.add(ContentRef::new(ContentType::Block, id), count);
+            }
+        } else {
+            for _ in 0..(-i32::from(amount)) {
+                let ordinal = r.ub()? as usize;
+                let id = r.s()? as u16;
+                let count = r.i()?;
+                if let Some(type_) = ContentType::ALL.get(ordinal).copied() {
+                    self.add(ContentRef::new(type_, id), count);
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -275,5 +332,48 @@ mod tests {
         assert_eq!(ItemStack::mult(&stacks, 1.5)[0].amount, 5);
         assert_eq!(ItemStack::mult(&stacks, 0.5)[0].amount, 2);
         assert_eq!(round_to_i32(-1.5), -2);
+    }
+
+    /// I01 T11: `PayloadSeq` round-trips through the negated-count format and
+    /// still reads the legacy block-only list (`PayloadSeq.java:70-95`).
+    #[test]
+    fn payload_seq_round_trips_and_reads_the_legacy_format() {
+        use crate::io::wire::{WireReader, WireWriter};
+
+        let mut seq = PayloadSeq::new();
+        let unit = ContentRef::new(ContentType::Unit, 7);
+        let block = ContentRef::new(ContentType::Block, 3);
+        seq.add(unit, 4);
+        seq.add(block, 2);
+        seq.add(block, 1);
+        assert_eq!(seq.get(unit), 4);
+        assert_eq!(seq.get(block), 3);
+        assert_eq!(seq.total(), 7);
+
+        let mut bytes = Vec::new();
+        {
+            let mut w = WireWriter::new(&mut bytes);
+            seq.write(&mut w);
+        }
+        // Header: the negated entry count (`s -size`).
+        assert_eq!(i16::from_be_bytes([bytes[0], bytes[1]]), -2);
+        let mut r = WireReader::new(&bytes);
+        let mut decoded = PayloadSeq::new();
+        decoded.read(&mut r).expect("read");
+        assert_eq!(decoded, seq);
+
+        // Legacy format: `s amount >= 0`, then block id + amount pairs.
+        let mut legacy = Vec::new();
+        {
+            let mut w = WireWriter::new(&mut legacy);
+            w.s(1);
+            w.s(3);
+            w.i(5);
+        }
+        let mut r = WireReader::new(&legacy);
+        let mut decoded = PayloadSeq::new();
+        decoded.read(&mut r).expect("read legacy");
+        assert_eq!(decoded.get(ContentRef::new(ContentType::Block, 3)), 5);
+        assert_eq!(decoded.total(), 5);
     }
 }

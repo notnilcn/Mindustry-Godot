@@ -1150,6 +1150,12 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
                 // Skip this building; the raycast continues.
                 return false;
             }
+            // `build.collide(self())` (`BulletComp.java:251`): `LogicBuild`
+            // returns false for a privileged non-destructible processor, so
+            // the bullet passes through without damage (`LogicBlock.java:447`).
+            if crate::world::build::logic_processor_invulnerable(ctx.world, target) {
+                return false;
+            }
             // `BulletComp.collision`: `BulletType.sticky` bullets attach on
             // first contact (`stickTo`); an already-attached bullet does not
             // re-hit its target. A pre-assigned *aim* target is not sticky
@@ -1272,6 +1278,8 @@ pub fn collide_bullet(ctx: &mut CombatCtx<'_>, bullet: Entity) -> CollisionOutco
                 piercing,
                 bullet_team,
             )
+            // Same `build.collide(self())` gate as the raycast above.
+            && !crate::world::build::logic_processor_invulnerable(ctx.world, target)
         {
             let same_team = ctx.world.get::<TeamComp>(target).map(|t| t.team) == Some(bullet_team);
             if !same_team || collide_team {
@@ -2271,5 +2279,56 @@ mod tests {
             harness.step_bullets_only();
         }
         assert_eq!(harness.building_health_at(10, 8), before);
+    }
+
+    /// I03 T6: `LogicBuild.collide(Bullet)`/`LogicBuild.damage(float)`
+    /// (`LogicBlock.java:437-451`): a privileged, non-destructible processor
+    /// ignores direct damage and lets bullets pass through untouched.
+    #[test]
+    fn privileged_processor_immune() {
+        let mut harness = CombatHarness::new(32, 16, 7);
+        let processor = harness
+            .content()
+            .block_id("world-processor")
+            .expect("processor");
+        assert!(harness.place(10, 8, processor, 0, true));
+        let target = harness.build.build_at(10, 8).expect("building");
+        assert!(
+            crate::world::build::logic_processor_invulnerable(&harness.build.world, target),
+            "world-processor is privileged and not destructible"
+        );
+        let before = harness.building_health_at(10, 8);
+        assert!(before > 0.0, "placed processor has health");
+        crate::combat::damage::area::apply_health(&mut harness.build.world, target, 50.0);
+        assert_eq!(
+            harness.building_health_at(10, 8),
+            before,
+            "direct damage is ignored"
+        );
+        // A fuse bullet fired along the row crosses the processor tile.
+        let (x, y) = CombatHarness::tile_origin(6, 8);
+        let bullet = harness.spawn_bullet("fuse", x, y, 0.0, 1).expect("spawn");
+        let mut crossed = false;
+        for _ in 0..120 {
+            harness.step_bullets_only();
+            if !bullet_alive(&harness.build.world, bullet) {
+                break;
+            }
+            let (bx, _) = bullet_pos(&harness.build.world, bullet).unwrap_or((0.0, 0.0));
+            if bx > 96.0 {
+                crossed = true;
+                break;
+            }
+        }
+        assert!(crossed, "the bullet flew past the processor tile");
+        assert!(
+            bullet_alive(&harness.build.world, bullet),
+            "the bullet did not collide"
+        );
+        assert_eq!(
+            harness.building_health_at(10, 8),
+            before,
+            "bullet passed through without damage"
+        );
     }
 }

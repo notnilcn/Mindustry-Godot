@@ -12,6 +12,7 @@ mod audio;
 mod camera;
 mod campaign;
 mod content_boot;
+mod display_context;
 mod editor;
 mod fx;
 mod hello;

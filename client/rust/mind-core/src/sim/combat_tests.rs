@@ -1072,7 +1072,7 @@ fn live_unit_command_switch_is_stored() {
     };
     assert!(poly_allows, "poly lists the repair command");
     assert_eq!(
-        sim.apply_live_unit_command(&[id], repair_id, 0.0, 0.0),
+        sim.apply_live_unit_command(&[id], repair_id, 0.0, 0.0, false),
         1,
         "the repair command is accepted"
     );
@@ -1083,7 +1083,13 @@ fn live_unit_command_switch_is_stored() {
     );
     // A move order keeps the ordered tile (and clears nothing else).
     assert_eq!(
-        sim.apply_live_unit_command(&[id], crate::sim::command::MOVE_COMMAND.raw(), 200.0, 100.0),
+        sim.apply_live_unit_command(
+            &[id],
+            crate::sim::command::MOVE_COMMAND.raw(),
+            200.0,
+            100.0,
+            false
+        ),
         1,
         "move order accepted"
     );
@@ -1434,6 +1440,7 @@ fn commanded_dagger_reaches_target() {
         command: 0,
         x: 260.0,
         y: 100.0,
+        queue: false,
     })
     .expect("move order");
     for _ in 0..600 {
@@ -1514,6 +1521,7 @@ fn set_move_command_does_not_move_units() {
         command: 0,
         x: 0.0,
         y: 0.0,
+        queue: false,
     })
     .expect("command switch applies");
     for _ in 0..300 {
@@ -1574,6 +1582,7 @@ fn any_unit_has_command_needs_target() {
         command: 0,
         x: 200.0,
         y: 100.0,
+        queue: false,
     })
     .expect("move order");
     assert!(

@@ -126,7 +126,6 @@ impl ActionBatcher {
                 // targets go through [`pack_wire_target`] and
                 // `resolve_wire_target` decodes them.
                 let (x, y) = crate::sim::command::pack_wire_target(&target);
-                let _ = queue;
                 let _ = final_batch;
                 for chunk in units.chunks(COMMAND_CHUNK) {
                     batches.push(self.batch(
@@ -136,6 +135,9 @@ impl ActionBatcher {
                             command: 0,
                             x,
                             y,
+                            // `commandUnits(..., queueCommand)`: append instead
+                            // of replace (I01 T13).
+                            queue,
                         }],
                     ));
                 }
@@ -151,6 +153,8 @@ impl ActionBatcher {
                         command,
                         x: 0.0,
                         y: 0.0,
+                        // `setUnitCommand` never queues.
+                        queue: false,
                     }],
                 ));
             }
@@ -312,6 +316,7 @@ mod tests {
                 command: 0,
                 x: 1.0,
                 y: 2.0,
+                queue: false,
             }
         );
         assert_eq!(
@@ -321,6 +326,7 @@ mod tests {
                 command: 0,
                 x: 1.0,
                 y: 2.0,
+                queue: false,
             }
         );
         assert_eq!(batches[0].client_seq, 0);

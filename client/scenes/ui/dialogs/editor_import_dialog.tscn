@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://d3f5h7j9l2m4b"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" path="res://ui/dialogs/editor_import_dialog.gd" id="2_script"]
+
+[node name="EditorImportDialog" unique_id=150338804 instance=ExtResource("1_base")]
+script = ExtResource("2_script")
