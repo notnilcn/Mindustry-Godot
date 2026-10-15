@@ -196,7 +196,7 @@ mod tests {
 
     fn load(fs: &MockFs) -> Mods {
         let mut mods = Mods::new(true, "/mods");
-        mods.load(fs, Path::new("/mods"), &SettingsStore::new())
+        mods.load(fs, Path::new("/mods"), &mut SettingsStore::new())
             .expect("load");
         mods
     }

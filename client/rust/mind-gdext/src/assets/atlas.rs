@@ -27,6 +27,8 @@ use mind_core::assets::atlas::{AtlasIndex, Region};
 use mind_core::assets::bundle::Bundle;
 use mind_core::assets::file_tree::FileTree;
 use mind_core::assets::icons::Iconc;
+use mind_core::assets::overlay::AssetOverlayProvider;
+use mind_core::mods::overlay::ModsOverlay;
 
 use crate::assets::audio::AudioRegistry;
 use crate::assets::bundle::{load_bundle, load_iconc, load_locales};
@@ -69,6 +71,8 @@ pub struct MindAssets {
     cursors: HashMap<String, Gd<ImageTexture>>,
     /// Whether [`MindAssets::load_assets`] completed.
     loaded: bool,
+    /// Whether the mods' asset overlay (bundles/sprites/sounds) was applied.
+    mod_overlay_applied: bool,
 }
 
 #[godot_api]
@@ -91,6 +95,7 @@ impl INode for MindAssets {
             audio: AudioRegistry::default(),
             cursors: HashMap::new(),
             loaded: false,
+            mod_overlay_applied: false,
         }
     }
 
@@ -243,6 +248,66 @@ impl MindAssets {
         texture.set_filter_clip(true);
         self.region_textures.insert(key, texture.clone());
         Some(texture)
+    }
+
+    /// Whether the atlas is loaded and no mod overlay has been applied yet
+    /// (`MindMods` pushes the overlay once per session; I07 T4/T5).
+    pub fn can_accept_mod_overlay(&self) -> bool {
+        self.loaded && !self.mod_overlay_applied
+    }
+
+    /// Applies the mods' asset overlay: `bundles/` merges into the live bundle
+    /// (`DataBundleLoader.load`), `sprites-override/` replaces base regions by
+    /// name, `sprites/` regions are added on their own pages, and `sounds/`
+    /// override by logical name (`Mods.packSprites`; I07 T4 bundles, T5 assets).
+    /// Java's `unload` snapshot/restore only runs when mods reload, which exits
+    /// the process, so no snapshot is kept.
+    pub fn apply_mod_overlay(&mut self, overlay: &ModsOverlay) {
+        if self.mod_overlay_applied {
+            return;
+        }
+        self.mod_overlay_applied = true;
+        let locale = self.locale.clone();
+        for (_file, incoming) in overlay.bundles() {
+            self.bundle.merge_assets(&locale, incoming.clone());
+        }
+        for sprite in overlay.sprites() {
+            let mut image = Image::new_gd();
+            let data = PackedByteArray::from(sprite.png.as_slice());
+            if image.load_png_from_buffer(&data) != Error::OK {
+                log::warn!("[assets] mod sprite decode failed: {}", sprite.path);
+                continue;
+            }
+            if let Some(scale) = overlay.texture_scale(&sprite.name)
+                && (scale - 1.0).abs() > f32::EPSILON
+            {
+                let width = ((image.get_width() as f32) * scale).round().max(1.0) as i32;
+                let height = ((image.get_height() as f32) * scale).round().max(1.0) as i32;
+                image.resize(width, height);
+            }
+            let width = image.get_width();
+            let height = image.get_height();
+            let Some(texture) = ImageTexture::create_from_image(&image) else {
+                continue;
+            };
+            let page = self.index.add_overlay_page(sprite.page, width, height);
+            self.pages.push(texture);
+            self.index.add_overlay_region(Region {
+                name: sprite.name.clone(),
+                page,
+                x: 0,
+                y: 0,
+                w: width,
+                h: height,
+                splits: None,
+                pads: None,
+                offsets: [0, 0],
+                page_type: sprite.page,
+            });
+            // A replace/override must beat any cached base `AtlasTexture`.
+            self.region_textures.remove(&sprite.name);
+        }
+        self.audio.add_mod_sounds(overlay.sounds());
     }
 
     /// Loads and caches a loose `sprites/<name>.png` texture (no atlas entry).
