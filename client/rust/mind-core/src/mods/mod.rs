@@ -915,6 +915,40 @@ mod tests {
         );
     }
 
+    /// I07 T3 (PAR-0116): the live client's bootstrap order — `MindMods`
+    /// (`gdext/mods.rs`) loads (non-headless, `set_failed_to_launch` first) and
+    /// then calls `load_scripts` like `ClientLauncher.java:170` — marks a mod
+    /// with `scripts/main.js` unsupported via the port's `NoScriptHost`.
+    #[test]
+    fn client_bootstrap_order_marks_script_mod_unsupported() {
+        let fs = MockFs::new();
+        write_mod(&fs, "s", r#"{"name":"Scripted","minGameVersion":"146"}"#);
+        fs.write(Path::new("/mods/s/scripts/main.js"), b"console.log('hi')")
+            .expect("write script");
+        fs.write(
+            Path::new("/mods/s/content/items/scrap.json"),
+            br#"{"name":"Scrap"}"#,
+        )
+        .expect("write item");
+        let mut settings = SettingsStore::new();
+        let mut mods = Mods::new(false, "/mods");
+        mods.set_failed_to_launch(false);
+        mods.load(&fs, Path::new("/mods"), &mut settings)
+            .expect("load");
+        mods.load_scripts(&fs);
+        let report = mods.report();
+        let scripted = report
+            .mods
+            .iter()
+            .find(|m| m.name == "scripted")
+            .expect("scripted");
+        assert_eq!(scripted.state, ModState::Unsupported);
+        // The row keeps the mod record; its content files are excluded from the
+        // enabled set, exactly like Java's ModState.unsupported.
+        assert!(!scripted.enabled);
+        assert!(mods.collect_content_files(&fs).is_empty());
+    }
+
     /// GenericModTest/ModTestAllure offline port (§7a): the committed
     /// `parity/mod_fixtures/zip/testmod.zip` package discovers, resolves and
     /// parses its JSON content into the registry.

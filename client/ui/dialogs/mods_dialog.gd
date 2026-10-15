@@ -158,8 +158,13 @@ func _refresh() -> void:
 ## `getStateText`: the colored state string shown under a mod's name.
 func _state_text(entry: Dictionary) -> String:
 	match str(entry.get("state", "")):
-		"incompatible", "unsupported":
+		"incompatible":
 			return _t("@mod.blacklisted")
+		"unsupported":
+			# Port-only state (no JS engine, OD1): the row shows the reason text
+			# (`UnsupportedReason::message`, e.g. scripts) that `list()` carries.
+			var reason := str(entry.get("reason", ""))
+			return reason if not reason.is_empty() else _t("@mod.blacklisted")
 		"circularDependencies":
 			return _t("@mod.circulardependencies")
 		"incompleteDependencies":

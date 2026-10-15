@@ -85,6 +85,14 @@ impl MindMods {
             }
             Err(error) => log::warn!("[mods] load failed: {error}"),
         }
+        // `ClientLauncher.java:170`: `mods.loadScripts()` runs before content
+        // creation. The port's `NoScriptHost` (OD1) marks mods with `scripts/`
+        // unsupported instead of running them (`Mods.java:803-834`).
+        self.mods.load_scripts(&NativeFs);
+        // I07 T4/T5: the assets autoload entered first (project.godot order), so
+        // its atlas is loaded; merge mod bundles/sprites/sounds now.
+        self.push_asset_overlay();
+        self.bootstrapped = true;
     }
 
     /// Emitted whenever the mod set or its enable flags change.
