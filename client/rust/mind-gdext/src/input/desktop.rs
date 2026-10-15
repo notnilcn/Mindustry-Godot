@@ -3159,6 +3159,28 @@ impl DesktopBridge {
         if def.kind == BlockKind::SwitchBlock {
             return None;
         }
+        // `LogicBlock.buildConfiguration` (`LogicBlock.java:736-739`): one
+        // pencil button opening the logic editor; `shouldShowConfigure` is
+        // `accessible()` (`LogicBlock.java:734`), so an inaccessible world
+        // processor opens no panel at all.
+        if def.kind == BlockKind::LogicBlock {
+            let state = guard.logic_get_state(i64::from(x), i64::from(y));
+            let accessible = state
+                .get("accessible")
+                .and_then(|value| value.try_to::<bool>().ok())
+                .unwrap_or(false);
+            if !accessible {
+                return None;
+            }
+            let spec = serde_json::json!({
+                "title": format!("block.{}.name", def.name),
+                "block": def.name,
+                "x": x,
+                "y": y,
+                "logic": true,
+            });
+            return Some(spec.to_string());
+        }
         // H02 T6: link blocks have no option list — the panel shows only the
         // title, the current link and the close button. The link itself is made
         // by tapping another block while this panel is open.

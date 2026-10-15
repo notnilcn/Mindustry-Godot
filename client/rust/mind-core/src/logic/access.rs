@@ -258,6 +258,41 @@ pub fn entity_team(world: &World, e: Entity) -> Option<u8> {
     world.get::<TeamComp>(e).map(|t| t.team)
 }
 
+/// `LogicDisplayBuild.sense(displayWidth/displayHeight)`
+/// (`LogicDisplay.java:117-124`); the tileable override subtracts the frame
+/// (`TileableLogicDisplay.java:143-148`, `frameSize * 2` per axis).
+fn display_dimension(world: &World, e: Entity, horizontal: bool) -> f64 {
+    // `CanvasBlock.CanvasBuild.sense`: `displayWidth/Height = canvasSize`
+    // (`CanvasBlock.java:297-302`).
+    if crate::logic::blocks::block_kind_of(world, e) == Some(crate::content::BlockKind::CanvasBlock)
+    {
+        return crate::logic::blocks::canvas_def_of(world, e)
+            .map(|def| def.canvas_size as f64)
+            .unwrap_or(0.0);
+    }
+    if crate::logic::blocks::block_kind_of(world, e)
+        == Some(crate::content::BlockKind::TileableLogicDisplay)
+    {
+        let frame = crate::logic::blocks::tileable_def_of(world, e)
+            .map(|def| def.frame_size)
+            .unwrap_or(6);
+        return world
+            .get::<crate::logic::blocks::LogicDisplayState>(e)
+            .map(|state| {
+                let tiles = if horizontal {
+                    state.tiles_width
+                } else {
+                    state.tiles_height
+                };
+                (tiles * 32 - frame * 2) as f64
+            })
+            .unwrap_or(f64::NAN);
+    }
+    display_def_of(world, e)
+        .map(|d| d.display_size as f64)
+        .unwrap_or(0.0)
+}
+
 /// `PrintI.toString` world-resolved names: contents (`LogicContentInfo`),
 /// building block names (`BlockTable`) and unit type names.
 ///
@@ -624,25 +659,23 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 255,
             ))
         }
-        LAccess::DisplayWidth => Sensed::Num(
-            display_def_of(world, e)
-                .map(|d| d.display_size as f64)
-                .unwrap_or(0.0),
-        ),
-        LAccess::DisplayHeight => Sensed::Num(
-            display_def_of(world, e)
-                .map(|d| d.display_size as f64)
-                .unwrap_or(0.0),
-        ),
+        LAccess::DisplayWidth => Sensed::Num(display_dimension(world, e, true)),
+        LAccess::DisplayHeight => Sensed::Num(display_dimension(world, e, false)),
+        // `bufferSize`/`operations` read the ROOT display
+        // (`LogicDisplay.java:117-124`).
         LAccess::BufferSize => Sensed::Num(
             world
                 .get::<crate::logic::blocks::LogicDisplayState>(e)
+                .and_then(|state| state.root_display)
+                .and_then(|root| world.get::<crate::logic::blocks::LogicDisplayState>(root))
                 .map(|d| d.commands.len() as f64)
                 .unwrap_or(0.0),
         ),
         LAccess::Operations => Sensed::Num(
             world
                 .get::<crate::logic::blocks::LogicDisplayState>(e)
+                .and_then(|state| state.root_display)
+                .and_then(|root| world.get::<crate::logic::blocks::LogicDisplayState>(root))
                 .map(|d| d.operations as f64)
                 .unwrap_or(0.0),
         ),

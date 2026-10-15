@@ -11,6 +11,7 @@
 pub mod access;
 pub mod assembler;
 pub mod blocks;
+pub mod display_raster;
 pub mod enums;
 pub mod executor;
 pub mod fx;

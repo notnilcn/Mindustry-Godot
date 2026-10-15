@@ -4320,11 +4320,7 @@ impl Sim {
             .map(|def| {
                 (
                     def.size as f32 * crate::config::TILESIZE as f32,
-                    // `build.block.buildVisibility != BuildVisibility.hidden`
-                    // (InputHandler.java:1049).
-                    def.kind != crate::content::BlockKind::CoreBlock
-                        && def.build_visibility
-                            != crate::content::registries::blocks::BuildVisibility::Hidden,
+                    crate::world::build::block_can_pickup(def),
                 )
             })
             .unwrap_or((0.0, false));

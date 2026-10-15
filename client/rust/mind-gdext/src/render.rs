@@ -54,6 +54,7 @@ mod hazards;
 mod light;
 mod links;
 mod load;
+mod logic_displays;
 mod menu;
 pub(crate) mod minimap;
 mod objective_markers;
@@ -248,6 +249,8 @@ pub struct MindWorldRenderer {
     puddles: Option<Gd<hazards::PuddleRenderer>>,
     /// Fires (`Layer.effect` band; H03 T7).
     fires: Option<Gd<hazards::FireRenderer>>,
+    /// Logic display buffers (`Layer.block` band; I03 T13).
+    logic_displays: Option<Gd<logic_displays::LogicDisplayRenderer>>,
     /// `world/draw/*` extras, normal blend (`Layer.block` band; H03 T8).
     block_extras: Option<Gd<block_extras::BlockExtras>>,
     /// `world/draw/*` extras, additive blend (`Layer.block` band; H03 T8).
@@ -328,6 +331,7 @@ impl INode2D for MindWorldRenderer {
             puddles: None,
             fires: None,
             block_extras: None,
+            logic_displays: None,
             block_extras_add: None,
             unit_build: None,
             shadow: None,
@@ -641,6 +645,18 @@ impl MindWorldRenderer {
             // code-instantiated: the additive half of the same pass.
             block_band.clone().add_child(&additive);
             self.block_extras_add = Some(additive.clone());
+        }
+        // Logic display buffers at `Layer.block + offset`
+        // (`LogicDisplayBuild.draw`, I03 T13); one z step above the block
+        // sprites and the extras.
+        if let Some(block_band) = self.band_node_at(BandKey::base(Layer::Block)) {
+            let mut node = logic_displays::LogicDisplayRenderer::new_alloc();
+            node.set_name("LogicDisplayRenderer");
+            node.set_z_index(2);
+            // code-instantiated: one display pass; the node count is fixed by
+            // the pipeline, not by content.
+            block_band.clone().add_child(&node);
+            self.logic_displays = Some(node);
         }
         // Unit factory / reconstructor build preview at `Layer.blockOver`
         // (`UnitFactory.draw` -> `Drawf.construct`; H03 T9).
