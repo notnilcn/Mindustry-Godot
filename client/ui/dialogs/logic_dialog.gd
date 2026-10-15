@@ -70,8 +70,7 @@ func _build() -> void:
 	variables.tooltip_text = _t("@variables")
 	controls.add_child(variables)
 	var add := MindWidgets.icon_button("add", _t("@add"), "cleart")
-	add.disabled = true
-	add.tooltip_text = _t("@add")
+	add.pressed.connect(_open_add_dialog)
 	controls.add_child(add)
 
 
@@ -393,6 +392,132 @@ func _load_from_clipboard() -> void:
 		_statements = parsed
 		_modified = true
 		_rebuild_list()
+
+
+## `LogicDialog.showAddDialog` (`LogicDialog.java:251-341`): a searchable list of
+## statements grouped by category; clicking one appends its default instance.
+func _open_add_dialog() -> void:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return
+	var popup := PopupPanel.new()
+	# code-instantiated: the add picker is a transient grouped list over the
+	# dialog (one per open).
+	add_child(popup)
+	var column := VBoxContainer.new()
+	column.custom_minimum_size = Vector2(560, 420)
+	popup.add_child(column)
+	var search := LineEdit.new()
+	search.placeholder_text = _t("@players.search")
+	column.add_child(search)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.custom_minimum_size = Vector2(0, 340)
+	column.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	var entries := _add_entries(logic)
+	var rebuild := func() -> void:
+		for child in list.get_children():
+			list.remove_child(child)
+			child.queue_free()
+		var text := search.text.to_lower()
+		var current_category := ""
+		var grid: GridContainer = null
+		var shown := 0
+		for entry in entries:
+			var label: String = entry.get("label", "")
+			var name: String = entry.get("name", "")
+			if not text.is_empty() and not label.to_lower().contains(text) and not name.to_lower().contains(text):
+				continue
+			var category: String = entry.get("category", "unknown")
+			if category != current_category:
+				current_category = category
+				var header := Label.new()
+				header.text = str(entry.get("category_label", category))
+				header.add_theme_color_override("font_color", CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"]))
+				list.add_child(header)
+				grid = GridContainer.new()
+				grid.columns = 3
+				list.add_child(grid)
+			if grid == null:
+				continue
+			var button := MindWidgets.button(label)
+			button.theme_type_variation = "flatt"
+			button.custom_minimum_size = Vector2(130, 50)
+			button.add_theme_color_override("font_color", CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"]))
+			button.tooltip_text = _t("lst." + str(entry.get("bundle", name)))
+			button.pressed.connect(_add_statement.bind(name, popup))
+			(grid as GridContainer).add_child(button)
+			shown += 1
+		if shown == 0:
+			var empty := Label.new()
+			empty.text = _t("@none")
+			list.add_child(empty)
+	search.text_changed.connect(func(_text: String) -> void: rebuild.call())
+	search.text_submitted.connect(
+		func(text: String) -> void:
+			var lowered := text.to_lower()
+			for entry in entries:
+				if str(entry.get("label", "")).to_lower().contains(lowered):
+					_add_statement(str(entry.get("name", "")), popup)
+					return
+	)
+	rebuild.call()
+	popup.popup_centered()
+	search.grab_focus()
+
+
+## Candidate statements for the add dialog (the Java filters:
+## `LogicDialog.java:296-305`).
+func _add_entries(logic: Node) -> Array:
+	var out: Array = []
+	var privileged := _privileged
+	var unit_allowed := true
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host != null:
+		var probe := str(host.call("logic_rules_probe"))
+		var parsed: Variant = JSON.parse_string(probe)
+		if parsed is Dictionary:
+			unit_allowed = bool((parsed as Dictionary).get("logicUnitControl", true))
+	for name in logic.call("statement_names"):
+		var meta: Variant = logic.call("statement_meta", str(name))
+		if not (meta is Dictionary):
+			continue
+		var info := meta as Dictionary
+		if bool(info.get("hidden", false)):
+			continue
+		if bool(info.get("privileged", false)) and not privileged:
+			continue
+		var category := str(info.get("category", "unknown"))
+		if category == "unit" and not privileged and not unit_allowed:
+			continue
+		var bundle := str(info.get("bundle", name))
+		var label := _t("lst." + bundle)
+		out.append({
+			"name": str(name),
+			"category": category,
+			"category_label": _t("lcategory." + category),
+			"bundle": bundle,
+			"label": label,
+		})
+	return out
+
+
+## Adds a default instance of `name` at the end of the list
+## (`canvas.addAt(canvas.statements.getChildren().size, prov.get())`).
+func _add_statement(name: String, popup: PopupPanel) -> void:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return
+	var row: Variant = logic.call("default_statement_row", name)
+	if not (row is Dictionary) or (row as Dictionary).is_empty():
+		return
+	_statements.append(row)
+	_modified = true
+	_rebuild_list()
+	popup.hide()
 
 
 ## `LCanvas.save` -> `LogicBuild.showEditDialog`'s consumer.

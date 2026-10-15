@@ -140,6 +140,13 @@ impl MindLogic {
                 GString::from(meta.registered_name).to_variant(),
             ),
             (
+                "bundle",
+                GString::from(
+                    mind_core::logic::statement::bundle_key(meta.registered_name).as_str(),
+                )
+                .to_variant(),
+            ),
+            (
                 "rust_variant",
                 GString::from(meta.rust_variant).to_variant(),
             ),

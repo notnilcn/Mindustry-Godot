@@ -2382,7 +2382,12 @@ impl MindSimHost {
             return GString::from("{}");
         };
         let rules = &runtime.session.rules;
+        let logic_rules = mind_core::logic::blocks::rules_ref(&self.sim.ecs.0);
         let value = serde_json::json!({
+            // I03 T9: the add dialog hides the unit category when the rule is off
+            // (`LogicDialog.showAddDialog`).
+            "logicUnitControl": logic_rules.logic_unit_control(),
+            "logicUnitBuild": logic_rules.logic_unit_build(),
             "waveSending": rules.wave_sending,
             "waveTimer": rules.wave_timer,
             "waves": rules.waves,
