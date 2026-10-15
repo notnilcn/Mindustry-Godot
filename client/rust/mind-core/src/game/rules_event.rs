@@ -208,4 +208,54 @@ mod tests {
         assert_eq!(load.rules_epoch, 1);
         assert!(load.from_save);
     }
+
+    /// `PausedDialog`'s live edit (`PausedDialog.java:20-37`): the rules dialog
+    /// edits a copy and `Call.setRules` writes both the session and its live
+    /// runtime; one `pump_runtime` mirror (runtime -> session) must keep the
+    /// accepted values, and the campaign gate must reject them without
+    /// `allowEditRules` (so the pause-menu book stays hidden).
+    #[test]
+    fn live_set_rules_reaches_the_runtime_and_survives_the_mirror() {
+        let mut epoch = RulesEpoch::new();
+        // A live custom-game session with a runtime copy.
+        let mut session = super::super::play::PlaySession::new(Rules::default());
+        session.rules.allow_edit_rules = true;
+        let mut runtime_rules = session.rules.clone();
+
+        let mut incoming = session.rules.clone();
+        incoming.fire = false;
+        incoming.win_wave = 7;
+        let is_campaign = session.is_campaign();
+        apply_set_rules(
+            &mut session.rules,
+            incoming.clone(),
+            is_campaign,
+            None,
+            &mut epoch,
+        )
+        .expect("non-campaign edits are always accepted");
+        apply_set_rules(&mut runtime_rules, incoming, false, None, &mut epoch)
+            .expect("the runtime copy takes the same edit");
+
+        // `pump_runtime` mirrors the runtime session back onto the facade.
+        session.rules = runtime_rules;
+        assert!(!session.rules.fire);
+        assert_eq!(session.rules.win_wave, 7);
+
+        // Campaign sector without allowEditRules: rejected on both copies, so
+        // the mirror cannot clobber the live rules either.
+        let mut campaign_rules = Rules::default();
+        let mut campaign_runtime = campaign_rules.clone();
+        let mut blocked = campaign_rules.clone();
+        blocked.fire = false;
+        assert!(matches!(
+            apply_set_rules(&mut campaign_rules, blocked.clone(), true, None, &mut epoch),
+            Err(SetRulesError::CampaignReadOnly)
+        ));
+        assert!(matches!(
+            apply_set_rules(&mut campaign_runtime, blocked, true, None, &mut epoch),
+            Err(SetRulesError::CampaignReadOnly)
+        ));
+        assert!(campaign_runtime.fire);
+    }
 }
