@@ -47,6 +47,22 @@ var _modified := false
 var _vars_popup: PopupPanel = null
 var _vars_rows: Array = []
 var _vars_timer := 0
+## Statement element nodes (parallel to `_statements`; `LCanvas.StatementElem`).
+var _row_nodes: Array = []
+## `index -> JumpButton` for the jump elements (`LCanvas.JumpButton`).
+var _jump_buttons: Dictionary = {}
+## Jump-curve + insertion overlay (`LCanvas.DragLayout.draw`, `JumpCurve`).
+var _overlay: Control = null
+## Drag-reorder state (`LCanvas.DragLayout`): dragged element, pointer origin
+## and the current insertion index.
+var _drag_index := -1
+var _drag_active := false
+var _drag_start := Vector2.ZERO
+var _drop_index := -1
+## Jump-target selection state (`LCanvas.JumpButton` touch drag).
+var _jump_selecting := -1
+var _jump_hover := -1
+var _jump_moved := false
 
 
 func _ready() -> void:
@@ -55,6 +71,8 @@ func _ready() -> void:
 	super._ready()
 	set_title_text(_t("@logic"))
 	_build()
+	# `LCanvas.DragLayout`/`JumpCurve` redraw every frame while visible.
+	set_process(true)
 
 
 func _build() -> void:
@@ -86,6 +104,15 @@ func _build() -> void:
 	var add := MindWidgets.icon_button("add", _t("@add"), "cleart")
 	add.pressed.connect(_open_add_dialog)
 	controls.add_child(add)
+
+	# code-instantiated: the jump-arrow and drop-line overlay sits above the
+	# statement list (`LCanvas.DragLayout.draw` + `JumpCurve`); it never takes
+	# mouse events.
+	_overlay = Control.new()
+	_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_overlay)
+	_overlay.draw.connect(_draw_overlay)
 
 
 ## `LogicDialog.show`: loads the processor's program into the statement list.
@@ -140,12 +167,22 @@ func _rebuild_list() -> void:
 	if _list == null:
 		return
 	_list.clear()
+	_row_nodes.clear()
+	_jump_buttons.clear()
 	for index in _statements.size():
 		var row: Variant = _statements[index]
 		if not (row is Dictionary):
 			continue
-		_list.add(_statement_row(index, row)).grow_x_axis().pad(2)
+		var panel := _statement_row(index, row)
+		_list.add(panel).grow_x_axis().pad(2)
 		_list.row()
+		_row_nodes.append(panel)
+	# A rebuilt grid gets no deferred sort (dialogs call `sort_now` + a
+	# deferred repeat once the cells are added; `MindTable.sort_now`).
+	_list.sort_now()
+	_list.call_deferred("sort_now")
+	if _overlay != null:
+		_overlay.queue_redraw()
 
 
 ## One statement element: the header row (`LCanvas.StatementElem`) plus the
@@ -163,6 +200,11 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	column.add_child(box)
 	var label := Label.new()
 	label.text = "%d  %s" % [index, _t("lst." + str(row.get("bundle", name)))]
+	# `JumpStatement.build`: `jump -> <dest>` while a target is set.
+	if name == "jump" and _jump_target(row) >= 0:
+		label.text = "%d  %s -> %d" % [
+			index, _t("lst." + str(row.get("bundle", name))), _jump_target(row)
+		]
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	box.add_child(label)
 	var copy := MindWidgets.glyph_button("copy", "C", "clearNonei")
@@ -175,8 +217,43 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	delete.tooltip_text = _t("@delete")
 	delete.pressed.connect(_delete_statement.bind(index))
 	box.add_child(delete)
+	# `StatementElem`'s header drag: left-drag reorders, middle-click copies.
+	box.gui_input.connect(_header_input.bind(index, box))
 	column.add_child(_field_row(index, row))
 	return panel
+
+
+## `StatementElem`'s header `touchDown`/`touchDragged`/`touchUp`
+## (`LCanvas.java:465-513`): left-drag reorders (the drop lands at
+## `insertPosition`), middle-click copies.
+func _header_input(event: InputEvent, index: int, box: Control) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_MIDDLE and event.pressed:
+		_copy_statement(index)
+		box.accept_event()
+		return
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_drag_index = index
+			_drag_active = false
+			_drag_start = event.position
+			box.accept_event()
+		else:
+			if _drag_active:
+				_finish_drag()
+			_drag_index = -1
+			_drag_active = false
+			if _overlay != null:
+				_overlay.queue_redraw()
+			box.accept_event()
+		return
+	if event is InputEventMouseMotion and _drag_index == index:
+		if not _drag_active and event.position.distance_to(_drag_start) > 8.0:
+			_drag_active = true
+		if _drag_active:
+			_drop_index = _drop_index_at(box.get_global_transform() * event.position)
+			if _overlay != null:
+				_overlay.queue_redraw()
+		box.accept_event()
 
 
 ## The per-statement field row (`LStatement.build(Table)`): `MindLogic.editor_layout`
@@ -264,7 +341,9 @@ func _field_row(index: int, row: Dictionary) -> Control:
 				jump_button.theme_type_variation = "logict"
 				jump_button.custom_minimum_size = Vector2(36, 32)
 				jump_button.tooltip_text = "%s.%s" % [name, label]
-				jump_button.pressed.connect(_open_jump_select.bind(index, field_index))
+				# `JumpButton`: press-drag-release onto a target element.
+				jump_button.gui_input.connect(_jump_button_input.bind(index, jump_button))
+				_jump_buttons[index] = jump_button
 				fields_box.add_child(jump_button)
 	return fields_box
 
@@ -505,21 +584,240 @@ func _commit_field_value(text: String, index: int, field_index: int) -> bool:
 	return true
 
 
-## `StatementElem.copy`: duplicates the element after itself.
+## `StatementElem.copy` (`LCanvas.java:516-538`): the duplicate lands after the
+## element; a copied `jump`'s target bumps when it pointed below (`:520-527`).
 func _copy_statement(index: int) -> void:
 	if index < 0 or index >= _statements.size():
 		return
-	_statements.insert(index + 1, (_statements[index] as Dictionary).duplicate(true))
+	var original: Dictionary = _statements[index]
+	var copied: Dictionary = original.duplicate(true)
+	_statements.insert(index + 1, copied)
+	if str(original.get("name", "")) == "jump":
+		var dest := _jump_target(original)
+		if dest > index:
+			(jump_fields(original))[0] = str(dest + 1)
+			original["fields"] = jump_fields(original)
+			(copied.get("fields", []) as Array)[0] = str(dest + 1)
 	_modified = true
 	_rebuild_list()
 
 
+## `StatementElem`'s delete button: dropped targets become `-1` and later
+## indices shift down (Java's `saveUI` recomputes `indexOf(dest)`).
 func _delete_statement(index: int) -> void:
 	if index < 0 or index >= _statements.size():
 		return
 	_statements.remove_at(index)
+	for row in _statements:
+		if not (row is Dictionary) or str((row as Dictionary).get("name", "")) != "jump":
+			continue
+		var fields := jump_fields(row)
+		if fields.is_empty():
+			continue
+		var dest := int(fields[0])
+		if dest == index:
+			fields[0] = "-1"
+		elif dest > index:
+			fields[0] = str(dest - 1)
+		(row as Dictionary)["fields"] = fields
 	_modified = true
 	_rebuild_list()
+
+
+## The `jump` row's `dest_index` (`-1` when unset/out of range).
+func _jump_target(row: Dictionary) -> int:
+	if str(row.get("name", "")) != "jump":
+		return -1
+	var fields: Array = row.get("fields", [])
+	if fields.is_empty():
+		return -1
+	var dest := int(fields[0])
+	return dest if dest >= 0 and dest < _statements.size() else -1
+
+
+func jump_fields(row: Variant) -> Array:
+	if row is Dictionary:
+		var fields: Variant = (row as Dictionary).get("fields", [])
+		if fields is Array and not (fields as Array).is_empty():
+			return fields
+	return [] as Array
+
+
+## `LCanvas.DragLayout.finishLayout`: drop the dragged element at
+## `insertPosition` and remap every `jump` target like Java's element refs do
+## (`JumpStatement.saveUI` recomputes `indexOf(dest)`).
+func _finish_drag() -> void:
+	var from := _drag_index
+	if from < 0 or from >= _statements.size():
+		return
+	var drop := clampi(_drop_index, 0, _statements.size())
+	var to := drop if drop <= from else drop - 1
+	if to != from:
+		for row in _statements:
+			if not (row is Dictionary) or str((row as Dictionary).get("name", "")) != "jump":
+				continue
+			var fields := jump_fields(row)
+			if fields.is_empty():
+				continue
+			var dest := int(fields[0])
+			if dest == from:
+				dest = to
+			elif to >= from and from < dest and dest <= to:
+				dest -= 1
+			elif to < from and to <= dest and dest < from:
+				dest += 1
+			fields[0] = str(dest)
+			(row as Dictionary)["fields"] = fields
+		var moved: Variant = _statements.pop_at(from)
+		_statements.insert(to, moved)
+		_modified = true
+	_drop_index = -1
+	_rebuild_list()
+
+
+## The insertion index for a global pointer position (`DragLayout.layout`'s
+## `insertPosition`).
+func _drop_index_at(global_pos: Vector2) -> int:
+	for i in _row_nodes.size():
+		var rect := (_row_nodes[i] as Control).get_global_rect()
+		if global_pos.y < rect.position.y + rect.size.y * 0.5:
+			return i
+	return _row_nodes.size()
+
+
+## The statement element under a global pointer position (`canvas.hovered`).
+func _row_at(global_pos: Vector2) -> int:
+	for i in _row_nodes.size():
+		if (_row_nodes[i] as Control).get_global_rect().has_point(global_pos):
+			return i
+	return -1
+
+
+## `JumpButton`'s touch handlers (`LCanvas.java:571-605`): press starts the
+## selection, dragging highlights the hovered element, release sets (or clears)
+## the target. A press-release without movement opens the target picker.
+func _jump_button_input(event: InputEvent, index: int, button: Control) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_jump_selecting = index
+			_jump_hover = -1
+			_jump_moved = false
+			button.accept_event()
+		else:
+			if _jump_moved:
+				if _jump_hover >= 0 and _jump_hover != index:
+					_set_jump_target(index, _jump_hover)
+				_rebuild_list()
+			else:
+				_open_jump_select(index, 0)
+			_jump_selecting = -1
+			_jump_hover = -1
+			if _overlay != null:
+				_overlay.queue_redraw()
+			button.accept_event()
+		return
+	if event is InputEventMouseMotion and _jump_selecting == index:
+		_jump_moved = true
+		_jump_hover = _row_at(button.get_global_transform() * event.position)
+		if _overlay != null:
+			_overlay.queue_redraw()
+		button.accept_event()
+
+
+## `JumpButton`'s setter: writes the `dest_index` field and rebuilds.
+func _set_jump_target(index: int, target: int) -> void:
+	if index < 0 or index >= _statements.size():
+		return
+	var row: Dictionary = _statements[index]
+	var fields: Array = row.get("fields", [])
+	if fields.is_empty():
+		return
+	fields[0] = str(target)
+	row["fields"] = fields
+	_statements[index] = row
+	_modified = true
+
+
+## `LCanvas.DragLayout.draw` + `JumpCurve.draw`: the drop line while dragging
+## and one trapezoid per `jump` from its button to the target's left edge
+## (`drawCurve`'s four-point trapezoid, `Pal.place`).
+func _draw_overlay() -> void:
+	if _overlay == null:
+		return
+	var place := Color8(0x63, 0x35, 0xf8)
+	if _drag_active and _drop_index >= 0 and not _row_nodes.is_empty():
+		var first := (_row_nodes[0] as Control).get_global_rect()
+		var y := 0.0
+		if _drop_index <= 0:
+			y = first.position.y - 3.0
+		elif _drop_index >= _row_nodes.size():
+			y = (_row_nodes[_row_nodes.size() - 1] as Control).get_global_rect().end.y + 3.0
+		else:
+			var above := (_row_nodes[_drop_index - 1] as Control).get_global_rect()
+			var below := (_row_nodes[_drop_index] as Control).get_global_rect()
+			y = (above.end.y + below.position.y) * 0.5
+		var left := first.position.x
+		var right := left + first.size.x
+		_overlay.draw_line(
+			_to_overlay(Vector2(left, y)),
+			_to_overlay(Vector2(right, y)),
+			Color(1, 1, 1, 0.7),
+			3.0
+		)
+	for info in _jump_spans():
+		var button: Control = _jump_buttons.get(info["jump"])
+		if button == null:
+			continue
+		var src := _to_overlay(button.get_global_rect().get_center())
+		var target_rect := (_row_nodes[int(info["target"])] as Control).get_global_rect()
+		var dst := _to_overlay(
+			Vector2(target_rect.position.x - 2.0, target_rect.position.y + target_rect.size.y * 0.5)
+		)
+		var h := 24.0 + 14.0 * float(info["lane"])
+		var dy := signf(dst.y - src.y) * h * 0.5
+		var points := PackedVector2Array(
+			[src, Vector2(src.x + h, src.y + dy), Vector2(src.x + h, dst.y - dy), dst]
+		)
+		_overlay.draw_polyline(points, place, 4.0)
+		_overlay.draw_rect(Rect2(dst - Vector2(4, 4), Vector2(8, 8)), place)
+	if _jump_selecting >= 0 and _jump_hover >= 0 and _jump_hover < _row_nodes.size():
+		var hovered := (_row_nodes[_jump_hover] as Control).get_global_rect()
+		_overlay.draw_rect(
+			Rect2(_to_overlay(hovered.position), hovered.size), Color(1, 1, 1, 0.25)
+		)
+
+
+func _to_overlay(global_pos: Vector2) -> Vector2:
+	return _overlay.get_global_transform().affine_inverse() * global_pos
+
+
+## The valid jump spans with greedy lane assignment so curves do not overlap
+## (`LCanvas.DragLayout.setJumpHeights`).
+func _jump_spans() -> Array:
+	var spans: Array = []
+	for i in _statements.size():
+		if not (_statements[i] is Dictionary):
+			continue
+		var dest := _jump_target(_statements[i])
+		if dest < 0 or dest == i or not _jump_buttons.has(i):
+			continue
+		if i >= _row_nodes.size() or dest >= _row_nodes.size():
+			continue
+		spans.append({"jump": i, "target": dest, "begin": mini(i, dest), "end": maxi(i, dest)})
+	spans.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return int(a["begin"]) < int(b["begin"]))
+	var lane_ends: Array = []
+	for span in spans:
+		var lane := -1
+		for li in lane_ends.size():
+			if int(lane_ends[li]) < int(span["begin"]):
+				lane = li
+				break
+		if lane < 0:
+			lane = lane_ends.size()
+			lane_ends.append(-1)
+		lane_ends[lane] = span["end"]
+		span["lane"] = lane
+	return spans
 
 
 ## `LogicDialog`'s `@edit` sub-dialog (`LogicDialog.java:141-190`): a popup with
@@ -696,6 +994,9 @@ func _open_globals_panel() -> void:
 ## The 15-frame variables refresh while the panel is shown
 ## (`LogicDialog.java:204-222`).
 func _process(_delta: float) -> void:
+	# `DragLayout`/`JumpCurve` repaint with the scroll position every frame.
+	if _overlay != null and is_visible_in_tree():
+		_overlay.queue_redraw()
 	if _vars_popup == null or not _vars_popup.visible:
 		return
 	_vars_timer += 1
