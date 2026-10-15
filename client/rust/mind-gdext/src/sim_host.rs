@@ -1245,6 +1245,42 @@ impl MindSimHost {
         out
     }
 
+    /// FNV-1a-64 over the registered content names
+    /// (`ContentRegistry::content_hash`); the relay build gate compares it
+    /// between host and joiner (I08 T4). 0 when no registry is loaded.
+    #[func]
+    pub fn content_hash(&self) -> i64 {
+        self.content_snapshot
+            .as_ref()
+            .map(|registry| registry.content_hash() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Saves the live world through the plan-05 IoSet handler and returns the
+    /// `.msav` bytes (I08 T4/T5 host snapshot encoder). `flush_io` runs the
+    /// save boundary without advancing the tick (`io_set.rs:227`), so the
+    /// bytes are ready when this returns; empty on failure.
+    #[func]
+    pub fn encode_snapshot(&mut self) -> PackedByteArray {
+        let relative = GString::from("user://mp/host-snapshot.msav");
+        let path = globalize(&relative);
+        if let Some(parent) = path.parent()
+            && std::fs::create_dir_all(parent).is_err()
+        {
+            log::warn!("encode_snapshot: cannot create {}", parent.display());
+            return PackedByteArray::new();
+        }
+        self.sim.request_save(path.clone(), false);
+        self.sim.flush_io();
+        match std::fs::read(&path) {
+            Ok(bytes) => PackedByteArray::from(bytes.as_slice()),
+            Err(error) => {
+                log::warn!("encode_snapshot: read {} failed: {error}", path.display());
+                PackedByteArray::new()
+            }
+        }
+    }
+
     /// Completed sim ticks.
     #[func]
     pub fn get_tick(&self) -> i64 {

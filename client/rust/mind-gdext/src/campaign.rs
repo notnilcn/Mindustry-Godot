@@ -101,6 +101,9 @@ pub struct MindCampaign {
     /// `state.playtestingMap` (`Control.java:409`): the map a playtest start
     /// loaded, read by the editor's `resumeAfterPlaytest`.
     playtesting_map: Option<String>,
+    /// `Map.name` of the last `start_map_mode` custom game (I08 T4: the host
+    /// match id / server-browser label for non-campaign worlds).
+    current_map_name: Option<String>,
 }
 
 #[godot_api]
@@ -123,6 +126,7 @@ impl INode for MindCampaign {
             saving_finish_tick: None,
             unlocked_since_last_take: Vec::new(),
             playtesting_map: None,
+            current_map_name: None,
         }
     }
 
@@ -787,6 +791,7 @@ impl MindCampaign {
         sector: i32,
         loadout_json: GString,
     ) -> bool {
+        self.current_map_name = None;
         let planet_name = planet.to_string();
         if sector < 0 {
             return false;
@@ -1367,6 +1372,7 @@ impl MindCampaign {
         if !self.start_loaded_world(rules) {
             return false;
         }
+        self.current_map_name = Some(header.name().to_string());
         if playtest {
             self.playtesting_map = Some(path);
         } else if settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
@@ -3177,6 +3183,16 @@ impl MindCampaign {
         dict.set(
             &GString::from("hasCore"),
             &(self.session.player_core_count() > 0).to_variant(),
+        );
+        // I08 T4: the live custom map's name (the host match id for
+        // non-campaign worlds); empty for campaign sectors and the menu.
+        dict.set(
+            &GString::from("mapName"),
+            &self
+                .current_map_name
+                .clone()
+                .unwrap_or_default()
+                .to_variant(),
         );
         if let Some((planet, sector)) = self.session.sector {
             let name = self

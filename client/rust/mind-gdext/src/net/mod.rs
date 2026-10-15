@@ -27,11 +27,12 @@ use mind_stdb::checksum::{ChecksumMonitor, ChecksumReport};
 use mind_stdb::commands::CommandSender;
 use mind_stdb::module_bindings::{
     AllMatchesTableAccessor, BreakBlock, ChatKind, CommandKind, Custom, Gamemode, MatchPlayerState,
-    MemberRole, MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor,
+    MatchStatus, MemberRole, MyMatchChecksumsTableAccessor, MyMatchMembersTableAccessor,
     MyMatchPlayerStatesTableAccessor, MyMatchSnapshotsTableAccessor, MyMatchStateTableAccessor,
-    MyMatchTableAccessor, PlaceBlock, RelayMatch, Visibility,
+    MyMatchTableAccessor, MyMatchesTableAccessor, PlaceBlock, RelayMatch, SnapshotKind, Visibility,
 };
 use mind_stdb::rows::RowView;
+use mind_stdb::snapshot::{SNAPSHOT_FORMAT, SnapshotHeader};
 use mind_stdb::transport::StdbTransport;
 use mind_stdb::{
     ConnectionConfig, Connector, ConnectorEvent, HostParams, MatchSession, RowChange, SessionState,
@@ -77,6 +78,17 @@ impl ProbeState {
     }
 }
 
+/// The live world a host captured for [`MindNet::host_current_world`]: the
+/// match identity plus the snapshot header inputs (I08 T4).
+#[derive(Debug, Clone)]
+struct HostedWorld {
+    map_id: String,
+    map_seed: u64,
+    build_id: String,
+    content_hash: u64,
+    rules_json: String,
+}
+
 /// A secondary `Connector` used to browse one server address without touching
 /// the active match connection (I08 T3): the lobby wave (`all_matches`) only,
 /// pumped once per frame by `pump_probes`.
@@ -117,6 +129,9 @@ pub struct MindNet {
     checksums_binder: Option<TableBinder<MyMatchChecksumsTableAccessor>>,
     snapshots_binder: Option<TableBinder<MyMatchSnapshotsTableAccessor>>,
     public_matches_binder: Option<TableBinder<AllMatchesTableAccessor>>,
+    /// Lobby-wave `my_matches` rows: the host's match id arrives here before
+    /// the game wave exists (I08 T4).
+    my_matches_binder: Option<TableBinder<MyMatchesTableAccessor>>,
     public_matches: std::collections::BTreeMap<u64, RelayMatch>,
     token_append: Option<String>,
     token_store_path: Option<std::path::PathBuf>,
@@ -141,6 +156,12 @@ pub struct MindNet {
     /// Per-address short-lived browser probes (`ping_server`), keyed by the
     /// normalized `host/db` address.
     probes: std::collections::BTreeMap<String, ServerProbe>,
+    /// Live world captured by [`Self::host_current_world`] (snapshot header
+    /// inputs); cleared when the host flow fails.
+    hosted: Option<HostedWorld>,
+    /// `host_current_world` asked for a start; the `my_matches` row drives
+    /// `start_match(true)` once the match id is known (I08 T4).
+    pending_host_start: bool,
 }
 
 #[godot_api]
@@ -163,6 +184,7 @@ impl INode for MindNet {
             checksums_binder: None,
             snapshots_binder: None,
             public_matches_binder: None,
+            my_matches_binder: None,
             public_matches: std::collections::BTreeMap::new(),
             token_append: None,
             token_store_path: None,
@@ -180,6 +202,8 @@ impl INode for MindNet {
             last_session_state: SessionState::Offline,
             desired_identity: None,
             probes: std::collections::BTreeMap::new(),
+            hosted: None,
+            pending_host_start: false,
         }
     }
 
@@ -214,6 +238,7 @@ impl INode for MindNet {
                 }
             }
             self.drain_match_rows();
+            self.drain_my_matches();
             self.drain_members_rows();
             self.drain_state_rows();
             self.drain_public_matches();
@@ -304,6 +329,7 @@ impl MindNet {
         self.snapshots_binder =
             Some(connector.bind::<MyMatchSnapshotsTableAccessor>("my_match_snapshots"));
         self.public_matches_binder = Some(connector.bind::<AllMatchesTableAccessor>("all_matches"));
+        self.my_matches_binder = Some(connector.bind::<MyMatchesTableAccessor>("my_matches"));
     }
 
     /// Session state changed (`offline`/`browsing`/`in_lobby`/`in_game`/...).
@@ -383,6 +409,94 @@ impl MindNet {
                 0
             }
         }
+    }
+
+    /// Hosts the CURRENT world on demand (I08 T4, Java `HostDialog.runHost`
+    /// `HostDialog.java:80-99`): creates a public running match from the live
+    /// map/rules, starts it immediately (Java has no lobby) and publishes a
+    /// snapshot so joiners can load. `map_id` is the live map/`planet-sector`
+    /// id; the player name/colour travel through `set_player_identity` (T2).
+    /// Returns 0 when the server is unreachable or hosting fails.
+    #[func]
+    pub fn host_current_world(&mut self, name: GString, map_id: GString, seed: i64) -> i64 {
+        let _ = name;
+        if !self.ensure_online() {
+            return 0;
+        }
+        let requested = map_id.to_string();
+        let map_id = if requested.trim().is_empty() {
+            "spine".to_string()
+        } else {
+            requested
+        };
+        let rules_json = self
+            .campaign_call("get_rules_json")
+            .unwrap_or_else(|| "{}".to_string());
+        let mode_name = serde_json::from_str::<serde_json::Value>(&rules_json)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("modeName")
+                    .and_then(|name| name.as_str())
+                    .map(str::to_string)
+            })
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| "survival".to_string());
+        // Java `SettingsMenuDialog.java:419`: `sliderPref("playerlimit", 16, 2, 32)`.
+        let max_players = settings_hub::with_settings(|settings| {
+            settings.get_i32("playerlimit", 16)
+        })
+        .clamp(1, 64) as u16;
+        let map_seed = seed.max(0) as u64;
+        let build_id = mind_stdb::MIND_VERSION.to_string();
+        let content_hash = self.content_hash();
+        let params = HostParams {
+            map_id: map_id.clone(),
+            map_seed,
+            mode: parse_gamemode(&mode_name),
+            mode_name,
+            visibility: Visibility::Public,
+            password: None,
+            max_players,
+            rules_json: rules_json.clone(),
+            build_id: build_id.clone(),
+            content_hash,
+            mods: self.mod_strings(),
+            ..HostParams::default()
+        };
+        let Some(connector) = self.connector.as_mut() else {
+            return 0;
+        };
+        match self.session.host(connector, &params) {
+            Ok(()) => {
+                self.hosted = Some(HostedWorld {
+                    map_id,
+                    map_seed,
+                    build_id,
+                    content_hash,
+                    rules_json,
+                });
+                self.pending_host_start = true;
+                self.ensure_relay();
+                self.notify_session_state();
+                log::info!("MindNet.host_current_world: match created, start pending");
+                self.session.match_id().unwrap_or(0) as i64
+            }
+            Err(error) => {
+                self.hosted = None;
+                // Java `HostDialog.runHost` failure: `@server.error`.
+                self.show_error("@server.error", &error.to_string());
+                0
+            }
+        }
+    }
+
+    /// `player.admin = true` after hosting (`HostDialog.runHost`): the match
+    /// host; the server's admin gate accepts the host for in-match actions
+    /// (`admin/mod.rs:194-220`).
+    #[func]
+    pub fn local_admin(&self) -> bool {
+        self.session.is_host()
     }
 
     /// Direct-connect (`JoinDialog.connect`): rebuilds the connector against
@@ -986,6 +1100,181 @@ impl MindNet {
         }
         self.probes
             .retain(|_, probe| probe.last_used.elapsed().as_secs() < PROBE_IDLE_SECS);
+    }
+
+    /// Feeds the lobby-wave `my_matches` view into the session: the host's
+    /// match id is known from here (the game wave that carries `my_match` does
+    /// not exist yet), and a pending [`Self::host_current_world`] start runs
+    /// once the row reaches `Lobby` (I08 T4).
+    fn drain_my_matches(&mut self) {
+        let Some(binder) = self.my_matches_binder.as_ref() else {
+            return;
+        };
+        let mut newest: Option<RelayMatch> = None;
+        for change in binder.drain() {
+            match change {
+                RowChange::Insert(row) | RowChange::Update { new: row, .. } => {
+                    if row.status != MatchStatus::Ended
+                        && newest
+                            .as_ref()
+                            .map(|current| row.match_id > current.match_id)
+                            .unwrap_or(true)
+                    {
+                        newest = Some(row);
+                    }
+                }
+                RowChange::Delete(_) => {}
+            }
+        }
+        let Some(row) = newest else {
+            return;
+        };
+        let local = self
+            .connector
+            .as_ref()
+            .and_then(Connector::local_identity)
+            .map(|identity| identity.identity);
+        let Some(local) = local else {
+            return;
+        };
+        let is_new = self.session.match_id() != Some(row.match_id);
+        self.session.observe_match(&row, &local);
+        if is_new {
+            self.ensure_relay();
+        }
+        if self.pending_host_start
+            && self.session.is_host()
+            && self.session.match_id() == Some(row.match_id)
+            && row.status == MatchStatus::Lobby
+        {
+            self.pending_host_start = false;
+            if self.start_match(true) {
+                log::info!(
+                    "MindNet: hosting match {} started immediately",
+                    row.match_id
+                );
+            }
+            self.publish_world_snapshot();
+        }
+    }
+
+    /// Publishes the live world as a dynamic snapshot so late joiners can load
+    /// it (`NetClient`'s `WorldStream`; I08 T4/T5). Wraps
+    /// `MindSimHost.encode_snapshot`'s save bytes in the `MGSN` header
+    /// (`snapshot.rs`) and sends them through `publish_snapshot`, which the
+    /// server splits into chunks.
+    fn publish_world_snapshot(&mut self) -> bool {
+        let Some(hosted) = self.hosted.clone() else {
+            return false;
+        };
+        let Some(match_id) = self.session.match_id() else {
+            return false;
+        };
+        let (save_bytes, sim_tick, checksum) = {
+            let Some(host) = self.sim_host.as_mut() else {
+                return false;
+            };
+            let bytes = host.bind_mut().encode_snapshot().to_vec();
+            let tick = host.bind().get_tick().max(0) as u64;
+            let checksum = host.bind().checksum_scoped_value();
+            (bytes, tick, checksum)
+        };
+        if save_bytes.is_empty() {
+            log::warn!("MindNet.publish_world_snapshot: save bytes empty; no snapshot");
+            return false;
+        }
+        let command_id = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.last_applied_command_id())
+            .unwrap_or(0);
+        let mut payload = SnapshotHeader {
+            format: SNAPSHOT_FORMAT,
+            checksum_version: mind_core::constants::CHECKSUM_VERSION,
+            command_id,
+            sim_tick,
+            map_id: hosted.map_id.clone(),
+            map_seed: hosted.map_seed,
+            map_hash: 0,
+            build_id: hosted.build_id.clone(),
+            content_hash: hosted.content_hash,
+            next_entity_id: 0,
+            rules_json: hosted.rules_json.clone(),
+            wave: 0,
+            wavetime: 0.0,
+            rng_sim: Vec::new(),
+        }
+        .to_bytes();
+        payload.extend_from_slice(&save_bytes);
+        let payload_len = payload.len();
+        let Some(connector) = self.connector.as_mut() else {
+            return false;
+        };
+        match connector.publish_snapshot(
+            match_id,
+            SnapshotKind::Dynamic,
+            SNAPSHOT_FORMAT,
+            mind_core::constants::CHECKSUM_VERSION,
+            command_id,
+            sim_tick,
+            checksum,
+            &hosted.map_id,
+            hosted.map_seed,
+            0,
+            &hosted.build_id,
+            hosted.content_hash,
+            payload,
+        ) {
+            Ok(()) => {
+                log::info!(
+                    "MindNet: snapshot published for match {match_id} ({payload_len} bytes)"
+                );
+                true
+            }
+            Err(error) => {
+                log::warn!("MindNet.publish_snapshot failed: {error}");
+                false
+            }
+        }
+    }
+
+    /// Reads a `GString`-returning method on `/root/Spine/MindCampaign`.
+    fn campaign_call(&self, method: &str) -> Option<String> {
+        let mut campaign = self
+            .base()
+            .try_get_node_as::<crate::MindCampaign>("/root/Spine/MindCampaign")?;
+        if !campaign.has_method(method) {
+            return None;
+        }
+        campaign
+            .call(method, &[])
+            .try_to::<GString>()
+            .ok()
+            .map(|value| value.to_string())
+    }
+
+    /// `ContentRegistry::content_hash` from the live sim host (0 when absent).
+    fn content_hash(&self) -> u64 {
+        self.sim_host
+            .as_ref()
+            .map(|host| host.bind().content_hash() as u64)
+            .unwrap_or(0)
+    }
+
+    /// Enabled mod strings from `/root/MindMods` (`MindMods.mod_strings`).
+    fn mod_strings(&self) -> Vec<String> {
+        let Some(mut mods) = self
+            .base()
+            .try_get_node_as::<crate::MindMods>("/root/MindMods")
+        else {
+            return Vec::new();
+        };
+        mods.bind_mut()
+            .mod_strings()
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect()
     }
 
     /// Emits `session_changed` when the session state differs from the last
