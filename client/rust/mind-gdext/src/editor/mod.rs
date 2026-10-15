@@ -30,8 +30,8 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::content::{
-    BlockDef, BlockId, BlockKind, BuildVisibility, Category, ContentRegistry, MemoryBundle,
-    MemoryUnlockStore,
+    BlockDef, BlockId, BlockKind, BuildVisibility, Category, ContentRegistry, GeneratorKind,
+    MemoryBundle, MemoryUnlockStore,
 };
 use mind_core::determinism::Checksummer;
 use mind_core::ecs::MindWorld;
@@ -897,15 +897,92 @@ impl MindEditor {
     /// and reports deferred until that host is wired in-engine.
     #[func]
     pub fn sector_generate(&mut self, planet: GString, sector: i64, seed: i64) -> bool {
+        let planet_name = planet.to_string();
+        let Ok(sector_id) = u16::try_from(sector) else {
+            self.last_error_key = Some("@editor.sectorgenerate".to_owned());
+            self.last_error_message = Some(format!("invalid sector {sector}"));
+            return false;
+        };
+        let seed_offset = seed.max(0) as u64;
+        let Some(content) = self.content.as_ref() else {
+            return false;
+        };
+        // `World.loadSector` -> `PlanetGenerator.generate` (the structure
+        // passes stay sim-side; the editor gets the generated terrain).
+        let extras = mind_core::game::planet::static_gen_extras(content, &planet_name, sector_id);
+        let Some(generated) = mind_core::maps::planet::generate_sector_with_seed(
+            &planet_name,
+            sector_id,
+            content,
+            extras,
+            seed_offset,
+        ) else {
+            self.last_error_key = Some("@editor.sectorgenerate".to_owned());
+            self.last_error_message = Some(format!("no generator for `{planet_name}`"));
+            return false;
+        };
+        let generated_rules = generated.rules.clone();
+        // `editor.load(() -> world.loadSector(...))` + `logic.reset()`: the
+        // generated grid replaces the editor world and its entities.
+        self.grid = generated.grid;
+        self.ecs = MindWorld::new();
+        // Java writes the generated `state.rules`; the port's editor keeps the
+        // map rules in the `rules` tag, and clears `sector` + the extra filters
+        // (`state.rules.sector = null`, `editor.tags.put("genfilters", "{}")`).
+        if let Ok(json) = mind_core::io::json::JsonIo::write(&generated_rules) {
+            self.editor.tags.insert("rules".to_owned(), json);
+        }
+        self.editor
+            .tags
+            .insert("genfilters".to_owned(), "{}".to_owned());
+        self.editor.tags.shift_remove("sector");
+        self.file = None;
+        self.editor.saved = false;
         self.mark_tiles_changed();
-        self.editor.tags.insert(
-            "sector".to_owned(),
-            format!("{}:{}:{}", planet, sector, seed),
-        );
-        self.last_error_key = Some("@editor.sectorgenerate".to_owned());
-        self.last_error_message =
-            Some("sector generation awaits the plan-06 load_sector host".to_owned());
-        false
+        self.clear_error();
+        true
+    }
+
+    /// `SectorGenerateDialog`'s planet picker (`:39-41`): every planet with a
+    /// generator, non-empty sectors and `accessible`.
+    #[func]
+    pub fn sector_planets_json(&self) -> GString {
+        let Some(content) = self.content.as_ref() else {
+            return GString::from("[]");
+        };
+        let rows: Vec<serde_json::Value> = content
+            .planets()
+            .iter()
+            .filter(|def| {
+                def.generator != GeneratorKind::None && !def.sectors.is_empty() && def.accessible
+            })
+            .map(|def| {
+                serde_json::json!({
+                    "name": def.name,
+                    "sectors": def.sectors.len(),
+                })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// `Sector.getSize()` for the picker's `[ NxN ]` label
+    /// (`Sector.java:203-205`); `0` when the planet/cell is unknown.
+    #[func]
+    pub fn sector_size(&self, planet: GString, sector: i64) -> i64 {
+        let Some(content) = self.content.as_ref() else {
+            return 0;
+        };
+        let Ok(sector_id) = u16::try_from(sector) else {
+            return 0;
+        };
+        mind_core::maps::planet::sector_size(&planet.to_string(), sector_id, content)
+            .map(|size| size as i64)
+            .unwrap_or(0)
     }
 
     /// `MapObjectivesDialog`: the objectives JSON (`MapInfoDialog` route).
