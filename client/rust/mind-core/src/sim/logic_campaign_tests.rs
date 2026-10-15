@@ -1182,3 +1182,43 @@ fn ulocate_building_core() {
     let _ = poly;
     assert_events_drained(&sim);
 }
+
+// ---- I03 T2: objective completionLogicCode runs live (PAR-0224) ----
+
+/// An objective whose `completionLogicCode` sets a flag runs against the live
+/// world when it completes (`MapObjectives.java:213` ->
+/// `LExecutor.runLogicScript`).
+#[test]
+fn objective_completion_script_runs_live() {
+    use crate::io::json::objectives::{FlagObjective, MapObjective};
+    let mut sim = campaign_sim();
+    let mut flag = FlagObjective {
+        flag: "x".to_owned(),
+        ..Default::default()
+    };
+    flag.common.completion_logic_code = Some("setflag \"x\" true\nstop".to_owned());
+    let data = crate::io::json::objectives::MapObjectives {
+        all: vec![MapObjective::Flag(flag)],
+    };
+    {
+        let mut runtime = sim
+            .ecs
+            .0
+            .get_resource_mut::<CampaignRuntime>()
+            .expect("campaign runtime");
+        runtime.session.objectives =
+            crate::game::map_objectives::MapObjectivesRuntime::from_data(data);
+        let session = &mut runtime.session;
+        assert!(
+            session.objectives.complete(0, &mut session.rules),
+            "objective completes"
+        );
+    }
+    assert!(!has_flag(&sim, "x"), "not yet run");
+    tick(&mut sim, 1);
+    assert!(
+        has_flag(&sim, "x"),
+        "the completion script set the live flag"
+    );
+    assert_events_drained(&sim);
+}

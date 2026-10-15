@@ -1191,6 +1191,45 @@ impl Sim {
     /// Drains the world-processor side-effect log once per tick
     /// (`LogicWorldState.events`; the T5/T6 half of `LExecutor`'s host sinks).
     fn drain_logic_events(&mut self) {
+        // `MapObjectives.completed` -> `LExecutor.runLogicScript`
+        // (`MapObjectives.java:213`): a privileged, loop-free script over the
+        // LIVE world, up to `SCRIPT_DEFAULT_MAX_INSTRUCTIONS`.
+        for code in self.take_pending_logic_scripts() {
+            let _ = crate::logic::script::run_logic_script_in(
+                &code,
+                crate::logic::script::SCRIPT_DEFAULT_MAX_INSTRUCTIONS,
+                false,
+                &mut self.ecs.0,
+            );
+        }
+        self.drain_logic_world_events();
+        // A script may emit world events and complete another objective: one
+        // more pass (bounded by the objectives themselves having no cycles).
+        for code in self.take_pending_logic_scripts() {
+            let _ = crate::logic::script::run_logic_script_in(
+                &code,
+                crate::logic::script::SCRIPT_DEFAULT_MAX_INSTRUCTIONS,
+                false,
+                &mut self.ecs.0,
+            );
+        }
+        self.drain_logic_world_events();
+    }
+
+    /// Takes the queued objective `completionLogicCode` scripts.
+    fn take_pending_logic_scripts(&mut self) -> Vec<String> {
+        self.ecs
+            .0
+            .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+            .map(|mut runtime| {
+                std::mem::take(&mut runtime.session.objectives.pending_logic_scripts)
+            })
+            .unwrap_or_default()
+    }
+
+    /// Drains the [`crate::logic::world::LogicWorldState`] event log into the
+    /// sim's host handlers.
+    fn drain_logic_world_events(&mut self) {
         let events = match self
             .ecs
             .0
