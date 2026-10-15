@@ -3920,6 +3920,11 @@ impl MindCampaign {
                 &GString::from("autosave"),
                 &settings_hub::with_settings(|store| slot.is_autosave(store)).to_variant(),
             );
+            // `SaveSlot.hasExternalAssets` (`@save.export.needsload` guard).
+            row.set(
+                &GString::from("external_assets"),
+                &slot.has_external_assets().to_variant(),
+            );
             // `SaveSlot.getMap/mode/getWave/getPlayTime/getDate` meta reads;
             // the dialog resolves `map_name` against the map registry
             // (`SaveMeta`: `maps.all().find(m -> m.name().equals(map))`).
@@ -3942,6 +3947,134 @@ impl MindCampaign {
             out.push(&row);
         }
         out
+    }
+
+    /// The `user://` `Paths` the save slots live in (same root as
+    /// `list_save_slots`).
+    fn save_paths(&self) -> Paths {
+        let root = ProjectSettings::singleton()
+            .globalize_path("user://")
+            .to_string();
+        Paths::new(root)
+    }
+
+    /// One `user://saves/<stem>.msav` slot, re-read from disk.
+    fn save_slot_by_name(&self, stem: &str) -> Option<mind_core::io::save::slot::SaveSlot> {
+        let paths = self.save_paths();
+        list_slot_files(&NativeFs, &paths)
+            .into_iter()
+            .find(|slot| slot.index() == stem)
+    }
+
+    /// `LoadDialog.addSetup`: imports one `.msav` into `user://saves`
+    /// (`SaveIO.isSaveValid` -> `SaveIO.getMeta` sector check ->
+    /// `Saves.importSave`, `LoadDialog.java:198-216`). Returns `""` on success
+    /// or `"invalid"` / `"nocampaign"` / `"fail:<message>"` for the dialog.
+    #[func]
+    pub fn import_save(&mut self, path: GString) -> GString {
+        let native = ProjectSettings::singleton().globalize_path(&path);
+        let from = std::path::PathBuf::from(native.to_string());
+        if !SaveIo::is_save_valid(&NativeFs, &from) {
+            return GString::from("invalid");
+        }
+        // `meta.rules.sector != null` -> `@save.nocampaign`: campaign saves are
+        // not importable.
+        if let Ok(meta) = SaveIo::get_meta(&NativeFs, &from) {
+            let has_sector = serde_json::from_str::<serde_json::Value>(&meta.rules_json)
+                .ok()
+                .and_then(|value| value.get("sector").cloned())
+                .is_some_and(|sector| !sector.is_null());
+            if has_sector {
+                return GString::from("nocampaign");
+            }
+        }
+        let paths = self.save_paths();
+        let result = settings_hub::with_settings(|store| {
+            self.saves.import_save(&NativeFs, &paths, store, &from)
+        });
+        match result {
+            Ok(_) => GString::new(),
+            Err(error) => GString::from(format!("fail:{error}").as_str()),
+        }
+    }
+
+    /// `LoadDialog.modifyButton` `Icon.trash`: `slot.delete()` plus the preview
+    /// PNG and the `save-<n>-name`/`save-<n>-autosave` settings keys
+    /// (`Saves.java:245-255`). Returns whether the slot file is gone.
+    #[func]
+    pub fn delete_save_slot(&mut self, name: GString) -> bool {
+        let stem = name.to_string();
+        let Some(mut slot) = self.save_slot_by_name(&stem) else {
+            return false;
+        };
+        let paths = self.save_paths();
+        let preview = slot.preview_path(&paths);
+        if NativeFs.exists(&preview) {
+            let _ = NativeFs.delete(&preview);
+        }
+        settings_hub::with_settings(|store| {
+            store.remove(&mind_core::io::settings::slot_name_key(&stem));
+            store.remove(&mind_core::io::settings::slot_autosave_key(&stem));
+        });
+        if let Err(error) = slot.delete(&NativeFs) {
+            log::warn!("delete_save_slot `{stem}`: {error}");
+            return false;
+        }
+        if let Err(error) = settings_hub::save(&self.paths) {
+            log::warn!("delete_save_slot: settings save failed: {error}");
+        }
+        true
+    }
+
+    /// `LoadDialog.modifyButton` `Icon.pencil`: `slot.setName(text)`.
+    #[func]
+    pub fn rename_save_slot(&mut self, name: GString, new_name: GString) -> bool {
+        let stem = name.to_string();
+        let renamed = new_name.to_string();
+        if renamed.trim().is_empty() {
+            return false;
+        }
+        let Some(slot) = self.save_slot_by_name(&stem) else {
+            return false;
+        };
+        settings_hub::with_settings(|store| slot.set_name(store, &renamed));
+        if let Err(error) = settings_hub::save(&self.paths) {
+            log::warn!("rename_save_slot: settings save failed: {error}");
+        }
+        true
+    }
+
+    /// `LoadDialog.modifyButton` `Icon.save`: `slot.setAutosave(on)`.
+    #[func]
+    pub fn set_slot_autosave(&mut self, name: GString, on: bool) -> bool {
+        let stem = name.to_string();
+        let Some(slot) = self.save_slot_by_name(&stem) else {
+            return false;
+        };
+        settings_hub::with_settings(|store| slot.set_autosave(store, on));
+        if let Err(error) = settings_hub::save(&self.paths) {
+            log::warn!("set_slot_autosave: settings save failed: {error}");
+        }
+        true
+    }
+
+    /// `LoadDialog.modifyButton` `Icon.export`: `slot.exportFile(to)`
+    /// (`FileChooser.export`).
+    #[func]
+    pub fn export_save_slot(&mut self, name: GString, path: GString) -> bool {
+        let stem = name.to_string();
+        let Some(mut slot) = self.save_slot_by_name(&stem) else {
+            return false;
+        };
+        let native = ProjectSettings::singleton().globalize_path(&path);
+        let to = std::path::PathBuf::from(native.to_string());
+        match slot.export_file(&NativeFs, &to, None) {
+            Ok(()) => true,
+            Err(error) => {
+                log::warn!("export_save_slot `{stem}`: {error}");
+                false
+            }
+        }
     }
 
     /// Writes one `CampaignRules` field for a planet and persists it
