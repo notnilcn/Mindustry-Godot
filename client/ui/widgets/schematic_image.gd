@@ -23,6 +23,9 @@ var _height := 0
 var _tiles: Array = []
 var _hovered := false
 var _silhouette: ImageTexture = null
+## `schematic-background` loaded from the assets dir (the sprite is not packed
+## into the atlas; `MindAssets.assets_dir()` resolves the root).
+var _background: Texture2D = null
 
 
 func _init() -> void:
@@ -49,10 +52,12 @@ func set_hovered(value: bool) -> void:
 func _draw() -> void:
 	if _width <= 0 or _height <= 0 or size.x <= 0.0 or size.y <= 0.0:
 		return
-	# Tiled `schematic-background` under everything (the PNG is not packed into
-	# the atlas yet: a flat dark backing keeps the card readable; noted in the
-	# commit).
+	# Tiled `schematic-background` under everything (atlas first, then the raw
+	# PNG through `MindAssets.assets_dir()`; a flat dark backing is the last
+	# resort).
 	var background := MindWidgets.icon_texture("schematic-background")
+	if background == null:
+		background = _background_texture()
 	if background != null:
 		draw_texture_rect(background, Rect2(Vector2.ZERO, size), true)
 	else:
@@ -101,6 +106,21 @@ func _draw() -> void:
 		false,
 		THICKNESS
 	)
+
+
+## Loads `sprites/schematic-background.png` once through the asset root.
+func _background_texture() -> Texture2D:
+	if _background != null:
+		return _background
+	var assets := get_node_or_null("/root/MindAssets")
+	if assets == null or not assets.has_method("assets_dir"):
+		return null
+	var path := "%s/sprites/schematic-background.png" % str(assets.call("assets_dir"))
+	var image := Image.load_from_file(path)
+	if image == null:
+		return null
+	_background = ImageTexture.create_from_image(image)
+	return _background
 
 
 ## One black pixel per occupied cell at `(1 + x + (size-1)/2)`

@@ -283,6 +283,10 @@ pub struct SchematicView {
     pub mod_name: Option<String>,
     /// Total build cost `(item name, amount)`.
     pub requirements: Vec<(String, i32)>,
+    /// `Schematic.powerConsumption()` (per tick).
+    pub power_consumption: f32,
+    /// `Schematic.powerProduction()` (per tick).
+    pub power_production: f32,
 }
 
 /// One launch loadout for a core (`LoadoutDialog`/`LaunchLoadoutDialog`).
@@ -1163,11 +1167,19 @@ fn requirement_pairs(
 }
 
 /// Builds the schematic library rows.
+///
+/// The vanilla launch loadouts (`Schematics.load_loadouts`, `file == None`) are
+/// hidden: Java's `Schematics.all()` yields them but `SchematicsDialog` never
+/// shows them (they are launch-loadout scaffolding, addressed through
+/// `loadout_views`). `SchematicView.index` keeps the real `Schematics.all`
+/// position so every action (`use_schematic`, export, delete) addresses the
+/// right entry.
 pub fn schematic_views(schematics: &Schematics, registry: &ContentRegistry) -> Vec<SchematicView> {
     schematics
         .all
         .iter()
         .enumerate()
+        .filter(|(_, schematic)| schematic.file.is_some())
         .map(|(index, schematic)| SchematicView {
             index,
             name: schematic.name(),
@@ -1194,6 +1206,8 @@ pub fn schematic_views(schematics: &Schematics, registry: &ContentRegistry) -> V
             file: schematic.file.clone(),
             mod_name: schematic.mod_name.clone(),
             requirements: requirement_pairs(registry, &schematic.requirements(registry)),
+            power_consumption: schematic.power_consumption(registry),
+            power_production: schematic.power_production(registry),
         })
         .collect()
 }
@@ -1443,6 +1457,12 @@ impl CampaignViews {
 
         let mut schematics = Schematics::new();
         schematics.load_loadouts(&registry);
+        // `schematic_views` hides the vanilla loadouts (`file == None`); keep
+        // one file-backed copy so the M5 fixtures still carry a dialog row
+        // with a core and requirements.
+        if let Some(first) = schematics.all.first_mut() {
+            first.file = Some("fixture-loadout.msch".to_owned());
+        }
         Self::from_campaign(&campaign, &registry, &schematics, active, None, 0, &|_| {
             Vec::new()
         })
@@ -1492,7 +1512,16 @@ mod tests {
         );
         assert!(!views.sectors.is_empty(), "serpulo sectors present");
         assert!(!views.research.is_empty(), "tech nodes present");
-        assert_eq!(views.schematics.len(), 4, "four vanilla loadout schematics");
+        assert_eq!(
+            views.schematics.len(),
+            1,
+            "only the file-backed fixture schematic is dialog-visible \
+             (vanilla loadouts hidden)"
+        );
+        assert_eq!(
+            views.schematics[0].index, 0,
+            "the view keeps the real Schematics.all index"
+        );
         assert!(!views.loadouts.is_empty(), "core-shard loadouts present");
         assert_eq!(views.rules.difficulties.len(), 5, "all five difficulties");
         assert_eq!(views.rules.difficulty, "normal", "default difficulty");
