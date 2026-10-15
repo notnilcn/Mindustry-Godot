@@ -174,6 +174,11 @@ impl BuildingBehavior for DoorBehavior {
         }
     }
 
+    /// `DoorBuild.checkSolid()` (`Door.java:142-145`): `!open`.
+    fn check_solid(&self, world: &World, e: Entity) -> bool {
+        world.get::<DoorState>(e).is_some_and(|state| !state.open)
+    }
+
     fn on_proximity_added(&self, world: &mut World, e: Entity) {
         update_chained(world, e);
     }
@@ -261,7 +266,8 @@ pub fn set_open(world: &mut World, e: Entity, open: bool) {
         if let Some(mut state) = world.get_mut::<DoorState>(door) {
             state.open = open;
         }
-        // `pathfinder.updateTile(entity.tile)` is plan 11's hook (no-op in core).
+        // `pathfinder.updateTile(entity.tile)` (Door.java:56) is the sim's
+        // `world::sync_dynamic_solid` + unit-runtime refresh (`Sim::configure`).
     }
 }
 
@@ -309,6 +315,11 @@ impl BuildingBehavior for AutoDoorBehavior {
         if world.get::<DoorState>(e).is_none() {
             world.entity_mut(e).insert(DoorState::default());
         }
+    }
+
+    /// `AutoDoor extends Door`: inherits `DoorBuild.checkSolid()` (`!open`).
+    fn check_solid(&self, world: &World, e: Entity) -> bool {
+        world.get::<DoorState>(e).is_some_and(|state| !state.open)
     }
 
     fn always_update_when_disabled(&self) -> bool {

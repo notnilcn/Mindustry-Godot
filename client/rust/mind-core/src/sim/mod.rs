@@ -538,7 +538,14 @@ impl Sim {
         if self.configure_power_node(entity, &value) {
             return true;
         }
-        crate::world::config::configure(&mut self.ecs.0, entity, None, value)
+        let applied = crate::world::config::configure(&mut self.ecs.0, entity, None, value);
+        // A door toggle changes `Tile.solid()` (Java calls
+        // `pathfinder.updateTile(entity.tile)` inline, `Door.java:56`); mirror
+        // the new `checkSolid` into the grid and re-pack when it moved.
+        if applied && crate::world::sync_dynamic_solid(&mut self.grid, &self.ecs.0) {
+            self.refresh_unit_runtime();
+        }
+        applied
     }
 
     /// link config, so the caller falls through to the normal behavior config

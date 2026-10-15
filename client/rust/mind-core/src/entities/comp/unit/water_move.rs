@@ -28,7 +28,8 @@ pub fn update_water_move(world: &mut World, entity: Entity, delta: (f32, f32)) {
     }
 }
 
-/// `EntityCollisions.waterSolid(x, y)`: solid unless the tile is a liquid floor.
+/// `EntityCollisions.waterSolid(x, y)`: solid unless the tile is a liquid floor
+/// (`tile.solid() || !tile.floor().isLiquid`, EntityCollisions.java:134-137).
 pub fn water_solid(
     grid: &WorldGrid,
     content: &crate::content::ContentRegistry,
@@ -40,7 +41,8 @@ pub fn water_solid(
         return true;
     }
     let tile = grid.tile(x, y);
-    tile.solid(content) || !crate::world::behavior::environment::floor_is_liquid(table, tile.floor)
+    tile.solid_full(content)
+        || !crate::world::behavior::environment::floor_is_liquid(table, tile.floor)
 }
 
 /// `WaterMoveComp.onLiquid()`: the tile under the unit is a liquid floor.

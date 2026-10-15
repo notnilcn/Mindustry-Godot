@@ -1248,6 +1248,9 @@ pub struct BlockSpec {
     pub env_disabled: Option<EnvMask>,
     /// Solid.
     pub solid: Option<bool>,
+    /// `Block.solidifes` (sic, `Block.java:116`): blocks placement under units
+    /// like a solid block does (`Build.checkNoUnitOverlap`). True for doors.
+    pub solidifies: Option<bool>,
     /// Can float on liquids.
     pub floating: Option<bool>,
     /// `CoreBlock.incinerateNonBuildable`: drop non-buildable items on intake
@@ -1414,6 +1417,7 @@ impl Default for BlockSpec {
             env_enabled: None,
             env_disabled: None,
             solid: None,
+            solidifies: None,
             floating: None,
             incinerate_non_buildable: None,
             update: None,
@@ -1756,6 +1760,8 @@ impl BlockSpec {
             }
             BlockKind::Door => {
                 spec.solid = Some(false);
+                // `Door.java:35`: `solidifes = true`.
+                spec.solidifies = Some(true);
                 spec.destructible = Some(true);
                 spec.group = Some(BlockGroup::Walls);
                 spec.build_cost_multiplier = Some(6.0);
@@ -1766,6 +1772,8 @@ impl BlockSpec {
             }
             BlockKind::AutoDoor => {
                 spec.solid = Some(false);
+                // `AutoDoor extends Door`: inherits `solidifes = true`.
+                spec.solidifies = Some(true);
                 spec.destructible = Some(true);
                 spec.update = Some(true);
                 spec.group = Some(BlockGroup::Walls);
@@ -2106,6 +2114,10 @@ pub struct BlockDef {
     pub env_disabled: EnvMask,
     /// Solid.
     pub solid: bool,
+    /// `Block.solidifes` (`Block.java:116`): placement is refused when a ground
+    /// unit overlaps the footprint (`Build.checkNoUnitOverlap`). True for the
+    /// doors (`Door.java:35`).
+    pub solidifies: bool,
     /// Floats on liquids.
     pub floating: bool,
     /// Updates each tick.
@@ -2466,6 +2478,7 @@ impl BlockDef {
                 .unwrap_or_else(|| EnvMask::of(vec![EnvFlag::Terrestrial])),
             env_disabled: spec.env_disabled.unwrap_or_default(),
             solid: spec.solid.unwrap_or(false),
+            solidifies: spec.solidifies.unwrap_or(false),
             floating: spec.floating.unwrap_or(false),
             update: spec.update.unwrap_or(false),
             destructible: spec.destructible.unwrap_or(false),

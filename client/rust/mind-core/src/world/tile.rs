@@ -45,6 +45,12 @@ pub struct Tile {
     pub build: Option<Entity>,
     /// Guard against re-entrant change events (`Tile.changing`).
     pub changing: bool,
+    /// Derived mirror of `Building.checkSolid()` for the building on this tile
+    /// (`Tile.solid()`'s `build != null && build.checkSolid()` term). Only a
+    /// closed `Door` sets it today (`Door.java:142-145`). This is *derived*
+    /// state: it is never persisted, and `world::sync_dynamic_solid` re-derives
+    /// it from the ECS (`core/world/mod.rs`).
+    pub dynamic_solid: bool,
 }
 
 impl Default for Tile {
@@ -61,6 +67,7 @@ impl Default for Tile {
             overlay: BlockId::AIR,
             build: None,
             changing: false,
+            dynamic_solid: false,
         }
     }
 }
@@ -129,10 +136,13 @@ impl Tile {
     }
 
     /// Whether the block/floor is solid (`Tile.solid()`, Tile.java:462-464):
-    /// `block.solid || floor.solid || (build != null && build.checkSolid())`
-    /// (`checkSolid` has no port override — grep `fn check_solid`).
+    /// `block.solid || floor.solid || (build != null && build.checkSolid())`.
+    /// The last term is the derived [`Self::dynamic_solid`] mirror (a closed
+    /// door), maintained by `world::sync_dynamic_solid`.
     pub fn solid_full(&self, content: &ContentRegistry) -> bool {
-        self.solid(content) || content.block(self.floor).is_some_and(|def| def.solid)
+        self.solid(content)
+            || content.block(self.floor).is_some_and(|def| def.solid)
+            || self.dynamic_solid
     }
 
     /// `Tile.isDeep()` (Tile.java:475-477): `block == air && floor.isDeep()`.
