@@ -15,6 +15,8 @@ extends Control
 var _editor: Node = null
 var _brush_sizes: Array[int] = []
 var _team_buttons: Array[Button] = []
+## A `MindUi` confirm for `@editor.unsaved` is awaiting an answer.
+var _pending_exit := false
 
 @onready var _search: LineEdit = $RightPalette/SearchField
 @onready var _selected: Label = $RightPalette/SelectedLabel
@@ -34,6 +36,16 @@ func _ready() -> void:
 	if _editor != null:
 		_rebuild_palette()
 	_refresh()
+	_connect_confirm()
+
+
+## `MapEditorDialog.tryExit` answers through the shared `MindUi` confirm signal.
+func _connect_confirm() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	if ui.has_signal("confirm_result") and not ui.is_connected("confirm_result", _on_confirm):
+		ui.connect("confirm_result", _on_confirm)
 
 
 func _process(_delta: float) -> void:
@@ -53,7 +65,8 @@ func hide_dialog() -> void:
 
 
 ## Closing the editor returns to the editor map list (`EditorMapsDialog.openin`
-## flow: `ui.maps.show()` on exit). Escape folds into the same exit.
+## flow: `ui.maps.show()` on exit); Back and Escape always confirm first
+## (`MapEditorDialog.tryExit`).
 func _exit_to_maps() -> void:
 	hide_dialog()
 	var ui := get_node_or_null("/root/MindUi")
@@ -61,8 +74,43 @@ func _exit_to_maps() -> void:
 		ui.call("open_dialog", "editor_maps", "{}")
 
 
+## `MapEditorDialog.tryExit` (`MapEditorDialog.java:789-795`): always
+## `ui.showConfirm("@confirm", "@editor.unsaved", ...)`; it never checks
+## `editor.saved`.
+func _confirm_exit() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("show_confirm"):
+		_exit_now()
+		return
+	_pending_exit = true
+	ui.call("show_confirm", MindWidgets.markup_text(_t("@editor.unsaved")))
+
+
+## The accept path: `logic.reset(); hide()` (`MindEditor.try_exit`).
+func _exit_now() -> void:
+	if _editor != null:
+		_editor.call("try_exit")
+	_exit_to_maps()
+
+
+func _on_confirm(confirmed: bool) -> void:
+	if not _pending_exit:
+		return
+	_pending_exit = false
+	if confirmed:
+		_exit_now()
+
+
+func _t(key: String) -> String:
+	var resolved := key.trim_prefix("@")
+	var assets := MindWidgets.assets()
+	if assets == null:
+		return resolved
+	return str(assets.call("bundle_get", resolved))
+
+
 func _bind_toolbar() -> void:
-	$LeftTools/BackButton.pressed.connect(_exit_to_maps)
+	$LeftTools/BackButton.pressed.connect(_confirm_exit)
 	var tools := {
 		"ZoomButton": "zoom",
 		"PickButton": "pick",
@@ -223,7 +271,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	match key:
 		KEY_ESCAPE:
-			_exit_to_maps()
+			# T8 replaces this with the editor menu (`doInput`: Escape opens
+			# `menu`); until then Escape takes the same confirm-first path.
+			_confirm_exit()
 		KEY_V:
 			_select_tool("zoom")
 		KEY_I:

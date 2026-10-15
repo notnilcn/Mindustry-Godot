@@ -659,6 +659,9 @@ func _build_prompt(
 	root.color = MindStyles.BLACK_9
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
+	# Prompts are topmost (`UI` has one shared layer upstream; the port's
+	# `Ui/EditorDialog` is a sibling of `UiRoot`, so raise above it).
+	root.z_index = 1000
 	overlay_layer.add_child(root)
 	_active_prompt = root
 	var center := CenterContainer.new()
