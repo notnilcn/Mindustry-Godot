@@ -147,6 +147,9 @@ pub struct ItemBridgeBehavior {
     pub buffer_capacity: usize,
     /// `BufferedItemBridge.speed`.
     pub speed: f32,
+    /// `BufferedItemBridge.displayedSpeed` (stats only, `Blocks.java`
+    /// `bridge-conveyor` = 11; 0 on non-buffered bridges).
+    pub displayed_speed: f32,
     /// Whether accepting when disabled is suppressed.
     pub no_accept_disabled: bool,
 }
@@ -160,6 +163,7 @@ impl ItemBridgeBehavior {
         buffered: false,
         buffer_capacity: 0,
         speed: 0.0,
+        displayed_speed: 0.0,
         no_accept_disabled: false,
     };
     /// `bridge-conveyor`.
@@ -170,6 +174,7 @@ impl ItemBridgeBehavior {
         buffered: true,
         buffer_capacity: 14,
         speed: 74.0,
+        displayed_speed: 11.0,
         no_accept_disabled: false,
     };
 

@@ -19,6 +19,7 @@
 //! * `Block.instantTransfer`/`maxConsecutive` have no port field yet, so the
 //!   `itemsMoved = Instant` branch is skipped.
 
+pub mod logistics;
 pub mod production;
 pub mod values;
 

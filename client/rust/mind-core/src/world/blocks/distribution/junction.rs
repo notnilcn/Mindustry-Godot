@@ -39,11 +39,16 @@ impl Default for JunctionBuild {
 pub struct JunctionBehavior {
     /// Frames taken to pass through (`Junction.speed`).
     pub speed: f32,
+    /// `Junction.displayedSpeed` (`Blocks.java` junction = 13; stats only).
+    pub displayed_speed: f32,
 }
 
 impl JunctionBehavior {
     /// Vanilla `junction` (`speed = 26`).
-    pub const VANILLA: JunctionBehavior = JunctionBehavior { speed: 26.0 };
+    pub const VANILLA: JunctionBehavior = JunctionBehavior {
+        speed: 26.0,
+        displayed_speed: 13.0,
+    };
 }
 
 impl BuildingBehavior for JunctionBehavior {

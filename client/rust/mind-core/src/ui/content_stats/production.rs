@@ -53,12 +53,20 @@ pub fn family_block_stats(ctx: &StatCtx, id: BlockId) -> Stats {
     let time_period = time_period_before_super(ctx, def, id);
     let mut stats = block_stats_timed(ctx, id, time_period);
     family_body(ctx, id, def, &mut stats);
+    // I04 T4: logistics/storage/logic/defense families, same `super.setStats()`
+    // ordering (base first, then the family's adds/removes).
+    super::logistics::logistics_block_stats(ctx, id, def, &mut stats);
     stats
 }
 
 /// The `stats.timePeriod = …` assignment each family body performs before
 /// `super.setStats()` (`-1` = the `Stats` default).
 fn time_period_before_super(ctx: &StatCtx, def: &BlockDef, id: BlockId) -> f32 {
+    // I04 T4: the projector families set `stats.timePeriod` before
+    // `super.setStats()` too (their optional-consumer rows divide by it).
+    if let Some(value) = super::logistics::time_period_before_super(ctx, id, def) {
+        return value;
+    }
     match def.kind {
         BlockKind::GenericCrafter
         | BlockKind::HeatProducer
