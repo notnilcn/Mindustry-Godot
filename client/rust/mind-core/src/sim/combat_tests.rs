@@ -138,9 +138,6 @@ fn shots_in(sim_setup: impl Fn(&mut Sim, Entity), ticks: usize) -> (i32, f32) {
     (start - end, left)
 }
 
-/// PAR-0087: a duo accepts water coolant (capacity 20) and fires faster
-/// while consuming it; slag/oil are rejected by the `ConsumeCoolant` filter.
-#[test]
 /// I01 T9: the coolant consumer reads `liquids.current()`
 /// (`ConsumeLiquidFilter.getConsumed`, `ConsumeLiquidFilter.java:57-71`), so a
 /// module holding water and cryofluid consumes the cryofluid (the last added).
@@ -186,6 +183,9 @@ fn coolant_uses_current_liquid() {
     );
 }
 
+/// PAR-0087: a duo accepts water coolant (capacity 20) and fires faster
+/// while consuming it; slag/oil are rejected by the `ConsumeCoolant` filter.
+#[test]
 fn duo_water_coolant_speeds_fire_and_drains() {
     use crate::world::blocks::defense::turrets::{accept_liquid, handle_liquid};
     let mut sim = live_sim(16);
