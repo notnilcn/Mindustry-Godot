@@ -11,6 +11,7 @@ mod assets;
 mod audio;
 mod camera;
 mod campaign;
+mod content_boot;
 mod editor;
 mod fx;
 mod hello;
@@ -65,10 +66,20 @@ unsafe impl ExtensionLibrary for MindExtension {
                     .globalize_path("user://")
                     .to_string(),
             );
+            // `Vars.checkLaunch` (Vars.java:398-408) runs in `ClientLauncher.main`
+            // before anything reads `failedToLaunch`: the `MindMods` autoload
+            // bootstraps (and skips mod loading) during autoload `_ready`, which
+            // precedes `MindPlatform`'s scene insert. The Godot editor also
+            // instantiates the scene and never clears the marker, so only the
+            // game process runs the check.
             log_bridge::install();
             // Chains the log bridge's hook so a panic flushes `last_log.txt`
             // before writing its `crashes/` report (plan 22 §3.4).
             platform::crash::install();
+            if !godot::classes::Engine::singleton().is_editor_hint() {
+                let launch = platform::args::parse_process_args();
+                platform::note_launch(&platform::desktop::data_root(launch.data_dir.as_deref()));
+            }
         }
     }
 }

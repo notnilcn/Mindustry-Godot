@@ -225,6 +225,31 @@ impl AtlasIndex {
         Vec::new()
     }
 
+    /// Appends a mod overlay region (I07 T5; `Mods.packSprites` runtime half).
+    /// A name that already exists replaces the base lookup (`sprites-override/`
+    /// semantics); the region keeps its own page so mesh/UV callers that read
+    /// `region.page`/`page_texture` batch unchanged.
+    pub fn add_overlay_region(&mut self, region: Region) {
+        let index = self.regions.len();
+        self.by_name.insert(region.name.clone(), index);
+        self.regions.push(region);
+    }
+
+    /// Appends an overlay page (no manifest file; pixels live in the runtime)
+    /// and returns its index.
+    pub fn add_overlay_page(&mut self, type_: PageType, width: i32, height: i32) -> usize {
+        let index = self.pages.len();
+        self.pages.push(Page {
+            index,
+            type_,
+            file: String::new(),
+            width,
+            height,
+            sha256: String::new(),
+        });
+        index
+    }
+
     /// `UnlockableContent.loadIcon()` full-icon chain (plan 03 §4):
     /// `fullOverride` → `<type>-<name>-full` → `<name>-full` → `<name>` →
     /// `<type>-<name>` → `<name>1`.

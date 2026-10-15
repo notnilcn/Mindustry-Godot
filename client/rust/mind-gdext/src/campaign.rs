@@ -25,7 +25,7 @@ use mind_core::content::registries::planets::GeneratorKind;
 use mind_core::content::tech::{ObjectiveSpec, TechNodeRef};
 use mind_core::content::{
     BlockId, ContentRef, ContentRegistry, ContentType, ItemId, LiquidId, MemoryBundle, PlanetId,
-    SectorId, create_base_content,
+    SectorId,
 };
 use mind_core::game::State;
 use mind_core::game::campaign_rules::CampaignRules;
@@ -209,18 +209,17 @@ impl MindCampaign {
         );
 
         let bundle = MemoryBundle::new();
+        // I07 T4: the one content boot path (base content + enabled mods);
+        // Java `ClientLauncher.java:166-189`.
         let content = settings_hub::with_settings(|settings| {
             let store = SettingsUnlockStore::new(settings);
-            create_base_content(&bundle, &store, true)
+            crate::content_boot::build_registry(&bundle, &store)
         });
         match content {
-            Ok(mut registry) => {
+            Ok(registry) => {
                 // The facade reads database tabs and derived block/unit fields
-                // (`ContentLoader.init`/`postInit` sweeps), so run the same
-                // lifecycle the sim host/editor run.
-                if let Err(error) = registry.init().and_then(|()| registry.post_init()) {
-                    log::error!("MindCampaign content lifecycle failed: {error}");
-                }
+                // (`ContentLoader.init`/`postInit` sweeps), so the boot path
+                // already ran the same lifecycle the sim host/editor run.
                 // `Vars.init`: `control.saves.load()` runs its legacy sector
                 // remap (moving `sector-serpulo-15.msav` to Ground Zero's
                 // current cell and migrating `<planet>-s-<id>-info`) before the
@@ -1370,7 +1369,7 @@ impl MindCampaign {
         }
         if playtest {
             self.playtesting_map = Some(path);
-        } else if self.live_setting_flag("savecreate") {
+        } else if settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
             // `Control.playMap`'s `savecreate` slot (`Control.java:418-420`):
             // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`.
             let name = format!("{} {}", header.name(), save_date_stamp());
@@ -4958,7 +4957,7 @@ fn clear_sector_record(
 mod tests {
     use super::*;
     use mind_core::assets::bundle::parse_properties;
-    use mind_core::content::MemoryUnlockStore;
+    use mind_core::content::{MemoryUnlockStore, create_base_content};
 
     /// EV-0063: the registry boots with an empty `MemoryBundle`, so the paused
     /// dialog's `@objective` gate must resolve the description from the live

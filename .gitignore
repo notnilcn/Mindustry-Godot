@@ -65,3 +65,5 @@ parity-java-home/
 parity-ledger.json.lock
 
 screenshots_for_ai/
+# Vars.checkLaunch marker (Vars.java:398-408); never commit a crash marker
+client/launchid.dat
