@@ -717,6 +717,8 @@ pub fn radar_filters() -> RadarFiltersReport {
         flying,
         player: false,
         dead: false,
+        targetable: true,
+        attacker: true,
     };
     let derelict = mind_core::game::team::DERELICT.0;
     let list = vec![
@@ -727,7 +729,17 @@ pub fn radar_filters() -> RadarFiltersReport {
         candidate(5, 1, 20.0, false, 20.0),
     ];
     let any = [RadarTarget::Enemy, RadarTarget::Any, RadarTarget::Any];
-    let enemy = radar::find(&list, 0, any, RadarSort::Distance, true, 0.0, 0.0);
+    let enemy = radar::find(
+        &list,
+        0,
+        any,
+        RadarSort::Distance,
+        true,
+        0.0,
+        0.0,
+        1000.0,
+        None,
+    );
     let ground = radar::find(
         &list,
         0,
@@ -736,8 +748,20 @@ pub fn radar_filters() -> RadarFiltersReport {
         true,
         0.0,
         0.0,
+        1000.0,
+        None,
     );
-    let farthest = radar::find(&list, 0, any, RadarSort::Health, false, 0.0, 0.0);
+    let farthest = radar::find(
+        &list,
+        0,
+        any,
+        RadarSort::Health,
+        false,
+        0.0,
+        0.0,
+        1000.0,
+        None,
+    );
     let mut hasher = mind_core::determinism::Hasher::new();
     hasher.write_u64(enemy.map(|e| e.index().index() as u64).unwrap_or(u64::MAX));
     hasher.write_u64(ground.map(|e| e.index().index() as u64).unwrap_or(u64::MAX));
@@ -1463,10 +1487,14 @@ mod tests {
         assert_eq!(sensor.size, 1.0);
 
         let radar = radar_filters();
-        assert_eq!(radar.checksum, "a740d5e42b2bb201");
+        // I03 T5: `sortOrder 0` maximizes `sort.func * -1` (Java
+        // `RadarSort.health` = max health with order 1, min health with order
+        // 0), so `farthest` is the lowest-health enemy (entity 5, health 20),
+        // not the highest (entity 4, health 40).
+        assert_eq!(radar.checksum, "88460edb203c67e0");
         assert_eq!(radar.enemy, Some(4));
         assert_eq!(radar.ground, Some(4));
-        assert_eq!(radar.farthest, Some(4));
+        assert_eq!(radar.farthest, Some(5));
 
         let gating = unit_control_gating();
         assert_eq!(gating.checksum, "a6a2ae141c632f15");

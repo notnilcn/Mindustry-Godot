@@ -1286,18 +1286,79 @@ impl Instruction {
                 output,
             } => {
                 let base = exec.arena.get(radar.id()).value_obj().cloned();
-                let (base_x, base_y, team) = base_team_pos(world, base.as_ref());
-                let order = exec.arena.get(sort_order.id()).as_bool();
-                let found = radar::find(
-                    &radar::candidates(world),
-                    team,
-                    *targets,
-                    *sort,
-                    order,
-                    base_x,
-                    base_y,
-                );
                 let output = output.id();
+                let Some(base) = base else {
+                    if !exec.is_constant(output) {
+                        exec.arena.get_mut(output).set_obj(None);
+                    }
+                    return;
+                };
+                // `Ranged` + team + building-privilege gates (`RadarI.run`).
+                let Some(src) = radar::source(world, &base, exec.team, exec.privileged) else {
+                    if !exec.is_constant(output) {
+                        exec.arena.get_mut(output).set_obj(None);
+                    }
+                    return;
+                };
+                let order = exec.arena.get(sort_order.id()).as_bool();
+                let key = (exec.arena.get(exec.counter).num - 1.0).max(0.0) as u32;
+                let tick = world
+                    .get_resource::<crate::logic::world::LogicWorldState>()
+                    .map(|state| state.tick as f32)
+                    .unwrap_or(0.0);
+                let recompute = if src.unit {
+                    // `uradar`: `UnitControlI.checkLogicAI(exec, base, true)` +
+                    // the per-instruction 40-tick `checkTargetTimer` gate.
+                    if unit_control::check_logic_ai(
+                        world,
+                        exec.team,
+                        exec.privileged,
+                        src.entity,
+                        Some(src.entity),
+                        true,
+                        exec.build,
+                    )
+                    .is_none()
+                    {
+                        if !exec.is_constant(output) {
+                            exec.arena.get_mut(output).set_obj(None);
+                        }
+                        return;
+                    }
+                    unit_control::refresh_control_timer(world, src.entity);
+                    world
+                        .get_mut::<crate::ai::types::logic::LogicAi>(src.entity)
+                        .is_some_and(|mut ai| ai.check_target_timer(key))
+                } else {
+                    // Building sources refresh on a fixed 30-tick interval (or
+                    // when the source changed).
+                    match exec.radar_cache.get(&key) {
+                        Some((cached_tick, cached_base, _)) => {
+                            *cached_base != Some(src.entity) || tick - *cached_tick >= 30.0
+                        }
+                        None => true,
+                    }
+                };
+                let found = if recompute {
+                    let found = radar::find(
+                        &radar::candidates(world),
+                        src.team,
+                        *targets,
+                        *sort,
+                        order,
+                        src.x,
+                        src.y,
+                        src.range,
+                        Some(src.entity),
+                    );
+                    exec.radar_cache
+                        .insert(key, (tick, Some(src.entity), found));
+                    found
+                } else {
+                    exec.radar_cache
+                        .get(&key)
+                        .and_then(|(_, _, target)| *target)
+                };
                 if !exec.is_constant(output) {
                     exec.arena
                         .get_mut(output)
@@ -1622,37 +1683,6 @@ impl Instruction {
     }
 }
 
-/// Base `(x, y, team)` for a radar/locate instruction.
-fn base_team_pos(world: &World, base: Option<&LogicObject>) -> (f32, f32, u8) {
-    match base {
-        Some(LogicObject::Building(e)) => {
-            let pos = world.get::<crate::entities::comp::Pos>(*e);
-            let team = world
-                .get::<crate::entities::comp::TeamComp>(*e)
-                .map(|t| t.team)
-                .unwrap_or(0);
-            (
-                pos.map(|p| p.x).unwrap_or(0.0),
-                pos.map(|p| p.y).unwrap_or(0.0),
-                team,
-            )
-        }
-        Some(LogicObject::Unit(e)) => {
-            let pos = world.get::<crate::entities::comp::Pos>(*e);
-            let team = world
-                .get::<crate::entities::comp::TeamComp>(*e)
-                .map(|t| t.team)
-                .unwrap_or(0);
-            (
-                pos.map(|p| p.x).unwrap_or(0.0),
-                pos.map(|p| p.y).unwrap_or(0.0),
-                team,
-            )
-        }
-        _ => (0.0, 0.0, 0),
-    }
-}
-
 fn set_output_num(exec: &mut Executor, var: VarRef, value: f64) {
     let id = var.id();
     if !exec.is_constant(id) {
@@ -1740,6 +1770,9 @@ pub struct Executor {
     /// `LExecutor.unitTimeouts`: last transfer tick per unit (entity keyed;
     /// Java keys by unit id — same identity in a live run).
     pub unit_timeouts: indexmap::IndexMap<Entity, f32>,
+    /// `RadarI` per-instruction cache `(tick, source, target)` (building
+    /// sources refresh every 30 ticks).
+    pub radar_cache: indexmap::IndexMap<u32, (f32, Option<Entity>, Option<Entity>)>,
     /// `@queries` result arenas (deviation 3); index 0 is the privileged arena.
     pub queries: Vec<Vec<LogicObject>>,
     /// Global arena snapshot from the assembler (deviation 2).
@@ -1782,6 +1815,7 @@ impl Executor {
             link_ids: IndexSet::new(),
             binds: Vec::new(),
             unit_timeouts: indexmap::IndexMap::new(),
+            radar_cache: indexmap::IndexMap::new(),
             queries: Vec::new(),
             globals: crate::logic::globals::GlobalVars::new(),
             global_mirrors: Vec::new(),
