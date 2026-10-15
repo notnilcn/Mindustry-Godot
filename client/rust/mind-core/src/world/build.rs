@@ -8,6 +8,8 @@
 //! Bans/limits/darkness/core-radius use the plan-07 [`BuildRules`]/
 //! [`BlockCounter`] providers (plan 12 overrides).
 
+use bevy_ecs::entity::Entity;
+
 use crate::content::{BlockDef, BlockId, BlockKind, ContentRegistry, EnvFlag};
 use crate::ecs::BuildingComp;
 use crate::entities::comp::TeamComp;
@@ -70,8 +72,34 @@ pub fn can_place_on(_def: &BlockDef, _team: u8, _rot: u8) -> bool {
     true
 }
 
-/// `Block.canBreak` (`CoreBlock.java:173-177` for cores; `Block.canBreak` is
-/// unconditionally true otherwise).
+/// Payload pickup gate: `build.block.buildVisibility != BuildVisibility.hidden`
+/// (`InputHandler.java:1049`) and `build.canPickup()`. `LogicBuild.canPickup()`
+/// is false (`LogicBlock.java:471`) and a core is never pickable.
+pub fn block_can_pickup(def: &BlockDef) -> bool {
+    use crate::content::registries::blocks::BuildVisibility;
+    def.kind != BlockKind::CoreBlock
+        && def.kind != BlockKind::LogicBlock
+        && def.build_visibility != BuildVisibility::Hidden
+}
+
+/// `LogicBuild.collide(Bullet)` / `LogicBuild.damage(float)`
+/// (`LogicBlock.java:437-451`): a privileged, non-destructible processor is
+/// immune to bullets and every damage source. `false` for every other block.
+pub fn logic_processor_invulnerable(world: &bevy_ecs::world::World, entity: Entity) -> bool {
+    let Some(building) = world.get::<crate::entities::comp::Building>(entity) else {
+        return false;
+    };
+    world
+        .get_resource::<BlockTable>()
+        .and_then(|table| table.get(building.block))
+        .is_some_and(|inst| {
+            inst.def.kind == BlockKind::LogicBlock && inst.def.privileged && !inst.def.destructible
+        })
+}
+
+/// `Block.canBreak` (`CoreBlock.java:173-177` for cores; `LogicBlock.canBreak`
+/// is `accessible()`, `LogicBlock.java:120-122`; unconditionally true
+/// otherwise).
 pub fn can_break(def: &BlockDef, rules: &BuildRules, cores_of_team: usize) -> bool {
     if def.kind == BlockKind::CoreBlock {
         //always keep at least 1 core to not lose the save
@@ -131,6 +159,15 @@ pub fn valid_break(
     let Some(def) = content.block(tile.block) else {
         return false;
     };
+    // `LogicBlock.canBreak(tile) = accessible()` (`LogicBlock.java:120-122`,
+    // `Build.validBreak` `Build.java:319`): an inaccessible privileged
+    // processor cannot be broken, even before its building entity exists.
+    if def.kind == BlockKind::LogicBlock
+        && let Some(world) = world
+        && !crate::logic::blocks::accessible(def.privileged, crate::logic::blocks::rules_ref(world))
+    {
+        return false;
+    }
     let breakable = tile.breakable(content) || rules.allow_environment_deconstruct;
     if !breakable {
         return false;

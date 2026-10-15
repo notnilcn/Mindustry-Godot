@@ -292,6 +292,11 @@ pub fn apply_health(world: &mut World, entity: Entity, amount: f32) {
     if amount <= 0.0 {
         return;
     }
+    // `LogicBuild.damage(float)` (`LogicBlock.java:437-444`): a privileged,
+    // non-destructible processor ignores every damage instance.
+    if crate::world::build::logic_processor_invulnerable(world, entity) {
+        return;
+    }
     let divisor = world
         .get::<StatusComp>(entity)
         .map(|status| status.health_multiplier)

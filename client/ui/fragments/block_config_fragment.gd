@@ -59,10 +59,39 @@ func _rebuild() -> void:
 		_build_link_panel()
 	elif bool(_config.get("color", false)):
 		_build_color_picker()
+	elif bool(_config.get("logic", false)):
+		_build_logic_panel()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
 	else:
 		_build_options()
+
+
+## `LogicBlock.buildConfiguration` (`LogicBlock.java:736-739`): one 40x40
+## `Icon.pencil` button with `Styles.cleari` opening the logic editor. The
+## pencil is an icon-font glyph (`MindIcons`), like every upstream `Icon.*`.
+func _build_logic_panel() -> void:
+	# code-instantiated: Java builds this single pencil button per processor at
+	# tap time; it has no scene-authorable per-building shape.
+	var pencil := MindWidgets.glyph_button("pencil", "edit", "cleari")
+	pencil.custom_minimum_size = Vector2(40, 40)
+	pencil.tooltip_text = _t("@edit", "edit")
+	pencil.pressed.connect(_open_logic_dialog)
+	body.add_child(pencil)
+	var row := HBoxContainer.new()
+	body.add_child(row)
+	_add_close_button(row)
+
+
+## Opens the logic editor dialog for this processor (T7). Until the dialog is
+## registered `open_dialog` returns false and nothing happens.
+func _open_logic_dialog() -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("open_dialog"):
+		return
+	var x := int(_config.get("x", 0))
+	var y := int(_config.get("y", 0))
+	ui.call("open_dialog", "logic", JSON.stringify({"x": x, "y": y}))
 
 
 ## H02 T6: link blocks (bridges, conduits, drivers, power nodes) show no
