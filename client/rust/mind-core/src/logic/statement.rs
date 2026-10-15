@@ -563,6 +563,27 @@ logic_enum!(
     }
 );
 
+impl LogicRule {
+    /// Rules whose rebuild shows the `of`/value row (`SetRuleStatement.rebuild`,
+    /// `LStatements.java:1653-1660`).
+    pub const fn uses_team(self) -> bool {
+        use LogicRule::*;
+        matches!(
+            self,
+            BuildSpeed
+                | UnitHealth
+                | UnitBuildSpeed
+                | UnitMineSpeed
+                | UnitCost
+                | UnitDamage
+                | BlockHealth
+                | BlockDamage
+                | RtsMinSquad
+                | RtsMinWeight
+        )
+    }
+}
+
 impl Statement {
     /// `LStatement.afterRead()` post-processing.
     pub fn after_read(&mut self) {
@@ -1022,6 +1043,321 @@ pub fn editor_layout(name: &str, values: &[String]) -> Vec<EditorItem> {
             out.push(e_jump(0));
             out
         }
+        // `UnitBindStatement.build` (`:1024-1060`); the unit picker is a
+        // content button in Java (not ported).
+        "ubind" => vec![e_text("type"), e_field(0)],
+        // `UnitControlStatement.build` (`:1068-1101`): one row per
+        // `LUnitControl.params` entry.
+        "ucontrol" => {
+            let mut out = vec![e_select(0)];
+            let control = LUnitControl::from_name(value(0)).unwrap_or(LUnitControl::Move);
+            for (i, &param) in control.params().iter().enumerate() {
+                out.push(e_labeled(1 + i, param));
+            }
+            out
+        }
+        // `UnitRadarStatement` = `RadarStatement.build` without the `from` field
+        // (`:1103-1125`).
+        "uradar" => vec![
+            e_field(6),
+            e_text("="),
+            e_select(0),
+            e_select(1),
+            e_select(2),
+            e_labeled(5, "order"),
+            e_text("sort"),
+            e_select(3),
+        ],
+        // `UnitLocateStatement.build` (`:1135-1215`).
+        "ulocate" => {
+            let locate = LLocate::from_name(value(0)).unwrap_or(LLocate::Building);
+            let mut out = vec![e_text("find"), e_select(0)];
+            match locate {
+                LLocate::Building => {
+                    out.push(e_text("group"));
+                    out.push(e_select(1));
+                    out.push(e_labeled(2, "enemy"));
+                }
+                LLocate::Ore => out.push(e_labeled(3, "ore")),
+                LLocate::Spawn | LLocate::Damaged => {}
+            }
+            out.push(e_labeled(4, "outX"));
+            out.push(e_labeled(5, "outY"));
+            out.push(e_labeled(6, "found"));
+            if locate != LLocate::Ore {
+                out.push(e_labeled(7, "building"));
+            }
+            out
+        }
+        // `QueryStatement.build` (`:1224-1267`).
+        "query" => {
+            let shape = QueryShape::from_name(value(0)).unwrap_or(QueryShape::Circle);
+            let mut out = vec![
+                e_select(0),
+                e_select(1),
+                e_labeled(2, "team"),
+                e_labeled(3, "x"),
+                e_labeled(4, "y"),
+            ];
+            if shape == QueryShape::Circle {
+                out.push(e_labeled(5, "radius"));
+            } else {
+                out.push(e_labeled(5, "width"));
+                out.push(e_labeled(6, "height"));
+            }
+            out
+        }
+        // `GetBlockStatement.build` (`:1275-1303`).
+        "getblock" => vec![
+            e_field(1),
+            e_text(" ="),
+            e_select(0),
+            e_labeled(2, "x"),
+            e_labeled(3, "y"),
+        ],
+        // `SetBlockStatement.rebuild` (`:1315-1354`).
+        "setblock" => {
+            let layer = TileLayer::from_name(value(0)).unwrap_or(TileLayer::Block);
+            let mut out = vec![
+                e_text("set"),
+                e_select(0),
+                e_labeled(2, "x"),
+                e_labeled(3, "y"),
+                e_labeled(1, "block"),
+            ];
+            if layer == TileLayer::Block {
+                out.push(e_labeled(4, "team"));
+                out.push(e_labeled(5, "rotation"));
+            }
+            out
+        }
+        // `SpawnUnitStatement.build` (`:1361-1385`).
+        "spawn" => vec![
+            e_field(5),
+            e_text("-spawn"),
+            e_labeled(0, "type"),
+            e_labeled(1, "x"),
+            e_labeled(2, "y"),
+            e_labeled(4, "team"),
+            e_labeled(3, "angle"),
+            e_labeled(6, "effect"),
+        ],
+        // `SpawnBulletStatement.build` (`:1392-1426`).
+        "bullet" => vec![
+            e_field(0),
+            e_text("-bullet"),
+            e_labeled(1, "from"),
+            e_labeled(2, "index"),
+            e_labeled(3, "x"),
+            e_labeled(4, "y"),
+            e_labeled(5, "rotation"),
+            e_labeled(6, "team"),
+            e_labeled(7, "owner"),
+            e_labeled(8, "damage"),
+            e_labeled(9, "velocityScl"),
+            e_labeled(10, "lifeScl"),
+            e_labeled(11, "aimX"),
+            e_labeled(12, "aimY"),
+        ],
+        // `ApplyStatusStatement.build` (`:1435-1491`); the effect picker is a
+        // content button in Java (not ported) and the `isPermanent` check needs
+        // status content (duration shown for every non-clear status).
+        "status" => {
+            let mut out = vec![e_select(0), e_field(1), e_labeled(2, "target")];
+            if value(0) != "true" {
+                out.push(e_labeled(3, "seconds"));
+            }
+            out
+        }
+        // `WeatherSenseStatement.build` (`:1501-1545`).
+        "weathersense" => vec![e_field(0), e_text("="), e_text("weather"), e_field(1)],
+        // `WeatherSetStatement.build` (`:1554-1595`).
+        "weatherset" => vec![e_field(0), e_labeled(1, "state")],
+        // `SpawnWaveStatement.build` (`:1602-1622`).
+        "spawnwave" => vec![
+            e_labeled(2, "natural"),
+            e_labeled(0, "x"),
+            e_labeled(1, "y"),
+        ],
+        // `SetRuleStatement.rebuild` (`:1634-1690`).
+        "setrule" => {
+            let rule = LogicRule::from_name(value(0)).unwrap_or(LogicRule::WaveSpacing);
+            let mut out = vec![e_select(0)];
+            if rule == LogicRule::MapArea {
+                out.extend([
+                    e_text("="),
+                    e_labeled(2, "x"),
+                    e_labeled(3, "y"),
+                    e_labeled(4, "w"),
+                    e_labeled(5, "h"),
+                ]);
+            } else if rule.uses_team() {
+                out.extend([e_labeled(2, "of"), e_text("="), e_field(1)]);
+            } else if matches!(rule, LogicRule::Ban | LogicRule::Unban) {
+                out.extend([e_text("block-unit"), e_field(1)]);
+            } else {
+                out.extend([e_text("="), e_field(1)]);
+            }
+            out
+        }
+        // `FlushMessageStatement.build` (`:1698-1733`).
+        "message" => {
+            let type_ = MessageType::from_name(value(0)).unwrap_or(MessageType::Announce);
+            let mut out = vec![e_select(0)];
+            if matches!(type_, MessageType::Announce | MessageType::Toast) {
+                out.push(e_labeled(1, "duration"));
+            }
+            out.push(e_labeled(2, "success"));
+            out
+        }
+        // `CutsceneStatement.rebuild` (`:1745-1794`).
+        "cutscene" => {
+            let action = CutsceneAction::from_name(value(0)).unwrap_or(CutsceneAction::Pan);
+            let mut out = vec![e_select(0)];
+            match action {
+                CutsceneAction::Active | CutsceneAction::GetHud => {
+                    out.push(e_labeled(1, "result"));
+                }
+                CutsceneAction::Pan => {
+                    out.extend([e_labeled(1, "x"), e_labeled(2, "y"), e_labeled(3, "speed")]);
+                }
+                CutsceneAction::Zoom => out.push(e_labeled(1, "level")),
+                CutsceneAction::Shake => {
+                    out.extend([e_labeled(1, "amount"), e_labeled(2, "duration")]);
+                }
+                CutsceneAction::SetHud => out.push(e_labeled(1, "shown")),
+                CutsceneAction::Stop => {}
+            }
+            out
+        }
+        // `EffectStatement.build` (`:1801-1855`); the effect picker is the
+        // effects dialog in Java (a plain select here).
+        "effect" => {
+            let entry = crate::logic::fx::get(value(0));
+            let mut out = vec![e_select(0), e_labeled(1, "x"), e_labeled(2, "y")];
+            if let Some(entry) = entry {
+                if entry.color {
+                    out.push(e_labeled(4, "color"));
+                    out.push(e_color(4));
+                }
+                if entry.size || entry.rotate {
+                    out.push(e_labeled(3, if entry.size { "size" } else { "rotation" }));
+                }
+                if entry.data.is_some() {
+                    out.push(e_labeled(5, "data"));
+                }
+            }
+            out
+        }
+        // `ExplosionStatement.build` (`:1862-1888`).
+        "explosion" => vec![
+            e_labeled(0, "team"),
+            e_labeled(1, "x"),
+            e_labeled(2, "y"),
+            e_labeled(3, "radius"),
+            e_labeled(4, "damage"),
+            e_labeled(5, "air"),
+            e_labeled(6, "ground"),
+            e_labeled(7, "pierce"),
+            e_labeled(8, "effect"),
+        ],
+        // `SetRateStatement.build` (`:1895-1898`).
+        "setrate" => vec![e_labeled(0, "ipt = ")],
+        // `FetchStatement.rebuild` (`:1920-1965`).
+        "fetch" => {
+            let type_ = FetchType::from_name(value(0)).unwrap_or(FetchType::Unit);
+            let mut out = vec![e_field(1), e_text("="), e_select(0), e_labeled(2, "team")];
+            if !matches!(
+                type_,
+                FetchType::CoreCount
+                    | FetchType::PlayerCount
+                    | FetchType::UnitCount
+                    | FetchType::BuildCount
+            ) {
+                out.push(e_labeled(3, "#"));
+            }
+            if matches!(type_, FetchType::Build | FetchType::BuildCount) {
+                out.push(e_labeled(4, "block"));
+            }
+            if matches!(type_, FetchType::Unit | FetchType::UnitCount) {
+                out.push(e_labeled(4, "unit"));
+            }
+            out
+        }
+        // `SyncStatement.build` (`:1972-1974`).
+        "sync" => vec![e_field(0)],
+        // `ClientDataStatement.build` (`:1997-2005`).
+        "clientdata" => vec![
+            e_text("send "),
+            e_field(1),
+            e_text(" on "),
+            e_field(0),
+            e_text(", reliable "),
+            e_field(2),
+        ],
+        // `GetFlagStatement.build` (`:2033-2058`).
+        "getflag" => vec![e_field(0), e_text("="), e_text("flag"), e_field(1)],
+        // `SetFlagStatement.build` (`:2065-2085`).
+        "setflag" => vec![e_field(0), e_text("="), e_field(1)],
+        // `SetPropStatement.build` (`:2093-2178`).
+        "setprop" => vec![
+            e_text("set"),
+            e_field(0),
+            e_text("of"),
+            e_field(1),
+            e_text("to"),
+            e_field(2),
+        ],
+        // `PlaySoundStatement.build` (`:2181-2229`); the sound picker is the
+        // sounds dialog in Java (not ported).
+        "playsound" => {
+            let positional = value(0) == "true";
+            let mut out = vec![
+                e_select(0),
+                e_field(1),
+                e_labeled(2, "volume"),
+                e_labeled(3, "pitch"),
+            ];
+            if positional {
+                out.extend([e_labeled(5, "x"), e_labeled(6, "y")]);
+            } else {
+                out.push(e_labeled(4, "pan"));
+            }
+            out.push(e_labeled(7, "limit"));
+            out
+        }
+        // `PlayMusicStatement.build` (`:2352-2357`).
+        "playmusic" => vec![e_labeled(0, "music"), e_labeled(1, "interrupt")],
+        // `SetMarkerStatement.rebuild` (`:2364-2430`); the draw-layer list and
+        // marker colours map through the marker params.
+        "setmarker" => {
+            let control = LMarkerControl::from_name(value(0)).unwrap_or(LMarkerControl::Pos);
+            let mut out = vec![e_text("set"), e_select(0), e_labeled(1, "id")];
+            for (i, &param) in control.params().iter().enumerate() {
+                out.push(e_labeled(2 + i, param));
+                if control == LMarkerControl::Color || (control == LMarkerControl::Colori && i == 1)
+                {
+                    out.push(e_color(2 + i));
+                }
+                if matches!(
+                    control,
+                    LMarkerControl::TextAlign | LMarkerControl::LineAlign
+                ) {
+                    out.push(e_align(2));
+                }
+            }
+            out
+        }
+        // `MakeMarkerStatement.build` (`:2435-2471`).
+        "makemarker" => vec![
+            e_select(0),
+            e_labeled(1, "id"),
+            e_labeled(2, "x"),
+            e_labeled(3, "y"),
+            e_labeled(4, "replace"),
+        ],
+        // `LocalePrintStatement.build` (`:2477-2479`).
+        "localeprint" => vec![e_wide(0)],
         _ => generic(),
     }
 }
@@ -1061,6 +1397,43 @@ pub fn editor_options(name: &str, index: usize) -> Vec<EditorOption> {
             ]
             .into_iter()
             .map(ContentType::name),
+        ),
+        // `UnitControlStatement` (`LUnitControl.all`; build/deconstruct are
+        // hidden by the live rules probe in the dialog).
+        ("ucontrol", 0) => enum_options("lunitcontrol", LUnitControl::ALL.iter().map(|v| v.name())),
+        // `UnitLocateStatement` (`LLocate` / `BlockFlag.allLogic`).
+        ("ulocate", 0) => enum_options("llocate", LLocate::ALL.iter().map(|v| v.name())),
+        ("ulocate", 1) => enum_options("blockflag", BlockFlag::ALL_LOGIC.iter().map(|v| v.name())),
+        // `QueryStatement` shape toggle + `QueryType.queryable`.
+        ("query", 0) => token_options(["circle", "rect"].into_iter()),
+        ("query", 1) => enum_options("querytype", QueryType::QUERYABLE.iter().map(|v| v.name())),
+        // `GetBlockStatement`/`SetBlockStatement` layers.
+        ("getblock", 0) => enum_options("tilelayer", TileLayer::ALL.iter().map(|v| v.name())),
+        ("setblock", 0) => enum_options("tilelayer", TileLayer::SETTABLE.iter().map(|v| v.name())),
+        // `ApplyStatusStatement`'s apply/clear toggle.
+        ("status", 0) => toggle_options(&[("false", "apply"), ("true", "clear")]),
+        // `FlushMessageStatement`/`CutsceneStatement`/`FetchStatement`.
+        ("message", 0) => enum_options("messagetype", MessageType::ALL.iter().map(|v| v.name())),
+        ("cutscene", 0) => enum_options(
+            "cutsceneaction",
+            CutsceneAction::ALL.iter().map(|v| v.name()),
+        ),
+        ("fetch", 0) => enum_options("fetchtype", FetchType::ALL.iter().map(|v| v.name())),
+        // `SetRuleStatement`/`SetMarkerStatement`.
+        ("setrule", 0) => enum_options("logicrule", LogicRule::ALL.iter().map(|v| v.name())),
+        ("setmarker", 0) => enum_options(
+            "lmarkercontrol",
+            LMarkerControl::ALL.iter().map(|v| v.name()),
+        ),
+        // `EffectStatement`: the effects dialog is a select of `LogicFx` names.
+        ("effect", 0) => token_options(crate::logic::fx::EFFECTS.iter().map(|e| e.name)),
+        // `PlaySoundStatement`'s global/positional toggle.
+        ("playsound", 0) => toggle_options(&[("false", "global"), ("true", "positional")]),
+        // `MakeMarkerStatement` (`MapObjectives.allMarkerTypeNames`).
+        ("makemarker", 0) => token_options(
+            crate::game::map_markers::ALL_MARKER_TYPE_NAMES
+                .iter()
+                .copied(),
         ),
         _ => {
             let Some(statement) = default_statement(name) else {
@@ -1110,6 +1483,48 @@ where
             },
         })
         .collect()
+}
+
+/// `name.token.<token>` options (Java `showSelect` over plain strings).
+fn token_options<'a>(names: impl Iterator<Item = &'a str>) -> Vec<EditorOption> {
+    names
+        .map(|name| EditorOption {
+            name: name.to_owned(),
+            label: name.to_owned(),
+            key: format!("name.token.{name}"),
+        })
+        .collect()
+}
+
+/// Toggle-button options (Java builds these with `bundle(clear ? "clear" : "apply")`).
+fn toggle_options(pairs: &[(&'static str, &'static str)]) -> Vec<EditorOption> {
+    pairs
+        .iter()
+        .map(|(name, token)| EditorOption {
+            name: (*name).to_owned(),
+            label: (*token).to_owned(),
+            key: format!("name.token.{token}"),
+        })
+        .collect()
+}
+
+/// Build-time field fixups: `SetRuleStatement.rebuild` defaults `p1` to
+/// `@sharded` for the team rules (`LStatements.java:1653-1660`).
+pub fn editor_normalize(name: &str, values: &mut [String]) -> bool {
+    if name != "setrule" {
+        return false;
+    }
+    let Some(rule) = LogicRule::from_name(values.first().map(String::as_str).unwrap_or("")) else {
+        return false;
+    };
+    if rule.uses_team()
+        && values.get(2).map(String::as_str) == Some("0")
+        && let Some(slot) = values.get_mut(2)
+    {
+        *slot = "@sharded".to_owned();
+        return true;
+    }
+    false
 }
 
 /// The value fixups `DrawStatement` applies when the type button changes
@@ -1481,5 +1896,335 @@ mod tests {
         let lookup = editor_options("lookup", 0);
         assert_eq!(lookup.len(), 5);
         assert!(lookup.iter().any(|o| o.name == "team"));
+    }
+
+    #[test]
+    fn unit_layouts_match_java() {
+        // `ubind`: type <field> (`LStatements.java:1024-1060`).
+        let ubind = layout("ubind", &["@poly"]);
+        assert_eq!((ubind[0].kind, ubind[0].label), (EditorKind::Text, "type"));
+        assert_eq!((ubind[1].kind, ubind[1].index), (EditorKind::Field, 0));
+        // `ucontrol move`: select + x/y (`LUnitControl.params`).
+        let move_ = layout("ucontrol", &["move", "0", "0", "0", "0", "0"]);
+        assert_eq!((move_[0].kind, move_[0].index), (EditorKind::Select, 0));
+        assert_eq!(
+            move_[1..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(1, "x"), (2, "y")]
+        );
+        // `ucontrol target`: x/y/shoot.
+        let target = layout("ucontrol", &["target", "0", "0", "1", "0", "0"]);
+        assert_eq!(
+            target[1..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(1, "x"), (2, "y"), (3, "shoot")]
+        );
+        // `ucontrol build`: five params.
+        assert_eq!(
+            layout("ucontrol", &["build", "0", "0", "b", "0", "0"]).len(),
+            6
+        );
+        // `uradar` drops the `from` field of `RadarStatement` (`:1103-1125`).
+        let uradar = layout(
+            "uradar",
+            &["enemy", "any", "any", "distance", "0", "1", "out"],
+        );
+        assert_eq!((uradar[2].kind, uradar[2].index), (EditorKind::Select, 0));
+        assert_eq!(uradar.len(), 8);
+        // `ulocate building`: find/group rows + all outputs (`:1135-1215`).
+        let building = layout(
+            "ulocate",
+            &["building", "core", "true", "@copper", "ox", "oy", "f", "b"],
+        );
+        assert_eq!(
+            building
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Text, 0, "find"),
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Text, 0, "group"),
+                (EditorKind::Select, 1, ""),
+                (EditorKind::Field, 2, "enemy"),
+                (EditorKind::Field, 4, "outX"),
+                (EditorKind::Field, 5, "outY"),
+                (EditorKind::Field, 6, "found"),
+                (EditorKind::Field, 7, "building"),
+            ]
+        );
+        // `ulocate ore`: the ore field replaces the group row, no building out.
+        let ore = layout(
+            "ulocate",
+            &["ore", "core", "true", "@copper", "ox", "oy", "f", "b"],
+        );
+        assert_eq!(
+            ore.iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Text, 0, "find"),
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Field, 3, "ore"),
+                (EditorKind::Field, 4, "outX"),
+                (EditorKind::Field, 5, "outY"),
+                (EditorKind::Field, 6, "found"),
+            ]
+        );
+        // `ulocate spawn`: neither group nor ore rows.
+        let spawn = layout(
+            "ulocate",
+            &["spawn", "core", "true", "@copper", "ox", "oy", "f", "b"],
+        );
+        assert_eq!(spawn.len(), 6);
+        // Options: `LUnitControl`/`BlockFlag.allLogic` labels.
+        let controls = editor_options("ucontrol", 0);
+        assert_eq!(controls.len(), 21);
+        assert!(
+            controls
+                .iter()
+                .any(|o| o.name == "itemDrop" && o.key == "lunitcontrol.label.itemdrop")
+        );
+        let flags = editor_options("ulocate", 1);
+        assert_eq!(flags.len(), 10);
+        assert!(
+            flags
+                .iter()
+                .any(|o| o.name == "core" && o.key == "blockflag.label.core")
+        );
+    }
+
+    #[test]
+    fn world_layouts_match_java() {
+        // `query` circle: shape + type + team/x/y + radius (`:1224-1267`).
+        let circle = layout("query", &["circle", "unit", "null", "0", "0", "10", "10"]);
+        assert_eq!(
+            circle
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Select, 1, ""),
+                (EditorKind::Field, 2, "team"),
+                (EditorKind::Field, 3, "x"),
+                (EditorKind::Field, 4, "y"),
+                (EditorKind::Field, 5, "radius"),
+            ]
+        );
+        let rect = layout("query", &["rect", "unit", "null", "0", "0", "10", "10"]);
+        assert_eq!((rect[5].index, rect[5].label), (5, "width"));
+        assert_eq!((rect[6].index, rect[6].label), (6, "height"));
+        // `getblock`: result, " =", layer, x, y (`:1275-1303`).
+        let getblock = layout("getblock", &["block", "r", "0", "0"]);
+        assert_eq!(
+            getblock
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 1, ""),
+                (EditorKind::Text, 0, " ="),
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Field, 2, "x"),
+                (EditorKind::Field, 3, "y"),
+            ]
+        );
+        // `setblock` block layer shows team/rotation; floor/ore hide them.
+        let block = layout(
+            "setblock",
+            &["block", "@copper-wall", "1", "2", "@sharded", "0"],
+        );
+        assert_eq!(
+            block
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Text, 0, "set"),
+                (EditorKind::Select, 0, ""),
+                (EditorKind::Field, 2, "x"),
+                (EditorKind::Field, 3, "y"),
+                (EditorKind::Field, 1, "block"),
+                (EditorKind::Field, 4, "team"),
+                (EditorKind::Field, 5, "rotation"),
+            ]
+        );
+        assert_eq!(
+            layout("setblock", &["floor", "@sand", "1", "2", "@sharded", "0"]).len(),
+            5
+        );
+        // `spawn`: result then "= spawn", then type/x/y/team/angle/effect.
+        let spawn = layout(
+            "spawn",
+            &["@dagger", "10", "10", "90", "@sharded", "r", "true"],
+        );
+        assert_eq!((spawn[0].kind, spawn[0].index), (EditorKind::Field, 5));
+        assert_eq!(
+            (spawn[1].kind, spawn[1].label),
+            (EditorKind::Text, "-spawn")
+        );
+        assert_eq!((spawn[2].index, spawn[2].label), (0, "type"));
+        assert_eq!((spawn[5].index, spawn[5].label), (4, "team"));
+        assert_eq!((spawn[6].index, spawn[6].label), (3, "angle"));
+        // `status`: seconds hidden when clear (`:1435-1491`).
+        let wet = layout("status", &["false", "@status-wet", "unit", "10"]);
+        assert_eq!(wet.len(), 4);
+        let clear = layout("status", &["true", "@status-wet", "unit", "10"]);
+        assert_eq!(clear.len(), 3);
+        // `setrule` rows per rule (`:1634-1690`).
+        let area = layout("setrule", &["mapArea", "10", "0", "0", "100", "100"]);
+        assert_eq!(
+            area[1..]
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Text, 0, "="),
+                (EditorKind::Field, 2, "x"),
+                (EditorKind::Field, 3, "y"),
+                (EditorKind::Field, 4, "w"),
+                (EditorKind::Field, 5, "h"),
+            ]
+        );
+        let team = layout("setrule", &["unitHealth", "10", "0", "0", "100", "100"]);
+        assert_eq!(
+            team[1..]
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 2, "of"),
+                (EditorKind::Text, 0, "="),
+                (EditorKind::Field, 1, ""),
+            ]
+        );
+        let ban = layout("setrule", &["ban", "10", "0", "0", "100", "100"]);
+        assert_eq!((ban[1].label, ban[2].index), ("block-unit", 1));
+        // `message` announce shows duration; mission does not.
+        assert_eq!(layout("message", &["announce", "3", "@wait"]).len(), 3);
+        assert_eq!(layout("message", &["mission", "3", "@wait"]).len(), 2);
+        // `cutscene` pan/x/y/speed vs zoom/level.
+        let pan = layout("cutscene", &["pan", "100", "100", "0.06", "0"]);
+        assert_eq!(
+            pan[1..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(1, "x"), (2, "y"), (3, "speed")]
+        );
+        let zoom = layout("cutscene", &["zoom", "4", "100", "0.06", "0"]);
+        assert_eq!((zoom[1].index, zoom[1].label), (1, "level"));
+        // `effect` follows `LogicFx` flags: warn (none), trail (size+color),
+        // blockFall (data).
+        let warn = layout("effect", &["warn", "0", "0", "2", "%ffaaff", ""]);
+        assert_eq!(warn.len(), 3);
+        let trail = layout("effect", &["trail", "0", "0", "2", "%ffaaff", ""]);
+        assert_eq!((trail[3].index, trail[3].label), (4, "color"));
+        assert_eq!(trail[4].kind, EditorKind::Color);
+        assert_eq!((trail[5].index, trail[5].label), (3, "size"));
+        let fall = layout("effect", &["blockFall", "0", "0", "2", "%ffaaff", "block"]);
+        assert_eq!((fall[3].index, fall[3].label), (5, "data"));
+        // `fetch` unit hides nothing, coreCount hides `#`.
+        let unit = layout("fetch", &["unit", "r", "@sharded", "0", "@conveyor"]);
+        assert_eq!(
+            unit[4..]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(3, "#"), (4, "unit")]
+        );
+        let count = layout("fetch", &["coreCount", "r", "@sharded", "0", "@conveyor"]);
+        assert_eq!(count.len(), 4);
+        // `playsound` global shows pan, positional shows x/y.
+        let global = layout(
+            "playsound",
+            &[
+                "false",
+                "@sfx-shoot",
+                "1",
+                "1",
+                "0",
+                "@thisx",
+                "@thisy",
+                "true",
+            ],
+        );
+        assert_eq!((global[4].index, global[4].label), (4, "pan"));
+        let pos = layout(
+            "playsound",
+            &[
+                "true",
+                "@sfx-shoot",
+                "1",
+                "1",
+                "0",
+                "@thisx",
+                "@thisy",
+                "true",
+            ],
+        );
+        assert_eq!(
+            pos[4..6]
+                .iter()
+                .map(|i| (i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(5, "x"), (6, "y")]
+        );
+        // `setmarker` color/colori rows carry the colour pencil.
+        let color = layout("setmarker", &["color", "0", "%ff0000", "0", "0"]);
+        assert_eq!(
+            color[3..]
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![(EditorKind::Field, 2, "color"), (EditorKind::Color, 2, "")]
+        );
+        let colori = layout("setmarker", &["colori", "0", "0", "%ff0000", "0"]);
+        assert_eq!(
+            colori[3..]
+                .iter()
+                .map(|i| (i.kind, i.index, i.label))
+                .collect::<Vec<_>>(),
+            vec![
+                (EditorKind::Field, 2, "index"),
+                (EditorKind::Field, 3, "color"),
+                (EditorKind::Color, 3, ""),
+            ]
+        );
+        // `makemarker`/`playsound`/`status` select options.
+        let marker = editor_options("makemarker", 0);
+        assert_eq!(marker.len(), 8);
+        assert!(
+            marker
+                .iter()
+                .any(|o| o.name == "shapeText" && o.key == "name.token.shapeText")
+        );
+        let sound = editor_options("playsound", 0);
+        assert_eq!(
+            (sound[0].label.as_str(), sound[1].label.as_str()),
+            ("global", "positional")
+        );
+        let status = editor_options("status", 0);
+        assert_eq!(
+            (status[0].name.as_str(), status[0].label.as_str()),
+            ("false", "apply")
+        );
+        // `editor_normalize`: team rules default `p1` to `@sharded`.
+        let mut values: Vec<String> = ["unitHealth", "10", "0", "0", "100", "100"]
+            .iter()
+            .map(|v| (*v).to_owned())
+            .collect();
+        assert!(editor_normalize("setrule", &mut values));
+        assert_eq!(values[2], "@sharded");
+        let mut values: Vec<String> = ["unitHealth", "10", "@crux", "0", "100", "100"]
+            .iter()
+            .map(|v| (*v).to_owned())
+            .collect();
+        assert!(!editor_normalize("setrule", &mut values));
     }
 }
