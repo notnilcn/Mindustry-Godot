@@ -2835,6 +2835,7 @@ impl MindCampaign {
             blocks: block_table.as_ref(),
             in_game: self.session.phase.is_game(),
             planet: Some(self.session.rules.planet.as_str()),
+            campaign: self.session.is_campaign(),
         };
         let stats = compute_content_stats(&ctx, content);
         let categories: Vec<serde_json::Value> = stats

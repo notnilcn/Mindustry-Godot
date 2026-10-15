@@ -21,6 +21,7 @@
 
 pub mod logistics;
 pub mod production;
+pub mod unit_blocks;
 pub mod values;
 
 use serde::Serialize;
@@ -785,6 +786,9 @@ pub struct StatCtx<'a> {
     /// Active planet name (`state.getPlanet()`), for the Erekir-only rows
     /// (`NuclearReactor` heat output).
     pub planet: Option<&'a str>,
+    /// `state.isCampaign()`: the `unlockedNow()` branches show lock icons for
+    /// content that is not unlocked (outside a campaign everything is shown).
+    pub campaign: bool,
 }
 
 impl StatCtx<'_> {
@@ -1050,6 +1054,7 @@ mod tests {
             blocks: None,
             in_game: false,
             planet: None,
+            campaign: false,
         }
     }
 

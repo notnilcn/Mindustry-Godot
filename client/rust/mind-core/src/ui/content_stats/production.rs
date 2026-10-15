@@ -56,6 +56,8 @@ pub fn family_block_stats(ctx: &StatCtx, id: BlockId) -> Stats {
     // I04 T4: logistics/storage/logic/defense families, same `super.setStats()`
     // ordering (base first, then the family's adds/removes).
     super::logistics::logistics_block_stats(ctx, id, def, &mut stats);
+    // I04 T5: unit-factory and payload families.
+    super::unit_blocks::unit_block_stats(ctx, id, def, &mut stats);
     stats
 }
 
@@ -984,6 +986,7 @@ mod tests {
             blocks: Some(blocks),
             in_game: true,
             planet: Some("serpulo"),
+            campaign: false,
         }
     }
 

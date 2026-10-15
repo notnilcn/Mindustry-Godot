@@ -627,6 +627,7 @@ mod tests {
             blocks: Some(blocks),
             in_game: true,
             planet: Some("serpulo"),
+            campaign: false,
         }
     }
 

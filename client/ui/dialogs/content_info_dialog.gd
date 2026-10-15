@@ -240,7 +240,10 @@ func _icon_cell(cell: Dictionary) -> Control:
 	var content := str(cell.get("content", ""))
 	if not content.is_empty():
 		button.pressed.connect(open_content_info.bind(content))
-	var amount := str(cell.get("amount", ""))
+	# `Cell::Icon.amount` serializes `None` as JSON null; `str(null)` is the
+	# literal "<null>", so read the value and skip null explicitly.
+	var amount_value: Variant = cell.get("amount")
+	var amount := "" if amount_value == null else str(amount_value)
 	if not amount.is_empty():
 		var label := MindWidgets.styled_label(amount, "outlineLabel")
 		label.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
