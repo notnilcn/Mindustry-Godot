@@ -1256,6 +1256,8 @@ pub struct BlockSpec {
     /// `CoreBlock.incinerateNonBuildable`: drop non-buildable items on intake
     /// (Erekir cores). Default false.
     pub incinerate_non_buildable: Option<bool>,
+    /// `CoreBlock.requiresCoreZone`. Default false.
+    pub requires_core_zone: Option<bool>,
     /// Updates each tick.
     pub update: Option<bool>,
     /// Destructible.
@@ -1420,6 +1422,7 @@ impl Default for BlockSpec {
             solidifies: None,
             floating: None,
             incinerate_non_buildable: None,
+            requires_core_zone: None,
             update: None,
             destructible: None,
             save_data: None,
@@ -2062,6 +2065,10 @@ pub struct BlockDef {
     /// three Erekir cores, `Blocks.java:3197,3216,3234`): drops non-buildable
     /// items on intake instead of storing them.
     pub incinerate_non_buildable: bool,
+    /// `CoreBlock.requiresCoreZone` (`CoreBlock.java:53`; true for the three
+    /// Erekir cores, `Blocks.java:3198,3218,3236`): the upgrade branch of
+    /// `canPlaceOn` requires every footprint floor to allow core placement.
+    pub requires_core_zone: bool,
     /// Unit cap contribution.
     pub unit_cap_modifier: i32,
     /// Core unit type spawned on player spawn/respawn (`CoreBlock.unitType`).
@@ -2450,6 +2457,7 @@ impl BlockDef {
             ),
             deconstruct_drop_all_liquid: false,
             incinerate_non_buildable: spec.incinerate_non_buildable.unwrap_or(false),
+            requires_core_zone: spec.requires_core_zone.unwrap_or(false),
             unit_cap_modifier: spec.unit_cap_modifier.unwrap_or(BASE_UNIT_CAP_MODIFIER),
             core_unit: spec.core_unit,
             flags: spec.flags,

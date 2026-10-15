@@ -548,9 +548,10 @@ pub fn valid_place_query(
 
 /// `CoreBlock.canPlaceOn` (`CoreBlock.java:185-203`): a `core-zone`-free
 /// footprint of allowed floors is always placeable; otherwise the team's core
-/// must hold the requirements and the centre tile must hold a smaller core.
-/// `requiresCoreZone` is true only for the Erekir cores; treated as false (the
-/// port's Serpulo content never sets it).
+/// must hold the requirements and the centre tile must hold a smaller core
+/// (`requiresCoreZone` then additionally requires every footprint floor to
+/// allow core placement - true for the three Erekir cores,
+/// `Blocks.java:3198,3218,3236`).
 #[allow(clippy::too_many_arguments)]
 fn core_can_place_on(
     content: &ContentRegistry,
@@ -568,6 +569,7 @@ fn core_can_place_on(
     let size = def.size.max(1);
     let offset = -(size - 1) / 2;
     let mut any_core_or_disallowed = false;
+    let mut all_floors_allow = true;
     for dx in 0..size {
         for dy in 0..size {
             let tx = x + offset + dx;
@@ -585,6 +587,7 @@ fn core_can_place_on(
             if !floor_allows || holds_core {
                 any_core_or_disallowed = true;
             }
+            all_floors_allow &= floor_allows;
         }
     }
     if !any_core_or_disallowed {
@@ -610,6 +613,8 @@ fn core_can_place_on(
     content
         .block(center.block)
         .is_some_and(|block| block.kind == BlockKind::CoreBlock && def.size > block.size)
+        // `(!requiresCoreZone || tempTiles.allMatch(o => o.floor().allowCorePlacement))`
+        && (!def.requires_core_zone || all_floors_allow)
 }
 
 /// The team's core (`Team.core()`): first `CoreBuild` of `team` by entity
