@@ -2877,4 +2877,126 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
+
+    /// I01 T11: the assembler save body (`UnitAssembler.java:756-789`):
+    /// `progress`, the drone id list (resolved through the restored unit ids),
+    /// the `blocks` `PayloadSeq` and `commandPos` (revision 1).
+    #[test]
+    fn assembler_save_round_trip() {
+        use crate::world::blocks::units::{AssemblerPayload, UnitAssembler, payload_content_ref};
+
+        let sim_seq = |sim: &Sim, entity| sim.ecs.0.get::<EntitySeq>(entity).map(|seq| seq.0);
+        let mut sim = Sim::new(1, 64, 64, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        sim.ecs
+            .0
+            .get_resource_mut::<crate::world::limits::BuildRules>()
+            .expect("build rules")
+            .default_team = 1;
+        let assembler_block = sim.content().id("tank-assembler").expect("tank-assembler");
+        sim.apply(Command::Place {
+            x: 12,
+            y: 12,
+            block: assembler_block,
+        })
+        .expect("place assembler");
+        let assembler_entity = sim.grid.tile(12, 12).build.expect("assembler entity");
+        let drone = sim
+            .spawn_live_unit("assembly-drone", 2, 96.0, 96.0, 0.0)
+            .expect("drone");
+        let drone_seq = sim_seq(&sim, drone).expect("drone seq");
+        let content = boot_registry().expect("content");
+        let stell = content.unit_id("stell").expect("stell").raw();
+        let wall = content
+            .block_id("tungsten-wall-large")
+            .expect("tungsten-wall-large")
+            .raw();
+        {
+            let mut assembler = sim
+                .ecs
+                .0
+                .get_mut::<UnitAssembler>(assembler_entity)
+                .expect("assembler state");
+            assembler.units = vec![drone];
+            assembler.progress = 0.42;
+            assembler.command_pos = Some((123.0, 456.0));
+            // Partial requirements: the loaded tick must not advance progress.
+            assembler.stored.add(
+                payload_content_ref(AssemblerPayload {
+                    is_block: false,
+                    content: stell,
+                    amount: 0,
+                }),
+                3,
+            );
+            assembler.stored.add(
+                payload_content_ref(AssemblerPayload {
+                    is_block: true,
+                    content: wall,
+                    amount: 0,
+                }),
+                2,
+            );
+        }
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+
+        let path = temp_path("assembler-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses.len(), 1, "one save response: {responses:?}");
+        assert_eq!(responses[0].status, IoStatus::Ok);
+
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        let responses = sim.take_io_responses();
+        assert_eq!(responses[0].status, IoStatus::Ok, "save reloads");
+
+        let assembler_entity = sim.grid.tile(12, 12).build.expect("assembler respawned");
+        let state = sim
+            .ecs
+            .0
+            .get::<UnitAssembler>(assembler_entity)
+            .expect("assembler respawned");
+        assert!(
+            (state.progress - 0.42).abs() < 1e-6,
+            "progress restored ({})",
+            state.progress
+        );
+        assert!(state.read_unit_ids.is_empty(), "read ids resolved");
+        assert_eq!(state.units.len(), 1, "one drone restored");
+        assert_eq!(
+            sim_seq(&sim, state.units[0]),
+            Some(drone_seq),
+            "drone id restored through the save body"
+        );
+        assert_eq!(
+            state.command_pos,
+            Some((123.0, 456.0)),
+            "commandPos restored"
+        );
+        assert_eq!(
+            state.stored.get(payload_content_ref(AssemblerPayload {
+                is_block: false,
+                content: stell,
+                amount: 0,
+            })),
+            3,
+            "unit payload count restored"
+        );
+        assert_eq!(
+            state.stored.get(payload_content_ref(AssemblerPayload {
+                is_block: true,
+                content: wall,
+                amount: 0,
+            })),
+            2,
+            "block payload count restored"
+        );
+        assert_eq!(state.stored.total(), 5);
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

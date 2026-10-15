@@ -71,7 +71,7 @@ pub use registries::weathers::{
     Attribute, ParticleWeatherFields, RainWeatherFields, WeatherDef, WeatherKind,
 };
 pub use settings_store::{MemoryUnlockStore, UnlockStore};
-pub use stacks::{ItemStack, LiquidStack, PayloadStack};
+pub use stacks::{ItemStack, LiquidStack, PayloadSeq, PayloadStack};
 pub use tech::{
     NodeObjective, ObjectiveSpec, TechNode, TechNodeRef, TechStore, TechTreeBuildReport,
     TechTreeBuilder, TreeId, round_to_10,

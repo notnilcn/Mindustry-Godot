@@ -707,6 +707,8 @@ pub struct AssemblerBehavior {
     pub assembler: UnitAssembler,
     /// Produced unit defs keyed by raw [`UnitTypeId`].
     pub units: BTreeMap<u16, Arc<UnitTypeDef>>,
+    /// Drone definition (`UnitAssembler.droneType` = `assembly-drone`).
+    pub drone_def: Option<Arc<UnitTypeDef>>,
     /// Block size in tiles (spawn offset math).
     pub size: i32,
 }
@@ -734,9 +736,15 @@ impl AssemblerBehavior {
             })
             .collect();
         let units = resolve_units(content, def.assembler_plans.iter().map(|plan| plan.unit));
+        // `UnitAssembler.droneType = UnitTypes.assemblyDrone`.
+        let drone_def = content
+            .unit_id("assembly-drone")
+            .and_then(|id| content.unit(id))
+            .map(|def| Arc::new(def.clone()));
         Self {
             assembler: UnitAssembler::new(plans, 240.0),
             units,
+            drone_def,
             size: def.size,
         }
     }
@@ -756,6 +764,26 @@ impl AssemblerBehavior {
     }
 }
 
+/// Sets one drone's `AssemblerAI` target (`UnitAssembler.java:509-513`:
+/// `ai.targetPos.trns(i * 90f + 45f, len).add(spawn); ai.targetAngle =
+/// i * 90f + 45f + 180f`).
+fn arrange_drone(world: &mut World, unit: Entity, target_x: f32, target_y: f32, target_angle: f32) {
+    use crate::ai::types::assembler::AssemblerAi;
+    if let Some(mut ai) = world.get_mut::<AssemblerAi>(unit) {
+        ai.unit = Some(unit);
+        ai.target_x = target_x;
+        ai.target_y = target_y;
+        ai.target_angle = target_angle;
+    } else if world.get_entity(unit).is_ok() {
+        world.entity_mut(unit).insert(AssemblerAi {
+            unit: Some(unit),
+            target_x,
+            target_y,
+            target_angle,
+        });
+    }
+}
+
 impl BuildingBehavior for AssemblerBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
         world.entity_mut(e).insert(self.assembler.clone());
@@ -765,23 +793,133 @@ impl BuildingBehavior for AssemblerBehavior {
         let Some(mut assembler) = world.entity_mut(e).take::<UnitAssembler>() else {
             return;
         };
-        // `UnitAssemblerBuild.updateTile` gates progress on `efficiency > 0`
-        // (`shouldConsume` power/liquid).
+        // `UnitAssemblerBuild.updateTile` (`UnitAssembler.java:443-532`).
+        // 1. Resolve the drone ids read from the save body (`:444-456`).
+        if !assembler.read_unit_ids.is_empty() {
+            let ids = std::mem::take(&mut assembler.read_unit_ids);
+            assembler.units.clear();
+            for id in ids {
+                if let Some(unit) = crate::sim::unit_runtime::unit_by_id(world, id) {
+                    assembler.units.push(unit);
+                }
+            }
+        }
+        // 2. A tier change resets progress (`:458-466`).
+        let current_tier = assembler.module_tier.max(0);
+        if assembler.last_tier != current_tier {
+            if assembler.last_tier >= 0 {
+                assembler.progress = 0.0;
+            }
+            assembler.last_tier = if assembler.last_tier == -2 {
+                -1
+            } else {
+                current_tier
+            };
+        }
+        // 3. Drop dead or re-controlled drones (`:468-472`).
+        assembler.units.retain(|unit| {
+            world
+                .get::<crate::entities::comp::unit::comp::UnitCore>(*unit)
+                .is_some_and(|core| !core.dead)
+                && world
+                    .get::<crate::ai::controller::ControllerSlot>(*unit)
+                    .is_some_and(|slot| slot.kind == crate::ai::AiKind::Assembler)
+        });
+        let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+        let enabled = world
+            .get::<crate::entities::comp::Building>(e)
+            .is_some_and(|building| building.enabled);
+        // 4. Drone construction (`:480-500`): `powerStatus`, then
+        //    `droneProgress += delta() * unitBuildSpeed * powerStatus /
+        //    droneConstructTime`; one drone per completed unit.
+        let power_status = if !enabled {
+            0.0
+        } else {
+            world
+                .get::<crate::world::modules::PowerModule>(e)
+                .map(|power| power.status)
+                .unwrap_or(1.0)
+        };
+        let delta = crate::world::update::delta(world, e);
+        let speed = unit_build_speed(world, team);
+        if (assembler.units.len() as i32) < assembler.drones_created && enabled {
+            assembler.drone_progress +=
+                delta * speed * power_status / assembler.drone_construct_time.max(0.0001);
+            if assembler.drone_progress >= 1.0 {
+                assembler.drone_progress = 0.0;
+                if let Some(def) = self.drone_def.clone()
+                    && let Some(pos) = world.get::<Pos>(e).copied()
+                {
+                    let seq = next_unit_seq(world);
+                    let drone = spawn_unit_def(world, seq, &def, team, pos.x, pos.y, 90.0);
+                    // `UnitCargoLoaderBuild`-style tether adoption
+                    // (`UnitAssembler.java:489-494`: `bt.building(this)`).
+                    world.entity_mut(drone).insert(
+                        crate::entities::comp::unit::comp::BuildingTetherComp { building: Some(e) },
+                    );
+                    adopt_output_unit(world, drone, &def.name);
+                    assembler.units.push(drone);
+                }
+            }
+        }
+        if (assembler.units.len() as i32) >= assembler.drones_created {
+            assembler.drone_progress = 0.0;
+        }
+        // 5. Arrange the drones around the spawn point (`:509-513`).
+        let spawn = self.unit_spawn(world, e);
+        if let Some((sx, sy)) = spawn {
+            let radius = (assembler.area_size as f32 / 2.0)
+                * std::f32::consts::SQRT_2
+                * crate::world::block::TILE_SIZE;
+            for (index, unit) in assembler.units.iter().enumerate() {
+                let angle = index as f32 * 90.0 + 45.0;
+                let radians = angle.to_radians();
+                arrange_drone(
+                    world,
+                    *unit,
+                    sx + radians.cos() * radius,
+                    sy + radians.sin() * radius,
+                    angle + 180.0,
+                );
+            }
+        }
+        // 6. Efficiency = in-position drones / dronesCreated (`:516-517`).
+        let positioned = assembler
+            .units
+            .iter()
+            .filter(|unit| {
+                world
+                    .get::<crate::ai::types::assembler::AssemblerAi>(**unit)
+                    .is_some_and(|ai| {
+                        crate::ai::types::assembler::in_position_world(world, **unit, ai)
+                    })
+            })
+            .count() as f32;
+        let eff = positioned / assembler.drones_created.max(1) as f32;
+        // 7. Product progress (`:520-532`); the port keeps the requirement
+        //    gate inside `UnitAssembler::update`.
         let efficiency = world
             .get::<crate::entities::comp::Building>(e)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
         if efficiency > 0.0
-            && let Some(unit) = assembler.update(efficiency)
+            && let Some(unit) = assembler.update(delta * speed, eff)
             && let Some(def) = self.units.get(&unit.raw())
-            && let Some((x, y)) = self.unit_spawn(world, e)
+            && let Some((x, y)) = spawn
         {
-            let team = world.get::<TeamComp>(e).map(|t| t.team).unwrap_or(0);
+            // `spawned()`: the product spawns at `getUnitSpawn()` with the
+            // building's rotation (`UnitAssembler.java:558-561`).
+            let rotation = world
+                .get::<crate::entities::comp::Building>(e)
+                .map(|building| building.rotation as f32 * 90.0)
+                .unwrap_or(0.0);
             let seq = next_unit_seq(world);
-            let drone = spawn_unit_def(world, seq, def, team, x, y, 90.0);
-            // The drone runs `AssemblerAI`; adopt it into the live runtime so
-            // the dispatched controller updates it (H01 T13).
-            adopt_output_unit(world, drone, &def.name);
+            let product = spawn_unit_def(world, seq, def, team, x, y, rotation);
+            adopt_output_unit(world, product, &def.name);
+            // `spawned()` also hands `commandPos` to a commandable unit
+            // (`UnitAssembler.java:560-562`); the port's `CommandAiState` lives
+            // in the Sim-owned `UnitCommandRuntime` (not an ECS component), so
+            // the application half is deferred to the I08/T13 command wiring.
             // `UnitAssembler.java:568`: `createSound.at(spawn.x, spawn.y, 1 + range(0.06), 1)`.
             crate::audio::sim::emit_world_sound(
                 world,
@@ -794,6 +932,56 @@ impl BuildingBehavior for AssemblerBehavior {
             );
         }
         world.entity_mut(e).insert(assembler);
+    }
+
+    /// `UnitAssemblerBuild.version` returns 1 (the save body gained
+    /// `commandPos`; `UnitAssembler.java:751-753`).
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    /// `UnitAssemblerBuild.write` (`UnitAssembler.java:756-769`): `progress`,
+    /// the drone id list, the `blocks` `PayloadSeq`, then `commandPos`.
+    fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
+        let Some(assembler) = world.get::<UnitAssembler>(e) else {
+            return;
+        };
+        w.f(assembler.progress);
+        let count = assembler.units.len().min(i8::MAX as usize) as i8;
+        w.b(count);
+        for unit in assembler.units.iter().take(count as usize) {
+            let id = world
+                .get::<crate::ecs::EntitySeq>(*unit)
+                .map(|seq| seq.0 as i32)
+                .unwrap_or(-1);
+            w.i(id);
+        }
+        assembler.stored.write(w);
+        crate::io::typeio::codecs::write_vec_nullable(w, assembler.command_pos);
+    }
+
+    /// `UnitAssemblerBuild.read` (`UnitAssembler.java:772-789`): the drone ids
+    /// land in `readUnits` and are resolved by `updateTile`.
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        let progress = r.f().unwrap_or(0.0);
+        let count = r.b().unwrap_or(0);
+        let mut read_unit_ids = Vec::new();
+        for _ in 0..count.max(0) {
+            read_unit_ids.push(r.i().unwrap_or(-1));
+        }
+        let mut stored = crate::content::PayloadSeq::default();
+        let _ = stored.read(r);
+        let command_pos = if revision >= 1 {
+            crate::io::typeio::codecs::read_vec_nullable(r).unwrap_or(None)
+        } else {
+            None
+        };
+        if let Some(mut assembler) = world.get_mut::<UnitAssembler>(e) {
+            assembler.progress = progress;
+            assembler.read_unit_ids = read_unit_ids;
+            assembler.stored = stored;
+            assembler.command_pos = command_pos;
+        }
     }
 
     fn accept_payload(
@@ -1202,8 +1390,65 @@ mod tests {
         }
     }
 
-    /// gap5 GAP-4 / K-4: an assembler reads `def.assembler_plans`, accepts the
-    /// planned payloads and spawns the tier-0 unit through `update_buildings`.
+    /// The arrangement target/angle for drone `index` (`UnitAssembler.java:509-513`).
+    fn arrangement_target(world: &World, assembler: Entity, index: usize) -> (f32, f32, f32) {
+        let pos = world
+            .get::<crate::entities::comp::Pos>(assembler)
+            .copied()
+            .expect("assembler pos");
+        let rotation = world
+            .get::<crate::entities::comp::Building>(assembler)
+            .map(|building| building.rotation)
+            .unwrap_or(0);
+        let (dx, dy) = crate::world::blocks::autotiler::d4(rotation);
+        let len = crate::world::block::TILE_SIZE * (11 + 5) as f32 / 2.0;
+        let (sx, sy) = (pos.x + dx as f32 * len, pos.y + dy as f32 * len);
+        let radius = 11.0f32 / 2.0 * std::f32::consts::SQRT_2 * crate::world::block::TILE_SIZE;
+        let angle = index as f32 * 90.0 + 45.0;
+        let radians = angle.to_radians();
+        (
+            sx + radians.cos() * radius,
+            sy + radians.sin() * radius,
+            angle + 180.0,
+        )
+    }
+
+    /// Moves one drone onto its arranged spot and faces it the locked angle
+    /// (a bare world has no unit-update pass to fly it there).
+    fn place_drone_in_position(world: &mut World, assembler: Entity, drone: Entity, index: usize) {
+        let (tx, ty, angle) = arrangement_target(world, assembler, index);
+        if let Some(mut pos) = world.get_mut::<crate::entities::comp::Pos>(drone) {
+            pos.x = tx;
+            pos.y = ty;
+        }
+        if let Some(mut core) = world.get_mut::<crate::entities::comp::unit::comp::UnitCore>(drone)
+        {
+            core.rotation = angle;
+        }
+    }
+
+    /// Runs `update_buildings` until the assembler holds four drones, forcing
+    /// the power status like the existing assembler test does.
+    fn build_assembler_drones(world: &mut World, entity: Entity) -> Vec<Entity> {
+        use crate::world::modules::PowerModule;
+        for _ in 0..4000 {
+            if let Some(mut power) = world.get_mut::<PowerModule>(entity) {
+                power.status = 1.0;
+            }
+            update_buildings(world);
+            let state = world.get::<UnitAssembler>(entity).expect("assembler state");
+            if state.units.len() >= 4 {
+                return state.units.clone();
+            }
+        }
+        panic!("assembler did not construct four drones");
+    }
+
+    /// gap5 GAP-4 / K-4 (I01 T11): an assembler reads `def.assembler_plans`,
+    /// accepts the planned payloads, builds four `assembly-drone`s
+    /// (`UnitAssembler.java:480-500`) and spawns the tier-0 unit once the
+    /// drones hold their arranged spots (the `inPosition` efficiency term,
+    /// `:516-517`).
     #[test]
     fn assembler_reads_plans_and_spawns_tier_unit() {
         use crate::entities::comp::unit::UnitTypeComp;
@@ -1264,6 +1509,12 @@ mod tests {
         {
             liquids.add(cyanogen, 1000.0, 1000.0);
         }
+        // Phase 1: the four drones (`UnitAssembler.java:480-500`).
+        let drones = build_assembler_drones(&mut world, entity);
+        // Phase 2: place them on their spots; the product then makes progress.
+        for (index, drone) in drones.iter().enumerate() {
+            place_drone_in_position(&mut world, entity, *drone, index);
+        }
         let vanquish = content.unit_id("vanquish").expect("vanquish");
         let mut spawned = false;
         for _ in 0..3200 {
@@ -1279,6 +1530,139 @@ mod tests {
             }
         }
         assert!(spawned, "tank-assembler produced vanquish");
+    }
+
+    /// I01 T11: every drone gets its perimeter spot and locked angle
+    /// (`UnitAssembler.java:509-513`).
+    #[test]
+    fn assembler_drones_take_positions() {
+        let content = content();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("mech-assembler")
+            .expect("mech-assembler")
+            .clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let entity = inst.spawn(
+            &mut world,
+            1,
+            crate::world::TilePos::new(6, 6),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        let drones = build_assembler_drones(&mut world, entity);
+        for (index, drone) in drones.iter().enumerate() {
+            let (expected_x, expected_y, expected_angle) =
+                arrangement_target(&world, entity, index);
+            let ai = world
+                .get::<crate::ai::types::assembler::AssemblerAi>(*drone)
+                .expect("drone AssemblerAI");
+            assert!(
+                (ai.target_x - expected_x).abs() < 1e-3 && (ai.target_y - expected_y).abs() < 1e-3,
+                "drone {index} target ({}, {}) vs ({expected_x}, {expected_y})",
+                ai.target_x,
+                ai.target_y
+            );
+            assert_eq!(ai.target_angle, expected_angle, "drone {index} angle");
+        }
+    }
+
+    /// I01 T11: the product's progress waits for the drones — with every drone
+    /// off-position `eff = 0` (`UnitAssembler.java:516-517`), and advances once
+    /// all four hold their spots.
+    #[test]
+    fn assembler_waits_for_drones_in_position() {
+        use crate::world::PayloadRef;
+        use crate::world::modules::PowerModule;
+
+        let content = content();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("tank-assembler")
+            .expect("tank-assembler")
+            .clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let entity = inst.spawn(
+            &mut world,
+            1,
+            crate::world::TilePos::new(6, 6),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        // Tier-0 requirements fully staged.
+        let stell = content.unit_id("stell").expect("stell");
+        let wall = content.block_id("tungsten-wall-large").expect("wall");
+        for _ in 0..4 {
+            inst.behavior.handle_payload(
+                &mut world,
+                entity,
+                entity,
+                PayloadRef {
+                    entity: None,
+                    content: stell.raw(),
+                    is_block: false,
+                },
+            );
+        }
+        for _ in 0..10 {
+            inst.behavior.handle_payload(
+                &mut world,
+                entity,
+                entity,
+                PayloadRef {
+                    entity: None,
+                    content: wall.raw(),
+                    is_block: true,
+                },
+            );
+        }
+        let drones = build_assembler_drones(&mut world, entity);
+        // Keep power + cyanogen efficiency at 1 like the spawn test.
+        if let Some(mut power) = world.get_mut::<PowerModule>(entity) {
+            power.status = 1.0;
+        }
+        if let Some(cyanogen) = content.liquid_id("cyanogen")
+            && let Some(mut liquids) = world.get_mut::<crate::world::modules::LiquidModule>(entity)
+        {
+            liquids.add(cyanogen, 1000.0, 1000.0);
+        }
+        // The drones spawned at the building centre and never moved: no
+        // efficiency, so no product progress even with requirements met.
+        for _ in 0..600 {
+            if let Some(mut power) = world.get_mut::<PowerModule>(entity) {
+                power.status = 1.0;
+            }
+            update_buildings(&mut world);
+        }
+        let progress = world
+            .get::<UnitAssembler>(entity)
+            .expect("assembler")
+            .progress;
+        assert_eq!(progress, 0.0, "no progress while no drone is in position");
+        // In position: progress starts advancing.
+        for (index, drone) in drones.iter().enumerate() {
+            place_drone_in_position(&mut world, entity, *drone, index);
+        }
+        if let Some(mut power) = world.get_mut::<PowerModule>(entity) {
+            power.status = 1.0;
+        }
+        update_buildings(&mut world);
+        let progress = world
+            .get::<UnitAssembler>(entity)
+            .expect("assembler")
+            .progress;
+        assert!(
+            progress > 0.0,
+            "progress advances with all drones in position ({progress})"
+        );
     }
 
     /// PAR-0076: the additive reconstructor accepts its configured

@@ -19,7 +19,7 @@
 use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
-use crate::content::{ItemId, UnitTypeId};
+use crate::content::{ContentRef, ContentType, ItemId, PayloadSeq, UnitTypeId};
 use crate::entities::comp::{Building, Health, Pos};
 use crate::world::modules::ItemModule;
 
@@ -337,25 +337,41 @@ pub struct UnitAssembler {
     pub area_size: i32,
     /// Plans, in tier order.
     pub plans: Vec<AssemblerUnitPlan>,
-    /// Module tier registered by an adjacent module (`0` = none).
+    /// Module tier registered by an adjacent module (`currentTier`; `0` = none).
     pub module_tier: i32,
-    /// How many drones were created (`dronesCreated`).
+    /// How many drones to keep alive (`dronesCreated`, Java default 4).
     pub drones_created: i32,
     /// Drone construct time.
     pub drone_construct_time: f32,
-    /// Accumulated build progress (`progress`).
+    /// Accumulated unit build progress (`progress`).
     pub progress: f32,
-    /// Stored payloads (`blocks`/`payloads` sequences), keyed by plan entry.
-    pub stored: Vec<(AssemblerPayload, i32)>,
+    /// Accumulated drone build progress (`droneProgress`; transient).
+    pub drone_progress: f32,
+    /// Tier seen last tick (`lastTier`; transient, Java starts at `-2`).
+    pub last_tier: i32,
+    /// Stored payloads (Java `blocks` `PayloadSeq`).
+    pub stored: PayloadSeq,
+    /// Live assembly drones (Java `units`).
+    pub units: Vec<Entity>,
+    /// Drones ids read from the save body (`readUnits`), resolved on update.
+    pub read_unit_ids: Vec<i32>,
+    /// Command position handed to produced units (`commandPos`).
+    pub command_pos: Option<(f32, f32)>,
 }
 
 /// `UnitAssembler.areaSize` default.
 pub const ASSEMBLER_AREA_SIZE: i32 = 11;
 
-/// Whether two plan payload entries denote the same content (the stored
-/// counter keys ignore the requirement amount).
-fn same_payload(a: AssemblerPayload, b: AssemblerPayload) -> bool {
-    a.is_block == b.is_block && a.content == b.content
+/// Content reference of one stored payload (`PayloadStack.item`).
+pub fn payload_content_ref(payload: AssemblerPayload) -> ContentRef {
+    ContentRef::new(
+        if payload.is_block {
+            ContentType::Block
+        } else {
+            ContentType::Unit
+        },
+        payload.content,
+    )
 }
 
 impl UnitAssembler {
@@ -365,10 +381,16 @@ impl UnitAssembler {
             area_size: ASSEMBLER_AREA_SIZE,
             plans,
             module_tier: 0,
-            drones_created: 0,
+            // `UnitAssembler.dronesCreated = 4`.
+            drones_created: 4,
             drone_construct_time,
             progress: 0.0,
-            stored: Vec::new(),
+            drone_progress: 0.0,
+            last_tier: -2,
+            stored: PayloadSeq::default(),
+            units: Vec::new(),
+            read_unit_ids: Vec::new(),
+            command_pos: None,
         }
     }
 
@@ -402,13 +424,9 @@ impl UnitAssembler {
         self.plans.get(index)
     }
 
-    /// Stored count for `payload`.
+    /// Stored count for `payload` (`blocks.get`).
     pub fn stored(&self, payload: AssemblerPayload) -> i32 {
-        self.stored
-            .iter()
-            .find(|(candidate, _)| same_payload(*candidate, payload))
-            .map(|(_, amount)| *amount)
-            .unwrap_or(0)
+        self.stored.get(payload_content_ref(payload))
     }
 
     /// Whether the active plan accepts one more `payload`
@@ -417,24 +435,19 @@ impl UnitAssembler {
         let Some(plan) = self.plan() else {
             return false;
         };
+        let reference = payload_content_ref(payload);
         plan.payloads.iter().any(|requirement| {
-            same_payload(*requirement, payload) && self.stored(*requirement) < requirement.amount
+            payload_content_ref(*requirement) == reference
+                && self.stored(*requirement) < requirement.amount
         })
     }
 
-    /// Stores one accepted payload (`moveInPayload` into `blocks`/`payloads`).
+    /// Stores one accepted payload (`moveInPayload` into `blocks`).
     pub fn store_payload(&mut self, payload: AssemblerPayload) -> bool {
         if !self.accepts_payload(payload) {
             return false;
         }
-        match self
-            .stored
-            .iter_mut()
-            .find(|(candidate, _)| same_payload(*candidate, payload))
-        {
-            Some((_, amount)) => *amount += 1,
-            None => self.stored.push((payload, 1)),
-        }
+        self.stored.add(payload_content_ref(payload), 1);
         true
     }
 
@@ -449,33 +462,27 @@ impl UnitAssembler {
             .all(|requirement| self.stored(*requirement) >= requirement.amount)
     }
 
-    /// Consumes the active plan's stored payloads (`consume()`).
+    /// Consumes the active plan's stored payloads (`ConsumePayloadDynamic`).
     pub fn consume_requirements(&mut self) {
         let Some(plan) = self.plan() else {
             return;
         };
         let payloads = plan.payloads.clone();
         for requirement in &payloads {
-            if let Some((_, amount)) = self
-                .stored
-                .iter_mut()
-                .find(|(candidate, _)| same_payload(*candidate, *requirement))
-            {
-                *amount = (*amount - requirement.amount).max(0);
-            }
+            self.stored
+                .remove(payload_content_ref(*requirement), requirement.amount);
         }
-        self.stored.retain(|(_, amount)| *amount > 0);
     }
 
-    /// `UnitAssemblerBuild.updateTile` progress half: advance when the plan's
-    /// requirements are met and return the unit on completion.
-    pub fn update(&mut self, time_scale: f32) -> Option<UnitTypeId> {
+    /// `UnitAssemblerBuild.updateTile` product half: advance with the `eff`
+    /// (in-position drones) term and return the unit on completion.
+    pub fn update(&mut self, time_scale: f32, eff: f32) -> Option<UnitTypeId> {
         let plan = self.plan()?;
         let (unit, time) = (plan.unit, plan.time.max(0.0001));
         if !self.has_requirements() {
             return None;
         }
-        self.progress += time_scale / time;
+        self.progress += time_scale * eff / time;
         if self.progress < 1.0 {
             return None;
         }
