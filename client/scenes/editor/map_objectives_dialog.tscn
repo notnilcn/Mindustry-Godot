@@ -2,8 +2,9 @@
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
 [ext_resource type="Script" uid="uid://bybdcnawnq4da" path="res://scenes/editor/map_objectives_dialog.gd" id="2_script"]
+[ext_resource type="PackedScene" path="res://scenes/editor/map_objectives_canvas.tscn" id="3_canvas"]
 
 [node name="MapObjectivesDialog" unique_id=371595425 instance=ExtResource("1_base")]
 script = ExtResource("2_script")
 editor_path = NodePath("/root/Spine/MindEditor")
-canvas_scene = null
+canvas_scene = ExtResource("3_canvas")

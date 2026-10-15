@@ -41,6 +41,7 @@ use mind_core::editor::draw_op::DrawOperation;
 use mind_core::editor::grid::WorldEditorGrid;
 use mind_core::editor::lifecycle::try_catch_map_error;
 use mind_core::editor::maps_glue::{editor_base_tags, save_editor_map_with_ecs};
+use mind_core::editor::objectives::{FieldFlags, FieldKind};
 use mind_core::editor::playtest::EditorPlayState;
 use mind_core::editor::{BRUSH_SIZES, EditorTool, EditorWorldHooks, MapEditor};
 use mind_core::game::play::PlaySession;
@@ -983,6 +984,67 @@ impl MindEditor {
         mind_core::maps::planet::sector_size(&planet.to_string(), sector_id, content)
             .map(|size| size as i64)
             .unwrap_or(0)
+    }
+
+    /// `MapObjectivesDialog`'s type table
+    /// (`MapObjectives.allObjectiveTypes` + `#[derive(ObjectiveFields)]`):
+    /// every objective class with its editor field descriptors. The
+    /// `kind`/`flags` tags are the GDScript ABI (`content:item`, `vec2i`,
+    /// `seq:int`, flags `second`/`tilepos`/`multiline`/`logiccode`/
+    /// `researchable`/`synthetic`/`hidden`).
+    #[func]
+    pub fn objective_classes_json(&self) -> GString {
+        let rows: Vec<serde_json::Value> = mind_core::editor::objectives::all_class_tags()
+            .iter()
+            .map(|tag| {
+                let fields: Vec<serde_json::Value> =
+                    mind_core::editor::objectives::class_fields(tag)
+                        .iter()
+                        .map(|field| {
+                            serde_json::json!({
+                                "name": field.name,
+                                "kind": objective_kind_tag(&field.kind),
+                                "flags": objective_flag_tags(field.flags),
+                            })
+                        })
+                        .collect();
+                serde_json::json!({ "tag": tag, "fields": fields })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// A fresh objective of class `tag` with Java's provider defaults
+    /// (`MapObjectivesDialog`'s `getProvider(MapObjective.class)`, `:213-240`)
+    /// plus the canvas default `editorPos`.
+    #[func]
+    pub fn objective_default_json(&self, tag: GString) -> GString {
+        let tag = tag.to_string();
+        let mut map = serde_json::Map::new();
+        map.insert("class".to_owned(), serde_json::Value::String(tag.clone()));
+        let fields = mind_core::editor::objectives::class_fields(&tag);
+        if fields.is_empty() {
+            return GString::from("{}");
+        }
+        for field in fields {
+            map.insert(
+                field.name.to_owned(),
+                mind_core::editor::objectives::provider_default(&field.kind, self.content.as_ref()),
+            );
+        }
+        map.insert(
+            "editorPos".to_owned(),
+            serde_json::Value::from(mind_core::io::json::objectives::default_editor_pos()),
+        );
+        GString::from(
+            serde_json::to_string(&serde_json::Value::Object(map))
+                .unwrap_or_else(|_| "{}".to_owned())
+                .as_str(),
+        )
     }
 
     /// `MapObjectivesDialog`: the objectives JSON (`MapInfoDialog` route).
@@ -2189,6 +2251,44 @@ impl MindEditor {
         );
         out
     }
+}
+
+/// GDScript tag for one objective field kind (`FieldKind`).
+fn objective_kind_tag(kind: &FieldKind) -> String {
+    match kind {
+        FieldKind::String => "string".to_owned(),
+        FieldKind::Bool => "bool".to_owned(),
+        FieldKind::Byte => "byte".to_owned(),
+        FieldKind::Int => "int".to_owned(),
+        FieldKind::Float => "float".to_owned(),
+        FieldKind::Content(content_type) => format!("content:{}", content_type.name()),
+        FieldKind::Team => "team".to_owned(),
+        FieldKind::Color => "color".to_owned(),
+        FieldKind::Vec2F => "vec2f".to_owned(),
+        FieldKind::Vec2I => "vec2i".to_owned(),
+        FieldKind::Objective(_) => "objective".to_owned(),
+        FieldKind::Seq(inner) => format!("seq:{}", objective_kind_tag(inner)),
+        FieldKind::Map(inner) => format!("map:{}", objective_kind_tag(inner)),
+    }
+}
+
+/// GDScript tags for one objective field's annotation flags (`FieldFlags`).
+fn objective_flag_tags(flags: FieldFlags) -> Vec<&'static str> {
+    let mut tags = Vec::new();
+    for (flag, tag) in [
+        (FieldFlags::SECOND, "second"),
+        (FieldFlags::TILE_POS, "tilepos"),
+        (FieldFlags::MULTILINE, "multiline"),
+        (FieldFlags::LOGIC_CODE, "logiccode"),
+        (FieldFlags::RESEARCHABLE, "researchable"),
+        (FieldFlags::SYNTHETIC, "synthetic"),
+        (FieldFlags::HIDDEN, "hidden"),
+    ] {
+        if flags.contains(flag) {
+            tags.push(tag);
+        }
+    }
+    tags
 }
 
 /// Builds one palette/`block_info` row.
