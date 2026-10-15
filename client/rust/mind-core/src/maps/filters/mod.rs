@@ -429,6 +429,13 @@ pub trait GenerateFilter: Send + Sync {
         '\0'
     }
 
+    /// The block whose `uiIcon` the editor icon stands for (`Iconc.block*`),
+    /// named for the Godot atlas (`block-<name>-ui`). `None` when `icon()` is
+    /// `'\0'`.
+    fn icon_block(&self) -> Option<&'static str> {
+        None
+    }
+
     /// The filter seed (`GenerateFilter.seed`).
     fn seed(&self) -> i32 {
         0
@@ -750,6 +757,50 @@ pub fn read_filters(content: &ContentRegistry, json: &str) -> Vec<Box<dyn Genera
     }
 }
 
+/// Rewrites every integral float in a `genfilters` array as an integer.
+///
+/// GDScript's `JSON.parse_string` turns every JSON number into a `float`, so a
+/// dialog round-trip (`JsonIO.write`-shaped JSON -> Dictionary -> stringify)
+/// would write `"seed": 0.0`, which `serde` rejects for the `i32` fields
+/// (`angle`/`radius`/`amount`/`seed`). Upstream `JsonIO.write` keeps `int`
+/// fields integral; normalizing at the write boundary restores that.
+/// Non-integral values (and parse failures) pass through unchanged.
+pub fn normalize_filter_numbers(json: &str) -> String {
+    match serde_json::from_str::<serde_json::Value>(json) {
+        Ok(mut value) => {
+            normalize_numbers(&mut value);
+            serde_json::to_string(&value).unwrap_or_else(|_| json.to_owned())
+        }
+        Err(_) => json.to_owned(),
+    }
+}
+
+/// Recursive integral-float rewrite used by [`normalize_filter_numbers`].
+fn normalize_numbers(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Number(number) => {
+            if let Some(float) = number.as_f64()
+                && number.is_f64()
+                && float.fract() == 0.0
+                && float.abs() <= 9_007_199_254_740_992.0
+            {
+                *number = serde_json::Number::from(float as i64);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                normalize_numbers(item);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for item in map.values_mut() {
+                normalize_numbers(item);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Parses a `genfilters` array; unknown classes are warned + skipped.
 pub fn parse_filters(
     content: &ContentRegistry,
@@ -777,6 +828,79 @@ pub fn write_filters(content: &ContentRegistry, stack: &[Box<dyn GenerateFilter>
     serde_json::to_string(&values).unwrap_or_else(|_| "[]".to_owned())
 }
 
+/// Serializes the current stack's `FilterOption` descriptors + values for the
+/// Godot `MapGenerateDialog` (`MapGenerateDialog.rebuildFilters` walks
+/// `filter.options()` and each option's live getter).
+///
+/// Rows are in tag order. `values` is the filter's serialized JSON (class
+/// defaults merged with the tag's fields), so the dialog renders concrete
+/// defaults for partial `genfilters` entries without knowing any schema.
+pub fn filter_options_json(content: &ContentRegistry, json: &str) -> String {
+    let registry = FilterRegistry::vanilla();
+    let filters = match parse_filters(content, json, &registry) {
+        Ok(filters) => filters,
+        Err(_) => default_filter_stack(content),
+    };
+    let rows: Vec<serde_json::Value> = filters
+        .iter()
+        .map(|filter| {
+            let options: Vec<serde_json::Value> =
+                filter.options().iter().map(FilterOption::to_json).collect();
+            serde_json::json!({
+                "class": filter.class_tag(),
+                "name": filter.simple_name(),
+                "icon": filter.icon_block().unwrap_or(""),
+                "post": filter.is_post(),
+                "options": options,
+                "values": filter.to_json(content),
+            })
+        })
+        .collect();
+    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_owned())
+}
+
+/// Serializes `Maps.allFilterTypes` for the dialog's `@add` picker: class tag,
+/// `simpleName` (bundle `filter.<name>`) and `isPost` (post filters are hidden
+/// in applied mode).
+pub fn filter_types_json() -> String {
+    let registry = FilterRegistry::vanilla();
+    let rows: Vec<serde_json::Value> = registry
+        .types
+        .iter()
+        .map(|(tag, ctor)| {
+            let filter = ctor();
+            serde_json::json!({
+                "class": tag,
+                "name": filter.simple_name(),
+                "icon": filter.icon_block().unwrap_or(""),
+                "post": filter.is_post(),
+            })
+        })
+        .collect();
+    serde_json::to_string(&rows).unwrap_or_else(|_| "[]".to_owned())
+}
+
+/// `Maps.addDefaultOres`: one `OreFilter` per `oreDefault` overlay
+/// (`Maps.java:354-363`), in content-id order.
+pub fn default_ore_filters(content: &ContentRegistry) -> Vec<Box<dyn GenerateFilter>> {
+    let mut filters: Vec<Box<dyn GenerateFilter>> = Vec::new();
+    for def in content.blocks() {
+        if block_info::is_overlay(def) && def.ore_default {
+            filters.push(Box::new(builtin::OreFilter {
+                seed: 0,
+                scl: def.ore_scale,
+                threshold: def.ore_threshold,
+                octaves: 2.0,
+                falloff: 0.3,
+                tilt: 0.0,
+                ore: def.id,
+                target: BlockId::AIR,
+            }));
+        }
+    }
+    filters
+}
+
 /// The default stack (`Maps.readFilters("")`): per-floor scatter + default ores.
 pub fn default_filter_stack(content: &ContentRegistry) -> Vec<Box<dyn GenerateFilter>> {
     let mut filters: Vec<Box<dyn GenerateFilter>> = Vec::new();
@@ -797,20 +921,7 @@ pub fn default_filter_stack(content: &ContentRegistry) -> Vec<Box<dyn GenerateFi
         }
     }
 
-    for def in content.blocks() {
-        if block_info::is_overlay(def) && def.ore_default {
-            filters.push(Box::new(builtin::OreFilter {
-                seed: 0,
-                scl: def.ore_scale,
-                threshold: def.ore_threshold,
-                octaves: 2.0,
-                falloff: 0.3,
-                tilt: 0.0,
-                ore: def.id,
-                target: BlockId::AIR,
-            }));
-        }
-    }
+    filters.extend(default_ore_filters(content));
 
     filters
 }
@@ -1008,5 +1119,147 @@ mod tests {
         apply_stack(&mut tiles, &mut stack, &content, &mut rng);
         assert_eq!(tiles.geti(4).block, wall, "setblock block applied");
         assert_eq!(tiles.geti(0).floor, sand, "setblock floor applied");
+    }
+
+    /// `MapGenerateDialog.rebuildFilters` option rows: names/fields match the
+    /// Java `options()` declarations (`NoiseFilter.java:39-49`,
+    /// `MirrorFilter.java:42-47`), including the int sliders.
+    #[test]
+    fn options_follow_java_declarations() {
+        let registry = FilterRegistry::vanilla();
+        let noise = registry.create("noise").expect("noise");
+        let names: Vec<&str> = noise.options().iter().map(FilterOption::name).collect();
+        assert_eq!(
+            names,
+            vec![
+                "scale",
+                "threshold",
+                "octaves",
+                "falloff",
+                "tilt",
+                "target",
+                "floor",
+                "wall"
+            ]
+        );
+        let fields: Vec<&str> = noise.options().iter().map(FilterOption::field).collect();
+        assert_eq!(
+            fields,
+            vec![
+                "scl",
+                "threshold",
+                "octaves",
+                "falloff",
+                "tilt",
+                "target",
+                "floor",
+                "block"
+            ]
+        );
+        let mirror = registry.create("mirror").expect("mirror");
+        match &mirror.options()[0] {
+            FilterOption::Slider {
+                min,
+                max,
+                step,
+                integer,
+                ..
+            } => {
+                assert_eq!((*min, *max, *step), (0.0, 360.0, 15.0));
+                assert!(integer, "angle casts to int");
+            }
+            other => panic!("expected slider, got {other:?}"),
+        }
+        assert!(
+            registry
+                .create("coreSpawn")
+                .expect("coreSpawn")
+                .options()
+                .is_empty(),
+            "CoreSpawnFilter.options() is disabled upstream"
+        );
+    }
+
+    /// The Godot dialog payload: class defaults merged into `values`, options
+    /// and the block icon in registry order (`MapGenerateDialog.showAdd`).
+    #[test]
+    fn filter_options_json_merges_defaults() {
+        let content = test_registry();
+        let rows: serde_json::Value =
+            serde_json::from_str(&filter_options_json(&content, r#"[{"class":"noise"}]"#)).unwrap();
+        let rows = rows.as_array().expect("rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["class"], "noise");
+        assert_eq!(rows[0]["icon"], "pebbles");
+        assert_eq!(rows[0]["values"]["scl"], 40.0);
+        assert_eq!(rows[0]["values"]["threshold"], 0.5);
+        assert_eq!(rows[0]["options"][0]["field"], "scl");
+        assert_eq!(rows[0]["options"][5]["predicate"], "anyOptional");
+
+        // An empty tag falls back to the default stack (scatter + ores).
+        let defaults = filter_options_json(&content, "");
+        let parsed: serde_json::Value = serde_json::from_str(&defaults).unwrap();
+        assert!(parsed.as_array().is_some_and(|rows| !rows.is_empty()));
+
+        // The add-picker payload: 15 vanilla types, post flags set.
+        let types: serde_json::Value = serde_json::from_str(&filter_types_json()).unwrap();
+        let types = types.as_array().expect("types");
+        assert_eq!(types.len(), 15);
+        assert_eq!(types[0]["class"], "noise");
+        assert_eq!(types[0]["name"], "noise");
+        assert_eq!(
+            types
+                .iter()
+                .find(|row| row["class"] == "coreSpawn")
+                .map(|row| row["post"].clone()),
+            Some(serde_json::Value::Bool(true))
+        );
+    }
+
+    /// `Maps.addDefaultOres` is the tail of the default stack.
+    #[test]
+    fn default_ores_match_stack_tail() {
+        let content = test_registry();
+        let ores = default_ore_filters(&content);
+        assert!(
+            !ores.is_empty(),
+            "the base registry defines `oreDefault` overlays"
+        );
+        let stack = default_filter_stack(&content);
+        let tail = &stack[stack.len() - ores.len()..];
+        assert_eq!(
+            write_filters(&content, tail),
+            write_filters(&content, &ores),
+            "default stack ends with the default ores"
+        );
+        // Every ore filter targets an `oreDefault` overlay.
+        for filter in &ores {
+            assert_eq!(filter.class_tag(), "ore");
+        }
+    }
+
+    /// The Godot dialog writes its tag through GDScript's JSON (all numbers
+    /// become floats); normalization keeps the `i32` fields parsable.
+    #[test]
+    fn normalize_filter_numbers_restores_integer_fields() {
+        let content = test_registry();
+        let raw = r#"[{"class":"scatter","seed":0.0,"chance":0.013},{"class":"mirror","seed":123.0,"angle":45.0,"rotate":false,"axisX":0.5,"axisY":0.5}]"#;
+        assert!(
+            parse_filters(&content, raw, &FilterRegistry::vanilla()).is_err(),
+            "float seeds fail the strict parse"
+        );
+        let fixed = normalize_filter_numbers(raw);
+        let filters = parse_filters(&content, &fixed, &FilterRegistry::vanilla()).unwrap();
+        assert_eq!(filters.len(), 2);
+        assert_eq!(filters[1].seed(), 123);
+        // Non-integral values stay floats; integral floats inside strings/keys
+        // are untouched.
+        assert!(fixed.contains("0.013"));
+        let parsed: serde_json::Value = serde_json::from_str(&fixed).unwrap();
+        assert!(parsed[0]["seed"].is_i64());
+        assert!(parsed[1]["angle"].is_i64());
+        assert!(parsed[1]["axisX"].is_f64());
+        // Invalid JSON passes through unchanged.
+        assert_eq!(normalize_filter_numbers("not json"), "not json");
     }
 }

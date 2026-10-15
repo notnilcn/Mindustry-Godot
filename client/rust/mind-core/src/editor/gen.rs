@@ -168,16 +168,27 @@ pub fn generate_preview(
     content: &ContentRegistry,
     seed: u64,
 ) -> PreviewImage {
+    generate_preview_with_palette(snapshot, filters, content, &BlockPalette::of(content), seed)
+}
+
+/// [`generate_preview`] with a caller-supplied palette (`ContentLoader.loadColors`
+/// minimap colours; the editor dialog reuses the loaded palette).
+pub fn generate_preview_with_palette(
+    snapshot: &EditorSnapshot,
+    filters: &mut [Box<dyn GenerateFilter>],
+    content: &ContentRegistry,
+    palette: &BlockPalette,
+    seed: u64,
+) -> PreviewImage {
     let mut tiles = snapshot.to_tiles();
     for filter in filters.iter_mut() {
         apply_filter_write_through(&mut tiles, filter.as_mut(), content, seed);
     }
-    let palette = BlockPalette::of(content);
     let source = TilesMapSource {
         tiles: &tiles,
         content,
     };
-    generate_preview_from_tiles(&palette, &source)
+    generate_preview_from_tiles(palette, &source)
 }
 
 /// Applies every filter to the live editor grid and clears the undo stack
