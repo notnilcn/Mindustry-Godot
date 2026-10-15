@@ -7,6 +7,8 @@
 #   spacetimedb STDB module typecheck + generated-bindings drift gate
 #   godot-import build the GDExtension, download pinned Godot 4.7.2, run the
 #              headless editor import/parse check
+#   export-smoke (manual/nightly, I07 T8) release build + pack + Linux export,
+#              then launch the export headless and check it found its assets
 #
 # The interactive MCP smoke (`tools/mcp-smoke.sh`) is local-only: it needs a
 # running editor + display and is never run here. No secrets are used.
@@ -18,6 +20,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Nightly run for the heavy export-smoke job (gated below).
+    - cron: '43 2 * * *'
 
 env:
   CARGO_TERM_COLOR: always
@@ -209,3 +215,79 @@ jobs:
             echo "FAIL: Godot headless import logged parse/load errors" >&2
             exit 1
           fi
+
+  # I07 T8 (PAR-0119): manual/nightly export smoke. Proves an exported build
+  # boots with the `assets/` directory beside the binary (resolver steps 4-5 in
+  # client/rust/mind-gdext/src/assets/loader.rs) instead of the placeholder
+  # quads. Heavy (templates + release build + pack), so push/PR skip it.
+  export-smoke:
+    name: export-smoke
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    env:
+      GODOT_VERSION: 4.7.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.98.1
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev unzip curl
+
+      - name: Download pinned Godot 4.7.2 (standard)
+        run: |
+          set -euo pipefail
+          URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -sSL -o /tmp/godot.zip "$URL"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          BIN="$(find /tmp/godot -maxdepth 1 -type f -name 'Godot_v*' | head -n 1)"
+          chmod +x "$BIN"
+          echo "GODOT_BIN=$BIN" >> "$GITHUB_ENV"
+          "$BIN" --version
+
+      - name: Install Godot 4.7.2 export templates
+        run: |
+          set -euo pipefail
+          URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_export_templates.tpz"
+          curl -sSL -o /tmp/templates.tpz "$URL"
+          mkdir -p /tmp/templates
+          unzip -q /tmp/templates.tpz -d /tmp/templates
+          mkdir -p "$HOME/.local/share/godot/export_templates"
+          rm -rf "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          mv /tmp/templates/templates "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
+          test -f "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable/version.txt"
+
+      - name: Build release GDExtension (client/bin/rust/release/libmind_gdext.so)
+        run: tools/build.sh --release
+
+      - name: Pack assets
+        run: tools/pack.sh pack
+
+      - name: Export Linux (binary with assets/ beside it)
+        run: tools/export.sh linux --verify
+
+      - name: Launch the export headless (300 frames) and check the assets root
+        run: |
+          set -euo pipefail
+          LOG="$(mktemp)"
+          set +e
+          timeout 300 client/bin/export/Mindustry-Godot.x86_64 --headless --quit-after 300 >"$LOG" 2>&1
+          STATUS=$?
+          set -e
+          cat "$LOG"
+          if [ "$STATUS" -ne 0 ]; then
+            echo "FAIL: export exited with status $STATUS" >&2
+            exit 1
+          fi
+          if grep -n 'missing manifest' "$LOG"; then
+            echo "FAIL: exported build did not resolve its assets directory" >&2
+            exit 1
+          fi
+          # The loader logs the chosen root once. In an export the exe-dir
+          # assets/ is reached through Godot's res:// -> executable-dir
+          # fallback (step 4, then step 5 in loader.rs), so accept either.
+          grep -nE '\[assets\] assets root: .*\(source: (res://assets|exe-dir assets)\)' "$LOG"
