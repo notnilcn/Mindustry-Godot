@@ -908,7 +908,18 @@ impl DesktopBridge {
                 if self.controller.state.command_mode {
                     self.control_group(bindings, index);
                 } else {
-                    self.select_catalog_block(index);
+                    // `PlacementFragment.gridUpdate` owns the digit combos: the
+                    // fragment holds the live, unlock-filtered catalogue, so the
+                    // binding edge only reaches it (Java `:745` gate).
+                    self.fire_hotkey(name);
+                }
+            }
+            "block_select_left" | "block_select_right" | "block_select_up"
+            | "block_select_down" => {
+                // `gridUpdate` arrows (`PlacementFragment.java:189-207`); the
+                // fragment resolves them against the live catalogue.
+                if !self.controller.state.command_mode {
+                    self.fire_hotkey(name);
                 }
             }
             "command_mode" => {
@@ -1056,9 +1067,11 @@ impl DesktopBridge {
                 self.fire_hotkey(name);
             }
             "category_prev" | "category_next" => {
-                // The placement fragment owns the category rail; it reacts to
-                // the hotkey signal and pushes the new index back.
-                self.fire_hotkey(name);
+                // `gridUpdate` category cycles (`PlacementFragment.java:240-258`);
+                // `:745` gates them off in command mode.
+                if !self.controller.state.command_mode {
+                    self.fire_hotkey(name);
+                }
             }
             "pause" => {
                 // `Control.java:730-734`: the pause key is ignored while
@@ -1104,29 +1117,6 @@ impl DesktopBridge {
         if !self.controller.state.select_plans.is_empty() {
             self.controller.state.select_plans.clear();
             self.refresh_select_preview();
-        }
-    }
-
-    /// Selects the Nth buildable block of the active catalogue category.
-    pub fn select_catalog_block(&mut self, index: usize) {
-        let Some(category) = self.catalog.get(self.catalog_category) else {
-            return;
-        };
-        let Some(name) = category.get(index).cloned() else {
-            return;
-        };
-        let Some(mut host) = self.host.clone() else {
-            return;
-        };
-        if host.bind_mut().select_block(GString::from(&name)) {
-            let guard = host.bind();
-            if let Some(content) = guard.content_registry()
-                && let Some(id) = content.block_id(&name)
-            {
-                self.controller.state.select_block(Some(id));
-            }
-            self.clear_select_plans();
-            self.fire_hotkey("block_select");
         }
     }
 
@@ -1499,24 +1489,38 @@ impl DesktopBridge {
     }
 
     /// Opens the config UI or content info for the block under the cursor.
+    /// F1 (`Binding.blockInfo`, `PlacementFragment.java:260-271`): the content
+    /// dialog for the hovered unit, else the selected block, else the block
+    /// under the cursor (constructs resolve to their `current`). It never opens
+    /// the config panel (that is the configure tap, not `blockInfo`).
     fn block_info_hotkey(&mut self) {
-        let Some((x, y)) = self.cursor_tile() else {
-            return;
-        };
-        if let Some(spec) = self.config_spec(x, y) {
-            self.effects.push(Effect::OpenBlockConfig {
-                x,
-                y,
-                screen: self.mouse,
-                spec,
-            });
-            self.fire_hotkey("block_info");
-            return;
-        }
-        if let Some(name) = self.block_name_at(x, y) {
+        // `hovered() instanceof Unit unit && unit.type.unlockedNow()`.
+        if let Some(name) = self.hovered_unit_name() {
             self.open_dialog("content", &format!("{{\"content\":\"{name}\"}}"));
+        } else {
+            // `displayBlock = input.block ?? hovering` (`:263-266`).
+            let hovering = self
+                .cursor_tile()
+                .and_then(|(x, y)| self.host.clone()?.bind().pick_target_at(x, y))
+                .map(|(block, _)| block);
+            let display = self
+                .selected_block_name()
+                .and_then(|name| self.block_id_by_name(&name))
+                .or(hovering);
+            if let Some(block) = display
+                && let Some(name) = self.placeable_block_name(block)
+            {
+                self.open_dialog("content", &format!("{{\"content\":\"{name}\"}}"));
+            }
         }
         self.fire_hotkey("block_info");
+    }
+
+    /// Content id for a block name (`content.block_id`).
+    fn block_id_by_name(&self, name: &str) -> Option<mind_core::content::BlockId> {
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        guard.content_registry()?.block_id(name)
     }
 
     fn open_dialog(&mut self, name: &str, ctx: &str) {
@@ -1526,32 +1530,132 @@ impl DesktopBridge {
         });
     }
 
-    /// Selects the block under the cursor (middle-click `pick`).
+    /// Middle-click pick (`PlacementFragment.updatePick` `:132-172`).
+    ///
+    /// Runs only outside command mode (`:745`), with a live player unit and no
+    /// dialog (`:134`): the hovered building (a `ConstructBuild` resolves to
+    /// its `current`) or a queued non-breaking plan under the cursor is
+    /// selected when it is player-placeable, and a copied config is remembered
+    /// (`tryBlock.lastConfig = tryConfig`, `:170`).
     fn pick_block(&mut self) {
-        let Some((x, y)) = self.cursor_tile() else {
-            return;
-        };
-        let Some(name) = self.block_name_at(x, y) else {
-            return;
-        };
-        if name == "air" {
+        if self.controller.state.command_mode || self.ui_dialog {
             return;
         }
         let Some(mut host) = self.host.clone() else {
             return;
         };
-        if host.bind_mut().select_block(GString::from(&name)) {
-            let guard = host.bind();
-            if let Some(content) = guard.content_registry()
-                && let Some(id) = content.block_id(&name)
-            {
-                self.controller.state.select_block(Some(id));
-            }
-            self.clear_select_plans();
-            // `HintsFragment` `schematicSelect` includes `keyTap(pick)`.
-            self.push_hint("pick_tap");
-            self.fire_hotkey("pick");
+        // `player.isBuilder()`: a live player unit (the builder check itself is
+        // the campaign placement gate's).
+        if !host.bind().has_player_unit() {
+            return;
         }
+        let Some((x, y)) = self.cursor_tile() else {
+            return;
+        };
+        let Some((wx, wy)) = self.aim_world() else {
+            return;
+        };
+        // `tryBlock`/`tryConfig` from the hovered building (`:141-143`).
+        let mut trial = host.bind().pick_target_at(x, y);
+        // Queued non-breaking player plans override the hovered building
+        // (`:145-154`).
+        if let Some((block, config)) = host.bind().player_plan_at_world(wx, wy) {
+            trial = Some((block, Some(config)));
+        }
+        let Some((block, config)) = trial else {
+            return;
+        };
+        // `unlocked(tryBlock)` (`:169`): the bridge registry has no live unlock
+        // store, so the static player-placeable half is enforced here and the
+        // placement gate owns the tech-unlock half.
+        let Some(name) = self.placeable_block_name(block) else {
+            return;
+        };
+        if !host.bind_mut().select_block(GString::from(&name)) {
+            return;
+        }
+        let id = host
+            .bind()
+            .content_registry()
+            .and_then(|content| content.block_id(&name));
+        if let Some(id) = id {
+            self.controller.state.select_block(Some(id));
+        }
+        if let Some(value) = config {
+            // `tryBlock.lastConfig = tryConfig` (`Block.java:827-832`).
+            self.last_config.insert(block.raw(), value);
+        }
+        self.clear_select_plans();
+        // `HintsFragment` `schematicSelect` includes `keyTap(pick)`.
+        self.push_hint("pick_tap");
+        self.fire_hotkey("pick");
+    }
+
+    /// The block's content name when it may reach the placement palette
+    /// (`PlacementFragment.unlocked`'s static half: visible, player-placeable).
+    fn placeable_block_name(&self, block: BlockId) -> Option<String> {
+        use mind_core::content::registries::blocks::BuildVisibility;
+        let host = self.host.clone()?;
+        let guard = host.bind();
+        let content = guard.content_registry()?;
+        let def = content.block(block)?;
+        if def.removed
+            || !def.placeable_player
+            || matches!(
+                def.build_visibility,
+                BuildVisibility::Hidden | BuildVisibility::DebugOnly | BuildVisibility::EditorOnly
+            )
+        {
+            return None;
+        }
+        Some(def.name.clone())
+    }
+
+    /// The block name under the cursor (`""` for air/unset).
+    fn selected_block_name(&self) -> Option<String> {
+        let host = self.host.clone()?;
+        let name = host.bind().selected_block().to_string();
+        (!name.is_empty() && name != "air").then_some(name)
+    }
+
+    /// Nearest player-team unit whose body overlaps the cursor
+    /// (`PlacementFragment.hovered` `:798-801`,
+    /// `Units.closestOverlap(team, x, y, 5f, ...)`; world units).
+    fn hovered_unit_name(&self) -> Option<String> {
+        let (wx, wy) = self.aim_world()?;
+        let team = self.player_team();
+        let host = self.host.clone()?;
+        let json = host.bind().selectable_units_json();
+        let rows = serde_json::from_str::<serde_json::Value>(json.to_string().as_str()).ok()?;
+        let mut best: Option<(f32, i32)> = None;
+        for row in rows.as_array()? {
+            if row.get("team").and_then(serde_json::Value::as_u64) != Some(u64::from(team)) {
+                continue;
+            }
+            let (Some(x), Some(y), Some(hit_size), Some(kind)) = (
+                row.get("x").and_then(serde_json::Value::as_f64),
+                row.get("y").and_then(serde_json::Value::as_f64),
+                row.get("hit_size").and_then(serde_json::Value::as_f64),
+                row.get("type").and_then(serde_json::Value::as_i64),
+            ) else {
+                continue;
+            };
+            let dx = x as f32 - wx;
+            let dy = y as f32 - wy;
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance > hit_size as f32 / 2.0 + 5.0 {
+                continue;
+            }
+            if best.is_none_or(|(current, _)| distance < current) {
+                best = Some((distance, kind as i32));
+            }
+        }
+        let (_, kind) = best?;
+        let guard = host.bind();
+        let def = guard
+            .content_registry()?
+            .unit(mind_core::content::UnitTypeId::new(kind as u16))?;
+        Some(def.name.clone())
     }
 
     /// One `Effect::Hotkey` for the fired binding (probe/UI signal).
@@ -3036,18 +3140,6 @@ impl DesktopBridge {
         };
         let block = guard.grid().block_at(TilePos::new(tx, ty))?;
         content.block(block).map(|def| def.kind)
-    }
-
-    /// Block name at a tile (`None` out of bounds/unloaded).
-    pub fn block_name_at(&self, x: i32, y: i32) -> Option<String> {
-        let host = self.host.clone()?;
-        let guard = host.bind();
-        let content = guard.content_registry()?;
-        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
-            return None;
-        };
-        let block = guard.grid().block_at(TilePos::new(tx, ty))?;
-        content.block(block).map(|def| def.name.clone())
     }
 
     /// Builds the config-spec JSON for a configurable block.
