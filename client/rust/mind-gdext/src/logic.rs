@@ -319,6 +319,13 @@ impl MindLogic {
         }
     }
 
+    /// `LStatement.sanitize`: makes user text-field input safe for the parser
+    /// (`LStatement.java:94-150`).
+    #[func]
+    pub fn sanitize(&self, value: GString) -> GString {
+        GString::from(mind_core::logic::statement::Statement::sanitize(&value.to_string()).as_str())
+    }
+
     /// A minimal valid starter program (`set`/`op`/`jump`), for the editor.
     #[func]
     pub fn default_program(&self) -> GString {

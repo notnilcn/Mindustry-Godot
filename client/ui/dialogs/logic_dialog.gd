@@ -112,16 +112,19 @@ func _rebuild_list() -> void:
 		_list.row()
 
 
-## One statement header row (`LCanvas.StatementElem`, `LCanvas.java:417-510`).
+## One statement element: the header row (`LCanvas.StatementElem`) plus the
+## generic field builder (T8; `LStatement.field`/`fields`).
 func _statement_row(index: int, row: Dictionary) -> Control:
 	var name := str(row.get("name", "noop"))
 	var category := str(row.get("category", "unknown"))
-	# code-instantiated: one header row per statement element; the count is the
-	# program length.
+	# code-instantiated: one element per statement; the count is the program
+	# length, not scene-authorable.
 	var panel := PanelContainer.new()
 	panel.modulate = CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"])
+	var column := VBoxContainer.new()
+	panel.add_child(column)
 	var box := HBoxContainer.new()
-	panel.add_child(box)
+	column.add_child(box)
 	var label := Label.new()
 	label.text = "%d  %s" % [index, _t("lst." + str(row.get("bundle", name)))]
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -136,7 +139,70 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	delete.tooltip_text = _t("@delete")
 	delete.pressed.connect(_delete_statement.bind(index))
 	box.add_child(delete)
+	column.add_child(_field_row(index, row))
 	return panel
+
+
+## The generic field builder (`LStatement.fields`, `LStatement.java:233-287`):
+## one labelled text field per `StatementField`, in serialization order.
+func _field_row(index: int, row: Dictionary) -> Control:
+	var fields_box := HBoxContainer.new()
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return fields_box
+	var name := str(row.get("name", "noop"))
+	var values: Array = row.get("fields", [])
+	var metas: Variant = logic.call("statement_fields", name)
+	if not (metas is Array):
+		return fields_box
+	for field_index in (metas as Array).size():
+		var meta: Variant = (metas as Array)[field_index]
+		if not (meta is Dictionary):
+			continue
+		var field_name := str((meta as Dictionary).get("name", ""))
+		var label := Label.new()
+		label.text = field_name
+		label.tooltip_text = "%s.%s" % [name, field_name]
+		fields_box.add_child(label)
+		var value := str(values[field_index]) if field_index < values.size() else ""
+		var edit := LineEdit.new()
+		edit.text = value
+		edit.custom_minimum_size = Vector2(90, 32)
+		edit.tooltip_text = "%s.%s" % [name, field_name]
+		edit.text_submitted.connect(_set_field.bind(index, field_index))
+		edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
+		fields_box.add_child(edit)
+	return fields_box
+
+
+## `field(table, value, setter)`: `setter.get(sanitize(text))`.
+func _set_field(text: String, index: int, field_index: int) -> void:
+	_commit_field_value(text, index, field_index)
+
+
+## Commit on focus loss (`TextField.changed` in Java runs per keystroke; the
+## port commits on submit/blur so typing stays cheap).
+func _commit_field(index: int, field_index: int, edit: LineEdit) -> void:
+	_commit_field_value(edit.text, index, field_index)
+
+
+func _commit_field_value(text: String, index: int, field_index: int) -> void:
+	if index < 0 or index >= _statements.size():
+		return
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return
+	var sanitized := str(logic.call("sanitize", text))
+	var row: Dictionary = _statements[index]
+	var values: Array = row.get("fields", [])
+	if field_index >= values.size():
+		return
+	if str(values[field_index]) == sanitized:
+		return
+	values[field_index] = sanitized
+	row["fields"] = values
+	_statements[index] = row
+	_modified = true
 
 
 ## `StatementElem.copy`: duplicates the element after itself.
