@@ -32,6 +32,10 @@ var _code := ""
 var _statements: Array = []
 var _list: MindTable = null
 var _modified := false
+## Variables panel state (`LogicDialog`'s 15-frame refresh).
+var _vars_popup: PopupPanel = null
+var _vars_rows: Array = []
+var _vars_timer := 0
 
 
 func _ready() -> void:
@@ -66,8 +70,7 @@ func _build() -> void:
 	edit.pressed.connect(_open_edit_menu)
 	controls.add_child(edit)
 	var variables := MindWidgets.icon_button("menu", _t("@variables"), "cleart")
-	variables.disabled = true
-	variables.tooltip_text = _t("@variables")
+	variables.pressed.connect(_open_variables_panel)
 	controls.add_child(variables)
 	var add := MindWidgets.icon_button("add", _t("@add"), "cleart")
 	add.pressed.connect(_open_add_dialog)
@@ -392,6 +395,145 @@ func _load_from_clipboard() -> void:
 		_statements = parsed
 		_modified = true
 		_rebuild_list()
+
+
+## `LogicDialog`'s `@variables` button (`:169-247`): the variables panel when
+## the processor has non-constant vars, else the globals panel
+## (`shouldShowVariables`); the button label follows.
+func _open_variables_panel() -> void:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null:
+		return
+	var state: Variant = host.call("logic_get_state", _x, _y)
+	var vars: Array = []
+	if state is Dictionary:
+		var list: Variant = (state as Dictionary).get("vars", [])
+		if list is Array:
+			vars = list
+	if vars.is_empty():
+		_open_globals_panel()
+	else:
+		_open_vars_panel(vars)
+
+
+## The per-variable rows (`LogicDialog.java:183-247`): name (accent), the value
+## (140 wide, refreshed every 15 frames) and the type.
+func _open_vars_panel(vars: Array) -> void:
+	var popup := PopupPanel.new()
+	# code-instantiated: the variables panel is transient and data-driven.
+	add_child(popup)
+	var column := VBoxContainer.new()
+	column.custom_minimum_size = Vector2(420, 320)
+	popup.add_child(column)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	_vars_rows.clear()
+	for entry in vars:
+		if not (entry is Dictionary):
+			continue
+		var row := HBoxContainer.new()
+		var name_label := Label.new()
+		name_label.text = " " + str((entry as Dictionary).get("name", "")) + " "
+		name_label.add_theme_color_override("font_color", MindStyles.ACCENT)
+		row.add_child(name_label)
+		var value_label := Label.new()
+		value_label.text = _format_var_value(entry)
+		value_label.custom_minimum_size = Vector2(140, 0)
+		value_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		row.add_child(value_label)
+		var type_label := Label.new()
+		type_label.text = " " + str((entry as Dictionary).get("type", "")) + " "
+		type_label.custom_minimum_size = Vector2(120, 0)
+		row.add_child(type_label)
+		list.add_child(row)
+		_vars_rows.append([str((entry as Dictionary).get("name", "")), value_label])
+	var buttons := HBoxContainer.new()
+	column.add_child(buttons)
+	var globals := MindWidgets.icon_button("list", _t("@logic.globals"), "cleart")
+	globals.pressed.connect(
+		func() -> void:
+			popup.hide()
+			_open_globals_panel()
+	)
+	buttons.add_child(globals)
+	_vars_popup = popup
+	_vars_timer = 0
+	popup.popup_centered()
+	set_process(true)
+
+
+## `LogicDialog`'s value text: objects print through the sim, numbers as
+## integers within 0.00001 (`LogicDialog.java:206-215`).
+func _format_var_value(entry: Variant) -> String:
+	return str((entry as Dictionary).get("value", ""))
+
+
+## The globals panel (`GlobalVarsDialog`): `@name` + its `lglobal.<name>`
+## description.
+func _open_globals_panel() -> void:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return
+	var popup := PopupPanel.new()
+	# code-instantiated: the globals panel is transient and data-driven.
+	add_child(popup)
+	var column := VBoxContainer.new()
+	column.custom_minimum_size = Vector2(520, 380)
+	popup.add_child(column)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	column.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(list)
+	var rows: Variant = logic.call("globals")
+	if rows is Array:
+		for entry in rows:
+			if not (entry is Dictionary):
+				continue
+			var row := HBoxContainer.new()
+			var name_label := Label.new()
+			name_label.text = " " + str((entry as Dictionary).get("name", "")) + " "
+			name_label.custom_minimum_size = Vector2(150, 0)
+			row.add_child(name_label)
+			var desc_label := Label.new()
+			desc_label.text = _t(str((entry as Dictionary).get("description", "")))
+			desc_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			desc_label.custom_minimum_size = Vector2(320, 0)
+			row.add_child(desc_label)
+			list.add_child(row)
+	popup.popup_centered()
+
+
+## The 15-frame variables refresh while the panel is shown
+## (`LogicDialog.java:204-222`).
+func _process(_delta: float) -> void:
+	if _vars_popup == null or not _vars_popup.visible:
+		return
+	_vars_timer += 1
+	if _vars_timer < 15:
+		return
+	_vars_timer = 0
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null:
+		return
+	var state: Variant = host.call("logic_get_state", _x, _y)
+	if not (state is Dictionary):
+		return
+	var vars: Variant = (state as Dictionary).get("vars", [])
+	if not (vars is Array):
+		return
+	for entry in vars:
+		if not (entry is Dictionary):
+			continue
+		var name := str((entry as Dictionary).get("name", ""))
+		for row in _vars_rows:
+			if row[0] == name:
+				(row[1] as Label).text = _format_var_value(entry)
 
 
 ## `LogicDialog.showAddDialog` (`LogicDialog.java:251-341`): a searchable list of

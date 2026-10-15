@@ -386,6 +386,31 @@ impl MindLogic {
         out
     }
 
+    /// The built-in global entries (`GlobalVarsDialog`: `@logic.globals`).
+    ///
+    /// Rows are `{name, description}`; the description falls back to the
+    /// `lglobal.<name>` bundle key (`GlobalVarsDialog.java:33-36`).
+    #[func]
+    pub fn globals(&self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        let Some(globals) = mind_core::logic::globals::GlobalVars::global_entries() else {
+            return out;
+        };
+        for entry in globals {
+            out.push(
+                &dict(vec![
+                    ("name", GString::from(entry.as_str()).to_variant()),
+                    (
+                        "description",
+                        GString::from(format!("lglobal.{}", entry).as_str()).to_variant(),
+                    ),
+                ])
+                .to_variant(),
+            );
+        }
+        out
+    }
+
     /// A minimal valid starter program (`set`/`op`/`jump`), for the editor.
     #[func]
     pub fn default_program(&self) -> GString {
