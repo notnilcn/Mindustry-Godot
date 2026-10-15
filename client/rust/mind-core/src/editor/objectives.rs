@@ -47,6 +47,12 @@ impl FieldFlags {
     pub const SYNTHETIC: FieldFlags = FieldFlags(32);
     /// Field is hidden from the default view.
     pub const HIDDEN: FieldFlags = FieldFlags(64);
+    /// `@Unordered`: the `Seq` editor hides the up/down indexer.
+    pub const UNORDERED: FieldFlags = FieldFlags(128);
+    /// `@Alignment(ver = false)`: only horizontally-centered alignments.
+    pub const ALIGN_NO_VER: FieldFlags = FieldFlags(256);
+    /// `@Alignment(hor = false)`: only vertically-centered alignments.
+    pub const ALIGN_NO_HOR: FieldFlags = FieldFlags(512);
 
     /// Empty flags.
     pub const fn empty() -> Self {
@@ -97,7 +103,7 @@ pub enum FieldKind {
     Team,
     /// Color picker (`Color`).
     Color,
-    /// World-space vector (`Vec2`).
+    /// `Vec2` world-space vector (`Vec2`); `TILE_POS` tiles are ×8 display.
     Vec2F,
     /// Tile-space point (`Point2`).
     Vec2I,
@@ -107,6 +113,20 @@ pub enum FieldKind {
     Seq(Box<FieldKind>),
     /// `ObjectMap`/array map (`Map(Box<FieldKind>)`).
     Map(Box<FieldKind>),
+    /// `@IndexBool int`: a checkbox that stores `1` (checked) / `-1`.
+    IndexBool,
+    /// `@LabelFlag byte`: the two `WorldLabel` flag bits (`@marker.*`).
+    LabelFlag,
+    /// `@Alignment int`: an `Align` bitmask; the `ALIGN_NO_*` flags restrict
+    /// the options.
+    Alignment,
+    /// `TextureHolder`: the string-backed texture name.
+    TextureHolder,
+    /// `float[]` quad vertex data (`Vertices`).
+    Vertices,
+    /// One `ObjectiveMarker` element (polymorphic; the JSON `class` picks the
+    /// field set).
+    Marker,
 }
 
 /// One editor-renderable objective field.
@@ -136,30 +156,26 @@ pub trait ObjectiveFields {
 fn common_fields() -> Vec<ObjectiveField> {
     vec![
         ObjectiveField::new("hidden", FieldKind::Bool, FieldFlags::empty()),
-        ObjectiveField::new(
-            "details",
-            FieldKind::String,
-            FieldFlags::MULTILINE.union(FieldFlags::HIDDEN),
-        ),
+        ObjectiveField::new("details", FieldKind::String, FieldFlags::MULTILINE),
         ObjectiveField::new(
             "completionLogicCode",
             FieldKind::String,
-            FieldFlags::LOGIC_CODE.union(FieldFlags::HIDDEN),
+            FieldFlags::LOGIC_CODE,
         ),
         ObjectiveField::new(
             "flagsAdded",
             FieldKind::Seq(Box::new(FieldKind::String)),
-            FieldFlags::HIDDEN,
+            FieldFlags::UNORDERED,
         ),
         ObjectiveField::new(
             "flagsRemoved",
             FieldKind::Seq(Box::new(FieldKind::String)),
-            FieldFlags::HIDDEN,
+            FieldFlags::UNORDERED,
         ),
         ObjectiveField::new(
             "markers",
-            FieldKind::Seq(Box::new(FieldKind::Map(Box::new(FieldKind::String)))),
-            FieldFlags::HIDDEN,
+            FieldKind::Seq(Box::new(FieldKind::Marker)),
+            FieldFlags::empty(),
         ),
         ObjectiveField::new(
             "parents",
@@ -173,10 +189,13 @@ fn common_fields() -> Vec<ObjectiveField> {
 /// The class-specific editor fields for an upstream objective class tag.
 ///
 /// Every name matches the plan-04 JSON key exactly; the `objective_field_descriptors`
-/// test asserts the serialized JSON contains each name.
+/// test asserts the serialized JSON contains each name. Order is Java's
+/// `Json.getFields` walk: superclass fields first (`MapObjective`), then the
+/// class's own declarations.
 pub fn class_fields(class_tag: &str) -> Vec<ObjectiveField> {
     let content = |kind: ContentType| FieldKind::Content(kind);
-    let mut fields = match class_tag {
+    let mut fields = common_fields();
+    let specific = match class_tag {
         "Research" | "Produce" => vec![ObjectiveField::new(
             "content",
             content(ContentType::Item),
@@ -212,7 +231,7 @@ pub fn class_fields(class_tag: &str) -> Vec<ObjectiveField> {
             ObjectiveField::new(
                 "positions",
                 FieldKind::Seq(Box::new(FieldKind::Vec2I)),
-                FieldFlags::TILE_POS,
+                FieldFlags::TILE_POS.union(FieldFlags::UNORDERED),
             ),
             ObjectiveField::new("team", FieldKind::Team, FieldFlags::empty()),
             ObjectiveField::new("block", content(ContentType::Block), FieldFlags::empty()),
@@ -224,13 +243,115 @@ pub fn class_fields(class_tag: &str) -> Vec<ObjectiveField> {
         ],
         _ => Vec::new(),
     };
-    fields.extend(common_fields());
+    fields.extend(specific);
     fields
 }
 
 /// All class-specific editor fields for every registered objective.
 pub fn class_fields_for(objective: &MapObjective) -> Vec<ObjectiveField> {
     class_fields(objective.class_tag())
+}
+
+/// Marker class tags in upstream registration order (`allMarkerTypes`; these
+/// are the JSON `class` tags and the `marker.<name>.name` bundle keys).
+pub fn all_marker_tags() -> &'static [&'static str] {
+    &[
+        "ShapeText",
+        "Point",
+        "Shape",
+        "Text",
+        "Line",
+        "Texture",
+        "Quad",
+        "Light",
+    ]
+}
+
+/// The shared `ObjectiveMarker` editor fields (`ObjectiveMarker`).
+fn marker_common_fields() -> Vec<ObjectiveField> {
+    vec![
+        ObjectiveField::new("world", FieldKind::IndexBool, FieldFlags::empty()),
+        ObjectiveField::new("minimap", FieldKind::IndexBool, FieldFlags::empty()),
+        ObjectiveField::new("light", FieldKind::IndexBool, FieldFlags::empty()),
+        ObjectiveField::new("autoscale", FieldKind::Bool, FieldFlags::empty()),
+    ]
+}
+
+/// The editor fields for one upstream marker class tag, in Java's
+/// `Json.getFields` order (superclass fields first).
+pub fn marker_fields(tag: &str) -> Vec<ObjectiveField> {
+    let mut fields = marker_common_fields();
+    let pos = || ObjectiveField::new("pos", FieldKind::Vec2F, FieldFlags::TILE_POS);
+    let specific = match tag {
+        "Point" => vec![
+            pos(),
+            ObjectiveField::new("radius", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("stroke", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("color", FieldKind::Color, FieldFlags::empty()),
+        ],
+        "ShapeText" => vec![
+            pos(),
+            ObjectiveField::new("text", FieldKind::String, FieldFlags::MULTILINE),
+            ObjectiveField::new("fontSize", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("textHeight", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("flags", FieldKind::LabelFlag, FieldFlags::empty()),
+            ObjectiveField::new("textAlign", FieldKind::Alignment, FieldFlags::empty()),
+            ObjectiveField::new("lineAlign", FieldKind::Alignment, FieldFlags::ALIGN_NO_VER),
+            ObjectiveField::new("radius", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("rotation", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("sides", FieldKind::Int, FieldFlags::empty()),
+            ObjectiveField::new("color", FieldKind::Color, FieldFlags::empty()),
+        ],
+        "Shape" => vec![
+            pos(),
+            ObjectiveField::new("radius", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("rotation", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("stroke", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("startAngle", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("endAngle", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("fill", FieldKind::Bool, FieldFlags::empty()),
+            ObjectiveField::new("outline", FieldKind::Bool, FieldFlags::empty()),
+            ObjectiveField::new("sides", FieldKind::Int, FieldFlags::empty()),
+            ObjectiveField::new("color", FieldKind::Color, FieldFlags::empty()),
+        ],
+        "Text" => vec![
+            pos(),
+            ObjectiveField::new("text", FieldKind::String, FieldFlags::MULTILINE),
+            ObjectiveField::new("fontSize", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("flags", FieldKind::LabelFlag, FieldFlags::empty()),
+            ObjectiveField::new("textAlign", FieldKind::Alignment, FieldFlags::empty()),
+            ObjectiveField::new("lineAlign", FieldKind::Alignment, FieldFlags::ALIGN_NO_VER),
+        ],
+        "Line" => vec![
+            pos(),
+            ObjectiveField::new("endPos", FieldKind::Vec2F, FieldFlags::TILE_POS),
+            ObjectiveField::new("stroke", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("outline", FieldKind::Bool, FieldFlags::empty()),
+            ObjectiveField::new("color1", FieldKind::Color, FieldFlags::empty()),
+            ObjectiveField::new("color2", FieldKind::Color, FieldFlags::empty()),
+        ],
+        "Texture" => vec![
+            pos(),
+            ObjectiveField::new("rotation", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("width", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("height", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("texture", FieldKind::TextureHolder, FieldFlags::empty()),
+            ObjectiveField::new("color", FieldKind::Color, FieldFlags::empty()),
+        ],
+        "Quad" => vec![
+            ObjectiveField::new("texture", FieldKind::TextureHolder, FieldFlags::empty()),
+            ObjectiveField::new("vertices", FieldKind::Vertices, FieldFlags::empty()),
+            ObjectiveField::new("mapRegion", FieldKind::Bool, FieldFlags::empty()),
+        ],
+        "Light" => vec![
+            pos(),
+            ObjectiveField::new("radius", FieldKind::Float, FieldFlags::empty()),
+            ObjectiveField::new("color", FieldKind::Color, FieldFlags::empty()),
+        ],
+        _ => Vec::new(),
+    };
+    fields.extend(specific);
+    fields
 }
 
 /// Objective class tags with an editor field set (`ALL_OBJECTIVE_TYPES` subset).
@@ -280,13 +401,46 @@ pub fn provider_default(kind: &FieldKind, content: Option<&ContentRegistry>) -> 
             }))
         }
         FieldKind::Team => Value::from(1),
-        FieldKind::Color => Value::String(String::from("accent")),
+        // `Pal.accent` (`ffd37f`, Arc `Color` JSON is RRGGBBAA lowercase).
+        FieldKind::Color => Value::String(String::from("ffd37fff")),
         FieldKind::Vec2F => serde_json::json!({"x": 0.0, "y": 0.0}),
         FieldKind::Vec2I => serde_json::json!({"x": 0, "y": 0}),
         FieldKind::Objective(_) => Value::from(0),
         FieldKind::Seq(_) => Value::Array(Vec::new()),
         FieldKind::Map(_) => Value::Object(serde_json::Map::new()),
+        // `@IndexBool` provider is `1` (`cons.get(1)` on `int` fields).
+        FieldKind::IndexBool => Value::from(1),
+        // `@LabelFlag` provider is `WorldLabel.flagBackground | flagOutline`.
+        FieldKind::LabelFlag => {
+            Value::from(i64::from(crate::io::json::objectives::LABEL_FLAGS_DEFAULT))
+        }
+        // `@Alignment` provider is `Align.center` (1).
+        FieldKind::Alignment => Value::from(crate::io::json::objectives::ALIGN_CENTER),
+        // `TextureHolder` provider is `new TextureHolder()` (`string = white`).
+        FieldKind::TextureHolder => serde_json::json!({"string": "white"}),
+        // `float[]` provider is an empty array (`Reflect.newArray`).
+        FieldKind::Vertices => Value::Array(Vec::new()),
+        // `ObjectiveMarker` elements always come from the marker picker.
+        FieldKind::Marker => Value::Object(serde_json::Map::new()),
     }
+}
+
+/// The default JSON for one marker class tag (`getProvider(ObjectiveMarker)`
+/// with each class's Java field defaults; used by the marker picker).
+pub fn marker_default_json(tag: &str) -> serde_json::Value {
+    use crate::io::json::objectives::*;
+    let marker = match tag {
+        "Point" => ObjectiveMarker::Point(PointMarker::default()),
+        "ShapeText" => ObjectiveMarker::ShapeText(ShapeTextMarker::default()),
+        "Shape" => ObjectiveMarker::Shape(ShapeMarker::default()),
+        "Text" => ObjectiveMarker::Text(TextMarker::default()),
+        "Line" => ObjectiveMarker::Line(LineMarker::default()),
+        "Texture" => ObjectiveMarker::Texture(TextureMarker::default()),
+        "Quad" => ObjectiveMarker::Quad(QuadMarker::default()),
+        "Light" => ObjectiveMarker::Light(LightMarker::default()),
+        _ => return serde_json::json!({}),
+    };
+    serde_json::to_value(marker).unwrap_or_else(|_| serde_json::json!({}))
 }
 
 /// Interprets a raw UI number for a field (`@Second`/`@TilePos` scaling).
@@ -435,6 +589,53 @@ mod tests {
         assert_eq!(fields[1].name, "positions");
         assert_eq!(fields[1].kind, FieldKind::Seq(Box::new(FieldKind::Vec2I)));
         assert!(fields[1].flags.contains(FieldFlags::TILE_POS));
+    }
+
+    #[test]
+    fn marker_descriptors_match_serialized_keys() {
+        for tag in all_marker_tags() {
+            let fields = marker_fields(tag);
+            assert!(!fields.is_empty(), "no fields for marker {tag}");
+            let default = marker_default_json(tag);
+            let object = default
+                .as_object()
+                .unwrap_or_else(|| panic!("{tag}: default is not an object"));
+            assert_eq!(
+                object.get("class").and_then(|value| value.as_str()),
+                Some(*tag),
+                "{tag}: class tag"
+            );
+            for field in &fields {
+                assert!(
+                    object.contains_key(field.name),
+                    "{tag}: descriptor `{}` has no serialized key (keys: {:?})",
+                    field.name,
+                    object.keys().collect::<Vec<_>>()
+                );
+            }
+        }
+        // `world`/`minimap`/`light` are `@IndexBool` ints; `pos` is `@TilePos`.
+        let fields = marker_fields("Point");
+        let world = fields
+            .iter()
+            .find(|field| field.name == "world")
+            .expect("world field");
+        assert_eq!(world.kind, FieldKind::IndexBool);
+        let pos = fields
+            .iter()
+            .find(|field| field.name == "pos")
+            .expect("pos field");
+        assert!(pos.flags.contains(FieldFlags::TILE_POS));
+        // The `markers` seq carries marker elements, not a string map.
+        let markers = class_fields("Item")
+            .into_iter()
+            .find(|field| field.name == "markers")
+            .expect("markers field");
+        assert_eq!(markers.kind, FieldKind::Seq(Box::new(FieldKind::Marker)));
+        // Superclass fields first (Java's `Json.getFields` hierarchy walk).
+        let fields = class_fields("Item");
+        assert_eq!(fields[0].name, "hidden");
+        assert_eq!(fields[5].name, "markers");
     }
 
     #[allow(clippy::format_in_format_args)]

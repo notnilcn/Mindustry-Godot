@@ -1142,6 +1142,47 @@ impl MindEditor {
         )
     }
 
+    /// `MapObjectivesDialog`'s marker type table (`MapObjectives.allMarkerTypes`)
+    /// with the same field-descriptor shape as `objective_classes_json`
+    /// (`ObjectiveMarker` subclass reflection in `defaultInterpreter`).
+    #[func]
+    pub fn marker_classes_json(&self) -> GString {
+        let rows: Vec<serde_json::Value> = mind_core::editor::objectives::all_marker_tags()
+            .iter()
+            .map(|tag| {
+                let fields: Vec<serde_json::Value> =
+                    mind_core::editor::objectives::marker_fields(tag)
+                        .iter()
+                        .map(|field| {
+                            serde_json::json!({
+                                "name": field.name,
+                                "kind": objective_kind_tag(&field.kind),
+                                "flags": objective_flag_tags(field.flags),
+                            })
+                        })
+                        .collect();
+                serde_json::json!({ "tag": tag, "fields": fields })
+            })
+            .collect();
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| "[]".to_owned())
+                .as_str(),
+        )
+    }
+
+    /// A fresh marker of class `tag` with the Java field defaults
+    /// (`getProvider(ObjectiveMarker.class)`, `MapObjectivesDialog.java:236-256`).
+    #[func]
+    pub fn marker_default_json(&self, tag: GString) -> GString {
+        let value = mind_core::editor::objectives::marker_default_json(&tag.to_string());
+        GString::from(
+            serde_json::to_string(&value)
+                .unwrap_or_else(|_| "{}".to_owned())
+                .as_str(),
+        )
+    }
+
     /// `MapObjectivesDialog`: the objectives JSON (`MapInfoDialog` route).
     #[func]
     pub fn objectives_json(&self) -> GString {
@@ -2364,6 +2405,12 @@ fn objective_kind_tag(kind: &FieldKind) -> String {
         FieldKind::Objective(_) => "objective".to_owned(),
         FieldKind::Seq(inner) => format!("seq:{}", objective_kind_tag(inner)),
         FieldKind::Map(inner) => format!("map:{}", objective_kind_tag(inner)),
+        FieldKind::IndexBool => "indexbool".to_owned(),
+        FieldKind::LabelFlag => "labelflag".to_owned(),
+        FieldKind::Alignment => "alignment".to_owned(),
+        FieldKind::TextureHolder => "texture".to_owned(),
+        FieldKind::Vertices => "verts".to_owned(),
+        FieldKind::Marker => "marker".to_owned(),
     }
 }
 
@@ -2378,6 +2425,9 @@ fn objective_flag_tags(flags: FieldFlags) -> Vec<&'static str> {
         (FieldFlags::RESEARCHABLE, "researchable"),
         (FieldFlags::SYNTHETIC, "synthetic"),
         (FieldFlags::HIDDEN, "hidden"),
+        (FieldFlags::UNORDERED, "unordered"),
+        (FieldFlags::ALIGN_NO_VER, "align-nover"),
+        (FieldFlags::ALIGN_NO_HOR, "align-nohor"),
     ] {
         if flags.contains(flag) {
             tags.push(tag);
