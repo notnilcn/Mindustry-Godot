@@ -165,10 +165,10 @@ impl INode2D for LinkOverlay {
             }
             // Beam-node beams (`BeamNode.BeamNodeBuild.draw`,
             // `BeamNode.java:207-233`; I02 T5). `Mathf.absin(scl, mag)` is
-            // `absin(Time.time, ..)` with `Time.time` in seconds
-            // (`Mathf.java:74-76`), unlike the older power-node branch above.
+            // `absin(Time.time, ..)` (`Mathf.java:74-76`) and Arc's `Time.time`
+            // accumulates `Time.delta`, i.e. ticks (60 per second), so this
+            // shares the power-node branch's `ms * 0.06` clock.
             if laser_opacity > 0.0 {
-                let time = Time::singleton().get_ticks_msec() as f32 / 1000.0;
                 for link in guard.beam_node_lasers(rect) {
                     let Some(def) = content.block(link.block) else {
                         continue;
@@ -181,13 +181,13 @@ impl INode2D for LinkOverlay {
                         .or_else(|| self.region(&node, "power-beam-end"));
                     // `Draw.color(laserColor1, laserColor2, (1 - satisfaction)
                     // * 0.86 + absin(3, 0.1))` then `Draw.alpha(laserOpacity)`.
-                    let mix = (1.0 - link.satisfaction) * 0.86 + drawf::absin(time, 3.0, 0.1);
+                    let mix = (1.0 - link.satisfaction) * 0.86 + drawf::absin(ticks, 3.0, 0.1);
                     let mut color = drawf::lerp([1.0, 1.0, 1.0, 1.0], BEAM_LASER_2, mix);
                     color[3] = laser_opacity;
                     let color = canvas::color_f4(color);
                     // `float w = laserWidth + absin(pulseScl, pulseMag)`.
                     let width =
-                        BEAM_LASER_WIDTH + drawf::absin(time, BEAM_PULSE_SCL, BEAM_PULSE_MAG);
+                        BEAM_LASER_WIDTH + drawf::absin(ticks, BEAM_PULSE_SCL, BEAM_PULSE_MAG);
                     let rot = (link.y2 - link.y1).atan2(link.x2 - link.x1).to_degrees();
                     if laser.is_some() {
                         cmds.push(Cmd::RegionLine {

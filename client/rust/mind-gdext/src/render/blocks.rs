@@ -42,6 +42,15 @@ const DRILL_ROTATE_SPEED: f32 = 2.0;
 const HEAT_COLOR: u32 = 0xab34_00ff;
 /// `Vars.itemSize` — belt item icons draw at 5 world px (`Conveyor.draw`).
 const ITEM_SIZE: f32 = 5.0;
+/// `Wall.WallBuild.hit` decays by `Time.delta / 10` per frame
+/// (`Wall.java:158-159`): a full flash lasts 10 ticks.
+const WALL_FLASH_TICKS: f64 = 10.0;
+
+/// One `Wall.WallBuild.draw` decay step (`Wall.java:158-159`):
+/// `hit = Mathf.clamp(hit - Time.delta / 10f)` with `dt` in sim ticks.
+fn decay_wall_hit(hit: f32, dt: f32) -> f32 {
+    (hit - dt / WALL_FLASH_TICKS as f32).clamp(0.0, 1.0)
+}
 
 /// Blocks whose `DrawBlock` chain (H03 T8, `render/block_extras.rs`) animates
 /// parts that the composed `block-<name>-full` icon already bakes at rest:
@@ -186,11 +195,11 @@ impl BlockRenderer {
         // wall-collision log and decay every active hit first, so a flash keeps
         // redrawing without a world-revision bump (`needs_rebuild` early-out).
         let tick = self.host.clone().bind().get_tick() as f64;
-        // `Wall.java:159-160` decays `hit` per frame with `Time.delta / 10`;
-        // one tick is 1/60 s, so `hit -= dt / 600`. A gap longer than the whole
-        // 600-tick flash only has to zero it.
+        // `Wall.java:158-159` decays `hit` per frame with `Time.delta / 10`;
+        // `Time.delta` and `dt` are both in sim ticks (1/60 s), so a flash
+        // lasts 10 ticks. A gap longer than the whole flash only has to zero it.
         let dt = if self.last_tick > 0.0 {
-            (tick - self.last_tick).clamp(0.0, 600.0) as f32
+            (tick - self.last_tick).clamp(0.0, WALL_FLASH_TICKS) as f32
         } else {
             0.0
         };
@@ -200,10 +209,10 @@ impl BlockRenderer {
             self.wall_hits.insert((i32::from(x), i32::from(y)), 1.0);
         }
         if !self.wall_hits.is_empty() {
-            // `Wall.java:159-160`: `hit = clamp(hit - Time.delta / 10)` while
-            // not paused; one tick is 1/60 s, so `hit -= dt / 600`.
+            // `Wall.java:158-159`: `hit = clamp(hit - Time.delta / 10)` while
+            // not paused (a paused sim does not advance `tick`, so `dt == 0`).
             self.wall_hits.retain(|_, hit| {
-                *hit = (*hit - dt / 600.0).max(0.0);
+                *hit = decay_wall_hit(*hit, dt);
                 *hit >= 0.001
             });
         }
@@ -880,4 +889,26 @@ pub(crate) fn rotates_sprite(def: &BlockDef) -> bool {
             | BlockKind::Duct
             | BlockKind::PayloadConveyor
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decay_wall_hit;
+
+    /// `Wall.java:158-159`: `hit -= Time.delta / 10` with `Time.delta` in
+    /// ticks, so a full flash (`hit = 1`) is gone after 10 ticks, not 600.
+    #[test]
+    fn wall_flash_decays_over_ten_ticks() {
+        let mut hit = 1.0f32;
+        for _ in 0..5 {
+            hit = decay_wall_hit(hit, 1.0);
+        }
+        assert!((hit - 0.5).abs() < 1e-5, "half gone after 5 ticks: {hit}");
+        for _ in 0..5 {
+            hit = decay_wall_hit(hit, 1.0);
+        }
+        assert!(hit < 1e-5, "fully decayed after 10 ticks: {hit}");
+        assert_eq!(decay_wall_hit(1.0, 0.0), 1.0, "paused (dt 0) holds");
+        assert_eq!(decay_wall_hit(0.3, 600.0), 0.0, "clamped at zero");
+    }
 }
