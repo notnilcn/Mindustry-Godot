@@ -14,6 +14,7 @@ use godot::builtin::{
     Color, GString, PackedByteArray, PackedFloat32Array, PackedStringArray, Rect2i, VarDictionary,
     Vector2i,
 };
+use godot::classes::canvas_item::TextureFilter;
 use godot::classes::notify::{CanvasItemNotification, NodeNotification};
 use godot::classes::{
     Camera2D, CanvasGroup, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D,
@@ -298,6 +299,17 @@ pub struct MindWorldRenderer {
     fog: Option<FogRenderer>,
     overlays: Option<OverlayRenderer>,
     pixelator: Pixelator,
+    /// Bloom capture `CanvasGroup` (`Renderer.java:391-394`; J10 T2): the
+    /// `Layer.bullet..Layer.effect` band nodes render through it with the
+    /// ported threshold/blur/composite material.
+    bloom_group: Option<Gd<CanvasGroup>>,
+    /// The bloom composite material (`bloom.gdshader`); absent when the shader
+    /// failed to load, which leaves the plain group bake in place.
+    bloom_material: Option<Gd<ShaderMaterial>>,
+    /// Last adopted `(bloom, bloomintensity, bloomblur)`.
+    bloom_setting: Option<(bool, i32, i32)>,
+    /// Last adopted `linear` value (world + UI texture filter).
+    linear_setting: Option<bool>,
     planet: PlanetRenderer,
     menu: MenuRenderer,
     load: LoadRenderer,
@@ -365,6 +377,10 @@ impl INode2D for MindWorldRenderer {
             fog: None,
             overlays: None,
             pixelator: Pixelator::new(),
+            bloom_group: None,
+            bloom_material: None,
+            bloom_setting: None,
+            linear_setting: None,
             planet: PlanetRenderer::new(),
             menu: MenuRenderer::new(),
             load: LoadRenderer::new(),
@@ -400,12 +416,6 @@ impl MindWorldRenderer {
     /// Rebuilds the Godot-derived pipeline state (adopts persisted band
     /// children) after `ready()` or a hot reload.
     fn bootstrap(&mut self) {
-        // Mindustry renders the world atlas with nearest sampling (crisp
-        // pixel-art floors/blocks); Godot's default canvas filter is linear,
-        // which softens every world edge. Children inherit the parent node's
-        // filter, so one set here covers all band meshes.
-        self.base_mut()
-            .set_texture_filter(godot::classes::canvas_item::TextureFilter::NEAREST);
         if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
             self.host = Some(host);
         } else {
@@ -414,6 +424,11 @@ impl MindWorldRenderer {
         self.build_bands();
         self.build_floor();
         self.build_markers();
+        // Apply the boot values once so the first frame matches the settings
+        // (`linear` is `SettingsMenuDialog.java:540-550`; the bloom pass is
+        // `Renderer.java:391-394`).
+        self.poll_linear(true);
+        self.poll_bloom(true);
         log::info!("MindWorldRenderer ready ({} bands)", self.band_nodes.len());
     }
 
@@ -464,10 +479,21 @@ impl MindWorldRenderer {
         // child with the same name instead of duplicating it, and drop the
         // stale render-bank children it still carries (the rebuilt passes
         // re-attach fresh ones).
+        // Bloom capture group (`Renderer.java:391-394`, J10 T2): the
+        // `Layer.bullet..Layer.effect` band nodes live inside a `CanvasGroup`
+        // so the composite material can threshold/blur them like Java's
+        // captured frame buffer; the group draws at the effect band z.
+        let bloom_group = self.ensure_bloom_group();
         for entry in self.band_plan.entries().to_vec() {
             let name = band_name(&entry);
-            let adopted = self
-                .base()
+            let capture =
+                entry.layer.z() >= Layer::Bullet.z() && entry.layer.z() <= Layer::Effect.z();
+            let mut parent: Gd<Node> = if capture {
+                bloom_group.clone().upcast()
+            } else {
+                self.to_gd().upcast()
+            };
+            let adopted = parent
                 .get_node_or_null(name.as_str())
                 .and_then(|node| node.try_cast::<Node2D>().ok());
             let mut node = if let Some(mut node) = adopted {
@@ -479,7 +505,7 @@ impl MindWorldRenderer {
             } else {
                 let mut node = Node2D::new_alloc();
                 node.set_name(name.as_str());
-                self.base_mut().add_child(&node);
+                parent.add_child(&node);
                 node
             };
             let walls = entry.layer == Layer::Floor && entry.sub == CacheLayerId::Walls.id();
@@ -568,6 +594,146 @@ impl MindWorldRenderer {
         Some(material)
     }
 
+    /// Adopts (hot reload) or creates the bloom `CanvasGroup` under the
+    /// renderer; the group composites at the effect band z
+    /// (`Layer.effect + 0.02`, `Renderer.java:394`).
+    fn ensure_bloom_group(&mut self) -> Gd<CanvasGroup> {
+        let effect_z = self.band_plan.band(BandKey::base(Layer::Effect));
+        if let Some(existing) = self
+            .base()
+            .get_node_or_null("BloomGroup")
+            .and_then(|node| node.try_cast::<CanvasGroup>().ok())
+        {
+            let mut group = existing;
+            group.set_z_index(effect_z);
+            self.ensure_bloom_rect(&group);
+            self.bloom_group = Some(group.clone());
+            return group;
+        }
+        let mut group = CanvasGroup::new_alloc();
+        group.set_name("BloomGroup");
+        // The bake must cover the blur halo (up to ~52 px at radius 4).
+        group.set_fit_margin(64.0);
+        group.set_clear_margin(0.0);
+        group.set_z_index(effect_z);
+        // code-instantiated: bloom capture composite; one per frame, fixed by
+        // the pipeline (mirrors the shield/build-beam group passes).
+        self.base_mut().add_child(&group);
+        self.ensure_bloom_rect(&group);
+        self.bloom_group = Some(group.clone());
+        group
+    }
+
+    /// The `CanvasGroup` bake bounding box comes from its children's canvas
+    /// item rects; the band nodes (custom `_draw` passes with `z_as_relative =
+    /// false`) report none, which leaves the bake degenerate. A transparent
+    /// `CaptureRect` child tracks the camera's visible world rect and defines
+    /// the bake bounds (`update_bloom_rect`).
+    fn ensure_bloom_rect(&mut self, group: &Gd<CanvasGroup>) {
+        if group.get_node_or_null("CaptureRect").is_some() {
+            return;
+        }
+        let mut rect = godot::classes::ColorRect::new_alloc();
+        rect.set_name("CaptureRect");
+        rect.set_color(Color::from_rgba(0.0, 0.0, 0.0, 0.0));
+        rect.set_mouse_filter(godot::classes::control::MouseFilter::IGNORE);
+        // code-instantiated: bake-bounds probe for the CanvasGroup composite.
+        group.clone().upcast::<Node>().add_child(&rect);
+    }
+
+    /// Tracks the visible world rect (`Layer.effect` capture range) for the
+    /// bloom bake bounds; called per frame.
+    fn update_bloom_rect(&mut self) {
+        let Some(group) = self.bloom_group.clone() else {
+            return;
+        };
+        let Some(mut rect) = group
+            .get_node_or_null("CaptureRect")
+            .and_then(|node| node.try_cast::<godot::classes::ColorRect>().ok())
+        else {
+            return;
+        };
+        let view = self.camera_view();
+        if view.w <= 0.0 || view.h <= 0.0 {
+            return;
+        }
+        // Extra margin for the blur reach (screen px -> world units) and the
+        // group fit margin.
+        let margin = 64.0 / view.zoom.max(0.01) + view.w * 0.05;
+        rect.set_position(Vector2::new(
+            view.x - view.w / 2.0 - margin,
+            view.y - view.h / 2.0 - margin,
+        ));
+        rect.set_size(Vector2::new(view.w + margin * 2.0, view.h + margin * 2.0));
+    }
+
+    /// `Renderer.java:391-394`: `bloom` gates the pass, `bloomintensity` maps
+    /// to `setBloomIntensity(v / 4f + 1f)` and `bloomblur` to `blurPasses`.
+    /// With the setting off the material draws the bake unchanged
+    /// (`renderer.toggleBloom(false)`), so the bands still render.
+    fn poll_bloom(&mut self, force: bool) {
+        let state = (
+            crate::settings_hub::row_bool("bloom"),
+            crate::settings_hub::row_i32("bloomintensity"),
+            crate::settings_hub::row_i32("bloomblur"),
+        );
+        if !force && self.bloom_setting == Some(state) {
+            return;
+        }
+        self.bloom_setting = Some(state);
+        let Some(material) = self.bloom_material.clone() else {
+            return;
+        };
+        let mut material = material;
+        material.set_shader_parameter("u_enabled", &state.0.to_variant());
+        if !state.0 {
+            return;
+        }
+        material.set_shader_parameter(
+            "u_bloom_intensity",
+            &mind_core::render::bloom::intensity(state.1).to_variant(),
+        );
+        material.set_shader_parameter("u_original_intensity", &1.0f32.to_variant());
+        material.set_shader_parameter(
+            "u_blur_radius",
+            &mind_core::render::bloom::blur_radius(state.2).to_variant(),
+        );
+        if let Some(viewport) = self.base().get_viewport() {
+            let size = viewport.get_visible_rect().size;
+            if size.x > 1.0 && size.y > 1.0 {
+                material.set_shader_parameter(
+                    "u_screen_px",
+                    &Vector2::new(1.0 / size.x, 1.0 / size.y).to_variant(),
+                );
+            }
+        }
+    }
+
+    /// `SettingsMenuDialog.java:540-550`: the `linear` checkbox re-filters
+    /// every atlas page (`Core.atlas.getTextures()`). The port approximates a
+    /// texture-level filter with the canvas-item filter inherited by the world
+    /// bands and the UI tree (`linear=false` is the crisp/mobile look; the
+    /// desktop default is linear).
+    fn poll_linear(&mut self, force: bool) {
+        let value = crate::settings_hub::row_bool("linear");
+        if !force && self.linear_setting == Some(value) {
+            return;
+        }
+        self.linear_setting = Some(value);
+        let filter = if value {
+            TextureFilter::LINEAR
+        } else {
+            TextureFilter::NEAREST
+        };
+        self.base_mut().set_texture_filter(filter);
+        if let Some(mut ui) = self
+            .base()
+            .try_get_node_as::<godot::classes::Control>("/root/Spine/Ui/UiRoot")
+        {
+            ui.set_texture_filter(filter);
+        }
+    }
+
     /// Constructs the plan-16 floor + dynamic block passes.
     fn build_floor(&mut self) {
         let Some(host) = self.host.clone() else {
@@ -597,6 +763,14 @@ impl MindWorldRenderer {
             self.stats.shader_substitutions,
             manifest_loaded
         );
+        // The bloom composite material needs the loaded registry (J10 T2);
+        // without `bloom.gdshader` the group stays a plain bake.
+        if let Some(mut group) = self.bloom_group.clone()
+            && let Some(material) = self.group_material("bloom")
+        {
+            group.set_material(&material);
+            self.bloom_material = Some(material);
+        }
         let band_nodes = self.floor_band_nodes();
         self.floor = Some(FloorRenderer::new(host.clone(), assets.clone(), band_nodes));
         if let (Some(shadow_band), Some(dark_band)) = (
@@ -975,6 +1149,9 @@ impl MindWorldRenderer {
         self.queue.clear();
         // Stage 9/12: frame-alpha view, chunk invalidation + floor bake.
         let view = self.camera_view();
+        // Keep the bloom bake bounds wrapped around the visible world
+        // (`Layer.effect` capture range; J10 T2).
+        self.update_bloom_rect();
         // Stage 4: `Lod.update()` — `scale = screen_width / camera.width`.
         self.lod.update(view.w * view.zoom, view.w);
         self.stats.lod_l1 = self.lod.l1;
@@ -1016,6 +1193,10 @@ impl MindWorldRenderer {
             // `Renderer.pixelate = settings.getBool("pixelate")`
             // (`Renderer.java:178`).
             self.pixelator.poll_setting();
+            // `Renderer.java:391-394`: the bloom pass gate + its two sliders.
+            self.poll_bloom(false);
+            // `SettingsMenuDialog.java:540-550`: the atlas filter toggle.
+            self.poll_linear(false);
             // `Renderer.java:435`: the debug hitbox pass is settings-gated too.
             self.draw_hitboxes_setting = self
                 .base()

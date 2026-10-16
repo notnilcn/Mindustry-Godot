@@ -38,6 +38,17 @@ pub fn blur_passes(settings: i32) -> i32 {
     settings
 }
 
+/// The single-pass gaussian tap radius for `blurPasses` (`J10 T2` deviation).
+///
+/// Java repeats `alpha_gaussian` H+V `blurPasses` times over quarter-res
+/// ping-pong buffers (`Bloom.java:145-159`); the port's `bloom.gdshader` runs
+/// one wider separable kernel instead. Repeated convolution grows the standard
+/// deviation as `sqrt(n)`, so the tap offsets scale with `sqrt(passes)`,
+/// clamped at 4x so extreme slider values (16) stay cheap.
+pub fn blur_radius(passes: i32) -> f32 {
+    (passes.max(1) as f32).sqrt().min(4.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -52,5 +63,15 @@ mod tests {
     fn intensity_and_blur_settings() {
         assert_eq!(intensity(6), 2.5);
         assert_eq!(blur_passes(1), 1);
+    }
+
+    #[test]
+    fn blur_radius_grows_with_sqrt_and_clamps() {
+        assert_eq!(blur_radius(0), 1.0);
+        assert_eq!(blur_radius(1), 1.0);
+        assert_eq!(blur_radius(4), 2.0);
+        assert_eq!(blur_radius(9), 3.0);
+        assert_eq!(blur_radius(16), 4.0);
+        assert_eq!(blur_radius(64), 4.0);
     }
 }

@@ -75,7 +75,13 @@ pub const EXPECTED: &[ExpectedShader] = &[
 ];
 
 /// Ported helper shaders that are not registry keys but are still checked.
-pub const AUXILIARY: &[&str] = &["default", "cubemap", "shield_group", "buildbeam_group"];
+pub const AUXILIARY: &[&str] = &[
+    "default",
+    "cubemap",
+    "shield_group",
+    "buildbeam_group",
+    "bloom",
+];
 
 /// Upstream shaders explicitly not ported (`Shaders.java` disabled / dead).
 pub const UNPORTED: &[&str] = &["shockwave"];

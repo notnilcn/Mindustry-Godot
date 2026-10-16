@@ -141,9 +141,12 @@ impl INode for MindInput {
                 continue;
             }
             self.refresh_command_mode_hold(&raw);
-            // `DesktopInput.java:478`: the wheel only zooms while
+            // `DesktopInput.java:476-481`: the wheel only zooms while
             // `!scene.hasScroll()` and no console/chat fragment is shown
-            // (PAR-0100).
+            // (PAR-0100). Skip the zoom WITHOUT consuming the event: scene2d
+            // still delivers `scrolled` to the hovered pane, so the GUI
+            // (`ScrollContainer`, `Slider`) must receive the wheel here —
+            // marking it handled killed every UI scroll (J10 T2 item 3).
             if let RawEvent::Scroll { .. } = &raw {
                 if self.bridge.locked {
                     self.mark_input_handled();
@@ -151,7 +154,6 @@ impl INode for MindInput {
                 }
                 let (mx, my) = self.bridge.mouse;
                 if self.ui_scroll_at(mx, my) || self.console_or_chat_visible() {
-                    self.mark_input_handled();
                     continue;
                 }
             }
