@@ -1837,7 +1837,10 @@
 "PAR-0366":{"t":"Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0367":{"t":"Weapon `layerOffset` not applied when drawing weapons","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0368":{"t":"`drawCrawl` segments (renale/latum) not drawn","s":"world","st":"seeded","u":"2026-10-17"},
-"PAR-0369":{"t":"`drawPayload` (mega/quad/oct carrying units/blocks) not drawn","s":"world","st":"seeded","u":"2026-10-17"}
+"PAR-0369":{"t":"`drawPayload` (mega/quad/oct carrying units/blocks) not drawn","s":"world","st":"seeded","u":"2026-10-17"},
+"PAR-0370":{"t":"Text buttons render the glyph inline in the label with a flat slate fill (no `defaultt` nine-patch/cell layout) (0cf55155)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T1/"},
+"PAR-0371":{"t":"Dialogs draw boxed slate panels instead of the Java fill/floating shells (988ec70d)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T2/"},
+"PAR-0372":{"t":"Sliders render as thin Godot sliders through the text (no `defaultSlider` skin) (65dd3052)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T3/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4526,6 +4529,9 @@
 "2026-10-17 round J (J02 T3 a7b1aff0): scrap ore now uses MapIO.colorFor exactly (use_color on block defs, ore map_color from the item colour, preview cache _v2 -> _v3); grey scrap circle verified in previews/minimap (runs/20261016-s3-J02-T3/).",
 "2026-10-17 round J (J01 T2 1b844069): the 3 user maps (anthill v5, Capital Ship Crash Site, [Orange]Attack_Secret Island Outpost) now import (pre-short MSAV v1-3 + Arc JSON forms) and render previews + mode icons; verified via texture_for_name/map_modes in runs/20261017-s2-J01-T2/ (diff/09-custom-side.png). Both halves closed -> item verified."
 ],
+"PAR-0359":[
+"2026-10-17 round J wave B (J02 T4/T5, 5e3b3ed9): the main-menu bake now materialises the menu world through the shared floor path (edges + ore overlays) with the per-wall shadow framebuffer upscaled 8x and blended (-4,-4) under the walls, plus live flyers (MenuFlyers node; one of the nine Java types; packed unit-<type>-full icon interim, no -shadow region upstream) — runs/20261017-s3-J02-T4/. T5 re-check: Caldera + Ground Zero wall edges/shadows/darkness match Java (wall-region SSD 7.98, offset (0,1)); residual: TallBlock.shadowOffset/customShadow is unported, so Erekir crystal decor draws no drop shadow although crystal-*-shadow1..3 regions exist — runs/20261017-s3-J02-T5/."
+],
 "PAR-0362":[
 "2026-10-17 coordinator (wave A): five committed golden suites fail on main, all before round J and unchanged by it: mind-core blocks_golden family_counts (other 158 / production 51 vs golden 164/45 — 6 blocks reclassified other->production after the golden's last regen); mind-headless audio_golden (audio_events_sim: shootDuo muzzle moved to (33.0,66.25) and the tick-4 explosionArtillery event is missing), input_golden, logistics_golden, maps_editor_golden (preview checksum). J01 attributed the drift to H01 T1 (8e7b68b8) intentionally moving building positions to the Java convention after the last golden regen (G07 T2, 95d015bb); the audio event delta still needs attribution before regenerating. Regenerate deliberately with the owning task's Java reason (see each test's regen command); do not blanket-regen."
 ],
@@ -5566,6 +5572,15 @@
 ],
 "PAR-0348":[
 "closed: 54d13776 (J03 T7): convention decided and applied (see the item note); test arc_square_conventions; in-engine diamond status markers in runs/20261017-s4-J03-T7/."
+],
+"PAR-0370":[
+"closed: 0cf55155 (J06 T1): defaultt/defaultb now use the packed button/over/down/disabled nine-patches with Java font colours (Styles.java:118-141) and icon_button reproduces the Java cell layout (Table.java:536-550, TextButton.java:30-34); verified against frames 06/07/32 with a real-pointer hover (runs/20261017-s3-J06-T1/)."
+],
+"PAR-0371":[
+"closed: 988ec70d (J06 T2): defaultDialog = windowEmpty (no box), fill_parent defaults to Java's setFillParent(true) with a floating mode (BaseDialog.java:20-33, UI.java:582-606), add_close_button 210x64, MindTable centres, pause geometry fixed (PausedDialog.java:61,73-116), savecreate registers the autosave slot; verified against frames 06/07/26/30/32/39 (runs/20261017-s3-J06-T2/). Residual: load-slot previews (J06 T5)."
+],
+"PAR-0372":[
+"closed: 65dd3052 (J06 T3): defaultSlider maps slider-back track + slider-knob/-over grabbers with empty progress areas (Styles.java:374-378) and centred labels (SettingsMenuDialog.java:846-869); verified against frame 36 with a real-pointer hover (runs/20261017-s3-J06-T3/)."
 ]
 }
 }
