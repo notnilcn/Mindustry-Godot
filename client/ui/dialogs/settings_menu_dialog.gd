@@ -304,11 +304,15 @@ func _add_slider_row(table: VBoxContainer, row: Dictionary, key: String, title: 
 	header.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var title_label := MindWidgets.styled_label(title, "outlineLabel")
 	title_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(title_label)
+	# `Styles.outlineLabel` cells centre vertically in Arc; a Godot `Label`
+	# defaults to top alignment, which would ride above the slider's track.
 	var value_label := MindWidgets.styled_label(_format_value(row, value), "outlineLabel")
 	value_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	value_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	value_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(value_label)
 	content.add_child(header)

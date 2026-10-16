@@ -156,8 +156,30 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 		"RichTextLabel":
 			theme.set_color("default_color", name, Color(0.92, 0.92, 0.92))
 		"HSlider":
-			theme.set_stylebox("slider", name, flat(Color(0.12, 0.13, 0.15, 1.0)))
-			theme.set_stylebox("grabber_area", name, flat(MindStyles.ACCENT))
+			if name == "defaultSlider":
+				# `Styles.defaultSlider` (`Styles.java:374-378`): the
+				# `sliderBack` 9-patch track (4 px splits) with the
+				# `sliderKnob`/`sliderKnobOver`/`sliderKnobDown` grabbers
+				# (`Tex.sliderKnob*`). Java draws no filled progress area, so
+				# both `grabber_area` boxes stay empty. A disabled slider keeps
+				# the plain knob like Arc (its `SliderStyle` has no disabled
+				# knob).
+				# `sliderBack` is 27 px tall; Godot's `HSlider` draws the track at
+				# the box's minimum height, so the content margin supplies the
+				# missing (27 - 4 - 4) / 2 per side.
+				theme.set_stylebox("slider", name, _nine_patch("slider-back", 4.0, 9.5))
+				theme.set_stylebox("grabber_area", name, StyleBoxEmpty.new())
+				theme.set_stylebox("grabber_area_highlight", name, StyleBoxEmpty.new())
+				var knob := MindWidgets.icon_texture("slider-knob")
+				if knob != null:
+					theme.set_icon("grabber", name, knob)
+					theme.set_icon("grabber_disabled", name, knob)
+				var knob_over := MindWidgets.icon_texture("slider-knob-over")
+				if knob_over != null:
+					theme.set_icon("grabber_highlight", name, knob_over)
+			else:
+				theme.set_stylebox("slider", name, flat(Color(0.12, 0.13, 0.15, 1.0)))
+				theme.set_stylebox("grabber_area", name, flat(MindStyles.ACCENT))
 		"LineEdit":
 			theme.set_stylebox("normal", name, flat(Color(0.08, 0.09, 0.11, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
@@ -169,22 +191,35 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			pass
 
 
+## A packed 9-patch region with uniform texture margins (the pack `splits`).
+## `StyleBoxTexture`'s content margin follows the texture margin, so pass
+## `content_margin` when a control measures the box's minimum size instead of
+## its content (Godot's `HSlider` sizes its track from `get_minimum_size()`).
+static func _nine_patch(region: String, margin: float, content_margin: float = -1.0) -> StyleBox:
+	var texture := MindWidgets.icon_texture(region)
+	if texture == null:
+		return flat(Color(0.08, 0.08, 0.10, 1.0))
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	box.texture_margin_left = margin
+	box.texture_margin_top = margin
+	box.texture_margin_right = margin
+	box.texture_margin_bottom = margin
+	if content_margin >= 0.0:
+		box.content_margin_left = content_margin
+		box.content_margin_top = content_margin
+		box.content_margin_right = content_margin
+		box.content_margin_bottom = content_margin
+	return box
+
+
 ## `Tex.button*` nine-patch (`button`, `button-over`, `button-down`,
 ## `button-disabled`): 12 px texture margins on all four edges (the pack
 ## `splits`). `StyleBoxTexture`'s content margin follows the texture margin, so
 ## the button's content starts 12 px in — the same padding Arc applies from the
 ## background drawable.
 static func _button_nine_patch(region: String) -> StyleBox:
-	var texture := MindWidgets.icon_texture(region)
-	if texture == null:
-		return flat(Color(0.08, 0.08, 0.10, 1.0))
-	var box := StyleBoxTexture.new()
-	box.texture = texture
-	box.texture_margin_left = 12.0
-	box.texture_margin_top = 12.0
-	box.texture_margin_right = 12.0
-	box.texture_margin_bottom = 12.0
-	return box
+	return _nine_patch(region, 12.0)
 
 
 ## `Tex.buttonSelect` ninepatch (accent border, splits 4) for the
