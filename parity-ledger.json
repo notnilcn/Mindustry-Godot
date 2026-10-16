@@ -26159,8 +26159,8 @@
       "title": "Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows",
       "surface": "world",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T16:22:59Z",
+      "status": "fixing",
+      "updated": "2026-10-17T01:40:00+10:00",
       "discovered_by": null,
       "path": {
         "to": "Ground Zero launched in the Godot client, player mech near the core at zoom 4, compared against the Java reference frames",
@@ -26238,7 +26238,7 @@
         "summary": null,
         "plan": {
           "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+          "state": "round J 2026-10-17 (reopened by the twin walk, runs/20261016-J-twin/diff/52-legs-crop.png): legs/treads/wrecks/segments/payloads are still not drawn (mind-gdext/src/render/units.rs has 0 hits); turrets were fixed separately (PAR-0363, 16d2a336); J03 T4-T5 (wave B) own the unit draws. Original: seeded by code-scan 2026-10-10; not yet verified in-engine",
           "seam": "MindSimHost::unit_draws (client/rust/mind-gdext/src/sim_host.rs:1341) returns a 6-tuple (x, y, rotation, region, flying, lowAltitude) and UnitRenderer (client/rust/mind-gdext/src/render/units.rs:91) draws exactly one quad per unit with color 0xffffffff.",
           "files": [
             "client/rust/mind-gdext/src/sim_host.rs:1341",
