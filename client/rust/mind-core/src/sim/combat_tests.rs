@@ -7060,3 +7060,40 @@ fn core_control_select_respawns() {
         "respawned at the selected core ({px}, {py}) vs ({cx}, {cy})"
     );
 }
+
+/// J03 T2: a freshly placed idle duo draws its head facing up.
+///
+/// `BaseTurretBuild.rotation = 90` (`BaseTurret.java:47`) and the barrel angle
+/// is `drawrot() = rotation - 90 = 0` (`Turret.java:327-329`); with no ammo the
+/// turret never turns (`Turret.updateTile` gates targeting on `hasAmmo`,
+/// `Turret.java:571-605`). Pins the sim half of the drawn angle: a no-ammo duo
+/// keeps `rotation = 90` (drawrot 0) across 60 ticks.
+#[test]
+fn placed_duo_idle_head_rotation_is_up() {
+    use crate::world::blocks::defense::turrets::TurretState;
+
+    let mut sim = live_sim(48);
+    let duo = place(&mut sim, 20, 20, "duo", 1);
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<TurretState>(duo)
+            .expect("turret state")
+            .rotation,
+        90.0,
+        "BaseTurretBuild starts at rotation 90"
+    );
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let state = sim.ecs.0.get::<TurretState>(duo).expect("turret state");
+    assert_eq!(state.total_ammo, 0, "no ammo");
+    assert!(state.target.is_none(), "no target");
+    assert_eq!(state.rotation, 90.0, "idle turret stays at 90");
+    // The renderer draws at `rotation - 90` (blocks.rs / render/turret.rs).
+    let drawrot = state.rotation - 90.0;
+    assert!(
+        drawrot.abs() < 1e-6,
+        "idle head drawrot is 0 (up): {drawrot}"
+    );
+}
