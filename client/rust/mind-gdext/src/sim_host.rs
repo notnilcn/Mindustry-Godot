@@ -3588,6 +3588,16 @@ impl MindSimHost {
         self.sim.ecs.0.insert_resource(runtime);
     }
 
+    /// The installed runtime's `universe.secondsf()` (read-only; `None` with
+    /// no campaign sector installed).
+    pub fn campaign_universe_secondsf(&self) -> Option<f32> {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.campaign.universe.secondsf(false))
+    }
+
     /// Live core snapshot of `team` for `SectorInfo.prepare` (the save-time
     /// sector record: items, capacity, spawn position, map facts). Rust-only
     /// seam for `MindCampaign::persist_sector_record`.
