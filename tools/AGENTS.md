@@ -21,6 +21,7 @@
 | `parity-session.sh` | SSH/no-display session bootstrap for the parity workflow: Xvfb `:10` (optionally headless weston for Godot), Godot editor on bridge 6970, env summary; `--run` execs opencode at the workspace root, `--stop` tears down. |
 | `mp-local.sh` | Local SpacetimeDB harness for multiplayer work (I08): `up` starts the standalone server on 3000 (log `/tmp/opencode/stdb.log`, pidfile `/tmp/opencode/stdb.pid`), publishes the module with `server/build.sh` and prints the db address (`127.0.0.1:3000/mindustry`); `down` stops what `up` started; `status` reports the listener + server ping. |
 | `watch.sh` | Watch `client/rust/**` for `.rs`/`Cargo.toml` edits and re-run `build.sh`; ignores `client/rust/target/` and `client/bin/`. |
+| `twin.sh` + `twin_pointer.py` | Sourced Java↔Godot twin-walk harness (J10 T1): `JW`/`JM`/`JD`/`JK`/`JS` (Java leg; the click origin is re-read from `xwininfo` on every call), `GC`/`GW`/`GK`/`GS`/`GE`/`GP` (Godot leg; `GP` warps the real pointer over the engine window via `twin_pointer.py`), `SIDE`/`ZOOM` compare, and the `twin_launch`/`twin_place_java`/`twin_stop` lifecycle (settings.bin backup/restore, save-snapshot teardown). |
 
 ## Responsibilities
 
