@@ -231,8 +231,13 @@ func _make_button(entry: Dictionary, size: Vector2) -> Button:
 	button.focus_mode = Control.FOCUS_NONE
 	button.toggle_mode = entry.has("submenu")
 	button.add_theme_stylebox_override("normal", _menu_style(Color(0.0, 0.0, 0.0, 0.0)))
-	button.add_theme_stylebox_override("hover", _menu_style(Color(1.0, 1.0, 1.0, 0.08)))
-	button.add_theme_stylebox_override("pressed", _menu_style(Color(1.0, 1.0, 1.0, 0.14)))
+	# `Styles.flatToggleMenut` (`ui/Styles.java:210-219`): `up = clear`,
+	# `over = flatOver` (`#454545`) and `down`/`checked = flatDown` (the accent
+	# `flat-down-base` frame), so the open submenu's parent stays checked with
+	# the accent border (`MenuFragment.java:271,291`) instead of a hover tint.
+	button.add_theme_stylebox_override("hover", _menu_style(Color8(0x45, 0x45, 0x45)))
+	button.add_theme_stylebox_override("pressed", MindThemeBuilder._flat_down_frame())
+	button.add_theme_stylebox_override("hover_pressed", MindThemeBuilder._flat_down_frame())
 	var row := HBoxContainer.new()
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	row.offset_left = 11.0
