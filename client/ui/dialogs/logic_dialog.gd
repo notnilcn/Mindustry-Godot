@@ -298,8 +298,13 @@ func _should_show_variables() -> bool:
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if host == null:
 		return false
+	# `executor.vars.length > 0` (`LogicDialog.java:253`): an empty program has
+	# no executor vars, so it shows `@logic.globals`.
 	var state: Variant = host.call("logic_get_state", _x, _y)
-	return state is Dictionary and not (state as Dictionary).is_empty()
+	if not (state is Dictionary):
+		return false
+	var vars: Variant = (state as Dictionary).get("vars", [])
+	return vars is Array and not (vars as Array).is_empty()
 
 
 ## The `variables` button's `update` (`@variables` vs `@logic.globals`) and
