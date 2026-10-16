@@ -442,11 +442,23 @@ pub(crate) fn chunk_used_layers(
     cx: i32,
     cy: i32,
 ) -> SmallVec<[CacheLayerId; 9]> {
+    chunk_used_layers_sized(world, content, cx, cy, CHUNK_SIZE)
+}
+
+/// [`chunk_used_layers`] for a chunk grid of `chunk` tiles per side (the
+/// editor bakes `EditorRenderer.chunkSize` = 60, the world cache 30).
+pub(crate) fn chunk_used_layers_sized(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    cx: i32,
+    cy: i32,
+    chunk: i32,
+) -> SmallVec<[CacheLayerId; 9]> {
     let mut used: SmallVec<[CacheLayerId; 9]> = SmallVec::new();
-    let min_x = (cx * CHUNK_SIZE - 1).max(0);
-    let min_y = (cy * CHUNK_SIZE - 1).max(0);
-    let max_x = ((cx + 1) * CHUNK_SIZE + 1).min(world.width());
-    let max_y = ((cy + 1) * CHUNK_SIZE + 1).min(world.height());
+    let min_x = (cx * chunk - 1).max(0);
+    let min_y = (cy * chunk - 1).max(0);
+    let max_x = ((cx + 1) * chunk + 1).min(world.width());
+    let max_y = ((cy + 1) * chunk + 1).min(world.height());
     for ty in min_y..max_y {
         for tx in min_x..max_x {
             let tile = world.tile(tx, ty);

@@ -59,7 +59,7 @@ mod map_view;
 pub mod preview;
 
 pub use editor_renderer::MindEditorRenderer;
-use map_view::{MapViewDriver, brush_polygon};
+use map_view::MapViewDriver;
 pub use preview::MindPreview;
 
 /// Builds a `{GString: Variant}` dictionary (mirrors the other facades).
@@ -2006,7 +2006,8 @@ impl MindEditor {
         ])
     }
 
-    /// `MapView.project`: screen pixel → tile.
+    /// `MapView.project`: screen pixel (Godot y-down) → tile; row 0 is the
+    /// bottom of the canvas like Java's y-up scene (PAR-0109).
     #[func]
     pub fn map_view_project(
         &self,
@@ -2063,19 +2064,16 @@ impl MindEditor {
         view_h: f64,
     ) -> PackedVector2Array {
         let mut out = PackedVector2Array::new();
-        let (cx, cy) = self.view.unproject(
+        for (x, y) in self.view.brush_outline(
             tile_x,
             tile_y,
             view_w as f32,
             view_h as f32,
             self.grid.width(),
             self.grid.height(),
-        );
-        let scale = self
-            .view
-            .tile_scale(view_w as f32, view_h as f32, self.grid.width());
-        for point in brush_polygon(self.editor.brush_size) {
-            out.push(Vector2::new(cx + point[0] * scale, cy + point[1] * scale));
+            self.editor.brush_size,
+        ) {
+            out.push(Vector2::new(x, y));
         }
         out
     }
