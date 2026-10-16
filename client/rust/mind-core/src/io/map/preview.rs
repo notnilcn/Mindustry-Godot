@@ -468,6 +468,29 @@ impl WorldContext for PreviewContext {
         Ok(())
     }
 
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> IoResult<()> {
+        // Pre-short `MSAV` v1-3 chunks carry the same core teams (the base
+        // holds the team byte); the body is skipped like `read_building`.
+        let mut decoded = crate::world::building_io::DecodedBase::default();
+        crate::world::building_io::read_base_pre_short(&mut decoded, reader, content, block)?;
+        if self
+            .block_ids
+            .get(index)
+            .copied()
+            .is_some_and(|block| self.palette.kind(block) == Some(BlockKind::CoreBlock))
+        {
+            self.teams.insert(decoded.team);
+        }
+        reader.skip_to_end();
+        Ok(())
+    }
+
     fn set_legacy_entities(&mut self, legacy: bool) {
         // The reader selects this for legacy `MSAV` and native v2 chunks.
         self.legacy_entities = legacy;

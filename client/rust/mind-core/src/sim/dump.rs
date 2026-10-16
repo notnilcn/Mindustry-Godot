@@ -27,6 +27,11 @@ pub struct StateDump {
     pub tick: u64,
     /// Simulation seed.
     pub seed: u64,
+    /// Generation seed of the last map load's `World.FilterContext` filter step
+    /// (`World.loadMap`; absent for save loads, sector loads and scenarios that
+    /// never loaded a custom map).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_gen_seed: Option<u64>,
     /// Current phase (`menu`/`playing`/`paused`).
     pub phase: State,
     /// Final checksum, 16 lowercase hex digits.
@@ -146,6 +151,7 @@ pub(crate) fn build(sim: &Sim, all_tiles: bool) -> StateDump {
         version: MIND_VERSION.to_owned(),
         tick: sim.tick_count(),
         seed: sim.seed(),
+        map_gen_seed: sim.map_gen_seed(),
         phase: sim.phase(),
         checksum: sim.checksum_hex(),
         world: DumpWorld {

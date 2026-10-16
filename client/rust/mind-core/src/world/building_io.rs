@@ -372,6 +372,66 @@ fn read_modules(
     Ok(())
 }
 
+/// Reads one pre-short-chunk `MSAV` building payload (`MSAV` v1-3,
+/// `LegacySaveVersion.readMap`): the entity version byte, `u16` health, the
+/// packed team/rotation byte (`Pack.leftByte`/`rightByte`; a left nibble of 8
+/// means a full team byte follows), the module stacks whose presence comes
+/// from the block def with legacy `u8` module ids, the `cons.valid` byte, and
+/// the per-kind body. Upstream sets `tile.build.enabled = true` right after
+/// `Tile.setBlock`, so the decoded base is always enabled.
+pub fn read_base_pre_short(
+    decoded: &mut DecodedBase,
+    r: &mut EntityReader,
+    content: &crate::content::ContentRegistry,
+    block: crate::content::BlockId,
+) -> Result<(), IoError> {
+    let version = r.ub()?;
+    decoded.version = version;
+    decoded.kind_revision = Some(version);
+    decoded.health = f32::from(r.us()?);
+    let packed = r.ub()?;
+    let left = (packed >> 4) & 0x0F;
+    decoded.rotation = packed & 0x0F;
+    decoded.team = if left == 8 { r.ub()? } else { left };
+
+    let def = content.block(block);
+    let has_items = def.is_some_and(|def| def.has_items);
+    let has_power = def.is_some_and(|def| def.has_power);
+    let has_liquids = def.is_some_and(|def| def.has_liquids);
+    if has_items {
+        let count = r.ub()? as i32;
+        for _ in 0..count.max(0) {
+            let item = r.ub()? as u16;
+            let amount = r.i()?;
+            decoded.items.push((item, amount));
+        }
+    }
+    if has_power {
+        let amount = r.s()?;
+        let mut links = Vec::new();
+        for _ in 0..amount.max(0) {
+            links.push(r.i()?);
+        }
+        let mut status = r.f()?;
+        if !status.is_finite() {
+            status = 0.0;
+        }
+        decoded.power = Some((links, status));
+    }
+    if has_liquids {
+        let count = r.ub()? as i32;
+        for _ in 0..count.max(0) {
+            let liquid = r.ub()? as u16;
+            let amount = r.f()?;
+            decoded.liquids.push((liquid, amount));
+        }
+    }
+    // `//skip cons.valid boolean, it's not very important here`
+    let _cons_valid = r.ub()?;
+    decoded.enabled = true;
+    Ok(())
+}
+
 /// Applies a [`DecodedBase`] onto an existing building entity (`readBase`).
 pub fn apply_base(world: &mut World, entity: Entity, decoded: &DecodedBase, max_health: f32) {
     if let Some(mut health) = world.get_mut::<Health>(entity) {

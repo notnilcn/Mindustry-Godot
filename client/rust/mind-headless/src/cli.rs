@@ -1107,6 +1107,24 @@ pub enum CampaignCommand {
         dump: Option<PathBuf>,
     },
 
+    /// `campaign_map_mode`: the `Control.playMap`/`start_map_mode` world half
+    /// on one map file — `World.FilterContext` (`World.loadMap`) applied with
+    /// `seed`, reporting the generated ore/boulder counts.
+    MapMode {
+        /// Map/save container file path.
+        #[arg(long, default_value = "assets/maps/default/caldera.msav")]
+        map: PathBuf,
+        /// Generation seed (`FilterContext`; `GenerateFilter.randomize`).
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// Emit a machine-readable JSON report on stdout.
+        #[arg(long)]
+        json: bool,
+        /// Write the canonical golden dump here.
+        #[arg(long)]
+        dump: Option<PathBuf>,
+    },
+
     /// `campaign_bench` (plan 12 §7d): per-system timings + deterministic
     /// checksums for the campaign budget profiles.
     Bench {

@@ -157,6 +157,20 @@ impl WorldContext for Context<'_> {
         Ok(())
     }
 
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> Result<(), IoError> {
+        let mut decoded = super::building_io::DecodedBase::default();
+        super::building_io::read_base_pre_short(&mut decoded, reader, content, block)?;
+        decoded.body = reader.bytes(reader.remaining())?.to_vec();
+        self.pending_buildings.push((index, decoded));
+        Ok(())
+    }
+
     fn set_legacy_entities(&mut self, legacy: bool) {
         self.legacy_entities = legacy;
     }
@@ -177,6 +191,20 @@ pub struct FilterContext<'a> {
     pub filters: Vec<Box<dyn crate::maps::filters::GenerateFilter>>,
     /// Deterministic generation seed.
     pub seed: u64,
+}
+
+/// Runs one resolved filter stack (`World.FilterContext.applyFilters`,
+/// `World.java:661-695`): every filter is randomized from the `MapGen` stream
+/// (seeded here from the caller's recorded generation seed) and applied to the
+/// tiles before `World.endMapLoad`.
+pub fn apply_filters(
+    tiles: &mut super::Tiles,
+    filters: &mut [Box<dyn crate::maps::filters::GenerateFilter>],
+    content: &ContentRegistry,
+    seed: u64,
+) {
+    let mut rng = crate::determinism::SimRng::new(seed);
+    crate::maps::filters::apply_stack(tiles, filters, content, &mut rng);
 }
 
 impl<'a> FilterContext<'a> {
@@ -237,13 +265,7 @@ impl WorldContext for FilterContext<'_> {
             ..
         } = self;
         if !filters.is_empty() {
-            let mut rng = crate::determinism::SimRng::new(*seed);
-            crate::maps::filters::apply_stack(
-                &mut inner.grid.tiles,
-                filters,
-                inner.content,
-                &mut rng,
-            );
+            apply_filters(&mut inner.grid.tiles, filters, inner.content, *seed);
         }
         inner.end();
     }
@@ -279,6 +301,17 @@ impl WorldContext for FilterContext<'_> {
         version: u8,
     ) -> Result<(), IoError> {
         self.inner.read_building(index, reader, version)
+    }
+
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> Result<(), IoError> {
+        self.inner
+            .read_building_pre_short(index, reader, content, block)
     }
 
     fn is_map(&self) -> bool {

@@ -259,6 +259,20 @@ impl WorldContext for EditorContext<'_> {
         Ok(())
     }
 
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> Result<(), IoError> {
+        let mut decoded = crate::world::building_io::DecodedBase::default();
+        crate::world::building_io::read_base_pre_short(&mut decoded, reader, content, block)?;
+        decoded.body = reader.bytes(reader.remaining())?.to_vec();
+        self.pending_buildings.push((index, decoded));
+        Ok(())
+    }
+
     fn is_map(&self) -> bool {
         true
     }
