@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/parity-ledger@3",
-  "updated": "2026-10-11T21:54:51+10:00",
+  "updated": "2026-10-17T00:30:00+10:00",
   "goal": "1:1 visual and behavioral parity between the Java Mindustry reference (../Mindustry) and the Godot client, proven by mirrored actions, screenshot diffs, and per-item reproduction sequences stored in the ledger. The ledger is also the coverage record: every interactive element and player action is an item, whether it matches or not.",
   "focus": {
     "kind": "area",
@@ -24906,8 +24906,8 @@
       "title": "Map previews never render: custom game and editor map lists show a placeholder instead of the map image",
       "surface": "ui",
       "parent": null,
-      "status": "reference",
-      "updated": "2026-10-10T16:13:25Z",
+      "status": "fixing",
+      "updated": "2026-10-17T00:30:00+10:00",
       "discovered_by": null,
       "path": {
         "to": "Standalone menu -> Play -> Custom Game (map preview panel) and Editor -> maps list",
@@ -24938,7 +24938,7 @@
         "summary": null,
         "plan": {
           "round": 0,
-          "state": "seeded by code-scan 2026-10-10; not yet verified in-engine",
+          "state": "round J 2026-10-17: the scrap-ore half is fixed (J02 T3 a7b1aff0, MapIO.colorFor exact, preview cache _v3) and verified in-engine (runs/20261016-s3-J02-T3/); the remaining half stays open until J01 T2 imports the 3 user maps so their previews + mode icons show. Original: seeded by code-scan 2026-10-10; not yet verified in-engine",
           "seam": "Preview pipeline seam: MindPreview.refresh (client/rust/mind-gdext/src/editor/preview.rs:126-128) never calls PreviewPipeline::{load_previews,create_all_previews,check_previews} (client/rust/mind-core/src/editor/preview.rs:48,73,128, zero live callers); MindEditor.save (gdext editor/mod.rs:1011-1058) uses save_editor_map (maps_glue.rs:105-125) instead of save_map_e2e (maps_glue.rs:178-215); textures are never bound into the map-list UI.",
           "files": [
             "client/rust/mind-gdext/src/editor/preview.rs:126-128",
