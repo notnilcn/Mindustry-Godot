@@ -16,6 +16,7 @@ use bevy_ecs::world::World;
 
 use crate::ai::BlockIndexer;
 use crate::content::ContentRegistry;
+use crate::entities::comp::unit::comp::{HitboxComp, UnitTypeComp};
 use crate::entities::comp::{Health, Pos, TeamComp, Unit};
 
 /// Deterministic target index shared by a combat tick (plan 10 `TargetQueries`).
@@ -27,6 +28,8 @@ pub struct TargetQueries {
     pub indexer: BlockIndexer,
     /// Live unit entities in stable (entity-index) order (plan 11 units).
     pub units: Vec<Entity>,
+    /// Ground-unit cluster counts (`TeamData.getClustered`).
+    pub clusters: ClusterCounts,
 }
 
 impl TargetQueries {
@@ -48,7 +51,14 @@ impl TargetQueries {
         units.sort_unstable_by_key(|entity| entity.index());
         units.dedup();
 
-        Self { indexer, units }
+        // Grouped sorts read the per-team cluster counts (`UnitSorts.grouped`).
+        let clusters = ClusterCounts::build(world, &units);
+
+        Self {
+            indexer,
+            units,
+            clusters,
+        }
     }
 
     /// `Units.bestTarget`-equivalent: nearest enemy unit in range, else the
@@ -135,7 +145,7 @@ impl TargetQueries {
                 continue;
             };
             let half = world
-                .get::<crate::entities::comp::unit::comp::HitboxComp>(entity)
+                .get::<HitboxComp>(entity)
                 .map_or(0.0, |h| h.hit_size / 2.0);
             let dx = pos.x - x;
             let dy = pos.y - y;
@@ -150,7 +160,123 @@ impl TargetQueries {
         best.map(|(_, entity)| entity)
     }
 
-    /// Nearest damaged ally building (`Units.findAllyTile` for healing turrets).
+    /// `Units.bestEnemy` (`Units.java:322-341`): the best enemy unit by `sort`,
+    /// gated by `predicate`, `range + hitSize/2`, `targetable(team)` and the fog.
+    ///
+    /// Selection order is Java's: a strictly higher `UnitType.targetPriority`
+    /// wins regardless of cost (`:335`); within a priority band the lowest cost
+    /// wins; ties keep the first candidate in the stable unit-snapshot order
+    /// (`TargetQueries.units` mirrors Java's `nearbyEnemies` walk).
+    #[allow(clippy::too_many_arguments)]
+    pub fn best_enemy(
+        &self,
+        world: &World,
+        content: &ContentRegistry,
+        team: u8,
+        x: f32,
+        y: f32,
+        range: f32,
+        sort: UnitSort,
+        predicate: &mut dyn FnMut(&World, &ContentRegistry, Entity) -> bool,
+    ) -> Option<Entity> {
+        let mut best: Option<UnitCandidate> = None;
+        for &entity in &self.units {
+            let Some(other) = world.get::<TeamComp>(entity).map(|t| t.team) else {
+                continue;
+            };
+            if other == team || crate::ai::block_indexer::is_derelict(world, other) {
+                continue;
+            }
+            if !world.get::<Health>(entity).is_some_and(|h| !h.dead) {
+                continue;
+            }
+            if !predicate(world, content, entity) {
+                continue;
+            }
+            // `e.targetable(team)` (`Units.java:329` via `invalidateTarget`).
+            if crate::sim::unit_runtime::invalid_target(world, content, team, entity) {
+                continue;
+            }
+            if crate::game::fog_gate::unit_in_fog_to(world, entity, team) {
+                continue;
+            }
+            let Some(pos) = world.get::<Pos>(entity) else {
+                continue;
+            };
+            let half = world
+                .get::<HitboxComp>(entity)
+                .map_or(0.0, |h| h.hit_size / 2.0);
+            let dx = pos.x - x;
+            let dy = pos.y - y;
+            let dst2 = dx * dx + dy * dy;
+            if dst2 > (range + half) * (range + half) {
+                continue;
+            }
+            // `UnitType.targetPriority` defaults to 0 (`UnitTypes.java`);
+            // harness stand-in units carry no `UnitTypeComp`.
+            let priority = world
+                .get::<UnitTypeComp>(entity)
+                .and_then(|comp| content.unit(comp.type_id))
+                .map(|def| def.target_priority)
+                .unwrap_or(0.0);
+            let clustered = if matches!(sort, UnitSort::Grouped(_)) {
+                self.clusters.get(other, pos.x, pos.y)
+            } else {
+                0
+            };
+            let max_health = world
+                .get::<Health>(entity)
+                .map(|h| h.max_health)
+                .unwrap_or(0.0);
+            let cost = sort.cost(clustered, max_health, dst2);
+            let take = match &best {
+                None => true,
+                Some(current) => {
+                    (cost < current.cost || priority > current.priority)
+                        && priority >= current.priority
+                }
+            };
+            if take {
+                best = Some(UnitCandidate {
+                    entity,
+                    cost,
+                    priority,
+                });
+            }
+        }
+        best.map(|candidate| candidate.entity)
+    }
+
+    /// `Units.bestTarget` (`Units.java:281-291`): the sorted best enemy unit,
+    /// else the nearest enemy building (`findEnemyTile`) when the turret's
+    /// `buildings` gate is set.
+    #[allow(clippy::too_many_arguments)]
+    pub fn best_target(
+        &self,
+        world: &World,
+        content: &ContentRegistry,
+        team: u8,
+        x: f32,
+        y: f32,
+        range: f32,
+        sort: UnitSort,
+        predicate: &mut dyn FnMut(&World, &ContentRegistry, Entity) -> bool,
+        buildings: bool,
+        allow_under_blocks: bool,
+    ) -> Option<Entity> {
+        if let Some(unit) = self.best_enemy(world, content, team, x, y, range, sort, predicate) {
+            return Some(unit);
+        }
+        if buildings {
+            self.indexer
+                .find_enemy_building(world, team, x, y, range, allow_under_blocks)
+        } else {
+            None
+        }
+    }
+
+    /// Nearest damaged ally building (`Units.findAllyTile` for healing turrets),
+    /// excluding `exclude` (`b -> b.damaged() && b != this`, `Turret.java:661`).
     pub fn find_ally_tile(
         &self,
         world: &World,
@@ -158,10 +284,14 @@ impl TargetQueries {
         x: f32,
         y: f32,
         range: f32,
+        exclude: Option<Entity>,
     ) -> Option<Entity> {
         let range2 = range * range;
         let mut best: Option<(f32, Entity)> = None;
         for &entity in self.indexer.all() {
+            if Some(entity) == exclude {
+                continue;
+            }
             if world.get::<TeamComp>(entity).map(|t| t.team) != Some(team) {
                 continue;
             }
@@ -185,11 +315,102 @@ impl TargetQueries {
     }
 }
 
+/// Unit cost functions (`UnitSorts.java:9-40`).
+///
+/// `Turret.unitSort` defaults to `closest` (`Turret.java:113`); turrets override
+/// it (ripple `grouped`, foreshadow/lustre/scathe/malign `strongest`) and an
+/// ammo def can override it again (`Turret.java:643`: `ammo.unitSort !=
+/// UnitSorts.closest ? ammo.unitSort : unitSort`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum UnitSort {
+    /// `Unit::dst2` — nearest squared distance.
+    Closest,
+    /// `-dst2`.
+    Farthest,
+    /// `-maxHealth + dst2 / 6400`.
+    Strongest,
+    /// `maxHealth + dst2 / 6400`.
+    Weakest,
+    /// `grouped(dstWeight)`: `-team.data().getClustered(x, y) + dst * weight`
+    /// (`dstWeight <= 0` ignores distance); ground units only.
+    Grouped(f32),
+}
+
+impl UnitSort {
+    /// The sort cost for one candidate (`UnitSorts` function body).
+    pub fn cost(&self, clustered: i32, max_health: f32, dst2: f32) -> f32 {
+        match self {
+            UnitSort::Closest => dst2,
+            UnitSort::Farthest => -dst2,
+            UnitSort::Strongest => -max_health + dst2 / 6400.0,
+            UnitSort::Weakest => max_health + dst2 / 6400.0,
+            UnitSort::Grouped(weight) => {
+                let dst_term = if *weight > 0.0 {
+                    dst2.sqrt() * *weight
+                } else {
+                    0.0
+                };
+                -(clustered as f32) + dst_term
+            }
+        }
+    }
+}
+
+/// One candidate unit's sort inputs (`UnitSorts` reads position/health/team).
+struct UnitCandidate {
+    entity: Entity,
+    cost: f32,
+    priority: f32,
+}
+
 /// Whether `(dist2, entity)` should replace the current best (stable tie-break).
 fn is_closer(best: Option<(f32, Entity)>, dist2: f32, entity: Entity) -> bool {
     best.is_none_or(|(current, current_entity)| {
         dist2 < current || (dist2 == current && entity.index() < current_entity.index())
     })
+}
+
+/// Ground-unit cluster counts keyed by `(team, TeamData.clusterKey)`
+/// (`TeamData.getClustered`).
+#[derive(Debug, Clone, Default)]
+pub struct ClusterCounts {
+    counts: std::collections::HashMap<(u8, i32), i32>,
+}
+
+impl ClusterCounts {
+    /// Counts ground units per `(team, cluster key)` over the snapshot.
+    ///
+    /// Java's `getClustered` caches the map for 10 ticks of `Time.time`
+    /// (`Teams.java:477-494`); the port recomputes it whenever a targeting
+    /// snapshot is built (one pass per pass), which is the same value a fresh
+    /// Java cache would hold.
+    pub fn build(world: &World, units: &[Entity]) -> Self {
+        let mut counts: std::collections::HashMap<(u8, i32), i32> =
+            std::collections::HashMap::new();
+        for &entity in units {
+            if crate::combat::bullet::unit_is_flying(world, entity) {
+                continue;
+            }
+            let Some(team) = world.get::<TeamComp>(entity).map(|t| t.team) else {
+                continue;
+            };
+            let Some(pos) = world.get::<Pos>(entity) else {
+                continue;
+            };
+            *counts
+                .entry((team, crate::game::teams::cluster_key(pos.x, pos.y)))
+                .or_insert(0) += 1;
+        }
+        Self { counts }
+    }
+
+    /// `TeamData.getClustered`: the count in the candidate's cluster cell.
+    pub fn get(&self, team: u8, x: f32, y: f32) -> i32 {
+        self.counts
+            .get(&(team, crate::game::teams::cluster_key(x, y)))
+            .copied()
+            .unwrap_or(0)
+    }
 }
 
 /// `Predict.intercept` (`Predict.java:26-52`): lead a moving target for a bullet

@@ -28,6 +28,7 @@ use super::pal;
 use super::sound_meta::SoundId;
 use super::units::UnitSpec;
 use super::units::parts::InterpKind;
+use crate::combat::targeting::UnitSort;
 use crate::content::color::Rgba;
 use crate::content::ctype::{Content, ModContentInfo};
 use crate::content::id::{BulletId, LiquidId, StatusId, UnitTypeId};
@@ -217,6 +218,10 @@ pub struct BulletDef {
     /// turret's range while this ammo is loaded (`Turret.TurretBuild.range()`,
     /// `Turret.java:348-353`).
     pub range_change: f32,
+    /// `BulletType.minRangeChange` (`BulletType.java:171`): added to the firing
+    /// turret's minimum range while this ammo is loaded
+    /// (`Turret.TurretBuild.minRange()`, `Turret.java:340-344`).
+    pub min_range_change: f32,
     /// Ammo created per item/liquid.
     pub ammo_multiplier: f32,
     /// Whether the ammo multiplier shows in stats.
@@ -261,6 +266,9 @@ pub struct BulletDef {
     pub target_blocks: bool,
     /// Turret-only: whether missiles are targeted (`targetMissiles`).
     pub target_missiles: bool,
+    /// `BulletType.unitSort` (`BulletType.java:125`): overrides the turret's
+    /// `unitSort` when it is not `closest` (`Turret.java:643`).
+    pub unit_sort: UnitSort,
     /// Whether the bullet can be reflected.
     pub reflectable: bool,
     /// Whether the projectile can be absorbed by shields.
@@ -640,6 +648,7 @@ impl BulletDef {
             optimal_life_fract: 0.0,
             reload_multiplier: 1.0,
             range_change: 0.0,
+            min_range_change: 0.0,
             ammo_multiplier: 2.0,
             display_ammo_multiplier: true,
             recoil: 0.0,
@@ -662,6 +671,7 @@ impl BulletDef {
             hittable: true,
             target_blocks: true,
             target_missiles: true,
+            unit_sort: UnitSort::Closest,
             reflectable: true,
             absorbable: true,
             collides: true,
@@ -1249,6 +1259,7 @@ impl BulletDef {
             optimal_life_fract,
             reload_multiplier,
             range_change,
+            min_range_change,
             ammo_multiplier,
             display_ammo_multiplier,
             recoil,
@@ -1674,6 +1685,8 @@ pub struct BulletSpec {
     pub reload_multiplier: Option<f32>,
     /// `BulletType.rangeChange`.
     pub range_change: Option<f32>,
+    /// `BulletType.minRangeChange`.
+    pub min_range_change: Option<f32>,
     /// Ammo multiplier.
     pub ammo_multiplier: Option<f32>,
     /// Display ammo multiplier.

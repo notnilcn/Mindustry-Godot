@@ -33,8 +33,9 @@ use smallvec::SmallVec;
 
 use crate::ai::types::player::PlayerInput;
 use crate::audio::math::AudioRng;
+use crate::combat::bullet::unit_is_flying;
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
-use crate::combat::targeting::TargetQueries;
+use crate::combat::targeting::{TargetQueries, UnitSort};
 use crate::content::registries::bullets::BulletDef;
 use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::weapon::ShootPatternSpec;
@@ -64,6 +65,9 @@ pub struct ItemAmmo {
     /// `BulletType.rangeChange` of the fired bullet (`Turret.range()`,
     /// `Turret.java:348-353`).
     pub range_change: f32,
+    /// `BulletType.minRangeChange` of the fired bullet
+    /// (`Turret.TurretBuild.minRange()`, `Turret.java:340-344`).
+    pub min_range_change: f32,
 }
 
 /// One resolved liquid-ammo entry (`LiquidTurret.ammoTypes`).
@@ -77,6 +81,8 @@ pub struct LiquidAmmo {
     pub ammo_multiplier: f32,
     /// `BulletType.rangeChange` of the fired bullet.
     pub range_change: f32,
+    /// `BulletType.minRangeChange` of the fired bullet.
+    pub min_range_change: f32,
 }
 
 /// One payload-ammo entry (`PayloadAmmoTurret.ammoTypes`).
@@ -88,6 +94,8 @@ pub struct PayloadAmmo {
     pub bullet: BulletId,
     /// `BulletType.rangeChange` of the fired bullet.
     pub range_change: f32,
+    /// `BulletType.minRangeChange` of the fired bullet.
+    pub min_range_change: f32,
 }
 
 /// Payload content key (block or unit) for `PayloadAmmoTurret`.
@@ -190,6 +198,14 @@ pub struct TurretConfig {
     pub warmup_maintain_time: f32,
     /// `Turret.targetInterval`.
     pub target_interval: f32,
+    /// `Turret.newTargetInterval` (`Turret.java:44`): the retarget interval used
+    /// while a target is held; `<= 0` falls back to `target_interval`
+    /// (`Turret.init`, `:216`).
+    pub new_target_interval: f32,
+    /// `Turret.unitSort` (`Turret.java:113`, default `UnitSorts.closest`).
+    /// Turret overrides: ripple `grouped`, foreshadow/lustre/scathe/malign
+    /// `strongest`.
+    pub unit_sort: UnitSort,
     /// `Turret.inaccuracy` (degrees).
     pub inaccuracy: f32,
     /// `Turret.velocityRnd`.
@@ -202,6 +218,13 @@ pub struct TurretConfig {
     pub extra_life: f32,
     /// `Turret.scaleLifetimeOffset`.
     pub scale_lifetime_offset: f32,
+    /// `Turret.minRange` (`Turret.java:80`): the minimum bullet range (the
+    /// `scaleLife` lifetime lower clamp, `Turret.java:797`).
+    pub min_range: f32,
+    /// `Turret.trackingRange` (`Turret.java:78`): post-`init` this is
+    /// `max(range, trackingRange)` (`Turret.java:223`); ammo `rangeChange`
+    /// shifts it at use time (`trackingRange()`, `:355-356`).
+    pub tracking_range: f32,
     /// `Turret.recoil`.
     pub recoil: f32,
     /// `Turret.recoils`.
@@ -226,6 +249,13 @@ pub struct TurretConfig {
     pub target_ground: bool,
     /// `Turret.targetBlocks`.
     pub target_blocks: bool,
+    /// `Turret.targetUnderBlocks` (`Turret.java:107`; `scathe` sets false,
+    /// `Blocks.java:5668`).
+    pub target_under_blocks: bool,
+    /// `Turret.targetHealing` (`Turret.java:101`): damaged allies are healed
+    /// when no enemy is found and the ammo both heals and collides with the
+    /// turret's team.
+    pub target_healing: bool,
     /// `Turret.alwaysShooting`.
     pub always_shooting: bool,
     /// `Turret.predictTarget` (`Turret.java:111`; set false only by `scathe`,
@@ -567,6 +597,9 @@ pub fn config_for(
     names: &BTreeMap<String, BulletId>,
 ) -> Option<TurretConfig> {
     let mut config = config_for_inner(content, name, names)?;
+    // `Turret.init` (`Turret.java:223`): `trackingRange = Math.max(range,
+    // trackingRange)`.
+    config.tracking_range = config.tracking_range.max(config.range);
     apply_block_coolant(content, name, &mut config);
     apply_turret_sounds(name, &mut config);
     // Harness fixtures (`test-item`, ...) carry a coolant amount but no block
@@ -726,6 +759,7 @@ fn config_for_inner(
             bullet: id,
             ammo_multiplier: mult.max(1),
             range_change: def.map(|d| d.range_change).unwrap_or(0.0),
+            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
         })
     };
     let liquid_ammo = |liquid_name: &str, bullet_name: &str| -> Option<LiquidAmmo> {
@@ -737,6 +771,7 @@ fn config_for_inner(
             bullet: id,
             ammo_multiplier: mult.max(0.001),
             range_change: def.map(|d| d.range_change).unwrap_or(0.0),
+            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
         })
     };
 
@@ -760,12 +795,16 @@ fn config_for_inner(
                 linear_warmup: false,
                 warmup_maintain_time: 0.0,
                 target_interval: 20.0,
+                new_target_interval: -1.0,
+                unit_sort: UnitSort::Closest,
                 inaccuracy: 2.0,
                 velocity_rnd: 0.0,
                 extra_velocity: 0.0,
                 life_rnd: 0.0,
                 extra_life: 0.0,
                 scale_lifetime_offset: 0.0,
+                min_range: 0.0,
+                tracking_range: 0.0,
                 recoil: 0.5,
                 recoils: 2,
                 recoil_time: 20.0,
@@ -778,6 +817,8 @@ fn config_for_inner(
                 target_air: true,
                 target_ground: true,
                 target_blocks: true,
+                target_under_blocks: true,
+                target_healing: false,
                 always_shooting: false,
                 predict_target: true,
                 accurate_delay: true,
@@ -830,12 +871,16 @@ fn config_for_inner(
                 linear_warmup: false,
                 warmup_maintain_time: 0.0,
                 target_interval: 5.0,
+                new_target_interval: -1.0,
+                unit_sort: UnitSort::Closest,
                 inaccuracy: 0.0,
                 velocity_rnd: 0.0,
                 extra_velocity: 0.0,
                 life_rnd: 0.0,
                 extra_life: 0.0,
                 scale_lifetime_offset: 0.0,
+                min_range: 0.0,
+                tracking_range: 0.0,
                 recoil: 1.0,
                 recoils: -1,
                 recoil_time: 10.0,
@@ -848,6 +893,8 @@ fn config_for_inner(
                 target_air: true,
                 target_ground: true,
                 target_blocks: true,
+                target_under_blocks: true,
+                target_healing: false,
                 always_shooting: false,
                 predict_target: true,
                 accurate_delay: true,
@@ -900,12 +947,16 @@ fn config_for_inner(
                 linear_warmup: false,
                 warmup_maintain_time: 0.0,
                 target_interval: 5.0,
+                new_target_interval: -1.0,
+                unit_sort: UnitSort::Closest,
                 inaccuracy: 0.0,
                 velocity_rnd: 0.0,
                 extra_velocity: 0.0,
                 life_rnd: 0.0,
                 extra_life: 0.0,
                 scale_lifetime_offset: 0.0,
+                min_range: 0.0,
+                tracking_range: 0.0,
                 recoil: 1.0,
                 recoils: -1,
                 recoil_time: 5.0,
@@ -918,6 +969,8 @@ fn config_for_inner(
                 target_air: true,
                 target_ground: true,
                 target_blocks: true,
+                target_under_blocks: true,
+                target_healing: false,
                 always_shooting: false,
                 predict_target: true,
                 accurate_delay: true,
@@ -970,12 +1023,16 @@ fn config_for_inner(
                 linear_warmup: false,
                 warmup_maintain_time: 0.0,
                 target_interval: 5.0,
+                new_target_interval: -1.0,
+                unit_sort: UnitSort::Closest,
                 inaccuracy: 0.0,
                 velocity_rnd: 0.0,
                 extra_velocity: 0.0,
                 life_rnd: 0.0,
                 extra_life: 0.0,
                 scale_lifetime_offset: 0.0,
+                min_range: 0.0,
+                tracking_range: 0.0,
                 recoil: 1.0,
                 recoils: -1,
                 recoil_time: 10.0,
@@ -988,6 +1045,8 @@ fn config_for_inner(
                 target_air: true,
                 target_ground: true,
                 target_blocks: true,
+                target_under_blocks: true,
+                target_healing: false,
                 always_shooting: false,
                 predict_target: true,
                 accurate_delay: true,
@@ -1147,6 +1206,37 @@ pub fn peek_ammo_range_change_of(state: &TurretState, world: &World, e: Entity) 
                     .any(|stack| stack.content == entry.content && stack.count > 0)
             })
             .map_or(0.0, |entry| entry.range_change),
+    }
+}
+
+/// `TurretBuild.peekAmmo().minRangeChange` (`BulletType.minRangeChange`):
+/// mirrors [`peek_ammo_range_change_of`]'s ammo selection for the minimum
+/// range (`Turret.TurretBuild.minRange()`, `Turret.java:340-344`). `Power`
+/// turrets hold only the bullet id, so their change reads `0` (no vanilla
+/// power turret sets one).
+pub fn peek_ammo_min_range_change_of(state: &TurretState, world: &World, e: Entity) -> f32 {
+    match &state.config.ammo {
+        TurretAmmo::Item(ammo) => state
+            .ammo
+            .last()
+            .and_then(|entry| ammo.iter().find(|config| config.bullet == entry.bullet))
+            .map_or(0.0, |config| config.min_range_change),
+        TurretAmmo::Liquid(ammo) => {
+            let Some(liquids) = world.get::<LiquidModule>(e) else {
+                return 0.0;
+            };
+            current_liquid_ammo(liquids, ammo).map_or(0.0, |entry| entry.min_range_change)
+        }
+        TurretAmmo::Power(_) => 0.0,
+        TurretAmmo::Payload(ammo) => ammo
+            .iter()
+            .find(|entry| {
+                state
+                    .payloads
+                    .iter()
+                    .any(|stack| stack.content == entry.content && stack.count > 0)
+            })
+            .map_or(0.0, |entry| entry.min_range_change),
     }
 }
 
@@ -1740,11 +1830,16 @@ fn update_turret(
         return;
     }
 
-    // Target acquisition on the interval timer.
+    // Target acquisition on the interval timer: `timer(timerTarget, target !=
+    // null ? newTargetInterval : targetInterval)` (`Turret.java:571`).
     state.target_timer -= 1.0;
     if state.target_timer <= 0.0 {
         find_target(ctx, e, state, team, x, y, targets);
-        state.target_timer = config.target_interval;
+        state.target_timer = if state.target.is_some() {
+            config.new_target_interval.max(0.0001)
+        } else {
+            config.target_interval
+        };
     }
 
     // `Turret.updateTile` (`Turret.java:571-605`): with a valid target the aim
@@ -2008,7 +2103,13 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
         let life_scl = if scale_life && bullet_range > 0.0 {
             let dst =
                 ((state.target_pos.0 - bx).powi(2) + (state.target_pos.1 - by).powi(2)).sqrt();
-            ((base_life + config.scale_lifetime_offset) * dst / bullet_range).clamp(0.0, 1.0)
+            // `Turret.bullet` (`Turret.java:797`): `clamp((baseLife +
+            // scaleLifetimeOffset) * dst / type.range, minRange()/type.range,
+            // range()/type.range)`.
+            let min_range = min_range_of(state, ctx.world, e);
+            let max_range = turret_range_of(state, ctx.world, e);
+            ((base_life + config.scale_lifetime_offset) * dst / bullet_range)
+                .clamp(min_range / bullet_range, max_range / bullet_range)
         } else {
             base_life
         };
@@ -2066,7 +2167,11 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
     state.heat = 1.0;
 }
 
-/// `TurretBuild.findTarget` via plan 11's [`TargetQueries`] (plan 10 §3.8).
+/// `TurretBuild.findTarget` / `findEnemy` (`Turret.java:631-677`) via plan 11's
+/// [`TargetQueries`] (plan 10 §3.8).
+///
+/// Two passes: the firing range first, then `trackingRange()` when it differs
+/// (a null first pass only), and finally a damaged ally when the turret heals.
 #[allow(clippy::too_many_arguments)]
 fn find_target(
     ctx: &CombatCtx<'_>,
@@ -2078,25 +2183,108 @@ fn find_target(
     targets: &TargetQueries,
 ) {
     let config = &state.config;
-    // The dispatched state is out of the world during this pass, so the
-    // range comes from the state handle (`turret_range_of`).
+    // The dispatched state is out of the world during this pass, so the ranges
+    // come from the state handle (`turret_range_of`).
     let range = turret_range_of(state, ctx.world, e);
-    state.target = targets.closest_target(
-        ctx.world,
-        team,
-        x,
-        y,
-        range,
-        config.target_air,
-        config.target_ground,
-        config.target_blocks,
-        // `Turret.targetUnderBlocks` defaults true (Turret.java:107).
-        true,
-    );
-    let _ = e;
-    if let Some(target) = state.target {
+    let track_range = tracking_range_of(state, ctx.world, e);
+    let sort = ammo_unit_sort(state, ctx.world, e, ctx.content);
+    let ammo = peek_ammo_state(state, ctx.world, e).and_then(|id| ctx.content.bullet(id));
+    let missiles = ammo.is_none_or(|def| def.target_missiles);
+    let buildings =
+        config.target_ground && config.target_blocks && ammo.is_none_or(|def| def.target_blocks);
+
+    let find = |query_range: f32| -> Option<Entity> {
+        if config.target_air && !config.target_ground {
+            // `Units.bestEnemy` with `!e.isGrounded()` (`Turret.java:645`).
+            targets.best_enemy(
+                ctx.world,
+                ctx.content,
+                team,
+                x,
+                y,
+                query_range,
+                sort,
+                &mut |world, _content, unit| !unit_is_flying(world, unit),
+            )
+        } else {
+            // `Units.bestTarget` (`Turret.java:647-651`): the unit gate keeps
+            // grounded/flying per the target flags and skips missiles unless
+            // the ammo allows them.
+            targets.best_target(
+                ctx.world,
+                ctx.content,
+                team,
+                x,
+                y,
+                query_range,
+                sort,
+                &mut |world, _content, unit| {
+                    let flying = unit_is_flying(world, unit);
+                    (flying || config.target_ground)
+                        && (!flying || config.target_air)
+                        && (missiles
+                            || world
+                                .get::<crate::entities::comp::unit::comp::TimedKillComp>(unit)
+                                .is_none())
+                },
+                buildings,
+                config.target_under_blocks,
+            )
+        }
+    };
+
+    let mut target = find(range);
+    // `findTarget`: a different tracking range gets a second chance only when
+    // nothing was found in the firing range (`Turret.java:655-658`;
+    // `Mathf.equal`).
+    if (track_range - range).abs() > f32::EPSILON && target.is_none() {
+        target = find(track_range);
+    }
+    if target.is_none() && can_heal(state, ctx.world, ctx.content, e) {
+        target = targets.find_ally_tile(ctx.world, team, x, y, range, Some(e));
+    }
+    state.target = target;
+    if let Some(target) = target {
         state.target_pos = position(ctx.world, target).unwrap_or((x, y));
     }
+}
+
+/// `TurretBuild.canHeal` (`Turret.java:634-636`): `targetHealing && hasAmmo()
+/// && peekAmmo().collidesTeam && peekAmmo().heals()`.
+fn can_heal(state: &TurretState, world: &World, content: &ContentRegistry, e: Entity) -> bool {
+    if !state.config.target_healing || !has_ammo_state(state, world, e) {
+        return false;
+    }
+    peek_ammo_state(state, world, e)
+        .and_then(|id| content.bullet(id))
+        .is_some_and(|def| def.collides_team && def.heals())
+}
+
+/// `TurretBuild.minRange()` (`Turret.java:340-344`): `minRange +
+/// peekAmmo().minRangeChange`.
+pub fn min_range_of(state: &TurretState, world: &World, e: Entity) -> f32 {
+    state.config.min_range + peek_ammo_min_range_change_of(state, world, e)
+}
+
+/// `TurretBuild.trackingRange()` (`Turret.java:355-356`): the init-maxed
+/// tracking range shifted by the ammo's `rangeChange`.
+pub fn tracking_range_of(state: &TurretState, world: &World, e: Entity) -> f32 {
+    state.config.tracking_range + peek_ammo_range_change_of(state, world, e)
+}
+
+/// `Turret.findEnemy`'s sort (`Turret.java:643`): `ammo.unitSort != closest ?
+/// ammo.unitSort : unitSort`.
+fn ammo_unit_sort(
+    state: &TurretState,
+    world: &World,
+    e: Entity,
+    content: &ContentRegistry,
+) -> UnitSort {
+    peek_ammo_state(state, world, e)
+        .and_then(|id| content.bullet(id))
+        .map(|def| def.unit_sort)
+        .filter(|sort| *sort != UnitSort::Closest)
+        .unwrap_or(state.config.unit_sort)
 }
 
 /// `Turret.targetPosition` (`Turret.java:459-479`): the per-tick aim point for
@@ -2607,5 +2795,238 @@ mod tests {
             }
         }
         assert!(matched > 0, "hail emitted its own shoot sound");
+    }
+}
+
+/// J04 T1 (`Turret.findTarget`, `Turret.java:631-677`): unit sorts, min-range
+/// lifetime clamp and tracking range.
+#[cfg(test)]
+mod find_target_tests {
+    use super::*;
+    use crate::combat::harness::CombatHarness;
+    use crate::entities::comp::Health;
+
+    /// Spawns a turret with one ammo entry (`amount` units) and a zeroed
+    /// retarget timer so the next pass acquires a target.
+    fn armed_turret(
+        harness: &mut CombatHarness,
+        name: &str,
+        x: f32,
+        y: f32,
+        item_name: &str,
+        bullet_name: &str,
+    ) -> Entity {
+        let turret = harness
+            .spawn_test_turret(name, x, y, 1)
+            .unwrap_or_else(|| panic!("turret `{name}`"));
+        let item = harness.content().item_id(item_name).expect(item_name);
+        let bullet = harness.content().bullet_names()[bullet_name];
+        let mut state = harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .expect("turret state");
+        state.ammo.push(AmmoEntry {
+            item,
+            bullet,
+            amount: 40,
+        });
+        state.target_timer = 0.0;
+        turret
+    }
+
+    /// Two enemies at different health and distance: foreshadow (`strongest`,
+    /// `Blocks.java:4261`) picks the far high-health unit, duo (`closest`,
+    /// `Turret.java:113` default) the near one.
+    #[test]
+    fn find_target_strongest_and_closest_sorts() {
+        for (turret_name, item_name, bullet_name, expect_far) in [
+            ("foreshadow", "surge-alloy", "foreshadow_rail", true),
+            ("duo", "copper", "duo_copper", false),
+        ] {
+            let mut harness = CombatHarness::new(64, 64, 7);
+            let (tx, ty) = CombatHarness::tile_center(4, 8);
+            let turret = armed_turret(&mut harness, turret_name, tx, ty, item_name, bullet_name);
+            // Near unit (40 px, 100 health) vs far unit (80 px, 1000 health);
+            // `strongest = -maxHealth + dst2/6400` (`UnitSorts.java:13`).
+            let near = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+            harness
+                .build
+                .world
+                .get_mut::<Health>(near)
+                .unwrap()
+                .max_health = 100.0;
+            let far = harness.spawn_test_unit(tx + 80.0, ty, 2, Vec::new());
+            harness
+                .build
+                .world
+                .get_mut::<Health>(far)
+                .unwrap()
+                .max_health = 1000.0;
+            harness.update_turrets_only();
+            let state = harness.turret_state(turret).expect("state");
+            let expected = if expect_far { far } else { near };
+            assert_eq!(state.target, Some(expected), "`{turret_name}` target sort");
+        }
+    }
+
+    /// Ripple (`unitSort = grouped`, `Blocks.java:4107`) picks a member of the
+    /// clustered trio over a lone nearer unit (`-getClustered + dst * 0.003`,
+    /// `UnitSorts.java:24-27`).
+    #[test]
+    fn find_target_grouped_prefers_cluster() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(
+            &mut harness,
+            "ripple",
+            tx,
+            ty,
+            "graphite",
+            "ripple_graphite",
+        );
+        // Lone unit 40 px away: cost -1 + 40 * 0.003 = -0.88.
+        harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        // Three units in one 70 px cluster cell 200 px away: cost -3 + 0.6.
+        let first_cluster = harness.spawn_test_unit(tx + 200.0, ty, 2, Vec::new());
+        harness.spawn_test_unit(tx + 201.0, ty, 2, Vec::new());
+        harness.spawn_test_unit(tx + 202.0, ty, 2, Vec::new());
+        harness.update_turrets_only();
+        let state = harness.turret_state(turret).expect("state");
+        assert_eq!(
+            state.target,
+            Some(first_cluster),
+            "grouped picks the cluster (first in stable unit order on a tie)"
+        );
+    }
+
+    /// Ripple's `minRange = 50` (`Blocks.java:4100`) clamps the `scaleLife`
+    /// lifetime to `minRange()/range` (`Turret.java:797`): a shell aimed 40 px
+    /// away lives for the minimum fraction, not the shorter raw distance ratio.
+    #[test]
+    fn ripple_min_range_clamps_bullet_lifetime() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(
+            &mut harness,
+            "ripple",
+            tx,
+            ty,
+            "graphite",
+            "ripple_graphite",
+        );
+        // Target inside the 50-unit minimum range.
+        let target = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        {
+            let mut state = harness.build.world.get_mut::<TurretState>(turret).unwrap();
+            state.target = Some(target);
+            state.target_pos = (tx + 40.0, ty);
+        }
+        let def_lifetime = {
+            let bullet = harness.content().bullet_names()["ripple_graphite"];
+            harness
+                .content()
+                .bullet(bullet)
+                .map(|def| def.lifetime)
+                .unwrap_or(0.0)
+        };
+        let mut fired: Option<f32> = None;
+        for _ in 0..200 {
+            harness.tick();
+            if
+            // A newer bullet than the pre-set state: the first spawn.
+            let Some(entity) = harness.bullets.last().copied()
+                && let Some(bullet) = harness
+                    .build
+                    .world
+                    .get::<crate::combat::bullet::Bullet>(entity)
+            {
+                fired = Some(bullet.lifetime);
+                break;
+            }
+        }
+        let lifetime = fired.expect("a shell spawned");
+        // (baseLife(1) + scaleLifetimeOffset(0.1)) * dst(40) / type.range(240)
+        // = 0.1833, clamped up to minRange(50)/range(240) = 0.2083.
+        let expected = def_lifetime * (50.0 / 240.0);
+        assert!(
+            (lifetime - expected).abs() < 0.5,
+            "clamped lifetime {lifetime} ~= {expected}"
+        );
+        let unclamped = def_lifetime * 1.1 * 40.0 / 240.0;
+        assert!(
+            lifetime > unclamped,
+            "the min-range clamp raised the lifetime"
+        );
+    }
+
+    /// Smite's `trackingRange = range * 1.4` (`Blocks.java:5947`): a target
+    /// beyond the firing range but inside the tracking range is acquired; one
+    /// beyond it is not.
+    #[test]
+    fn find_target_uses_tracking_range() {
+        let mut harness = CombatHarness::new(128, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "smite", tx, ty, "surge-alloy", "smite_orb");
+        let config = harness.turret_state(turret).expect("state").config.clone();
+        assert!((config.tracking_range - config.range * 1.4).abs() < 0.01);
+        // 350 px: outside `range` 300, inside `trackingRange` 420.
+        let tracked = harness.spawn_test_unit(tx + 350.0, ty, 2, Vec::new());
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).unwrap().target,
+            Some(tracked),
+            "second pass at trackingRange()"
+        );
+        // 460 px: outside the tracking range too.
+        harness.build.world.get_mut::<Pos>(tracked).unwrap().x = tx + 460.0;
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .unwrap()
+            .target_timer = 0.0;
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).unwrap().target,
+            None,
+            "out of tracking range"
+        );
+    }
+
+    /// `Turret.newTargetInterval` (`Turret.java:571`): scathe retargets on 40
+    /// ticks while holding a target (`Blocks.java:5666`), the plain interval
+    /// otherwise.
+    #[test]
+    fn new_target_interval_applies_with_a_target() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scathe", tx, ty, "carbide", "scathe_carbide");
+        assert_eq!(
+            harness
+                .turret_state(turret)
+                .unwrap()
+                .config
+                .new_target_interval,
+            40.0
+        );
+        // First pass: no target held -> the plain interval.
+        harness.update_turrets_only();
+        assert_eq!(harness.turret_state(turret).unwrap().target, None);
+        assert_eq!(
+            harness.turret_state(turret).unwrap().target_timer,
+            harness.turret_state(turret).unwrap().config.target_interval
+        );
+        // With a target in range the retarget interval becomes 40.
+        harness.spawn_test_unit(tx + 100.0, ty, 2, Vec::new());
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .unwrap()
+            .target_timer = 0.0;
+        harness.update_turrets_only();
+        assert!(harness.turret_state(turret).unwrap().target.is_some());
+        assert_eq!(harness.turret_state(turret).unwrap().target_timer, 40.0);
     }
 }

@@ -4863,8 +4863,8 @@ impl MindSimHost {
         out
     }
 
-    /// Debug probe: `{name, x, y, team}` rows for every live unit (render
-    /// verification; companion to `tile_debug`).
+    /// Debug probe: `{name, x, y, team, hp_fract}` rows for every live unit
+    /// (render verification; companion to `tile_debug`).
     #[func]
     pub fn unit_debug_positions(&self) -> GString {
         let rows: Vec<serde_json::Value> = self
@@ -4876,10 +4876,95 @@ impl MindSimHost {
                     "x": unit.x,
                     "y": unit.y,
                     "team": unit.team,
+                    "hp_fract": unit.healthf,
                 })
             })
             .collect();
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
+    }
+
+    /// Debug probe (J04 T1): the turret's resolved targeting state at `(x, y)`
+    /// — `{sort, min_range, tracking_range, target_interval,
+    /// new_target_interval, target}` where `target` is `{seq, name, x, y}` or
+    /// null. Companion to `tile_debug`.
+    #[func]
+    pub fn turret_debug(&self, x: i32, y: i32) -> Dictionary<GString, Variant> {
+        use mind_core::combat::targeting::UnitSort;
+        use mind_core::world::blocks::defense::turrets::TurretState;
+
+        let mut d = Dictionary::new();
+        let Some(tile) = self.sim.grid.tiles.getn(x, y) else {
+            return d;
+        };
+        let Some(entity) = tile.build else {
+            return d;
+        };
+        let Some(state) = self.sim.ecs.0.get::<TurretState>(entity) else {
+            return d;
+        };
+        let config = &state.config;
+        d.set(
+            "sort",
+            &GString::from(match config.unit_sort {
+                UnitSort::Closest => "closest",
+                UnitSort::Farthest => "farthest",
+                UnitSort::Strongest => "strongest",
+                UnitSort::Weakest => "weakest",
+                UnitSort::Grouped(_) => "grouped",
+            })
+            .to_variant(),
+        );
+        d.set("min_range", &config.min_range.to_variant());
+        d.set("tracking_range", &config.tracking_range.to_variant());
+        d.set("target_interval", &config.target_interval.to_variant());
+        d.set(
+            "new_target_interval",
+            &config.new_target_interval.to_variant(),
+        );
+        d.set("total_ammo", &state.total_ammo.to_variant());
+        d.set("ammo_entries", &(state.ammo.len() as i64).to_variant());
+        d.set("max_ammo", &config.max_ammo.to_variant());
+        let accepts_copper = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.item_id("copper"))
+            .is_some_and(|item| {
+                mind_core::world::blocks::defense::turrets::accept_item(
+                    &self.sim.ecs.0,
+                    entity,
+                    item,
+                )
+            });
+        d.set("accepts_copper", &accepts_copper.to_variant());
+        match state.target {
+            Some(target) => {
+                let mut row = Dictionary::<GString, Variant>::new();
+                row.set(
+                    "seq",
+                    &(self.sim.ecs.seq_of(target).unwrap_or(u64::MAX) as i64).to_variant(),
+                );
+                let name = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::UnitTypeComp>(target)
+                    .and_then(|comp| {
+                        self.content_snapshot
+                            .as_ref()
+                            .and_then(|content| content.unit(comp.type_id))
+                    })
+                    .map(|def| def.name.clone())
+                    .unwrap_or_default();
+                row.set("name", &GString::from(name.as_str()).to_variant());
+                if let Some(pos) = self.sim.ecs.0.get::<mind_core::entities::comp::Pos>(target) {
+                    row.set("x", &pos.x.to_variant());
+                    row.set("y", &pos.y.to_variant());
+                }
+                d.set("target", &row.to_variant());
+            }
+            None => d.set("target", &Variant::nil()),
+        }
+        d
     }
 
     /// Player unit world position as `[x, y]`, or empty when absent (render
