@@ -2384,3 +2384,27 @@ Run: runs/20261014-s3-verify3/.
   for the C++ default-parameter overload. The 2-argument `resize` silently uses
   the engine default (nearest), which made the menu shadow layer hard-edged.
   Run: `runs/20261017-s3-J02-T4/`.
+
+## 2026-10-17 — evals that pin the frame loop (session 4, bridge 7000)
+
+- Symptom: a `godot_exec` eval never returns; the addon watchdog logs
+  `eval stalled the frame loop; stop+play` and the running world is replaced (staged
+  blocks gone — re-stage after every stall).
+- Pins seen this session:
+  - `SimHost.world_size()` (a `(i32, i32)` Rust return) and `SimHost.tile_region(...)`
+    (a `Vec<(i16, i16, u16)>` return) — both hang the eval wrapper; read tiles in small
+    batches or use `building_debug`/`get_state_json` slices instead.
+  - `SimHost.block_items_json(x, y)` — used to read a container's contents; tapping the
+    building and reading the fragment's cells is the reliable path.
+  - `find_child(name, true, false)` chains when the search returns `null`: calling a
+    method on the null result errors and pins the loop. Probe existence first
+    (`find_child(...) != null`) or use exact node paths.
+- `get_viewport().get_mouse_position()` (the hover fragment's source) follows the **OS
+  pointer**, not synthetic `godot_input` motion events: for hover work call
+  `Input.warp_mouse(Vector2(x, y))` (plus a motion event for the input bridge) before
+  capturing.
+- The long `tools/gmcp.py` wrapper with `OPEN_GODOT_MCP_PORT=7000` drives the same MCP
+  server when the editor-facing client connection drops across a session-play restart;
+  helper used in the run: `/tmp/opencode/g4.sh <tool> <json>` and
+  `/tmp/opencode/e4.py "<gdscript>"` (JSON quoting handled in Python).
+- Run: `runs/20261017-s4-J05-T{1..5}/`.

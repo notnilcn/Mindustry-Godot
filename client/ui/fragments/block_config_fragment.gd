@@ -23,6 +23,8 @@ var _config: Dictionary = {}
 ## Tapped tile of the configured building (`config.getSelected()`).
 var _tile := Vector2i(-1, -1)
 var _scale_tween: Tween = null
+## Launch-pad destination planet (the spec's `planet`, `LaunchPad.java:192`).
+var _launch_planet := ""
 
 @onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var title: Label = get_node_or_null("Panel/Layout/Title")
@@ -41,19 +43,20 @@ func configure(world_pos: Vector2, spec_json: String) -> void:
 	var parsed: Variant = JSON.parse_string(spec_json)
 	_config = parsed if parsed is Dictionary else {}
 	_tile = Vector2i(int(_config.get("x", -1)), int(_config.get("y", -1)))
-	var buttons_only := _buttons_only()
+	var frameless := _frameless()
 	if title != null:
 		title.text = _t(str(_config.get("title", "")), str(_config.get("block", "")))
-		title.visible = not buttons_only
+		title.visible = not frameless
 	if panel != null:
 		# `BlockConfigFragment.showConfig`: `table.background(null)` — blocks
-		# whose `buildConfiguration` only adds buttons show just the buttons.
-		if buttons_only:
+		# whose `buildConfiguration` only adds buttons show just the buttons,
+		# and the `ItemSelection` grid carries its own `Styles.black6` table.
+		if frameless:
 			panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 		else:
 			panel.remove_theme_stylebox_override("panel")
 	_rebuild()
-	size = panel.get_combined_minimum_size() if buttons_only and panel != null else PANEL_SIZE
+	size = panel.get_combined_minimum_size() if frameless and panel != null else PANEL_SIZE
 	_align_to_building()
 	visible = true
 	# `table.setOrigin(Align.center)` + `scaleTo(0f, 1f)` -> `scaleTo(1f, 1f,
@@ -75,11 +78,23 @@ func _buttons_only() -> bool:
 	return bool(_config.get("logic", false)) or bool(_config.get("canvas", false))
 
 
+## Panels that draw no title and no own pane background: the buttons-only
+## configurations above and the `ItemSelection` grid / unit-command row (J05
+## T1/T2, whose `Styles.black6` backgrounds sit inside the widgets).
+func _frameless() -> bool:
+	return (
+		_buttons_only()
+		or bool(_config.get("selection", false))
+		or _config.get("commands", null) is Dictionary
+		or bool(_config.get("launch", false))
+	)
+
+
 func _process(_delta: float) -> void:
 	if not visible:
 		return
-	# `table.pack()`: the buttons-only table is exactly its buttons.
-	if _buttons_only() and panel != null:
+	# `table.pack()`: the frameless table is exactly its contents.
+	if _frameless() and panel != null:
 		size = panel.get_combined_minimum_size()
 		pivot_offset = size / 2.0
 	_align_to_building()
@@ -137,6 +152,10 @@ func _rebuild() -> void:
 	for child in body.get_children():
 		body.remove_child(child)
 		child.queue_free()
+	# Separation resets per route: Java stacks the grid and the command row with
+	# no table spacing (`table.row()`, `UnitFactory.java:291`) while the other
+	# panels keep the themed spacing.
+	body.remove_theme_constant_override("separation")
 	# code-instantiated: config rows come from the `config_spec` JSON (item or
 	# liquid option list / logic code field / color picker) produced by
 	# `MindInput`; the count is runtime content, not authorable in the scene.
@@ -150,6 +169,11 @@ func _rebuild() -> void:
 		_build_canvas_panel()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
+	elif bool(_config.get("launch", false)):
+		_build_launch_panel()
+	elif bool(_config.get("selection", false)) or _config.get("commands", null) is Dictionary:
+		body.add_theme_constant_override("separation", 0)
+		_build_selection()
 	else:
 		_build_options()
 
@@ -229,6 +253,10 @@ func _build_text_editor() -> void:
 		var edit := TextEdit.new()
 		edit.custom_minimum_size = Vector2(240, 90)
 		edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		# `MessageBlock.maxTextLength = 400` (`MessageBlock.java:29`); the
+		# dialog's `maxNewlines = 24` guard has no Godot TextEdit equivalent and
+		# stays a recorded residual.
+		edit.max_length = maxi(1, int(_config.get("max_text", 400)))
 		edit.text = str(_config.get("current", ""))
 		field = edit
 	else:
@@ -244,6 +272,47 @@ func _build_text_editor() -> void:
 	apply.pressed.connect(func() -> void: _submit("string", _text_of(field)))
 	row.add_child(apply)
 	_add_close_button(row)
+
+
+## `LaunchPad.buildConfiguration` (`LaunchPad.java:185-203`): one 40 px
+## `Icon.upOpen` button opening the sector-destination picker; the choice writes
+## `rules.sector.info.destination` (`MindCampaign.set_launch_destination`) and
+## closes the panel (`deselect()`).
+func _build_launch_panel() -> void:
+	# code-instantiated: one launch button per launch pad.
+	var button := MindWidgets.glyph_button("up-open", "▲", "cleari")
+	button.custom_minimum_size = Vector2(40, 40)
+	button.tooltip_text = _t("@launch.select", "select destination")
+	button.pressed.connect(_open_launch_select)
+	body.add_child(button)
+
+
+func _open_launch_select() -> void:
+	_launch_planet = str(_config.get("planet", ""))
+	_close()
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null:
+		return
+	if root != null and root.has_method("dialog"):
+		var dialog: Node = root.call("dialog", "sector_select")
+		if dialog != null and dialog.has_signal("sector_chosen"):
+			# The launch-loadout flow keeps its own handler on this signal; the
+			# launch pad owns the choice while its dialog is up.
+			for connection in dialog.sector_chosen.get_connections():
+				dialog.sector_chosen.disconnect(connection["callable"])
+			if not dialog.sector_chosen.is_connected(_on_launch_destination_chosen):
+				dialog.sector_chosen.connect(_on_launch_destination_chosen)
+	ui.call("open_dialog", "sector_select", JSON.stringify({"planet": _launch_planet}))
+
+
+func _on_launch_destination_chosen(sector: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "sector_select")
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("set_launch_destination"):
+		campaign.call("set_launch_destination", _launch_planet, sector)
 
 
 ## Reads the submitted text from a `LineEdit` or `TextEdit`.
@@ -276,6 +345,51 @@ func _build_color_picker() -> void:
 ## `Color.rgba8888` → Godot `Color` (the packed value is `0xRRGGBBAA`).
 func _rgba_from_int(value: int) -> Color:
 	return Color8((value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
+
+
+## J05 T1: `ItemSelection.buildTable` blocks (item/liquid/block/unit pickers).
+## The grid widget owns the layout; picking closes the panel
+## (`ItemSelection.java:70-71`, `closeSelect`) and re-tapping the checked icon
+## submits an empty value (`:73`, Java's `null` → `configure(null)`).
+##
+## J05 T2: unit factories additionally stack the produced unit's command row
+## (`UnitFactory.java:292-340`); a reconstructor's whole panel is that row
+## (`Reconstructor.java:215-240`, 5 columns of 44 px cells).
+func _build_selection() -> void:
+	if bool(_config.get("selection", false)):
+		# code-instantiated: the icon grid is built from the `config_spec` JSON's
+		# option list (runtime content); it has no scene-authorable shape.
+		var selection := MindItemSelection.new()
+		body.add_child(selection)
+		selection.build(_config)
+		selection.picked.connect(_on_selection_pick)
+	var commands: Variant = _config.get("commands", null)
+	if commands is Dictionary:
+		# code-instantiated: the command row is built from the produced unit's
+		# command list in the spec.
+		var row := MindItemCommandRow.new()
+		body.add_child(row)
+		row.build(commands)
+		row.picked.connect(_on_command_pick.bind(row))
+
+
+func _on_selection_pick(value: String) -> void:
+	var kind := str(_config.get("pick_kind", "content"))
+	if value.is_empty():
+		# `configure(null)`/`configClear`: the re-tap cleared the selection.
+		_submit("none", "")
+	else:
+		_submit(kind, value)
+	_close()
+
+
+## A command-row pick configures the command (`configure(item)`); the
+## reconstructor also closes the panel (`deselect()`, `Reconstructor.java:230`)
+## while the factory's row leaves it open (`UnitFactory.java:311-315`).
+func _on_command_pick(name: String, row: Node) -> void:
+	_submit("content", name)
+	if row != null and row.has_method("close_select") and bool(row.call("close_select")):
+		_close()
 
 
 func _build_options() -> void:

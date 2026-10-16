@@ -2510,7 +2510,23 @@ fn building_config_sensor() {
         )))),
         "factory plan unit"
     );
+    // `configClear` (`UnitFactory.java:82`) clears only the command; the plan
+    // is unset through `config(Integer.class)` with `-1` (`:58-67`).
     assert!(configure(&mut sim.ecs.0, factory, None, ConfigValue::None));
+    assert_eq!(
+        config_of(&sim, factory),
+        Sensed::Obj(Some(LogicObject::Content(crate::content::ContentRef::new(
+            crate::content::ContentType::Unit,
+            dagger.raw(),
+        )))),
+        "configClear keeps the plan"
+    );
+    assert!(configure(
+        &mut sim.ecs.0,
+        factory,
+        None,
+        ConfigValue::Number(-1.0)
+    ));
     assert_eq!(config_of(&sim, factory), Sensed::Obj(None), "no plan");
     // Through the VM: `sensor c sorter1 @config`.
     place_linked_world_processor(

@@ -149,6 +149,12 @@ pub struct UnitFactoryBuild {
     pub current_plan: i32,
     /// Accumulated build time.
     pub progress: f32,
+    /// Queued unit's command override (`UnitFactoryBuild.command`,
+    /// `UnitFactory.java:227`); `None` keeps the unit's `defaultCommand`
+    /// (`UnitFactory.java:437`). Set by the command row (`:292-340`) and
+    /// cleared by `configClear` (`:82`) or when a new plan's unit lacks it
+    /// (`:64-66`, `:76-78`).
+    pub command: Option<crate::content::UnitCommandId>,
 }
 
 impl UnitFactoryBuild {
@@ -157,6 +163,7 @@ impl UnitFactoryBuild {
         Self {
             current_plan: -1,
             progress: 0.0,
+            command: None,
         }
     }
 

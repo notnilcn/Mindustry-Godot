@@ -195,18 +195,30 @@ impl UnitFactoryBehavior {
     }
 
     /// `Block.configurations` body for `Integer`/`UnitType`
-    /// (`UnitFactory.config`): clamp the index and reset progress.
+    /// (`UnitFactory.java:58-80`): clamp the index, reset progress and drop a
+    /// command the new plan's unit cannot use.
     fn set_plan(&self, world: &mut World, e: Entity, index: i32) {
         let clamped = if index < 0 || index as usize >= self.factory.plans.len() {
             -1
         } else {
             index
         };
-        if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e)
-            && state.current_plan != clamped
-        {
+        let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e) else {
+            return;
+        };
+        if state.current_plan != clamped {
             state.current_plan = clamped;
             state.progress = 0.0;
+        }
+        if let Some(command) = state.command {
+            let supported = usize::try_from(state.current_plan)
+                .ok()
+                .and_then(|index| self.factory.plans.get(index))
+                .and_then(|plan| self.units.get(&plan.unit.raw()))
+                .is_some_and(|unit| unit.commands.contains(&command));
+            if !supported {
+                state.command = None;
+            }
         }
     }
 }
@@ -270,13 +282,17 @@ impl BuildingBehavior for UnitFactoryBehavior {
     }
 
     fn config_kinds(&self) -> &'static [ConfigKind] {
-        // `UnitFactory.config(UnitType.class, ...)`.
-        &[ConfigKind::Unit]
+        // `UnitFactory.config(Integer.class/UnitType.class/UnitCommand.class)`
+        // (`UnitFactory.java:58-82`).
+        &[ConfigKind::Unit, ConfigKind::Content]
     }
 
     fn config(&self, world: &World, e: Entity) -> ConfigValue {
+        // `UnitFactoryBuild.config()` (`UnitFactory.java:375-378`):
+        // `currentPlan == -1 ? null : plans.get(currentPlan).unit`.
         self.plan_index(world, e)
-            .map(|index| ConfigValue::Number(index as f64))
+            .and_then(|index| self.factory.plans.get(index))
+            .map(|plan| ConfigValue::Unit(plan.unit))
             .unwrap_or(ConfigValue::None)
     }
 
@@ -295,7 +311,19 @@ impl BuildingBehavior for UnitFactoryBehavior {
                     None => self.set_plan(world, e, -1),
                 }
             }
-            ConfigValue::None => self.set_plan(world, e, -1),
+            // `UnitFactory.config(UnitCommand.class)` (`UnitFactory.java:81`).
+            ConfigValue::Content(crate::content::ContentType::UnitCommand, id) => {
+                if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e) {
+                    state.command = Some(crate::content::UnitCommandId::new(id));
+                }
+            }
+            // `UnitFactory.configClear` (`UnitFactory.java:82`): only the
+            // command is cleared; the plan stays selected.
+            ConfigValue::None => {
+                if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e) {
+                    state.command = None;
+                }
+            }
             _ => {}
         }
     }
@@ -310,14 +338,19 @@ impl BuildingBehavior for UnitFactoryBehavior {
         // (`UnitFactory.java:486-506` extends `PayloadBlock.java:276-292`).
         crate::world::blocks::payloads::payload_block::write_base(world, e, w);
         // progress (f32), currentPlan (short), commandPos (nullable vec),
-        // command (TypeIO command). The port has no command/commandPos state on
-        // factories, so both are written unset.
+        // command (TypeIO command). The port has no commandPos state, so it is
+        // written unset.
         if let Some(state) = world.get::<UnitFactoryBuild>(e) {
             w.f(state.progress);
             w.s(state.current_plan as i16);
         }
         crate::io::typeio::codecs::write_vec_nullable(w, None);
-        crate::io::typeio::codecs::write_command(w, None);
+        crate::io::typeio::codecs::write_command(
+            w,
+            world
+                .get::<UnitFactoryBuild>(e)
+                .and_then(|state| state.command),
+        );
     }
 
     fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
@@ -329,12 +362,15 @@ impl BuildingBehavior for UnitFactoryBehavior {
         if revision >= 2 {
             let _ = crate::io::typeio::codecs::read_vec_nullable(r);
         }
-        if revision >= 3 {
-            let _ = crate::io::typeio::codecs::read_command(r);
-        }
+        let command = if revision >= 3 {
+            crate::io::typeio::codecs::read_command(r).ok().flatten()
+        } else {
+            None
+        };
         if let Some(mut state) = world.get_mut::<UnitFactoryBuild>(e) {
             state.progress = progress;
             state.current_plan = current_plan;
+            state.command = command;
         }
     }
 
@@ -379,9 +415,10 @@ impl BuildingBehavior for UnitFactoryBehavior {
                 }
             }
             if let Some(def) = def {
-                // The port has no factory command config, so the spawn applies
-                // the type's `defaultCommand` (`UnitFactory.java:425-433`).
-                spawn_output_unit_with_command(world, e, def, None);
+                // `UnitFactory.java:437`: `unit.command().command(command ==
+                // null && unit.type.defaultCommand != null ? defaultCommand :
+                // command)` — an unset factory command keeps the type default.
+                spawn_output_unit_with_command(world, e, def, state.command);
                 // `UnitFactory.java:440`: `createSound.at(this, 1 + range(0.06), 1)`.
                 if let Some((x, y)) = crate::audio::sim::building_centre_of(world, e) {
                     crate::audio::sim::emit_world_sound(
@@ -1987,6 +2024,74 @@ mod tests {
                 .any(|entity_ref| entity_ref.contains::<Unit>()),
             "ground-factory produced a dagger through update_buildings"
         );
+    }
+
+    /// J05 T2: `UnitFactory`'s command config (`UnitFactory.java:58-82`, the
+    /// command row's `configure(item)`): the row sets `command`, a plan change
+    /// drops a command the new unit cannot use (`:64-66`, `:76-78`) and
+    /// `configClear` clears only the command.
+    #[test]
+    fn factory_command_config_sets_and_drops_by_plan() {
+        let content = content();
+        let table = BlockTable::build_default(&content).expect("table");
+        let inst = table
+            .get_named("ground-factory")
+            .expect("ground-factory")
+            .clone();
+        let mut world = World::new();
+        world.insert_resource(BuildRules::default());
+        world.insert_resource(table);
+        let entity = inst.spawn(
+            &mut world,
+            1,
+            crate::world::TilePos::new(4, 4),
+            0,
+            0,
+            content.items().len(),
+            content.liquids().len(),
+        );
+        let behavior = inst.behavior.clone();
+        // `nova` (plan 2) derives commands `[move, repair]`
+        // (`UnitType.java:1066-1103`).
+        let nova = content.unit_id("nova").expect("nova");
+        behavior.configured(&mut world, entity, None, ConfigValue::Unit(nova));
+        assert_eq!(
+            world
+                .get::<UnitFactoryBuild>(entity)
+                .map(|state| state.current_plan),
+            Some(2)
+        );
+        let repair = content.unit_command_by_name("repair").expect("repair").id;
+        behavior.configured(
+            &mut world,
+            entity,
+            None,
+            ConfigValue::Content(crate::content::ContentType::UnitCommand, repair.raw()),
+        );
+        assert_eq!(
+            world
+                .get::<UnitFactoryBuild>(entity)
+                .and_then(|state| state.command),
+            Some(repair)
+        );
+        // The dagger plan (commands `[move]`) drops the unsupported command.
+        let dagger = content.unit_id("dagger").expect("dagger");
+        behavior.configured(&mut world, entity, None, ConfigValue::Unit(dagger));
+        let state = world.get::<UnitFactoryBuild>(entity).expect("state");
+        assert_eq!(state.current_plan, 0);
+        assert_eq!(state.command, None, "unsupported command dropped");
+        // `configClear` (`:82`) clears only the command; the plan stays.
+        behavior.configured(&mut world, entity, None, ConfigValue::Unit(nova));
+        behavior.configured(
+            &mut world,
+            entity,
+            None,
+            ConfigValue::Content(crate::content::ContentType::UnitCommand, repair.raw()),
+        );
+        behavior.configured(&mut world, entity, None, ConfigValue::None);
+        let state = world.get::<UnitFactoryBuild>(entity).expect("state");
+        assert_eq!(state.current_plan, 2, "plan kept by configClear");
+        assert_eq!(state.command, None);
     }
 
     fn campaign_runtime(

@@ -133,6 +133,8 @@ func _process(delta: float) -> void:
 
 
 ## `BlockInventoryFragment.update`: follows the building's top-right corner.
+## The panel hugs its `Tex.inventory` table (`table.pack()`), not the scene's
+## 260x200 stub — Java draws a compact box around the 3-column 40 px grid.
 func _position_panel() -> void:
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
 	if camera == null or not camera.has_method("world_to_screen"):
@@ -145,6 +147,11 @@ func _position_panel() -> void:
 		float(_tile.x) * 8.0 + float(size) * 4.0, float(_tile.y) * 8.0 + float(size) * 4.0
 	)
 	position = camera.call("world_to_screen", corner.x, corner.y)
+	if panel != null:
+		# `table.pack()`: the fragment is exactly the inventory table
+		# (the scene stub is 260x200, which stretched the ninepatch).
+		self.size = panel.get_combined_minimum_size()
+		pivot_offset = self.size / 2.0
 
 
 ## Live amounts every 100 ms; hide when the building is gone, the inventory has
