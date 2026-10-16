@@ -117,7 +117,19 @@ func _refresh_log() -> void:
 func _process(delta: float) -> void:
 	if _fade > 0.0 and not _shown:
 		_fade = maxf(0.0, _fade - delta / 3.0)
-		_log.modulate.a = clampf(_fade, 0.0, 1.0)
+	# `ChatFragment.draw` (`ChatFragment.java:149-187`): message text and
+	# shadow alpha scale by `chatopacity / 100` (full while the field is
+	# shown, the fade factor otherwise).
+	var fade := 1.0 if _shown else clampf(_fade, 0.0, 1.0)
+	_log.modulate.a = fade * _chat_opacity()
+
+
+## `Core.settings.getInt("chatopacity") / 100f` (slider default 100).
+func _chat_opacity() -> float:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_i32"):
+		return 1.0
+	return clampf(float(ui.call("settings_get_i32", "chatopacity")) / 100.0, 0.0, 1.0)
 
 
 func toggle() -> void:

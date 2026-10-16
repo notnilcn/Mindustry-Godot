@@ -53,6 +53,11 @@ pub struct MindFx {
     trails: TrailRegistry,
     shake: ShakeState,
     settings: FxSettings,
+    /// Last persisted `effects` value adopted into `settings`
+    /// (`Renderer.enableEffects = settings.getBool("effects")`,
+    /// `Renderer.java:171`); change-detected so `set_fx_enabled` still
+    /// works as a dev override until the setting changes.
+    effects_setting: Option<bool>,
     program: DrawProgram,
     view_tick: u64,
     draw_calls: i64,
@@ -82,6 +87,7 @@ impl INode2D for MindFx {
             trails: TrailRegistry::new(),
             shake: ShakeState::default(),
             settings: FxSettings::default(),
+            effects_setting: None,
             program: DrawProgram::new(),
             view_tick: 0,
             draw_calls: 0,
@@ -570,6 +576,13 @@ impl MindFx {
     #[func]
     pub fn tick_view(&mut self) {
         self.view_tick += 1;
+        // `Effect.shouldCreate` (`Effect.java:142`) gates every spawn on
+        // `renderer.enableEffects`; live effects play out.
+        let effects = crate::settings_hub::row_bool("effects");
+        if self.effects_setting != Some(effects) {
+            self.effects_setting = Some(effects);
+            self.settings.effects = effects;
+        }
         let snapshot = EmptySnapshot;
         for event in self.bus.drain() {
             match event {

@@ -241,7 +241,11 @@ impl UnitOverlay {
                 tile,
                 self.last_tick,
             );
-            let color = color4(unit_draw::mine_beam_color(self.last_tick));
+            let mut color = color4(unit_draw::mine_beam_color(self.last_tick));
+            // `Draw.alpha(Renderer.unitLaserOpacity)` (`UnitType.java:1621`);
+            // `unitLaserOpacity = settings.getInt("unitlaseropacity") / 100f`
+            // (`Renderer.java:165`).
+            color.a = crate::settings_hub::row_i32("unitlaseropacity").clamp(0, 100) as f32 / 100.0;
             if let Some(texture) = self.region(node, "minelaser") {
                 // `Drawf.laser` stretches the `minelaser` region along the beam
                 // (`stroke 12 * 0.75 = 9`).

@@ -25,6 +25,8 @@ use crate::sim_host::MindSimHost;
 
 /// Default `screenshake` setting (`Renderer` reads it each frame).
 const DEFAULT_SCREENSHAKE: i32 = 4;
+/// `sliderPref("screenshake", 4, 0, 8, ...)` upper bound (2x shake).
+const MAX_SCREENSHAKE: i32 = 8;
 /// Distance from a viewport edge that starts edge panning (px, upstream base).
 const EDGE_MARGIN: f32 = 60.0;
 
@@ -39,7 +41,7 @@ pub struct MindCamera2D {
     mouse_inside: bool,
     /// Monotonic render tick (deterministic shake direction seed).
     view_tick: u64,
-    /// `screenshake` setting `0..=4`.
+    /// `screenshake` setting `0..=8`.
     screenshake: i32,
     /// Last `(x, y)` position exchanged with the Godot node (echo guard).
     shadow_position: (f32, f32),
@@ -115,6 +117,7 @@ impl ICamera2D for MindCamera2D {
         }
 
         self.view_tick = self.view_tick.wrapping_add(1);
+        self.read_view_settings();
         if let Some(viewport) = self.base().get_viewport() {
             let size = viewport.get_visible_rect().size;
             self.camera.viewport = (size.x, size.y);
@@ -491,6 +494,23 @@ impl MindCamera2D {
         input.bind().locked()
     }
 
+    /// `Renderer.update` per-frame settings reads: `screenshake`
+    /// (`Renderer.java:210`, slider `0..8`, `/ 4f`) and the magnification
+    /// multipliers behind `maxZoomInGame`/`minZoomInGame`
+    /// (`Renderer.java:173-174`; written by the Graphics sliders).
+    fn read_view_settings(&mut self) {
+        let shake = crate::settings_hub::row_i32("screenshake");
+        let (max_mult, min_mult) = crate::settings_hub::with_settings(|store| {
+            (
+                store.get_f32("maxzoomingamemultiplier", 1.0),
+                store.get_f32("minzoomingamemultiplier", 1.0),
+            )
+        });
+        self.screenshake = shake.clamp(0, MAX_SCREENSHAKE);
+        self.camera.max_zoom_multiplier = max_mult;
+        self.camera.min_zoom_multiplier = min_mult;
+    }
+
     /// `smoothcamera` setting (`/root/MindUi` owns the store; default true).
     fn read_smooth_camera(&self) -> bool {
         let Some(mut ui) = self
@@ -658,10 +678,11 @@ impl MindCamera2D {
         self.camera.world_size = Some((width as f32, height as f32));
     }
 
-    /// Pushes the `screenshake` setting (`0..=4`).
+    /// Pushes the `screenshake` setting (`0..=8`, `sliderPref("screenshake",
+    /// 4, 0, 8)`). The next frame re-reads the persisted setting.
     #[func]
     pub fn set_screenshake(&mut self, value: i64) {
-        self.screenshake = (value as i32).clamp(0, 4);
+        self.screenshake = (value as i32).clamp(0, MAX_SCREENSHAKE);
     }
 
     /// Consumes a plan-17 `ShakeEvent { intensity, duration }`.

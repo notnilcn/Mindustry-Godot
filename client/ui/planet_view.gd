@@ -36,6 +36,8 @@ const LIGHT_NORMAL := Vector3(0.9036, 0.1988, 0.3795)
 @onready var background: MeshInstance3D = $ViewportContainer/SubViewport/Background
 @onready var body: MeshInstance3D = $ViewportContainer/SubViewport/Body
 @onready var atmosphere: MeshInstance3D = $ViewportContainer/SubViewport/Atmosphere
+## Whether the shown planet has an atmosphere billboard (`planet.hasAtmosphere`).
+var _has_atmosphere := false
 @onready var grid: MeshInstance3D = $ViewportContainer/SubViewport/Grid
 @onready var selection: MeshInstance3D = $ViewportContainer/SubViewport/Selection
 @onready var hover_fill: MeshInstance3D = $ViewportContainer/SubViewport/Hover
@@ -582,6 +584,7 @@ func _build_grid() -> void:
 ## `radius + atmosphereRad{In,Out}`, light is `Planet.getLightNormal()`.
 func _build_atmosphere() -> void:
 	atmosphere.visible = false
+	_has_atmosphere = false
 	var atmos: Dictionary = data.get("atmosphere", {})
 	if atmos.is_empty() or not bool(atmos.get("has", false)):
 		return
@@ -598,8 +601,19 @@ func _build_atmosphere() -> void:
 	material.set_shader_parameter("u_color", atmos.get("color", Color(0.3, 0.7, 1.0)))
 	material.set_shader_parameter("u_light", LIGHT_NORMAL)
 	atmosphere.material_override = material
-	atmosphere.visible = true
+	_has_atmosphere = true
+	atmosphere.visible = _atmosphere_setting()
 	_update_atmosphere_camera()
+
+
+## `PlanetRenderer.renderTransparent` (`PlanetRenderer.java:156`): the
+## atmosphere draws only while `Core.settings.getBool("atmosphere")` (Graphics
+## row, default true); read every frame like Java.
+func _atmosphere_setting() -> bool:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_bool"):
+		return true
+	return bool(ui.call("settings_get_bool", "atmosphere"))
 
 
 ## `AtmosphereShader.apply`: `u_campos` is the camera in planet space and
@@ -607,6 +621,7 @@ func _build_atmosphere() -> void:
 ## the viewport origin, so both are the camera position). The mesh faces the
 ## camera like `Planet.getTransform` does in Java; the space backdrop follows.
 func _update_atmosphere_camera() -> void:
+	atmosphere.visible = _has_atmosphere and _atmosphere_setting()
 	atmosphere.rotation = camera.rotation
 	background.rotation = camera.rotation
 	if atmosphere.material_override is ShaderMaterial:

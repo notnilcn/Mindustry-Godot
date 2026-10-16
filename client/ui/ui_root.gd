@@ -775,3 +775,60 @@ func _add_prompt_button(
 	button.pressed.connect(callback)
 	container.add_child(button)
 	return button
+
+
+## `Control.pause()`/`resume()` (`Control.java:619-633`), which the SDL backend
+## fires on window focus loss/gain (`SdlApplication.java:198-201`): with
+## `backgroundpause` on (Game row, desktop default true), an unfocused
+## single-player game pauses and resumes on refocus unless it was already
+## paused (`wasPaused`).
+var _background_paused := false
+var _background_was_paused := false
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_background_pause()
+	elif what == NOTIFICATION_APPLICATION_FOCUS_IN:
+		_background_resume()
+
+
+## `settings.getBool("backgroundpause", true) && !net.active() &&
+## !state.rules.pauseDisabled`.
+func _background_pause_allowed() -> bool:
+	var ui := _ui()
+	if ui == null or not bool(ui.call("settings_get_bool", "backgroundpause")):
+		return false
+	var net := get_node_or_null("/root/Spine/MindNet")
+	if net != null and net.has_method("session_state") \
+			and str(net.call("session_state")) != "offline":
+		return false
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null:
+		return false
+	if host.has_method("rules_pause_disabled") and bool(host.call("rules_pause_disabled")):
+		return false
+	return true
+
+
+func _background_pause() -> void:
+	# `if(state.is(State.playing)) state.set(State.paused)`: only an in-game
+	# session (the menu has no running game).
+	if menu_group == null or menu_group.visible or not _background_pause_allowed():
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	_background_paused = true
+	_background_was_paused = bool(host.call("is_paused"))
+	if not _background_was_paused:
+		host.call("set_paused", true)
+
+
+func _background_resume() -> void:
+	if not _background_paused:
+		return
+	_background_paused = false
+	if _background_was_paused or not _background_pause_allowed():
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if bool(host.call("is_paused")):
+		host.call("set_paused", false)

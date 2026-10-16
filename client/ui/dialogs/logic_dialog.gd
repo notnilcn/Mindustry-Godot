@@ -348,10 +348,13 @@ func _field_row(index: int, row: Dictionary) -> Control:
 	return fields_box
 
 
-## `bundle(desc)`: `name.token.<token>` with the raw token as the fallback.
+## `bundle(desc)`: `name.token.<token>` with the raw token as the fallback;
+## the raw token when `logiclocalization` is off (`LStatement.java:158-161`).
 func _field_label_text(token: String) -> String:
 	if token.is_empty():
 		return ""
+	if not _logic_localization():
+		return token
 	var key := "name.token." + token
 	var resolved := _t(key)
 	return token if resolved == key else resolved
@@ -363,6 +366,15 @@ func _field_label(text: String) -> Label:
 	label.text = text
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	return label
+
+
+## `LStatement.logicLocalization()`: `Core.settings.getBool("logiclocalization",
+## true)` (`LStatement.java:154-156`).
+func _logic_localization() -> bool:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_bool"):
+		return true
+	return bool(ui.call("settings_get_bool", "logiclocalization"))
 
 
 ## The current option's display text for a select (`LStatement.bundle(Enum)`
@@ -382,7 +394,9 @@ func _select_text(name: String, field_index: int, value: String) -> String:
 func _option_text(option: Variant) -> String:
 	var text := str((option as Dictionary).get("label", (option as Dictionary).get("name", "")))
 	var key := str((option as Dictionary).get("key", ""))
-	if not key.is_empty():
+	# `LStatement.bundle(Enum)`/`selectTranslate` (`LStatement.java:163-184`):
+	# no translation when `logiclocalization` is off.
+	if not key.is_empty() and _logic_localization():
 		var resolved := _t(key)
 		if resolved != key:
 			text = resolved

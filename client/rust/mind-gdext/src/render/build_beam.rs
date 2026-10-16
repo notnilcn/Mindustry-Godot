@@ -8,7 +8,7 @@
 //!
 //! `BuilderComp.buildAlpha = lerpDelta(buildAlpha, activelyBuilding() ? 1 : 0,
 //! 0.15)` (line 85); the emitted geometry is `Drawf.buildBeam`'s filled
-//! triangles (`Drawf.java:131-157`). With `animatedshields` on (the H03 T11
+//! triangles (`Drawf.java:131-157`). With `animatedwater` on (`animateShields`; the H03 T11
 //! `CanvasGroup` composite), the CPU alpha is `buildAlpha` and the group
 //! shader (`buildbeam_group.gdshader`) applies Java's
 //! `0.37 + abs(sin(u_time / 15)) * 0.05 + stripe` modulation; off, the flat
@@ -43,7 +43,8 @@ pub struct BuildBeamOverlay {
     /// `BuilderComp.lastActive`: the plan (and its block size) drawn while the
     /// alpha fades out.
     last_active: Option<(UnitBuildPlan, i32, bool)>,
-    /// `animatedshields` setting, re-read every frame.
+    /// `animatedwater` setting (`Renderer.animateShields = animateWater`,
+    /// `Renderer.java:168-169`), re-read every frame.
     animated: bool,
     /// `None` until the first frame's setting read installs/clears the parent
     /// `CanvasGroup` material.
@@ -195,7 +196,8 @@ impl BuildBeamOverlay {
         self.material = material;
     }
 
-    /// `animatedshields` setting (shared by the shield and build-beam gates,
+    /// `Renderer.animateShields = animateWater` (the `animatedwater` row,
+    /// `Renderer.java:168-169`; shared by the shield and build-beam gates,
     /// `Renderer.java:403-414`; desktop default true).
     fn animated_setting(&self) -> bool {
         self.base()
@@ -203,7 +205,7 @@ impl BuildBeamOverlay {
             .map(|mut ui| {
                 ui.call(
                     "settings_get_bool",
-                    &[GString::from("animatedshields").to_variant()],
+                    &[GString::from("animatedwater").to_variant()],
                 )
                 .booleanize()
             })
