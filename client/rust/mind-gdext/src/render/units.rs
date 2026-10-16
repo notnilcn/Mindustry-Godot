@@ -236,6 +236,59 @@ impl UnitRenderer {
                     sprites += 1;
                 }
             }
+            // `drawTank` (`UnitType.java:1806-1824`): the full `-treads` base
+            // at `rotation - 90`, then the animated `-treads<i>-<frame>` slices
+            // per `treadRects` for both sides (`Mathf.signs`), offset by
+            // `-(rect.x + w/2)`/`-(rect.y + h/2)` image px (÷4 → world units).
+            if let Some(treads) = &unit.treads
+                && let Some(base_tread) = self.resolver.find(&format!("{}-treads", unit.name))
+            {
+                let entry = groups
+                    .entry((bucket, base_tread.page))
+                    .or_insert((base_tread.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: base_tread.w * self.sprite_scale,
+                    h: base_tread.h * self.sprite_scale,
+                    rot: unit.rotation - 90.0,
+                    uv: base_tread.uv,
+                    color: 0xffff_ffff,
+                });
+                sprites += 1;
+                let frame = (treads.tread_time as i32).rem_euclid(treads.frames.max(1));
+                for (index, rect) in treads.rects.iter().enumerate() {
+                    let Some(region) = self
+                        .resolver
+                        .find(&format!("{}-treads{}-{}", unit.name, index, frame))
+                    else {
+                        continue;
+                    };
+                    let x_offset = -(rect.x + rect.width / 2.0);
+                    let y_offset = -(rect.y + rect.height / 2.0);
+                    for side in [-1.0f32, 1.0] {
+                        let angle = (unit.rotation - 90.0).to_radians();
+                        let (sin, cos) = angle.sin_cos();
+                        let (vx, vy) = (
+                            (x_offset * side) * cos - y_offset * sin,
+                            (x_offset * side) * sin + y_offset * cos,
+                        );
+                        let entry = groups
+                            .entry((bucket, region.page))
+                            .or_insert((region.texture.clone(), Vec::new()));
+                        entry.1.push(UnitQuad {
+                            cx: unit.x + vx / 4.0,
+                            cy: unit.y + vy / 4.0,
+                            w: rect.width / 4.0,
+                            h: region.h * self.sprite_scale,
+                            rot: unit.rotation - 90.0,
+                            uv: region.uv,
+                            color: 0xffff_ffff,
+                        });
+                        sprites += 1;
+                    }
+                }
+            }
             // `drawLegs` (`UnitType.java:1826-1904`): the plan-17 leg op list
             // (front-first feet/joints, upper+lower leg lines, base joints,
             // base) emitted at `z - 0.02`, under the soft shadow and body.

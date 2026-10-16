@@ -226,6 +226,17 @@ impl FxBus {
 }
 
 impl FxSink for FxBus {
+    fn decal(&self, region: &str, x: f32, y: f32, rotation: f32, lifetime: f32, color: Rgba) {
+        self.push(FxEvent::Decal {
+            region: crate::fx::parts::draw::intern_region(region),
+            x,
+            y,
+            rotation,
+            lifetime,
+            color,
+        });
+    }
+
     fn effect(&self, effect: &EffectRef, x: f32, y: f32, rotation: f32, color: Rgba) {
         self.push(FxEvent::Effect {
             effect: effect.clone(),

@@ -44,6 +44,12 @@ pub trait FxSink: Send + Sync {
         let _ = (x, y, rotation, color, width, length);
     }
 
+    /// Places a ground decal (`Effect.decal`; J03 T5 unit wrecks). The region
+    /// is filtered view-side on `region.found()`.
+    fn decal(&self, region: &str, x: f32, y: f32, rotation: f32, lifetime: f32, color: Rgba) {
+        let _ = (region, x, y, rotation, lifetime, color);
+    }
+
     /// Appends a trail point to a known channel (plan 17 §3.9). The default
     /// forwards to [`FxSink::trail`] so existing sinks keep their behavior; a
     /// channel-aware sink can resolve the per-channel `TrailRegistry` tint.

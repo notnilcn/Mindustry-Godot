@@ -401,21 +401,29 @@ impl MindFx {
     }
 
     /// Appends decal/trail/weather view prims to the frame program (plan 17 M6).
-    fn append_view_prims(&self, program: &mut DrawProgram) {
-        // Decals (`Layer.scorch`, fade `1 - curve(fin, 0.98)`).
-        for decal in self.decals.iter_live() {
+    fn append_view_prims(&mut self, program: &mut DrawProgram) {
+        // Decals (`Layer.scorch`, fade `1 - curve(fin, 0.98)`). Java's
+        // `Effect.decal` draws the region at its natural size
+        // (`Draw.rect(region, x, y, rot)`), so the quad size comes from the
+        // resolved region; a missing region is skipped (`region.found()`).
+        let decals: Vec<Decal> = self.decals.iter_live().cloned().collect();
+        for decal in decals {
             let alpha = decal.alpha();
             if alpha <= 0.0 {
                 continue;
             }
+            let Some(texture) = self.region_texture(decal.region.0) else {
+                continue;
+            };
+            let size = texture.get_size();
             program.push(mind_core::render::draw::DrawPrim::at(
                 Decal::LAYER,
                 PrimKind::Region {
                     region: decal.region,
                     x: decal.x,
                     y: decal.y,
-                    w: 32.0,
-                    h: 32.0,
+                    w: size.x * 0.25,
+                    h: size.y * 0.25,
                     rotation_deg: decal.rotation,
                     origin: (0.5, 0.5),
                     color: decal.color.with_alpha(decal.color.a * alpha),

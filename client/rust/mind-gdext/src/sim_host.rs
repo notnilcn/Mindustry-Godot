@@ -53,6 +53,9 @@ pub struct UnitDraw {
     /// Legged-unit state (`LegsComp` + `UnitType` leg knobs); `None` for
     /// non-legged units (J03 T4).
     pub legs: Option<LegsDraw>,
+    /// Tank tread state (`TankComp` + `UnitType` tread knobs); `None` for
+    /// non-tanks (J03 T5).
+    pub treads: Option<TreadsDraw>,
     /// Live weapon mounts (`UnitWeapons`).
     pub weapons: Vec<WeaponDraw>,
     /// `EntitySeq.0` (view-state key; entities are reused).
@@ -89,6 +92,16 @@ pub struct MechDraw {
     pub walk_time: f32,
     /// `UnitType.mechStride`.
     pub stride: f32,
+}
+
+/// `TankComp` tread animation state (`drawTank`) + `UnitType` tread knobs.
+pub struct TreadsDraw {
+    /// `TankComp.treadTime` (`unit.treadTime()`).
+    pub tread_time: f32,
+    /// `UnitType.treadRects`.
+    pub rects: Vec<mind_core::content::registries::units::TreadRect>,
+    /// `UnitType.treadFrames`.
+    pub frames: i32,
 }
 
 /// `LegsComp` state + `UnitType` leg knobs resolved for `drawLegs` (J03 T4).
@@ -5394,6 +5407,16 @@ impl MindSimHost {
                         walk_time: mech.walk_time,
                         stride: def.mech_stride.max(0.001),
                     });
+                let treads = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::TankComp>(*entity)
+                    .map(|tank| TreadsDraw {
+                        tread_time: tank.tread_time,
+                        rects: def.tread_rects.clone(),
+                        frames: def.tread_frames.max(1),
+                    });
                 let legs = self
                     .sim
                     .ecs
@@ -5532,6 +5555,7 @@ impl MindSimHost {
                     hit_size: def.hit_size,
                     mech,
                     legs,
+                    treads,
                     weapons,
                     id,
                     mine_tile,
