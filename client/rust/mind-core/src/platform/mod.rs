@@ -16,7 +16,6 @@ pub mod hooks;
 pub mod uri;
 
 use std::path::{Path, PathBuf};
-use std::time::Instant;
 
 pub use args::{LaunchArgs, data_root, parse as parse_launch_args};
 pub use caps::{PerformanceTier, PlatformCaps, PlatformKind};
@@ -46,8 +45,10 @@ pub trait Platform: Send {
     fn log(&self, level: LogLevel, msg: &str);
     /// Requests application exit (`Core.app.exit`).
     fn exit(&self);
-    /// Monotonic milliseconds since host start (`Time.millis`); never used by
-    /// sim scheduling (D8), only by view/UI code.
+    /// Wall-clock milliseconds since the Unix epoch (`Time.millis` =
+    /// `System.currentTimeMillis()`, `Time.java:122-124`; written into the save
+    /// meta `saved` tag, `SaveVersion.java:130`). Never used by sim scheduling
+    /// (D8), only by view/UI and save metadata.
     fn millis(&self) -> u64;
 }
 
@@ -55,7 +56,6 @@ pub trait Platform: Send {
 #[derive(Debug)]
 pub struct HeadlessPlatform {
     data_dir: PathBuf,
-    start: Instant,
 }
 
 impl HeadlessPlatform {
@@ -63,7 +63,6 @@ impl HeadlessPlatform {
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
         Self {
             data_dir: data_dir.into(),
-            start: Instant::now(),
         }
     }
 
@@ -100,7 +99,10 @@ impl Platform for HeadlessPlatform {
     fn exit(&self) {}
 
     fn millis(&self) -> u64 {
-        self.start.elapsed().as_millis() as u64
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0)
     }
 }
 
@@ -116,5 +118,27 @@ mod tests {
         platform.log(LogLevel::Info, "hello");
         let _ = platform.millis();
         platform.exit();
+    }
+
+    /// T5: `Time.millis` is wall-clock epoch milliseconds (`Time.java:122-124`),
+    /// the value `SaveVersion.writeMeta` stores as `saved` — not a monotonic
+    /// host-start counter (which made every new save sort to 1970).
+    #[test]
+    fn platform_millis_is_epoch_milliseconds() {
+        let floor = 1_700_000_000_000u64; // 2023-11-14; any real clock is past it.
+        let before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis() as u64;
+        let platform = HeadlessPlatform::new("/tmp/mind-test");
+        let value = platform.millis();
+        let after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_millis() as u64;
+        assert!(
+            value >= before.max(floor) && value <= after,
+            "millis {value} is wall-clock epoch time (before {before}, after {after})"
+        );
     }
 }

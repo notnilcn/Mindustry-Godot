@@ -24,7 +24,7 @@ use bevy_ecs::entity::Entity;
 
 use crate::audio::math::AudioRng;
 use crate::combat::bullet::{Bullet, BulletSpawn, CombatCtx};
-use crate::combat::targeting::TargetQueries;
+use crate::combat::targeting::{TargetQueries, UnitSort};
 use crate::content::registries::bullets::BulletDef;
 use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::weapon::ShootPatternSpec;
@@ -53,6 +53,11 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
     let mut add = |name: &str, kind: BulletKind, configure: &dyn Fn(&mut BulletDef)| {
         let mut def = BulletDef::new(kind);
         configure(&mut def);
+        // `BulletType.init()` (`BulletType.java:410`): `range = calculateRange()`.
+        // These anonymous ammo bullets are registered after the registry's init
+        // pass, so derive the range here; the scaleLife lifetime clamp reads it
+        // (`Turret.java:797`).
+        def.range = def.compute_range();
         if let Ok(id) = content.add_bullet(def) {
             names.insert(name.to_owned(), id);
         }
@@ -1062,12 +1067,16 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         linear_warmup: false,
         warmup_maintain_time: 0.0,
         target_interval: 20.0,
+        new_target_interval: -1.0,
+        unit_sort: UnitSort::Closest,
         inaccuracy: 0.0,
         velocity_rnd: 0.0,
         extra_velocity: 0.0,
         life_rnd: 0.0,
         extra_life: 0.0,
         scale_lifetime_offset: 0.0,
+        min_range: 0.0,
+        tracking_range: 0.0,
         recoil: 0.0,
         recoils: -1,
         recoil_time: 0.0,
@@ -1080,6 +1089,8 @@ pub fn base_config(kind: TurretKind, ammo: TurretAmmo) -> TurretConfig {
         target_air: true,
         target_ground: true,
         target_blocks: true,
+        target_under_blocks: true,
+        target_healing: false,
         always_shooting: false,
         predict_target: true,
         accurate_delay: true,
@@ -1132,6 +1143,7 @@ pub fn config_for(
             bullet: id,
             ammo_multiplier: mult.max(1),
             range_change: def.map(|d| d.range_change).unwrap_or(0.0),
+            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
         })
     };
     let liquid_ammo = |liquid_name: &str, bullet_name: &str| -> Option<LiquidAmmo> {
@@ -1143,6 +1155,7 @@ pub fn config_for(
             bullet: id,
             ammo_multiplier: mult.max(0.001),
             range_change: def.map(|d| d.range_change).unwrap_or(0.0),
+            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
         })
     };
     let power =
@@ -1263,6 +1276,10 @@ pub fn config_for(
             c.recoil = 6.0;
             c.target_air = false;
             c.scale_lifetime_offset = 0.1;
+            // `Blocks.java:4100`: `minRange = 50f`; `Blocks.java:4107`:
+            // `unitSort = UnitSorts.grouped`.
+            c.min_range = 50.0;
+            c.unit_sort = UnitSort::Grouped(0.003);
             c.shoot = ShootPatternSpec::plain(4, 0.0, 0.0);
             Some(c)
         }
@@ -1326,6 +1343,8 @@ pub fn config_for(
             c.cooldown_time = 200.0;
             c.coolant_amount = 1.0;
             c.coolant_multiplier = 0.4;
+            // `Blocks.java:4261`: `unitSort = UnitSorts.strongest`.
+            c.unit_sort = UnitSort::Strongest;
             Some(c)
         }
         "spectre" => {
@@ -1524,6 +1543,8 @@ pub fn config_for(
             c.coolant_amount = 30.0 / 60.0;
             c.coolant_multiplier = 3.75;
             c.target_interval = 40.0;
+            // `Blocks.java:4835`: `newTargetInterval = 40f`.
+            c.new_target_interval = 40.0;
             Some(c)
         }
         // `disperse` (`ItemTurret`, anti-air flak).
@@ -1565,11 +1586,15 @@ pub fn config_for(
             c.inaccuracy = 1.0;
             c.shoot_y = 4.0;
             c.target_interval = 40.0;
+            // `Blocks.java:5159`: `newTargetInterval = 40f`.
+            c.new_target_interval = 40.0;
             Some(c)
         }
         // `lustre` (`ContinuousTurret`, Erekir beam).
         "lustre" => {
             let mut c = base_config(TurretKind::Continuous, power("lustre_laser")?);
+            // `Blocks.java:5239`: `unitSort = UnitSorts.strongest`.
+            c.unit_sort = UnitSort::Strongest;
             c.range = 250.0;
             c.rotate_speed = 0.9;
             c.aim_change_speed = 0.9;
@@ -1602,6 +1627,8 @@ pub fn config_for(
                 ShootPatternSpec::alternate(5, 0.0, 6.27, 5),
                 vec![ShootPatternSpec::helix(4.0, 3.0)],
             );
+            // `Blocks.java:5947`: `trackingRange = range * 1.4f`.
+            c.tracking_range = c.range * 1.4;
             Some(c)
         }
         // `malign` (`PowerTurret`, Erekir homing flak).
@@ -1621,6 +1648,10 @@ pub fn config_for(
             c.shoot_cone = 100.0;
             c.shoot_y = 20.0;
             c.shoot = ShootPatternSpec::summon(0.0, 0.0, 11.0, 20.0);
+            // `Blocks.java:6278,6290`: `unitSort = strongest`,
+            // `trackingRange = range * 1.4f`.
+            c.unit_sort = UnitSort::Strongest;
+            c.tracking_range = c.range * 1.4;
             Some(c)
         }
         // `sublimate` (`ContinuousLiquidTurret`, Erekir flame beam). The engine
@@ -1642,6 +1673,8 @@ pub fn config_for(
             c.scale_damage_efficiency = true;
             // `Blocks.java:4620`: `liquidConsumed = 18f / 60f`.
             c.liquid_consumed = 18.0 / 60.0;
+            // `Blocks.java:4622`: `newTargetInterval = 30f`.
+            c.new_target_interval = 30.0;
             Some(c)
         }
         // `scathe` (`ItemTurret`, Erekir missile launcher). `predictTarget=false`
@@ -1669,6 +1702,13 @@ pub fn config_for(
             c.target_interval = 20.0;
             // `Blocks.java:5248`: `scathe` sets `predictTarget = false`.
             c.predict_target = false;
+            // `Blocks.java:5666-5668`: `newTargetInterval = 40`,
+            // `unitSort = strongest`, `targetAir = false`,
+            // `targetUnderBlocks = false`.
+            c.new_target_interval = 40.0;
+            c.unit_sort = UnitSort::Strongest;
+            c.target_air = false;
+            c.target_under_blocks = false;
             Some(c)
         }
         // `build-tower` (`BuildTurret`): proxy build-plan follower (plan 10 M6).
@@ -1691,6 +1731,10 @@ pub fn config_for(
                 },
                 bullet: fuse,
                 range_change: content.bullet(fuse).map(|d| d.range_change).unwrap_or(0.0),
+                min_range_change: content
+                    .bullet(fuse)
+                    .map(|d| d.min_range_change)
+                    .unwrap_or(0.0),
             }];
             let mut c = base_config(TurretKind::PayloadAmmo, TurretAmmo::Payload(ammo));
             c.range = 160.0;
@@ -2065,7 +2109,13 @@ pub fn update_continuous(
     state.target_timer -= 1.0;
     if state.target_timer <= 0.0 {
         super::find_target(ctx, e, state, team, x, y, targets);
-        state.target_timer = config.target_interval;
+        // `timer(timerTarget, target != null ? newTargetInterval :
+        // targetInterval)` (`Turret.java:571`).
+        state.target_timer = if state.target.is_some() {
+            config.new_target_interval.max(0.0001)
+        } else {
+            config.target_interval
+        };
     }
     if state.target.is_none() {
         return;
@@ -2175,7 +2225,13 @@ pub fn update_laser(
     state.target_timer -= 1.0;
     if state.target_timer <= 0.0 {
         super::find_target(ctx, e, state, team, x, y, targets);
-        state.target_timer = config.target_interval;
+        // `timer(timerTarget, target != null ? newTargetInterval :
+        // targetInterval)` (`Turret.java:571`).
+        state.target_timer = if state.target.is_some() {
+            config.new_target_interval.max(0.0001)
+        } else {
+            config.target_interval
+        };
     }
     if state.target.is_none() {
         return;

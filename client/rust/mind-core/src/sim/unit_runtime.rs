@@ -5925,7 +5925,12 @@ fn within_spawn(tile: TilePos, x: f32, y: f32, radius: f32) -> bool {
 /// `Units.invalidateTarget(target, team, x, y)` (Units.java:1049-1056): dead or
 /// despawned, own team, or a non-targetable unit. No distance check — the
 /// 3-argument `AIController.invalid` passes `Float.MAX_VALUE`.
-fn invalid_target(world: &World, content: &ContentRegistry, team: u8, target: Entity) -> bool {
+pub(crate) fn invalid_target(
+    world: &World,
+    content: &ContentRegistry,
+    team: u8,
+    target: Entity,
+) -> bool {
     let Some(health) = world.get::<Health>(target) else {
         return true;
     };

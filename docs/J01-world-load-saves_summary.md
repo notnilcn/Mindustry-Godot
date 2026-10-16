@@ -217,3 +217,149 @@ from behaviour changes merged after the goldens were last regenerated:
   targets) + the Custom Game list showing previews and mode icons for the 3
   maps. ✅
 - Remaining done criteria (T3–T5, full twin re-captures) are wave B.
+
+---
+
+# Wave B (T3–T6) — 2026-10-17, session 2
+
+Branch `parity/session-2` (worktree `Mindustry-Godot-session2`), session 2 (display :11,
+bridge 6980). Wave A (T1/T2) is above; this section covers **T3–T6**, each as its own commit.
+
+## Per-task status
+
+| Task | Status | Commit |
+|---|---|---|
+| T3 — Map list order = `MapPriority` | done (in-engine verified) | `a17dda0f` |
+| T4 — Save previews (`SaveSlot.savePreview`) | done (in-engine verified) | `44e959f6` |
+| T5 — Load list order + Save & Quit label | done (in-engine verified) | `6e07cd0f` |
+| T6 — Slot naming parity (deviation) | done (documented) | `b08e17f1` |
+
+## T3 — map list order
+
+**Root cause.** The comparator was already ported, but its key came from GDScript
+`FileAccess.get_modified_time` — whole seconds. Java's key is
+`-m.file.lastModified()`, i.e. `File.lastModified()` *milliseconds*
+(`MapListDialog.java:44-50`); the reference profile's user maps sit in one copy second
+with sub-ms differences, so Java forms two mtime buckets and the `Map::name`
+tie-break orders them, while the port collapsed everything into one tie.
+
+**Change.** `MindPreview.maps_list` rows carry `lastModified` (ms via
+`std::fs::metadata`; 0 for classpath-style built-ins like Java's jar `Fi`s) and the
+`mod` flag the dialog already read; `map_list_dialog.gd::_last_modified` uses the row
+value (Custom Game and the Editor Maps dialog share the base). Pinned by
+`map_row_last_modified_is_ms_for_files_and_zero_for_builtins` (mind-gdext).
+
+**Evidence (`runs/20261017-s2-J01-T3/`).** Session 2 pid 374208, with the session's user
+maps normalized to the reference profile's mtimes (`cp -p`):
+
+- Play > Custom Game and Editor > Maps show the Java frame order — 4 corners of death /
+  Capital Ship Crash Site / [Orange]Attack_Secret Island Outpost / mini map / pvp //
+  sandbox / Tonks / anthill v5 / stainedMountains / Ancient Caldera
+  (`godot/custom-recent.png`, `godot/editor-open.png`, structured `_sorted_maps()`
+  check).
+- A fresh live Java leg reproduced the stored frame order and its builtin tail
+  (`java-live-custom.png`, `java-live-custom-scrolled.png`).
+- Filter popup real clicks: `name` -> alphabetical, `recent` -> restored, persisted in
+  `editormapviewsettings` (`godot/filter-panel.png`, `godot/custom-name.png`,
+  `godot/custom-recent-restored.png`).
+- Frame diff vs `java/09-custom.png`: changed 0.497, mean_abs [31.67, 29.88, 30.02],
+  coarse 13.12, palette 0.104 — the residual is the dialog skin (F11), not order
+  (`diff/09-custom-side.png`).
+
+## T4 — save previews
+
+**Change.** `SaveSlot::write_preview_from_file` (mind-core) renders a save's own tiles
+into `previews/save_slot_<index>.png` (`Saves.java:343-358`); the live-grid
+`savePreview()` half is now called for autosaves, GameOver/capture saves, sector saves
+and `run_exit_save` (Save & Quit); `list_save_slots` backfills any slot without a
+preview and `import_save` renders the imported slot's; `save_slot` also registers the
+slot as current while in game (`Saves.java:265-271` — without it a custom game had no
+current slot, so neither the autosave cadence nor the exit save ran). Pinned by
+`missing_preview_renders_from_save_file`.
+
+Game Data import parity: `import_data` extracts every archive entry, but Java's
+`exportData` omits `mapPreviewDirectory` (`SettingsMenuDialog.java:575-608`) and the
+shipped profile zip has no `previews/` entries (checked with `unzip -l`), so previews
+are regenerated from the save tiles.
+
+**Evidence (`runs/20261017-s2-J01-T4/`).** Session 2 pid 414445: the Custom Game
+savecreate slot wrote its preview; `saveinterval=5` fired a real autosave that
+rewrote save+preview in the same second; Save & Quit (exit save) rewrote both; Load
+Game shows previews on every card (`save_slot_*.png` 3 -> 38 via the listing
+backfill; `godot/load-list.png`, before frame `godot/before-load-list.png`).
+
+## T5 — load list order + Save & Quit
+
+**Change.** `load_dialog.gd` sorts by `timestamp_ms` desc (`LoadDialog.java:93`);
+`paused_dialog.gd` binds `@save.quit` to `MindCampaign.current_save_autosave()`
+(`PausedDialog.java:116,154-155`) instead of the campaign flag. **Root cause found while
+verifying:** `Platform::millis` was "monotonic since host start", but `Time.millis` is
+wall-clock epoch milliseconds (`Time.java:122-124`; stored as the save meta `saved`,
+`SaveVersion.java:130`) — every new save carried a tiny `saved` and sorted last.
+Fixed and pinned by `platform_millis_is_epoch_milliseconds`.
+
+**Evidence (`runs/20261017-s2-J01-T5/`).** Session 2 pid 428628: the pause menu reads
+"Save & Quit" in a custom game (`godot/pause-savequit-final.png`); the confirm matches
+`java/26-quitconf.png` (changed 0.0997, mean [6.28, 6.34, 6.14], coarse 4.41; the
+residual is the F11 confirm-panel skin); Load Game lists the new
+`AncientCalderaOct17641` (Oct 17 2026) first, then the 2024 profile saves in descending
+timestamp order (`godot/load-newest-final.png`).
+
+## T6 — slot naming
+
+Kept the round-I name-stem design as a **documented deviation** (Java numeric slots:
+`Saves.getNextSlotFile` -> `saves/<index>.msav`, name in `save-<index>-name`/meta,
+`Saves.java:265-271,283-290`; previews `save_slot_<index>.png`). The port keys the file,
+settings and preview by the sanitized name; `Saves::import_save` keeps imported Java
+saves on their numeric stems, so a data export/import round-trips by slot identity.
+Recorded in `sanitize_slot_name`'s doc (commit `b08e17f1`).
+
+## Deviations (wave B, with Java locations)
+
+1. `Platform::millis` epoch semantics fixed (was a monotonic counter) — no deviation,
+   a Java-parity fix (`Time.java:122-124`).
+2. `list_save_slots` renders missing previews synchronously on open; Java loads them
+   lazily through the asset loader (`Saves.java:359-370`). Same output, simpler seam.
+3. Game Data archives keep Java's "no `previews/` in the export" behaviour
+   (`SettingsMenuDialog.java:575-608`); previews are regenerated instead.
+4. Name-stem slot files (T6 deviation above).
+
+## Residuals observed (wave B)
+
+- Custom-game save meta still writes `mapname: "sim"`, so the Load card's `Map:` line
+  reads "Unknown" (Java writes `state.map.name()`, `SaveVersion.java:133`). Candidate
+  follow-up.
+- The pause/load/map-list dialog skin remains as found (F11 / J06).
+
+## Pre-existing failures on main (unchanged from wave A)
+
+`blocks_golden::family_counts_match_golden` and the mind-headless goldens
+(`audio`/`input`/`logistics`/`maps_editor`) still fail at the wave-B base
+(`3bd1abe8`); verified pre-existing in wave A by reverting the touched files.
+
+## Ledger changes to apply (wave B)
+
+- **New item (T3)**: "Map list order uses second-precision mtimes (Java
+  `MapPriority.recent` reads milliseconds)" — status `verified` (`mode: reference`),
+  fix `a17dda0f`, evidence `runs/20261017-s2-J01-T3/diff/09-custom-side.png` +
+  `godot/custom-recent.png`; surface `ui`.
+- **New item (T4)**: "Save slots have no preview PNG (Load Game cards show the map
+  glyph)" — status `verified` (`mode: reference`), fix `44e959f6`, evidence
+  `runs/20261017-s2-J01-T4/godot/load-list.png` vs `java/39-load.png`.
+- **New item (T5)**: "Load Game lists oldest-first; the pause menu never says Save &
+  Quit" — status `verified` (`mode: reference`), fix `6e07cd0f`, evidence
+  `runs/20261017-s2-J01-T5/godot/load-newest-final.png`,
+  `godot/quit-confirm-final.png` vs `java/26-quitconf.png`.
+- **PAR-0114 note**: the three user maps' previews (T2) and every save-slot preview
+  (T4) now render.
+- **New deviation note (T6)**: name-stem save slots (kept from round I; see T6).
+- **Candidate follow-up**: custom-game saves write `mapname: sim` -> "Map: Unknown"
+  on the Load card (`SaveVersion.java:133`).
+
+## Done criteria (wave-B scope)
+
+- T3–T6 landed with tests/deviation records; T3/T4/T5 verified in-engine against the
+  stored Java frames (§3b) with real input. ✅
+- The twin frames re-captured for the three surfaces (`09-custom`, `39-load`,
+  `26-quitconf`) match structurally; the remaining frame deltas are the F11 dialog
+  skin and are tracked there.

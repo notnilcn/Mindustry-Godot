@@ -319,7 +319,8 @@ impl MindPreview {
     }
 
     /// `CustomGameDialog`/`EditorMapsDialog` provider rows:
-    /// `{name, path, custom, author, description, width, height, preview}`.
+    /// `{name, path, custom, author, description, width, height,
+    /// lastModified, preview}`.
     #[func]
     pub fn maps_list(&self) -> Array<VarDictionary> {
         let paths = self.paths();
@@ -336,6 +337,7 @@ impl MindPreview {
                 &GString::from(path.as_str()).to_variant(),
             );
             row.set(&GString::from("custom"), &custom.to_variant());
+            row.set(&GString::from("mod"), &map.mod_id.is_some().to_variant());
             row.set(
                 &GString::from("author"),
                 &GString::from(author.as_str()).to_variant(),
@@ -346,6 +348,10 @@ impl MindPreview {
             );
             row.set(&GString::from("width"), &width.to_variant());
             row.set(&GString::from("height"), &height.to_variant());
+            row.set(
+                &GString::from("lastModified"),
+                &map_row_last_modified(map).to_variant(),
+            );
             row.set(
                 &GString::from("preview"),
                 &NativeFs.exists(&preview_file(&paths, map)).to_variant(),
@@ -482,6 +488,24 @@ fn map_row_fields(map: &Map) -> (String, String, bool, String, String, i32, i32)
     )
 }
 
+/// `map.file.lastModified()` in milliseconds — `MapPriority.recent`'s primary
+/// key (`MapListDialog.java:48`). Java's built-in maps are classpath entries
+/// whose `Fi.lastModified()` is 0, so non-file-backed maps report 0 here and
+/// the real millisecond mtime is used for custom/mod/workshop files (Java's
+/// comparator drops the sub-millisecond digits, so clients on the same files
+/// order identically).
+fn map_row_last_modified(map: &Map) -> i64 {
+    if !map.custom && !map.workshop && map.mod_id.is_none() {
+        return 0;
+    }
+    std::fs::metadata(&map.file)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Binds a [`PreviewImage`] to a Godot `Texture2D` (RGBA8).
 pub(crate) fn bind_texture(image: &PreviewImage) -> Option<Gd<Texture2D>> {
     let data = PackedByteArray::from(image.rgba.as_slice());
@@ -497,6 +521,8 @@ pub(crate) fn bind_texture(image: &PreviewImage) -> Option<Gd<Texture2D>> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::expect_used)]
+
     use super::*;
     use mind_core::io::StringMap;
 
@@ -526,5 +552,43 @@ mod tests {
         assert_eq!(author, "tester");
         assert_eq!(description, "a test map");
         assert_eq!((width, height), (64, 32));
+    }
+
+    /// T3: the row's `lastModified` is the file mtime in **milliseconds** for
+    /// custom maps (Java `Fi.lastModified`, `MapListDialog.java:48`) and 0 for
+    /// classpath-style built-ins and missing files.
+    #[test]
+    fn map_row_last_modified_is_ms_for_files_and_zero_for_builtins() {
+        let dir = std::env::temp_dir().join(format!("mind-map-mtime-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let file = dir.join("alpha.msav");
+        std::fs::write(&file, b"x").expect("write");
+        let expected = std::fs::metadata(&file)
+            .and_then(|meta| meta.modified())
+            .ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0);
+        assert!(expected > 0, "temp file has a real mtime");
+
+        let mut custom = fixture_map();
+        custom.file = file.clone();
+        custom.custom = true;
+        assert_eq!(map_row_last_modified(&custom), expected);
+
+        let mut builtin = fixture_map();
+        builtin.file = file.clone();
+        builtin.custom = false;
+        assert_eq!(
+            map_row_last_modified(&builtin),
+            0,
+            "classpath built-ins report 0"
+        );
+
+        let mut missing = fixture_map();
+        missing.file = dir.join("missing.msav");
+        assert_eq!(map_row_last_modified(&missing), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

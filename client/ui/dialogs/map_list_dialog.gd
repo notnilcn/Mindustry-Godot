@@ -450,16 +450,13 @@ static func _cmp_str(a: String, b: String) -> int:
 	return -1 if a < b else (1 if a > b else 0)
 
 
-## `map.file.lastModified()`. Built-in maps are classpath `internal` files on
-## desktop (`Maps.loadDefault`), whose `File.lastModified()` is 0, so they sort
-## after every custom map under `recent`.
+## `map.file.lastModified()` in milliseconds (`MapPriority.recent`'s primary
+## key; Java truncates the sub-millisecond digits, `MapListDialog.java:48`).
+## Built-in maps report 0 like Java's classpath-backed `Fi`s; the value comes
+## from the registry row (`MindPreview.maps_list`), not a second-precision
+## `FileAccess` read.
 static func _last_modified(row: Dictionary) -> int:
-	if not bool(row.get("custom", false)) and not bool(row.get("mod", false)):
-		return 0
-	var path := str(row.get("path", ""))
-	if path.is_empty() or not FileAccess.file_exists(path):
-		return 0
-	return int(FileAccess.get_modified_time(path))
+	return int(row.get("lastModified", 0))
 
 
 ## `Gamemode.valid(map)` (`Gamemode.java`): survival needs `spawns > 0`,

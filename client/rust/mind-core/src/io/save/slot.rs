@@ -16,6 +16,7 @@ use super::super::IoError;
 use super::super::fs::{FileSystem, Paths, SAVE_EXTENSION};
 use super::super::settings::{SettingsStore, slot_autosave_key, slot_name_key};
 use super::{SaveIo, SaveMeta, SaveOptions, SaveReadState, WriteContext};
+use crate::content::ContentRegistry;
 
 /// One save slot (`Saves.SaveSlot`).
 #[derive(Debug, Clone)]
@@ -203,6 +204,31 @@ impl SaveSlot {
             let _ = fs.delete(&preview);
         }
         self.requested_preview = true;
+    }
+
+    /// `SaveSlot.savePreview`'s tile-rendering half for a slot with no live
+    /// world (imported saves / a listed slot with no preview): renders the
+    /// save's own tiles into `previews/save_slot_<index>.png`
+    /// (`MapIO.generatePreview(Map)` + `PixmapIO.writePng`, `Saves.java:343-358`).
+    ///
+    /// `palette` carries the real per-block minimap colours
+    /// (`ContentLoader.loadColors`); the request flag is cleared like Java's
+    /// `requestedPreview = false`.
+    pub fn write_preview_from_file(
+        &mut self,
+        fs: &dyn FileSystem,
+        paths: &Paths,
+        registry: &mut ContentRegistry,
+        palette: crate::io::map::BlockPalette,
+    ) -> Result<PathBuf, IoError> {
+        let bytes = fs.read(&self.file)?;
+        let (image, _facts) =
+            crate::io::map::MapIo::generate_preview_with_palette(palette, registry, &bytes)?;
+        let png = crate::io::map::encode_png(&image)?;
+        let path = self.preview_path(paths);
+        fs.write(&path, &png)?;
+        self.requested_preview = false;
+        Ok(path)
     }
 }
 
@@ -412,5 +438,47 @@ mod tests {
         assert!(rules_json_has_sector("{\"sector\":\"serpulo-12\"}"));
         assert!(!rules_json_has_sector("{\"sector\":null}"));
         assert!(!rules_json_has_sector("not json"));
+    }
+
+    /// T4: a save without a preview PNG renders one from its own tiles
+    /// (`Saves.SaveSlot.savePreview` / imported saves, `Saves.java:343-358`)
+    /// and clears the re-render request like Java's `requestedPreview = false`.
+    #[test]
+    fn missing_preview_renders_from_save_file() {
+        use crate::io::map::{BlockPalette, PNG_SIGNATURE, decode_png};
+        use crate::io::save::fixture::FixtureWorld;
+
+        let fs = MockFs::new();
+        let paths = Paths::new("/data");
+        let content = crate::content::test_support::test_registry();
+        let file = paths.save_slot(0);
+        let world = FixtureWorld::synthetic(&content, 16, 16);
+        let mut tags = base_meta_tags(16, 16, 0, "fixture");
+        tags.insert("name".to_owned(), "fixture".to_owned());
+        let mut ctx = WriteContext::meta_only(tags);
+        ctx.content = Some(&content);
+        ctx.map = Some(&world);
+        ctx.entities = Some(&world);
+        SaveIo::save(&fs, &file, &ctx, &SaveOptions::new()).unwrap();
+
+        let mut slot = SaveSlot::new(file);
+        slot.load_meta(&fs).unwrap();
+        let preview = slot.preview_path(&paths);
+        assert!(!fs.exists(&preview), "no preview before the render");
+        slot.requested_preview = true;
+
+        let mut registry = crate::content::test_support::test_registry();
+        let palette = BlockPalette::of(&registry);
+        slot.write_preview_from_file(&fs, &paths, &mut registry, palette)
+            .expect("preview write");
+        assert!(fs.exists(&preview));
+        assert!(
+            !slot.requested_preview,
+            "the render clears the request flag"
+        );
+        let bytes = fs.read(&preview).unwrap();
+        assert_eq!(&bytes[..8], &PNG_SIGNATURE, "PNG magic");
+        let image = decode_png(&bytes).expect("decodes");
+        assert_eq!((image.width, image.height), (16, 16));
     }
 }

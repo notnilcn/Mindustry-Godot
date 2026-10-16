@@ -142,7 +142,13 @@ func _rebuild_list() -> void:
 	if _grid == null:
 		return
 	_grid.clear_children()
-	var slots: Array = _slots
+	var slots: Array = _slots.duplicate()
+	# `LoadDialog.rebuild`: `array.sort((slot, other) -> -Long.compare(
+	# slot.getTimestamp(), other.getTimestamp()))` — newest first
+	# (`LoadDialog.java:93`, `SaveSlot.getTimestamp` = `meta.timestamp`). The
+	# listing order breaks exact timestamp ties (Java's sort is unstable).
+	slots.sort_custom(func(a: Variant, b: Variant) -> bool:
+		return _slot_timestamp(a) > _slot_timestamp(b))
 	var needle := _field.text.strip_edges().to_lower() if _field != null else ""
 	var columns := maxi(int(get_viewport_rect().size.x / 470.0), 1)
 	var any := false
@@ -308,6 +314,14 @@ func _format_date(timestamp_ms: int) -> String:
 		months[int(dt.month) - 1], int(dt.day), int(dt.year), hour, int(dt.minute), int(dt.second),
 		"PM" if int(dt.hour) >= 12 else "AM",
 	]
+
+
+## A slot row's `SaveSlot.getTimestamp()` (`meta.timestamp`); 0 for injected
+## rows without meta (the sort key, `LoadDialog.java:93`).
+static func _slot_timestamp(entry: Variant) -> int:
+	if not (entry is Dictionary):
+		return 0
+	return int((entry as Dictionary).get("timestamp_ms", 0))
 
 
 func _icon_action(icon_name: String, style: String, is_pressed: bool) -> Button:

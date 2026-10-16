@@ -49,7 +49,7 @@ use mind_core::game::universe::{Campaign, TurnContext, launch_plan};
 use mind_core::game::waves::WaveMapHooks;
 use mind_core::game::world_reloader::HostReloader;
 use mind_core::io::FileSystem;
-use mind_core::io::fs::{NativeFs, Paths};
+use mind_core::io::fs::{NativeFs, Paths, SAVE_EXTENSION};
 use mind_core::io::json::quote_bare_keys;
 use mind_core::io::json::rules::GameStats;
 use mind_core::io::save::slot::list_save_slots as list_slot_files;
@@ -284,6 +284,42 @@ impl MindCampaign {
         self.base().try_get_node_as::<MindSimHost>("../SimHost")
     }
 
+    /// `Saves.SaveSlot.savePreview` on the live world (`Saves.java:343-358`):
+    /// renders `<user>/previews/save_slot_<stem>.png` from the current grid
+    /// before the queued save lands at the IO boundary. Java runs it for every
+    /// slot save (manual, autosave, sector, capture, game over).
+    fn write_live_slot_preview(&self, file: &std::path::Path) {
+        let Some(stem) = file.file_stem().and_then(|stem| stem.to_str()) else {
+            return;
+        };
+        if let Some(mut host) = self.host() {
+            host.bind_mut().write_save_preview(GString::from(stem));
+        }
+    }
+
+    /// `SaveSlot.savePreview` for a slot with no live world: renders the preview
+    /// PNG from the slot file's own tiles. Used on import and when listing a
+    /// slot that has no preview (`Saves.java:343-358`).
+    fn render_slot_preview_from_file(&mut self, file: &std::path::Path) -> bool {
+        let paths = self.save_paths();
+        let Some(mut registry) = self.registry.take() else {
+            log::warn!("save preview: content registry unavailable");
+            return false;
+        };
+        let mut palette = mind_core::io::map::BlockPalette::of(&registry);
+        palette.apply_block_colors(&crate::render::minimap::load_block_colors());
+        let mut slot = mind_core::io::save::slot::SaveSlot::new(file.to_path_buf());
+        let result = slot.write_preview_from_file(&NativeFs, &paths, &mut registry, palette);
+        self.registry = Some(registry);
+        match result {
+            Ok(_) => true,
+            Err(error) => {
+                log::warn!("save preview `{}` render failed: {error}", file.display());
+                false
+            }
+        }
+    }
+
     /// `Core.scene.hasDialog()` for the `MindUi` dialog stack.
     fn ui_has_dialog(&self) -> bool {
         let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") else {
@@ -474,6 +510,8 @@ impl MindCampaign {
             // live sector record (core snapshot, items, production, wave) lands
             // in settings next to the autosave (PAR-0153).
             self.persist_sector_record_in(Some(&mut runtime));
+            // `Saves.SaveSlot.save` -> `savePreview()` (autosave path).
+            self.write_live_slot_preview(&file);
             host.bind_mut()
                 .request_save(GString::from(file.to_string_lossy().as_ref()), false);
             self.saving_finish_tick = Some(tick.saturating_add(3));
@@ -514,6 +552,7 @@ impl MindCampaign {
                     // `control.saves.saveSector(state.rules.sector)` — the
                     // captured world is saved immediately, like the GameOver arm.
                     if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        self.write_live_slot_preview(&file);
                         host.bind_mut()
                             .request_save(GString::from(file.to_string_lossy().as_ref()), false);
                         self.saving_finish_tick = Some(tick.saturating_add(3));
@@ -539,6 +578,7 @@ impl MindCampaign {
                     // game-over state immediately, so a later re-attack loads
                     // the destroyed base (PAR-0084).
                     if let Some(file) = self.saves.current_slot().map(|slot| slot.file.clone()) {
+                        self.write_live_slot_preview(&file);
                         host.bind_mut()
                             .request_save(GString::from(file.to_string_lossy().as_ref()), false);
                         self.saving_finish_tick = Some(tick.saturating_add(3));
@@ -1303,6 +1343,8 @@ impl MindCampaign {
                 });
                 if let Some(mut host) = self.host() {
                     let path = format!("user://saves/{save_name}.msav");
+                    // `Saves.saveSector` -> `SaveSlot.save` -> `savePreview()`.
+                    self.write_live_slot_preview(std::path::Path::new(&save_name));
                     host.bind_mut()
                         .request_save(GString::from(path.as_str()), false);
                 }
@@ -3719,11 +3761,22 @@ impl MindCampaign {
         }
         let total_playtime = self.saves.total_playtime;
         host.bind_mut().set_save_playtime(total_playtime);
-        // `Saves.SaveSlot.save` -> `savePreview()`: the slot's preview PNG,
-        // written from the live grid before the queued save lands at the IO
-        // boundary (`Saves.java:343-375`).
+        // `Saves.addSave` (`Saves.java:265-271`) -> `SaveSlot.save`
+        // (`:343-358`): the slot's preview PNG is written from the live grid
+        // before the queued save lands at the IO boundary, the slot is
+        // registered and it becomes current while in game (`slot.save()`'s
+        // `if(state.isGame()) current = this`).
         host.bind_mut()
             .write_save_preview(GString::from(slot.as_str()));
+        let file = self
+            .save_paths()
+            .saves()
+            .join(format!("{slot}.{SAVE_EXTENSION}"));
+        if self.session.phase.is_game() {
+            settings_hub::with_settings(|store| {
+                self.saves.set_current_by_file(store, &file);
+            });
+        }
         host.bind_mut().request_save(
             GString::from(format!("user://saves/{slot}.msav").as_str()),
             false,
@@ -3815,6 +3868,8 @@ impl MindCampaign {
         if should_save
             && let (Some(file), Some(mut host)) = (current.map(|slot| slot.file), self.host())
         {
+            // `Saves.SaveSlot.save` -> `savePreview()` (`@save.quit` path).
+            self.write_live_slot_preview(&file);
             host.bind_mut()
                 .request_save(GString::from(file.to_string_lossy().as_ref()), false);
             host.bind_mut().flush_io();
@@ -4329,7 +4384,7 @@ impl MindCampaign {
 
     /// Lists the known save slots (`name`, `file`, `sector`, `autosave`).
     #[func]
-    pub fn list_save_slots(&self) -> Array<VarDictionary> {
+    pub fn list_save_slots(&mut self) -> Array<VarDictionary> {
         let mut out = Array::<VarDictionary>::new();
         // `request_save` writes through Godot's `user://`, so scan that same
         // directory instead of the bootstrap-time `Saves` snapshot: a slot saved
@@ -4339,6 +4394,14 @@ impl MindCampaign {
             .to_string();
         let paths = Paths::new(root);
         for slot in list_slot_files(&NativeFs, &paths) {
+            // `Saves.SaveSlot.previewTexture()` shows the saved preview PNG; a
+            // slot that has none (imported saves, pre-fix saves) gets one from
+            // its own tiles here (`Saves.java:343-358`).
+            let preview = slot.preview_path(&paths);
+            if !NativeFs.exists(&preview) {
+                let file = slot.file.clone();
+                self.render_slot_preview_from_file(&file);
+            }
             let mut row = VarDictionary::new();
             row.set(
                 &GString::from("name"),
@@ -4428,7 +4491,22 @@ impl MindCampaign {
             self.saves.import_save(&NativeFs, &paths, store, &from)
         });
         match result {
-            Ok(_) => GString::new(),
+            Ok(index) => {
+                // `importData` ships no `previews/` entries (`SettingsMenuDialog.java:575-608`),
+                // so the imported slot renders its preview from its own tiles
+                // (`Saves.SaveSlot.savePreview`, `Saves.java:343-358`).
+                let slot = self
+                    .saves
+                    .get_save_slots()
+                    .get(index)
+                    .map(|slot| (slot.index(), slot.file.clone(), slot.preview_path(&paths)));
+                if let Some((_stem, file, preview)) = slot
+                    && !NativeFs.exists(&preview)
+                {
+                    self.render_slot_preview_from_file(&file);
+                }
+                GString::new()
+            }
             Err(error) => GString::from(format!("fail:{error}").as_str()),
         }
     }
@@ -4477,6 +4555,16 @@ impl MindCampaign {
             log::warn!("rename_save_slot: settings save failed: {error}");
         }
         true
+    }
+
+    /// `Saves.getCurrent().isAutosave()` (`PausedDialog.java:116,154-155`):
+    /// whether the live current save slot autosaves (`save-<index>-autosave`,
+    /// default true). `false` when no slot is current.
+    #[func]
+    pub fn current_save_autosave(&self) -> bool {
+        self.saves
+            .current_slot()
+            .is_some_and(|slot| settings_hub::with_settings(|store| slot.is_autosave(store)))
     }
 
     /// `LoadDialog.modifyButton` `Icon.save`: `slot.setAutosave(on)`.
@@ -5663,6 +5751,19 @@ fn apply_loaded_meta(session: &mut PlaySession, meta: &SaveMeta) {
 }
 
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).
+///
+/// **Deviation (J01 T6, kept deliberately).** Java slots are numeric files:
+/// `Saves.getNextSlotFile` builds `saves/<index>.msav` and the display name
+/// lives in the `save-<index>-name` setting / the meta (`Saves.java:265-271,
+/// 283-290`), previews as `previews/save_slot_<index>.png`. The port keys the
+/// file, the `save-<stem>-name`/`-autosave` settings and the preview PNG by
+/// this sanitized name — the round-I I06 flow (`save_slot("t5-preview")` ->
+/// `save_slot_t5-preview.png`) built the load/save/import/rename/export
+/// surface on stems, and `Saves::import_save` keeps imported Java saves on
+/// their numeric stems. A Java data export/import therefore round-trips by
+/// slot identity, not by file name; switching to numeric indices would churn
+/// the save/preview/settings ABI for no behavioural gain (the slot name is
+/// user data in both designs).
 fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
