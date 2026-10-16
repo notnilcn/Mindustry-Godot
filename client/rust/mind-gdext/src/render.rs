@@ -67,6 +67,7 @@ mod shaders;
 mod shadow;
 mod shields;
 mod status;
+mod turret;
 mod unit_build;
 mod unit_overlays;
 mod units;
@@ -242,6 +243,10 @@ pub struct MindWorldRenderer {
     floor: Option<FloorRenderer>,
     blocks: Option<BlockRenderer>,
     units: Option<UnitRenderer>,
+    /// Live `DrawTurret` pass, normal blend (`Layer.turret` band; J03 T1).
+    turrets: Option<Gd<turret::TurretRenderer>>,
+    /// Live `DrawTurret` heat half, additive (`Layer.turretHeat` band).
+    turret_heat: Option<Gd<turret::TurretRenderer>>,
     building_cache: Option<BuildingCacheRenderer>,
     /// Cracks for `!drawDynamic` cached buildings (`Layer.blockCracks` band;
     /// H03 T18).
@@ -330,6 +335,8 @@ impl INode2D for MindWorldRenderer {
             floor: None,
             blocks: None,
             units: None,
+            turrets: None,
+            turret_heat: None,
             building_cache: None,
             cached_cracks: None,
             puddles: None,
@@ -724,6 +731,25 @@ impl MindWorldRenderer {
                 building_band,
                 &self.shaders,
             ));
+        }
+        // Live `DrawTurret` pass (J03 T1): normal-blend pieces at `Layer.turret`
+        // and the additive heat overlay at `Layer.turretHeat`
+        // (`DrawTurret.draw`, `DrawTurret.java:72-141`).
+        if let Some(turret_band) = self.band_node_at(BandKey::base(Layer::Turret)) {
+            let mut node = turret::TurretRenderer::new_alloc();
+            node.set_name("TurretRenderer");
+            // code-instantiated: one live draw pass per blend; the node count is
+            // fixed by the pipeline, not by content.
+            turret_band.clone().add_child(&node);
+            self.turrets = Some(node);
+        }
+        if let Some(heat_band) = self.band_node_at(BandKey::base(Layer::TurretHeat)) {
+            let mut node = turret::TurretRenderer::new_alloc();
+            node.set_name("TurretHeatRenderer");
+            node.bind_mut().additive = true;
+            // code-instantiated: the additive half of the same pass.
+            heat_band.clone().add_child(&node);
+            self.turret_heat = Some(node);
         }
         let unit_bands = vec![
             self.band_node_at(BandKey::base(Layer::GroundUnit)),

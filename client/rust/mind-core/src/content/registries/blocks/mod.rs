@@ -32,6 +32,7 @@ pub mod power;
 pub mod production;
 pub mod sandbox;
 pub mod storage;
+pub mod turret_parts;
 pub mod turrets;
 pub mod units;
 pub mod units_erekir;

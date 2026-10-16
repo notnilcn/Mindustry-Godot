@@ -1071,4 +1071,40 @@ mod tests {
         assert_eq!(outline_icon_index(turret.kind, 2), Some(1));
         assert!(turret_body_outlined(&turret));
     }
+
+    /// J03 T1/T3: the pack-time outline list for every turret the runtime part
+    /// data covers must be exactly the regions `DrawPart.getOutlines` would
+    /// produce (`Block.getRegionsToOutline` -> `<region>-outline` in
+    /// `Block.createIcons`, `Block.java:1617-1630`). Guards the hand table in
+    /// [`turret_part_outlines`] against the part data in
+    /// `mind_core::content::registries::blocks::turret_parts`.
+    #[test]
+    fn turret_outline_table_matches_runtime_parts() {
+        use mind_core::content::registries::blocks::turret_parts;
+        use mind_core::fx::parts::draw::get_outlines;
+
+        for name in [
+            "duo",
+            "scatter",
+            "salvo",
+            "cyclone",
+            "diffuse",
+            "sublimate",
+            "titan",
+            "disperse",
+            "afflict",
+        ] {
+            let mut runtime = get_outlines(&turret_parts::parts_for(name), name);
+            let mut packed: Vec<String> = turret_part_outlines(name)
+                .iter()
+                .map(|suffix| format!("{name}{suffix}"))
+                .collect();
+            runtime.sort();
+            packed.sort();
+            assert_eq!(runtime, packed, "{name} outline regions differ");
+        }
+        // The part-free turrets contribute nothing to the outline list.
+        assert!(turret_part_outlines("lancer").is_empty());
+        assert!(turret_part_outlines("fuse").is_empty());
+    }
 }

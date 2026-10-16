@@ -27,8 +27,13 @@ pub struct TurretDraw<'a> {
     pub x: f32,
     /// Building center.
     pub y: f32,
-    /// Turret rotation in degrees (`tb.drawrot()`).
+    /// Turret rotation in degrees (`tb.drawrot()`), used for the head, liquid,
+    /// top, shadow and outline draws.
     pub drawrot: f32,
+    /// Raw turret rotation in degrees (`tb.rotation`); `DrawPart.params` is
+    /// set with this and every part subtracts 90 itself
+    /// (`DrawTurret.java:101`, `RegionPart.draw`).
+    pub rotation: f32,
     /// Recoil offset (`tb.recoilOffset`).
     pub recoil_offset: (f32, f32),
     /// Turret elevation (`turret.elevation`).
@@ -70,6 +75,7 @@ impl Default for TurretDraw<'static> {
             x: 0.0,
             y: 0.0,
             drawrot: 0.0,
+            rotation: 0.0,
             recoil_offset: (0.0, 0.0),
             elevation: 0.0,
             heat: 0.0,
@@ -126,7 +132,11 @@ pub fn draw_turret(emit: &mut PartEmit, t: &TurretDraw) {
     emit.region(&format!("{}-top", t.name), rx, ry, t.drawrot);
 
     // heat
-    if t.heat > 0.00001 {
+    //
+    // `DrawTurret.drawHeat` (`DrawTurret.java:137-141`): `if(build.heat <=
+    // 0.00001f || !heat.found()) return;` — the found-check matters: a turret
+    // without a `-heat` sprite must not emit a placeholder.
+    if t.heat > 0.00001 && emit.lookup(&format!("{}-heat", t.name)).found {
         let saved_color = emit.color;
         let saved_blend = emit.blend;
         emit.color = t.heat_color.with_alpha(t.heat);
@@ -141,8 +151,11 @@ pub fn draw_turret(emit: &mut PartEmit, t: &TurretDraw) {
     }
 
     // parts
-    let has_parts = !t.parts.is_empty() || !t.ammo_parts.is_empty();
-    if has_parts {
+    //
+    // `DrawTurret.draw` splits the two blocks: the outline + `parts` run when
+    // `parts.size > 0` (the outline is *not* drawn for ammo-only drawers) and
+    // `ammoParts` run in a separate `if` (`DrawTurret.java:90-119`).
+    if !t.parts.is_empty() {
         if emit.lookup(&format!("{}-outline", t.name)).found {
             emit.push_at(
                 t.turret_layer - 0.01,
@@ -161,18 +174,18 @@ pub fn draw_turret(emit: &mut PartEmit, t: &TurretDraw) {
                 };
             emit.draw_part(part, &p, t.name);
         }
-        if !t.ammo_parts.is_empty() {
-            for part in t.ammo_parts {
-                let mut p = params;
-                p.recoil = if part.recoil_index >= 0
-                    && (part.recoil_index as usize) < t.cur_recoils.len()
-                {
+    }
+    if !t.ammo_parts.is_empty() {
+        let params = part_params(t, rx, ry);
+        for part in t.ammo_parts {
+            let mut p = params;
+            p.recoil =
+                if part.recoil_index >= 0 && (part.recoil_index as usize) < t.cur_recoils.len() {
                     t.cur_recoils[part.recoil_index as usize]
                 } else {
                     t.cur_recoil
                 };
-                emit.draw_part(part, &p, t.name);
-            }
+            emit.draw_part(part, &p, t.name);
         }
     }
 
@@ -193,6 +206,10 @@ pub fn draw_turret_plan(emit: &mut PartEmit, t: &TurretDraw, plan_rotation: i32,
 
 fn part_params(t: &TurretDraw, rx: f32, ry: f32) -> PartParams {
     let mut params = PartParams::default();
+    // `DrawPart.params.set(..., tb.x + tb.recoilOffset.x, tb.y +
+    // tb.recoilOffset.y, tb.rotation)` (`DrawTurret.java:101`): the **raw**
+    // turret rotation, not `drawrot()` — every part subtracts 90 itself
+    // (`RegionPart.draw`'s `params.rotation - 90`).
     params.set(
         t.warmup,
         1.0 - t.progress,
@@ -202,7 +219,7 @@ fn part_params(t: &TurretDraw, rx: f32, ry: f32) -> PartParams {
         t.charge,
         rx,
         ry,
-        t.drawrot,
+        t.rotation,
     );
     params
 }
@@ -227,7 +244,8 @@ fn region_kind(emit: &PartEmit, name: &str, x: f32, y: f32, rot: f32) -> PrimKin
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fx::parts::draw::{AllRegions, PartEmit};
+    use crate::content::registries::blocks::turret_parts;
+    use crate::fx::parts::draw::{AllRegions, MapRegions, PartEmit};
     use crate::render::draw::DrawProgram;
 
     fn names(program: &DrawProgram) -> Vec<(&str, f32)> {
@@ -239,6 +257,149 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// `(region, rotation_deg)` pairs in program order.
+    fn rotations(program: &DrawProgram) -> Vec<(&str, f32)> {
+        program
+            .prims
+            .iter()
+            .filter_map(|p| match &p.kind {
+                PrimKind::Region {
+                    region,
+                    rotation_deg,
+                    ..
+                } => Some((region.0, *rotation_deg)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// J03 T1: `DrawTurret.java:90-119` — the outline and `parts` block runs
+    /// only when the drawer has base parts, and each part keeps its own z
+    /// (`RegionPart.draw`: `under && turretShading` steps 0.0001 below the
+    /// turret layer). Pinned with the ported `duo` part data (two per-barrel
+    /// recoil parts) and the part-free `fuse`.
+    #[test]
+    fn turret_part_draw_order_matches_java() {
+        let mut lookup = MapRegions::new();
+        for name in [
+            "duo-base",
+            "duo-preview",
+            "duo",
+            "duo-outline",
+            "duo-barrel-l",
+            "duo-barrel-r",
+            "duo-barrel-l-outline",
+            "duo-barrel-r-outline",
+            "duo-heat",
+            "fuse-base",
+            "fuse-preview",
+            "fuse",
+            "fuse-outline",
+        ] {
+            lookup.add(name, 32.0, 32.0);
+        }
+        let parts = turret_parts::parts_for("duo");
+        let mut program = DrawProgram::new();
+        {
+            let mut emit = PartEmit::new(&mut program, &lookup, 0.0);
+            emit.z = Layer::Block.z();
+            let t = TurretDraw {
+                name: "duo",
+                x: 10.0,
+                y: 20.0,
+                // Idle turret: raw rotation 90, `drawrot() = 0`. Parts take the
+                // raw rotation (`DrawTurret.java:101`) and subtract 90
+                // themselves, so their quads must come out at 0, not -90.
+                rotation: 90.0,
+                drawrot: 0.0,
+                heat: 0.5,
+                parts: &parts,
+                ..Default::default()
+            };
+            draw_turret(&mut emit, &t);
+        }
+        program.sort();
+        for (name, rot) in rotations(&program) {
+            if name.starts_with("duo-barrel") {
+                assert_eq!(rot, 0.0, "{name} part rotation with rotation=90");
+            }
+        }
+        let mut ns = names(&program);
+        ns.retain(|(name, _)| *name != "duo-base" && *name != "duo-preview");
+        assert_eq!(
+            ns,
+            vec![
+                ("duo-outline", Layer::Turret.z() - 0.01),
+                (
+                    "duo-barrel-l-outline",
+                    Layer::Turret.z() - 0.0001 + (-0.001)
+                ),
+                (
+                    "duo-barrel-r-outline",
+                    Layer::Turret.z() - 0.0001 + (-0.001)
+                ),
+                ("duo-barrel-l", Layer::Turret.z() - 0.0001),
+                ("duo-barrel-r", Layer::Turret.z() - 0.0001),
+                ("duo", Layer::Turret.z()),
+                ("duo-heat", Layer::TurretHeat.z()),
+            ],
+            "outline under the head, under-shaded barrels under the head, in part order"
+        );
+        assert_eq!(
+            program.prims.last().map(|prim| prim.blend),
+            Some(Blending::Additive),
+            "the heat overlay is additive (`Drawf.additive`)"
+        );
+        // `drawHeat` also returns early when `<name>-heat` is missing
+        // (`DrawTurret.java:138`): no placeholder prim may be emitted
+        // (a missing lookup carries the `error` region key).
+        let mut plain = MapRegions::new();
+        plain.add("duo", 32.0, 32.0).add("duo-base", 32.0, 32.0);
+        let mut missing_heat = DrawProgram::new();
+        {
+            let mut emit = PartEmit::new(&mut missing_heat, &plain, 0.0);
+            let t = TurretDraw {
+                name: "duo",
+                heat: 0.5,
+                heat_color: Rgba::WHITE,
+                ..Default::default()
+            };
+            draw_turret(&mut emit, &t);
+        }
+        assert!(
+            names(&missing_heat)
+                .iter()
+                .all(|(name, _)| !name.contains("heat") && *name != "error"),
+            "no heat region -> no heat prim: {:?}",
+            names(&missing_heat)
+        );
+
+        // `fuse` has no drawer parts (`Blocks.java:3937`): even with a
+        // `fuse-outline` region present, no outline or part prim may appear
+        // (`DrawTurret.java:90-107`).
+        let empty: [DrawPartSpec; 0] = [];
+        let mut program = DrawProgram::new();
+        {
+            let mut emit = PartEmit::new(&mut program, &lookup, 0.0);
+            emit.z = Layer::Block.z();
+            let t = TurretDraw {
+                name: "fuse",
+                x: 10.0,
+                y: 20.0,
+                parts: &empty,
+                ..Default::default()
+            };
+            draw_turret(&mut emit, &t);
+        }
+        program.sort();
+        let fuse = names(&program);
+        assert!(
+            fuse.iter().all(|(name, _)| *name != "fuse-outline"),
+            "no part list -> no outline ({fuse:?})"
+        );
+        assert!(!fuse.is_empty(), "the head itself still draws");
     }
 
     #[test]

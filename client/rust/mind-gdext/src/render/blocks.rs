@@ -38,8 +38,6 @@ const ACCENT: u32 = 0xffd3_7fff;
 const REMOVE: u32 = 0xe554_54ff;
 /// `Drill.rotateSpeed` (`Drill.java:59`): rotator degrees per `timeDrilled`.
 const DRILL_ROTATE_SPEED: f32 = 2.0;
-/// `Turret.heatColor = Pal.turretHeat` (`ab3400`); the alpha carries heat.
-const HEAT_COLOR: u32 = 0xab34_00ff;
 /// `Vars.itemSize` — belt item icons draw at 5 world px (`Conveyor.draw`).
 const ITEM_SIZE: f32 = 5.0;
 /// `Wall.WallBuild.hit` decays by `Time.delta / 10` per frame
@@ -175,6 +173,21 @@ impl BlockRenderer {
     /// Current counters.
     pub fn stats(&self) -> BlockStats {
         self.stats
+    }
+
+    /// `DrawTurret.load` base chain (`DrawTurret.java:146-170`): `<name>-base`,
+    /// else `<basePrefix>block-<size>` (`reinforced-` for the Erekir turrets).
+    fn turret_base_region(&mut self, def: &BlockDef) -> Option<ResolvedRegion> {
+        for candidate in
+            mind_core::content::registries::blocks::turret_parts::base_region_candidates(
+                &def.name, def.size,
+            )
+        {
+            if let Some(region) = self.resolver.find(&candidate) {
+                return Some(region);
+            }
+        }
+        None
     }
 
     /// Whether the visible set or the world changed (early-out, §3.6).
@@ -388,57 +401,38 @@ impl BlockRenderer {
                     }
                     continue;
                 }
-                // `DrawTurret.draw` (T10): `<basePrefix>block-<size>` base, then
-                // the barrel `region` and `-top` at the recoil offset, rotation
-                // `drawrot() = rotation - 90` (heat overlays when hot).
+                // `DrawTurret.draw` (`DrawTurret.java:73-88`): the turret
+                // **base** draws at the block layer; the head/shadow/heat and
+                // every part are the live turret pass (`render/turret.rs`).
+                // `DrawTurret.load` (`:146-170`): `<name>-base`, else the mod's
+                // `<prefix>block-<size>`, else `<basePrefix>block-<size>`
+                // (`basePrefix = "reinforced-"` for the Erekir turrets).
                 if matches!(
                     def.kind,
-                    BlockKind::ItemTurret | BlockKind::PowerTurret | BlockKind::LiquidTurret
+                    BlockKind::ItemTurret
+                        | BlockKind::PowerTurret
+                        | BlockKind::LiquidTurret
+                        | BlockKind::ContinuousTurret
+                        | BlockKind::ContinuousLiquidTurret
+                        | BlockKind::LaserTurret
+                        | BlockKind::PointDefenseTurret
+                        | BlockKind::TractorBeamTurret
+                        | BlockKind::BuildTurret
                 ) {
-                    if let Some((rotation, recoil_x, recoil_y, heat)) =
-                        host.turret_draw(tile.x, tile.y)
-                    {
-                        if let Some(base) = self.resolver.find(&format!("block-{}", def.size)) {
-                            push(
-                                &base,
-                                base.uv,
-                                anchor_x,
-                                anchor_y,
-                                w,
-                                w,
-                                0.0,
-                                0xffff_ffff,
-                                1.0,
-                            );
-                        }
-                        let rot = rotation - 90.0;
-                        let bx = anchor_x + recoil_x;
-                        let by = anchor_y + recoil_y;
-                        if let Some(barrel) = self.resolver.find(&def.region) {
-                            push(&barrel, barrel.uv, bx, by, w, w, rot, 0xffff_ffff, 1.0);
-                        }
-                        if let Some(top) = self.resolver.find(&format!("{}-top", def.name)) {
-                            push(&top, top.uv, bx, by, w, w, rot, 0xffff_ffff, 1.0);
-                        }
-                        if heat > 0.00001
-                            && let Some(heat_region) =
-                                self.resolver.find(&format!("{}-heat", def.name))
-                        {
-                            push(
-                                &heat_region,
-                                heat_region.uv,
-                                bx,
-                                by,
-                                w,
-                                w,
-                                rot,
-                                (HEAT_COLOR & !0xff) | ((heat.clamp(0.0, 1.0) * 255.0) as u32),
-                                1.0,
-                            );
-                        }
-                        dynamic += 1;
-                        animating = true;
+                    if let Some(base) = self.turret_base_region(def) {
+                        push(
+                            &base,
+                            base.uv,
+                            anchor_x,
+                            anchor_y,
+                            w,
+                            w,
+                            0.0,
+                            0xffff_ffff,
+                            1.0,
+                        );
                     }
+                    dynamic += 1;
                     continue;
                 }
                 // `UnitFactory.draw` / `Reconstructor.draw` (H03 T9): base

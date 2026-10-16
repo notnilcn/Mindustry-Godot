@@ -404,6 +404,14 @@ impl MindAssets {
         out
     }
 
+    /// Rust-only region geometry for the render passes: `(w, h)` in atlas
+    /// pixels (`AtlasIndex::find`), `None` when absent.
+    pub fn region_pixels(&self, name: &str) -> Option<(f32, f32)> {
+        self.index
+            .find(name)
+            .map(|region| (region.w as f32, region.h as f32))
+    }
+
     /// Ninepatch splits for a region (`[]` when absent).
     #[func]
     pub fn tex_splits(&self, name: GString) -> PackedInt32Array {

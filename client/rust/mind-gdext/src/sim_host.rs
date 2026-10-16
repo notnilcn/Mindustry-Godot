@@ -6104,6 +6104,101 @@ impl MindSimHost {
         Some((state.rotation, dx, dy, state.heat))
     }
 
+    /// Full `DrawTurret.draw` inputs at `(x, y)` (J03 T1): the live
+    /// `TurretState` counters (`DrawTurret.java:74-119`) plus the placed
+    /// block's draw metadata (parts, heat color, liquid, elevation). `None`
+    /// without a turret. Rust-only seam for the turret render pass.
+    pub fn turret_draw_input(
+        &self,
+        x: i32,
+        y: i32,
+    ) -> Option<crate::fx::draw_turret::TurretDrawInput> {
+        use mind_core::content::registries::blocks::turret_parts;
+        use mind_core::world::blocks::defense::turrets::TurretState;
+
+        let entity = self.tile_at(x, y)?.build?;
+        let content = self.content_snapshot.as_ref()?;
+        let def = content.block(self.sim.grid.tile(x, y).block)?;
+        let state = self.sim.ecs.0.get::<TurretState>(entity)?;
+        let name = def.name.as_str();
+
+        let len = -state.cur_recoil.max(0.0).powf(state.config.recoil_pow) * state.config.recoil;
+        let (dx, dy) = mind_core::render::conveyor_items::trns(state.rotation, len, 0.0);
+
+        // `TurretBuild.progress()` = `clamp(reloadCounter / reload)`.
+        let progress = if state.config.reload > 0.0 {
+            (state.reload_counter / state.config.reload).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+
+        // `drawTurret`: `Drawf.liquid(liquid, ..., liquids.get(toDraw) /
+        // block.liquidCapacity, toDraw.color, drawrot)`.
+        let (liquid_fraction, liquid_color) = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::modules::LiquidModule>(entity)
+            .map(|liquids| {
+                let liquid = liquids.current_liquid();
+                let capacity = def.liquid_capacity.max(1e-6);
+                let color = content
+                    .liquid(liquid)
+                    .map(|def| def.color)
+                    .unwrap_or(mind_core::content::Rgba::WHITE);
+                (liquids.get(liquid) / capacity, color)
+            })
+            .unwrap_or((0.0, mind_core::content::Rgba::WHITE));
+
+        // `TurretBuild.getAmmoContent()` for `ammoParts`: the last item entry
+        // (`ItemTurretBuild.getAmmoContent`, `ItemTurret.java:172-174`).
+        let ammo_item = state
+            .ammo
+            .last()
+            .and_then(|entry| content.item(entry.item))
+            .map(|item| item.name.as_str())
+            .unwrap_or("");
+        let ammo_parts = if ammo_item.is_empty() {
+            Vec::new()
+        } else {
+            turret_parts::ammo_parts_for(name, ammo_item)
+        };
+
+        let center = ((def.size - 1) / 2) as f32;
+        let size = mind_core::config::TILESIZE as f32;
+
+        Some(crate::fx::draw_turret::TurretDrawInput {
+            handle: 0,
+            name: name.to_owned(),
+            // `Building.x/y` = the footprint center (`Tile.drawx + Block.offset`);
+            // the caller passes the first row-major tile, exactly like the block
+            // pass's anchor.
+            x: (x as f32 + center) * size + def.offset,
+            y: (y as f32 + center) * size + def.offset,
+            // `BaseTurretBuild.drawrot()` = `rotation - 90`.
+            drawrot: state.rotation - 90.0,
+            // `DrawPart.params` takes the raw rotation (`DrawTurret.java:101`).
+            rotation: state.rotation,
+            recoil_offset: (dx, dy),
+            // `Turret.init`: `elevation = size / 2f` (no vanilla override).
+            elevation: def.size as f32 / 2.0,
+            heat: state.heat,
+            warmup: state.shoot_warmup,
+            cur_recoil: state.cur_recoil,
+            cur_recoils: state.cur_recoils.to_vec(),
+            charge: state.charge,
+            progress,
+            liquid_fraction,
+            liquid_color,
+            heat_color: turret_parts::heat_color(name),
+            parts: turret_parts::parts_for(name),
+            ammo_parts,
+            turret_layer: mind_core::render::layer::Layer::Turret.z(),
+            shadow_layer: mind_core::render::layer::Layer::Turret.z() - 0.5,
+            heat_layer: mind_core::render::layer::Layer::TurretHeat.z(),
+        })
+    }
+
     /// Command-overlay rows for the selected unit ids
     /// (`InputHandler.drawCommanded`; T16/PAR-0157):
     /// `(x, y, hit_size, flying, target_pos)` where `target_pos` is

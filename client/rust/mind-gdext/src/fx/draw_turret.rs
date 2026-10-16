@@ -7,18 +7,45 @@
 //! converts a plan-10 [`TurretDrawState`] plus the block's resident part data
 //! into a [`TurretDraw`] and appends the compiled prims to the frame program.
 //!
-//! The in-engine caller (`MindFx`) has no direct sim handle (effects are a
-//! one-way view), so the state is pushed as an owned snapshot via the
-//! `spawn_turret_draw` probe; MCP drives it and the live plan-10 pass can feed
-//! the same struct when the plan-16 executor lands.
+//! The `MindFx` probe (`spawn_turret_draw`) keeps pushing owned snapshots as a
+//! dev/test seam; the live pass is `mind-gdext::render::turret`, which feeds
+//! every visible turret's state through the same `build_turret` adapter and
+//! binds [`AtlasLookup`] instead of the debug-only `AllRegions`.
+
+use godot::prelude::Gd;
 
 use mind_core::combat::view::TurretDrawState;
 use mind_core::content::Rgba;
 use mind_core::content::registries::units::parts::DrawPartSpec;
-use mind_core::fx::parts::draw::{PartEmit, RegionLookup};
+use mind_core::fx::parts::draw::{PartEmit, RegionInfo, RegionLookup, intern_region};
 use mind_core::fx::parts::turret::{TurretDraw, draw_turret};
 use mind_core::render::draw::DrawProgram;
 use mind_core::render::layer::Layer;
+
+/// Atlas pixels per world unit (`scale_marker` is 4x4 px; `Draw.scl = 1/4`).
+pub const ATLAS_PX_TO_WORLD: f32 = 0.25;
+
+/// The real [`RegionLookup`] over the live `MindAssets` atlas (plan 03):
+/// mirrors `Core.atlas.find` + `region.width * region.scl()` sizing in world
+/// units. Replaces the debug-only `AllRegions` binding (J03 T1).
+pub struct AtlasLookup<'a> {
+    /// The atlas autoload.
+    pub assets: &'a Gd<crate::assets::MindAssets>,
+}
+
+impl RegionLookup for AtlasLookup<'_> {
+    fn region(&self, name: &str) -> RegionInfo {
+        let Some((w, h)) = self.assets.bind().region_pixels(name) else {
+            return RegionInfo::missing();
+        };
+        RegionInfo {
+            key: intern_region(name),
+            w: w * ATLAS_PX_TO_WORLD,
+            h: h * ATLAS_PX_TO_WORLD,
+            found: true,
+        }
+    }
+}
 
 /// Owned turret draw snapshot (the `&str`/`&[DrawPartSpec]` fields of
 /// [`TurretDraw`] made `'static`).
@@ -34,6 +61,8 @@ pub struct TurretDrawInput {
     pub y: f32,
     /// Turret rotation in degrees (`tb.drawrot()`).
     pub drawrot: f32,
+    /// Raw turret rotation in degrees (`tb.rotation`; `DrawPart.params`).
+    pub rotation: f32,
     /// Recoil offset.
     pub recoil_offset: (f32, f32),
     /// Turret elevation.
@@ -87,7 +116,10 @@ impl TurretDrawInput {
             name: name.into(),
             x,
             y,
-            drawrot: state.rotation,
+            // The plan-10 draw state's `rotation` is `TurretState.rotation`
+            // (raw); `drawrot() = rotation - 90` (`Turret.java:327-329`).
+            drawrot: state.rotation - 90.0,
+            rotation: state.rotation,
             recoil_offset: (0.0, 0.0),
             elevation: 0.0,
             heat: state.heat,
@@ -114,6 +146,7 @@ impl TurretDrawInput {
             x: self.x,
             y: self.y,
             drawrot: self.drawrot,
+            rotation: self.rotation,
             recoil_offset: self.recoil_offset,
             elevation: self.elevation,
             heat: self.heat,
@@ -136,6 +169,7 @@ impl TurretDrawInput {
     /// The part params `DrawTurret.draw` would evaluate for the current state.
     pub fn part_params(&self) -> mind_core::fx::parts::PartParams {
         let mut params = mind_core::fx::parts::PartParams::default();
+        // `DrawTurret.java:101`: the raw turret rotation (`tb.rotation`).
         params.set(
             self.warmup,
             1.0 - self.progress,
@@ -145,7 +179,7 @@ impl TurretDrawInput {
             self.charge,
             self.x + self.recoil_offset.0,
             self.y + self.recoil_offset.1,
-            self.drawrot,
+            self.rotation,
         );
         params
     }
