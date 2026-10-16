@@ -3052,7 +3052,14 @@ impl MindCampaign {
             return GString::from("{}");
         };
         let unlocked_override = !self.session.is_campaign() && self.session.phase.is_game();
-        let view = mind_core::ui::database::database_view(registry, unlocked_override);
+        // `Block.isBanned()`: `state.isGame() && rules.bannedBlocks.contains`
+        // (`DatabaseDialog.rebuild` draws the cross and sorts banned last).
+        let banned = self
+            .session
+            .phase
+            .is_game()
+            .then_some(&self.session.rules.banned_blocks);
+        let view = mind_core::ui::database::database_view(registry, unlocked_override, banned);
         GString::from(
             serde_json::to_string(&view)
                 .unwrap_or_else(|_| String::from("{}"))
