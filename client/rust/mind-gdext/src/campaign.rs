@@ -5722,6 +5722,19 @@ fn apply_loaded_meta(session: &mut PlaySession, meta: &SaveMeta) {
 }
 
 /// Sanitizes a save-slot name into a file stem (alphanumerics, `-`, `_`).
+///
+/// **Deviation (J01 T6, kept deliberately).** Java slots are numeric files:
+/// `Saves.getNextSlotFile` builds `saves/<index>.msav` and the display name
+/// lives in the `save-<index>-name` setting / the meta (`Saves.java:265-271,
+/// 283-290`), previews as `previews/save_slot_<index>.png`. The port keys the
+/// file, the `save-<stem>-name`/`-autosave` settings and the preview PNG by
+/// this sanitized name — the round-I I06 flow (`save_slot("t5-preview")` ->
+/// `save_slot_t5-preview.png`) built the load/save/import/rename/export
+/// surface on stems, and `Saves::import_save` keeps imported Java saves on
+/// their numeric stems. A Java data export/import therefore round-trips by
+/// slot identity, not by file name; switching to numeric indices would churn
+/// the save/preview/settings ABI for no behavioural gain (the slot name is
+/// user data in both designs).
 fn sanitize_slot_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == '.')
