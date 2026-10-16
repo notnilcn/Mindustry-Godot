@@ -6932,6 +6932,22 @@ impl MindSimHost {
             "construct",
             &self.construct_draw(x, y).is_some().to_variant(),
         );
+        // Live building health (J04 T2 verification; debug probe only).
+        match tile.build.and_then(|entity| {
+            self.sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::health::Health>(entity)
+        }) {
+            Some(health) => {
+                d.set("health", &health.health.to_variant());
+                d.set("max_health", &health.max_health.to_variant());
+            }
+            None => {
+                d.set("health", &Variant::nil());
+                d.set("max_health", &Variant::nil());
+            }
+        }
         // `Rules.limitMapArea` play area (`World.getDarkness` border half);
         // `null` when unrestricted.
         match self.sim.grid.limit_area {

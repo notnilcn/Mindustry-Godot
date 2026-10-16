@@ -64,6 +64,118 @@ fn combustion_generator_accepts_coal_and_generates() {
     assert!(production > 0.0, "production {production}");
 }
 
+/// J04 T2 (`ConsumeItemExplode.java:30-42`): explosive fuel damages a
+/// combustion generator and fires `Trigger.blastGenerator` while
+/// `rules.reactorExplosions` is on; both stop when the rule is off.
+#[test]
+fn explosive_fuel_damages_generator_and_fires_trigger() {
+    use crate::world::blocks::power::behavior::GeneratorEnv;
+    use crate::world::blocks::power::generator::{GeneratorConfig, ItemExplodeConfig};
+
+    let mut sim = runtime_sim();
+    let generator = place(&mut sim, "combustion-generator", 5, 5);
+    // The vanilla chance is `delta * 0.06 * clamp(1.2 - 0.5)` (~4%/tick);
+    // force the roll so this test is deterministic.
+    sim.ecs
+        .0
+        .get_mut::<GeneratorConfig>(generator)
+        .expect("generator config")
+        .explode_items = Some(ItemExplodeConfig {
+        base_chance: 600.0,
+        ..ItemExplodeConfig::default()
+    });
+    let blast = item(&sim, "blast-compound");
+    sim.ecs
+        .0
+        .get_mut::<crate::world::modules::ItemModule>(generator)
+        .expect("item module")
+        .add(blast, 20, i32::MAX);
+    let health = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Health>(generator)
+            .map(|health| health.health)
+            .unwrap_or(0.0)
+    };
+    let before = health(&sim);
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        health(&sim) < before,
+        "explosive fuel damaged the generator ({before} -> {})",
+        health(&sim)
+    );
+    assert!(
+        sim.triggers.fire_count(crate::sim::Trigger::BlastGenerator) > 0,
+        "Trigger.blastGenerator fired"
+    );
+
+    // `Rules.reactorExplosions = false` -> the consumer is inert.
+    sim.ecs.0.insert_resource(GeneratorEnv {
+        reactor_explosions: false,
+        ..GeneratorEnv::default()
+    });
+    let frozen = health(&sim);
+    let fired = sim.triggers.fire_count(crate::sim::Trigger::BlastGenerator);
+    for _ in 0..10 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(health(&sim), frozen, "no damage with the rule off");
+    assert_eq!(
+        sim.triggers.fire_count(crate::sim::Trigger::BlastGenerator),
+        fired,
+        "no trigger with the rule off"
+    );
+}
+
+/// J04 T2 (`ConsumeGenerator.java:126-131`, `Blocks.java:2538`):
+/// `itemDurationMultipliers` scale the burn time - pyratite burns 3x longer
+/// than coal in a combustion generator.
+#[test]
+fn item_duration_multipliers_scale_burn_time() {
+    use crate::world::blocks::power::generator::GeneratorConfig;
+
+    let burn_ticks = |name: &str| -> i64 {
+        let mut sim = runtime_sim();
+        let generator = place(&mut sim, "combustion-generator", 5, 5);
+        // Isolate the duration multiplier from the T2 explosive consumer.
+        sim.ecs
+            .0
+            .get_mut::<GeneratorConfig>(generator)
+            .expect("generator config")
+            .explode_items = None;
+        let fuel = item(&sim, name);
+        sim.ecs
+            .0
+            .get_mut::<crate::world::modules::ItemModule>(generator)
+            .expect("item module")
+            .add(fuel, 2, i32::MAX);
+        let mut first: Option<i64> = None;
+        for tick in 1..=1500i64 {
+            sim.tick().expect("tick");
+            let left = stored_item(&sim, generator, fuel);
+            if first.is_none() && left == 1 {
+                first = Some(tick);
+            } else if let (Some(first), 0) = (first, left) {
+                return tick - first;
+            }
+        }
+        panic!("`{name}` was not fully consumed");
+    };
+
+    let coal = burn_ticks("coal");
+    let pyratite = burn_ticks("pyratite");
+    assert!(
+        (coal - 120).abs() <= 2,
+        "coal burns for {coal} ticks (itemDuration 120)"
+    );
+    assert!(
+        (pyratite - 360).abs() <= 2,
+        "pyratite burns for {pyratite} ticks (120 x 3)"
+    );
+}
+
 fn liquid(sim: &Sim, name: &str) -> crate::content::LiquidId {
     sim.block_runtime()
         .expect("runtime")

@@ -82,6 +82,42 @@ pub enum GeneratorFilter {
     },
 }
 
+/// `ConsumeItemExplode` (`world/consumers/ConsumeItemExplode.java:21-44`):
+/// while `rules.reactorExplosions` is on, an item with
+/// `explosiveness >= threshold` inside the building damages it (`damage`) with
+/// chance `delta * baseChance * clamp(explosiveness - threshold)` and fires
+/// `Trigger.blastGenerator`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemExplodeConfig {
+    /// `ConsumeItemExplode.threshold` (`filter: item.explosiveness >= threshold`).
+    pub threshold: f32,
+    /// `ConsumeItemExplode.damage` (applied to the building's health).
+    pub damage: f32,
+    /// `ConsumeItemExplode.baseChance`.
+    pub base_chance: f32,
+}
+
+impl Default for ItemExplodeConfig {
+    fn default() -> Self {
+        // `ConsumeItemExplode` defaults: threshold 0.5, damage 4, chance 0.06.
+        Self {
+            threshold: 0.5,
+            damage: 4.0,
+            base_chance: 0.06,
+        }
+    }
+}
+
+impl ItemExplodeConfig {
+    /// `Mathf.chance(delta * baseChance * Mathf.clamp(explosiveness - threshold))`
+    /// (`ConsumeItemExplode.java:34`). The port's fixed step uses `delta` in
+    /// ticks (1 per tick), so the per-tick probability matches Java's per-frame
+    /// rate at 60 fps.
+    pub fn chance(&self, delta: f32, explosiveness: f32) -> f32 {
+        (delta * self.base_chance * (explosiveness - self.threshold).clamp(0.0, 1.0)).max(0.0)
+    }
+}
+
 /// Generator knobs (`PowerGenerator`/`ConsumeGenerator` fields).
 #[derive(Debug, Clone, PartialEq, Component)]
 pub struct GeneratorConfig {
@@ -99,6 +135,12 @@ pub struct GeneratorConfig {
     pub filter_item: Option<GeneratorFilter>,
     /// `consume(new ConsumeLiquidFlammable(..))` present.
     pub filter_liquid: Option<GeneratorFilter>,
+    /// `consume(new ConsumeItemExplode())` present (combustion/steam
+    /// generators, `Blocks.java:2537,2571`).
+    pub explode_items: Option<ItemExplodeConfig>,
+    /// `ConsumeGenerator.itemDurationMultipliers` (pyratite x3 in the
+    /// combustion/steam generators, phase fabric x15 in the RTG).
+    pub item_duration_multipliers: Vec<(ItemId, f32)>,
     /// Items consumed by `consume()` each `itemDuration` (`ConsumeItems.trigger`)
     /// for blocks whose item consumer is lowered generically.
     pub trigger_items: Vec<(ItemId, i32)>,
@@ -122,6 +164,8 @@ impl Default for GeneratorConfig {
             explode_on_full: false,
             filter_item: None,
             filter_liquid: None,
+            explode_items: None,
+            item_duration_multipliers: Vec::new(),
             trigger_items: Vec::new(),
             liquid_capacity: 0.0,
             explosion_min_warmup: 0.0,
@@ -190,6 +234,31 @@ pub fn liquid_flammabilities(content: &ContentRegistry) -> Vec<f32> {
         .iter()
         .map(|liquid| liquid.flammability)
         .collect()
+}
+
+/// Item explosiveness indexed by `ItemId` (content order), for
+/// `ConsumeItemExplode` (`ConsumeItemExplode.java:26`).
+pub fn item_explosiveness(content: &ContentRegistry) -> Vec<f32> {
+    content
+        .items()
+        .iter()
+        .map(|item| item.explosiveness)
+        .collect()
+}
+
+/// `ConsumeItemFilter.getConsumed` (`ConsumeItemFilter.java:61-72`) for the
+/// `ConsumeItemExplode` filter: the lowest-id stored item with
+/// `explosiveness >= threshold`.
+pub fn first_explosive_item(
+    module: &ItemModule,
+    explosiveness: &[f32],
+    threshold: f32,
+) -> Option<ItemId> {
+    explosiveness
+        .iter()
+        .enumerate()
+        .find(|(index, value)| module.get(ItemId::new(*index as u16)) > 0 && **value >= threshold)
+        .map(|(index, _)| ItemId::new(index as u16))
 }
 
 /// First item in ascending id order accepted by `filter` and stored, with its
@@ -509,6 +578,24 @@ pub fn update_generator_with(
     let production_efficiency = efficiency * state.efficiency_multiplier;
     state.production_efficiency = production_efficiency;
     state.total_time += state.warmup * delta;
+
+    // `ConsumeGeneratorBuild.updateTile`: while a filtered item is present the
+    // duration multiplier follows it
+    // (`itemDurationMultiplier = itemDurationMultipliers.get(getConsumed(this), 1)`;
+    // "make sure the multiplier doesn't change when there is nothing to consume
+    // while it's still running").
+    if valid
+        && !config.item_duration_multipliers.is_empty()
+        && let (Some(filter), Some(module)) =
+            (config.filter_item.as_ref(), item_module(world, entity))
+        && let Some(item) = any_filtered_item(filter, module, item_flammability, item_radioactivity)
+    {
+        state.item_duration_multiplier = config
+            .item_duration_multipliers
+            .iter()
+            .find(|(entry, _)| *entry == item)
+            .map_or(1.0, |(_, multiplier)| *multiplier);
+    }
 
     // Take in items periodically (`hasItems && valid && generateTime <= 0`).
     if valid && state.generate_time <= 0.0 {

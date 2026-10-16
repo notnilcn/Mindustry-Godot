@@ -41,8 +41,8 @@ use crate::world::blocks::heat::HeatState;
 use crate::world::blocks::power::PowerProduction;
 use crate::world::blocks::power::explosion::{ReactorExplosion, fire_explosion};
 use crate::world::blocks::power::generator::{
-    GeneratorConfig, GeneratorFilter, GeneratorState, item_flammabilities, item_radioactivities,
-    liquid_flammabilities, reactor_explosions_enabled, set_direct_production,
+    GeneratorConfig, GeneratorFilter, GeneratorState, ItemExplodeConfig, item_flammabilities,
+    item_radioactivities, liquid_flammabilities, reactor_explosions_enabled, set_direct_production,
     update_generator_with,
 };
 use crate::world::blocks::power::reactors::{
@@ -1203,6 +1203,10 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         power_production: 1.0,
         item_duration: 120.0,
         filter_item: Some(flammable.clone()),
+        // `Blocks.java:2537-2538`: `consume(new ConsumeItemExplode())` and
+        // `itemDurationMultipliers.put(Items.pyratite, 3f)`.
+        explode_items: Some(ItemExplodeConfig::default()),
+        item_duration_multipliers: vec![(content.item_id("pyratite").unwrap_or_default(), 3.0)],
         ..GeneratorConfig::default()
     });
     registry.register_named("combustion-generator", Arc::new(combustion));
@@ -1212,6 +1216,9 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         power_production: 5.5,
         item_duration: 90.0,
         filter_item: Some(flammable.clone()),
+        // `Blocks.java:2570-2572`: `ConsumeItemExplode` + pyratite x3.
+        explode_items: Some(ItemExplodeConfig::default()),
+        item_duration_multipliers: vec![(content.item_id("pyratite").unwrap_or_default(), 3.0)],
         liquid_capacity: content
             .block_id("steam-generator")
             .and_then(|id| content.block(id))
@@ -1235,6 +1242,12 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         power_production: 4.5,
         item_duration: 840.0,
         filter_item: Some(GeneratorFilter::ItemRadioactive { min: 0.2 }),
+        // `Blocks.java:2614`: `itemDurationMultipliers.put(Items.phaseFabric,
+        // 210f / 14f)`.
+        item_duration_multipliers: vec![(
+            content.item_id("phase-fabric").unwrap_or_default(),
+            210.0 / 14.0,
+        )],
         ..GeneratorConfig::default()
     });
     registry.register_named("rtg-generator", Arc::new(rtg));

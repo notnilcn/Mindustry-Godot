@@ -1331,6 +1331,80 @@ impl Sim {
         }
     }
 
+    /// `ConsumeItemExplode.update` (`ConsumeItemExplode.java:30-42`): an
+    /// explosive item (`explosiveness >= threshold`) stored in a generator
+    /// damages it by `damage` (4) with chance
+    /// `build.delta() * baseChance * clamp(explosiveness - threshold)` and
+    /// fires `Trigger.blastGenerator`, only while `rules.reactorExplosions`
+    /// (`Blocks.java:2537,2571` use both consumers).
+    pub(crate) fn update_item_explode_consumers(&mut self) {
+        use crate::world::blocks::power::generator::{
+            GeneratorConfig, first_explosive_item, item_explosiveness, reactor_explosions_enabled,
+        };
+
+        if !reactor_explosions_enabled(&self.ecs.0) {
+            return;
+        }
+        // Collect candidates first: the body mutates health, draws RNG and
+        // fires the trigger.
+        let candidates: Vec<(
+            Entity,
+            crate::world::blocks::power::generator::ItemExplodeConfig,
+        )> = {
+            let mut query = self.ecs.0.query::<(Entity, &GeneratorConfig)>();
+            query
+                .iter(&self.ecs.0)
+                .filter_map(|(entity, config)| config.explode_items.map(|config| (entity, config)))
+                .collect()
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        let Some(runtime) = self.block_runtime() else {
+            return;
+        };
+        let explosiveness = item_explosiveness(runtime.content());
+        for (entity, explode) in candidates {
+            // `Building.updateConsumption` runs `updateConsumers` only while
+            // enabled with `shouldConsume() && productionValid()` and
+            // `efficiency > 0` (`Building.java:2166-2204`); the generator's
+            // same-tick efficiency comes from `update_generator_with`.
+            let (enabled, efficiency) = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Building>(entity)
+                .map(|building| (building.enabled, building.efficiency))
+                .unwrap_or((false, 0.0));
+            if !enabled || efficiency <= 0.0 {
+                continue;
+            }
+            let Some(module) = self.ecs.0.get::<ItemModule>(entity) else {
+                continue;
+            };
+            let Some(item) = first_explosive_item(module, &explosiveness, explode.threshold) else {
+                continue;
+            };
+            let value = explosiveness.get(item.index()).copied().unwrap_or(0.0);
+            let delta = crate::world::update::delta(&self.ecs.0, entity);
+            let chance = explode.chance(delta, value);
+            // `Mathf.chance(d)`: `d >= 1f || rand.nextFloat() < d`.
+            let fired = chance >= 1.0
+                || self
+                    .rng_streams
+                    .chance(crate::determinism::RngStream::Sim, chance as f64);
+            if !fired {
+                continue;
+            }
+            if let Some(mut health) = self.ecs.0.get_mut::<crate::entities::comp::Health>(entity) {
+                health.health -= explode.damage;
+            }
+            // `Fx.generatespark.at(...)` is view-only (no generator-effect
+            // seam yet; the damage and the trigger are the sim-visible halves).
+            self.triggers
+                .fire(super::Trigger::BlastGenerator, &mut self.ecs.0);
+        }
+    }
+
     /// `BeamNode.updateTile` -> `updateDirections` (T15): rebuilds the four
     /// directional links of every registered beam node whose
     /// `WorldGrid.tile_changes` view is stale.
