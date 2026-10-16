@@ -236,6 +236,166 @@ impl UnitRenderer {
                     sprites += 1;
                 }
             }
+            // `drawLegs` (`UnitType.java:1826-1904`): the plan-17 leg op list
+            // (front-first feet/joints, upper+lower leg lines, base joints,
+            // base) emitted at `z - 0.02`, under the soft shadow and body.
+            if let Some(legs_draw) = &unit.legs {
+                let foot = self.resolver.find(&format!("{}-foot", unit.name));
+                let leg_region = self.resolver.find(&format!("{}-leg", unit.name));
+                let leg_base = self
+                    .resolver
+                    .find(&format!("{}-leg-base", unit.name))
+                    .or_else(|| leg_region.clone());
+                let joint = self.resolver.find(&format!("{}-joint", unit.name));
+                let base_joint = self.resolver.find(&format!("{}-joint-base", unit.name));
+                let base = self.resolver.find(&format!("{}-base", unit.name));
+                let found = mind_core::render::unit_draw::LegRegions {
+                    foot: foot.is_some(),
+                    leg: leg_region.is_some(),
+                    leg_base: leg_base.is_some(),
+                    joint: joint.is_some(),
+                    base_joint: base_joint.is_some(),
+                    base: base.is_some(),
+                };
+                let params = mind_core::render::unit_draw::LegsDrawParams {
+                    x: unit.x,
+                    y: unit.y,
+                    base_rotation: legs_draw.base_rotation,
+                    inv_drown: legs_draw.inv_drown,
+                    legs: legs_draw.legs.clone(),
+                    leg_base_offset: legs_draw.leg_base_offset,
+                    leg_straightness: legs_draw.leg_straightness,
+                    base_leg_straightness: legs_draw.base_leg_straightness,
+                    leg_straight_length: legs_draw.leg_straight_length,
+                    leg_extension: legs_draw.leg_extension,
+                    leg_base_under: legs_draw.leg_base_under,
+                    shadow_elevation: legs_draw.shadow_elevation,
+                    shadow_tx: -12.0,
+                    shadow_ty: -13.0,
+                    sprite_scale: self.sprite_scale,
+                    foot_w: foot.as_ref().map(|r| r.w).unwrap_or(0.0),
+                    leg_h: leg_region.as_ref().map(|r| r.h).unwrap_or(0.0),
+                    leg_base_h: leg_base.as_ref().map(|r| r.h).unwrap_or(0.0),
+                    found,
+                };
+                for op in mind_core::render::unit_draw::leg_draw_ops(&params) {
+                    use mind_core::render::unit_draw::{LegOp, LegSprite};
+                    let (region, quad) = match &op {
+                        LegOp::FootShadow {
+                            x,
+                            y,
+                            radius,
+                            alpha,
+                        } => {
+                            let Some(region) = self.resolver.find("circle-shadow") else {
+                                continue;
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: *x,
+                                    cy: *y,
+                                    w: *radius,
+                                    h: *radius,
+                                    rot: 0.0,
+                                    uv: region.uv,
+                                    // `Pal.shadow` color at `0.4 * invDrown`.
+                                    color: (0.4 * alpha * 255.0) as u32,
+                                },
+                            )
+                        }
+                        LegOp::Rect { sprite, x, y, rot } => {
+                            let region = match sprite {
+                                LegSprite::Foot => foot.clone(),
+                                LegSprite::Leg => leg_region.clone(),
+                                LegSprite::LegBase => leg_base.clone(),
+                                LegSprite::Joint => joint.clone(),
+                                LegSprite::BaseJoint => base_joint.clone(),
+                                LegSprite::Base => base.clone(),
+                            };
+                            let Some(region) = region else {
+                                continue;
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: *x,
+                                    cy: *y,
+                                    w: region.w * self.sprite_scale,
+                                    h: region.h * self.sprite_scale,
+                                    rot: *rot,
+                                    uv: region.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            )
+                        }
+                        LegOp::Line {
+                            sprite,
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            stroke,
+                        } => {
+                            let region = match sprite {
+                                LegSprite::Leg => leg_region.clone(),
+                                LegSprite::LegBase => leg_base.clone(),
+                                _ => None,
+                            };
+                            let Some(region) = region else {
+                                continue;
+                            };
+                            let len = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
+                            if len <= 1e-6 {
+                                continue;
+                            }
+                            // `Lines.line` maps the region's width along the
+                            // segment and its height across it; a negative
+                            // stroke mirrors the sprite (`Lines.java:108-131`).
+                            let [u0, v0, u1, v1] = region.uv;
+                            let uv = if *stroke < 0.0 {
+                                [u0, v1, u1, v0]
+                            } else {
+                                [u0, v0, u1, v1]
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: (x1 + x2) / 2.0,
+                                    cy: (y1 + y2) / 2.0,
+                                    w: len,
+                                    h: stroke.abs(),
+                                    rot: (y2 - y1).atan2(x2 - x1).to_degrees(),
+                                    uv,
+                                    color: 0xffff_ffff,
+                                },
+                            )
+                        }
+                        LegOp::Base { x, y, rot } => {
+                            let Some(region) = base.clone() else {
+                                continue;
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: *x,
+                                    cy: *y,
+                                    w: region.w * self.sprite_scale,
+                                    h: region.h * self.sprite_scale,
+                                    rot: *rot,
+                                    uv: region.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            )
+                        }
+                    };
+                    let entry = groups
+                        .entry((bucket, region.page))
+                        .or_insert((region.texture.clone(), Vec::new()));
+                    entry.1.push(quad);
+                    sprites += 1;
+                }
+            }
             // `drawSoftShadow`: `max(region.w, region.h) * region.scl() *
             // softShadowScl * 1.6`, colour `(0,0,0,0.4)`. Java draws it at
             // `z - 0.01`, *over* the legs (`z - 0.02`) and under the body.

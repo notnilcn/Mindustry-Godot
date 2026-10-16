@@ -161,6 +161,294 @@ pub fn flying_shadow_offset(elevation: f32) -> (f32, f32) {
     (-12.0 * e, -13.0 * e)
 }
 
+// ---- `UnitType.drawLegs` (J03 T4) ----
+
+use crate::entities::comp::unit::legs::leg_offset;
+
+/// One leg's live endpoints (`LegsComp.Leg`; the port's `Leg` names the hip
+/// anchor `base`, which is Java's *foot* — see [`leg_draw_ops`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LegDrawLeg {
+    /// Foot (Java `Leg.base`).
+    pub foot: (f32, f32),
+    /// Knee (Java `Leg.joint`).
+    pub joint: (f32, f32),
+    /// Whether the leg is mid-step (`Leg.moving`).
+    pub moving: bool,
+    /// Step progress (`Leg.stage`; the port tracks it in `Leg.step`).
+    pub stage: f32,
+}
+
+/// Which resolved sprite a [`LegOp`] uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LegSprite {
+    /// `footRegion` (`<name>-foot`).
+    Foot,
+    /// `legRegion` (`<name>-leg`): the upper leg.
+    Leg,
+    /// `legBaseRegion` (`<name>-leg-base` else `<name>-leg`): the lower leg.
+    LegBase,
+    /// `jointRegion` (`<name>-joint`).
+    Joint,
+    /// `baseJointRegion` (`<name>-joint-base`).
+    BaseJoint,
+    /// `baseRegion` (`<name>-base`).
+    Base,
+}
+
+/// One `drawLegs` op, in Java emission order (world space, world units).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LegOp {
+    /// `Drawf.shadow(x, y, ssize, invDrown)` — the radial circle shadow.
+    FootShadow {
+        /// Center x.
+        x: f32,
+        /// Center y.
+        y: f32,
+        /// `ssize` (the shadow quad size).
+        radius: f32,
+        /// `invDrown` alpha factor.
+        alpha: f32,
+    },
+    /// `Draw.rect(region, x, y, rot)`.
+    Rect {
+        /// Which sprite.
+        sprite: LegSprite,
+        /// Center x.
+        x: f32,
+        /// Center y.
+        y: f32,
+        /// Rotation in degrees.
+        rot: f32,
+    },
+    /// `Lines.line(region, x1, y1, x2, y2, false)`: the sprite's width is
+    /// stretched along the segment; `stroke` may be negative (the back half of
+    /// the legs mirrors the sprite, `Mathf.sign(flip)`).
+    Line {
+        /// Which sprite (`Leg` or `LegBase`).
+        sprite: LegSprite,
+        /// Segment start x.
+        x1: f32,
+        /// Segment start y.
+        y1: f32,
+        /// Segment end x.
+        x2: f32,
+        /// Segment end y.
+        y2: f32,
+        /// Stroke thickness (signed: negative mirrors the sprite).
+        stroke: f32,
+    },
+    /// `baseRegion` (`<name>-base`) under the body.
+    Base {
+        /// Center x.
+        x: f32,
+        /// Center y.
+        y: f32,
+        /// Rotation in degrees (`baseRotation - 90`).
+        rot: f32,
+    },
+}
+
+/// Region presence for the leg sprites (`region.found()` gates in Java).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct LegRegions {
+    /// `footRegion.found()`.
+    pub foot: bool,
+    /// `legRegion.found()`.
+    pub leg: bool,
+    /// `legBaseRegion.found()`.
+    pub leg_base: bool,
+    /// `jointRegion.found()`.
+    pub joint: bool,
+    /// `baseJointRegion.found()`.
+    pub base_joint: bool,
+    /// `baseRegion.found()`.
+    pub base: bool,
+}
+
+/// Inputs of one `UnitType.drawLegs` evaluation (`UnitType.java:1826-1904`).
+#[derive(Debug, Clone)]
+pub struct LegsDrawParams {
+    /// Unit center x.
+    pub x: f32,
+    /// Unit center y.
+    pub y: f32,
+    /// `LegsComp.baseRotation` (`unit.baseRotation()`).
+    pub base_rotation: f32,
+    /// `1 - drownTime` (the port has no drowning yet: 1).
+    pub inv_drown: f32,
+    /// Live legs in index order.
+    pub legs: Vec<LegDrawLeg>,
+    /// `legBaseOffset`.
+    pub leg_base_offset: f32,
+    /// `legStraightness`.
+    pub leg_straightness: f32,
+    /// `baseLegStraightness`.
+    pub base_leg_straightness: f32,
+    /// `legStraightLength`.
+    pub leg_straight_length: f32,
+    /// `legExtension`.
+    pub leg_extension: f32,
+    /// `legBaseUnder`: the lower-leg line draws before the upper one.
+    pub leg_base_under: bool,
+    /// `shadowElevation` (`0` = off).
+    pub shadow_elevation: f32,
+    /// `shadowTX * shadowElevation` world offset per elevation unit
+    /// (`UnitType.shadowTX = -12`).
+    pub shadow_tx: f32,
+    /// `shadowTY = -13`.
+    pub shadow_ty: f32,
+    /// `spriteScale` (`region.scl()`): atlas pixels → world units.
+    pub sprite_scale: f32,
+    /// Resolved region sizes in atlas pixels: `(foot w, leg h, legBase h)`.
+    pub foot_w: f32,
+    /// `legRegion.height`.
+    pub leg_h: f32,
+    /// `legBaseRegion.height`.
+    pub leg_base_h: f32,
+    /// Which regions are found.
+    pub found: LegRegions,
+}
+
+/// Pure port of `UnitType.drawLegs` (`UnitType.java:1826-1904`), in Java draw
+/// order: the front-first `j` loop (feet shadows, feet, both leg lines,
+/// joints), then the base joints for every leg, then the base.
+pub fn leg_draw_ops(p: &LegsDrawParams) -> Vec<LegOp> {
+    let mut ops = Vec::new();
+    let n = p.legs.len();
+    let ssize = p.foot_w * p.sprite_scale * 1.5;
+
+    if p.found.foot {
+        for leg in &p.legs {
+            ops.push(LegOp::FootShadow {
+                x: leg.foot.0,
+                y: leg.foot.1,
+                radius: ssize,
+                alpha: p.inv_drown,
+            });
+        }
+    }
+
+    // legs are drawn front first
+    for j in (0..n).rev() {
+        let i = if j % 2 == 0 { j / 2 } else { n - 1 - j / 2 };
+        let leg = p.legs[i];
+        let flips = if (i as f32) >= n as f32 / 2.0 {
+            -1.0
+        } else {
+            1.0
+        };
+        let (hip_x, hip_y) = leg_offset(
+            p.base_rotation,
+            n,
+            i,
+            p.leg_base_offset,
+            p.leg_straightness,
+            p.base_leg_straightness,
+            p.leg_straight_length,
+        );
+        let (position_x, position_y) = (p.x + hip_x, p.y + hip_y);
+        // `Tmp.v1.set(leg.base).sub(leg.joint).inv().setLength(legExtension)`:
+        // from the joint away from the foot by `legExtension`.
+        let (fx, fy) = leg.foot;
+        let (jx, jy) = leg.joint;
+        let (dx, dy) = (jx - fx, jy - fy);
+        let len = (dx * dx + dy * dy).sqrt().max(1e-6);
+        let (v1x, v1y) = (dx / len * p.leg_extension, dy / len * p.leg_extension);
+
+        if p.found.foot && leg.moving && p.shadow_elevation > 0.0 {
+            let scl = p.shadow_elevation * p.inv_drown;
+            // `Mathf.slope(1 - stage) = 1 - |(1-stage) - 0.5| * 2`.
+            let stage = 1.0 - leg.stage;
+            let elev = (1.0 - (stage - 0.5).abs() * 2.0) * scl;
+            ops.push(LegOp::Rect {
+                sprite: LegSprite::Foot,
+                x: fx + p.shadow_tx * elev,
+                y: fy + p.shadow_ty * elev,
+                rot: ang_deg(position_x, position_y, fx, fy),
+            });
+        }
+
+        if p.found.foot {
+            ops.push(LegOp::Rect {
+                sprite: LegSprite::Foot,
+                x: fx,
+                y: fy,
+                rot: ang_deg(position_x, position_y, fx, fy),
+            });
+        }
+
+        let upper = LegOp::Line {
+            sprite: LegSprite::Leg,
+            x1: position_x,
+            y1: position_y,
+            x2: jx,
+            y2: jy,
+            stroke: p.leg_h * p.sprite_scale * flips,
+        };
+        let lower = LegOp::Line {
+            sprite: LegSprite::LegBase,
+            x1: jx + v1x,
+            y1: jy + v1y,
+            x2: fx,
+            y2: fy,
+            stroke: p.leg_base_h * p.sprite_scale * flips,
+        };
+        if p.leg_base_under {
+            ops.push(lower);
+            ops.push(upper);
+        } else {
+            ops.push(upper);
+            ops.push(lower);
+        }
+
+        if p.found.joint {
+            ops.push(LegOp::Rect {
+                sprite: LegSprite::Joint,
+                x: jx,
+                y: jy,
+                rot: 0.0,
+            });
+        }
+    }
+
+    // base joints are drawn after everything else
+    if p.found.base_joint {
+        for j in (0..n).rev() {
+            let i = if j % 2 == 0 { j / 2 } else { n - 1 - j / 2 };
+            let (hip_x, hip_y) = leg_offset(
+                p.base_rotation,
+                n,
+                i,
+                p.leg_base_offset,
+                p.leg_straightness,
+                p.base_leg_straightness,
+                p.leg_straight_length,
+            );
+            ops.push(LegOp::Rect {
+                sprite: LegSprite::BaseJoint,
+                x: p.x + hip_x,
+                y: p.y + hip_y,
+                rot: p.base_rotation,
+            });
+        }
+    }
+
+    if p.found.base {
+        ops.push(LegOp::Base {
+            x: p.x,
+            y: p.y,
+            rot: p.base_rotation - 90.0,
+        });
+    }
+    ops
+}
+
+/// `Mathf.angle(x1, y1, x2, y2)` in degrees.
+fn ang_deg(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
+    (y2 - y1).atan2(x2 - x1).to_degrees()
+}
+
 /// One unit's view-only state (G03 T5; the port has no sim `hitTime`/`itemTime`).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnitViewState {
@@ -377,6 +665,7 @@ pub fn mine_beam_color(time: f32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::entities::comp::unit::legs::default_leg_angle;
 
     /// `drawShadow` offsets the silhouette down-left by `(-12, -13) * e`
     /// (`UnitType.java:44,1652-1654`).
@@ -443,6 +732,184 @@ mod tests {
             weapon_mount_transform(100.0, 200.0, 90.0, 4.0, 0.0, true, -90.0, 0.0, 0.0);
         assert!((wx - 104.0).abs() < 1e-4 && (wy - 200.0).abs() < 1e-4);
         assert!((wr + 90.0).abs() < 1e-4);
+    }
+
+    /// J03 T4: `UnitType.drawLegs` (`UnitType.java:1826-1904`) — hip anchors
+    /// from `legOffset`/`defaultLegAngle`, front-first draw order for 4 legs,
+    /// and the base joints + base after every leg.
+    #[test]
+    fn leg_draw_ops_follow_java_order_and_geometry() {
+        let params = |legs: Vec<LegDrawLeg>| LegsDrawParams {
+            x: 100.0,
+            y: 200.0,
+            base_rotation: 90.0,
+            inv_drown: 1.0,
+            legs,
+            leg_base_offset: 8.0,
+            leg_straightness: 0.0,
+            base_leg_straightness: 0.0,
+            leg_straight_length: 0.0,
+            leg_extension: 2.0,
+            leg_base_under: false,
+            shadow_elevation: 0.0,
+            shadow_tx: -12.0,
+            shadow_ty: -13.0,
+            sprite_scale: 0.25,
+            foot_w: 16.0,
+            leg_h: 8.0,
+            leg_base_h: 8.0,
+            found: LegRegions {
+                foot: true,
+                leg: true,
+                leg_base: true,
+                joint: true,
+                base_joint: true,
+                base: true,
+            },
+        };
+        // Four legs, feet planted at the `defaultLegAngle` directions from the
+        // hip (baseRotation 90 = +y; index 0 -> 90+90+45 = 225 deg, ...).
+        let legs: Vec<LegDrawLeg> = (0..4)
+            .map(|index| {
+                let angle = default_leg_angle(90.0, 4, index);
+                let (ox, oy) = leg_offset(90.0, 4, index, 8.0, 0.0, 0.0, 0.0);
+                let (fx, fy) = trns(angle, 8.0, 0.0);
+                LegDrawLeg {
+                    foot: (100.0 + ox + fx, 200.0 + oy + fy),
+                    joint: (100.0 + ox + fx * 0.5, 200.0 + oy + fy * 0.5),
+                    moving: false,
+                    stage: 0.0,
+                }
+            })
+            .collect();
+        let ops = leg_draw_ops(&params(legs.clone()));
+
+        // `defaultLegAngle` = baseRotation + 90 * index + 45.
+        assert!((default_leg_angle(90.0, 4, 0) - 135.0).abs() < 1e-4);
+        assert!((default_leg_angle(90.0, 4, 3) - 405.0).abs() < 1e-4);
+        // Hip offset at `legBaseOffset` along the leg angle: index 0 at
+        // 135 deg -> (-5.66, +5.66).
+        let (hx, hy) = leg_offset(90.0, 4, 0, 8.0, 0.0, 0.0, 0.0);
+        assert!((hx + 5.6568).abs() < 1e-3 && (hy - 5.6568).abs() < 1e-3);
+
+        // Op sequence: 4 foot shadows, then per leg (front first: 2, 1, 3, 0)
+        // foot + upper line + lower line + joint, then 4 base joints, then base.
+        assert_eq!(ops.len(), 4 + 4 * 4 + 4 + 1);
+        assert!(matches!(ops[0], LegOp::FootShadow { .. }));
+        assert!(matches!(ops[3], LegOp::FootShadow { .. }));
+        // Java's j loop order for n=4: i = 2, 1, 3, 0.
+        let rects: Vec<&LegOp> = ops
+            .iter()
+            .filter(|op| {
+                matches!(
+                    op,
+                    LegOp::Rect {
+                        sprite: LegSprite::Foot,
+                        ..
+                    }
+                )
+            })
+            .collect();
+        assert_eq!(rects.len(), 4);
+        let order: Vec<(f32, f32)> = rects
+            .iter()
+            .map(|op| match op {
+                LegOp::Rect { x, y, .. } => (*x, *y),
+                _ => unreachable!(),
+            })
+            .collect();
+        // i=2 first: angle 90 + 180 + 45 = 315 deg.
+        let (fx2, fy2) = trns(315.0, 8.0, 0.0);
+        let (hx2, hy2) = leg_offset(90.0, 4, 2, 8.0, 0.0, 0.0, 0.0);
+        assert!((order[0].0 - (100.0 + hx2 + fx2)).abs() < 1e-3);
+        assert!((order[0].1 - (200.0 + hy2 + fy2)).abs() < 1e-3);
+        // Back-half legs mirror the line stroke (`Mathf.sign(flip)`).
+        let lines: Vec<f32> = ops
+            .iter()
+            .filter_map(|op| match op {
+                LegOp::Line { stroke, .. } => Some(*stroke),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines.len(), 8);
+        assert_eq!(lines.iter().filter(|s| **s > 0.0).count(), 4);
+        assert_eq!(lines.iter().filter(|s| **s < 0.0).count(), 4);
+        assert!(
+            (lines[0].abs() - 2.0).abs() < 1e-4,
+            "legRegion.height * scl"
+        );
+
+        // The lower leg runs from `joint + inv(joint -> foot) * legExtension`
+        // to the foot (`UnitType.java:1851`).
+        if let Some(LegOp::Line {
+            sprite: LegSprite::LegBase,
+            x1,
+            y1,
+            x2,
+            y2,
+            ..
+        }) = ops.iter().find(|op| {
+            matches!(
+                op,
+                LegOp::Line {
+                    sprite: LegSprite::LegBase,
+                    ..
+                }
+            )
+        }) {
+            let leg = &legs[2];
+            let (dx, dy) = (leg.joint.0 - leg.foot.0, leg.joint.1 - leg.foot.1);
+            let len = (dx * dx + dy * dy).sqrt();
+            assert!((x1 - (leg.joint.0 + dx / len * 2.0)).abs() < 1e-3);
+            assert!((y1 - (leg.joint.1 + dy / len * 2.0)).abs() < 1e-3);
+            assert!((x2 - leg.foot.0).abs() < 1e-3 && (y2 - leg.foot.1).abs() < 1e-3);
+        } else {
+            panic!("no lower-leg line");
+        }
+        // The base draws last at `baseRotation - 90`.
+        match ops.last() {
+            Some(LegOp::Base { rot, .. }) => assert!((rot - 0.0).abs() < 1e-4),
+            other => panic!("expected base last: {other:?}"),
+        }
+
+        // `legBaseUnder` swaps the two line ops of every leg.
+        let swapped = {
+            let mut p = params(legs.clone());
+            p.leg_base_under = true;
+            leg_draw_ops(&p)
+        };
+        // The first leg block starts after the four foot shadows:
+        // [foot, line, line, joint]. Normal: upper(Leg) then lower(LegBase).
+        let sprite_of = |ops: &[LegOp], index: usize| match &ops[index] {
+            LegOp::Line { sprite, .. } => *sprite,
+            other => panic!("expected line at {index}: {other:?}"),
+        };
+        let first_leg = 4;
+        assert_eq!(sprite_of(&ops, first_leg + 1), LegSprite::Leg);
+        assert_eq!(sprite_of(&ops, first_leg + 2), LegSprite::LegBase);
+        // `legBaseUnder`: lower first, then upper (`UnitType.java:1862-1875`).
+        assert_eq!(sprite_of(&swapped, first_leg + 1), LegSprite::LegBase);
+        assert_eq!(sprite_of(&swapped, first_leg + 2), LegSprite::Leg);
+
+        // No `foot`/`base` regions -> no shadows and no base op.
+        let missing = {
+            let mut p = params(legs);
+            p.found = LegRegions {
+                foot: false,
+                leg: true,
+                leg_base: true,
+                joint: false,
+                base_joint: false,
+                base: false,
+            };
+            leg_draw_ops(&p)
+        };
+        assert!(
+            missing
+                .iter()
+                .all(|op| !matches!(op, LegOp::FootShadow { .. } | LegOp::Base { .. }))
+        );
+        assert_eq!(missing.len(), 4 * 2, "upper+lower line per leg");
     }
 
     #[test]
