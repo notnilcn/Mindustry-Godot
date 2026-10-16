@@ -1560,7 +1560,7 @@
 "PAR-0089":{"t":"Sublimate fires with any trace of fuel and never consumes ozone/cyanogen (no liquid activation window)","s":"world","st":"fixing","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"harness: place `sublimate`, inject 1.0 ozone (below the 4-tick activation threshold), step 120 ticks and assert no beam and no liquid drain","path":{"java":"s239","godot":"s240"},"conf":"k60","rep":{"java":"s241","godot":"s242","compare":"s243"}},
 "PAR-0090":{"t":"Save/load drops all fires and puddles: no entity save path reaches their codecs","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"headless io round-trip: create a fire and a puddle in the live world, save through SimIoHandler, load, assert both survive","path":{"java":"s244","godot":"s245"},"conf":"k61","rep":{"java":"s246","godot":"s247","compare":"s248"}},
 "PAR-0091":{"t":"Deposited puddles never react, evaporate or apply status: no live fire/puddle update system runs","s":"world","st":"verified","u":"2026-10-15","run":"runs/20261014-s3-H09-T6/","to":"in-engine: let an `atrax` (or any liquid bullet) hit a building, then watch the slag puddle for 300 ticks","path":{"java":"s249","godot":"s250"},"conf":"k62","rep":{"java":"s251","godot":"s252"}},
-"PAR-0092":{"t":"Unit factories, reconstructors and payload blocks cannot be configured: the panel is empty or lists unrelated items","s":"hud","st":"verified","u":"2026-10-12T22:00:00+10:00","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client, campaign or custom game: place a ground-factory / additive-reconstructor / constructor / payload-router / payload-source (sandbox) and left-tap it with no block selected.","rep":{"java":"s253","godot":"s254","compare":"s255"}},
+"PAR-0092":{"t":"Unit factories, reconstructors and payload blocks cannot be configured: the panel is empty or lists unrelated items","s":"hud","st":"verified","u":"2026-10-17","run":"runs/20261017-s4-J05-T1/","to":"Live client, campaign or custom game: place a ground-factory / additive-reconstructor / constructor / payload-router / payload-source (sandbox) and left-tap it with no block selected.","rep":{"java":"s253","godot":"s254","compare":"s255"}},
 "PAR-0093":{"t":"Message and illuminator blocks open an empty config panel: message text and light colour cannot be edited","s":"hud","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client: place a message block (custom game / editor map) or an illuminator and left-tap it.","rep":{"java":"s256","godot":"s257","compare":"s258"}},
 "PAR-0094":{"t":"Selecting a block shows no info panel: no name, hotkey, requirement/cost rows or '?' content button","s":"hud","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Live client, any game mode: select a block in the bottom-right palette and look above it (and hover any placed building with no block selected).","rep":{"java":"s259","godot":"s260","compare":"s261"}},
 "PAR-0095":{"t":"Holding Shift shows no command panel: the block palette stays and no unit/stance/command buttons appear","s":"hud","st":"verified","u":"2026-10-15","run":"runs/20261014-s3-H03-T3/","to":"Live client with player-team units: hold Shift (command mode) and drag-select, then look at the bottom-right HUD.","rep":{"java":"s262","godot":"s263","compare":"s264"}},
@@ -1846,7 +1846,9 @@
 "PAR-0375":{"t":"Load Game lists oldest-first; the pause menu never says Save & Quit (Platform::millis was not epoch ms) (6e07cd0f)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J01-T5/"},
 "PAR-0376":{"t":"Turrets always target the closest unit (no UnitSorts/minRange/trackingRange/newTargetInterval) (e5b94549)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T1/"},
 "PAR-0377":{"t":"Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)","s":"ui","st":"seeded","u":"2026-10-17"},
-"PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"seeded","u":"2026-10-17"}
+"PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"seeded","u":"2026-10-17"},
+"PAR-0379":{"t":"Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)","s":"hud","st":"seeded","u":"2026-10-17"},
+"PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -3833,7 +3835,8 @@
 "2026-10-13: G03 T5 33b95ce: mining beam, carried items, engines, trails, hit flash; mining evidence runs/20261013-s3-G03-T5 (items/engines occluded by the paused banner in the PNGs)."
 ],
 "PAR-0187":[
-"2026-10-13: G03 T6 8ff98f7: hover bars for health/power/items/liquid; core Health bar evidence runs/20261013-s3-G03-T6/core-hover.png."
+"2026-10-13: G03 T6 8ff98f7: hover bars for health/power/items/liquid; core Health bar evidence runs/20261013-s3-G03-T6/core-hover.png.",
+"2026-10-17 round J (J05 T4, 584a0e30): the twin walk showed the core's Capacity bar missing (runs/20261016-J-twin/diff/49-hovercore-side.png). BarExtras + family rows now emit core capacity (CoreBlock.java:148-152), drill drillspeed (Drill.java:117-119), HeatProducer/Conductor/Crafter heat, UnitFactory progress (:121-125) and the item/liquid removeBar families (ItemSource/LiquidSource/Unloader/DirectionalUnloader/LiquidVoid/LiquidJunction); the player-team guard was dropped (Java's hovered() shows any building). Verified with the real pointer: core Health+Capacity, drill Health/Water/Drill Speed, battery Power 0, conduit Liquid, heat heat (runs/20261017-s4-J05-T4/). Residual families seeded as PAR-0379."
 ],
 "PAR-0188":[
 "2026-10-13: G03 T8 af283f8: code+tests landed but in-engine unconfirmed (configured sorter rendered identically; suspect Configure never reaches configured()).",
@@ -4428,7 +4431,8 @@
 "PAR-0092":[
 "Code-scan 2026-10-10 (hud-world-ui): S2 high confidence - the unit/production side of the game is unconfigurable, so a factory can only ever build its default plan and a reconstructor cannot be given a command; payload rout/source selection (Erekir) is equally unreachable. This is the per-block-config half of BlockConfigFragment; the item/liquid pickers for sorters/unloaders/duct-routers do work. Distinct from the logic-scan switch/message items. In-engine verification pending.",
 "2026-10-12 (session 4 §7.3): fixed — `c9cb0e8`; air-factory lists flare/mono and selects plan 1; constructor lists 144 size-filtered blocks. Open: unit-factory `command` config is stored but not applied.",
-"2026-10-12 audit (verified): building-production: placed factory had no plan; defaults to plan 0 since 45163d9."
+"2026-10-12 audit (verified): building-production: placed factory had no plan; defaults to plan 0 since 45163d9.",
+"2026-10-17 round J (J05 T1/T2, 0a7f40cc + 3069c447): the generic text grid is replaced by the Java ItemSelection widget (40 px black6 clearNoneTogglei cells at clamp(selectionSize,0,40), min-check-0 group -> re-tap clears, @players.search above rows*1.5, pane capped at 40*rows, selectScroll memory) for sorter/inverted-sorter, item/liquid sources, unloader/duct-unloader, duct router, landing pad, unit-cargo-unload-point, constructor pair, payload pair and every UnitFactory; campaign unlocks route via MindCampaign.content_unlocked. UnitFactory/Reconstructor command rows build Java's checked command tables (40/44 px, separator, plan-change drop, spawn command ?? defaultCommand). Verified cell-for-cell vs java/22-srccfg.png and the factory/reconstructor panels (runs/20261017-s4-J05-T1/, -T2/). Residual: reconstructor payload-unit branch (no payload model); bespoke panels seeded as PAR-0380."
 ],
 "PAR-0093":[
 "Code-scan 2026-10-10 (hud-world-ui): S3 high confidence - message blocks (a staple of Erekir/editor maps) and illuminators can never be edited, so their content is stuck at the default. The string->Content encoding is shared with the logic-editor gap recorded as 'No in-game logic editor: processor code cannot be viewed or edited...' (logic code-scan item); this record covers the different block family and the missing text flag. In-engine verification pending.",
@@ -5600,6 +5604,9 @@
 ],
 "PAR-0372":[
 "closed: 65dd3052 (J06 T3): defaultSlider maps slider-back track + slider-knob/-over grabbers with empty progress areas (Styles.java:374-378) and centred labels (SettingsMenuDialog.java:846-869); verified against frame 36 with a real-pointer hover (runs/20261017-s3-J06-T3/)."
+],
+"PAR-0092":[
+"2026-10-17 (0a7f40cc, 3069c447): ItemSelection widget + UnitFactory/Reconstructor command rows landed; see the item notes and runs/20261017-s4-J05-T1/, -T2/. Residual: reconstructor payload-unit branch (no payload model)."
 ]
 }
 }
