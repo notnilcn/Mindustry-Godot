@@ -23,7 +23,7 @@ use godot::obj::{Base, NewGd, WithBaseField};
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
-use mind_core::content::ContentRegistry;
+use mind_core::content::{BlockId, ContentRegistry};
 use mind_core::render::Layer;
 use mind_core::render::bands::{BandEntry, BandKey, BandPlan};
 use mind_core::render::layer::CacheLayerId;
@@ -32,8 +32,12 @@ use mind_core::render::menu::MenuWorld;
 use mind_core::render::queue::RenderQueue;
 use mind_core::render::rules::RulesRenderView;
 use mind_core::render::scan::CameraView;
+use mind_core::world::WorldGrid;
 
 use crate::assets::MindAssets;
+use crate::render::floor::{
+    PendingQuad, RegionAtlas, floor_draw_base_quads, resolved_uv, tile_quads,
+};
 use crate::sim_host::MindSimHost;
 
 mod atlas_bind;
@@ -391,8 +395,8 @@ impl INode2D for MindWorldRenderer {
         }
     }
 
-    fn process(&mut self, _delta: f64) {
-        self.frame();
+    fn process(&mut self, delta: f64) {
+        self.frame(delta as f32);
     }
 }
 
@@ -965,7 +969,9 @@ impl MindWorldRenderer {
 
     /// Runs one frame of the pipeline skeleton (plan 16 §3.3). M0 resets the
     /// queue and records counters; floor/block/overlay passes attach in M1+.
-    pub fn frame(&mut self) {
+    /// Runs one render frame (`delta` = wall-clock seconds; the menu clock uses
+    /// it like `MenuRenderer.render`'s `time += Time.delta`).
+    pub fn frame(&mut self, delta: f32) {
         let start = std::time::Instant::now();
         self.stats.frames += 1;
         self.stats.stage_trace.clear();
@@ -1140,7 +1146,7 @@ impl MindWorldRenderer {
         self.stats.stage_trace.push(String::from("fog"));
         self.stats.stage_trace.push(String::from("space"));
         self.stats.stage_trace.push(String::from("draw_over"));
-        self.menu.update(1.0 / 60.0);
+        self.menu.update(delta.clamp(0.0, 0.25));
         self.stats.menu_ready = self.menu.is_ready();
         self.stats.menu_tiles = self.menu.tile_count() as i64;
         self.stats.menu_flyers = self.menu.flyers() as i64;
@@ -1434,23 +1440,75 @@ impl MindWorldRenderer {
     }
 
     /// Bakes the procedural menu world (`MenuRenderer`) into a single
-    /// atlas-blitted `ImageTexture` for the menu background. Floors, walls and
-    /// ore overlays are composited per tile; `None` when assets or the content
-    /// registry are unavailable.
+    /// atlas-blitted `ImageTexture` for the menu background. Floors, edges,
+    /// overlays, the wall shadow layer and walls are composited per tile;
+    /// `None` when assets or the content registry are unavailable.
     #[func]
     pub fn build_menu_texture(&mut self, seed: i64, mobile: bool) -> Option<Gd<ImageTexture>> {
         self.menu.generate(seed as i32, mobile);
         let world = self.menu.world()?.clone();
         let assets = self.assets.clone()?;
         let host = self.host.clone()?;
-        let assets = assets.bind();
-        let host = host.bind();
-        let registry = host.content_registry()?;
-        let texture = build_menu_image(&assets, registry, &world);
+        let texture = {
+            let host = host.bind();
+            let registry = host.content_registry()?;
+            build_menu_image(&assets, registry, &world)
+        };
         if texture.is_none() {
             log::warn!("MindWorldRenderer: menu background bake failed");
         }
         texture
+    }
+
+    /// `MenuRenderer.drawFlyers()` (`graphics/MenuRenderer.java:241-262`): the
+    /// current flyer sprites for the baked menu texture, as JSON.
+    ///
+    /// Returns `{"width", "height", "rot", "type", "rows": [[x_tex, y_tex,
+    /// region], ...]}`. `x_tex`/`y_tex` are in the same texture-pixel space as
+    /// `build_menu_image` (32 px per tile); the world's y-up motion is mapped to
+    /// screen-up, so the squadron crosses the background like Java's. The caller
+    /// resolves `region` through `MindAssets` and rotates it by `rot`.
+    #[func]
+    pub fn menu_flyers_json(&mut self) -> GString {
+        let Some(world) = self.menu.world().cloned() else {
+            return GString::from("{\"rows\":[]}");
+        };
+        let speed = match self.host.clone() {
+            Some(host) => {
+                let host = host.bind();
+                host.content_registry()
+                    .and_then(|registry| registry.unit_by_name(world.flyer_type))
+                    .map(|unit| unit.speed)
+                    .unwrap_or(1.0)
+            }
+            None => 1.0,
+        };
+        let scale = MENU_TILE_PX as f32 / TILESIZE as f32;
+        let tex_height = world.height as f32 * MENU_TILE_PX as f32;
+        let time = self.menu.time();
+        let rot = self.menu.flyer_rot();
+        let rows: Vec<String> = (0..world.flyers)
+            .map(|i| {
+                let [x, y] = world.flyer_position(i, time, rot, speed);
+                format!(
+                    "[{:.2},{:.2},\"unit-{}-full\"]",
+                    x * scale,
+                    tex_height - y * scale,
+                    world.flyer_type
+                )
+            })
+            .collect();
+        GString::from(
+            format!(
+                "{{\"width\":{},\"height\":{},\"rot\":{},\"type\":\"{}\",\"rows\":[{}]}}",
+                world.width as i32 * MENU_TILE_PX,
+                tex_height as i32,
+                rot,
+                world.flyer_type,
+                rows.join(",")
+            )
+            .as_str(),
+        )
     }
 
     /// Planet/g3d sector + mesh info (plan 16 M7).
@@ -1537,37 +1595,92 @@ fn kebab_name(name: &str) -> String {
     out
 }
 
-/// Resolves the atlas geometry `[x, y, w, h, page]` for a menu block name,
-/// trying the content block's region plus its numbered sprite variants
-/// (environment floors/walls ship `name1..N` and the port stores the bare name).
-fn resolve_menu_geometry(
-    assets: &MindAssets,
-    registry: &ContentRegistry,
-    name: &str,
-) -> Option<PackedInt32Array> {
+/// Resolves a menu block name (`sandWall`, `sand`) to a registered block id;
+/// the Java floor fields use the region names (`sand` is the `sand-floor`
+/// block).
+fn menu_block_id(registry: &ContentRegistry, name: &str) -> Option<BlockId> {
     let kebab = kebab_name(name);
-    let base = registry
-        .block_by_name(&kebab)
-        .or_else(|| registry.block_by_name(&format!("{kebab}-floor")))
-        .map(|block| block.region.clone())
-        .unwrap_or(kebab);
-    for suffix in ["", "1", "2", "3"] {
-        let geometry = assets.region_geometry(GString::from(format!("{base}{suffix}").as_str()));
-        if geometry.len() >= 5 {
-            return Some(geometry);
-        }
-    }
-    None
+    registry
+        .block_id(&kebab)
+        .or_else(|| registry.block_id(&format!("{kebab}-floor")))
 }
 
-/// Composites a [`MenuWorld`]'s floor/wall/overlay tiles into an RGBA8 texture.
+/// Blends one floor/wall/edge quad of the menu bake into the target image.
+///
+/// The bake is a direct y-down pixel copy (row `y` = world tile `y`), so unlike
+/// the camera pass it uses the region's *authored* orientation — exactly what
+/// Arc's `Draw.rect` shows (`v_flip` is ignored here, `crop` is honoured).
+#[allow(clippy::too_many_arguments)]
+fn blend_menu_quad(
+    target: &mut Gd<Image>,
+    pages: &mut HashMap<i32, Gd<Image>>,
+    assets: &Gd<MindAssets>,
+    atlas: &mut RegionAtlas,
+    quad: &PendingQuad,
+    tx: i32,
+    ty: i32,
+    scale: f32,
+) {
+    let resolved = if quad.variant {
+        atlas.resolve_variant(&quad.region, tx, ty)
+    } else {
+        atlas.resolve(&quad.region)
+    };
+    let (page, _texture, uv) = resolved_uv(&resolved);
+    let geometry = match pages.get(&page) {
+        Some(image) => image.clone(),
+        None => {
+            let bound = assets.bind();
+            let Some(image) = bound.page_texture(page as i64).and_then(|page| page.get_image())
+            else {
+                return;
+            };
+            drop(bound);
+            pages.insert(page, image.clone());
+            image
+        }
+    };
+    let (tw, th) = (
+        geometry.get_width() as f32,
+        geometry.get_height() as f32,
+    );
+    let mut sx = (uv[0] * tw).round() as i32;
+    let mut sy = (uv[1] * th).round() as i32;
+    let mut sw = ((uv[2] - uv[0]) * tw).round() as i32;
+    let mut sh = ((uv[3] - uv[1]) * th).round() as i32;
+    // `Floor.edge`: one cell of the region's 3×3 split, rows from the image top.
+    if let Some((cols, rows, col, row)) = quad.crop {
+        let cw = sw / i32::from(cols.max(1));
+        let ch = sh / i32::from(rows.max(1));
+        sx += i32::from(col) * cw;
+        sy += i32::from(row) * ch;
+        sw = cw;
+        sh = ch;
+    }
+    let dw = (quad.w * scale).round() as i32;
+    let dh = (quad.h * scale).round() as i32;
+    let dx = (quad.cx * scale).round() as i32 - dw / 2;
+    let dy = (quad.cy * scale).round() as i32 - dh / 2;
+    target.blend_rect(
+        &geometry,
+        Rect2i::new(Vector2i::new(sx, sy), Vector2i::new(sw, sh)),
+        Vector2i::new(dx, dy),
+    );
+}
+
+/// Composites a [`MenuWorld`] the way `MenuRenderer.cache` + `render` do
+/// (`graphics/MenuRenderer.java:170-239`): floors with `drawBase` (so J02 T1
+/// edges), overlays, the black per-wall shadow framebuffer offset `(-4,-4)`
+/// world units, then the walls.
 fn build_menu_image(
-    assets: &MindAssets,
+    assets: &Gd<MindAssets>,
     registry: &ContentRegistry,
     world: &MenuWorld,
 ) -> Option<Gd<ImageTexture>> {
     let width = world.width as i32;
     let height = world.height as i32;
+    // World units (TILESIZE = 8) → texture px (32 px per tile, the pack scale).
+    let scale = MENU_TILE_PX as f32 / TILESIZE as f32;
     let mut data = PackedByteArray::new();
     data.resize((width * MENU_TILE_PX * height * MENU_TILE_PX * 4) as usize);
     let mut target = Image::create_from_data(
@@ -1581,43 +1694,91 @@ fn build_menu_image(
     // world behind the menu backdrop.
     target.fill(Color::from_rgba8(18, 20, 24, 255));
 
-    let mut pages: HashMap<i32, Gd<Image>> = HashMap::new();
-    let mut missing: u64 = 0;
+    // `MenuRenderer.generate` world → a real tile grid so the shared floor path
+    // (`tile_quads`/`floor_draw_base_quads`) does base + edges + overlays.
+    let mut grid = WorldGrid::new(width, height);
+    grid.generating = true;
     for y in 0..world.height {
         for x in 0..world.width {
             let Some(tile) = world.tile(x, y) else {
                 continue;
             };
-            for name in [tile.floor, tile.wall, tile.overlay] {
-                if name == "air" {
-                    continue;
-                }
-                let Some(geometry) = resolve_menu_geometry(assets, registry, name) else {
-                    missing += 1;
-                    continue;
-                };
-                let slice = geometry.as_slice();
-                let page = slice[4];
-                if let std::collections::hash_map::Entry::Vacant(entry) = pages.entry(page) {
-                    let image = assets.page_texture(page as i64)?.get_image()?;
-                    entry.insert(image);
-                }
-                let Some(source) = pages.get(&page) else {
-                    continue;
-                };
-                target.blend_rect(
-                    source,
-                    Rect2i::new(
-                        Vector2i::new(slice[0], slice[1]),
-                        Vector2i::new(slice[2], slice[3]),
-                    ),
-                    Vector2i::new(x as i32 * MENU_TILE_PX, y as i32 * MENU_TILE_PX),
-                );
+            let grid_tile = grid.tiles.get_mut(x as i32, y as i32);
+            grid_tile.floor = menu_block_id(registry, tile.floor).unwrap_or(BlockId::AIR);
+            grid_tile.block = menu_block_id(registry, tile.wall).unwrap_or(BlockId::AIR);
+            grid_tile.overlay = menu_block_id(registry, tile.overlay).unwrap_or(BlockId::AIR);
+        }
+    }
+
+    let mut atlas = RegionAtlas::new(Some(assets.clone()));
+    let mut pages: HashMap<i32, Gd<Image>> = HashMap::new();
+
+    // Floors + edges + overlays (`tile.floor().drawBase(tile)`,
+    // `MenuRenderer.java:191-197` — no accessibility gate in the menu cache).
+    for y in 0..height {
+        for x in 0..width {
+            let tile = grid.tile(x, y);
+            for quad in floor_draw_base_quads(&grid, registry, tile, CacheLayerId::Normal) {
+                blend_menu_quad(&mut target, &mut pages, assets, &mut atlas, &quad, x, y, scale);
             }
         }
     }
-    if missing > 0 {
-        log::warn!("MindWorldRenderer: menu background {missing} tiles missing regions");
+
+    // Shadow framebuffer (`MenuRenderer.java:172-184`): one *pixel* per occupied
+    // block (the menu FBO is `width`×`height` px), upscaled 8× with bilinear
+    // filtering when drawn (`:226-228`) — that is what softens Java's shadows.
+    // Drawn offset `(-4,-4)` world units = `(-16,+16)` texture px in this
+    // y-down bake.
+    let mut shadow_data = PackedByteArray::new();
+    shadow_data.resize((width * height * 4) as usize);
+    let mut shadows = Image::create_from_data(
+        width,
+        height,
+        false,
+        godot::classes::image::Format::RGBA8,
+        &shadow_data,
+    )?;
+    shadows.fill(Color::from_rgba8(0, 0, 0, 0));
+    for y in 0..height {
+        for x in 0..width {
+            if grid.tile(x, y).block != BlockId::AIR {
+                shadows.set_pixel(x, y, Color::from_rgba8(0, 0, 0, 255));
+            }
+        }
+    }
+    shadows
+        .resize_ex(width * MENU_TILE_PX, height * MENU_TILE_PX)
+        .interpolation(godot::classes::image::Interpolation::BILINEAR)
+        .done();
+    let shadow = (MENU_TILE_PX as f32 * 4.0 / TILESIZE as f32).round() as i32;
+    // Shifted `(-shadow, +shadow)`: blend the in-bounds part
+    // (`MenuRenderer.java` clips the same way at the framebuffer edge).
+    target.blend_rect(
+        &shadows,
+        Rect2i::new(
+            Vector2i::new(shadow, 0),
+            Vector2i::new(
+                width * MENU_TILE_PX - shadow,
+                height * MENU_TILE_PX - shadow,
+            ),
+        ),
+        Vector2i::new(0, shadow),
+    );
+
+    // Walls (`tile.block().drawBase(tile)`, `MenuRenderer.java:202-204`).
+    for y in 0..height {
+        for x in 0..width {
+            let tile = grid.tile(x, y);
+            for quad in tile_quads(&grid, registry, tile, CacheLayerId::Walls) {
+                blend_menu_quad(&mut target, &mut pages, assets, &mut atlas, &quad, x, y, scale);
+            }
+        }
+    }
+    if atlas.missing > 0 {
+        log::warn!(
+            "MindWorldRenderer: menu background {} tiles missing regions",
+            atlas.missing
+        );
     }
     ImageTexture::create_from_image(&target)
 }
@@ -1788,6 +1949,14 @@ impl MindRender {
     pub fn build_menu_texture(&mut self, seed: i64, mobile: bool) -> Option<Gd<ImageTexture>> {
         self.renderer()
             .and_then(|mut renderer| renderer.bind_mut().build_menu_texture(seed, mobile))
+    }
+
+    /// `MenuRenderer.drawFlyers()` rows (`MindWorldRenderer::menu_flyers_json`).
+    #[func]
+    pub fn menu_flyers_json(&mut self) -> GString {
+        self.renderer()
+            .map(|mut renderer| renderer.bind_mut().menu_flyers_json())
+            .unwrap_or_else(|| GString::from("{\"rows\":[]}"))
     }
 
     /// Planet/g3d sector + mesh info (plan 16 M7).

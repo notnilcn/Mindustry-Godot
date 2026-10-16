@@ -583,62 +583,7 @@ pub(crate) fn tile_quads(
             .block(tile.block)
             .is_some_and(|block| block_cache_layer(block) == CacheLayerId::Walls);
         if accessible || !wall_layer {
-            // `AirBlock.drawBase()` overrides `Floor.drawBase` with an empty
-            // body, so an `air` floor contributes no base, no edges and no
-            // overlay (`AirBlock.java`; the region is never drawn, not even as
-            // `error`). `floor_matches_layer` already excludes it.
-            let Some(floor) = floor_def else {
-                return out;
-            };
-            out.push(PendingQuad {
-                region: floor.region.clone(),
-                cx,
-                cy,
-                w: size,
-                h: size,
-                color: 0xffff_ffff,
-                variant: true,
-                // Arc `Draw.rect` orientation through the y-flip camera (J02 T1).
-                v_flip: true,
-                crop: None,
-            });
-
-            // `Floor.drawBase`: `drawEdges` when `drawEdgeIn` (`Floor.java:252`).
-            // The tile's own edge sprites plus the neighbours' — this is the
-            // `drawEdges`/`drawBlended`/`doEdge` port (`Floor.java:363-440`).
-            if floor.draw_edge_in {
-                for edge in draw_edges(content, world, tile, tile.floor) {
-                    out.push(edge_quad(content, edge, cx, cy, size));
-                }
-            }
-
-            // `Floor.drawOverlay` → `overlay.drawBase` (`Floor.java:304-309`):
-            // an overlay floor draws on top of the base floor it belongs to.
-            if tile.overlay != BlockId::AIR
-                && tile.overlay != tile.floor
-                && let Some(overlay) = content.block(tile.overlay)
-            {
-                out.push(PendingQuad {
-                    region: overlay.region.clone(),
-                    cx,
-                    cy,
-                    w: size,
-                    h: size,
-                    color: 0xffff_ffff,
-                    variant: true,
-                    v_flip: true,
-                    crop: None,
-                });
-                // `OverlayFloor.drawBase` (`OverlayFloor.java:22-24`) draws the
-                // variant only; a plain floor used as an overlay runs the full
-                // `Floor.drawBase` (its own edges; the overlay-of-overlay step
-                // cannot recurse).
-                if !is_overlay_floor_kind(overlay.kind) && overlay.draw_edge_in {
-                    for edge in draw_edges(content, world, tile, tile.overlay) {
-                        out.push(edge_quad(content, edge, cx, cy, size));
-                    }
-                }
-            }
+            out.extend(floor_draw_base_quads(world, content, tile, layer));
         }
     } else if floor_def.is_some_and(|floor| floor_cache_layer(floor) != layer)
         && layer != CacheLayerId::Walls
@@ -648,6 +593,86 @@ pub(crate) fn tile_quads(
         // edges over shallow, etc.).
         for edge in draw_non_layer(content, world, tile, layer) {
             out.push(edge_quad(content, edge, cx, cy, size));
+        }
+    }
+
+    out
+}
+
+/// `Floor.drawBase` (`Floor.java:249-262`) quads for one tile: `drawMain`, then
+/// `drawEdges` when `drawEdgeIn`, then `drawOverlay` → `overlay.drawBase`.
+///
+/// No accessibility/building gate: `MenuRenderer.cache()` (`:191-197`) calls
+/// `tile.floor().drawBase(tile)` for every tile of the menu world, and the
+/// chunked `FloorRenderer` path applies its own gate in [`tile_quads`].
+pub(crate) fn floor_draw_base_quads(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    tile: &Tile,
+    layer: CacheLayerId,
+) -> SmallVec<[PendingQuad; 4]> {
+    let mut out = SmallVec::new();
+    let size = TILESIZE as f32;
+    let cx = tile.x as f32 * size;
+    let cy = tile.y as f32 * size;
+
+    // `AirBlock.drawBase()` overrides `Floor.drawBase` with an empty body, so
+    // an `air` floor contributes no base, no edges and no overlay
+    // (`AirBlock.java`; the region is never drawn, not even as `error`).
+    let Some(floor) = content.block(tile.floor) else {
+        return out;
+    };
+    if floor_cache_layer(floor) != layer || floor.kind == BlockKind::AirBlock {
+        return out;
+    }
+
+    out.push(PendingQuad {
+        region: floor.region.clone(),
+        cx,
+        cy,
+        w: size,
+        h: size,
+        color: 0xffff_ffff,
+        variant: true,
+        // Arc `Draw.rect` orientation through the y-flip camera (J02 T1).
+        v_flip: true,
+        crop: None,
+    });
+
+    // `Floor.drawBase`: `drawEdges` when `drawEdgeIn` (`Floor.java:252`).
+    // The tile's own edge sprites plus the neighbours' — this is the
+    // `drawEdges`/`drawBlended`/`doEdge` port (`Floor.java:363-440`).
+    if floor.draw_edge_in {
+        for edge in draw_edges(content, world, tile, tile.floor) {
+            out.push(edge_quad(content, edge, cx, cy, size));
+        }
+    }
+
+    // `Floor.drawOverlay` → `overlay.drawBase` (`Floor.java:304-309`):
+    // an overlay floor draws on top of the base floor it belongs to.
+    if tile.overlay != BlockId::AIR
+        && tile.overlay != tile.floor
+        && let Some(overlay) = content.block(tile.overlay)
+    {
+        out.push(PendingQuad {
+            region: overlay.region.clone(),
+            cx,
+            cy,
+            w: size,
+            h: size,
+            color: 0xffff_ffff,
+            variant: true,
+            v_flip: true,
+            crop: None,
+        });
+        // `OverlayFloor.drawBase` (`OverlayFloor.java:22-24`) draws the
+        // variant only; a plain floor used as an overlay runs the full
+        // `Floor.drawBase` (its own edges; the overlay-of-overlay step
+        // cannot recurse).
+        if !is_overlay_floor_kind(overlay.kind) && overlay.draw_edge_in {
+            for edge in draw_edges(content, world, tile, tile.overlay) {
+                out.push(edge_quad(content, edge, cx, cy, size));
+            }
         }
     }
 

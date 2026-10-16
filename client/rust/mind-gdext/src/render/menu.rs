@@ -56,6 +56,16 @@ impl MenuRenderer {
         self.world.as_ref().map(|w| w.flyers).unwrap_or(0)
     }
 
+    /// The animation clock (`MenuRenderer.time`).
+    pub fn time(&self) -> f32 {
+        self.time
+    }
+
+    /// `MenuRenderer.flyerRot` (45 degrees).
+    pub fn flyer_rot(&self) -> f32 {
+        self.flyer_rot
+    }
+
     /// Advances the animation clock (`MenuRenderer.render` `time += delta`).
     pub fn update(&mut self, delta: f32) {
         self.time += delta;
