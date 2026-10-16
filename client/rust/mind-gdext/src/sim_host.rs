@@ -4477,6 +4477,32 @@ impl MindSimHost {
             .or_else(|| self.sector_rules.clone())
     }
 
+    /// `state.isCampaign()` (`GameState.java:60-62`: `rules.sector != null`)
+    /// for the config panels' `unlockedNow()` short-circuit
+    /// (`UnlockableContent.java:281-283`): outside a campaign every content
+    /// option is unlocked.
+    pub fn in_campaign(&self) -> bool {
+        self.sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .is_some_and(|runtime| runtime.session.sector.is_some())
+    }
+
+    /// `state.getPlanet()` (`GameState.java:85-87`) for the config panels'
+    /// `isOnPlanet` filter: the campaign session's sector planet, else
+    /// `rules.planet`'s default (`Rules.java:249`, `serpulo`).
+    pub fn config_planet(&self) -> Option<mind_core::content::PlanetId> {
+        if let Some(runtime) = self.sim.ecs.0.get_resource::<CampaignRuntime>()
+            && let Some((planet, _)) = runtime.session.sector
+        {
+            return Some(planet);
+        }
+        self.content_snapshot
+            .as_ref()
+            .and_then(|content| content.planet_id("serpulo"))
+    }
+
     /// `LightRenderer` sources in the (grown) camera rect (G03 T12): cores
     /// (`CoreBlock.java:158,739-741`), illuminators (`LightBlock.java:40,105,
     /// 126-129`), static `emitLight` blocks (`Block.lightRadius` default 60),

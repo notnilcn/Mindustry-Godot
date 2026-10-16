@@ -415,6 +415,9 @@ pub struct DesktopBridge {
     /// `InputHandler.buildWasAutoPaused` (`DesktopInput.java:593/673`,
     /// resumed by `ConstructBlock.tapped`, `ConstructBlock.java:206-208`).
     build_was_auto_paused: bool,
+    /// Per-block remembered config scroll offset (`Block.selectScroll`,
+    /// `ItemSelection.java:103-108`), keyed by block content name.
+    config_scroll: HashMap<String, f32>,
 }
 
 impl Default for DesktopBridge {
@@ -463,6 +466,7 @@ impl DesktopBridge {
             block_replace: true,
             build_autopause: false,
             build_was_auto_paused: false,
+            config_scroll: HashMap::new(),
         }
     }
 
@@ -3163,6 +3167,9 @@ impl DesktopBridge {
     /// Builds the config-spec JSON for a configurable block.
     pub fn config_spec(&self, x: i32, y: i32) -> Option<String> {
         let host = self.host.clone()?;
+        // Fetched before the sim-host bind: `MindCampaign` owns the campaign
+        // tech state (`content_unlocked`) that `unlockedNow()` reads.
+        let campaign = host.try_get_node_as::<Node>("/root/Spine/MindCampaign");
         let guard = host.bind();
         let content = guard.content_registry()?;
         let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
@@ -3245,6 +3252,35 @@ impl DesktopBridge {
             }
             return Some(spec.to_string());
         }
+        // `state.isCampaign()`/`state.getPlanet()`/`Rules.researched` feed the
+        // `ItemSelection` filter (`ItemSelection.java:68`).
+        let in_campaign = guard.in_campaign();
+        let planet = guard.config_planet();
+        let rules = guard.live_rules();
+        // `UnlockableContent.unlockedNow()` (`UnlockableContent.java:281-283`):
+        // outside a campaign every option is unlocked. In a campaign the
+        // client's tech-tree state lives on `MindCampaign` (the settings-backed
+        // store); the sim's registry carries no campaign unlocks, so the
+        // multiplayer `Rules.researched` set and the campaign query are the two
+        // sources.
+        let unlocked_now = |name: &str| -> bool {
+            if !in_campaign {
+                return true;
+            }
+            if rules
+                .as_ref()
+                .is_some_and(|rules| rules.researched.iter().any(|entry| entry.as_str() == name))
+            {
+                return true;
+            }
+            let Some(node) = campaign.clone() else {
+                return false;
+            };
+            let mut node = node;
+            node.call("content_unlocked", &[GString::from(name).to_variant()])
+                .try_to::<bool>()
+                .unwrap_or(false)
+        };
         // `Reconstructor.buildConfiguration` (`Reconstructor.java:215-240`):
         // with `showAllCommands = true` it lists every unit command (the held
         // payload's command subset needs a payload-model this panel cannot see).
@@ -3263,57 +3299,85 @@ impl DesktopBridge {
         // A behavior that declares its config kinds (`Block.config(...)`) owns
         // the picker; undeclared blocks keep the item/liquid-container fallback.
         let declared = guard.block_config_kinds(block);
-        // `UnitFactory.buildConfiguration` / `PayloadSource`/`PayloadRouter`:
-        // factory plans (or every unit), plus sortable blocks for payloads.
-        if declared.contains(&ConfigKind::Unit) {
-            if def.unit_plans.is_empty() {
-                for entry in content.entries(ContentType::Unit) {
-                    if let Some(name) = entry.name {
-                        options.push(serde_json::json!({
-                            "name": name,
-                            "label": format!("unit.{name}.name"),
-                        }));
+        // `UnitFactory.buildConfiguration` (`UnitFactory.java:286-289`) and the
+        // payload blocks (`PayloadSource.java:113-118`, `PayloadRouter.java:184`):
+        // factory plans (or every unit), plus sortable blocks. The declared kind
+        // order is Java's list order, so payload sources list blocks first.
+        for kind in declared {
+            match kind {
+                ConfigKind::Unit => {
+                    let push_unit = |options: &mut Vec<serde_json::Value>, name: &str| {
+                        // `u.isBanned()` in the caller lists
+                        // (`UnitFactory.java:287`, `PayloadSource.java:92-94`,
+                        // `PayloadRouter.java:58-60`).
+                        if rules
+                            .as_ref()
+                            .is_some_and(|rules| rules.is_banned_unit(name))
+                        {
+                            return;
+                        }
+                        options.push(content_option_json(
+                            content,
+                            ContentType::Unit,
+                            name,
+                            format!("unit.{name}.name"),
+                            planet,
+                            &unlocked_now,
+                        ));
+                    };
+                    if def.unit_plans.is_empty() {
+                        for entry in content.entries(ContentType::Unit) {
+                            if let Some(name) = entry.name {
+                                push_unit(&mut options, name);
+                            }
+                        }
+                    } else {
+                        for plan in &def.unit_plans {
+                            if let Some(unit) = content.unit(plan.unit) {
+                                let name = unit.name.clone();
+                                push_unit(&mut options, &name);
+                            }
+                        }
                     }
                 }
-            } else {
-                for plan in &def.unit_plans {
-                    if let Some(unit) = content.unit(plan.unit) {
-                        let name = unit.name.clone();
-                        options.push(serde_json::json!({
-                            "name": name,
-                            "label": format!("unit.{name}.name"),
-                        }));
+                ConfigKind::Block => {
+                    // `Constructor.canProduce` size window (`Init` min/max block
+                    // size); payload sources/routers sort any producible block.
+                    let (min_size, max_size) = match def.name.as_str() {
+                        "constructor" => (1, 2),
+                        "large-constructor" => (3, 4),
+                        _ => (1, i32::MAX),
+                    };
+                    for entry in content.entries(ContentType::Block) {
+                        let Some(name) = entry.name else {
+                            continue;
+                        };
+                        let Some(candidate) = content.block_by_name(name) else {
+                            continue;
+                        };
+                        if candidate.removed
+                            || candidate.build_visibility
+                                == mind_core::content::BuildVisibility::Hidden
+                            || candidate.kind == BlockKind::CoreBlock
+                            || candidate.size < min_size
+                            || candidate.size > max_size
+                            || rules
+                                .as_ref()
+                                .is_some_and(|rules| rules.is_banned_block(name))
+                        {
+                            continue;
+                        }
+                        options.push(content_option_json(
+                            content,
+                            ContentType::Block,
+                            name,
+                            format!("block.{name}.name"),
+                            planet,
+                            &unlocked_now,
+                        ));
                     }
                 }
-            }
-        }
-        if declared.contains(&ConfigKind::Block) {
-            // `Constructor.canProduce` size window (`Init` min/max block size);
-            // payload sources/routers sort any producible block.
-            let (min_size, max_size) = match def.name.as_str() {
-                "constructor" => (1, 2),
-                "large-constructor" => (3, 4),
-                _ => (1, i32::MAX),
-            };
-            for entry in content.entries(ContentType::Block) {
-                let Some(name) = entry.name else {
-                    continue;
-                };
-                let Some(candidate) = content.block_by_name(name) else {
-                    continue;
-                };
-                if candidate.removed
-                    || candidate.build_visibility == mind_core::content::BuildVisibility::Hidden
-                    || candidate.kind == BlockKind::CoreBlock
-                    || candidate.size < min_size
-                    || candidate.size > max_size
-                {
-                    continue;
-                }
-                options.push(serde_json::json!({
-                    "name": name,
-                    "label": format!("block.{name}.name"),
-                }));
+                _ => {}
             }
         }
         let item_options = options.is_empty()
@@ -3321,10 +3385,14 @@ impl DesktopBridge {
         if item_options {
             for entry in content.entries(ContentType::Item) {
                 if let Some(name) = entry.name {
-                    options.push(serde_json::json!({
-                        "name": name,
-                        "label": format!("item.{name}.name"),
-                    }));
+                    options.push(content_option_json(
+                        content,
+                        ContentType::Item,
+                        name,
+                        format!("item.{name}.name"),
+                        planet,
+                        &unlocked_now,
+                    ));
                 }
             }
         }
@@ -3333,10 +3401,14 @@ impl DesktopBridge {
         if options.is_empty() && liquid_options {
             for entry in content.entries(ContentType::Liquid) {
                 if let Some(name) = entry.name {
-                    options.push(serde_json::json!({
-                        "name": name,
-                        "label": format!("liquid.{name}.name"),
-                    }));
+                    options.push(content_option_json(
+                        content,
+                        ContentType::Liquid,
+                        name,
+                        format!("liquid.{name}.name"),
+                        planet,
+                        &unlocked_now,
+                    ));
                 }
             }
         }
@@ -3358,21 +3430,15 @@ impl DesktopBridge {
         } else {
             None
         };
-        // Reconstructor current command (`command == item` checked state,
-        // `Reconstructor.java:237-240`): the content config id resolved to a name.
-        let current_command = if reconstructor {
+        // The checked option (`ItemSelection.java:75`: `holder.get() == item`)
+        // and the Reconstructor's current command
+        // (`Reconstructor.java:237-240`): the content config id resolved to a
+        // name.
+        let selection = item_selection_shape(&def.name);
+        let current_content = if reconstructor || selection.is_some() {
             serde_json::from_str::<serde_json::Value>(&guard.building_config_json(x, y).to_string())
                 .ok()
-                .filter(|value| value.get("type").and_then(|kind| kind.as_str()) == Some("content"))
-                .and_then(|value| value.get("id").and_then(|id| id.as_u64()))
-                .and_then(|id| {
-                    content
-                        .entries(ContentType::UnitCommand)
-                        .into_iter()
-                        .find(|entry| u64::from(entry.id) == id)
-                        .and_then(|entry| entry.name)
-                        .map(str::to_owned)
-                })
+                .and_then(|value| config_content_name(content, &value))
         } else {
             None
         };
@@ -3386,10 +3452,22 @@ impl DesktopBridge {
             "color": color,
             "options": options,
         });
+        if let Some((pick_kind, rows, columns)) = selection {
+            // `MindItemSelection` route: the `ItemSelection.buildTable` panel
+            // (no title, `Styles.black6`, 40 px icon cells, close on pick).
+            spec["selection"] = serde_json::Value::Bool(true);
+            spec["selection_rows"] = serde_json::Value::from(rows);
+            spec["selection_columns"] = serde_json::Value::from(columns);
+            spec["pick_kind"] = serde_json::Value::from(pick_kind);
+            // `block.selectScroll` (`ItemSelection.java:103-108`): the pane's
+            // remembered scroll offset, restored on open.
+            spec["select_scroll"] =
+                serde_json::Value::from(self.config_scroll.get(&def.name).copied().unwrap_or(0.0));
+        }
         if let Some(current) = current_text {
             spec["current"] = serde_json::Value::from(current);
         }
-        if let Some(current) = current_command {
+        if let Some(current) = current_content {
             spec["current"] = serde_json::Value::from(current);
         }
         if let Some(current) = current_color {
@@ -3398,6 +3476,12 @@ impl DesktopBridge {
             spec["options"] = serde_json::Value::Array(Vec::new());
         }
         Some(spec.to_string())
+    }
+
+    /// Records the `ItemSelection` pane's scroll offset for a block
+    /// (`ItemSelection.java:105-107`: `block.selectScroll = pane.getScrollY()`).
+    pub fn set_config_scroll(&mut self, block: &str, scroll: f32) {
+        self.config_scroll.insert(block.to_owned(), scroll);
     }
 
     fn enqueue_commands(&self, commands: &[SimCommand]) {
@@ -3412,6 +3496,135 @@ impl DesktopBridge {
             guard.submit_player_command(command.clone());
         }
     }
+}
+
+/// `UnlockableContent.isOnPlanet` (`UnlockableContent.java:132-134`):
+/// `planet == null || planet == Planets.sun || shownPlanets.isEmpty() ||
+/// shownPlanets.contains(planet)`.
+fn content_on_planet(
+    content: &ContentRegistry,
+    unlock: Option<&mind_core::content::UnlockFields>,
+    planet: Option<mind_core::content::PlanetId>,
+) -> bool {
+    let Some(planet) = planet else {
+        return true;
+    };
+    if content.planet_id("sun") == Some(planet) {
+        return true;
+    }
+    unlock.is_none_or(|unlock| {
+        unlock.shown_planets.is_empty() || unlock.shown_planets.contains(&planet)
+    })
+}
+
+/// One `config_spec` option entry carrying the `ItemSelection` fields
+/// (`ItemSelection.java:66-75`): the `uiIcon` fallback chain
+/// (`UnlockableContent.java:108-117`), the icon size
+/// (`UnlockableContent.java:44`, `Block.java:450`, `UnitType.java:534`) and
+/// the unlocked/planet filter result (`ItemSelection.java:68`).
+fn content_option_json(
+    content: &ContentRegistry,
+    content_type: ContentType,
+    name: &str,
+    label: String,
+    planet: Option<mind_core::content::PlanetId>,
+    unlocked_now: &dyn Fn(&str) -> bool,
+) -> serde_json::Value {
+    let reference = content.get_by_name(content_type, name);
+    let unlock = reference
+        .and_then(|reference| mind_core::game::tech_tree::unlock_fields(content, reference));
+    let prefix = content_type.name();
+    // `UnlockableContent.loadIcon` (`UnlockableContent.java:108-117`):
+    // `{type}-{name}-ui`, else the `fullOverride`/`{type}-{name}-full` chain.
+    let mut icons = vec![format!("{prefix}-{name}-ui")];
+    if let Some(override_name) = unlock.map(|unlock| unlock.full_override.as_str())
+        && !override_name.is_empty()
+    {
+        icons.push(override_name.to_owned());
+    }
+    for candidate in [
+        format!("{prefix}-{name}-full"),
+        format!("{name}-full"),
+        name.to_owned(),
+        format!("{prefix}-{name}"),
+        format!("{name}1"),
+    ] {
+        icons.push(candidate);
+    }
+    // `ItemSelection.java:70`: `Mathf.clamp(item.selectionSize, 0f, 40f)`.
+    let size = match content_type {
+        ContentType::Block => 28.0,
+        ContentType::Unit => 30.0,
+        _ => unlock.map(|unlock| unlock.selection_size).unwrap_or(24.0),
+    };
+    serde_json::json!({
+        "name": name,
+        "label": label,
+        "size": size,
+        "icons": icons,
+        "unlocked": unlocked_now(name),
+        "on_planet": content_on_planet(content, unlock, planet),
+    })
+}
+
+/// `ItemSelection.buildTable` call sites in `world/**` — `(pick kind, rows,
+/// columns)`. Sorter/InvertedSorter (`Sorter.java:147`), ItemSource
+/// (`ItemSource.java:116`), LiquidSource (`LiquidSource.java:94`), Unloader
+/// (`Unloader.java:286`), DirectionalUnloader (`DirectionalUnloader.java:146`),
+/// DuctRouter (`DuctRouter.java:125`), LandingPad (`LandingPad.java:380`),
+/// PayloadRouter (`PayloadRouter.java:184`), PayloadSource
+/// (`PayloadSource.java:114`), Constructor/LargeConstructor
+/// (`Constructor.java:68`), UnitCargoUnloadPoint
+/// (`UnitCargoUnloadPoint.java:83`), UnitFactory (`UnitFactory.java:289`).
+/// Rows/columns are `Block.selectionRows`/`selectionColumns` (`Block.java:273`,
+/// `5`/`4`) except PayloadSource (`PayloadSource.java:35`, both `8`).
+fn item_selection_shape(name: &str) -> Option<(&'static str, i64, i64)> {
+    let (rows, columns) = if name == "payload-source" {
+        (8, 8)
+    } else {
+        (5, 4)
+    };
+    let pick = match name {
+        "sorter"
+        | "inverted-sorter"
+        | "item-source"
+        | "unloader"
+        | "duct-unloader"
+        | "duct-router"
+        | "landing-pad"
+        | "unit-cargo-unload-point" => "item",
+        "liquid-source" => "liquid",
+        "constructor" | "large-constructor" | "payload-router" | "payload-source" => "block",
+        "unit-factory" => "unit",
+        _ => return None,
+    };
+    Some((pick, rows, columns))
+}
+
+/// The checked option's content name from a `building_config_json` value
+/// (`ItemSelection.java:75`: `holder.get() == item`). `item`/`liquid`/`block`/
+/// `unit` carry a dense id; `content` carries its own content-type name
+/// (unit commands).
+fn config_content_name(content: &ContentRegistry, value: &serde_json::Value) -> Option<String> {
+    let id = u16::try_from(value.get("id")?.as_u64()?).ok()?;
+    let content_type = match value.get("type")?.as_str()? {
+        "item" => ContentType::Item,
+        "liquid" => ContentType::Liquid,
+        "block" => ContentType::Block,
+        "unit" => ContentType::Unit,
+        "content" => match value.get("content")?.as_str()? {
+            "unitCommand" => ContentType::UnitCommand,
+            "unitStance" => ContentType::UnitStance,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    content
+        .entries(content_type)
+        .into_iter()
+        .find(|entry| entry.id == id)
+        .and_then(|entry| entry.name)
+        .map(str::to_owned)
 }
 
 /// Camera world coordinate for a viewport point (screen→tile center;
@@ -3695,5 +3908,154 @@ mod tests {
         assert_eq!(view.break_rect, Some(((1, 1), (3, 4))));
         assert_eq!(view.mode, PlaceMode::Breaking);
         assert!(view.line_plans.is_empty());
+    }
+
+    fn base_registry() -> ContentRegistry {
+        use mind_core::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        match create_base_content(&bundle, &store, true) {
+            Ok(mut registry) => {
+                if let Err(error) = registry.init() {
+                    panic!("registry init failed: {error}");
+                }
+                if let Err(error) = registry.post_init() {
+                    panic!("registry post_init failed: {error}");
+                }
+                registry
+            }
+            Err(error) => panic!("content boot failed: {error}"),
+        }
+    }
+
+    #[test]
+    fn item_selection_shapes_match_the_java_call_sites() {
+        // J05 T1: the `ItemSelection.buildTable` call sites in `world/**`.
+        assert_eq!(item_selection_shape("sorter"), Some(("item", 5, 4)));
+        assert_eq!(
+            item_selection_shape("inverted-sorter"),
+            Some(("item", 5, 4))
+        );
+        assert_eq!(item_selection_shape("item-source"), Some(("item", 5, 4)));
+        assert_eq!(item_selection_shape("unloader"), Some(("item", 5, 4)));
+        assert_eq!(item_selection_shape("duct-unloader"), Some(("item", 5, 4)));
+        assert_eq!(
+            item_selection_shape("liquid-source"),
+            Some(("liquid", 5, 4))
+        );
+        assert_eq!(item_selection_shape("constructor"), Some(("block", 5, 4)));
+        assert_eq!(
+            item_selection_shape("large-constructor"),
+            Some(("block", 5, 4))
+        );
+        // `PayloadSource.java:35`: `selectionRows = selectionColumns = 8`.
+        assert_eq!(
+            item_selection_shape("payload-source"),
+            Some(("block", 8, 8))
+        );
+        assert_eq!(item_selection_shape("unit-factory"), Some(("unit", 5, 4)));
+        // A `Reconstructor` panel is a plain command row, not a grid; ordinary
+        // blocks never route through `ItemSelection`.
+        assert_eq!(item_selection_shape("reconstructor"), None);
+        assert_eq!(item_selection_shape("duo"), None);
+    }
+
+    #[test]
+    fn content_options_carry_the_java_icon_size_and_filters() {
+        let content = base_registry();
+        let serpulo = content.planet_id("serpulo");
+        // `unlockedNow()` outside a campaign (`UnlockableContent.java:281-283`).
+        let always = |_: &str| true;
+        let item = content_option_json(
+            &content,
+            ContentType::Item,
+            "copper",
+            "item.copper.name".to_owned(),
+            serpulo,
+            &always,
+        );
+        assert_eq!(item["icons"][0], "item-copper-ui");
+        // `UnlockableContent.selectionSize` default 24 (`:44`).
+        assert_eq!(item["size"], 24.0);
+        // `unlockedNow()` outside a campaign (`UnlockableContent.java:281-283`).
+        assert_eq!(item["unlocked"], true);
+        assert_eq!(item["on_planet"], true);
+        // `Block.java:450` (`28f`) / `UnitType.java:534` (`30f`).
+        let block = content_option_json(
+            &content,
+            ContentType::Block,
+            "duo",
+            "block.duo.name".to_owned(),
+            serpulo,
+            &always,
+        );
+        assert_eq!(block["size"], 28.0);
+        let unit = content_option_json(
+            &content,
+            ContentType::Unit,
+            "dagger",
+            "unit.dagger.name".to_owned(),
+            serpulo,
+            &always,
+        );
+        assert_eq!(unit["size"], 30.0);
+        assert_eq!(unit["icons"][0], "unit-dagger-ui");
+        // Erekir content is off-planet on Serpulo (`isOnPlanet`,
+        // `UnlockableContent.java:132-134`) — the Java sandbox grid shows no
+        // tungsten/oxide.
+        let tungsten = content_option_json(
+            &content,
+            ContentType::Item,
+            "tungsten",
+            "item.tungsten.name".to_owned(),
+            serpulo,
+            &always,
+        );
+        assert_eq!(tungsten["on_planet"], false);
+        // A campaign with an empty unlock state hides locked content (the
+        // closure is the `MindCampaign`/`Rules.researched` query).
+        let locked = content_option_json(
+            &content,
+            ContentType::Block,
+            "duo",
+            "block.duo.name".to_owned(),
+            serpulo,
+            &|_: &str| false,
+        );
+        assert_eq!(locked["unlocked"], false);
+    }
+
+    #[test]
+    fn config_readbacks_resolve_to_content_names() {
+        let content = base_registry();
+        // `ItemSource`/`Sorter` configs are `{"type":"item","id":..}`.
+        assert_eq!(
+            config_content_name(&content, &serde_json::json!({"type": "item", "id": 0})),
+            Some("copper".to_owned())
+        );
+        // `Reconstructor`/`UnitFactory` commands are `Content` values
+        // (`behavior.rs` `ConfigValue::Content(UnitCommand, ..)`).
+        let command = content
+            .entries(ContentType::UnitCommand)
+            .into_iter()
+            .find(|entry| entry.id == 0)
+            .and_then(|entry| entry.name)
+            .map(str::to_owned);
+        assert!(command.is_some());
+        assert_eq!(
+            config_content_name(
+                &content,
+                &serde_json::json!({"type": "content", "content": "unitCommand", "id": 0})
+            ),
+            command
+        );
+        // A `Point2` (bridge link) has no content name.
+        assert_eq!(
+            config_content_name(
+                &content,
+                &serde_json::json!({"type": "point", "x": 1, "y": 2})
+            ),
+            None
+        );
     }
 }

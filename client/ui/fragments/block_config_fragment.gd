@@ -41,19 +41,20 @@ func configure(world_pos: Vector2, spec_json: String) -> void:
 	var parsed: Variant = JSON.parse_string(spec_json)
 	_config = parsed if parsed is Dictionary else {}
 	_tile = Vector2i(int(_config.get("x", -1)), int(_config.get("y", -1)))
-	var buttons_only := _buttons_only()
+	var frameless := _frameless()
 	if title != null:
 		title.text = _t(str(_config.get("title", "")), str(_config.get("block", "")))
-		title.visible = not buttons_only
+		title.visible = not frameless
 	if panel != null:
 		# `BlockConfigFragment.showConfig`: `table.background(null)` — blocks
-		# whose `buildConfiguration` only adds buttons show just the buttons.
-		if buttons_only:
+		# whose `buildConfiguration` only adds buttons show just the buttons,
+		# and the `ItemSelection` grid carries its own `Styles.black6` table.
+		if frameless:
 			panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 		else:
 			panel.remove_theme_stylebox_override("panel")
 	_rebuild()
-	size = panel.get_combined_minimum_size() if buttons_only and panel != null else PANEL_SIZE
+	size = panel.get_combined_minimum_size() if frameless and panel != null else PANEL_SIZE
 	_align_to_building()
 	visible = true
 	# `table.setOrigin(Align.center)` + `scaleTo(0f, 1f)` -> `scaleTo(1f, 1f,
@@ -75,11 +76,18 @@ func _buttons_only() -> bool:
 	return bool(_config.get("logic", false)) or bool(_config.get("canvas", false))
 
 
+## Panels that draw no title and no own pane background: the buttons-only
+## configurations above and the `ItemSelection` grid (J05 T1, whose
+## `Styles.black6` background sits inside the widget).
+func _frameless() -> bool:
+	return _buttons_only() or bool(_config.get("selection", false))
+
+
 func _process(_delta: float) -> void:
 	if not visible:
 		return
-	# `table.pack()`: the buttons-only table is exactly its buttons.
-	if _buttons_only() and panel != null:
+	# `table.pack()`: the frameless table is exactly its contents.
+	if _frameless() and panel != null:
 		size = panel.get_combined_minimum_size()
 		pivot_offset = size / 2.0
 	_align_to_building()
@@ -150,6 +158,8 @@ func _rebuild() -> void:
 		_build_canvas_panel()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
+	elif bool(_config.get("selection", false)):
+		_build_selection()
 	else:
 		_build_options()
 
@@ -276,6 +286,29 @@ func _build_color_picker() -> void:
 ## `Color.rgba8888` → Godot `Color` (the packed value is `0xRRGGBBAA`).
 func _rgba_from_int(value: int) -> Color:
 	return Color8((value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff)
+
+
+## J05 T1: `ItemSelection.buildTable` blocks (item/liquid/block/unit pickers).
+## The grid widget owns the layout; picking closes the panel
+## (`ItemSelection.java:70-71`, `closeSelect`) and re-tapping the checked icon
+## submits an empty value (`:73`, Java's `null` → `configure(null)`).
+func _build_selection() -> void:
+	# code-instantiated: the icon grid is built from the `config_spec` JSON's
+	# option list (runtime content); it has no scene-authorable shape.
+	var selection := MindItemSelection.new()
+	body.add_child(selection)
+	selection.build(_config)
+	selection.picked.connect(_on_selection_pick)
+
+
+func _on_selection_pick(value: String) -> void:
+	var kind := str(_config.get("pick_kind", "content"))
+	if value.is_empty():
+		# `configure(null)`/`configClear`: the re-tap cleared the selection.
+		_submit("none", "")
+	else:
+		_submit(kind, value)
+	_close()
 
 
 func _build_options() -> void:

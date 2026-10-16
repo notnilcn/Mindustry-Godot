@@ -1274,6 +1274,15 @@ impl MindInput {
         self.bridge.config_selected = None;
     }
 
+    /// `Block.selectScroll` writeback (`ItemSelection.java:103-108`): the
+    /// `MindItemSelection` pane reports its scroll offset so the next open of a
+    /// panel for that block restores it.
+    #[func]
+    pub fn set_config_scroll(&mut self, block: GString, scroll: f32) {
+        let block = block.to_string();
+        self.bridge.set_config_scroll(&block, scroll);
+    }
+
     /// [`Self::config_selected`] as `"[x,y]"` or `"null"`.
     #[func]
     pub fn config_selected_json(&self) -> GString {
