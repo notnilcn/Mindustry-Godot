@@ -89,6 +89,7 @@ pub struct BlockPalette {
     solid: Vec<bool>,
     wall_ore: Vec<bool>,
     has_color: Vec<bool>,
+    use_colors: Vec<bool>,
     sizes: Vec<i32>,
     /// `stone` floor id (0 when absent).
     pub stone: u16,
@@ -107,6 +108,7 @@ impl BlockPalette {
             solid: blocks.iter().map(|def| def.solid).collect(),
             wall_ore: blocks.iter().map(|def| def.wall_ore).collect(),
             has_color: blocks.iter().map(|def| def.has_color).collect(),
+            use_colors: blocks.iter().map(|def| def.use_color).collect(),
             sizes: blocks.iter().map(|def| def.size.max(1)).collect(),
             stone: registry.block_id("stone").map(|id| id.raw()).unwrap_or(0),
         }
@@ -185,9 +187,9 @@ impl BlockPalette {
     }
 
     fn use_color(&self, id: u16) -> bool {
-        // `Floor.useColor` is not ported yet (plan 06/16); overlays with an
-        // explicit map_color behave as colored.
-        self.get(&self.has_color, id).unwrap_or(false)
+        // `Block.useColor` (`Block.java:183`; `OverlayFloor`/`AirBlock` false,
+        // `OreBlock` true) — read from the registry since J02 T3.
+        self.get(&self.use_colors, id).unwrap_or(false)
     }
 
     fn is_overlay(&self, id: u16) -> bool {
@@ -736,6 +738,51 @@ mod tests {
         let conveyor = registry.block_id("conveyor").unwrap().raw();
         assert!(palette.synthetic(conveyor));
         assert_eq!(color_for(&palette, conveyor, 0, 0, 1), team_color(1));
+    }
+
+    /// J02 T3: `MapIO.colorFor`'s `overlay.useColor` branch
+    /// (`MapIO.java:235`) — an `OreBlock` (`useColor = true`,
+    /// `OreBlock.java:23`) contributes its item-coloured `mapColor`; air and
+    /// the editor overlays keep `OverlayFloor.useColor = false`
+    /// (`OverlayFloor.java:13`) and fall back to the floor colour.
+    #[test]
+    fn ore_overlays_use_their_map_color() {
+        let registry = test_registry();
+        let palette = BlockPalette::of(&registry);
+        let stone = registry.block_id("stone").unwrap().raw();
+        let floor_color = palette.map_color(stone);
+
+        // `ore-scrap`'s `mapColor` is the scrap item colour (grey `777777`).
+        let scrap = registry.block_id("ore-scrap").unwrap().raw();
+        let scrap_item = registry.item_id("scrap").unwrap();
+        let scrap_color = registry.item(scrap_item).unwrap().color.to_rgba8888();
+        assert_eq!(palette.map_color(scrap), scrap_color);
+        assert_eq!(color_for(&palette, 0, stone, scrap, 0), scrap_color);
+
+        // `ore-copper` -> the copper item colour.
+        let copper = registry.block_id("ore-copper").unwrap().raw();
+        let copper_item = registry.item_id("copper").unwrap();
+        let copper_color = registry.item(copper_item).unwrap().color.to_rgba8888();
+        assert_eq!(color_for(&palette, 0, stone, copper, 0), copper_color);
+
+        // Air (no overlay) and `spawn` (an `OverlayFloor`) use the floor.
+        assert_eq!(color_for(&palette, 0, stone, 0, 0), floor_color);
+        let spawn = registry.block_id("spawn").unwrap().raw();
+        assert!(!palette.use_color(spawn));
+        assert_eq!(color_for(&palette, 0, stone, spawn, 0), floor_color);
+
+        // A non-`OverlayFloor` overlay keeps the alpha-128 blend
+        // (`MapIO.java:236`); `metal-floor` is such a floor-kind overlay.
+        let metal = registry.block_id("metal-floor").unwrap().raw();
+        assert!(palette.use_color(metal));
+        assert!(!palette.is_overlay(metal));
+        assert_eq!(
+            color_for(&palette, 0, stone, metal, 0),
+            blend(
+                (palette.map_color(metal) & !0xff) | 128,
+                palette.map_color(stone)
+            )
+        );
     }
 
     /// Minimal in-memory sink capturing the image-import writes.

@@ -1413,6 +1413,10 @@ pub struct BlockSpec {
     pub draw_edge_in: Option<bool>,
     /// `Floor.drawEdgeOut` (`Floor.java:94`; Java default true).
     pub draw_edge_out: Option<bool>,
+    /// `Block.useColor` (`Block.java:183`; Java default true, `OverlayFloor`
+    /// and `AirBlock` clear it, `OreBlock` re-enables it). J02 T3:
+    /// `MapIO.colorFor` uses the overlay's value.
+    pub use_color: Option<bool>,
 }
 
 impl Default for BlockSpec {
@@ -1522,6 +1526,7 @@ impl Default for BlockSpec {
             blend_group: None,
             draw_edge_in: None,
             draw_edge_out: None,
+            use_color: None,
         }
     }
 }
@@ -2349,6 +2354,9 @@ pub struct BlockDef {
     /// The upstream `edges` generator makes one for every non-overlay floor
     /// with `blendGroup == this && drawEdgeOut` (`Generators.java:827-847`).
     pub has_edge: bool,
+    /// `Block.useColor` (`Block.java:183`): whether `MapIO.colorFor` uses this
+    /// block's `mapColor` for an overlay (J02 T3).
+    pub use_color: bool,
 }
 
 /// Whether the kind extends `Floor` (`world/blocks/environment/*`): base and
@@ -2452,6 +2460,13 @@ impl BlockDef {
                     .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
             ),
             None => None,
+        };
+        // `OreBlock.java:22,40` (`setup`): an ore's `mapColor` is its item's
+        // colour. The generated specs already carry the same literals; this
+        // covers mod content and any future drift.
+        let map_color = match (spec.kind, spec.map_color, item_drop) {
+            (BlockKind::OreBlock, None, Some(item)) => registry.item(item).map(|def| def.color),
+            (_, color, _) => color,
         };
         // `Floor.isDeep()` = `drownTime > 0` (`Floor.java:339`).
         let drown_time = spec.drown_time.unwrap_or(0.0);
@@ -2646,7 +2661,7 @@ impl BlockDef {
             size_offset: 0,
             stats: Vec::new(),
             bars: Vec::new(),
-            map_color: spec.map_color,
+            map_color,
             albedo: spec.albedo.unwrap_or(0.0),
             has_color: spec.has_color.unwrap_or(false),
             square_sprite: spec.square_sprite.unwrap_or(true),
@@ -2710,6 +2725,17 @@ impl BlockDef {
             draw_edge_out: spec.draw_edge_out.unwrap_or(true),
             // Computed in `init_self` (the block id is assigned on registration).
             has_edge: false,
+            // `Block.useColor` (`Block.java:183`); `OverlayFloor.java:13` and
+            // `AirBlock.java:14` clear it, `OreBlock.java:23` re-enables it.
+            use_color: spec.use_color.unwrap_or(!matches!(
+                spec.kind,
+                BlockKind::OverlayFloor
+                    | BlockKind::CharacterOverlay
+                    | BlockKind::RuneOverlay
+                    | BlockKind::SpawnBlock
+                    | BlockKind::RemoveOre
+                    | BlockKind::AirBlock
+            )),
         };
         // `Block.init`: `if(underBullets){ priority = TargetPriority.under; }`
         // (Block.java:1386-1387) — unconditional, so conveyors/conduits (which

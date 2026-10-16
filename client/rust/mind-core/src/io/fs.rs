@@ -461,9 +461,10 @@ impl Paths {
     }
 
     /// Preview image for a map name (`Vars.mapPreviewDirectory`):
-    /// `previews/<name>_v2.png`.
+    /// `previews/<name>_v3.png` (J02 T3 name bump; Java uses `_v2`,
+    /// `maps/Map.java:75`).
     pub fn preview_for_map(&self, name: &str) -> PathBuf {
-        self.previews().join(format!("{name}_v2.png"))
+        self.previews().join(format!("{name}_v3.png"))
     }
 
     /// Minimap pixel cache for a map: `previews/<name>-cache_v2.dat`.
@@ -553,7 +554,7 @@ mod tests {
         );
         assert_eq!(
             paths.preview_for_map("fork"),
-            PathBuf::from("/data/previews/fork_v2.png")
+            PathBuf::from("/data/previews/fork_v3.png")
         );
         assert_eq!(
             paths.map_cache("fork"),
