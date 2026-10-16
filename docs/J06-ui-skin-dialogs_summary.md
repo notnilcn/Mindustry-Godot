@@ -142,3 +142,174 @@ frame predates, shifting the rows below it by one (the 46 px pitch matches).
   previews (J06 T5), frame 36's extra `bloomintensity` row (content/settings
   model, not skin).
 - No chain/ledger files were edited by this session.
+
+---
+
+# Wave C — J06 T4, T6, T7, T8, T9 (T5 deferred)
+
+Session 3, 2026-10-17. Branch `parity/session-3` fast-forwarded onto main
+(`5b810821`, wave-B branches of J02/J06 merged) before this work. T5 (Load Game
+dialog) stayed deferred per the coordinator: session 2 owns `load_dialog.gd`
+while landing J01 T4/T5.
+
+## Per-task status (wave C)
+
+| Task | Status | Commit |
+|---|---|---|
+| T4 — Rebind Keys dialog | done (verified in-engine) | `8b197956` |
+| T6 — Game Over dialog | done (verified in-engine) | `9da3b3b2` (+ `31302153` fmt) |
+| T7 — Map Play clipping | done (verified in-engine, 27-map sweep) | `37ef2a8d` |
+| T8 — Placement palette details | done (verified in-engine) | `a35307a8` |
+| T9 — Small fidelity items | landed 1-5, 2 items recorded | `9eb88e02` |
+| T5 — Load Game dialog | **deferred** (session 2 lands J01 T4/T5) | — |
+
+## T4 — Rebind Keys (`KeybindDialog`)
+
+`ui/dialogs/KeybindDialog.java:88-131`: category header + gray rule; rows
+name (`padLeft 8`, `padRight 40`) → key cell (`left()`, `minWidth(90)`,
+`padRight(20)`) → Rebind/Reset at `bw x bh` 140x40; the axis cell is
+`min + " [red]/[] " + max` through Arc colour markup, coloured `Pal.accent`
+(`Color.darkGray` unset); reset-all `button("@settings.reset", Icon.refresh,
+Styles.grayt)`.
+
+- `keybind_dialog.gd`: the key label translates the markup via
+  `render_markup` before assigning it to the BBCode label (the raw
+  `A [red]/[] D` string was shown literally) and uses the rich label's
+  `default_color`; the key cell no longer `fill_x_axis`; the binds table keeps
+  the 845 px width Java's table spans and centres; reset-all uses
+  `icon_button("refresh", …)`.
+- Evidence `runs/20261017-s3-J06-T4/`: keys in accent with the red `/`
+  separator, left-aligned cells, centred ~845 px table (`diff/axis-markup-zoom.png`,
+  `diff/rebind-keys-side.png` vs `ref/java-38-controls.png`).
+
+## T6 — Game Over (`GameOverDialog`)
+
+`ui/dialogs/GameOverDialog.java`: `super("@gameover")` + `titleTable.remove()`
+(`:25-30`); a centred 600 px column (`:102`); a `Styles.black3` pane with one
+50 px `StatLabel` per stat — `delay = 0.05 * i`, scale-in from x=0 and tint
+`Pal.accent` → `Pal.darkestGray` over 0.3 s `pow3Out`, value counting up after a
+further 0.3 s over 60 frames (linear below 10, `Interp.slowFast` = `pow2In`
+above); only the wave row gated on `state.rules.waves`; a Time Played row while
+a save slot is current (`Strings.formatMillis`); `@menu` 140x60 / `@continue`
+170x60.
+
+- **Stats path**: Java records the wave reached in the `GameOverEvent` listener
+  (`Control.java:132-133`) and the remote `Logic.gameOver` (`Logic.java:435-437`);
+  the port set `session.game_over` directly, so a core loss reported
+  `stats.wave = 0`. `check_game_state`'s four detection sites now raise through
+  `raise_game_over`, which sets `stats.waves_lasted = wave`.
+- `GameStats::context_json` owns the `game_stats_json` keys (camelCase
+  `STAT_ROWS` keys + the `waves` gate); `MindCampaign.current_save_playtime_ms`
+  exposes `SaveSlot.getPlayTime()` for the Time Played row.
+- `game_over_dialog.gd`: no title row, the 600 px centred block, the black3 pane
+  (13 px margins, 12 px cells), the per-row tween as above, `Arc
+  Strings.formatMillis` for the playtime value, 60 px buttons.
+- Tests: `game::play::tests::core_loss_game_over_records_waves_lasted`,
+  `game::stats::tests::game_over_context_keys_match_dialog_rows` (both fail
+  before the stat fix).
+- Evidence `runs/20261017-s3-J06-T6/`: sandbox core killed via
+  `MindSimHost.debug_kill_building` → dark rows, `Waves Defeated 1` (was 0),
+  `Time Played 0:00:58`, 140x60 Menu (`godot/01`, `godot/02` mid-animation,
+  `diff/gameover-side.png` vs `ref/java-50-final.png`, `in-engine-probe.txt`).
+
+## T7 — Map Play layout
+
+Root cause: the floating dialog's panel is one reused `PanelContainer`
+(`MapPlayDialog` is `setFillParent(false)`), so a rebuild lays out against the
+previous content's width; the resize landing mid-sort was dropped by
+`MindTable`'s `_sorting` guard, leaving the cells at the stale width's offsets.
+
+- `mind_table.gd`: a `NOTIFICATION_RESIZED` during a sort is latched
+  (`_resort_after_sort`) and re-queued when the sort finishes.
+- `map_play_dialog.gd`: the build ends with a deferred `_resort_tables()`.
+- The preview cell was already constrained (250x250 `custom_minimum_size`,
+  `EXPAND_IGNORE_SIZE` + `STRETCH_KEEP_ASPECT_CENTERED`), matching Java's fixed
+  cell with `Scaling.fit`.
+- Evidence `runs/20261017-s3-J06-T7/`: `ref/java-41-caldera.png` side-by-side and
+  a sweep of all 27 registered maps (`map-layout-sweep.txt`, `sweep-tool.py`)
+  showing identical geometry (panel 428 px at x=362, image 250x250 at x=451,
+  mode table at x=396).
+
+## T8 — Placement palette
+
+`ui/fragments/PlacementFragment.java:313-323`: each cell's per-frame
+`button.update` tints the icon `Color.gray` unless
+`state.rules.isInfiniteResources(player.team())` or the core holds every
+requirement scaled by `buildCostMultiplier` **and** `player.isBuilder()`, with a
+`Color.darkGray` override when `block.isPlaceable()` is false; the pane is a
+`smallPane` scroll over a 4x46 px grid.
+
+- `mind-core::world::build::palette_tint` owns the precedence (unplaceable wins)
+  with a five-case unit test; `MindSimHost.palette_tints_json` computes the tint
+  for every content block in one call from the same inputs as
+  `block_requirements_json` (`player_core_items`, `player_can_build`,
+  `supports_env_bits`).
+- `placement_fragment.gd` re-applies the tints on the 10-frame HUD poll cadence
+  through the per-state `icon_*_color` overrides (only the icon tints, so the
+  checked `selecti` frame keeps its accent).
+- `placement_fragment.tscn`: the ScrollContainer reserves the 8 px bar
+  (min width 204) and the grid keeps its exact 196 px, so the bar no longer
+  covers the fourth column.
+- Deviation recorded: the plan's "category buttons with no cell background" note
+  is inaccurate — Java's rail uses `clearTogglei` (`up = black6`,
+  `Styles.java:345-350`) and the port already matches.
+- Evidence `runs/20261017-s3-J06-T8/`: sandbox (infinite resources) → every cell
+  white like Java's rule; Ground Zero → 202 white / 245 gray / 0 darkGray of 447
+  blocks and the palette matches `ref/java-46-conv-sel.png`; geometry probe shows
+  the bar beside the grid (`in-engine-probe.txt`).
+
+## T9 — Small fidelity items
+
+Landed:
+1. Sidebar parent checked: `flatToggleMenut` (`Styles.java:210-219`,
+   `MenuFragment.java:271,291`) — `flatOver` hover + the packed `flat-down-base`
+   checked frame (was a translucent-white tint).
+2. No keyboard focus frames: every button style gets an empty `focus` stylebox
+   (the sector page's Go button showed one, `godot/03-sector.png`).
+3. Core Database backdrop: verified translucent after T2's `windowEmpty`
+   (`Styles.java:458-469`) — the menu shows through the black9 stage like Java.
+4. Sector panel state lines ("Under attack!") centre (`planet_dialog.gd`).
+5. `CheckBox` uses the round `check-on`/`check-off` indicators
+   (`Styles.java:446-456`) instead of Godot's squares.
+
+Recorded, not landed (`runs/20261017-s3-J06-T9/notes.md`): the wave panel's
+fixed-width wrap (Java wraps "N Enemies Remaining" left-aligned; the port renders
+the Rust `hud_text` block in one centred label, `diff/43-wave-side.png`) and the
+editor palette's selected-cell highlight (`diff/31-editor-open-side.png`); Java's
+checkbox hover icons have no Godot equivalent.
+
+Evidence: `runs/20261017-s3-J06-T9/` (`godot/01-menu-parent-checked.png`,
+`godot/02-sector-no-focus-frame.png`, `godot/03-coredb-translucent.png` +
+`diff/` side-by-sides).
+
+## Gates (wave C)
+
+- `cargo fmt --check` clean; clippy `-D warnings` clean for `mind-core` +
+  `mind-gdext` per task; `cargo test -p mind-core` 2732 passed (the only failure
+  is the pre-existing `blocks_golden::family_counts_match_golden` documented in
+  the J02 wave-A summary), `-p mind-gdext` 67 passed; Godot headless
+  import/parse gate clean after every GDScript/scene change.
+- Shared files touched additively: `mind_table.gd` (resort latch),
+  `theme_builder.gd` (focus styleboxes, `CheckBox` icons, `_nine_patch` reuse),
+  `menu_fragment.gd`, `planet_dialog.gd`, `placement_fragment.gd`/`.tscn`,
+  `map_play_dialog.gd`, `game_over_dialog.gd`, `keybind_dialog.gd`;
+  `load_dialog.gd` untouched (deferred T5).
+
+## Ledger changes to apply (wave C)
+
+- New item: "Rebind Keys shows raw `[red]`/`[]` markup and white keys" → closed
+  by `8b197956` (T4), verified against frame 38.
+- New item: "Game Over shows Waves Defeated 0, no Time Played row, bright accent
+  rows and a duplicated title" → closed by `9da3b3b2` (T6), with the stats fix
+  covered by two new tests; verified against frame 50.
+- New item: "Map Play lays out against the previous map's panel width (portrait
+  previews clip)" → closed by `37ef2a8d` (T7); the shared `MindTable` resort bug
+  is the root cause, swept over all 27 maps.
+- New item: "Placement palette ignores affordability and clips the fourth
+  column under the scroll bar" → closed by `a35307a8` (T8), verified against
+  frame 46 + a unit test.
+- New item: "Sidebar parent button never stays checked / Godot focus frames /
+  square checkbox indicators" → closed by `9eb88e02` (T9). Two residuals noted
+  for the wave-D queue: the wave panel's fixed-width wrap and the editor
+  palette's selected-cell highlight.
+- No chain/ledger files were edited by this session.
