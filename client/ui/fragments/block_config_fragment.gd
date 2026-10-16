@@ -12,8 +12,19 @@
 
 extends Control
 
-var _config: Dictionary = {}
+## Scene size of the titled panel (`block_config_fragment.tscn`) used by the
+## option/text/link/colour specs.
+const PANEL_SIZE := Vector2(300, 220)
+## `BlockConfigFragment.showConfig` scale-in (`Actions.scaleTo(1f, 1f, 0.07f,
+## Interp.pow3Out)`).
+const SCALE_IN_SECONDS := 0.07
 
+var _config: Dictionary = {}
+## Tapped tile of the configured building (`config.getSelected()`).
+var _tile := Vector2i(-1, -1)
+var _scale_tween: Tween = null
+
+@onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var title: Label = get_node_or_null("Panel/Layout/Title")
 @onready var body: VBoxContainer = get_node_or_null("Panel/Layout/Body")
 
@@ -23,14 +34,85 @@ func _ready() -> void:
 
 
 ## Opens the panel for a building (`ConfigUiSpec` JSON from `MindInput`).
+## `world_pos` (the tap point) is only the fallback anchor: the table follows
+## the building every frame like `Building.updateTableAlign`.
 func configure(world_pos: Vector2, spec_json: String) -> void:
 	position = world_pos
 	var parsed: Variant = JSON.parse_string(spec_json)
 	_config = parsed if parsed is Dictionary else {}
+	_tile = Vector2i(int(_config.get("x", -1)), int(_config.get("y", -1)))
+	var buttons_only := _buttons_only()
 	if title != null:
 		title.text = _t(str(_config.get("title", "")), str(_config.get("block", "")))
+		title.visible = not buttons_only
+	if panel != null:
+		# `BlockConfigFragment.showConfig`: `table.background(null)` — blocks
+		# whose `buildConfiguration` only adds buttons show just the buttons.
+		if buttons_only:
+			panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		else:
+			panel.remove_theme_stylebox_override("panel")
 	_rebuild()
+	size = panel.get_combined_minimum_size() if buttons_only and panel != null else PANEL_SIZE
+	_align_to_building()
 	visible = true
+	# `table.setOrigin(Align.center)` + `scaleTo(0f, 1f)` -> `scaleTo(1f, 1f,
+	# 0.07f, Interp.pow3Out)`.
+	pivot_offset = size / 2.0
+	scale = Vector2(0.0, 1.0)
+	if _scale_tween != null and _scale_tween.is_valid():
+		_scale_tween.kill()
+	_scale_tween = create_tween()
+	_scale_tween.tween_property(self, "scale", Vector2.ONE, SCALE_IN_SECONDS).set_trans(
+		Tween.TRANS_CUBIC
+	).set_ease(Tween.EASE_OUT)
+
+
+## `LogicBlock`/`CanvasBlock.buildConfiguration` add a single pencil button
+## (`LogicBlock.java:737-739`, `CanvasBlock.java:314-317`): no title, no
+## background pane, no close button.
+func _buttons_only() -> bool:
+	return bool(_config.get("logic", false)) or bool(_config.get("canvas", false))
+
+
+func _process(_delta: float) -> void:
+	if not visible:
+		return
+	# `table.pack()`: the buttons-only table is exactly its buttons.
+	if _buttons_only() and panel != null:
+		size = panel.get_combined_minimum_size()
+		pivot_offset = size / 2.0
+	_align_to_building()
+
+
+## `Building.updateTableAlign` (`BuildingComp.java:1682-1685`): the table's
+## top-centre sits at `mouseScreen(x, y - block.size * tilesize / 2f - 1)`, i.e.
+## just under the building, every frame. A building that is gone hides the
+## table (`BlockConfigFragment.showConfig` update: `!selected.isValid()`).
+func _align_to_building() -> void:
+	if _tile.x < 0 or _tile.y < 0:
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	if host == null or camera == null or not host.has_method("building_center_world"):
+		return
+	if not camera.has_method("world_to_screen"):
+		return
+	var center: Variant = host.call("building_center_world", _tile.x, _tile.y)
+	if not (center is Vector2):
+		if visible:
+			_close()
+		return
+	var block_size := 1
+	if host.has_method("block_size"):
+		block_size = maxi(1, int(host.call("block_size", _tile.x, _tile.y)))
+	var anchor := center as Vector2
+	var screen: Variant = camera.call(
+		"world_to_screen", anchor.x, anchor.y - float(block_size) * 4.0 - 1.0
+	)
+	if screen is Vector2:
+		var point := screen as Vector2
+		position = Vector2(point.x - size.x / 2.0, point.y)
 
 
 ## Resolves a bundle key through `MindAssets` with a raw fallback.
@@ -50,7 +132,10 @@ func _t(key: String, fallback: String) -> String:
 func _rebuild() -> void:
 	if body == null:
 		return
+	# Detach before freeing so the panel's minimum size (the buttons-only table
+	# size) no longer counts the previous rows this frame.
 	for child in body.get_children():
+		body.remove_child(child)
 		child.queue_free()
 	# code-instantiated: config rows come from the `config_spec` JSON (item or
 	# liquid option list / logic code field / color picker) produced by
@@ -79,10 +164,8 @@ func _build_logic_panel() -> void:
 	pencil.custom_minimum_size = Vector2(40, 40)
 	pencil.tooltip_text = _t("@edit", "edit")
 	pencil.pressed.connect(_open_logic_dialog)
+	pencil.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	body.add_child(pencil)
-	var row := HBoxContainer.new()
-	body.add_child(row)
-	_add_close_button(row)
 
 
 ## `CanvasBlock.buildConfiguration` (`CanvasBlock.java:314-317`): one 40x40
@@ -94,10 +177,8 @@ func _build_canvas_panel() -> void:
 	pencil.custom_minimum_size = Vector2(40, 40)
 	pencil.tooltip_text = _t("@edit", "edit")
 	pencil.pressed.connect(_open_canvas_dialog)
+	pencil.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	body.add_child(pencil)
-	var row := HBoxContainer.new()
-	body.add_child(row)
-	_add_close_button(row)
 
 
 ## Opens the canvas editor (`CanvasEditDialog`; T14).

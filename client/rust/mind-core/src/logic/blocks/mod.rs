@@ -334,6 +334,16 @@ pub fn logic_def_of(world: &World, e: Entity) -> Option<LogicBlockDef> {
     }
 }
 
+/// `LogicBlock.drawPlace` range (`LogicBlock.java:185-189`): the link range a
+/// processor shows while it is being placed — `None` for a privileged (world)
+/// processor, a non-logic block or a zero range.
+pub fn logic_place_range(world: &World, block: crate::content::BlockId) -> Option<f32> {
+    match &world.get_resource::<BlockTable>()?.get(block)?.kind_data {
+        BlockKindData::Logic(def) if !def.privileged && def.range > 0.0 => Some(def.range),
+        _ => None,
+    }
+}
+
 /// `MemoryBlock` family knobs for a building.
 pub fn memory_def_of(world: &World, e: Entity) -> Option<MemoryDef> {
     let block = world.get::<Building>(e)?.block;
@@ -494,6 +504,32 @@ mod integration_tests {
         let pe = harness.build_at(4, 4).expect("processor entity");
         let me = harness.build_at(5, 4).expect("memory entity");
         (harness, pe, me)
+    }
+
+    /// `LogicBlock.drawPlace` (`LogicBlock.java:185-189`): non-privileged
+    /// processors show their link range while placing; the world processor
+    /// (`privileged`) returns early.
+    #[test]
+    fn logic_place_range_skips_privileged() {
+        let harness = BuildHarness::new(4, 4, 1);
+        let id = |name: &str| harness.content().block_id(name).expect(name);
+        assert_eq!(
+            logic_place_range(&harness.world, id("micro-processor")),
+            Some(8.0 * 10.0)
+        );
+        assert_eq!(
+            logic_place_range(&harness.world, id("logic-processor")),
+            Some(8.0 * 22.0)
+        );
+        assert_eq!(
+            logic_place_range(&harness.world, id("hyper-processor")),
+            Some(8.0 * 42.0)
+        );
+        assert_eq!(
+            logic_place_range(&harness.world, id("world-processor")),
+            None
+        );
+        assert_eq!(logic_place_range(&harness.world, id("conveyor")), None);
     }
 
     #[test]

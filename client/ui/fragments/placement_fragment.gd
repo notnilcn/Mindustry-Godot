@@ -628,6 +628,16 @@ func _refresh_top_amounts(display: String = "") -> void:
 						_top_requirements[index] = (parsed as Array)[index]
 	for index in _top_amounts.size():
 		var entry: Dictionary = _top_requirements[index]
+		var label := _top_amounts[index]
+		# `PlacementFragment.java:407-416`: the sim host formats the Java markup
+		# (`*/90` under infinite resources or without a core, else
+		# `[scarlet|accent|white]amount[white]/need`).
+		var raw := str(entry.get("label", ""))
+		if not raw.is_empty():
+			if label.get_meta("raw", "") != raw:
+				label.set_meta("raw", raw)
+				label.text = MindWidgets.markup_text(raw)
+			continue
 		var have := int(entry.get("have", 0))
 		var need := int(entry.get("amount", 0))
 		# `amount < stackamount / 2f ? [scarlet] : amount < stackamount ?
@@ -637,7 +647,6 @@ func _refresh_top_amounts(display: String = "") -> void:
 			color = "#e55454"
 		elif have < need:
 			color = "#ffd37f"
-		var label := _top_amounts[index]
 		label.text = "[color=%s]%d[/color]/%d" % [color, have, need]
 
 

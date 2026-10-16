@@ -198,26 +198,45 @@ impl INode2D for OverlayTop {
                     canvas::select(&mut base, tx, ty, r, color);
                 }
             }
-            // `LogicBuild.drawConfigure` (`LogicBlock.java:661-683`): the
-            // non-privileged link-range circles, one `Pal.place` square per
+            // `LogicBuild.drawConfigure` (`LogicBlock.java:661-683`):
+            // `super.drawConfigure()` (a 1px `Pal.accent` `Lines.square` at
+            // `size * 4 + 1`, `BuildingComp.java:1732-1737`), the
+            // non-privileged link-range `Drawf.circles(x, y, range)` — whose
+            // default colour is `Pal.accent` (`Drawf.java:406-408`) — one
+            // `Drawf.square(.., size * 4 + 1, Pal.place)` (45° rotation) per
             // valid link and the link names above them.
-            Some(ConfigOverlay::Logic { x, y, range, links }) => {
+            Some(ConfigOverlay::Logic {
+                x,
+                y,
+                size,
+                range,
+                links,
+            }) => {
+                let accent = canvas::color_u32(to_bits(pal::ACCENT));
+                let half = size as f32 * 4.0 + 1.0;
+                canvas::poly_line(
+                    &mut base,
+                    &[
+                        (x - half, y - half),
+                        (x + half, y - half),
+                        (x + half, y + half),
+                        (x - half, y + half),
+                        (x - half, y - half),
+                    ],
+                    1.0,
+                    accent,
+                );
                 if let Some(range) = range {
-                    canvas::circles(
-                        &mut base,
-                        x,
-                        y,
-                        range,
-                        canvas::color_u32(to_bits(pal::PLACE)),
-                    );
+                    canvas::circles(&mut base, x, y, range, accent);
                 }
                 let font = godot::classes::ThemeDb::singleton().get_fallback_font();
                 for (lx, ly, size, name) in &links {
-                    canvas::select(
+                    canvas::square(
                         &mut base,
                         *lx,
                         *ly,
                         *size as f32 * 4.0 + 1.0,
+                        45.0,
                         canvas::color_u32(to_bits(pal::PLACE)),
                     );
                     if let Some(font) = &font {

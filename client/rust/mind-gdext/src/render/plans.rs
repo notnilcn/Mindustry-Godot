@@ -289,6 +289,17 @@ impl INode2D for PlanOverlay {
                             }
                         }
                     }
+                    // `LogicBlock.drawPlace` (`LogicBlock.java:185-189`):
+                    // `Drawf.circles(x * tilesize + offset, .., range)` in the
+                    // default `Pal.accent`; privileged processors skip it.
+                    if let Some(range) = guard.logic_place_range(block) {
+                        cmds.push(DrawCmd::Circles {
+                            x: cx as f32 * 8.0 + def.offset,
+                            y: cy as f32 * 8.0 + def.offset,
+                            r: range,
+                            color: canvas::color_u32(drawf::to_bits(pal::ACCENT)),
+                        });
+                    }
                 }
             }
 

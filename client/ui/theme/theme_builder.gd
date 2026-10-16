@@ -92,6 +92,17 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				var checked := _checked_frame()
 				theme.set_stylebox("pressed", name, checked)
 				theme.set_stylebox("hover_pressed", name, checked)
+			elif name == "clearTogglei":
+				# `Styles.clearTogglei` (Styles.java:345-350): `up = black6`,
+				# `over = flatOver` (#454545), `down = checked = flatDown` (the
+				# accent-bordered `flat-down-base` 9-patch). The checked frame is
+				# what marks the selected `PlacementFragment` category.
+				theme.set_stylebox("normal", name, flat(MindStyles.BLACK_6))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("disabled", name, flat(MindStyles.BLACK_6))
+				var flat_down := _flat_down_frame()
+				theme.set_stylebox("pressed", name, flat_down)
+				theme.set_stylebox("hover_pressed", name, flat_down)
 			elif name == "clearNonei" or name == "clearNoneTogglei":
 				# `Styles.clearNonei` (Styles.java:316): `up = none` (fully
 				# transparent at rest), hover/pressed carry the flat highlight
@@ -157,6 +168,28 @@ static func _checked_frame() -> StyleBox:
 	box.texture_margin_right = 4.0
 	box.texture_margin_bottom = 4.0
 	return box
+
+
+## `Styles.flatDown` (`Styles.createFlatDown`, Styles.java:479-495): the
+## `flat-down-base` 9-patch (splits 12; 4px `Pal.accent` border around a black
+## fill) with zero padding. Falls back to an accent-bordered flat box when the
+## atlas region is unavailable.
+static func _flat_down_frame() -> StyleBox:
+	var texture := MindWidgets.icon_texture("flat-down-base")
+	if texture == null:
+		var box := flat(Color.BLACK)
+		box.border_color = MindStyles.ACCENT
+		box.set_border_width_all(4)
+		box.set_content_margin_all(0.0)
+		return box
+	var frame := StyleBoxTexture.new()
+	frame.texture = texture
+	frame.texture_margin_left = 12.0
+	frame.texture_margin_top = 12.0
+	frame.texture_margin_right = 12.0
+	frame.texture_margin_bottom = 12.0
+	frame.set_content_margin_all(0.0)
+	return frame
 
 
 ## Flat stylebox with the standard content margins (ninepatch replaces at M1).
