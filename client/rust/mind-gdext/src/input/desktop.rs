@@ -3284,18 +3284,9 @@ impl DesktopBridge {
         // `Reconstructor.buildConfiguration` (`Reconstructor.java:215-240`):
         // with `showAllCommands = true` it lists every unit command (the held
         // payload's command subset needs a payload-model this panel cannot see).
+        // The row is built below (`commands`), not as `ItemSelection` options.
         let reconstructor = def.kind == BlockKind::Reconstructor;
         let mut options: Vec<serde_json::Value> = Vec::new();
-        if reconstructor {
-            for entry in content.entries(ContentType::UnitCommand) {
-                if let Some(name) = entry.name {
-                    options.push(serde_json::json!({
-                        "name": name,
-                        "label": format!("command.{name}"),
-                    }));
-                }
-            }
-        }
         // A behavior that declares its config kinds (`Block.config(...)`) owns
         // the picker; undeclared blocks keep the item/liquid-container fallback.
         let declared = guard.block_config_kinds(block);
@@ -3412,6 +3403,15 @@ impl DesktopBridge {
                 }
             }
         }
+        // `UnitFactory.buildConfiguration` (`UnitFactory.java:287`): the
+        // command row's column count follows the *unlocked* plan count
+        // (`Mathf.clamp(units.size, 2, selectionColumns)`).
+        let unlocked_options = options
+            .iter()
+            .filter(|option| {
+                option.get("unlocked").and_then(serde_json::Value::as_bool) == Some(true)
+            })
+            .count();
         let text = matches!(def.kind, BlockKind::LogicBlock | BlockKind::MessageBlock);
         let multiline = def.kind == BlockKind::MessageBlock;
         let color = def.kind == BlockKind::LightBlock;
@@ -3434,7 +3434,7 @@ impl DesktopBridge {
         // and the Reconstructor's current command
         // (`Reconstructor.java:237-240`): the content config id resolved to a
         // name.
-        let selection = item_selection_shape(&def.name);
+        let selection = item_selection_shape(def);
         let current_content = if reconstructor || selection.is_some() {
             serde_json::from_str::<serde_json::Value>(&guard.building_config_json(x, y).to_string())
                 .ok()
@@ -3474,6 +3474,75 @@ impl DesktopBridge {
             // The color picker replaces the option grid entirely.
             spec["current"] = serde_json::Value::from(current);
             spec["options"] = serde_json::Value::Array(Vec::new());
+        }
+        if def.kind == BlockKind::UnitFactory {
+            // `UnitFactory.buildConfiguration` (`UnitFactory.java:292-340`):
+            // under the plan grid, the selected plan's unit command row — 40 px
+            // toggles, `clamp(units.size, 2, selectionColumns)` columns, a
+            // `Pal.gray` separator, and a click configures without closing.
+            let state = guard.unit_factory_config(x, y);
+            let unit = state
+                .and_then(|(plan, _)| usize::try_from(plan).ok())
+                .and_then(|index| def.unit_plans.get(index))
+                .and_then(|plan| content.unit(plan.unit));
+            if let Some(unit) = unit
+                && unit.commands.len() > 1
+                && unit.allow_change_commands
+            {
+                let limit = selection.map(|(_, _, columns)| columns).unwrap_or(4);
+                let columns = i64::try_from(unlocked_options)
+                    .unwrap_or(2)
+                    .clamp(2, limit.max(2));
+                let current_command = state
+                    .and_then(|(_, command)| command)
+                    .and_then(|command| {
+                        content.unit_command(mind_core::content::UnitCommandId::new(command))
+                    })
+                    .map(|def| def.name.as_str());
+                spec["commands"] = serde_json::json!({
+                    "options": command_options_json(
+                        content,
+                        &unit.commands,
+                        current_command,
+                        unit.default_command
+                            .map(mind_core::content::UnitCommandId::raw),
+                    ),
+                    "columns": columns,
+                    "size": 40.0,
+                    "separator": true,
+                    "background": true,
+                    "close_select": false,
+                });
+            }
+        }
+        if reconstructor {
+            // `Reconstructor.buildConfiguration` (`Reconstructor.java:215-240`):
+            // all unit commands as 44 px toggles, 5 columns over
+            // `Styles.black6`; a click configures and closes the panel
+            // (`deselect()`, `:230`). The port has no payload unit, so the list
+            // is never narrowed to `unit().commands`.
+            let commands: Vec<mind_core::content::UnitCommandId> = content
+                .entries(ContentType::UnitCommand)
+                .into_iter()
+                .map(|entry| mind_core::content::UnitCommandId::new(entry.id))
+                .collect();
+            let current_command = spec
+                .get("current")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned);
+            spec["commands"] = serde_json::json!({
+                "options": command_options_json(
+                    content,
+                    &commands,
+                    current_command.as_deref(),
+                    None,
+                ),
+                "columns": 5,
+                "size": 44.0,
+                "separator": false,
+                "background": true,
+                "close_select": true,
+            });
         }
         Some(spec.to_string())
     }
@@ -3567,6 +3636,33 @@ fn content_option_json(
     })
 }
 
+/// One command-row option (`UnitFactory.java:311-315`,
+/// `Reconstructor.java:222-232`): the `Icon` glyph name, the `command.<name>`
+/// bundle key and the checked state — `command == item` or, when no command is
+/// configured, the unit's `defaultCommand`.
+fn command_options_json(
+    content: &ContentRegistry,
+    commands: &[mind_core::content::UnitCommandId],
+    current: Option<&str>,
+    default: Option<u16>,
+) -> Vec<serde_json::Value> {
+    commands
+        .iter()
+        .filter_map(|id| {
+            let def = content.unit_command(*id)?;
+            let name = def.name.clone();
+            let checked =
+                current == Some(name.as_str()) || (current.is_none() && default == Some(id.raw()));
+            Some(serde_json::json!({
+                "name": name,
+                "icon": def.icon,
+                "label": format!("command.{name}"),
+                "checked": checked,
+            }))
+        })
+        .collect()
+}
+
 /// `ItemSelection.buildTable` call sites in `world/**` — `(pick kind, rows,
 /// columns)`. Sorter/InvertedSorter (`Sorter.java:147`), ItemSource
 /// (`ItemSource.java:116`), LiquidSource (`LiquidSource.java:94`), Unloader
@@ -3578,24 +3674,27 @@ fn content_option_json(
 /// (`UnitCargoUnloadPoint.java:83`), UnitFactory (`UnitFactory.java:289`).
 /// Rows/columns are `Block.selectionRows`/`selectionColumns` (`Block.java:273`,
 /// `5`/`4`) except PayloadSource (`PayloadSource.java:35`, both `8`).
-fn item_selection_shape(name: &str) -> Option<(&'static str, i64, i64)> {
-    let (rows, columns) = if name == "payload-source" {
+fn item_selection_shape(def: &mind_core::content::BlockDef) -> Option<(&'static str, i64, i64)> {
+    let (rows, columns) = if def.name == "payload-source" {
         (8, 8)
     } else {
         (5, 4)
     };
-    let pick = match name {
-        "sorter"
-        | "inverted-sorter"
-        | "item-source"
-        | "unloader"
-        | "duct-unloader"
-        | "duct-router"
-        | "landing-pad"
-        | "unit-cargo-unload-point" => "item",
-        "liquid-source" => "liquid",
-        "constructor" | "large-constructor" | "payload-router" | "payload-source" => "block",
-        "unit-factory" => "unit",
+    // Keyed on the block kind: the routed families share kinds
+    // (sorter/inverted-sorter, constructor/large-constructor, the payload
+    // router pair) and every `UnitFactory` (ground/air/naval factory plus the
+    // tank/ship/mech fabricators) lists plans.
+    let pick = match def.kind {
+        BlockKind::Sorter
+        | BlockKind::ItemSource
+        | BlockKind::Unloader
+        | BlockKind::DirectionalUnloader
+        | BlockKind::DuctRouter
+        | BlockKind::LandingPad
+        | BlockKind::UnitCargoUnloadPoint => "item",
+        BlockKind::LiquidSource => "liquid",
+        BlockKind::Constructor | BlockKind::PayloadRouter | BlockKind::PayloadSource => "block",
+        BlockKind::UnitFactory => "unit",
         _ => return None,
     };
     Some((pick, rows, columns))
@@ -3930,34 +4029,31 @@ mod tests {
 
     #[test]
     fn item_selection_shapes_match_the_java_call_sites() {
-        // J05 T1: the `ItemSelection.buildTable` call sites in `world/**`.
-        assert_eq!(item_selection_shape("sorter"), Some(("item", 5, 4)));
-        assert_eq!(
-            item_selection_shape("inverted-sorter"),
-            Some(("item", 5, 4))
-        );
-        assert_eq!(item_selection_shape("item-source"), Some(("item", 5, 4)));
-        assert_eq!(item_selection_shape("unloader"), Some(("item", 5, 4)));
-        assert_eq!(item_selection_shape("duct-unloader"), Some(("item", 5, 4)));
-        assert_eq!(
-            item_selection_shape("liquid-source"),
-            Some(("liquid", 5, 4))
-        );
-        assert_eq!(item_selection_shape("constructor"), Some(("block", 5, 4)));
-        assert_eq!(
-            item_selection_shape("large-constructor"),
-            Some(("block", 5, 4))
-        );
+        // J05 T1: the `ItemSelection.buildTable` call sites in `world/**`,
+        // keyed on the block kind.
+        let content = base_registry();
+        let shape = |name: &str| content.block_by_name(name).and_then(item_selection_shape);
+        assert_eq!(shape("sorter"), Some(("item", 5, 4)));
+        assert_eq!(shape("inverted-sorter"), Some(("item", 5, 4)));
+        assert_eq!(shape("item-source"), Some(("item", 5, 4)));
+        assert_eq!(shape("unloader"), Some(("item", 5, 4)));
+        assert_eq!(shape("duct-unloader"), Some(("item", 5, 4)));
+        assert_eq!(shape("duct-router"), Some(("item", 5, 4)));
+        assert_eq!(shape("landing-pad"), Some(("item", 5, 4)));
+        assert_eq!(shape("unit-cargo-unload-point"), Some(("item", 5, 4)));
+        assert_eq!(shape("liquid-source"), Some(("liquid", 5, 4)));
+        assert_eq!(shape("constructor"), Some(("block", 5, 4)));
+        assert_eq!(shape("large-constructor"), Some(("block", 5, 4)));
+        assert_eq!(shape("payload-router"), Some(("block", 5, 4)));
         // `PayloadSource.java:35`: `selectionRows = selectionColumns = 8`.
-        assert_eq!(
-            item_selection_shape("payload-source"),
-            Some(("block", 8, 8))
-        );
-        assert_eq!(item_selection_shape("unit-factory"), Some(("unit", 5, 4)));
+        assert_eq!(shape("payload-source"), Some(("block", 8, 8)));
+        // Every `UnitFactory` lists plans (J05 T2 adds the command row).
+        assert_eq!(shape("ground-factory"), Some(("unit", 5, 4)));
+        assert_eq!(shape("air-factory"), Some(("unit", 5, 4)));
         // A `Reconstructor` panel is a plain command row, not a grid; ordinary
         // blocks never route through `ItemSelection`.
-        assert_eq!(item_selection_shape("reconstructor"), None);
-        assert_eq!(item_selection_shape("duo"), None);
+        assert_eq!(shape("additive-reconstructor"), None);
+        assert_eq!(shape("duo"), None);
     }
 
     #[test]
@@ -4023,6 +4119,52 @@ mod tests {
             &|_: &str| false,
         );
         assert_eq!(locked["unlocked"], false);
+    }
+
+    #[test]
+    fn command_rows_follow_the_java_checked_state() {
+        // J05 T2: `UnitFactory.java:311-315` / `Reconstructor.java:222-232`.
+        let content = base_registry();
+        let Some(unit) = content.unit_by_name("nova") else {
+            panic!("nova unit");
+        };
+        let commands = unit.commands.clone();
+        assert!(commands.len() > 1, "nova derives move + repair");
+        let Some(default_id) = unit.default_command else {
+            panic!("nova default command");
+        };
+        let default = Some(default_id.raw());
+        let default_name = content
+            .unit_command(default_id)
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
+        // No configured command: the unit's `defaultCommand` is checked.
+        let rows = command_options_json(&content, &commands, None, default);
+        assert_eq!(rows.len(), commands.len());
+        let checked: Vec<&serde_json::Value> =
+            rows.iter().filter(|row| row["checked"] == true).collect();
+        assert_eq!(checked.len(), 1);
+        assert_eq!(checked[0]["name"], serde_json::Value::from(default_name));
+        // `icon` carries the `UnitCommandDef` `Icon` key for the glyph button.
+        assert!(
+            rows.iter()
+                .all(|row| row["icon"].as_str().is_some_and(|icon| !icon.is_empty()))
+        );
+        // An explicit command wins over the default.
+        let other = commands
+            .iter()
+            .find(|id| Some(id.raw()) != default)
+            .copied()
+            .unwrap_or(commands[0]);
+        let other_name = content
+            .unit_command(other)
+            .map(|def| def.name.clone())
+            .unwrap_or_default();
+        let rows = command_options_json(&content, &commands, Some(other_name.as_str()), default);
+        let checked: Vec<&serde_json::Value> =
+            rows.iter().filter(|row| row["checked"] == true).collect();
+        assert_eq!(checked.len(), 1);
+        assert_eq!(checked[0]["name"], serde_json::Value::from(other_name));
     }
 
     #[test]

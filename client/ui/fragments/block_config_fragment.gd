@@ -77,10 +77,14 @@ func _buttons_only() -> bool:
 
 
 ## Panels that draw no title and no own pane background: the buttons-only
-## configurations above and the `ItemSelection` grid (J05 T1, whose
-## `Styles.black6` background sits inside the widget).
+## configurations above and the `ItemSelection` grid / unit-command row (J05
+## T1/T2, whose `Styles.black6` backgrounds sit inside the widgets).
 func _frameless() -> bool:
-	return _buttons_only() or bool(_config.get("selection", false))
+	return (
+		_buttons_only()
+		or bool(_config.get("selection", false))
+		or _config.get("commands", null) is Dictionary
+	)
 
 
 func _process(_delta: float) -> void:
@@ -145,6 +149,10 @@ func _rebuild() -> void:
 	for child in body.get_children():
 		body.remove_child(child)
 		child.queue_free()
+	# Separation resets per route: Java stacks the grid and the command row with
+	# no table spacing (`table.row()`, `UnitFactory.java:291`) while the other
+	# panels keep the themed spacing.
+	body.remove_theme_constant_override("separation")
 	# code-instantiated: config rows come from the `config_spec` JSON (item or
 	# liquid option list / logic code field / color picker) produced by
 	# `MindInput`; the count is runtime content, not authorable in the scene.
@@ -158,7 +166,8 @@ func _rebuild() -> void:
 		_build_canvas_panel()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
-	elif bool(_config.get("selection", false)):
+	elif bool(_config.get("selection", false)) or _config.get("commands", null) is Dictionary:
+		body.add_theme_constant_override("separation", 0)
 		_build_selection()
 	else:
 		_build_options()
@@ -292,13 +301,26 @@ func _rgba_from_int(value: int) -> Color:
 ## The grid widget owns the layout; picking closes the panel
 ## (`ItemSelection.java:70-71`, `closeSelect`) and re-tapping the checked icon
 ## submits an empty value (`:73`, Java's `null` → `configure(null)`).
+##
+## J05 T2: unit factories additionally stack the produced unit's command row
+## (`UnitFactory.java:292-340`); a reconstructor's whole panel is that row
+## (`Reconstructor.java:215-240`, 5 columns of 44 px cells).
 func _build_selection() -> void:
-	# code-instantiated: the icon grid is built from the `config_spec` JSON's
-	# option list (runtime content); it has no scene-authorable shape.
-	var selection := MindItemSelection.new()
-	body.add_child(selection)
-	selection.build(_config)
-	selection.picked.connect(_on_selection_pick)
+	if bool(_config.get("selection", false)):
+		# code-instantiated: the icon grid is built from the `config_spec` JSON's
+		# option list (runtime content); it has no scene-authorable shape.
+		var selection := MindItemSelection.new()
+		body.add_child(selection)
+		selection.build(_config)
+		selection.picked.connect(_on_selection_pick)
+	var commands: Variant = _config.get("commands", null)
+	if commands is Dictionary:
+		# code-instantiated: the command row is built from the produced unit's
+		# command list in the spec.
+		var row := MindItemCommandRow.new()
+		body.add_child(row)
+		row.build(commands)
+		row.picked.connect(_on_command_pick.bind(row))
 
 
 func _on_selection_pick(value: String) -> void:
@@ -309,6 +331,15 @@ func _on_selection_pick(value: String) -> void:
 	else:
 		_submit(kind, value)
 	_close()
+
+
+## A command-row pick configures the command (`configure(item)`); the
+## reconstructor also closes the panel (`deselect()`, `Reconstructor.java:230`)
+## while the factory's row leaves it open (`UnitFactory.java:311-315`).
+func _on_command_pick(name: String, row: Node) -> void:
+	_submit("content", name)
+	if row != null and row.has_method("close_select") and bool(row.call("close_select")):
+		_close()
 
 
 func _build_options() -> void:

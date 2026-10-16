@@ -88,6 +88,7 @@ const CODES := {
 	"reddit-alien": 62081,
 	"redo": 59446,
 	"refresh": 59498,
+	"resize": 59403,
 	"right": 59395,
 	"rotate": 59427,
 	"right-open": 59450,

@@ -175,7 +175,7 @@ func _make_button(option: Dictionary) -> Button:
 	button.custom_minimum_size = Vector2(CELL, CELL)
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	button.tooltip_text = _label(option)
-	_apply_clear_none_toggle(button)
+	apply_clear_none_toggle(button)
 	var texture := _icon_texture(option)
 	if texture != null:
 		# code-instantiated: one centered icon cell per option (the cell is the
@@ -205,20 +205,22 @@ func _make_button(option: Dictionary) -> Button:
 ## `Styles.clearNoneTogglei` (`Styles.java:351-356`): `up = none`,
 ## `over = flatOver` (#454545), `down`/`checked = flatDown` (the
 ## `flat-down-base` 9-patch: black centre in a 4 px `Pal.accent` frame).
-func _apply_clear_none_toggle(button: Button) -> void:
+## Shared with `MindItemCommandRow` (J05 T2), the style Java uses for both
+## panels' cells.
+static func apply_clear_none_toggle(button: Button) -> void:
 	var over := StyleBoxFlat.new()
 	over.bg_color = Color8(0x45, 0x45, 0x45)
 	over.set_content_margin_all(ICON_MARGIN)
 	button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 	button.add_theme_stylebox_override("hover", over)
-	button.add_theme_stylebox_override("pressed", _flat_down_frame())
-	button.add_theme_stylebox_override("hover_pressed", _flat_down_frame())
+	button.add_theme_stylebox_override("pressed", flat_down_frame())
+	button.add_theme_stylebox_override("hover_pressed", flat_down_frame())
 	button.add_theme_stylebox_override("disabled", StyleBoxEmpty.new())
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 
 
 ## `Styles.createFlatDown` (`Styles.java:479-495`).
-static func _flat_down_frame() -> StyleBox:
+static func flat_down_frame() -> StyleBox:
 	var texture := MindWidgets.icon_texture("flat-down-base")
 	if texture == null:
 		var box := StyleBoxFlat.new()

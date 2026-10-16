@@ -5817,6 +5817,37 @@ impl MindSimHost {
             .unwrap_or(&[])
     }
 
+    /// [`Self::unit_factory_config`] as `"[plan, command]"` (`command` = `-1`
+    /// unset); `"null"` without a factory build. Probe/UI seam.
+    #[func]
+    pub fn factory_command_json(&self, x: i32, y: i32) -> GString {
+        match self.unit_factory_config(x, y) {
+            Some((plan, command)) => {
+                GString::from(format!("[{plan},{}]", command.map_or(-1, i64::from)).as_str())
+            }
+            None => GString::from("null"),
+        }
+    }
+
+    /// `UnitFactoryBuild` config state for the plan grid + command row (J05
+    /// T2): the selected plan index (`-1` = none) and the queued command
+    /// override (`UnitFactory.java:227`).
+    pub fn unit_factory_config(&self, x: i32, y: i32) -> Option<(i32, Option<u16>)> {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let entity = self.sim.grid.entity_at(TilePos::new(tx, ty))?;
+        let state = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::world::blocks::units::UnitFactoryBuild>(entity)?;
+        Some((
+            state.current_plan,
+            state.command.map(mind_core::content::UnitCommandId::raw),
+        ))
+    }
+
     /// Item counts of the building at `(x, y)` as JSON (`{item-name: amount}`).
     ///
     /// `None` when the tile holds no item-capable building or its item module

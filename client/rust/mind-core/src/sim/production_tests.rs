@@ -650,9 +650,12 @@ fn message_block_accepts_text_config() {
     );
 }
 
-/// PAR-0092: `UnitFactory.config(UnitType.class)` selects the matching plan
-/// (resetting progress), `config()` reports the index and `None` clears it; with
-/// no plan selected nothing is produced even with the items in storage.
+/// PAR-0092 / J05 T2: `UnitFactory.config(UnitType.class)` selects the matching
+/// plan (resetting progress) and `config()` reports the plan's unit
+/// (`UnitFactory.java:375-378`, `build.currentPlan == -1 ? null :
+/// plans.get(currentPlan).unit`). `config(Integer.class)` with `-1` clears the
+/// plan; `configure(null)` (`configClear`, `:82`) only clears the *command*.
+/// With no plan selected nothing is produced even with the items in storage.
 #[test]
 fn unit_factory_config_selects_plan() {
     let mut sim = runtime_sim();
@@ -674,10 +677,10 @@ fn unit_factory_config_selects_plan() {
 
     // `created()` auto-selects the first `unlockedNow()` plan; the runtime
     // registry never carries campaign research, so the first plan (flare) is
-    // the fallback default.
+    // the fallback default. `config()` reports that plan's unit type.
     assert_eq!(
         crate::world::config::read_config(&sim.ecs.0, factory),
-        crate::world::config::ConfigValue::Number(0.0)
+        crate::world::config::ConfigValue::Unit(content_flare)
     );
 
     // Configure a plan by unit name (the config panel's content submit path).
@@ -689,14 +692,27 @@ fn unit_factory_config_selects_plan() {
     .expect("configure mono");
     assert_eq!(
         crate::world::config::read_config(&sim.ecs.0, factory),
-        crate::world::config::ConfigValue::Number(1.0)
+        crate::world::config::ConfigValue::Unit(mono)
     );
 
-    // Clearing removes the plan: storage full of requirements still builds nothing.
+    // `configure(null)` / `configClear` (`UnitFactory.java:82`) clears only the
+    // command; the plan stays selected. `config(Integer.class)` with `-1`
+    // (`:58-67`) is the way to unset the plan.
     sim.command(SimCommand::Configure {
         x: 5,
         y: 5,
         value: crate::determinism::ConfigValue::None,
+    })
+    .expect("clear command");
+    assert_eq!(
+        crate::world::config::read_config(&sim.ecs.0, factory),
+        crate::world::config::ConfigValue::Unit(mono),
+        "configClear keeps the plan"
+    );
+    sim.command(SimCommand::Configure {
+        x: 5,
+        y: 5,
+        value: crate::determinism::ConfigValue::Int(-1),
     })
     .expect("clear plan");
     assert_eq!(
