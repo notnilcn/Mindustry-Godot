@@ -174,3 +174,118 @@ smoke; the T2 item 1 stretch and T3 are untouched.
 **yes**. The T2 items this workstream owned (item 6) are landed with root
 causes and in-engine evidence — **yes**. Round-K re-walk (T3) and the summary
 in `docs/K-round-twin-verification.md` — **not started (not this workstream)**.
+## Wave B (2026-10-17) — T2 items 1–5
+
+Branch base `3bd1abe8` (wave-A merged). Session 5, display `:14`, bridge 7010.
+
+| Item | Status | Commit |
+|---|---|---|
+| T2.1 — inert graphics settings (`bloomintensity`/`bloomblur`/`linear`) | **done** (bloom pass implemented + both rows wired; in-engine verified) | `5325720c` |
+| T2.2 — rapid skip-wave double click | **done / recorded**: both clients advance ONE wave (Godot measured; Java source chain) — no port debounce bug | (record only) |
+| T2.3 — settings page wheel scroll (real pointer) | **done**: reproduced, root-caused (PAR-0100 regression), fixed in `MindInput` | `3afd8b70` |
+| T2.4 — hover info over UI (real pointer) | **done / recorded**: MATCH (box shows over the world, hides over STOP UI) | (record only) |
+| T2.5 — round-I FX/audio follow-ups | **record**: PAR-0346 kept as is; PAR-0348 + LegsComp emitter delegated to session 4 (J03 T7/T4) | (record only) |
+
+### T2.1 details
+
+Java sources: `Renderer.java:391-394` (bloom gate + intensity/blur),
+`SettingsMenuDialog.java:531` (`bloom` checkbox), `SettingsMenuDialog.java:540-550`
+(`linear` re-filters every atlas page), `ARC .../g2d/Bloom.java:128-168`
+(threshold/blur/composite maths). Port: new `client/shaders/bloom.gdshader`,
+`mind-core/src/render/bloom.rs::blur_radius`, `World/BloomGroup` in
+`mind-gdext/src/render.rs` (bullet..effect band nodes baked through a
+`CanvasGroup` with a camera-tracked `CaptureRect` defining the bake bounds;
+`bloom`/`bloomintensity`/`bloomblur`/`linear` polled on the 30-frame settings
+cadence).
+
+Deviations: single-pass sqrt-scaled blur instead of Java's repeated quarter-res
+ping-pong passes; `/root/Spine/MindFx` (FX host, sibling of the world renderer)
+stays outside the capture; the pack-time bleed half of `linear`
+(`Drawf.java:59`, `Mods.java:204`) remains a `mind-tools pack` concern.
+
+Evidence: `runs/20261017-s5-J10-T2-1/` — uniforms follow the settings
+(2.5→5.0, 1.4142→2.8284, gate on/off), bullet frames change 1.5–2.2 % of pixels
+across bloom off/default/max, `linear` off/on changes 0.53 % at a fractional
+camera offset.
+
+### T2.2 details
+
+`runs/20261017-s5-J10-T2-2/`: sandbox wave 1 + one 24-step sequence (two clicks
+~300 ms apart) → wave 2. Gate = `hud_fragment.gd:_refresh_skip_button`
+(`not spawning and enemies <= 0`), window ≈121 ticks
+(`wave_spawner.rs::SPAWN_WINDOW_TICKS`). Java's button is disabled for the same
+121 ticks (`HudFragment.java:509,1234-1236`; `WaveSpawner.java:62,108`) → also
+one wave. Java live double click not run (deviation, budget); the source chain
+is deterministic for that path.
+
+### T2.3 details
+
+Reproduced with the real pointer + real wheel (and injected): the settings
+Graphics page never scrolled; a `Body.gui_input` probe showed the wheel never
+reached the GUI. Root cause: `MindInput::input`'s Scroll branch marked the
+wheel handled when `ui_scroll_at()` (PAR-0100's `!scene.hasScroll()` gate)
+matched, so `DesktopInput.java:476-481`'s "skip the zoom" became "consume the
+event". Fix: skip the zoom without consuming; the GUI now gets the wheel.
+
+### T2.4 details
+
+`runs/20261017-s5-J10-T2-4/`: real pointer over the core → hover box visible
+(2 rows) with the HUD fragment hovered (non-STOP); over a palette button
+(STOP) → hidden. Matches `Core.scene.hasMouse()`.
+
+### T2.5 details
+
+No code. See `runs/20261017-s5-J10-T2-5/`.
+
+## Wave B — tests, gates and ledger changes
+
+Per-commit gates (all clean): `cargo fmt --all -- --check`; `cargo clippy -p
+mind-core -p mind-gdext --all-targets -- -D warnings`; `cargo test -p mind-core
+--lib render::` (195 passed) and `-- shaders` (3 passed);
+`bash tools/godot.sh --headless --path client --script res://tools/shaders_check.gd`
+(29 shaders, 0 failed, includes `bloom.gdshader`); `bash tools/godot.sh
+--headless --editor --quit --path client` after the `mind_widgets.gd` change.
+No goldens moved.
+
+### Ledger changes to apply (coordinator; chains.json / parity-ledger.json untouched)
+
+- **PAR-0100** (`wheel-over-UI zooms the camera ...`): annotate the verified
+  entry — the T8 guard consumed the wheel in `_input`, which regressed every UI
+  scroll (settings Graphics page, map lists). Fixed in `3afd8b70`; the wheel is
+  suppressed for the camera and delivered to the GUI. Run:
+  `runs/20261017-s5-J10-T2-3/`.
+- **New (J10 T2.1)**: I05 audit rows `bloomintensity`/`bloomblur`/`linear`
+  ("still inert") are now wired and verified — commit `5325720c`, run
+  `runs/20261017-s5-J10-T2-1/`, with the recorded deviations (single-pass
+  sqrt-scaled blur; `/root/Spine/MindFx` outside the capture; pack-time linear
+  bleed not ported).
+- **New (J10 T2.3)**: settings/map-list wheel scroll — root cause PAR-0100
+  regression + Godot sliders `scrollable`; fixed `3afd8b70`. Can fold into the
+  PAR-0100 annotation above.
+- **T2.2 (skip-wave double click)**: record that both clients advance one wave
+  on a ~300 ms double click (Godot measured; Java `HudFragment.java:509,1234-6`
+  + `WaveSpawner.java:62,108` disabled-button window). No port item needed.
+- **T2.4 (hover info over UI)**: record MATCH — `placement_fragment.gd` gates on
+  STOP-hovered UI exactly like `Core.scene.hasMouse()`. Run:
+  `runs/20261017-s5-J10-T2-4/`.
+- **PAR-0346** (power-node shimmer): keep as is → propose `wontfix` (the round-I
+  claim was retracted in `docs/J-round-twin-verification.md` §2 item 8).
+- **PAR-0348** (`FxEmit::square` 45-degree convention) and the **LegsComp
+  leg-base emitter**: delegated to session 4 (J03 T7 / J03 T4); no J10 code
+  touched those files this wave.
+- **J-INDEX §4**: no new J10 row; the existing `PAR-0345/0347` row stays as the
+  wave-A entry above.
+
+### Wave-B deviations
+
+- T2.2's live Java double click was not run (budget): the Java result is
+  determined by the button gate chain above; recorded in
+  `runs/20261017-s5-J10-T2-2/notes.md`.
+- Bloom blur is a single wider pass rather than Java's repeated quarter-res
+  passes; the FX host is outside the capture (both recorded in the commit and
+  the T2.1 run notes).
+
+### Done criteria (wave B)
+
+T2 items 1–5 are landed or recorded with in-engine evidence. T3 (round-K
+re-walk) remains **not started**.
