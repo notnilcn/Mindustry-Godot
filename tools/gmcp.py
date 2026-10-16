@@ -12,6 +12,19 @@
 #
 # Several TOOL JSON pairs on one command line run in order in one MCP session.
 # Prints one JSON result per call. Exit 1 on the first tool error.
+#
+# Harness guards for eval calls (J10 T2):
+#   * Leading whitespace is normalised to tabs before the body is sent: the
+#     addon wraps it as "func _eval():\n\t" + code.replace("\n", "\n\t"), so a
+#     space-indented body becomes tab+spaces on every line, which GDScript
+#     rejects as mixed indentation -- that parse error trips the editor
+#     break-on-error and pins the frame loop (PAR-0345).
+#   * An eval watchdog (--eval-timeout, default 10 s) aborts a hung eval and
+#     issues `godot_game stop` + `play` on the pinned runtime, then exits 1
+#     with a "watchdog" JSON summary. A bad body (e.g. `$I....`, an invalid
+#     node path, a wrong-arity method) errors the same way (PAR-0347).
+#     Pass --eval-timeout 0 for the plain --timeout (no client-side cut) and
+#     --no-watchdog to leave recovery to the caller.
 
 from __future__ import annotations
 
@@ -24,6 +37,86 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mcp_smoke import McpClient, SmokeError, find_mcp_bin  # noqa: E402
+
+# Spaces per GDScript indent level; used to convert space indentation to tabs.
+INDENT_UNIT = 4
+
+DEFAULT_EVAL_TIMEOUT = 10.0
+DEFAULT_WATCHDOG_SCENE = "res://scenes/game.tscn"
+DEFAULT_WATCHDOG_WAIT = 30.0
+
+
+def normalize_eval_indent(code: str) -> tuple[str, bool]:
+    """Rewrite per-line leading whitespace to tabs.
+
+    The addon wraps the body as "func _eval():\\n\\t" + code.replace("\\n", "\\n\\t"),
+    appending each line's own leading whitespace after an injected tab. A
+    space-indented body then starts every line with tab+spaces, which GDScript
+    rejects as mixed indentation; the parse error trips the editor's
+    break-on-error and pins the frame loop (PAR-0345). Converting each line's
+    leading whitespace to tabs keeps the levels and removes the mix.
+    """
+    lines = []
+    changed = False
+    for line in code.split("\n"):
+        stripped = line.lstrip(" \t")
+        indent = line[: len(line) - len(stripped)]
+        if " " in indent:
+            width = indent.count("\t") * INDENT_UNIT + indent.count(" ")
+            new_indent = "\t" * ((width + INDENT_UNIT - 1) // INDENT_UNIT)
+            changed = True
+            line = new_indent + stripped
+        lines.append(line)
+    return "\n".join(lines), changed
+
+
+def prepare_call(tool: str, args: dict, quiet: bool = False) -> dict:
+    """Apply the eval-body normaliser to a tool call; returns a copy."""
+    if tool != "godot_exec" or not isinstance(args, dict) or args.get("action") != "eval":
+        return args
+    params = args.get("params")
+    if not isinstance(params, dict) or not isinstance(params.get("code"), str):
+        return args
+    code, changed = normalize_eval_indent(params["code"])
+    if not changed:
+        return args
+    if not quiet:
+        print("[gmcp] normalised eval indentation (PAR-0345)", file=sys.stderr)
+    args = json.loads(json.dumps(args))
+    args["params"]["code"] = code
+    return args
+
+
+def watchdog_recover(mcp: McpClient, scene: str, wait: float) -> dict:
+    """stop + play (bounded wait) after a pinned eval; prints the summary."""
+    summary: dict = {"watchdog": "eval stalled the frame loop; stop+play", "actions": []}
+    for tool, args in (
+        ("godot_game", {"action": "stop"}),
+        ("godot_game", {"action": "play", "params": {"scene": scene}}),
+    ):
+        try:
+            summary["actions"].append({args["action"]: mcp.call(tool, args, timeout=30.0)})
+        except SmokeError as e:
+            summary["actions"].append({f"{args['action']}_error": str(e)})
+    deadline = time.monotonic() + max(wait, 0.0)
+    connected = False
+    while time.monotonic() < deadline:
+        time.sleep(1.5)
+        try:
+            status = mcp.call("godot_game", {"action": "status"}, timeout=20.0)
+        except SmokeError:
+            continue
+        if status.get("runtime_connected"):
+            connected = True
+            break
+    summary["runtime_connected"] = connected
+    summary["note"] = (
+        "the game restarted: re-establish pid/tick/camera state"
+        if connected
+        else "runtime did not reconnect within the watchdog wait"
+    )
+    print(json.dumps(summary, default=str))
+    return summary
 
 
 def _find_png(obj):
@@ -49,6 +142,28 @@ def main() -> int:
     ap.add_argument("--screenshot", help="write a game screenshot PNG to this path")
     ap.add_argument("--batch", action="store_true", help="read [[tool, args], ...] JSON from stdin")
     ap.add_argument("--timeout", type=float, default=60.0)
+    ap.add_argument(
+        "--eval-timeout",
+        type=float,
+        default=DEFAULT_EVAL_TIMEOUT,
+        help=f"eval watchdog cutoff in seconds (default {DEFAULT_EVAL_TIMEOUT:g}; 0 keeps --timeout)",
+    )
+    ap.add_argument(
+        "--no-watchdog",
+        action="store_true",
+        help="on an eval timeout, do not run godot_game stop/play recovery",
+    )
+    ap.add_argument(
+        "--watchdog-scene",
+        default=DEFAULT_WATCHDOG_SCENE,
+        help="scene godot_game play replays after a watchdog recovery",
+    )
+    ap.add_argument(
+        "--watchdog-wait",
+        type=float,
+        default=DEFAULT_WATCHDOG_WAIT,
+        help="seconds to wait for runtime_connected after a watchdog replay",
+    )
     ap.add_argument("--sleep", type=float, default=0.0, help="seconds to sleep between calls")
     ap.add_argument("pairs", nargs="*")
     a = ap.parse_args()
@@ -66,11 +181,25 @@ def main() -> int:
     mcp = McpClient(find_mcp_bin(None), [])
     try:
         for tool, args in calls:
+            is_eval = tool == "godot_exec" and isinstance(args, dict) and args.get("action") == "eval"
+            args = prepare_call(tool, args)
+            call_timeout = a.timeout
+            if is_eval and a.eval_timeout > 0:
+                call_timeout = min(a.timeout, a.eval_timeout)
             try:
-                res = mcp.call(tool, args, timeout=a.timeout)
+                res = mcp.call(tool, args, timeout=call_timeout)
                 print(json.dumps(res, default=str)[:20000])
+                if is_eval and not a.no_watchdog:
+                    # A parse error returns ok:true with result:null and an
+                    # inline error after pinning the loop; recover like a
+                    # timeout, before the next call hits the pinned runtime.
+                    if res.get("result") is None and isinstance(res.get("error"), dict):
+                        watchdog_recover(mcp, a.watchdog_scene, a.watchdog_wait)
+                        return 1
             except SmokeError as e:
                 print(json.dumps({"ok": False, "tool": tool, "error": str(e)}))
+                if is_eval and not a.no_watchdog:
+                    watchdog_recover(mcp, a.watchdog_scene, a.watchdog_wait)
                 return 1
             if a.sleep:
                 time.sleep(a.sleep)
