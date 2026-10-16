@@ -1,0 +1,7 @@
+[gd_scene format=3 uid="uid://buppenjh73wll"]
+
+[ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
+[ext_resource type="Script" uid="uid://v6pvqqpobjuv" path="res://ui/dialogs/sector_stats_dialog.gd" id="2_stats"]
+
+[node name="SectorStatsDialog" unique_id=612045889 instance=ExtResource("1_base")]
+script = ExtResource("2_stats")

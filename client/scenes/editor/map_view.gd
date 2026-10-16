@@ -32,6 +32,9 @@ func _ready() -> void:
 
 
 func _process(delta: float) -> void:
+	# Hidden with the shell (playtest / main menu): WASD belongs to the game.
+	if not is_visible_in_tree():
+		return
 	if _editor != null and is_instance_valid(_editor):
 		_pan_keys(delta)
 		_drive_view()
@@ -39,8 +42,11 @@ func _process(delta: float) -> void:
 
 
 ## `MapView.act`: WASD/arrows pan (`offset -= axis * 15 * delta / zoom`) unless a
-## text field has focus or Ctrl is held.
+## text field has focus or Ctrl is held. Keys belong to a dialog on top
+## (`Core.scene.hasField()` / the editor not being the top dialog).
 func _pan_keys(delta: float) -> void:
+	if _modal():
+		return
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit:
 		return
@@ -153,18 +159,38 @@ func _end_pan() -> void:
 
 ## `MapView.act`: Shift or Alt swaps to the temporary `pick` tool until release.
 func _unhandled_input(event: InputEvent) -> void:
-	if _editor == null or not is_instance_valid(_editor):
+	if _editor == null or not is_instance_valid(_editor) or not is_visible_in_tree():
 		return
 	var key := event as InputEventKey
 	if key == null or key.echo or (key.keycode != KEY_SHIFT and key.keycode != KEY_ALT):
 		return
 	if key.pressed:
+		if _modal():
+			return
 		if _last_tool.is_empty():
 			_last_tool = str(_editor.call("tool"))
 			_editor.call("set_tool", "pick")
 	elif not _last_tool.is_empty():
 		_editor.call("set_tool", _last_tool)
 		_last_tool = ""
+
+
+## A dialog or prompt is up over the editor shell (`MapEditorDialog.has_modal`).
+func _modal() -> bool:
+	var shell := get_parent()
+	return shell != null and shell.has_method("has_modal") and bool(shell.call("has_modal"))
+
+
+## Drops an in-progress stroke/pan and restores a temporary tool (the shell is
+## hiding; `MapView` would otherwise keep the eraser/zoom/pick swap).
+func cancel_input() -> void:
+	_drawing = false
+	_panning = false
+	_cursor = Vector2i(-1, -1)
+	if not _last_tool.is_empty() and _editor != null and is_instance_valid(_editor):
+		_editor.call("set_tool", _last_tool)
+	_last_tool = ""
+	queue_redraw()
 
 
 func _tile_at(position: Vector2) -> Vector2i:

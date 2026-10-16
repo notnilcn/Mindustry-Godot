@@ -2,24 +2,17 @@
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 ## Source: core/src/mindustry/ui/dialogs/EditorMapsDialog.java (plan 14 M5).
 ##
-## Editor map browser (`MapListDialog`, `displayType = true`):
+## Editor map browser (`EditorMapsDialog extends MapListDialog`, `displayType = true`;
+## grid, filters and ordering in `map_list_dialog.gd`): `@back`,
 ## `@editor.newmap` + `@editor.importmap` in the button row, a search row over
 ## the T5 preview grid, and per-map clicks opening `editor_map` (preview +
 ## name/author/description + open/delete).
 
-extends MindDialog
+extends "res://ui/dialogs/map_list_dialog.gd"
 
-## `MapListDialog` tile metrics (shared with `custom_game_dialog`).
-const TILE_SIZE := Vector2(200.0, 288.0)
-const NAME_WIDTH := 182.0
-const PREVIEW_SIZE := Vector2(180.0, 180.0)
-const COLUMN_WIDTH := 230.0
 ## `MapEditorDialog`/`ui.editor.show()` default size for `New Map`.
 const NEW_MAP_SIZE := 200
 
-var _field: LineEdit = null
-var _grid: MindTable = null
-var _search := ""
 ## Pending `file_chosen` route (`import`); empty when none is active.
 var _chooser_action := ""
 ## A `file_chosen` handler is connected.
@@ -28,200 +21,24 @@ var _chooser_connected := false
 var _pending_new_map := false
 ## A pending import path awaiting the overwrite confirm.
 var _pending_import := ""
-## Coalesces `previews_changed` batches into one rebuild per frame.
-var _preview_refresh_queued := false
 
 
 func _ready() -> void:
 	set_title_key("@maps")
-	should_pause = false
-	full_dialog = true
+	display_type = true
 	super._ready()
-	_build()
-	clear_buttons()
-	# `buildButtons`: `@editor.newmap` (210x64) and `@editor.importmap`.
-	add_button(_t("@editor.newmap"), _new_map, "add", 210.0)
-	add_button(_t("@editor.importmap"), _open_import, "upload", 210.0)
-	add_close_button()
 	_connect_prompts()
 
 
-## `MapListDialog.shown` rebuilds the grid so refreshed maps appear.
-func shown() -> void:
-	_refresh_registry()
-	_rebuild()
+## `buildButtons`: `@editor.newmap` (`Icon.add`) then `@editor.importmap`
+## (`Icon.upload`), both 210x64, after the shared `@back`.
+func _build_buttons() -> void:
+	add_pane_button(_t("@editor.newmap"), "add", _new_map)
+	add_pane_button(_t("@editor.importmap"), "upload", _open_import)
 
 
-func _build() -> void:
-	var root := content_table()
-	# code-instantiated: the search row is a fixed composite (zoom glyph + field).
-	var search := HBoxContainer.new()
-	search.add_theme_constant_override("separation", 6)
-	search.add_child(MindWidgets.glyph("zoom", 20))
-	_field = MindWidgets.field(_t("@editor.search"))
-	_field.max_length = 50
-	_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_field.text_changed.connect(func(text: String) -> void:
-		_search = text.to_lower()
-		_rebuild())
-	search.add_child(_field)
-	root.add(search).grow_x_axis().pad(4)
-	root.row()
-	# code-instantiated: tile count and layout are driven by the map registry.
-	_grid = MindTable.new()
-	_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add(_grid).grow_x_axis().grow_y_axis()
-	_rebuild()
-
-
-## Reloads the live `MindPreview` registry and asks for missing previews.
-func _refresh_registry() -> void:
-	var preview := get_node_or_null("/root/Spine/MindPreview")
-	if preview == null:
-		return
-	if preview.has_method("refresh"):
-		preview.call("refresh")
-	_connect_previews(preview)
-	if preview.has_method("generate_previews"):
-		preview.call("generate_previews")
-
-
-func _connect_previews(preview: Node) -> void:
-	if not preview.has_signal("previews_changed"):
-		return
-	if not preview.is_connected("previews_changed", Callable(self, "_on_previews_changed")):
-		preview.connect("previews_changed", Callable(self, "_on_previews_changed"))
-
-
-func _on_previews_changed() -> void:
-	if _preview_refresh_queued:
-		return
-	_preview_refresh_queued = true
-	call_deferred("_rebuild_after_previews")
-
-
-func _rebuild_after_previews() -> void:
-	_preview_refresh_queued = false
-	_rebuild()
-
-
-## The live registry rows (`MindPreview.maps_list`).
-func _maps() -> Array:
-	var rows: Array = []
-	var preview := get_node_or_null("/root/Spine/MindPreview")
-	if preview != null and preview.has_method("maps_list"):
-		var maps: Variant = preview.call("maps_list")
-		if maps is Array:
-			for map_variant in maps:
-				var map: Dictionary = map_variant
-				if not str(map.get("name", "")).is_empty():
-					rows.append(map)
-	return rows
-
-
-func _rebuild() -> void:
-	if _grid == null:
-		return
-	_grid.clear_children()
-	var maxwidth := maxi(1, int(get_viewport_rect().size.x / COLUMN_WIDTH))
-	var index := 0
-	var shown_any := false
-	for map_variant in _maps():
-		var map: Dictionary = map_variant
-		if not _passes_filter(map):
-			continue
-		shown_any = true
-		if index > 0 and index % maxwidth == 0:
-			_grid.row()
-		_grid.add(_build_map_tile(map)).pad(8)
-		index += 1
-	if not shown_any:
-		_grid.add(MindWidgets.label(_tm("@maps.none"))).pad(8)
-	_grid.sort_now()
-	_grid.call_deferred("sort_now")
-
-
-func _passes_filter(map: Dictionary) -> bool:
-	if _search.is_empty():
-		return true
-	var name := str(map.get("name", "")).to_lower()
-	var author := str(map.get("author", "")).to_lower()
-	return name.contains(_search) or author.contains(_search)
-
-
-## `MapListDialog.rebuildMaps` tile: name, divider, preview, source label
-## (shared shape with `custom_game_dialog`).
-func _build_map_tile(map: Dictionary) -> Button:
-	# code-instantiated: map tiles are data-driven from the Maps registry.
-	var map_name := str(map.get("name", ""))
-	var tile := MindWidgets.button("")
-	tile.theme_type_variation = "grayt"
-	tile.custom_minimum_size = TILE_SIZE
-	tile.clip_contents = true
-	tile.pressed.connect(func() -> void: _open_map(map_name))
-
-	var column := VBoxContainer.new()
-	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	column.alignment = BoxContainer.ALIGNMENT_CENTER
-	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_theme_constant_override("separation", 4)
-	tile.add_child(column)
-
-	# code-instantiated: the name needs native ellipsis trimming.
-	var name_label := Label.new()
-	name_label.text = map_name
-	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name_label.clip_text = true
-	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	name_label.custom_minimum_size.x = NAME_WIDTH
-	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(name_label)
-
-	# code-instantiated: divider between the map name and the preview.
-	var divider := HSeparator.new()
-	divider.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(divider)
-
-	var texture := _preview_texture(map_name)
-	if texture != null:
-		# code-instantiated: the preview texture comes from the map registry.
-		var image := MindBorderImage.new()
-		image.texture = texture
-		image.thickness = 3.0
-		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		image.custom_minimum_size = PREVIEW_SIZE
-		image.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		column.add_child(image)
-	else:
-		# code-instantiated: the `nomap` placeholder until generation lands.
-		var preview := PanelContainer.new()
-		preview.theme_type_variation = "smallPane"
-		preview.custom_minimum_size = PREVIEW_SIZE
-		preview.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var glyph := MindWidgets.glyph("map", 48)
-		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		preview.add_child(glyph)
-		column.add_child(preview)
-
-	# `displayType`: `@custom` / `@builtin` source label.
-	var type_label := MindWidgets.label(_t("@custom") if bool(map.get("custom", false)) else _t("@builtin"))
-	type_label.add_theme_color_override("default_color", Color.GRAY)
-	type_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	type_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(type_label)
-
-	return tile
-
-
-func _preview_texture(map_name: String) -> Texture2D:
-	var preview := get_node_or_null("/root/Spine/MindPreview")
-	if preview == null or not preview.has_method("texture_for_name"):
-		return null
-	var value: Variant = preview.call("texture_for_name", map_name)
-	return value if value is Texture2D else null
+func _show_map(map: Dictionary) -> void:
+	_open_map(str(map.get("name", "")))
 
 
 ## `EditorMapsDialog.showMap`: the per-map dialog (preview + actions).

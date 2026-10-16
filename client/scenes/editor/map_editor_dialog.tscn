@@ -26,90 +26,127 @@ color = Color(0.03, 0.04, 0.06, 0.94)
 
 [node name="MapView" parent="." unique_id=345889062 instance=ExtResource("1_view")]
 layout_mode = 1
-offset_left = 176.0
-offset_right = -288.0
+offset_left = 174.0
+offset_right = -310.0
 
 [node name="LeftTools" type="VBoxContainer" parent="." unique_id=1580297551]
 layout_mode = 1
 anchors_preset = 9
 anchor_bottom = 1.0
-offset_left = 8.0
-offset_top = 8.0
-offset_right = 168.0
-offset_bottom = -8.0
+offset_right = 174.0
 grow_vertical = 2
-theme_override_constants/separation = 6
-
-[node name="Title" type="Label" parent="LeftTools" unique_id=1912069298]
-layout_mode = 2
-text = "Editor"
-
-[node name="MenuButton" type="Button" parent="LeftTools" unique_id=1600000012]
-layout_mode = 2
-text = "menu"
+theme_override_constants/separation = 0
 
 [node name="ToolGrid" type="GridContainer" parent="LeftTools" unique_id=1806637987]
 layout_mode = 2
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
 columns = 3
 
-[node name="GridButton" type="Button" parent="LeftTools/ToolGrid" unique_id=1624434975]
+[node name="MenuButton" type="Button" parent="LeftTools/ToolGrid" unique_id=1600000012]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "grid"
+theme_type_variation = &"flati"
+
+[node name="GridButton" type="Button" parent="LeftTools/ToolGrid" unique_id=1624434975]
+custom_minimum_size = Vector2(58, 58)
+layout_mode = 2
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="ZoomButton" type="Button" parent="LeftTools/ToolGrid" unique_id=1673335060]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "zoom"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="UndoButton" type="Button" parent="LeftTools/ToolGrid" unique_id=2028914581]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "undo"
+theme_type_variation = &"flati"
 
 [node name="RedoButton" type="Button" parent="LeftTools/ToolGrid" unique_id=893404710]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "redo"
+theme_type_variation = &"flati"
 
 [node name="PickButton" type="Button" parent="LeftTools/ToolGrid" unique_id=1133125653]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "pick"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="LineButton" type="Button" parent="LeftTools/ToolGrid" unique_id=1258076407]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "line"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="PencilButton" type="Button" parent="LeftTools/ToolGrid" unique_id=2097311064]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "pencil"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="EraserButton" type="Button" parent="LeftTools/ToolGrid" unique_id=790988862]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "eraser"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="FillButton" type="Button" parent="LeftTools/ToolGrid" unique_id=216202360]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "fill"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="SprayButton" type="Button" parent="LeftTools/ToolGrid" unique_id=525647393]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "spray"
+theme_type_variation = &"squareTogglei"
+toggle_mode = true
 
 [node name="RotateButton" type="Button" parent="LeftTools/ToolGrid" unique_id=2038373819]
+custom_minimum_size = Vector2(58, 58)
 layout_mode = 2
-text = "rotate"
+theme_type_variation = &"flati"
 
-[node name="TeamLabel" type="Label" parent="LeftTools" unique_id=639891919]
+[node name="ToolSeparator" type="ColorRect" parent="LeftTools" unique_id=386471429]
+custom_minimum_size = Vector2(174, 4)
 layout_mode = 2
-text = "Team"
+mouse_filter = 2
+color = Color(0.27058825, 0.27058825, 0.27058825, 1)
 
-[node name="TeamRow" type="HBoxContainer" parent="LeftTools" unique_id=1096618317]
+[node name="TeamGrid" type="GridContainer" parent="LeftTools" unique_id=1096618317]
 layout_mode = 2
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
+columns = 3
 
-[node name="BrushLabel" type="Label" parent="LeftTools" unique_id=1913791396]
+[node name="BrushStack" type="MarginContainer" parent="LeftTools" unique_id=1663879839]
 layout_mode = 2
-text = "Brush"
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 9
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 2
 
-[node name="BrushSlider" type="HSlider" parent="LeftTools" unique_id=1864859013]
+[node name="BrushSlider" type="HSlider" parent="LeftTools/BrushStack" unique_id=1864859013]
+custom_minimum_size = Vector2(154, 30)
 layout_mode = 2
 max_value = 8.0
+
+[node name="BrushLabel" type="Label" parent="LeftTools/BrushStack" unique_id=1913791396]
+layout_mode = 2
+mouse_filter = 2
+text = "Brush"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="BrushUnderline" type="ColorRect" parent="LeftTools" unique_id=1304073663]
+custom_minimum_size = Vector2(174, 3)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.27058825, 0.27058825, 0.27058825, 1)
 
 [node name="ShowChecks" type="VBoxContainer" parent="LeftTools" unique_id=1936155251]
 layout_mode = 2
@@ -117,17 +154,23 @@ layout_mode = 2
 [node name="ShowBlocks" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=1228478403]
 layout_mode = 2
 button_pressed = true
-text = "blocks"
+text = "Show Blocks"
 
 [node name="ShowTerrain" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=1248652680]
 layout_mode = 2
 button_pressed = true
-text = "terrain"
+text = "Show Terrain"
 
 [node name="ShowFloor" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=2004911415]
 layout_mode = 2
 button_pressed = true
-text = "floor"
+text = "Show Floor"
+
+[node name="CenterButton" type="Button" parent="LeftTools" unique_id=1205523437]
+custom_minimum_size = Vector2(0, 50)
+layout_mode = 2
+theme_type_variation = &"flatt"
+text = "Center"
 
 [node name="RightPalette" type="VBoxContainer" parent="." unique_id=454920606]
 layout_mode = 1
@@ -135,26 +178,38 @@ anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -280.0
-offset_top = 8.0
-offset_right = -8.0
-offset_bottom = -8.0
+offset_left = -310.0
 grow_horizontal = 0
 grow_vertical = 2
-theme_override_constants/separation = 6
+theme_override_constants/separation = 4
 
-[node name="PaletteTitle" type="Label" parent="RightPalette" unique_id=350122544]
+[node name="SearchRow" type="HBoxContainer" parent="RightPalette" unique_id=1525797150]
 layout_mode = 2
-text = "Blocks"
+theme_override_constants/separation = 8
 
-[node name="SearchField" type="LineEdit" parent="RightPalette" unique_id=681532099]
+[node name="SearchIcon" type="Label" parent="RightPalette/SearchRow" unique_id=1562615358]
 layout_mode = 2
-placeholder_text = "search"
+mouse_filter = 2
+vertical_alignment = 1
+
+[node name="SearchField" type="LineEdit" parent="RightPalette/SearchRow" unique_id=681532099]
+layout_mode = 2
+size_flags_horizontal = 3
+placeholder_text = "Search..."
 
 [node name="SelectedLabel" type="Label" parent="RightPalette" unique_id=1992759346]
+custom_minimum_size = Vector2(200, 0)
 layout_mode = 2
-text = "selected: -"
+size_flags_horizontal = 4
+text = "-"
+horizontal_alignment = 1
 autowrap_mode = 2
+
+[node name="SelectedUnderline" type="ColorRect" parent="RightPalette" unique_id=980918996]
+custom_minimum_size = Vector2(0, 3)
+layout_mode = 2
+mouse_filter = 2
+color = Color(0.27058825, 0.27058825, 0.27058825, 1)
 
 [node name="ConfigPanel" type="VBoxContainer" parent="RightPalette" unique_id=1724509812]
 visible = false
@@ -164,8 +219,13 @@ layout_mode = 2
 layout_mode = 2
 text = "config"
 
-[node name="BlockList" type="ItemList" parent="RightPalette" unique_id=1880728245]
+[node name="BlockScroll" type="ScrollContainer" parent="RightPalette" unique_id=1880728245]
 layout_mode = 2
 size_flags_vertical = 3
-same_column_width = true
-fixed_column_width = 260
+horizontal_scroll_mode = 0
+
+[node name="BlockGrid" type="GridContainer" parent="RightPalette/BlockScroll" unique_id=1276299895]
+layout_mode = 2
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
+columns = 6

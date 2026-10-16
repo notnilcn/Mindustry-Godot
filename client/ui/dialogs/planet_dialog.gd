@@ -44,6 +44,7 @@ var _complete_announced := ""
 var _sectors_shown := false
 var _sector_search := ""
 var _sector_list: VBoxContainer = null
+var _sector_list_backdrop: PanelContainer = null
 ## Stage layers hidden while the planet page covers the screen (PAR-0146/0147):
 ## node path -> visibility captured when the page first covered the stage, so
 ## closing it restores exactly what was showing before (the live game's HUD +
@@ -825,17 +826,24 @@ func _build_sector_list(planet_name: String) -> void:
 		return
 	based.sort_custom(_sector_list_before)
 	# code-instantiated: rebuilt with the planet view; content is the live
-	# based-sector set.
+	# based-sector set. Java: `sectorList.background(Styles.black8)`.
+	var backdrop := PanelContainer.new()
+	backdrop.name = "SectorListBackdrop"
+	var box := StyleBoxFlat.new()
+	box.bg_color = MindStyles.BLACK_8
+	backdrop.add_theme_stylebox_override("panel", box)
+	backdrop.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	backdrop.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	backdrop.offset_left = -295.0
+	backdrop.offset_right = -5.0
+	backdrop.offset_top = 3.0
+	backdrop.custom_minimum_size = Vector2(290.0, 0.0)
+	add_child(backdrop)
+	_sector_list_backdrop = backdrop
 	_sector_list = VBoxContainer.new()
 	_sector_list.name = "SectorList"
 	_sector_list.add_theme_constant_override("separation", 0)
-	_sector_list.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_sector_list.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_sector_list.offset_left = -295.0
-	_sector_list.offset_right = -5.0
-	_sector_list.offset_top = 3.0
-	_sector_list.custom_minimum_size = Vector2(290.0, 0.0)
-	add_child(_sector_list)
+	backdrop.add_child(_sector_list)
 
 	var toggle := Button.new()
 	toggle.toggle_mode = true
@@ -948,6 +956,9 @@ func _fill_sector_entries(entries: VBoxContainer, based: Array) -> void:
 
 
 func _remove_sector_list() -> void:
+	if _sector_list_backdrop != null:
+		_sector_list_backdrop.queue_free()
+		_sector_list_backdrop = null
 	if _sector_list != null:
 		_sector_list.queue_free()
 		_sector_list = null
@@ -1172,7 +1183,7 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 		stats_button.theme_type_variation = "cleart"
 		stats_button.custom_minimum_size = Vector2(0.0, 40.0)
 		build_button_content(stats_button, MindWidgets.glyph("info", 20), _t("@stats"))
-		stats_button.pressed.connect(func() -> void: _show_sector_stats(sector))
+		stats_button.pressed.connect(func() -> void: _open_sector_stats(int(sector.get("id", -1))))
 		column.add_child(stats_button)
 
 	var action := _sector_action(sector)
@@ -1353,38 +1364,6 @@ func _sector_state_labels(sector: Dictionary) -> PackedStringArray:
 	return out
 
 
-## `PlanetDialog.showStats`: the sector's attempts/wave/threat, resources,
-## lockdown notice and production/export/import/stored rows, shown through the
-## `full_text` dialog titled with the sector name.
-func _show_sector_stats(sector: Dictionary) -> void:
-	var stats: Dictionary = sector.get("stats", {})
-	var lines := PackedStringArray()
-	if int(stats.get("playtime_ms", 0)) > 0:
-		lines.append("%s [color=#ffd37f]%s[/color]" % [_t("@sectors.time"), format_time_ms(int(stats.get("playtime_ms", 0)))])
-	if int(stats.get("attempts", 0)) > 0:
-		lines.append("%s [color=#ffd37f]%d[/color]" % [_t("@sectors.attempts"), int(stats.get("attempts", 0))])
-	if int(stats.get("wave", 0)) > 0:
-		lines.append("%s [color=#ffd37f]%d[/color]" % [_t("@sectors.wave"), int(stats.get("wave", 0))])
-	if bool(sector.get("attacked", false)) or not bool(sector.get("has_base", false)):
-		var threat := str(sector.get("threat_band", "low"))
-		lines.append("%s [color=#ffd37f]%s[/color]" % [_t("@sectors.threat"), _t("@threat.%s" % threat)])
-	if bool(sector.get("frozen", false)):
-		lines.append(_tm("@sector.lockdown"))
-	for key in ["production", "export", "import"]:
-		var line := _stat_line("@sectors.%s" % key, stats.get(key, []))
-		if not line.is_empty():
-			lines.append(line)
-	var stored := _stat_line("@sectors.stored", stats.get("stored", []))
-	if not stored.is_empty():
-		lines.append(stored)
-	var ui := get_node_or_null("/root/MindUi")
-	if ui != null:
-		ui.call(
-			"open_dialog", "full_text",
-			JSON.stringify({"title": _localized_sector(sector), "text": "\n".join(lines)})
-		)
-
-
 ## `UnlockableContent.uiIcon` for a resource name (`item-<name>-ui`, then the
 ## other `defaultContentIcons` types).
 func _content_icon(content_name: String) -> Texture2D:
@@ -1395,15 +1374,16 @@ func _content_icon(content_name: String) -> Texture2D:
 	return null
 
 
-## `label item amount` line for a `[[name, value]]` stats list ("" when empty).
-func _stat_line(label_key: String, values: Array) -> String:
-	var parts := PackedStringArray()
-	for entry in values:
-		if entry is Array and (entry as Array).size() >= 2:
-			parts.append("%s %s" % [str(entry[0]), str(entry[1])])
-	if parts.is_empty():
-		return ""
-	return "%s %s" % [_t(label_key), ", ".join(parts)]
+## `PlanetDialog` `@stats`: the sector stats window (round-I I04 T10,
+## `PlanetDialog.java:1026-1171`).
+func _open_sector_stats(sector_id: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null:
+		return
+	ui.call(
+		"open_dialog", "sector_stats",
+		JSON.stringify({"planet": _selected_planet, "sector": sector_id})
+	)
 
 
 ## `PlanetDialog` action label/icon/behavior for the selected sector

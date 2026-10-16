@@ -42,6 +42,10 @@ var _active_prompt: Control = null
 var _announce_node: Control = null
 ## Its cancel path (Esc); invalid when no prompt is up.
 var _prompt_cancel: Callable = Callable()
+## `Ui/EditorDialog` is shown (`ui.editor.isShown()`); see `set_editor_open`.
+var _editor_open := false
+## `mouse_filter` to restore when the editor shell closes.
+var _root_mouse_filter: Control.MouseFilter = Control.MOUSE_FILTER_PASS
 
 
 func _enter_tree() -> void:
@@ -274,11 +278,12 @@ func _boot() -> void:
 ## in-game HUD group (parity: `state.isMenu()` gates both), clearing the loading
 ## overlay too.
 func set_menu_visible(menu_visible: bool) -> void:
-	menu_group.visible = menu_visible
-	hud_group.visible = not menu_visible
+	# Neither surface shows through an open editor shell (`set_editor_open`).
+	menu_group.visible = menu_visible and not _editor_open
+	hud_group.visible = not menu_visible and not _editor_open
 	var background := get_node_or_null("../MenuBackground")
 	if background != null:
-		background.visible = menu_visible
+		background.visible = menu_visible and not _editor_open
 	var loading := loading_layer.get_node_or_null("loading")
 	if loading != null and loading.has_method("hide_loading"):
 		loading.call("hide_loading")
@@ -289,6 +294,70 @@ func set_menu_visible(menu_visible: bool) -> void:
 		var platform := get_node_or_null("/root/Spine/MindPlatform")
 		if platform != null and platform.has_method("finish_launch"):
 			platform.call("finish_launch")
+
+
+## `MapEditorDialog` is a full-screen dialog over the game UI: while it is
+## shown the menu (`MenuFragment`: `group.visible(() -> !ui.editor.isShown())`)
+## and the in-game HUD (`state.isMenu()` after `logic.reset()`) are hidden, and
+## the building config/inventory panels close. `Ui/EditorDialog` sits *before*
+## `UiRoot` in `Ui` so dialogs and prompts in `DialogLayer`/`OverlayLayer`
+## receive mouse input above it (Godot GUI picking follows tree order, not
+## `z_index`); the full-rect `UiRoot` stops intercepting the pointer so clicks
+## with no dialog over them fall through to the editor shell. Closing only
+## restores the pointer filter: the caller picks the next surface (main menu
+## on exit, the game HUD for playtest / edit-in-game).
+func set_editor_open(open: bool) -> void:
+	if not open:
+		if _editor_open:
+			mouse_filter = _root_mouse_filter
+		_editor_open = false
+		return
+	if not _editor_open:
+		_root_mouse_filter = mouse_filter
+	_editor_open = true
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	menu_group.visible = false
+	hud_group.visible = false
+	var background := get_node_or_null("../MenuBackground") as CanvasItem
+	if background != null:
+		background.visible = false
+	_close_hud_panels()
+
+
+## Closes the HUD panels that would otherwise reappear with the HUD group
+## (`config.hideConfig()`, `inv.hide()`, the fullscreen minimap).
+func _close_hud_panels() -> void:
+	var config := hud_group.get_node_or_null("block_config") as CanvasItem
+	if config != null and config.visible:
+		if config.has_method("_close"):
+			config.call("_close")
+		else:
+			config.visible = false
+	var inventory := hud_group.get_node_or_null("block_inventory") as CanvasItem
+	if inventory != null and inventory.visible:
+		if inventory.has_method("hide_panel"):
+			inventory.call("hide_panel")
+		else:
+			inventory.visible = false
+	for panel_name: String in ["plan_config", "minimap"]:
+		var panel := hud_group.get_node_or_null(panel_name) as CanvasItem
+		if panel != null:
+			panel.visible = false
+
+
+## Whether the editor shell is shown (`ui.editor.isShown()`).
+func is_editor_open() -> bool:
+	return _editor_open
+
+
+## True while a `MindUi` dialog or a transient prompt is up: the editor shell
+## only takes keys while it is the top dialog (`MapEditorDialog`:
+## `update(() -> { if(hasKeyboard()) doInput(); })`).
+func has_modal() -> bool:
+	if _active_prompt != null and is_instance_valid(_active_prompt):
+		return true
+	var ui := _ui()
+	return ui != null and bool(ui.call("has_dialog"))
 
 
 ## `Control.java:75-80`: after the client load, a boot that skipped mod loading
@@ -624,18 +693,22 @@ func _on_show_confirm(text: String) -> void:
 	# `UI.java:582-606 showConfirm(text, cb)`: `@confirm` title, 500 px wrapped
 	# body, `@cancel`/`@ok` 200x54 with icons, Enter = OK, Esc = cancel.
 	var prompt := _build_prompt(_t("@confirm"), text, false, 500.0)
+	var root: Control = prompt.root
+	# Connected after every listener, one-shot: the prompt closes once the
+	# answer has been delivered, whichever path resolved it.
+	var ui_node := _ui()
+	if ui_node != null and ui_node.has_signal("confirm_result"):
+		ui_node.connect("confirm_result", _on_confirm_resolved.bind(root), CONNECT_ONE_SHOT)
 	var cancel := func() -> void:
 		var ui := _ui()
 		if ui != null:
 			ui.call("resolve_confirm", false)
-		prompt.root.queue_free()
-		_clear_prompt()
+		_dismiss_prompt(root)
 	var confirm := func() -> void:
 		var ui := _ui()
 		if ui != null:
 			ui.call("resolve_confirm", true)
-		prompt.root.queue_free()
-		_clear_prompt()
+		_dismiss_prompt(root)
 	prompt.cancel = cancel
 	_prompt_cancel = cancel
 	_add_prompt_button(prompt.buttons, "@cancel", "cancel", Vector2(200.0, 54.0), cancel)
@@ -687,6 +760,25 @@ func _on_text_input_request(title: String, message: String, max_length: int, def
 	field.grab_focus()
 
 
+## `showConfirm`'s dialog hides with its answer (`dialog.hide()` in both
+## buttons), whichever path delivered it: the buttons, Enter/Esc, or a direct
+## `MindUi.resolve_confirm` (MCP / script callers).
+func _on_confirm_resolved(_confirmed: bool, root: Variant) -> void:
+	if is_instance_valid(root):
+		_dismiss_prompt(root as Control)
+
+
+## Frees one prompt root, clearing the active-prompt bookkeeping only when it is
+## still that prompt (a listener may have opened the next prompt meanwhile).
+func _dismiss_prompt(root: Control) -> void:
+	if root == null or not is_instance_valid(root):
+		return
+	if _active_prompt == root:
+		_clear_prompt()
+	if not root.is_queued_for_deletion():
+		root.queue_free()
+
+
 ## Clears the active-prompt bookkeeping (used by every prompt exit path).
 func _clear_prompt() -> void:
 	_active_prompt = null
@@ -728,8 +820,9 @@ func _build_prompt(
 	root.color = MindStyles.BLACK_9
 	root.set_anchors_preset(Control.PRESET_FULL_RECT)
 	root.mouse_filter = Control.MOUSE_FILTER_STOP
-	# Prompts are topmost (`UI` has one shared layer upstream; the port's
-	# `Ui/EditorDialog` is a sibling of `UiRoot`, so raise above it).
+	# Prompts are topmost (`UI` has one shared layer upstream). `Ui/EditorDialog`
+	# precedes `UiRoot` in tree order, so prompts already pick input above it;
+	# the z_index keeps them drawn above any later `OverlayLayer` sibling.
 	root.z_index = 1000
 	overlay_layer.add_child(root)
 	_active_prompt = root

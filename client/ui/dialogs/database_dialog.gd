@@ -12,7 +12,7 @@ extends MindDialog
 ## `Planets.sun` content name (`DatabaseDialog.tab`'s all-content default).
 const ALL_TAB := "sun"
 
-var _tabs: HBoxContainer = null
+var _tabs: GridContainer = null
 var _grid: VBoxContainer = null
 var _search: LineEdit = null
 var _view: Dictionary = {}
@@ -23,6 +23,8 @@ func _ready() -> void:
 	set_title_key("@database")
 	should_pause = true
 	super._ready()
+	# Java `BaseDialog`: the `cont.pane(all)` grid fills the viewport.
+	fill_panel()
 	_build()
 	add_close_button()
 
@@ -39,10 +41,14 @@ func _build() -> void:
 	table.add(_search).grow_x_axis().pad(4)
 	table.row()
 
-	# code-instantiated: the tab rail is the data-driven `checkTabList` planets.
-	_tabs = HBoxContainer.new()
-	_tabs.alignment = BoxContainer.ALIGNMENT_CENTER
-	table.add(_tabs).grow_x_axis().pad(4)
+	# code-instantiated: the tab rail is the data-driven `checkTabList` planets
+	# (`t.button(..., Styles.clearNoneTogglei, iconMed, ...).size(50f)`, 10 per
+	# row).
+	_tabs = GridContainer.new()
+	_tabs.columns = 10
+	_tabs.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_tabs.add_theme_constant_override("h_separation", 4)
+	table.add(_tabs).pad(4)
 	table.row()
 
 	# code-instantiated: the category/tag grid is live content, not scene state.
@@ -62,7 +68,17 @@ func _load_view() -> void:
 	var tabs: Array = _view.get("tabs", [])
 	if not tabs.is_empty():
 		var names: Array = tabs.map(func(tab: Dictionary) -> String: return str(tab.get("name", "")))
-		if not names.has(_tab):
+		# `DatabaseDialog.shown`: in a campaign the active tab follows the
+		# played planet (`state.getPlanet()`) when the tab list has it.
+		var current_planet := ""
+		var campaign := campaign_node()
+		if campaign != null and campaign.has_method("get_sector_state"):
+			var state: Dictionary = campaign.call("get_sector_state")
+			if bool(state.get("campaign", false)):
+				current_planet = str(state.get("planet", ""))
+		if not current_planet.is_empty() and names.has(current_planet):
+			_tab = current_planet
+		elif not names.has(_tab):
 			_tab = str((tabs[0] as Dictionary).get("name", ALL_TAB))
 	_build_tabs()
 	_rebuild()
@@ -74,7 +90,9 @@ func _build_tabs() -> void:
 	for child in _tabs.get_children():
 		_tabs.remove_child(child)
 		child.queue_free()
-	# code-instantiated: one tab button per planet in the database model.
+	# code-instantiated: one 50 px icon toggle per planet tab — `Icon.eyeSmall`
+	# for the sun, else the planet's icon tinted `p.iconColor`
+	# (`t.button(..., Styles.clearNoneTogglei, iconMed, ...)`).
 	var group := ButtonGroup.new()
 	var tabs: Array = _view.get("tabs", [])
 	for index in tabs.size():
@@ -82,17 +100,23 @@ func _build_tabs() -> void:
 		var name := str(tab.get("name", ""))
 		var is_all := bool(tab.get("is_all", false))
 		var label := _tab_label(tab, is_all)
+		var color := Color.WHITE if is_all else _hex_color(str(tab.get("color", "")))
+		var icon_name := str(tab.get("icon", ""))
 		var button := Button.new()
 		button.name = "tab-%s" % name
-		button.theme_type_variation = "flatTogglet"
-		button.text = label
+		button.theme_type_variation = "clearNoneTogglei"
 		button.tooltip_text = label
 		button.toggle_mode = true
 		button.button_group = group
 		button.button_pressed = name == _tab
-		button.custom_minimum_size = Vector2(90, 40)
-		if not is_all:
-			button.add_theme_color_override("font_color", _hex_color(str(tab.get("color", ""))))
+		button.custom_minimum_size = Vector2(50, 50)
+		if MindIcons.glyph(icon_name).is_empty():
+			button.text = label
+		else:
+			var glyph := MindWidgets.glyph(icon_name, 32, color)
+			glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			button.add_child(glyph)
 		button.pressed.connect(_select_tab.bind(name))
 		_tabs.add_child(button)
 
@@ -207,6 +231,15 @@ func _entry_button(entry_variant: Variant) -> Button:
 		lock.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		lock.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		button.add_child(lock)
+	if bool(entry.get("banned", false)):
+		# `new Image(Icon.cancel, Tmp.c1.set(Color.scarlet).a(0.6f))` over the
+		# content icon when in a game with the block banned.
+		var scarlet := Color("ff341c")
+		scarlet.a = 0.6
+		var cross := MindWidgets.glyph("cancel", 32, scarlet)
+		cross.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		cross.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		button.add_child(cross)
 	button.name = "content-%s" % entry_name
 	button.custom_minimum_size = Vector2(46, 46)
 	button.set_meta("unlocked", unlocked)

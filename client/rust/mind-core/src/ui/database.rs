@@ -36,6 +36,11 @@ pub struct DatabaseEntryView {
     pub all_tabs: bool,
     /// Planet content names whose tabs include this entry.
     pub tabs: Vec<String>,
+    /// `UnlockableContent.isBanned()` (`Block.isBanned`: in-game
+    /// `rules.bannedBlocks` membership; always false outside a game). Banned
+    /// entries draw the scarlet `Icon.cancel` cross and sort last
+    /// (`DatabaseDialog.rebuild`).
+    pub banned: bool,
 }
 
 /// One `databaseTag` group inside a category.
@@ -69,6 +74,9 @@ pub struct DatabaseTabView {
     pub localized: String,
     /// Planet icon color `rrggbb` (`""` for the all-content tab).
     pub color: String,
+    /// `Icon.eyeSmall` for the sun, else the planet's `icon` region name
+    /// (`Icon.icons.get(p.icon, Icon.commandRally)`).
+    pub icon: String,
     /// Whether this is the `Planets.sun` all-content tab.
     pub is_all: bool,
 }
@@ -96,8 +104,15 @@ impl DatabaseView {
 ///
 /// `unlocked_override` mirrors `DatabaseDialog.unlocked`: custom (non-campaign)
 /// games show everything unlocked, while the menu and campaign read the
-/// persisted per-content unlock state.
-pub fn database_view(registry: &ContentRegistry, unlocked_override: bool) -> DatabaseView {
+/// persisted per-content unlock state. `banned_blocks` is the live
+/// `rules.bannedBlocks` set while a game runs (`None` elsewhere): matching
+/// entries carry `banned` and sort last in their tag, like Java's in-game
+/// `array.sort` (`DatabaseDialog.java:145-146`).
+pub fn database_view(
+    registry: &ContentRegistry,
+    unlocked_override: bool,
+    banned_blocks: Option<&indexmap::IndexSet<String>>,
+) -> DatabaseView {
     // Every grid-eligible unlockable, paired with its `isHidden()` flag. The
     // `Unlockable` trait is not dyn-compatible (`Content::TYPE` is an associated
     // const), so the macro records the borrowed fields per concrete type.
@@ -136,6 +151,7 @@ pub fn database_view(registry: &ContentRegistry, unlocked_override: bool) -> Dat
         name: String::from("sun"),
         localized: String::from("all"),
         color: String::new(),
+        icon: String::from("eyeSmall"),
         is_all: true,
     }];
     for id in tab_ids {
@@ -144,6 +160,7 @@ pub fn database_view(registry: &ContentRegistry, unlocked_override: bool) -> Dat
                 name: planet.name.clone(),
                 localized: label("planet", &planet.name, &planet.unlock.localized_name),
                 color: hex(&planet.icon_color),
+                icon: planet.icon.clone(),
                 is_all: false,
             });
         }
@@ -185,6 +202,7 @@ pub fn database_view(registry: &ContentRegistry, unlocked_override: bool) -> Dat
                         .map(|planet| planet.name.clone())
                 })
                 .collect(),
+            banned: banned_blocks.is_some_and(|set| set.contains(record_name)),
         };
         sorted
             .entry(category)
@@ -192,6 +210,16 @@ pub fn database_view(registry: &ContentRegistry, unlocked_override: bool) -> Dat
             .entry(tag)
             .or_default()
             .push(entry);
+    }
+
+    // Java's in-game `array.sort(comparingBool(isBanned), comparingInt(id))`:
+    // a stable banned-last pass keeps the content-map order for both groups.
+    if banned_blocks.is_some() {
+        for tags in sorted.values_mut() {
+            for entries in tags.values_mut() {
+                entries.sort_by_key(|entry| entry.banned);
+            }
+        }
     }
 
     let categories = sorted
@@ -232,7 +260,7 @@ mod tests {
     #[test]
     fn tabs_and_categories_match_the_reference() {
         let registry = test_registry();
-        let view = database_view(&registry, false);
+        let view = database_view(&registry, false, None);
         let tab_names: Vec<&str> = view.tabs.iter().map(|tab| tab.name.as_str()).collect();
         // `checkTabList`: sun inserted first, then the Serpulo/Erekir tech-tree
         // tabs sorted by planet id (erekir = 1, serpulo = 5).
@@ -258,10 +286,74 @@ mod tests {
         );
     }
 
+    /// T11: `DatabaseDialog.rebuild` tab icons — `Icon.eyeSmall` for the sun
+    /// tab, the planet's `icon` region otherwise
+    /// (`Icon.icons.get(p.icon, Icon.commandRally)`; `Planet.icon` defaults to
+    /// `"planet"`).
+    #[test]
+    fn database_tab_icons() {
+        let registry = test_registry();
+        let view = database_view(&registry, false, None);
+        assert_eq!(
+            view.tabs[0].icon, "eyeSmall",
+            "the all-content tab uses the eye icon"
+        );
+        for tab in &view.tabs[1..] {
+            assert_eq!(tab.icon, "planet", "planet tabs use the planet glyph");
+        }
+    }
+
+    /// T11: in-game `rules.bannedBlocks` membership marks entries banned and a
+    /// stable pass sorts them last inside their tag
+    /// (`DatabaseDialog.java:145-146`).
+    #[test]
+    fn banned_entries_mark_and_sort_last() {
+        let registry = test_registry();
+        let banned: indexmap::IndexSet<String> = ["conveyor".to_owned()].into_iter().collect();
+        let view = database_view(&registry, false, Some(&banned));
+        let blocks = view
+            .categories
+            .iter()
+            .find(|category| category.name == "block")
+            .expect("block category");
+        let distribution = blocks
+            .tags
+            .iter()
+            .find(|tag| tag.name == "distribution")
+            .expect("distribution tag");
+        let flagged: Vec<&str> = distribution
+            .entries
+            .iter()
+            .filter(|entry| entry.banned)
+            .map(|entry| entry.name.as_str())
+            .collect();
+        assert_eq!(
+            flagged,
+            vec!["conveyor"],
+            "banned flag follows the rules set"
+        );
+        assert!(
+            distribution
+                .entries
+                .last()
+                .is_some_and(|entry| entry.banned),
+            "banned entries sort last in their tag"
+        );
+        // Outside a game (`None`) nothing is flagged.
+        let menu = database_view(&registry, false, None);
+        assert!(
+            menu.categories
+                .iter()
+                .flat_map(|category| &category.tags)
+                .flat_map(|tag| &tag.entries)
+                .all(|entry| !entry.banned)
+        );
+    }
+
     #[test]
     fn block_tags_follow_first_seen_content_order() {
         let registry = test_registry();
-        let view = database_view(&registry, false);
+        let view = database_view(&registry, false, None);
         let blocks = view
             .categories
             .iter()
@@ -297,7 +389,7 @@ mod tests {
     #[test]
     fn menu_unlock_state_and_custom_game_override() {
         let registry = test_registry();
-        let menu = database_view(&registry, false);
+        let menu = database_view(&registry, false, None);
         let entry = |view: &DatabaseView, name: &str| {
             view.categories
                 .iter()
@@ -310,7 +402,7 @@ mod tests {
         assert_eq!(entry(&menu, "copper").map(|e| e.unlocked), Some(true));
         assert_eq!(entry(&menu, "metaglass").map(|e| e.unlocked), Some(false));
         // Custom games (`!isCampaign && !isMenu`) force everything unlocked.
-        let custom = database_view(&registry, true);
+        let custom = database_view(&registry, true, None);
         assert!(
             custom
                 .categories
@@ -324,7 +416,7 @@ mod tests {
     #[test]
     fn planet_tabs_filter_content() {
         let registry = test_registry();
-        let view = database_view(&registry, false);
+        let view = database_view(&registry, false, None);
         let entries: Vec<&DatabaseEntryView> = view
             .categories
             .iter()

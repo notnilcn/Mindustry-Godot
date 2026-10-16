@@ -104,6 +104,11 @@ pub struct MindCampaign {
     /// `Map.name` of the last `start_map_mode` custom game (I08 T4: the host
     /// match id / server-browser label for non-campaign worlds).
     current_map_name: Option<String>,
+    /// Cached `planet_mesh` build `(planet, mesh)`. The hex mesh costs a full
+    /// per-tile noise pass (Java caches it on `Planet.mesh`; `reloadMeshAsync`
+    /// rebuilds on capture/loss), so repeat dialog opens reuse it until a
+    /// capture/abandon invalidates the entry (T13/T14).
+    planet_mesh_cache: Option<(String, VarDictionary)>,
 }
 
 #[godot_api]
@@ -127,6 +132,7 @@ impl INode for MindCampaign {
             unlocked_since_last_take: Vec::new(),
             playtesting_map: None,
             current_map_name: None,
+            planet_mesh_cache: None,
         }
     }
 
@@ -1720,6 +1726,8 @@ impl MindCampaign {
             // `Logic.sectorCapture`'s "save, just in case": the capture
             // bookkeeping must be on disk before a restart (PAR-0081).
             self.persist_sector_record();
+            // `onSectorCaptured` -> `reloadMeshAsync` (T14).
+            self.planet_mesh_cache = None;
             return true;
         }
         // Menu fallback on the facade copy.
@@ -1728,6 +1736,7 @@ impl MindCampaign {
         };
         let events = sector_capture(&mut self.session, &mut campaign);
         self.campaign = Some(campaign);
+        self.planet_mesh_cache = None;
         !events.is_empty()
     }
 
@@ -3052,7 +3061,14 @@ impl MindCampaign {
             return GString::from("{}");
         };
         let unlocked_override = !self.session.is_campaign() && self.session.phase.is_game();
-        let view = mind_core::ui::database::database_view(registry, unlocked_override);
+        // `Block.isBanned()`: `state.isGame() && rules.bannedBlocks.contains`
+        // (`DatabaseDialog.rebuild` draws the cross and sorts banned last).
+        let banned = self
+            .session
+            .phase
+            .is_game()
+            .then_some(&self.session.rules.banned_blocks);
+        let view = mind_core::ui::database::database_view(registry, unlocked_override, banned);
         GString::from(
             serde_json::to_string(&view)
                 .unwrap_or_else(|_| String::from("{}"))
@@ -3127,6 +3143,48 @@ impl MindCampaign {
             0,
             &loadout_of,
         );
+        // T10: `SaveSlot.getPlayTime` (`Saves.java:385-386`) — the stats dialog
+        // reads `meta.timePlayed` from the sector's save slot (one scan; the
+        // live slot's in-memory accumulation is not added, deviation).
+        let stems: std::collections::HashMap<u16, String> = campaign
+            .planet(active)
+            .map(|planet| {
+                planet
+                    .sectors
+                    .iter()
+                    .filter_map(|sector| sector.save.clone().map(|save| (sector.id, save)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !stems.is_empty() {
+            let saved = list_slot_files(&NativeFs, &self.save_paths());
+            for view in &mut views.sectors {
+                if let Some(stem) = stems.get(&view.id)
+                    && let Some(slot) = saved.iter().find(|slot| slot.index() == *stem)
+                    && let Some(meta) = slot.meta.as_ref()
+                {
+                    view.stats.playtime_ms = meta.time_played;
+                }
+            }
+        }
+        // The live registry boots with the empty `MemoryBundle`, so the
+        // builder's `SectorPreset.isHidden()` proxy (`unlock.description`) is
+        // always true here. Java reads the description from `Core.bundle`
+        // (`UnlockableContent.java:91`); resolve the stats description key the
+        // same way `localized_content_description` does so a bundle-less
+        // preset keeps no row.
+        for view in &mut views.sectors {
+            if view.stats.preset_description_key.is_some() {
+                continue;
+            }
+            let Some(preset) = view.preset.as_deref() else {
+                continue;
+            };
+            let key = format!("sector.{preset}.description");
+            if self.bundle.get(&key) != key {
+                view.stats.preset_description_key = Some(key);
+            }
+        }
         // The map-registry dialogs read `maps` from the same endpoint; keep the
         // built-in rows the fixture path feeds them.
         views.maps = mind_core::ui::campaign::default_map_entries();
@@ -3846,6 +3904,45 @@ impl MindCampaign {
         let _ = NativeFs.delete(&backup);
         self.persist();
         log::info!("abandoned campaign sector `{planet_name}:{sector_id}`");
+        self.planet_mesh_cache = None;
+        true
+    }
+
+    /// `PlanetDialog.abandonSectorConfirm`: an off-play sector loses its items,
+    /// base and production in the record (`saveInfo` + persist); the played
+    /// sector routes through the existing played-sector clear.
+    #[func]
+    pub fn abandon_sector_at(&mut self, planet: GString, sector: i32) -> bool {
+        if sector < 0 {
+            return false;
+        }
+        let planet_name = planet.to_string();
+        let sector_id = sector as u16;
+        let Some(planet_id) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet_by_name(&planet_name))
+            .map(|def| def.id)
+        else {
+            return false;
+        };
+        if self.session.sector == Some((planet_id, sector_id)) {
+            return self.abandon_sector();
+        }
+        let Some(true) = self.with_campaign_mut(|campaign, settings| {
+            let Some(record) = campaign.sector_mut(planet_id, sector_id) else {
+                return false;
+            };
+            record.info.info.items.clear();
+            record.info.info.has_core = false;
+            record.info.info.production.clear();
+            let _ = record.save_info(settings, &planet_name);
+            true
+        }) else {
+            return false;
+        };
+        self.persist();
+        self.planet_mesh_cache = None;
         true
     }
 
@@ -5021,6 +5118,122 @@ impl MindCampaign {
         out.set("tile_corners", &tile_corners);
         out.set("lines", &lines);
         out.set("presets", &presets);
+        out
+    }
+
+    /// Hex planet mesh for the globe (`HexMesh.java:11`:
+    /// `MeshBuilder.buildHex(planet.generator, 6, planet.radius, 0.2f)`):
+    /// vertices, flat normals, per-tile colors (`Block.mapColor` with
+    /// `1 - albedo` alpha) and the emissive channel (`CUSTOM0`, `isEmissive()`
+    /// planets only). Empty for planets without a hex generator.
+    #[func]
+    pub fn planet_mesh(&mut self, planet: GString) -> VarDictionary {
+        use mind_core::maps::generators::planet::HexMesher;
+
+        let mut out = VarDictionary::new();
+        let name = planet.to_string();
+        if let Some((cached_name, cached)) = &self.planet_mesh_cache
+            && cached_name == &name
+        {
+            return cached.clone();
+        }
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        let Some(def) = registry.planet_by_name(&name) else {
+            return out;
+        };
+        let mut mesher: Box<dyn HexMesher> = match name.as_str() {
+            "serpulo" => {
+                let mut generator = mind_core::maps::planet::SerpuloPlanetGenerator::new();
+                generator.load_content(registry, &crate::render::minimap::load_block_colors());
+                // `getEmissiveColor` + the megabase patch read the live sector
+                // states (`Planets.serpulo.sectors`); project them from the
+                // campaign with the same grid the globe uses.
+                let grid = PlanetGrid::create(def.sector_tiles as usize);
+                let mut glow = Vec::new();
+                if let Some(planet) = self
+                    .campaign
+                    .as_ref()
+                    .and_then(|campaign| campaign.planet(def.id))
+                {
+                    for sector in &planet.sectors {
+                        // Only sectors that can contribute a glow (the per-tile
+                        // loop runs over the whole mesh).
+                        let captured = sector.is_captured(None);
+                        if !((sector.has_enemy_base() && !captured) || sector.has_base()) {
+                            continue;
+                        }
+                        let Some(tile) = grid.tiles.get(sector.id as usize) else {
+                            continue;
+                        };
+                        glow.push(mind_core::maps::planet::SectorGlow {
+                            v: tile.v,
+                            has_enemy_base: sector.has_enemy_base(),
+                            captured,
+                            has_base: sector.has_base(),
+                            has_preset: sector.preset.is_some(),
+                            difficulty: sector.preset_difficulty,
+                            light_coverage: sector.info.info.light_coverage,
+                        });
+                    }
+                }
+                generator.set_sector_glow(glow);
+                Box::new(generator)
+            }
+            "erekir" => {
+                let mut generator = mind_core::maps::planet::ErekirPlanetGenerator::new();
+                generator.load_content(registry, &crate::render::minimap::load_block_colors());
+                Box::new(generator)
+            }
+            _ => return out,
+        };
+        let emissive = mesher.is_emissive();
+        let mesh =
+            mind_core::render::g3d::mesh_data::build_hex(mesher.as_mut(), 6, def.radius, 0.2);
+        let mut vertices = PackedVector3Array::new();
+        for vertex in &mesh.vertices {
+            vertices.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
+        }
+        let mut normals = PackedVector3Array::new();
+        for normal in &mesh.normals {
+            normals.push(Vector3::new(normal[0], normal[1], normal[2]));
+        }
+        let color_of = |packed: u32| {
+            Color::from_rgba8(
+                (packed >> 24) as u8,
+                (packed >> 16) as u8,
+                (packed >> 8) as u8,
+                packed as u8,
+            )
+        };
+        let mut colors = PackedColorArray::new();
+        for color in &mesh.colors {
+            colors.push(color_of(*color));
+        }
+        let mut emissive_colors = PackedColorArray::new();
+        for color in &mesh.emissive {
+            emissive_colors.push(color_of(*color));
+        }
+        let mut indices = PackedInt32Array::new();
+        for index in &mesh.indices {
+            indices.push(*index as i32);
+        }
+        out.set("indexed", mesh.indexed);
+        out.set("emissive", emissive);
+        out.set(
+            "emissive_count",
+            mesh.emissive
+                .iter()
+                .filter(|&&color| (color & 0xff) > 0)
+                .count() as i64,
+        );
+        out.set("vertices", &vertices);
+        out.set("normals", &normals);
+        out.set("colors", &colors);
+        out.set("emissive_colors", &emissive_colors);
+        out.set("indices", &indices);
+        self.planet_mesh_cache = Some((name, out.clone()));
         out
     }
 

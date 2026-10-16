@@ -188,6 +188,22 @@ pub struct SectorView {
     pub threat_color: String,
 }
 
+/// One `@sectors.import` source row (`SectorInfo.eachImport`): the sector that
+/// exports into the shown one (`PlanetDialog.java:1109-1113`).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SectorStatRef {
+    /// Planet content name.
+    pub planet: String,
+    /// Sector grid index.
+    pub sector: u16,
+    /// Display name (`Sector.name()`).
+    pub name: String,
+    /// `info.icon` (`Iconc` field name; export/import row prefix).
+    pub icon: Option<String>,
+    /// `info.contentIcon` (content name; export/import row prefix).
+    pub content_icon: Option<String>,
+}
+
 /// `PlanetDialog.showStats` data: per-minute rate rows for `production`,
 /// `export` and `import` (entries with `mean * 60 > 1`) plus attempts/wave and
 /// the stored item pool.
@@ -208,6 +224,19 @@ pub struct SectorStatsView {
     /// `sector.info.resources` content names (`@sectors.resources` icon row;
     /// `Sector.loadInfo` folds the legacy `water` block into the liquid).
     pub resources: Vec<String>,
+    /// `SaveSlot.getPlayTime()` in ms (`meta.timePlayed`); filled by the host
+    /// from the save meta (`PlanetDialog.java:1053`).
+    pub playtime_ms: i64,
+    /// `sector.info.destination` when the target has a base (the export row's
+    /// `Iconc.rightOpen` line).
+    pub destination: Option<SectorStatRef>,
+    /// `SectorInfo.eachImport` sources (the import row's lines).
+    pub import_sources: Vec<SectorStatRef>,
+    /// `sector.isAttacked() && !sector.isBeingPlayed()` (`@sector.lockdown`).
+    pub lockdown: bool,
+    /// `sector.preset.displayDescription` bundle key
+    /// (`sector.<preset>.description`), when the preset has a description.
+    pub preset_description_key: Option<String>,
 }
 
 /// One tech-tree node (`ResearchDialog`).
@@ -706,19 +735,16 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
     }
 }
 
-/// Builds one sector marker.
-fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
-    // `Sector.name()`: a player-set `info.name` wins, then the preset name
-    // (localized by the dialog), then the planet name for single-sector
-    // planets, then the bare grid index (`id + ""`).
-    let info_name = sector
+/// `Sector.name()`: a player-set `info.name` wins, then the preset name
+/// (localized by the dialog), then the planet name for single-sector planets,
+/// then the bare grid index (`id + ""`).
+fn sector_display_name(planet: &Planet, sector: &Sector) -> String {
+    sector
         .info
         .info
         .name
         .clone()
-        .filter(|name| !name.is_empty());
-    let named = info_name.is_some();
-    let name = info_name
+        .filter(|name| !name.is_empty())
         .or_else(|| sector.preset_name.clone())
         .unwrap_or_else(|| {
             if planet.sectors.len() == 1 {
@@ -726,7 +752,18 @@ fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
             } else {
                 sector.id.to_string()
             }
-        });
+        })
+}
+
+/// Builds one sector marker.
+fn sector_view(planet: &Planet, sector: &Sector, registry: &ContentRegistry) -> SectorView {
+    let named = sector
+        .info
+        .info
+        .name
+        .as_ref()
+        .is_some_and(|name| !name.is_empty());
+    let name = sector_display_name(planet, sector);
     SectorView {
         named,
         selectable: false,
@@ -753,7 +790,7 @@ fn sector_view(planet: &Planet, sector: &Sector) -> SectorView {
         has_enemy_base: sector.has_enemy_base(),
         is_last: sector_is_last(&planet.name, sector),
         capture_wave: sector.preset_capture_wave,
-        stats: sector_stats_view(sector),
+        stats: sector_stats_view(sector, planet, registry),
         launch_from: None,
         no_candidate: false,
         show_action: false,
@@ -786,17 +823,71 @@ pub fn threat_color(threat: f32) -> String {
 
 /// `PlanetDialog.showStats` rows from the stored sector record: rate rows pass
 /// the `(int)(mean * 60) > 1` filter (per-minute totals), stored items only
-/// positive amounts.
-fn sector_stats_view(sector: &Sector) -> SectorStatsView {
+/// positive amounts. Rows are item-id ordered (`content.items()` order in
+/// Java; `PlanetDialog.java:1040-1046`). `destination`/`import_sources` come
+/// from `SectorInfo.destination` + `SectorInfo.eachImport`; `playtime_ms` is
+/// left at 0 for the host to fill from the save meta.
+fn sector_stats_view(
+    sector: &Sector,
+    planet: &Planet,
+    registry: &ContentRegistry,
+) -> SectorStatsView {
     let info = &sector.info.info;
+    let item_order = |name: &str| -> u16 {
+        registry
+            .item_id(name)
+            .map(|id| id.raw())
+            .unwrap_or(u16::MAX)
+    };
     let rates = |map: &indexmap::IndexMap<String, ExportStat>| -> Vec<(String, i32)> {
-        map.iter()
+        let mut rows: Vec<(String, i32)> = map
+            .iter()
             .filter_map(|(name, stat)| {
                 let per_minute = (stat.mean * 60.0) as i32;
                 (per_minute > 1).then(|| (name.clone(), per_minute))
             })
-            .collect()
+            .collect();
+        rows.sort_by_key(|(name, _)| item_order(name));
+        rows
     };
+    let this_key = crate::io::json::content_serde::SectorKey::format(&planet.name, sector.id);
+    let stat_ref = |other: &Sector| -> SectorStatRef {
+        SectorStatRef {
+            planet: planet.name.clone(),
+            sector: other.id,
+            name: sector_display_name(planet, other),
+            icon: other.info.info.icon.clone(),
+            content_icon: other.info.info.content_icon.clone(),
+        }
+    };
+    let destination = info.destination.as_ref().and_then(|key| {
+        let target = planet.sectors.iter().find(|other| {
+            crate::io::json::content_serde::SectorKey::format(&planet.name, other.id) == *key
+        });
+        target.filter(|other| other.has_base()).map(stat_ref)
+    });
+    let import_sources: Vec<SectorStatRef> = planet
+        .sectors
+        .iter()
+        .filter(|other| {
+            other.id != sector.id
+                && other.has_base()
+                && other.info.info.destination.as_ref() == Some(&this_key)
+                && other.info.any_exports()
+        })
+        .map(stat_ref)
+        .collect();
+    let preset_description_key = sector
+        .preset
+        .and_then(|id| registry.sector(id))
+        .and_then(|def| (!def.is_hidden()).then(|| format!("sector.{}.description", def.name)));
+    let mut stored: Vec<(String, i32)> = info
+        .items
+        .iter()
+        .filter(|(_, amount)| **amount > 0)
+        .map(|(name, amount)| (name.clone(), *amount))
+        .collect();
+    stored.sort_by_key(|(name, _)| item_order(name));
     SectorStatsView {
         attempts: info.attempts,
         wave: if info.waves && sector.has_base() {
@@ -807,12 +898,7 @@ fn sector_stats_view(sector: &Sector) -> SectorStatsView {
         production: rates(&info.production),
         export: rates(&info.export),
         import: rates(&info.imports),
-        stored: info
-            .items
-            .iter()
-            .filter(|(_, amount)| **amount > 0)
-            .map(|(name, amount)| (name.clone(), *amount))
-            .collect(),
+        stored,
         resources: {
             let mut resources: Vec<String> = Vec::new();
             for name in &info.resources {
@@ -822,6 +908,11 @@ fn sector_stats_view(sector: &Sector) -> SectorStatsView {
             }
             resources
         },
+        playtime_ms: 0,
+        destination,
+        import_sources,
+        lockdown: sector.is_attacked(None) && !sector.is_being_played(),
+        preset_description_key,
     }
 }
 
@@ -1120,12 +1211,16 @@ pub fn annotate_globe(
 }
 
 /// Builds the sector markers for a planet.
-pub fn sector_views(planet: &Planet, presets: &[SectorPresetDef]) -> Vec<SectorView> {
+pub fn sector_views(
+    planet: &Planet,
+    presets: &[SectorPresetDef],
+    registry: &ContentRegistry,
+) -> Vec<SectorView> {
     planet
         .sectors
         .iter()
         .map(|sector| {
-            let mut view = sector_view(planet, sector);
+            let mut view = sector_view(planet, sector, registry);
             if let Some(preset) = sector
                 .preset
                 .and_then(|id| presets.get(id.raw() as usize))
@@ -1460,7 +1555,7 @@ impl CampaignViews {
                 .map(|planet| planet_view(registry, planet))
                 .collect(),
             sectors: annotate_globe(
-                sector_views(planet, presets),
+                sector_views(planet, presets, registry),
                 registry,
                 planet,
                 &ctx,
@@ -1635,6 +1730,65 @@ mod tests {
         assert_eq!(threat_color(0.0), "ffffffff");
     }
 
+    /// T10: `PlanetDialog.showStats` rows follow `content.items()` order (item
+    /// id), not the insertion order of the persisted maps, for both the stored
+    /// pool and the per-minute rate lists (`PlanetDialog.java:1040-1046`).
+    #[test]
+    fn sector_stats_rows_in_item_order() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+        use crate::io::json::rules::ExportStat;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let serpulo = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let ground_zero = registry
+            .sector_by_name("groundZero")
+            .expect("groundZero")
+            .sector;
+        {
+            let planet = campaign.planet_mut(serpulo).expect("serpulo");
+            let sector = planet
+                .sectors
+                .get_mut(ground_zero as usize)
+                .expect("groundZero sector");
+            sector.save = Some(format!("sector-serpulo-{ground_zero}"));
+            sector.info.info.has_core = true;
+            sector.info.info.waves = false;
+            // Inserted in non-item-id order (graphite 3, lead 1, copper 0).
+            sector.info.info.items.insert("graphite".to_owned(), 21);
+            sector.info.info.items.insert("lead".to_owned(), 12);
+            sector.info.info.items.insert("copper".to_owned(), 33);
+            for (name, mean) in [("graphite", 0.5f32), ("copper", 2.0)] {
+                sector.info.info.production.insert(
+                    name.to_owned(),
+                    ExportStat {
+                        mean,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let sector = planet.sectors.get(ground_zero as usize).expect("sector");
+        let view = sector_stats_view(sector, planet, &registry);
+        assert_eq!(
+            view.stored,
+            vec![
+                ("copper".to_owned(), 33),
+                ("lead".to_owned(), 12),
+                ("graphite".to_owned(), 21)
+            ],
+            "stored pool in item-id order"
+        );
+        assert_eq!(
+            view.production,
+            vec![("copper".to_owned(), 120), ("graphite".to_owned(), 30)],
+            "rate rows in item-id order (`content.items()`)"
+        );
+    }
+
     /// Serpulo's numbered launch needs a based, calm neighbour with a size >= 4
     /// core (`SerpuloPlanetGenerator.allowNumberedLaunch`).
     #[test]
@@ -1676,7 +1830,7 @@ mod tests {
         let ctx = CampaignObjectiveContext::new(&registry, &campaign);
         let planet = campaign.planet(serpulo).expect("serpulo");
         let views = annotate_globe(
-            sector_views(planet, registry.sectors()),
+            sector_views(planet, registry.sectors(), &registry),
             &registry,
             planet,
             &ctx,
@@ -1702,7 +1856,7 @@ mod tests {
         let ctx = CampaignObjectiveContext::new(&registry, &campaign);
         let planet = campaign.planet(serpulo).expect("serpulo");
         let views = annotate_globe(
-            sector_views(planet, registry.sectors()),
+            sector_views(planet, registry.sectors(), &registry),
             &registry,
             planet,
             &ctx,
@@ -1766,7 +1920,7 @@ mod tests {
         let ctx = CampaignObjectiveContext::new(&registry, &campaign);
         let planet = campaign.planet(serpulo).expect("serpulo");
         let views = annotate_globe(
-            sector_views(planet, registry.sectors()),
+            sector_views(planet, registry.sectors(), &registry),
             &registry,
             planet,
             &ctx,

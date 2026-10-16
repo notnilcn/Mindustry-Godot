@@ -40,6 +40,11 @@ var _campaign_views_loaded := false
 ## on its own `_ready`; per-open refreshes always re-fetch.
 static var _shared_views: Dictionary = {}
 
+## In-flight hide fade (`hide_dialog`) and its logical-hidden flag; a re-show
+## cancels the tween and `is_shown` reports false while it runs.
+var _hide_tween: Tween = null
+var _hiding := false
+
 
 func _ready() -> void:
 	visible = false
@@ -127,11 +132,16 @@ func _ensure_title_underline() -> void:
 
 ## Shows the dialog (called by `MindUi`; also safe to call directly).
 func show_dialog() -> void:
+	# A re-show during the hide fade cancels it (`Dialog.setShowAction` wins
+	# over an in-flight `setHideAction` action).
+	if _hide_tween != null and _hide_tween.is_valid():
+		_hide_tween.kill()
+	_hide_tween = null
+	_hiding = false
 	visible = true
 	move_to_front()
 	shown()
-	# `UI.java:132-133`: showing fades in over 0.1 s (hide stays instant; the
-	# Java hide fade is deferred to a later pass).
+	# `UI.java:132-133`: showing fades in over 0.1 s.
 	MindWidgets.fade_in(self, 0.1)
 	# `MindTable` layout is manual: place now (min sizes) and again next frame
 	# once the containers have assigned their final size, so grow cells fill.
@@ -147,22 +157,38 @@ func _resort_tables() -> void:
 			node.sort_now()
 
 
-## Hides the dialog.
+## Hides the dialog. `Dialog.setHideAction(() -> sequence(fadeOut(0.1f)))`
+## (`UI.java:132-133`): the panel fades out for 0.1 s and only then hides; the
+## `MindUi` stack bookkeeping stays synchronous through `is_shown`.
 func hide_dialog() -> void:
-	if not visible:
+	if not visible or _hiding:
 		return
-	visible = false
+	_hiding = true
 	hidden()
 	# `BaseDialog.java:27-32`: every dialog hide plays uiBack (emit-only; G07
 	# owns the playback wiring).
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("play_ui_sound"):
 		ui.call("play_ui_sound", "uiBack")
+	if _hide_tween != null and _hide_tween.is_valid():
+		_hide_tween.kill()
+	_hide_tween = create_tween()
+	_hide_tween.tween_property(self, "modulate:a", 0.0, 0.1)
+	_hide_tween.tween_callback(_finish_hide)
 
 
-## `is_shown` for `MindUi.reveal_top` / `is_dialog_shown`.
+## End of the hide fade: hide and restore the alpha for the next show.
+func _finish_hide() -> void:
+	_hide_tween = null
+	_hiding = false
+	modulate.a = 1.0
+	visible = false
+
+
+## `is_shown` for `MindUi.reveal_top` / `is_dialog_shown` (false as soon as the
+## hide starts, so a stacked parent is revealed without waiting for the fade).
 func is_shown() -> bool:
-	return visible
+	return visible and not _hiding
 
 
 ## True when this dialog is the top of the MindUi stack (Arc modal focus):

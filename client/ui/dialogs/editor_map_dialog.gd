@@ -8,6 +8,9 @@ extends MindDialog
 
 ## `showMap`: `Core.graphics.isPortrait() ? 160f : 300f`.
 const PREVIEW_SIZE := Vector2(300.0, 300.0)
+## `mind_core::maps::UNKNOWN`: the `Map.tag` fallback `MindPreview.maps_list`
+## puts in a row whose tag is missing/blank (`Map.hasTag` false).
+const MISSING_TAG := "unknown"
 
 var _name := ""
 var _row: Dictionary = {}
@@ -63,25 +66,42 @@ func _build() -> void:
 	info.add_theme_constant_override("separation", 4)
 	top.add_child(info)
 	_add_info(info, "@editor.mapname", _name)
-	var author := str(_row.get("author", ""))
-	if not bool(_row.get("custom", false)) and author.is_empty():
-		# `showMap`: built-ins with no author tag show "Anuke".
-		author = "Anuke"
+	var author := _tag("author")
+	if author.is_empty():
+		# `showMap`: built-ins with no author tag show "Anuke"; custom maps
+		# show `map.author()` = `Map.tag` -> `@unknown`.
+		author = "Anuke" if not bool(_row.get("custom", false)) else _t("@unknown")
 	_add_info(info, "@editor.author", author)
-	var description := str(_row.get("description", ""))
+	# `if(!map.tags.get("description", "").isEmpty())`: no description row at
+	# all for a map without one.
+	var description := _tag("description")
 	if not description.is_empty():
 		_add_info(info, "@editor.description", description)
 
-	# `table.button("@editor.openin", Icon.export, ...)`.
+	# `table.row()` then the two buttons side by side, each `fillX()` under its
+	# column (preview | info): `@editor.openin` left, `@delete` right.
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 4)
+	root.add(buttons).grow_x_axis().pad(2)
+	# `table.button("@editor.openin", Icon.export, ...).fillX().height(54f)`.
 	var open_button := MindWidgets.icon_button("export", _t("@editor.openin"))
+	open_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	open_button.custom_minimum_size.y = 54.0
 	open_button.pressed.connect(_open_in_editor)
-	root.add(open_button).grow_x_axis().height(54.0).pad(2)
-	root.row()
+	buttons.add_child(open_button)
 	# `table.button("@delete", Icon.trash, ...).disabled(!map.custom)`.
 	var delete_button := MindWidgets.icon_button("trash", _t("@delete"))
+	delete_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	delete_button.custom_minimum_size.y = 54.0
 	delete_button.disabled = not bool(_row.get("custom", false))
 	delete_button.pressed.connect(_confirm_delete)
-	root.add(delete_button).grow_x_axis().height(54.0).pad(2)
+	buttons.add_child(delete_button)
+
+
+## A row tag as the raw `map.tags.get(name, "")` (blank when missing).
+func _tag(name: String) -> String:
+	var value := str(_row.get(name, "")).strip_edges()
+	return "" if value == MISSING_TAG else value
 
 
 func _add_info(parent: VBoxContainer, label_key: String, value: String) -> void:

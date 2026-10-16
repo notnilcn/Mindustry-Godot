@@ -58,11 +58,18 @@ var cam_pos := Vector3(0.0, CAM_LENGTH, 0.1)
 ## the wheel and the reveal set (`PlanetDialog.zoom`).
 var zoom := 1.0
 var zoom_target := 1.0
+## `PlanetDialog.state.uiAlpha`: the sector overlays fade when the zoom passes
+## 1.9 (`lerpDelta(uiAlpha, zoom < 1.9 ? 1 : 0, 0.1)`).
+var ui_alpha := 1.0
+## Values baked into the last marker rebuild (throttles the per-frame updates).
+var _built_ui_alpha := -1.0
+var _built_pulse := -1.0
 
 var _tiles := PackedVector3Array()
 var _corners := PackedVector3Array()
 var _tile_corners: Array = []
 var _grid_material: ShaderMaterial = null
+var _body_material: ShaderMaterial = null
 var _sector_label_text := ""
 ## Preset whose icon is drawn inside the selected hex (`renderProjections`).
 var _sector_icon_preset := ""
@@ -163,6 +170,8 @@ func _rebuild_markers() -> void:
 		child.queue_free()
 	if _tile_corners.is_empty():
 		return
+	_built_ui_alpha = ui_alpha
+	_built_pulse = _preset_pulse()
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var arad := float(data.get("outline", 1.17)) + 0.001
@@ -175,10 +184,11 @@ func _rebuild_markers() -> void:
 		if bool(sector.get("selectable", false)) or bool(sector.get("unlocked", false)):
 			if color != null:
 				var ring: Color = color
-				ring = Color(ring.r * 0.8, ring.g * 0.8, ring.b * 0.8, 1.0)
+				ring = Color(ring.r * 0.8, ring.g * 0.8, ring.b * 0.8, ui_alpha)
 				_append_ring(verts, colors, tile, arad, 0.026, ring)
 		else:
-			_append_fill(verts, colors, tile, arad, SHADOW)
+			var shadow := Color(SHADOW.r, SHADOW.g, SHADOW.b, SHADOW.a * ui_alpha)
+			_append_fill(verts, colors, tile, arad, shadow)
 		_add_icon(sector, tile)
 	if verts.is_empty():
 		return
@@ -203,8 +213,8 @@ func _status_color(sector: Dictionary) -> Variant:
 	if bool(sector.get("has_base", false)):
 		return SHARDED.lerp(CRUX, 0.5 if bool(sector.get("has_enemy_base", false)) else 0.0)
 	if not str(sector.get("preset", "")).is_empty() and bool(sector.get("require_unlock", false)):
-		# `derelict.lerp(white, absin(time, 10, 1))`: static midpoint.
-		return DERELICT.lerp(Color.WHITE, 0.5) if bool(sector.get("preset_unlocked", false)) else Color.GRAY
+		# `derelict.lerp(white, absin(time, 10, 1))` (`PlanetDialog.java:463`).
+		return DERELICT.lerp(Color.WHITE, _preset_pulse()) if bool(sector.get("preset_unlocked", false)) else Color.GRAY
 	if bool(sector.get("has_enemy_base", false)):
 		return CRUX
 	return null
@@ -249,6 +259,10 @@ func _append_ring(verts: PackedVector3Array, colors: PackedColorArray, tile: int
 
 ## `renderProjections` icon for one sector.
 func _add_icon(sector: Dictionary, tile: int) -> void:
+	# `drawSectors`/`renderProjections`: icons behind the limb (the camera
+	# hemisphere's back side) are culled (`tile_v · camera_dir <= 0`).
+	if _tiles[tile].dot(cam_pos.normalized()) <= 0.0:
+		return
 	var preset := str(sector.get("preset", ""))
 	var has_base := bool(sector.get("has_base", false))
 	var glyph := ""
@@ -294,6 +308,7 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
 		sprite.render_priority = 7
 		sprite.position = position
+		sprite.modulate = Color(1.0, 1.0, 1.0, ui_alpha)
 		_markers.add_child(sprite)
 		return
 	var text := MindIcons.glyph(glyph)
@@ -310,7 +325,7 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 	label.font_size = 64
 	label.outline_size = 0
 	label.pixel_size = SECTOR_ICON_SIZE / 64.0
-	label.modulate = color
+	label.modulate = Color(color.r, color.g, color.b, color.a * ui_alpha)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.render_priority = 7
 	label.position = position
@@ -390,6 +405,18 @@ func _process(delta: float) -> void:
 	camera.position = cam_pos.normalized() * distance
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 	_update_atmosphere_camera()
+	# `PlanetDialog.draw`: `uiAlpha = lerpDelta(uiAlpha, zoom < 1.9 ? 1 : 0, 0.1)`
+	# and `absin(Time.time, 10, 1)` are baked into the marker rebuilds (Java
+	# redraws every frame; the port rebuilds when either moves).
+	ui_alpha = lerp(ui_alpha, 1.0 if zoom < 1.9 else 0.0, 1.0 - pow(1.0 - 0.1, delta * 60.0))
+	if absf(ui_alpha - _built_ui_alpha) > 0.02 or absf(_preset_pulse() - _built_pulse) > 0.04:
+		_rebuild_markers()
+
+
+## `Mathf.absin(Time.time, 10f, 1f)` (`PlanetDialog.java:463`): a 10 s
+## `|sin|` pulse for unlocked, still-locked presets.
+func _preset_pulse() -> float:
+	return absf(sin(Time.get_ticks_msec() / 1000.0 / 10.0 * TAU))
 
 
 ## Clears the selected sector highlight/icon without moving the camera
@@ -533,7 +560,59 @@ func view_tile(sector: Dictionary) -> int:
 	return int(sector.get("id", -1))
 
 
+## `HexMesh(planet, 6)`: the shaded hex mesh (`MeshBuilder.buildHex` with the
+## generator colours) replaces the vendored-art billboard; the billboard stays
+## as the fallback for planets without a hex generator (T13/PAR-0142).
 func _build_body() -> void:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	var mesh_data: Dictionary = {}
+	if campaign != null and campaign.has_method("planet_mesh"):
+		mesh_data = campaign.call("planet_mesh", planet)
+	if mesh_data.is_empty():
+		_build_body_billboard()
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = mesh_data.get("vertices", PackedVector3Array())
+	arrays[Mesh.ARRAY_NORMAL] = mesh_data.get("normals", PackedVector3Array())
+	arrays[Mesh.ARRAY_COLOR] = mesh_data.get("colors", PackedColorArray())
+	arrays[Mesh.ARRAY_INDEX] = mesh_data.get("indices", PackedInt32Array())
+	var flags := 0
+	var emissive: PackedColorArray = mesh_data.get("emissive_colors", PackedColorArray())
+	if not emissive.is_empty():
+		# Godot wants `ARRAY_CUSTOM0` as a float/byte array, not a colour array.
+		var floats := PackedFloat32Array()
+		floats.resize(emissive.size() * 4)
+		for index in emissive.size():
+			var color := emissive[index]
+			floats[index * 4] = color.r
+			floats[index * 4 + 1] = color.g
+			floats[index * 4 + 2] = color.b
+			floats[index * 4 + 3] = color.a
+		arrays[Mesh.ARRAY_CUSTOM0] = floats
+		flags = (
+			Mesh.ARRAY_FORMAT_CUSTOM0
+			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+		)
+	var array_mesh := ArrayMesh.new()
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
+	body.mesh = array_mesh
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/planet.gdshader")
+	material.render_priority = -8
+	material.set_shader_parameter("u_lightdir", LIGHT_NORMAL)
+	material.set_shader_parameter("u_ambientColor", Color(1.0, 1.0, 1.0))
+	material.set_shader_parameter(
+		"u_emissive", 1.0 if bool(mesh_data.get("emissive", false)) else 0.0
+	)
+	body.material_override = material
+	_body_material = material
+	_update_body_camera()
+	body.visible = true
+
+
+## Vendored-art fallback (no hex generator data).
+func _build_body_billboard() -> void:
 	var texture := _load_loose("planets/%s" % planet, true)
 	# code-instantiated: the globe quad is a data-driven billboard whose scale
 	# depends on the planet radius; no static scene owns per-planet meshes.
@@ -613,6 +692,16 @@ func _update_atmosphere_camera() -> void:
 		var material := atmosphere.material_override as ShaderMaterial
 		material.set_shader_parameter("u_campos", camera.position)
 		material.set_shader_parameter("u_rcampos", camera.position)
+	_update_body_camera()
+
+
+## `Shaders.PlanetShader.apply`: `u_campos` is the camera and `u_camdir` its
+## direction (the port does not model planet rotation).
+func _update_body_camera() -> void:
+	if _body_material == null:
+		return
+	_body_material.set_shader_parameter("u_campos", camera.global_position)
+	_body_material.set_shader_parameter("u_camdir", -camera.global_basis.z)
 
 
 func _rebuild_highlight() -> void:
