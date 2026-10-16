@@ -445,11 +445,13 @@ mod tests {
         for i in 0..world.flyers {
             let p = world.flyer_position(i, 1.5, 45.0, 2.7);
             // `MenuRenderer.flyers`: `% (tw + randomSeed(i+5, 0, 500))`, `% th`.
-            assert!(p[0].is_finite() && p[0] >= 0.0 && p[0] < tw + 500.0, "{p:?}");
+            assert!(
+                p[0].is_finite() && p[0] >= 0.0 && p[0] < tw + 500.0,
+                "{p:?}"
+            );
             assert!(p[1].is_finite() && p[1] >= 0.0 && p[1] < th, "{p:?}");
             let later = world.flyer_position(i, 3.0, 45.0, 2.7);
-            if (later[0] - p[0]).abs() > f32::EPSILON || (later[1] - p[1]).abs() > f32::EPSILON
-            {
+            if (later[0] - p[0]).abs() > f32::EPSILON || (later[1] - p[1]).abs() > f32::EPSILON {
                 moved = true;
             }
         }

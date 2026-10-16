@@ -1631,7 +1631,9 @@ fn blend_menu_quad(
         Some(image) => image.clone(),
         None => {
             let bound = assets.bind();
-            let Some(image) = bound.page_texture(page as i64).and_then(|page| page.get_image())
+            let Some(image) = bound
+                .page_texture(page as i64)
+                .and_then(|page| page.get_image())
             else {
                 return;
             };
@@ -1640,10 +1642,7 @@ fn blend_menu_quad(
             image
         }
     };
-    let (tw, th) = (
-        geometry.get_width() as f32,
-        geometry.get_height() as f32,
-    );
+    let (tw, th) = (geometry.get_width() as f32, geometry.get_height() as f32);
     let mut sx = (uv[0] * tw).round() as i32;
     let mut sy = (uv[1] * th).round() as i32;
     let mut sw = ((uv[2] - uv[0]) * tw).round() as i32;
@@ -1719,7 +1718,16 @@ fn build_menu_image(
         for x in 0..width {
             let tile = grid.tile(x, y);
             for quad in floor_draw_base_quads(&grid, registry, tile, CacheLayerId::Normal) {
-                blend_menu_quad(&mut target, &mut pages, assets, &mut atlas, &quad, x, y, scale);
+                blend_menu_quad(
+                    &mut target,
+                    &mut pages,
+                    assets,
+                    &mut atlas,
+                    &quad,
+                    x,
+                    y,
+                    scale,
+                );
             }
         }
     }
@@ -1770,7 +1778,16 @@ fn build_menu_image(
         for x in 0..width {
             let tile = grid.tile(x, y);
             for quad in tile_quads(&grid, registry, tile, CacheLayerId::Walls) {
-                blend_menu_quad(&mut target, &mut pages, assets, &mut atlas, &quad, x, y, scale);
+                blend_menu_quad(
+                    &mut target,
+                    &mut pages,
+                    assets,
+                    &mut atlas,
+                    &quad,
+                    x,
+                    y,
+                    scale,
+                );
             }
         }
     }
