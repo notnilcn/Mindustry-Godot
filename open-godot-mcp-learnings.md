@@ -2316,3 +2316,18 @@ Run: runs/20261014-s3-verify3/.
   and makes a fine tile/size probe.
 - Workaround: `tools/session-play.sh 3 --play` / the gmcp watchdog recovers; re-stamp pid/tick
   afterwards. Run: runs/20261016-s3-J02-T1/.
+
+## 2026-10-17 — session 2 (J01 T1/T2): screenshot filenames are not monotonic; `sort | tail -1` copies a stale capture
+
+- Symptom: after walking the Godot menu, `godot_screenshot` returned a path
+  (`.../mcp_screenshots/game_xxxxx.png`) but the copied frame showed the wrong dialog
+  (a "Rename Sector" box that had already been closed); a second click also looked
+  inert because the frame was minutes old.
+- Cause: the addon names captures `game_<n>.png` with a non-monotonic counter, so
+  `find ... -name 'game_*.png' | sort | tail -1` picks by lexical order, not mtime.
+  The eval state (`MindUi.dialog_stack()`) was the truth: `["load"]`.
+- Workaround: copy by mtime (`ls -t .../game_*.png | head -1`) and always cross-check
+  a capture against structured state (`dialog_stack`, `world_gen_debug`, tick/frames)
+  before drawing conclusions. Helper used in the run:
+  `/tmp/opencode/s2-shot.sh <out>` (session 2, bridge 6980).
+- Run: `runs/20261016-s2-J01-T1/`, `runs/20261017-s2-J01-T2/`.
