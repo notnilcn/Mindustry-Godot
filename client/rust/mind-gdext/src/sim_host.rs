@@ -50,6 +50,12 @@ pub struct UnitDraw {
     pub hit_size: f32,
     /// Mech walk state (`MechComp`); `None` for non-mechs.
     pub mech: Option<MechDraw>,
+    /// Legged-unit state (`LegsComp` + `UnitType` leg knobs); `None` for
+    /// non-legged units (J03 T4).
+    pub legs: Option<LegsDraw>,
+    /// Tank tread state (`TankComp` + `UnitType` tread knobs); `None` for
+    /// non-tanks (J03 T5).
+    pub treads: Option<TreadsDraw>,
     /// Live weapon mounts (`UnitWeapons`).
     pub weapons: Vec<WeaponDraw>,
     /// `EntitySeq.0` (view-state key; entities are reused).
@@ -86,6 +92,40 @@ pub struct MechDraw {
     pub walk_time: f32,
     /// `UnitType.mechStride`.
     pub stride: f32,
+}
+
+/// `TankComp` tread animation state (`drawTank`) + `UnitType` tread knobs.
+pub struct TreadsDraw {
+    /// `TankComp.treadTime` (`unit.treadTime()`).
+    pub tread_time: f32,
+    /// `UnitType.treadRects`.
+    pub rects: Vec<mind_core::content::registries::units::TreadRect>,
+    /// `UnitType.treadFrames`.
+    pub frames: i32,
+}
+
+/// `LegsComp` state + `UnitType` leg knobs resolved for `drawLegs` (J03 T4).
+pub struct LegsDraw {
+    /// `LegsComp.baseRotation` (`unit.baseRotation()`).
+    pub base_rotation: f32,
+    /// Live legs in index order (foot/joint from `LegsComp.Leg`).
+    pub legs: Vec<mind_core::render::unit_draw::LegDrawLeg>,
+    /// `1 - drownTime`; the port has no drowning yet, so 1.
+    pub inv_drown: f32,
+    /// `UnitType.legBaseOffset`.
+    pub leg_base_offset: f32,
+    /// `UnitType.legStraightness`.
+    pub leg_straightness: f32,
+    /// `UnitType.baseLegStraightness`.
+    pub base_leg_straightness: f32,
+    /// `UnitType.legStraightLength`.
+    pub leg_straight_length: f32,
+    /// `UnitType.legExtension`.
+    pub leg_extension: f32,
+    /// `UnitType.legBaseUnder`.
+    pub leg_base_under: bool,
+    /// `UnitType.shadowElevation` (`0` = off).
+    pub shadow_elevation: f32,
 }
 
 /// One command-overlay row: `(x, y, hit_size, flying, target_pos)`
@@ -5367,6 +5407,44 @@ impl MindSimHost {
                         walk_time: mech.walk_time,
                         stride: def.mech_stride.max(0.001),
                     });
+                let treads = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::TankComp>(*entity)
+                    .map(|tank| TreadsDraw {
+                        tread_time: tank.tread_time,
+                        rects: def.tread_rects.clone(),
+                        frames: def.tread_frames.max(1),
+                    });
+                let legs = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::LegsComp>(*entity)
+                    .map(|comp| LegsDraw {
+                        base_rotation: comp.base_rotation,
+                        legs: comp
+                            .legs
+                            .iter()
+                            .map(|leg| mind_core::render::unit_draw::LegDrawLeg {
+                                foot: (leg.foot_x, leg.foot_y),
+                                joint: (leg.joint_x, leg.joint_y),
+                                moving: leg.moving,
+                                stage: leg.step,
+                            })
+                            .collect(),
+                        // `UnitType.drawLegs` reads `1 - unit.drownTime`; the
+                        // port has no drowning yet (`UnitCore.drown_time`).
+                        inv_drown: 1.0,
+                        leg_base_offset: def.leg_base_offset,
+                        leg_straightness: def.leg_straightness,
+                        base_leg_straightness: def.base_leg_straightness,
+                        leg_straight_length: def.leg_straight_length,
+                        leg_extension: def.leg_extension,
+                        leg_base_under: def.leg_base_under,
+                        shadow_elevation: def.shadow_elevation,
+                    });
                 let weapons = self
                     .sim
                     .ecs
@@ -5476,6 +5554,8 @@ impl MindSimHost {
                     elevation: core.elevation,
                     hit_size: def.hit_size,
                     mech,
+                    legs,
+                    treads,
                     weapons,
                     id,
                     mine_tile,

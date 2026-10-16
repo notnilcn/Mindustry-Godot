@@ -164,6 +164,24 @@ pub struct Falling;
 /// snapshot the movement/kinematics passes read, the per-team flowfield
 /// pathfinder and the live unit/bullet entity lists. Stored as a non-send
 /// resource because [`ContentRegistry`] is `!Send`.
+/// Pre-kill snapshot for the `UnitComp` wreck decals (J03 T5).
+struct WreckDecalInput {
+    /// Unit type name (`<name>-wreck<i>` region prefix).
+    name: String,
+    /// `UnitType.hitSize`.
+    hit_size: f32,
+    /// `UnitType.createScorch`.
+    create_scorch: bool,
+    /// Unit center x.
+    x: f32,
+    /// Unit center y.
+    y: f32,
+    /// Unit rotation in degrees.
+    rotation: f32,
+    /// `EntitySeq.0` (deterministic view-RNG seed).
+    seed: u64,
+}
+
 pub struct UnitRuntime {
     /// Content registry (unit/bullet/status/weapon defs).
     pub content: ContentRegistry,
@@ -681,17 +699,36 @@ impl Sim {
                     content,
                     grid,
                     rng,
+                    fx,
                     seq,
                     ..
                 } = &mut runtime;
                 let before = *seq;
-                // Read the team and type name before the kill despawns the
-                // entity (`Logic.java:218-226` needs both for stats).
+                // Read the team, type and pose before the kill despawns the
+                // entity (`Logic.java:218-226` needs team/name for stats; the
+                // wreck decals need name/pose, `UnitComp.java:932-941`).
                 let unit_team = world.get::<TeamComp>(entity).map(|t| t.team).unwrap_or(0);
-                let unit_name = world
+                let unit_def = world
                     .get::<crate::entities::comp::unit::comp::UnitTypeComp>(entity)
                     .and_then(|comp| content.unit(comp.type_id))
-                    .map(|def| def.name.clone());
+                    .cloned();
+                let unit_name = unit_def.as_ref().map(|def| def.name.clone());
+                let wreck: Option<WreckDecalInput> = unit_def.as_ref().map(|def| WreckDecalInput {
+                    name: def.name.clone(),
+                    hit_size: def.hit_size,
+                    create_scorch: def.create_scorch,
+                    x: world.get::<Pos>(entity).map(|p| p.x).unwrap_or(0.0),
+                    y: world.get::<Pos>(entity).map(|p| p.y).unwrap_or(0.0),
+                    rotation: world
+                        .get::<UnitCore>(entity)
+                        .map(|c| c.rotation)
+                        .unwrap_or(0.0),
+                    seed: world
+                        .get::<crate::ecs::EntitySeq>(entity)
+                        .map(|seq| seq.0)
+                        .unwrap_or(0),
+                });
+                let fx_sink = fx.as_ref();
                 if crate::entities::comp::unit::lifecycle::kill_unit_with_abilities(
                     world,
                     content,
@@ -700,6 +737,21 @@ impl Sim {
                     seq,
                     entity,
                 ) {
+                    // `UnitComp.java:932-941`: wreck decals (view-only, gated
+                    // on `createScorch`).
+                    if let Some(wreck) = &wreck
+                        && wreck.create_scorch
+                    {
+                        crate::entities::comp::unit::lifecycle::emit_wreck_decals(
+                            fx_sink,
+                            &wreck.name,
+                            wreck.hit_size,
+                            wreck.x,
+                            wreck.y,
+                            wreck.rotation,
+                            wreck.seed ^ 0x9e37_79b9_7f4a_7c15,
+                        );
+                    }
                     killed_units += 1;
                     runtime.units_removed += 1;
                     // `Logic` `UnitDestroyEvent` (`Logic.java:218-226`): a

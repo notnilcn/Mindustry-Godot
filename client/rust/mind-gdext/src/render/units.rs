@@ -236,6 +236,219 @@ impl UnitRenderer {
                     sprites += 1;
                 }
             }
+            // `drawTank` (`UnitType.java:1806-1824`): the full `-treads` base
+            // at `rotation - 90`, then the animated `-treads<i>-<frame>` slices
+            // per `treadRects` for both sides (`Mathf.signs`), offset by
+            // `-(rect.x + w/2)`/`-(rect.y + h/2)` image px (÷4 → world units).
+            if let Some(treads) = &unit.treads
+                && let Some(base_tread) = self.resolver.find(&format!("{}-treads", unit.name))
+            {
+                let entry = groups
+                    .entry((bucket, base_tread.page))
+                    .or_insert((base_tread.texture.clone(), Vec::new()));
+                entry.1.push(UnitQuad {
+                    cx: unit.x,
+                    cy: unit.y,
+                    w: base_tread.w * self.sprite_scale,
+                    h: base_tread.h * self.sprite_scale,
+                    rot: unit.rotation - 90.0,
+                    uv: base_tread.uv,
+                    color: 0xffff_ffff,
+                });
+                sprites += 1;
+                let frame = (treads.tread_time as i32).rem_euclid(treads.frames.max(1));
+                for (index, rect) in treads.rects.iter().enumerate() {
+                    let Some(region) = self
+                        .resolver
+                        .find(&format!("{}-treads{}-{}", unit.name, index, frame))
+                    else {
+                        continue;
+                    };
+                    let x_offset = -(rect.x + rect.width / 2.0);
+                    let y_offset = -(rect.y + rect.height / 2.0);
+                    for side in [-1.0f32, 1.0] {
+                        let angle = (unit.rotation - 90.0).to_radians();
+                        let (sin, cos) = angle.sin_cos();
+                        let (vx, vy) = (
+                            (x_offset * side) * cos - y_offset * sin,
+                            (x_offset * side) * sin + y_offset * cos,
+                        );
+                        let entry = groups
+                            .entry((bucket, region.page))
+                            .or_insert((region.texture.clone(), Vec::new()));
+                        entry.1.push(UnitQuad {
+                            cx: unit.x + vx / 4.0,
+                            cy: unit.y + vy / 4.0,
+                            w: rect.width / 4.0,
+                            h: region.h * self.sprite_scale,
+                            rot: unit.rotation - 90.0,
+                            uv: region.uv,
+                            color: 0xffff_ffff,
+                        });
+                        sprites += 1;
+                    }
+                }
+            }
+            // `drawLegs` (`UnitType.java:1826-1904`): the plan-17 leg op list
+            // (front-first feet/joints, upper+lower leg lines, base joints,
+            // base) emitted at `z - 0.02`, under the soft shadow and body.
+            if let Some(legs_draw) = &unit.legs {
+                let foot = self.resolver.find(&format!("{}-foot", unit.name));
+                let leg_region = self.resolver.find(&format!("{}-leg", unit.name));
+                let leg_base = self
+                    .resolver
+                    .find(&format!("{}-leg-base", unit.name))
+                    .or_else(|| leg_region.clone());
+                let joint = self.resolver.find(&format!("{}-joint", unit.name));
+                let base_joint = self.resolver.find(&format!("{}-joint-base", unit.name));
+                let base = self.resolver.find(&format!("{}-base", unit.name));
+                let found = mind_core::render::unit_draw::LegRegions {
+                    foot: foot.is_some(),
+                    leg: leg_region.is_some(),
+                    leg_base: leg_base.is_some(),
+                    joint: joint.is_some(),
+                    base_joint: base_joint.is_some(),
+                    base: base.is_some(),
+                };
+                let params = mind_core::render::unit_draw::LegsDrawParams {
+                    x: unit.x,
+                    y: unit.y,
+                    base_rotation: legs_draw.base_rotation,
+                    inv_drown: legs_draw.inv_drown,
+                    legs: legs_draw.legs.clone(),
+                    leg_base_offset: legs_draw.leg_base_offset,
+                    leg_straightness: legs_draw.leg_straightness,
+                    base_leg_straightness: legs_draw.base_leg_straightness,
+                    leg_straight_length: legs_draw.leg_straight_length,
+                    leg_extension: legs_draw.leg_extension,
+                    leg_base_under: legs_draw.leg_base_under,
+                    shadow_elevation: legs_draw.shadow_elevation,
+                    shadow_tx: -12.0,
+                    shadow_ty: -13.0,
+                    sprite_scale: self.sprite_scale,
+                    foot_w: foot.as_ref().map(|r| r.w).unwrap_or(0.0),
+                    leg_h: leg_region.as_ref().map(|r| r.h).unwrap_or(0.0),
+                    leg_base_h: leg_base.as_ref().map(|r| r.h).unwrap_or(0.0),
+                    found,
+                };
+                for op in mind_core::render::unit_draw::leg_draw_ops(&params) {
+                    use mind_core::render::unit_draw::{LegOp, LegSprite};
+                    let (region, quad) = match &op {
+                        LegOp::FootShadow {
+                            x,
+                            y,
+                            radius,
+                            alpha,
+                        } => {
+                            let Some(region) = self.resolver.find("circle-shadow") else {
+                                continue;
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: *x,
+                                    cy: *y,
+                                    w: *radius,
+                                    h: *radius,
+                                    rot: 0.0,
+                                    uv: region.uv,
+                                    // `Pal.shadow` color at `0.4 * invDrown`.
+                                    color: (0.4 * alpha * 255.0) as u32,
+                                },
+                            )
+                        }
+                        LegOp::Rect { sprite, x, y, rot } => {
+                            let region = match sprite {
+                                LegSprite::Foot => foot.clone(),
+                                LegSprite::Leg => leg_region.clone(),
+                                LegSprite::LegBase => leg_base.clone(),
+                                LegSprite::Joint => joint.clone(),
+                                LegSprite::BaseJoint => base_joint.clone(),
+                                LegSprite::Base => base.clone(),
+                            };
+                            let Some(region) = region else {
+                                continue;
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: *x,
+                                    cy: *y,
+                                    w: region.w * self.sprite_scale,
+                                    h: region.h * self.sprite_scale,
+                                    rot: *rot,
+                                    uv: region.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            )
+                        }
+                        LegOp::Line {
+                            sprite,
+                            x1,
+                            y1,
+                            x2,
+                            y2,
+                            stroke,
+                        } => {
+                            let region = match sprite {
+                                LegSprite::Leg => leg_region.clone(),
+                                LegSprite::LegBase => leg_base.clone(),
+                                _ => None,
+                            };
+                            let Some(region) = region else {
+                                continue;
+                            };
+                            let len = ((x2 - x1).powi(2) + (y2 - y1).powi(2)).sqrt();
+                            if len <= 1e-6 {
+                                continue;
+                            }
+                            // `Lines.line` maps the region's width along the
+                            // segment and its height across it; a negative
+                            // stroke mirrors the sprite (`Lines.java:108-131`).
+                            let [u0, v0, u1, v1] = region.uv;
+                            let uv = if *stroke < 0.0 {
+                                [u0, v1, u1, v0]
+                            } else {
+                                [u0, v0, u1, v1]
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: (x1 + x2) / 2.0,
+                                    cy: (y1 + y2) / 2.0,
+                                    w: len,
+                                    h: stroke.abs(),
+                                    rot: (y2 - y1).atan2(x2 - x1).to_degrees(),
+                                    uv,
+                                    color: 0xffff_ffff,
+                                },
+                            )
+                        }
+                        LegOp::Base { x, y, rot } => {
+                            let Some(region) = base.clone() else {
+                                continue;
+                            };
+                            (
+                                region.clone(),
+                                UnitQuad {
+                                    cx: *x,
+                                    cy: *y,
+                                    w: region.w * self.sprite_scale,
+                                    h: region.h * self.sprite_scale,
+                                    rot: *rot,
+                                    uv: region.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            )
+                        }
+                    };
+                    let entry = groups
+                        .entry((bucket, region.page))
+                        .or_insert((region.texture.clone(), Vec::new()));
+                    entry.1.push(quad);
+                    sprites += 1;
+                }
+            }
             // `drawSoftShadow`: `max(region.w, region.h) * region.scl() *
             // softShadowScl * 1.6`, colour `(0,0,0,0.4)`. Java draws it at
             // `z - 0.01`, *over* the legs (`z - 0.02`) and under the body.
@@ -402,6 +615,32 @@ impl UnitRenderer {
                     color: 0xffff_ffff,
                 });
                 sprites += 1;
+                // `Weapon.draw` (`Weapon.java:261-265`): `<weapon>-cell` tinted
+                // by `UnitType.cellColor`, same mount transform as the region.
+                if let Some(cell) = self.resolver.find(&format!("{}-cell", weapon.name)) {
+                    let team = mind_core::game::team::Team::get(unit.team)
+                        .color
+                        .to_rgba8888();
+                    let [c0, d0, c1, d1] = cell.uv;
+                    let uv = if weapon.flip {
+                        [c1, d0, c0, d1]
+                    } else {
+                        [c0, d0, c1, d1]
+                    };
+                    let entry = groups
+                        .entry((bucket, cell.page))
+                        .or_insert((cell.texture.clone(), Vec::new()));
+                    entry.1.push(UnitQuad {
+                        cx: wx,
+                        cy: wy,
+                        w: cell.w * self.sprite_scale,
+                        h: cell.h * self.sprite_scale,
+                        rot: wr,
+                        uv,
+                        color: mind_core::render::cell_color(team, unit.healthf, time),
+                    });
+                    sprites += 1;
+                }
             }
         }
 

@@ -362,6 +362,42 @@ pub fn kill_unit(world: &mut World, entity: Entity) -> bool {
     remove_unit(world, entity)
 }
 
+/// `UnitComp` death wreck decals (`UnitComp.java:932-941`): each
+/// `<name>-wreck<i>` (`i in 0..3`, gated on `createScorch`) lands at a random
+/// point within `hitSize/4` of the unit, rotated `rotation - 90`.
+///
+/// View-only (`Effect.decal` never feeds the sim); the offset randomness comes
+/// from a deterministic *view* RNG seeded by `seed` so replays stay identical
+/// without consuming the sim's RNG stream. The missing-region filter runs
+/// view-side (`region.found()`).
+pub fn emit_wreck_decals(
+    fx: &dyn crate::combat::view::FxSink,
+    name: &str,
+    hit_size: f32,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    seed: u64,
+) {
+    use crate::content::Rgba;
+    use crate::fx::pool_spec::DECAL_LIFETIME;
+    use crate::math::ArcRand;
+    let mut rand = ArcRand::new(seed);
+    let range = hit_size / 4.0;
+    for i in 0..3 {
+        let dx = rand.random_range_float(-range, range);
+        let dy = rand.random_range_float(-range, range);
+        fx.decal(
+            &format!("{name}-wreck{i}"),
+            x + dx,
+            y + dy,
+            rotation - 90.0,
+            DECAL_LIFETIME,
+            Rgba::WHITE,
+        );
+    }
+}
+
 /// Kills a unit and runs its death abilities first (`UnitComp.killed` →
 /// `Ability.death` for `SpawnDeathAbility`/`LiquidExplodeAbility`).
 ///
@@ -442,5 +478,61 @@ pub fn sync_weapon_state(world: &mut World, entity: Entity) {
         state.delta_len = delta_len;
         state.reload_multiplier = reload_multiplier;
         state.can_shoot = !disarmed && !boosting;
+    }
+}
+
+#[cfg(test)]
+mod wreck_decal_tests {
+    use crate::combat::view::FxSink;
+    use crate::content::Rgba;
+    use std::sync::Mutex;
+
+    /// `(region, x, y, rotation, lifetime)`.
+    type DecalRow = (String, f32, f32, f32, f32);
+
+    #[derive(Default)]
+    struct RecordingSink {
+        decals: Mutex<Vec<DecalRow>>,
+    }
+
+    impl FxSink for RecordingSink {
+        fn decal(&self, region: &str, x: f32, y: f32, rotation: f32, lifetime: f32, _color: Rgba) {
+            self.decals
+                .lock()
+                .expect("lock")
+                .push((region.to_owned(), x, y, rotation, lifetime));
+        }
+    }
+
+    /// J03 T5: `UnitComp.java:932-941` — three `<name>-wreck<i>` decals per
+    /// death, offset within `hitSize/4`, rotated `rotation - 90`, and the
+    /// offsets differ (view RNG).
+    #[test]
+    fn wreck_decals_emit_three_names_within_range() {
+        let sink = RecordingSink::default();
+        super::emit_wreck_decals(&sink, "dagger", 8.0, 100.0, 200.0, 45.0, 7);
+        let decals = sink.decals.lock().expect("lock");
+        assert_eq!(decals.len(), 3);
+        for (i, (name, x, y, rot, _life)) in decals.iter().enumerate() {
+            assert_eq!(name, &format!("dagger-wreck{i}"));
+            assert!((x - 100.0).abs() <= 2.0 && (y - 200.0).abs() <= 2.0);
+            assert!((rot + 45.0).abs() < 1e-4, "rotation - 90: {rot}");
+        }
+        let distinct = decals[0].1 != decals[1].1 || decals[0].2 != decals[1].2;
+        assert!(distinct, "random per-decal offsets");
+    }
+
+    /// Deterministic: the same seed reproduces the same offsets.
+    #[test]
+    fn wreck_decal_offsets_are_seed_reproducible() {
+        let a = RecordingSink::default();
+        super::emit_wreck_decals(&a, "dagger", 8.0, 0.0, 0.0, 0.0, 42);
+        let b = RecordingSink::default();
+        super::emit_wreck_decals(&b, "dagger", 8.0, 0.0, 0.0, 0.0, 42);
+        let (a, b) = (
+            a.decals.lock().expect("lock").clone(),
+            b.decals.lock().expect("lock").clone(),
+        );
+        assert_eq!(a, b);
     }
 }

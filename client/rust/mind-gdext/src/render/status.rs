@@ -21,13 +21,15 @@ use crate::sim_host::MindSimHost;
 /// `Pal.gray` (`Pal.java:63`) backing diamond.
 const GRAY: (u8, u8, u8) = (0x45, 0x45, 0x45);
 
-/// One 45° square (Arc `Fill.square(x, y, radius, 45)`: half-width `radius`).
+/// One `Fill.square(x, y, radius, 45)` diamond (`Arc Fill.java:361-363`:
+/// `Draw.rect(white, x, y, radius*2, radius*2, 45)` — a square of side
+/// `2*radius` rotated 45°, i.e. a diamond whose corners sit on the axes at
+/// `radius * sqrt(2)`).
 fn square_points(cx: f32, cy: f32, radius: f32) -> PackedVector2Array {
-    // A square with half-width `radius` has a circumradius of `radius * sqrt2`.
     let circum = radius * std::f32::consts::SQRT_2;
     let mut out: Vec<Vector2> = Vec::with_capacity(4);
     for i in 0..4 {
-        let angle = std::f32::consts::FRAC_PI_4 + i as f32 * std::f32::consts::TAU / 4.0;
+        let angle = i as f32 * std::f32::consts::TAU / 4.0;
         out.push(Vector2::new(
             cx + angle.cos() * circum,
             cy + angle.sin() * circum,
@@ -79,6 +81,15 @@ impl INode2D for StatusRenderer {
         if rows.is_empty() {
             return;
         }
+        // `Draw.color(Pal.gray, Lod.alpha2)` / `Draw.color(status().color,
+        // Lod.alpha2)` (`BuildingComp.java:1226-1228`).
+        let alpha2 = self
+            .base()
+            .try_get_node_as::<Node>("/root/Spine/World/Renderer")
+            .map(|mut renderer| renderer.call("stats_lod_alpha2", &[]).to::<f32>())
+            .unwrap_or(1.0)
+            .clamp(0.0, 1.0);
+        let alpha = (alpha2 * 255.0) as u32;
         let visible = self.visible_rect();
         let mut base = self.base_mut();
         for (_tx, _ty, x, y, size, rgba) in rows {
@@ -92,7 +103,7 @@ impl INode2D for StatusRenderer {
             let (cx, cy, m) = status_corner(x, y, size);
             base.draw_colored_polygon(
                 &square_points(cx, cy, 2.5 * m),
-                Color::from_rgba8(GRAY.0, GRAY.1, GRAY.2, 0xff),
+                Color::from_rgba8(GRAY.0, GRAY.1, GRAY.2, alpha as u8),
             );
             base.draw_colored_polygon(
                 &square_points(cx, cy, 1.5 * m),
@@ -100,7 +111,7 @@ impl INode2D for StatusRenderer {
                     ((rgba >> 24) & 0xff) as u8,
                     ((rgba >> 16) & 0xff) as u8,
                     ((rgba >> 8) & 0xff) as u8,
-                    (rgba & 0xff) as u8,
+                    ((((rgba & 0xff) as f32 * alpha2).min(255.0)) as u32) as u8,
                 ),
             );
         }
