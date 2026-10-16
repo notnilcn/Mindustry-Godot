@@ -1,10 +1,13 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-# J02 — Terrain, floor and menu-background rendering (session 3, wave A)
+# J02 — Terrain, floor and menu-background rendering (session 3, wave A + wave B)
 
 Branch `parity/session-3`, base `fe8fb0e4`, session 3 (display :12, bridge 6990).
 Wave-A scope: T1, T3, then T2 if time. **T1 and T3 landed and are verified
 in-engine; T2 was not started (wave-A budget after T1/T3 ran out).** T4/T5 are
 wave B by policy.
+
+Wave B (2026-10-17) added **T4** (menu background = `MenuRenderer`) and ran
+**T5** (wall shadows/darkness re-check); see the wave-B section at the end.
 
 ## Per-task status
 
@@ -207,3 +210,109 @@ cargo test --manifest-path client/rust/Cargo.toml -p mind-core                  
 - Summary committed to `docs/J02-terrain-rendering_summary.md`; run evidence in
   `runs/20261016-s3-J02-T1/` and `runs/20261016-s3-J02-T3/`; branch left with a
   clean working tree after the docs commit.
+
+---
+
+# Wave B — J02 T4 (menu background) and T5 (wall-shadow check)
+
+Session 3, 2026-10-17. Branch `parity/session-3` was fast-forwarded onto main
+(`3bd1abe8`, wave-A branches of J01/J03/J10 merged) before this work; every
+wave-B commit is on top of that merge.
+
+## Per-task status (wave B)
+
+| Task | Status | Commit |
+|---|---|---|
+| T4 — Menu background = `MenuRenderer` (edges, wall shadows, flyers) | done (verified in-engine) | `5e3b3ed9` (+ `ce3abe7a` uid, `18df9b71` fmt) |
+| T5 — Static wall shadows/darkness re-check (Ground Zero + Caldera) | done — verification only, no residual code change | — |
+
+## T4 — what changed
+
+Java spec: `graphics/MenuRenderer.java` — `cache()` `:170-208` (shadow FBO
+`:172-184`, floors with `drawBase` `:191-197`, overlays, walls `:202-204`),
+`render()` `:211-239` (static camera, floor cache, shadow texture offset
+`(-4,-4)` world units, wall cache, `drawFlyers()`, `darkness` overlay),
+`drawFlyers`/`flyers` `:241-271` (one random type of the nine, `flyerRot = 45`);
+Arc `Mathf.randomSeed`/`randomSeedRange` (`Mathf.java:306-324`).
+
+1. **Bake** (`mind-gdext::render::build_menu_image`): the generated `MenuWorld`
+   is materialised into a `WorldGrid` (camelCase → kebab block ids, plus the
+   `-floor` fallback Java uses for `sand`) and composited through the shared
+   floor path, so menu floors now carry J02 T1's `drawBase` edges and the ore
+   overlays. The wall shadow framebuffer is a `width`×`height`-px image with one
+   pixel per occupied block (`:177-181`), upscaled 8× with bilinear filtering
+   and blended `(-4,-4)` world units (`:226-228`) under the walls — Java's soft
+   shadows come from exactly that FBO scale. Walls use
+   `tile_quads(CacheLayerId::Walls)`.
+   `floor.rs` now exposes `floor_draw_base_quads` — the `drawBase` composition
+   without the chunked renderer's accessibility gate, because `MenuRenderer.cache`
+   draws `tile.floor().drawBase(tile)` for every tile; `tile_quads` keeps its
+   gate.
+2. **Flyers**: `MindWorldRenderer.menu_flyers_json` returns the current sprites
+   in bake-texture pixels (32 px per tile) and the new `MenuFlyers` node
+   (`client/ui/menu_flyers.gd`, added under `Ui/MenuBackground` in
+   `scenes/game.tscn`) draws them with the background's
+   `STRETCH_KEEP_ASPECT_COVERED` transform and the 0.7 darkness modulate.
+   `MenuWorld` now carries `flyer_type` (one of the nine Java candidates, `:33`);
+   the squadron marches up-right like Java's.
+3. **Arc RNG parity fix**: `flyer_position` used a wrong `Mathf.randomSeed`
+   (values in `[-0.5, 255.5)` instead of Java's `Rand` semantics), which put the
+   flyers millions of pixels off the texture; `random_seed_min_max` /
+   `random_seed_range` now follow `Mathf.java:306-324` through
+   `mind-core::random::JavaRandom`. The menu clock uses the real frame delta like
+   `MenuRenderer.render`'s `time += Time.delta` (`frame(delta)`).
+
+### Deviations (T4)
+
+- Flyers draw the packed `unit-<type>-full` icon (the plan's interim) instead of
+  J03's live unit composition; no flyer shadow is drawn — Java's `drawShadow`
+  samples a `<name>-shadow` region that no upstream asset provides (the
+  reference frame shows none either).
+- `flyer_type` is picked after the terrain/flyer count rather than during field
+  init (`MenuRenderer.java:31-33`), keeping the pinned-seed goldens' tiles
+  unchanged.
+
+### Evidence (T4) — `runs/20261017-s3-J02-T4/`
+
+`godot/01-menu-boot-shadows-edges.png` (the real boot flow: floor edges + wall
+shadows), `02-menu-soft-shadows-edges.png` (bilinear shadow zoom basis),
+`03/04-menu-flyer-{a,b}.png`; `diff/menu-side.png` (vs `ref/java-00-menu.png`),
+`diff/shadow-soft-zoom.png` (vs `ref/java-shadow-zoom.png`),
+`diff/flyer-zoom.png`, `diff/flyer-motion-diff.png` (a two-frame diff: only the
+flyer pixels change while the background stays static). Note: the flyer
+squadron capture uses a staged seed via `MindRender.build_menu_texture` because
+the per-launch roll can legitimately produce 0 flyers (Java can too); the real
+boot capture is `01-`.
+
+## T5 — result (verification only)
+
+Re-captured Caldera (custom game) and Ground Zero (campaign) after T1/T3 and
+compared the wall/shadow regions against `runs/20261016-J-twin/java/42-survival`
+and `java/04-gz`: wall edges, wall drop shadows and the darkness pass match
+(Caldera wall-region SSD 7.98, alignment offset `(0, 1)`; the remaining
+difference is the J01 T1 map-filter ores/boulders plus the different save
+state). No residual attributable to T1 was found, so no code change was made.
+
+Recorded residual (not fixed; LOW scope, recorded per the plan's "fix or
+record"): `TallBlock.shadowOffset` (`world/blocks/environment/TallBlock.java:11,32-47`)
+is still unported — the four vanilla TallBlocks (`crystal-cluster`,
+`vibrant-crystal-cluster`, `crystal-blocks`, `crystal-orbs`) render without
+their `variantShadowRegions` drop shadow even though the sprites exist
+(`crystal-cluster-shadow1..3` etc. in the packed atlas). The port has no
+`customShadow` path in the block pass; this is Erekir-environment decor only.
+
+### Evidence (T5) — `runs/20261017-s3-J02-T5/`
+
+`godot/01-caldera-walls.png`, `02-groundzero-walls.png`;
+`diff/caldera-wall-region-side.png`, `diff/gz-side.png`.
+
+## Ledger changes to apply (wave B, J02)
+
+- PAR-0119 (exported builds ship placeholder assets) was staged in the deferred
+  soak; T4's `MenuRenderer` work does not touch it.
+- No new ledger items from T4/T5. T5 adds the residual detail
+  `TallBlock.shadowOffset` + missing `customShadow` shadow pass to whichever
+  environment/editor item owns Erekir crystal decor (suggest: a note on the
+  J02 environment item rather than a new one, since the sprite regions are
+  present and the gap is one draw call).
+- No chain/ledger files were edited by this session.
