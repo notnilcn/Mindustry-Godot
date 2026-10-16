@@ -55,6 +55,10 @@ pub struct CrafterDef {
     pub output_items: Vec<(u16, i32)>,
     /// `outputLiquids` stacks (`(liquid, amount)`).
     pub output_liquids: Vec<(u16, f32)>,
+    /// `GenericCrafter.liquidOutputDirections` (`GenericCrafter.java:35`):
+    /// per-output relative directions (`-1` = all sides; electrolyzer `{1, 3}`,
+    /// `Blocks.java:1397`).
+    pub liquid_output_directions: Vec<i8>,
     /// `ignoreLiquidFullness`.
     pub ignore_liquid_fullness: bool,
 }
@@ -748,6 +752,7 @@ impl BlockKindData {
             craft_time: 0.0,
             output_items: items,
             output_liquids: liquids,
+            liquid_output_directions: Vec::new(),
             ignore_liquid_fullness: ignore,
         };
         // `Blocks.java` factories whose `craftTime` is set explicitly upstream
@@ -759,6 +764,7 @@ impl BlockKindData {
             craft_time,
             output_items: items,
             output_liquids: liquids,
+            liquid_output_directions: Vec::new(),
             ignore_liquid_fullness: ignore,
         };
         match name {
@@ -845,15 +851,21 @@ impl BlockKindData {
                 self.set_crafter(craft_t(vec![(item("silicon"), 4)], vec![], 50.0, false))
             }
             // `Blocks.java:1356 electrolyzer` — ozone 4/60 + hydrogen 6/60, craftTime 10.
-            "electrolyzer" => self.set_crafter(craft_t(
-                vec![],
-                vec![
-                    (liquid("ozone"), 4.0 / 60.0),
-                    (liquid("hydrogen"), 6.0 / 60.0),
-                ],
-                10.0,
-                false,
-            )),
+            "electrolyzer" => {
+                let mut crafter = craft_t(
+                    vec![],
+                    vec![
+                        (liquid("ozone"), 4.0 / 60.0),
+                        (liquid("hydrogen"), 6.0 / 60.0),
+                    ],
+                    10.0,
+                    false,
+                );
+                // `Blocks.java:1397`: `liquidOutputDirections = new int[]{1, 3}`
+                // (relative to rotation; the only vanilla crafter with them).
+                crafter.liquid_output_directions = vec![1, 3];
+                self.set_crafter(crafter);
+            }
             // `Blocks.java:1400 atmospheric-concentrator` (HeatCrafter) —
             // nitrogen 16/60, default craftTime 80.
             "atmospheric-concentrator" => self.set_crafter(craft_t(

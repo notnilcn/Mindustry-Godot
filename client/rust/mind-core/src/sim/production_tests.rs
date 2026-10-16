@@ -129,6 +129,79 @@ fn explosive_fuel_damages_generator_and_fires_trigger() {
     );
 }
 
+/// J04 T3 (`GenericCrafter.dumpOutputs`/`liquidOutputDirections`,
+/// `GenericCrafter.java:345-351`; electrolyzer `{1, 3}` at `Blocks.java:1397`):
+/// a rotated electrolyzer dumps ozone only toward its relative-left side and
+/// hydrogen only toward its relative-right side.
+#[test]
+fn electrolyzer_dumps_liquids_in_configured_directions() {
+    let mut sim = runtime_sim();
+    let electrolyzer = sim.world_block_id("electrolyzer").expect("electrolyzer");
+    // Rotation 1: the relative output dirs become absolute -x (ozone) and +x
+    // (hydrogen).
+    sim.command(SimCommand::Place {
+        x: 5,
+        y: 5,
+        block: electrolyzer,
+        rotation: 1,
+        team: 1,
+        player: None,
+    })
+    .expect("placed");
+    // The electrolyzer is 3x3 (anchor = center): conduits on all four sides,
+    // each facing away (front tile empty), so dumped liquid stays put.
+    let conduit = sim.world_block_id("conduit").expect("conduit");
+    for (x, y, rotation) in [(3, 5, 2), (7, 5, 0), (5, 3, 3), (5, 7, 1)] {
+        sim.command(SimCommand::Place {
+            x,
+            y,
+            block: conduit,
+            rotation,
+            team: 1,
+            player: None,
+        })
+        .expect("placed");
+    }
+    let crafter = sim.grid.entity_at(TilePos::new(5, 5)).expect("crafter");
+    let left = sim.grid.entity_at(TilePos::new(3, 5)).expect("left");
+    let right = sim.grid.entity_at(TilePos::new(7, 5)).expect("right");
+    let above = sim.grid.entity_at(TilePos::new(5, 3)).expect("above");
+    let below = sim.grid.entity_at(TilePos::new(5, 7)).expect("below");
+    let ozone = liquid(&sim, "ozone");
+    let hydrogen = liquid(&sim, "hydrogen");
+    let seeds = [(ozone, 25.0), (hydrogen, 25.0)];
+    for (liquid, amount) in seeds {
+        sim.ecs
+            .0
+            .get_mut::<crate::world::modules::LiquidModule>(crafter)
+            .expect("module")
+            .add(liquid, amount, 500.0);
+    }
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        stored_liquid(&sim, left, ozone) > 0.0,
+        "ozone dumps toward the relative-left side (dir 1 + rotation 1)"
+    );
+    assert!(
+        stored_liquid(&sim, right, hydrogen) > 0.0,
+        "hydrogen dumps toward the relative-right side (dir 3 + rotation 1)"
+    );
+    assert_eq!(stored_liquid(&sim, right, ozone), 0.0, "no ozone right");
+    assert_eq!(stored_liquid(&sim, left, hydrogen), 0.0, "no hydrogen left");
+    assert_eq!(
+        stored_liquid(&sim, above, ozone) + stored_liquid(&sim, below, ozone),
+        0.0,
+        "no ozone above/below"
+    );
+    assert_eq!(
+        stored_liquid(&sim, above, hydrogen) + stored_liquid(&sim, below, hydrogen),
+        0.0,
+        "no hydrogen above/below"
+    );
+}
+
 /// J04 T2 (`ConsumeGenerator.java:126-131`, `Blocks.java:2538`):
 /// `itemDurationMultipliers` scale the burn time - pyratite burns 3x longer
 /// than coal in a combustion generator.

@@ -6948,6 +6948,35 @@ impl MindSimHost {
                 d.set("max_health", &Variant::nil());
             }
         }
+        // Stored liquids `[{"liquid": name, "amount": f}]` (J04 T3 verification;
+        // debug probe only).
+        let mut liquid_rows: Vec<serde_json::Value> = Vec::new();
+        if let Some(entity) = tile.build
+            && let Some(module) = self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::world::modules::LiquidModule>(entity)
+        {
+            for (index, amount) in module.liquids.iter().enumerate() {
+                if *amount <= 0.0 {
+                    continue;
+                }
+                let name = self
+                    .content_snapshot
+                    .as_ref()
+                    .and_then(|content| {
+                        content.liquid(mind_core::content::LiquidId::new(index as u16))
+                    })
+                    .map(|def| def.name.clone())
+                    .unwrap_or_default();
+                liquid_rows.push(serde_json::json!({"liquid": name, "amount": amount}));
+            }
+        }
+        d.set(
+            "liquids",
+            &GString::from(serde_json::Value::Array(liquid_rows).to_string().as_str()).to_variant(),
+        );
         // `Rules.limitMapArea` play area (`World.getDarkness` border half);
         // `null` when unrestricted.
         match self.sim.grid.limit_area {
