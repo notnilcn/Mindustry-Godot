@@ -7706,9 +7706,10 @@ impl MindSimHost {
         let Some(entity) = tile.build else {
             return GString::from("[]");
         };
-        if self.building_team(x, y) != Some(self.player_team()) {
-            return GString::from("[]");
-        }
+        // `PlacementFragment.hovered()` calls `build.display(table)` for the
+        // hovered building whatever its team (Java shows enemy/derelict bars
+        // too); only the *unit* test is player-team-scoped
+        // (`Units.closestOverlap(player.team(), ...)`).
         let Some(content) = self.content_snapshot.as_ref() else {
             return GString::from("[]");
         };
@@ -7755,6 +7756,57 @@ impl MindSimHost {
                 )
             })
             .collect();
+        // `Block.setBars` family overrides read live component state (J05
+        // T4): heat, drill speed/warmup, `storageCapacity` + the unlocked item
+        // count for a core, and the factory's progress.
+        let extras = BarExtras {
+            heat: self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::world::blocks::heat::HeatState>(entity)
+                .map(|state| (state.heat, state.heat_output)),
+            drill: self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::DrillState>(entity)
+                .map(|state| (state.last_drill_speed, state.warmup)),
+            time_scale: self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::entities::comp::Building>(entity)
+                .map(|building| building.time_scale)
+                .unwrap_or(1.0),
+            core_capacity: (def.kind == mind_core::content::BlockKind::CoreBlock).then(|| {
+                let unlocked = self
+                    .content_snapshot
+                    .as_ref()
+                    .map(|content| {
+                        content
+                            .items()
+                            .iter()
+                            .filter(|item| item.unlock.unlocked() || !self.in_campaign())
+                            .count() as f32
+                    })
+                    .unwrap_or(0.0);
+                let capacity = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::world::blocks::storage::CoreBuild>(entity)
+                    .map(|core| core.storage_capacity as f32)
+                    .unwrap_or(0.0);
+                (capacity, unlocked)
+            }),
+            factory: self
+                .sim
+                .ecs
+                .0
+                .get::<mind_core::world::blocks::units::UnitFactoryBuild>(entity)
+                .map(|state| (state.progress, state.current_plan)),
+        };
         let rows = building_bar_rows(
             def,
             healthf,
@@ -7762,6 +7814,7 @@ impl MindSimHost {
             items_total,
             liquids.as_deref(),
             &liquid_info,
+            &extras,
         );
         let json: Vec<serde_json::Value> = rows
             .iter()
@@ -9578,6 +9631,24 @@ pub struct BarRow {
 /// `health` is the health **fraction** (`Health.fraction`); `liquid_info` is
 /// `(name, rgba8888)` per liquid in id order (colour for the bar; `name` for
 /// the `liquid.<name>.name` label key).
+/// Live values the `Block.setBars` family overrides read (J05 T4).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BarExtras {
+    /// `HeatBlock.heat()` and `heatOutput`/`heatRequirement`
+    /// (`HeatProducer.java:40`, `HeatConductor.java:34`, `HeatCrafter.java:28`).
+    pub heat: Option<(f32, f32)>,
+    /// `DrillBuild.lastDrillSpeed`/`warmup` (`Drill.java:117-119`).
+    pub drill: Option<(f32, f32)>,
+    /// `Building.timeScale()`.
+    pub time_scale: f32,
+    /// `CoreBuild.storageCapacity` plus the unlocked item count
+    /// (`CoreBlock.java:148-152`).
+    pub core_capacity: Option<(f32, f32)>,
+    /// `UnitFactoryBuild`: `(progress, currentPlan)`
+    /// (`UnitFactory.java:121-125`).
+    pub factory: Option<(f32, i32)>,
+}
+
 pub fn building_bar_rows(
     def: &mind_core::content::registries::blocks::BlockDef,
     health: f32,
@@ -9585,6 +9656,7 @@ pub fn building_bar_rows(
     items_total: Option<i32>,
     liquids: Option<&[f32]>,
     liquid_info: &[(String, u32)],
+    extras: &BarExtras,
 ) -> Vec<BarRow> {
     use mind_core::content::registries::blocks::Consume;
     let mut rows = Vec::new();
@@ -9615,9 +9687,26 @@ pub fn building_bar_rows(
             value: status.clamp(0.0, 1.0),
         });
     }
+    // `ItemSource.java:41`, `Unloader.java:74`, `DirectionalUnloader.java:79`:
+    // the item bar is removed for these families.
+    let removes_items = matches!(
+        def.kind,
+        mind_core::content::BlockKind::ItemSource
+            | mind_core::content::BlockKind::Unloader
+            | mind_core::content::BlockKind::DirectionalUnloader
+    );
+    // `LiquidSource.java:45`, `LiquidVoid.java:23`, `LiquidJunction.java:29`:
+    // the liquid bar is removed for these families.
+    let removes_liquid = matches!(
+        def.kind,
+        mind_core::content::BlockKind::LiquidSource
+            | mind_core::content::BlockKind::LiquidVoid
+            | mind_core::content::BlockKind::LiquidJunction
+    );
     if def.has_items
         && def.configurable
         && def.item_capacity > 0
+        && !removes_items
         && let Some(total) = items_total
     {
         rows.push(BarRow {
@@ -9628,7 +9717,7 @@ pub fn building_bar_rows(
             value: (total as f32 / def.item_capacity as f32).clamp(0.0, 1.0),
         });
     }
-    if def.has_liquids && def.liquid_capacity > 0.0 {
+    if def.has_liquids && def.liquid_capacity > 0.0 && !removes_liquid {
         let amounts = liquids.unwrap_or(&[]);
         let mut added = false;
         for spec in &def.consumes {
@@ -9681,6 +9770,106 @@ pub fn building_bar_rows(
             });
         }
     }
+    // `Block.setBars` overrides append after the defaults, in each family's
+    // `addBar` order (`CoreBlock.java:145-153`, `Drill.java:117-119`,
+    // `HeatProducer.java:40`, `HeatConductor.java:34`,
+    // `HeatCrafter.java:28-34`, `UnitFactory.java:121-135`).
+    match def.kind {
+        mind_core::content::BlockKind::CoreBlock => {
+            if let Some((capacity, unlocked)) = extras.core_capacity
+                && capacity > 0.0
+                && unlocked > 0.0
+            {
+                // `bar.capacity` = `UI.formatAmount(storageCapacity)`;
+                // `Pal.items`; fill = `items.total() / (storageCapacity *
+                // unlockedItems)`.
+                let denominator = capacity * unlocked;
+                // `UI.formatAmount` carries `[gray]`/`[]` markup for Arc's
+                // label renderer; the hover bar label is plain text, so the
+                // markers are stripped ("13k").
+                let capacity_text = mind_core::ui::text::format_amount_default(capacity as i64)
+                    .replace("[gray]", "")
+                    .replace("[]", "");
+                rows.push(BarRow {
+                    key: "capacity",
+                    label_key: String::from("bar.capacity"),
+                    label_arg: Some(capacity_text),
+                    color: 0x2ea7_56ff,
+                    value: (items_total.unwrap_or(0) as f32 / denominator).clamp(0.0, 1.0),
+                });
+            }
+        }
+        mind_core::content::BlockKind::Drill => {
+            if let Some((speed, warmup)) = extras.drill {
+                // `bar.drillspeed` = `lastDrillSpeed * 60 * timeScale`
+                // (two decimals); `Pal.ammo`; fraction = `warmup`.
+                rows.push(BarRow {
+                    key: "drillspeed",
+                    label_key: String::from("bar.drillspeed"),
+                    label_arg: Some(format!("{:.2}", speed * 60.0 * extras.time_scale)),
+                    color: 0xff89_47ff,
+                    value: warmup.clamp(0.0, 1.0),
+                });
+            }
+        }
+        mind_core::content::BlockKind::HeatProducer
+        | mind_core::content::BlockKind::HeatConductor => {
+            if let Some((heat, output)) = extras.heat
+                && output > 0.0
+            {
+                // `bar.heat` (`HeatProducer.java:40`); `Pal.lightOrange`;
+                // `heat / heatOutput`.
+                rows.push(BarRow {
+                    key: "heat",
+                    label_key: String::from("bar.heat"),
+                    label_arg: None,
+                    color: 0xf680_21ff,
+                    value: (heat / output).clamp(0.0, 1.0),
+                });
+            }
+        }
+        mind_core::content::BlockKind::HeatCrafter => {
+            if let Some((heat, requirement)) = extras.heat
+                && requirement > 0.0
+            {
+                // `HeatCrafter.java:28-34`: `bar.heatpercent` (a two-argument
+                // label; the port's bar row carries one argument, so the value
+                // fraction and colour match Java and the label stays the
+                // single-argument `bar.heat` fallback).
+                rows.push(BarRow {
+                    key: "heat",
+                    label_key: String::from("bar.heatpercent"),
+                    label_arg: Some(format!("{}", (heat + 0.01) as i32)),
+                    color: 0xf680_21ff,
+                    value: (heat / requirement).clamp(0.0, 1.0),
+                });
+            }
+        }
+        mind_core::content::BlockKind::UnitFactory => {
+            if let Some((progress, plan)) = extras.factory {
+                // `UnitFactory.java:121-125`: `bar.progress` (percent);
+                // `Pal.ammo`; `fraction()`.
+                let time = usize::try_from(plan)
+                    .ok()
+                    .and_then(|index| def.unit_plans.get(index))
+                    .map(|unit| unit.time)
+                    .unwrap_or(0.0);
+                let fraction = if time > 0.0 {
+                    (progress / time).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
+                rows.push(BarRow {
+                    key: "progress",
+                    label_key: String::from("bar.progress"),
+                    label_arg: Some(format!("{}", (fraction * 100.0) as i32)),
+                    color: 0xff89_47ff,
+                    value: fraction,
+                });
+            }
+        }
+        _ => {}
+    }
     rows
 }
 
@@ -9705,6 +9894,99 @@ mod tests {
             }
             Err(error) => panic!("content boot failed: {error}"),
         }
+    }
+
+    fn bar_rows(def_name: &str, extras: &BarExtras, content: &ContentRegistry) -> Vec<BarRow> {
+        let Some(def) = content.block_by_name(def_name) else {
+            panic!("block {def_name}");
+        };
+        building_bar_rows(def, 1.0, Some(0.5), Some(0), Some(&[]), &[], extras)
+    }
+
+    #[test]
+    fn bar_rows_follow_the_java_overrides() {
+        // J05 T4: `Block.setBars` + the `addBar`/`removeBar` calls in `world/**`.
+        let content = base_registry();
+        let extras = BarExtras {
+            core_capacity: Some((4000.0, 16.0)),
+            drill: Some((12.5, 0.5)),
+            heat: Some((5.0, 10.0)),
+            time_scale: 1.0,
+            factory: Some((450.0, 0)),
+        };
+        // `CoreBlock.java:148-152`: `bar.capacity` appended after the defaults.
+        let core = bar_rows("core-shard", &extras, &content);
+        let Some(capacity) = core.iter().find(|row| row.key == "capacity") else {
+            panic!("core capacity bar missing");
+        };
+        assert_eq!(capacity.label_key, "bar.capacity");
+        assert_eq!(capacity.color, 0x2ea7_56ff);
+        assert_eq!(capacity.value, 0.0, "0 items over 4000 * 16");
+        assert_eq!(
+            capacity.label_arg.as_deref(),
+            Some(
+                mind_core::ui::text::format_amount_default(4000)
+                    .replace("[gray]", "")
+                    .replace("[]", "")
+                    .as_str()
+            ),
+            "`UI.formatAmount(storageCapacity)` with the markup stripped"
+        );
+        // `ItemSource.java:41` / `Unloader.java:74` / `DirectionalUnloader.java:79`.
+        for name in ["item-source", "unloader", "duct-unloader"] {
+            assert!(
+                !bar_rows(name, &extras, &content)
+                    .iter()
+                    .any(|row| row.key == "items"),
+                "{name} removes the item bar"
+            );
+        }
+        // `LiquidSource.java:45` / `LiquidVoid.java:23` / `LiquidJunction.java:29`.
+        for name in ["liquid-source", "liquid-void", "liquid-junction"] {
+            assert!(
+                !bar_rows(name, &extras, &content)
+                    .iter()
+                    .any(|row| row.key == "liquid"),
+                "{name} removes the liquid bar"
+            );
+        }
+        // `Drill.java:117-119`: `bar.drillspeed` = speed * 60 * timeScale.
+        let drill = bar_rows("mechanical-drill", &extras, &content);
+        let Some(speed) = drill.iter().find(|row| row.key == "drillspeed") else {
+            panic!("drill speed bar missing");
+        };
+        assert_eq!(speed.label_key, "bar.drillspeed");
+        assert_eq!(speed.label_arg.as_deref(), Some("750.00"));
+        assert_eq!(speed.value, 0.5, "warmup");
+        assert_eq!(speed.color, 0xff89_47ff);
+        // `HeatProducer.java:40` / `HeatConductor.java:34`: `bar.heat`, heat/output.
+        let heat_block = bar_rows("heat-source", &extras, &content);
+        assert!(
+            heat_block.iter().any(|row| row.key == "heat"),
+            "heat-source has a heat bar"
+        );
+        // `UnitFactory.java:121-125`: `bar.progress` = `fraction()`.
+        let factory = bar_rows("ground-factory", &extras, &content);
+        let Some(progress) = factory.iter().find(|row| row.key == "progress") else {
+            panic!("factory progress bar missing");
+        };
+        assert_eq!(progress.value, 0.5, "450 / dagger's 900 ticks");
+        assert_eq!(progress.label_key, "bar.progress");
+        // A plain block keeps exactly the default rows (`Block.java:709-760`):
+        // health only (the helper's synthetic power status is not fed here).
+        let Some(router_def) = content.block_by_name("router") else {
+            panic!("router");
+        };
+        let router = building_bar_rows(router_def, 1.0, None, None, None, &[], &extras);
+        assert_eq!(
+            router.iter().map(|row| row.key).collect::<Vec<_>>(),
+            ["health"]
+        );
+        let duo = bar_rows("duo", &extras, &content);
+        assert_eq!(
+            duo.iter().map(|row| row.key).collect::<Vec<_>>(),
+            ["health", "power", "liquid"]
+        );
     }
 
     #[test]
@@ -9860,7 +10142,7 @@ mod tests {
             panic!("launch-pad def missing");
         };
         assert!(def.has_items && def.configurable && def.item_capacity > 0);
-        let rows = building_bar_rows(def, 1.0, None, Some(5), None, &[]);
+        let rows = building_bar_rows(def, 1.0, None, Some(5), None, &[], &BarExtras::default());
         assert_eq!(rows.len(), 2, "rows: {:?}", rows.len());
         assert_eq!(rows[0].key, "health");
         assert_eq!(rows[1].key, "items");
@@ -9888,7 +10170,15 @@ mod tests {
             .collect();
         let capacity = def.liquid_capacity;
         let liquids = vec![0.0, capacity * 0.4];
-        let rows = building_bar_rows(def, 1.0, None, None, Some(&liquids), &liquid_info);
+        let rows = building_bar_rows(
+            def,
+            1.0,
+            None,
+            None,
+            Some(&liquids),
+            &liquid_info,
+            &BarExtras::default(),
+        );
         let row = rows
             .iter()
             .find(|row| row.key == "liquid")
