@@ -1582,7 +1582,7 @@
 "PAR-0111":{"t":"Leaving the map editor silently discards unsaved changes (no confirm)","s":"editor","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Godot editor shell -> draw a block -> click Back (or Escape)","rep":{"java":"s330","godot":"s331","compare":"s332"}},
 "PAR-0112":{"t":"Planet-generated campaign sectors have no core and no enemy base: launch loadout, ruins and base walls are skipped","s":"campaign","st":"verified","u":"2026-10-16","run":"runs/20261016-s2-I04-T17/","to":"Godot: launch a non-preset sector (planet-page hex with no preset, or MindSimHost.load_sector('serpulo', <id>) for a cell whose preset is None) and inspect the world; Java: same sector via World.loadSector","rep":{"java":"s333","godot":"s334","compare":"s335"}},
 "PAR-0113":{"t":"Editor map view cannot pan or temporarily pick/zoom: no drag/WASD pan, no shift-alt pick, no middle-click zoom","s":"input","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Godot editor shell -> MapView: drag with the zoom tool, hold WASD, middle-click, hold shift, right-click a tool button","rep":{"java":"s336","godot":"s337","compare":"s338"}},
-"PAR-0114":{"t":"Map previews never render: custom game and editor map lists show a placeholder instead of the map image","s":"ui","st":"fixing","u":"2026-10-17","run":"runs/20261016-s3-J02-T3/","to":"Standalone menu -> Play -> Custom Game (map preview panel) and Editor -> maps list","rep":{"java":"s339","godot":"s340","compare":"s341"}},
+"PAR-0114":{"t":"Map previews never render: custom game and editor map lists show a placeholder instead of the map image","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J01-T2/","to":"Standalone menu -> Play -> Custom Game (map preview panel) and Editor -> maps list","rep":{"java":"s339","godot":"s340","compare":"s341"}},
 "PAR-0115":{"t":"Installing a mod changes nothing in the game: modded blocks, items and units never appear","s":"mods","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Boot the Mods dialog (root/MindMods list()) then follow a modded content name into the live registry boot: client/rust/mind-gdext/src/sim_host.rs:216 (create_base_content with an empty MemoryBundle) and client/rust/mind-gdext/src/assets/atlas.rs:78 (FileTree::new() with no mod overlay). Both show mod content/assets never enter the shipped client.","rep":{"java":"s342","godot":"s343","compare":"s344"}},
 "PAR-0116":{"t":"Mods that ship scripts never run and get no unsupported warning","s":"mods","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Start at client/rust/mind-gdext/src/mods.rs:65 (bootstrap) and confirm Mods::load_scripts (client/rust/mind-core/src/mods/mod.rs:449) has no caller outside tests; then check the Mods dialog row for a mod with user://mods/<mod>/scripts/main.js.","rep":{"java":"s345","godot":"s346","compare":"s347"}},
 "PAR-0117":{"t":"Disabling a mod does not stick: after a restart every mod is enabled again","s":"mods","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Start at client/rust/mind-gdext/src/mods.rs:44 (settings: SettingsStore::new()) and confirm no SettingsStore::load/force_save/flush_if_dirty call in that file; compare the working pattern at client/rust/mind-gdext/src/ui/ui_host.rs:806/957.","rep":{"java":"s348","godot":"s349","compare":"s350"}},
@@ -1806,7 +1806,7 @@
 "PAR-0335":{"t":"env blocks blocked by build darkness; dead BeamDrillState; markers region (T8 79396fbf)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0336":{"t":"Coolant consumers ignore liquids.current() (T9 8df5a940)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0337":{"t":"fog_debug_json stalls on no arguments (T15 6efa56c3, in-engine)","s":"world","st":"verified","u":"2026-10-16"},
-"PAR-0338":{"t":"7 Serpulo presets fail the legacy import (rules JSON)","s":"world","st":"seeded","u":"2026-10-16"},
+"PAR-0338":{"t":"7 Serpulo presets fail the legacy import (rules JSON)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J01-T2/"},
 "PAR-0339":{"t":"Live content boot drops turret ammo (no turret behaviors in-engine) (T16 cd2d751f)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0340":{"t":"BuilderAI boost tail unported (T16 cd2d751f; floor terms limited to deep floors)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0341":{"t":"Turret block-unit proxies are fog/target/damage sources (T12 346da687; scan filters)","s":"world","st":"verified","u":"2026-10-16"},
@@ -1828,7 +1828,9 @@
 "PAR-0357":{"t":"The block/unit content picker never opened from the objectives dialog: `SimHost.content_list` returns a `PackedStringArray` and the `is Array` guard rejected it (412a0383)","s":"ui","st":"verified","u":"2026-10-16"},
 "PAR-0358":{"t":"`list_select` stacked a new content table per open and could render a zero-height body (412a0383)","s":"ui","st":"verified","u":"2026-10-16"},
 "PAR-0359":{"t":"Floor transitions render as hard tile edges: `Floor.drawEdges`/`drawNonLayer`/`drawBlended` were not ported (b33dce04)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s3-J02-T1/"},
-"PAR-0360":{"t":"Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s3-J02-T1/"}
+"PAR-0360":{"t":"Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s3-J02-T1/"},
+"PAR-0361":{"t":"Custom maps load without generation filters (no ores/boulders): `World.loadMap` never ran `FilterContext`/`applyFilters` (396c9886)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s2-J01-T1/"},
+"PAR-0362":{"t":"Committed goldens predate deliberate H01-T1 position and I-round content changes: `blocks_golden`, `audio_golden` (audio_events_sim), `input_golden`, `logistics_golden`, `maps_editor_golden` all fail on main (regen pending)","s":"world","st":"seeded","u":"2026-10-17"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4513,7 +4515,11 @@
 "PAR-0114":[
 "Code-scan 2026-10-10 (maps-editor): S3, confidence medium (UI placeholder observed in code; texture_for is implemented but unbound, and no live preview generation exists). Player impact: map selection in Custom Game and the Editor maps list lacks the map image Java shows; PAR-0065 verified the rows but not previews. Plan 19's deferred 'Gd<ImageTexture> binding' is half-landed: the binding exists (preview.rs:193) but nothing calls it and nothing generates pixels. In-engine verification pending.",
 "2026-10-16 round I: I06 T5: 24 previews from the shipped block colours; Custom Game grid + Map Play + save-slot previews; Java reference histogram match",
-"2026-10-17 round J (J02 T3 a7b1aff0): scrap ore now uses MapIO.colorFor exactly (use_color on block defs, ore map_color from the item colour, preview cache _v2 -> _v3); grey scrap circle verified in previews/minimap (runs/20261016-s3-J02-T3/). Remaining half stays open until J01 T2: the 3 unimportable user maps (previews + mode icons)."
+"2026-10-17 round J (J02 T3 a7b1aff0): scrap ore now uses MapIO.colorFor exactly (use_color on block defs, ore map_color from the item colour, preview cache _v2 -> _v3); grey scrap circle verified in previews/minimap (runs/20261016-s3-J02-T3/).",
+"2026-10-17 round J (J01 T2 1b844069): the 3 user maps (anthill v5, Capital Ship Crash Site, [Orange]Attack_Secret Island Outpost) now import (pre-short MSAV v1-3 + Arc JSON forms) and render previews + mode icons; verified via texture_for_name/map_modes in runs/20261017-s2-J01-T2/ (diff/09-custom-side.png). Both halves closed -> item verified."
+],
+"PAR-0362":[
+"2026-10-17 coordinator (wave A): five committed golden suites fail on main, all before round J and unchanged by it: mind-core blocks_golden family_counts (other 158 / production 51 vs golden 164/45 — 6 blocks reclassified other->production after the golden's last regen); mind-headless audio_golden (audio_events_sim: shootDuo muzzle moved to (33.0,66.25) and the tick-4 explosionArtillery event is missing), input_golden, logistics_golden, maps_editor_golden (preview checksum). J01 attributed the drift to H01 T1 (8e7b68b8) intentionally moving building positions to the Java convention after the last golden regen (G07 T2, 95d015bb); the audio event delta still needs attribution before regenerating. Regenerate deliberately with the owning task's Java reason (see each test's regen command); do not blanket-regen."
 ],
 "PAR-0115":[
 "Reference soak: staging blocker: no mod fixture in parity-java-home (the Mods dialog reads 'No mods found'); a content-mod zip must be installed to stage the loading half.",
@@ -5522,6 +5528,15 @@
 ],
 "PAR-0360":[
 "closed: b33dce04 (J02 T1): the world/editor floor+wall bake was vertically mirrored; fixed in the same commit and verified against vflip(atlas) vs normal (SSD 0.2 vs 3.8) in runs/20261016-s3-J02-T1/."
+],
+"PAR-0361":[
+"closed: 396c9886 (J01 T1): map loads (custom game / editor playtest / start_map_mode) now randomize + apply map.filters() (genfilters tag, else Maps.defaultFilters) before endMapLoad, per World.java:341-357,661-695; save loads and sector loads keep the plain path. Sim records map_gen_seed; real-input walk shows ores/boulders and per-load re-roll like Java frames 42/46 (runs/20261016-s2-J01-T1/)."
+],
+"PAR-0114":[
+"closed: a7b1aff0 (J02 T3) + 1b844069 (J01 T2): MapIO.colorFor exact (scrap ore grey circle in previews/minimap, cache _v3) and the 3 user maps import with previews + mode icons. Runs runs/20261016-s3-J02-T3/ and runs/20261017-s2-J01-T2/."
+],
+"PAR-0338":[
+"closed: 1b844069 (J01 T2): the 7 presets now import via the Arc-minimal JSON converter + field tolerances (ObjectSet {\"values\":[...]}, weather:null, numeric spawn effect, Color bean) and pre-short MSAV v1-3 readers; the full suite imports 78 Serpulo presets, 114 shipped maps, 9 user maps, 9 previews (runs/20261017-s2-J01-T2/)."
 ]
 }
 }

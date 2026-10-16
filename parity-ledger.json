@@ -24906,8 +24906,8 @@
       "title": "Map previews never render: custom game and editor map lists show a placeholder instead of the map image",
       "surface": "ui",
       "parent": null,
-      "status": "fixing",
-      "updated": "2026-10-17T00:30:00+10:00",
+      "status": "verified",
+      "updated": "2026-10-17T01:10:00+10:00",
       "discovered_by": null,
       "path": {
         "to": "Standalone menu -> Play -> Custom Game (map preview panel) and Editor -> maps list",
@@ -24933,12 +24933,12 @@
       "steps": [],
       "mismatch": null,
       "fix": {
-        "status": "open",
-        "commit": null,
-        "summary": null,
+        "status": "closed",
+        "commit": "a7b1aff0 (J02 T3) + 1b844069 (J01 T2)",
+        "summary": "Scrap ore drawn via MapIO.colorFor exactly (use_color on block defs, ore map_color from the item colour, preview cache _v3; runs/20261016-s3-J02-T3/) and the 3 user maps import with previews + mode icons via pre-short MSAV v1-3 + Arc JSON forms (runs/20261017-s2-J01-T2/).",
         "plan": {
           "round": 0,
-          "state": "round J 2026-10-17: the scrap-ore half is fixed (J02 T3 a7b1aff0, MapIO.colorFor exact, preview cache _v3) and verified in-engine (runs/20261016-s3-J02-T3/); the remaining half stays open until J01 T2 imports the 3 user maps so their previews + mode icons show. Original: seeded by code-scan 2026-10-10; not yet verified in-engine",
+          "state": "closed 2026-10-17 (round J): both halves verified in-engine. round J 2026-10-17: the scrap-ore half is fixed (J02 T3 a7b1aff0, MapIO.colorFor exact, preview cache _v3) and verified in-engine (runs/20261016-s3-J02-T3/); the remaining half stays open until J01 T2 imports the 3 user maps so their previews + mode icons show. Original: seeded by code-scan 2026-10-10; not yet verified in-engine",
           "seam": "Preview pipeline seam: MindPreview.refresh (client/rust/mind-gdext/src/editor/preview.rs:126-128) never calls PreviewPipeline::{load_previews,create_all_previews,check_previews} (client/rust/mind-core/src/editor/preview.rs:48,73,128, zero live callers); MindEditor.save (gdext editor/mod.rs:1011-1058) uses save_editor_map (maps_glue.rs:105-125) instead of save_map_e2e (maps_glue.rs:178-215); textures are never bound into the map-list UI.",
           "files": [
             "client/rust/mind-gdext/src/editor/preview.rs:126-128",
@@ -24968,7 +24968,12 @@
           }
         }
       },
-      "verified": null,
+      "verified": {
+        "mode": "reference",
+        "date": "2026-10-17T01:10:00+10:00",
+        "run": "runs/20261017-s2-J01-T2/",
+        "reference": "runs/20261016-s3-J02-T3/"
+      },
       "note": "Code-scan 2026-10-10 (maps-editor): S3, confidence medium (UI placeholder observed in code; texture_for is implemented but unbound, and no live preview generation exists). Player impact: map selection in Custom Game and the Editor maps list lacks the map image Java shows; PAR-0065 verified the rows but not previews. Plan 19's deferred 'Gd<ImageTexture> binding' is half-landed: the binding exists (preview.rs:193) but nothing calls it and nothing generates pixels. In-engine verification pending.",
       "evidence": [
         "../Mindustry/core/src/mindustry/maps/Maps.java:113",
