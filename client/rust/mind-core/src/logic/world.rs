@@ -686,11 +686,12 @@ fn in_box(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32) -> bool {
     px >= x && px <= x + w && py >= y && py <= y + h
 }
 
-/// Circle test (`within`).
+/// Circle test (`Position.within`: `dst2 < radius * radius`, strict;
+/// `arc/math/geom/Position.java:44-46`).
 fn within(cx: f32, cy: f32, radius: f32, px: f32, py: f32) -> bool {
     let dx = px - cx;
     let dy = py - cy;
-    dx * dx + dy * dy <= radius * radius
+    dx * dx + dy * dy < radius * radius
 }
 
 fn num(exec: &Executor, var: VarRef) -> f64 {

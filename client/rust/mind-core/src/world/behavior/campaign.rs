@@ -265,6 +265,11 @@ impl BuildingBehavior for LandingPadBehavior {
         }
     }
 
+    fn config_kinds(&self) -> &'static [super::super::config::ConfigKind] {
+        // `LandingPad.config(Item.class, ...)` (`LandingPad.java:73`).
+        &[super::super::config::ConfigKind::Item]
+    }
+
     fn config(&self, world: &World, e: Entity) -> super::super::config::ConfigValue {
         world
             .get::<LandingPadState>(e)

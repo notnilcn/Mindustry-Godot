@@ -610,18 +610,38 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|m| m.total as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::ItemCapacity => {
-            Sensed::Num(def.as_ref().map(|d| d.item_capacity as f64).unwrap_or(0.0))
-        }
+        // `itemCapacity -> block.hasItems ? block.itemCapacity : 0`.
+        LAccess::ItemCapacity => Sensed::Num(
+            def.as_ref()
+                .filter(|d| d.has_items)
+                .map(|d| d.item_capacity as f64)
+                .unwrap_or(0.0),
+        ),
         LAccess::TotalLiquids => Sensed::Num(
             world
                 .get::<LiquidModule>(e)
                 .map(|m| m.current_amount as f64)
                 .unwrap_or(0.0),
         ),
+        // `liquidCapacity -> block.hasLiquids ? block.liquidCapacity : 0`.
         LAccess::LiquidCapacity => Sensed::Num(
             def.as_ref()
+                .filter(|d| d.has_liquids)
                 .map(|d| d.liquid_capacity.max(0.0) as f64)
+                .unwrap_or(0.0),
+        ),
+        // `powerCapacity -> block.consPower != null ? block.consPower.capacity
+        // : 0f` (the buffered capacity; `consumePower(usage)` has capacity 0).
+        LAccess::PowerCapacity => Sensed::Num(
+            def.as_ref()
+                .and_then(|d| {
+                    d.consumes.iter().find_map(|c| match &c.consume {
+                        crate::content::registries::blocks::Consume::Power { buffered, .. } => {
+                            Some(*buffered as f64)
+                        }
+                        _ => None,
+                    })
+                })
                 .unwrap_or(0.0),
         ),
         LAccess::TotalPower => {
@@ -704,13 +724,15 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|d| d.capacity as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::CameraX
-        | LAccess::CameraY
-        | LAccess::CameraWidth
-        | LAccess::CameraHeight
-        | LAccess::Shooting
-        | LAccess::Boosting
-        | LAccess::Mining => Sensed::Num(0.0),
+        // `cameraX.. -> this instanceof ControlBlock c ? c.unit().sense(sensor)
+        // : 0` (`BuildingComp.java:2130`): the proxy unit is only a `Player`
+        // controller while possessed, and the port has no possessed-turret
+        // camera mirror, so every building reads `0`.
+        LAccess::CameraX | LAccess::CameraY | LAccess::CameraWidth | LAccess::CameraHeight => {
+            Sensed::Num(0.0)
+        }
+        // `shooting`/`boosting`/`mining` are not base `BuildingComp.sense`
+        // rows (turrets override `shooting`): Java's `default -> NaN` (null).
         // `BuildingComp.sense(id)`: not in the table -> `NaN` (null).
         LAccess::Id => Sensed::Num(f64::NAN),
         LAccess::Type => match world.get::<Building>(e) {
@@ -725,18 +747,128 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .and_then(|m| m.first())
                 .map(|i| LogicObject::Content(crate::content::ContentRef::item(i))),
         ),
-        LAccess::Controlled => Sensed::Num(0.0),
-        // `configSenseable() ? config() : null` (a later task's building config).
-        LAccess::Config => Sensed::Obj(None),
+        // `controlled -> this instanceof ControlBlock c && c.isControlled() ?
+        // GlobalVars.ctrlPlayer : 0` (`BuildingComp.java:2127`).
+        LAccess::Controlled => Sensed::Num(if building_is_player_controlled(world, e) {
+            crate::logic::globals::CTRL_PLAYER as f64
+        } else {
+            0.0
+        }),
+        // `config -> block.configSenseable() ? config() : null`
+        // (`BuildingComp.java:2140`, `Block.java:822-825`).
+        LAccess::Config => Sensed::Obj(sense_building_config(world, e)),
         // `BuildingComp.senseObject(name)`/`(id)` fall through to `noSensed`
         // (Java: null / NaN) — a building has no name or logic id.
         LAccess::Name => Sensed::Obj(None),
-        // `payloadCount`/`payloadType` (unit payloads live with plan 08 state).
-        LAccess::PayloadCount => Sensed::Num(0.0),
-        LAccess::PayloadType => Sensed::Obj(None),
+        // `payloadCount -> (getPayloads() != null ? getPayloads().total() : 0)
+        // + (getPayload() != null ? 1 : 0)` (`BuildingComp.java:2128`).
+        LAccess::PayloadCount => Sensed::Num(
+            (building_payloads_total(world, e) + i32::from(building_payload(world, e).is_some()))
+                as f64,
+        ),
+        // `payloadType -> getPayload() instanceof UnitPayload p1 ? p1.unit.type
+        // : getPayload() instanceof BuildPayload p2 ? p2.block() : null`
+        // (`BuildingComp.java:2141`).
+        LAccess::PayloadType => Sensed::Obj(building_payload(world, e).map(|payload| {
+            LogicObject::Content(crate::content::ContentRef::new(
+                if payload.is_block {
+                    ContentType::Block
+                } else {
+                    ContentType::Unit
+                },
+                payload.content,
+            ))
+        })),
         // Java `BuildingComp.sense` default: `NaN` → null through `setnum`.
         _ => Sensed::Obj(None),
     }
+}
+
+/// `ControlBlock.isControlled()` = `unit().isPlayer()` (`ControlBlock.java:9-11`)
+/// for the port's control blocks: turrets (`TurretBuild`, `BuildTurretBuild`)
+/// carry a detached `block` proxy unit that holds the `Player` marker while
+/// possessed (`Turret.java:448-450`). `RouterBuild` is a `ControlBlock` too,
+/// but the port never possesses routers, so it reads `0` (Java's value for an
+/// unpossessed router).
+fn building_is_player_controlled(world: &World, e: Entity) -> bool {
+    world
+        .get::<crate::world::blocks::defense::turrets::TurretState>(e)
+        .and_then(|state| state.block_unit)
+        .is_some_and(|unit| world.get::<crate::entities::comp::Player>(unit).is_some())
+}
+
+/// `Block.configSenseable()` (`Block.java:822-825`): the block declares an
+/// `Item`, `Liquid`, `UnlockableContent`, `Block` or `UnitType` configuration.
+pub fn config_senseable(kinds: &[ConfigKind]) -> bool {
+    kinds.iter().any(|kind| {
+        matches!(
+            kind,
+            ConfigKind::Item
+                | ConfigKind::Liquid
+                | ConfigKind::Block
+                | ConfigKind::Unit
+                | ConfigKind::Content
+        )
+    })
+}
+
+/// `senseObject(config)` base row: `block.configSenseable() ? config() : null`.
+///
+/// Every config-senseable Java block returns a content (or `null`) from
+/// `config()` (`Sorter`/`Unloader`/`ItemSource`/`DuctRouter`/
+/// `DirectionalUnloader`/`LandingPad` items, `LiquidSource` liquid,
+/// `Constructor` block, `PayloadSource`/`PayloadRouter` block or unit); the
+/// two that do not (`UnitFactory`'s plan index, `Reconstructor`) override the
+/// row in their `logic_sense`. Other readbacks therefore map to null.
+fn sense_building_config(world: &World, e: Entity) -> Option<LogicObject> {
+    let block = world.get::<Building>(e)?.block;
+    let inst = world.get_resource::<BlockTable>()?.get(block)?;
+    if !config_senseable(inst.behavior.config_kinds()) {
+        return None;
+    }
+    let content = |type_: ContentType, id: u16| {
+        Some(LogicObject::Content(crate::content::ContentRef::new(
+            type_, id,
+        )))
+    };
+    match inst.behavior.config(world, e) {
+        ConfigValue::Item(item) => content(ContentType::Item, item.raw()),
+        ConfigValue::Liquid(liquid) => content(ContentType::Liquid, liquid.raw()),
+        ConfigValue::Block(block) => content(ContentType::Block, block.raw()),
+        ConfigValue::Unit(unit) => content(ContentType::Unit, unit.raw()),
+        ConfigValue::Content(type_, id) => content(type_, id),
+        _ => None,
+    }
+}
+
+/// `Building.getPayload()` through the family behavior (`PayloadBlock`,
+/// `PayloadConveyor`, `Reconstructor`, ... overrides; `null` by default).
+fn building_payload(world: &World, e: Entity) -> Option<crate::world::behavior::PayloadRef> {
+    let block = world.get::<Building>(e)?.block;
+    world
+        .get_resource::<BlockTable>()?
+        .get(block)?
+        .behavior
+        .get_payload(world, e)
+}
+
+/// `Building.getPayloads().total()`: `UnitAssemblerBuild.blocks`
+/// (`UnitAssembler.java:720-723`) and `PayloadTurretBuild.payloads`
+/// (`PayloadAmmoTurret.java:142-145`); every other block returns `null` (0).
+fn building_payloads_total(world: &World, e: Entity) -> i32 {
+    if let Some(assembler) = world.get::<crate::world::blocks::units::UnitAssembler>(e) {
+        return assembler.stored.total();
+    }
+    world
+        .get::<crate::world::blocks::defense::turrets::TurretState>(e)
+        .filter(|state| {
+            matches!(
+                state.config.ammo,
+                crate::world::blocks::defense::turrets::TurretAmmo::Payload(_)
+            )
+        })
+        .map(|state| state.payloads.iter().map(|stack| stack.count).sum())
+        .unwrap_or(0)
 }
 
 fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
@@ -783,16 +915,19 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
             0.0
         }),
         LAccess::Size => Sensed::Num(hit.map(|h| (h.hit_size / 8.0) as f64).unwrap_or(0.0)),
+        // `totalItems -> stack().amount` (units hold one `ItemsComp` stack,
+        // never an `ItemModule`).
         LAccess::TotalItems => Sensed::Num(
             world
-                .get::<ItemModule>(e)
-                .map(|m| m.total as f64)
+                .get::<crate::entities::comp::unit::comp::ItemsComp>(e)
+                .and_then(|items| items.item)
+                .map(|(_, amount)| amount as f64)
                 .unwrap_or(0.0),
         ),
+        // `itemCapacity -> type.itemCapacity`.
         LAccess::ItemCapacity => Sensed::Num(
-            world
-                .get::<ItemModule>(e)
-                .map(|m| m.items.len() as f64)
+            unit_def_of(world, e)
+                .map(|def| def.item_capacity as f64)
                 .unwrap_or(0.0),
         ),
         LAccess::Shield => Sensed::Num(
@@ -956,21 +1091,23 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
         // `firstItem -> stack.amount == 0 ? null : item`.
         LAccess::FirstItem => Sensed::Obj(
             world
-                .get::<ItemModule>(e)
-                .filter(|m| m.total > 0)
-                .and_then(|m| m.first())
-                .map(|i| LogicObject::Content(crate::content::ContentRef::item(i))),
+                .get::<crate::entities::comp::unit::comp::ItemsComp>(e)
+                .and_then(|items| items.item)
+                .filter(|(_, amount)| *amount > 0)
+                .map(|(item, _)| LogicObject::Content(crate::content::ContentRef::item(item))),
         ),
         // `controller instanceof LogicAI log ? log.controller : this`.
-        LAccess::Controller => {
-            let value = match crate::entities::comp::unit::ai_kind_of(world, e) {
-                Some(crate::ai::AiKind::Logic) => world
+        // The logic controller is the processor building; otherwise the unit
+        // itself (a `Unit` object, not a building).
+        LAccess::Controller => match crate::entities::comp::unit::ai_kind_of(world, e) {
+            Some(crate::ai::AiKind::Logic) => Sensed::Obj(
+                world
                     .get::<crate::ai::types::logic::LogicAi>(e)
-                    .and_then(|ai| ai.controller),
-                _ => Some(e),
-            };
-            Sensed::Obj(value.map(LogicObject::Building))
-        }
+                    .and_then(|ai| ai.controller)
+                    .map(LogicObject::Building),
+            ),
+            _ => Sensed::Obj(Some(LogicObject::Unit(e))),
+        },
         // `@name` is the player name for the player unit, else null.
         LAccess::Name => {
             let is_player = crate::entities::comp::unit::ai_kind_of(world, e)
@@ -1490,18 +1627,10 @@ pub fn control(
             else {
                 return false;
             };
-            // `Block.logicConfigurable`: any `UnlockableContent`-typed config.
-            let configurable = inst.behavior.config_kinds().iter().any(|kind| {
-                matches!(
-                    kind,
-                    ConfigKind::Item
-                        | ConfigKind::Liquid
-                        | ConfigKind::Block
-                        | ConfigKind::Unit
-                        | ConfigKind::Content
-                )
-            });
-            if !configurable {
+            // `Block.logicConfigurable` (`Block.java:1482-1488`): any
+            // `UnlockableContent`-typed config — the same key set as
+            // `configSenseable`.
+            if !config_senseable(inst.behavior.config_kinds()) {
                 return false;
             }
             let Some(value) = content_config_value(&value) else {

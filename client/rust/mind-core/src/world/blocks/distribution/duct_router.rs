@@ -181,6 +181,11 @@ impl BuildingBehavior for DuctRouterBehavior {
         removed
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        // `DuctRouter.config(Item.class, ...)` (`DuctRouter.java:43`).
+        &[crate::world::config::ConfigKind::Item]
+    }
+
     fn config(&self, world: &World, e: Entity) -> ConfigValue {
         match world.get::<DuctRouterBuild>(e).and_then(|b| b.sort_item) {
             Some(item) => ConfigValue::Item(item),

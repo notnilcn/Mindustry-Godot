@@ -175,7 +175,8 @@ pub fn find(
         }
         let dx = c.x - base_x;
         let dy = c.y - base_y;
-        if dx * dx + dy * dy > range * range {
+        // `!u.within(b, range)` (`LExecutor.java:815`): `within` is strict.
+        if dx * dx + dy * dy >= range * range {
             continue;
         }
         if !targets.iter().all(|t| matches_target(c, team, *t)) {
