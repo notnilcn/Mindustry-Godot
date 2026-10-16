@@ -53,21 +53,45 @@ func _process(_delta: float) -> void:
 		_refresh()
 
 
-## Shows the editor dialog (MCP / menu entry point).
+## Shows the editor dialog (MCP / menu entry point). The shell is a
+## full-screen dialog below the `UiRoot` layers: `UiRoot.set_editor_open` hides
+## the standalone menu (`MenuFragment` `group.visible(() -> !ui.editor.isShown())`)
+## and the in-game HUD, closes the config/inventory panels and lets editor
+## dialogs/prompts take the pointer above the shell.
 func show_dialog() -> void:
 	visible = true
 	_refresh()
-	# The shell is full-screen below the UiRoot layers (editor dialogs draw
-	# above it via `UiRoot.z_index`), so the standalone menu must be hidden
-	# while it is open (`ui.menu.hide()` parity).
-	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
-	if ui_root != null and ui_root.has_method("set_menu_visible"):
-		ui_root.call("set_menu_visible", false)
+	var ui_root := _ui_root()
+	if ui_root != null and ui_root.has_method("set_editor_open"):
+		ui_root.call("set_editor_open", true)
 
 
-## Hides the editor dialog.
+## Hides the editor dialog (`hidden(...)`); the caller shows the next surface.
 func hide_dialog() -> void:
 	visible = false
+	_drop_temporary_input()
+	var ui_root := _ui_root()
+	if ui_root != null and ui_root.has_method("set_editor_open"):
+		ui_root.call("set_editor_open", false)
+
+
+func _ui_root() -> Node:
+	return get_node_or_null("/root/Spine/Ui/UiRoot")
+
+
+## True while a `MindUi` dialog or prompt is up over the shell: `MapEditorDialog`
+## only runs `doInput()` while it `hasKeyboard()` (it is the top dialog), and
+## `MapView` stops key panning under a modal.
+func has_modal() -> bool:
+	var ui_root := _ui_root()
+	return ui_root != null and ui_root.has_method("has_modal") and bool(ui_root.call("has_modal"))
+
+
+## Releases any in-progress stroke / temporary tool in the view.
+func _drop_temporary_input() -> void:
+	var view := get_node_or_null(^"MapView")
+	if view != null and view.has_method("cancel_input"):
+		view.call("cancel_input")
 
 
 ## `MapEditorDialog.build()` (`:606`): the first tool-grid button is
@@ -79,16 +103,18 @@ func _open_menu() -> void:
 		ui.call("open_dialog", "editor_menu", "")
 
 
-## Closing the editor returns to the editor map list (`EditorMapsDialog.openin`
-## flow: `ui.maps.show()` on exit); Back and Escape always confirm first
-## (`MapEditorDialog.tryExit`).
-func _exit_to_maps() -> void:
+## Closing the editor returns to the main menu: `tryExit`'s confirm runs
+## `logic.reset(); hide()` and nothing reopens the maps dialog (it was hidden by
+## `EditorMapsDialog`'s New Map / `@editor.openin` before `ui.editor.show()`),
+## so `MenuFragment`'s `group.visible(() -> !ui.editor.isShown())` brings the
+## menu back. Every open dialog on top (the editor menu) is closed too
+## (`menu.hide()` after `tryExit()` in the `@quit` button).
+func _exit_to_menu() -> void:
 	hide_dialog()
 	var ui := get_node_or_null("/root/MindUi")
-	if ui != null and ui.has_method("open_dialog"):
-		ui.call("open_dialog", "editor_maps", "{}")
-	# Back on the menu path: restore the standalone menu behind the dialog.
-	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui != null and ui.has_method("close_dialog"):
+		ui.call("close_dialog", "editor_menu")
+	var ui_root := _ui_root()
 	if ui_root != null and ui_root.has_method("set_menu_visible"):
 		ui_root.call("set_menu_visible", true)
 
@@ -109,7 +135,7 @@ func _confirm_exit() -> void:
 func _exit_now() -> void:
 	if _editor != null:
 		_editor.call("try_exit")
-	_exit_to_maps()
+	_exit_to_menu()
 
 
 func _on_confirm(confirmed: bool) -> void:
@@ -267,6 +293,10 @@ func _refresh_config(block: String) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not visible or _editor == null:
+		return
+	# `update(() -> { if(hasKeyboard()) doInput(); })`: dialogs/prompts on top
+	# own the keys (UiRoot's Escape closes them).
+	if has_modal():
 		return
 	if not (event is InputEventKey) or not event.pressed or event.echo:
 		return
