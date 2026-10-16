@@ -2270,3 +2270,15 @@ Run: runs/20261014-s3-verify2/.
 - Arc oracle: `/usr/bin/javac` + `Arc/arc-core/build/libs/arc-core-1.0.jar` run Arc helpers
   (`Strings.autoFixed`, `Noise.noise`) directly: `javac -cp $JAR X.java && java -cp $JAR:. X`.
 Run: runs/20261014-s3-verify3/.
+
+## 2026-10-17 — session 3 (J02 T1): `SimHost.world_size()` is not `#[func]` and pinned the frame loop
+
+- Symptom: `tools/gmcp.py --eval 'return get_node("/root/Spine/SimHost").world_size()'` returned
+  `MCP timeout after 10s waiting for tools/call`; the watchdog answered with
+  `eval stalled the frame loop; stop+play` (the game restarted, pid changed).
+- Cause: `MindSimHost::world_size` (`sim_host.rs:4045`) is documented "Plain accessor (not
+  `#[func]`)" — a GDScript call to it raises and trips break-on-error. Check the exposing
+  `#[godot_api]` block before probing a new accessor; `tile_debug(x, y)` **is** a `#[func]`
+  and makes a fine tile/size probe.
+- Workaround: `tools/session-play.sh 3 --play` / the gmcp watchdog recovers; re-stamp pid/tick
+  afterwards. Run: runs/20261016-s3-J02-T1/.
