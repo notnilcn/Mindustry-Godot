@@ -1,6 +1,6 @@
 {
 "schema":"mindustry-godot/chains@1",
-"updated":"2026-10-16T18:00:00+10:00",
+"updated":"2026-10-16T23:20:00+10:00",
 "sources":{"chains":"chains/*.md (49)","ledger":"parity-ledger.json (166 items)"},
 "guide":{"summary":"Lightweight chain library. Query with jq; never read the whole file. 'chains' = curated recipes from chains/*.md (steps inline; notes/failure_modes/variants in the maps below). 'ledger' = one compact record per parity item; exact call sequences are joinable via 'calls'/'seqs' refs. Notes/failure_modes/fixes are kept out of the records so a default query stays small. Keys of notes/failure_modes/variants/fixes are chain ids (kebab-case) or ledger item ids (PAR-####).","list_chains":"jq -r '.chains[] | [.id, .status, .title] | @tsv' chains.json","chain":"jq '.chains[] | select(.id==\"ground-zero-conveyor-line\")' chains.json","chain_steps":"jq -r '.chains[] | select(.id==\"<id>\") | .steps[]' chains.json","chain_notes":"jq -r '(.notes[\"<id>\"] // [])[]' chains.json","chain_failure_modes":"jq -r '(.failure_modes[\"<id>\"] // [])[]' chains.json","chain_variants":"jq -r '(.variants[\"<id>\"] // [])[]' chains.json","chains_for_item":"jq -r '.chains[] | select(.par | index(\"PAR-0049\")) | .id' chains.json","ledger_item":"jq '.ledger[\"PAR-0049\"]' chains.json  # t=title s=surface st=status par=parent item u=updated run=last run to=fork state path/rep=sequence refs conf=confirm ref","ledger_item_steps":"jq -r '(.ledger[\"PAR-0049\"].steps // [])[] | .a' chains.json","ledger_calls":"jq -r '. as $root | (.ledger[\"PAR-0049\"].rep // {}) | .[] as $s | $root.seqs[$s][] as $c | $root.calls[$c]' chains.json","ledger_notes":"jq -r '(.notes[\"PAR-0049\"] // [])[]' chains.json","ledger_failure_modes":"jq -r '(.failure_modes[\"PAR-0049\"] // [])[]' chains.json","ledger_fixes":"jq -r '(.fixes[\"PAR-0049\"] // [])[]' chains.json","find_by_title":"jq -r '.ledger | to_entries[] | select(.value.t|test(\"loadout\";\"i\")) | .key' chains.json","fields":{"ledger":"t title, s surface, st status, par parent, u updated, run run dir, chain md chain id, to fork state, path {java,godot}->seq ids, conf->pool id, rep {java,godot,compare}->seq ids, steps [{a action, v verdict}].","calls":"exact call object/string as stored in parity-ledger.json.","seqs":"ordered arrays of calls[] ids."}},
 "chains":[
@@ -1813,9 +1813,9 @@
 "PAR-0342":{"t":"`Wall.flashHit` (phase walls) never flashed; the wall kinds drew cached instead of dynamic (T4 622df962)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0343":{"t":"`DrawBlock` parts before `DrawDefault` (`-bottom`, `DrawLiquidTile`) drew above the base sprite (T7 d152f6ab)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0344":{"t":"Beam nodes/towers drew no lasers (T5 4ae65c09)","s":"world","st":"verified","u":"2026-10-16"},
-"PAR-0345":{"t":"MCP evals with mixed indentation hang the frame loop","s":"world","st":"seeded","u":"2026-10-16"},
+"PAR-0345":{"t":"MCP evals with mixed indentation hang the frame loop","s":"world","st":"verified","u":"2026-10-16","run":"runs/20261016-s5-J10-T2/"},
 "PAR-0346":{"t":"power-node laser shimmer uses ticks where Java uses `Time.time` seconds (T5 note)","s":"world","st":"seeded","u":"2026-10-16"},
-"PAR-0347":{"t":"`$I.configure_building` on a door can time out and stall the frame loop","s":"world","st":"seeded","u":"2026-10-16"},
+"PAR-0347":{"t":"`$I.configure_building` on a door can time out and stall the frame loop","s":"world","st":"verified","u":"2026-10-16","run":"runs/20261016-s5-J10-T2/"},
 "PAR-0348":{"t":"`FxEmit::square`/`square_line` draw `Poly(4)` where Arc's `Fill.square`/`Lines.square` need a 45-degree-shifted vertex set (audit ~30 call sites; Arc Fill.java:357-363, Lines.java:503-509)","s":"world","st":"seeded","u":"2026-10-16"},
 "PAR-0349":{"t":"A raw door config can close a door under a unit; the `Units.anyEntities(tile) && !open` guard exists only on the tap path (Door.java:49)","s":"world","st":"seeded","u":"2026-10-16"},
 "PAR-0350":{"t":"Unlock toast never shows (no `MindHud.push_unlock` producer) (T2)","s":"hud","st":"verified","u":"2026-10-16"},
@@ -5507,6 +5507,12 @@
 ],
 "PAR-0155":[
 "closed: The legacy (MSAV) JSON normalizer now maps Arc's bare Infinity/-Infinity to the port's NEVER_F32 sentinel text, unblocking the 11 authored maps whose rules carry non-finite spawn scaling; regression tests cover the maps and the mapping."
+],
+"PAR-0345":[
+"closed: 78f42bf5 (J10 T2): root cause is the addon eval wrapper (runtime_autoload.gd:691) injecting a tab per line, so space-indented bodies parse-error and pin the frame loop; tools/gmcp.py now normalises eval-body leading whitespace to tabs and an eval watchdog (10 s default) issues stop/play recovery. Reproduced before/after in runs/20261016-s5-J10-T2/."
+],
+"PAR-0347":[
+"closed: 78f42bf5 (J10 T2): root cause is `$I` being the eval node shorthand get_node(\"I\"), not /root/Spine/Input; the door config itself is fine via the full node path. The gmcp.py eval watchdog now recovers any pinned runtime (stop/play + reconnect poll) and exits 1 with a summary. Reproduced in runs/20261016-s5-J10-T2/."
 ]
 }
 }
