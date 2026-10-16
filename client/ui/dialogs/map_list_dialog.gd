@@ -692,7 +692,8 @@ func _build_preview(map_name: String, extent: float, thickness: float) -> Contro
 	return placeholder
 
 
-## `map.safeTexture()` (`MapPreviewLoader` + the cached `<previews>/<stem>_v2.png`).
+## `map.safeTexture()` (`MapPreviewLoader` + the cached `<previews>/<stem>_v2.png`;
+## the port bumps the name to `_v3` to regenerate pre-T3 colour caches).
 func _preview_texture(map_name: String) -> Texture2D:
 	var preview := _preview_node()
 	if preview == null or not preview.has_method("texture_for_name"):

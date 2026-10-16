@@ -29,11 +29,16 @@ pub struct PreviewCache {
     pub teams: BTreeSet<u8>,
 }
 
-/// `<previews>/<name>_v2.png` (workshop maps use the parent folder name).
+/// `<previews>/<name>_v3.png` (workshop maps use the parent folder name).
+///
+/// J02 T3 deviation: the port's cache name bumps `_v2` -> `_v3` so previews
+/// generated with the pre-`useColor` colour path (`MapIO.java:229-237`)
+/// regenerate on first use. Java's own name stays `_v2`
+/// (`maps/Map.java:75`).
 pub fn preview_file(paths: &Paths, map: &Map) -> PathBuf {
     paths
         .previews()
-        .join(format!("{}_v2.png", preview_stem(map)))
+        .join(format!("{}_v3.png", preview_stem(map)))
 }
 
 /// `<previews>/<name>-cache_v2.dat` (workshop: `<parent>-workshop-cache.dat`).
@@ -185,7 +190,7 @@ mod tests {
 
         assert_eq!(
             preview_file(&paths, &map),
-            PathBuf::from("/data/previews/fork_v2.png")
+            PathBuf::from("/data/previews/fork_v3.png")
         );
         assert_eq!(
             cache_file(&paths, &map),

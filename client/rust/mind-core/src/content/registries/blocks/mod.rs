@@ -1406,6 +1406,17 @@ pub struct BlockSpec {
     pub commandable: Option<bool>,
     /// Floor/environment attributes (`Floor.attributes`; plan 09 R3 steam vents).
     pub attributes: Vec<(&'static str, f32)>,
+    /// `Floor.blendGroup` content name (`Floor.java:62`; omitted = the block
+    /// itself). J02 T1: the `-edge` texture group and the blend-id source.
+    pub blend_group: Option<&'static str>,
+    /// `Floor.drawEdgeIn` (`Floor.java:92`; Java default true).
+    pub draw_edge_in: Option<bool>,
+    /// `Floor.drawEdgeOut` (`Floor.java:94`; Java default true).
+    pub draw_edge_out: Option<bool>,
+    /// `Block.useColor` (`Block.java:183`; Java default true, `OverlayFloor`
+    /// and `AirBlock` clear it, `OreBlock` re-enables it). J02 T3:
+    /// `MapIO.colorFor` uses the overlay's value.
+    pub use_color: Option<bool>,
 }
 
 impl Default for BlockSpec {
@@ -1512,6 +1523,10 @@ impl Default for BlockSpec {
             construct_time: None,
             commandable: None,
             attributes: Vec::new(),
+            blend_group: None,
+            draw_edge_in: None,
+            draw_edge_out: None,
+            use_color: None,
         }
     }
 }
@@ -1642,7 +1657,8 @@ impl BlockSpec {
                 spec.solid = Some(true);
                 spec.ore_threshold = Some(0.828);
                 spec.ore_scale = Some(24.0);
-                // `EmptyFloor extends Floor`.
+                // `EmptyFloor extends Floor`; `EmptyFloor.java:15`: `drawEdgeOut = false`.
+                spec.draw_edge_out = Some(false);
                 spec.ignore_build_darkness = Some(true);
             }
             BlockKind::OverlayFloor => {
@@ -2325,9 +2341,68 @@ pub struct BlockDef {
     pub construct_time: f32,
     /// `Block.commandable` (unit command center; plan 11/15 `commandBuilding`).
     pub commandable: bool,
+    /// `Floor.blendGroup` (`Floor.java:62`) resolved to an id; `None` = the
+    /// block itself (`Floor.init`: `blendId = blendGroup.id`, `Floor.java:190`).
+    pub blend_group: Option<BlockId>,
+    /// `Floor.drawEdgeIn` (`Floor.java:92`): this floor draws other floors'
+    /// edges on itself (`Floor.drawBase`).
+    pub draw_edge_in: bool,
+    /// `Floor.drawEdgeOut` (`Floor.java:94`): this floor's edges draw onto
+    /// other floors (`Floor.drawEdges` / `drawNonLayer`).
+    pub draw_edge_out: bool,
+    /// Whether a `<name>-edge` region exists (`Floor.load`, `Floor.java:170`).
+    /// The upstream `edges` generator makes one for every non-overlay floor
+    /// with `blendGroup == this && drawEdgeOut` (`Generators.java:827-847`).
+    pub has_edge: bool,
+    /// `Block.useColor` (`Block.java:183`): whether `MapIO.colorFor` uses this
+    /// block's `mapColor` for an overlay (J02 T3).
+    pub use_color: bool,
+}
+
+/// Whether the kind extends `Floor` (`world/blocks/environment/*`): base and
+/// empty floors, every overlay kind, shallow liquids, steam vents and colored
+/// floors. `AirBlock` extends `Floor` too (`AirBlock.java`) but draws nothing
+/// (`AirBlock.drawBase` is empty).
+pub fn is_floor_kind(kind: BlockKind) -> bool {
+    matches!(
+        kind,
+        BlockKind::Floor
+            | BlockKind::AirBlock
+            | BlockKind::EmptyFloor
+            | BlockKind::OverlayFloor
+            | BlockKind::OreBlock
+            | BlockKind::ShallowLiquid
+            | BlockKind::ColoredFloor
+            | BlockKind::CharacterOverlay
+            | BlockKind::RuneOverlay
+            | BlockKind::SpawnBlock
+            | BlockKind::RemoveOre
+            | BlockKind::SteamVent
+    )
+}
+
+/// Whether the kind's `drawBase` is `OverlayFloor.drawBase` — the variant
+/// region only, no edges/overlay recursion (`OverlayFloor.java:22-24`). Covers
+/// `OreBlock`, `SpawnBlock`, `CharacterOverlay`, `RuneOverlay` and `RemoveOre`,
+/// which all extend `OverlayFloor`.
+pub fn is_overlay_floor_kind(kind: BlockKind) -> bool {
+    matches!(
+        kind,
+        BlockKind::OverlayFloor
+            | BlockKind::OreBlock
+            | BlockKind::SpawnBlock
+            | BlockKind::RemoveOre
+            | BlockKind::CharacterOverlay
+            | BlockKind::RuneOverlay
+    )
 }
 
 impl BlockDef {
+    /// `Floor.init()`: `blendId = blendGroup.id` (`Floor.java:190`).
+    pub fn blend_group_id(&self) -> BlockId {
+        self.blend_group.unwrap_or(self.id)
+    }
+
     /// Resolves a generated [`BlockSpec`] into a record
     /// (`ContentLoader`-adjacent construction; names resolve at load time like
     /// upstream object references).
@@ -2386,6 +2461,13 @@ impl BlockDef {
             ),
             None => None,
         };
+        // `OreBlock.java:22,40` (`setup`): an ore's `mapColor` is its item's
+        // colour. The generated specs already carry the same literals; this
+        // covers mod content and any future drift.
+        let map_color = match (spec.kind, spec.map_color, item_drop) {
+            (BlockKind::OreBlock, None, Some(item)) => registry.item(item).map(|def| def.color),
+            (_, color, _) => color,
+        };
         // `Floor.isDeep()` = `drownTime > 0` (`Floor.java:339`).
         let drown_time = spec.drown_time.unwrap_or(0.0);
         let is_deep = drown_time > 0.0;
@@ -2404,6 +2486,16 @@ impl BlockDef {
         let floor_drag_multiplier = spec.floor_drag_multiplier.unwrap_or(1.0);
         let floor_damage_taken = spec.floor_damage_taken.unwrap_or(0.0);
         let subclass = spec.subclass.unwrap_or(spec.kind);
+        // `Floor.blendGroup` (`Floor.java:62`); `None` resolves to this block in
+        // `init_self` (the id is assigned after `from_spec`).
+        let blend_group = match spec.blend_group {
+            Some(name) => Some(
+                registry
+                    .block_id(name)
+                    .ok_or_else(|| ContentError::UnknownName(name.to_owned()))?,
+            ),
+            None => None,
+        };
         let mut unit_plans = Vec::with_capacity(spec.unit_plans.len());
         for plan in &spec.unit_plans {
             let unit = registry
@@ -2569,7 +2661,7 @@ impl BlockDef {
             size_offset: 0,
             stats: Vec::new(),
             bars: Vec::new(),
-            map_color: spec.map_color,
+            map_color,
             albedo: spec.albedo.unwrap_or(0.0),
             has_color: spec.has_color.unwrap_or(false),
             square_sprite: spec.square_sprite.unwrap_or(true),
@@ -2628,6 +2720,22 @@ impl BlockDef {
             craft_time: spec.craft_time.unwrap_or(0.0),
             construct_time: spec.construct_time.unwrap_or(0.0),
             commandable: spec.commandable.unwrap_or(false),
+            blend_group,
+            draw_edge_in: spec.draw_edge_in.unwrap_or(true),
+            draw_edge_out: spec.draw_edge_out.unwrap_or(true),
+            // Computed in `init_self` (the block id is assigned on registration).
+            has_edge: false,
+            // `Block.useColor` (`Block.java:183`); `OverlayFloor.java:13` and
+            // `AirBlock.java:14` clear it, `OreBlock.java:23` re-enables it.
+            use_color: spec.use_color.unwrap_or(!matches!(
+                spec.kind,
+                BlockKind::OverlayFloor
+                    | BlockKind::CharacterOverlay
+                    | BlockKind::RuneOverlay
+                    | BlockKind::SpawnBlock
+                    | BlockKind::RemoveOre
+                    | BlockKind::AirBlock
+            )),
         };
         // `Block.init`: `if(underBullets){ priority = TargetPriority.under; }`
         // (Block.java:1386-1387) — unconditional, so conveyors/conduits (which
@@ -2874,6 +2982,17 @@ impl Content for BlockDef {
         // `Block.displayShadow(tile)` is `hasShadow` for every vanilla block
         // (no overrides), kept as a field for the render/metadata ABI.
         self.display_shadow = self.has_shadow;
+
+        // `Floor.init` (`Floor.java:187-190`): `blendId = blendGroup.id`; the
+        // self default resolves to this block's own id. `Floor.load` (`:170`)
+        // exposes `<name>-edge` only for the floors the upstream `edges`
+        // generator covers: non-overlay floors with `blendGroup == this` and
+        // `drawEdgeOut` (`tools/Generators.java:827-847`).
+        self.has_edge = is_floor_kind(self.kind)
+            && self.kind != BlockKind::AirBlock
+            && !is_overlay_floor_kind(self.kind)
+            && self.blend_group.is_none()
+            && self.draw_edge_out;
 
         if self.fog_radius > 0 && !self.flags.contains(&BlockFlag::HasFogRadius) {
             self.flags.push(BlockFlag::HasFogRadius);

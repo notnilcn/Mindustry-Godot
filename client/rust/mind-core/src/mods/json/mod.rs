@@ -342,10 +342,29 @@ impl<'a> ContentJsonParser<'a> {
             ("placeablePlayer", &mut spec.placeable_player),
             ("placeableLiquid", &mut spec.placeable_liquid),
             ("placeableOn", &mut spec.placeable_on),
+            // `Floor.drawEdgeIn`/`drawEdgeOut` (`Floor.java:92-94`; J02 T1).
+            ("drawEdgeIn", &mut spec.draw_edge_in),
+            ("drawEdgeOut", &mut spec.draw_edge_out),
         ] {
             if let Some(value) = field_bool(object, field) {
                 *target = Some(value);
             }
+        }
+        // `Floor.blendGroup` (`Floor.java:62`; J02 T1). A self reference keeps
+        // the `None` (self) default — the block is not registered yet, so
+        // `from_spec` could not resolve it either.
+        if let Some(group) = object.get("blendGroup").and_then(Value::as_str)
+            && group != leaked
+        {
+            let resolved = self
+                .resolve_prefixed(registry, ContentType::Block, group)
+                .and_then(|reference| {
+                    registry
+                        .block(crate::content::BlockId::new(reference.id))
+                        .map(|def| def.name.clone())
+                })
+                .unwrap_or_else(|| group.to_owned());
+            spec.blend_group = Some(Box::leak(resolved.into_boxed_str()));
         }
         if let Some(visibility) = object.get("buildVisibility").and_then(Value::as_str) {
             spec.build_visibility = resolve_build_visibility(visibility);

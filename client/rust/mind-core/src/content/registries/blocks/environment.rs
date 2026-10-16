@@ -21,6 +21,7 @@ use super::{
     consume_optional, consume_power, consume_power_buffered, rgba_hex,
 };
 use crate::content::{Category, ContentError};
+use crate::render::layer::CacheLayerId;
 
 /// Loads the `environment` region in upstream order.
 pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
@@ -205,6 +206,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status: Some("wet"),
         floor_status_duration: Some(120.0),
         albedo: Some(0.9),
+        // `Blocks.java:219`: `cacheLayer = CacheLayer.water`.
+        cache_layer: Some(CacheLayerId::Water),
         ..spec("deep-water", BlockKind::Floor)
     })?;
 
@@ -215,6 +218,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status: Some("wet"),
         floor_status_duration: Some(90.0),
         albedo: Some(0.9),
+        // `Blocks.java:231`: `cacheLayer = CacheLayer.water`.
+        cache_layer: Some(CacheLayerId::Water),
         ..spec("shallow-water", BlockKind::Floor)
     })?;
 
@@ -225,6 +230,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status: Some("wet"),
         floor_status_duration: Some(90.0),
         albedo: Some(0.9),
+        // `Blocks.java:243`: `cacheLayer = CacheLayer.water`.
+        cache_layer: Some(CacheLayerId::Water),
         ..spec("tainted-water", BlockKind::Floor)
     })?;
 
@@ -237,6 +244,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status: Some("wet"),
         floor_status_duration: Some(140.0),
         albedo: Some(0.9),
+        // `Blocks.java:258`: `cacheLayer = CacheLayer.water`.
+        cache_layer: Some(CacheLayerId::Water),
         ..spec("deep-tainted-water", BlockKind::Floor)
     })?;
 
@@ -279,6 +288,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         drown_time: Some(230.0),
         floor_status: Some("tarred"),
         floor_status_duration: Some(240.0),
+        // `Blocks.java:294`: `cacheLayer = CacheLayer.tar`.
+        cache_layer: Some(CacheLayerId::Tar),
         ..spec("tar", BlockKind::Floor)
     })?;
 
@@ -290,6 +301,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_multiplier: Some(0.5),
         floor_status: Some("freezing"),
         floor_status_duration: Some(240.0),
+        // `Blocks.java:309`: `cacheLayer = CacheLayer.cryofluid`.
+        cache_layer: Some(CacheLayerId::Cryofluid),
         ..spec("pooled-cryofluid", BlockKind::Floor)
     })?;
 
@@ -302,12 +315,18 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status_duration: Some(240.0),
         // `Blocks.java:327`: `attributes.set(Attribute.heat, 0.85f)`.
         attributes: vec![("heat", 0.85f32)],
+        // `Blocks.java:326`: `cacheLayer = CacheLayer.slag`.
+        cache_layer: Some(CacheLayerId::Slag),
         ..spec("molten-slag", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
         placeable_on: Some(false),
+        // `Blocks.java:337`: `cacheLayer = CacheLayer.space`.
+        cache_layer: Some(CacheLayerId::Space),
+        // `Blocks.java:342`: `drawEdgeOut = false` (`drawEdgeIn` stays true).
+        draw_edge_out: Some(false),
         ..spec("space", BlockKind::Floor)
     })?;
 
@@ -319,11 +338,17 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("stone", BlockKind::Floor))?;
 
-    sink.push(spec("crater-stone", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:350-353`: `variants = 3`, `blendGroup = stone`.
+        blend_group: Some("stone"),
+        ..spec("crater-stone", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", -0.25f32)],
+        // `Blocks.java:356`: `blendGroup = stone`.
+        blend_group: Some("stone"),
         ..spec("char", BlockKind::Floor)
     })?;
 
@@ -337,12 +362,16 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `Blocks.java:365-366`: floor attribute affinities (T7) + heat 0.5 for
         // the thermal generator (`ThermalGenerator.java:87-89`).
         attributes: vec![("heat", 0.5f32), ("water", -0.5f32)],
+        // `Blocks.java:367`: `blendGroup = basalt`.
+        blend_group: Some("basalt"),
         ..spec("hotrock", BlockKind::Floor)
     })?;
 
     sink.push(BlockSpec {
         // `Blocks.java:375-376`: floor attribute affinities (T7) + heat 0.75.
         attributes: vec![("heat", 0.75f32), ("water", -0.75f32)],
+        // `Blocks.java:377`: `blendGroup = basalt`.
+        blend_group: Some("basalt"),
         ..spec("magmarock", BlockKind::Floor)
     })?;
 
@@ -370,6 +399,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status_duration: Some(30.0),
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", 1.0f32)],
+        // `Blocks.java:404`: `cacheLayer = CacheLayer.mud`.
+        cache_layer: Some(CacheLayerId::Mud),
         ..spec("mud", BlockKind::Floor)
     })?;
 
@@ -384,6 +415,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", -1.0f32)],
+        // `Blocks.java:423`: `blendGroup = rhyolite`.
+        blend_group: Some("rhyolite"),
         ..spec("rhyolite-crater", BlockKind::Floor)
     })?;
 
@@ -420,6 +453,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         // `Blocks.java`: floor attribute affinities (T7).
         attributes: vec![("water", -1.0f32)],
+        // `Blocks.java:451`: `blendGroup = ferricStone` (`ferric-stone`).
+        blend_group: Some("ferric-stone"),
         ..spec("ferric-craters", BlockKind::Floor)
     })?;
 
@@ -457,6 +492,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         is_liquid: Some(true),
         drown_time: Some(200.0),
         albedo: Some(0.9),
+        // `Blocks.java:495`: `cacheLayer = CacheLayer.arkycite`.
+        cache_layer: Some(CacheLayerId::Arkycite),
         ..spec("arkycite-floor", BlockKind::Floor)
     })?;
 
@@ -465,48 +502,64 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:505`: `parent = blendGroup = rhyolite`.
+        blend_group: Some("rhyolite"),
         ..spec("rhyolite-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:510`: `parent = blendGroup = carbonStone` (`carbon-stone`).
+        blend_group: Some("carbon-stone"),
         ..spec("carbon-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:515`: `parent = blendGroup = arkyicStone` (`arkyic-stone`).
+        blend_group: Some("arkyic-stone"),
         ..spec("arkyic-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:520`: `parent = blendGroup = yellowStone` (`yellow-stone`).
+        blend_group: Some("yellow-stone"),
         ..spec("yellow-stone-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:525`: `parent = blendGroup = denseRedStone` (`dense-red-stone`).
+        blend_group: Some("dense-red-stone"),
         ..spec("red-stone-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:530`: `parent = blendGroup = crystallineStone` (`crystalline-stone`).
+        blend_group: Some("crystalline-stone"),
         ..spec("crystalline-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:535`: `parent = blendGroup = stone`.
+        blend_group: Some("stone"),
         ..spec("stone-vent", BlockKind::SteamVent)
     })?;
 
     sink.push(BlockSpec {
         attributes: vec![("steam", 1.0)],
         flags: vec![BlockFlag::SteamVent],
+        // `Blocks.java:540`: `parent = blendGroup = basalt`.
+        blend_group: Some("basalt"),
         ..spec("basalt-vent", BlockKind::SteamVent)
     })?;
 
@@ -824,31 +877,30 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ..spec("dark-metal", BlockKind::StaticWall)
     })?;
 
-    sink.push(spec("metal-tiles-1", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-2", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-3", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-4", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-5", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-6", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-7", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-8", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-9", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-10", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-11", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-12", BlockKind::Floor))?;
-
-    sink.push(spec("metal-tiles-13", BlockKind::Floor))?;
+    // `Blocks.java:842-930`: every `metal-tiles-*` sets `drawEdgeOut = false`
+    // and `drawEdgeIn = false` (the J02 T1 floor-edge flags; autotile metadata
+    // is J02 T2).
+    for name in [
+        "metal-tiles-1",
+        "metal-tiles-2",
+        "metal-tiles-3",
+        "metal-tiles-4",
+        "metal-tiles-5",
+        "metal-tiles-6",
+        "metal-tiles-7",
+        "metal-tiles-8",
+        "metal-tiles-9",
+        "metal-tiles-10",
+        "metal-tiles-11",
+        "metal-tiles-12",
+        "metal-tiles-13",
+    ] {
+        sink.push(BlockSpec {
+            draw_edge_in: Some(false),
+            draw_edge_out: Some(false),
+            ..spec(name, BlockKind::Floor)
+        })?;
+    }
 
     sink.push(BlockSpec {
         solid: Some(true),
@@ -871,6 +923,10 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     sink.push(BlockSpec {
         save_data: Some(true),
         save_config: Some(true),
+        // `Blocks.java:945-949`: `autotile = true`, `drawEdgeOut = false`,
+        // `drawEdgeIn = false` (autotile metadata is J02 T2).
+        draw_edge_in: Some(false),
+        draw_edge_out: Some(false),
         ..spec("colored-floor", BlockKind::ColoredFloor)
     })?;
 
