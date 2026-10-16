@@ -615,6 +615,32 @@ impl UnitRenderer {
                     color: 0xffff_ffff,
                 });
                 sprites += 1;
+                // `Weapon.draw` (`Weapon.java:261-265`): `<weapon>-cell` tinted
+                // by `UnitType.cellColor`, same mount transform as the region.
+                if let Some(cell) = self.resolver.find(&format!("{}-cell", weapon.name)) {
+                    let team = mind_core::game::team::Team::get(unit.team)
+                        .color
+                        .to_rgba8888();
+                    let [c0, d0, c1, d1] = cell.uv;
+                    let uv = if weapon.flip {
+                        [c1, d0, c0, d1]
+                    } else {
+                        [c0, d0, c1, d1]
+                    };
+                    let entry = groups
+                        .entry((bucket, cell.page))
+                        .or_insert((cell.texture.clone(), Vec::new()));
+                    entry.1.push(UnitQuad {
+                        cx: wx,
+                        cy: wy,
+                        w: cell.w * self.sprite_scale,
+                        h: cell.h * self.sprite_scale,
+                        rot: wr,
+                        uv,
+                        color: mind_core::render::cell_color(team, unit.healthf, time),
+                    });
+                    sprites += 1;
+                }
             }
         }
 
