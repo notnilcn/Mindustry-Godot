@@ -3,7 +3,9 @@
 ## Source: core/src/mindustry/ui/dialogs/MapPlayDialog.java (plan 14 M5).
 ##
 ## Gamemode selection, the mode help list, Customize Rules, the map preview and
-## the high score, then Play/Playtest. `Gamemode.editor` is hidden upstream.
+## the high score, then Back/Play. `Gamemode.editor` is hidden upstream. The
+## dialog is a non-fill `BaseDialog` (`setFillParent(false)`): the column floats
+## centred over the dim without a boxed panel or scroll body.
 ## The selected mode + rules JSON are handed to `MindCampaign.start_map_mode`
 ## (`control.playMap(map, rules, playtesting)`).
 
@@ -11,9 +13,12 @@ extends MindDialog
 
 ## Visible `Gamemode` names in declaration order (`Gamemode.all` minus editor).
 const MODES := ["survival", "sandbox", "attack", "pvp"]
-## `MapPlayDialog` mode-button size (`mobile ? 44 : 54`).
+## `MapPlayDialog` mode-button size (`size(140f, mobile ? 44f : 54f)`).
 const MODE_BUTTON := Vector2(140.0, 54.0)
+## `size(mobile && !portrait ? 150f : 250f)`.
 const PREVIEW_SIZE := Vector2(250.0, 250.0)
+## `buttons.button(...).size(210f, 64f)` (`addCloseButton` + `@play`).
+const ACTION_BUTTON := Vector2(210.0, 64.0)
 
 var _map_name := ""
 var _mode := "survival"
@@ -29,7 +34,25 @@ var _button_modes: Array[String] = []
 func _ready() -> void:
 	should_pause = false
 	super._ready()
-	add_close_button()
+	_apply_floating_layout()
+
+
+## `super(""); setFillParent(false)` with `Styles.defaultDialog`
+## (`background = windowEmpty`, `stageBackground = black9`): the content floats
+## centred over the dim with no boxed panel, the dialog sizes to its content
+## (no scrolling body), and the title uses `titleFontColor = Pal.accent`.
+func _apply_floating_layout() -> void:
+	var panel := get_node_or_null("Center/Panel") as Control
+	if panel != null:
+		panel.theme_type_variation = "none"
+		panel.custom_minimum_size = Vector2.ZERO
+	if body != null:
+		# The body reports its content height so nothing is clipped/scrolled.
+		body.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		body.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	if buttons != null:
+		buttons.add_theme_constant_override("separation", 8)
+	title_color = MindStyles.ACCENT
 
 
 func set_context_json(json_text: String) -> void:
@@ -72,12 +95,21 @@ func _build() -> void:
 		_rules_json = _mode_rules_json(_mode)
 
 	var root := content_table()
-	# `selmode.add("@level.mode").colspan(2)`
-	root.add(MindWidgets.label(_t("@level.mode"))).set_colspan(2).grow_x_axis().pad(4)
-	root.row()
-	# `selmode.table(Tex.button, modes -> ...)` + the `?` help button on the
-	# same row (`MapPlayDialog.java:56-64`).
+	# `Table selmode`: `add("@level.mode").colspan(2)`, then the `Tex.button`
+	# mode table and the `?` button on one row (`MapPlayDialog.java:56-71`).
+	var selmode := MindWidgets.table()
+	selmode.add(MindWidgets.label(_t("@level.mode"))).set_colspan(2)
+	selmode.row()
+	# code-instantiated: `selmode.table(Tex.button, modes -> ...)` frame.
+	var mode_frame := PanelContainer.new()
+	var frame_box := _pane_box(Color.BLACK, PANE_OUTLINE_GRAY)
+	frame_box.content_margin_left = 6.0
+	frame_box.content_margin_right = 6.0
+	frame_box.content_margin_top = 6.0
+	frame_box.content_margin_bottom = 6.0
+	mode_frame.add_theme_stylebox_override("panel", frame_box)
 	var mode_box := MindWidgets.table()
+	mode_frame.add_child(mode_box)
 	_mode_buttons.clear()
 	_button_modes.clear()
 	var index := 0
@@ -85,31 +117,37 @@ func _build() -> void:
 		# code-instantiated: one toggle per visible Gamemode (`Gamemode.all`).
 		var button := MindWidgets.button(_t("@mode.%s.name" % mode))
 		button.theme_type_variation = "flatToggleMenut"
+		_apply_flat_toggle_menu(button)
 		button.toggle_mode = true
 		button.button_pressed = mode == _mode
 		button.disabled = not bool(modes.get(mode, true))
 		button.custom_minimum_size = MODE_BUTTON
 		button.pressed.connect(_select_mode.bind(mode))
-		mode_box.add(button).width(MODE_BUTTON.x).height(MODE_BUTTON.y).pad(1)
+		mode_box.add(button).width(MODE_BUTTON.x).height(MODE_BUTTON.y)
 		if index % 2 == 1:
 			mode_box.row()
 		index += 1
 		_mode_buttons.append(button)
 		_button_modes.append(mode)
-	root.add(mode_box).pad(1)
+	selmode.add(mode_frame)
+	# `selmode.button("?", this::displayGameModeHelp).width(50f).fillY().padLeft(18f)`
 	var help := MindWidgets.button("?")
+	apply_pane_button(help, PANE_OUTLINE_GRAY)
 	help.custom_minimum_size = Vector2(50.0, 0.0)
-	help.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	help.pressed.connect(_show_mode_help)
-	root.add(help).width(50.0).fill_y_axis().set_pad_left(18).pad(1)
+	selmode.add(help).width(50.0).fill_y_axis().set_pad_left(18.0)
+	root.add(selmode).expand_x_axis()
 	root.row()
-	# `cont.button("@customize", Icon.settings, ...).height(50).width(230)`
-	var customize := MindWidgets.icon_button("settings", _t("@customize"))
+	# `cont.button("@customize", Icon.settings, ...).height(50f).width(230)`
+	var customize := MindWidgets.button("")
+	apply_pane_button(customize, PANE_OUTLINE_GRAY)
+	build_button_content(customize, MindWidgets.glyph("settings", 24), _t("@customize"))
 	customize.custom_minimum_size = Vector2(230.0, 50.0)
 	customize.pressed.connect(_open_rules)
-	root.add(customize).width(230.0).height(50.0).pad(2)
+	root.add(customize).width(230.0).height(50.0)
 	root.row()
-	# `cont.add(new BorderImage(map.safeTexture(), 3f))` (250 / 150 mobile).
+	# `cont.add(new BorderImage(map.safeTexture(), 3f)).size(250f).get()
+	# .setScaling(Scaling.fit)`: the whole preview, fitted, never clipped.
 	var preview := get_node_or_null("/root/Spine/MindPreview")
 	var texture: Texture2D = null
 	if preview != null and preview.has_method("texture_for_name"):
@@ -119,18 +157,59 @@ func _build() -> void:
 		var image := MindBorderImage.new()
 		image.texture = texture
 		image.thickness = 3.0
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.custom_minimum_size = PREVIEW_SIZE
-		root.add(image).width(PREVIEW_SIZE.x).height(PREVIEW_SIZE.y).pad(2)
-		root.row()
-	# `if(Gamemode.survival.valid(map)) cont.label(level.highscore)`
+		root.add(image).width(PREVIEW_SIZE.x).height(PREVIEW_SIZE.y)
+	# `if(Gamemode.survival.valid(map)) cont.label(level.highscore).pad(3f)`
 	if bool(modes.get("survival", false)):
-		root.add(MindWidgets.label(_high_score_text())).pad(3)
 		root.row()
+		root.add(MindWidgets.label(_high_score_text())).pad(3)
 
 	clear_buttons()
-	add_button(_t("@back"), _close_pressed, "left", 210.0)
-	add_button(_t("@play"), func() -> void: _play(_mode, _playtest), "play", 210.0)
+	# `addCloseButton()` (210x64) then `buttons.button("@play", Icon.play, ...)
+	# .size(210f, 64f)`.
+	_add_action_button(_t("@back"), "left", _close_pressed)
+	_add_action_button(_t("@play"), "play", func() -> void: _play(_mode, _playtest))
+
+
+## A 210x64 `Tex.button` action button with an icon (`BaseDialog` buttons row).
+func _add_action_button(text_value: String, icon_name: String, listener: Callable) -> Button:
+	# code-instantiated: the button row is rebuilt per shown map.
+	var button := MindWidgets.button("")
+	button.custom_minimum_size = ACTION_BUTTON
+	apply_pane_button(button, PANE_OUTLINE_GRAY)
+	build_button_content(button, MindWidgets.glyph(icon_name, 24), text_value)
+	button.pressed.connect(listener)
+	if buttons != null:
+		buttons.add_child(button)
+	return button
+
+
+## `Styles.flatToggleMenut` (`Styles.java:210-219`): `up = clear`,
+## `over = flatOver` (#454545), `down`/`checked = flatDown` (the accent
+## `flat-down-base` frame), `disabled = black` with `disabledFontColor = gray`.
+static func _apply_flat_toggle_menu(button: Button) -> void:
+	var over := StyleBoxFlat.new()
+	over.bg_color = Color(0.271, 0.271, 0.271)
+	var checked := StyleBoxFlat.new()
+	checked.bg_color = Color.BLACK
+	checked.border_color = MindStyles.ACCENT
+	checked.set_border_width_all(4)
+	checked.set_corner_radius_all(2)
+	var disabled := StyleBoxFlat.new()
+	disabled.bg_color = Color.BLACK
+	button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+	button.add_theme_stylebox_override("hover", over)
+	button.add_theme_stylebox_override("pressed", checked)
+	button.add_theme_stylebox_override("hover_pressed", checked)
+	button.add_theme_stylebox_override("disabled", disabled)
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	button.add_theme_color_override("font_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_color_override("font_pressed_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
+	button.add_theme_color_override("font_disabled_color", Color.GRAY)
 
 
 ## `Gamemode.valid(map)` per visible mode (`Gamemode.all`, `MindPreview.map_modes`).
