@@ -6768,6 +6768,58 @@ impl MindSimHost {
         GString::from(serde_json::Value::Array(rows).to_string().as_str())
     }
 
+    /// `PlacementFragment.java:313-323`: the palette cell tint for every content
+    /// block, keyed by block name — `0` white (placeable, affordable and the
+    /// player unit is a builder), `1` gray (unaffordable or not a builder),
+    /// `2` darkGray (`Block.isPlaceable()` false: the block does not support
+    /// the current env). One call per palette refresh instead of a per-cell
+    /// seam, mirroring Java's per-frame `button.update`.
+    #[func]
+    pub fn palette_tints_json(&self) -> GString {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return GString::from("{}");
+        };
+        let rules = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.clone());
+        let team = rules.as_ref().map_or(0, |rules| rules.default_team);
+        let core_items: std::collections::HashMap<String, i32> =
+            self.player_core_items(team).into_iter().collect();
+        let multiplier = rules
+            .as_ref()
+            .map(|rules| rules.build_cost_multiplier)
+            .filter(|value| *value > 0.0)
+            .unwrap_or(1.0);
+        // `state.rules.isInfiniteResources(player.team())`
+        // (`PlacementFragment.java:316`): the rule field or the team rule.
+        let infinite = rules.as_ref().is_some_and(|rules| {
+            rules.infinite_resources
+                || rules
+                    .teams
+                    .get(team)
+                    .is_some_and(|rule| rule.infinite_resources)
+        });
+        let builder = self.sim.player_can_build();
+        let env = rules.as_ref().map_or(0, |rules| rules.env);
+        let mut out = serde_json::Map::new();
+        for def in content.blocks() {
+            let placeable = mind_core::world::build::supports_env_bits(def, env);
+            let affordable = infinite
+                || def.requirements.iter().all(|stack| {
+                    let amount = (stack.amount as f32 * multiplier + 0.5).floor() as i32;
+                    content.item(stack.item).is_some_and(|item| {
+                        core_items.get(&item.name).copied().unwrap_or(0) >= amount
+                    })
+                });
+            let tint = mind_core::world::build::palette_tint(placeable, affordable, builder);
+            out.insert(def.name.clone(), serde_json::Value::from(tint));
+        }
+        GString::from(serde_json::Value::Object(out).to_string().as_str())
+    }
+
     /// Tile `(x, y)`; `None` off the map (`world.build`
     /// returns null out of bounds). Every coordinate-taking render/HUD seam
     /// goes through this: `WorldGrid::tile` panics (debug_assert) off-map.

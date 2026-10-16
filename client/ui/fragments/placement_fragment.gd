@@ -50,6 +50,7 @@ var _top_state := ""
 var _warned_block_select := false
 ## Last block selection mirrored into the palette's checked cell (T4).
 var _last_selected := ""
+var _tint_tick := 0
 ## Block name -> cell button for the current grid. Node *names* are not a
 ## stable key: a double `_rebuild` in one frame (boot + world load) makes Godot
 ## rename the new children to its auto-generated `@Button@N` names, so the
@@ -161,6 +162,55 @@ func _process(_delta: float) -> void:
 	_update_top_table()
 	_update_selection_highlight()
 	_update_command_panel()
+	# `PlacementFragment.java:313-323` recolours every cell in a per-frame
+	# `button.update`; the port batches the seam (`palette_tints_json`) on the
+	# HUD poll cadence instead (10 frames) to keep the eval-free frame cheap.
+	_tint_tick += 1
+	if _tint_tick >= TINT_INTERVAL:
+		_tint_tick = 0
+		_update_palette_tints()
+
+
+## Java `Color.gray` / `Color.darkGray` (`arc/graphics/Color.java:14-15`).
+const TINT_WHITE := Color(1.0, 1.0, 1.0)
+const TINT_GRAY := Color(0.498, 0.498, 0.498)
+const TINT_DARK_GRAY := Color(0.247, 0.247, 0.247)
+## Palette tint refresh cadence in frames (Java updates every frame).
+const TINT_INTERVAL := 10
+
+
+## `button.update` block half: white when the block is placeable, affordable
+## (infinite resources or the player's core holds every scaled requirement) and
+## the player unit is a builder, `Color.gray` otherwise, `Color.darkGray` when
+## `Block.isPlaceable()` is false (`PlacementFragment.java:313-323`). Only the
+## icon is tinted (`icon_*_color`), so the checked `selecti` accent frame keeps
+## its colour like Java's ImageButton background.
+func _update_palette_tints() -> void:
+	if _block_buttons.is_empty():
+		return
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("palette_tints_json"):
+		return
+	var parsed: Variant = JSON.parse_string(str(host.call("palette_tints_json")))
+	if not (parsed is Dictionary):
+		return
+	var tints: Dictionary = parsed
+	for name_variant in _block_buttons.keys():
+		var button := _block_buttons[name_variant] as Button
+		if button == null or not is_instance_valid(button):
+			continue
+		var color := TINT_GRAY
+		match int(tints.get(str(name_variant), 1)):
+			0:
+				color = TINT_WHITE
+			2:
+				color = TINT_DARK_GRAY
+			_:
+				color = TINT_GRAY
+		if button.get_theme_color("icon_normal_color") == color:
+			continue
+		for state in ["icon_normal_color", "icon_hover_color", "icon_pressed_color", "icon_disabled_color"]:
+			button.add_theme_color_override(state, color)
 
 
 ## `PlacementFragment` per-frame `button.update`: the checked cell follows
