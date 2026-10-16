@@ -81,6 +81,22 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
 				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
 				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+			elif name == "defaultb" or name == "defaultt":
+				# `Styles.defaultb`/`defaultt` (`Styles.java:118-125,133-141`):
+				# `Tex.button` (black body, grey border) with `buttonOver` on
+				# hover and `buttonDown` (white border) while pressed;
+				# `buttonDisabled` for the disabled state. The 9-patch's 12 px
+				# splits are also the content padding, so the icon cell starts
+				# 12 px in like Java's `Button` background padding.
+				theme.set_stylebox("normal", name, _button_nine_patch("button"))
+				theme.set_stylebox("hover", name, _button_nine_patch("button-over"))
+				theme.set_stylebox("pressed", name, _button_nine_patch("button-down"))
+				theme.set_stylebox("hover_pressed", name, _button_nine_patch("button-down"))
+				theme.set_stylebox("disabled", name, _button_nine_patch("button-disabled"))
+				theme.set_color("font_color", name, Color.WHITE)
+				theme.set_color("font_hover_color", name, Color.WHITE)
+				theme.set_color("font_pressed_color", name, Color.WHITE)
+				theme.set_color("font_disabled_color", name, Color.GRAY)
 			elif name == "selecti":
 				# `Styles.selecti` (Styles.java:283-286): `checked = buttonSelect`
 				# (the accent 9-patch frame), `up = none`. The checked state is
@@ -152,6 +168,24 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL_DARK))
 		_:
 			pass
+
+
+## `Tex.button*` nine-patch (`button`, `button-over`, `button-down`,
+## `button-disabled`): 12 px texture margins on all four edges (the pack
+## `splits`). `StyleBoxTexture`'s content margin follows the texture margin, so
+## the button's content starts 12 px in — the same padding Arc applies from the
+## background drawable.
+static func _button_nine_patch(region: String) -> StyleBox:
+	var texture := MindWidgets.icon_texture(region)
+	if texture == null:
+		return flat(Color(0.08, 0.08, 0.10, 1.0))
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	box.texture_margin_left = 12.0
+	box.texture_margin_top = 12.0
+	box.texture_margin_right = 12.0
+	box.texture_margin_bottom = 12.0
+	return box
 
 
 ## `Tex.buttonSelect` ninepatch (accent border, splits 4) for the

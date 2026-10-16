@@ -82,13 +82,17 @@ static func glyph_button(
 
 
 ## An action button with an icon-font glyph followed by a label, mirroring
-## upstream `TextButton` + `Icon.*` drawables. Falls back to plain text when the
-## glyph is unknown or assets are absent.
+## upstream `TextButton` + `Icon.*` drawables (`Table.button(text, image,
+## runnable)`, `Table.java:536-550`): the icon is the first cell at the glyph's
+## natural size (`image.imageSize()`; `Fonts.icon` is a 30 px font,
+## `Fonts.java:78-82`) and the label grows over the remaining width, centring
+## its text (`TextButton.java:30-34`). Falls back to plain text when the glyph
+## is unknown or assets are absent.
 static func icon_button(
 	icon_name: String,
 	text_value: String,
 	style: String = "defaultt",
-	row_alignment: int = BoxContainer.ALIGNMENT_CENTER
+	row_alignment: int = BoxContainer.ALIGNMENT_BEGIN
 ) -> Button:
 	var result := Button.new()
 	result.theme_type_variation = style
@@ -97,21 +101,38 @@ static func icon_button(
 		result.text = text_value
 		return result
 	# code-instantiated: data-driven icon+label row inside the themed button.
+	var icon_only := text_value.is_empty()
 	var row := HBoxContainer.new()
-	row.alignment = row_alignment
+	# An icon-only entry is Java's `button(Icon.x, style, size, ...)` image
+	# button (icon centred); a text button keeps the icon cell at the left.
+	row.alignment = (
+		BoxContainer.ALIGNMENT_CENTER if icon_only else row_alignment
+	)
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.add_theme_constant_override("separation", 6)
+	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	result.add_child(row)
-	var icon := Label.new()
-	icon.text = glyph_text
-	MindIcons.apply_icon_font(icon)
-	icon.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	# The icon cell: the glyph at the icon font's 30 px size fills its own cell
+	# (Java does not reserve `iconMed` for text buttons).
+	var icon := glyph(icon_name, 30)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(icon)
+	if icon_only:
+		result.ready.connect(
+			func():
+				var row_min := row.get_combined_minimum_size()
+				result.custom_minimum_size = Vector2(
+					maxf(result.custom_minimum_size.x, row_min.x),
+					maxf(result.custom_minimum_size.y, row_min.y)
+				)
+		)
+		return result
 	var label := Label.new()
 	label.text = text_value
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# Apply the default font up front so the row reports a real minimum width
 	# (the theme font is not available before the node enters the tree).
@@ -130,7 +151,7 @@ static func icon_button(
 	result.ready.connect(
 		func():
 			var row_min := row.get_combined_minimum_size()
-			result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x + 20.0)
+			result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x)
 			result.custom_minimum_size.y = maxf(result.custom_minimum_size.y, row_min.y)
 	)
 	return result
