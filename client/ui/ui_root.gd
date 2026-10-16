@@ -360,6 +360,33 @@ func has_modal() -> bool:
 	return ui != null and bool(ui.call("has_dialog"))
 
 
+## `PausedDialog.checkPlaytest` (`PausedDialog.java:174-183`), shared by the
+## pause-menu quit (`runExitSave`) and the game-over `@menu` button: when the
+## match is a playtest, `MindCampaign.check_playtest` resets it without the exit
+## save and reopens the playtested map in `MindEditor`
+## (`ui.editor.resumeAfterPlaytest`); this then parks the sim and shows the
+## editor shell. Returns false (nothing done) for a normal match, so the caller
+## runs its usual quit-to-menu path.
+func check_playtest() -> bool:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign == null or not campaign.has_method("check_playtest"):
+		return false
+	var result: Variant = campaign.call("check_playtest")
+	if not (result is Dictionary) or not bool(result.get("playtest", false)):
+		return false
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host != null and host.has_method("set_paused"):
+		host.call("set_paused", true)
+	var shell := get_node_or_null("/root/Spine/Ui/EditorDialog")
+	if bool(result.get("resumed", false)) and shell != null and shell.has_method("show_dialog"):
+		# `beginEditMap` -> `show()`; the shell hides the standalone menu.
+		shell.call("show_dialog")
+	else:
+		# The reopen failed (`@editor.errorload` is up): fall back to the menu.
+		set_menu_visible(true)
+	return true
+
+
 ## `Control.java:75-80`: after the client load, a boot that skipped mod loading
 ## shows `@mods.initfailed` (`ui.showInfo`, deferred four ticks upstream).
 func _check_mod_init_failure() -> void:

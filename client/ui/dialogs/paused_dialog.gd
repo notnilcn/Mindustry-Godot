@@ -408,6 +408,16 @@ func _abandon_sector() -> void:
 ## current autosave slot (and `logic.reset`s the match), then the menu shows.
 func _quit_with_exit_save() -> void:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	# `runExitSave` -> `checkPlaytest()` (`PausedDialog.java:189-197`): a
+	# playtest (`state.playtestingMap`) skips the exit save and returns to the
+	# editor. Close first: closing releases the pause governor, then
+	# `check_playtest` re-parks the sim behind the editor.
+	if campaign != null and campaign.has_method("playtesting_map") \
+			and not str(campaign.call("playtesting_map")).is_empty():
+		_close_pressed()
+		var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+		if root != null and root.has_method("check_playtest") and bool(root.call("check_playtest")):
+			return
 	if campaign != null and campaign.has_method("run_exit_save"):
 		campaign.call("run_exit_save")
 	_quit_to_menu()

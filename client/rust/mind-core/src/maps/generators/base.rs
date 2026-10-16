@@ -1102,40 +1102,10 @@ mod tests {
         );
     }
 
-    /// The real `assets/baseparts` catalog; skips (with a note) when absent.
-    fn real_bases(registry: &ContentRegistry) -> Option<BaseRegistry> {
-        use std::path::PathBuf;
-
-        let baseparts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../assets/baseparts");
-        if !baseparts.is_dir() {
-            println!("assets/baseparts absent; skipping test");
-            return None;
-        }
-        let mut schematics = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&baseparts) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("msch") {
-                    continue;
-                }
-                if let Ok(bytes) = std::fs::read(&path)
-                    && let Ok(schem) = crate::game::schematics::read(&bytes, registry)
-                {
-                    schematics.push(schem);
-                }
-            }
-        }
-        if schematics.is_empty() {
-            println!("no base parts decoded; skipping test");
-            return None;
-        }
-        let mut bases = BaseRegistry::new();
-        bases.load(registry, schematics);
-        if bases.cores.is_empty() {
-            println!("no core parts classified; skipping test");
-            return None;
-        }
-        Some(bases)
+    /// The real `assets/baseparts` catalog; panics (never skips) when it is
+    /// missing or does not decode, so the test cannot pass vacuously.
+    fn real_bases(registry: &ContentRegistry) -> BaseRegistry {
+        crate::ai::base_registry::real_catalog_for_tests(registry)
     }
 
     #[test]
@@ -1147,9 +1117,7 @@ mod tests {
         use crate::world::modules::ItemModule;
 
         let registry = content();
-        let Some(bases) = real_bases(&registry) else {
-            return;
-        };
+        let bases = real_bases(&registry);
 
         let extras = SectorGenExtras {
             threat: 0.5,

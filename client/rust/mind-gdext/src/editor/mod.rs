@@ -1864,10 +1864,19 @@ impl MindEditor {
         true
     }
 
-    /// `MapEditorDialog.resumeAfterPlaytest(map)`: reopen the map file.
+    /// `MapEditorDialog.resumeAfterPlaytest(map)` (`MapEditorDialog.java:370-372`):
+    /// `beginEditMap(map.file)` — `shownWithMap = true` and the map the
+    /// playtest saved is reopened (`:508-519`). Called by
+    /// `MindCampaign.check_playtest` when a playtest ends (pause-menu quit or
+    /// game-over `@menu`); the caller shows the shell.
     #[func]
     pub fn resume_after_playtest(&mut self, path: GString) -> bool {
-        self.begin_edit_map(path)
+        self.play.playtesting = false;
+        let opened = self.begin_edit_map(path);
+        if opened {
+            self.editor.shown_with_map = true;
+        }
+        opened
     }
 
     /// `EditorMapsDialog.tryImportMap` (`EditorMapsDialog.java:55-98`): rejects

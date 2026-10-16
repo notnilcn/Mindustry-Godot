@@ -173,12 +173,15 @@ pub struct UnitRuntime {
     pub pathfinder: Pathfinder,
     /// Team the packed path tiles were built for.
     pub path_team: u8,
-    /// `Vars.controlPath`: per-goal ground fields for `CommandAI` move
-    /// orders. Passability is derived lazily from [`Self::pathfinder`]'s
-    /// packed tiles (the `solid` bit is team-independent).
-    pub control_path: crate::ai::ControlPathfinder,
-    /// Whether [`Self::control_path`] must re-read the path tiles.
-    pub control_path_dirty: bool,
+    /// `Vars.controlPath`: per-goal fields for `CommandAI`/`LogicAI` move
+    /// orders, one instance per `ControlPathfinder.costTypes` entry indexed by
+    /// [`crate::ai::control_pathfinder::ControlCost::id`] (Java keys its
+    /// clusters/fields by `pathCost`). Passability is derived lazily from
+    /// [`Self::pathfinder`]'s packed tiles.
+    pub control_paths:
+        [crate::ai::ControlPathfinder; crate::ai::control_pathfinder::CONTROL_COST_COUNT],
+    /// Whether each [`Self::control_paths`] entry must re-read the path tiles.
+    pub control_path_dirty: [bool; crate::ai::control_pathfinder::CONTROL_COST_COUNT],
     /// Wave team (`rules.waveTeam`) new spawns default to.
     pub wave_team: u8,
     /// Live units in spawn order.
@@ -236,8 +239,10 @@ impl UnitRuntime {
             grid: grid.clone(),
             pathfinder,
             path_team: wave_team,
-            control_path: crate::ai::ControlPathfinder::new(grid.width(), grid.height()),
-            control_path_dirty: true,
+            control_paths: crate::ai::control_pathfinder::ControlCost::ALL.map(|cost| {
+                crate::ai::ControlPathfinder::with_cost(grid.width(), grid.height(), cost)
+            }),
+            control_path_dirty: [true; crate::ai::control_pathfinder::CONTROL_COST_COUNT],
             wave_team,
             units: Vec::new(),
             bullets: Vec::new(),
@@ -263,23 +268,28 @@ impl UnitRuntime {
         self.grid = grid.clone();
         self.pathfinder
             .rebuild(&self.grid, &self.content, world, core_capture);
-        self.control_path_dirty = true;
+        self.control_path_dirty = [true; crate::ai::control_pathfinder::CONTROL_COST_COUNT];
     }
 
-    /// The control pathfinder with passability current to the last
+    /// The control pathfinder for `cost` with passability current to the last
     /// [`Self::refresh_grid`] (`ControlPathfinder` world-update hook).
-    pub fn control_path(&mut self) -> &mut crate::ai::ControlPathfinder {
-        if self.control_path_dirty {
+    pub fn control_path(
+        &mut self,
+        cost: crate::ai::control_pathfinder::ControlCost,
+    ) -> &mut crate::ai::ControlPathfinder {
+        let index = usize::from(cost.id());
+        if self.control_path_dirty[index] {
             let team = self.path_team;
-            self.control_path.rebuild_passability(
+            self.control_paths[index].cost = cost;
+            self.control_paths[index].rebuild_passability(
                 self.pathfinder.width,
                 self.pathfinder.height,
                 &self.pathfinder.tiles,
                 team,
             );
-            self.control_path_dirty = false;
+            self.control_path_dirty[index] = false;
         }
-        &mut self.control_path
+        &mut self.control_paths[index]
     }
 
     /// Clears transient match state after `Logic.reset` (`Groups.clear`).
@@ -2894,19 +2904,21 @@ pub fn unit_update_system(world: &mut World) {
                             let flying = world
                                 .get::<PhysicsComp>(entity)
                                 .is_some_and(|physics| physics.flying);
-                            // Refresh the lazy control path before borrowing fields.
-                            runtime.control_path();
+                            // Refresh the lazy control path before borrowing
+                            // fields (`unit.type.pathCostId`).
+                            let cost = unit_control_cost(world, &runtime.content, entity);
+                            runtime.control_path(cost);
                             let UnitRuntime {
                                 grid,
                                 content,
-                                control_path,
+                                control_paths,
                                 ..
                             } = &mut runtime;
                             let arrived = crate::ai::types::command::update_command_move(
                                 world,
                                 grid,
                                 content,
-                                control_path,
+                                &mut control_paths[usize::from(cost.id())],
                                 entity,
                                 target,
                                 flying,
@@ -3282,14 +3294,18 @@ pub fn unit_update_system(world: &mut World) {
                     explicit,
                 );
                 let alive = {
-                    runtime.control_path();
+                    // `controlPath.getPathPosition(unit, ...)` reads
+                    // `unit.type.pathCostId` (ControlPathfinder.java:1137-1138).
+                    let cost = unit_control_cost(world, &runtime.content, entity);
+                    runtime.control_path(cost);
                     let UnitRuntime {
                         content,
                         grid,
                         pathfinder,
-                        control_path,
+                        control_paths,
                         ..
                     } = &mut runtime;
+                    let control_path = &mut control_paths[usize::from(cost.id())];
                     let mut ctx = crate::ai::ai_controller::AiCtx {
                         world,
                         grid,
@@ -5696,6 +5712,26 @@ fn unit_flowfield_cost(def: &crate::content::registries::units::UnitTypeDef) -> 
     } else {
         Cost::Ground
     }
+}
+
+/// `unit.type.pathCostId` (`UnitType.initPathType`, UnitType.java:901-910):
+/// the `ControlPathfinder` cost of `entity`'s unit type (ground when the type
+/// is unresolved).
+fn unit_control_cost(
+    world: &World,
+    content: &ContentRegistry,
+    entity: Entity,
+) -> crate::ai::control_pathfinder::ControlCost {
+    world
+        .get::<UnitTypeComp>(entity)
+        .and_then(|comp| content.unit(comp.type_id))
+        .map_or(crate::ai::control_pathfinder::ControlCost::Ground, |def| {
+            crate::ai::control_pathfinder::ControlCost::for_unit(
+                def.naval,
+                def.allow_leg_step,
+                def.hovering,
+            )
+        })
 }
 
 /// `Pathfinder.EnemyCoreField.getPositions` (Pathfinder.java:555-588): enemy

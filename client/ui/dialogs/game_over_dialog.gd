@@ -134,6 +134,11 @@ func _continue_pressed() -> void:
 ## Non-campaign `@menu`: park the sim paused behind the standalone menu.
 func _menu_pressed() -> void:
 	_close_pressed()
+	# `if(!ui.paused.checkPlaytest()) logic.reset();` (`GameOverDialog.java:134-139`):
+	# a playtest that ended in game over returns to the editor.
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root != null and ui_root.has_method("check_playtest") and bool(ui_root.call("check_playtest")):
+		return
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if host != null and host.has_method("set_paused"):
 		host.call("set_paused", true)

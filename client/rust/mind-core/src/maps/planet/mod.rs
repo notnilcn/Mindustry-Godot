@@ -405,41 +405,12 @@ mod tests {
     fn ruins_placed_when_roll_positive() {
         // H05 T6: on a numbered sector whose ruin roll is > 0, the structures
         // pass scatters team-0 derelict parts (none within 18 tiles of the
-        // spawn). Uses the real `assets/baseparts` catalog; skips (with a note)
-        // when it is absent.
+        // spawn). Uses the real `assets/baseparts` catalog and panics (never
+        // skips) when it is missing or does not decode.
         use crate::maps::generators::planet::StructureCtx;
-        use std::path::PathBuf;
 
-        let baseparts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../assets/baseparts");
-        if !baseparts.is_dir() {
-            println!("assets/baseparts absent; skipping ruins test");
-            return;
-        }
         let content = content();
-        let mut schematics = Vec::new();
-        if let Ok(entries) = std::fs::read_dir(&baseparts) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("msch") {
-                    continue;
-                }
-                if let Ok(bytes) = std::fs::read(&path)
-                    && let Ok(schem) = crate::game::schematics::read(&bytes, &content)
-                {
-                    schematics.push(schem);
-                }
-            }
-        }
-        if schematics.is_empty() {
-            println!("no base parts decoded; skipping ruins test");
-            return;
-        }
-        let mut bases = crate::ai::BaseRegistry::new();
-        bases.load(&content, schematics);
-        if bases.parts.is_empty() && bases.req_parts.is_empty() {
-            println!("no base parts classified; skipping ruins test");
-            return;
-        }
+        let bases = crate::ai::base_registry::real_catalog_for_tests(&content);
 
         let def = content.planet_by_name("serpulo").expect("serpulo");
         for id in 1..30u16 {
@@ -500,6 +471,6 @@ mod tests {
             );
             return;
         }
-        println!("no sector in 1..30 rolled ruins; skipping");
+        panic!("no sector in 1..30 rolled ruins; the ruins pass was never exercised");
     }
 }

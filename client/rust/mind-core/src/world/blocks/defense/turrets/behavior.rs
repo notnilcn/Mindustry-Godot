@@ -245,17 +245,13 @@ impl BuildingBehavior for TurretBehavior {
                         )))
                     })
                     .unwrap_or(Sensed::Obj(None)),
+                // `LiquidTurretBuild.senseObject(currentAmmoType)` and the
+                // continuous variant (`LiquidTurret.java:80-85`) return
+                // `liquids.current()`, never the most-filled slot.
                 TurretAmmo::Liquid(_) => {
                     let current = world
                         .get::<crate::world::modules::LiquidModule>(e)
-                        .and_then(|m| {
-                            m.liquids
-                                .iter()
-                                .enumerate()
-                                .max_by(|(_, a), (_, b)| a.total_cmp(b))
-                                .filter(|(_, amount)| **amount > 0.0)
-                                .map(|(i, _)| i)
-                        });
+                        .map(|m| m.current_liquid().index());
                     Sensed::Obj(current.map(|i| {
                         crate::logic::value::LogicObject::Content(crate::content::ContentRef::new(
                             crate::content::ContentType::Liquid,
@@ -442,5 +438,92 @@ mod tests {
             .get::<crate::world::modules::LiquidModule>(turret)
             .expect("liquid module");
         assert!(liquids.get(water) > 0.0, "water stored in the turret");
+    }
+
+    /// `LiquidTurretBuild.peekAmmo`/`hasAmmo`/`useAmmo`/`acceptLiquid`
+    /// (`LiquidTurret.java:128-155`) all key on `liquids.current()` (the last
+    /// liquid added), never on the most-filled slot.
+    #[test]
+    fn liquid_turret_ammo_follows_current_liquid_not_most_filled() {
+        let mut harness = CombatHarness::new(32, 32, 7);
+        let wave = harness.content().block_id("wave").expect("wave");
+        assert!(harness.place(10, 10, wave, 0, true));
+        let turret = harness.build_at(10, 10).expect("placed wave");
+        let water = harness.content().liquid_id("water").expect("water");
+        let slag = harness.content().liquid_id("slag").expect("slag");
+        let oil = harness.content().liquid_id("oil").expect("oil");
+        let entry = |liquid: LiquidId| {
+            let state = harness
+                .build
+                .world
+                .get::<TurretState>(turret)
+                .expect("state");
+            let TurretAmmo::Liquid(ammo) = &state.config.ammo else {
+                panic!("wave is a liquid turret");
+            };
+            *ammo
+                .iter()
+                .find(|entry| entry.liquid == liquid)
+                .expect("ammo entry")
+        };
+        let water_ammo = entry(water);
+        let slag_ammo = entry(slag);
+        assert_ne!(water_ammo.bullet, slag_ammo.bullet);
+
+        // 8 water, then a small slag top-up: slag becomes `current` while water
+        // stays the most-filled slot.
+        handle_liquid(&mut harness.build.world, turret, water, 8.0);
+        let slag_shot = 1.0 / slag_ammo.ammo_multiplier;
+        handle_liquid(&mut harness.build.world, turret, slag, slag_shot);
+        let world = &harness.build.world;
+        assert_eq!(
+            super::super::peek_ammo(world, turret),
+            Some(slag_ammo.bullet),
+            "peekAmmo = ammoTypes.get(liquids.current())"
+        );
+        assert!(
+            super::super::has_ammo(world, turret),
+            "one slag shot stored"
+        );
+        // `acceptLiquid`: another ammo liquid is refused while the current
+        // one holds more than one shot (+0.001); slag itself is accepted.
+        assert!(accept_liquid(world, turret, slag));
+        handle_liquid(&mut harness.build.world, turret, slag, slag_shot);
+        assert!(!accept_liquid(&harness.build.world, turret, oil));
+
+        // `useAmmo` drains the current liquid (slag), leaving water untouched.
+        let mut state = harness
+            .build
+            .world
+            .get::<TurretState>(turret)
+            .expect("state")
+            .clone();
+        let fired = super::super::use_ammo(&mut state, &mut harness.build.world, turret);
+        assert_eq!(fired, Some(slag_ammo.bullet));
+        let liquids = harness
+            .build
+            .world
+            .get::<crate::world::modules::LiquidModule>(turret)
+            .expect("liquid module");
+        assert_eq!(liquids.get(water), 8.0, "water is not consumed");
+        assert!((liquids.get(slag) - slag_shot).abs() < 1e-4);
+        // Down to one shot: other ammo liquids are accepted again.
+        assert!(accept_liquid(&harness.build.world, turret, oil));
+
+        // Empty current liquid: `hasAmmo` is false even though 8 water remain
+        // (`currentAmount() >= 1 / ammoMultiplier`), and `peekAmmo` still
+        // names the current liquid's bullet.
+        let mut liquids = harness
+            .build
+            .world
+            .get_mut::<crate::world::modules::LiquidModule>(turret)
+            .expect("liquid module");
+        liquids.remove(slag, 100.0);
+        let world = &harness.build.world;
+        assert!(!super::super::has_ammo(world, turret));
+        assert_eq!(
+            super::super::peek_ammo(world, turret),
+            Some(slag_ammo.bullet)
+        );
     }
 }

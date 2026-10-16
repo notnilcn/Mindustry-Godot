@@ -312,6 +312,15 @@ func _play(mode: String, playtest: bool) -> void:
 		# and starts the session in one call (`Control.playMap`).
 		started = bool(campaign.call("start_map_mode", _map_name, mode, playtest, _rules_json))
 	_close_stack()
+	if not started and playtest:
+		# `Control.playMap`: "booted out of map, resume editing"
+		# (`Control.java:422-428`, `ui.editor.resumeAfterPlaytest(map)`): the
+		# editor still holds the map the playtest just saved, so re-show it
+		# over the error.
+		var shell := get_node_or_null("/root/Spine/Ui/EditorDialog")
+		if shell != null and shell.has_method("show_dialog"):
+			shell.call("show_dialog")
+		return
 	if started:
 		# `MapEditorDialog.playtest`'s `playListener = this::hide`: a playtest
 		# returns to the editor, so hide the shell while the map plays.

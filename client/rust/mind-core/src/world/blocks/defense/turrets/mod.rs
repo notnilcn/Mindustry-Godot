@@ -1086,16 +1086,12 @@ pub fn peek_ammo(world: &World, e: Entity) -> Option<BulletId> {
 fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> Option<BulletId> {
     match &state.config.ammo {
         TurretAmmo::Item(_) => state.ammo.last().map(|entry| entry.bullet),
+        // `LiquidTurretBuild.peekAmmo` / `ContinuousLiquidTurretBuild.peekAmmo`
+        // (`LiquidTurret.java:136-139`, `ContinuousLiquidTurret.java:118-121`):
+        // `ammoTypes.get(liquids.current())`, independent of the stored amount.
         TurretAmmo::Liquid(ammo) => {
             let liquids = world.get::<LiquidModule>(e)?;
-            let mut best: Option<(f32, BulletId)> = None;
-            for entry in ammo {
-                let amount = liquids.get(entry.liquid);
-                if amount > 0.0 && best.is_none_or(|(current, _)| amount > current) {
-                    best = Some((amount, entry.bullet));
-                }
-            }
-            best.map(|(_, bullet)| bullet)
+            current_liquid_ammo(liquids, ammo).map(|entry| entry.bullet)
         }
         TurretAmmo::Power(bullet) => Some(*bullet),
         TurretAmmo::Payload(ammo) => ammo
@@ -1112,8 +1108,8 @@ fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> Option<Bull
 
 /// `TurretBuild.peekAmmo().rangeChange` (`BulletType.rangeChange`).
 ///
-/// Mirrors [`peek_ammo_state`]'s selection: the last item entry, the most-filled
-/// liquid entry, or the first stocked payload entry. `Power` turrets hold only
+/// Mirrors [`peek_ammo_state`]'s selection: the last item entry, the entry of
+/// `liquids.current()`, or the first stocked payload entry. `Power` turrets hold only
 /// the bullet id, so their `rangeChange` reads `0` (no vanilla power turret sets
 /// one).
 pub fn peek_ammo_range_change(world: &World, e: Entity) -> f32 {
@@ -1139,14 +1135,7 @@ pub fn peek_ammo_range_change_of(state: &TurretState, world: &World, e: Entity) 
             let Some(liquids) = world.get::<LiquidModule>(e) else {
                 return 0.0;
             };
-            let mut best: Option<(f32, f32)> = None;
-            for entry in ammo {
-                let amount = liquids.get(entry.liquid);
-                if amount > 0.0 && best.is_none_or(|(current, _)| amount > current) {
-                    best = Some((amount, entry.range_change));
-                }
-            }
-            best.map_or(0.0, |(_, change)| change)
+            current_liquid_ammo(liquids, ammo).map_or(0.0, |entry| entry.range_change)
         }
         TurretAmmo::Power(_) => 0.0,
         TurretAmmo::Payload(ammo) => ammo
@@ -1252,11 +1241,14 @@ fn has_ammo_state(state: &TurretState, world: &World, e: Entity) -> bool {
             // latch plus a correct, non-empty current liquid.
             if state.config.kind == TurretKind::Continuous {
                 return state.activated
-                    && current_ammo_liquid(liquids, &state.config)
-                        .is_some_and(|liquid| liquids.get(liquid) > 0.0);
+                    && current_ammo_liquid(liquids, &state.config).is_some()
+                    && liquids.current_liquid_amount() > 0.0;
             }
-            ammo.iter()
-                .any(|entry| liquids.get(entry.liquid) >= 1.0 / entry.ammo_multiplier)
+            // `LiquidTurretBuild.hasAmmo` (`LiquidTurret.java:141-144`):
+            // `ammoTypes.get(current) != null && currentAmount() >= 1 /
+            // ammoTypes.get(current).ammoMultiplier`.
+            current_liquid_ammo(liquids, ammo)
+                .is_some_and(|entry| liquids.current_liquid_amount() >= 1.0 / entry.ammo_multiplier)
         }
         TurretAmmo::Power(_) => true,
         TurretAmmo::Payload(ammo) => ammo.iter().any(|entry| {
@@ -1268,8 +1260,20 @@ fn has_ammo_state(state: &TurretState, world: &World, e: Entity) -> bool {
     }
 }
 
-/// `LiquidModule.current`: the ammo liquid with the largest stored amount
-/// (`ContinuousLiquidTurret` reads `liquids.current()`/`currentAmount`, T14).
+/// `ammoTypes.get(liquids.current())`: the ammo entry of the module's current
+/// liquid (`LiquidModule.current()`, the last liquid added/removed/loaded,
+/// `LiquidModule.java:89-91`), or `None` when that liquid is not ammo. Java
+/// never picks the most-filled slot.
+fn current_liquid_ammo<'a>(
+    liquids: &LiquidModule,
+    ammo: &'a [LiquidAmmo],
+) -> Option<&'a LiquidAmmo> {
+    let current = liquids.current_liquid();
+    ammo.iter().find(|entry| entry.liquid == current)
+}
+
+/// `liquids.current()` when `ammoTypes` contains it (`ContinuousLiquidTurret`
+/// reads `liquids.current()`/`currentAmount`, T14).
 fn current_ammo_liquid(
     liquids: &LiquidModule,
     config: &TurretConfig,
@@ -1277,15 +1281,28 @@ fn current_ammo_liquid(
     let TurretAmmo::Liquid(ammo) = &config.ammo else {
         return None;
     };
+    current_liquid_ammo(liquids, ammo).map(|entry| entry.liquid)
+}
+
+/// `ConsumeLiquidFilter.getConsumed` (`ConsumeLiquidFilter.java:66-80`): the
+/// current liquid when it passes the ammo filter and is non-empty, else the
+/// lowest-id ammo liquid with a positive amount.
+fn consumed_ammo_liquid(
+    liquids: &LiquidModule,
+    config: &TurretConfig,
+) -> Option<crate::content::LiquidId> {
+    if liquids.current_liquid_amount() > 0.0
+        && let Some(liquid) = current_ammo_liquid(liquids, config)
+    {
+        return Some(liquid);
+    }
+    let TurretAmmo::Liquid(ammo) = &config.ammo else {
+        return None;
+    };
     ammo.iter()
         .map(|entry| entry.liquid)
         .filter(|liquid| liquids.get(*liquid) > 0.0)
-        .max_by(|a, b| {
-            liquids
-                .get(*a)
-                .partial_cmp(&liquids.get(*b))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
+        .min_by_key(|liquid| liquid.index())
 }
 
 /// `TurretBuild.canConsume`: power/heat gates (item/liquid gate handled by
@@ -1363,18 +1380,15 @@ pub fn accept_liquid(world: &World, e: Entity, liquid: LiquidId) -> bool {
     let Some(liquids) = world.get::<LiquidModule>(e) else {
         return false;
     };
-    let current = ammo
-        .iter()
-        .filter(|entry| liquids.get(entry.liquid) > 0.0)
-        .max_by(|a, b| {
-            liquids
-                .get(a.liquid)
-                .partial_cmp(&liquids.get(b.liquid))
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .map(|entry| entry.liquid);
-    match current {
-        Some(active) => active == liquid || liquids.get(active) <= 0.001,
+    // `LiquidTurret.java:151-155` / `ContinuousLiquidTurret.java:138-142`:
+    // `current == liquid || !ammoTypes.containsKey(current) ||
+    // liquids.get(current) <= 1 / ammoTypes.get(current).ammoMultiplier + 0.001`.
+    let current = liquids.current_liquid();
+    if current == liquid {
+        return true;
+    }
+    match current_liquid_ammo(liquids, ammo) {
+        Some(entry) => liquids.get(current) <= 1.0 / entry.ammo_multiplier + 0.001,
         None => true,
     }
 }
@@ -1473,8 +1487,14 @@ fn use_ammo(state: &mut TurretState, world: &mut World, e: Entity) -> Option<Bul
             }
             state.total_ammo = (state.total_ammo - state.config.ammo_per_shot).max(0);
         }
+        // `LiquidTurretBuild.useAmmo` (`LiquidTurret.java:128-133`):
+        // `liquids.remove(current, 1 / type.ammoMultiplier)`.
+        // `ContinuousLiquidTurretBuild.useAmmo` does not consume (`:112-116`).
         TurretAmmo::Liquid(ammo) => {
-            if let Some(entry) = ammo.iter().find(|entry| entry.bullet == bullet) {
+            if state.config.kind != TurretKind::Continuous
+                && let Some(liquids) = world.get::<LiquidModule>(e)
+                && let Some(entry) = current_liquid_ammo(liquids, ammo)
+            {
                 let amount = 1.0 / entry.ammo_multiplier.max(0.001);
                 liquid_remove = Some((entry.liquid, amount));
             }
