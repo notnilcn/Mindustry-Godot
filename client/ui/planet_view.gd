@@ -58,6 +58,12 @@ var cam_pos := Vector3(0.0, CAM_LENGTH, 0.1)
 ## the wheel and the reveal set (`PlanetDialog.zoom`).
 var zoom := 1.0
 var zoom_target := 1.0
+## `PlanetDialog.state.uiAlpha`: the sector overlays fade when the zoom passes
+## 1.9 (`lerpDelta(uiAlpha, zoom < 1.9 ? 1 : 0, 0.1)`).
+var ui_alpha := 1.0
+## Values baked into the last marker rebuild (throttles the per-frame updates).
+var _built_ui_alpha := -1.0
+var _built_pulse := -1.0
 
 var _tiles := PackedVector3Array()
 var _corners := PackedVector3Array()
@@ -164,6 +170,8 @@ func _rebuild_markers() -> void:
 		child.queue_free()
 	if _tile_corners.is_empty():
 		return
+	_built_ui_alpha = ui_alpha
+	_built_pulse = _preset_pulse()
 	var verts := PackedVector3Array()
 	var colors := PackedColorArray()
 	var arad := float(data.get("outline", 1.17)) + 0.001
@@ -176,10 +184,11 @@ func _rebuild_markers() -> void:
 		if bool(sector.get("selectable", false)) or bool(sector.get("unlocked", false)):
 			if color != null:
 				var ring: Color = color
-				ring = Color(ring.r * 0.8, ring.g * 0.8, ring.b * 0.8, 1.0)
+				ring = Color(ring.r * 0.8, ring.g * 0.8, ring.b * 0.8, ui_alpha)
 				_append_ring(verts, colors, tile, arad, 0.026, ring)
 		else:
-			_append_fill(verts, colors, tile, arad, SHADOW)
+			var shadow := Color(SHADOW.r, SHADOW.g, SHADOW.b, SHADOW.a * ui_alpha)
+			_append_fill(verts, colors, tile, arad, shadow)
 		_add_icon(sector, tile)
 	if verts.is_empty():
 		return
@@ -204,8 +213,8 @@ func _status_color(sector: Dictionary) -> Variant:
 	if bool(sector.get("has_base", false)):
 		return SHARDED.lerp(CRUX, 0.5 if bool(sector.get("has_enemy_base", false)) else 0.0)
 	if not str(sector.get("preset", "")).is_empty() and bool(sector.get("require_unlock", false)):
-		# `derelict.lerp(white, absin(time, 10, 1))`: static midpoint.
-		return DERELICT.lerp(Color.WHITE, 0.5) if bool(sector.get("preset_unlocked", false)) else Color.GRAY
+		# `derelict.lerp(white, absin(time, 10, 1))` (`PlanetDialog.java:463`).
+		return DERELICT.lerp(Color.WHITE, _preset_pulse()) if bool(sector.get("preset_unlocked", false)) else Color.GRAY
 	if bool(sector.get("has_enemy_base", false)):
 		return CRUX
 	return null
@@ -250,6 +259,10 @@ func _append_ring(verts: PackedVector3Array, colors: PackedColorArray, tile: int
 
 ## `renderProjections` icon for one sector.
 func _add_icon(sector: Dictionary, tile: int) -> void:
+	# `drawSectors`/`renderProjections`: icons behind the limb (the camera
+	# hemisphere's back side) are culled (`tile_v · camera_dir <= 0`).
+	if _tiles[tile].dot(cam_pos.normalized()) <= 0.0:
+		return
 	var preset := str(sector.get("preset", ""))
 	var has_base := bool(sector.get("has_base", false))
 	var glyph := ""
@@ -295,6 +308,7 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
 		sprite.render_priority = 7
 		sprite.position = position
+		sprite.modulate = Color(1.0, 1.0, 1.0, ui_alpha)
 		_markers.add_child(sprite)
 		return
 	var text := MindIcons.glyph(glyph)
@@ -311,7 +325,7 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 	label.font_size = 64
 	label.outline_size = 0
 	label.pixel_size = SECTOR_ICON_SIZE / 64.0
-	label.modulate = color
+	label.modulate = Color(color.r, color.g, color.b, color.a * ui_alpha)
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	label.render_priority = 7
 	label.position = position
@@ -391,6 +405,18 @@ func _process(delta: float) -> void:
 	camera.position = cam_pos.normalized() * distance
 	camera.look_at(Vector3.ZERO, Vector3.UP)
 	_update_atmosphere_camera()
+	# `PlanetDialog.draw`: `uiAlpha = lerpDelta(uiAlpha, zoom < 1.9 ? 1 : 0, 0.1)`
+	# and `absin(Time.time, 10, 1)` are baked into the marker rebuilds (Java
+	# redraws every frame; the port rebuilds when either moves).
+	ui_alpha = lerp(ui_alpha, 1.0 if zoom < 1.9 else 0.0, 1.0 - pow(1.0 - 0.1, delta * 60.0))
+	if absf(ui_alpha - _built_ui_alpha) > 0.02 or absf(_preset_pulse() - _built_pulse) > 0.04:
+		_rebuild_markers()
+
+
+## `Mathf.absin(Time.time, 10f, 1f)` (`PlanetDialog.java:463`): a 10 s
+## `|sin|` pulse for unlocked, still-locked presets.
+func _preset_pulse() -> float:
+	return absf(sin(Time.get_ticks_msec() / 1000.0 / 10.0 * TAU))
 
 
 ## Clears the selected sector highlight/icon without moving the camera

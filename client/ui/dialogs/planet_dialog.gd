@@ -44,6 +44,7 @@ var _complete_announced := ""
 var _sectors_shown := false
 var _sector_search := ""
 var _sector_list: VBoxContainer = null
+var _sector_list_backdrop: PanelContainer = null
 ## Stage layers hidden while the planet page covers the screen (PAR-0146/0147):
 ## node path -> visibility captured when the page first covered the stage, so
 ## closing it restores exactly what was showing before (the live game's HUD +
@@ -825,17 +826,24 @@ func _build_sector_list(planet_name: String) -> void:
 		return
 	based.sort_custom(_sector_list_before)
 	# code-instantiated: rebuilt with the planet view; content is the live
-	# based-sector set.
+	# based-sector set. Java: `sectorList.background(Styles.black8)`.
+	var backdrop := PanelContainer.new()
+	backdrop.name = "SectorListBackdrop"
+	var box := StyleBoxFlat.new()
+	box.bg_color = MindStyles.BLACK_8
+	backdrop.add_theme_stylebox_override("panel", box)
+	backdrop.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	backdrop.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	backdrop.offset_left = -295.0
+	backdrop.offset_right = -5.0
+	backdrop.offset_top = 3.0
+	backdrop.custom_minimum_size = Vector2(290.0, 0.0)
+	add_child(backdrop)
+	_sector_list_backdrop = backdrop
 	_sector_list = VBoxContainer.new()
 	_sector_list.name = "SectorList"
 	_sector_list.add_theme_constant_override("separation", 0)
-	_sector_list.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	_sector_list.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	_sector_list.offset_left = -295.0
-	_sector_list.offset_right = -5.0
-	_sector_list.offset_top = 3.0
-	_sector_list.custom_minimum_size = Vector2(290.0, 0.0)
-	add_child(_sector_list)
+	backdrop.add_child(_sector_list)
 
 	var toggle := Button.new()
 	toggle.toggle_mode = true
@@ -948,6 +956,9 @@ func _fill_sector_entries(entries: VBoxContainer, based: Array) -> void:
 
 
 func _remove_sector_list() -> void:
+	if _sector_list_backdrop != null:
+		_sector_list_backdrop.queue_free()
+		_sector_list_backdrop = null
 	if _sector_list != null:
 		_sector_list.queue_free()
 		_sector_list = null
