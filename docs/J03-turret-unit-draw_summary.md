@@ -176,3 +176,131 @@ in-place replacement applies to `duo-preview` (`outlinedIcon = 1`,
 - T2 landed with a regression test and an in-engine idle frame.
 - T3 landed with a Java-atlas diff and a pack guard test.
 - This summary is committed separately.
+
+---
+
+# Wave B — T4–T7 (same session, after merging main @ `3bd1abe8`)
+
+## Per-task status
+
+| Task | Status | Commit |
+|---|---|---|
+| T4 — legged units (`UnitType.drawLegs`) + Java leg geometry | **done with residuals** | `9f381d49` |
+| T5 — tanks / segments / wrecks / payloads | **treads + wrecks landed; segments + payloads recorded** | `44401634` |
+| T6 — weapon outlines / unit parts / ability draws | **weapon `cellRegion` landed; parts + abilities recorded** | `f11231d7` |
+| T7 — status marker shape + Arc `Fill.square` (PAR-0348) | **done** | `54d13776` |
+
+## T4 — legged units
+
+Java: `UnitType.drawLegs` (`UnitType.java:1826-1904`), `LegsComp`
+(`LegsComp.java:112-220`), `InverseKinematics.solve` (`:211-213`).
+
+- The sim's knee now uses Java's IK inputs (`legLength/2`, `legLength/2`,
+  `foot - hip`) with the `legMinLength`/`legMaxLength` clamps; the hip anchor is
+  `legOffset(i)` (`legBaseOffset` + `defaultLegAngle`) and the step destination
+  `legAngle(i) × legLength * legLengthScl`. The old call passed the max/min
+  lengths as the two segments, placing joints past the feet
+  (`runs/20261017-s4-J03-T4/pre-fix-ik-legs-stretched.png`).
+- The draw pass emits Java's order: front-first leg loop
+  (`i = j%2==0 ? j/2 : n-1-j/2`), moving-foot shadows, feet, `legRegion` upper
+  line, `legBaseRegion` lower line (`joint + inv(joint→foot)*legExtension`),
+  joints, base joints, base — with `legBaseUnder` swap and
+  `Mathf.sign(flip)` stroke mirrors.
+- Tests: `leg_draw_ops_follow_java_order_and_geometry` (mind-core).
+- In-engine: `runs/20261017-s4-J03-T4/` — atrax (id 11) + arkyid (13) via
+  `spawn_unit`, zoom-6 captures vs the Java `unit-<name>-ui` previews; the twin
+  frame `before-twin-no-legs.png` is the before half of PAR-0126.
+- Residuals: `legSplashDamage` + step FX, `drownTime` (`invDrown = 1`), and
+  Java's `lerpDelta` stage stepping with `curMoveOffset` (the port snaps on
+  drift with Java's geometry).
+
+## T5 — tanks, segments, wrecks, payloads
+
+- **Treads landed**: `drawTank` (`UnitType.java:1806-1824`) — the `-treads`
+  base + animated `-treads<i>-<frame>` slices (`frame = treadTime %
+  treadFrames`) per rect/side; data added to `unit_draws_full`.
+- **Wrecks landed**: `UnitComp.java:932-941` — three `<name>-wreck<i>` decals
+  per death at a random offset within `hitSize/4`, `rotation - 90`; `FxSink`
+  gained `decal` and `MindFx` now draws decals at the resolved region's natural
+  size (was a hardcoded 32×32). Tests:
+  `wreck_decals_emit_three_names_within_range`,
+  `wreck_decal_offsets_are_seed_reproducible`.
+- In-engine (`runs/20261017-s4-J03-T5/`): stell (id 38) + locus (39) with
+  treads at zoom 5; after a real duo kill of a spawned dagger,
+  `MindFx.live_decal_count() == 3` / `last_program_size() == 3`.
+- **Recorded residuals**: `drawCrawl` segments (`renale`/`latum`,
+  `UnitTypes.java:4316,4335`) and `drawPayload` (`Payloadc`) — sim state/atlas
+  regions exist; the draw passes are not implemented (anchors in the T5 notes).
+
+## T6 — weapon outlines, unit parts, ability draws
+
+- Weapon `-outline` was already drawn for non-top weapons
+  (`UnitType.java:1744-1761`); landed the `<weapon>-cell` overlay
+  (`Weapon.java:261-265`) tinted by `cellColor`.
+- **Recorded residuals** (`runs/20261017-s4-J03-T6/notes.md`): unit
+  `UnitType.parts` after shields (content data exists; needs per-mount
+  warmup/smoothReload/heat/charge in `unit_draws_full` + a pass like T1's),
+  weapon `layerOffset`, and the seven ability draws (`ForceFieldAbility`,
+  `EnergyFieldAbility`, `ArmorPlateAbility`, `UnitSpawnAbility`,
+  `MoveLightningAbility`, `SuppressionFieldAbility`, `ShieldArcAbility`).
+
+## T7 — status marker + PAR-0348
+
+- **Decision**: Arc `Fill.square(x, y, radius, rotation)` =
+  `Draw.rect(white, x, y, radius*2, radius*2, rotation)` (`Fill.java:361-363`)
+  — a square of side `2*radius` rotated CCW; for `rotation = 45` (all vanilla
+  sites) a **diamond with corners on the axes at `radius*sqrt(2)`**.
+  `Lines.square` = `poly(4, radius, rotation - 45)` (`Lines.java:507-509`).
+- Fixed `status.rs::square_points` (was an axis-aligned square — the twin's
+  "axis-aligned squares with a dark border"), `FxEmit::square` (`r*sqrt2`,
+  `rotation + 45`) and `FxEmit::square_line` (`rotation - 45`); the single
+  emitter covers the ~30 call sites. Markers also take `Lod.alpha2`
+  (`BuildingComp.java:1226-1228`, exposed via `stats_lod_alpha2`).
+- Test: `arc_square_conventions` (mind-core). In-engine:
+  `runs/20261017-s4-J03-T7/` — diamond markers at zoom 2 vs the before crop.
+
+## Wave-B gates (final, this worktree)
+
+```bash
+cargo fmt --manifest-path client/rust/Cargo.toml --all -- --check          # clean
+cargo clippy ... -p mind-core -p mind-gdext -p mind-tools --all-targets -- -D warnings  # clean
+cargo test ... -p mind-core --lib   # 2728 passed; 0 failed; 4 ignored
+cargo test ... -p mind-gdext --lib  # 67 passed; 0 failed
+cargo test ... -p mind-tools --lib  # 26 passed; 0 failed
+```
+
+Pre-existing base failure unchanged: `blocks_golden::family_counts_match_golden`
+(`other` 158 vs 164) also fails at `fe8fb0e4`/`3bd1abe8`.
+
+## Wave-B blockers / hiccups
+
+- The session-4 runtime reset twice more during the T4 captures (game over from
+  staged enemies), and one `set_paused` `bind_mut` race (recorded in
+  `open-godot-mcp-learnings.md`); evidence was captured before each stop and the
+  gaps are listed per task.
+- Budget: T6's unit-parts pass and T5's segments/payloads are recorded, not
+  landed; they share the same pass shape as T1's turret parts.
+
+## Ledger changes to apply (wave B)
+
+- **PAR-0126** (reopened for legs/treads/wrecks/segments): now **partially
+  fixed** — legs (all 10 legged units) and tank treads are drawn and the wreck
+  decals fire; **segments (`renale`/`latum`) and payload draws are still
+  missing**. Evidence: `runs/20261017-s4-J03-T4/`, `runs/20261017-s4-J03-T5/`.
+  Keep it `fixing` with those two items as the remaining check.
+- **PAR-0348** settled: Arc `Fill.square`/`Lines.square` convention decided
+  (see T7) and applied to the marker + `FxEmit`; close it with
+  `runs/20261017-s4-J03-T7/notes.md` as the record.
+- **New item candidates**: "unit parts not drawn (`UnitType.parts`, 31 Erekir
+  parts)" and "ability draws missing (7 ability classes)" — J03 T6 residuals;
+  "weapon `layerOffset` not applied".
+
+## Done criteria (plan, wave B)
+
+- T4 landed with tests + in-engine atrax/arkyid evidence (preview fallback; no
+  live Java leg captured).
+- T5 landed for treads + wrecks (tests + in-engine); segments/payloads recorded
+  with exact anchors.
+- T6 landed the weapon cell; parts/abilities recorded with exact anchors.
+- T7 landed with the marker + the PAR-0348 decision.
+- This wave-B section is committed separately.
