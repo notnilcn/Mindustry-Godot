@@ -339,8 +339,14 @@ pub struct SpawnGroup {
     /// Initial amount (upstream JSON key `amount`).
     #[serde(rename = "amount", skip_serializing_if = "is_one")]
     pub unit_amount: i32,
-    /// Status effect applied to spawned units.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Status effect applied to spawned units. Older saves wrote the legacy
+    /// boss effect as a number: `8` maps to `boss`, anything else to none
+    /// (`SpawnGroup.java:149-154`).
+    #[serde(
+        default,
+        deserialize_with = "spawn_effect_name_or_legacy_id",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub effect: Option<String>,
     /// Pinned spawn point (`-1` = any).
     #[serde(skip_serializing_if = "is_minus_one")]
@@ -423,11 +429,82 @@ fn is_never_f32(value: &f32) -> bool {
     *value == NEVER_F32
 }
 
+/// Arc `Json.readValue`'s `ObjectSet` branch: modern writers emit a plain
+/// array, older saves the object wrapper `{"values":[...]}` (the form the
+/// `ObjectSet` serializer used). Both shapes decode into the port's set
+/// fields; anything else stays a real error.
+fn object_set_or_array<'de, D>(deserializer: D) -> Result<IndexSet<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let items = match value {
+        serde_json::Value::Array(items) => items,
+        serde_json::Value::Object(mut map) => match map.shift_remove("values") {
+            Some(serde_json::Value::Array(items)) => items,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "expected a set or an ObjectSet `values` wrapper",
+                ));
+            }
+        },
+        other => {
+            return Err(serde::de::Error::custom(format!(
+                "expected a set or an ObjectSet `values` wrapper, got {other}"
+            )));
+        }
+    };
+    items
+        .into_iter()
+        .map(|item| serde_json::from_value::<String>(item).map_err(serde::de::Error::custom))
+        .collect()
+}
+
+/// Arc reads `null` for missing strings (`JsonValue.asString`); decode it to
+/// the empty string for fields whose runtime path drops empty names.
+fn null_as_empty_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<String>::deserialize(deserializer)?;
+    Ok(value.unwrap_or_default())
+}
+
+/// `SpawnGroup.read`'s legacy boss effect: a numeric `8` becomes `boss`, any
+/// other number becomes none (`SpawnGroup.java:149-154`); strings resolve
+/// like the content lookup (`"none"`/unknown -> none).
+fn spawn_effect_name_or_legacy_id<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(match value {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(name)) => Some(name),
+        Some(serde_json::Value::Number(number)) => {
+            if number.as_i64() == Some(8) {
+                Some(String::from("boss"))
+            } else {
+                None
+            }
+        }
+        Some(other) => {
+            return Err(serde::de::Error::custom(format!(
+                "invalid spawn effect: {other}"
+            )));
+        }
+    })
+}
+
 /// One weather schedule entry (`mindustry.type.Weather.WeatherEntry`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct WeatherEntry {
-    /// Weather content name.
+    /// Weather content name. Arc reads `null` for missing strings; older
+    /// saves carry `weather:null` for removed weather content, and upstream
+    /// drops those entries after load (`Logic.java:377`), so `null` decodes
+    /// to an empty name the runtime filters out.
+    #[serde(deserialize_with = "null_as_empty_string")]
     pub weather: String,
     /// Minimum frequency between events.
     pub min_frequency: f32,
@@ -633,16 +710,21 @@ pub struct Rules {
     /// Placement limits per block name.
     pub block_limits: IndexMap<String, i32>,
     /// Unplaceable block names.
+    #[serde(default, deserialize_with = "object_set_or_array")]
     pub banned_blocks: IndexSet<String>,
     /// Unbuildable unit names.
+    #[serde(default, deserialize_with = "object_set_or_array")]
     pub banned_units: IndexSet<String>,
     /// Blocks revealed despite build visibility.
+    #[serde(default, deserialize_with = "object_set_or_array")]
     pub revealed_blocks: IndexSet<String>,
     /// Researched content names (multiplayer campaign).
+    #[serde(default, deserialize_with = "object_set_or_array")]
     pub researched: IndexSet<String>,
     /// In-map objective executor.
     pub objectives: MapObjectives,
     /// Flags set by objectives.
+    #[serde(default, deserialize_with = "object_set_or_array")]
     pub objective_flags: IndexSet<String>,
     /// Fog of war enabled.
     pub fog: bool,
@@ -1284,5 +1366,49 @@ mod tests {
         assert!(!rules.wave_timer);
         assert!(rules.waves);
         assert_eq!(rules.win_wave, 10);
+    }
+
+    /// T2: older saves wrote `ObjectSet` fields as the `{"values":[...]}`
+    /// wrapper (`Json.readValue`'s `object instanceof ObjectSet` branch:
+    /// `jsonData.getChild("values")`); the modern array form keeps working,
+    /// and any other object stays a real error.
+    #[test]
+    fn object_set_wrapper_and_array_both_decode() {
+        let rules: Rules = serde_json::from_str(
+            r#"{"bannedBlocks":{"values":["conveyor","router"]},"bannedUnits":["dagger"],"revealedBlocks":[],"researched":{"values":[]},"objectiveFlags":["flag"]}"#,
+        )
+        .expect("rules");
+        assert!(rules.banned_blocks.contains("conveyor"));
+        assert!(rules.banned_blocks.contains("router"));
+        assert!(rules.banned_units.contains("dagger"));
+        assert!(rules.researched.is_empty());
+        assert!(rules.objective_flags.contains("flag"));
+        assert!(serde_json::from_str::<Rules>(r#"{"bannedBlocks":{"nope":1}}"#).is_err());
+    }
+
+    /// T2: `weather:null` (a removed weather content) decodes to an empty
+    /// name that the runtime's `Logic.java:377` retain drops.
+    #[test]
+    fn null_weather_name_decodes() {
+        let rules: Rules = serde_json::from_str(
+            r#"{"weather":[{"weather":null,"minFrequency":1.0},{"weather":"rain"}]}"#,
+        )
+        .expect("rules");
+        assert_eq!(rules.weather.len(), 2);
+        assert_eq!(rules.weather[0].weather, "");
+        assert_eq!(rules.weather[1].weather, "rain");
+    }
+
+    /// T2: the legacy numeric spawn effect — `8` is the old boss id, every
+    /// other number disables the effect (`SpawnGroup.java:149-154`).
+    #[test]
+    fn legacy_numeric_spawn_effect_maps_to_boss() {
+        let rules: Rules = serde_json::from_str(
+            r#"{"spawns":[{"type":"dagger","effect":8},{"type":"crawler","effect":6},{"type":"wraith","effect":"none"}]}"#,
+        )
+        .expect("rules");
+        assert_eq!(rules.spawns[0].effect.as_deref(), Some("boss"));
+        assert_eq!(rules.spawns[1].effect, None);
+        assert_eq!(rules.spawns[2].effect.as_deref(), Some("none"));
     }
 }

@@ -452,7 +452,8 @@ fn read_legacy_simple_patches(
 /// entities as `u16` chunks with the legacy tile-data bit
 /// (`ShortChunkSaveVersion.readMap`); v10+ uses the 4-byte chunk framing
 /// (`SaveVersion.readMap`, shared with native v1). v1-3 use the older
-/// `LegacySaveVersion.readMap` layout, which is not ported.
+/// `LegacySaveVersion.readMap` layout: no packed-check byte, `u16`-framed
+/// building chunks with the legacy base layout, and per-block RLE runs.
 #[cfg(feature = "msav-import")]
 fn read_legacy_map(
     wire: &mut WireReader,
@@ -460,33 +461,70 @@ fn read_legacy_map(
     version: u32,
 ) -> Result<(), IoError> {
     if version <= 3 {
-        return Err(IoError::corrupt(format!(
-            "legacy MSAV v{version} maps use the pre-short-chunk map format (unsupported)"
-        )));
+        return read_map_with(wire, state, MapChunkFormat::PreShort);
     }
-    read_map_with(wire, state, version <= 9)
+    let format = if version <= 9 {
+        MapChunkFormat::Packed { legacy_short: true }
+    } else {
+        MapChunkFormat::Packed {
+            legacy_short: false,
+        }
+    };
+    read_map_with(wire, state, format)
 }
 
-/// `readEntities` for a legacy `MSAV` version: the entity-mapping region is
-/// absent in v4 (`Save4.readEntities`), and world entities move from the
-/// `LegacySaveVersion2`/`ShortChunkSaveVersion` `u16` chunk framing to the
-/// 4-byte framing in v10 (`Save10`).
+/// `readEntities` for a legacy `MSAV` version.
+///
+/// - v1-2 (`Save1`/`Save2`): `LegacySaveVersion.readLegacyEntities` — no
+///   mapping, no team plans, `groups` framing of short chunks.
+/// - v3 (`Save3`): legacy team plans (`i32` config, not TypeIO) then the
+///   groups framing.
+/// - v4 (`Save4`): no mapping; team blocks then id-less short chunks.
+/// - v5-6: mapping; team blocks; v5 id-less short chunks, v6 short chunks
+///   with ids (`ShortChunkSaveVersion.readWorldEntities`).
+/// - v7-9: mapping; team blocks; short chunks with ids.
+/// - v10+: the 4-byte chunk framing (`SaveVersion.readWorldEntities`).
 #[cfg(feature = "msav-import")]
 fn read_legacy_entities(
     wire: &mut WireReader,
     state: &mut SaveReadState,
     version: u32,
 ) -> Result<(), IoError> {
-    let custom = if version == 4 {
-        EntityIdMap::new()
-    } else {
-        read_entity_mapping(wire)?
+    let custom = match version {
+        1..=4 => EntityIdMap::new(),
+        _ => read_entity_mapping(wire)?,
     };
-    read_team_blocks(wire, state)?;
-    if version <= 6 {
-        // `LegacySaveVersion2.readWorldEntities`: IDs are not stored; each
-        // entity is re-added with a fresh ID. Entity sinks are not wired for
-        // this layout, so only the `u16` framing is consumed.
+    match version {
+        1 | 2 => read_legacy_groups(wire)?,
+        3 => {
+            read_legacy_team_plans(wire, state)?;
+            read_legacy_groups(wire)?;
+        }
+        4 | 5 => {
+            read_team_blocks(wire, state)?;
+            read_legacy_short_entities(wire)?;
+        }
+        6..=9 => {
+            read_team_blocks(wire, state)?;
+            read_short_chunk_world_entities(wire, state, &custom)?;
+        }
+        _ => {
+            read_team_blocks(wire, state)?;
+            read_world_entities(wire, state, &custom)?;
+        }
+    }
+    if let Some(sink) = state.entities.as_deref_mut() {
+        sink.after_read_all();
+    }
+    Ok(())
+}
+
+/// `LegacySaveVersion.readLegacyEntities`: `groups` (u8), then per group an
+/// entity count and `u16`-framed chunks the port skips.
+#[cfg(feature = "msav-import")]
+fn read_legacy_groups(wire: &mut WireReader) -> Result<(), IoError> {
+    let groups = wire.ub()?;
+    for _ in 0..groups {
         let amount = wire.i()?;
         if amount < 0 {
             return Err(IoError::corrupt(format!("invalid entity count: {amount}")));
@@ -495,13 +533,64 @@ fn read_legacy_entities(
             let len = wire.us()? as usize;
             wire.skip(len)?;
         }
-    } else if version <= 9 {
-        read_short_chunk_world_entities(wire, state, &custom)?;
-    } else {
-        read_world_entities(wire, state, &custom)?;
     }
-    if let Some(sink) = state.entities.as_deref_mut() {
-        sink.after_read_all();
+    Ok(())
+}
+
+/// `LegacySaveVersion2.readWorldEntities`: `amount` entities framed as `u16`
+/// short chunks without entity ids; the port consumes the framing.
+#[cfg(feature = "msav-import")]
+fn read_legacy_short_entities(wire: &mut WireReader) -> Result<(), IoError> {
+    let amount = wire.i()?;
+    if amount < 0 {
+        return Err(IoError::corrupt(format!("invalid entity count: {amount}")));
+    }
+    for _ in 0..amount {
+        let len = wire.us()? as usize;
+        wire.skip(len)?;
+    }
+    Ok(())
+}
+
+/// `Save3.readEntities`' legacy team plans: `teamc`, then per team
+/// `(team, blocks)` and per plan `(x, y, rot, block)` as `i16` plus an `i32`
+/// config (the pre-TypeIO object id, not decodable with the current codec and
+/// dropped here). Plans are stored for the current writer's `BlockPlan` shape.
+#[cfg(feature = "msav-import")]
+fn read_legacy_team_plans(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
+    let team_count = wire.i()?;
+    if team_count < 0 {
+        return Err(IoError::corrupt(format!(
+            "invalid team count: {team_count}"
+        )));
+    }
+    for _ in 0..team_count {
+        let team = wire.i()?;
+        let blocks = wire.i()?;
+        if blocks < 0 {
+            return Err(IoError::corrupt(format!(
+                "invalid team plan count: {blocks}"
+            )));
+        }
+        let mut plans = Vec::with_capacity((blocks as usize).min(1000));
+        let mut seen = std::collections::BTreeSet::new();
+        for _ in 0..blocks {
+            let x = wire.s()?;
+            let y = wire.s()?;
+            let rotation = wire.s()?;
+            let block = wire.us()?;
+            let _legacy_config = wire.i()?;
+            if seen.insert(typeio::pack_point2(i32::from(x), i32::from(y))) {
+                plans.push(TeamPlan {
+                    x,
+                    y,
+                    rotation,
+                    block: BlockId::new(block),
+                    config: typeio::TypeValue::Null,
+                });
+            }
+        }
+        state.team_plans.push((team, plans));
     }
     Ok(())
 }
@@ -673,16 +762,35 @@ fn write_map(
 
 /// `SaveVersion.readMap` (ported against [`super::super::state::WorldContext`]).
 fn read_map(wire: &mut WireReader, state: &mut SaveReadState) -> Result<(), IoError> {
-    read_map_with(wire, state, false)
+    read_map_with(
+        wire,
+        state,
+        MapChunkFormat::Packed {
+            legacy_short: false,
+        },
+    )
 }
 
 /// Map-region reader shared by native v1 (4-byte tile-entity chunks) and
 /// legacy MSAV v4-9 (`ShortChunkSaveVersion.readMap`: `u16` chunks plus the
 /// legacy bit-2 tile-data byte).
+/// One legacy map region's tile-chunk framing (`readMap` per save version).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MapChunkFormat {
+    /// v4-13: a packed-check byte per tile; building chunks are `u16`-framed
+    /// for v4-9 (`ShortChunkSaveVersion`, the legacy tile-data bit) and
+    /// `u32`-framed for v10+ (`SaveVersion`).
+    Packed { legacy_short: bool },
+    /// v1-3 (`LegacySaveVersion`): no packed-check byte; a building tile
+    /// carries a `u16`-framed chunk with the pre-short base layout, every
+    /// other block an RLE run.
+    PreShort,
+}
+
 fn read_map_with(
     wire: &mut WireReader,
     state: &mut SaveReadState,
-    legacy_short: bool,
+    format: MapChunkFormat,
 ) -> Result<(), IoError> {
     let width = wire.us()?;
     let height = wire.us()?;
@@ -714,7 +822,7 @@ fn read_map_with(
         width,
         height,
         len,
-        legacy_short,
+        format,
     );
     if !generating {
         context.end();
@@ -732,7 +840,7 @@ fn read_map_body(
     width: u16,
     height: u16,
     len: usize,
-    legacy_short: bool,
+    format: MapChunkFormat,
 ) -> Result<(), IoError> {
     let stone = registry
         .block_id("stone")
@@ -769,6 +877,12 @@ fn read_map_body(
     }
 
     // Block pass.
+    if format == MapChunkFormat::PreShort {
+        return read_pre_short_blocks(wire, preview, all_buildings, context, registry, len);
+    }
+    let MapChunkFormat::Packed { legacy_short } = format else {
+        unreachable!("PreShort handled above");
+    };
     let mut i = 0usize;
     while i < len {
         let block_raw = i32::from(wire.s()?);
@@ -848,6 +962,70 @@ fn read_map_body(
             i += consecutives;
         }
         i += 1;
+    }
+    Ok(())
+}
+
+/// The `LegacySaveVersion.readMap` block pass (`MSAV` v1-3): each tile reads a
+/// `block` id; a building block carries a `u16`-framed chunk with the legacy
+/// base layout (`read_building_pre_short`), every other block an RLE run.
+///
+/// The old proxy blocks (`part_x_y`) are not in the current registry, so they
+/// resolve to `air`; the center's materialization assigns the whole footprint
+/// afterwards, exactly like the modern reader's proxy handling.
+#[allow(clippy::too_many_arguments)]
+fn read_pre_short_blocks(
+    wire: &mut WireReader,
+    preview: bool,
+    all_buildings: &mut Vec<usize>,
+    context: &mut dyn super::super::state::WorldContext,
+    registry: &ContentRegistry,
+    len: usize,
+) -> Result<(), IoError> {
+    let mut i = 0usize;
+    while i < len {
+        let block_raw = i32::from(wire.s()?);
+        let block = map_block_id(registry, block_raw);
+        if crate::world::block_has_building(registry, BlockId::new(block)) {
+            // `if(!occupied) tile.setBlock(block)`; the port has no entities
+            // during the read, so the occupied guard is unnecessary - the
+            // center's materialization assigns the footprint.
+            context.set_block(i, block);
+            if context.has_building(i) && !preview {
+                all_buildings.push(i);
+            }
+            let chunk_len = wire.us()? as usize;
+            if context.block_has_building_io(i) {
+                let payload = wire.bytes(chunk_len)?;
+                if chunk_len > 0 {
+                    let mut chunk = WireReader::new(payload);
+                    context
+                        .read_building_pre_short(i, &mut chunk, registry, BlockId::new(block))
+                        .map_err(|error| {
+                            IoError::corrupt(format!(
+                                "Failed to read tile entity of block: {block}: {error}"
+                            ))
+                        })?;
+                }
+            } else {
+                // The block lost its building IO (removed/changed): skip.
+                wire.skip(chunk_len)?;
+            }
+            context.on_read_building(i);
+            i += 1;
+        } else {
+            let consecutives = wire.ub()? as usize;
+            if i + consecutives >= len {
+                return Err(IoError::corrupt("block RLE run exceeds the tile count"));
+            }
+            // `air is a waste of time and may mess up multiblocks`.
+            if block != 0 {
+                for j in 1..=consecutives {
+                    context.set_block(i + j, block);
+                }
+            }
+            i += consecutives + 1;
+        }
     }
     Ok(())
 }
@@ -1215,5 +1393,150 @@ mod tests {
         assert_eq!(meta.height(), 24);
         assert_eq!(meta.tags.get("custom").unwrap(), "value");
         assert!(!meta.is_map());
+    }
+}
+
+/// T2 (PAR-0338): every shipped and authored map imports through the legacy
+/// `MSAV` reader. Third-party user maps are not vendored; point
+/// `MIND_USER_MAPS_DIR` at them (defaults to this checkout's parity Java
+/// profile) and run with `--ignored` for the user-map half.
+#[cfg(all(test, feature = "msav-import"))]
+mod import_tests {
+    use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+    use crate::editor::context::EditorContext;
+    use crate::io::save::{SaveIo, SaveReadState};
+    use crate::world::WorldGrid;
+    use std::path::{Path, PathBuf};
+
+    fn collect_maps(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect_maps(&path, out);
+            } else if path.extension().and_then(|ext| ext.to_str()) == Some("msav") {
+                out.push(path);
+            }
+        }
+    }
+
+    /// Loads one map through the full legacy reader (`SaveIO.load` equivalent).
+    fn load_map(path: &Path) -> Result<(), String> {
+        let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+        let mut content =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .map_err(|error| error.to_string())?;
+        let mut grid = WorldGrid::new(0, 0);
+        grid.begin_map_load();
+        let mut context = EditorContext::new(&mut grid, &content);
+        let mut state = SaveReadState {
+            context: Some(&mut context),
+            content: Some(&mut content),
+            ..SaveReadState::default()
+        };
+        SaveIo::load_bytes(&bytes, &mut state).map_err(|error| format!("{error:?}"))?;
+        Ok(())
+    }
+
+    fn assert_all_import(dir: &Path) -> usize {
+        let mut maps = Vec::new();
+        collect_maps(dir, &mut maps);
+        maps.sort();
+        assert!(!maps.is_empty(), "no maps under {}", dir.display());
+        let mut failed = Vec::new();
+        for path in &maps {
+            if let Err(error) = load_map(path) {
+                failed.push(format!("{}: {error}", path.display()));
+            }
+        }
+        assert!(
+            failed.is_empty(),
+            "{} of {} map(s) failed to import:\n{}",
+            failed.len(),
+            maps.len(),
+            failed.join("\n")
+        );
+        maps.len()
+    }
+
+    /// T2 (PAR-0338): all shipped Serpulo presets import, including the seven
+    /// (`hidden/176`, `hidden/247`, `hidden/254`, `hidden/263`, `hidden/92`,
+    /// `infestedCanyons`, `navalFortress`) that failed with strict-JSON errors.
+    #[test]
+    fn serpulo_presets_all_import() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../assets/maps/serpulo");
+        let count = assert_all_import(&dir);
+        eprintln!("imported {count} serpulo presets");
+    }
+
+    /// T2: every shipped map of every planet imports.
+    #[test]
+    fn all_shipped_maps_import() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../assets/maps");
+        let count = assert_all_import(&dir);
+        eprintln!("imported {count} shipped maps");
+    }
+
+    /// T2 (I06 Pass 1 deviation 7): the three authored user maps load —
+    /// `anthill_v5.msav.msav` (`bannedBlocks:{values:[...]}`), `CrashSite.msav.msav`
+    /// and `Attack_Secret_Island_Outpost_1.msav.msav` (`Error reading region
+    /// "map"`). Third-party maps are not vendored: set `MIND_USER_MAPS_DIR`.
+    #[test]
+    #[ignore = "third-party user maps are not vendored; set MIND_USER_MAPS_DIR"]
+    fn user_maps_import() {
+        let dir = user_maps_dir();
+        let count = assert_all_import(&dir);
+        eprintln!("imported {count} user maps from {}", dir.display());
+    }
+
+    /// T2: the authored user maps also render their preview (`MapIO.generatePreview`),
+    /// which is what the Custom Game map list binds.
+    #[test]
+    #[ignore = "third-party user maps are not vendored; set MIND_USER_MAPS_DIR"]
+    fn user_maps_generate_previews() {
+        let dir = user_maps_dir();
+        let mut maps = Vec::new();
+        collect_maps(&dir, &mut maps);
+        maps.sort();
+        assert!(!maps.is_empty(), "no maps under {}", dir.display());
+        let mut failed = Vec::new();
+        for path in &maps {
+            let result = (|| -> Result<crate::io::map::PreviewFacts, String> {
+                let bytes = std::fs::read(path).map_err(|error| error.to_string())?;
+                let mut content =
+                    create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                        .map_err(|error| error.to_string())?;
+                crate::io::map::MapIo::generate_preview_with_facts(&mut content, &bytes)
+                    .map(|(_image, facts)| facts)
+                    .map_err(|error| format!("{error:?}"))
+            })();
+            match result {
+                Ok(facts) => eprintln!(
+                    "preview {}: spawns {} teams {:?}",
+                    path.display(),
+                    facts.spawns,
+                    facts.teams
+                ),
+                Err(error) => failed.push(format!("{}: {error}", path.display())),
+            }
+        }
+        assert!(
+            failed.is_empty(),
+            "{} of {} preview(s) failed:\n{}",
+            failed.len(),
+            maps.len(),
+            failed.join("\n")
+        );
+    }
+
+    fn user_maps_dir() -> PathBuf {
+        std::env::var_os("MIND_USER_MAPS_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../parity-java-home/.local/share/Mindustry/maps")
+            })
     }
 }

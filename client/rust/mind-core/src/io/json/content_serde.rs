@@ -249,8 +249,34 @@ impl Serialize for ColorHex {
 
 impl<'de> Deserialize<'de> for ColorHex {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let raw = String::deserialize(deserializer)?;
-        Ok(Self::parse(&raw))
+        // Arc `Json.readValue(Color.class, ...)`: strings parse as hex
+        // (`Color.valueOf`); objects go through `readFields`, i.e. the
+        // component fields present (`{"a":0.12}` from an older writer that
+        // serialized the Color bean) with absent channels left at zero like
+        // Java's float defaults. Other scalars leave the color at zero
+        // (`readFields` over a non-object sets nothing).
+        let value = serde_json::Value::deserialize(deserializer)?;
+        match value {
+            serde_json::Value::String(raw) => Ok(Self::parse(&raw)),
+            serde_json::Value::Object(map) => {
+                let mut color = Rgba::CLEAR;
+                for (key, value) in &map {
+                    let channel = match key.as_str() {
+                        "r" => &mut color.r,
+                        "g" => &mut color.g,
+                        "b" => &mut color.b,
+                        "a" => &mut color.a,
+                        _ => continue,
+                    };
+                    let number = value.as_f64().ok_or_else(|| {
+                        serde::de::Error::custom(format!("color channel `{key}` is not a number"))
+                    })?;
+                    *channel = number as f32;
+                }
+                Ok(Self(color))
+            }
+            _ => Ok(Self(Rgba::CLEAR)),
+        }
     }
 }
 
@@ -435,5 +461,18 @@ mod tests {
             UnitTypeId::new(0)
         );
         assert_eq!(unit_from_name(&registry, None), UnitTypeId::new(0));
+    }
+
+    /// T2: older saves wrote a `Color` bean (`{"a":0.12}`);
+    /// `Json.readValue(Color.class, ...)`'s `readFields` branch reads the
+    /// component fields present and leaves absent channels at zero, while a
+    /// string still parses as hex.
+    #[test]
+    fn color_hex_accepts_component_objects() {
+        let color: ColorHex = serde_json::from_str(r#"{"a":0.12}"#).expect("color object");
+        assert_eq!((color.0.r, color.0.g, color.0.b), (0.0, 0.0, 0.0));
+        assert!((color.0.a - 0.12).abs() < 1e-6);
+        let white: ColorHex = serde_json::from_str("\"ffffffff\"").expect("hex string");
+        assert!((white.0.a - 1.0).abs() < 1e-6);
     }
 }

@@ -54,77 +54,344 @@ pub fn strip_legacy_prefix(input: &str) -> Cow<'_, str> {
     }
 }
 
-/// Rewrites Arc's lenient `Json` text into strict JSON: bare object keys
-/// (`{teams:{0:{}}}`) and bare string values (`type:dagger`, `text:@gz.conveyors`)
-/// are quoted, while literals (`true`/`false`/`null`) and numbers are left
-/// alone. String literals are copied verbatim. Used by the legacy `MSAV`
-/// import for `Rules`/game data; strict JSON is unchanged.
+/// Rewrites Arc's lenient `Json` text into strict JSON (what `JsonReader`
+/// accepts and `JsonWriter.OutputType.minimal` emits).
+///
+/// Arc's minimal writer leaves names and values unquoted whenever
+/// `minimalNamePattern`/`minimalValuePattern` match (`JsonWriter.java`,
+/// `OutputType.minimal`); `JsonReader.parse` then lexes unquoted names up to
+/// `:`/CR/LF and unquoted values up to `}`, `]`, `,`, CR or LF, classifies the
+/// token as `true`/`false`/`null`, a number (only `0-9`, `-`, `+`, `.`, `e`,
+/// `E` characters, parsed as long/double) or otherwise a string. This port
+/// re-emits that token stream as strict JSON: bare names and string values are
+/// quoted (escape sequences are decoded with Arc's `unescape` then re-encoded),
+/// keywords stay bare, and numeric tokens stay bare only when they are valid
+/// strict JSON numbers - Arc's own `JsonValue` keeps the raw text for numbers
+/// (`asString()`), and older saves such as `ambientLight:00000000` rely on
+/// that (the port's `ColorHex` reads the hex string).
+///
+/// Arc writes non-finite floats bare (`Infinity`/`-Infinity`); strict JSON has
+/// none, and the port's JSON model stores Java's `Float.POSITIVE_INFINITY` as
+/// `NEVER_F32` (`i32::MAX as f32`), so those two tokens map to its numeric
+/// sentinel. Strict JSON input is copied through unchanged.
 pub fn quote_bare_keys(text: &str) -> String {
-    fn is_bare(ch: char) -> bool {
-        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '@' | '#')
-    }
-    fn is_literal(token: &str) -> bool {
-        matches!(token, "true" | "false" | "null") || token.parse::<f64>().is_ok()
+    ArcMinimal::new(text).convert()
+}
+
+/// Token-level converter behind [`quote_bare_keys`].
+struct ArcMinimal {
+    chars: Vec<char>,
+    pos: usize,
+    out: String,
+}
+
+impl ArcMinimal {
+    fn new(text: &str) -> Self {
+        Self {
+            chars: text.chars().collect(),
+            pos: 0,
+            out: String::with_capacity(text.len() + 64),
+        }
     }
 
-    let chars: Vec<char> = text.chars().collect();
-    let mut out = String::with_capacity(text.len() + 64);
-    let mut index = 0;
-    while index < chars.len() {
-        let current = chars[index];
-        if current == '"' {
-            out.push(current);
-            index += 1;
-            while index < chars.len() {
-                out.push(chars[index]);
-                if chars[index] == '\\' && index + 1 < chars.len() {
-                    index += 1;
-                    out.push(chars[index]);
-                } else if chars[index] == '"' {
-                    index += 1;
-                    break;
-                }
-                index += 1;
-            }
-            continue;
+    fn convert(mut self) -> String {
+        self.skip_ws();
+        if self.pos < self.chars.len() {
+            self.value();
         }
-        if is_bare(current) {
-            let start = index;
-            while index < chars.len() && is_bare(chars[index]) {
-                index += 1;
+        self.out
+    }
+
+    fn peek(&self) -> Option<char> {
+        self.chars.get(self.pos).copied()
+    }
+
+    fn skip_ws(&mut self) {
+        while self.peek().is_some_and(char::is_whitespace) {
+            self.pos += 1;
+        }
+    }
+
+    fn value(&mut self) {
+        self.skip_ws();
+        match self.peek() {
+            Some('{') => self.object(),
+            Some('[') => self.array(),
+            Some('"') => self.quoted(),
+            Some(_) => self.unquoted_value(),
+            None => {}
+        }
+    }
+
+    fn object(&mut self) {
+        self.out.push('{');
+        self.pos += 1;
+        let mut first = true;
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some('}') => {
+                    self.pos += 1;
+                    self.out.push('}');
+                    return;
+                }
+                None => return,
+                Some(_) => {}
             }
-            let token: String = chars[start..index].iter().collect();
-            let mut next = index;
-            while next < chars.len() && chars[next].is_whitespace() {
-                next += 1;
+            if !first {
+                self.out.push(',');
             }
-            let key = next < chars.len() && chars[next] == ':';
-            // Arc `Json` writes non-finite floats as bare literals; strict JSON
-            // has no `Infinity`, and the port's JSON model stores Java's
-            // `Float.POSITIVE_INFINITY` as `NEVER_F32` (`i32::MAX as f32`, see
-            // `io::json::rules::NEVER_F32`) - the legacy import maps it there.
-            // (`NaN` has no sentinel; none of the shipped maps use it.)
-            if !key && (token == "Infinity" || token == "-Infinity") {
-                out.push_str(if token == "Infinity" {
-                    "2147483648.0"
-                } else {
-                    "-2147483648.0"
-                });
+            first = false;
+            self.name();
+            self.skip_ws();
+            if self.peek() == Some(':') {
+                self.pos += 1;
+                self.out.push(':');
+            }
+            self.value();
+            self.skip_ws();
+            if self.peek() == Some(',') {
+                self.pos += 1;
+            }
+        }
+    }
+
+    fn array(&mut self) {
+        self.out.push('[');
+        self.pos += 1;
+        let mut first = true;
+        loop {
+            self.skip_ws();
+            match self.peek() {
+                Some(']') => {
+                    self.pos += 1;
+                    self.out.push(']');
+                    return;
+                }
+                None => return,
+                Some(_) => {}
+            }
+            if !first {
+                self.out.push(',');
+            }
+            first = false;
+            self.value();
+            self.skip_ws();
+            if self.peek() == Some(',') {
+                self.pos += 1;
+            }
+        }
+    }
+
+    /// Arc unquoted name: up to `:`, CR, LF or a comment (`JsonReader`
+    /// `unquotedChars` name branch); trailing whitespace is trimmed.
+    fn name(&mut self) {
+        if self.peek() == Some('"') {
+            self.quoted();
+            return;
+        }
+        let start = self.pos;
+        while let Some(ch) = self.peek() {
+            if ch == ':' || ch == '\r' || ch == '\n' {
+                break;
+            }
+            if ch == '/'
+                && self
+                    .chars
+                    .get(self.pos + 1)
+                    .is_some_and(|c| *c == '/' || *c == '*')
+            {
+                break;
+            }
+            self.pos += 1;
+        }
+        let raw: String = self.chars[start..self.pos].iter().collect();
+        let trimmed = raw.trim_end();
+        write_json_string(&mut self.out, trimmed);
+    }
+
+    /// Quoted string: copied verbatim (already strict-JSON escapes).
+    fn quoted(&mut self) {
+        self.out.push('"');
+        self.pos += 1;
+        while let Some(ch) = self.peek() {
+            self.out.push(ch);
+            self.pos += 1;
+            if ch == '\\' {
+                if let Some(next) = self.peek() {
+                    self.out.push(next);
+                    self.pos += 1;
+                }
                 continue;
             }
-            if key || !is_literal(&token) {
-                out.push('"');
-                out.push_str(&token);
-                out.push('"');
-            } else {
-                out.push_str(&token);
+            if ch == '"' {
+                break;
             }
-            continue;
         }
-        out.push(current);
+    }
+
+    /// Arc unquoted value: up to `}`, `]`, `,`, CR or LF (`JsonReader`
+    /// `unquotedChars` value branch), with `\` escape awareness; classified by
+    /// the reader's keyword/number/string rules.
+    fn unquoted_value(&mut self) {
+        let start = self.pos;
+        while let Some(ch) = self.peek() {
+            if ch == '\\' {
+                self.pos += 1;
+                if self.peek().is_some() {
+                    self.pos += 1;
+                }
+                continue;
+            }
+            if ch == '/'
+                && self
+                    .chars
+                    .get(self.pos + 1)
+                    .is_some_and(|c| *c == '/' || *c == '*')
+            {
+                break;
+            }
+            if matches!(ch, '}' | ']' | ',' | '\r' | '\n') {
+                break;
+            }
+            self.pos += 1;
+        }
+        let raw: String = self.chars[start..self.pos].iter().collect();
+        let token = raw.trim_end();
+        if matches!(token, "true" | "false" | "null") {
+            self.out.push_str(token);
+            return;
+        }
+        if token == "Infinity" || token == "-Infinity" {
+            self.out.push_str(if token == "Infinity" {
+                "2147483648.0"
+            } else {
+                "-2147483648.0"
+            });
+            return;
+        }
+        if is_strict_json_number(token) {
+            self.out.push_str(token);
+            return;
+        }
+        // Arc classifies digit/dot/exponent tokens as numbers, but keeps the
+        // raw text (`JsonValue.asString`); the port preserves the token as a
+        // string so field-level readers (e.g. `ColorHex`) can consume it.
+        let unescaped = arc_unescape(token);
+        write_json_string(&mut self.out, &unescaped);
+    }
+}
+
+/// Whether `token` is a valid strict JSON number (Arc's numeric classification
+/// also accepts forms like `00000000`, which strict JSON rejects).
+fn is_strict_json_number(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    if bytes.is_empty() {
+        return false;
+    }
+    let mut index = 0;
+    if bytes[index] == b'-' {
         index += 1;
     }
+    match bytes.get(index) {
+        Some(b'0') => index += 1,
+        Some(ch) if ch.is_ascii_digit() => {
+            while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+                index += 1;
+            }
+        }
+        _ => return false,
+    }
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let frac_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == frac_start {
+            return false;
+        }
+    }
+    if matches!(bytes.get(index), Some(b'e' | b'E')) {
+        index += 1;
+        if matches!(bytes.get(index), Some(b'+' | b'-')) {
+            index += 1;
+        }
+        let exp_start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == exp_start {
+            return false;
+        }
+    }
+    index == bytes.len()
+}
+
+/// Arc `JsonReader.unescape` for unquoted tokens: `\n`/`\r`/`\t`/`\b`/`\f`/
+/// `\"`/`\\`/`\/` and `\uXXXX`. Unknown escapes keep both characters.
+fn arc_unescape(token: &str) -> String {
+    let chars: Vec<char> = token.chars().collect();
+    let mut out = String::with_capacity(token.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let ch = chars[index];
+        index += 1;
+        if ch != '\\' || index >= chars.len() {
+            out.push(ch);
+            continue;
+        }
+        let escaped = chars[index];
+        index += 1;
+        match escaped {
+            '"' | '\\' | '/' => out.push(escaped),
+            'b' => out.push('\u{0008}'),
+            'f' => out.push('\u{000C}'),
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            'u' => {
+                let hex: String = chars
+                    .get(index..index + 4)
+                    .map(|s| s.iter().collect())
+                    .unwrap_or_default();
+                if let Ok(code) = u32::from_str_radix(&hex, 16)
+                    && let Some(decoded) = char::from_u32(code)
+                {
+                    out.push(decoded);
+                    index += 4;
+                } else {
+                    out.push('u');
+                }
+            }
+            other => {
+                out.push('\\');
+                out.push(other);
+            }
+        }
+    }
     out
+}
+
+/// Writes `value` as a strict JSON string literal.
+fn write_json_string(out: &mut String, value: &str) {
+    out.push('"');
+    for ch in value.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\u{000C}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
 }
 
 /// `JsonIO` static API (`write`, `read`, `read_into`, `copy`, `print`).
@@ -385,5 +652,46 @@ mod tests {
             Some(-(crate::io::json::rules::NEVER_F32 as f64))
         );
         assert_eq!(parsed["finite"].as_f64(), Some(1.5));
+    }
+
+    /// T2: Arc's minimal writer leaves multi-word string values unquoted with
+    /// embedded quotes and `\n` escapes (the authored maps' logic-code
+    /// strings); `JsonReader` lexes them as one string token. The converter
+    /// must emit one escaped JSON string, not fragments.
+    #[test]
+    fn arc_json_unquoted_string_values_are_single_tokens() {
+        let arc = "{objectives:[{class:Flag,completionLogicCode:print \"@announce.nuclearstrike\"\\nmessage announce 7 @wait\\nstop\\n,flag:nuc1}],hidden:false}";
+        let strict = super::quote_bare_keys(arc);
+        let parsed: Value = serde_json::from_str(&strict).expect("strict json");
+        assert_eq!(
+            parsed["objectives"][0]["completionLogicCode"],
+            Value::String(
+                "print \"@announce.nuclearstrike\"\nmessage announce 7 @wait\nstop\n".to_owned()
+            )
+        );
+        assert_eq!(
+            parsed["objectives"][0]["flag"],
+            Value::String("nuc1".to_owned())
+        );
+    }
+
+    /// T2: `ambientLight:00000000` is Arc's `Color.toString()` written bare;
+    /// the converter keeps the token text so `ColorHex` can read it.
+    #[test]
+    fn arc_json_leading_zero_color_tokens_stay_strings() {
+        let arc = r#"{ambientLight:00000000,cloudColor:7457ce7f}"#;
+        let strict = super::quote_bare_keys(arc);
+        let parsed: Value = serde_json::from_str(&strict).expect("strict json");
+        assert_eq!(parsed["ambientLight"], Value::String("00000000".to_owned()));
+        assert_eq!(parsed["cloudColor"], Value::String("7457ce7f".to_owned()));
+    }
+
+    /// Strict JSON round-trips unchanged through the converter.
+    #[test]
+    fn arc_json_strict_input_is_preserved() {
+        let strict =
+            r#"{"a":"b:c","n":-1.5e3,"flag":true,"nil":null,"arr":[1,2],"nested":{"k":"v"}}"#;
+        let converted = super::quote_bare_keys(strict);
+        assert_eq!(converted, strict);
     }
 }

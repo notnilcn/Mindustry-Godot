@@ -177,6 +177,23 @@ pub trait WorldContext {
         version: u8,
     ) -> Result<(), IoError>;
 
+    /// Reads one pre-short-chunk building payload (`MSAV` v1-3,
+    /// `LegacySaveVersion.readMap`): the legacy base layout is decoded into the
+    /// pending-building queue for `index`. Contexts that never serve legacy
+    /// maps keep the default error.
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> Result<(), IoError> {
+        let _ = (index, reader, content, block);
+        Err(IoError::corrupt(
+            "pre-short-chunk building payloads are unsupported by this context",
+        ))
+    }
+
     /// Called when a building finished reading (`WorldContext.onReadBuilding`).
     fn on_read_building(&mut self, _index: usize) {}
 

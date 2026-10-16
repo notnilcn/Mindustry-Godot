@@ -157,6 +157,20 @@ impl WorldContext for Context<'_> {
         Ok(())
     }
 
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> Result<(), IoError> {
+        let mut decoded = super::building_io::DecodedBase::default();
+        super::building_io::read_base_pre_short(&mut decoded, reader, content, block)?;
+        decoded.body = reader.bytes(reader.remaining())?.to_vec();
+        self.pending_buildings.push((index, decoded));
+        Ok(())
+    }
+
     fn set_legacy_entities(&mut self, legacy: bool) {
         self.legacy_entities = legacy;
     }
@@ -287,6 +301,17 @@ impl WorldContext for FilterContext<'_> {
         version: u8,
     ) -> Result<(), IoError> {
         self.inner.read_building(index, reader, version)
+    }
+
+    fn read_building_pre_short(
+        &mut self,
+        index: usize,
+        reader: &mut WireReader,
+        content: &ContentRegistry,
+        block: BlockId,
+    ) -> Result<(), IoError> {
+        self.inner
+            .read_building_pre_short(index, reader, content, block)
     }
 
     fn is_map(&self) -> bool {
