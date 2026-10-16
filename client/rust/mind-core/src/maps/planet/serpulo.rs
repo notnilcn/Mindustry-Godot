@@ -255,6 +255,7 @@ struct Ids {
     dark_panel_4: BlockId,
     dark_panel_6: BlockId,
     dark_metal: BlockId,
+    metal_floor: BlockId,
     metal_floor_damaged: BlockId,
     snow_wall: BlockId,
     ice_wall: BlockId,
@@ -304,6 +305,7 @@ impl Ids {
             dark_panel_4: id("dark-panel-4"),
             dark_panel_6: id("dark-panel-6"),
             dark_metal: id("dark-metal"),
+            metal_floor: id("metal-floor"),
             metal_floor_damaged: id("metal-floor-damaged"),
             snow_wall: id("snow-wall"),
             ice_wall: id("ice-wall"),
@@ -401,7 +403,29 @@ pub struct SerpuloPlanetGenerator {
     pub naval: bool,
     /// Block color table for the hex-mesh `getColor` (built with the ids).
     colors: super::PlanetColorTable,
+    /// Per-sector globe state (`getEmissiveColor` + the megabase patch).
+    sector_glow: Vec<SectorGlow>,
     ids: Ids,
+}
+
+/// One sector's globe-glow state (`SerpuloPlanetGenerator.getEmissiveColor`
+/// and the `getBlock(p, true)` megabase patch).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SectorGlow {
+    /// `Sector.tile.v` (unit-sphere position).
+    pub v: [f32; 3],
+    /// `Sector.hasEnemyBase()`.
+    pub has_enemy_base: bool,
+    /// `Sector.isCaptured()`.
+    pub captured: bool,
+    /// `Sector.hasBase()`.
+    pub has_base: bool,
+    /// Whether the sector has a preset (`preset != null`).
+    pub has_preset: bool,
+    /// `preset.difficulty` (0-10; ignored for presetless sectors).
+    pub difficulty: f32,
+    /// `SectorInfo.lightCoverage`.
+    pub light_coverage: f32,
 }
 
 impl Default for SerpuloPlanetGenerator {
@@ -427,8 +451,15 @@ impl SerpuloPlanetGenerator {
             height_scl: 1.01,
             naval: false,
             colors: super::PlanetColorTable::default(),
+            sector_glow: Vec::new(),
             ids: Ids::load_empty(),
         }
+    }
+
+    /// Sets the per-sector globe state for `getEmissiveColor` and the megabase
+    /// patch (`MindCampaign.planet_mesh` projects the live campaign).
+    pub fn set_sector_glow(&mut self, sectors: Vec<SectorGlow>) {
+        self.sector_glow = sectors;
     }
 
     /// Loads the content ids and the hex-mesh color table for
@@ -437,6 +468,50 @@ impl SerpuloPlanetGenerator {
     pub fn load_content(&mut self, content: &ContentRegistry, sprite_colors: &[u32]) {
         self.ids = Ids::load(content);
         self.colors = super::PlanetColorTable::load(content, sprite_colors);
+    }
+
+    /// `SerpuloPlanetGenerator.getBlock(p, true)` (`:193-231`): the generated
+    /// floor plus the derelict-megabase metal/dark-panel patch near `basePos`
+    /// (only outside the tar branch and within `0.65` of the megabase).
+    fn visual_block(&self, position: [f32; 3]) -> BlockId {
+        let (block, tarred) = get_block_split(&self.planet, position, &self.ids);
+        let base_dst = distance(position, self.base_pos);
+        if tarred || base_dst >= 0.65 {
+            return block;
+        }
+        let mut dst = 999.0f32;
+        for sector in &self.sector_glow {
+            if sector.has_enemy_base {
+                dst = dst.min(distance(position, sector.v));
+            }
+        }
+        let freq = 0.05f32;
+        let freq2 = 0.07f32;
+        let [x, y, z] = position;
+        if dst * 0.85
+            + noise::noise3d(
+                self.planet.seed,
+                3,
+                0.4,
+                5.5,
+                x as f64,
+                (y + 200.0) as f64,
+                z as f64,
+            ) * 0.015
+            + if (base_dst % freq) < freq / 2.0 {
+                1.0
+            } else {
+                0.0
+            } * 0.07
+            < 0.15
+        {
+            return if (base_dst + 0.01) % freq2 < freq2 * 0.65 {
+                self.ids.metal_floor
+            } else {
+                self.ids.dark_panel_6
+            };
+        }
+        block
     }
 }
 
@@ -474,6 +549,7 @@ impl Ids {
             dark_panel_4: BlockId::AIR,
             dark_panel_6: BlockId::AIR,
             dark_metal: BlockId::AIR,
+            metal_floor: BlockId::AIR,
             metal_floor_damaged: BlockId::AIR,
             snow_wall: BlockId::AIR,
             ice_wall: BlockId::AIR,
@@ -524,12 +600,97 @@ impl HexMesher for SerpuloPlanetGenerator {
 
     fn get_color(&self, position: [f32; 3]) -> [f32; 4] {
         // `SerpuloPlanetGenerator.getColor` (`:133-138`): `Block.mapColor` with
-        // `1 - albedo` alpha (salt shown as sand).
-        let mut block = get_block_with(&self.planet, position, &self.ids);
+        // `1 - albedo` alpha (salt shown as sand; `getBlock(p, true)` includes
+        // the megabase patch).
+        let mut block = self.visual_block(position);
         if block == self.ids.salt {
             block = self.ids.sand;
         }
         self.colors.rgba(block)
+    }
+
+    fn get_emissive_color(&self, position: [f32; 3]) -> [f32; 4] {
+        // `SerpuloPlanetGenerator.getEmissiveColor` (`:141-183`): enemy-base
+        // crux glow and captured-sector sharded glow (`info.lightCoverage`).
+        let mut dst = 999.0f32;
+        let mut capture_dst = 999.0f32;
+        let mut light_scl = 0.0f32;
+        for sector in &self.sector_glow {
+            if sector.has_enemy_base && !sector.captured {
+                let offset = if sector.has_preset {
+                    sector.difficulty / 10.0 * 0.03 - 0.03
+                } else {
+                    0.0
+                };
+                dst = dst.min(distance(position, sector.v) - offset);
+            } else if sector.has_base {
+                let cdst = distance(position, sector.v);
+                if cdst < capture_dst {
+                    capture_dst = cdst;
+                    light_scl = sector.light_coverage;
+                }
+            }
+        }
+        light_scl = (light_scl / 50000.0).min(1.3);
+        if light_scl < 1.0 {
+            light_scl = crate::math::interp::Interp::Pow5Out.apply(light_scl);
+        }
+        let seed = self.planet.seed;
+        let [x, y, z] = position;
+        let base_dst = distance(position, self.base_pos);
+        // `Team.crux` (f25555) / `Team.sharded` (ffd37f) colours.
+        let crux = [
+            0xf2 as f32 / 255.0,
+            0x55 as f32 / 255.0,
+            0x55 as f32 / 255.0,
+        ];
+        let sharded = [
+            0xff as f32 / 255.0,
+            0xd3 as f32 / 255.0,
+            0x7f as f32 / 255.0,
+        ];
+        let metal_dst_scl = 0.25f32;
+        let freq = 0.05f32;
+        let enemy_glow = if base_dst < 0.3 {
+            dst * metal_dst_scl
+                + noise::noise3d(
+                    seed + 1,
+                    3,
+                    0.4,
+                    5.5,
+                    x as f64,
+                    (y + 200.0) as f64,
+                    z as f64,
+                ) * 0.08
+                + if (base_dst % freq) < freq / 2.0 {
+                    1.0
+                } else {
+                    0.0
+                } * 0.07
+                < 0.08
+        } else {
+            dst * metal_dst_scl
+                + noise::noise3d(seed, 3, 0.4, 9.0, x as f64, (y + 370.0) as f64, z as f64) * 0.06
+                < 0.045
+        };
+        if enemy_glow {
+            let scale = 0.8
+                + noise::noise3d(seed, 1, 1.0, 9.0, x as f64, (y + 99.0) as f64, z as f64) * 0.4;
+            let mix =
+                0.2 * noise::noise3d(seed, 1, 1.0, 9.0, x as f64, (y + 999.0) as f64, z as f64);
+            blend(crux, sharded, mix, scale)
+        } else if capture_dst * metal_dst_scl
+            + noise::noise3d(seed, 3, 0.4, 9.0, x as f64, (y + 600.0) as f64, z as f64) * 0.07
+            < 0.05 * light_scl
+        {
+            let scale = 0.7
+                + noise::noise3d(seed, 1, 1.0, 9.0, x as f64, (y + 99.0) as f64, z as f64) * 0.4;
+            let mix =
+                0.3 * noise::noise3d(seed, 1, 1.0, 9.0, x as f64, (y + 999.0) as f64, z as f64);
+            blend(sharded, crux, mix, scale)
+        } else {
+            [0.0, 0.0, 0.0, 0.0]
+        }
     }
 
     fn is_emissive(&self) -> bool {
@@ -540,6 +701,24 @@ impl HexMesher for SerpuloPlanetGenerator {
         // `MeshBuilder.buildHex`: `generator.seed = generator.baseSeed`.
         self.planet.seed = self.planet.base_seed;
     }
+}
+
+/// Euclidean distance between two points (`Vec3.dst`).
+fn distance(a: [f32; 3], b: [f32; 3]) -> f32 {
+    let dx = a[0] - b[0];
+    let dy = a[1] - b[1];
+    let dz = a[2] - b[2];
+    (dx * dx + dy * dy + dz * dz).sqrt()
+}
+
+/// `out.set(c1).mul(scale).lerp(c2, mix)` on rgb (alpha stays `1`).
+fn blend(c1: [f32; 3], c2: [f32; 3], mix: f32, scale: f32) -> [f32; 4] {
+    [
+        (c1[0] + (c2[0] - c1[0]) * mix) * scale,
+        (c1[1] + (c2[1] - c1[1]) * mix) * scale,
+        (c1[2] + (c2[2] - c1[2]) * mix) * scale,
+        1.0,
+    ]
 }
 
 fn dst2(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
@@ -1652,6 +1831,12 @@ fn spawn_group_to_json(
 
 /// `getBlock` against an explicit id table (shared by `genTile` and `getBlock`).
 fn get_block_with(planet: &PlanetGenerator, position: [f32; 3], ids: &Ids) -> BlockId {
+    get_block_split(planet, position, ids).0
+}
+
+/// The `getBlock(p, false)` lookup plus whether the tar branch applied (the
+/// `getBlock(p, true)` megabase patch runs only outside it).
+fn get_block_split(planet: &PlanetGenerator, position: [f32; 3], ids: &Ids) -> (BlockId, bool) {
     let seed = planet.seed;
     let scl = 5.0_f32;
     let height_y_offset = 42.7_f32;
@@ -1693,9 +1878,9 @@ fn get_block_with(planet: &PlanetGenerator, position: [f32; 3], ids: &Ids) -> Bl
     let col = ((height * 13.0) as i32).clamp(0, 12) as usize;
     let res = ids.arr[row][col];
     if tar > 0.5 {
-        ids.tar(res).unwrap_or(res)
+        (ids.tar(res).unwrap_or(res), true)
     } else {
-        res
+        (res, false)
     }
 }
 
@@ -1768,6 +1953,34 @@ mod tests {
             }
         }
         panic!("no deep-water tile on the divisions=6 grid");
+    }
+
+    /// T14: `getEmissiveColor` lights captured sectors (sharded) and enemy
+    /// bases (crux) from the live sector table; no sectors means no glow.
+    #[test]
+    fn serpulo_emissive_returns_sector_glow() {
+        let content = registry();
+        let mut generator = SerpuloPlanetGenerator::new();
+        generator.load_content(&content, &[]);
+        assert_eq!(
+            generator.get_emissive_color([0.3, 0.2, 0.9]),
+            [0.0, 0.0, 0.0, 0.0],
+            "no sectors -> no glow"
+        );
+        generator.set_sector_glow(vec![SectorGlow {
+            v: [0.0, 0.0, 1.0],
+            has_enemy_base: false,
+            captured: false,
+            has_base: true,
+            has_preset: false,
+            difficulty: 0.0,
+            light_coverage: 60_000.0,
+        }]);
+        let lit = (0..20).any(|i| {
+            let z = 0.85 + i as f32 * 0.005;
+            generator.get_emissive_color([0.0, 0.0, z])[3] > 0.0
+        });
+        assert!(lit, "a captured sector glows near its tile");
     }
 
     #[test]

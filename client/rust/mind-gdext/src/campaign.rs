@@ -104,6 +104,11 @@ pub struct MindCampaign {
     /// `Map.name` of the last `start_map_mode` custom game (I08 T4: the host
     /// match id / server-browser label for non-campaign worlds).
     current_map_name: Option<String>,
+    /// Cached `planet_mesh` build `(planet, mesh)`. The hex mesh costs a full
+    /// per-tile noise pass (Java caches it on `Planet.mesh`; `reloadMeshAsync`
+    /// rebuilds on capture/loss), so repeat dialog opens reuse it until a
+    /// capture/abandon invalidates the entry (T13/T14).
+    planet_mesh_cache: Option<(String, VarDictionary)>,
 }
 
 #[godot_api]
@@ -127,6 +132,7 @@ impl INode for MindCampaign {
             unlocked_since_last_take: Vec::new(),
             playtesting_map: None,
             current_map_name: None,
+            planet_mesh_cache: None,
         }
     }
 
@@ -1720,6 +1726,8 @@ impl MindCampaign {
             // `Logic.sectorCapture`'s "save, just in case": the capture
             // bookkeeping must be on disk before a restart (PAR-0081).
             self.persist_sector_record();
+            // `onSectorCaptured` -> `reloadMeshAsync` (T14).
+            self.planet_mesh_cache = None;
             return true;
         }
         // Menu fallback on the facade copy.
@@ -1728,6 +1736,7 @@ impl MindCampaign {
         };
         let events = sector_capture(&mut self.session, &mut campaign);
         self.campaign = Some(campaign);
+        self.planet_mesh_cache = None;
         !events.is_empty()
     }
 
@@ -3895,6 +3904,7 @@ impl MindCampaign {
         let _ = NativeFs.delete(&backup);
         self.persist();
         log::info!("abandoned campaign sector `{planet_name}:{sector_id}`");
+        self.planet_mesh_cache = None;
         true
     }
 
@@ -3932,6 +3942,7 @@ impl MindCampaign {
             return false;
         };
         self.persist();
+        self.planet_mesh_cache = None;
         true
     }
 
@@ -5116,11 +5127,16 @@ impl MindCampaign {
     /// `1 - albedo` alpha) and the emissive channel (`CUSTOM0`, `isEmissive()`
     /// planets only). Empty for planets without a hex generator.
     #[func]
-    pub fn planet_mesh(&self, planet: GString) -> VarDictionary {
+    pub fn planet_mesh(&mut self, planet: GString) -> VarDictionary {
         use mind_core::maps::generators::planet::HexMesher;
 
         let mut out = VarDictionary::new();
         let name = planet.to_string();
+        if let Some((cached_name, cached)) = &self.planet_mesh_cache
+            && cached_name == &name
+        {
+            return cached.clone();
+        }
         let Some(registry) = self.registry.as_ref() else {
             return out;
         };
@@ -5131,6 +5147,38 @@ impl MindCampaign {
             "serpulo" => {
                 let mut generator = mind_core::maps::planet::SerpuloPlanetGenerator::new();
                 generator.load_content(registry, &crate::render::minimap::load_block_colors());
+                // `getEmissiveColor` + the megabase patch read the live sector
+                // states (`Planets.serpulo.sectors`); project them from the
+                // campaign with the same grid the globe uses.
+                let grid = PlanetGrid::create(def.sector_tiles as usize);
+                let mut glow = Vec::new();
+                if let Some(planet) = self
+                    .campaign
+                    .as_ref()
+                    .and_then(|campaign| campaign.planet(def.id))
+                {
+                    for sector in &planet.sectors {
+                        // Only sectors that can contribute a glow (the per-tile
+                        // loop runs over the whole mesh).
+                        let captured = sector.is_captured(None);
+                        if !((sector.has_enemy_base() && !captured) || sector.has_base()) {
+                            continue;
+                        }
+                        let Some(tile) = grid.tiles.get(sector.id as usize) else {
+                            continue;
+                        };
+                        glow.push(mind_core::maps::planet::SectorGlow {
+                            v: tile.v,
+                            has_enemy_base: sector.has_enemy_base(),
+                            captured,
+                            has_base: sector.has_base(),
+                            has_preset: sector.preset.is_some(),
+                            difficulty: sector.preset_difficulty,
+                            light_coverage: sector.info.info.light_coverage,
+                        });
+                    }
+                }
+                generator.set_sector_glow(glow);
                 Box::new(generator)
             }
             "erekir" => {
@@ -5173,11 +5221,19 @@ impl MindCampaign {
         }
         out.set("indexed", mesh.indexed);
         out.set("emissive", emissive);
+        out.set(
+            "emissive_count",
+            mesh.emissive
+                .iter()
+                .filter(|&&color| (color & 0xff) > 0)
+                .count() as i64,
+        );
         out.set("vertices", &vertices);
         out.set("normals", &normals);
         out.set("colors", &colors);
         out.set("emissive_colors", &emissive_colors);
         out.set("indices", &indices);
+        self.planet_mesh_cache = Some((name, out.clone()));
         out
     }
 

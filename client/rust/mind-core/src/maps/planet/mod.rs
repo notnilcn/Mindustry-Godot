@@ -15,7 +15,7 @@ pub mod tantros;
 
 pub use asteroid::AsteroidGenerator;
 pub use erekir::ErekirPlanetGenerator;
-pub use serpulo::SerpuloPlanetGenerator;
+pub use serpulo::{SectorGlow, SerpuloPlanetGenerator};
 pub use tantros::TantrosPlanetGenerator;
 
 use crate::content::BlockId;
