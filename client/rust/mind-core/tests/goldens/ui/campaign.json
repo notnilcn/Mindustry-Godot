@@ -159,7 +159,12 @@
       "export": [],
       "import": [],
       "stored": [],
-      "resources": []
+      "resources": [],
+      "playtime_ms": 0,
+      "destination": null,
+      "import_sources": [],
+      "lockdown": false,
+      "preset_description_key": null
     },
     "launch_from": 170,
     "no_candidate": false,
@@ -211,5 +216,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "65a3cbaaaead4c4c"
+  "checksum": "26350bc2d719ed88"
 }

@@ -1,6 +1,19 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene load_steps=3 format=3]
 
 [ext_resource type="Script" path="res://ui/planet_view.gd" id="1_view"]
+
+[sub_resource type="Environment" id="Environment_bloom"]
+background_mode = 3
+glow_enabled = true
+glow_levels/1 = 0.4
+glow_levels/2 = 1.0
+glow_levels/3 = 0.8
+glow_levels/4 = 0.4
+glow_intensity = 0.9
+glow_strength = 1.0
+glow_bloom = 0.0
+glow_blend_mode = 0
+glow_hdr_threshold = 0.8
 
 [node name="PlanetView" type="Control"]
 visible = false
@@ -39,6 +52,9 @@ stretch = true
 transparent_bg = true
 render_target_update_mode = 4
 size = Vector2i(1152, 648)
+
+[node name="Bloom" type="WorldEnvironment" parent="ViewportContainer/SubViewport"]
+environment = SubResource("Environment_bloom")
 
 [node name="SectorLabel" type="RichTextLabel" parent="."]
 visible = false

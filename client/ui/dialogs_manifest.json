@@ -33,6 +33,7 @@
     {"name": "research_root_select", "scene": "res://scenes/ui/dialogs/research_root_select_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "schematics", "scene": "res://scenes/ui/dialogs/schematics_dialog.tscn", "pause": true, "menu_openable": false, "args": []},
     {"name": "sector_select", "scene": "res://scenes/ui/dialogs/sector_select_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
+    {"name": "sector_stats", "scene": "res://scenes/ui/dialogs/sector_stats_dialog.tscn", "pause": false, "menu_openable": false, "args": ["planet:Str", "sector:Int"]},
     {"name": "launch_loadout", "scene": "res://scenes/ui/dialogs/launch_loadout_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "loadout", "scene": "res://scenes/ui/dialogs/loadout_dialog.tscn", "pause": false, "menu_openable": false, "args": []},
     {"name": "custom", "scene": "res://scenes/ui/dialogs/custom_game_dialog.tscn", "pause": false, "menu_openable": true, "args": []},

@@ -114,6 +114,7 @@ const CODES := {
 const JAVA_ALIASES := {
 	"commandAttack": "command-attack",
 	"commandRally": "command-rally",
+	"eyeSmall": "eye",
 	"modePvp": "mode-pvp",
 	"modeSurvival": "mode-survival",
 	"warning": "warn",

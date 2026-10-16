@@ -1332,6 +1332,8 @@ pub struct BlockSpec {
     pub always_unlocked: Option<bool>,
     /// Map color.
     pub map_color: Option<Rgba>,
+    /// `Block.albedo`: the mesh alpha is `1 - albedo` (planet globe tint).
+    pub albedo: Option<f32>,
     /// Use this block's color in the minimap.
     pub has_color: Option<bool>,
     /// Square sprite.
@@ -1474,6 +1476,7 @@ impl Default for BlockSpec {
             generate_icons: None,
             always_unlocked: None,
             map_color: None,
+            albedo: None,
             has_color: None,
             square_sprite: None,
             cache_layer: None,
@@ -2225,6 +2228,8 @@ pub struct BlockDef {
     pub bars: Vec<BarSpec>,
     /// Map color.
     pub map_color: Option<Rgba>,
+    /// `Block.albedo` (`1f - albedo` is the planet-mesh alpha; default 0).
+    pub albedo: f32,
     /// Use the block color in the minimap.
     pub has_color: bool,
     /// Square sprite.
@@ -2565,6 +2570,7 @@ impl BlockDef {
             stats: Vec::new(),
             bars: Vec::new(),
             map_color: spec.map_color,
+            albedo: spec.albedo.unwrap_or(0.0),
             has_color: spec.has_color.unwrap_or(false),
             square_sprite: spec.square_sprite.unwrap_or(true),
             cache_layer: spec.cache_layer.unwrap_or(CacheLayerId::Normal),

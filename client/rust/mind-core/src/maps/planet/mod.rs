@@ -15,15 +15,63 @@ pub mod tantros;
 
 pub use asteroid::AsteroidGenerator;
 pub use erekir::ErekirPlanetGenerator;
-pub use serpulo::SerpuloPlanetGenerator;
+pub use serpulo::{SectorGlow, SerpuloPlanetGenerator};
 pub use tantros::TantrosPlanetGenerator;
 
+use crate::content::BlockId;
 use crate::content::ContentRegistry;
 use crate::game::rules::Rules;
 use crate::maps::generators::planet::{FlatSectorView, SectorRect, make_rect};
 use crate::maps::generators::{BlankPlanetGenerator, WorldGenerator};
 use crate::render::g3d::grid::PlanetGrid;
 use crate::world::{WorldGrid, WorldParams};
+
+/// `Block.mapColor` + `1 - albedo` alpha per block id (the hex-mesh
+/// `getColor` table). Blocks without a map colour read as Java's default black
+/// (`Block.java:304` `new Color(0, 0, 0, 1)`), and the default albedo is `0`.
+#[derive(Debug, Clone, Default)]
+pub struct PlanetColorTable {
+    colors: Vec<([f32; 3], f32)>,
+}
+
+impl PlanetColorTable {
+    /// Builds the table from the block registry plus the `sprites/block_colors
+    /// .png` row (`ContentLoader.loadColors.java:140-152`: a non-0/non-255
+    /// sprite-centre pixel overwrites `Block.mapColor` and forces alpha `1`).
+    pub fn load(content: &ContentRegistry, sprite_colors: &[u32]) -> Self {
+        let mut colors = vec![([0.0, 0.0, 0.0], 0.0f32); content.blocks().len()];
+        for block in content.blocks() {
+            let mut rgb = block
+                .map_color
+                .map(|color| [color.r, color.g, color.b])
+                .unwrap_or([0.0, 0.0, 0.0]);
+            if let Some(&packed) = sprite_colors.get(block.id.raw() as usize)
+                && packed != 0
+                && packed != 255
+            {
+                rgb = [
+                    f32::from(((packed >> 24) & 0xff) as u8) / 255.0,
+                    f32::from(((packed >> 16) & 0xff) as u8) / 255.0,
+                    f32::from(((packed >> 8) & 0xff) as u8) / 255.0,
+                ];
+            }
+            if let Some(entry) = colors.get_mut(block.id.raw() as usize) {
+                *entry = (rgb, block.albedo);
+            }
+        }
+        Self { colors }
+    }
+
+    /// `out.set(block.mapColor).a(1f - block.albedo)` for a block id.
+    pub fn rgba(&self, block: BlockId) -> [f32; 4] {
+        let (rgb, albedo) = self
+            .colors
+            .get(block.raw() as usize)
+            .copied()
+            .unwrap_or(([0.0, 0.0, 0.0], 0.0));
+        [rgb[0], rgb[1], rgb[2], 1.0 - albedo]
+    }
+}
 
 /// Builds the vanilla planet generator for a planet content name
 /// (`Planets.java` generator assignment). `seed` feeds the asteroid generator;

@@ -145,6 +145,8 @@ pub struct ErekirPlanetGenerator {
     pub sector: FlatSectorView,
     /// Player spawn (`spawnX`, `spawnY`).
     pub spawn: (i32, i32),
+    /// Block color table for the hex-mesh `getColor`.
+    colors: super::PlanetColorTable,
     ids: Ids,
     /// Height scale (`heightScl`).
     pub height_scl: f32,
@@ -173,6 +175,7 @@ impl ErekirPlanetGenerator {
             planet,
             sector: FlatSectorView::default(),
             spawn: (0, 0),
+            colors: super::PlanetColorTable::default(),
             ids: Ids::default(),
             height_scl: 0.9,
             octaves: 8,
@@ -180,6 +183,14 @@ impl ErekirPlanetGenerator {
             height_pow: 3.0,
             height_mult: 1.6,
         }
+    }
+
+    /// Loads the content ids and the hex-mesh color table for
+    /// `MindCampaign.planet_mesh` (`sprite_colors` is the
+    /// `sprites/block_colors.png` row; empty when the pack output is absent).
+    pub fn load_content(&mut self, content: &ContentRegistry, sprite_colors: &[u32]) {
+        self.ids = Ids::load(content);
+        self.colors = super::PlanetColorTable::load(content, sprite_colors);
     }
 }
 
@@ -286,14 +297,18 @@ impl HexMesher for ErekirPlanetGenerator {
     }
 
     fn get_color(&self, position: [f32; 3]) -> [f32; 4] {
-        // `Block.mapColor` with `1 - albedo` alpha. The color table is a plan-16
-        // render detail; the block selection still runs so plan 16 can consume
-        // it (kept as an opaque placeholder here).
-        let mut _block = get_block(self.planet.seed, position, &self.ids);
-        if _block == self.ids.crystalline_stone {
-            _block = self.ids.crystal_floor;
+        // `ErekirPlanetGenerator.getColor`: `Block.mapColor` with `1 - albedo`
+        // alpha (crystalline stone shown as crystal floor).
+        let mut block = get_block(self.planet.seed, position, &self.ids);
+        if block == self.ids.crystalline_stone {
+            block = self.ids.crystal_floor;
         }
-        [0.0, 0.0, 0.0, 1.0]
+        self.colors.rgba(block)
+    }
+
+    fn reseed(&mut self) {
+        // `MeshBuilder.buildHex`: `generator.seed = generator.baseSeed`.
+        self.planet.seed = self.planet.base_seed;
     }
 }
 

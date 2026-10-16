@@ -32,9 +32,11 @@ pub trait HexMesher {
         [0.0, 0.0, 0.0, 1.0]
     }
 
-    /// Emissive color at a position (rgba).
+    /// Emissive color at a position (rgba). `MeshBuilder.buildHex` zeroes the
+    /// color before each call (`tmpCol.set(0,0,0,0)`), so the default is fully
+    /// transparent (no glow) like Java's untouched `out`.
     fn get_emissive_color(&self, _position: [f32; 3]) -> [f32; 4] {
-        [0.0, 0.0, 0.0, 1.0]
+        [0.0, 0.0, 0.0, 0.0]
     }
 
     /// Whether the mesh emits light.
@@ -46,6 +48,10 @@ pub trait HexMesher {
     fn skip(&self, _position: [f32; 3]) -> bool {
         false
     }
+
+    /// `MeshBuilder.buildHex`: `generator.seed = generator.baseSeed`. The
+    /// default is a no-op; generators with a mutable seed reset it here.
+    fn reseed(&mut self) {}
 }
 
 /// The projected sector plane (`Sector.SectorRect`).
