@@ -17,15 +17,24 @@ var _defaults: MindCell = null
 var _background_name := ""
 var _margin_value := 0.0
 var _sorting := false
+## A resize that arrived mid-sort; re-queued once the current sort finishes.
+var _resort_after_sort := false
 
 
 func _notification(what: int) -> void:
 	# Re-run layout when the container is resized. A deferred `queue_sort()` can
 	# fire before the parent assigns the final size, leaving grow cells at their
 	# minimum; re-sorting here lets them fill once the size is known. The guard
-	# stops a child min-size change from recursing mid-sort.
-	if what == NOTIFICATION_RESIZED and not _sorting:
-		queue_sort()
+	# stops a child min-size change from recursing mid-sort, but a resize that
+	# lands *while* a sort runs (a floating dialog panel shrinking to the new
+	# content's width in the same pass) must not be dropped — the cells would
+	# keep the stale width's positions. Latch it and re-queue at the end of the
+	# sort instead.
+	if what == NOTIFICATION_RESIZED:
+		if _sorting:
+			_resort_after_sort = true
+		else:
+			queue_sort()
 
 
 ## Appends `child` to the current row and returns its [MindCell].
@@ -203,6 +212,10 @@ func _sort_children_inner() -> void:
 			)
 		)
 		_place(control, inner, cell)
+
+	if _resort_after_sort:
+		_resort_after_sort = false
+		queue_sort()
 
 
 func _place(control: Control, rect: Rect2, cell: MindCell) -> void:

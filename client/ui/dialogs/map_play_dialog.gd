@@ -171,6 +171,12 @@ func _build() -> void:
 	# .size(210f, 64f)`.
 	_add_action_button(_t("@back"), "left", _close_pressed)
 	_add_action_button(_t("@play"), "play", func() -> void: _play(_mode, _playtest))
+	# The floating panel is reused across maps and only shrinks to the new
+	# content's width after the first layout pass (the Map Play dialog is
+	# `setFillParent(false)`), so re-run the table layout once the panel has
+	# its final size — otherwise the cells keep the previous map's offsets and
+	# a portrait preview can hang outside the panel.
+	call_deferred("_resort_tables")
 
 
 ## A 210x64 `Tex.button` action button with an icon (`BaseDialog` buttons row).
