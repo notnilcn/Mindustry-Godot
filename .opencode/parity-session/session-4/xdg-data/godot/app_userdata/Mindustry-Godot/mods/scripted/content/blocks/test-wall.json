@@ -1,0 +1,6 @@
+{
+  "name": "Test Wall",
+  "size": 2,
+  "health": 200,
+  "requirements": ["test-ingot/20"]
+}

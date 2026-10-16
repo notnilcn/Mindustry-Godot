@@ -114,9 +114,16 @@ wave-3 re-run list.
 | Plan | Session | State |
 |---|---|---|
 | I00 | 1 (main) | done 2026-10-15: merge a4578878, ledger 91492792, marker c2ba1f69; tests 2551/133/47, goldens 97 PASS |
-| I01, I03, I05, I06 | 2, 3, 4, 5 | wave 1 running (started 2026-10-15 ~13:5x) |
-| I02, I04, I07 | wave 2 | waiting |
-| I08 | wave 3 (two slots) | waiting |
+| I01 | 2 | DONE (T1-T16), merged through 6f4530cd |
+| I02 | 4 | pass 1-2 merged (T1-T10; T9 verified no-change); pass 3 running (T11 residuals) |
+| I03 | 5 | DONE (T1-T14); merged 51a55a23; PAR-0103 verified |
+| I04 | 2 | pass 2 partial: T8/T9 committed (parity/session-2) and merging; T10 mid-task left uncommitted — pass 3 relaunched to finish it + T10-T17 |
+| I05 | 4 | DONE (T1-T5), merged 546ceaab |
+| I06 | 5 | pass 1-7 merged (872a7430); pass 8 running (T12.4/T12.5 residuals + T12.9 investigation) |
+| I07 | 4 | DONE (T1-T8) + T6 sandbox half (d60dfee3); PAR-0115 fully verified |
+| I08 | 3+4 (two slots) | running its CURRENT pass only — **DEFERRED by operator 2026-10-16**: no continuation pass is launched after this one; any commits it lands are merged, gated and documented |
+
+Coordinator notes: user's `046ab375 "manual commit"` (mid-run) tracked `.opencode` caches + `parity-ledger.json` + docs plans; worktrees' ledger symlinks are `skip-worktree`-protected so `git merge main` works. **Operator deferred I08 (multiplayer) on 2026-10-16**: the in-flight pass finishes, its output is merged/gated/documented, and no further multiplayer pass is launched. Coordinator fix `4f95c4e0` (I06 settings-hub call sites found by the merge gate). Main gate after the I04-p1 merge (2026-10-16): mind-core 2671 / headless 133 / gdext 51, goldens 97 PASS.
 
 ## 6. Known non-issues (do not re-investigate)
 

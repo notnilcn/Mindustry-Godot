@@ -1,0 +1,6 @@
+{
+  "name": "Test Ingot",
+  "description": "An ingot-only asset fixture item.",
+  "hardness": 2,
+  "cost": 0.9
+}
