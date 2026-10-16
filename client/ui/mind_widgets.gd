@@ -196,6 +196,11 @@ static func slider(minimum: float, maximum: float, step: float) -> HSlider:
 	result.max_value = maximum
 	result.step = step
 	result.theme_type_variation = "defaultSlider"
+	# Arc `Slider` has no `scrolled` handler: in Java the wheel falls through to
+	# the surrounding `ScrollPane` and never moves a slider. Godot sliders are
+	# `scrollable` by default, which adjusted the value under the pointer while
+	# the pane scrolled (J10 T2 item 3).
+	result.scrollable = false
 	return result
 
 
