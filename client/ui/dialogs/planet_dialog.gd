@@ -92,6 +92,10 @@ func _ready() -> void:
 
 
 func shown() -> void:
+	# `PlanetDialog.show` (`PlanetDialog.java:257`): `selected = hovered =
+	# launchSector = null` — the page opens with no sector selected (no panel,
+	# no band); `lookAt(getLastSector())` below only turns the camera.
+	_selected_sector = -1
 	# "view current planet by default" (`PlanetDialog.show`): inside a campaign
 	# sector the page opens on that sector's planet, never the chooser.
 	_adopt_current_sector()
@@ -107,9 +111,9 @@ func shown() -> void:
 			_show_select()
 			chooser_shown = true
 		else:
-			_show_planet(_boot_planet(based))
+			_show_planet(_boot_planet(based), false)
 	else:
-		_show_planet(_selected_planet)
+		_show_planet(_selected_planet, false)
 	# `PlanetDialog.show` (`:260-288`): zoom reset, camera to the last sector
 	# and the new-preset reveal collection. The chooser never reaches here.
 	if not chooser_shown:
@@ -197,9 +201,10 @@ func _build() -> void:
 	_root = content_table()
 
 
-## `PlanetDialog.show`: `state.rules.sector != null` -> `state.planet =
-## sector.planet` (and the camera looks at that sector). Reads the live session
-## through `MindCampaign.get_sector_state`.
+## `PlanetDialog.show` (`PlanetDialog.java:244-248`): `state.rules.sector !=
+## null` -> `state.planet = sector.planet`. Only the planet is adopted; Java
+## leaves `selected` null (the camera turns to `getLastSector()`). Reads the
+## live session through `MindCampaign.get_sector_state`.
 func _adopt_current_sector() -> void:
 	var campaign := campaign_node()
 	if campaign == null or not campaign.has_method("get_sector_state"):
@@ -213,13 +218,8 @@ func _adopt_current_sector() -> void:
 	var planet_name := str(sector_state.get("planet", ""))
 	if planet_name.is_empty():
 		return
-	if planet_name != _selected_planet:
-		_selected_sector = -1
 	_selected_planet = planet_name
 	refresh_campaign_views(planet_name)
-	var sector_id := int(sector_state.get("sector", -1))
-	if sector_id >= 0 and not _find_sector(planet_name, sector_id).is_empty():
-		_selected_sector = sector_id
 
 
 ## Names of the landable planets with at least one `Sector.hasBase` sector

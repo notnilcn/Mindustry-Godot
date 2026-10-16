@@ -7,8 +7,10 @@
 
 pub mod grid;
 pub mod mesh_data;
+pub mod orbit;
 pub mod params;
 
 pub use grid::{Corner, Edge, PlanetGrid, Ptile};
 pub use mesh_data::{MeshData, build_planet_grid, hex_is_indexed};
+pub use orbit::{PlanetLight, planet_light};
 pub use params::PlanetParams;

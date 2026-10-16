@@ -25,10 +25,9 @@ const SECTOR_ICON_SIZE := 0.106
 
 ## `PlanetRenderer.outlineColor`/`hoverColor` are Pal.accent (#ffd37f).
 const ACCENT := Color(1.0, 0.827, 0.498)
-## `Planet.getLightNormal()` = normalize(sun.position - planet.position). Orbit
-## positions are not simulated in the port, so the direction is fitted to the
-## reference frame's halo (bright on the right/upper-right limb).
-const LIGHT_NORMAL := Vector3(0.9036, 0.1988, 0.3795)
+## `PlanetShader.lightDir` initial value (`Shaders.java:109`), used until
+## `MindCampaign.planet_light` answers.
+const DEFAULT_LIGHT := Vector3(0.57735, 0.57735, 0.57735)
 
 @onready var space: TextureRect = $Space
 @onready var sector_label: RichTextLabel = $SectorLabel
@@ -70,6 +69,11 @@ var _corners := PackedVector3Array()
 var _tile_corners: Array = []
 var _grid_material: ShaderMaterial = null
 var _body_material: ShaderMaterial = null
+## `HexMesh.preRender` light in the planet mesh frame (`MindCampaign.planet_light`):
+## `(solarSystem.position - position).rotate(Y, getRotation()).nor()` at the
+## current `universe.secondsf()`, and `solarSystem.lightColor`.
+var _light_dir := DEFAULT_LIGHT
+var _ambient := Color(1.0, 1.0, 1.0)
 var _sector_label_text := ""
 ## Preset whose icon is drawn inside the selected hex (`renderProjections`).
 var _sector_icon_preset := ""
@@ -142,6 +146,7 @@ func set_planet(name: String) -> bool:
 	_tiles = data.get("tiles", PackedVector3Array())
 	_corners = data.get("corners", PackedVector3Array())
 	_tile_corners = data.get("tile_corners", [])
+	_refresh_light()
 	_build_body()
 	_build_grid()
 	_build_atmosphere()
@@ -404,6 +409,9 @@ func _process(delta: float) -> void:
 	var distance := (radius + cam_radius) * CAM_LENGTH + (zoom - 1.0) * (radius + cam_radius) * 2.0
 	camera.position = cam_pos.normalized() * distance
 	camera.look_at(Vector3.ZERO, Vector3.UP)
+	# `HexMesh.preRender` runs every frame; the sun direction moves with
+	# `universe.secondsf()` (orbit + spin), so re-read it.
+	_refresh_light()
 	_update_atmosphere_camera()
 	# `PlanetDialog.draw`: `uiAlpha = lerpDelta(uiAlpha, zoom < 1.9 ? 1 : 0, 0.1)`
 	# and `absin(Time.time, 10, 1)` are baked into the marker rebuilds (Java
@@ -600,8 +608,8 @@ func _build_body() -> void:
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/planet.gdshader")
 	material.render_priority = -8
-	material.set_shader_parameter("u_lightdir", LIGHT_NORMAL)
-	material.set_shader_parameter("u_ambientColor", Color(1.0, 1.0, 1.0))
+	material.set_shader_parameter("u_lightdir", _light_dir)
+	material.set_shader_parameter("u_ambientColor", _ambient)
 	material.set_shader_parameter(
 		"u_emissive", 1.0 if bool(mesh_data.get("emissive", false)) else 0.0
 	)
@@ -675,7 +683,10 @@ func _build_atmosphere() -> void:
 	material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
 	material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))
 	material.set_shader_parameter("u_color", atmos.get("color", Color(0.3, 0.7, 1.0)))
-	material.set_shader_parameter("u_light", LIGHT_NORMAL)
+	# `AtmosphereShader.apply` passes `planet.getLightNormal()` against a
+	# world-space camera; the port's camera lives in the planet mesh frame, so
+	# the same sun direction is used in that frame.
+	material.set_shader_parameter("u_light", _light_dir)
 	atmosphere.material_override = material
 	atmosphere.visible = true
 	_update_atmosphere_camera()
@@ -695,8 +706,29 @@ func _update_atmosphere_camera() -> void:
 	_update_body_camera()
 
 
+## `HexMesh.preRender` (`HexMesh.java:22-27`): the sun direction in the planet
+## mesh frame and the sun's light colour, pushed to the body and atmosphere.
+func _refresh_light() -> void:
+	if planet.is_empty():
+		return
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign == null or not campaign.has_method("planet_light"):
+		return
+	var light: Dictionary = campaign.call("planet_light", planet)
+	if light.is_empty():
+		return
+	_light_dir = light.get("light_dir", DEFAULT_LIGHT)
+	_ambient = light.get("ambient", Color(1.0, 1.0, 1.0))
+	if _body_material != null:
+		_body_material.set_shader_parameter("u_lightdir", _light_dir)
+		_body_material.set_shader_parameter("u_ambientColor", _ambient)
+	if atmosphere.material_override is ShaderMaterial:
+		(atmosphere.material_override as ShaderMaterial).set_shader_parameter("u_light", _light_dir)
+
+
 ## `Shaders.PlanetShader.apply`: `u_campos` is the camera and `u_camdir` its
-## direction (the port does not model planet rotation).
+## direction. The port keeps the camera in the planet mesh frame (Java's
+## world camera rotated by `getRotation()`), matching `u_lightdir`.
 func _update_body_camera() -> void:
 	if _body_material == null:
 		return

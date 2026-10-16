@@ -39,7 +39,17 @@ void vertex() {
 	v_col = vec4(mix(COLOR.rgb, CUSTOM0.rgb, emissive), 1.0) * vec4(mix(norc, vec3(1.0), emissive), 1.0);
 }
 
+// `planet.frag` writes `v_col` straight to the (gamma-space) framebuffer. A
+// Godot 3D viewport treats ALBEDO as linear and encodes it to sRGB on output,
+// which lifted the dark (night) side of the globe to a flat grey; decode the
+// interpolated colour so the displayed value is Java's `v_col`.
+vec3 srgb_to_linear(vec3 c) {
+	vec3 lo = c / 12.92;
+	vec3 hi = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
+	return mix(hi, lo, lessThan(c, vec3(0.04045)));
+}
+
 void fragment() {
-	ALBEDO = v_col.rgb;
+	ALBEDO = srgb_to_linear(max(v_col.rgb, vec3(0.0)));
 	ALPHA = v_col.a;
 }

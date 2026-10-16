@@ -1883,6 +1883,46 @@ impl MindCampaign {
         )
     }
 
+    /// `universe.secondsf()` (`Universe.java:289-291`): the runtime copy while
+    /// a sector is installed, else the facade; `0` with no campaign.
+    fn universe_secondsf(&self) -> f32 {
+        let facade = self
+            .campaign
+            .as_ref()
+            .map_or(0.0, |campaign| campaign.universe.secondsf(false));
+        self.host()
+            .and_then(|host| host.bind().campaign_universe_secondsf())
+            .unwrap_or(facade)
+    }
+
+    /// `Shaders.planet` lighting for the globe (`HexMesh.preRender`,
+    /// `HexMesh.java:22-27`): `light_dir` is
+    /// `(solarSystem.position - position).rotate(Y, getRotation()).nor()` in
+    /// the planet's mesh frame at the current `universe.secondsf()`, and
+    /// `ambient` is `solarSystem.lightColor`. Empty for an unknown planet.
+    #[func]
+    pub fn planet_light(&self, planet: GString) -> VarDictionary {
+        let mut out = VarDictionary::new();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        let Some(def) = registry.planet_by_name(&planet.to_string()) else {
+            return out;
+        };
+        let index = def.id.index();
+        let light = mind_core::render::g3d::planet_light(
+            registry.planets(),
+            index,
+            self.universe_secondsf(),
+        );
+        let [x, y, z] = light.light_dir;
+        let [r, g, b] = light.ambient;
+        out.set("light_dir", Vector3::new(x, y, z));
+        out.set("ambient", Color::from_rgb(r, g, b));
+        out.set("rotation", light.rotation);
+        out
+    }
+
     /// The live record of one sector as JSON (T1 seam): the `SectorInfo` serde
     /// (camelCase) plus `"beingPlayed"` and `"hasSave"`; `"{}"` when unknown.
     /// Reads the runtime copy while a sector is installed, else the facade.
