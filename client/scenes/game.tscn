@@ -67,9 +67,9 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("4_menubg")
 
-[node name="UiRoot" parent="Ui" unique_id=1318437125 instance=ExtResource("2_uiroot")]
-
 [node name="EditorDialog" parent="Ui" unique_id=1972126241 instance=ExtResource("3_editor")]
+
+[node name="UiRoot" parent="Ui" unique_id=1318437125 instance=ExtResource("2_uiroot")]
 
 [node name="StateInspector" parent="Ui" unique_id=1200639430 instance=ExtResource("1_inspector")]
 
