@@ -26,7 +26,11 @@ var _game_over_shown := false
 @onready var fps_label: Label = get_node_or_null("FpsBox/Fps")
 @onready var memory_label: Label = get_node_or_null("FpsBox/Memory")
 @onready var ping_label: Label = get_node_or_null("FpsBox/Ping")
-@onready var core_items: CoreItemsDisplay = get_node_or_null("CoreInfo/CoreItems")
+@onready var core_items: CoreItemsDisplay = get_node_or_null("CoreInfo/CoreItemsPanel/CoreItems")
+## `coreItems` table background (`Styles.black6`, `margin(4)` once an item is used).
+@onready var core_items_panel: PanelContainer = get_node_or_null("CoreInfo/CoreItemsPanel")
+## `t.collapser(v -> v.add().height(pauseHeight), paused)` above the core info.
+@onready var pause_spacer: Control = get_node_or_null("CoreInfo/PauseSpacer")
 @onready var paused_banner: RichTextLabel = get_node_or_null("PausedBanner")
 @onready var waiting_banner: RichTextLabel = get_node_or_null("WaitingBanner")
 @onready var hud_text: RichTextLabel = get_node_or_null("CoreInfo/HudText")
@@ -383,17 +387,32 @@ func _on_skip_wave() -> void:
 	refresh()
 
 
-## `HudFragment` core-items table fed from the live sim core inventory.
+## `HudFragment` core-info table (`HudFragment.java:579-596`): anchored
+## top-centre; a `pauseHeight` (36) spacer drops it below the paused bar while
+## paused (and not waiting for players); the core-items table fed from the live
+## sim core inventory sits first.
 func _refresh_core_items() -> void:
 	if core_items == null or _hud == null:
 		return
+	if pause_spacer != null:
+		pause_spacer.visible = bool(_hud.get("paused")) and not bool(_hud.get("waiting"))
 	# `HudFragment.java:594`: the table is gated on `settings.getBool("coreitems")`.
+	var enabled := true
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("settings_get_bool"):
-		core_items.visible = bool(ui.call("settings_get_bool", "coreitems"))
+		enabled = bool(ui.call("settings_get_bool", "coreitems"))
 	var parsed: Variant = JSON.parse_string(str(_hud.call("core_items_json")))
 	if parsed is Dictionary:
 		core_items.update_items(parsed)
+	if core_items_panel != null:
+		core_items_panel.visible = enabled and core_items.has_items()
+		# `collapser(coreItems).fillX()`: the column is as wide as its widest
+		# row, and Arc's `Collapser.getPrefWidth` counts the collapsed
+		# "core under attack" banner, so the bar spans at least that width.
+		var width := 0.0
+		if core_attack != null:
+			width = core_attack.get_combined_minimum_size().x
+		core_items_panel.custom_minimum_size.x = width
 
 
 ## `LoadingFragment` driver: shows the overlay while the Rust IO queue has

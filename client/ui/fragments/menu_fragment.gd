@@ -23,6 +23,7 @@ const ICON_CODES := {
 	"download": 59513,
 	"info": 61737,
 	"paste": 59474,
+	"discord": 59405,
 }
 
 const BUTTON_W := 230.0
@@ -181,6 +182,15 @@ func _setup_discord() -> void:
 	discord.add_theme_stylebox_override("normal", box)
 	discord.add_theme_stylebox_override("hover", box)
 	discord.add_theme_stylebox_override("pressed", box)
+	# `MenuFragment.java:63-65`: `button(Icon.discord, style{up = discordBanner})`
+	# is an ImageButton — the white `Icon.discord` glyph centred in the
+	# 84x45 cell inside `marginTop(9)`/`marginLeft(10)` (the `Icon` label's
+	# offsets), the cell flush with the bottom-right corner.
+	var icon := discord.get_node_or_null("Icon") as Label
+	if icon != null:
+		icon.text = _glyph("discord")
+		if _icon_font != null:
+			icon.add_theme_font_override("font", _icon_font)
 	discord.tooltip_text = _t("@discord")
 	discord.pressed.connect(_open.bind("discord"))
 

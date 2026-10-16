@@ -14,6 +14,13 @@ content_margin_top = 4.0
 content_margin_right = 6.0
 content_margin_bottom = 4.0
 
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_coreitems"]
+bg_color = Color(0, 0, 0, 0.6)
+content_margin_left = 4.0
+content_margin_top = 4.0
+content_margin_right = 4.0
+content_margin_bottom = 4.0
+
 [node name="HudFragment" type="Control" unique_id=1693915975]
 layout_mode = 3
 anchors_preset = 15
@@ -96,17 +103,26 @@ horizontal_alignment = 2
 
 [node name="CoreInfo" type="VBoxContainer" parent="." unique_id=640893471]
 layout_mode = 1
-anchors_preset = 7
+anchors_preset = 5
 anchor_left = 0.5
-anchor_top = 1.0
 anchor_right = 0.5
-anchor_bottom = 1.0
 grow_horizontal = 2
-grow_vertical = 0
-theme_override_constants/separation = 2
+mouse_filter = 2
+theme_override_constants/separation = 0
 
-[node name="CoreItems" type="GridContainer" parent="CoreInfo" unique_id=1080290227]
-custom_minimum_size = Vector2(0, 32)
+[node name="PauseSpacer" type="Control" parent="CoreInfo" unique_id=640893472]
+visible = false
+custom_minimum_size = Vector2(0, 36)
+layout_mode = 2
+mouse_filter = 2
+
+[node name="CoreItemsPanel" type="PanelContainer" parent="CoreInfo" unique_id=640893473]
+visible = false
+layout_mode = 2
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_coreitems")
+
+[node name="CoreItems" type="GridContainer" parent="CoreInfo/CoreItemsPanel" unique_id=1080290227]
 layout_mode = 2
 script = ExtResource("4_coreitems")
 
