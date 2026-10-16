@@ -39,16 +39,12 @@ func shown() -> void:
 
 func _build() -> void:
 	var root := content_table()
-	# The base panel (min 400) would scroll the 300px preview + two 54px
-	# buttons; Java's dialog sizes to fit.
-	var panel := get_node_or_null("Center/Panel")
-	if panel != null:
-		panel.custom_minimum_size = Vector2(680.0, 500.0)
 	_row = _row_for(_name)
-	var top := HBoxContainer.new()
-	top.add_theme_constant_override("separation", 8)
-	root.add(top).grow_x_axis().pad(4)
-	root.row()
+	# `EditorMapsDialog.showMap` (`ui/dialogs/EditorMapsDialog.java:100-163`): a
+	# 2×2 grid — the preview and the `Styles.black` info pane are each
+	# `mapsize` (300) squares, and the two action buttons `fillX()` their own
+	# column, so the content is 600 px wide and centred by `BaseDialog`.
+	const MAPSIZE := 300.0
 	var preview := get_node_or_null("/root/Spine/MindPreview")
 	var texture: Texture2D = null
 	if preview != null and preview.has_method("texture_for_name"):
@@ -59,43 +55,45 @@ func _build() -> void:
 		image.texture = texture
 		image.thickness = 3.0
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		image.custom_minimum_size = PREVIEW_SIZE
-		top.add_child(image)
-	var info := VBoxContainer.new()
-	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	info.add_theme_constant_override("separation", 4)
-	top.add_child(info)
-	_add_info(info, "@editor.mapname", _name)
+		root.add(image).width(MAPSIZE).height(MAPSIZE)
+	else:
+		# Keep the grid's first column even without a preview texture.
+		# code-instantiated: layout placeholder for the missing preview.
+		root.add(Control.new()).width(MAPSIZE).height(MAPSIZE)
+	# code-instantiated: the info pane's rows come from the map's tags.
+	var info := PanelContainer.new()
+	info.theme_type_variation = "black"
+	var info_layout := VBoxContainer.new()
+	info_layout.add_theme_constant_override("separation", 2)
+	info_layout.alignment = BoxContainer.ALIGNMENT_BEGIN
+	info.add_child(info_layout)
+	_add_info(info_layout, "@editor.mapname", _name)
 	var author := _tag("author")
 	if author.is_empty():
 		# `showMap`: built-ins with no author tag show "Anuke"; custom maps
 		# show `map.author()` = `Map.tag` -> `@unknown`.
 		author = "Anuke" if not bool(_row.get("custom", false)) else _t("@unknown")
-	_add_info(info, "@editor.author", author)
+	_add_info(info_layout, "@editor.author", author)
 	# `if(!map.tags.get("description", "").isEmpty())`: no description row at
 	# all for a map without one.
 	var description := _tag("description")
 	if not description.is_empty():
-		_add_info(info, "@editor.description", description)
+		_add_info(info_layout, "@editor.description", description)
+	root.add(info).width(MAPSIZE).height(MAPSIZE)
+	root.row()
 
-	# `table.row()` then the two buttons side by side, each `fillX()` under its
-	# column (preview | info): `@editor.openin` left, `@delete` right.
-	var buttons := HBoxContainer.new()
-	buttons.add_theme_constant_override("separation", 4)
-	root.add(buttons).grow_x_axis().pad(2)
 	# `table.button("@editor.openin", Icon.export, ...).fillX().height(54f)`.
 	var open_button := MindWidgets.icon_button("export", _t("@editor.openin"))
-	open_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	open_button.custom_minimum_size.y = 54.0
 	open_button.pressed.connect(_open_in_editor)
-	buttons.add_child(open_button)
+	root.add(open_button).width(MAPSIZE).height(54.0)
 	# `table.button("@delete", Icon.trash, ...).disabled(!map.custom)`.
 	var delete_button := MindWidgets.icon_button("trash", _t("@delete"))
-	delete_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	delete_button.custom_minimum_size.y = 54.0
 	delete_button.disabled = not bool(_row.get("custom", false))
 	delete_button.pressed.connect(_confirm_delete)
-	buttons.add_child(delete_button)
+	root.add(delete_button).width(MAPSIZE).height(54.0)
+	root.row()
 
 
 ## A row tag as the raw `map.tags.get(name, "")` (blank when missing).

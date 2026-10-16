@@ -6,6 +6,7 @@
 [ext_resource type="Script" path="res://ui/menu_background.gd" id="4_menubg"]
 [ext_resource type="PackedScene" path="res://scenes/ui/planet_view.tscn" id="5_planetview"]
 [ext_resource type="Script" path="res://scenes/landing_core.gd" id="6_landing"]
+[ext_resource type="Script" path="res://ui/menu_flyers.gd" id="7_menuflyers"]
 
 [node name="Spine" type="Node" unique_id=1959762537]
 
@@ -66,6 +67,15 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("4_menubg")
+
+[node name="MenuFlyers" type="Control" parent="Ui/MenuBackground" unique_id=1600000031]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("7_menuflyers")
 
 [node name="EditorDialog" parent="Ui" unique_id=1972126241 instance=ExtResource("3_editor")]
 

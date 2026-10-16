@@ -14,8 +14,13 @@ extends Control
 @export var title_text := ""
 ## Whether showing this dialog pauses the game (manifest `pause`).
 @export var should_pause := false
-## Whether the dialog uses the full-screen dialog style.
+## Whether the dialog uses the full-screen dialog style (`fullDialog`).
 @export var full_dialog := false
+## Whether the dialog fills the parent (`BaseDialog.java:22`
+## `setFillParent(true)`). Java's dialogs are always fill-parent; a floating
+## dialog (`Dialog.setFillParent(false)`, `UI.java:586` `showConfirm`) sets this
+## to false and sizes to its content.
+@export var fill_parent := true
 ## Accent color of the title row.
 @export var title_color := Color.WHITE
 
@@ -50,10 +55,23 @@ func _ready() -> void:
 	visible = false
 	_apply_title()
 	_apply_full_dialog()
+	# `BaseDialog.java:22` fills the parent for every dialog; the floating mode
+	# (`set_fill_parent(false)`) keeps the panel at its content size
+	# (`Dialog.setFillParent(false)`, `UI.java:582-606`).
+	if fill_parent and not full_dialog:
+		fill_panel()
 	# Preload the read-model cache while `MindUi` cannot be bound yet (dialogs are
 	# constructed before any `open_dialog` call), so `shown()` never re-enters the
 	# `&mut` Rust endpoint through the lazy fallback.
 	_ensure_campaign_views_loaded()
+
+
+## `Dialog.setFillParent(false)`: sizes the panel to its content (floating
+## confirm-style dialogs); the stage backdrop stays full-screen.
+func set_fill_parent(value: bool) -> void:
+	fill_parent = value
+	if value:
+		fill_panel()
 
 
 ## Stretches the centered panel to the whole viewport for `full_dialog` dialogs
@@ -201,16 +219,14 @@ func is_top() -> bool:
 	return not stack.is_empty() and stack[stack.size() - 1] == String(name)
 
 
-## Adds an `@back` close button to the button row (`addCloseButton`).
-func add_close_button(width: float = 200.0) -> Button:
+## Adds an `@back` close button to the button row (`BaseDialog.addCloseButton`,
+## `BaseDialog.java:73-83`: `buttons.button("@back", Icon.left).size(210f,
+## 64f)`, i.e. the themed `defaultt` skin with T1's icon cell layout).
+func add_close_button(width: float = 210.0) -> Button:
 	# code-instantiated: the close button is added by the dialog's own script at
-	# runtime (button row contents vary per dialog). Mirrors
-	# `BaseDialog.addCloseButton`: `button("@back", Icon.left).size(200f, 54f)`
-	# over the themed pane.
-	var button := MindWidgets.button("")
-	button.custom_minimum_size = Vector2(width, 54.0)
-	apply_pane_button(button, PANE_OUTLINE_GRAY)
-	build_button_content(button, MindWidgets.glyph("left", 20), _t("@back"))
+	# runtime (button row contents vary per dialog).
+	var button := MindWidgets.icon_button("left", _t("@back"))
+	button.custom_minimum_size = Vector2(width, 64.0)
 	button.pressed.connect(_close_pressed)
 	if buttons != null:
 		buttons.add_child(button)

@@ -2331,3 +2331,56 @@ Run: runs/20261014-s3-verify3/.
   before drawing conclusions. Helper used in the run:
   `/tmp/opencode/s2-shot.sh <out>` (session 2, bridge 6980).
 - Run: `runs/20261016-s2-J01-T1/`, `runs/20261017-s2-J01-T2/`.
+
+## 2026-10-17 — session 3 (wave B): `godot_exec` on a missing node path pins the frame loop (watchdog restarts the game)
+
+- Symptom: an eval that referenced a node that does not exist
+  (`/root/Spine/Ui/UiRoot/DialogLayer/prompt`) returned `ok: false` and then the
+  bridge reported `eval stalled the frame loop` and ran `stop` + `play` — losing
+  the loaded match and the open dialog.
+- Cause: resolving a bad `NodePath` inside `godot_exec` raises inside the
+  scene-tree call chain and the runtime's error handling blocks the frame loop.
+  The prompt root is **not** a `DialogLayer` child (the transient prompt is
+  owned by `UiRoot`/`MindUi`), so the probe target itself was wrong.
+- Workaround: probe with `has_node`/`get_node_or_null` guards, and prefer
+  `MindUi.dialog_stack()` / `DialogLayer` child enumeration (filtering
+  `c is Control and c.visible`) over guessing child names. After a watchdog
+  restart, re-stamp pid/tick/camera and redo the walk.
+- Run: `runs/20261017-s3-J06-T2/`.
+
+## 2026-10-17 — session 3 (wave B): `set_layer_visible` keys Java `Layer` names, not cache-layer bands
+
+- Symptom: chasing "black blob" sprites in a fresh Caldera capture, hiding
+  `walls`, `blockProp`, `blockUnder`, `block`, `darkness` and finally every
+  `Layer` name in `Layer::ALL` did not remove them.
+- Cause: two things. (1) The floor cache bands are `Band_floor_<cacheLayerId>`
+  sub-bands, so there is no band named `walls` — the whole `floor` band must be
+  hidden (and hiding it also removes the blobs' *floor*, which is what gave the
+  game away). (2) The "blobs" were `ore-coal` overlays (black coal chunks)
+  added by the J01 T1 map filters landing in main — not a rendering bug at all.
+  `SimHost.tile_debug(x, y)` on the blob tiles (`floor/block/overlay`) settled
+  it in one call.
+- Workaround: confirm what a sprite *is* via `tile_debug` (tile content) before
+  bisecting render layers; treat pre-merge captures as stale references for
+  tile-content comparisons.
+- Run: `runs/20261017-s3-J02-T5/`.
+
+## 2026-10-17 — session 3 (wave B): real-pointer hover needs the *game* window, not the editor window
+
+- The session display (:12) carries three windows: the editor, a stale
+  `Mindustry-Godot (DEBUG)` window owned by the editor process, and the running
+  game. `xwininfo -root -tree` lists them all; `xprop -id <win> _NET_WM_PID`
+  identifies which pid owns which (the game pid is the one from
+  `session-play.sh`).
+- Hover recipe used (session 3): game window `0x600002` at `+64+64`, so
+  `pynput` moves to `(64 + viewport_x, 64 + viewport_y)`, then
+  `godot_screenshot` for the frame. This showed the accent hover borders (J06 T1)
+  and the slider `knobOver` + description tooltip (J06 T3).
+
+## 2026-10-17 — session 3 (wave B): godot-rust 0.5 `Image::resize` has no interpolation argument
+
+- `Image.resize(w, h, interpolation)` does not exist in the Rust binding; the
+  codegen exposes `resize_ex(w, h).interpolation(Interpolation::BILINEAR).done()`
+  for the C++ default-parameter overload. The 2-argument `resize` silently uses
+  the engine default (nearest), which made the menu shadow layer hard-edged.
+  Run: `runs/20261017-s3-J02-T4/`.

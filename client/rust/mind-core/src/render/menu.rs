@@ -11,6 +11,7 @@
 //! block names are the plan-02 ABI strings, resolved by the gdext host.
 
 use crate::math::{noise, ridged};
+use crate::random::JavaRandom;
 
 /// `MenuRenderer.darkness`.
 pub const DARKNESS: f32 = 0.3;
@@ -55,6 +56,12 @@ const ORES: [&str; 6] = [
     "oreThorium",
 ];
 
+/// `MenuRenderer.flyerType` candidates (`MenuRenderer.java:33`): one random
+/// flyer type per launch.
+pub const FLYER_TYPES: [&str; 9] = [
+    "flare", "horizon", "zenith", "mono", "poly", "mega", "alpha", "beta", "gamma",
+];
+
 /// The generated menu world (`MenuRenderer.generate`).
 #[derive(Clone, Debug)]
 pub struct MenuWorld {
@@ -66,6 +73,8 @@ pub struct MenuWorld {
     pub tiles: Vec<MenuTile>,
     /// Number of flyers.
     pub flyers: usize,
+    /// The one flyer type drawn (`MenuRenderer.flyerType`).
+    pub flyer_type: &'static str,
     /// The pinned seed.
     pub seed: i32,
 }
@@ -328,28 +337,35 @@ pub fn generate(seed: i32, mobile: bool) -> MenuWorld {
     } else {
         rng.int(15) as usize
     };
+    // `MenuRenderer.java:33`: one random type from the flyer list. Java picks
+    // it during field init (before generation); the port picks it after the
+    // terrain/flyer count so the existing pinned-seed goldens keep their tiles.
+    let flyer_type = FLYER_TYPES[rng.int(FLYER_TYPES.len() as u32) as usize];
 
     MenuWorld {
         width,
         height,
         tiles,
         flyers,
+        flyer_type,
         seed,
     }
 }
 
-/// Arc `Mathf.randomSeed` (deterministic `[-0.5, 0.5)`).
-fn random_seed(seed: i64) -> f32 {
-    let mut h = seed
-        .wrapping_mul(0x5851_f42d_4c95_7f2d)
-        .wrapping_add(0x1405_7b7e_f767_814f);
-    h ^= h >> 33;
-    ((h as u32) as f32 / (1u32 << 24) as f32) - 0.5
+/// Java's `Rand(seed).nextFloat()` — `arc.math.Rand` is `java.util.Random`.
+fn rand_float(seed: i64) -> f32 {
+    JavaRandom::new(seed as u64).next_float()
 }
 
-/// Arc `Mathf.randomSeedRange(seed, range)`.
+/// Arc `Mathf.randomSeed(seed, min, max)` (`Mathf.java:306-309`, raw seed).
+fn random_seed_min_max(seed: i64, min: f32, max: f32) -> f32 {
+    min + rand_float(seed) * (max - min)
+}
+
+/// Arc `Mathf.randomSeedRange(seed, range)` = `range * (nextFloat() - 0.5) * 2`
+/// ∈ [-range, range) (`Mathf.java:321-324`).
 fn random_seed_range(seed: i64, range: f32) -> f32 {
-    random_seed(seed) * range
+    range * (rand_float(seed.wrapping_mul(99999)) - 0.5) * 2.0
 }
 
 /// Arc `Mathf.absin(time, scl, mag)` (best-effort port).
@@ -374,11 +390,14 @@ pub fn flyer_position(
     let vx = angle.cos() * time * speed;
     let vy = angle.sin() * time * speed;
     let i = i as i64;
+    // `Mathf.randomSeed(i + 5, 0, 500)` in Java's modulo divisor
+    // (`MenuRenderer.java:267-268`).
+    let x_modulus = tw + random_seed_min_max(i + 5, 0.0, 500.0);
     let x = (random_seed_range(i, range)
         + vx
         + absin(time + random_seed_range(i + 2, range), 10.0, 3.4)
         + offset)
-        .rem_euclid(tw + random_seed(i + 5) * 500.0 + 250.0);
+        .rem_euclid(x_modulus);
     let y = (random_seed_range(i + 1, range)
         + vy
         + absin(time + random_seed_range(i + 3, range), 10.0, 3.4)
@@ -397,6 +416,8 @@ mod tests {
         let b = generate(1234, false);
         assert_eq!(a.tiles, b.tiles);
         assert_eq!(a.flyers, b.flyers);
+        assert_eq!(a.flyer_type, b.flyer_type);
+        assert!(FLYER_TYPES.contains(&a.flyer_type));
         assert_eq!(a.width, 100);
         assert_eq!(a.height, 50);
         assert_eq!(a.tiles.len(), 100 * 50);
@@ -413,12 +434,28 @@ mod tests {
 
     #[test]
     fn flyers_are_finite_and_bounded() {
-        let world = generate(1234, false);
-        assert!(world.flyers <= 35);
+        // Seed 2 rolls 13 flyers (the menu's `chance(0.2) ? random(35) :
+        // random(15)` can roll 0, exactly like Java's per-launch roll).
+        let world = generate(2, false);
+        assert!(world.flyers > 0 && world.flyers <= 35);
+        let tilesize = crate::config::TILESIZE as f32;
+        let tw = world.width as f32 * tilesize + tilesize;
+        let th = world.height as f32 * tilesize + tilesize;
+        let mut moved = false;
         for i in 0..world.flyers {
-            let p = world.flyer_position(i, 1.5, 45.0, 1.0);
-            assert!(p[0].is_finite() && p[1].is_finite());
+            let p = world.flyer_position(i, 1.5, 45.0, 2.7);
+            // `MenuRenderer.flyers`: `% (tw + randomSeed(i+5, 0, 500))`, `% th`.
+            assert!(
+                p[0].is_finite() && p[0] >= 0.0 && p[0] < tw + 500.0,
+                "{p:?}"
+            );
+            assert!(p[1].is_finite() && p[1] >= 0.0 && p[1] < th, "{p:?}");
+            let later = world.flyer_position(i, 3.0, 45.0, 2.7);
+            if (later[0] - p[0]).abs() > f32::EPSILON || (later[1] - p[1]).abs() > f32::EPSILON {
+                moved = true;
+            }
         }
+        assert!(moved, "the flyer clock must move the squadron");
     }
 
     #[test]

@@ -81,6 +81,22 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
 				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
 				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+			elif name == "defaultb" or name == "defaultt":
+				# `Styles.defaultb`/`defaultt` (`Styles.java:118-125,133-141`):
+				# `Tex.button` (black body, grey border) with `buttonOver` on
+				# hover and `buttonDown` (white border) while pressed;
+				# `buttonDisabled` for the disabled state. The 9-patch's 12 px
+				# splits are also the content padding, so the icon cell starts
+				# 12 px in like Java's `Button` background padding.
+				theme.set_stylebox("normal", name, _button_nine_patch("button"))
+				theme.set_stylebox("hover", name, _button_nine_patch("button-over"))
+				theme.set_stylebox("pressed", name, _button_nine_patch("button-down"))
+				theme.set_stylebox("hover_pressed", name, _button_nine_patch("button-down"))
+				theme.set_stylebox("disabled", name, _button_nine_patch("button-disabled"))
+				theme.set_color("font_color", name, Color.WHITE)
+				theme.set_color("font_hover_color", name, Color.WHITE)
+				theme.set_color("font_pressed_color", name, Color.WHITE)
+				theme.set_color("font_disabled_color", name, Color.GRAY)
 			elif name == "selecti":
 				# `Styles.selecti` (Styles.java:283-286): `checked = buttonSelect`
 				# (the accent 9-patch frame), `up = none`. The checked state is
@@ -117,18 +133,17 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"PanelContainer":
-			if name == "fullDialog":
-				# `Styles.fullDialog` uses `windowEmpty`: a full-viewport frame
-				# over the stage background (the `Dim` overlay + backdrop), not an
-				# opaque sheet. Content floats over the space backdrop.
+			if name == "fullDialog" or name == "defaultDialog":
+				# `Styles.defaultDialog`/`fullDialog` (`Styles.java:458-469`):
+				# `background = windowEmpty` — no visible box; the dialog floats
+				# over its stage backdrop (`black9`/`black`). `fullDialog` leaves
+				# 8 px below the button row (`PlanetDialog` OK at y=640 of 648).
 				var empty := StyleBoxEmpty.new()
 				empty.content_margin_left = 8.0
 				empty.content_margin_right = 8.0
 				# The Java title text starts at y=6 in the reference frame (no
 				# top inset above the title row).
 				empty.content_margin_top = 0.0
-				# Java's full dialogs leave 8 px below the button row
-				# (`PlanetDialog` OK at y=640 of 648).
 				empty.content_margin_bottom = 8.0
 				theme.set_stylebox("panel", name, empty)
 			elif name == "none":
@@ -141,8 +156,30 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 		"RichTextLabel":
 			theme.set_color("default_color", name, Color(0.92, 0.92, 0.92))
 		"HSlider":
-			theme.set_stylebox("slider", name, flat(Color(0.12, 0.13, 0.15, 1.0)))
-			theme.set_stylebox("grabber_area", name, flat(MindStyles.ACCENT))
+			if name == "defaultSlider":
+				# `Styles.defaultSlider` (`Styles.java:374-378`): the
+				# `sliderBack` 9-patch track (4 px splits) with the
+				# `sliderKnob`/`sliderKnobOver`/`sliderKnobDown` grabbers
+				# (`Tex.sliderKnob*`). Java draws no filled progress area, so
+				# both `grabber_area` boxes stay empty. A disabled slider keeps
+				# the plain knob like Arc (its `SliderStyle` has no disabled
+				# knob).
+				# `sliderBack` is 27 px tall; Godot's `HSlider` draws the track at
+				# the box's minimum height, so the content margin supplies the
+				# missing (27 - 4 - 4) / 2 per side.
+				theme.set_stylebox("slider", name, _nine_patch("slider-back", 4.0, 9.5))
+				theme.set_stylebox("grabber_area", name, StyleBoxEmpty.new())
+				theme.set_stylebox("grabber_area_highlight", name, StyleBoxEmpty.new())
+				var knob := MindWidgets.icon_texture("slider-knob")
+				if knob != null:
+					theme.set_icon("grabber", name, knob)
+					theme.set_icon("grabber_disabled", name, knob)
+				var knob_over := MindWidgets.icon_texture("slider-knob-over")
+				if knob_over != null:
+					theme.set_icon("grabber_highlight", name, knob_over)
+			else:
+				theme.set_stylebox("slider", name, flat(Color(0.12, 0.13, 0.15, 1.0)))
+				theme.set_stylebox("grabber_area", name, flat(MindStyles.ACCENT))
 		"LineEdit":
 			theme.set_stylebox("normal", name, flat(Color(0.08, 0.09, 0.11, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
@@ -152,6 +189,37 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL_DARK))
 		_:
 			pass
+
+
+## A packed 9-patch region with uniform texture margins (the pack `splits`).
+## `StyleBoxTexture`'s content margin follows the texture margin, so pass
+## `content_margin` when a control measures the box's minimum size instead of
+## its content (Godot's `HSlider` sizes its track from `get_minimum_size()`).
+static func _nine_patch(region: String, margin: float, content_margin: float = -1.0) -> StyleBox:
+	var texture := MindWidgets.icon_texture(region)
+	if texture == null:
+		return flat(Color(0.08, 0.08, 0.10, 1.0))
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	box.texture_margin_left = margin
+	box.texture_margin_top = margin
+	box.texture_margin_right = margin
+	box.texture_margin_bottom = margin
+	if content_margin >= 0.0:
+		box.content_margin_left = content_margin
+		box.content_margin_top = content_margin
+		box.content_margin_right = content_margin
+		box.content_margin_bottom = content_margin
+	return box
+
+
+## `Tex.button*` nine-patch (`button`, `button-over`, `button-down`,
+## `button-disabled`): 12 px texture margins on all four edges (the pack
+## `splits`). `StyleBoxTexture`'s content margin follows the texture margin, so
+## the button's content starts 12 px in — the same padding Arc applies from the
+## background drawable.
+static func _button_nine_patch(region: String) -> StyleBox:
+	return _nine_patch(region, 12.0)
 
 
 ## `Tex.buttonSelect` ninepatch (accent border, splits 4) for the
