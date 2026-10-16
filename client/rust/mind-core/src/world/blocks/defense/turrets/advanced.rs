@@ -1978,19 +1978,17 @@ pub fn update_continuous(
     if matches!(config.ammo, TurretAmmo::Liquid(_)) {
         let consumed = config.liquid_consumed;
         if let Some(mut liquids) = ctx.world.get_mut::<LiquidModule>(e) {
-            let current = super::current_ammo_liquid(&liquids, config);
+            // `ConsumeLiquidFilter.update` drains `getConsumed(build)`.
+            let current = super::consumed_ammo_liquid(&liquids, config);
             if state.activated
                 && eff > 0.0
                 && let Some(liquid) = current
             {
                 liquids.remove(liquid, consumed * eff);
             }
-            let amount: f32 = match &config.ammo {
-                TurretAmmo::Liquid(ammo) => {
-                    ammo.iter().map(|entry| liquids.get(entry.liquid)).sum()
-                }
-                _ => 0.0,
-            };
+            // The latch reads `liquids.currentAmount()` (the current liquid's
+            // slot, `LiquidModule.java:106-108`), not the ammo total.
+            let amount = liquids.current_liquid_amount();
             if amount >= consumed * 4.0 {
                 state.activated = true;
             } else if amount < consumed {

@@ -12,7 +12,9 @@
 //! is served from a per-goal [`FieldCache`]: the goal's `12×12` weight array per
 //! cluster (packed `cluster index -> weights` like upstream `FieldCache.fields`)
 //! plus the frontier, keyed by the goal tile (`FieldIndex` collapses to the goal
-//! here because this port is single-team/single-cost-id). The field is expanded
+//! here because each instance is single-team/single-cost-id; the runtime keeps
+//! one instance per [`ControlCost`], mirroring Java's per-`pathCost` cluster
+//! and field cache). The field is expanded
 //! by the deterministic bounded BFS in [`ControlPathfinder::compute_field`]
 //! (deviation 1: fixed work, no wall clock); the result path is reconstructed by
 //! descending the distance field. [`get_path_position_astar`] keeps the previous
@@ -69,8 +71,8 @@ const FIELD_UNINIT: i32 = i32::MAX;
 ///
 /// `fields` maps a cluster index to its `12×12` row-major weight array
 /// (distance-to-goal; [`FIELD_UNINIT`] = impassable or outside the field). The
-/// field is single-team and single-cost-id in this port (the `FieldIndex` key
-/// reduces to the goal tile), matching the one `costGround` caller. `frontier`
+/// field is single-team and single-cost-id per [`ControlPathfinder`] instance
+/// (the `FieldIndex` key reduces to the goal tile). `frontier`
 /// is the BFS queue and `complete` records whether the expansion drained.
 #[derive(Debug, Clone, Default)]
 pub struct FieldCache {
@@ -94,6 +96,9 @@ pub struct ControlPathfinder {
     /// The pathing team the passability was built for
     /// (`ControlPathfinder.team`; the ground cost is team-relative).
     pub team: u8,
+    /// The `ControlPathfinder.costTypes` entry the weights were built with
+    /// (Java keys clusters/fields by `pathCost`; one instance per cost here).
+    pub cost: ControlCost,
     /// Cluster columns (`ceil(width / CLUSTER_SIZE)`).
     pub cluster_w: i32,
     /// Cluster rows.
@@ -121,6 +126,109 @@ pub struct ControlPathfinder {
 /// `ControlPathfinder.wallImpassableCap` (ControlPathfinder.java:25).
 pub const WALL_IMPASSABLE_CAP: i32 = 1_000_000;
 
+/// `ControlPathfinder.solidCap` (ControlPathfinder.java:26): a cost at or above
+/// this is solid for the control pathfinder (`passable`/`solid`,
+/// ControlPathfinder.java:1453-1470).
+pub const SOLID_CAP: i32 = 7000;
+
+/// `ControlPathfinder.costTypes` ids (`costIdGround`..`costIdNaval`,
+/// ControlPathfinder.java:69-80). Indices are ABI (`FieldIndex.costId`).
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ControlCost {
+    /// `costIdGround` (0).
+    #[default]
+    Ground = 0,
+    /// `costIdHover` (1).
+    Hover = 1,
+    /// `costIdLegs` (2).
+    Legs = 2,
+    /// `costIdNaval` (3).
+    Naval = 3,
+}
+
+/// Number of control cost types (`ControlPathfinder.costTypes.size`).
+pub const CONTROL_COST_COUNT: usize = 4;
+
+impl ControlCost {
+    /// Every cost in id order.
+    pub const ALL: [ControlCost; CONTROL_COST_COUNT] = [
+        ControlCost::Ground,
+        ControlCost::Hover,
+        ControlCost::Legs,
+        ControlCost::Naval,
+    ];
+
+    /// ABI id (`pathCostId`).
+    pub const fn id(self) -> u8 {
+        self as u8
+    }
+
+    /// `ControlPathfinder.idToCost`; unknown ids fall back to ground like
+    /// `UnitType.initPathType` (`if(pathCostId == -1) pathCostId = 0`).
+    pub fn from_id(id: u8) -> ControlCost {
+        match id {
+            1 => ControlCost::Hover,
+            2 => ControlCost::Legs,
+            3 => ControlCost::Naval,
+            _ => ControlCost::Ground,
+        }
+    }
+
+    /// `UnitType.initPathType` (UnitType.java:901-910): `naval ? costNaval :
+    /// allowLegStep ? costLegs : hovering ? costHover : costGround`.
+    pub fn for_unit(naval: bool, allow_leg_step: bool, hovering: bool) -> ControlCost {
+        if naval {
+            ControlCost::Naval
+        } else if allow_leg_step {
+            ControlCost::Legs
+        } else if hovering {
+            ControlCost::Hover
+        } else {
+            ControlCost::Ground
+        }
+    }
+
+    /// `PathCost.getCost(team, tile)` for this control cost
+    /// (ControlPathfinder.java:31-67). `IMPASSABLE` (-1) marks a blocked tile.
+    pub fn cost(self, team: u8, tile: PathTile) -> i32 {
+        match self {
+            ControlCost::Ground => control_ground_cost(team, tile),
+            ControlCost::Hover => control_hover_cost(team, tile),
+            ControlCost::Legs => control_legs_cost(team, tile),
+            ControlCost::Naval => control_naval_cost(team, tile),
+        }
+    }
+
+    /// The A*/field step weight of `tile` (`0` = not passable):
+    /// `ControlPathfinder.passable` (ControlPathfinder.java:1453-1456) is
+    /// `cost != impassable && cost < solidCap`.
+    pub fn weight(self, team: u8, tile: PathTile) -> i32 {
+        let cost = self.cost(team, tile);
+        if cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < SOLID_CAP {
+            cost
+        } else {
+            0
+        }
+    }
+}
+
+/// `solid && ((team == t && !teamPassable) || t == 0)`: the same-team or
+/// neutral solid block every control cost but legs treats as `impassable`.
+fn own_or_neutral_solid(team: u8, tile: PathTile) -> bool {
+    tile.solid() && ((tile.team() == team && !tile.team_passable()) || tile.team() == 0)
+}
+
+/// `(t != team && t != 0) && solid ? wallImpassableCap : 0`: the synthetic
+/// enemy-block term.
+fn enemy_wall_cost(team: u8, tile: PathTile) -> i32 {
+    if tile.team() != team && tile.team() != 0 && tile.solid() {
+        WALL_IMPASSABLE_CAP
+    } else {
+        0
+    }
+}
+
 /// `ControlPathfinder.costGround` (ControlPathfinder.java:33-42): the control
 /// pathfinder has its OWN ground cost. A same-team or neutral solid block (and
 /// all-deep water) is `impassable`; a synthetic enemy block costs
@@ -128,18 +236,53 @@ pub const WALL_IMPASSABLE_CAP: i32 = 1_000_000;
 /// flowfield's `Pathfinder.costGround`, where enemy walls are passable at
 /// `health * 5` so ground units shoot their way through).
 pub fn control_ground_cost(team: u8, tile: PathTile) -> i32 {
-    if tile.all_deep()
-        || (tile.solid() && ((tile.team() == team && !tile.team_passable()) || tile.team() == 0))
-    {
+    if tile.all_deep() || own_or_neutral_solid(team, tile) {
         return crate::ai::pathfinder::cost::IMPASSABLE;
     }
-    if tile.team() != team && tile.team() != 0 && tile.solid() {
-        return WALL_IMPASSABLE_CAP;
-    }
-    1 + if tile.near_solid() { 6 } else { 0 }
+    enemy_wall_cost(team, tile)
+        + 1
+        + if tile.near_solid() { 6 } else { 0 }
         + if tile.near_liquid() { 8 } else { 0 }
         + if tile.deep() { 6000 } else { 0 }
         + if tile.damages() { 50 } else { 0 }
+}
+
+/// `ControlPathfinder.costHover` (ControlPathfinder.java:46-53): the ground
+/// cost without the liquid/deep/damage terms.
+pub fn control_hover_cost(team: u8, tile: PathTile) -> i32 {
+    if own_or_neutral_solid(team, tile) {
+        return crate::ai::pathfinder::cost::IMPASSABLE;
+    }
+    enemy_wall_cost(team, tile) + 1 + if tile.near_solid() { 6 } else { 0 }
+}
+
+/// `ControlPathfinder.costLegs` (ControlPathfinder.java:55-59):
+/// `legSolid ? impassable : 1 + nearDeep 8 + deep 6000 + nearLegSolid 3`.
+/// Team-independent: legged units walk over every non-`legSolid` block.
+pub fn control_legs_cost(_team: u8, tile: PathTile) -> i32 {
+    if tile.leg_solid() {
+        return crate::ai::pathfinder::cost::IMPASSABLE;
+    }
+    1 + if tile.near_deep() { 8 } else { 0 }
+        + if tile.deep() { 6000 } else { 0 }
+        + if tile.near_leg_solid() { 3 } else { 0 }
+}
+
+/// `ControlPathfinder.costNaval` (ControlPathfinder.java:61-67): an own-team
+/// or neutral solid block is `impassable`; land costs `6000` (still below
+/// `solidCap`, so it is passable but strongly avoided), water `1`; plus the
+/// enemy-wall term and `nearGround || nearSolid ? 6`.
+pub fn control_naval_cost(team: u8, tile: PathTile) -> i32 {
+    if own_or_neutral_solid(team, tile) {
+        return crate::ai::pathfinder::cost::IMPASSABLE;
+    }
+    (if !tile.liquid() { 6000 } else { 1 })
+        + enemy_wall_cost(team, tile)
+        + if tile.near_ground() || tile.near_solid() {
+            6
+        } else {
+            0
+        }
 }
 
 impl ControlPathfinder {
@@ -148,6 +291,17 @@ impl ControlPathfinder {
         Self {
             width,
             height,
+            ..Self::default()
+        }
+    }
+
+    /// Creates an empty pathfinder whose weights use the control `cost`
+    /// (`ControlPathfinder.costTypes.get(pathCostId)`).
+    pub fn with_cost(width: i32, height: i32, cost: ControlCost) -> Self {
+        Self {
+            width,
+            height,
+            cost,
             ..Self::default()
         }
     }
@@ -165,17 +319,8 @@ impl ControlPathfinder {
         self.height = grid.height();
         self.team = team;
         let tiles = path_tile::build_tiles(grid, content, world, core_capture);
-        self.weights = tiles
-            .iter()
-            .map(|tile| {
-                let cost = control_ground_cost(team, *tile);
-                if cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP {
-                    cost
-                } else {
-                    0
-                }
-            })
-            .collect();
+        let cost = self.cost;
+        self.weights = tiles.iter().map(|tile| cost.weight(team, *tile)).collect();
         self.passable = self.weights.iter().map(|weight| *weight > 0).collect();
         self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
@@ -198,17 +343,8 @@ impl ControlPathfinder {
         self.width = width;
         self.height = height;
         self.team = team;
-        self.weights = tiles
-            .iter()
-            .map(|tile| {
-                let cost = control_ground_cost(team, *tile);
-                if cost != crate::ai::pathfinder::cost::IMPASSABLE && cost < WALL_IMPASSABLE_CAP {
-                    cost
-                } else {
-                    0
-                }
-            })
-            .collect();
+        let cost = self.cost;
+        self.weights = tiles.iter().map(|tile| cost.weight(team, *tile)).collect();
         self.passable = self.weights.iter().map(|weight| *weight > 0).collect();
         self.cluster_w = (self.width + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
         self.cluster_h = (self.height + CLUSTER_SIZE - 1).max(0) / CLUSTER_SIZE;
@@ -978,6 +1114,213 @@ mod tests {
         );
         // The straight line between the two tiles crosses the deep column.
         assert!(deep_at(&TilePos::new(12, 6)));
+    }
+
+    /// `PathTile.get` argument order (Pathfinder.java:267-282) with only the
+    /// named flags set.
+    #[allow(clippy::too_many_arguments)]
+    fn tile(
+        team: u8,
+        solid: bool,
+        liquid: bool,
+        leg_solid: bool,
+        near_ground: bool,
+        near_solid: bool,
+        near_leg_solid: bool,
+        deep: bool,
+        near_deep: bool,
+        team_passable: bool,
+    ) -> PathTile {
+        PathTile::from_bits(
+            0,
+            team,
+            solid,
+            liquid,
+            leg_solid,
+            false,
+            near_ground,
+            near_solid,
+            near_leg_solid,
+            deep,
+            false,
+            false,
+            near_deep,
+            team_passable,
+        )
+    }
+
+    /// I-round audit (I01 T4 follow-up): `ControlPathfinder.costLegs`,
+    /// `costNaval` and `costHover` (ControlPathfinder.java:46-67) term by term.
+    #[test]
+    fn control_legs_naval_hover_costs_match_java() {
+        use crate::ai::pathfinder::cost::IMPASSABLE;
+        let f = false;
+        let plain = tile(0, f, f, f, f, f, f, f, f, f);
+        // costLegs: `legSolid ? impassable : 1 + nearDeep 8 + deep 6000 +
+        // nearLegSolid 3`; solid blocks of any team are walkable.
+        assert_eq!(ControlCost::Legs.cost(1, plain), 1);
+        assert_eq!(
+            ControlCost::Legs.cost(1, tile(0, f, f, f, f, f, f, f, true, f)),
+            9
+        );
+        assert_eq!(
+            ControlCost::Legs.cost(1, tile(0, f, true, f, f, f, f, true, true, f)),
+            6009
+        );
+        assert_eq!(
+            ControlCost::Legs.cost(1, tile(0, f, f, f, f, f, true, f, f, f)),
+            4
+        );
+        assert_eq!(
+            ControlCost::Legs.cost(1, tile(0, f, f, true, f, f, f, f, f, f)),
+            IMPASSABLE
+        );
+        let neutral_wall = tile(0, true, f, f, f, f, f, f, f, f);
+        let own_wall = tile(1, true, f, f, f, f, f, f, f, f);
+        let enemy_wall = tile(2, true, f, f, f, f, f, f, f, f);
+        assert_eq!(ControlCost::Legs.cost(1, neutral_wall), 1);
+        assert_eq!(ControlCost::Ground.cost(1, neutral_wall), IMPASSABLE);
+
+        // costNaval: own/neutral solid impassable; land 6000 vs water 1; the
+        // enemy-wall cap; `nearGround || nearSolid ? 6`.
+        assert_eq!(ControlCost::Naval.cost(1, plain), 6000);
+        assert_eq!(
+            ControlCost::Naval.weight(1, plain),
+            6000,
+            "land is passable"
+        );
+        let water = tile(0, f, true, f, f, f, f, true, true, f);
+        assert_eq!(ControlCost::Naval.cost(1, water), 1);
+        assert_eq!(
+            ControlCost::Naval.cost(1, tile(0, f, true, f, true, f, f, f, f, f)),
+            7
+        );
+        assert_eq!(
+            ControlCost::Naval.cost(1, tile(0, f, true, f, f, true, f, f, f, f)),
+            7
+        );
+        assert_eq!(ControlCost::Naval.cost(1, own_wall), IMPASSABLE);
+        assert_eq!(ControlCost::Naval.cost(1, neutral_wall), IMPASSABLE);
+        assert_eq!(
+            ControlCost::Naval.cost(1, enemy_wall),
+            6000 + WALL_IMPASSABLE_CAP
+        );
+        assert_eq!(ControlCost::Naval.weight(1, enemy_wall), 0);
+        // A team-passable own block does not block.
+        let own_passable = tile(1, true, f, f, f, f, f, f, f, true);
+        assert_eq!(ControlCost::Naval.cost(1, own_passable), 6000);
+
+        // costHover: ground without the liquid/deep/damage terms.
+        let all_deep =
+            PathTile::from_bits(0, 0, f, true, f, true, f, f, f, true, true, true, true, f);
+        assert_eq!(ControlCost::Ground.cost(1, all_deep), IMPASSABLE);
+        assert_eq!(ControlCost::Hover.cost(1, all_deep), 1);
+        assert_eq!(
+            ControlCost::Hover.cost(1, tile(0, f, f, f, f, true, f, f, f, f)),
+            7
+        );
+        assert_eq!(ControlCost::Hover.cost(1, own_wall), IMPASSABLE);
+        assert_eq!(ControlCost::Hover.cost(1, own_passable), 1);
+        assert_eq!(ControlCost::Hover.weight(1, enemy_wall), 0);
+    }
+
+    /// `UnitType.initPathType` (UnitType.java:901-910) priority and the frozen
+    /// `costId*` ids.
+    #[test]
+    fn control_cost_ids_and_unit_selection() {
+        assert_eq!(ControlCost::Ground.id(), 0);
+        assert_eq!(ControlCost::Hover.id(), 1);
+        assert_eq!(ControlCost::Legs.id(), 2);
+        assert_eq!(ControlCost::Naval.id(), 3);
+        assert_eq!(ControlCost::from_id(7), ControlCost::Ground);
+        let mut content = crate::content::create_base_content(
+            &crate::content::MemoryBundle::new(),
+            &crate::content::MemoryUnlockStore::new(),
+            true,
+        )
+        .expect("content");
+        // `UnitType.init()` derives `allowLegStep`/`naval` (UnitType.java:915-936).
+        content.init().expect("init");
+        let cost_of = |name: &str| {
+            let id = content.unit_id(name).expect("unit id");
+            let def = content.unit(id).expect("unit def");
+            ControlCost::for_unit(def.naval, def.allow_leg_step, def.hovering)
+        };
+        assert_eq!(cost_of("dagger"), ControlCost::Ground);
+        // Legged units also hover; `allowLegStep` wins.
+        assert_eq!(cost_of("atrax"), ControlCost::Legs);
+        assert_eq!(cost_of("risso"), ControlCost::Naval);
+        assert_eq!(cost_of("elude"), ControlCost::Hover);
+    }
+
+    /// A legged unit's control path crosses a neutral wall column that blocks
+    /// ground routing (`costLegs` only refuses `legSolid`).
+    #[test]
+    fn legs_control_path_crosses_walls() {
+        let f = false;
+        let (width, height) = (16, 16);
+        // A neutral (team 0) solid column at x = 8 that is not `legSolid`, and
+        // a `legSolid` column at x = 12 with a gap at y = 15.
+        let tiles: Vec<PathTile> = (0..height)
+            .flat_map(|y| (0..width).map(move |x| (x, y)))
+            .map(|(x, y)| match x {
+                8 => tile(0, true, f, f, f, f, f, f, f, f),
+                12 if y < 15 => tile(0, true, f, true, f, f, f, f, f, f),
+                _ => tile(0, f, f, f, f, f, f, f, f, f),
+            })
+            .collect();
+        let mut ground = ControlPathfinder::with_cost(width, height, ControlCost::Ground);
+        ground.rebuild_passability(width, height, &tiles, 1);
+        let mut legs = ControlPathfinder::with_cost(width, height, ControlCost::Legs);
+        legs.rebuild_passability(width, height, &tiles, 1);
+        let (from, to) = (TilePos::new(2, 6), TilePos::new(14, 6));
+        assert!(ground.get_path_position(from, to).unreachable);
+        let result = legs.get_path_position(from, to);
+        assert!(!result.unreachable);
+        assert!(result.path.iter().any(|pos| pos.x() == 8));
+        assert!(
+            result.path.iter().all(|pos| pos.x() != 12 || pos.y() == 15),
+            "legSolid tiles are impassable: {:?}",
+            result.path
+        );
+        assert_eq!(result.path.last().copied(), Some(to));
+    }
+
+    /// A naval control path keeps to water and detours around a land strip
+    /// (land costs `6000`, ControlPathfinder.java:61-67), and land itself
+    /// stays passable below `solidCap`.
+    #[test]
+    fn naval_control_path_prefers_water() {
+        let content = crate::content::create_base_content(
+            &crate::content::MemoryBundle::new(),
+            &crate::content::MemoryUnlockStore::new(),
+            true,
+        )
+        .expect("content");
+        let deep = content.block_id("deep-water").expect("deep-water");
+        let stone = content.block_id("stone").expect("stone");
+        let mut grid = WorldGrid::new(24, 16);
+        grid.fill(deep, crate::content::BlockId::AIR);
+        // A land column x = 12, y = 0..12; the top rows stay water.
+        for y in 0..13 {
+            grid.tiles.get_mut(12, y).floor = stone;
+        }
+        let mut naval = ControlPathfinder::with_cost(24, 16, ControlCost::Naval);
+        naval.build(&grid, &content, &bevy_ecs::world::World::new(), 1, false);
+        assert!(naval.at(12, 6), "land is passable for the control path");
+        let (from, to) = (TilePos::new(6, 6), TilePos::new(18, 6));
+        let land_at = |pos: &TilePos| grid.tiles.get(pos.x() as i32, pos.y() as i32).floor == stone;
+        let result = naval.get_path_position(from, to);
+        assert!(!result.unreachable);
+        assert!(
+            result.path.iter().all(|pos| !land_at(pos)),
+            "the naval field detours through water: {:?}",
+            result.path
+        );
+        // Ground cannot cross the all-deep water at all.
+        let mut ground = ControlPathfinder::with_cost(24, 16, ControlCost::Ground);
+        ground.build(&grid, &content, &bevy_ecs::world::World::new(), 1, false);
+        assert!(!ground.at(6, 6));
     }
 
     #[test]

@@ -836,6 +836,8 @@ impl MindCampaign {
         loadout_json: GString,
     ) -> bool {
         self.current_map_name = None;
+        // `logic.reset()` (`state = new GameState()`): not a playtest.
+        self.playtesting_map = None;
         let planet_name = planet.to_string();
         if sector < 0 {
             return false;
@@ -1417,9 +1419,10 @@ impl MindCampaign {
             return false;
         }
         self.current_map_name = Some(header.name().to_string());
-        if playtest {
-            self.playtesting_map = Some(path);
-        } else if settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
+        // `logic.reset()` (`state = new GameState()`) clears an earlier
+        // `playtestingMap`; `Control.java:407` records it for a playtest only.
+        self.playtesting_map = playtest.then(|| path.clone());
+        if !playtest && settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
             // `Control.playMap`'s `savecreate` slot (`Control.java:418-420`):
             // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`.
             let name = format!("{} {}", header.name(), save_date_stamp());
@@ -1673,6 +1676,8 @@ impl MindCampaign {
     /// `Control.playMap` control half runs through [`Self::start_loaded_world`].
     #[func]
     pub fn start_joined_world(&mut self, rules_json: GString) -> bool {
+        // `logic.reset()` (`state = new GameState()`): not a playtest.
+        self.playtesting_map = None;
         let text = rules_json.to_string();
         if text.trim().is_empty() {
             log::warn!("start_joined_world: empty rules JSON");
@@ -3628,6 +3633,8 @@ impl MindCampaign {
     /// boundary. Returns whether the request was queued.
     #[func]
     pub fn load_slot(&mut self, name: GString) -> bool {
+        // `logic.reset()` (`state = new GameState()`): not a playtest.
+        self.playtesting_map = None;
         let Some(mut host) = self.host() else {
             return false;
         };
@@ -3688,6 +3695,60 @@ impl MindCampaign {
             queued = true;
             log::info!("saved on exit (`{}`)", file.display());
         }
+        self.reset_to_menu();
+        queued
+    }
+
+    /// `PausedDialog.checkPlaytest` (`PausedDialog.java:174-183`), reached from
+    /// `runExitSave` (pause-menu quit, `:189-197`) and the game-over `@menu`
+    /// button (`GameOverDialog.java:134-139`): when the match is a playtest
+    /// (`state.playtestingMap != null`), reset it WITHOUT the exit save and
+    /// reopen the editor on the playtested map
+    /// (`ui.editor.resumeAfterPlaytest(map)` -> `beginEditMap(map.file)`,
+    /// `MapEditorDialog.java:370-372` / `:508-519`).
+    ///
+    /// Returns `{"playtest": bool, "resumed": bool}`: `playtest` is false (and
+    /// nothing happens) for a normal match; `resumed` is false when the map
+    /// could not be reopened (`@editor.errorload` is shown, like Java's
+    /// `ui.showException`). The caller shows the editor shell on `resumed`.
+    #[func]
+    pub fn check_playtest(&mut self) -> VarDictionary {
+        let status = |playtest: bool, resumed: bool| {
+            let mut out = VarDictionary::new();
+            out.set(&GString::from("playtest"), &playtest.to_variant());
+            out.set(&GString::from("resumed"), &resumed.to_variant());
+            out
+        };
+        let Some(path) = self.playtesting_map.take() else {
+            return status(false, false);
+        };
+        // "no exit save here"; `logic.reset()`.
+        self.reset_to_menu();
+        let resumed = self
+            .base()
+            .get_node_or_null("/root/Spine/MindEditor")
+            .is_some_and(|mut editor| {
+                editor
+                    .call(
+                        "resume_after_playtest",
+                        &[GString::from(path.as_str()).to_variant()],
+                    )
+                    .try_to::<bool>()
+                    .unwrap_or(false)
+            });
+        if !resumed {
+            log::warn!("check_playtest: could not reopen `{path}` in the editor");
+            self.show_error("@editor.errorload");
+        }
+        status(true, resumed)
+    }
+
+    /// `logic.reset()`'s saves/session half shared by [`Self::run_exit_save`]
+    /// and [`Self::check_playtest`]: persists the sector record, drops the
+    /// session runtime and returns to the menu phase (`state = new
+    /// GameState()`, so `playtestingMap` is cleared too; `Logic.java:299-311`).
+    fn reset_to_menu(&mut self) {
+        self.playtesting_map = None;
         // `SectorInfo.write()`/`saveInfo` on exit: the live wave/attack bookkeeping
         // lands in the stored record before the runtime is dropped (PAR-0081).
         self.persist_sector_record();
@@ -3713,7 +3774,6 @@ impl MindCampaign {
             host.bind_mut().clear_campaign_runtime();
         }
         self.persist();
-        queued
     }
 
     /// `run_exit_save` / capture bookkeeping: writes the live sector's stored

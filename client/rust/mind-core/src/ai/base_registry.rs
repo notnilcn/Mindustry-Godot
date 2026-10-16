@@ -216,6 +216,60 @@ fn classify(registry: &ContentRegistry, mut schematic: Schematic) -> BasePart {
     }
 }
 
+/// Test fixture: `BaseRegistry.load()` over the real `assets/baseparts`
+/// catalog (the repo ships all 210 upstream `.msch` parts).
+///
+/// The directory resolves from `CARGO_MANIFEST_DIR` (baked in at compile
+/// time), so it does not depend on the test runner's cwd. Files are read in
+/// sorted name order, like the host loader (`DirAccess.get_files_at`). This
+/// PANICS instead of skipping when the catalog is missing, a part fails to
+/// decode, or no core part is classified: tests built on it must never pass
+/// vacuously.
+#[cfg(test)]
+pub(crate) fn real_catalog_for_tests(registry: &ContentRegistry) -> BaseRegistry {
+    let dir =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../assets/baseparts");
+    let entries = std::fs::read_dir(&dir).unwrap_or_else(|error| {
+        panic!(
+            "assets/baseparts is required by the enemy-base/ruins tests but `{}` is unreadable: {error}",
+            dir.display()
+        )
+    });
+    let mut paths: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("msch"))
+        .collect();
+    paths.sort();
+    assert!(
+        !paths.is_empty(),
+        "no `.msch` base parts under `{}`",
+        dir.display()
+    );
+    let schematics: Vec<Schematic> = paths
+        .iter()
+        .map(|path| {
+            let bytes = std::fs::read(path)
+                .unwrap_or_else(|error| panic!("read `{}`: {error}", path.display()));
+            crate::game::schematics::read(&bytes, registry)
+                .unwrap_or_else(|error| panic!("decode `{}`: {error:?}", path.display()))
+        })
+        .collect();
+    let mut bases = BaseRegistry::new();
+    bases.load(registry, schematics);
+    assert!(
+        !bases.cores.is_empty(),
+        "no core parts classified from {} base parts",
+        paths.len()
+    );
+    assert!(
+        !bases.parts.is_empty(),
+        "no plain parts classified from {} base parts",
+        paths.len()
+    );
+    bases
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
