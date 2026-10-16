@@ -3281,6 +3281,28 @@ impl DesktopBridge {
                 .try_to::<bool>()
                 .unwrap_or(false)
         };
+        // `LaunchPad.buildConfiguration` (`LaunchPad.java:185-203`): in a
+        // campaign (and not a net client) one 40 px `Styles.cleari` button with
+        // `Icon.upOpen` opening the sector-destination picker; `deselect()`
+        // otherwise (no panel at all).
+        if def.kind == BlockKind::LaunchPad {
+            if !in_campaign {
+                return None;
+            }
+            let planet = planet
+                .and_then(|planet| content.planet(planet))
+                .map(|planet| planet.name.clone())
+                .unwrap_or_default();
+            let spec = serde_json::json!({
+                "title": format!("block.{}.name", def.name),
+                "block": def.name,
+                "x": x,
+                "y": y,
+                "launch": true,
+                "planet": planet,
+            });
+            return Some(spec.to_string());
+        }
         // `Reconstructor.buildConfiguration` (`Reconstructor.java:215-240`):
         // with `showAllCommands = true` it lists every unit command (the held
         // payload's command subset needs a payload-model this panel cannot see).
@@ -3414,6 +3436,9 @@ impl DesktopBridge {
             .count();
         let text = matches!(def.kind, BlockKind::LogicBlock | BlockKind::MessageBlock);
         let multiline = def.kind == BlockKind::MessageBlock;
+        // `MessageBlock.maxTextLength`/`maxNewlines` (`MessageBlock.java:29-30`;
+        // the port's `MessageDef` on the live block instance).
+        let message = guard.message_limits(block);
         let color = def.kind == BlockKind::LightBlock;
         // Current value readbacks (`MessageBlock.message` / `LightBuild.color`).
         let current_text = if text {
@@ -3452,6 +3477,10 @@ impl DesktopBridge {
             "color": color,
             "options": options,
         });
+        if let Some((max_text, max_newlines)) = message {
+            spec["max_text"] = serde_json::Value::from(max_text);
+            spec["max_newlines"] = serde_json::Value::from(max_newlines);
+        }
         if let Some((pick_kind, rows, columns)) = selection {
             // `MindItemSelection` route: the `ItemSelection.buildTable` panel
             // (no title, `Styles.black6`, 40 px icon cells, close on pick).

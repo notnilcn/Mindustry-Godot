@@ -5829,6 +5829,23 @@ impl MindSimHost {
         }
     }
 
+    /// `MessageBlock.maxTextLength`/`maxNewlines` for the block's live
+    /// instance (`MessageBlock.java:29-30`; the port's `MessageDef`); `None`
+    /// for other kinds.
+    pub fn message_limits(&self, block: BlockId) -> Option<(i32, i32)> {
+        let table = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::world::block::BlockTable>()?;
+        match &table.get(block)?.kind_data {
+            mind_core::world::block_kind_data::BlockKindData::Message(message) => {
+                Some((message.max_text, message.max_newlines))
+            }
+            _ => None,
+        }
+    }
+
     /// `UnitFactoryBuild` config state for the plan grid + command row (J05
     /// T2): the selected plan index (`-1` = none) and the queued command
     /// override (`UnitFactory.java:227`).

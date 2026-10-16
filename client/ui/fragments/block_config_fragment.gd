@@ -23,6 +23,8 @@ var _config: Dictionary = {}
 ## Tapped tile of the configured building (`config.getSelected()`).
 var _tile := Vector2i(-1, -1)
 var _scale_tween: Tween = null
+## Launch-pad destination planet (the spec's `planet`, `LaunchPad.java:192`).
+var _launch_planet := ""
 
 @onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var title: Label = get_node_or_null("Panel/Layout/Title")
@@ -84,6 +86,7 @@ func _frameless() -> bool:
 		_buttons_only()
 		or bool(_config.get("selection", false))
 		or _config.get("commands", null) is Dictionary
+		or bool(_config.get("launch", false))
 	)
 
 
@@ -166,6 +169,8 @@ func _rebuild() -> void:
 		_build_canvas_panel()
 	elif bool(_config.get("text", false)):
 		_build_text_editor()
+	elif bool(_config.get("launch", false)):
+		_build_launch_panel()
 	elif bool(_config.get("selection", false)) or _config.get("commands", null) is Dictionary:
 		body.add_theme_constant_override("separation", 0)
 		_build_selection()
@@ -248,6 +253,10 @@ func _build_text_editor() -> void:
 		var edit := TextEdit.new()
 		edit.custom_minimum_size = Vector2(240, 90)
 		edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		# `MessageBlock.maxTextLength = 400` (`MessageBlock.java:29`); the
+		# dialog's `maxNewlines = 24` guard has no Godot TextEdit equivalent and
+		# stays a recorded residual.
+		edit.max_length = maxi(1, int(_config.get("max_text", 400)))
 		edit.text = str(_config.get("current", ""))
 		field = edit
 	else:
@@ -263,6 +272,47 @@ func _build_text_editor() -> void:
 	apply.pressed.connect(func() -> void: _submit("string", _text_of(field)))
 	row.add_child(apply)
 	_add_close_button(row)
+
+
+## `LaunchPad.buildConfiguration` (`LaunchPad.java:185-203`): one 40 px
+## `Icon.upOpen` button opening the sector-destination picker; the choice writes
+## `rules.sector.info.destination` (`MindCampaign.set_launch_destination`) and
+## closes the panel (`deselect()`).
+func _build_launch_panel() -> void:
+	# code-instantiated: one launch button per launch pad.
+	var button := MindWidgets.glyph_button("up-open", "▲", "cleari")
+	button.custom_minimum_size = Vector2(40, 40)
+	button.tooltip_text = _t("@launch.select", "select destination")
+	button.pressed.connect(_open_launch_select)
+	body.add_child(button)
+
+
+func _open_launch_select() -> void:
+	_launch_planet = str(_config.get("planet", ""))
+	_close()
+	var ui := get_node_or_null("/root/MindUi")
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui == null:
+		return
+	if root != null and root.has_method("dialog"):
+		var dialog: Node = root.call("dialog", "sector_select")
+		if dialog != null and dialog.has_signal("sector_chosen"):
+			# The launch-loadout flow keeps its own handler on this signal; the
+			# launch pad owns the choice while its dialog is up.
+			for connection in dialog.sector_chosen.get_connections():
+				dialog.sector_chosen.disconnect(connection["callable"])
+			if not dialog.sector_chosen.is_connected(_on_launch_destination_chosen):
+				dialog.sector_chosen.connect(_on_launch_destination_chosen)
+	ui.call("open_dialog", "sector_select", JSON.stringify({"planet": _launch_planet}))
+
+
+func _on_launch_destination_chosen(sector: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "sector_select")
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("set_launch_destination"):
+		campaign.call("set_launch_destination", _launch_planet, sector)
 
 
 ## Reads the submitted text from a `LineEdit` or `TextEdit`.
