@@ -1039,30 +1039,36 @@ impl SerpuloPlanetGenerator {
 
             // The ore-scrap callback (`posc`) writes overlays and draws the
             // d8 chances inline, in Java order.
-            let mut posc = |ctx: &mut StructureCtx, rand: &mut dyn BaseRand, cx: i32, cy: i32| {
-                let Some(other) = ctx.sim.grid.tiles.getn(cx, cy) else {
-                    return;
+            let mut posc = |wctx: &mut crate::world::ops::WorldCtx<'_>,
+                            rand: &mut dyn BaseRand,
+                            cx: i32,
+                            cy: i32| {
+                let floor = {
+                    let Some(other) = wctx.grid.tiles.getn(cx, cy) else {
+                        return;
+                    };
+                    other.floor
                 };
-                let surface = ctx
+                let surface = wctx
                     .content
-                    .block(other.floor)
+                    .block(floor)
                     .map(block_info::has_surface)
                     .unwrap_or(false);
                 if !surface {
                     return;
                 }
                 if let Some(ore_scrap) = ore_scrap {
-                    set_overlay(ctx, cx, cy, ore_scrap);
+                    set_overlay(wctx, cx, cy, ore_scrap);
                 }
                 for j in 1..=2 {
                     for (ddx, ddy) in basic::D8 {
                         let tx = cx + ddx * j;
                         let ty = cy + ddy * j;
-                        if !ctx.sim.grid.tiles.in_bounds(tx, ty) {
+                        if !wctx.grid.tiles.in_bounds(tx, ty) {
                             continue;
                         }
-                        let floor = ctx.sim.grid.tile(tx, ty).floor;
-                        let surface = ctx
+                        let floor = wctx.grid.tile(tx, ty).floor;
+                        let surface = wctx
                             .content
                             .block(floor)
                             .map(block_info::has_surface)
@@ -1071,7 +1077,7 @@ impl SerpuloPlanetGenerator {
                             && rand.chance(if j == 1 { 0.4 } else { 0.2 })
                             && let Some(ore_scrap) = ore_scrap
                         {
-                            set_overlay(ctx, tx, ty, ore_scrap);
+                            set_overlay(wctx, tx, ty, ore_scrap);
                         }
                     }
                 }
@@ -1131,12 +1137,16 @@ impl SerpuloPlanetGenerator {
 }
 
 /// `WorldCtx.set_overlay` shorthand for the ruins callback.
-fn set_overlay(ctx: &mut StructureCtx, x: i32, y: i32, overlay: crate::content::BlockId) {
+fn set_overlay(
+    wctx: &mut crate::world::ops::WorldCtx<'_>,
+    x: i32,
+    y: i32,
+    overlay: crate::content::BlockId,
+) {
     let (Ok(x), Ok(y)) = (i16::try_from(x), i16::try_from(y)) else {
         return;
     };
-    ctx.sim
-        .with_world_ctx(|wctx| wctx.set_overlay(x, y, overlay));
+    wctx.set_overlay(x, y, overlay);
 }
 
 impl WorldGenerator for SerpuloPlanetGenerator {
@@ -1158,10 +1168,54 @@ impl WorldGenerator for SerpuloPlanetGenerator {
 
     /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4/T6):
     /// derelict ruins first (`SerpuloPlanetGenerator.java:633-711`), then the
-    /// launch loadout (`:719`).
+    /// launch loadout (`:719`), then the enemy base (`:721-731`, I04 T17).
     fn place_structures(&mut self, ctx: &mut StructureCtx) {
         self.place_ruins(ctx);
         place_launch_loadout(ctx, self.spawn.0, self.spawn.1);
+
+        // Enemy base (`BaseGenerator`; `SerpuloPlanetGenerator.java:721-731`).
+        // The enemy-room spawn overlays ran in `generate` (`:721-723`);
+        // `sector.info.attack` is persisted by `SectorInfo.write` once the wave
+        // team holds a core.
+        if self.sector.has_enemy_base() && ctx.bases.is_some() {
+            use crate::game::waves::Waves;
+            use crate::math::rand_arc::ArcRand;
+
+            let cores = self.enemy_spawns.clone();
+            let state = crate::maps::generators::base::generate(
+                ctx,
+                &cores,
+                self.spawn,
+                ctx.wave_team,
+                self.sector.id,
+                self.sector.threat,
+            );
+            // `state.rules.attackMode = sector.info.attack = true;`
+            ctx.rules.attack_mode = true;
+            crate::maps::generators::base::post_generate(ctx, &state);
+
+            // `postGenerate` (`:745-752`): no ground spawns left -> regenerate
+            // the wave table air-only.
+            let spawn_block = self.ids.spawn;
+            let ground_spawns = ctx
+                .sim
+                .grid
+                .tiles
+                .iter()
+                .filter(|tile| tile.overlay == spawn_block)
+                .count();
+            if ground_spawns == 0 {
+                let attack = ctx.rules.attack_mode;
+                let runtime = Waves::generate_with(
+                    self.sector.threat,
+                    &mut ArcRand::new(self.sector.id as u64),
+                    attack,
+                    true,
+                    false,
+                );
+                ctx.rules.spawns = runtime.iter().map(spawn_group_to_json).collect();
+            }
+        }
     }
 
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {
