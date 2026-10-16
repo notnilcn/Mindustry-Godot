@@ -6463,9 +6463,11 @@ impl MindSimHost {
 
     /// Build requirements of block `name` for the placement info table
     /// (`PlacementFragment` requirement rows): JSON
-    /// `[{item, amount, have}]` — amount scaled by `Rules.buildCostMultiplier`
-    /// (`Math.round(stack.amount * multiplier)`) and `have` from the player's
-    /// first core (`player.core().items`).
+    /// `[{item, amount, have, infinite, label}]` — amount scaled by
+    /// `Rules.buildCostMultiplier` (`Math.round(stack.amount * multiplier)`),
+    /// `have` from the player's first core (`player.core().items`), and
+    /// `label` the Java-markup amount text (`*/90` under infinite resources
+    /// or without a core; `PlacementFragment.java:407-416`).
     #[func]
     pub fn block_requirements_json(&self, name: GString) -> GString {
         let empty = GString::from("[]");
@@ -6495,6 +6497,23 @@ impl MindSimHost {
             .unwrap_or(0);
         let core_items: std::collections::HashMap<String, i32> =
             self.player_core_items(team).into_iter().collect();
+        // `core == null || state.rules.isInfiniteResources(player.team())`
+        // (`PlacementFragment.java:410`): Java's team check is
+        // `infiniteResources || teams.get(team).infiniteResources`.
+        let infinite = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<CampaignRuntime>()
+            .is_some_and(|runtime| {
+                let rules = &runtime.session.rules;
+                rules.infinite_resources
+                    || rules
+                        .teams
+                        .get(team)
+                        .is_some_and(|rule| rule.infinite_resources)
+            });
+        let has_core = self.player_core_blocks(team) > 0;
         let rows: Vec<serde_json::Value> = def
             .requirements
             .iter()
@@ -6502,10 +6521,17 @@ impl MindSimHost {
                 let item = content.item(stack.item)?;
                 let amount = (stack.amount as f32 * multiplier + 0.5).floor() as i32;
                 let have = core_items.get(&item.name).copied().unwrap_or(0);
+                let label = mind_core::ui::display::requirement_label(
+                    has_core.then_some(have),
+                    amount,
+                    infinite,
+                );
                 Some(serde_json::json!({
                     "item": item.name,
                     "amount": amount,
                     "have": have,
+                    "infinite": infinite || !has_core,
+                    "label": label,
                 }))
             })
             .collect();
@@ -6886,6 +6912,15 @@ impl MindSimHost {
         range.map(|range| (range, PlaceRangeKind::Turret, accent))
     }
 
+    /// `LogicBlock.drawPlace` (`LogicBlock.java:185-189`): the processor link
+    /// range drawn while placing (`Drawf.circles(.., range)` in `Pal.accent`);
+    /// `None` for privileged/world processors and non-logic blocks. Kept apart
+    /// from [`Self::block_place_range`] because `LogicBuild.drawSelect` draws
+    /// no hover range.
+    pub fn logic_place_range(&self, block: BlockId) -> Option<f32> {
+        mind_core::logic::blocks::logic_place_range(&self.sim.ecs.0, block)
+    }
+
     /// `InputHandler.validBreak(x, y)`: whether the local team may deconstruct
     /// the building at `(x, y)`. Builds `BuildRules` from the world resource
     /// like `SimRuntime::can_place` does. Rust-only seam for the break-rect
@@ -6965,6 +7000,38 @@ impl MindSimHost {
             .and_then(|tile| self.content_snapshot.as_ref()?.block(tile.block))
             .map(|def| def.size.max(1))
             .unwrap_or(1)
+    }
+
+    /// World-pixel centre `(Building.x, Building.y)` of the building covering
+    /// tile `(x, y)` — a multiblock proxy tile resolves to its centre tile plus
+    /// `Block.offset` — or `null` without a building. The block-config fragment
+    /// anchors to it every frame (`Building.updateTableAlign`,
+    /// `BuildingComp.java:1682-1685`) and hides once it is gone
+    /// (`BlockConfigFragment.showConfig` update: `!selected.isValid()`).
+    #[func]
+    pub fn building_center_world(&self, x: i32, y: i32) -> Variant {
+        let Some(entity) = self.tile_at(x, y).and_then(|tile| tile.build) else {
+            return Variant::nil();
+        };
+        let Some(building) = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::building::Building>(entity)
+        else {
+            return Variant::nil();
+        };
+        let offset = self
+            .content_snapshot
+            .as_ref()
+            .and_then(|content| content.block(building.block))
+            .map(|def| def.offset)
+            .unwrap_or(0.0);
+        Vector2::new(
+            f32::from(building.tile.0) * TILESIZE_F + offset,
+            f32::from(building.tile.1) * TILESIZE_F + offset,
+        )
+        .to_variant()
     }
 
     /// Per-building state for the block pass (G03 T8): door open, switch
@@ -7858,6 +7925,7 @@ impl MindSimHost {
             return Some(ConfigOverlay::Logic {
                 x: cx,
                 y: cy,
+                size: def.size,
                 range,
                 links,
             });
@@ -7971,7 +8039,9 @@ impl MindSimHost {
     #[func]
     pub fn overlay_probe(&self, x: i32, y: i32) -> GString {
         let config = match self.config_overlay(x, y) {
-            Some(ConfigOverlay::Logic { x, y, range, links }) => serde_json::json!({
+            Some(ConfigOverlay::Logic {
+                x, y, range, links, ..
+            }) => serde_json::json!({
                 "kind": "logic",
                 "x": x,
                 "y": y,
@@ -8349,6 +8419,8 @@ pub(crate) enum ConfigOverlay {
         /// Building centre x/y (world px).
         x: f32,
         y: f32,
+        /// `Block.size` (the `super.drawConfigure()` outline).
+        size: i32,
         /// `LogicBlock.range` circles (non-privileged only; `None` = none).
         range: Option<f32>,
         /// Valid links: `(centre x, centre y, block size, link name)`.

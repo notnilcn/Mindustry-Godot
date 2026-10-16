@@ -481,18 +481,156 @@ fn block_catalog_with(store: Option<&dyn UnlockStore>, planet: Option<&str>) -> 
     block_catalog_from(&registry, store, planet)
 }
 
+/// Rules context for `BuildVisibility.visible()` and `Block.isVisible()`
+/// (`world/meta/BuildVisibility.java`, `Block.java:1031-1033,1553-1555`).
+///
+/// The palette filter evaluates each block's `build_visibility` tag against
+/// this context rather than a fixed variant list: the editor-only world-logic
+/// blocks (`worldProcessorOnly`) stay out of a sandbox palette while the editor
+/// and `allowEditWorldProcessors` maps list them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct BlockVisibilityContext {
+    /// `state.rules.editor`.
+    pub editor: bool,
+    /// `state.rules.allowEditWorldProcessors`.
+    pub allow_edit_world_processors: bool,
+    /// `state.rules.infiniteResources` (the global flag, not the team rule).
+    pub infinite_resources: bool,
+    /// `state.isCampaign()`.
+    pub campaign: bool,
+    /// `state.isGame()` (false in the menu).
+    pub is_game: bool,
+    /// `state.rules.lighting`.
+    pub lighting: bool,
+    /// `state.rules.fog`.
+    pub fog: bool,
+    /// `indexer.isBlockPresent(Blocks.coreZone)`.
+    pub core_zone_present: bool,
+    /// `state.getPlanet().campaignRules.legacyLaunchPads`.
+    pub legacy_launch_pads: bool,
+    /// `Blocks.advancedLaunchPad.unlocked()`.
+    pub advanced_launch_pad_unlocked: bool,
+    /// `state.rules.hideBannedBlocks`.
+    pub hide_banned_blocks: bool,
+    /// `state.rules.blockWhitelist`.
+    pub block_whitelist: bool,
+    /// `state.rules.bannedBlocks` (content names).
+    pub banned_blocks: Vec<String>,
+    /// `state.rules.revealedBlocks` (content names).
+    pub revealed_blocks: Vec<String>,
+}
+
+impl BlockVisibilityContext {
+    /// The rules-less custom/sandbox inventory: an in-game, non-campaign
+    /// session with `infiniteResources`, so the sandbox blocks stay listed.
+    pub fn sandbox() -> Self {
+        Self {
+            is_game: true,
+            infinite_resources: true,
+            ..Self::default()
+        }
+    }
+
+    /// The rules-less campaign context (`state.isCampaign()`, default rules).
+    pub fn campaign() -> Self {
+        Self {
+            is_game: true,
+            campaign: true,
+            ..Self::default()
+        }
+    }
+
+    /// Context from the live match rules; `campaign` is `state.isCampaign()`.
+    /// The world-derived inputs (`core_zone_present`, `legacy_launch_pads`,
+    /// `advanced_launch_pad_unlocked`) stay `false` for the caller to fill.
+    pub fn from_rules(rules: &crate::io::json::rules::Rules, campaign: bool) -> Self {
+        Self {
+            editor: rules.editor,
+            allow_edit_world_processors: rules.allow_edit_world_processors,
+            infinite_resources: rules.infinite_resources,
+            campaign,
+            is_game: true,
+            lighting: rules.lighting,
+            fog: rules.fog,
+            hide_banned_blocks: rules.hide_banned_blocks,
+            block_whitelist: rules.block_whitelist,
+            banned_blocks: rules.banned_blocks.iter().cloned().collect(),
+            revealed_blocks: rules.revealed_blocks.iter().cloned().collect(),
+            ..Self::default()
+        }
+    }
+
+    /// `BuildVisibility.visible()` (`BuildVisibility.java:10-22`).
+    pub fn build_visible(&self, visibility: crate::content::BuildVisibility) -> bool {
+        use crate::content::BuildVisibility as V;
+        match visibility {
+            V::Hidden | V::DebugOnly => false,
+            V::Shown => true,
+            V::EditorOnly => self.editor,
+            V::CoreZoneOnly => self.core_zone_present || !self.is_game,
+            V::WorldProcessorOnly => self.editor || self.allow_edit_world_processors,
+            V::SandboxOnly => self.infinite_resources,
+            V::CampaignOnly => self.campaign || !self.is_game,
+            V::LegacyLaunchPadOnly => {
+                self.campaign && self.legacy_launch_pads && self.advanced_launch_pad_unlocked
+            }
+            V::NotLegacyLaunchPadOnly => {
+                !self.is_game
+                    || self.infinite_resources
+                    || (self.campaign && !self.legacy_launch_pads)
+            }
+            V::LightingOnly => {
+                self.lighting || self.campaign || !self.is_game || self.infinite_resources
+            }
+            V::FogOnly => self.fog || self.editor || !self.is_game,
+        }
+    }
+
+    /// `Rules.isBanned(Block)` (`blockWhitelist != bannedBlocks.contains`).
+    pub fn is_banned(&self, name: &str) -> bool {
+        self.block_whitelist != self.banned_blocks.iter().any(|banned| banned == name)
+    }
+
+    /// `Block.isVisible()`: `!isHidden() && (editor || !hideBannedBlocks ||
+    /// !isBanned())`, where `isHidden()` is `!buildVisibility.visible() &&
+    /// !revealedBlocks.contains(this)`.
+    pub fn block_visible(&self, name: &str, visibility: crate::content::BuildVisibility) -> bool {
+        let hidden = !self.build_visible(visibility)
+            && !self.revealed_blocks.iter().any(|revealed| revealed == name);
+        !hidden && (self.editor || !self.hide_banned_blocks || !self.is_banned(name))
+    }
+}
+
 /// Catalog over a caller-supplied registry: the live session registry in the
 /// client, so mod content is in the palette exactly like Java's
 /// `PlacementFragment.getUnlockedByCategory` reads the global
 /// `Vars.content.blocks()` (`PlacementFragment.java:771-781`). `store` enables
 /// the unlock/visibility filter and `planet` overrides the default Serpulo
-/// `environmentBuildable` context.
+/// `environmentBuildable` context. Without live rules the visibility context
+/// is [`BlockVisibilityContext::campaign`] when a store is bound, else
+/// [`BlockVisibilityContext::sandbox`].
 pub fn block_catalog_from(
     registry: &ContentRegistry,
     store: Option<&dyn UnlockStore>,
     planet: Option<&str>,
 ) -> BlockCatalogView {
-    use crate::content::registries::blocks::BuildVisibility;
+    let visibility = if store.is_some() {
+        BlockVisibilityContext::campaign()
+    } else {
+        BlockVisibilityContext::sandbox()
+    };
+    block_catalog_visible(registry, store, planet, &visibility)
+}
+
+/// [`block_catalog_from`] under the live rules' visibility context
+/// (`getUnlockedByCategory` filters on `Block.isVisible()`, which reads
+/// `state.rules`; `PlacementFragment.java:771-773`).
+pub fn block_catalog_visible(
+    registry: &ContentRegistry,
+    store: Option<&dyn UnlockStore>,
+    planet: Option<&str>,
+    visibility: &BlockVisibilityContext,
+) -> BlockCatalogView {
     use crate::content::{Category, PlanetId};
 
     // `State.getPlanet()` falls back to the rules planet (`serpulo` by default).
@@ -510,14 +648,11 @@ pub fn block_catalog_from(
         })
         .collect();
     for block in registry.blocks() {
-        // `Block.isVisible()` metadata half: hidden/debug/editor content never
-        // reaches the player's placement palette.
-        if block.removed
-            || matches!(
-                block.build_visibility,
-                BuildVisibility::Hidden | BuildVisibility::DebugOnly | BuildVisibility::EditorOnly
-            )
-        {
+        // `Block.isVisible()` (`Block.java:1031-1033`): the block's
+        // `BuildVisibility` predicate against the rules, so hidden/debug/editor
+        // content and the `worldProcessorOnly` world-logic blocks stay out of a
+        // play palette whichever registry (base or live) is passed in.
+        if block.removed || !visibility.block_visible(&block.name, block.build_visibility) {
             continue;
         }
         // `PlacementFragment.unlocked(block)`: player-placeable content only.
@@ -533,17 +668,6 @@ pub fn block_catalog_from(
             continue;
         }
         if store.is_some() {
-            if matches!(
-                block.build_visibility,
-                BuildVisibility::SandboxOnly
-                    | BuildVisibility::CoreZoneOnly
-                    | BuildVisibility::WorldProcessorOnly
-                    | BuildVisibility::LegacyLaunchPadOnly
-                    | BuildVisibility::LightingOnly
-                    | BuildVisibility::FogOnly
-            ) {
-                continue;
-            }
             // Tech-gated blocks need their unlock bit (or be a zero-requirement,
             // objective-free root that `check_auto_unlocks` grants at boot);
             // blocks outside the tech tree stay available (the port's specs do
@@ -2164,6 +2288,137 @@ mod tests {
                 .any(|block| block.name == "all-kinds-all-wall")),
             "base content has no mod blocks"
         );
+    }
+
+    /// Twin-verification bug 5: `Block.isVisible()` reads the rules, so the
+    /// four `worldProcessorOnly` world-logic blocks stay out of the sandbox
+    /// palette (`BuildVisibility.java:16`) and appear only in the editor or
+    /// with `allowEditWorldProcessors`.
+    #[test]
+    fn block_catalog_applies_build_visibility_rules() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::io::json::rules::Rules;
+
+        let mut registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+                .expect("content boot");
+        registry.init().expect("init");
+        registry.post_init().expect("post_init");
+        let has = |catalog: &BlockCatalogView, name: &str| {
+            catalog
+                .categories
+                .iter()
+                .any(|category| category.blocks.iter().any(|block| block.name == name))
+        };
+        const WORLD_LOGIC: [&str; 4] = [
+            "world-processor",
+            "world-cell",
+            "world-message",
+            "world-switch",
+        ];
+
+        // Sandbox: infinite resources, not the editor.
+        let sandbox_rules = Rules {
+            infinite_resources: true,
+            ..Rules::default()
+        };
+        let sandbox = block_catalog_visible(
+            &registry,
+            None,
+            Some("serpulo"),
+            &BlockVisibilityContext::from_rules(&sandbox_rules, false),
+        );
+        for name in WORLD_LOGIC {
+            assert!(!has(&sandbox, name), "`{name}` is hidden in a sandbox");
+        }
+        assert!(has(&sandbox, "micro-processor"));
+        assert!(has(&sandbox, "power-source"), "sandboxOnly is listed");
+        // The rules-less fallback (`MindInput`'s catalog) agrees.
+        let fallback = block_catalog_from(&registry, None, Some("serpulo"));
+        for name in WORLD_LOGIC {
+            assert!(!has(&fallback, name), "`{name}` is hidden without rules");
+        }
+
+        // Survival custom game: no infinite resources hides `sandboxOnly`.
+        let survival = block_catalog_visible(
+            &registry,
+            None,
+            Some("serpulo"),
+            &BlockVisibilityContext::from_rules(&Rules::default(), false),
+        );
+        assert!(!has(&survival, "power-source"));
+        assert!(has(&survival, "conveyor"));
+
+        // `allowEditWorldProcessors` (and the editor) list them.
+        let privileged_rules = Rules {
+            allow_edit_world_processors: true,
+            ..Rules::default()
+        };
+        let privileged = block_catalog_visible(
+            &registry,
+            None,
+            Some("serpulo"),
+            &BlockVisibilityContext::from_rules(&privileged_rules, false),
+        );
+        for name in WORLD_LOGIC {
+            assert!(
+                has(&privileged, name),
+                "`{name}` with allowEditWorldProcessors"
+            );
+        }
+
+        // `hideBannedBlocks` drops a banned block outside the editor.
+        let mut banned_rules = sandbox_rules.clone();
+        banned_rules.hide_banned_blocks = true;
+        banned_rules.banned_blocks.insert("conveyor".to_owned());
+        let banned = block_catalog_visible(
+            &registry,
+            None,
+            Some("serpulo"),
+            &BlockVisibilityContext::from_rules(&banned_rules, false),
+        );
+        assert!(!has(&banned, "conveyor"));
+        assert!(has(&banned, "junction"));
+    }
+
+    #[test]
+    fn build_visibility_predicates_match_upstream() {
+        use crate::content::BuildVisibility as V;
+
+        let sandbox = BlockVisibilityContext::sandbox();
+        assert!(!sandbox.build_visible(V::WorldProcessorOnly));
+        assert!(!sandbox.build_visible(V::EditorOnly));
+        assert!(sandbox.build_visible(V::SandboxOnly));
+        assert!(!sandbox.build_visible(V::CampaignOnly));
+        assert!(!sandbox.build_visible(V::CoreZoneOnly));
+        assert!(sandbox.build_visible(V::LightingOnly));
+        assert!(!sandbox.build_visible(V::FogOnly));
+
+        let campaign = BlockVisibilityContext::campaign();
+        assert!(!campaign.build_visible(V::SandboxOnly));
+        assert!(campaign.build_visible(V::CampaignOnly));
+        assert!(campaign.build_visible(V::LightingOnly));
+        assert!(campaign.build_visible(V::NotLegacyLaunchPadOnly));
+        assert!(!campaign.build_visible(V::LegacyLaunchPadOnly));
+
+        let editor = BlockVisibilityContext {
+            editor: true,
+            is_game: true,
+            ..BlockVisibilityContext::default()
+        };
+        assert!(editor.build_visible(V::WorldProcessorOnly));
+        assert!(editor.build_visible(V::EditorOnly));
+        assert!(editor.build_visible(V::FogOnly));
+        assert!(!editor.build_visible(V::DebugOnly));
+        assert!(!editor.build_visible(V::Hidden));
+
+        // `revealedBlocks` un-hides a block whose visibility is false.
+        let revealed = BlockVisibilityContext {
+            revealed_blocks: vec!["world-processor".to_owned()],
+            ..BlockVisibilityContext::sandbox()
+        };
+        assert!(revealed.block_visible("world-processor", V::WorldProcessorOnly));
+        assert!(!revealed.block_visible("world-cell", V::WorldProcessorOnly));
     }
 
     #[test]

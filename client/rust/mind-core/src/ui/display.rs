@@ -128,10 +128,48 @@ pub fn requirement_color(have: i32, need: i32) -> &'static str {
     }
 }
 
+/// `PlacementFragment` requirement-row amount label (`PlacementFragment.java:
+/// 407-416`): `"*/" + stackamount` without a core or under
+/// `state.rules.isInfiniteResources(player.team())`, else
+/// `color + UI.formatAmount(amount) + "[white]/" + stackamount` (Java markup;
+/// the caller renders it through `render_markup`).
+pub fn requirement_label(have: Option<i32>, need: i32, infinite: bool) -> String {
+    match have {
+        Some(have) if !infinite => format!(
+            "[{}]{}[white]/{}",
+            requirement_color(have, need),
+            crate::ui::text::format_amount_default(i64::from(have)),
+            need
+        ),
+        _ => format!("*/{need}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::assets::bundle::{Bundle, parse_properties};
+
+    /// Twin-verification bug 9: infinite resources (or no core) show `*/90`,
+    /// never the core amount.
+    #[test]
+    fn requirement_label_matches_placement_fragment() {
+        assert_eq!(requirement_label(Some(100), 90, true), "*/90");
+        assert_eq!(requirement_label(Some(0), 50, true), "*/50");
+        assert_eq!(requirement_label(None, 50, false), "*/50");
+        assert_eq!(
+            requirement_label(Some(100), 90, false),
+            "[white]100[white]/90"
+        );
+        assert_eq!(
+            requirement_label(Some(0), 50, false),
+            "[scarlet]0[white]/50"
+        );
+        assert_eq!(
+            requirement_label(Some(40), 50, false),
+            "[accent]40[white]/50"
+        );
+    }
 
     fn bundle() -> Bundle {
         Bundle::from_layers(vec![parse_properties(

@@ -3002,22 +3002,25 @@ impl MindCampaign {
         });
         let planet = loaded_planet.unwrap_or_else(|| self.session.rules.planet.clone());
         let is_campaign = self.session.is_campaign();
+        let visibility = self.block_visibility_context(is_campaign);
         let catalog = match self.registry.as_ref() {
             Some(registry) => {
                 if is_campaign {
                     settings_hub::with_settings(|settings| {
                         let store = SettingsUnlockStore::new(settings);
-                        mind_core::ui::campaign::block_catalog_from(
+                        mind_core::ui::campaign::block_catalog_visible(
                             registry,
                             Some(&store),
                             Some(planet.as_str()),
+                            &visibility,
                         )
                     })
                 } else {
-                    mind_core::ui::campaign::block_catalog_from(
+                    mind_core::ui::campaign::block_catalog_visible(
                         registry,
                         None,
                         Some(planet.as_str()),
+                        &visibility,
                     )
                 }
             }
@@ -3037,6 +3040,58 @@ impl MindCampaign {
                 .unwrap_or_else(|_| String::from("{}"))
                 .as_str(),
         )
+    }
+
+    /// `Block.isVisible()` inputs for the palette (`BuildVisibility.java`):
+    /// the live match rules (the sim's session rules, else the facade
+    /// session), `indexer.isBlockPresent(Blocks.coreZone)`, the active planet's
+    /// `campaignRules.legacyLaunchPads` and `advancedLaunchPad.unlocked()`.
+    fn block_visibility_context(
+        &self,
+        is_campaign: bool,
+    ) -> mind_core::ui::campaign::BlockVisibilityContext {
+        let host = self.host();
+        let rules = host
+            .as_ref()
+            .and_then(|host| host.bind().live_rules())
+            .unwrap_or_else(|| self.session.rules.clone());
+        let mut context =
+            mind_core::ui::campaign::BlockVisibilityContext::from_rules(&rules, is_campaign);
+        // `BlockIndexer.blocksPresent` covers floors, overlays and blocks.
+        context.core_zone_present = host.as_ref().is_some_and(|host| {
+            let guard = host.bind();
+            let Some(core_zone) = guard
+                .content_registry()
+                .and_then(|content| content.block_id("core-zone"))
+            else {
+                return false;
+            };
+            guard.grid().tiles.iter().any(|tile| {
+                tile.floor == core_zone || tile.overlay == core_zone || tile.block == core_zone
+            })
+        });
+        context.legacy_launch_pads = self
+            .session
+            .sector
+            .and_then(|(planet, _)| {
+                self.campaign
+                    .as_ref()
+                    .and_then(|campaign| campaign.planet(planet))
+            })
+            .is_some_and(|planet| planet.campaign_rules.legacy_launch_pads);
+        context.advanced_launch_pad_unlocked = self
+            .registry
+            .as_ref()
+            .and_then(|registry| {
+                registry
+                    .block_id("advanced-launch-pad")
+                    .and_then(|id| registry.block(id))
+            })
+            .is_some_and(|block| block.unlock.unlocked())
+            || settings_hub::with_settings(|settings| {
+                settings.get_bool("advanced-launch-pad-unlocked", false)
+            });
+        context
     }
 
     /// Drops `MindUi`'s cached placement catalog after an unlock change; its
