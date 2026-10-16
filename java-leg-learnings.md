@@ -817,3 +817,14 @@ Run: runs/20261014-s2-verify/java-0*.png.
 - Graceful quit from a custom game: Esc -> Save & Quit (640,477) -> confirm OK (742,393) ->
   main-menu Quit (415,535).
 Run: runs/20261014-s3-verify3/ (java-*.png).
+
+## 2026-10-16 — round-J twin (runs/20261016-J-twin): clicks miss after `window_ctl.py move` on the xrdp `:10`
+
+- Symptom: after `window_ctl.py unmaximize/resize/move Mindustry 1300 760` the window really sat at
+  (1305,789) (`xwininfo` Absolute upper-left, capture `region`), but `window_ctl.py` kept printing the stale
+  `x=5 y=29`, and every `java_input.py click` / `mousedown`+`mouseup` / `send_event_click.py` at
+  origin+(240,150) on Play was dead; one of them instead opened the Discord dialog (the client's idea of its
+  own origin lagged the real one).
+- Workaround: move the window once more (`window_ctl.py move Mindustry 60 100` -> real origin (65,129)), then
+  compute the origin per click from `xwininfo -name Mindustry` (never from `window_ctl.py`'s printout); clicks
+  landed from then on.

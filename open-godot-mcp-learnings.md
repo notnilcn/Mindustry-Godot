@@ -2270,3 +2270,37 @@ Run: runs/20261014-s3-verify2/.
 - Arc oracle: `/usr/bin/javac` + `Arc/arc-core/build/libs/arc-core-1.0.jar` run Arc helpers
   (`Strings.autoFixed`, `Noise.noise`) directly: `javac -cp $JAR X.java && java -cp $JAR:. X`.
 Run: runs/20261014-s3-verify3/.
+
+## 2026-10-16 — round-J twin (runs/20261016-J-twin): a `find_children(...)[0]._close()` eval pinned the frame loop
+
+- Symptom: `tools/gmcp.py --eval 'get_node("/root/Spine/Ui/UiRoot/OverlayLayer").find_children("block_config","",true,false)[0]._close(); return 1'`
+  returned `godot_exec: Runtime call 'exec' timed out after 15.0s`; afterwards `Engine.get_process_frames()` stayed
+  at 81147 across evals (break-on-error pin; the fragment is not under `OverlayLayer` under that name, so `[0]` on an
+  empty array errored).
+- Workaround: `tools/session-play.sh 1 --play` (stop + play). Probe the node path in a separate eval first and never
+  index a `find_children` result inside the same statement.
+- Related: `godot_input key` needs `{"key":"Escape"}` (Godot key names); `{"keycode":"KEY_ESCAPE"}` errors with
+  `godot_input: key required`, and `{"key":"KEY_ESCAPE"}` returns ok but does nothing.
+
+## 2026-10-17 — `MindSimHost::set_paused` panics with "already bound" during a turret-draw capture walk (session 4)
+
+- Symptom: after ~12 `place_block`/`center_on_tile` evals and one successful
+  paused screenshot, the next eval (`Camera2D.zoom_by`) returned
+  `godot_exec: No Godot instance connected`; the runtime had crashed and the
+  editor relaunched a fresh game (menu). Session console
+  (`.opencode/parity-session/session-4/editor-console.log`, line 1135822):
+  `panic before unwinding into Godot: Gd<T>::bind_mut() failed, already bound;
+  T = mind_gdext::sim_host::MindSimHost ... in MindSimHost::set_paused()` with a
+  GDScript `_eval` backtrace, i.e. the same race class as the 2026-10-10 MindUi
+  entry: an eval call reached `set_paused` while a shared borrow was still live.
+  Older (Oct 14) `set_paused` panics with the same signature exist in the same
+  log, so this is not specific to the turret pass.
+- Exact failing call: `--eval 'return get_node("/root/Spine/World/Camera2D").zoom_by(1.0)'`
+  issued right after a batch of `place_block` + `center_on_tile` + screenshot
+  calls (run dir `runs/20261017-s4-J03-T1`, pid 121389 -> relaunched 124726).
+- Workaround that worked: treat it as a hiccup — the editor auto-recovers with a
+  fresh game; re-enter the sandbox and avoid *toggling* pause between evals
+  (pause once for the capture pass; the capture flow itself kept working before
+  and after the crash).
+- No crash report was written; the panic line is only in the session console log
+  (`crashes/` stayed empty).
