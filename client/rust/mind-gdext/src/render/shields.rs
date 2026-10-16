@@ -54,7 +54,8 @@ fn polygon(sides: u8, x: f32, y: f32, radius: f32, rotation_deg: f32) -> Vec<Vec
 pub struct ShieldRenderer {
     base: Base<Node2D>,
     host: Option<Gd<MindSimHost>>,
-    /// `animatedshields` setting, re-read every frame.
+    /// `animatedwater` setting (`Renderer.animateShields = animateWater`,
+    /// `Renderer.java:168-169`), re-read every frame.
     animated: bool,
     /// `None` until the first frame's setting read installs/clears the parent
     /// `CanvasGroup` material.
@@ -90,7 +91,7 @@ impl INode2D for ShieldRenderer {
         if self.host.is_some() {
             // Domes rotate with `shieldRotation`; the shield state changes
             // without a world-revision bump. The group material follows the
-            // `animatedshields` setting (`Renderer.animateShields`).
+            // `animatedwater` setting (`Renderer.animateShields = animateWater`).
             self.sync_group_material();
             self.base_mut().queue_redraw();
         }
@@ -172,15 +173,16 @@ impl ShieldRenderer {
         self.material = material;
     }
 
-    /// `animatedshields` setting (`SettingsMenuDialog` `graphics.checkPref`,
-    /// desktop default true).
+    /// `Renderer.animateShields`: `animateWater` from the `animatedwater` row
+    /// (`Renderer.java:168-169`; Java has no `animatedshields` key,
+    /// default true).
     fn animated_setting(&self) -> bool {
         self.base()
             .try_get_node_as::<Node>("/root/MindUi")
             .map(|mut ui| {
                 ui.call(
                     "settings_get_bool",
-                    &[GString::from("animatedshields").to_variant()],
+                    &[GString::from("animatedwater").to_variant()],
                 )
                 .booleanize()
             })

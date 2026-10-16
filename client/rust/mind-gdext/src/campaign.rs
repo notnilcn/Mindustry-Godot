@@ -1422,9 +1422,11 @@ impl MindCampaign {
         // `logic.reset()` (`state = new GameState()`) clears an earlier
         // `playtestingMap`; `Control.java:407` records it for a playtest only.
         self.playtesting_map = playtest.then(|| path.clone());
-        if !playtest && settings_hub::with_settings(|store| store.get_bool("savecreate", false)) {
+        if !playtest && settings_hub::row_bool("savecreate") {
             // `Control.playMap`'s `savecreate` slot (`Control.java:418-420`):
-            // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`.
+            // `map.name() + " " + new SimpleDateFormat("MMM dd h:mm")`. The
+            // bare `getBool("savecreate")` reads the `checkPref("savecreate",
+            // true)` default (`SettingsMenuDialog.java:404`).
             let name = format!("{} {}", header.name(), save_date_stamp());
             if !self.save_slot(GString::from(name.as_str())) {
                 log::warn!("start_map_mode: savecreate slot `{name}` failed");

@@ -42,6 +42,8 @@ var _ip_field: LineEdit = null
 var _local_body: Control = null
 var _remote_body: Control = null
 var _global_list: MindTable = null
+## Header/search/body controls of the community section (`_build_sections`).
+var _global_nodes: Array[Control] = []
 ## Persisted servers (`[{"ip": String, "port": int}]`, Java `Server` shape).
 var _servers: Array = []
 ## Signature of the last rendered probe state; rows rebuild when it changes.
@@ -164,7 +166,15 @@ func _build_sections() -> void:
 	_remote_body = remote
 	_rebuild_servers()
 
+	var first_global := _table.get_child_count()
 	var global := _add_section("@servers.global", true)
+	# The community section's header/search/body nodes, hidden while
+	# `communityservers` is off (`JoinDialog.java:329-331`).
+	_global_nodes.clear()
+	for index in range(first_global, _table.get_child_count()):
+		var node := _table.get_child(index) as Control
+		if node != null:
+			_global_nodes.append(node)
 	# code-instantiated: the community body lists the active server's public
 	# `all_matches` rows; it is Java's community list minus the remote fetch.
 	_global_list = MindTable.new()
@@ -228,7 +238,23 @@ func _toggle_section(body: Control, glyph: Label) -> void:
 
 func shown() -> void:
 	_rebuild_servers()
-	_rebuild_public()
+	# `setupRemote`/`refreshAll` (`JoinDialog.java:143-150,329-331`): the
+	# community (`@servers.global`) section and its refresh exist only while
+	# `Core.settings.getBool("communityservers", true)`.
+	var community := _community_servers()
+	for node in _global_nodes:
+		if is_instance_valid(node):
+			node.visible = community
+	if community:
+		_rebuild_public()
+
+
+## `Core.settings.getBool("communityservers", true)` (Game settings row).
+func _community_servers() -> bool:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_bool"):
+		return true
+	return bool(ui.call("settings_get_bool", "communityservers"))
 
 
 ## Rebuilds both server sections from the live probe data (one container row

@@ -52,6 +52,26 @@ pub fn with_settings<R>(f: impl FnOnce(&mut SettingsStore) -> R) -> R {
     f(&mut guard)
 }
 
+/// `Core.settings.getBool(key)` with the default `SettingsMenuDialog` registered
+/// through `settings.defaults(name, def)` (`SettingsTable.checkPref`); `false`
+/// for a key that has no settings row. Per-frame readers (renderer, camera,
+/// FX) call this the way Java reads `Core.settings` every frame.
+pub fn row_bool(key: &str) -> bool {
+    let default = mind_core::ui::settings::all_rows()
+        .find(|row| row.key == key)
+        .is_some_and(|row| row.default_bool());
+    with_settings(|store| store.get_bool(key, default))
+}
+
+/// `Core.settings.getInt(key)` with the registered slider default
+/// (`SettingsTable.sliderPref`); `0` for a key that has no settings row.
+pub fn row_i32(key: &str) -> i32 {
+    let default = mind_core::ui::settings::all_rows()
+        .find(|row| row.key == key)
+        .map_or(0, |row| row.default_i32());
+    with_settings(|store| store.get_i32(key, default))
+}
+
 /// Re-reads the file after an external writer replaced it (data import, clear
 /// game data; Java `importData` reloads settings before exit).
 pub fn reload(paths: &Paths) {
@@ -69,6 +89,17 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    /// Serializes the tests of this module: they share the one process-wide
+    /// store and `reload` swaps it wholesale.
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        match TEST_LOCK.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     /// A unique directory under the system temp dir (this suite only).
     fn temp_root() -> PathBuf {
         static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -83,6 +114,7 @@ mod tests {
     /// fresh `SettingsStore::load` (the PAR-0164 shape: one `Core.settings`).
     #[test]
     fn closures_share_writes_and_save_persists() {
+        let _guard = serial();
         let root = temp_root();
         let paths = Paths::new(&root);
         init(&paths);
@@ -106,6 +138,40 @@ mod tests {
         reload(&paths);
         assert_eq!(with_settings(|store| store.get_string("locale", "")), "de");
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// `row_bool`/`row_i32` fall back to the `SettingsMenuDialog` defaults
+    /// (`settings.defaults(name, def)`) and read live writes.
+    #[test]
+    fn row_readers_use_registered_defaults() {
+        let _guard = serial();
+        let root = temp_root();
+        let paths = Paths::new(&root);
+        init(&paths);
+        reload(&paths);
+        with_settings(|store| {
+            store.remove("effects");
+            store.remove("screenshake");
+            store.remove("hidedisplays");
+        });
+        // `graphics.checkPref("effects", true)`, `checkPref("hidedisplays",
+        // false)`, `sliderPref("screenshake", 4, ...)`.
+        assert!(row_bool("effects"));
+        assert!(!row_bool("hidedisplays"));
+        assert_eq!(row_i32("screenshake"), 4);
+        assert!(!row_bool("not-a-settings-row"));
+        assert_eq!(row_i32("not-a-settings-row"), 0);
+        with_settings(|store| {
+            store.put_bool("effects", false);
+            store.put_i32("screenshake", 8);
+        });
+        assert!(!row_bool("effects"));
+        assert_eq!(row_i32("screenshake"), 8);
+        with_settings(|store| {
+            store.remove("effects");
+            store.remove("screenshake");
+        });
         let _ = std::fs::remove_dir_all(&root);
     }
 }

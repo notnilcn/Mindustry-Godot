@@ -729,6 +729,15 @@ impl MindUi {
                 store.remove(row.key);
             }
         });
+        // `SettingsTable.rebuild()` re-adds every row; `SliderSetting.add` calls
+        // `slider.change()`, which reruns each slider's processor/`changed`
+        // listener with the restored default (margins, fps cap, zoom
+        // multipliers).
+        for row in rows {
+            if matches!(row.kind, SettingKind::Slider { .. }) {
+                self.apply_row_change(row.key);
+            }
+        }
         self.persist_settings();
         true
     }
@@ -1153,6 +1162,20 @@ impl MindUi {
         match key {
             "vsync" | "fpscap" | "fullscreen" => self.apply_window_settings(),
             "uiEdgePadding" => self.update_margins(),
+            // `SettingsMenuDialog.java:468-480`: the magnification sliders'
+            // processors store the float multipliers `Renderer.update` reads
+            // (`Renderer.java:173-174`, `maxZoomInGame`/`minZoomInGame`).
+            "maxmagnificationmultiplierpercent" | "minmagnificationmultiplierpercent" => {
+                let target = if key.starts_with("max") {
+                    "maxzoomingamemultiplier"
+                } else {
+                    "minzoomingamemultiplier"
+                };
+                crate::settings_hub::with_settings(|store| {
+                    let percent = store.get_i32(key, 100);
+                    store.put_f32(target, percent as f32 / 100.0);
+                });
+            }
             _ => {}
         }
     }

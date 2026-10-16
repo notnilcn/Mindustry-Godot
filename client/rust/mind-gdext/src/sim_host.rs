@@ -1502,6 +1502,13 @@ impl MindSimHost {
         self.sim.is_paused()
     }
 
+    /// `state.rules.pauseDisabled` of the live session (`false` without
+    /// rules); the UI's pause paths gate on it (`Control.java:620,629`).
+    #[func]
+    pub fn rules_pause_disabled(&self) -> bool {
+        self.live_rules().is_some_and(|rules| rules.pause_disabled)
+    }
+
     // ---- Plan 09 networks debug API (data side; §7c MCP run deferred) ----
 
     /// Whole-network projection as pretty JSON (plan 09 §3.11).

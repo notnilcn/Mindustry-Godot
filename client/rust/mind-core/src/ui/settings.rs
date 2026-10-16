@@ -150,7 +150,7 @@ pub const CATEGORIES: &[SettingsCategory] = &[
     SettingsCategory {
         id: "sound",
         key: "settings.sound",
-        icon: "effect",
+        icon: "volume-up",
         action: SettingsAction::Table,
     },
     SettingsCategory {
@@ -162,7 +162,7 @@ pub const CATEGORIES: &[SettingsCategory] = &[
     SettingsCategory {
         id: "controls",
         key: "settings.controls",
-        icon: "pick",
+        icon: "move",
         action: SettingsAction::Controls,
     },
     SettingsCategory {
@@ -174,7 +174,7 @@ pub const CATEGORIES: &[SettingsCategory] = &[
     SettingsCategory {
         id: "dev",
         key: "settings.dev",
-        icon: "file-text",
+        icon: "file-code",
         action: SettingsAction::Table,
     },
 ];
@@ -243,7 +243,6 @@ pub const GRAPHICS_ROWS: &[SettingRow] = &[
     SettingRow::check("indicators", true),
     SettingRow::check("showweather", true),
     SettingRow::check("animatedwater", true),
-    SettingRow::check("animatedshields", true),
     SettingRow::check("bloom", true),
     SettingRow::check("pixelate", false),
     SettingRow::check("linear", true),
@@ -323,10 +322,10 @@ mod tests {
     #[test]
     fn row_order_and_count_match_upstream() {
         assert_eq!(GAME_ROWS.len(), 11);
-        assert_eq!(GRAPHICS_ROWS.len(), 40);
+        assert_eq!(GRAPHICS_ROWS.len(), 39);
         assert_eq!(SOUND_ROWS.len(), 4);
         assert_eq!(DEV_ROWS.len(), 4);
-        assert_eq!(all_rows().count(), 59);
+        assert_eq!(all_rows().count(), 58);
 
         let game_keys: Vec<_> = GAME_ROWS.iter().map(|row| row.key).collect();
         assert_eq!(
@@ -383,7 +382,6 @@ mod tests {
                 "indicators",
                 "showweather",
                 "animatedwater",
-                "animatedshields",
                 "bloom",
                 "pixelate",
                 "linear",
@@ -411,17 +409,37 @@ mod tests {
         );
     }
 
-    /// H03 T11 (`SettingsMenuDialog` `graphics.checkPref("animatedshields",
-    /// !mobile)`): the animated shield/build-beam composite row exists with
-    /// default true (desktop).
+    /// Java has no `animatedshields` row: `Renderer.java:168-169` derives
+    /// `animateShields = animateWater` from the `animatedwater` checkbox, so
+    /// the shield/build-beam composite follows that row (default true).
     #[test]
-    fn animated_shields_row_defaults_true() {
+    fn animated_shields_follow_animatedwater_row() {
+        assert!(GRAPHICS_ROWS.iter().all(|row| row.key != "animatedshields"));
         let row = GRAPHICS_ROWS
             .iter()
-            .find(|row| row.key == "animatedshields")
-            .expect("animatedshields row");
+            .find(|row| row.key == "animatedwater")
+            .expect("animatedwater row");
         assert_eq!(row.kind, SettingKind::Check);
         assert!(row.default_bool());
+    }
+
+    /// `rebuildMenu` icons: `Icon.settings`, `image`, `volumeUp`, `chat`,
+    /// `move`, `save`, `fileCode` (`SettingsMenuDialog.java:344-353`).
+    #[test]
+    fn category_icons_match_upstream() {
+        let icons: Vec<_> = CATEGORIES.iter().map(|category| category.icon).collect();
+        assert_eq!(
+            icons,
+            [
+                "settings",
+                "image",
+                "volume-up",
+                "chat",
+                "move",
+                "save",
+                "file-code"
+            ]
+        );
     }
 
     #[test]

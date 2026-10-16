@@ -812,6 +812,9 @@ func _flat_box(color: Color) -> StyleBoxFlat:
 func _field_label_text(token: String) -> String:
 	if token.is_empty():
 		return ""
+	# The raw token when `logiclocalization` is off (`LStatement.java:158-161`).
+	if not _logic_localization():
+		return token
 	var key := "name.token." + token
 	var resolved := _t(key)
 	return token if resolved == key else resolved
@@ -844,7 +847,9 @@ func _select_text(name: String, field_index: int, value: String) -> String:
 func _option_text(option: Variant) -> String:
 	var text := str((option as Dictionary).get("label", (option as Dictionary).get("name", "")))
 	var key := str((option as Dictionary).get("key", ""))
-	if not key.is_empty():
+	# `LStatement.bundle(Enum)`/`selectTranslate` (`LStatement.java:163-184`):
+	# no translation when `logiclocalization` is off.
+	if not key.is_empty() and _logic_localization():
 		var resolved := _t(key)
 		if resolved != key:
 			text = resolved

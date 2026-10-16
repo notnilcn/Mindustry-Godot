@@ -526,7 +526,7 @@ impl MindWorldRenderer {
 
     /// A `CanvasGroup` under `band` for the animated-shield/build-beam
     /// effect-buffer composite (`Renderer.java:403-414`; H03 T11). The pass
-    /// inside toggles the group's material from the `animatedshields` setting.
+    /// inside toggles the group's material from `animatedwater` (`animateShields`).
     fn canvas_group(&self, mut band: Gd<Node2D>, name: &str) -> Gd<Node2D> {
         let mut group = CanvasGroup::new_alloc();
         group.set_name(name);
@@ -752,7 +752,7 @@ impl MindWorldRenderer {
         // Shield domes/bubbles at `Layer.shields` (`ForceProjector.drawShield`).
         if let Some(shield_band) = self.band_node_at(BandKey::base(Layer::Shields)) {
             // H03 T11: the pass lives inside a `CanvasGroup`; with
-            // `animatedshields` on it stamps opaque fills and the group's
+            // `animatedwater` (`animateShields`) on it stamps opaque fills and the group's
             // `shield_group` material composites them (`Renderer.java:403-414`).
             let mut group = self.canvas_group(shield_band, "ShieldGroup");
             let mut node = shields::ShieldRenderer::new_alloc();
@@ -987,6 +987,9 @@ impl MindWorldRenderer {
                     .booleanize()
                 })
                 .unwrap_or(true);
+            // `Renderer.pixelate = settings.getBool("pixelate")`
+            // (`Renderer.java:178`).
+            self.pixelator.poll_setting();
             // `Renderer.java:435`: the debug hitbox pass is settings-gated too.
             self.draw_hitboxes_setting = self
                 .base()
@@ -1130,6 +1133,15 @@ impl MindWorldRenderer {
             screen.y as i32,
             false,
             1.0,
+        );
+        // `Renderer.draw`: `if(pixelate) pixelator.drawPixelate()` (the
+        // port resamples the drawn world; see `render/pixelate.rs`).
+        pixelate::sync_overlay(
+            self.to_gd().upcast::<Node2D>(),
+            self.pixelator.enabled() && !self.editor_view_active,
+            (view.x, view.y),
+            (view.w, view.h),
+            view.zoom,
         );
         self.stats.pixelate = self.pixelator.enabled();
         self.stats.pixel_w = self.pixelator.size().0 as i64;

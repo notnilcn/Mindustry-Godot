@@ -143,9 +143,16 @@ impl LogicDisplayRenderer {
                 .filter_map(|value| value.try_to::<Row>().ok())
                 .collect()
         };
+        // `Renderer.drawDisplays = !settings.getBool("hidedisplays")`
+        // (`Renderer.java:172`): with displays hidden, `LogicDisplayBuild.draw`
+        // / `CanvasBuild.draw` draw only the block sprite and
+        // `TileableLogicDisplayBuild.draw` only its back + frame regions
+        // (`LogicDisplay.java:102`, `TileableLogicDisplay.java:172-176`,
+        // `CanvasBlock.java:257-260`): no buffer and no canvas texture.
+        let draw_displays = !crate::settings_hub::row_bool("hidedisplays");
         // Upload changed rasters first (one texture per root).
         for row in &rows {
-            if !dict_bool(row, "draw_buffer") {
+            if !draw_displays || !dict_bool(row, "draw_buffer") {
                 continue;
             }
             let key = (
@@ -156,7 +163,11 @@ impl LogicDisplayRenderer {
         }
         // Canvases (`CanvasBlock.draw`; T14): one texture per canvas tile.
         let mut cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32)> = Vec::new();
-        let canvases = host.bind().logic_canvas_sync(min_x, min_y, max_x, max_y);
+        let canvases = if draw_displays {
+            host.bind().logic_canvas_sync(min_x, min_y, max_x, max_y)
+        } else {
+            Array::<Variant>::new()
+        };
         for value in canvases.iter_shared() {
             let Some(dict) = value.try_to::<Row>().ok() else {
                 continue;
@@ -211,7 +222,7 @@ impl LogicDisplayRenderer {
         }
         // Rebuild the display draw list (resolves frame regions through the cache).
         for row in &rows {
-            if dict_bool(row, "draw_buffer") {
+            if draw_displays && dict_bool(row, "draw_buffer") {
                 let key = (
                     dict_i64(row, "root_x") as i32,
                     dict_i64(row, "root_y") as i32,
