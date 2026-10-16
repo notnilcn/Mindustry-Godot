@@ -14,8 +14,8 @@
 //! keys.
 //!
 //! Deviations (also in the task summary):
-//! * `ReloadTurret`/`LaserTurret` coolant booster panels are not ported (the
-//!   `StatValues.boosters` reload math); the ammo and base rows are.
+//! * `ReloadTurret`/`LaserTurret` coolant booster panels follow
+//!   `StatValues.boosters`; the liquid tooltip (`withTooltip`) is not modeled.
 //! * `type.showStats`/`spawnBullets` collapse buttons are not modeled; nested
 //!   frag/interval bullets render expanded inside sub-panels.
 //! * Java's `statusText` emoji is skipped (the port's status content has no
@@ -522,11 +522,111 @@ pub fn turret_block_stats(ctx: &StatCtx, id: BlockId, def: &BlockDef, stats: &mu
             }
         }
     }
-    // `LaserTurret extends PowerTurret` (`LaserTurret.java:26`): remove the
-    // coolant booster (not ported; see the module docs).
-    if def.kind == BlockKind::LaserTurret {
+    // Coolant boosters. `ReloadTurret.setStats` (`ReloadTurret.java:17-22`)
+    // replaces `Stat.booster` with `StatValues.boosters(reload, coolant.amount,
+    // coolantMultiplier, true, coolant::consumes)`; `LaserTurret.setStats`
+    // (`LaserTurret.java:26-33`) removes it and lists the boosters under
+    // `Stat.input` with `baseReload = false`. `TractorBeamTurret` extends
+    // `BaseTurret` (no reload, no booster row).
+    if def.kind != BlockKind::TractorBeamTurret
+        && let Some(coolant) = coolant_consumer(def)
+    {
+        if def.kind == BlockKind::LaserTurret {
+            stats.remove(Stat::Booster);
+            stats.add(
+                Stat::Input,
+                boosters(
+                    ctx,
+                    config.reload,
+                    coolant,
+                    config.coolant_multiplier,
+                    false,
+                ),
+            );
+        } else {
+            stats.replace(
+                Stat::Booster,
+                boosters(ctx, config.reload, coolant, config.coolant_multiplier, true),
+            );
+        }
+    } else if def.kind == BlockKind::LaserTurret {
         stats.remove(Stat::Booster);
     }
+}
+
+/// `BaseTurret.coolant` (`findConsumer(c -> c instanceof ConsumeCoolant)`,
+/// `BaseTurret.java:50-52`): `(amount, allowLiquid, allowGas)`.
+fn coolant_consumer(def: &BlockDef) -> Option<(f32, bool, bool)> {
+    use crate::content::registries::blocks::Consume;
+    def.consumes.iter().find_map(|spec| match spec.consume {
+        Consume::Coolant {
+            amount,
+            allow_liquid,
+            allow_gas,
+        } => Some((amount, allow_liquid, allow_gas)),
+        _ => None,
+    })
+}
+
+/// `StatValues.boosters(reload, maxUsed, multiplier, baseReload, filter)`
+/// (`StatValues.java:536-563`) over the `ConsumeCoolant` filter
+/// (`ConsumeCoolant.java:12`: `coolant && (allowLiquid && !gas || allowGas &&
+/// gas) && temperature <= 0.5 && flammability < 0.1`): one `grayPanel` per
+/// liquid with the 40 px icon, name + `maxUsed * 60 /sec` (light gray) and the
+/// right-aligned `bullet.reload` percentage.
+fn boosters(
+    ctx: &StatCtx,
+    reload: f32,
+    (max_used, allow_liquid, allow_gas): (f32, bool, bool),
+    multiplier: f32,
+    base_reload: bool,
+) -> Vec<Cell> {
+    use crate::ui::stat_display::auto_fixed;
+    const MAX_TEMP: f32 = 0.5;
+    const MAX_FLAMMABILITY: f32 = 0.1;
+    let mut panel = vec![Cell::Row];
+    for liquid in ctx.registry.liquids() {
+        if liquid.removed
+            || !liquid.coolant
+            || !(allow_liquid && !liquid.gas || allow_gas && liquid.gas)
+            || liquid.temperature > MAX_TEMP
+            || liquid.flammability >= MAX_FLAMMABILITY
+        {
+            continue;
+        }
+        let reload_rate =
+            if base_reload { 1.0 } else { 0.0 } + max_used * multiplier * liquid.heat_capacity;
+        let standard_reload = if base_reload {
+            reload
+        } else {
+            reload / (max_used * multiplier * 0.4)
+        };
+        let result = standard_reload / (reload / reload_rate);
+        let percent = auto_fixed(result * 100.0, 2);
+        let name = liquid.name.clone();
+        panel.push(Cell::Panel {
+            cells: vec![
+                Cell::Icon {
+                    region: format!("liquid-{name}-ui"),
+                    amount: None,
+                    size: 40,
+                    content: Some(name.clone()),
+                },
+                Cell::Space { w: 10.0 },
+                values::text(format!(
+                    "{}\n[lightgray]{}{}",
+                    ctx.liquid_name(&name),
+                    auto_fixed(max_used * 60.0, 2),
+                    ctx.unit_label(StatUnit::PerSecond)
+                )),
+                Cell::Fill,
+                values::text(ctx.bundle.format("bullet.reload", &[percent.as_str()])),
+                Cell::Space { w: 15.0 },
+            ],
+        });
+        panel.push(Cell::Row);
+    }
+    panel
 }
 
 #[cfg(test)]
@@ -556,7 +656,7 @@ mod tests {
             "bullet.damage=[stat]{0}[lightgray] damage\n\
              bullet.multiplier=[stat]{0}[lightgray] ammo/item\n\
              item.copper.name=Copper\nitem.graphite.name=Graphite\nitem.silicon.name=Silicon\n\
-             stat.ammo=Ammo\nstat.ammocapacity=Ammo Capacity\nstat.reload=Reload\n\
+             stat.ammo=Ammo\nbullet.reload=[stat]{0}%[lightgray] fire rate\nstat.ammocapacity=Ammo Capacity\nstat.reload=Reload\n\
              stat.inaccuracy=Inaccuracy\nstat.targetsair=Targets Air\nstat.targetsground=Targets Ground\n\
              stat.ammouse=Ammo Use\nstat.shootrange=Shoot Range\nunit.shots=shots\n\
              unit.persecond=/sec\nunit.blocks=blocks\nunit.degrees=degrees\nunit.pershot=/shot\n\
@@ -664,6 +764,56 @@ mod tests {
             copper_multiplier.as_deref(),
             Some("[lightgray][stat]2[lightgray] ammo/item[lightgray]"),
             "copper gives 2 ammo per item"
+        );
+    }
+
+    #[test]
+    fn duo_coolant_boosters() {
+        let registry = registry();
+        let bundle = bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let id = registry.block_id("duo").expect("duo");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        let booster = row(&stats, Stat::Booster);
+        assert_eq!(
+            booster.len(),
+            1,
+            "one booster value (replaced, not appended)"
+        );
+        // One panel per coolant: (icon content, reload text). Duo:
+        // `consumeCoolant(0.1f)`, `coolantMultiplier = 10f` (`Blocks.java:3343-3344`);
+        // water (heatCapacity 0.4) -> 1 + 0.1 * 10 * 0.4 = 140%, cryofluid
+        // (0.9) -> 190%.
+        let panels: Vec<(String, String)> = booster[0]
+            .iter()
+            .filter_map(|cell| match cell {
+                Cell::Panel { cells } => {
+                    let content = cells.iter().find_map(|inner| match inner {
+                        Cell::Icon { content, .. } => content.clone(),
+                        _ => None,
+                    })?;
+                    let reload = cells.iter().find_map(|inner| match inner {
+                        Cell::Text { t } if t.contains("fire rate") => Some(t.clone()),
+                        _ => None,
+                    })?;
+                    Some((content, reload))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            panels,
+            vec![
+                (
+                    "water".to_owned(),
+                    "[stat]140%[lightgray] fire rate".to_owned()
+                ),
+                (
+                    "cryofluid".to_owned(),
+                    "[stat]190%[lightgray] fire rate".to_owned()
+                ),
+            ]
         );
     }
 }

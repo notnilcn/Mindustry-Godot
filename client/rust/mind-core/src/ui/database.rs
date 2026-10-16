@@ -167,11 +167,13 @@ pub fn database_view(
     }
 
     // `sortContents`: category -> tag -> entries, first-seen insertion order.
+    // Java files *every* unlockable (hidden ones included) before `rebuild`
+    // filters `isHidden()/hideDatabase`, so hidden content still fixes the
+    // category/tag order: the environment blocks (`air`, id 0) default to
+    // `Category.distribution`, which puts Distribution first under Blocks
+    // (`DatabaseDialog.java:81-99`, `Block.java:363,1347`).
     let mut sorted: CategoryMap = CategoryMap::new();
     for (record_name, fields, hidden) in records {
-        if hidden || fields.hide_database {
-            continue;
-        }
         let category = fields
             .database_category
             .clone()
@@ -182,6 +184,10 @@ pub fn database_view(
             .clone()
             .filter(|value| !value.is_empty())
             .unwrap_or_else(|| String::from("default"));
+        let tag_entries = sorted.entry(category).or_default().entry(tag).or_default();
+        if hidden || fields.hide_database {
+            continue;
+        }
         let entry = DatabaseEntryView {
             name: record_name.to_owned(),
             localized: label(
@@ -204,13 +210,13 @@ pub fn database_view(
                 .collect(),
             banned: banned_blocks.is_some_and(|set| set.contains(record_name)),
         };
-        sorted
-            .entry(category)
-            .or_default()
-            .entry(tag)
-            .or_default()
-            .push(entry);
+        tag_entries.push(entry);
     }
+    // `rebuild` skips tags/categories left empty by the filter.
+    for tags in sorted.values_mut() {
+        tags.retain(|_, entries| !entries.is_empty());
+    }
+    sorted.retain(|_, tags| !tags.is_empty());
 
     // Java's in-game `array.sort(comparingBool(isBanned), comparingInt(id))`:
     // a stable banned-last pass keeps the content-map order for both groups.
@@ -360,16 +366,17 @@ mod tests {
             .find(|category| category.name == "block")
             .expect("block category");
         let tag_names: Vec<&str> = blocks.tags.iter().map(|tag| tag.name.as_str()).collect();
-        // First-seen order over the upstream block-id sequence (graphite-press,
-        // copper-wall, mender, conveyor, ...); the Java reference renders the
-        // same `databaseTag` groups.
+        // First-seen order over the upstream block-id sequence, hidden blocks
+        // included: `air` (id 0, `Category.distribution`) seeds Distribution
+        // first, then graphite-press, copper-wall, mender, ... (the Java
+        // reference renders Distribution, Crafting, Defense, ...).
         assert_eq!(
             tag_names,
             vec![
+                "distribution",
                 "crafting",
                 "defense",
                 "effect",
-                "distribution",
                 "liquid",
                 "power",
                 "production",
@@ -379,7 +386,7 @@ mod tests {
             ]
         );
         assert_eq!(blocks.label, "database-category.block");
-        assert_eq!(blocks.tags[0].label, "database-tag.crafting");
+        assert_eq!(blocks.tags[0].label, "database-tag.distribution");
         assert!(
             blocks.tags.iter().all(|tag| !tag.entries.is_empty()),
             "empty tags are dropped"

@@ -19,7 +19,14 @@ func _ready() -> void:
 	set_title_key("@info.title")
 	should_pause = false
 	super._ready()
+	# Java `ContentInfoDialog extends BaseDialog` (`setFillParent(true)`): the
+	# dialog covers the viewport and `cont.add(pane)` centres the info table.
+	fill_panel()
 	_table = content_table()
+	# `table.margin(10)` (+ `marginRight(30f)` for the pane's scroll bar); the
+	# table keeps its natural width (description `width(500f)`) and is centred.
+	_table.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_table.margin(10)
 	add_close_button()
 
 
@@ -48,9 +55,7 @@ func shown() -> void:
 	if not description.is_empty():
 		if has_stats:
 			# `table.add("@category.purpose").color(Pal.accent).fillX().padTop(10)`
-			_table.add(
-				MindWidgets.styled_label(_tm("@category.purpose"), "techLabel")
-			).grow_x_axis().set_pad_top(10).left()
+			_table.add(_accent_label(_t("@category.purpose"))).grow_x_axis().set_pad_top(10).left()
 			_table.row()
 		# code-instantiated: description text comes from the live content.
 		var body := MindWidgets.label(MindWidgets.markup_text("[lightgray]" + description))
@@ -59,9 +64,7 @@ func shown() -> void:
 		_table.add(body).grow_x_axis().set_pad_left(10 if has_stats else 0).left()
 		_table.row()
 		if not bool(info.get("use_categories", false)) and has_stats:
-			_table.add(
-				MindWidgets.styled_label(_tm("@category.general"), "techLabel")
-			).grow_x_axis().left()
+			_table.add(_accent_label(_t("@category.general"))).grow_x_axis().left()
 			_table.row()
 
 	if not categories.is_empty():
@@ -102,11 +105,22 @@ func _show_header(info: Dictionary, content_name: String) -> void:
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	header.add_child(icon)
 	var localized := str(info.get("localized", content_name))
-	header.add_child(
-		MindWidgets.styled_label(MindWidgets.markup_text("[accent]" + localized), "techLabel")
-	)
-	_table.add(header).grow_x_axis().pad(4).left()
+	# `title1.add("[accent]" + content.localizedName).padLeft(5)`.
+	var name_label := MindWidgets.label(MindWidgets.markup_text("[accent]" + localized))
+	name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	name_label.fit_content = true
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	header.add_child(name_label)
+	# `table.table(title1 -> ...)` has no alignment: the header sits centred.
+	_table.add(header).pad(4)
 	_table.row()
+
+
+## A default-font label tinted `Pal.accent` (`table.add(text).color(Pal.accent)`).
+func _accent_label(text: String) -> Control:
+	var label := MindWidgets.label(text)
+	label.modulate = MindStyles.ACCENT
+	return label
 
 
 ## One accent category label, then the inset stat rows (`useCategories`).
@@ -119,11 +133,8 @@ func _render_categories(categories: Array, use_categories: bool) -> void:
 		if stats.is_empty():
 			continue
 		if use_categories:
-			_table.add(
-				MindWidgets.styled_label(
-					MindWidgets.markup_text("[accent]" + str(cat.get("label", ""))), "techLabel"
-				)
-			).grow_x_axis().left()
+			# `table.add(cat.localized()).color(Pal.accent).fillX()`.
+			_table.add(_accent_label(str(cat.get("label", "")))).grow_x_axis().left()
 			_table.row()
 		for stat_variant in stats:
 			_render_stat(stat_variant)
@@ -139,11 +150,7 @@ func _render_stats(stats: Array) -> void:
 		var category := str(stat.get("category", ""))
 		if not category.is_empty() and category != current_category:
 			current_category = category
-			_table.add(
-				MindWidgets.styled_label(
-					MindWidgets.markup_text("[accent]" + _stat_text(category)), "techLabel"
-				)
-			).grow_x_axis().left()
+			_table.add(_accent_label(_stat_text(category))).grow_x_axis().left()
 			_table.row()
 		# code-instantiated: one label/value row per computed stat.
 		var row := HBoxContainer.new()
@@ -201,6 +208,11 @@ func _add_cell(column: Container, line: HBoxContainer, cell_variant: Variant) ->
 			)
 		"space":
 			line.add_child(_spacer(float(cell.get("w", 0.0))))
+		"fill":
+			# `Cell::Fill`: Java `.right().grow()` pushes the rest right.
+			var fill := _spacer(0.0)
+			fill.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			line.add_child(fill)
 		"row":
 			# code-instantiated: multi-line stat values split into extra lines.
 			var next := HBoxContainer.new()
@@ -256,14 +268,19 @@ func _icon_cell(cell: Dictionary) -> Control:
 ## `Cell::Panel`: nested cells inside a flat gray box (reconstructor upgrades).
 func _panel_cell(cell: Dictionary) -> Control:
 	# code-instantiated: panel cells are data-driven (upgrade pairs).
+	# `table.table(Styles.grayPanel, ...).growX().pad(5).margin(10)`
+	# (`StatValues.ammo`/`boosters`/upgrade panels): the box spans the stat
+	# column instead of shrinking to its text.
 	var panel := PanelContainer.new()
 	panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var box := StyleBoxFlat.new()
-	box.bg_color = Color(0.1, 0.1, 0.1, 0.9)
-	box.content_margin_left = 4.0
-	box.content_margin_right = 4.0
-	box.content_margin_top = 2.0
-	box.content_margin_bottom = 2.0
+	# `Styles.grayPanel = whiteui.tint(Pal.darkestGray)`.
+	box.bg_color = Color(0.1, 0.1, 0.1, 1.0)
+	box.content_margin_left = 10.0
+	box.content_margin_right = 10.0
+	box.content_margin_top = 10.0
+	box.content_margin_bottom = 10.0
 	panel.add_theme_stylebox_override("panel", box)
 	# Nested cells may start their own rows (`Cell::Row`): the panel is a
 	# VBox of HBox lines so `_add_cell`'s row containers land below, not beside

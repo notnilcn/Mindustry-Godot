@@ -308,12 +308,140 @@ fn valid_place_ctx(ctx: &WorldCtx<'_>, block: BlockId, team: u8, rot: u8, x: i32
     )
 }
 
+/// Arc `JsonWriter.OutputType.minimal.quoteValue` for a string: the value is
+/// written bare unless it starts with space or one of `":,{[]/`, contains
+/// `//`, `/*` or one of `}],`, ends with a space or is `true`/`false`/`null`.
+fn minimal_quote_value(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for ch in value.chars() {
+        match ch {
+            '\\' => escaped.push_str("\\\\"),
+            '\r' => escaped.push_str("\\r"),
+            '\n' => escaped.push_str("\\n"),
+            '\t' => escaped.push_str("\\t"),
+            other => escaped.push(other),
+        }
+    }
+    let bare = !matches!(value, "true" | "false" | "null")
+        && !value.contains("//")
+        && !value.contains("/*")
+        && !escaped.ends_with(' ')
+        && escaped
+            .chars()
+            .next()
+            .is_some_and(|first| !matches!(first, '"' | ':' | ',' | '{' | '[' | ']' | '/' | ' '))
+        && !escaped.chars().any(|ch| matches!(ch, '}' | ']' | ','));
+    if bare {
+        escaped
+    } else {
+        format!("\"{}\"", escaped.replace('"', "\\\""))
+    }
+}
+
+/// `JsonIO.write(String[])` with Arc's default `OutputType.minimal`
+/// (`[Power,"[magenta]advanced-logic"]`, `JsonWriter.java:142-182`).
+pub fn write_labels(labels: &[String]) -> String {
+    let parts: Vec<String> = labels
+        .iter()
+        .map(|label| minimal_quote_value(label))
+        .collect();
+    format!("[{}]", parts.join(","))
+}
+
+/// Arc `JsonReader` unescape of a quoted or bare string body.
+fn unescape_json(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut chars = body.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('b') => out.push('\u{8}'),
+            Some('f') => out.push('\u{c}'),
+            Some('u') => {
+                let hex: String = chars.by_ref().take(4).collect();
+                if let Some(decoded) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
+                    out.push(decoded);
+                }
+            }
+            Some(other) => out.push(other),
+            None => {}
+        }
+    }
+    out
+}
+
+/// `JsonIO.read(String[].class, raw)`: Arc's lenient `JsonReader`
+/// (`JsonReader.java:418-470`) accepts the `OutputType.minimal` text Java
+/// writes (`[\u{f831},Reactor,on/off]`), where a bare value runs to the next
+/// `}`, `]`, `,`, newline or comment and is right-trimmed. Strict JSON parses
+/// through the same path. Malformed text yields no labels.
+pub fn read_labels(raw: &str) -> Vec<String> {
+    if let Ok(strict) = serde_json::from_str::<Vec<String>>(raw) {
+        return strict;
+    }
+    let chars: Vec<char> = raw.trim().chars().collect();
+    if chars.first() != Some(&'[') {
+        return Vec::new();
+    }
+    let mut labels = Vec::new();
+    let mut index = 1;
+    while index < chars.len() {
+        let ch = chars[index];
+        if ch == ']' {
+            return labels;
+        }
+        if ch == ',' || ch.is_whitespace() {
+            index += 1;
+            continue;
+        }
+        if ch == '"' {
+            index += 1;
+            let start = index;
+            while index < chars.len() && chars[index] != '"' {
+                if chars[index] == '\\' {
+                    index += 1;
+                }
+                index += 1;
+            }
+            let end = index.min(chars.len());
+            let body: String = chars[start..end].iter().collect();
+            labels.push(unescape_json(&body));
+            index += 1;
+            continue;
+        }
+        let start = index;
+        while index < chars.len() {
+            let current = chars[index];
+            if matches!(current, '}' | ']' | ',' | '\r' | '\n') {
+                break;
+            }
+            if current == '/' && matches!(chars.get(index + 1), Some('/' | '*')) {
+                break;
+            }
+            index += 1;
+        }
+        let body: String = chars[start..index].iter().collect();
+        let body = body.trim_end();
+        if !body.is_empty() {
+            labels.push(unescape_json(body));
+        }
+    }
+    Vec::new()
+}
+
 /// Writes a schematic to bytes (`Schematics.write`).
 pub fn write(schem: &Schematic, registry: &ContentRegistry) -> Result<Vec<u8>, SchematicError> {
     // Tags are mutated with `labels`/`contentMap` like upstream; clone first.
     let mut tags = schem.tags.clone();
-    let labels_json = serde_json::to_string(&schem.labels)?;
-    tags.insert("labels".to_owned(), labels_json);
+    // `JsonIO.write(schematic.labels.toArray(String.class))` (`Schematics.java:660`):
+    // Arc `Json` defaults to `OutputType.minimal`, so plain labels are bare.
+    tags.insert("labels".to_owned(), write_labels(&schem.labels));
     // Content remapping metadata: Rust↔Rust uses dense ids directly, so the
     // map is emitted empty (upstream emits name→id pairs). Documented dev.
     tags.insert("contentMap".to_owned(), "{}".to_owned());
@@ -398,9 +526,10 @@ pub fn read(bytes: &[u8], registry: &ContentRegistry) -> Result<Schematic, Schem
         tags.insert(key, value);
     }
 
+    // `JsonIO.read(String[].class, map.get("labels", "[]"))` (`Schematics.java:612`).
     let labels: Vec<String> = tags
         .get("labels")
-        .and_then(|raw| serde_json::from_str(raw).ok())
+        .map(|raw| read_labels(raw))
         .unwrap_or_default();
 
     let dict_count = reader.ub()?;
@@ -975,6 +1104,39 @@ mod tests {
         );
         schem.tags.insert("name".to_owned(), "test-base".to_owned());
         schem
+    }
+
+    #[test]
+    fn labels_read_arc_minimal_json() {
+        // `Switch on_off.msch` from a Java profile (Arc `OutputType.minimal`).
+        let raw = "[logic,switch,on/off,\u{f7e2},\"[magenta]advanced-logic\"]";
+        assert_eq!(
+            read_labels(raw),
+            vec![
+                "logic",
+                "switch",
+                "on/off",
+                "\u{f7e2}",
+                "[magenta]advanced-logic"
+            ]
+        );
+        assert_eq!(read_labels("[]"), Vec::<String>::new());
+        assert_eq!(read_labels("[\"a\",\"b c\"]"), vec!["a", "b c"]);
+        assert_eq!(read_labels("[Power ]"), vec!["Power"]);
+    }
+
+    #[test]
+    fn labels_write_matches_arc_minimal_json() {
+        let labels: Vec<String> = ["Power", "on/off", "[magenta]advanced-logic", "true", "a,b"]
+            .iter()
+            .map(|label| (*label).to_owned())
+            .collect();
+        let written = write_labels(&labels);
+        assert_eq!(
+            written,
+            "[Power,on/off,\"[magenta]advanced-logic\",\"true\",\"a,b\"]"
+        );
+        assert_eq!(read_labels(&written), labels);
     }
 
     #[test]

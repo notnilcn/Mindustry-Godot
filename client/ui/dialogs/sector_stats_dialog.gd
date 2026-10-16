@@ -25,6 +25,9 @@ var _pending_abandon := false
 func _ready() -> void:
 	should_pause = false
 	super._ready()
+	# `new BaseDialog(sector.name())` fills the viewport (`setFillParent(true)`)
+	# instead of floating as a boxed panel.
+	fill_panel()
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_signal("confirm_result") \
 			and not ui.is_connected("confirm_result", _on_confirm):
@@ -45,14 +48,11 @@ func shown() -> void:
 ## lockdown, rate sections and the stored pool, in this order.
 func _build() -> void:
 	if _root == null:
-		# code-instantiated: the stats pane is a data-driven `cont.pane`.
-		var scroll := MindScroll.new()
-		scroll.custom_minimum_size = Vector2(520.0, 430.0)
-		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_root = MindTable.new()
-		_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		scroll.add_child(_root)
-		cont.add_child(scroll)
+		# `dialog.cont.pane(c -> ...)`: the dialog body already scrolls, so the
+		# stats table sits directly in it, centred at its natural width (no
+		# boxed inner pane).
+		_root = content_table()
+		_root.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_root.clear_children()
 	clear_buttons()
 	set_title_text(_localized_name())
@@ -98,11 +98,14 @@ func _build() -> void:
 		_root.row()
 
 	if bool(stats.get("lockdown", false)):
-		var lockdown := MindWidgets.label(_tm("@sector.lockdown"))
+		# `c.add(UI.formatIcons(bundle.get("sector.lockdown"))).wrap().fillX()`:
+		# `[red]:warning:[accent] Sector currently under attack\n...`.
+		var lockdown := MindWidgets.label(_icon_glyph_markup(_tm("@sector.lockdown")))
 		lockdown.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		lockdown.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_root.add(lockdown).grow_x_axis().set_pad_bottom(10)
 		_root.row()
+		_apply_icon_fallback(lockdown)
 
 	_stat_section("@sectors.production", stats.get("production", []), [])
 	var destination: Variant = stats.get("destination")
@@ -136,6 +139,45 @@ func _build() -> void:
 		var abandon := MindWidgets.icon_button("cancel", _t("@sector.abandon"), "cleart")
 		abandon.pressed.connect(_confirm_abandon)
 		buttons.add_child(abandon)
+
+
+## `UI.formatIcons` for icon-font tokens (`:warning:`): `render_markup` emits
+## empty `[icon name="…"][/icon]` spans (OD-UI3) that draw nothing, so the
+## lockdown line lost its warning sign. Icon-font names become their code point
+## (drawn through the icon-font fallback, [method _apply_icon_fallback]);
+## other spans are left as they are.
+func _icon_glyph_markup(markup: String) -> String:
+	var regex := RegEx.create_from_string("\\[icon name=\"([^\"]+)\"\\]\\[/icon\\]")
+	var out := ""
+	var cursor := 0
+	for found in regex.search_all(markup):
+		out += markup.substr(cursor, found.get_start() - cursor)
+		var glyph := MindIcons.glyph(found.get_string(1))
+		out += glyph if not glyph.is_empty() else found.get_string()
+		cursor = found.get_end()
+	return out + markup.substr(cursor)
+
+
+## Gives a label the `MindAssets.icon_font()` as a fallback of its current
+## text font so icon code points render inline (Arc injects the icon glyphs
+## into every UI font, `Fonts.java`). Runs once the label is in the tree so the
+## themed font resolves.
+func _apply_icon_fallback(label: RichTextLabel) -> void:
+	var assets := MindWidgets.assets()
+	if assets == null or not label.is_inside_tree():
+		return
+	var icon_font: Variant = assets.call("icon_font")
+	if not (icon_font is Font):
+		return
+	var base := label.get_theme_font("normal_font")
+	if base == null:
+		return
+	# code-instantiated: per-label font wrapper adding the icon-font fallback.
+	var variation := FontVariation.new()
+	variation.base_font = base
+	var fallbacks: Array[Font] = [icon_font as Font]
+	variation.fallbacks = fallbacks
+	label.add_theme_font_override("normal_font", variation)
 
 
 ## `name [accent]value` line (`c.add(Core.bundle.get(...) + " [accent]" + ...)`).
