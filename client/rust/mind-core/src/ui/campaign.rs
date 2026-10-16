@@ -306,7 +306,12 @@ fn schematic_lasers(
     let Some(&(stile_index, def)) = tiles.get(own) else {
         return Vec::new();
     };
-    if !matches!(def.kind, BlockKind::PowerNode | BlockKind::LongPowerNode) {
+    // `PowerSource extends PowerNode` (`PowerSource.java:6`) inherits
+    // `drawPlanConfigTop`, so sandbox sources draw their lasers too.
+    if !matches!(
+        def.kind,
+        BlockKind::PowerNode | BlockKind::LongPowerNode | BlockKind::PowerSource
+    ) {
         return Vec::new();
     }
     let Some(plan) = schematic.tiles.get(stile_index) else {
@@ -2175,6 +2180,24 @@ mod tests {
         let tiles = schematic_tile_views(&schematic, &registry);
         assert_eq!(tiles[0].lasers, vec![1, 2]);
         assert!(tiles[1].lasers.is_empty());
+
+        // `PowerSource extends PowerNode`: a source's links draw as well.
+        let source = Schematic::from_tiles(
+            vec![
+                Stile::new(
+                    block("power-source"),
+                    0,
+                    0,
+                    ConfigValue::Point2Array([pack_point2(3, 0)].into_iter().collect()),
+                    0,
+                ),
+                Stile::new(block("battery"), 3, 0, ConfigValue::None, 0),
+            ],
+            Default::default(),
+            4,
+            1,
+        );
+        assert_eq!(schematic_tile_views(&source, &registry)[0].lasers, vec![1]);
     }
 
     #[test]
