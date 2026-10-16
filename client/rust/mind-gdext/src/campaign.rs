@@ -5110,6 +5110,77 @@ impl MindCampaign {
         out
     }
 
+    /// Hex planet mesh for the globe (`HexMesh.java:11`:
+    /// `MeshBuilder.buildHex(planet.generator, 6, planet.radius, 0.2f)`):
+    /// vertices, flat normals, per-tile colors (`Block.mapColor` with
+    /// `1 - albedo` alpha) and the emissive channel (`CUSTOM0`, `isEmissive()`
+    /// planets only). Empty for planets without a hex generator.
+    #[func]
+    pub fn planet_mesh(&self, planet: GString) -> VarDictionary {
+        use mind_core::maps::generators::planet::HexMesher;
+
+        let mut out = VarDictionary::new();
+        let name = planet.to_string();
+        let Some(registry) = self.registry.as_ref() else {
+            return out;
+        };
+        let Some(def) = registry.planet_by_name(&name) else {
+            return out;
+        };
+        let mut mesher: Box<dyn HexMesher> = match name.as_str() {
+            "serpulo" => {
+                let mut generator = mind_core::maps::planet::SerpuloPlanetGenerator::new();
+                generator.load_content(registry, &crate::render::minimap::load_block_colors());
+                Box::new(generator)
+            }
+            "erekir" => {
+                let mut generator = mind_core::maps::planet::ErekirPlanetGenerator::new();
+                generator.load_content(registry, &crate::render::minimap::load_block_colors());
+                Box::new(generator)
+            }
+            _ => return out,
+        };
+        let emissive = mesher.is_emissive();
+        let mesh =
+            mind_core::render::g3d::mesh_data::build_hex(mesher.as_mut(), 6, def.radius, 0.2);
+        let mut vertices = PackedVector3Array::new();
+        for vertex in &mesh.vertices {
+            vertices.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
+        }
+        let mut normals = PackedVector3Array::new();
+        for normal in &mesh.normals {
+            normals.push(Vector3::new(normal[0], normal[1], normal[2]));
+        }
+        let color_of = |packed: u32| {
+            Color::from_rgba8(
+                (packed >> 24) as u8,
+                (packed >> 16) as u8,
+                (packed >> 8) as u8,
+                packed as u8,
+            )
+        };
+        let mut colors = PackedColorArray::new();
+        for color in &mesh.colors {
+            colors.push(color_of(*color));
+        }
+        let mut emissive_colors = PackedColorArray::new();
+        for color in &mesh.emissive {
+            emissive_colors.push(color_of(*color));
+        }
+        let mut indices = PackedInt32Array::new();
+        for index in &mesh.indices {
+            indices.push(*index as i32);
+        }
+        out.set("indexed", mesh.indexed);
+        out.set("emissive", emissive);
+        out.set("vertices", &vertices);
+        out.set("normals", &normals);
+        out.set("colors", &colors);
+        out.set("emissive_colors", &emissive_colors);
+        out.set("indices", &indices);
+        out
+    }
+
     /// Content boot error, if any (diagnostics).
     #[func]
     pub fn content_error(&self) -> GString {

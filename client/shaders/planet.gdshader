@@ -33,9 +33,10 @@ void vertex() {
 
 	vec3 norc = (u_ambientColor + specular) * (diffuse + vec3(clamp((dot(normal, u_lightdir) + 1.0) / 2.0, 0.0, 1.0)));
 
-	float emissive = u_emissive * min(pow(max(0.0, (1.0 - norc.r) * 1.2), 3.0), 1.1);
+	// `planet.vert`: `emissive = a_emissive.a * u_emissive * min(pow(max(0, (1 - norc.r) * 1.2), 3), 1.1)`
+	float emissive = CUSTOM0.a * u_emissive * min(pow(max(0.0, (1.0 - norc.r) * 1.2), 3.0), 1.1);
 
-	v_col = vec4(mix(COLOR.rgb, COLOR.rgb, emissive), 1.0) * vec4(mix(norc, vec3(1.0), emissive), 1.0);
+	v_col = vec4(mix(COLOR.rgb, CUSTOM0.rgb, emissive), 1.0) * vec4(mix(norc, vec3(1.0), emissive), 1.0);
 }
 
 void fragment() {

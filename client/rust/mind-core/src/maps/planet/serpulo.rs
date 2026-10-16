@@ -399,6 +399,8 @@ pub struct SerpuloPlanetGenerator {
     /// Whether the generated sector is predominantly water (`naval`; feeds
     /// `Waves.generate`'s naval flag in [`Self::generate_rules`]).
     pub naval: bool,
+    /// Block color table for the hex-mesh `getColor` (built with the ids).
+    colors: super::PlanetColorTable,
     ids: Ids,
 }
 
@@ -424,8 +426,17 @@ impl SerpuloPlanetGenerator {
             water_offset: 0.04,
             height_scl: 1.01,
             naval: false,
+            colors: super::PlanetColorTable::default(),
             ids: Ids::load_empty(),
         }
+    }
+
+    /// Loads the content ids and the hex-mesh color table for
+    /// `MindCampaign.planet_mesh` (`sprite_colors` is the
+    /// `sprites/block_colors.png` row; empty when the pack output is absent).
+    pub fn load_content(&mut self, content: &ContentRegistry, sprite_colors: &[u32]) {
+        self.ids = Ids::load(content);
+        self.colors = super::PlanetColorTable::load(content, sprite_colors);
     }
 }
 
@@ -512,17 +523,22 @@ impl HexMesher for SerpuloPlanetGenerator {
     }
 
     fn get_color(&self, position: [f32; 3]) -> [f32; 4] {
-        // `Block.mapColor` for the generated floor (salt shown as sand);
-        // rendering color tables are a plan-16 detail.
-        let mut _block = get_block_with(&self.planet, position, &self.ids);
-        if _block == self.ids.salt {
-            _block = self.ids.sand;
+        // `SerpuloPlanetGenerator.getColor` (`:133-138`): `Block.mapColor` with
+        // `1 - albedo` alpha (salt shown as sand).
+        let mut block = get_block_with(&self.planet, position, &self.ids);
+        if block == self.ids.salt {
+            block = self.ids.sand;
         }
-        [0.0, 0.0, 0.0, 1.0]
+        self.colors.rgba(block)
     }
 
     fn is_emissive(&self) -> bool {
         true
+    }
+
+    fn reseed(&mut self) {
+        // `MeshBuilder.buildHex`: `generator.seed = generator.baseSeed`.
+        self.planet.seed = self.planet.base_seed;
     }
 }
 
@@ -1720,6 +1736,38 @@ mod tests {
         assert_ne!(ids.arr[0][0], BlockId::AIR);
         assert_ne!(ids.ore_copper, BlockId::AIR);
         assert_ne!(ids.dark_panel_3, BlockId::AIR);
+    }
+
+    /// T13: `SerpuloPlanetGenerator.getColor` returns `Block.mapColor` with
+    /// `1 - albedo` alpha (`SerpuloPlanetGenerator.java:133-138`; albedos from
+    /// `Blocks.java:220-282,558-611`).
+    #[test]
+    fn serpulo_color_alpha_from_albedo() {
+        let content = registry();
+        let mut generator = SerpuloPlanetGenerator::new();
+        generator.load_content(&content, &[]);
+        let alpha = |name: &str| {
+            let id = content.block_id(name).expect("block");
+            generator.colors.rgba(id)[3]
+        };
+        assert!((alpha("deep-water") - 0.1).abs() < 1e-4, "albedo 0.9");
+        assert!((alpha("arkycite-floor") - 0.1).abs() < 1e-4, "albedo 0.9");
+        assert!((alpha("snow") - 0.3).abs() < 1e-4, "albedo 0.7");
+        assert!((alpha("ice") - 0.35).abs() < 1e-4, "albedo 0.65");
+        assert!((alpha("ice-snow") - 0.4).abs() < 1e-4, "albedo 0.6");
+        assert!((alpha("ice-wall") - 0.4).abs() < 1e-4, "albedo 0.6");
+        assert!((alpha("moss") - 1.0).abs() < 1e-4, "default albedo 0");
+        // A generated tile that resolves to deep water carries the same alpha.
+        let grid = crate::render::g3d::grid::PlanetGrid::create(6);
+        for tile in &grid.tiles {
+            if get_block_with(&generator.planet, tile.v, &generator.ids) == generator.ids.deep_water
+            {
+                let color = generator.get_color(tile.v);
+                assert!((color[3] - 0.1).abs() < 1e-4, "deep-water tile alpha");
+                return;
+            }
+        }
+        panic!("no deep-water tile on the divisions=6 grid");
     }
 
     #[test]

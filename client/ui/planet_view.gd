@@ -63,6 +63,7 @@ var _tiles := PackedVector3Array()
 var _corners := PackedVector3Array()
 var _tile_corners: Array = []
 var _grid_material: ShaderMaterial = null
+var _body_material: ShaderMaterial = null
 var _sector_label_text := ""
 ## Preset whose icon is drawn inside the selected hex (`renderProjections`).
 var _sector_icon_preset := ""
@@ -533,7 +534,59 @@ func view_tile(sector: Dictionary) -> int:
 	return int(sector.get("id", -1))
 
 
+## `HexMesh(planet, 6)`: the shaded hex mesh (`MeshBuilder.buildHex` with the
+## generator colours) replaces the vendored-art billboard; the billboard stays
+## as the fallback for planets without a hex generator (T13/PAR-0142).
 func _build_body() -> void:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	var mesh_data: Dictionary = {}
+	if campaign != null and campaign.has_method("planet_mesh"):
+		mesh_data = campaign.call("planet_mesh", planet)
+	if mesh_data.is_empty():
+		_build_body_billboard()
+		return
+	var arrays := []
+	arrays.resize(Mesh.ARRAY_MAX)
+	arrays[Mesh.ARRAY_VERTEX] = mesh_data.get("vertices", PackedVector3Array())
+	arrays[Mesh.ARRAY_NORMAL] = mesh_data.get("normals", PackedVector3Array())
+	arrays[Mesh.ARRAY_COLOR] = mesh_data.get("colors", PackedColorArray())
+	arrays[Mesh.ARRAY_INDEX] = mesh_data.get("indices", PackedInt32Array())
+	var flags := 0
+	var emissive: PackedColorArray = mesh_data.get("emissive_colors", PackedColorArray())
+	if not emissive.is_empty():
+		# Godot wants `ARRAY_CUSTOM0` as a float/byte array, not a colour array.
+		var floats := PackedFloat32Array()
+		floats.resize(emissive.size() * 4)
+		for index in emissive.size():
+			var color := emissive[index]
+			floats[index * 4] = color.r
+			floats[index * 4 + 1] = color.g
+			floats[index * 4 + 2] = color.b
+			floats[index * 4 + 3] = color.a
+		arrays[Mesh.ARRAY_CUSTOM0] = floats
+		flags = (
+			Mesh.ARRAY_FORMAT_CUSTOM0
+			| (Mesh.ARRAY_CUSTOM_RGBA_FLOAT << Mesh.ARRAY_FORMAT_CUSTOM0_SHIFT)
+		)
+	var array_mesh := ArrayMesh.new()
+	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
+	body.mesh = array_mesh
+	var material := ShaderMaterial.new()
+	material.shader = load("res://shaders/planet.gdshader")
+	material.render_priority = -8
+	material.set_shader_parameter("u_lightdir", LIGHT_NORMAL)
+	material.set_shader_parameter("u_ambientColor", Color(1.0, 1.0, 1.0))
+	material.set_shader_parameter(
+		"u_emissive", 1.0 if bool(mesh_data.get("emissive", false)) else 0.0
+	)
+	body.material_override = material
+	_body_material = material
+	_update_body_camera()
+	body.visible = true
+
+
+## Vendored-art fallback (no hex generator data).
+func _build_body_billboard() -> void:
 	var texture := _load_loose("planets/%s" % planet, true)
 	# code-instantiated: the globe quad is a data-driven billboard whose scale
 	# depends on the planet radius; no static scene owns per-planet meshes.
@@ -613,6 +666,16 @@ func _update_atmosphere_camera() -> void:
 		var material := atmosphere.material_override as ShaderMaterial
 		material.set_shader_parameter("u_campos", camera.position)
 		material.set_shader_parameter("u_rcampos", camera.position)
+	_update_body_camera()
+
+
+## `Shaders.PlanetShader.apply`: `u_campos` is the camera and `u_camdir` its
+## direction (the port does not model planet rotation).
+func _update_body_camera() -> void:
+	if _body_material == null:
+		return
+	_body_material.set_shader_parameter("u_campos", camera.global_position)
+	_body_material.set_shader_parameter("u_camdir", -camera.global_basis.z)
 
 
 func _rebuild_highlight() -> void:
