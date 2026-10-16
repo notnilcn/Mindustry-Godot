@@ -315,9 +315,29 @@ pub fn reset_controller_def(
     }
 }
 
+/// `UnitType.logicControllable` for a unit type id. Unknown types (or a world
+/// without the unit runtime's content) default to `true`, the upstream field
+/// default (`UnitType.java`).
+pub fn unit_type_logic_controllable(world: &World, type_id: crate::content::UnitTypeId) -> bool {
+    with_content(world, |content| {
+        content
+            .unit(type_id)
+            .map(|def| def.logic_controllable)
+            .unwrap_or(true)
+    })
+    .unwrap_or(true)
+}
+
 /// `UnitBindI`: returns the next unit of `type_id` in stable spawn order for a
 /// team, advancing the per-type binding cursor (`%=`/`++` semantics).
+///
+/// `type.obj() instanceof UnitType type && type.logicControllable`
+/// (`LExecutor.java:188`): a type that is not logic-controllable binds `null`
+/// and leaves the cursor untouched.
 pub fn bind_next(world: &mut World, type_id: u16, team: u8, cursor: &mut u32) -> Option<Entity> {
+    if !unit_type_logic_controllable(world, crate::content::UnitTypeId::new(type_id)) {
+        return None;
+    }
     let mut matches: Vec<Entity> = Vec::new();
     for entity_ref in world.iter_entities() {
         let entity = entity_ref.id();
@@ -371,15 +391,7 @@ pub fn bind_object_ok(world: &World, team: u8, privileged: bool, unit: Entity) -
     }
     world
         .get::<crate::entities::comp::unit::comp::UnitTypeComp>(unit)
-        .and_then(|comp| {
-            with_content(world, |content| {
-                content
-                    .unit(comp.type_id)
-                    .map(|def| def.logic_controllable)
-                    .unwrap_or(true)
-            })
-        })
-        .unwrap_or(true)
+        .is_none_or(|comp| unit_type_logic_controllable(world, comp.type_id))
 }
 
 /// `UnitControlI`: applies one command to the bound unit. The full Java
@@ -452,11 +464,11 @@ pub fn apply_control(
             }
         }
         LUnitControl::Within => {
-            let inside = world.get::<Pos>(unit).is_some_and(|pos| {
-                let dx = x1 - pos.x;
-                let dy = y1 - pos.y;
-                dx * dx + dy * dy <= d1 * d1
-            });
+            // `p4.setnum(unit.within(x1, y1, d1) ? 1 : 0)` (`LExecutor.java:
+            // 379-381`); Arc `Position.within` is `dst2 < dst * dst`.
+            let inside = world
+                .get::<Pos>(unit)
+                .is_some_and(|pos| within(pos.x, pos.y, d1, x1, y1));
             super::set_output_num(exec, p4, if inside { 1.0 } else { 0.0 });
         }
         LUnitControl::Target => {
@@ -690,7 +702,7 @@ pub fn apply_control(
             let within = world.get::<Pos>(unit).is_some_and(|pos| {
                 let dx = x1 - pos.x;
                 let dy = y1 - pos.y;
-                dx * dx + dy * dy <= range * range
+                dx * dx + dy * dy < range * range
             });
             if !within {
                 super::set_output_obj(exec, p3, None);
@@ -770,7 +782,7 @@ pub fn apply_control(
                         LOGIC_ITEM_TRANSFER_RANGE + size * crate::config::TILESIZE as f32 / 2.0;
                     let dx = bx - pos.x;
                     let dy = by - pos.y;
-                    dx * dx + dy * dy <= range * range
+                    dx * dx + dy * dy < range * range
                 })
             });
             if build_team != team
@@ -843,7 +855,7 @@ pub fn apply_control(
                         LOGIC_ITEM_TRANSFER_RANGE + size * crate::config::TILESIZE as f32 / 2.0;
                     let dx = bx - pos.x;
                     let dy = by - pos.y;
-                    dx * dx + dy * dy <= range * range
+                    dx * dx + dy * dy < range * range
                 })
             });
             if !within {
@@ -1228,11 +1240,12 @@ fn find_closest_spawn(world: &World, x: f32, y: f32) -> Option<(f32, f32, Option
     .flatten()
 }
 
-/// `Mathf.within`.
+/// `Position.within(x, y, dst)` = `Mathf.dst2(...) < dst * dst` (strict;
+/// `arc/math/geom/Position.java:44-46`).
 fn within(ax: f32, ay: f32, radius: f32, bx: f32, by: f32) -> bool {
     let dx = ax - bx;
     let dy = ay - by;
-    dx * dx + dy * dy <= radius * radius
+    dx * dx + dy * dy < radius * radius
 }
 
 #[cfg(test)]

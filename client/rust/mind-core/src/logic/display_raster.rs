@@ -39,6 +39,11 @@ pub type Rgba = u32;
 /// Opaque white (`Color.whiteFloatBits` equivalent for the raster path).
 pub const WHITE: Rgba = 0xffff_ffff;
 
+/// `LogicDisplay.maxSides` (`LogicDisplay.java:51`; no vanilla display
+/// overrides it): `poly`/`linePoly` draw `Math.min(p1, maxSides)` sides
+/// (`LogicDisplay.java:208-209`).
+pub const MAX_SIDES: i32 = 25;
+
 /// Decoded RGBA image handed to the rasterizer (icons, glyphs).
 #[derive(Debug, Clone, PartialEq)]
 pub struct RgbaImage {
@@ -287,7 +292,24 @@ impl DisplayRaster {
     /// `Fill.poly(x, y, sides, radius, rotation)`: the full regular polygon
     /// (the Arc triangle-fan union is identical for a convex polygon).
     fn fill_poly(&mut self, x: f32, y: f32, sides: i32, radius: f32, rotation: f32, color: Rgba) {
-        let sides = sides.max(1);
+        if sides < 3 {
+            // Arc's fan (`Fill.java:272-297`) draws no quads for `sides < 3`
+            // and, for an odd count, one trailing `tri(center, i, i + 1)` with
+            // `i = sides - 1` (Java `%` keeps the sign). `0..=2` sides are
+            // degenerate; a negative odd count is a real sector triangle.
+            if sides < 0 && sides % 2 != 0 {
+                let space = 360.0 / sides as f32;
+                let i = (sides - 1) as f32;
+                let point = |angle: f32| {
+                    let a = angle.to_radians();
+                    (x + a.cos() * radius, y + a.sin() * radius)
+                };
+                let p1 = point(space * i + rotation);
+                let p2 = point(space * (i + 1.0) + rotation);
+                self.tri([(x, y), p1, p2], color);
+            }
+            return;
+        }
         let space = 360.0 / sides as f32;
         let mut points = Vec::with_capacity(sides as usize);
         for i in 0..sides {
@@ -299,7 +321,11 @@ impl DisplayRaster {
 
     /// `Lines.poly(x, y, sides, radius, startAngle, endAngle)`.
     fn line_poly(&mut self, x: f32, y: f32, sides: i32, radius: f32, rotation: f32, color: Rgba) {
-        let sides = sides.max(1);
+        // `for(int i = 0; i < sides; i++)` (`Lines.java:398-411`): no quads
+        // for `sides <= 0`.
+        if sides <= 0 {
+            return;
+        }
         let space = 360.0 / sides as f32;
         let hstep = self.stroke / 2.0 / (space / 2.0).to_radians().cos();
         let r1 = radius - hstep;
@@ -486,8 +512,8 @@ pub fn process_commands(
             COMMAND_LINE => raster.line(x, y, p1, p2, color),
             COMMAND_RECT => raster.crect(x, y, p1, p2, color),
             COMMAND_LINE_RECT => raster.line_rect(x, y, p1, p2, color),
-            COMMAND_POLY => raster.fill_poly(x, y, p1 as i32, p2, p3, color),
-            COMMAND_LINE_POLY => raster.line_poly(x, y, p1 as i32, p2, p3, color),
+            COMMAND_POLY => raster.fill_poly(x, y, (p1 as i32).min(MAX_SIDES), p2, p3, color),
+            COMMAND_LINE_POLY => raster.line_poly(x, y, (p1 as i32).min(MAX_SIDES), p2, p3, color),
             COMMAND_TRIANGLE => raster.tri([(x, y), (p1, p2), (p3, p4)], color),
             COMMAND_IMAGE => {
                 let packed = ((p4 as i32) << 10) | p1 as i32;
@@ -995,24 +1021,72 @@ mod tests {
         assert_eq!(r.pixel(5, 10), Some(0x0000_00ff), "before the line");
     }
 
-    /// A hexagon of radius 10 has area `2.598 * r^2`; pixel-centre sampling
-    /// lands within 2%.
+    /// A hexagon of radius 20 has area `2.598 * r^2`; pixel-centre sampling
+    /// lands within 2%. At radius 10 the raster fills exactly the 268 pixel
+    /// centres inside the ideal hexagon (counted analytically): the 3.15% gap
+    /// to the 259.8 area there is the sampling grid, not the rasterizer, so
+    /// the 2% area check uses a radius where that grid error is ~1%.
     #[test]
     fn poly_hexagon_area_within_2pct() {
-        let mut r = raster(80, 80);
-        let mut queue = VecDeque::new();
-        queue.push_back(cmd(COMMAND_POLY, 40, 40, 6, 10, 0, 0));
-        assert!(process_commands(&mut r, &mut queue, &NoImages));
-        let filled = r.pixels.iter().filter(|pixel| **pixel == WHITE).count() as f32;
-        let expected = 2.598_076 * 100.0;
+        let filled_for = |radius: i32| {
+            let mut r = raster(80, 80);
+            let mut queue = VecDeque::new();
+            queue.push_back(cmd(COMMAND_POLY, 40, 40, 6, radius, 0, 0));
+            assert!(process_commands(&mut r, &mut queue, &NoImages));
+            r.pixels.iter().filter(|pixel| **pixel == WHITE).count()
+        };
+        assert_eq!(filled_for(10), 268, "exact pixel-centre count at r=10");
+        let filled = filled_for(20) as f32;
+        let expected = 2.598_076 * 400.0;
         let error = (filled - expected).abs() / expected;
-        // Pixel-centre sampling: the theoretical bound is ±perimeter/2
-        // (~11.5% here); the measured error is 3.15% (268 vs 259.8 pixels).
         assert!(
-            error < 0.04,
+            error < 0.02,
             "hexagon area {filled} vs {expected} ({:.2}% off)",
             error * 100.0
         );
+    }
+
+    /// `Math.min(p1, maxSides)` (`LogicDisplay.java:208-209`): `poly` and
+    /// `linePoly` with more than 25 sides draw exactly the 25-gon.
+    #[test]
+    fn poly_sides_capped_at_max_sides() {
+        let draw = |type_: u8, sides: i32| {
+            let mut r = raster(80, 80);
+            let mut queue = VecDeque::new();
+            queue.push_back(cmd(type_, 40, 40, sides, 30, 0, 0));
+            assert!(process_commands(&mut r, &mut queue, &NoImages));
+            r.pixels
+        };
+        for type_ in [COMMAND_POLY, COMMAND_LINE_POLY] {
+            let capped = draw(type_, MAX_SIDES);
+            assert_eq!(draw(type_, 200), capped, "type {type_}: 200 sides -> 25");
+            assert_eq!(draw(type_, 26), capped, "type {type_}: 26 sides -> 25");
+            assert_ne!(draw(type_, 24), capped, "type {type_}: 24 sides differ");
+        }
+    }
+
+    /// Arc `Fill.poly` below three sides: `0..=2` and negative even counts
+    /// draw nothing; a negative odd count draws Arc's trailing fan triangle
+    /// (`Fill.java:272-297`). `Lines.poly` draws nothing for `sides <= 0`.
+    #[test]
+    fn poly_degenerate_side_counts_follow_arc() {
+        let filled = |type_: u8, sides: i32| {
+            let mut r = raster(80, 80);
+            let mut queue = VecDeque::new();
+            queue.push_back(cmd(type_, 40, 40, sides, 20, 0, 0));
+            assert!(process_commands(&mut r, &mut queue, &NoImages));
+            r.pixels.iter().filter(|pixel| **pixel == WHITE).count()
+        };
+        for sides in [0, 1, 2, -2, -4] {
+            assert_eq!(filled(COMMAND_POLY, sides), 0, "poly {sides} sides");
+        }
+        // `sides = -3`: `space = -120`, `i = -4` -> tri(center, 480deg, 360deg),
+        // a 120-degree sector triangle of area `r^2 * sin(120) / 2` ~ 173.
+        let sector = filled(COMMAND_POLY, -3);
+        assert!((150..=200).contains(&sector), "poly -3 sides: {sector}");
+        for sides in [0, -1, -5] {
+            assert_eq!(filled(COMMAND_LINE_POLY, sides), 0, "linePoly {sides}");
+        }
     }
 
     /// `translate 10 10` then `rect 0 0 5 5` lands at 10..14; `resetTransform`

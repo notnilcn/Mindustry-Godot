@@ -228,6 +228,11 @@ impl BuildingBehavior for UnloaderBehavior {
         world.entity_mut(e).insert(build);
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        // `Unloader.config(Item.class, ...)` (`Unloader.java:49`).
+        &[crate::world::config::ConfigKind::Item]
+    }
+
     fn config(&self, world: &World, e: Entity) -> ConfigValue {
         match world.get::<UnloaderBuild>(e).and_then(|b| b.sort_item) {
             Some(item) => ConfigValue::Item(item),

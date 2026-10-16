@@ -148,6 +148,12 @@ impl BuildingBehavior for DirectionalUnloaderBehavior {
         world.entity_mut(e).insert(build);
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        // `DirectionalUnloader.config(Item.class, ...)`
+        // (`DirectionalUnloader.java:48`).
+        &[crate::world::config::ConfigKind::Item]
+    }
+
     fn config(&self, world: &World, e: Entity) -> ConfigValue {
         match world
             .get::<DirectionalUnloaderBuild>(e)

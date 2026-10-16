@@ -237,6 +237,18 @@ impl BuildingBehavior for UnitFactoryBehavior {
                     0.0
                 })
             }
+            // `UnitFactory.senseObject(config)` (`UnitFactory.java:272-275`):
+            // `currentPlan == -1 ? null : plans.get(currentPlan).unit`.
+            LAccess::Config => Sensed::Obj(
+                self.plan_index(world, e)
+                    .and_then(|index| self.factory.plans.get(index))
+                    .map(|plan| {
+                        crate::logic::value::LogicObject::Content(crate::content::ContentRef::new(
+                            crate::content::ContentType::Unit,
+                            plan.unit.raw(),
+                        ))
+                    }),
+            ),
             _ => return None,
         })
     }
@@ -545,10 +557,30 @@ impl BuildingBehavior for ReconstructorBehavior {
             // `Reconstructor.sense(progress)` (`Reconstructor.java:370-373`):
             // the build fraction.
             LAccess::Progress => {
-                let state = world.get::<UnitFactoryBuild>(e)?;
+                // The reconstructor's state is `ReconstructorBuild`
+                // (`create_state`), not the factory's `UnitFactoryBuild`.
+                let state = world.get::<ReconstructorBuild>(e)?;
                 let time = self.reconstructor.construct_time.max(1.0);
                 Sensed::Num(f64::from((state.progress / time).clamp(0.0, 1.0)))
             }
+            // `Reconstructor.senseObject(config)` = `unit()`
+            // (`Reconstructor.java:320-323`, `:386-391`): the upgrade of the
+            // held payload's type, or null. Java also nulls a target that is
+            // not `unlockedNowHost()` for a non-AI team; the sim has no host
+            // unlock state, so every upgrade counts as unlocked (the same
+            // simplification as `ucontrol build`'s `unlockedNow`).
+            LAccess::Config => Sensed::Obj(
+                world
+                    .get::<ReconstructorBuild>(e)
+                    .and_then(|state| state.payload)
+                    .and_then(|unit| self.reconstructor.can_upgrade(unit))
+                    .map(|unit| {
+                        crate::logic::value::LogicObject::Content(crate::content::ContentRef::new(
+                            crate::content::ContentType::Unit,
+                            unit.raw(),
+                        ))
+                    }),
+            ),
             _ => return None,
         })
     }
