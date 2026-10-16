@@ -29,6 +29,10 @@ alloc-audit = ["mind-core/alloc-audit"]
 # `mind-core`. Default-off; `blocks bench` opt-in (`--features profile-build`)
 # to print the order/consume/dispatch split without instrumenting release.
 profile-build = ["mind-core/profile-build"]
+# Plan 04 §2.3.1: forwards the legacy upstream `MSAV` reader to `mind-core` so
+# `campaign map-mode` can load the shipped preset maps (they are all `MSAV`).
+# Default-off like the core feature.
+msav-import = ["mind-core/msav-import"]
 
 [lints]
 workspace = true

@@ -179,6 +179,20 @@ pub struct FilterContext<'a> {
     pub seed: u64,
 }
 
+/// Runs one resolved filter stack (`World.FilterContext.applyFilters`,
+/// `World.java:661-695`): every filter is randomized from the `MapGen` stream
+/// (seeded here from the caller's recorded generation seed) and applied to the
+/// tiles before `World.endMapLoad`.
+pub fn apply_filters(
+    tiles: &mut super::Tiles,
+    filters: &mut [Box<dyn crate::maps::filters::GenerateFilter>],
+    content: &ContentRegistry,
+    seed: u64,
+) {
+    let mut rng = crate::determinism::SimRng::new(seed);
+    crate::maps::filters::apply_stack(tiles, filters, content, &mut rng);
+}
+
 impl<'a> FilterContext<'a> {
     /// Wraps a context with a map name and an empty filter stack.
     pub fn new(inner: Context<'a>, map_name: impl Into<String>) -> Self {
@@ -237,13 +251,7 @@ impl WorldContext for FilterContext<'_> {
             ..
         } = self;
         if !filters.is_empty() {
-            let mut rng = crate::determinism::SimRng::new(*seed);
-            crate::maps::filters::apply_stack(
-                &mut inner.grid.tiles,
-                filters,
-                inner.content,
-                &mut rng,
-            );
+            apply_filters(&mut inner.grid.tiles, filters, inner.content, *seed);
         }
         inner.end();
     }

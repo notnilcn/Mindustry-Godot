@@ -433,6 +433,9 @@ pub struct MindSimHost {
     /// `World.loadMap`'s error key from the last failed `load_map_world`
     /// (`map.invalid`; `None` = the last load succeeded or none ran).
     last_map_error: Option<String>,
+    /// Pinned generation seed for the next `load_map_world`
+    /// ([`Self::set_next_map_gen_seed`]); `None` draws a fresh one.
+    pending_map_gen_seed: Option<u64>,
     /// Content-name snapshot for the display rasterizer's icon lookup (T13);
     /// built on the first `logic_display_sync`.
     display_icon_names: Option<crate::display_context::IconNames>,
@@ -473,6 +476,7 @@ impl INode for MindSimHost {
             generated_loadout_placed: false,
             logic_last_error: String::new(),
             last_map_error: None,
+            pending_map_gen_seed: None,
             display_icon_names: None,
         }
     }
@@ -3050,12 +3054,41 @@ impl MindSimHost {
             self.last_map_error = Some(String::from("map.invalid"));
             return false;
         };
-        let Some(loaded) = load_grid_file(&resolved, &mut registry) else {
+        // `World.loadMap` loads through `new FilterContext(map)`: the map's
+        // `genfilters` stack (or the default one) is applied to the decoded
+        // tiles (`World.java:341-357,661-695`). Java's `filter.randomize()`
+        // draws from the global `Mathf.rand`, so every load re-rolls; the port
+        // draws a fresh seed per load and records it (`map_gen_seed`) so the
+        // world is reproducible from seed + map (`GenerateFilter.java:91-92`).
+        let seed = self.next_map_gen_seed();
+        let Some(loaded) = load_map_grid_file(&resolved, &mut registry, seed) else {
             self.content_snapshot = Some(registry);
             self.last_map_error = Some(String::from("map.invalid"));
             return false;
         };
         self.finish_world_load(registry, loaded, WorldLoadExtras::default())
+    }
+
+    /// A fresh generation seed for the next `load_map_world` (`Mathf.rand`
+    /// re-rolls every map load; the port keeps the draw recorded instead).
+    ///
+    /// The value is mixed with the monotonic world-load counter so two loads
+    /// requested within the same clock tick still re-roll; in-engine replays
+    /// can pin it through `MindSimHost::set_next_map_gen_seed`.
+    fn next_map_gen_seed(&mut self) -> u64 {
+        if let Some(seed) = self.pending_map_gen_seed.take() {
+            return seed;
+        }
+        let ticks = godot::classes::Time::singleton().get_ticks_usec();
+        ticks ^ self.world_loads.wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    }
+
+    /// Pins the generation seed the next `load_map_world` will use and report
+    /// (`World.FilterContext`; the value recorded in the state dump as
+    /// `map_gen_seed`). Rust-only replay/debug seam; the default draw is a
+    /// fresh seed per load.
+    pub fn set_next_map_gen_seed(&mut self, seed: u64) {
+        self.pending_map_gen_seed = Some(seed);
     }
 
     /// Resolves a `load_map_world` path argument: absolute paths as-is,
@@ -3297,6 +3330,11 @@ impl MindSimHost {
         // iteration keeps no ECS entities from the previous world.
         let mut sim = Sim::new(1, grid.width(), grid.height(), BlockId::AIR, BlockId::AIR);
         sim.grid = grid;
+        // `World.loadMap`'s `FilterContext` seed (recorded from
+        // `decode_map_bytes`; surfaced in the state dump as `map_gen_seed`).
+        if let Some(seed) = save.as_ref().and_then(|save| save.map_gen_seed) {
+            sim.set_map_gen_seed(seed);
+        }
         if let Some((rotation, sides)) = extras.polygon {
             sim.grid.sector_polygon = Some(mind_core::world::SectorPolygon {
                 rotation,
@@ -6650,6 +6688,30 @@ impl MindSimHost {
         d
     }
 
+    /// Debug probe (J01 T1): the loaded grid's generation facts — the recorded
+    /// `World.FilterContext` seed (`-1` when the load ran no filters) plus ore
+    /// overlay and boulder block counts and a few ore tile coordinates for
+    /// `tile_debug` spot checks. Companion to `tile_debug`.
+    #[func]
+    pub fn world_gen_debug(&self) -> Dictionary<GString, Variant> {
+        let mut d = Dictionary::new();
+        let seed = self
+            .sim
+            .map_gen_seed()
+            .map(|seed| seed as i64)
+            .unwrap_or(-1);
+        d.set("seed", &seed.to_variant());
+        let (ore, boulders, ore_sample, boulder_sample) = match self.content_snapshot.as_ref() {
+            Some(content) => count_world_gen(&self.sim.grid, content),
+            None => (0, 0, Vec::new(), Vec::new()),
+        };
+        d.set("ore", &ore.to_variant());
+        d.set("boulders", &boulders.to_variant());
+        d.set("ore_tiles", &pack_coords(ore_sample).to_variant());
+        d.set("boulder_tiles", &pack_coords(boulder_sample).to_variant());
+        d
+    }
+
     /// Construct block state at `(x, y)` as `(current block, progress,
     /// deconstructing)` (`ConstructBuild`; render seam).
     pub fn construct_at(&self, x: i32, y: i32) -> Option<(BlockId, f32, bool)> {
@@ -9062,29 +9124,53 @@ fn load_preset_map_grid(
 
 /// Reads an `.msav`/`MGRS` file into a fresh [`WorldGrid`] through the save
 /// reader, preserving the container's rules and the resume payload (units,
-/// fires, puddles, markers, stats, meta tags).
+/// fires, puddles, markers, stats, meta tags). Plain loads (Load Game, sector
+/// resume) never re-run generation filters.
 fn load_grid_file(path: &str, registry: &mut ContentRegistry) -> Option<LoadedGrid> {
     let bytes = FileAccess::get_file_as_bytes(path);
-    let mut save = match mind_core::io::sim_io::decode_save_bytes(bytes.as_slice(), registry) {
+    let save = match mind_core::io::sim_io::decode_save_bytes(bytes.as_slice(), registry) {
         Ok(save) => save,
         Err(error) => {
             log::warn!("load_map_file: `{path}` failed: {error}");
             return None;
         }
     };
-    // Move the world half out (callers keep their current shape); the resume
-    // half stays in `save` for the sector-resume path.
+    let loaded = take_loaded_grid(save);
+    Some(loaded)
+}
+
+/// [`load_grid_file`] for map loads: runs the `World.FilterContext` step with
+/// `seed` (`World.loadMap`, `World.java:341-357,661-695`), so the map's
+/// `genfilters`/default stack lands ore and boulders before `endMapLoad`.
+fn load_map_grid_file(path: &str, registry: &mut ContentRegistry, seed: u64) -> Option<LoadedGrid> {
+    let bytes = FileAccess::get_file_as_bytes(path);
+    let save = match mind_core::io::sim_io::decode_map_bytes(bytes.as_slice(), registry, seed) {
+        Ok(save) => save,
+        Err(error) => {
+            log::warn!("load_map_file: `{path}` failed: {error}");
+            return None;
+        }
+    };
+    if let Some(seed) = save.map_gen_seed {
+        log::info!("load_map_file: `{path}` gen seed {seed}");
+    }
+    Some(take_loaded_grid(save))
+}
+
+/// Moves the world half out of a decoded save (callers keep their current
+/// shape); the resume half stays in `save` for the sector-resume path.
+fn take_loaded_grid(mut save: mind_core::io::sim_io::DecodedSave) -> LoadedGrid {
     let grid = std::mem::take(&mut save.grid);
     let pending_buildings = std::mem::take(&mut save.pending);
     let plans = std::mem::take(&mut save.plans);
     let rules = save.rules.take();
-    Some(LoadedGrid {
+    LoadedGrid {
         grid,
         rules,
         pending_buildings,
         plans,
         save: Some(save),
-    })
+    }
 }
 
 /// Counts enemy spawn overlays (`BlockPalette.is_spawn`) on a loaded grid.
@@ -9098,6 +9184,55 @@ fn count_spawns(grid: &WorldGrid, content: &ContentRegistry) -> i32 {
                 .is_some_and(|def| def.kind == BlockKind::SpawnBlock)
         })
         .count() as i32
+}
+
+/// `(x, y)` tile-coordinate list for the `world_gen_debug` probe.
+type GenCoords = Vec<(i32, i32)>;
+
+/// Counts generated ore overlays (`OreBlock`) and boulder props (the
+/// `StaticProp` blocks named `*-boulder`) on a loaded grid, returning the
+/// counts plus a few ore and boulder tile coordinates (J01 T1 debug probe; the
+/// generation filters' observable output).
+fn count_world_gen(
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+) -> (i64, i64, GenCoords, GenCoords) {
+    let mut ore = 0i64;
+    let mut boulders = 0i64;
+    let mut ore_sample: GenCoords = Vec::new();
+    let mut boulder_sample: GenCoords = Vec::new();
+    for (pos, index) in grid.iter_row_major() {
+        let tile = grid.tile_ref(index);
+        if content
+            .block(tile.overlay)
+            .is_some_and(|def| def.kind == BlockKind::OreBlock)
+        {
+            ore += 1;
+            if ore_sample.len() < 8 {
+                ore_sample.push((i32::from(pos.x()), i32::from(pos.y())));
+            }
+        }
+        if content
+            .block(tile.block)
+            .is_some_and(|def| def.kind == BlockKind::StaticProp && def.name.contains("boulder"))
+        {
+            boulders += 1;
+            if boulder_sample.len() < 8 {
+                boulder_sample.push((i32::from(pos.x()), i32::from(pos.y())));
+            }
+        }
+    }
+    (ore, boulders, ore_sample, boulder_sample)
+}
+
+/// Packs `(x, y)` pairs into a flat `PackedInt32Array` (debug probes).
+fn pack_coords(coords: GenCoords) -> PackedInt32Array {
+    let mut packed = PackedInt32Array::new();
+    for (x, y) in coords {
+        packed.push(x);
+        packed.push(y);
+    }
+    packed
 }
 
 /// Parses `--capture <path>` / `--capture=<path>` from the user args (after `--`).

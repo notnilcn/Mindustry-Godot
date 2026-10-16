@@ -252,6 +252,9 @@ pub struct Sim {
     pub hint_events: HintEvents,
 
     seed: u64,
+    /// Generation seed of the last map load's `World.FilterContext` step
+    /// ([`Sim::map_gen_seed`]).
+    map_gen_seed: Option<u64>,
     selected_block: BlockId,
     entity_seq: EntitySequencer,
     commands_applied: u64,
@@ -292,6 +295,7 @@ impl Sim {
             loaded_unit_entities: Vec::new(),
             hint_events: HintEvents::default(),
             seed,
+            map_gen_seed: None,
             // Upstream `player.block == null` at boot: no placement block is
             // selected until the player picks one (the command-mode gate
             // requires it; PAR-0140).
@@ -2283,6 +2287,19 @@ impl Sim {
     /// Scenario seed.
     pub fn seed(&self) -> u64 {
         self.seed
+    }
+
+    /// The recorded generation seed of the last map load's `FilterContext` step
+    /// (`World.loadMap`); `None` until a map load runs filters or after a save
+    /// load. Surfaced in the state dump (`map_gen_seed`).
+    pub fn map_gen_seed(&self) -> Option<u64> {
+        self.map_gen_seed
+    }
+
+    /// Records the generation seed of the last map load (host half of
+    /// [`crate::io::sim_io::decode_map_bytes`]).
+    pub fn set_map_gen_seed(&mut self, seed: u64) {
+        self.map_gen_seed = Some(seed);
     }
 
     /// Re-derives the world state that mirrors `Rules`: the map-area limit rect

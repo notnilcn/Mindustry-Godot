@@ -70,6 +70,7 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
         CampaignCommand::Fog { .. } => campaign_fog()?,
         CampaignCommand::Objectives { .. } => objectives_completion()?,
         CampaignCommand::Play { planet, sector, .. } => campaign_play(planet, sector)?,
+        CampaignCommand::MapMode { map, seed, .. } => campaign_map_mode(map, *seed)?,
         CampaignCommand::Bench { profile, ticks, .. } => campaign_bench(profile, *ticks)?,
     };
     match command {
@@ -91,6 +92,9 @@ pub fn run(command: &CampaignCommand) -> Result<i32> {
             json, dump: path, ..
         }
         | CampaignCommand::Play {
+            json, dump: path, ..
+        }
+        | CampaignCommand::MapMode {
             json, dump: path, ..
         }
         | CampaignCommand::Bench {
@@ -660,7 +664,8 @@ fn campaign_fog() -> Result<(Value, Value)> {
         team: 0,
     }];
     let units = vec![FogUnit {
-        entity: bevy_ecs::entity::Entity::from_raw_u32(1).expect("entity"),
+        entity: bevy_ecs::entity::Entity::from_raw_u32(1)
+            .ok_or_else(|| anyhow::anyhow!("invalid entity index"))?,
         tile_x: 40,
         tile_y: 40,
         radius: 6,
@@ -1080,6 +1085,74 @@ fn campaign_play(planet_name: &str, sector_name: &str) -> Result<(Value, Value)>
     Ok((report, dump))
 }
 
+/// `campaign mapmode` — the `Control.playMap` world half (`start_map_mode`:
+/// custom game / editor playtest) on one map file. `World.loadMap` loads
+/// through a `FilterContext` (`World.java:341-357,661-695`), so the map's
+/// resolved `genfilters`/default stack lands ore and boulders before
+/// `endMapLoad`; this reports what the applied filters produced.
+fn campaign_map_mode(map: &Path, seed: u64) -> Result<(Value, Value)> {
+    use mind_core::content::BlockKind;
+
+    let mut registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+        .map_err(|error| anyhow::anyhow!("content boot failed: {error}"))?;
+    let bytes = std::fs::read(map)
+        .map_err(|error| anyhow::anyhow!("map `{}` unreadable: {error}", map.display()))?;
+    let decoded = mind_core::io::sim_io::decode_map_bytes(&bytes, &mut registry, seed)
+        .map_err(|error| anyhow::anyhow!("map `{}` failed to load: {error}", map.display()))?;
+
+    let content = &registry;
+    let mut ore = 0i64;
+    let mut boulders = 0i64;
+    let mut ore_tiles: Vec<(i32, i32)> = Vec::new();
+    for (pos, index) in decoded.grid.iter_row_major() {
+        let tile = decoded.grid.tile_ref(index);
+        if content
+            .block(tile.overlay)
+            .is_some_and(|def| def.kind == BlockKind::OreBlock)
+        {
+            ore += 1;
+            if ore_tiles.len() < 8 {
+                ore_tiles.push((i32::from(pos.x()), i32::from(pos.y())));
+            }
+        }
+        if content
+            .block(tile.block)
+            .is_some_and(|def| def.kind == BlockKind::StaticProp && def.name.contains("boulder"))
+        {
+            boulders += 1;
+        }
+    }
+    let seed_recorded = decoded.map_gen_seed == Some(seed);
+    let map_name = decoded
+        .tags
+        .get("name")
+        .cloned()
+        .unwrap_or_else(|| map.display().to_string());
+    let passed = ore > 0 && boulders > 0 && seed_recorded;
+    let dump = json!({
+        "format": 1,
+        "scenario": "campaign_map_mode",
+        "map": map.display().to_string(),
+        "name": map_name,
+        "seed": seed,
+        "width": decoded.grid.width(),
+        "height": decoded.grid.height(),
+        "ore": ore,
+        "boulders": boulders,
+        "ore_tiles": ore_tiles.iter().map(|(x, y)| json!({"x": x, "y": y})).collect::<Vec<_>>(),
+        "pass": passed,
+    });
+    let report = json!({
+        "scenario": "campaign_map_mode",
+        "map": map.display().to_string(),
+        "seed": seed,
+        "ore": ore,
+        "boulders": boulders,
+        "pass": passed,
+    });
+    Ok((report, dump))
+}
+
 /// `campaign bench` — plan 12 §7d budget profiles (measurement, not a gate).
 fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
     use std::time::Instant;
@@ -1192,14 +1265,18 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
             })
             .collect();
         let units: Vec<FogUnit> = (0..400)
-            .map(|i| FogUnit {
-                entity: bevy_ecs::entity::Entity::from_raw_u32(i + 1).expect("entity"),
-                tile_x: (i % 25) as i32 + 50,
-                tile_y: (i / 25) as i32,
-                radius: 4,
-                team: (i % 2) as u8,
+            .map(|i| {
+                bevy_ecs::entity::Entity::from_raw_u32(i + 1)
+                    .map(|entity| FogUnit {
+                        entity,
+                        tile_x: (i % 25) as i32 + 50,
+                        tile_y: (i / 25) as i32,
+                        radius: 4,
+                        team: (i % 2) as u8,
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("invalid entity index"))
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
         let mut fog = FogControl::new();
         fog.on_world_load(128, 128, true, true, &blocks);
         let start = Instant::now();
