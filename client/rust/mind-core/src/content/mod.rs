@@ -46,7 +46,7 @@ pub use names::{NameMaps, mod_content_name_map, transform_name};
 pub use parity::{AssetManifest, AuditReport, BundleKeysFile, GoldenContent, audit, dump_golden};
 pub use registries::blocks::{
     BarSpec, BlockDef, BlockFlag, BlockGroup, BlockKind, BlockSpec, Blocks, BuildVisibility,
-    Consume, ConsumeSpec, EnvMask, StatSpec, TILE_SIZE,
+    Consume, ConsumeSpec, EnvMask, StatSpec, TILE_SIZE, is_floor_kind, is_overlay_floor_kind,
 };
 pub use registries::bullets::{BulletDef, BulletKind};
 pub use registries::commands::{ControllerKind, UnitCommandDef};

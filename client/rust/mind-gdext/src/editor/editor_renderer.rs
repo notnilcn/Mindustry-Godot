@@ -48,7 +48,8 @@ use mind_core::world::WorldGrid;
 use crate::assets::MindAssets;
 use crate::editor::MindEditor;
 use crate::render::floor::{
-    PendingQuad, Quad, RegionAtlas, build_mesh, chunk_used_layers_sized, resolved_uv, tile_quads,
+    PendingQuad, Quad, RegionAtlas, build_mesh, chunk_used_layers_sized, crop_uv, resolved_uv,
+    tile_quads,
 };
 
 /// Upstream `EditorRenderer.chunkSize` (60; the live world floor cache uses 30).
@@ -302,6 +303,10 @@ impl MindEditorRenderer {
                     atlas.resolve(&quad.region)
                 };
                 let (page, texture, uv) = resolved_uv(&resolved);
+                let uv = match quad.crop {
+                    Some((cols, rows, col, row)) => crop_uv(uv, cols, rows, col, row),
+                    None => uv,
+                };
                 let entry = groups
                     .entry((layer_id, page))
                     .or_insert((texture, Vec::new()));

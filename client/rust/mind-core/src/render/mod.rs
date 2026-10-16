@@ -26,6 +26,7 @@ pub mod draw_meta;
 pub mod drawf;
 pub mod env;
 pub mod floor_cache;
+pub mod floor_edges;
 pub mod fog;
 pub mod g3d;
 pub mod hooks;
@@ -68,6 +69,7 @@ pub use env::{
     ANY as ENV_ANY, EnvRegistry, EnvRendererSpec, NONE as ENV_NONE, matches as env_matches,
 };
 pub use floor_cache::{CHUNK_SIZE, CHUNK_UNITS, FloorChunkGrid};
+pub use floor_edges::{D8 as D8_OFFSETS, EdgeQuad, draw_edges, draw_non_layer};
 pub use g3d::{MeshData, PlanetGrid, PlanetParams, build_planet_grid, hex_is_indexed};
 pub use hooks::RenderInvalidation;
 pub use ids::{RegionId, RegionIdTable};
