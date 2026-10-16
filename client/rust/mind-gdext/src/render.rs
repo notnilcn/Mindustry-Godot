@@ -158,6 +158,8 @@ pub struct RenderStats {
     pub lod_l1: bool,
     /// `Lod.l2` (plan 16 M6).
     pub lod_l2: bool,
+    /// `Lod.alpha2` (plan 16 M6; `drawStatus` fill alpha).
+    pub lod_alpha2: f32,
     /// Last frame build time in microseconds.
     pub build_us: i64,
     /// Current sim tick (updated by the facade).
@@ -979,6 +981,7 @@ impl MindWorldRenderer {
         self.lod.update(view.w * view.zoom, view.w);
         self.stats.lod_l1 = self.lod.l1;
         self.stats.lod_l2 = self.lod.l2;
+        self.stats.lod_alpha2 = self.lod.alpha2;
         self.stats.stage_trace.push(String::from("lod"));
         // Live sector rules feed (`Rules` -> `RulesRenderView`, G03 T12):
         // polled every 30 frames so a `load_sector`/rules edit reaches the
@@ -1246,6 +1249,13 @@ impl MindWorldRenderer {
     #[func]
     pub fn stats_lod_l1(&self) -> bool {
         self.stats.lod_l1
+    }
+
+    /// `Lod.alpha2` from the last frame (`BuildingComp.drawStatus` fill alpha,
+    /// `BuildingComp.java:1226-1228`; J03 T7).
+    #[func]
+    pub fn stats_lod_alpha2(&self) -> f32 {
+        self.stats.lod_alpha2
     }
 
     /// Whether the nullable `shield` shader resolved (plan 16 §3.9,

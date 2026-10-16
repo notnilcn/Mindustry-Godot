@@ -191,28 +191,33 @@ impl<'a> FxEmit<'a> {
         });
     }
 
-    /// `Fill.square(x, y, radius, rotation)`.
+    /// `Fill.square(x, y, radius, rotation)` (`Arc Fill.java:361-363`):
+    /// `Draw.rect(atlas.white(), x, y, radius*2, radius*2, rotation)` — a
+    /// square of side `radius * 2` rotated `rotation` degrees, i.e. a 4-gon of
+    /// circumradius `radius * sqrt(2)` with its corners at `rotation + 45`.
     pub fn square(&mut self, x: f32, y: f32, r: f32, rotation_deg: f32) {
         self.push(PrimKind::Poly {
             x,
             y,
             sides: 4,
-            r,
-            rotation_deg,
+            r: r * std::f32::consts::SQRT_2,
+            rotation_deg: rotation_deg + 45.0,
             fill: true,
             stroke: 0.0,
             color: self.current,
         });
     }
 
-    /// `Lines.square(x, y, radius, rotation)`.
+    /// `Lines.square(x, y, radius, rotation)` (`Arc Lines.java:507-509`):
+    /// `poly(x, y, 4, radius, rotation - 45)` — a 4-gon of circumradius
+    /// `radius` with its corners at `rotation`.
     pub fn square_line(&mut self, x: f32, y: f32, r: f32, rotation_deg: f32) {
         self.push(PrimKind::Poly {
             x,
             y,
             sides: 4,
             r,
-            rotation_deg,
+            rotation_deg: rotation_deg - 45.0,
             fill: false,
             stroke: self.stroke,
             color: self.current,
@@ -348,6 +353,62 @@ mod tests {
             assert_eq!(*stroke, 2.0);
         } else {
             panic!("expected line");
+        }
+    }
+
+    /// J03 T7/PAR-0348: Arc's `Fill.square(x, y, radius, rotation)` is
+    /// `Draw.rect(white, x, y, radius*2, radius*2, rotation)`
+    /// (`Fill.java:361-363`) — a square of side `2*radius` rotated, i.e. a
+    /// 4-gon of circumradius `radius*sqrt(2)` with corners at
+    /// `rotation + 45`; `Lines.square` is `poly(4, radius, rotation - 45)`
+    /// (`Lines.java:507-509`).
+    #[test]
+    fn arc_square_conventions() {
+        let mut program = DrawProgram::new();
+        {
+            let mut emit = FxEmit::new(&mut program, 0.0);
+            emit.square(1.0, 2.0, 5.0, 45.0);
+            emit.square_line(3.0, 4.0, 5.0, 45.0);
+        }
+        match &program.prims[0].kind {
+            PrimKind::Poly {
+                sides,
+                r,
+                rotation_deg,
+                fill,
+                ..
+            } => {
+                assert_eq!(*sides, 4);
+                assert!((r - 5.0 * std::f32::consts::SQRT_2).abs() < 1e-4, "r {r}");
+                // `rotation + 45` with corners at the axes for rotation=45:
+                // the Diamond the Java `Fill.square(…, 45)` call sites expect.
+                assert!((rotation_deg - 90.0).abs() < 1e-4);
+                assert!(*fill);
+                // Corner positions: radius*sqrt2 at 90/180/270/0 degrees.
+                let points = crate::render::drawf::poly_ring(1.0, 2.0, 4, *r, *rotation_deg);
+                for (x, y) in points {
+                    let dx = x - 1.0;
+                    let dy = y - 2.0;
+                    assert!(
+                        dx.abs() < 1e-3 || dy.abs() < 1e-3,
+                        "corner on an axis ({x}, {y})"
+                    );
+                }
+            }
+            other => panic!("expected poly: {other:?}"),
+        }
+        match &program.prims[1].kind {
+            PrimKind::Poly {
+                r,
+                rotation_deg,
+                fill,
+                ..
+            } => {
+                assert!((r - 5.0).abs() < 1e-4);
+                assert!((rotation_deg - 0.0).abs() < 1e-4);
+                assert!(!fill);
+            }
+            other => panic!("expected poly: {other:?}"),
         }
     }
 }
