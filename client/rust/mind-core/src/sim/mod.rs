@@ -529,15 +529,13 @@ impl Sim {
         })
     }
 
-    /// T2: applies a `PowerNode` link config (`PowerNode.java:419-441`,
-    /// `config(Integer.class)` = toggle link, `config(Point2[].class)` = replace
-    /// all links) through the `PowerGrids` arena.
-    ///
-    /// Returns `false` when `entity` is not a power node or the value is not a
     /// Applies one `world::config::ConfigValue` to a building: the power-node
-    /// graph path first, then the behavior `configured` path — the exact order
-    /// of the `SimCommand::Configure` arm.
-    fn apply_world_config(
+    /// graph path first (`PowerNode.java:419-441`, `config(Integer.class)` =
+    /// toggle link, `config(Point2[].class)` = replace all links), then the
+    /// behavior `configured` path — the exact order of the
+    /// `SimCommand::Configure` arm. Used by the command arm and by the
+    /// generator `postGenerate` power-node reset (I04 T17).
+    pub(crate) fn apply_world_config(
         &mut self,
         entity: Entity,
         value: crate::world::config::ConfigValue,
@@ -555,8 +553,18 @@ impl Sim {
         applied
     }
 
-    /// link config, so the caller falls through to the normal behavior config
-    /// path.
+    /// Runs the `placed()` hooks for a building placed outside the construction
+    /// path (`BuildingComp.placed` + `PowerNode.placed`; `BaseGenerator.postGenerate`
+    /// calls `tile.build.placed()` explicitly, `BaseGenerator.java:180`).
+    pub fn run_placed_hooks(&mut self, entity: Entity) {
+        let Some(runtime) = self.block_runtime.as_mut() else {
+            return;
+        };
+        runtime.placed_hooks(&mut self.ecs.0, &self.grid, entity);
+    }
+
+    /// Returns `false` for a non-node (no `PowerNodeConfig`), so the caller
+    /// falls through to the normal behavior config path.
     fn configure_power_node(
         &mut self,
         entity: Entity,
