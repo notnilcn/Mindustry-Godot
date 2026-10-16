@@ -84,6 +84,7 @@ const CODES := {
 	"reddit-alien": 62081,
 	"refresh": 59498,
 	"right": 59395,
+	"rotate": 59427,
 	"right-open": 59450,
 	"save": 59419,
 	"settings": 59516,
