@@ -82,6 +82,20 @@ func _load_tags() -> void:
 		for tag in parsed:
 			if not str(tag).is_empty() and not _tags.has(str(tag)):
 				_tags.append(str(tag))
+	_check_tags()
+
+
+## `checkTags()` (`SchematicsDialog.java:367-379`): every label of every
+## schematic joins the global tag list in first-seen order. Like Java the
+## merged list is not persisted until the tags change (`tagsChanged`).
+func _check_tags() -> void:
+	for row_variant in campaign_section("schematics"):
+		if not row_variant is Dictionary:
+			continue
+		for label in (row_variant as Dictionary).get("labels", []):
+			var tag := str(label)
+			if not tag.is_empty() and not _tags.has(tag):
+				_tags.append(tag)
 
 
 func _save_tags() -> void:
@@ -127,19 +141,63 @@ func _rebuild_tags() -> void:
 	for child in _tags_row.get_children():
 		child.queue_free()
 	# code-instantiated: the tag label/toggles follow the settings tag list.
-	_tags_row.add_child(MindWidgets.label(_t("@schematic.tags")))
+	var tags_label := MindWidgets.label(_t("@schematic.tags"))
+	tags_label.custom_minimum_size = Vector2(0, TAG_HEIGHT)
+	tags_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_tags_row.add_child(tags_label)
+	# `in.add("@schematic.tags").padRight(4)`.
+	_tags_row.add_child(MindWidgets.space(2.0, 0.0))
+	# `in.pane(Styles.noBarPane, t -> ...).fillX().height(tagh).scrollY(false)`:
+	# the toggles scroll horizontally without a visible bar, so a long tag
+	# list never widens the dialog.
+	# code-instantiated: rebuilt with the tag list (`rebuildTags`).
+	var pane := ScrollContainer.new()
+	pane.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pane.custom_minimum_size = Vector2(0, TAG_HEIGHT + 4.0)
+	pane.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	pane.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	var toggles := HBoxContainer.new()
+	# `t.defaults().pad(2).height(tagh)`.
+	toggles.add_theme_constant_override("separation", 4)
+	pane.add_child(toggles)
+	_tags_row.add_child(pane)
 	for tag in _tags:
-		var button := MindWidgets.button(str(tag))
+		var button := MindWidgets.button(_tag_plain(str(tag)))
+		# Tag labels carry Arc color markup (`[magenta]advanced-logic`); the
+		# Java label renders it, so tint the button text with that color.
+		var tint: Variant = _tag_color(str(tag))
+		if tint is Color:
+			for key in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+				button.add_theme_color_override(key, tint)
 		button.theme_type_variation = "togglet"
 		button.toggle_mode = true
 		button.button_pressed = _selected_tags.has(tag)
 		button.custom_minimum_size = Vector2(0, TAG_HEIGHT)
+		# `.with(c -> c.getLabel().setWrap(false))`.
+		button.autowrap_mode = TextServer.AUTOWRAP_OFF
 		button.pressed.connect(_toggle_tag.bind(str(tag)))
-		_tags_row.add_child(button)
+		toggles.add_child(button)
 	var pencil := MindWidgets.glyph_button("pencil", _t("@schematic.edittags"), "emptyi")
 	pencil.custom_minimum_size = Vector2(TAG_HEIGHT, TAG_HEIGHT)
 	pencil.pressed.connect(_edit_tags)
 	_tags_row.add_child(pencil)
+
+
+## A tag with its Arc color markup (`[magenta]`, `[#ff00ff]`, `[]`) removed.
+func _tag_plain(tag: String) -> String:
+	var regex := RegEx.create_from_string("\\[[^\\[\\]]*\\]")
+	return regex.sub(tag, "", true)
+
+
+## The first color the tag's markup selects, or null for plain tags.
+func _tag_color(tag: String) -> Variant:
+	var regex := RegEx.create_from_string("^\\[([^\\[\\]]+)\\]")
+	var found := regex.search(tag)
+	if found == null:
+		return null
+	var sentinel := Color(0, 0, 0, 0)
+	var parsed := Color.from_string(found.get_string(1), sentinel)
+	return null if parsed == sentinel else parsed
 
 
 func _toggle_tag(tag: String) -> void:

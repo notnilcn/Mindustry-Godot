@@ -77,7 +77,8 @@ func _draw() -> void:
 			Rect2(origin - Vector2(resolution, resolution), Vector2(_width + 2, _height + 2) * resolution),
 			false
 		)
-	# Plan regions (`fullIcon`) at `(x + 1.5, y + 1.5)` tiles.
+	# Plan regions (`drawPlanRegion`: `fullIcon` at `plan.drawx()/drawy()`,
+	# rotated by `rotation * 90` when the block rotates).
 	for tile_variant in _tiles:
 		var tile: Dictionary = tile_variant
 		var name := str(tile.get("block", ""))
@@ -87,18 +88,20 @@ func _draw() -> void:
 		if texture == null:
 			continue
 		var footprint := float(int(tile.get("size", 1)))
-		var center := origin + Vector2(
-			float(int(tile.get("x", 0))) + footprint / 2.0,
-			float(int(tile.get("y", 0))) + footprint / 2.0
-		) * resolution
+		var center := _tile_center(tile, origin, resolution)
 		var half := Vector2(footprint, footprint) * resolution / 2.0
 		var rect := Rect2(-half, half * 2.0)
 		if bool(tile.get("rotate", false)) and int(tile.get("rotation", 0)) != 0:
-			draw_set_transform(center, deg_to_rad(float(int(tile.get("rotation", 0))) * 90.0), Vector2.ONE)
+			# Java angles are counter-clockwise in y-up space; Godot's canvas
+			# is y-down, so the angle is negated.
+			draw_set_transform(center, -deg_to_rad(float(int(tile.get("rotation", 0))) * 90.0), Vector2.ONE)
 			draw_texture_rect(texture, rect, false)
 			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 		else:
 			draw_texture_rect(texture, Rect2(center - half, half * 2.0), false)
+	# `plans.each(req -> req.block.drawPlanConfigTop(req, eachPlans))`: power
+	# nodes draw a laser to every linked plan (`PowerNode.java:335-351`).
+	_draw_lasers(origin, resolution)
 	# 4 px border: Pal.gray normally, accent while hovered.
 	draw_rect(
 		Rect2(Vector2.ZERO, size),
@@ -106,6 +109,81 @@ func _draw() -> void:
 		false,
 		THICKNESS
 	)
+
+
+## `BuildPlan.drawx()/drawy()` in widget pixels: the tile centre plus
+## `Block.offset` (`(size + 1) % 2 * tilesize / 2`, half a tile for even
+## sizes). Java's preview is y-up (`Schematics.getBuffer`), so rows count up
+## from the bottom of the tile area.
+func _tile_center(tile: Dictionary, origin: Vector2, resolution: float) -> Vector2:
+	var footprint := int(tile.get("size", 1))
+	var offset := 0.5 if footprint % 2 == 0 else 0.0
+	var tx := float(int(tile.get("x", 0))) + 0.5 + offset
+	var ty := float(int(tile.get("y", 0))) + 0.5 + offset
+	return origin + Vector2(tx, float(_height) - ty) * resolution
+
+
+## `PowerNode.drawPlanConfigTop` -> `drawLaser(.., false)` -> `Drawf.laser`
+## (`PowerNode.java:183-197`, `Drawf.java:521-541`) in world units scaled by
+## `resolution / tilesize`: endpoints pulled in by `size * 4 - 1.5`, the
+## `laser` line (stroke `12 * laserScale`) between `laser-end` caps sized
+## `region * laserScale * Draw.scl`; `setupColor(1)` is `laserColor1`
+## (white) at `Renderer.laserOpacity`.
+func _draw_lasers(origin: Vector2, resolution: float) -> void:
+	var laser := MindWidgets.icon_texture("laser")
+	var laser_end := MindWidgets.icon_texture("laser-end")
+	if laser == null and laser_end == null:
+		return
+	var unit := resolution / 8.0
+	var color := Color(1.0, 1.0, 1.0, _laser_opacity())
+	if color.a <= 0.0:
+		return
+	for tile_variant in _tiles:
+		var tile: Dictionary = tile_variant
+		var targets: Array = tile.get("lasers", [])
+		if targets.is_empty():
+			continue
+		var from := _tile_center(tile, origin, resolution)
+		var size1 := float(int(tile.get("size", 1)))
+		for target_variant in targets:
+			var target_index := int(target_variant)
+			if target_index < 0 or target_index >= _tiles.size():
+				continue
+			var other: Dictionary = _tiles[target_index]
+			var to := _tile_center(other, origin, resolution)
+			if from.is_equal_approx(to):
+				continue
+			var size2 := float(int(other.get("size", 1)))
+			var dir := (to - from).normalized()
+			var p1 := from + dir * (size1 * 4.0 - 1.5) * unit
+			var p2 := to - dir * (size2 * 4.0 - 1.5) * unit
+			var angle := dir.angle()
+			if laser_end != null:
+				var cap := laser_end.get_size() * 0.25 * 0.25 * unit
+				# `Draw.rect(start, x, y, .., rot + 180)` / `Draw.rect(end, x2, y2, .., rot)`.
+				draw_set_transform(p1, angle + PI, Vector2.ONE)
+				draw_texture_rect(laser_end, Rect2(-cap / 2.0, cap), false, color)
+				draw_set_transform(p2, angle, Vector2.ONE)
+				draw_texture_rect(laser_end, Rect2(-cap / 2.0, cap), false, color)
+			if laser != null:
+				# `Lines.line(line, x + vx, y + vy, x2 - vx, y2 - vy, false)`,
+				# `vx = cos(rot) * 8 * scale * Draw.scl`.
+				var inset := dir * 0.5 * unit
+				var a := p1 + inset
+				var b := p2 - inset
+				var length := a.distance_to(b)
+				var stroke := 3.0 * unit
+				draw_set_transform(a, angle, Vector2.ONE)
+				draw_texture_rect(laser, Rect2(0.0, -stroke / 2.0, length, stroke), false, color)
+			draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## `Renderer.laserOpacity` (`lasersopacity` setting / 100, default 100).
+func _laser_opacity() -> float:
+	var ui := get_node_or_null("/root/MindUi")
+	if ui == null or not ui.has_method("settings_get_int"):
+		return 1.0
+	return clampf(float(int(ui.call("settings_get_int", "lasersopacity", 100))) / 100.0, 0.0, 1.0)
 
 
 ## Loads `sprites/schematic-background.png` once through the asset root.
@@ -123,17 +201,22 @@ func _background_texture() -> Texture2D:
 	return _background
 
 
-## One black pixel per occupied cell at `(1 + x + (size-1)/2)`
-## (`getBuffer`'s `padding/2 + wx + 0.5`).
+## One black pixel per footprint cell (`getBuffer`: for every `dx, dy` in the
+## block size, `Fill.square(padding/2 + wx + 0.5, padding/2 + wy + 0.5, 0.5)`
+## with `wx = x + dx - (size - 1) / 2`). The buffer is y-up, so image rows
+## count down from the top (`row = height - wy`).
 func _build_silhouette() -> ImageTexture:
 	var image := Image.create(_width + 2, _height + 2, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.0, 0.0, 0.0, 0.0))
 	for tile_variant in _tiles:
 		var tile: Dictionary = tile_variant
-		var offset := int((int(tile.get("size", 1)) - 1) / 2)
-		var x := 1 + int(tile.get("x", 0)) + offset
-		var y := 1 + int(tile.get("y", 0)) + offset
-		if x < 0 or y < 0 or x >= image.get_width() or y >= image.get_height():
-			continue
-		image.set_pixel(x, y, Color(0.0, 0.0, 0.0, 1.0))
+		var footprint := int(tile.get("size", 1))
+		var offset := -int((footprint - 1) / 2)
+		for dx in footprint:
+			for dy in footprint:
+				var x := 1 + int(tile.get("x", 0)) + dx + offset
+				var y := _height - (int(tile.get("y", 0)) + dy + offset)
+				if x < 0 or y < 0 or x >= image.get_width() or y >= image.get_height():
+					continue
+				image.set_pixel(x, y, Color(0.0, 0.0, 0.0, 1.0))
 	return ImageTexture.create_from_image(image)

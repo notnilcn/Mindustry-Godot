@@ -256,6 +256,55 @@ pub struct SchematicTileView {
     pub size: i32,
     /// `kind_rotates(def.kind)`: draw the plan region rotated.
     pub rotate: bool,
+    /// Power-node laser targets as indices into the view's `tiles`
+    /// (`PowerNode.drawPlanConfigTop`, drawn by `Schematics.getBuffer`).
+    pub lasers: Vec<usize>,
+}
+
+/// `PowerNode.drawPlanConfigTop` (`PowerNode.java:328-351`): for each
+/// `Point2[]` link offset, the first other plan whose footprint covers
+/// `(x + dx, y + dy)` and whose block `hasPower` (`planFinder`).
+fn schematic_lasers(
+    schematic: &crate::game::schematic::Schematic,
+    tiles: &[(usize, &crate::content::registries::blocks::BlockDef)],
+    own: usize,
+) -> Vec<usize> {
+    use crate::content::registries::blocks::BlockKind;
+    use crate::io::typeio::{unpack_point2_x, unpack_point2_y};
+    use crate::world::config::ConfigValue;
+    let Some(&(stile_index, def)) = tiles.get(own) else {
+        return Vec::new();
+    };
+    if !matches!(def.kind, BlockKind::PowerNode | BlockKind::LongPowerNode) {
+        return Vec::new();
+    }
+    let Some(plan) = schematic.tiles.get(stile_index) else {
+        return Vec::new();
+    };
+    let ConfigValue::Point2Array(points) = &plan.config else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for &point in points.iter() {
+        let find_x = plan.x as i32 + unpack_point2_x(point);
+        let find_y = plan.y as i32 + unpack_point2_y(point);
+        let found = tiles.iter().enumerate().find(|(index, (other_index, other))| {
+            let Some(other_plan) = schematic.tiles.get(*other_index) else {
+                return false;
+            };
+            let (ox, oy) = (other_plan.x as i32, other_plan.y as i32);
+            *index != own
+                && other.has_power
+                && find_x >= ox - (other.size - 1) / 2
+                && find_y >= oy - (other.size - 1) / 2
+                && find_x <= ox + other.size / 2
+                && find_y <= oy + other.size / 2
+        });
+        if let Some((index, _)) = found {
+            out.push(index);
+        }
+    }
+    out
 }
 
 /// One schematic library entry (`SchematicsDialog`).
@@ -1200,21 +1249,7 @@ pub fn schematic_views(schematics: &Schematics, registry: &ContentRegistry) -> V
             description: schematic.description(),
             width: schematic.width,
             height: schematic.height,
-            tiles: schematic
-                .tiles
-                .iter()
-                .filter_map(|tile| {
-                    let def = registry.block(tile.block)?;
-                    Some(SchematicTileView {
-                        block: def.name.clone(),
-                        x: tile.x as i32,
-                        y: tile.y as i32,
-                        rotation: tile.rotation.max(0) as u8,
-                        size: def.size,
-                        rotate: crate::world::block::kind_rotates(def.kind),
-                    })
-                })
-                .collect(),
+            tiles: schematic_tile_views(schematic, registry),
             has_core: schematic.has_core(registry),
             labels: schematic.labels.clone(),
             file: schematic.file.clone(),
@@ -1222,6 +1257,37 @@ pub fn schematic_views(schematics: &Schematics, registry: &ContentRegistry) -> V
             requirements: requirement_pairs(registry, &schematic.requirements(registry)),
             power_consumption: schematic.power_consumption(registry),
             power_production: schematic.power_production(registry),
+        })
+        .collect()
+}
+
+/// The preview tiles of one schematic (`Schematics.getBuffer` plan list):
+/// tiles whose block is unknown are dropped, and power nodes carry their
+/// resolved laser targets.
+fn schematic_tile_views(
+    schematic: &crate::game::schematic::Schematic,
+    registry: &ContentRegistry,
+) -> Vec<SchematicTileView> {
+    let known: Vec<(usize, &crate::content::registries::blocks::BlockDef)> = schematic
+        .tiles
+        .iter()
+        .enumerate()
+        .filter_map(|(index, tile)| registry.block(tile.block).map(|def| (index, def)))
+        .collect();
+    known
+        .iter()
+        .enumerate()
+        .map(|(own, &(stile_index, def))| {
+            let tile = &schematic.tiles[stile_index];
+            SchematicTileView {
+                block: def.name.clone(),
+                x: tile.x as i32,
+                y: tile.y as i32,
+                rotation: tile.rotation.max(0) as u8,
+                size: def.size,
+                rotate: crate::world::block::kind_rotates(def.kind),
+                lasers: schematic_lasers(schematic, &known, own),
+            }
         })
         .collect()
 }
@@ -1793,6 +1859,39 @@ mod tests {
                 .any(|schem| !schem.requirements.is_empty()),
             "loadouts have build costs"
         );
+    }
+
+    #[test]
+    fn schematic_preview_resolves_power_lasers() {
+        use crate::game::schematic::{Schematic, Stile};
+        use crate::io::typeio::pack_point2;
+        use crate::world::config::ConfigValue;
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        let registry =
+            create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
+        let block = |name: &str| registry.block_id(name).unwrap();
+        // Node at (0,0) linked to a battery at (3,0) and a 2x2 battery whose
+        // footprint covers (0,3) from its origin (0,2); the conveyor link at
+        // (5,0) has no power and draws nothing (`planFinder.hasPower`).
+        let links = ConfigValue::Point2Array(
+            [pack_point2(3, 0), pack_point2(0, 3), pack_point2(5, 0)]
+                .into_iter()
+                .collect(),
+        );
+        let schematic = Schematic::from_tiles(
+            vec![
+                Stile::new(block("power-node"), 0, 0, links, 0),
+                Stile::new(block("battery"), 3, 0, ConfigValue::None, 0),
+                Stile::new(block("battery-large"), 0, 2, ConfigValue::None, 0),
+                Stile::new(block("conveyor"), 5, 0, ConfigValue::None, 0),
+            ],
+            Default::default(),
+            6,
+            5,
+        );
+        let tiles = schematic_tile_views(&schematic, &registry);
+        assert_eq!(tiles[0].lasers, vec![1, 2]);
+        assert!(tiles[1].lasers.is_empty());
     }
 
     #[test]
