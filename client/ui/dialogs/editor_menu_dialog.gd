@@ -47,11 +47,8 @@ func shown() -> void:
 
 func _build() -> void:
 	var root := content_table()
-	# The base panel (min 400) would scroll the menu; Java's `BaseDialog`
-	# auto-sizes, so grow the panel to fit the fixed six rows.
-	var panel := get_node_or_null("Center/Panel")
-	if panel != null:
-		panel.custom_minimum_size = Vector2(560.0, 512.0)
+	# `BaseDialog` fills the parent; the fixed menu rows centre in the full
+	# screen (Java's `MapEditorDialog` menu table).
 	# code-instantiated: the menu grid is data-driven from `ENTRIES`.
 	var grid := MindWidgets.table()
 	var column := 0

@@ -1430,6 +1430,25 @@ impl MindCampaign {
             let name = format!("{} {}", header.name(), save_date_stamp());
             if !self.save_slot(GString::from(name.as_str())) {
                 log::warn!("start_map_mode: savecreate slot `{name}` failed");
+            } else {
+                // `Saves.addSave` -> `SaveSlot.save()`: saving while a game is
+                // running makes the fresh slot `current` (`Saves.java` `save()`
+                // sets `current` when `state.isGame()`), and `isAutosave()`
+                // defaults to true (`Saves.java:445-447`). The pause menu's
+                // `@save.quit` label and `runExitSave` both read the current
+                // slot (`PausedDialog.java:116`).
+                let file = self.paths.saves().join(format!(
+                    "{}.{}",
+                    sanitize_slot_name(&name),
+                    mind_core::io::fs::SAVE_EXTENSION
+                ));
+                settings_hub::with_settings(|store| {
+                    let index = self.saves.set_current_by_file(store, &file);
+                    if let Some(slot) = self.saves.get_save_slots().get(index) {
+                        slot.set_name(store, &name);
+                        slot.set_autosave(store, true);
+                    }
+                });
             }
         }
         true
@@ -3769,6 +3788,16 @@ impl MindCampaign {
     #[func]
     pub fn get_total_playtime(&self) -> i64 {
         self.saves.get_total_playtime()
+    }
+
+    /// Whether the current save slot is an autosave
+    /// (`control.saves.getCurrent().isAutosave()`, used by the pause menu's
+    /// `@save.quit` label, `PausedDialog.java:116`).
+    #[func]
+    pub fn current_save_is_autosave(&self) -> bool {
+        self.saves
+            .get_current()
+            .is_some_and(|slot| settings_hub::with_settings(|store| slot.is_autosave(store)))
     }
 
     /// `PausedDialog.runExitSave` / `Control.dispose`: writes the current

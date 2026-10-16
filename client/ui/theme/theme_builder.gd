@@ -133,18 +133,17 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"PanelContainer":
-			if name == "fullDialog":
-				# `Styles.fullDialog` uses `windowEmpty`: a full-viewport frame
-				# over the stage background (the `Dim` overlay + backdrop), not an
-				# opaque sheet. Content floats over the space backdrop.
+			if name == "fullDialog" or name == "defaultDialog":
+				# `Styles.defaultDialog`/`fullDialog` (`Styles.java:458-469`):
+				# `background = windowEmpty` — no visible box; the dialog floats
+				# over its stage backdrop (`black9`/`black`). `fullDialog` leaves
+				# 8 px below the button row (`PlanetDialog` OK at y=640 of 648).
 				var empty := StyleBoxEmpty.new()
 				empty.content_margin_left = 8.0
 				empty.content_margin_right = 8.0
 				# The Java title text starts at y=6 in the reference frame (no
 				# top inset above the title row).
 				empty.content_margin_top = 0.0
-				# Java's full dialogs leave 8 px below the button row
-				# (`PlanetDialog` OK at y=640 of 648).
 				empty.content_margin_bottom = 8.0
 				theme.set_stylebox("panel", name, empty)
 			elif name == "none":

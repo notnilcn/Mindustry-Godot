@@ -13,6 +13,7 @@
 
 extends MindDialog
 
+var _save_row: Container = null
 var _planet_button: Button = null
 var _objective_button: Button = null
 var _abandon_button: Button = null
@@ -85,10 +86,10 @@ func _build() -> void:
 
 	# Desktop non-campaign, non-editor entry set (`PausedDialog.java:89-93`);
 	# the campaign/mobile branch replaces it with `@research`/`@planetmap`.
-	var save_row := _row(rows)
-	_save_button = _add_to(save_row, _t("@savegame"), _open_save, "save", 220.0)
+	_save_row = _row(rows)
+	_save_button = _add_to(_save_row, _t("@savegame"), _open_save, "save", 220.0)
 	_save_button.name = "savegame"
-	_load_button = _add_to(save_row, _t("@loadgame"), _open_load, "upload", 220.0)
+	_load_button = _add_to(_save_row, _t("@loadgame"), _open_load, "upload", 220.0)
 	_load_button.name = "loadgame"
 
 	# Mobile campaign branch entry (`PausedDialog.java:140-149`); desktop keeps
@@ -100,8 +101,20 @@ func _build() -> void:
 	_host_button = _add_to(rows, _t("@hostserver"), _open_host, "host", 450.0)
 	_host_button.name = "hostserver"
 	_host_button.disabled = _net_active()
-	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 450.0)
+	# `PausedDialog.java:116`: the quit entry spans both columns but keeps the
+	# `dw + 10` (230) width, so it centres inside its cell instead of stretching.
+	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 230.0)
+	_quit_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_quit_button.name = "quit"
+	# `PausedDialog.java:61,79,82` (`tpad = -60f`): the first row is pulled up in
+	# Java, which reads as the column sitting slightly above centre. Reproduce
+	# that bias with a small bottom spacer inside the centred row column (a
+	# negative VBox margin has no container equivalent).
+	# code-instantiated: layout bias for the fixed upstream row column.
+	var bias := Control.new()
+	bias.custom_minimum_size = Vector2(0.0, 14.0)
+	bias.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rows.add_child(bias)
 	_build_rules_button()
 
 
@@ -238,6 +251,11 @@ func _refresh_campaign_buttons() -> void:
 	var campaign := bool(state.get("campaign", false))
 	var editor := bool(state.get("editor", false))
 	var can_save := not campaign and not editor
+	# `PausedDialog.java:89-93`: the campaign branch builds no `@savegame`/
+	# `@loadgame` row at all, so hide the whole row container (a hidden row keeps
+	# its VBox separation and shifts the rows below it).
+	if _save_row != null:
+		_save_row.visible = can_save
 	if _save_button != null:
 		_save_button.visible = can_save
 	if _load_button != null:
@@ -256,8 +274,21 @@ func _refresh_campaign_buttons() -> void:
 		_apply_planet_visibility.call_deferred(campaign)
 	if _quit_button != null:
 		# `PausedDialog.java:116`: the entry reads `@save.quit` while the
-		# current save is an autosave (every campaign sector save is one).
-		_set_button_text(_quit_button, _t("@save.quit" if campaign else "@quit"))
+		# current save is an autosave (`control.saves.getCurrent().isAutosave()`
+		# — every campaign sector save is one, and custom games launched from an
+		# autosave slot are too).
+		_set_button_text(
+			_quit_button,
+			_t("@save.quit" if campaign or _current_save_is_autosave() else "@quit")
+		)
+
+
+## `control.saves.getCurrent().isAutosave()` through the campaign facade.
+func _current_save_is_autosave() -> bool:
+	var campaign := get_node_or_null(CAMPAIGN_PATH)
+	if campaign == null or not campaign.has_method("current_save_is_autosave"):
+		return false
+	return bool(campaign.call("current_save_is_autosave"))
 
 
 ## Mobile-branch gate for `@planetmap`, deferred out of the `MindUi` bind.

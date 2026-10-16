@@ -171,6 +171,20 @@ func _sort_children_inner() -> void:
 		row_y.append(running)
 		running += value
 
+	# Arc `Table.align = Align.center` by default (`Table.java:39`): the whole
+	# grid is centred inside the table's bounds when it is smaller. Dialogs whose
+	# panel fills the screen (every `BaseDialog`) rely on this to keep their
+	# narrow button columns centred like Java.
+	var grid_width := _margin_value * 2.0
+	for value in col_widths:
+		grid_width += value
+	var grid_height := _margin_value * 2.0
+	for value in row_heights:
+		grid_height += value
+	var origin := Vector2(
+		maxf(0.0, (size.x - grid_width) * 0.5), maxf(0.0, (size.y - grid_height) * 0.5)
+	)
+
 	for placement in grid.placements:
 		var cell: MindCell = placement.cell
 		var control: Control = placement.control
@@ -180,7 +194,7 @@ func _sort_children_inner() -> void:
 		for s in placement.span:
 			cell_width += col_widths[placement.col + s]
 		var cell_height: float = row_heights[placement.row_index]
-		var pos := Vector2(col_x[placement.col], row_y[placement.row_index])
+		var pos := origin + Vector2(col_x[placement.col], row_y[placement.row_index])
 		var inner := Rect2(
 			pos + Vector2(cell.pad_left, cell.pad_top),
 			Vector2(

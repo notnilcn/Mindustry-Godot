@@ -49,6 +49,7 @@ horizontal_scroll_mode = 0
 [node name="Content" type="VBoxContainer" parent="Center/Panel/Layout/Body" unique_id=379964347]
 layout_mode = 2
 size_flags_horizontal = 3
+alignment = 1
 
 [node name="Buttons" type="HBoxContainer" parent="Center/Panel/Layout" unique_id=1008643032]
 layout_mode = 2
