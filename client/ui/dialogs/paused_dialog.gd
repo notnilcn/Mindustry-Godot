@@ -255,9 +255,20 @@ func _refresh_campaign_buttons() -> void:
 		# call returns (same deferral as the game-over HUD toggle, EV-0061).
 		_apply_planet_visibility.call_deferred(campaign)
 	if _quit_button != null:
-		# `PausedDialog.java:116`: the entry reads `@save.quit` while the
-		# current save is an autosave (every campaign sector save is one).
-		_set_button_text(_quit_button, _t("@save.quit" if campaign else "@quit"))
+		# `PausedDialog.java:116,154-155`: the entry reads `@save.quit` while
+		# the current save is an autosave (`SaveSlot.isAutosave`, default true)
+		# regardless of campaign/custom (`control.saves.getCurrent()`).
+		_set_button_text(_quit_button, _t("@save.quit" if _current_slot_autosave() else "@quit"))
+
+
+## `control.saves.getCurrent().isAutosave()` (`PausedDialog.java:116`): the live
+## current save slot's autosave flag from the saves facade (`false` when no
+## slot is current).
+func _current_slot_autosave() -> bool:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign == null or not campaign.has_method("current_save_autosave"):
+		return false
+	return bool(campaign.call("current_save_autosave"))
 
 
 ## Mobile-branch gate for `@planetmap`, deferred out of the `MindUi` bind.

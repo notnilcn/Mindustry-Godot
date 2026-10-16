@@ -4528,6 +4528,16 @@ impl MindCampaign {
         true
     }
 
+    /// `Saves.getCurrent().isAutosave()` (`PausedDialog.java:116,154-155`):
+    /// whether the live current save slot autosaves (`save-<index>-autosave`,
+    /// default true). `false` when no slot is current.
+    #[func]
+    pub fn current_save_autosave(&self) -> bool {
+        self.saves
+            .current_slot()
+            .is_some_and(|slot| settings_hub::with_settings(|store| slot.is_autosave(store)))
+    }
+
     /// `LoadDialog.modifyButton` `Icon.save`: `slot.setAutosave(on)`.
     #[func]
     pub fn set_slot_autosave(&mut self, name: GString, on: bool) -> bool {
