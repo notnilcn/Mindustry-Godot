@@ -1814,7 +1814,7 @@
 "PAR-0343":{"t":"`DrawBlock` parts before `DrawDefault` (`-bottom`, `DrawLiquidTile`) drew above the base sprite (T7 d152f6ab)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0344":{"t":"Beam nodes/towers drew no lasers (T5 4ae65c09)","s":"world","st":"verified","u":"2026-10-16"},
 "PAR-0345":{"t":"MCP evals with mixed indentation hang the frame loop","s":"world","st":"verified","u":"2026-10-16","run":"runs/20261016-s5-J10-T2/"},
-"PAR-0346":{"t":"power-node laser shimmer uses ticks where Java uses `Time.time` seconds (T5 note)","s":"world","st":"seeded","u":"2026-10-16"},
+"PAR-0346":{"t":"power-node laser shimmer uses ticks where Java uses `Time.time` seconds (T5 note)","s":"world","st":"wontfix","u":"2026-10-17"},
 "PAR-0347":{"t":"`$I.configure_building` on a door can time out and stall the frame loop","s":"world","st":"verified","u":"2026-10-16","run":"runs/20261016-s5-J10-T2/"},
 "PAR-0348":{"t":"`FxEmit::square`/`square_line` draw `Poly(4)` where Arc's `Fill.square`/`Lines.square` need a 45-degree-shifted vertex set (audit ~30 call sites; Arc Fill.java:357-363, Lines.java:503-509)","s":"world","st":"seeded","u":"2026-10-16"},
 "PAR-0349":{"t":"A raw door config can close a door under a unit; the `Units.anyEntities(tile) && !open` guard exists only on the tap path (Door.java:49)","s":"world","st":"seeded","u":"2026-10-16"},
@@ -1831,7 +1831,8 @@
 "PAR-0360":{"t":"Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s3-J02-T1/"},
 "PAR-0361":{"t":"Custom maps load without generation filters (no ores/boulders): `World.loadMap` never ran `FilterContext`/`applyFilters` (396c9886)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s2-J01-T1/"},
 "PAR-0362":{"t":"Committed goldens predate deliberate H01-T1 position and I-round content changes: `blocks_golden`, `audio_golden` (audio_events_sim), `input_golden`, `logistics_golden`, `maps_editor_golden` all fail on main (regen pending)","s":"world","st":"seeded","u":"2026-10-17"},
-"PAR-0363":{"t":"Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261017-s4-J03-T1/"}
+"PAR-0363":{"t":"Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261017-s4-J03-T1/"},
+"PAR-0364":{"t":"Inert graphics settings: `bloomintensity`/`bloomblur` and `linear` never reached the renderer (5325720c)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J10-T2-1/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4456,7 +4457,8 @@
 "PAR-0100":[
 "Code-scan 2026-10-10 (input-controls): S3 high confidence on the dead seam, medium on the lock half's current reachability (no shipped path sets a lock yet; logic cutscene side effects are inert, so today the trigger is the MCP/direct set_locks or a future cutscene). Player impact: UI focus does not protect the camera (wheel over the console/scroll panes also zooms the world) and cutscene/lock states cannot gate input at all. Context: plan 24 sec 7 input residual 'Runtime reachability of desktop+mobile handlers, locked()/focus-guard branch parity'. DesktopController::handle_scroll (the core gated path) is never called by gdext. In-engine verification pending.",
 "2026-10-12 (session 4 §9): fixed — `11204fc`; console open -> wheel leaves zoom at 4, hidden -> zoom 5.",
-"2026-10-12 audit (verified): building-production: works in-engine; risky — scans every UI node per wheel tick (audit-building-production.md)."
+"2026-10-12 audit (verified): building-production: works in-engine; risky — scans every UI node per wheel tick (audit-building-production.md).",
+"2026-10-17 round J (J10 T2, 3afd8b70): regression from the T8 focus/lock guard — MindInput::input consumed the wheel whenever ui_scroll_at() matched, so no UI page scrolled (settings Graphics, map lists). Fix suppresses the camera zoom without consuming (DesktopInput.java:476-481) and sets MindWidgets.slider.scrollable=false (Arc sliders do not move on wheel). Real wheel: scroll 0->743 and over a slider 0->202 with the value unchanged; camera zoom guard intact. Run runs/20261017-s5-J10-T2-3/."
 ],
 "PAR-0101":[
 "Code-scan 2026-10-10 (input-controls): S3 high confidence. Player impact: the main menu leaks gameplay interactions (dialogs/console/placement toggles open from the menu, and the manifest's menu_openable=false for schematics is not enforced), unlike Java where no binding is processed outside a game. This is the same guard-wiring family as the focus/lock finding but a distinct missing feed (game state, not FocusState). In-engine verification pending.",
@@ -4522,8 +4524,14 @@
 "PAR-0362":[
 "2026-10-17 coordinator (wave A): five committed golden suites fail on main, all before round J and unchanged by it: mind-core blocks_golden family_counts (other 158 / production 51 vs golden 164/45 — 6 blocks reclassified other->production after the golden's last regen); mind-headless audio_golden (audio_events_sim: shootDuo muzzle moved to (33.0,66.25) and the tick-4 explosionArtillery event is missing), input_golden, logistics_golden, maps_editor_golden (preview checksum). J01 attributed the drift to H01 T1 (8e7b68b8) intentionally moving building positions to the Java convention after the last golden regen (G07 T2, 95d015bb); the audio event delta still needs attribution before regenerating. Regenerate deliberately with the owning task's Java reason (see each test's regen command); do not blanket-regen."
 ],
-"PAR-0126":[
-"2026-10-17 round J (reopened): the round-J twin walk (docs/J-round-twin-verification.md §1 row 52, runs/20261016-J-twin/diff/52-legs-crop.png) shows a spawned atrax/arkyid drawing as bodies with no legs, and J03's audit adds no tank treads, wreck decals, neoplasm segments or payload draws in mind-gdext/src/render/units.rs. J03 wave A fixed the turret half (PAR-0363); legs/treads/wrecks/segments/payloads are J03 T4-T5 (wave B). Status reopened to fixing."
+"PAR-0346":[
+"2026-10-17 round J (J10 T2.5): kept as is -> wontfix. The I02 summary's claim that the power-node shimmer (ticks vs Time.time) was wrong was itself retracted by the round-J twin report (docs/J-round-twin-verification.md §2 item 8). No code change."
+],
+"PAR-0348":[
+"2026-10-17 round J: delegated to session 4 (J03 T7) to decide the Arc Fill.square 45-degree convention once and apply it to the status marker + the port's FxEmit::square/square_line call sites (~30 in mind-core fx). J10 T2 did not touch those files."
+],
+"PAR-0364":[
+"2026-10-17 round J (J10 T2.1, 5325720c): the world bloom pass is implemented (bullet..effect band baked through a CanvasGroup with a camera-tracked CaptureRect; client/shaders/bloom.gdshader ports Arc alpha_{threshold,gaussian,bloom}.frag; mind-core blur_radius) and bloom/bloomintensity/bloomblur + linear are wired to the settings store (Renderer.java:391-394; SettingsMenuDialog.java:531,540-550). In-engine: uniforms follow settings (2.5->5.0, 1.4142->2.8284, gate on/off), bullet frames change 1.5-2.2% across bloom off/default/max, linear 0.53% at a fractional camera offset. Deviations: single-pass sqrt-scaled blur vs Java ping-pong; /root/Spine/MindFx outside the capture; pack-time linear bleed not ported. Run runs/20261017-s5-J10-T2-1/."
 ],
 "PAR-0363":[
 "2026-10-17 round J (J03 T1-T3, 16d2a336): live turret pass ported from DrawTurret.java:72-170 — base lookup chain (reinforced- prefix for Erekir), Drawf.shadow, region drawrot, liquid + top, additive heat (heatColor overrides), outline at turretLayer-0.01 when parts exist, per-part params/curRecoils, ammoParts (titan); hand-ported parts for duo/scatter/salvo/cyclone/diffuse/sublimate/titan/disperse/afflict; live TurretState feed + real AtlasLookup (no AllRegions); two in-engine-only bugs fixed (drawrot vs raw rotation, !heat.found() guard). T2 diagnosed the idle head as a state mismatch (test placed_duo_idle_head_rotation_is_up; no sim bug). T3: pack arm correct; live duo ring comes from duo-outline (DrawTurret.java:90-96) not an in-place duo replacement; outline_icon_in_place guarded + fixture-pinned. Residual: scathe/smite/malign/lustre part trees, firing/heat pixel frames (prim-level + test evidence instead). Run runs/20261017-s4-J03-T1/ (T2 runs/20261017-s4-J03-T2/, T3 runs/20261017-s4-J03-T3/)."
@@ -4575,7 +4583,8 @@
 "2026-10-12 (session 3 §3.4): fixed — `8ce2941` (`unit_draw.rs`, 16 tests; composed pass: body/legs/weapon mounts/team cell/shadow); alpha verified in-engine (`par0126-offcore.png`); dagger framing blocked by inert waves + camera re-centering; step-3 outlines skipped (no `-outline` regions ship).",
 "2026-10-12 audit (fixing): rendering-hud: math matches Java but no ground shadow/outline on the alpha; dagger legs/weapons unverified in-engine (audit-rendering-hud.md).",
 "2026-10-13 G00: flying shadow + soft shadow 100ac50, outlines 5dcd208 (in-engine vs Java crop).",
-"2026-10-13 wave-1: G03 T5 33b95ce: engines/trails/mining beam/item stack/hit flash added; in-engine partially staged."
+"2026-10-13 wave-1: G03 T5 33b95ce: engines/trails/mining beam/item stack/hit flash added; in-engine partially staged.",
+"2026-10-17 round J (reopened): the round-J twin walk (docs/J-round-twin-verification.md §1 row 52, runs/20261016-J-twin/diff/52-legs-crop.png) shows a spawned atrax/arkyid drawing as bodies with no legs, and J03's audit adds no tank treads, wreck decals, neoplasm segments or payload draws in mind-gdext/src/render/units.rs. J03 wave A fixed the turret half (PAR-0363); legs/treads/wrecks/segments/payloads are J03 T4-T5 (wave B). Status reopened to fixing."
 ],
 "PAR-0127":[
 "Reference soak: staging blocker: the imported campaign's Frozen Forest save exists but its sector is not launchable (no owned/launchable hex in the visible planet state; no weather frames stored elsewhere). Needs a fresh-profile campaign branch to a weather sector.",
@@ -5544,6 +5553,9 @@
 ],
 "PAR-0338":[
 "closed: 1b844069 (J01 T2): the 7 presets now import via the Arc-minimal JSON converter + field tolerances (ObjectSet {\"values\":[...]}, weather:null, numeric spawn effect, Color bean) and pre-short MSAV v1-3 readers; the full suite imports 78 Serpulo presets, 114 shipped maps, 9 user maps, 9 previews (runs/20261017-s2-J01-T2/)."
+],
+"PAR-0364":[
+"closed: 5325720c (J10 T2.1): bloom pass + bloomintensity/bloomblur/linear wired; in-engine uniforms and pixel deltas verified (runs/20261017-s5-J10-T2-1/); deviations recorded in the item note (single wider blur pass vs Java ping-pong, FX host outside the capture, pack-time linear bleed not ported)."
 ]
 }
 }
