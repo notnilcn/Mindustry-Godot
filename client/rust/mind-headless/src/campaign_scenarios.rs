@@ -38,6 +38,16 @@ const EXIT_PASS: i32 = 0;
 /// Exit code: assertion/golden mismatch.
 const EXIT_FAIL: i32 = 1;
 
+/// Build the entity ids the fog scenarios use. They are always valid, but the
+/// workspace denies `expect_used`/`unwrap_used`, so convert the `Option`
+/// explicitly instead of `expect`ing it.
+fn scenario_entity(id: u32) -> bevy_ecs::entity::Entity {
+    match bevy_ecs::entity::Entity::from_raw_u32(id) {
+        Some(entity) => entity,
+        None => panic!("invalid entity id {id}"),
+    }
+}
+
 /// Stateless objective context: all objectives met, no sector state. Campaign
 /// gating is exercised separately in M3.
 struct ObjectivesMet;
@@ -660,7 +670,7 @@ fn campaign_fog() -> Result<(Value, Value)> {
         team: 0,
     }];
     let units = vec![FogUnit {
-        entity: bevy_ecs::entity::Entity::from_raw_u32(1).expect("entity"),
+        entity: scenario_entity(1),
         tile_x: 40,
         tile_y: 40,
         radius: 6,
@@ -1193,7 +1203,7 @@ fn campaign_bench(profile: &str, ticks: u32) -> Result<(Value, Value)> {
             .collect();
         let units: Vec<FogUnit> = (0..400)
             .map(|i| FogUnit {
-                entity: bevy_ecs::entity::Entity::from_raw_u32(i + 1).expect("entity"),
+                entity: scenario_entity(i + 1),
                 tile_x: (i % 25) as i32 + 50,
                 tile_y: (i / 25) as i32,
                 radius: 4,
