@@ -383,6 +383,33 @@ impl RegionCache {
     }
 }
 
+/// World-space visible rect `(min x, min y, w, h)` from the `/root/Spine/World/
+/// Camera2D` transform (`BlockExtras`/turret pass cull helper).
+pub(crate) fn visible_world_rect(canvas: &Node2D) -> Option<(f32, f32, f32, f32)> {
+    let camera =
+        canvas.try_get_node_as::<godot::classes::Camera2D>("/root/Spine/World/Camera2D")?;
+    let viewport = canvas.get_viewport()?;
+    let rect = viewport.get_visible_rect();
+    let inverse = camera.get_canvas_transform().affine_inverse();
+    let corners = [
+        inverse * rect.position,
+        inverse * (rect.position + Vector2::new(rect.size.x, 0.0)),
+        inverse * rect.position + rect.size,
+        inverse * (rect.position + Vector2::new(0.0, rect.size.y)),
+    ];
+    let min_x = corners.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
+    let min_y = corners.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
+    let max_x = corners
+        .iter()
+        .map(|p| p.x)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let max_y = corners
+        .iter()
+        .map(|p| p.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+    Some((min_x, min_y, max_x - min_x, max_y - min_y))
+}
+
 /// `Fill.light` (`Fill.java:171-191`): a triangle fan with `center` at the
 /// hub and `edge` on the rim (`sides` rounded up to even by Arc).
 pub(crate) fn fill_light(

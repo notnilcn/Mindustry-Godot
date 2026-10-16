@@ -106,28 +106,12 @@ pub fn run(ctx: &mut GenCtx, registry: &ContentRegistry) -> Result<()> {
 
         // `outlineIcon`: outline the chosen icon region (padded, 1px, saved
         // under the region's own name) and remember the unpadded outline.
-        let mut last: Option<Pixmap> = None;
-        if let Some(outline_index) = outline_index
-            && ctx.atlas.has(&icons[outline_index])
-        {
-            let region = icons[outline_index].clone();
-            let base = ctx.atlas.get(&region)?.as_ref().clone();
-            let mut out = base.outline(outline_color, outline_radius);
-            let outlined_index = metadata::outlined_icon(block.kind);
-            if outlined_index >= 0 {
-                for extra in icons.iter().skip(outlined_index as usize + 1) {
-                    let pixmap = ctx.atlas.get(extra)?;
-                    out.draw_blended(&pixmap, 0, 0);
-                }
+        let last = match outline_index {
+            Some(index) => {
+                outline_icon_in_place(ctx, &icons, index, outline_color, outline_radius)?
             }
-            last = Some(out);
-
-            let mut padded = Pixmap::new(base.width + 2, base.height + 2);
-            padded.draw(&base, 1, 1);
-            let padded = padded.outline(outline_color, outline_radius);
-            // `region.path.delete(); save(padded, region.name)`.
-            ctx.atlas.replace(&region, &region, &padded)?;
-        }
+            None => None,
+        };
 
         // Compose the full icon.
         let mut image: Option<Pixmap> = None;
@@ -201,6 +185,42 @@ pub fn run(ctx: &mut GenCtx, registry: &ContentRegistry) -> Result<()> {
     Ok(())
 }
 
+/// `Block.createIcons` `outlineIcon` arm (`Block.java:1606-1615`): outline the
+/// generated icon at `icons[outline_index]` and save it **in place** under the
+/// same atlas name (padded by 1 px first, like the upstream `Pixmap out`), so
+/// the packed turret region itself carries the dark ring (`Drawf.checkBleed`
+/// keeps the 1 px rim opaque). Returns the *unpadded* outline, which the
+/// `block-<name>-full` compose draws instead of the last icon when present
+/// (`Block.java:1632-1647`, `last != null`).
+fn outline_icon_in_place(
+    ctx: &mut GenCtx,
+    icons: &[String],
+    outline_index: usize,
+    outline_color: u32,
+    outline_radius: i32,
+) -> Result<Option<Pixmap>> {
+    if !ctx.atlas.has(&icons[outline_index]) {
+        return Ok(None);
+    }
+    let region = icons[outline_index].clone();
+    let base = ctx.atlas.get(&region)?.as_ref().clone();
+    let mut out = base.outline(outline_color, outline_radius);
+    // `outlinedIcon`: any icons after the outlined one are composited into the
+    // returned outline for the full icon (turrets: `outlinedIcon = 1`,
+    // `Turret.java:166`; nothing follows for vanilla).
+    for extra in icons.iter().skip(outline_index + 1) {
+        let pixmap = ctx.atlas.get(extra)?;
+        out.draw_blended(&pixmap, 0, 0);
+    }
+
+    let mut padded = Pixmap::new(base.width + 2, base.height + 2);
+    padded.draw(&base, 1, 1);
+    let padded = padded.outline(outline_color, outline_radius);
+    // `region.path.delete(); save(padded, region.name)`.
+    ctx.atlas.replace(&region, &region, &padded)?;
+    Ok(Some(out))
+}
+
 /// `ImagePacker.saveScaled`: `<size>×<size>` nearest... upstream uses
 /// filtering=true (bilinear) with blending.
 fn save_scaled(pixmap: &Pixmap, size: usize) -> Pixmap {
@@ -241,5 +261,67 @@ mod tests {
         assert!(is_excluded(BlockKind::ConstructBlock));
         assert!(is_excluded(BlockKind::OreBlock));
         assert!(!is_excluded(BlockKind::Wall));
+    }
+
+    /// J03 T3: `Block.createIcons` replaces the `outlinedIcon` region **in
+    /// place** under the same atlas name (`Block.java:1606-1615`) so the packed
+    /// turret icon (here `duo-preview`, `Turret.java:166`) carries the dark
+    /// ring. The replacement is padded by 1 px; the border pixels the outline
+    /// pass touched become `outlineColor`.
+    #[test]
+    fn outlined_icon_is_replaced_in_place() {
+        use mind_atlas::pixmaps::rgba8888;
+        use mind_atlas::png_io;
+
+        let dir = std::env::temp_dir().join(format!(
+            "mind-tools-outline-icon-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A 32x32 preview: opaque 24x24 centre, transparent rim.
+        let mut preview = Pixmap::new(32, 32);
+        for y in 4..28 {
+            for x in 4..28 {
+                preview.set_raw(x, y, rgba8888(120, 80, 60, 255));
+            }
+        }
+        std::fs::write(
+            dir.join("duo-preview.png"),
+            png_io::write_png(&preview).unwrap(),
+        )
+        .unwrap();
+
+        let mut ctx = GenCtx::new(&dir).unwrap();
+        let icons = vec![String::from("block-1"), String::from("duo-preview")];
+        let last = outline_icon_in_place(
+            &mut ctx,
+            &icons,
+            1,
+            metadata::DEFAULT_OUTLINE_COLOR,
+            metadata::DEFAULT_OUTLINE_RADIUS,
+        )
+        .unwrap()
+        .expect("outline produced");
+
+        // The in-place region is the padded, outlined preview.
+        let replaced = ctx.atlas.get("duo-preview").unwrap();
+        assert_eq!((replaced.width, replaced.height), (34, 34));
+        // 1 px pad + outline ring on the transparent rim of the content.
+        assert_eq!(
+            replaced.get_raw(1 + 4 - 1, 1 + 15),
+            metadata::DEFAULT_OUTLINE_COLOR,
+            "rim pixel outlined"
+        );
+        assert_eq!(
+            replaced.get_raw(1 + 15, 1 + 15),
+            rgba8888(120, 80, 60, 255),
+            "content pixel untouched"
+        );
+        // The returned unpadded outline keeps the original content size and is
+        // what `block-<name>-full` composites.
+        assert_eq!((last.width, last.height), (32, 32));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
