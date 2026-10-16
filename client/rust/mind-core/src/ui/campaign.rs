@@ -287,6 +287,8 @@ pub struct SchematicTileView {
     pub rotate: bool,
     /// Power-node laser targets as indices into the view's `tiles`
     /// (`PowerNode.drawPlanConfigTop`, drawn by `Schematics.getBuffer`).
+    /// Omitted when empty (non-node tiles), which keeps the row shape stable.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub lasers: Vec<usize>,
 }
 
@@ -317,18 +319,21 @@ fn schematic_lasers(
     for &point in points.iter() {
         let find_x = plan.x as i32 + unpack_point2_x(point);
         let find_y = plan.y as i32 + unpack_point2_y(point);
-        let found = tiles.iter().enumerate().find(|(index, (other_index, other))| {
-            let Some(other_plan) = schematic.tiles.get(*other_index) else {
-                return false;
-            };
-            let (ox, oy) = (other_plan.x as i32, other_plan.y as i32);
-            *index != own
-                && other.has_power
-                && find_x >= ox - (other.size - 1) / 2
-                && find_y >= oy - (other.size - 1) / 2
-                && find_x <= ox + other.size / 2
-                && find_y <= oy + other.size / 2
-        });
+        let found = tiles
+            .iter()
+            .enumerate()
+            .find(|(index, (other_index, other))| {
+                let Some(other_plan) = schematic.tiles.get(*other_index) else {
+                    return false;
+                };
+                let (ox, oy) = (other_plan.x as i32, other_plan.y as i32);
+                *index != own
+                    && other.has_power
+                    && find_x >= ox - (other.size - 1) / 2
+                    && find_y >= oy - (other.size - 1) / 2
+                    && find_x <= ox + other.size / 2
+                    && find_y <= oy + other.size / 2
+            });
         if let Some((index, _)) = found {
             out.push(index);
         }
@@ -2017,10 +2022,10 @@ mod tests {
 
     #[test]
     fn schematic_preview_resolves_power_lasers() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
         use crate::game::schematic::{Schematic, Stile};
         use crate::io::typeio::pack_point2;
         use crate::world::config::ConfigValue;
-        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
         let registry =
             create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true).unwrap();
         let block = |name: &str| registry.block_id(name).unwrap();

@@ -326,9 +326,10 @@ fn minimal_quote_value(value: &str) -> String {
         && !value.contains("//")
         && !value.contains("/*")
         && !escaped.ends_with(' ')
-        && escaped.chars().next().is_some_and(|first| {
-            !matches!(first, '"' | ':' | ',' | '{' | '[' | ']' | '/' | ' ')
-        })
+        && escaped
+            .chars()
+            .next()
+            .is_some_and(|first| !matches!(first, '"' | ':' | ',' | '{' | '[' | ']' | '/' | ' '))
         && !escaped.chars().any(|ch| matches!(ch, '}' | ']' | ','));
     if bare {
         escaped
@@ -364,10 +365,7 @@ fn unescape_json(body: &str) -> String {
             Some('f') => out.push('\u{c}'),
             Some('u') => {
                 let hex: String = chars.by_ref().take(4).collect();
-                if let Some(decoded) = u32::from_str_radix(&hex, 16)
-                    .ok()
-                    .and_then(char::from_u32)
-                {
+                if let Some(decoded) = u32::from_str_radix(&hex, 16).ok().and_then(char::from_u32) {
                     out.push(decoded);
                 }
             }

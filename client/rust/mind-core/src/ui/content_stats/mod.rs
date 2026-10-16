@@ -676,6 +676,9 @@ pub enum Cell {
     },
     /// Starts a new line inside the value.
     Row,
+    /// An expanding gap that pushes the following cells to the right edge
+    /// (Java `.right().grow()` sub-tables, e.g. `StatValues.boosters`).
+    Fill,
     /// A gray panel box around nested cells.
     Panel {
         /// Nested cells.
