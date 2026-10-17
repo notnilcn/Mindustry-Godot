@@ -139,11 +139,13 @@ pub mod block_info {
         !matches!(def.kind, BlockKind::SpawnBlock)
     }
 
-    /// The default decoration block (`<name>-boulder`) or `None`.
-    pub fn decoration(content: &ContentRegistry, def: &BlockDef) -> Option<BlockId> {
-        content
-            .block_by_name(&format!("{}-boulder", def.name))
-            .map(|block| block.id)
+    /// `Floor.decoration` (`Floor.java:70`): the explicit per-floor prop set
+    /// by the decorating block (`Blocks.java:705-822`) or a mod's `decoration`
+    /// field; `BlockId::AIR` when none. Java never guesses `<name>-boulder`
+    /// for vanilla floors (the `Floor.init` lookup at `Floor.java:201-203`
+    /// only runs for a `null` decoration), so neither does the port (L02 T1).
+    pub fn decoration(def: &BlockDef) -> BlockId {
+        def.decoration
     }
 
     /// The default wall block (`<name>-wall`, with the dune special case).
@@ -908,9 +910,11 @@ pub fn default_filter_stack(content: &ContentRegistry) -> Vec<Box<dyn GenerateFi
     for def in content.blocks() {
         if block_info::floors_only(def)
             && def.in_editor
-            && let Some(decoration) = block_info::decoration(content, def)
-            && decoration != BlockId::AIR
+            && block_info::decoration(def) != BlockId::AIR
         {
+            // `Maps.readFilters("")` (`Maps.java`): one `ScatterFilter` per
+            // in-editor floor whose `decoration != Blocks.air`.
+            let decoration = block_info::decoration(def);
             filters.push(Box::new(builtin::ScatterFilter {
                 seed: 0,
                 chance: 0.013,
@@ -1093,6 +1097,108 @@ mod tests {
         let filters = parse_filters(&content, partial, &FilterRegistry::vanilla()).unwrap();
         assert_eq!(filters.len(), 1);
         assert_eq!(filters[0].seed(), 5);
+    }
+
+    /// L02 T1: `Floor.decoration` is the explicit Java table
+    /// (`Blocks.java:705-822`; every other floor keeps `Blocks.air`,
+    /// `Floor.java:70`).
+    #[test]
+    fn floor_decorations_match_java_table() {
+        let content = test_registry();
+        let table = [
+            ("redmat", "redweed"),
+            ("bluemat", "pur-bush"),
+            ("stone", "boulder"),
+            ("crater-stone", "boulder"),
+            ("char", "boulder"),
+            ("snow", "snow-boulder"),
+            ("ice", "snow-boulder"),
+            ("ice-snow", "snow-boulder"),
+            ("salt", "snow-boulder"),
+            ("shale", "shale-boulder"),
+            ("sand-floor", "sand-boulder"),
+            ("dacite", "dacite-boulder"),
+            ("basalt", "basalt-boulder"),
+            ("hotrock", "basalt-boulder"),
+            ("darksand", "basalt-boulder"),
+            ("magmarock", "basalt-boulder"),
+            ("carbon-stone", "carbon-boulder"),
+            ("ferric-stone", "ferric-boulder"),
+            ("ferric-craters", "ferric-boulder"),
+            ("beryllic-stone", "beryllic-boulder"),
+            ("yellow-stone", "yellow-stone-boulder"),
+            ("regolith", "yellow-stone-boulder"),
+            ("yellow-stone-plates", "yellow-stone-boulder"),
+            ("arkyic-stone", "arkyic-boulder"),
+            ("crystalline-stone", "crystalline-boulder"),
+            ("red-ice", "red-ice-boulder"),
+            ("rhyolite", "rhyolite-boulder"),
+            ("rough-rhyolite", "rhyolite-boulder"),
+            ("red-stone", "red-stone-boulder"),
+            ("dense-red-stone", "red-stone-boulder"),
+        ];
+        assert_eq!(table.len(), 30);
+        for (floor, decoration) in table {
+            let def = content.block_by_name(floor).expect(floor);
+            let got = content
+                .block(block_info::decoration(def))
+                .map(|block| block.name.as_str());
+            assert_eq!(got, Some(decoration), "{floor}.decoration");
+        }
+        let decorated: Vec<&str> = content
+            .blocks()
+            .iter()
+            .filter(|def| def.decoration != BlockId::AIR)
+            .map(|def| def.name.as_str())
+            .collect();
+        assert_eq!(decorated.len(), 30, "only the Java floors: {decorated:?}");
+    }
+
+    /// L02 T1: the default stack (`Maps.readFilters("")`, `Maps.java:333-336`)
+    /// scatters `boulder` on stone and `sand-boulder` on sand at
+    /// `ScatterFilter.chance = 0.013` (`ScatterFilter.java:10`). The old
+    /// `<name>-boulder` guess found neither.
+    #[test]
+    fn default_stack_scatters_boulders_on_stone_and_sand() {
+        let content = test_registry();
+        let stone = content.block_id("stone").expect("stone");
+        let sand = content.block_id("sand-floor").expect("sand-floor");
+        let boulder = content.block_id("boulder").expect("boulder");
+        let sand_boulder = content.block_id("sand-boulder").expect("sand-boulder");
+        let (width, height) = (200, 200);
+        let mut tiles = crate::world::tiles::Tiles::new(width, height);
+        for index in 0..tiles.len() {
+            let tile = tiles.geti_mut(index);
+            tile.floor = if i32::from(tile.x) < width / 2 {
+                stone
+            } else {
+                sand
+            };
+            tile.block = BlockId::AIR;
+            tile.overlay = BlockId::AIR;
+        }
+        let mut stack = default_filter_stack(&content);
+        let mut rng = SimRng::new(7);
+        apply_stack(&mut tiles, &mut stack, &content, &mut rng);
+        let half = f64::from(width / 2 * height);
+        let (mut on_stone, mut on_sand, mut wrong) = (0u32, 0u32, 0u32);
+        for index in 0..tiles.len() {
+            let tile = tiles.geti(index);
+            match (tile.floor == stone, tile.block) {
+                (true, block) if block == boulder => on_stone += 1,
+                (false, block) if block == sand_boulder => on_sand += 1,
+                (_, block) if block != BlockId::AIR => wrong += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(wrong, 0, "only the floor's own decoration");
+        for (label, count) in [("stone", on_stone), ("sand", on_sand)] {
+            let density = f64::from(count) / half;
+            assert!(
+                (0.009..=0.017).contains(&density),
+                "{label} boulder density {density} (count {count}) ~ 0.013"
+            );
+        }
     }
 
     /// Plan-13 M7/plan-06 hook: a `LogicFilter` script mutates the generation

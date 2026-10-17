@@ -794,33 +794,85 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
 
     sink.push(spec("spore-cluster", BlockKind::Prop))?;
 
-    sink.push(spec("redweed", BlockKind::Seaweed))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:705`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["redmat"],
+        ..spec("redweed", BlockKind::Seaweed)
+    })?;
 
-    sink.push(spec("pur-bush", BlockKind::SeaBush))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:709`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["bluemat"],
+        ..spec("pur-bush", BlockKind::SeaBush)
+    })?;
 
     sink.push(spec("yellowcoral", BlockKind::SeaBush))?;
 
-    sink.push(spec("boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:725`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["stone", "crater-stone", "char"],
+        ..spec("boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("snow-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:730`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["snow", "ice", "ice-snow", "salt"],
+        ..spec("snow-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("shale-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:735`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["shale"],
+        ..spec("shale-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("sand-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:740`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["sand-floor"],
+        ..spec("sand-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("dacite-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:745`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["dacite"],
+        ..spec("dacite-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("basalt-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:750`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["basalt", "hotrock", "darksand", "magmarock"],
+        ..spec("basalt-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("carbon-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:755`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["carbon-stone"],
+        ..spec("carbon-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("ferric-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:760`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["ferric-stone", "ferric-craters"],
+        ..spec("ferric-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("beryllic-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:765`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["beryllic-stone"],
+        ..spec("beryllic-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("yellow-stone-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:770`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["yellow-stone", "regolith", "yellow-stone-plates"],
+        ..spec("yellow-stone-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("arkyic-boulder", BlockKind::Prop))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:777`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["arkyic-stone"],
+        ..spec("arkyic-boulder", BlockKind::Prop)
+    })?;
 
     sink.push(BlockSpec {
         solid: Some(true),
@@ -842,13 +894,29 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ..spec("crystal-orbs", BlockKind::TallBlock)
     })?;
 
-    sink.push(spec("crystalline-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:807`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["crystalline-stone"],
+        ..spec("crystalline-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("red-ice-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:812`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["red-ice"],
+        ..spec("red-ice-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("rhyolite-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:817`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["rhyolite", "rough-rhyolite"],
+        ..spec("rhyolite-boulder", BlockKind::StaticProp)
+    })?;
 
-    sink.push(spec("red-stone-boulder", BlockKind::StaticProp))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:822`: `<floor>.asFloor().decoration = this` (L02 T1).
+        decorates: vec!["dense-red-stone", "red-stone"],
+        ..spec("red-stone-boulder", BlockKind::StaticProp)
+    })?;
 
     sink.push(spec("metal-floor", BlockKind::Floor))?;
 

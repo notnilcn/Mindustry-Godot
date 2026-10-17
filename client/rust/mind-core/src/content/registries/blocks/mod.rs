@@ -1442,6 +1442,13 @@ pub struct BlockSpec {
     /// and `AirBlock` clear it, `OreBlock` re-enables it). J02 T3:
     /// `MapIO.colorFor` uses the overlay's value.
     pub use_color: Option<bool>,
+    /// Floors whose `Floor.decoration` is this block. Java assigns it from the
+    /// prop's initialiser (`Blocks.java:705-822`, e.g. `boulder`:
+    /// `stone.asFloor().decoration = craters.asFloor().decoration =
+    /// charr.asFloor().decoration = this`); the floors register first, so the
+    /// registry sink writes the back-reference when this block is pushed
+    /// (L02 T1).
+    pub decorates: Vec<&'static str>,
 }
 
 impl Default for BlockSpec {
@@ -1562,6 +1569,7 @@ impl Default for BlockSpec {
             draw_edge_in: None,
             draw_edge_out: None,
             use_color: None,
+            decorates: Vec::new(),
         }
     }
 }
@@ -2413,6 +2421,12 @@ pub struct BlockDef {
     /// `Block.useColor` (`Block.java:183`): whether `MapIO.colorFor` uses this
     /// block's `mapColor` for an overlay (J02 T3).
     pub use_color: bool,
+    /// `Floor.decoration` (`Floor.java:70`, default `Blocks.air`): the prop the
+    /// generators scatter on this floor (`BasicGenerator.decoration`, the
+    /// default `ScatterFilter`s of `Maps.readFilters`, `SerpuloPlanetGenerator`).
+    /// Set by the decorating prop (`BlockSpec::decorates`) or a mod's
+    /// `decoration` field; `AIR` = none (L02 T1).
+    pub decoration: BlockId,
 }
 
 /// Whether the kind extends `Floor` (`world/blocks/environment/*`): base and
@@ -2794,6 +2808,9 @@ impl BlockDef {
             draw_edge_out: spec.draw_edge_out.unwrap_or(true),
             // Computed in `init_self` (the block id is assigned on registration).
             has_edge: false,
+            // `Floor.decoration = Blocks.air` (`Floor.java:70`); the decorating
+            // prop writes it on registration (`RegistrySink::push`).
+            decoration: BlockId::AIR,
             // `Block.useColor` (`Block.java:183`); `OverlayFloor.java:13` and
             // `AirBlock.java:14` clear it, `OreBlock.java:23` re-enables it.
             use_color: spec.use_color.unwrap_or(!matches!(
@@ -3347,8 +3364,19 @@ struct RegistrySink<'a> {
 
 impl BlockSink for RegistrySink<'_> {
     fn push(&mut self, spec: BlockSpec) -> Result<(), ContentError> {
+        let decorates = spec.decorates.clone();
         let def = BlockDef::from_spec(spec, self.registry, self.bundle, self.store)?;
-        self.registry.add_block(def)?;
+        let id = self.registry.add_block(def)?;
+        // `<floor>.asFloor().decoration = this` (`Blocks.java:705-822`).
+        for floor in decorates {
+            let floor_id = self
+                .registry
+                .block_id(floor)
+                .ok_or_else(|| ContentError::UnknownName(floor.to_owned()))?;
+            if let Some(def) = self.registry.block_mut(floor_id) {
+                def.decoration = id;
+            }
+        }
         Ok(())
     }
 }

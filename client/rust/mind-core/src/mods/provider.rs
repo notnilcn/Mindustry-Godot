@@ -215,6 +215,11 @@ impl ModContentProvider for ModsContentProvider<'_> {
             }
         }
         registry.set_current_mod(previous);
+        // `ContentParser.finishParsing` (`ContentParser.java:1005`): deferred
+        // block references (`Floor.decoration`) resolve after every file.
+        for error in self.parser.finish_parsing(registry) {
+            errors.push(ContentError::Parse(error.message));
+        }
         self.errors = errors.clone();
         if errors.is_empty() {
             Ok(())
