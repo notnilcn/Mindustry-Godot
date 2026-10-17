@@ -679,22 +679,32 @@ func _build_grid() -> void:
 	grid.material_override = _grid_material
 
 
-## `PlanetRenderer.drawAtmosphere`: additive atmospheric scattering over a
-## billboard (`MeshBuilder.buildHex(Color.white, 2, 1.5f)`); radii are
-## `radius + atmosphereRad{In,Out}`, light is `Planet.getLightNormal()`.
+## `PlanetRenderer.drawAtmosphere`: additive atmospheric scattering over
+## `MeshBuilder.buildHex(Color.white, 2, 1.5f)` — a sphere of radius 1.5 that
+## covers the `radius + atmosphereRad{In,Out}` shell (the shader reads the
+## mesh's surface position as the ray target); light is `Planet.getLightNormal()`.
+## Drawn AFTER the body (Java's `renderTransparent`): `render_priority` -7 vs
+## the body's -8, so the additive veil covers the planet's limb instead of
+## being hidden behind it.
 func _build_atmosphere() -> void:
 	atmosphere.visible = false
 	_has_atmosphere = false
 	var atmos: Dictionary = data.get("atmosphere", {})
 	if atmos.is_empty() or not bool(atmos.get("has", false)):
 		return
-	# code-instantiated: one atmosphere billboard per planet view.
-	var quad := QuadMesh.new()
-	quad.size = Vector2(3.0, 3.0)
-	atmosphere.mesh = quad
+	# code-instantiated: one atmosphere sphere per planet view. Deviation: a
+	# smooth sphere instead of the 2-subdivision hex sphere (rotationally
+	# symmetric, so the shader's per-fragment ray is the same surface ray).
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.5
+	sphere.height = 3.0
+	sphere.radial_segments = 48
+	sphere.rings = 24
+	atmosphere.mesh = sphere
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/atmosphere.gdshader")
-	material.render_priority = -9
+	# After the body (-8); Java composites the atmosphere over the planet.
+	material.render_priority = -7
 	var radius := float(data.get("radius", 1.0))
 	material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
 	material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))
@@ -767,11 +777,11 @@ func _atmosphere_setting() -> bool:
 
 ## `AtmosphereShader.apply`: `u_campos` is the camera in planet space and
 ## `u_rcampos` the camera relative to the planet (the port keeps the planet at
-## the viewport origin, so both are the camera position). The mesh faces the
-## camera like `Planet.getTransform` does in Java; the space backdrop follows.
+## the viewport origin, so both are the camera position). The sphere is
+## rotation-symmetric, so no billboard rotation is needed; the space backdrop
+## still follows the camera.
 func _update_atmosphere_camera() -> void:
 	atmosphere.visible = _has_atmosphere and _atmosphere_setting()
-	atmosphere.rotation = camera.rotation
 	background.rotation = camera.rotation
 	if atmosphere.material_override is ShaderMaterial:
 		var material := atmosphere.material_override as ShaderMaterial
