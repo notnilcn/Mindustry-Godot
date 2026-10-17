@@ -140,11 +140,6 @@ pub fn update_overdrive_projector(
     }
 }
 
-/// Buildings of the origin's team within `range` world units of `origin`
-/// (`BlockIndexer.eachBlock(team, wx, wy, range, ...)`,
-/// `BlockIndexer.java:328-361`): same team only, `b.within(wx, wy, range +
-/// b.hitSize()/2f)`, `privileged` blocks excluded. `range` is world units;
-
 /// `Block.suppressable` (`MendProjector.java:46`, `RegenProjector.java:46`,
 /// `RepairTower.java:31`, `BuildTurret.java:46`): the healing blocks whose
 /// healing heal-suppression stops.
@@ -223,6 +218,10 @@ pub fn apply_suppression(world: &mut World, team: u8, x: f32, y: f32, range: f32
     }
 }
 
+/// Buildings of the origin's team within `range` world units of `origin`
+/// (`BlockIndexer.eachBlock(team, wx, wy, range, ...)`,
+/// `BlockIndexer.java:328-361`): same team only, `b.within(wx, wy, range +
+/// b.hitSize()/2f)`, `privileged` blocks excluded. `range` is world units;
 /// `hitSize = size * 8` (T4).
 pub fn buildings_in_range(world: &World, origin: Entity, range: f32) -> Vec<Entity> {
     let Some(pos) = world.get::<Pos>(origin).copied() else {

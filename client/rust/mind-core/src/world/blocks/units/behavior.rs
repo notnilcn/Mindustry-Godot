@@ -951,10 +951,10 @@ pub fn assembler_spawn_at(
 /// a ground `output` overlaps a solid tile (`EntityCollisions.overlapsTile`
 /// with `EntityCollisions::solid`, `EntityCollisions.java:98-120`), or an
 /// added unit's `hitboxTile` (`HitboxComp.java:69-76`) overlaps the
-/// `hitSize * 1.4` square at `v` (`Units.anyEntities`, `Units.java:199-209`)
-/// - not counting `spawnedByCore` units, units of the output type when
-/// `same`, and only units in the output's layer (leg-step pair, both flying,
-/// or a grounded unit for a ground output).
+/// `hitSize * 1.4` square at `v` (`Units.anyEntities`, `Units.java:199-209`),
+/// not counting `spawnedByCore` units, units of the output type when `same`,
+/// and only units in the output's layer (leg-step pair, both flying, or a
+/// grounded unit for a ground output).
 ///
 /// Deviation: Java's tile radius reads an unrelated temp rect
 /// (`EntityCollisions.r1`); the port scans `round(hitSize / 8) + 1`, which
