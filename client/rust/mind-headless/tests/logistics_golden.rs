@@ -35,7 +35,10 @@ fn golden() -> serde_json::Value {
 
 #[test]
 fn logistics_scenario_checksums_match_golden() {
-    let golden = golden();
+    let mut golden = golden();
+    // `MIND_BLESS=1` rewrites `tests/golden/logistics.json` from this build
+    // (L08 T1); the reason goes into `parity/golden_manifest.json` `reasons`.
+    let bless = std::env::var("MIND_BLESS").is_ok_and(|v| v == "1");
     let exe = env!("CARGO_BIN_EXE_mind-headless");
     for name in SCENARIOS {
         let output = Command::new(exe)
@@ -60,10 +63,22 @@ fn logistics_scenario_checksums_match_golden() {
             Some(true),
             "{name}: scenario reported failure"
         );
+        if bless {
+            golden[name] = report["checksum"].clone();
+            continue;
+        }
         assert_eq!(
             report["checksum"].as_str(),
             golden[name].as_str(),
             "checksum mismatch for {name}"
         );
+    }
+    if bless {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/logistics.json");
+        let text = format!(
+            "{}\n",
+            serde_json::to_string_pretty(&golden).expect("golden")
+        );
+        std::fs::write(&path, text).expect("write logistics golden");
     }
 }
