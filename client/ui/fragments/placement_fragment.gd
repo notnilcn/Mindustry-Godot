@@ -86,6 +86,7 @@ func _ready() -> void:
 	if search != null:
 		search.text_changed.connect(func(_value: String) -> void: _rebuild())
 	_setup_top_style()
+	_setup_frame_style()
 	_setup_command_style()
 	_build_input_bar()
 	# The HUD starts hidden in the menu; the catalogue is rebuilt on every reveal
@@ -234,6 +235,34 @@ func _update_selection_highlight() -> void:
 		# `setPressedNoSignal`: the ButtonGroup must not re-fire `pressed`
 		# (which would re-select through `_select_block`).
 		button.set_pressed_no_signal(button == active)
+
+
+## `full.table(frame -> ...)` has no background of its own (`PlacementFragment.
+## java:282`): the frame hugs the screen's bottom-right corner, and the hover
+## table is exactly as wide as the palette. The panel's themed `black6` box
+## carried 8 px margins that pushed the whole stack 8 px left (L03 T4:
+## java/49-hovercore.png has the hover box at x=840..1152). The blocks column
+## draws `Tex.pane2` behind itself (`blockCatTable.table(Tex.pane2, ...)`,
+## `:677`) and the category column draws the `black6` filler behind its cells
+## (`categories.add(new Image(Styles.black6))`, `:697`).
+func _setup_frame_style() -> void:
+	if panel != null:
+		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	var left := get_node_or_null("Panel/Frame/Layout/Left") as Control
+	var pane: Variant = MindWidgets.icon_texture("pane-2")
+	if left != null and pane is Texture2D:
+		var box := StyleBoxTexture.new()
+		box.texture = pane
+		for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+			box.set_texture_margin(side, 12.0)
+		left.draw.connect(func() -> void: left.draw_style_box(box, Rect2(Vector2.ZERO, left.size)))
+		left.queue_redraw()
+	if categories != null:
+		categories.draw.connect(func() -> void:
+			categories.draw_rect(Rect2(Vector2.ZERO, categories.size), MindStyles.BLACK_6))
+		categories.queue_redraw()
+	if layout != null:
+		layout.add_theme_constant_override("separation", 0)
 
 
 ## `Tex.buttonEdge2` ninepatch frame for the top table (splits 12, margin 5).
