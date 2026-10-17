@@ -22,6 +22,7 @@ pub mod grid;
 pub mod lifecycle;
 pub mod maps_glue;
 pub mod objectives;
+pub mod palette;
 pub mod playtest;
 pub mod preview;
 pub mod processors;
@@ -201,8 +202,11 @@ impl EditorBlockInfo {
         Self {
             id: def.id,
             size: def.size.max(1),
-            is_floor: block_info::is_floor(def),
-            is_overlay: block_info::is_overlay(def),
+            // `instanceof Floor` / `instanceof OverlayFloor`: `SpawnBlock` and
+            // `RemoveOre` extend `OverlayFloor` (`SpawnBlock.java:6`,
+            // `RemoveOre.java:11`).
+            is_floor: block_info::is_floor(def) || palette::is_overlay_floor(def),
+            is_overlay: palette::is_overlay_floor(def),
             is_multiblock: def.size > 1,
             synthetic: block_info::synthetic(def),
             rotate: crate::world::block::kind_rotates(def.kind),
@@ -683,10 +687,23 @@ impl MapEditor {
             } else if !(info.wall_ore
                 && !EditorBlockInfo::from_def(content.block(world.block_id(tx, ty))).solid)
             {
-                if world.floor_id(tx, ty) != block {
-                    self.record_op(world, tx, ty, tile_op::OP_FLOOR);
+                if info.is_overlay {
+                    // `EditorTile.setFloor` (`EditorTile.java:27-32`): an
+                    // `OverlayFloor` (ores, `spawn`) goes to the overlay layer,
+                    // and not onto liquids unless it needs no surface.
+                    let floor = content.block(world.floor_id(tx, ty));
+                    let surface = floor.is_some_and(block_info::has_surface);
+                    let needs_surface = content.block(block).is_none_or(block_info::needs_surface);
+                    if (surface || !needs_surface) && world.overlay_id(tx, ty) != block {
+                        self.record_op(world, tx, ty, tile_op::OP_OVERLAY);
+                        world.set_overlay(tx, ty, block);
+                    }
+                } else {
+                    if world.floor_id(tx, ty) != block {
+                        self.record_op(world, tx, ty, tile_op::OP_FLOOR);
+                    }
+                    world.set_floor(tx, ty, block);
                 }
-                world.set_floor(tx, ty, block);
                 let overlay = world.overlay_id(tx, ty);
                 if !tool::is_overlay(content.block(overlay)) && !info.supports_overlay {
                     if overlay != BlockId::AIR {
@@ -1069,6 +1086,32 @@ mod tests {
         assert_eq!(square.len(), 9);
         assert!(square.contains(&(7, 7)));
         assert!(square.contains(&(9, 9)));
+    }
+
+    /// `EditorTile.setFloor` (`EditorTile.java:27-32`): drawing an
+    /// `OverlayFloor` (an ore, `spawn`) sets the overlay and keeps the floor;
+    /// ores skip liquids, `spawn` (`needsSurface = false`) does not.
+    #[test]
+    fn draw_overlay_floor_goes_to_overlay_layer() {
+        let content = crate::content::test_support::test_registry();
+        let water = content.block_id("deep-water").unwrap();
+        for name in ["ore-copper", "spawn"] {
+            let block = content.block_id(name).unwrap();
+            let mut editor = MapEditor::new();
+            let mut world = TestGrid::new(4, 4);
+            let floor = stone(&content);
+            world.set_floor(1, 1, floor);
+            world.set_floor(2, 2, water);
+            editor.draw_block = block;
+            editor.draw_blocks(&mut world, &content, 1, 1);
+            assert_eq!(world.floor_id(1, 1), floor, "{name} floor");
+            assert_eq!(world.overlay_id(1, 1), block, "{name} overlay");
+            assert_eq!(world.block_id(1, 1), BlockId::AIR, "{name} block");
+            editor.draw_blocks(&mut world, &content, 2, 2);
+            let on_water = if name == "spawn" { block } else { BlockId::AIR };
+            assert_eq!(world.overlay_id(2, 2), on_water, "{name} on water");
+            assert_eq!(world.floor_id(2, 2), water, "{name} keeps water");
+        }
     }
 
     #[test]

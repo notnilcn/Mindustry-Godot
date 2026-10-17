@@ -133,9 +133,9 @@ pub fn is_floor(def: Option<&BlockDef>) -> bool {
     def.is_some_and(crate::maps::filters::block_info::is_floor)
 }
 
-/// `OverlayFloor` classification.
+/// `instanceof OverlayFloor` (ores, `spawn`, `remove-ore`, character/rune overlays).
 pub fn is_overlay(def: Option<&BlockDef>) -> bool {
-    def.is_some_and(crate::maps::filters::block_info::is_overlay)
+    def.is_some_and(super::palette::is_overlay_floor)
 }
 
 /// `Floor.isLiquid` classification.

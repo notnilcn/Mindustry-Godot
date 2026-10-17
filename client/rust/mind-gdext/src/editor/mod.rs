@@ -643,8 +643,10 @@ impl MindEditor {
 
     // --- palette (behaviour: filter + upstream sort, plan 19 §3.10) ---
 
-    /// Editor block palette rows, filtered by `search` and sorted upstream:
-    /// `(is_core desc, synthetic asc, is_overlay asc, id asc)`.
+    /// Editor block palette rows in Java's order
+    /// (`mind_core::editor::palette::palette_order`,
+    /// `MapEditorDialog.java:846-864`), filtered by an ASCII `search` on the
+    /// internal name (the shell searches `localizedName` itself and passes "").
     #[func]
     pub fn palette_blocks(&self, search: GString) -> Array<VarDictionary> {
         let mut out = Array::<VarDictionary>::new();
@@ -652,25 +654,10 @@ impl MindEditor {
             return out;
         };
         let needle = search.to_string().to_ascii_lowercase();
-        let mut rows: Vec<&BlockDef> = content
-            .blocks()
-            .iter()
-            .filter(|def| def.in_editor && def.build_visibility != BuildVisibility::DebugOnly)
-            .filter(|def| {
-                needle.is_empty() || def.name.to_ascii_lowercase().contains(needle.as_str())
-            })
-            .collect();
-        rows.sort_by(|a, b| {
-            let a_core = a.kind == BlockKind::CoreBlock;
-            let b_core = b.kind == BlockKind::CoreBlock;
-            b_core
-                .cmp(&a_core)
-                .then_with(|| block_info::synthetic(a).cmp(&block_info::synthetic(b)))
-                .then_with(|| block_info::is_overlay(a).cmp(&block_info::is_overlay(b)))
-                .then_with(|| a.id.raw().cmp(&b.id.raw()))
-        });
-        for def in rows {
-            out.push(&palette_row(def));
+        for def in mind_core::editor::palette::palette_order(content.blocks()) {
+            if needle.is_empty() || def.name.to_ascii_lowercase().contains(needle.as_str()) {
+                out.push(&palette_row(def));
+            }
         }
         out
     }
@@ -2453,7 +2440,7 @@ fn palette_row(def: &BlockDef) -> VarDictionary {
     row.set(&key("is_floor"), &block_info::is_floor(def).to_variant());
     row.set(
         &key("is_overlay"),
-        &block_info::is_overlay(def).to_variant(),
+        &mind_core::editor::palette::is_overlay_floor(def).to_variant(),
     );
     row.set(&key("is_multiblock"), &(def.size > 1).to_variant());
     row.set(
