@@ -1845,8 +1845,8 @@
 "PAR-0374":{"t":"Save slots have no preview PNG (Load Game cards show the map glyph), and the slot was never registered current (44e959f6)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J01-T4/"},
 "PAR-0375":{"t":"Load Game lists oldest-first; the pause menu never says Save & Quit (Platform::millis was not epoch ms) (6e07cd0f)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J01-T5/"},
 "PAR-0376":{"t":"Turrets always target the closest unit (no UnitSorts/minRange/trackingRange/newTargetInterval) (e5b94549)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T1/"},
-"PAR-0377":{"t":"Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)","s":"ui","st":"seeded","u":"2026-10-17"},
-"PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"seeded","u":"2026-10-17"},
+"PAR-0377":{"t":"Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
+"PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"wontfix","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
 "PAR-0379":{"t":"Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)","s":"hud","st":"seeded","u":"2026-10-17"},
 "PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"},
 "PAR-0381":{"t":"Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T4/"},
@@ -1870,7 +1870,7 @@
 "PAR-0399":{"t":"Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0400":{"t":"`Block.depositCooldown` ignored (global deposit gate only) (60e34db5)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T5/"},
 "PAR-0401":{"t":"Power turrets report `rangeChange`/`minRangeChange` = 0 (TurretAmmo::Power kept only the bullet id) (8986959a)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"},
-"PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"seeded","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"},
+"PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261017-s2-J04-T6/"},
 "PAR-0403":{"t":"Load dialog cards render white titles and a slate body with tiny buttons (23828d01)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T5/"},
 "PAR-0404":{"t":"Editor draws buildings as unrotated base regions (grey squares) (061ddaba)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T1/"},
 "PAR-0405":{"t":"Editor block palette selected entry has no accent frame (d2176386)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T2/"},
@@ -1904,7 +1904,9 @@
 "PAR-0433":{"t":"Logic editor: 'Built-in Variables' clipped on one line over Add (Java wraps to two lines); Java pauses the game behind the editor","s":"logic","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0434":{"t":"World Processors empty-state text left-aligned (Java centres it)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0435":{"t":"Settings Graphics list starts 9 px higher than Java","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T1/"},
-"PAR-0436":{"t":"Planet atmosphere rim drawn on the dark side too (Java glows only on the lit side)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T2/"}
+"PAR-0436":{"t":"Planet atmosphere rim drawn on the dark side too (Java glows only on the lit side)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T2/"},
+"PAR-0437":{"t":"Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261018-s3-L06-T3/"},
+"PAR-0438":{"t":"Save Game -> New Save with a typed name writes no file, and the dialog shows the raw key 'save.name'","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4964,7 +4966,8 @@
 "2026-10-18 found in L02 T1's spot-check: L02-T1/java/08-gen-serpulo0.png vs godot/12-gen-serpulo0.png. Related PAR-0391 (generator residuals) and L07 T3.2 (editor generate structure passes). -> session B (L06 T6)."
 ],
 "PAR-0425":[
-"2026-10-18 seen in passing during L02 T2 (session B); needs a Java pair. Unverified side observations recorded with it: no custom-game autosave on Save & Quit (savecreate setting?), SimHost.place_block places derelict team blocks, editor view leaves an unrendered grey chunk after a sector generate."
+"2026-10-18 seen in passing during L02 T2 (session B); needs a Java pair. Unverified side observations recorded with it: no custom-game autosave on Save & Quit (savecreate setting?), SimHost.place_block places derelict team blocks, editor view leaves an unrendered grey chunk after a sector generate.",
+"2026-10-18 correction (session B wave 2): custom-game autosaves ARE written on Save & Quit (wrong directory checked); drop that side observation."
 ],
 "PAR-0427":[
 "2026-10-18 L01 T3 residue -> L05 T3."
@@ -4980,6 +4983,12 @@
 ],
 "PAR-0436":[
 "2026-10-18 seen during L03 T2. Related PAR-0388."
+],
+"PAR-0402":[
+"2026-10-18 round L wave 2: landed L06 T1 assembler output gate (wasOccupied/checkSolid) + payload hand-off + commandPos + areaSize 13 (bfc8d589), L06 T2 router ControlBlock + Turret.playerControllable (f9403276), L06 T3 bullet heal suppression + findPierceLength/findLaserLength (fcf2e192), all with failing-first mind-core tests. Remaining: tether I/O (L06 T4), DrawLiquidOutputs sides (L06 T5), itemEffMultiplier row (L05 T3), generator effects (L04 T5)."
+],
+"PAR-0438":[
+"2026-10-18 found in the L02 T4 walk (runs/20261018-s3-L02-T4/notes.md). -> session A."
 ]
 },
 "failure_modes":{
@@ -5850,6 +5859,12 @@
 ],
 "PAR-0414":[
 "closed 2026-10-18 (L03 T2 9ca2138c): planet rail + Difficulty top-left at x=3 (PlanetDialog.java:732-735); globe size matches (FOV 60, camLength 4; limb ~340 vs 352 px), camLength unchanged (runs/20261018-s2-L03-T2/)."
+],
+"PAR-0377":[
+"closed 2026-10-18 (L02 T4 57bab8f1): save meta mapname = state.map.name() (SaveVersion.java:133,186-191; World.java:300,369) via Sim::map_name set on every world load, cleared on reset; Load card reads 'Map: Ancient Caldera' (runs/20261018-s3-L02-T4/godot/06-load.png; no Java save taken to keep the oracle profile read-only)."
+],
+"PAR-0378":[
+"closed 2026-10-18 (L02 T5 14151269): Java behaviour — updateProximity walks Edges.getEdges(size), which has no corners (Edges.java:22-36, BuildingComp.java:1886-1914); two tests pin orthogonal-only proximity."
 ]
 }
 }
