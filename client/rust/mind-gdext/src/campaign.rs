@@ -5387,6 +5387,52 @@ impl MindCampaign {
         atmos.set("rad_in", def.atmosphere_rad_in);
         atmos.set("rad_out", def.atmosphere_rad_out);
         out.set("atmosphere", &atmos);
+        // `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`): every
+        // visible planet with a parent draws a `lineLoop` of `radius * 10`
+        // points around its parent's position at `orbitRadius`, colour
+        // `Pal.gray` with alpha = `params.uiAlpha`, skipped when
+        // `!planet.drawOrbit`. The port's view frame keeps the current planet
+        // at the origin, so each centre is `parent.position - planet.position`.
+        let planets = registry.planets();
+        let orbit = mind_core::render::g3d::orbit::orbit_radii(planets);
+        let seconds = self.universe_secondsf();
+        let system = mind_core::render::g3d::orbit::solar_system(planets, def.id.index());
+        let current =
+            mind_core::render::g3d::orbit::world_position(planets, &orbit, def.id.index(), seconds);
+        let mut orbits = Array::<VarDictionary>::new();
+        for (index, body) in planets.iter().enumerate() {
+            let Some(parent) = body.parent else {
+                continue;
+            };
+            if !body.visible || !body.draw_orbit {
+                continue;
+            }
+            if mind_core::render::g3d::orbit::solar_system(planets, index) != system {
+                continue;
+            }
+            let radius = orbit.get(index).copied().unwrap_or(0.0);
+            if radius <= 0.0 {
+                continue;
+            }
+            let parent_position = mind_core::render::g3d::orbit::world_position(
+                planets,
+                &orbit,
+                parent.index(),
+                seconds,
+            );
+            let mut row = VarDictionary::new();
+            row.set("radius", radius);
+            row.set(
+                "center",
+                Vector3::new(
+                    parent_position[0] - current[0],
+                    parent_position[1] - current[1],
+                    parent_position[2] - current[2],
+                ),
+            );
+            orbits.push(&row);
+        }
+        out.set("orbits", &orbits);
         out.set("tiles", &tiles);
         out.set("corners", &corners);
         out.set("tile_corners", &tile_corners);

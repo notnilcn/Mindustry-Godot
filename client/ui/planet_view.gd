@@ -84,6 +84,13 @@ var _sector_icon: MeshInstance3D = null
 ## icons), rebuilt from the `campaign_views` sector rows.
 var _markers: Node3D = null
 var _sectors: Array = []
+## `PlanetRenderer.renderOrbit` loop meshes (one per system planet with a
+## parent); the shared material's alpha tracks `params.uiAlpha`.
+var _orbits: Node3D = null
+var _orbit_material: StandardMaterial3D = null
+
+## `Pal.gray` (`Pal.java:82`, `454545`) — the orbit line colour.
+const ORBIT_GRAY := Color(0.271, 0.271, 0.271)
 
 ## `Team.sharded/crux/derelict.color`.
 const SHARDED := Color(1.0, 0.827, 0.498)
@@ -152,6 +159,7 @@ func set_planet(name: String) -> bool:
 	_build_body()
 	_build_grid()
 	_build_atmosphere()
+	_build_orbits()
 	_clear_highlight()
 	return true
 
@@ -419,6 +427,11 @@ func _process(delta: float) -> void:
 	# and `absin(Time.time, 10, 1)` are baked into the marker rebuilds (Java
 	# redraws every frame; the port rebuilds when either moves).
 	ui_alpha = lerp(ui_alpha, 1.0 if zoom < 1.9 else 0.0, 1.0 - pow(1.0 - 0.1, delta * 60.0))
+	# `renderOrbit`'s `alpha = params.uiAlpha` (skipped at <= 0.02).
+	if _orbit_material != null:
+		_orbit_material.albedo_color = Color(ORBIT_GRAY.r, ORBIT_GRAY.g, ORBIT_GRAY.b, ui_alpha)
+	if _orbits != null:
+		_orbits.visible = ui_alpha > 0.02
 	if absf(ui_alpha - _built_ui_alpha) > 0.02 or absf(_preset_pulse() - _built_pulse) > 0.04:
 		_rebuild_markers()
 
@@ -694,6 +707,52 @@ func _build_atmosphere() -> void:
 	_has_atmosphere = true
 	atmosphere.visible = _atmosphere_setting()
 	_update_atmosphere_camera()
+
+
+## `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`): a `lineLoop`
+## of `(int)(radius * 10)` points around each parent position at `orbitRadius`,
+## colour `Pal.gray` with `alpha = params.uiAlpha` (hidden below 0.02). The
+## payload pre-computes each centre in the view frame (planet at the origin).
+func _build_orbits() -> void:
+	if _orbits == null:
+		# code-instantiated: one loop mesh per solar-system planet with a
+		# parent; the count is data-driven from the system layout.
+		_orbits = Node3D.new()
+		_orbits.name = "Orbits"
+		$ViewportContainer/SubViewport.add_child(_orbits)
+	for child in _orbits.get_children():
+		_orbits.remove_child(child)
+		child.queue_free()
+	_orbit_material = StandardMaterial3D.new()
+	_orbit_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_orbit_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_orbit_material.albedo_color = Color(ORBIT_GRAY.r, ORBIT_GRAY.g, ORBIT_GRAY.b, ui_alpha)
+	_orbit_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_orbit_material.render_priority = 2
+	for row_variant in data.get("orbits", []):
+		var row: Dictionary = row_variant
+		var radius := float(row.get("radius", 0.0))
+		var points := int(radius * 10.0)
+		if points < 3:
+			continue
+		var center: Vector3 = row.get("center", Vector3.ZERO)
+		# `Angles.circleVectors(points, radius, ...)` with a `Gl.lineLoop`
+		# (the strip repeats the first point to close).
+		var verts := PackedVector3Array()
+		verts.resize(points + 1)
+		for i in points + 1:
+			var angle := TAU * float(i % points) / float(points)
+			verts[i] = center + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = verts
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINE_STRIP, arrays)
+		var node := MeshInstance3D.new()
+		node.mesh = mesh
+		node.material_override = _orbit_material
+		_orbits.add_child(node)
+	_orbits.visible = ui_alpha > 0.02
 
 
 ## `PlanetRenderer.renderTransparent` (`PlanetRenderer.java:156`): the
