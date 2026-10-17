@@ -46,7 +46,10 @@ static var _styles: Dictionary = {}
 
 
 func _init() -> void:
-	clip_contents = true
+	# Java's tree `View` is an unclipped `Group` stacked in `cont`
+	# (`ResearchDialog.java:110-114`): nodes and lines run on under the bottom
+	# button row, which draws over them (L03 T5, diff/40-tech-side.png).
+	clip_contents = false
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 

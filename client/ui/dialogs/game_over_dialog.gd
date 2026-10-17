@@ -169,9 +169,13 @@ func _add_stat_row(
 	var row := HBoxContainer.new()
 	var name_label := MindWidgets.styled_label(_t("@" + key), "outlineLabel")
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `StatLabel` cells centre their labels in the 50 px bar (java/44b.png); a
+	# filled HBox child top-aligned the text (L03 T5).
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(name_label)
 	var value_label := MindWidgets.styled_label("0", "outlineLabel")
 	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(value_label)
 	panel.add_child(row)
 	parent.add_child(_padded(panel, 5.0))
@@ -302,10 +306,33 @@ func _is_campaign() -> bool:
 	return state is Dictionary and bool(state.get("campaign", false))
 
 
+## `ui.hudfrag.shown = false/true` (GameOverDialog shown/hidden): the HUD
+## tables gated on `shown()` (waves, status, minimap, placement) disappear while
+## the dialog is up. `MindUi.hud_set_visible` only records the flag, so hide the
+## HUD fragments that are visible now and restore exactly those afterwards (the
+## menu path hides the HUD group itself, so nothing is re-shown over the menu;
+## L03 T5: java/44b.png has no HUD behind the dialog).
+var _hidden_hud: Array = []
+
+
 func _hud_set(visible: bool) -> void:
 	var ui := _ui()
 	if ui != null:
 		ui.call("hud_set_visible", visible)
+	var group := get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
+	if group == null:
+		return
+	if not visible:
+		_hidden_hud.clear()
+		for child in group.get_children():
+			if child is CanvasItem and (child as CanvasItem).visible:
+				(child as CanvasItem).visible = false
+				_hidden_hud.append(child)
+	else:
+		for child in _hidden_hud:
+			if is_instance_valid(child):
+				(child as CanvasItem).visible = true
+		_hidden_hud.clear()
 
 
 func _ui() -> Node:
