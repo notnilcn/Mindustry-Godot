@@ -22,7 +22,7 @@ use godot::classes::{INode, Image, ImageTexture, Node, Texture2D};
 use godot::obj::Base;
 use godot::prelude::*;
 
-use mind_core::content::{ContentRegistry, MemoryBundle, MemoryUnlockStore, create_base_content};
+use mind_core::content::{ContentRegistry, MemoryBundle, MemoryUnlockStore};
 use mind_core::editor::preview::PreviewPipeline;
 use mind_core::game::gamemode::{Gamemode, MapView};
 use mind_core::game::waves::WaveMapHooks;
@@ -131,7 +131,9 @@ impl MindPreview {
         if self.content.is_some() {
             return true;
         }
-        match create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true) {
+        // The shared content boot (`content::boot::build_registry_with_mods`):
+        // mod content renders in previews and map lists (J09 T3).
+        match crate::content_boot::build_registry(&MemoryBundle::new(), &MemoryUnlockStore::new()) {
             Ok(mut registry) => {
                 if let Err(error) = registry.init().and_then(|()| registry.post_init()) {
                     log::warn!("MindPreview content lifecycle failed: {error}");

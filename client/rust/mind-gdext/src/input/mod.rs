@@ -338,19 +338,59 @@ impl MindInput {
     }
 
     /// Loads the buildable-block catalogue for the `1`..`0` block-select binds.
+    ///
+    /// The list must match the palette's (`I07 Pass 3` note 1): the live
+    /// `MindUi.block_catalog_json` (the live registry with mod content and the
+    /// campaign unlock store), falling back to base content when the UI node is
+    /// not up yet.
     fn load_catalog(&mut self) {
-        let catalog = mind_core::ui::campaign::block_catalog();
-        let categories: Vec<Vec<String>> = catalog
-            .categories
-            .iter()
-            .map(|category| {
-                category
-                    .blocks
+        let live = self
+            .base()
+            .get_node_or_null("/root/MindUi")
+            .and_then(|mut node| {
+                let json = node
+                    .call("block_catalog_json", &[])
+                    .try_to::<GString>()
+                    .ok()?;
+                let value: serde_json::Value =
+                    serde_json::from_str(json.to_string().as_str()).ok()?;
+                let categories: Vec<Vec<String>> = value
+                    .get("categories")?
+                    .as_array()?
                     .iter()
-                    .map(|block| block.name.clone())
-                    .collect()
-            })
-            .collect();
+                    .map(|category| {
+                        category
+                            .get("blocks")
+                            .and_then(serde_json::Value::as_array)
+                            .map(|blocks| {
+                                blocks
+                                    .iter()
+                                    .filter_map(|block| {
+                                        block
+                                            .get("name")
+                                            .and_then(serde_json::Value::as_str)
+                                            .map(str::to_owned)
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .collect();
+                (!categories.is_empty()).then_some(categories)
+            });
+        let categories = live.unwrap_or_else(|| {
+            mind_core::ui::campaign::block_catalog()
+                .categories
+                .iter()
+                .map(|category| {
+                    category
+                        .blocks
+                        .iter()
+                        .map(|block| block.name.clone())
+                        .collect()
+                })
+                .collect()
+        });
         self.bridge.set_catalog(categories);
     }
 
