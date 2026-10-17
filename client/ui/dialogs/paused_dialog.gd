@@ -14,6 +14,9 @@
 extends MindDialog
 
 var _save_row: Container = null
+## The `@objective`/`@abandon` row; hidden (no VBox separation) unless one of
+## its buttons shows.
+var _campaign_row: Container = null
 var _planet_button: Button = null
 var _objective_button: Button = null
 var _abandon_button: Button = null
@@ -71,6 +74,8 @@ func _build() -> void:
 		host.add_child(rows)
 
 	var campaign_row := _row(rows)
+	_campaign_row = campaign_row
+	campaign_row.visible = false
 	_objective_button = _add_to(campaign_row, _t("@objective"), _open_objective, "info", 220.0)
 	_objective_button.name = "objective"
 	_objective_button.visible = false
@@ -106,15 +111,11 @@ func _build() -> void:
 	_quit_button = _add_to(rows, _t("@quit"), _confirm_quit, "exit", 230.0)
 	_quit_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_quit_button.name = "quit"
-	# `PausedDialog.java:61,79,82` (`tpad = -60f`): the first row is pulled up in
-	# Java, which reads as the column sitting slightly above centre. Reproduce
-	# that bias with a small bottom spacer inside the centred row column (a
-	# negative VBox margin has no container equivalent).
-	# code-instantiated: layout bias for the fixed upstream row column.
-	var bias := Control.new()
-	bias.custom_minimum_size = Vector2(0.0, 14.0)
-	bias.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	rows.add_child(bias)
+	# `PausedDialog.java:61,80-82` (`tpad = -60f`): the abandon row's cell is
+	# `height(55) + pad(5)` with `padTop(-60)`, i.e. zero layout height, so the
+	# visible rows centre exactly (L01 T2 measured java/26-pause.png: rows
+	# y=218-467, centred under the title). The old 14 px bottom "bias" spacer and
+	# the always-present empty campaign row lifted the column ~7 px; both gone.
 	_build_rules_button()
 
 
@@ -267,6 +268,13 @@ func _refresh_campaign_buttons() -> void:
 	if _abandon_button != null:
 		_abandon_button.visible = campaign
 		_abandon_button.disabled = _net_active() or _game_over()
+	if _campaign_row != null:
+		# Deviation: Java draws this row 60 px above its zero-height cell; the
+		# port gives it a normal row when shown (campaign only).
+		_campaign_row.visible = (
+			(_objective_button != null and _objective_button.visible)
+			or (_abandon_button != null and _abandon_button.visible)
+		)
 	if _planet_button != null:
 		# `_is_mobile()` re-enters `MindUi`, which `MindUi.open_dialog` mutably
 		# binds while calling `shown()`; resolve the mobile branch after that

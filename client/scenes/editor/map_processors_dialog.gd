@@ -31,6 +31,8 @@ var _pending_delete := Vector2i(-1, -1)
 
 
 func _ready() -> void:
+	# `cont.top()` (`MapProcessorsDialog.java:58`): the body sticks to the top (L01 T2).
+	cont_top = true
 	set_title_key("@editor.worldprocessors")
 	should_pause = false
 	super._ready()

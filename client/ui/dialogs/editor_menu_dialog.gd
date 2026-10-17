@@ -26,7 +26,10 @@ const ENTRIES := [
 	{"key": "@editor.export", "icon": "upload", "action": "editor_export"},
 	{"key": "@editor.ingame", "icon": "right", "action": "ingame"},
 	{"key": "@editor.playtest", "icon": "play", "action": "playtest"},
-	{"key": "@editor.sectorgenerate", "icon": "terrain", "action": "sector_generate", "wide": true},
+	# The wide rows are `menu.cont` cells (`MapEditorDialog.java:181-184`,
+	# `padTop(-3)` under the cont `pad(3)`); measured in java/32-edmenu.png at
+	# y=370 and y=434 (the 5 px padBottom of the last grid row, then 4 px).
+	{"key": "@editor.sectorgenerate", "icon": "terrain", "action": "sector_generate", "wide": true, "pad_bottom": 4.0},
 	{"key": "@quit", "icon": "exit", "action": "quit", "wide": true},
 ]
 
@@ -62,7 +65,13 @@ func _build() -> void:
 		var button := MindWidgets.icon_button(str(entry.get("icon", "")), _t(str(entry.get("key", ""))))
 		button.pressed.connect(_run.bind(str(entry.get("action", ""))))
 		var size := WIDE_SIZE if wide else BUTTON_SIZE
-		grid.add(button).width(size.x).height(size.y).pad(1).set_colspan(2 if wide else 1)
+		var cell := grid.add(button).width(size.x).height(size.y).set_colspan(2 if wide else 1)
+		if wide:
+			cell.set_pad_top(float(entry.get("pad_top", 0.0))).set_pad_bottom(float(entry.get("pad_bottom", 0.0)))
+		else:
+			# `t.defaults().size(swidth, 60f).padBottom(5).padRight(5).padLeft(5)`
+			# (`MapEditorDialog.java:71`): a 65 px row pitch and 190 px columns.
+			cell.set_pad_left(5.0).set_pad_right(5.0).set_pad_bottom(5.0)
 		if wide:
 			grid.row()
 			column = 0
@@ -72,7 +81,8 @@ func _build() -> void:
 				grid.row()
 	if column % 2 != 0:
 		grid.row()
-	root.add(grid).pad(4)
+	# `menu.cont.table(t -> ...)` under `cont.defaults().pad(3)` (Dialog.java:213).
+	root.add(grid).pad(3)
 
 
 func _run(action: String) -> void:

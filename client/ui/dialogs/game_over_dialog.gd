@@ -20,6 +20,9 @@ func _ready() -> void:
 	should_pause = false
 	super._ready()
 	_table = content_table()
+	# The block below `grow()`s, so the content table takes the whole `cont`
+	# height (Arc `cont` is `expand().fill()`, Dialog.java:209).
+	_table.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 
 func shown() -> void:
@@ -46,8 +49,10 @@ const STAT_ROWS: Array[Array] = [
 	["stats.deconstructed", "deconstructed"],
 ]
 ## `cont.table(...).center().minWidth(370).maxSize(600f, 550f).grow()`
-## (`GameOverDialog.java:102`): the stats block is a centred 600 px column.
+## (`GameOverDialog.java:102`): the stats block is a centred 600 px column that
+## grows to at most 550 px tall.
 const BLOCK_WIDTH := 600.0
+const BLOCK_MAX_HEIGHT := 550.0
 ## `Pal.darkestGray` (`graphics/Pal.java:61`): the colour every row animates to.
 const DARKEST_GRAY := Color(0.1, 0.1, 0.1)
 
@@ -63,16 +68,25 @@ func _rebuild() -> void:
 	block.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	block.add_theme_constant_override("separation", 0)
 	# No `grow_x_axis` on the cell: the block keeps its own 600 px width and the
-	# table's default align centres it (Java's `.center()`).
-	_table.add(block)
+	# table's default align centres it (Java's `.center()`). Vertically it grows
+	# up to `maxSize(.., 550)` and centres in `cont` (L01 T2; java/44b.png has the
+	# pane well below the headline, the port's rows sat right under it).
+	_table.add(block).grow_y_axis().set_max_height(BLOCK_MAX_HEIGHT)
 	_table.row()
 	block.add_child(_padded(_headline_label(), 6.0))
 
 	var stats: Dictionary = _context.get("stats", {})
+	# `p.table(stats -> ...).top().grow()`: the stats table takes the pane's free
+	# height and, a `Table` with the default centre align, centres its rows in
+	# it (java/44b.png rows y=104-464); fillers above and below the rows.
+	# `t.pane(...).grow().pad(12).top()`: the pane takes the block's remaining
+	# height.
 	var pane_holder := _padded(_stats_pane(), 12.0)
+	pane_holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	block.add_child(pane_holder)
 	var pane := pane_holder.get_child(0) as PanelContainer
 	var rows := pane.get_child(0) as VBoxContainer
+	rows.add_child(_filler())
 	# `if(state.rules.waves) addStat(...)` (`GameOverDialog.java:79`): only the
 	# wave row is gated on waves; every other row always shows.
 	for index in STAT_ROWS.size():
@@ -82,7 +96,9 @@ func _rebuild() -> void:
 	# `if(control.saves.getCurrent() != null)` (`GameOverDialog.java:92-96`): the
 	# Time Played row only exists while a save slot is current.
 	var playtime := _current_playtime_ms()
+	rows.add_child(_filler())
 	if playtime >= 0:
+		# Below the grown stats table: the playtime row sits at the pane bottom.
 		rows.add_child(_playtime_row(playtime))
 	_build_buttons()
 
@@ -103,6 +119,15 @@ func _stats_pane() -> PanelContainer:
 	rows.add_theme_constant_override("separation", 0)
 	pane.add_child(rows)
 	return pane
+
+
+## An expanding spacer (the grown stats table's free space, centring its rows).
+func _filler() -> Control:
+	# code-instantiated: layout filler around the data-built stat rows.
+	var filler := Control.new()
+	filler.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	filler.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return filler
 
 
 ## A child wrapped in a uniform margin (`Cell.pad`).
@@ -234,10 +259,17 @@ func _headline() -> String:
 ## modes get `@menu` (the standalone menu); both are 60 px tall.
 func _build_buttons() -> void:
 	clear_buttons()
+	var button: Button
 	if _is_campaign():
-		add_button(_t("@continue"), _continue_pressed, "map", 170.0).custom_minimum_size.y = 60.0
+		button = add_button(_t("@continue"), _continue_pressed, "map", 170.0)
 	else:
-		add_button(_t("@menu"), _menu_pressed, "", 140.0).custom_minimum_size.y = 60.0
+		button = add_button(_t("@menu"), _menu_pressed, "", 140.0)
+	button.custom_minimum_size.y = 60.0
+	# `buttons.margin(10)` (`GameOverDialog.java:47`): a 10 px margin around the
+	# 60 px button row (java/44b.png: Menu centred at y=600, not 608).
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if buttons != null:
+		buttons.custom_minimum_size.y = 80.0
 
 
 func _continue_pressed() -> void:

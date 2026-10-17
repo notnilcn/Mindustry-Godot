@@ -40,6 +40,8 @@ var _toggles: Dictionary = {}
 
 
 func _ready() -> void:
+	# `cont.top()` (`CampaignRulesDialog.java:42`): the body sticks to the top (L01 T2).
+	cont_top = true
 	set_title_key("@campaign.difficulty")
 	should_pause = false
 	# The Java BaseDialog is full-screen: title at the top, content from the top,
