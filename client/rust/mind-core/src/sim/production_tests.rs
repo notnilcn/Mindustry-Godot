@@ -5731,3 +5731,88 @@ fn locked_upgrade_blocks_and_fires_hint() {
         "an unlocked upgrade target is accepted"
     );
 }
+
+/// L06 T6.3: abandoning the played sector (`PlanetDialog.abandonSectorConfirm`,
+/// `PlanetDialog.java:1153-1161`) kills every player-team core 7 ticks later
+/// (`Time.runTask(7f, ... core.kill())`), so the campaign `checkGameState`
+/// (`Logic.java:329-334`) plays the game-over / sector-loss path instead of the
+/// record being deleted.
+#[test]
+fn abandon_played_sector_kills_cores_and_plays_game_over() {
+    use crate::content::PlanetId;
+    use crate::game::planet::EmptyNeighborhood;
+    use crate::game::play::{PlayEvent, PlaySession};
+    use crate::game::rules::Rules;
+    use crate::game::runtime::CampaignRuntime;
+    use crate::game::universe::Campaign;
+
+    let mut sim = runtime_sim();
+    let core = place(&mut sim, "core-shard", 10, 10);
+    let campaign = {
+        let content = sim.block_runtime().expect("runtime").content();
+        Campaign::from_registry(content, &EmptyNeighborhood)
+    };
+    let mut session = PlaySession::new(Rules {
+        default_team: 1,
+        wave_team: 2,
+        ..Rules::default()
+    });
+    session.phase = crate::game::State::Playing;
+    session.sector = Some((PlanetId::new(0), 15));
+    let rules = session.rules.clone();
+    session
+        .teams
+        .register_core(core, crate::ecs::TeamId(1), &rules);
+    sim.ecs
+        .0
+        .insert_resource(CampaignRuntime::new(session, campaign));
+
+    sim.ecs
+        .0
+        .get_resource_mut::<CampaignRuntime>()
+        .expect("campaign")
+        .abandon_played_sector();
+    for _ in 0..6 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.ecs.0.get_entity(core).is_ok(),
+        "the core survives the 7-tick delay"
+    );
+    let early = sim
+        .ecs
+        .0
+        .get_resource_mut::<CampaignRuntime>()
+        .expect("campaign")
+        .take_events();
+    assert!(
+        !early
+            .iter()
+            .any(|event| matches!(event, PlayEvent::SectorLose { .. })),
+        "no loss before the cores die: {early:?}"
+    );
+    for _ in 0..6 {
+        sim.tick().expect("tick");
+    }
+    assert!(
+        sim.grid.entity_at(TilePos::new(10, 10)).is_none(),
+        "the abandoned sector's core was killed"
+    );
+    let events = sim
+        .ecs
+        .0
+        .get_resource_mut::<CampaignRuntime>()
+        .expect("campaign")
+        .take_events();
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            PlayEvent::SectorLose {
+                sector: 15,
+                winner: 2,
+                ..
+            }
+        )),
+        "the game-over path ran: {events:?}"
+    );
+}

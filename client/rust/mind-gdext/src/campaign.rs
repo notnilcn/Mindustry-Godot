@@ -4117,10 +4117,33 @@ impl MindCampaign {
             .map(|sector| sector.info.info.clone())
     }
 
-    /// `PlanetDialog.abandonSectorConfirm` (persisted half): clears the active
-    /// sector's items/base/production, drops its save and removes the file.
+    /// `PlanetDialog.abandonSectorConfirm` for the played sector
+    /// (PlanetDialog.java:1153-1161): the caller hides the planet page and
+    /// 7 ticks later every player-team core dies, so the campaign game-over
+    /// path (`Logic.checkGameState` -> `GameOverEvent` -> sector loss) plays.
+    /// Without a live sim runtime (no sector running) it falls back to the
+    /// off-play record clear.
     #[func]
     pub fn abandon_sector(&mut self) -> bool {
+        if let Some(mut host) = self.host() {
+            let taken = host.bind_mut().take_campaign_runtime();
+            if let Some(mut runtime) = taken {
+                let played = runtime.session.is_campaign();
+                runtime.abandon_played_sector();
+                host.bind_mut().put_campaign_runtime(runtime);
+                if played {
+                    log::info!("abandon: player cores die in 7 ticks (game-over path)");
+                    return true;
+                }
+            }
+        }
+        self.clear_played_sector_record()
+    }
+
+    /// The persisted half of an abandon without a running sector: clears the
+    /// session sector's items/base/production, drops its save and removes the
+    /// file.
+    fn clear_played_sector_record(&mut self) -> bool {
         let Some((planet, sector_id)) = self.session.sector else {
             return false;
         };

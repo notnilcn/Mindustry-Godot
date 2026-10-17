@@ -430,15 +430,20 @@ func _on_confirm(confirmed: bool) -> void:
 		_quit_with_exit_save()
 
 
-## `PlanetDialog.abandonSectorConfirm`: clears the sector base/items and drops
-## its save, ending the run back at the standalone menu.
+## `PlanetDialog.abandonSectorConfirm` for the played sector
+## (`PlanetDialog.java:1150-1161`): the listener hides this dialog, the planet
+## page hides, and 7 ticks later the sim kills the player cores, so the match
+## ends through the campaign game-over path (no direct return to the menu).
 func _abandon_sector() -> void:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign == null or not campaign.has_method("abandon_sector"):
 		return
-	var cleared: Variant = campaign.call("abandon_sector")
-	if bool(cleared):
-		_quit_to_menu()
+	var abandoned: Variant = campaign.call("abandon_sector")
+	if bool(abandoned):
+		_close_pressed()
+		var ui := _ui()
+		if ui != null and ui.has_method("close_dialog"):
+			ui.call("close_dialog", "planet")
 
 
 ## `PausedDialog.showQuitConfirm`'s quit runnable: `runExitSave()` writes the

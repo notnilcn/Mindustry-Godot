@@ -2038,15 +2038,35 @@ impl Sim {
     /// world from inside a system: the capture → derelict conversion (T7) and
     /// `coreDestroyClear` `timeDestroy` posts.
     pub(crate) fn apply_campaign_world_requests(&mut self) {
-        let (derelict_team, time_destroys) = {
+        let (derelict_team, time_destroys, abandon_kill) = {
             let Some(mut runtime) = self.ecs.0.get_resource_mut::<CampaignRuntime>() else {
                 return;
+            };
+            // `abandonSectorConfirm`'s `Time.runTask(7f)` (PlanetDialog.java:
+            // 1156-1161): count down, then kill `player.team().cores()`.
+            let abandon_kill = match runtime.pending_abandon_kill {
+                Some(ticks) if ticks <= 1 => {
+                    runtime.pending_abandon_kill = None;
+                    let rules = runtime.session.rules.clone();
+                    runtime.session.teams.player_cores(&rules).to_vec()
+                }
+                Some(ticks) => {
+                    runtime.pending_abandon_kill = Some(ticks - 1);
+                    Vec::new()
+                }
+                None => Vec::new(),
             };
             (
                 runtime.pending_derelict_team.take(),
                 std::mem::take(&mut runtime.pending_time_destroy),
+                abandon_kill,
             )
         };
+        // `core.kill()`: the next death pass destroys them and the campaign
+        // `checkGameState` sees no player core.
+        for core in abandon_kill {
+            self.kill_building(core);
+        }
         if derelict_team.is_none() && time_destroys.is_empty() {
             return;
         }
