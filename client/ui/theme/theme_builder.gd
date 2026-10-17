@@ -219,10 +219,16 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				# both `grabber_area` boxes stay empty. A disabled slider keeps
 				# the plain knob like Arc (its `SliderStyle` has no disabled
 				# knob).
-				# `sliderBack` is 27 px tall; Godot's `HSlider` draws the track at
-				# the box's minimum height, so the content margin supplies the
-				# missing (27 - 4 - 4) / 2 per side.
-				theme.set_stylebox("slider", name, _nine_patch("slider-back", 4.0, 9.5))
+				# Godot's `HSlider` draws the track at the box's *minimum* height,
+				# centred. Arc's row box fills the whole 42 px slider (the
+				# `sliderKnob` height): java/36-graphics.png shows each row as a
+				# 500x42 `sliderBack` box (4 px #454545 border, black fill) with
+				# the full-height knob inside (L03 T1, PAR-0413). A 21 px vertical
+				# content margin makes the box's minimum height 42.
+				var back := _nine_patch("slider-back", 4.0, 4.0)
+				back.content_margin_top = SLIDER_ROW_HEIGHT * 0.5
+				back.content_margin_bottom = SLIDER_ROW_HEIGHT * 0.5
+				theme.set_stylebox("slider", name, back)
 				theme.set_stylebox("grabber_area", name, StyleBoxEmpty.new())
 				theme.set_stylebox("grabber_area_highlight", name, StyleBoxEmpty.new())
 				var knob := MindWidgets.icon_texture("slider-knob")
@@ -283,6 +289,9 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 ## content: L01 T3 measured the Custom Game cards at x=39 in java/custom.png vs
 ## x=48 with Godot's default 8 px bar.
 const SCROLL_BAR_WIDTH := 24.0
+## `sliderKnob` height (29x42 region): the Arc slider's pref height and the
+## height its `sliderBack` box fills.
+const SLIDER_ROW_HEIGHT := 42.0
 
 
 static func _apply_scroll_bar(theme: Theme) -> void:

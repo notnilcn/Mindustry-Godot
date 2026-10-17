@@ -571,5 +571,28 @@ func _init() -> void:
 	)
 	rules_dialog.free()
 
+	# L03 T1 (PAR-0413): `Styles.defaultSlider` — the `sliderBack` box fills the
+	# whole slider row (Godot draws the track at the box's minimum height), and
+	# the row is the 42 px `sliderKnob` tall (java/36-graphics.png: 500x42 rows).
+	var slider_theme := MindThemeBuilder.build(assets)
+	var slider_box := slider_theme.get_stylebox("slider", "defaultSlider")
+	var knob_icon := slider_theme.get_icon("grabber", "defaultSlider")
+	_check(
+		slider_box != null and is_equal_approx(slider_box.get_minimum_size().y, 42.0),
+		"defaultSlider box min height equals the 42 px row (got %s)" % (slider_box.get_minimum_size().y if slider_box else -1.0)
+	)
+	_check(
+		knob_icon != null and knob_icon.get_height() == 42,
+		"defaultSlider knob is the 42 px sliderKnob region (got %s)" % (knob_icon.get_height() if knob_icon else -1)
+	)
+	var probe := MindWidgets.slider(0.0, 100.0, 1.0)
+	probe.theme = slider_theme
+	root.add_child(probe)
+	_check(
+		is_equal_approx(probe.get_combined_minimum_size().y, 42.0),
+		"a settings slider is 42 px tall (got %s)" % probe.get_combined_minimum_size().y
+	)
+	probe.free()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
