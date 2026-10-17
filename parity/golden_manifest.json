@@ -146,7 +146,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/entitymeta.json",
       "owner_plan": "05",
-      "sha256": "cd5e8e3b5ecaabb57d1012d648c8da74c1cbdeadc98db516a8e52a046eb14bf4"
+      "sha256": "a0755630b05e63bca26328f5cee6e051b73f3c70dc30e8a862acd8d6ee4b2734",
+      "reasons": [
+        "2026-10-18 L08 T1: BuildingComp gains the transient should_consume field after should_consume_power. b1ea8694 (Audit fix T1) caches Building.shouldConsume() (BuildingComp.java:761; consumption gate BuildingComp.java:1955-2005, ConsumePower.java:56-60) on the component; not serialized (write_base unchanged)."
+      ]
     },
     {
       "id": "harness_fx_fx_lifecycle",

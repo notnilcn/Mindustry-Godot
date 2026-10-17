@@ -11,13 +11,17 @@ use mind_core::entities::vanilla_registry;
 
 #[test]
 fn entitymeta_matches_golden() {
+    const GOLDEN: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/entitymeta.json");
     let registry = vanilla_registry().expect("vanilla registry builds");
     let live = registry.metadata_json();
-    let golden_text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/golden/entitymeta.json"
-    ))
-    .expect("golden entitymeta.json is committed");
+    // `MIND_BLESS=1` rewrites the golden in the `meta entities --out` shape
+    // (L08 T1); the reason goes into `parity/golden_manifest.json` `reasons`.
+    if std::env::var("MIND_BLESS").is_ok_and(|v| v == "1") {
+        let text = format!("{}\n", serde_json::to_string_pretty(&live).unwrap());
+        std::fs::write(GOLDEN, text).unwrap();
+        return;
+    }
+    let golden_text = std::fs::read_to_string(GOLDEN).expect("golden entitymeta.json is committed");
     let golden: serde_json::Value =
         serde_json::from_str(&golden_text).expect("golden is valid JSON");
     assert_eq!(

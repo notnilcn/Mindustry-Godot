@@ -201,6 +201,12 @@
           "since": 0
         },
         {
+          "name": "should_consume",
+          "kind": "Plain",
+          "type": "bool",
+          "since": 0
+        },
+        {
           "name": "time_scale",
           "kind": "Plain",
           "type": "float",
