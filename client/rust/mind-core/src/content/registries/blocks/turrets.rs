@@ -39,6 +39,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.1f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("duo", BlockKind::ItemTurret)
     })?;
 
@@ -58,6 +60,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.2f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 0.5f` (T5).
+        deposit_cooldown: Some(0.5),
         ..spec("scatter", BlockKind::ItemTurret)
     })?;
 
@@ -75,6 +79,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.1f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 1.0f` (T5).
+        deposit_cooldown: Some(1.0),
         ..spec("scorch", BlockKind::ItemTurret)
     })?;
 
@@ -92,6 +98,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.1f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("hail", BlockKind::ItemTurret)
     })?;
 
@@ -199,6 +207,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("swarmer", BlockKind::ItemTurret)
     })?;
 
@@ -221,6 +231,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.2f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("salvo", BlockKind::ItemTurret)
     })?;
 
@@ -285,6 +297,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 1.0f` (T5).
+        deposit_cooldown: Some(1.0),
         ..spec("fuse", BlockKind::ItemTurret)
     })?;
 
@@ -307,6 +321,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("ripple", BlockKind::ItemTurret)
     })?;
 
@@ -329,6 +345,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(0.3f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("cyclone", BlockKind::ItemTurret)
     })?;
 
@@ -356,6 +374,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_optional(consume_coolant(1.0f32, true, false)).update(false),
         ],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("foreshadow", BlockKind::ItemTurret)
     })?;
 
@@ -380,6 +400,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         // `BaseTurret.init`: `coolant.optional = true; coolant.update = false` (PAR-0087).
         consumes: vec![consume_optional(consume_coolant(1.0f32, true, false)).update(false)],
         has_liquids: Some(true),
+        // `Blocks.java` `depositCooldown = 2.0f` (T5).
+        deposit_cooldown: Some(2.0),
         ..spec("spectre", BlockKind::ItemTurret)
     })?;
 
@@ -654,4 +676,39 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
     })?;
     let _ = sink;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::content::test_support::test_registry;
+
+    /// J04 T5: the 11 Serpulo turrets that set `Block.depositCooldown`
+    /// (`Blocks.java:3346-4337`); every other block uses the global
+    /// `Rules.itemDepositCooldown` gate.
+    #[test]
+    fn player_deposit_cooldowns_match_java() {
+        let registry = test_registry();
+        let cooldown = |name: &str| {
+            registry
+                .block_id(name)
+                .and_then(|id| registry.block(id))
+                .map(|def| def.deposit_cooldown)
+        };
+        for (name, value) in [
+            ("duo", 2.0),
+            ("scatter", 0.5),
+            ("scorch", 1.0),
+            ("hail", 2.0),
+            ("swarmer", 2.0),
+            ("salvo", 2.0),
+            ("fuse", 1.0),
+            ("ripple", 2.0),
+            ("cyclone", 2.0),
+            ("foreshadow", 2.0),
+            ("spectre", 2.0),
+        ] {
+            assert_eq!(cooldown(name), Some(value), "`{name}` depositCooldown");
+        }
+        assert_eq!(cooldown("conveyor"), Some(-1.0), "global gate");
+    }
 }

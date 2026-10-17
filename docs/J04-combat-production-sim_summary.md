@@ -118,3 +118,133 @@ through `submit_player_command_json`, and the pair spawned through
 
 **Done criteria (wave-B scope).** T1 landed with tests and an in-engine walk showing
 the sort change end-to-end; T2–T6 remain for later waves.
+
+---
+
+# Wave C (T2–T6) — 2026-10-17, session 2
+
+Branch `parity/session-2`; base `3bd1abe8` (main after the J02/J06/J03-B/J05/J10-B
+merges). Wave B (T1) is above; this section covers **T2–T6**, each as its own
+commit.
+
+## Per-task status
+
+| Task | Status | Commit |
+|---|---|---|
+| T2 — `ConsumeItemExplode` + `itemDurationMultipliers` | done (in-engine verified) | `fefc574` |
+| T3 — `GenericCrafter.liquidOutputDirections` | done (in-engine verified) | `d236e4a7` |
+| T4 — `PowerGenerator.createExplosion` | done (sim half; unit-tested) | `501f2727` |
+| T5 — per-block player deposit cooldown | done | `60e34db5` |
+| T6 — round-I residuals | partial: PAR-0349 + power `rangeChange` landed; rest recorded | `8986959a` |
+
+## T2 — `ConsumeItemExplode` + `itemDurationMultipliers`
+
+`GeneratorConfig` gained `explode_items` (`ItemExplodeConfig` with the Java
+threshold/damage/baseChance) and `item_duration_multipliers`; a new `Sim` pass
+`update_item_explode_consumers` applies the damage
+(`delta * 0.06 * clamp(explosiveness - 0.5)`) and fires
+`Trigger::BlastGenerator` while `rules.reactorExplosions`; combustion/steam
+register the consumer + pyratite x3, the RTG phase fabric x15
+(`Blocks.java:2537-2538,2571-2572,2614`). `update_generator_with` follows the
+consumed item's duration multiplier each tick (`ConsumeGenerator.java:126-131`).
+Tests: `explosive_fuel_damages_generator_and_fires_trigger`,
+`item_duration_multipliers_scale_burn_time`. In-engine (pid 628685): a
+combustion generator fed blast-compound lost 24/40 health in 120 paused ticks
+and died after 120 more; the coal control stayed at 40/40
+(`runs/20261017-s2-J04-T2/godot/generator-explosive-fuel.png`).
+
+## T3 — `liquidOutputDirections`
+
+`CrafterDef.liquid_output_directions` + the per-output `dir` in the
+`dumpOutputs` liquid half (`GenericCrafter.java:345-351`; the dump's direction
+check already matched `Building.dumpLiquid`); electrolyzer `{1, 3}`
+(`Blocks.java:1397`). Test:
+`electrolyzer_dumps_liquids_in_configured_directions`. In-engine (pid 664020): a
+rotated electrolyzer with conduits on all four sides dumps ozone only left and
+hydrogen only right (`tile_debug(...)["liquids"]` after 300 paused ticks;
+`runs/20261017-s2-J04-T3/`).
+
+## T4 — `PowerGenerator.createExplosion` (sim half)
+
+The 11 missing `PowerGenerator` explosion fields are ported to
+`GeneratorConfig`/`ReactorExplosion`; `fire_explosion` queues
+`PendingGeneratorExplosions` and the new `Sim::apply_generator_explosions` pass
+applies `Damage.damage`, ignition fires (delayed by `dst / explosionSpeed`),
+`unitMoveBreakable` prop breaking, fireballs and puddles
+(`PowerGenerator.java:149-201`). Vanilla knobs for combustion/steam
+(`Blocks.java:2532-2534,2566-2568`), thorium/impact reactors
+(`NuclearReactor.java:66-67`, `ImpactReactor.java:36-37`), flux
+(`VariableReactor.java:47-50`) and neoplasia (`Blocks.java:2834-2848`).
+Test: `generator_explosion_applies_sim_side_effects` (damage, prop gone,
+puddles, fires, fireballs). No live `ExplosionSink` host yet, so the view half
+(effect/sound/shake/scorch) is not visible in-engine.
+
+## T5 — per-block deposit cooldown
+
+`BlockSpec`/`BlockDef.deposit_cooldown` + the 11 turret values
+(`Blocks.java:3346-4337`) and the `InputHandler.canDepositItem` gate
+(`InputHandler.java:2310-2316`). Tests: `deposit_cooldown_gate` (extended) and
+`player_deposit_cooldowns_match_java`.
+
+## T6 — round-I residuals
+
+- **Landed**: `PAR-0349` door close guard (`Door.java:49-53`; test
+  `door_refuses_to_close_with_a_unit_on_it`) and the power-turret
+  `PowerAmmo { range_change, min_range_change }` snapshot
+  (`Turret.java:340-353`; test `power_turret_reads_bullet_range_change`).
+- **Already in main (verified)**: the `AIController.faceTarget` intercept lead
+  (`sim/unit_runtime.rs:6138`) and the sublimate activation window
+  (`PAR-0089`, `advanced.rs:2029-2047`).
+- **Recorded, not ported**: unit-assembler output gate/hand-off
+  (`UnitAssembler.java:466-472,516-532,560-562`), the `router` `ControlBlock`,
+  bullet suppression + `findPierceLength`/`findLaserLength`
+  (`BulletType.java:562-580`), `UnitTetherComp.spawnerUnitId` +
+  `EmptyDataAbility` round-trip. Details in
+  `runs/20261017-s2-J04-T6/report.md`.
+
+## Deviations (wave C, with Java locations)
+
+1. T2/T4: generator effects (`Fx.generatespark`/`explodeEffect`/shake/scorch)
+   have no live host sink yet; the sim halves are complete.
+2. T4: ignition delays are whole ticks (`PendingExplosionFires`) instead of the
+   `Time.run` unit clock (≤1-tick boundary lag); the puddle/fireball draws use
+   the sim stream rather than Java's global `Mathf.rand`.
+3. T3: `DrawLiquidOutputs`/`drawOverlay` side icons remain region-only
+   (`render/draw_desc.rs:678`); the side data now exists in `CrafterDef`.
+4. T2: the `ConsumeItemEfficiency.display`/`StatValues.itemEffMultiplier` info
+   row and Java's sandbox `cheating()` consumer bypass are not ported.
+
+## Pre-existing failures at the wave-C base
+
+`blocks_golden::family_counts_match_golden` (other 158 vs 164) plus the
+mind-headless goldens (`audio`, `input`, `logistics`, `maps_editor`) and
+**`units_scenarios::committed_goldens_match`** (`units_legs_ik`). The legs
+golden was verified pre-existing by running the test in a worktree at
+`99ef19cf`: it was introduced by the merged J03 T4 (`9f381d49` "leg draws
+(UnitType.drawLegs) + Java leg geometry in LegsComp" — the golden still holds
+the old segment lengths). Wave C touches nothing under `entities/`.
+
+## Ledger changes to apply
+
+- **PAR-0349** (door close guard): status -> `fix`/verified, fix `8986959a`,
+  evidence `runs/20261017-s2-J04-T6/report.md`.
+- **PAR-0089** (sublimate activation window): verified present in main
+  (`advanced.rs:2029-2047`, tests `:2545`); close if its remaining criteria are
+  met.
+- **New item (T2)**: \"Explosive items never damage generators and never fire
+  Trigger.blastGenerator; itemDurationMultipliers ignored\" — fix `fefc574`,
+  evidence `runs/20261017-s2-J04-T2/godot/generator-explosive-fuel.png`.
+- **New item (T3)**: \"Crafters dump output liquids on every side
+  (liquidOutputDirections ignored)\" — fix `d236e4a7`, evidence
+  `runs/20261017-s2-J04-T3/godot/electrolyzer-directions.png`.
+- **New item (T4)**: \"Generator/reactor explosions apply no side effects\"
+  — fix `501f2727`, evidence
+  `runs/20261017-s2-J04-T4/` (unit test) + the residual view half.
+- **New item (T5)**: \"Block.depositCooldown ignored (global gate only)\" —
+  fix `60e34db5`, evidence `runs/20261017-s2-J04-T5/report.md`.
+- **New item (T6)**: \"Power turrets report rangeChange/minRangeChange = 0\" —
+  fix `8986959a`.
+- **Candidate follow-ups**: live `ExplosionSink` (view half of T4), generator
+  spark/explode effects, `DrawLiquidOutputs` side regions, the filter
+  `itemEffMultiplier` stats row, assembler output gate, `ControlBlock`,
+  bullet suppression, tether `spawnerUnitId`.

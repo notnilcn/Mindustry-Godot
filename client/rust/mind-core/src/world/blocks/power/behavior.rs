@@ -41,8 +41,8 @@ use crate::world::blocks::heat::HeatState;
 use crate::world::blocks::power::PowerProduction;
 use crate::world::blocks::power::explosion::{ReactorExplosion, fire_explosion};
 use crate::world::blocks::power::generator::{
-    GeneratorConfig, GeneratorFilter, GeneratorState, item_flammabilities, item_radioactivities,
-    liquid_flammabilities, reactor_explosions_enabled, set_direct_production,
+    GeneratorConfig, GeneratorFilter, GeneratorState, ItemExplodeConfig, item_flammabilities,
+    item_radioactivities, liquid_flammabilities, reactor_explosions_enabled, set_direct_production,
     update_generator_with,
 };
 use crate::world::blocks::power::reactors::{
@@ -147,13 +147,7 @@ fn fire_generator_explosion_cond(
     if !reactor_explosions_enabled(world) {
         return false;
     }
-    let Some(explosion) = ReactorExplosion::for_building(
-        world,
-        e,
-        config.explosion_radius,
-        config.explosion_damage,
-        fire,
-    ) else {
+    let Some(explosion) = ReactorExplosion::for_building(world, e, config, fire) else {
         return false;
     };
     fire_explosion(world, e, explosion, should_explode)
@@ -1203,6 +1197,15 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         power_production: 1.0,
         item_duration: 120.0,
         filter_item: Some(flammable.clone()),
+        // `Blocks.java:2532-2534`: `explosionShake = 1f`,
+        // `explosionScorchSize = 1`, `explosionFireballs = 3`.
+        explosion_shake: 1.0,
+        explosion_scorch_size: 1,
+        explosion_fireballs: 3,
+        // `Blocks.java:2537-2538`: `consume(new ConsumeItemExplode())` and
+        // `itemDurationMultipliers.put(Items.pyratite, 3f)`.
+        explode_items: Some(ItemExplodeConfig::default()),
+        item_duration_multipliers: vec![(content.item_id("pyratite").unwrap_or_default(), 3.0)],
         ..GeneratorConfig::default()
     });
     registry.register_named("combustion-generator", Arc::new(combustion));
@@ -1212,6 +1215,14 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         power_production: 5.5,
         item_duration: 90.0,
         filter_item: Some(flammable.clone()),
+        // `Blocks.java:2566-2568`: `explosionShake = 1f`,
+        // `explosionScorchSize = 2`, `explosionFireballs = 6`.
+        explosion_shake: 1.0,
+        explosion_scorch_size: 2,
+        explosion_fireballs: 6,
+        // `Blocks.java:2570-2572`: `ConsumeItemExplode` + pyratite x3.
+        explode_items: Some(ItemExplodeConfig::default()),
+        item_duration_multipliers: vec![(content.item_id("pyratite").unwrap_or_default(), 3.0)],
         liquid_capacity: content
             .block_id("steam-generator")
             .and_then(|id| content.block(id))
@@ -1235,6 +1246,12 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
         power_production: 4.5,
         item_duration: 840.0,
         filter_item: Some(GeneratorFilter::ItemRadioactive { min: 0.2 }),
+        // `Blocks.java:2614`: `itemDurationMultipliers.put(Items.phaseFabric,
+        // 210f / 14f)`.
+        item_duration_multipliers: vec![(
+            content.item_id("phase-fabric").unwrap_or_default(),
+            210.0 / 14.0,
+        )],
         ..GeneratorConfig::default()
     });
     registry.register_named("rtg-generator", Arc::new(rtg));
@@ -1291,6 +1308,17 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             trigger_items: vec![(content.item_id("phase-fabric").unwrap_or_default(), 1)],
             liquid_capacity: 80.0,
             explosion_min_warmup: 0.5,
+            // `Blocks.java:2834-2848`: `explosionRadius = 9`,
+            // `explosionDamage = 2000`, `explosionPuddles = 80`,
+            // `explosionPuddleRange = tilesize * 7f`,
+            // `explosionPuddleLiquid = Liquids.neoplasm`,
+            // `explosionPuddleAmount = 200f`.
+            explosion_radius: 9.0,
+            explosion_damage: 2000.0,
+            explosion_puddles: 80,
+            explosion_puddle_range: 7.0 * crate::config::TILESIZE as f32,
+            explosion_puddle_liquid: content.liquid_id("neoplasm"),
+            explosion_puddle_amount: 200.0,
             ..GeneratorConfig::default()
         }),
         heat_output: 60.0,
@@ -1347,6 +1375,10 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 explosion_min_warmup: 0.0,
                 explosion_radius: 19.0,
                 explosion_damage: 1250.0 * 4.0,
+                // `NuclearReactor.java:66-67`: `explosionShake = 6f`,
+                // `explosionShakeDuration = 16f` (no puddles/fireballs).
+                explosion_shake: 6.0,
+                explosion_shake_duration: 16.0,
                 ..GeneratorConfig::default()
             },
             heating: 0.005,
@@ -1373,6 +1405,10 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 liquid_capacity: 80.0,
                 explosion_min_warmup: 0.3,
                 explosion_damage: 1900.0 * 4.0,
+                // `ImpactReactor.java:36-37`: `explosionShake = 6f`,
+                // `explosionShakeDuration = 16f`.
+                explosion_shake: 6.0,
+                explosion_shake_duration: 16.0,
                 ..GeneratorConfig::default()
             },
             item_count,
@@ -1390,6 +1426,14 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 explosion_min_warmup: 0.5,
                 explosion_radius: 16.0,
                 explosion_damage: 1500.0,
+                // `VariableReactor.java:47-50`: `explosionPuddles = 70`,
+                // `explosionPuddleRange = tilesize * 6f`,
+                // `explosionPuddleLiquid = Liquids.slag`,
+                // `explosionPuddleAmount = 100f`.
+                explosion_puddles: 70,
+                explosion_puddle_range: 6.0 * crate::config::TILESIZE as f32,
+                explosion_puddle_liquid: content.liquid_id("slag"),
+                explosion_puddle_amount: 100.0,
                 ..GeneratorConfig::default()
             },
             max_heat: 150.0,

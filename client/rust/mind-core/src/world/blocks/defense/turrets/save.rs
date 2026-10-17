@@ -131,7 +131,7 @@ impl TurretAmmo {
                 .first()
                 .map(|entry| entry.bullet)
                 .unwrap_or_default(),
-            TurretAmmo::Power(bullet) => *bullet,
+            TurretAmmo::Power(ammo) => ammo.bullet,
             TurretAmmo::Payload(entries) => entries
                 .first()
                 .map(|entry| entry.bullet)
@@ -151,7 +151,7 @@ pub fn ammo_bullet_kind(
             .first()
             .map(|entry| entry.bullet)
             .or_else(|| match &state.config.ammo {
-                TurretAmmo::Power(bullet) => Some(*bullet),
+                TurretAmmo::Power(ammo) => Some(ammo.bullet),
                 TurretAmmo::Item(entries) => entries.first().map(|entry| entry.bullet),
                 TurretAmmo::Liquid(entries) => entries.first().map(|entry| entry.bullet),
                 TurretAmmo::Payload(entries) => entries.first().map(|entry| entry.bullet),

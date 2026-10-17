@@ -1158,8 +1158,15 @@ pub fn config_for(
             min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
         })
     };
-    let power =
-        |bullet_name: &str| -> Option<TurretAmmo> { Some(TurretAmmo::Power(bullet(bullet_name)?)) };
+    let power = |bullet_name: &str| -> Option<TurretAmmo> {
+        let id = bullet(bullet_name)?;
+        let def = content.bullet(id);
+        Some(TurretAmmo::Power(super::PowerAmmo {
+            bullet: id,
+            range_change: def.map(|d| d.range_change).unwrap_or(0.0),
+            min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
+        }))
+    };
 
     match name {
         "scatter" => {
@@ -2261,8 +2268,8 @@ fn spawn_beam(
     team: u8,
     life: f32,
 ) {
-    let bullet = if let TurretAmmo::Power(bullet) = &config.ammo {
-        *bullet
+    let bullet = if let TurretAmmo::Power(ammo) = &config.ammo {
+        ammo.bullet
     } else {
         super::peek_ammo_state(state, ctx.world, e).unwrap_or_default()
     };

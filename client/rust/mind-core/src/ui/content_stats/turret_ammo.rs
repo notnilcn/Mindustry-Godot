@@ -507,8 +507,8 @@ pub fn turret_block_stats(ctx: &StatCtx, id: BlockId, def: &BlockDef, stats: &mu
                 (TurretAmmo::Liquid(liquids), _) => {
                     add_liquid_ammo(ctx, stats, liquids);
                 }
-                (TurretAmmo::Power(bullet), _) => {
-                    add_power_ammo(ctx, stats, *bullet, &def.name);
+                (TurretAmmo::Power(ammo), _) => {
+                    add_power_ammo(ctx, stats, ammo.bullet, &def.name);
                 }
                 // Continuous turrets remove the reload/inaccuracy rows after
                 // the ammo (`ContinuousTurret.java:32-35`).

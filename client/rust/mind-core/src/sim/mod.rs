@@ -1231,6 +1231,13 @@ impl Sim {
         // `BeamNode.updateTile` -> `updateDirections` (T15): the directional
         // scan needs the grid and the power graph arena.
         self.refresh_beam_nodes();
+        // `ConsumeItemExplode.update` (T2): explosive generator fuel damages
+        // the building and fires `Trigger.blastGenerator`.
+        self.update_item_explode_consumers();
+        // `PowerGenerator.onExplosion`'s sim half (T4): damage, fires, props,
+        // fireballs and puddles (the fireballs drain in the fires/puddles pass
+        // below, matching `onExplosion`'s immediate `createNet`).
+        self.apply_generator_explosions();
         // `Groups.fires`/`Groups.puddles.update()` (`Logic.updateEntities`):
         // fires burn/spread and puddles evaporate/apply statuses every tick
         // (PAR-0091). Damage they deal is picked up by `resolve_deaths` below.

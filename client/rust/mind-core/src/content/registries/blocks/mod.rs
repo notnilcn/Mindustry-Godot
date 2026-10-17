@@ -1387,6 +1387,8 @@ pub struct BlockSpec {
     pub crush_damage_multiplier: Option<f32>,
     /// `Block.unitMoveBreakable` (deconstructed by moving units; plan 11).
     pub unit_move_breakable: Option<bool>,
+    /// `Block.depositCooldown` (`-1` = use the global rule; J04 T5).
+    pub deposit_cooldown: Option<f32>,
     /// `Block.teamPassable` (`AutoDoor`; pathfinder `teamPassable` bit).
     pub team_passable: Option<bool>,
     /// `Block.alwaysReplace` (plan 07 `Block.canReplace`).
@@ -1514,6 +1516,7 @@ impl Default for BlockSpec {
             crush_fragile: None,
             crush_damage_multiplier: None,
             unit_move_breakable: None,
+            deposit_cooldown: None,
             team_passable: None,
             always_replace: None,
             privileged: None,
@@ -2312,6 +2315,9 @@ pub struct BlockDef {
     pub crush_damage_multiplier: f32,
     /// `Block.unitMoveBreakable` (plan 11 unit deconstruct).
     pub unit_move_breakable: bool,
+    /// `Block.depositCooldown` (`-1` = use `Rules.itemDepositCooldown`;
+    /// `InputHandler.canDepositItem`, J04 T5).
+    pub deposit_cooldown: f32,
     /// `Block.teamPassable` (H01 T15 pathfinder bit; `AutoDoor.java:38`).
     pub team_passable: bool,
     /// `Block.alwaysReplace` (plan 07 `can_replace`).
@@ -2702,6 +2708,7 @@ impl BlockDef {
             crush_fragile: spec.crush_fragile.unwrap_or(false),
             crush_damage_multiplier: spec.crush_damage_multiplier.unwrap_or(1.0),
             unit_move_breakable: spec.unit_move_breakable.unwrap_or(false),
+            deposit_cooldown: spec.deposit_cooldown.unwrap_or(-1.0),
             team_passable: spec
                 .team_passable
                 .unwrap_or(spec.kind == BlockKind::AutoDoor),

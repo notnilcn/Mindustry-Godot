@@ -73,6 +73,7 @@ fn crafter_knobs(data: &BlockKindData) -> Option<CrafterDef> {
             craft_time: def.craft_time,
             output_items: Vec::new(),
             output_liquids: Vec::new(),
+            liquid_output_directions: Vec::new(),
             ignore_liquid_fullness: false,
         }),
         _ => None,
@@ -219,14 +220,21 @@ impl BuildingBehavior for CrafterBehavior {
                 }
             }
         }
-        // `dumpOutputs()` liquid half: `dumpLiquid(output.liquid, 2f, dir)`.
-        for (liquid, _) in &crafter.output_liquids {
+        // `dumpOutputs()` liquid half (`GenericCrafter.java:345-351`):
+        // `dir = liquidOutputDirections.length > i ? liquidOutputDirections[i]
+        // : -1`, then `dumpLiquid(output.liquid, 2f, dir)`.
+        for (index, (liquid, _)) in crafter.output_liquids.iter().enumerate() {
+            let dir = crafter
+                .liquid_output_directions
+                .get(index)
+                .copied()
+                .unwrap_or(-1) as i32;
             crate::world::blocks::liquid::movement::dump_liquid_proximity(
                 world,
                 e,
                 LiquidId::new(*liquid),
                 2.0,
-                -1,
+                dir,
             );
         }
     }
