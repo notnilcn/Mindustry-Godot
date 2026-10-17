@@ -274,7 +274,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/sim_core_determinism.checksums",
       "owner_plan": "05",
-      "sha256": "4c8326ce662925cb2976eeae0455e8f753a25cca2ed8b0b2d5e6bda60bae9093"
+      "sha256": "ed42f3eef130385a25c2ca9c6ac3994e69c201f19602cd0a983b308db21b254c",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3) - ecs::TeamId::SHARDED 0 -> 1, the canonical sharded id (game/Team.java: sharded = new Team(1, ...), derelict = Team 0); the scenario's placed blocks now belong to sharded instead of derelict. Verified: the test passes at ddeae35d^ and gives today's values at ddeae35d (mainline first-parent bisect -> merge 4137ea80, then its 6-commit branch). Samples 1-4 unchanged (no buildings yet); final checksum 155716ca1b7b210f -> f2631084cabb7526."
+      ]
     },
     {
       "id": "harness_sim_core_schedule_order",
@@ -429,7 +432,10 @@
       "kind": "scenario",
       "path": "scenarios/sim_core_determinism.json",
       "owner_plan": "05",
-      "sha256": "8d413688bfbe53aa40d02ed2eb26ea5d81ecc22abbf84b648f5328bc5ad411f3"
+      "sha256": "765ccc446186f121adacf13552e6ff73c70df666993b0f8111b1b1171d6986f0",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3) - ecs::TeamId::SHARDED 0 -> 1, the canonical sharded id (game/Team.java: sharded = new Team(1, ...), derelict = Team 0); the scenario's placed blocks now belong to sharded instead of derelict. Verified: the test passes at ddeae35d^ and gives today's values at ddeae35d (mainline first-parent bisect -> merge 4137ea80, then its 6-commit branch). Samples 1-4 unchanged (no buildings yet); final checksum 155716ca1b7b210f -> f2631084cabb7526."
+      ]
     },
     {
       "id": "scenario_sim_core_many_commands",

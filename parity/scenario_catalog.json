@@ -234,7 +234,7 @@
       "tier": "T1",
       "kind": "file",
       "path": "scenarios/sim_core_determinism.json",
-      "expect_checksum": "155716ca1b7b210f"
+      "expect_checksum": "f2631084cabb7526"
     },
     {
       "name": "sim_core_many_commands",
