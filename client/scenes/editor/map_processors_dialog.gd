@@ -84,8 +84,18 @@ func _build() -> void:
 	scroll.custom_minimum_size = Vector2(680.0, 300.0)
 	root.add(scroll).grow_x_axis().grow_y_axis()
 	_list = VBoxContainer.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_list)
+	# `cont.pane(t -> list = t)` has no grow (`MapProcessorsDialog.java:67-69`):
+	# the list is content-sized and centred (Arc cell default), so the
+	# `@editor.worldprocessors.none` block sits mid-dialog, lines left-aligned.
+	_list.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	# A ScrollContainer pins a non-filling child to x=0, so a full-width row
+	# centres the list (top-aligned: `cont.top()`).
+	# code-instantiated: the centring wrapper of the scan-driven list.
+	var center_row := HBoxContainer.new()
+	center_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	center_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(center_row)
+	center_row.add_child(_list)
 	_rebuild()
 
 

@@ -147,7 +147,9 @@ func _build() -> void:
 	# `cont.table(...)` / `cont.table(...)`: the banned + unbanned panes.
 	# `.fill().expandY().uniform()` (`BannedContentDialog.java:105,128`): the
 	# panes take the height but only their content width (`50 * cols` grids).
-	var panes := HBoxContainer.new()
+	# Portrait stacks the panes (`if(Core.graphics.isPortrait()) cont.row()`,
+	# `cell2.padTop(10f)`), landscape puts them side by side (`padLeft(10f)`).
+	var panes: BoxContainer = VBoxContainer.new() if _portrait() else HBoxContainer.new()
 	panes.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panes.add_theme_constant_override("separation", 10)
 	root.add(panes).grow_y_axis().pad(4)
@@ -212,7 +214,16 @@ func _pane(selected: bool) -> Control:
 ## `max(4, (screen - 300) / 50 / 2)` cells per pane.
 func _columns() -> int:
 	var width := get_viewport_rect().size.x
+	if _portrait():
+		# `max(4, (width - 100) / 50)` (`BannedContentDialog.java:155-156`).
+		return maxi(4, int((width - 100.0) / CELL))
 	return maxi(4, int((width - 300.0) / CELL / 2.0))
+
+
+## Arc `Core.graphics.isPortrait()`: taller than wide.
+func _portrait() -> bool:
+	var size := get_viewport_rect().size
+	return size.y > size.x
 
 
 ## `rebuildTables()`: refilter and repaint both panes.
@@ -298,8 +309,9 @@ func _filtered_rows() -> Array:
 			continue
 		if not _search.is_empty():
 			var name := str(row.get("name", ""))
-			if not name.to_lower().contains(_search) \
-					and not _localized(name).to_lower().contains(_search):
+			# `content.localizedName.toLowerCase().contains(contentSearch)` only
+			# (`BannedContentDialog.java:89,141`), never the internal name.
+			if not _localized(name).to_lower().contains(_search):
 				continue
 		out.append(row)
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
