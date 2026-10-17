@@ -316,3 +316,128 @@ their `variantShadowRegions` drop shadow even though the sprites exist
   J02 environment item rather than a new one, since the sprite regions are
   present and the gap is one draw call).
 - No chain/ledger files were edited by this session.
+
+# Wave C — J02 T2 (autotiled, tiled and liquid-overlay floors, session 5)
+
+Backfill for the one task left unstarted in wave A. Branch `parity/session-5`
+(worktree `Mindustry-Godot-session5`), display `:14`, bridge `7010`.
+
+## Per-task status (wave C)
+
+| Task | Status | Commit |
+|---|---|---|
+| T2 — Autotiled/tiled floors + liquid-overlay alpha | done (verified in-engine; fresh Java capture pending, see Blockers) | `847f0d4f` |
+
+## T2 — what changed
+
+Java spec: `Floor.drawBase` (`world/blocks/environment/Floor.java:249-262`:
+`drawMain` → `drawEdges` when `drawEdgeIn` → `drawOverlay` → the liquid-overlay
+redraw), `Floor.drawMain` (`:264-292`), `Floor.checkAutotileSame` (`:284-286`),
+the load-time naming (`:129-146` tiling, `:157-168` autotile slices / variant
+rows / mid slices), `TileBitmask.values` (`world/blocks/TileBitmask.java:8-25`,
+`load`/`loadVariants` `:27-44`), and `Draw.scl` (`Control.java:330`, the 4-px
+`scale_marker` → `tsize = 32` px per tiling cell).
+
+- `client/rust/mind-core/src/render/floor_main.rs` (new, Godot-free): `D8` (Arc
+  `Geometry.d8` order), `autotile_bits`, `autotile_index`, `autotile_region`
+  (plain `<name>-<bit>`, variant `<name>-<v+1>-<bit>`, the bit-13 mid rule
+  `<name>-13` / `<name>-mid-<i+1>`), and `tiling_split`/`tiling_block`/
+  `tiling_cell` (32-px cells, variant per block of tiles,
+  `[x % n][n - 1 - y % n]`).
+- `client/rust/mind-gdext/src/render/floor.rs`: `main_quad` implements the
+  three `drawMain` branches; `autotile_same` is `checkAutotileSame` (the
+  neighbour on the drawn def's layer, `blendGroup` equality, out-of-bounds =
+  different); `RegionAtlas::resolve_tiling` probes `<name>-tile1` for the
+  sprite-derived `tilingSize` (non-square splits fall back to the plain region,
+  matching `Floor.load:139-146`), picks
+  `randomSeed(pack(x / n, y / n), 0, tilingVariants - 1)` and crops the cell;
+  the liquid pass re-pushes the floor's own main quad at `1 - overlayAlpha`
+  (`Floor.java:257-261`) after the overlay.
+- Content: `BlockDef`/`BlockSpec` gain `autotile`, `autotile_variants`,
+  `autotile_mid_variants`, `tiling_variants`, `overlay_alpha` (default 0.65,
+  `Floor.java:54`), wired to `Blocks.java:843-897` (metal-tiles-1..13:
+  `autotile`, mid 9/2/6 on 7/8/13, variant rows 3/4 on 11/12),
+  `colored-floor` (`Blocks.java:945-949`) and `pooled-cryofluid`'s
+  `overlayAlpha = 0.35f` (`Blocks.java:300`); the mod JSON parser carries the
+  same fields.
+
+### T2 tests
+
+- `cargo test -p mind-core --lib render::floor_main` — 4 passed: the 47-slice
+  table pin (`VALUES` length 256, all 47 indices used, Java pins
+  `value(0) = 39`, `value(255) = 13`, `value(5) = 16`), the `d8` bit order, the
+  region naming for all four slice forms, and the tiling split/block/cell math.
+- `cargo test -p mind-core` — 2744 passed; the single failure is the
+  pre-existing `blocks_golden::family_counts_match_golden` (`other` 158 vs 164),
+  which also fails on the clean tree (reproduced with the change stashed) — a
+  golden drift from another wave, outside this task.
+- `cargo test -p mind-gdext` — 77 passed, including the new floor-quad tests:
+  tiling marker, autotile `39`/`24`/`2` for lone / SW-corner / NE-corner tiles,
+  the bit-13 mid variant, and the liquid redraw (`0xffff_ff59`).
+- `cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings` and
+  `cargo fmt --all -- --check` clean.
+
+### T2 in-engine evidence (`runs/20261017-s5-J02-T2/`)
+
+Built with `tools/build.sh`, full editor restart (`tools/session-play.sh 5`),
+then a 64×64 map staged through the scriptable editor path
+(`MindEditor.begin_new` → `set_draw_block("metal-tiles-1")` + fill → a 7×7
+square-brush `metal-tiles-7` patch at (20, 20) → `export_map`; `stage.sh` is
+the exact sequence), loaded with `MindSimHost.load_map_world`, camera at
+tile (20, 20), zoom 4 (= Java zoom 1 at 1152×648), sim paused.
+
+- `godot-02-metal-tiles-field-clean.png` — coherent `metal-tiles-1` stripe
+  field (interior tiles = `metal-tiles-1-13`) with the `metal-tiles-7` patch
+  bounded by edge slices and filled with the per-tile
+  `metal-tiles-7-mid-<i+1>` variants.
+- `godot-01-metal-tiles-field.png` — the same frame with HUD/pause overlay.
+- `godot-03-metal-tiles-11-variant-rows.png` — a `metal-tiles-11` field
+  (`autotileVariants = 3`, `Blocks.java:908-914`) rendered from the
+  `metal-tiles-11-<v>-13` rows with the per-tile variant pick.
+- Zero `floor region missing` warnings across the run (`godot_log`); the atlas
+  carries all 873 `metal-tiles-*` regions (`metal-tiles-{1,7,11}-*` and
+  `metal-tiles-7-mid-2..9` spot-checked).
+- `metal-tiles-j02t2.msav` / `metal-tiles-11.msav` are the exported maps (port
+  `MGRS` format).
+
+### Deviations (T2)
+
+- `TileBitmask.java` citation fix: the plan says `TileBitmask.java:12-24`; the
+  `values` table is actually `:8-25` (`load`/`loadVariants` `:27-44`).
+- Tiling `%` on negative tile coords: Java truncates (negative index), the port
+  uses `rem_euclid` (wraps). Map coords are never negative, so behaviour is
+  identical for loaded maps; the wrapper is deliberate.
+- Tiling is mod-only (no vanilla `tilingVariants`), so its in-engine coverage is
+  the unit test plus the `resolve_tiling` path; the plan's floor-quad test is
+  the `stone`-with-`tiling_variants = 2` quad test.
+- The liquid-overlay redraw is exercised by unit test only (no vanilla liquid
+  floor + overlay pair was staged in-engine in the time box); recorded, not a
+  blocker: the redraw reuses the base quad and only changes the alpha byte.
+- Harness note: a second `begin_new` + `edit_in_game()` while the play session
+  is already `playing` does not replace the world (the GDScript flow calls
+  `resume_editing()` first); the second map used `export_map` +
+  `load_map_world`.
+
+### Blockers (T2)
+
+- Fresh Java capture: **not taken**. The exported map is `MGRS`
+  (`maps/mod.rs:306`; only legacy `MSAV` *import* exists), so the map cannot be
+  handed to the Java client. Remaining Java step: Java client (display `:10`,
+  `parity-java-home`): `Maps → Editor → New Map` 64×64, floor `metal-tiles-1` +
+  Fill (G) click, then a 7×7 square Pencil (B, mode 1) patch of
+  `metal-tiles-7` at (20, 20), `Playtest`, zoom 1, capture the (20, 20) region;
+  it should match `godot-02-metal-tiles-field-clean.png` (same slice set).
+
+## Ledger changes to apply (wave C, J02 T2)
+
+- Mark the J02 T2 item resolved: the "no autotile/tiling/liquid-overlay
+  branches" gap is closed by `847f0d4f` (autotile incl. variant rows and
+  bit-13 mid slices, tiling, liquid redraw), verified in-engine on the
+  metal-tiles field / mid patch / metal-tiles-11 rows; attach the evidence dir
+  `runs/20261017-s5-J02-T2/`.
+- Keep the item open for the fresh Java capture only: the map is `MGRS`
+  (native), so the remaining step is re-authoring the same tiles in the Java
+  editor UI (coordinates and expected slices recorded above).
+- Note the `TileBitmask.java:12-24` → `:8-25` citation fix and the pre-existing
+  `blocks_golden::family_counts_match_golden` failure (not T2's).
+- No ledger/chain files were edited by this session.
