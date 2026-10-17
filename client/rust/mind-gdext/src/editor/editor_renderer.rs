@@ -51,6 +51,7 @@ use crate::render::floor::{
     PendingQuad, Quad, RegionAtlas, build_mesh, chunk_used_layers_sized, crop_uv, resolved_uv,
     tile_quads,
 };
+use crate::render::units::{UnitQuad, build_unit_mesh};
 
 /// Upstream `EditorRenderer.chunkSize` (60; the live world floor cache uses 30).
 const CHUNK: i32 = 60;
@@ -77,6 +78,11 @@ struct BlockIcon {
     cy: f32,
     /// `block.fullIcon` region name.
     region: String,
+    /// Block name (resolves the packed `block-<name>-full` icon).
+    name: String,
+    /// Drawn rotation in degrees (`EditorRenderer.java:230-232`:
+    /// `block.rotate && block.rotateDrawEditor ? build.rotdeg() : 0`).
+    rot: f32,
     /// Owning team (`-1` = no build; the border is skipped).
     team: i32,
 }
@@ -346,26 +352,30 @@ impl MindEditorRenderer {
             // (`building_cache`: `flip_v = true`) to stay upright.
             let border = atlas.resolve(TEAM_REGION);
             for icon in &icons {
-                let icon_region = atlas.resolve(&icon.region);
+                // `TextureRegion region = block.fullIcon` (`EditorRenderer.java:223`):
+                // the packed `block-<name>-full` icon, with the base region as
+                // the fallback when the packer emitted none.
+                let icon_region = atlas
+                    .resolve(&format!("block-{}-full", icon.name))
+                    .or_else(|| atlas.resolve(&icon.region));
                 let (icon_w, icon_h) = icon_region.as_ref().map_or((0.0, 0.0), |region| {
                     (region.w / SPRITE_SCALE, region.h / SPRITE_SCALE)
                 });
                 if let Some(region) = icon_region {
                     let (page, texture, uv) = resolved_uv(&Some(region.clone()));
-                    let quad = Quad {
+                    // Rotated quads go through the unit mesh builder (the same
+                    // y-up local space + v swap the unit pass uses).
+                    let quad = UnitQuad {
                         cx: icon.cx,
                         cy: icon.cy,
                         w: icon_w,
                         h: icon_h,
-                        u0: uv[0],
-                        v0: uv[1],
-                        u1: uv[2],
-                        v1: uv[3],
+                        rot: icon.rot,
+                        uv,
                         color: 0xffff_ffff,
-                        v_flip: true,
                     };
                     if let Some(blocks_node) = self.blocks.clone()
-                        && let Some(mesh) = build_mesh(&[quad], 0.0)
+                        && let Some(mesh) = build_unit_mesh(&[quad])
                     {
                         blocks.push(spawn_mesh(blocks_node, &mesh, texture, page));
                     }
@@ -467,10 +477,22 @@ fn collect_buildings(
             if !center {
                 continue;
             }
+            // `EditorRenderer.java:228-232`: the icon rotates only when the
+            // block is rotatable and `rotateDrawEditor` allows it.
+            let rot = match tile.build {
+                Some(entity) if def.rotate && def.rotate_draw_editor => ecs
+                    .0
+                    .get::<BuildingComp>(entity)
+                    .map(|comp| f32::from(comp.rot) * 90.0)
+                    .unwrap_or(0.0),
+                _ => 0.0,
+            };
             out.push(BlockIcon {
                 cx: tx as f32 * TILE + def.offset,
                 cy: ty as f32 * TILE + def.offset,
                 region: def.region.clone(),
+                name: def.name.clone(),
+                rot,
                 team,
             });
         }

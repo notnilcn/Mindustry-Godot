@@ -1399,6 +1399,17 @@ pub struct BlockSpec {
     pub replaceable: Option<bool>,
     /// `Block.quickRotate` (`canReplace` self-replacement; plan 07).
     pub quick_rotate: Option<bool>,
+    /// `Block.rotate` (`Block.java:124`): whether the block is rotatable.
+    /// `None` derives it from the block kind (`kind_rotates`).
+    pub rotate: Option<bool>,
+    /// `Block.rotateDraw` (`Block.java:126`): rotate the region while drawing.
+    pub rotate_draw: Option<bool>,
+    /// `Block.rotateDrawEditor` (`Block.java:128`): rotate the region in the map
+    /// editor.
+    pub rotate_draw_editor: Option<bool>,
+    /// `Block.visualRotationOffset` (`Block.java:130`): degrees added to the
+    /// drawn rotation (broken-plan rendering).
+    pub visual_rotation_offset: Option<f32>,
     /// Java `Block.subclass` proxy; plan 07 uses `kind` equality when unset.
     pub subclass: Option<BlockKind>,
     /// `GenericCrafter.craftTime` (ticks); plan 07 R2 reconciliation.
@@ -1522,6 +1533,10 @@ impl Default for BlockSpec {
             privileged: None,
             replaceable: None,
             quick_rotate: None,
+            rotate: None,
+            rotate_draw: None,
+            rotate_draw_editor: None,
+            visual_rotation_offset: None,
             subclass: None,
             craft_time: None,
             construct_time: None,
@@ -2240,6 +2255,14 @@ pub struct BlockDef {
     pub region: String,
     /// Multiblock draw offset (`Block.offset`).
     pub offset: f32,
+    /// `Block.rotate`: this block is rotatable.
+    pub rotate: bool,
+    /// `Block.rotateDraw`: the region rotates with the block (default true).
+    pub rotate_draw: bool,
+    /// `Block.rotateDrawEditor`: the region rotates in the editor (default true).
+    pub rotate_draw_editor: bool,
+    /// `Block.visualRotationOffset`: degrees added when drawing.
+    pub visual_rotation_offset: f32,
     /// Centered iteration offset (`Block.sizeOffset`).
     pub size_offset: i32,
     /// Stat data (`setStats`).
@@ -2665,6 +2688,10 @@ impl BlockDef {
             fog_radius: spec.fog_radius.unwrap_or(-1),
             region,
             offset: 0.0,
+            rotate: spec.rotate.unwrap_or_else(|| kind_rotates(spec.kind)),
+            rotate_draw: spec.rotate_draw.unwrap_or(true),
+            rotate_draw_editor: spec.rotate_draw_editor.unwrap_or(true),
+            visual_rotation_offset: spec.visual_rotation_offset.unwrap_or(0.0),
             size_offset: 0,
             stats: Vec::new(),
             bars: Vec::new(),
@@ -3474,6 +3501,57 @@ pub(crate) fn post_init_link(registry: &mut ContentRegistry) -> Result<(), Conte
     Ok(())
 }
 
+/// `Block.rotate`'s per-class default: the Java classes that set
+/// `rotate = true` in their constructors (`world/blocks/**`, 26 sites —
+/// turrets, unit factories, drills/wall-crafters, payload blocks, heat blocks,
+/// conduits, thrusters, character overlays, ducts/conveyors and bridges, the
+/// heater generator and the power diode).
+pub fn kind_rotates(kind: BlockKind) -> bool {
+    matches!(
+        kind,
+        BlockKind::Thruster
+            | BlockKind::ItemTurret
+            | BlockKind::LiquidTurret
+            | BlockKind::PowerTurret
+            | BlockKind::TractorBeamTurret
+            | BlockKind::PointDefenseTurret
+            | BlockKind::LaserTurret
+            | BlockKind::ContinuousLiquidTurret
+            | BlockKind::ContinuousTurret
+            | BlockKind::RepairTurret
+            | BlockKind::BuildTurret
+            | BlockKind::Conveyor
+            | BlockKind::ArmoredConveyor
+            | BlockKind::DirectionalUnloader
+            | BlockKind::DuctBridge
+            | BlockKind::DirectionLiquidBridge
+            | BlockKind::Duct
+            | BlockKind::DuctRouter
+            | BlockKind::StackRouter
+            | BlockKind::OverflowDuct
+            | BlockKind::StackConveyor
+            | BlockKind::HeatConductor
+            | BlockKind::HeatProducer
+            | BlockKind::Conduit
+            | BlockKind::ArmoredConduit
+            | BlockKind::Constructor
+            | BlockKind::PayloadConveyor
+            | BlockKind::PayloadRouter
+            | BlockKind::PayloadLoader
+            | BlockKind::PayloadUnloader
+            | BlockKind::PayloadMassDriver
+            | BlockKind::PayloadSource
+            | BlockKind::HeaterGenerator
+            | BlockKind::PowerDiode
+            | BlockKind::BeamDrill
+            | BlockKind::WallCrafter
+            | BlockKind::UnitAssembler
+            | BlockKind::UnitAssemblerModule
+            | BlockKind::UnitFactory
+            | BlockKind::Reconstructor
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3689,6 +3767,20 @@ mod tests {
         assert!(power_source.unlock.always_unlocked);
         assert!(get("target-dummy").unlock.always_unlocked);
         assert!(get("heat-source").unlock.always_unlocked);
+
+        // J08 T1: `Block.rotate`/`rotateDraw`/`rotateDrawEditor`/
+        // `visualRotationOffset` (`Block.java:124-130`) — the port derives
+        // `rotate` from the kind and takes the three draw fields from the spec.
+        let conveyor = get("conveyor");
+        assert!(conveyor.rotate && conveyor.rotate_draw && conveyor.rotate_draw_editor);
+        assert_eq!(conveyor.visual_rotation_offset, 0.0);
+        assert!(!get("copper-wall").rotate, "walls are not rotatable");
+        let centrifuge = get("coal-centrifuge");
+        assert!(
+            !centrifuge.rotate && !centrifuge.rotate_draw,
+            "Blocks.java:1318-1320 sets rotateDraw = false (a GenericCrafter is \
+             not rotatable, so the flag only matters for the editor draw)"
+        );
 
         let processor = get("world-processor");
         assert_eq!(processor.group, BlockGroup::Logic);

@@ -137,6 +137,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         always_unlocked: Some(true),
+        rotate_draw: Some(false),
         ..spec("heat-source", BlockKind::HeatProducer)
     })?;
 

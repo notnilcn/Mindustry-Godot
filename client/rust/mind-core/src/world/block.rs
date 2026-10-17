@@ -524,60 +524,11 @@ pub fn building_kind(data: &BlockKindData) -> BuildingKind {
 /// rotation-capable set of this plan's families plus the transport/turret kinds
 /// owned by plans 08/10.
 pub fn kind_rotates(kind: crate::content::BlockKind) -> bool {
-    use crate::content::BlockKind as K;
-    // `rotate = true` in `J/world/blocks` plus the `Blocks.java` per-block
-    // overrides applied in `BlockInstance::from_def` (`Block.java:122` default
-    // false): Thruster, Turret (all subclasses), Conveyor/ArmoredConveyor,
-    // DirectionalUnloader, DirectionBridge (Duct/DirectionLiquidBridge), Duct,
-    // DuctRouter/StackRouter, OverflowDuct, StackConveyor, HeatConductor,
-    // HeatProducer, Conduit/ArmoredConduit, BlockProducer (Constructor),
-    // PayloadConveyor/PayloadRouter, PayloadLoader/PayloadUnloader,
-    // PayloadMassDriver, PayloadSource, HeaterGenerator, PowerDiode, BeamDrill,
-    // WallCrafter, UnitAssembler, UnitAssemblerModule, UnitBlock
-    // (UnitFactory/Reconstructor).
-    matches!(
-        kind,
-        K::Thruster
-            | K::ItemTurret
-            | K::LiquidTurret
-            | K::PowerTurret
-            | K::TractorBeamTurret
-            | K::PointDefenseTurret
-            | K::LaserTurret
-            | K::ContinuousLiquidTurret
-            | K::ContinuousTurret
-            | K::RepairTurret
-            | K::BuildTurret
-            | K::Conveyor
-            | K::ArmoredConveyor
-            | K::DirectionalUnloader
-            | K::DuctBridge
-            | K::DirectionLiquidBridge
-            | K::Duct
-            | K::DuctRouter
-            | K::StackRouter
-            | K::OverflowDuct
-            | K::StackConveyor
-            | K::HeatConductor
-            | K::HeatProducer
-            | K::Conduit
-            | K::ArmoredConduit
-            | K::Constructor
-            | K::PayloadConveyor
-            | K::PayloadRouter
-            | K::PayloadLoader
-            | K::PayloadUnloader
-            | K::PayloadMassDriver
-            | K::PayloadSource
-            | K::HeaterGenerator
-            | K::PowerDiode
-            | K::BeamDrill
-            | K::WallCrafter
-            | K::UnitAssembler
-            | K::UnitAssemblerModule
-            | K::UnitFactory
-            | K::Reconstructor
-    )
+    // The canonical list lives with the block content (`rotate = true` in
+    // `J/world/blocks` plus the `Blocks.java` per-block overrides; `Block.java`
+    // defaults `rotate` to false). Kept as a thin alias so the sim's placement
+    // code and `BlockDef.rotate` cannot drift.
+    crate::content::registries::blocks::kind_rotates(kind)
 }
 
 /// Default lifecycle sounds by size (`Block.init`).

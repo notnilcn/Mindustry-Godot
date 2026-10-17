@@ -13,13 +13,16 @@ use bevy_ecs::world::World;
 use crate::content::BlockId;
 use crate::world::TilePos;
 
-/// Team identifier (P0: `sharded = 0`).
+/// Team identifier (`Team.derelict = 0`, `Team.sharded = 1` in
+/// `game/Team.java`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct TeamId(pub u8);
 
 impl TeamId {
-    /// Default team, matching Mindustry's `Team.sharded` id at P0.
-    pub const SHARDED: TeamId = TeamId(0);
+    /// `Team.sharded.id` (`game/Team.java`: `sharded = new Team(1, "sharded",
+    /// ...)`) — the canonical constant lives in [`crate::game::team::SHARDED`];
+    /// this alias keeps the ECS-side callers on the same id.
+    pub const SHARDED: TeamId = crate::game::team::SHARDED;
 }
 
 /// Monotonic per-entity sequence, used as the deterministic iteration key and the

@@ -2442,3 +2442,20 @@ Run: runs/20261014-s3-verify3/.
   sort, plus a deferred `_resort_tables()` at the end of the dialog's build.
 - Run: `runs/20261017-s3-J06-T7/`.
 
+
+## 2026-10-17 — session 3 (wave D): the editor walk needs the shell shown separately
+
+- Symptom: after opening a map through the editor's map-info dialog, the editor
+  view stayed covered by the dialog and the editor shell never appeared; a
+  direct `EditorDialog.show_dialog()` also looked inert because the
+  `DialogLayer` dialog was drawn on top.
+- Cause/recipe: the map-info dialog's `_open_in_editor` does
+  `begin_edit_map(path)` -> close the dialogs -> `EditorDialog.show_dialog()`.
+  Fast-forwarding that path with evals means closing both dialogs explicitly
+  (`MindUi.close_dialog("editor_map")` + `("editor_maps")`) after the shell is
+  shown; `MindEditor.begin_edit_map(<path from MindPreview.maps_list>)` alone
+  loads the map but never shows the shell.
+- Also: `git add runs/...` fails with "beyond a symbolic link" (the shared
+  `runs/` symlink) — evidence stays untracked there, which matches the
+  never-stage-runs rule.
+- Run: `runs/20261017-s3-J08-T1/`.

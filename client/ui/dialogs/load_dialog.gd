@@ -111,9 +111,11 @@ func _build() -> void:
 	_grid = MindTable.new()
 	root.add(_grid).grow_x_axis().grow_y_axis().pad(4)
 
-	# Bottom row: Back (`left`) and `@save.import` (`add`).
-	add_button(_t("@back"), _close, "left")
-	add_button(_t("@save.import"), _open_import, "add")
+	# Bottom row: `addCloseButton()` (210x64) then `buttons.button("@save.import",
+	# Icon.add, ...)` (`LoadDialog.java:47-48,59-60,197-226`), also 210x64.
+	add_close_button()
+	var import_button := add_button(_t("@save.import"), _open_import, "add", 210.0)
+	import_button.custom_minimum_size.y = 64.0
 
 	_rebuild_list()
 
@@ -125,6 +127,8 @@ func _add_filters(row: HBoxContainer) -> void:
 		var button := MindWidgets.icon_button(str(filter.get("icon", "")), "", "emptyTogglei")
 		button.toggle_mode = true
 		button.button_pressed = true
+		# `search.button(...).size(60f).padLeft(-12f)` (`LoadDialog.java:71-76`).
+		button.custom_minimum_size = Vector2(60.0, 60.0)
 		button.tooltip_text = _t("@mode.%s.name" % mode)
 		button.pressed.connect(_toggle_filter.bind(mode))
 		row.add_child(button)
@@ -202,9 +206,12 @@ func _build_card(slot: Dictionary) -> Button:
 	var title := HBoxContainer.new()
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	content.add_child(title)
-	var name_label := MindWidgets.styled_label(name, "techLabel")
+	# `title.add("[accent]" + slot.getName()).left().growX().width(230f).wrap()`
+	# (`LoadDialog.java:105-107`); the markup needs the BBCode translation.
+	var name_label := MindWidgets.styled_label(MindWidgets.markup_text("[accent]" + name), "techLabel")
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	name_label.custom_minimum_size.x = 230.0
 	name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	title.add_child(name_label)
 	# `modifyButton`: `Icon.save` autosave toggle, `Icon.trash` delete,
@@ -238,14 +245,14 @@ func _build_card(slot: Dictionary) -> Button:
 		image.texture = texture
 		image.thickness = 3.0
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		image.custom_minimum_size = Vector2(160, 100)
+		image.custom_minimum_size = Vector2(160, 160)
 		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		body.add_child(image)
 	else:
 		# code-instantiated: `nomap` placeholder glyph is an icon-font run.
 		var preview := Panel.new()
 		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		preview.custom_minimum_size = Vector2(160, 100)
+		preview.custom_minimum_size = Vector2(160, 160)
 		body.add_child(preview)
 		var map_icon := MindWidgets.glyph("map", 40)
 		map_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -256,6 +263,8 @@ func _build_card(slot: Dictionary) -> Button:
 	var meta := VBoxContainer.new()
 	meta.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	meta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `meta.defaults().padBottom(-2).left().width(280f)` (`LoadDialog.java:167`).
+	meta.custom_minimum_size.x = 280.0
 	body.add_child(meta)
 	for line in _meta_lines(slot):
 		var label := MindWidgets.label(line)
@@ -327,7 +336,7 @@ static func _slot_timestamp(entry: Variant) -> int:
 func _icon_action(icon_name: String, style: String, is_pressed: bool) -> Button:
 	# code-instantiated: card action buttons are per-slot (no static scene).
 	var button := MindWidgets.icon_button(icon_name, "", style)
-	button.custom_minimum_size = Vector2(34, 34)
+	button.custom_minimum_size = Vector2(40, 40)
 	if style == "emptyTogglei":
 		button.toggle_mode = true
 		button.button_pressed = is_pressed
@@ -349,14 +358,17 @@ func _meta_lines(slot: Dictionary) -> Array:
 	var date := str(slot.get("date", ""))
 	if date.is_empty() and int(slot.get("timestamp_ms", 0)) > 0:
 		date = _format_date(int(slot.get("timestamp_ms", 0)))
+	# `String color = "[lightgray]"` (`LoadDialog.java:147`): every meta value is
+	# light grey, the mode name stays white.
+	var color := "[lightgray]"
 	var lines := [
-		_fmt("@save.map", [map_name]),
-		"%s /%s" % [mode, _fmt("@save.wave", [wave])],
-		_fmt("@save.autosave", [_t("@on" if autosave else "@off")]),
-		_fmt("@save.playtime", [playtime]),
+		_fmt("@save.map", [color + map_name]),
+		"%s /%s" % [mode, _fmt("@save.wave", [color + str(wave)])],
+		_fmt("@save.autosave", [color + _t("@on" if autosave else "@off")]),
+		_fmt("@save.playtime", [color + playtime]),
 	]
 	if not date.is_empty():
-		lines.append(date)
+		lines.append(MindWidgets.markup_text(color + date))
 	return lines
 
 
@@ -503,7 +515,7 @@ func _close() -> void:
 
 ## Bundle lookup with `{0}`-style substitution (`Bundle.format`).
 func _fmt(key: String, args: Array) -> String:
-	var result := _t(key)
-	for index in args.size():
-		result = result.replace("{%d}" % index, str(args[index]))
-	return result
+	# `Core.bundle.format` + the BBCode translation: the meta lines carry
+	# Mindustry colour markup (`[lightgray]`) that `MindWidgets.label` renders as
+	# BBCode (`LoadDialog.java:166-178`).
+	return MindWidgets.markup_format(key, args)

@@ -75,7 +75,7 @@ mod status;
 mod turret;
 mod unit_build;
 mod unit_overlays;
-mod units;
+pub(crate) mod units;
 mod weather;
 
 pub use blocks::BlockRenderer;
