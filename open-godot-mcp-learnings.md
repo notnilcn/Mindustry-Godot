@@ -2459,3 +2459,14 @@ Run: runs/20261014-s3-verify3/.
   `runs/` symlink) — evidence stays untracked there, which matches the
   never-stage-runs rule.
 - Run: `runs/20261017-s3-J08-T1/`.
+
+## 2026-10-17 — round-L twin (runs/20261017-L-twin): Godot text entry and hover need real input
+
+- `godot_input key` events (`{"key":"S","pressed":true}` …) focus-and-type into a `LineEdit` inserts nothing (no
+  `unicode` on the synthetic event); pynput typing goes to the X-focused window, which on `:10` stays the Java client
+  (the embedded game window never becomes `_NET_ACTIVE_WINDOW`). Only `field.text_changed.emit("…")` reached the
+  search logic (staging, not a real-input check). Fix proposed in docs/parity-plans/L01 T4.
+- Real wheel scrolling (pynput `mouse.scroll` with the real pointer over the game window via `GP`) scrolls the Custom
+  Game grid; the round-K "grid does not scroll" finding was an injected-input artefact.
+- An eval on a wrong dialog node name (`DialogLayer/custom_game`; the node is `custom`) timed out; the gmcp watchdog
+  restarted the game (stop+play) automatically. List `DialogLayer` children first.

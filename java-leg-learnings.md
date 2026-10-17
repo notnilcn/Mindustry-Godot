@@ -828,3 +828,11 @@ Run: runs/20261014-s3-verify3/ (java-*.png).
 - Workaround: move the window once more (`window_ctl.py move Mindustry 60 100` -> real origin (65,129)), then
   compute the origin per click from `xwininfo -name Mindustry` (never from `window_ctl.py`'s printout); clicks
   landed from then on.
+
+## 2026-10-17 — round-L twin (runs/20261017-L-twin): first Java click after the pointer crossed the Godot window is swallowed
+
+- Symptom: `JW 133 480` on the Custom Game sandbox card (and once on Play) returned ok but the frame did not
+  change; `_NET_ACTIVE_WINDOW` was already the Java window. A `JM` hover on the same spot followed by the same `JW`
+  landed every time.
+- Workaround: hover first (`JM x y; sleep 0.4; JW x y`); round L wrapped this as `JWC`. Proposed default for
+  `tools/twin.sh` JW in docs/parity-plans/L08 T5.
