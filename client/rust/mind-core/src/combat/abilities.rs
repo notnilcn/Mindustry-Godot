@@ -357,15 +357,16 @@ fn update_ability(
             state.timer += 1.0;
             if state.timer >= SUPPRESSION_MAX_DELAY {
                 let (rx, ry) = rotate_offset(x, y, spec.x, spec.y, unit_rotation(world, entity));
-                for (_, target) in buildings_in_radius(world, rx, ry, spec.range) {
-                    let enemy = world
-                        .get::<TeamComp>(target)
-                        .is_some_and(|comp| comp.team != team);
-                    if enemy && let Some(mut building) = world.get_mut::<Building>(target) {
-                        building.heal_suppression_time =
-                            building.heal_suppression_time.max(spec.reload + 1.0);
-                    }
-                }
+                // `Damage.applySuppression(unit.team, rx, ry, range, reload, ...)`
+                // (absolute `Time.time + reload + 1`; L06 T3).
+                crate::world::blocks::defense::projectors::apply_suppression(
+                    world,
+                    team,
+                    rx,
+                    ry,
+                    spec.range,
+                    spec.reload,
+                );
                 state.timer = 0.0;
             }
         }

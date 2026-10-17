@@ -393,6 +393,8 @@ impl<'a> ContentJsonParser<'a> {
             ("drawEdgeOut", &mut spec.draw_edge_out),
             // `Floor.autotile` (`Floor.java:82-90`; J02 T2).
             ("autotile", &mut spec.autotile),
+            // `Turret.playerControllable` (`Turret.java:103`; L06 T2).
+            ("playerControllable", &mut spec.player_controllable),
         ] {
             if let Some(value) = field_bool(object, field) {
                 *target = Some(value);
@@ -2361,6 +2363,31 @@ mod tests {
             Some("sand-boulder")
         );
         assert_eq!(decoration("mods-bad-floor").as_deref(), Some("air"));
+    }
+
+    /// L06 T2: `Turret.playerControllable` (`Turret.java:103`) parses from
+    /// mod JSON and defaults to true.
+    #[test]
+    fn turret_player_controllable_parses() {
+        let mut reg = registry();
+        let (_, fixed) = parse(
+            &mut reg,
+            ContentType::Block,
+            "fixed-turret",
+            r#"{"type":"ItemTurret","playerControllable":false}"#,
+        );
+        assert!(fixed.is_ok(), "{fixed:?}");
+        let (_, plain) = parse(
+            &mut reg,
+            ContentType::Block,
+            "plain-turret",
+            r#"{"type":"ItemTurret"}"#,
+        );
+        assert!(plain.is_ok(), "{plain:?}");
+        let flag = |name: &str| reg.block_by_name(name).map(|def| def.player_controllable);
+        assert_eq!(flag("mods-fixed-turret"), Some(false));
+        assert_eq!(flag("mods-plain-turret"), Some(true));
+        assert_eq!(flag("duo"), Some(true), "no vanilla turret clears it");
     }
 
     #[test]

@@ -3,7 +3,10 @@
 
 //! `Router` build behavior (`world/blocks/distribution/Router.java`) — plan 08
 //! M2. Per-item rotation cursors, `lastItem`/`lastInput` and the `overflowGate`
-//! source skip. The player-controlled block-unit branch is plan 11 (L8).
+//! source skip. `RouterBuild implements ControlBlock` (`Router.java:30-53`):
+//! a size-1 router has a lazily created `block` proxy unit the player can
+//! possess; while possessed it routes only toward the aimed side, and only
+//! while shooting (`Router.java:102-117`; L06 T2).
 
 use bevy_ecs::component::Component;
 use bevy_ecs::entity::Entity;
@@ -29,6 +32,9 @@ pub struct RouterBuild {
     pub last_input: Option<Entity>,
     /// Accumulated routing time (`time`).
     pub time: f32,
+    /// `ControlBlock.unit()` proxy (`unit`, `Router.java:35-44`): created on
+    /// first use by `Sim::control_block_unit_id`, never added to the unit pass.
+    pub block_unit: Option<Entity>,
 }
 
 impl Default for RouterBuild {
@@ -38,8 +44,17 @@ impl Default for RouterBuild {
             last_item: None,
             last_input: None,
             time: 0.0,
+            block_unit: None,
         }
     }
+}
+
+/// `isControlled()` (`ControlBlock.java:9-11`): the proxy holds the player.
+pub fn router_controlled_unit(world: &World, e: Entity) -> Option<Entity> {
+    world
+        .get::<RouterBuild>(e)
+        .and_then(|router| router.block_unit)
+        .filter(|unit| world.get::<crate::entities::comp::Player>(*unit).is_some())
 }
 
 fn is_overflow_gate(block: BlockId, table: &BlockTable) -> bool {
@@ -78,6 +93,15 @@ impl BuildingBehavior for RouterBehavior {
         true
     }
 
+    /// The proxy is never in `Groups.unit`; it goes with the building.
+    fn on_removed(&self, world: &mut World, e: Entity) {
+        if let Some(unit) = world.get::<RouterBuild>(e).and_then(|r| r.block_unit)
+            && world.get_entity(unit).is_ok()
+        {
+            let _ = world.despawn(unit);
+        }
+    }
+
     fn update_tile(&self, world: &mut World, e: Entity) {
         let (mut last_item, last_input, mut time) = {
             let Some(router) = world.get::<RouterBuild>(e) else {
@@ -88,9 +112,10 @@ impl BuildingBehavior for RouterBehavior {
         if last_item.is_none() && transfer::item_total(world, e) > 0 {
             last_item = transfer::first_item(world, e);
         }
+        let controlled = router_controlled_unit(world, e).is_some();
         if let Some(item) = last_item {
             time += 1.0 / self.speed * delta(world, e);
-            let target = self.get_tile_target(world, e, item, last_input, false, false);
+            let target = self.get_tile_target(world, e, item, last_input, false, controlled);
             // Java: `time >= 1 || !(target.block instanceof Router || target.block.instantTransfer)`.
             let deferred = target
                 .and_then(|t| world.get::<Building>(t))
@@ -109,7 +134,7 @@ impl BuildingBehavior for RouterBehavior {
             if let Some(target) = target
                 && (time >= 1.0 || !deferred)
             {
-                self.get_tile_target(world, e, item, last_input, true, false);
+                self.get_tile_target(world, e, item, last_input, true, controlled);
                 transfer::dispatch_handle_item(world, target, e, item);
                 if let Some(mut items) = world.get_mut::<ItemModule>(e) {
                     items.remove(item, 1);
@@ -181,6 +206,54 @@ impl BuildingBehavior for RouterBehavior {
 }
 
 impl RouterBehavior {
+    /// `getTileTarget`'s possessed branch (`Router.java:102-117`): sync the
+    /// proxy (`health`, `ammo`, `team`, position), take the aimed quadrant
+    /// `mod((angleTo(aim) + 45) / 90, 4)` and, only while shooting, the
+    /// accepting `nearby(angle)` building; otherwise nothing.
+    fn controlled_target(&self, world: &mut World, e: Entity, item: ItemId) -> Option<Entity> {
+        let unit = router_controlled_unit(world, e)?;
+        let pos = world.get::<crate::entities::comp::Pos>(e).copied()?;
+        let team = world
+            .get::<crate::entities::comp::TeamComp>(e)
+            .map(|t| t.team);
+        let health = world
+            .get::<crate::entities::comp::Health>(e)
+            .map(|h| h.health);
+        if let Some(mut unit_pos) = world.get_mut::<crate::entities::comp::Pos>(unit) {
+            unit_pos.x = pos.x;
+            unit_pos.y = pos.y;
+        }
+        if let (Some(team), Some(mut unit_team)) =
+            (team, world.get_mut::<crate::entities::comp::TeamComp>(unit))
+        {
+            unit_team.team = team;
+        }
+        if let (Some(health), Some(mut unit_health)) =
+            (health, world.get_mut::<crate::entities::comp::Health>(unit))
+        {
+            unit_health.health = health;
+        }
+        let (aim_x, aim_y, shooting) = world
+            .get_resource::<crate::ai::types::player::PlayerInput>()
+            .map(|input| (input.aim_x, input.aim_y, input.shooting))
+            .unwrap_or((pos.x, pos.y, false));
+        if !shooting {
+            return None;
+        }
+        // `Angles.angle(x, y, aimX, aimY)` in [0, 360).
+        let mut angle = (aim_y - pos.y).atan2(aim_x - pos.x).to_degrees();
+        if angle < 0.0 {
+            angle += 360.0;
+        }
+        let quadrant = (((angle + 45.0) / 90.0) as i32).rem_euclid(4) as u8;
+        let tile = world.get::<Building>(e)?.tile;
+        let (dx, dy) = crate::world::blocks::autotiler::d4(quadrant);
+        let other = world
+            .get_resource::<crate::world::TileBuilds>()?
+            .get(tile.x() as i32 + dx, tile.y() as i32 + dy)?;
+        transfer::dispatch_accept_item(world, other, e, item).then_some(other)
+    }
+
     /// `RouterBuild.getTileTarget`. `set` advances the per-item cursor.
     fn get_tile_target(
         &self,
@@ -192,7 +265,7 @@ impl RouterBehavior {
         controlled: bool,
     ) -> Option<Entity> {
         if controlled {
-            return None; // L8: block units are plan 11.
+            return self.controlled_target(world, e, item);
         }
         let len = world
             .get::<Building>(e)

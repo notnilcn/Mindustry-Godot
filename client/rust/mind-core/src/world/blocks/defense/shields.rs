@@ -525,6 +525,10 @@ pub fn update_mend_projector_world(
         crate::world::blocks::defense::projectors::buildings_in_range(world, e, real_range);
     let mut any = false;
     for target in targets {
+        // `b -> b.damaged() && !b.isHealSuppressed()` (`MendProjector.java:112`).
+        if crate::world::blocks::defense::projectors::is_heal_suppressed(world, target) {
+            continue;
+        }
         let Some(mut health) = world.get_mut::<Health>(target) else {
             continue;
         };

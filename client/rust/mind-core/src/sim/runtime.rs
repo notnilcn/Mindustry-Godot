@@ -1298,6 +1298,57 @@ impl Sim {
         }
     }
 
+    /// `UnitAssemblerBuild.updateTile`'s `wasOccupied = checkSolid(spawn,
+    /// false)` (`UnitAssembler.java:515`), computed before the scheduled
+    /// building pass because the behavior cannot see the live grid (L06 T1).
+    pub(crate) fn refresh_assembler_occupancy(&mut self) {
+        use crate::world::blocks::units::UnitAssembler;
+        use crate::world::blocks::units::behavior::{assembler_check_solid, assembler_spawn_at};
+        let assemblers: Vec<Entity> = {
+            let mut query = self
+                .ecs
+                .0
+                .query_filtered::<Entity, bevy_ecs::query::With<UnitAssembler>>();
+            query.iter(&self.ecs.0).collect()
+        };
+        if assemblers.is_empty() {
+            return;
+        }
+        let mut results: Vec<(Entity, bool)> = Vec::with_capacity(assemblers.len());
+        {
+            let world = &self.ecs.0;
+            let Some(runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+            else {
+                return;
+            };
+            let content = &runtime.content;
+            let table = world.get_resource::<crate::world::block::BlockTable>();
+            for entity in assemblers {
+                let Some(state) = world.get::<UnitAssembler>(entity) else {
+                    continue;
+                };
+                let Some(output) = state.plan().and_then(|plan| content.unit(plan.unit)) else {
+                    continue;
+                };
+                let size = world
+                    .get::<crate::entities::comp::Building>(entity)
+                    .and_then(|building| table.and_then(|table| table.get(building.block)))
+                    .map_or(1, |instance| instance.def.size);
+                let Some(spawn) = assembler_spawn_at(world, entity, state.area_size, size) else {
+                    continue;
+                };
+                let occupied =
+                    assembler_check_solid(world, &self.grid, content, output, spawn, false);
+                results.push((entity, occupied));
+            }
+        }
+        for (entity, occupied) in results {
+            if let Some(mut state) = self.ecs.0.get_mut::<UnitAssembler>(entity) {
+                state.was_occupied = occupied;
+            }
+        }
+    }
+
     /// `ThermalGeneratorBuild.onProximityAdded` rescan (T14): the behavior hook
     /// cannot see the live grid (`Sim.grid` is not an ECS resource), so the
     /// whole floor-attribute sum is recomputed for every registered thermal

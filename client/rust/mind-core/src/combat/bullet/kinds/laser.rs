@@ -9,7 +9,7 @@
 use bevy_ecs::entity::Entity;
 
 use super::super::behavior::BulletBehavior;
-use super::super::{CombatCtx, HIT, collide_line_bullet};
+use super::super::{CombatCtx, HIT, collide_laser};
 use super::motion;
 
 /// `LaserBulletType` behavior.
@@ -32,16 +32,17 @@ impl BulletBehavior for LaserBehavior {
         };
         let pierce_cap = def.pierce_cap;
         let large = def.large_hit;
+        let laser = def.laser_absorb;
         let Some(((x, y), _vel, rotation)) = motion(ctx, b) else {
             return;
         };
         // `LaserBulletType.init` -> `Damage.collideLaser(b, length, largeHit,
-        // laserAbsorb, pierceCap)` (`LaserBulletType.java:68`). The
-        // `findPierceLength`/`findLaserLength` length pre-pass is not ported
-        // (G01 T3 keeps the existing no-`findLength` behaviour).
-        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, large, pierce_cap);
+        // laserAbsorb, pierceCap)` (`LaserBulletType.java:68`): the
+        // `findPierceLength`/`findLaserLength` pre-pass cuts the beam at the
+        // pierce cap / an enemy absorber (plastanium walls); `fdata` = the
+        // result length (L06 T3).
+        let _ = collide_laser(ctx, b, x, y, rotation, length, large, laser, pierce_cap);
         if let Some(mut bullet) = ctx.world.get_mut::<super::super::Bullet>(b) {
-            bullet.fdata = length;
             bullet.set(HIT);
         }
     }

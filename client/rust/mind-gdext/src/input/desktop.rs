@@ -2088,8 +2088,8 @@ impl DesktopBridge {
         // `build instanceof ControlBlock cont && cont.canControl() && build.team
         // == player.team() && cont.unit() != player.unit() && cont.unit().isAI()`
         // -> `cont.unit()`; the sim resolves the turret's proxy `block` unit.
-        if let (Some(host), Some((x, y))) = (self.host.clone(), self.cursor_tile())
-            && let Some(id) = host.bind().control_block_unit_id(x, y)
+        if let (Some(mut host), Some((x, y))) = (self.host.clone(), self.cursor_tile())
+            && let Some(id) = host.bind_mut().control_block_unit_id(x, y)
         {
             return Some(id);
         }

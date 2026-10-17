@@ -267,13 +267,191 @@ pub(crate) fn rail_handle_pierce(
     }
 }
 
+/// Whether the building absorbs lasers (`BuildingComp.absorbLasers()` =
+/// `block.absorbLasers`, e.g. the plastanium walls, `Blocks.java:1735,1744`).
+fn absorbs_lasers(ctx: &CombatCtx<'_>, build: Entity) -> bool {
+    ctx.world
+        .get::<crate::entities::comp::Building>(build)
+        .and_then(|comp| ctx.content.block(comp.block))
+        .is_some_and(|def| def.absorb_lasers)
+}
+
+/// `Damage.findLaserLength` (`Damage.java:165-174`): the ray (`World.raycast`)
+/// stops at the first enemy laser-absorbing building; the length becomes
+/// `max(6, dst(tile.worldx, tile.worldy))`, else the full `length`.
+pub fn find_laser_length(
+    ctx: &CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    angle: f32,
+    length: f32,
+) -> f32 {
+    let team = ctx.team(bullet);
+    let rad = angle.to_radians();
+    let (x2, y2) = (x + rad.cos() * length, y + rad.sin() * length);
+    let ts = crate::config::TILESIZE as f32;
+    let mut found: Option<(i32, i32)> = None;
+    crate::world::raycast::raycast_each(
+        to_tile(x),
+        to_tile(y),
+        to_tile(x2),
+        to_tile(y2),
+        |tx, ty| {
+            let Some(tile) = ctx.grid.tiles.getn(tx, ty) else {
+                return false;
+            };
+            // `furthest.team() != b.team && furthest.build != null &&
+            // furthest.build.absorbLasers()`.
+            let Some(build) = tile.build else {
+                return false;
+            };
+            let tile_team = ctx.world.get::<TeamComp>(build).map_or(0, |t| t.team);
+            if tile_team != team && absorbs_lasers(ctx, build) {
+                found = Some((tx, ty));
+                return true;
+            }
+            false
+        },
+    );
+    match found {
+        Some((tx, ty)) => {
+            let (wx, wy) = (tx as f32 * ts, ty as f32 * ts);
+            ((wx - x).powi(2) + (wy - y).powi(2)).sqrt().max(6.0)
+        }
+        None => length,
+    }
+}
+
+/// `Damage.findPierceLength(b, pierceCap, laser, length)`
+/// (`Damage.java:180-218`): every enemy building on the `World.raycast` ray
+/// (the ray stops at a laser absorber when `laser`, capping the length at
+/// its distance) and every enemy unit whose hitbox the segment crosses adds
+/// its distance; with at least `pierceCap` blockers the length is the
+/// `pierceCap`-th one (`max(6, d)`), never past an absorber.
+#[allow(clippy::too_many_arguments)]
+pub fn find_pierce_length(
+    ctx: &CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    angle: f32,
+    length: f32,
+    pierce_cap: i32,
+    laser: bool,
+) -> f32 {
+    let Some(state) = ctx.bullet(bullet).cloned() else {
+        return length;
+    };
+    let Some(def) = ctx.content.bullet(state.def) else {
+        return length;
+    };
+    let (hit_under, piercing) = (def.hit_under, def.pierce);
+    let team = ctx.team(bullet);
+    let rad = angle.to_radians();
+    let (x2, y2) = (x + rad.cos() * length, y + rad.sin() * length);
+    let mut max_dst = f32::INFINITY;
+    let mut distances: Vec<f32> = Vec::new();
+    let dst = |px: f32, py: f32| ((px - x).powi(2) + (py - y).powi(2)).sqrt();
+    if def.collides_ground && def.collides_tiles {
+        crate::world::raycast::raycast_each(
+            to_tile(x),
+            to_tile(y),
+            to_tile(x2),
+            to_tile(y2),
+            |tx, ty| {
+                let Some(build) = ctx.grid.tiles.getn(tx, ty).and_then(|tile| tile.build) else {
+                    return false;
+                };
+                let build_team = ctx.world.get::<TeamComp>(build).map_or(0, |t| t.team);
+                // `build.team != b.team && build.collide(b) &&
+                // b.checkUnderBuild(build, x * tilesize, y * tilesize)`.
+                if build_team == team
+                    || !passes_under_build(ctx, &state, bullet, build, hit_under, piercing, team)
+                {
+                    return false;
+                }
+                let Some(pos) = ctx.world.get::<Pos>(build).copied() else {
+                    return false;
+                };
+                let d = dst(pos.x, pos.y);
+                distances.push(d);
+                if laser && absorbs_lasers(ctx, build) {
+                    max_dst = max_dst.min(d);
+                    return true;
+                }
+                false
+            },
+        );
+    }
+    // `Units.nearbyEnemies(b.team, rect, ...)`: hitbox vs segment, `u.dst(b)`.
+    for (_, _, unit) in line_units(ctx, bullet, x, y, x2, y2, 0.0) {
+        if let Some(pos) = ctx.world.get::<Pos>(unit) {
+            distances.push(dst(pos.x, pos.y));
+        }
+    }
+    distances.sort_by(|a, b| a.total_cmp(b));
+    let capped = if pierce_cap <= 0 || (distances.len() as i32) < pierce_cap {
+        length
+    } else {
+        distances[(pierce_cap - 1) as usize].max(6.0)
+    };
+    capped.min(max_dst)
+}
+
+/// `Damage.findLength` (`Damage.java:155-163`): the pierce pre-pass when the
+/// bullet has a pierce cap, else the laser-absorber pass for lasers.
+#[allow(clippy::too_many_arguments)]
+pub fn find_length(
+    ctx: &CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    angle: f32,
+    length: f32,
+    laser: bool,
+    pierce_cap: i32,
+) -> f32 {
+    if pierce_cap > 0 {
+        find_pierce_length(ctx, bullet, x, y, angle, length, pierce_cap, laser)
+    } else if laser {
+        find_laser_length(ctx, bullet, x, y, angle, length)
+    } else {
+        length
+    }
+}
+
+/// `Damage.collideLaser` (`Damage.java:221-228`): `findPierceLength` first,
+/// then `collideLine` over the result; `fdata` is the result length (the beam
+/// draw length).
+#[allow(clippy::too_many_arguments)]
+pub fn collide_laser(
+    ctx: &mut CombatCtx<'_>,
+    bullet: Entity,
+    x: f32,
+    y: f32,
+    angle: f32,
+    length: f32,
+    large: bool,
+    laser: bool,
+    pierce_cap: i32,
+) -> f32 {
+    let result = find_pierce_length(ctx, bullet, x, y, angle, length, pierce_cap, laser);
+    collide_line_bullet(ctx, bullet, x, y, angle, result, large, laser, pierce_cap);
+    if let Some(mut b) = ctx.world.get_mut::<Bullet>(bullet) {
+        b.fdata = result;
+    }
+    result
+}
+
 /// `Damage.collideLine` (`Damage.java:256-337`) for a live bullet.
 ///
 /// Damages enemy units **and** buildings along the ray in `dst2` order while
-/// `bullet.damage > 0` and under the pierce cap; sets `bullet.fdata` to the
-/// beam length (Java sets it after `findLength`; this port keeps the existing
-/// no-`findLength` behaviour) and returns the final value. `large` adds the
-/// `Geometry.d4` neighbour buildings unconditionally (`largeHit`).
+/// `bullet.damage > 0` and under the pierce cap. The length is first cut by
+/// `findLength(hitter, length, laser, pierceCap)` (`Damage.java:257`: pierce
+/// cap or laser absorbers, L06 T3) and stored in `bullet.fdata`, which is
+/// returned. `large` adds the `Geometry.d4` neighbour buildings
+/// unconditionally (`largeHit`).
 #[allow(clippy::too_many_arguments)]
 pub fn collide_line_bullet(
     ctx: &mut CombatCtx<'_>,
@@ -283,8 +461,10 @@ pub fn collide_line_bullet(
     angle: f32,
     length: f32,
     large: bool,
+    laser: bool,
     pierce_cap: i32,
 ) -> f32 {
+    let length = find_length(ctx, bullet, x, y, angle, length, laser, pierce_cap);
     let Some(state) = ctx.bullet(bullet).cloned() else {
         return length;
     };
@@ -493,5 +673,86 @@ pub fn linecast_enemy(
         (Some(b), None) => Some(b),
         (None, Some(u)) => Some(u),
         (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod length_tests {
+    use crate::combat::harness::CombatHarness;
+
+    fn fdata(harness: &CombatHarness, bullet: bevy_ecs::entity::Entity) -> f32 {
+        harness
+            .build
+            .world
+            .get::<super::Bullet>(bullet)
+            .map_or(-1.0, |b| b.fdata)
+    }
+
+    /// L06 T3: `Damage.collideLaser` -> `findPierceLength(..., laser = true)`
+    /// (`Damage.java:180-218,221-228`): an enemy laser absorber (plastanium
+    /// wall, `absorbLasers`, `Blocks.java:1735`) cuts the beam; the wall
+    /// behind it is untouched and `fdata` is the cut length.
+    #[test]
+    fn laser_stops_at_enemy_absorber() {
+        let mut harness = CombatHarness::new(48, 16, 5);
+        let plast = harness
+            .content()
+            .block_id("plastanium-wall")
+            .expect("plastanium-wall");
+        let copper = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(12, 8, plast, 0, true));
+        assert!(harness.place(16, 8, copper, 0, true));
+        let full = harness.building_health_at(16, 8);
+        let (x, y) = CombatHarness::tile_origin(4, 8);
+        let laser = harness.spawn_bullet("laser", x, y, 0.0, 1).expect("laser");
+        let cut = fdata(&harness, laser);
+        assert!(
+            (cut - 64.0).abs() < 0.5,
+            "beam cut at the absorber (12 * 8 - 32 = 64), got {cut}"
+        );
+        assert!(
+            harness.building_health_at(12, 8) < 190.0 * 4.0,
+            "absorber hit"
+        );
+        assert_eq!(harness.building_health_at(16, 8), full, "nothing behind it");
+    }
+
+    /// Without an absorber the laser keeps its full length and pierces.
+    #[test]
+    fn laser_without_absorber_keeps_length() {
+        let mut harness = CombatHarness::new(48, 16, 5);
+        let copper = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(12, 8, copper, 0, true));
+        assert!(harness.place(16, 8, copper, 0, true));
+        let full = harness.building_health_at(16, 8);
+        let (x, y) = CombatHarness::tile_origin(4, 8);
+        let laser = harness.spawn_bullet("laser", x, y, 0.0, 1).expect("laser");
+        assert_eq!(fdata(&harness, laser), 200.0);
+        assert!(
+            harness.building_health_at(16, 8) < full,
+            "pierces both walls"
+        );
+    }
+
+    /// `findPierceLength` with `pierceCap` (`Damage.java:217`): the rail's
+    /// line length becomes the `pierceCap`-th blocker's distance.
+    #[test]
+    fn pierce_cap_cuts_rail_length() {
+        let mut harness = CombatHarness::new(64, 16, 5);
+        let copper = harness.content().block_id("copper-wall").expect("wall");
+        for x in [12, 14, 16, 18] {
+            assert!(harness.place(x, 8, copper, 0, true));
+        }
+        let full = harness.building_health_at(18, 8);
+        let (x, y) = CombatHarness::tile_origin(4, 8);
+        let rail = harness.spawn_bullet("rail", x, y, 0.0, 1).expect("rail");
+        // pierceCap 3: third wall at 16 * 8 - 32 = 96.
+        let length = fdata(&harness, rail);
+        assert!((length - 96.0).abs() < 0.5, "rail length {length}");
+        assert_eq!(
+            harness.building_health_at(18, 8),
+            full,
+            "fourth wall spared"
+        );
     }
 }

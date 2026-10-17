@@ -10,7 +10,7 @@ Session A reports L08 T5 (and later T6) in its own wave reports; the coordinator
 | T2 `ModDataManager` owner + decorator (PAR-0394) | pending | 5 |
 | T3 Mod content parser TODOs | pending | 5 |
 | T4 Evidence debt (PAR-0408 …) | pending | 5 |
-| T5 Harness text input / focus | session A | 1 |
+| T5 Harness text input / focus | **DONE** (session A, 766e9cb9) | 1 |
 | T6 Closing twin walk (round M) | session A | last |
 
 ## T1 — golden suites green with attribution
@@ -77,6 +77,32 @@ the STDB checks of `tools/ci.sh` (no server/bench-relevant change).
 - Plan text vs findings: the tick-4 `explosionArtillery` was a scenario geometry bug, not
   artillery despawn timing; the "shootDuo muzzle moved per H01 T1" is the same geometry.
 - The bisect tooling is kept as evidence only (not committed to `tools/`).
+
+## T5 — harness: text input and Java focus (session A, wave 1, commit 766e9cb9)
+
+Record merged from session A (`runs/20261018-L-coordinator/L08-T5-record.md`).
+
+1. Godot text entry = L01 T4 (005e203e): `tools/gmcp.py --text 'sand'`, twin `GT`. The
+   runtime autoload's `godot_input text` reused one `InputEventKey` for press and release
+   (buffered input delivered two releases); now a fresh press+release per character with
+   `unicode`, one frame apart. Proof: typed `sand` into the Custom Game search and read it
+   back; 4x `GK Backspace` cleared it (`runs/20261018-s2-L01-T4/`).
+2. `tools/twin.sh` `JW x y` hovers with `java_input.py hover`, waits `TWIN_JW_HOVER_S` (0.4 s),
+   then clicks (round L's `JWC` as the default; opt out `TWIN_JW_HOVER=0`). Proof
+   (`runs/20261018-s2-L01-T2`, :11): pointer parked over the Godot window, `JW 230 289` opened
+   Java's editor maps dialog on the first click; `JW 139 500` opened Map Info — no swallowed
+   clicks.
+3. `GC`/`GW` call `twin_g_pointer`: the real X pointer warps to the target (viewport coords
+   scaled via `TWIN_GODOT_VIEW_W/H`, default 1152x648), then the click is injected; a failed warp
+   only warns (opt out `TWIN_G_POINTER=0`). Proof: `GC 575 607` -> pointer (639,671) = window
+   origin (64,64) + target, `get_mouse_position()` (575,607). Cost ~0.5 s per GC/GW, ~0.4 s per
+   JW.
+4. Recorded in `java-leg-learnings.md` and `open-godot-mcp-learnings.md` (2026-10-18).
+
+Later (session A wave 2, aace6aca): Java text entry by XSendEvent (`tools/java_xkeys.py`, twin
+`JT`) — fixes session B's wave-1 "JK does not reach Java on :12".
+Deviation: the installed open-godot-mcp package's `godot_input` description still says "text
+is broken" (outside the repo).
 
 ## Ledger changes to apply
 

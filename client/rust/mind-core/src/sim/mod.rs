@@ -255,6 +255,10 @@ pub struct Sim {
     /// Generation seed of the last map load's `World.FilterContext` step
     /// ([`Sim::map_gen_seed`]).
     map_gen_seed: Option<u64>,
+    /// `state.map.name()` (`GameState.map`, `Map.name()` = the `name` tag):
+    /// the loaded map, the sector (`World.setSectorRules`) or the save's
+    /// `mapname` (`SaveVersion.readMeta`). Empty = `Vars.emptyMap` (L02 T4).
+    map_name: String,
     selected_block: BlockId,
     entity_seq: EntitySequencer,
     commands_applied: u64,
@@ -296,6 +300,7 @@ impl Sim {
             hint_events: HintEvents::default(),
             seed,
             map_gen_seed: None,
+            map_name: String::new(),
             // Upstream `player.block == null` at boot: no placement block is
             // selected until the player picks one (the command-mode gate
             // requires it; PAR-0140).
@@ -1221,6 +1226,9 @@ impl Sim {
         // `Logic.java:533-535`: `fogControl.update()` when `rules.fog`, after
         // `updateTeamStats()` and before the entity pass.
         self.update_fog();
+        // `UnitAssembler.checkSolid` needs the grid (L06 T1): refresh
+        // `wasOccupied` just before the building pass reads it.
+        self.refresh_assembler_occupancy();
         self.schedule.run(&mut self.ecs.0);
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.
@@ -2307,6 +2315,23 @@ impl Sim {
     /// [`crate::io::sim_io::decode_map_bytes`]).
     pub fn set_map_gen_seed(&mut self, seed: u64) {
         self.map_gen_seed = Some(seed);
+    }
+
+    /// `state.map.name()` as written into save meta (`SaveVersion.java:133`):
+    /// the recorded map name, else `Map.tag`'s `"unknown"` fallback
+    /// (`Map.java:151-153`, bundle `unknown` = "Unknown") for `emptyMap`.
+    pub fn map_name(&self) -> &str {
+        if self.map_name.is_empty() {
+            "Unknown"
+        } else {
+            &self.map_name
+        }
+    }
+
+    /// Records `state.map` for the world just loaded (host map/sector loads,
+    /// save loads); see [`Sim::map_name`].
+    pub fn set_map_name(&mut self, name: impl Into<String>) {
+        self.map_name = name.into();
     }
 
     /// Re-derives the world state that mirrors `Rules`: the map-area limit rect

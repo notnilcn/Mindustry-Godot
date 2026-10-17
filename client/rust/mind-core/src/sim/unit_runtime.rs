@@ -2108,25 +2108,101 @@ impl Sim {
     }
 
     /// `InputHandler.selectedUnit()`'s ControlBlock branch
-    /// (`InputHandler.java:2159-2161`): the detached `block` unit of an own
-    /// controllable turret on `pos` (`TurretBuild.unit`; I01 T12). `None` when
-    /// the tile holds no turret, the team differs, or the turret is the
-    /// player's own unit already.
-    pub fn control_block_unit_id(&self, pos: TilePos) -> Option<i32> {
+    /// (`InputHandler.java:2159-2161`): `build instanceof ControlBlock cont &&
+    /// cont.canControl() && build.team == player.team() && cont.unit() !=
+    /// player.unit()` -> the detached `block` proxy unit. Turrets
+    /// (`TurretBuild.unit`; I01 T12) need `playerControllable`
+    /// (`Turret.java:382-384`); size-1 routers (`Router.java:46-49`) get their
+    /// proxy created on first use like Java's lazy `unit()` (`:37-44`; L06
+    /// T2). `None` when the tile holds no controllable block, the team
+    /// differs, or the proxy is the player's own unit already.
+    pub fn control_block_unit_id(&mut self, pos: TilePos) -> Option<i32> {
         let entity = self.grid.entity_at(pos)?;
         let team = self.player_team?;
         if self.ecs.0.get::<TeamComp>(entity).map(|t| t.team) != Some(team) {
             return None;
         }
-        let state = self
+        let def = self
             .ecs
             .0
-            .get::<crate::world::blocks::defense::turrets::TurretState>(entity)?;
-        let unit = state.block_unit?;
+            .get::<crate::entities::comp::Building>(entity)
+            .and_then(|building| {
+                self.ecs
+                    .0
+                    .get_resource::<crate::world::block::BlockTable>()
+                    .and_then(|table| table.get(building.block))
+                    .map(|instance| {
+                        (
+                            instance.def.kind,
+                            instance.def.size,
+                            instance.def.player_controllable,
+                        )
+                    })
+            });
+        let unit = match def {
+            // `RouterBuild.canControl()` = `size == 1` (the distributor is not).
+            Some((crate::content::BlockKind::Router, size, _)) => {
+                if size != 1 {
+                    return None;
+                }
+                self.ensure_router_block_unit(entity)?
+            }
+            Some((_, _, player_controllable)) => {
+                // `TurretBuild.canControl()` = `playerControllable`.
+                if !player_controllable {
+                    return None;
+                }
+                self.ecs
+                    .0
+                    .get::<crate::world::blocks::defense::turrets::TurretState>(entity)?
+                    .block_unit?
+            }
+            None => return None,
+        };
         if self.player_unit == Some(unit) || self.ecs.0.get_entity(unit).is_err() {
             return None;
         }
         self.ecs.0.get::<EntitySeq>(unit).map(|seq| seq.0 as i32)
+    }
+
+    /// `RouterBuild.unit()` (`Router.java:37-44`): `UnitTypes.block.create(team)`
+    /// tied to the router on first use; kept on `RouterBuild.block_unit`,
+    /// never added to the unit pass.
+    fn ensure_router_block_unit(&mut self, router: Entity) -> Option<Entity> {
+        use crate::world::blocks::distribution::router::RouterBuild;
+        if let Some(unit) = self.ecs.0.get::<RouterBuild>(router)?.block_unit
+            && self.ecs.0.get_entity(unit).is_ok()
+        {
+            return Some(unit);
+        }
+        let def = self
+            .unit_runtime()?
+            .content
+            .unit_by_name("block")
+            .cloned()?;
+        let team = self.ecs.0.get::<TeamComp>(router).map_or(0, |t| t.team);
+        let (x, y) = self
+            .ecs
+            .0
+            .get::<crate::entities::comp::Pos>(router)
+            .map(|pos| (pos.x, pos.y))?;
+        let tile = self
+            .ecs
+            .0
+            .get::<crate::entities::comp::Building>(router)
+            .map_or(i32::MIN, |building| building.tile.pack());
+        let world = &mut self.ecs.0;
+        let seq = crate::world::blocks::units::behavior::next_unit_seq(world);
+        let unit = crate::entities::comp::unit::lifecycle::spawn_unit_def(
+            world, seq, &def, team, x, y, 0.0,
+        );
+        world
+            .entity_mut(unit)
+            .insert(crate::entities::comp::unit::comp::BlockUnitComp { tile });
+        if let Some(mut state) = world.get_mut::<RouterBuild>(router) {
+            state.block_unit = Some(unit);
+        }
+        Some(unit)
     }
 
     /// The controlled player unit entity, if any.

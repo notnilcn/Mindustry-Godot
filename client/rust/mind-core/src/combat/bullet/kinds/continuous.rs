@@ -43,7 +43,10 @@ impl BulletBehavior for ContinuousBehavior {
         // the pierce falloff mutates `b.damage`, so save and restore it around
         // the line collision.
         let damage = ctx.bullet(b).map(|bullet| bullet.damage).unwrap_or(0.0);
-        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, large, pierce_cap);
+        // `Damage.collideLine(..., largeHit, laserAbsorb, pierceCap)`
+        // (`ContinuousBulletType.java:88`): `findLength` cuts the beam (L06 T3).
+        let laser = def.laser_absorb;
+        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, large, laser, pierce_cap);
         if let Some(mut bullet) = ctx.world.get_mut::<Bullet>(b) {
             bullet.damage = damage;
         }

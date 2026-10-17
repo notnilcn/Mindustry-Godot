@@ -140,6 +140,84 @@ pub fn update_overdrive_projector(
     }
 }
 
+/// `Block.suppressable` (`MendProjector.java:46`, `RegenProjector.java:46`,
+/// `RepairTower.java:31`, `BuildTurret.java:46`): the healing blocks whose
+/// healing heal-suppression stops.
+fn suppressable(world: &World, e: Entity) -> bool {
+    use crate::content::BlockKind;
+    world
+        .get::<Building>(e)
+        .and_then(|building| {
+            world
+                .get_resource::<crate::world::block::BlockTable>()
+                .and_then(|table| table.get(building.block))
+        })
+        .is_some_and(|instance| {
+            matches!(
+                instance.def.kind,
+                BlockKind::MendProjector
+                    | BlockKind::RegenProjector
+                    | BlockKind::RepairTower
+                    | BlockKind::BuildTurret
+            )
+        })
+}
+
+/// `BuildingComp.isHealSuppressed()` (`BuildingComp.java:493-495`):
+/// `block.suppressable && Time.time <= healSuppressionTime`. The port's
+/// `Time.time` is the [`crate::world::update::BuildClock`]; a building never
+/// suppressed keeps `heal_suppression_time <= 0` (Java's `-1` default), which
+/// never counts (L06 T3).
+pub fn is_heal_suppressed(world: &World, e: Entity) -> bool {
+    let Some(time) = world.get::<Building>(e).map(|b| b.heal_suppression_time) else {
+        return false;
+    };
+    time > 0.0 && crate::world::update::build_time(world) <= time && suppressable(world, e)
+}
+
+/// `BuildingComp.applyHealSuppression(amount)` (`BuildingComp.java:485-491`):
+/// `healSuppressionTime = max(healSuppressionTime, Time.time + amount)`.
+pub fn apply_heal_suppression(world: &mut World, e: Entity, amount: f32) {
+    let now = crate::world::update::build_time(world);
+    if let Some(mut building) = world.get_mut::<Building>(e) {
+        building.heal_suppression_time = building.heal_suppression_time.max(now + amount);
+    }
+}
+
+/// `Damage.applySuppression` (`Damage.java:46-60`), sim half: every
+/// non-privileged building of another team with
+/// `within(x, y, range + hitSize / 2)` (`BlockIndexer.allBuildings`,
+/// `BlockIndexer.java:435-454`) gets `applyHealSuppression(reload + 1)`. The
+/// `regenSuppressSeek` particles are view-only (not ported here).
+pub fn apply_suppression(world: &mut World, team: u8, x: f32, y: f32, range: f32, reload: f32) {
+    let targets: Vec<Entity> = {
+        let table = world.get_resource::<crate::world::block::BlockTable>();
+        // Each target gets the same idempotent update, so visit order is moot.
+        world
+            .iter_entities()
+            .filter_map(|entity| {
+                let building = entity.get::<Building>()?;
+                let pos = entity.get::<Pos>()?;
+                if entity.get::<TeamComp>().map_or(0, |t| t.team) == team {
+                    return None;
+                }
+                let def = table
+                    .and_then(|table| table.get(building.block))
+                    .map(|i| &i.def)?;
+                if def.privileged {
+                    return None;
+                }
+                let reach = range + def.size as f32 * crate::world::block::TILE_SIZE / 2.0;
+                let d2 = (pos.x - x).powi(2) + (pos.y - y).powi(2);
+                (d2 <= reach * reach).then_some(entity.id())
+            })
+            .collect()
+    };
+    for target in targets {
+        apply_heal_suppression(world, target, reload + 1.0);
+    }
+}
+
 /// Buildings of the origin's team within `range` world units of `origin`
 /// (`BlockIndexer.eachBlock(team, wx, wy, range, ...)`,
 /// `BlockIndexer.java:328-361`): same team only, `b.within(wx, wy, range +
@@ -247,6 +325,11 @@ pub fn update_regen_projector(
     state.did_regen = false;
     state.any_targets = false;
 
+    // "no healing when suppressed" (`RegenProjector.java:134-137`).
+    if is_heal_suppressed(world, e) {
+        return;
+    }
+
     let range = state.range as f32;
     let targets = buildings_in_range(world, e, range);
     let mut any = false;
@@ -270,6 +353,11 @@ pub fn update_regen_projector(
         let heal_amount =
             (1.0f32 + (state.optional_multiplier - 1.0) * optional_efficiency) * state.heal_percent;
         for target in targets {
+            // `if(!build.damaged() || build.isHealSuppressed()) continue;`
+            // (`RegenProjector.java:151`).
+            if is_heal_suppressed(world, target) {
+                continue;
+            }
             let Some(health) = world.get::<Health>(target) else {
                 continue;
             };
@@ -465,5 +553,46 @@ pub fn update_base_shield(
     }
     for target in targets {
         let _ = world.despawn(target);
+    }
+}
+
+#[cfg(test)]
+mod suppression_tests {
+    use crate::combat::harness::CombatHarness;
+    use crate::world::blocks::defense::projectors::is_heal_suppressed;
+
+    /// L06 T3: a bullet with `suppressionRange` (`BulletType.java:572-575`)
+    /// suppresses enemy healing blocks around the bullet
+    /// (`Damage.applySuppression`, `BuildingComp.applyHealSuppression`), not
+    /// non-suppressable blocks; a suppressed mender does not heal
+    /// (`MendProjector.java:94,112`).
+    #[test]
+    fn suppression_bullet_stops_enemy_mender() {
+        let mut harness = CombatHarness::new(48, 32, 5);
+        let mender = harness.content().block_id("mender").expect("mender");
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(10, 10, mender, 0, true));
+        assert!(harness.place(11, 10, wall, 0, true));
+        let fuse = harness.bullet_id("fuse").expect("fuse");
+        if let Some(def) = harness.build.content.bullet_mut(fuse) {
+            def.suppression_range = 40.0;
+        }
+        let mender_e = harness.build_at(10, 10).expect("mender entity");
+        let wall_e = harness.build_at(11, 10).expect("wall entity");
+        assert!(!is_heal_suppressed(&harness.build.world, mender_e));
+        // Team-1 fuse flies into the team-0 wall row from the left.
+        let (x, y) = CombatHarness::tile_origin(4, 10);
+        let _ = harness.spawn_bullet("fuse", x, y, 0.0, 1);
+        for _ in 0..30 {
+            harness.step_bullets_only();
+        }
+        assert!(
+            is_heal_suppressed(&harness.build.world, mender_e),
+            "enemy mender suppressed"
+        );
+        assert!(
+            !is_heal_suppressed(&harness.build.world, wall_e),
+            "a wall is not suppressable"
+        );
     }
 }

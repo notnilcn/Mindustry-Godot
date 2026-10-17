@@ -8,8 +8,8 @@ Owner: session B (session 3 worktree, branch `parity/session-3`). Round L.
 | T1 Explicit `Floor.decoration` | PAR-0411 (retargeted) | **DONE** (generation goldens deferred to the L06 batch) | 1 | 38dc36f1 |
 | T2 Single `reset_to_menu()` path | PAR-0416 | **DONE** | 1 | 0d7c4c8f |
 | T3 `ItemSelection` honours `isHidden()` | PAR-0417 | **DONE** | 1 | 44e7a863 |
-| T4 Save metadata `mapname` | PAR-0377 | pending | 2 | — |
-| T5 Diagonal proximity check | PAR-0378 | pending | 2 | — |
+| T4 Save metadata `mapname` | PAR-0377 | **DONE** | 2 | 57bab8f1 |
+| T5 Diagonal proximity check | PAR-0378 | **DONE: wontfix (Java behaviour)**, pinned by tests | 2 | 14151269 |
 
 ## T1 — explicit `Floor.decoration` (PAR-0411)
 
@@ -93,13 +93,46 @@ In-engine (`runs/20261018-s3-L02-T3/`): sandbox item source (block selected via
 `select_block_by_name` and deselected via `clear_building` — staging; placement and the config
 tap are real clicks): **16 items**, 4×4 grid = Java `22-srccfg`. **MATCH.**
 
-## Test commands (end of wave 1)
+## T4 — save meta `mapname` (PAR-0377)
+
+Java writes `"mapname", state.map.name()` (`SaveVersion.java:133`); the port wrote the `sim`
+placeholder, so custom-game Load cards read "Map: Unknown".
+
+- `Sim::map_name`/`set_map_name` (Java `GameState.map`; empty = `emptyMap` -> `Map.tag`'s
+  "Unknown", `Map.java:151-153`), cleared by `Sim::reset` (`logic.reset()`).
+- Set on every world load: custom map = the map's `name` tag (`World.java:369`,
+  `Map.java:127-129`); sector = `preset.localizedName` or "<planet>; Sector <id>"
+  (`World.setSectorRules`, `World.java:300`, also on resume); Load Game = the save's
+  `mapname` (`SaveVersion.java:186-191`). `SimIoHandler::save` writes it.
+- Deviation: the editor playtest saves carry the map's name, not Java's
+  "Editor Playtesting" (`MapEditorDialog.java:338`) - the port playtests through map play.
+
+Test: `io::sim_io::tests::save_meta_mapname_is_the_loaded_map`. No golden moved.
+
+In-engine (`runs/20261018-s3-L02-T4/`, fresh build, real clicks): the new Caldera autosave
+card reads **Map: Ancient Caldera**; this session's pre-T4 Caldera saves read
+**Map: Unknown**. No Java capture (saving would change the oracle profile); citation only.
+
+## T5 — PAR-0378 diagonal proximity (wontfix)
+
+Java has no diagonal proximity: `BuildingComp.updateProximity` (`BuildingComp.java:1886-1914`)
+links through `Edges.getEdges(block.size)` only, and the edge table (`Edges.java:22-36`) is
+`size * 4` side points, never a corner (size 1 = the four orthogonal neighbours); there is
+no `checkDiagonal` in the Java tree. The J04 T1 observation (a diagonally adjacent item
+source does not feed a turret) is therefore Java behaviour. Pinned by
+`world::edges::tests::edges_match_java_table_without_corners` and
+`world::proximity::tests::diagonal_neighbours_do_not_link`. No Java in-engine capture was
+taken (the code citation is exact); recommend `wontfix`.
+
+## Test commands (end of wave 2)
 
 ```
 cargo fmt --all -- --check; cargo clippy --workspace --all-targets -- -D warnings   # clean
-cargo test -p mind-core --no-fail-fast    # 2757 passed, 3 failed = the deferred generation checksums
+cargo test -p mind-core --no-fail-fast    # 2770 passed, 3 failed = the deferred generation checksums
 cargo test -p mind-headless --no-fail-fast  # green
-cargo test -p mind-gdext --lib            # 77 passed
+cargo test -p mind-gdext                  # 77 passed
+mind-headless parity goldens              # 97 PASS; run-all --tier T0 4/4
+godot --headless --path client --script res://tools/shaders_check.gd   # exit 0
 bash tools/godot.sh --headless --editor --quit --path client   # clean
 ```
 
@@ -111,8 +144,9 @@ bash tools/godot.sh --headless --editor --quit --path client   # clean
    Candidate for L06 (PAR-0391 generator work) or a new item.
 2. Clicking the highlighted placement-palette button does not deselect the block (Java
    toggles off). UI owner: session A. `runs/20261018-s3-L02-T3/notes.md`.
-3. No custom-game autosave is written on Save & Quit (before and after T2). Java creates one
-   when `savecreate` is on — needs a check of the profile setting before filing.
+3. (Corrected in wave 2) custom-game autosaves ARE written; wave 1 looked in the wrong
+   directory. New wave-2 findings instead: Save Game -> New Save with a typed name writes no
+   file, and that dialog shows the raw key `save.name` (`runs/20261018-s3-L02-T4/notes.md`).
 4. `SimHost.place_block` (API) places team-0 (derelict) blocks — harness note only.
 5. Godot editor view: an unrendered grey chunk at the top-right after a sector generate
    (`godot/09-gen-serpulo100.png`).
@@ -124,10 +158,14 @@ bash tools/godot.sh --headless --editor --quit --path client   # clean
 | PAR-0411 | fixed by L02 T1 (38dc36f1); Caldera frame MATCH; generation goldens pending the L06 batch | `runs/20261018-s3-L02-T1/diff/42-survival-side.png` |
 | PAR-0416 | fixed by L02 T2 (0d7c4c8f); Core Database after quit/game-over MATCH | `runs/20261018-s3-L02-T2/` |
 | PAR-0417 | fixed by L02 T3 (44e7a863); 16-item grid MATCH | `runs/20261018-s3-L02-T3/godot/03-srccfg.png` |
-| new | Serpulo generated sector layout/ruins differ from Java (finding 1) | as above |
-| new (UI) | palette button click does not deselect (finding 2) | T3 notes |
+| PAR-0424 | Serpulo generated sector layout/ruins differ from Java (finding 1; L06 T6, wave 3) | as above |
+| new (UI) | palette button click does not deselect (finding 2) - seeded as PAR-0425 | T3 notes |
+| PAR-0377 | fixed by L02 T4 (57bab8f1); Load card "Map: Ancient Caldera" | `runs/20261018-s3-L02-T4/godot/06-load.png` |
+| PAR-0378 | wontfix (Java behaviour: `Edges.getEdges` has no corners), tests 14151269 | `Edges.java:22-36`, `BuildingComp.java:1886-1914` |
+| new | Save Game -> New Save with a typed name writes no file; dialog shows raw `save.name` | `runs/20261018-s3-L02-T4/notes.md` |
 
 ## Done criteria
 
-T1–T3 landed with tests and matching frames; goldens: L02 T1's generation checksums wait for
-the L06 batch (by plan). T4/T5 in wave 2.
+T1–T5 resolved: T1–T4 landed with tests and matching frames, T5 recorded as Java behaviour
+with pinning tests. Goldens: L02 T1's three planet generation checksums wait for the batched
+regen after L06 T4–T7 (wave 3, by plan). Plan complete.

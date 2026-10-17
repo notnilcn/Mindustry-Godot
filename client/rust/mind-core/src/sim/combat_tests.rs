@@ -7097,3 +7097,266 @@ fn placed_duo_idle_head_rotation_is_up() {
         "idle head drawrot is 0 (up): {drawrot}"
     );
 }
+
+/// L06 T1: `UnitAssemblerBuild.wasOccupied = checkSolid(getUnitSpawn(), false)`
+/// (`UnitAssembler.java:515,679-685`) with the vanilla `areaSize = 13`
+/// (`Blocks.java:6566`): a solid tile or a grounded unit on the spawn point
+/// occupies a ground output; a flyer or a `spawnedByCore` unit does not.
+#[test]
+fn assembler_output_area_occupancy() {
+    use crate::world::blocks::units::UnitAssembler;
+    let mut sim = live_sim(64);
+    let assembler = place(&mut sim, 20, 20, "tank-assembler", 1);
+    sim.tick().expect("tick");
+    let occupied = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<UnitAssembler>(assembler)
+            .expect("assembler")
+            .was_occupied
+    };
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitAssembler>(assembler)
+            .map(|a| a.area_size),
+        Some(13)
+    );
+    assert!(!occupied(&sim), "free output area");
+    // Spawn point: rotation 0, `x + tilesize * (13 + 5) / 2` = tile (29, 20).
+    let (sx, sy) = (29.0 * 8.0, 20.0 * 8.0);
+    let flare = sim.spawn_live_unit("flare", 1, sx, sy, 0.0).expect("flare");
+    sim.tick().expect("tick");
+    assert!(!occupied(&sim), "a flyer does not block a ground output");
+    sim.ecs.0.despawn(flare);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, sx, sy, 0.0)
+        .expect("dagger");
+    if let Some(mut slot) = sim
+        .ecs
+        .0
+        .get_mut::<crate::ai::controller::ControllerSlot>(dagger)
+    {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    sim.tick().expect("tick");
+    assert!(occupied(&sim), "a grounded unit on the spawn point");
+    if let Some(mut core) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::unit::comp::UnitCore>(dagger)
+    {
+        core.spawned_by_core = true;
+    }
+    sim.tick().expect("tick");
+    assert!(!occupied(&sim), "spawnedByCore units are ignored");
+    sim.ecs.0.despawn(dagger);
+    let _wall = place(&mut sim, 29, 20, "copper-wall", 1);
+    sim.tick().expect("tick");
+    assert!(occupied(&sim), "a solid tile under a ground output");
+}
+
+/// L06 T1: `UnitAssemblerBuild.spawned()` (`UnitAssembler.java:556-574`): the
+/// product takes `commandPos` (`CommandAI.commandPosition`) and goes into the
+/// same-team payload block under the spawn point when it accepts it
+/// (`unit.buildOn()`); otherwise it is added to the world.
+#[test]
+fn assembled_unit_takes_command_pos_and_payload_handoff() {
+    use crate::world::blocks::payloads::PayloadHolder;
+    use crate::world::blocks::units::behavior::deliver_assembled_unit;
+    let mut sim = live_sim(64);
+    // Team 1 is the player's (`rules.defaultTeam`), so products get `CommandAI`
+    // (`UnitType.controller`, UnitType.java:283).
+    if let Some(mut rules) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+    {
+        rules.default_team = 1;
+    }
+    let conveyor = place(&mut sim, 10, 10, "payload-conveyor", 1);
+    let def = sim
+        .unit_runtime()
+        .expect("runtime")
+        .content
+        .unit_by_name("dagger")
+        .cloned()
+        .expect("dagger");
+    let in_runtime = |sim: &Sim, unit: Entity| {
+        sim.unit_runtime()
+            .is_some_and(|runtime| runtime.units.contains(&unit))
+    };
+    // Payload conveyor at tile (10, 10) (size 3, centred) under the spawn.
+    let (unit, handed) = deliver_assembled_unit(
+        &mut sim.ecs.0,
+        &def,
+        1,
+        80.0,
+        80.0,
+        0.0,
+        Some((400.0, 240.0)),
+    );
+    assert!(handed, "handed to the payload conveyor");
+    assert!(!in_runtime(&sim, unit), "a payload unit is not added");
+    let held = sim
+        .ecs
+        .0
+        .get::<PayloadHolder>(conveyor)
+        .and_then(|holder| holder.payload);
+    assert_eq!(held.and_then(|p| p.entity), Some(unit), "conveyor holds it");
+    // Open ground: `unit.add()`.
+    let (free, handed) = deliver_assembled_unit(
+        &mut sim.ecs.0,
+        &def,
+        1,
+        300.0,
+        300.0,
+        0.0,
+        Some((400.0, 240.0)),
+    );
+    assert!(!handed);
+    assert!(in_runtime(&sim, free), "added to the world");
+    let slot = sim
+        .ecs
+        .0
+        .get::<crate::ai::controller::ControllerSlot>(free)
+        .cloned()
+        .expect("controller");
+    if slot.kind == crate::ai::controller::AiKind::Command {
+        assert_eq!(
+            slot.target,
+            Some(crate::world::TilePos::new(50, 30)),
+            "commandPos -> move target"
+        );
+    } else {
+        panic!(
+            "a player-team product should be commandable: {:?}",
+            slot.kind
+        );
+    }
+    // An enemy-team payload block never takes it.
+    let enemy = place(&mut sim, 40, 40, "payload-conveyor", 2);
+    let (_, handed) = deliver_assembled_unit(&mut sim.ecs.0, &def, 1, 320.0, 320.0, 0.0, None);
+    assert!(!handed, "team check");
+    assert!(
+        sim.ecs
+            .0
+            .get::<PayloadHolder>(enemy)
+            .and_then(|holder| holder.payload)
+            .is_none()
+    );
+}
+
+/// L06 T2: `RouterBuild implements ControlBlock` (`Router.java:30-53`): an own
+/// size-1 router yields a lazily created, stable `block` proxy
+/// (`unit()`, `:37-44`); the distributor (size 2) cannot be controlled
+/// (`canControl() = size == 1`); turrets keep theirs (`playerControllable`).
+#[test]
+fn router_is_a_control_block() {
+    let mut sim = live_sim(48);
+    sim.set_player_team(1);
+    let router = place(&mut sim, 10, 10, "router", 1);
+    let _distributor = place(&mut sim, 20, 20, "distributor", 1);
+    let _duo = place(&mut sim, 30, 30, "duo", 1);
+    let _enemy = place(&mut sim, 40, 40, "router", 2);
+    let pos = |x: i16, y: i16| crate::world::TilePos::new(x, y);
+    let first = sim
+        .control_block_unit_id(pos(10, 10))
+        .expect("router proxy");
+    assert_eq!(
+        sim.control_block_unit_id(pos(10, 10)),
+        Some(first),
+        "stable"
+    );
+    let proxy = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::distribution::router::RouterBuild>(router)
+        .and_then(|state| state.block_unit)
+        .expect("proxy stored");
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::BlockUnitComp>(proxy)
+            .is_some()
+    );
+    assert!(
+        !sim.unit_runtime().expect("runtime").units.contains(&proxy),
+        "never added to the unit pass"
+    );
+    assert_eq!(sim.control_block_unit_id(pos(20, 20)), None, "distributor");
+    assert!(sim.control_block_unit_id(pos(30, 30)).is_some(), "duo");
+    assert_eq!(sim.control_block_unit_id(pos(40, 40)), None, "enemy team");
+}
+
+/// L06 T2: a possessed router (`Router.java:102-117`) routes only toward the
+/// aimed quadrant and only while shooting; unpossessed it round-robins.
+#[test]
+fn possessed_router_routes_toward_aim_while_shooting() {
+    use crate::ai::types::player::PlayerInput;
+    use crate::world::blocks::distribution::transfer;
+    let mut sim = live_sim(48);
+    sim.set_player_team(1);
+    let router = place(&mut sim, 10, 10, "router", 1);
+    let east = place(&mut sim, 11, 10, "container", 1);
+    let north = place(&mut sim, 9, 11, "container", 1);
+    let copper = sim
+        .unit_runtime()
+        .expect("runtime")
+        .content
+        .item_id("copper")
+        .expect("copper");
+    let proxy_seq = sim
+        .control_block_unit_id(crate::world::TilePos::new(10, 10))
+        .expect("proxy");
+    let proxy = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::distribution::router::RouterBuild>(router)
+        .and_then(|state| state.block_unit)
+        .expect("proxy");
+    // `InputHandler.unitControl` on the proxy (the Ctrl+click path).
+    assert!(sim.possess_unit(proxy_seq), "possess the router proxy");
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Player>(proxy)
+            .is_some()
+    );
+    let set_input = |sim: &mut Sim, shooting: bool| {
+        let mut input = sim
+            .ecs
+            .0
+            .remove_resource::<PlayerInput>()
+            .unwrap_or_default();
+        // Aim at tile (14, 10): due east of the router.
+        input.aim_x = 14.0 * 8.0;
+        input.aim_y = 10.0 * 8.0;
+        input.shooting = shooting;
+        sim.ecs.0.insert_resource(input);
+    };
+    let stored = |sim: &Sim, e: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::world::modules::ItemModule>(e)
+            .map_or(0, |items| items.get(copper))
+    };
+    set_input(&mut sim, false);
+    transfer::dispatch_handle_item(&mut sim.ecs.0, router, router, copper);
+    for _ in 0..30 {
+        set_input(&mut sim, false);
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored(&sim, east) + stored(&sim, north),
+        0,
+        "holds while not shooting"
+    );
+    assert_eq!(stored(&sim, router), 1);
+    for _ in 0..30 {
+        set_input(&mut sim, true);
+        sim.tick().expect("tick");
+    }
+    assert_eq!(stored(&sim, east), 1, "aimed side");
+    assert_eq!(stored(&sim, north), 0, "never the other side");
+}

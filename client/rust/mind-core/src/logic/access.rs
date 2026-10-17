@@ -787,14 +787,14 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
 /// `ControlBlock.isControlled()` = `unit().isPlayer()` (`ControlBlock.java:9-11`)
 /// for the port's control blocks: turrets (`TurretBuild`, `BuildTurretBuild`)
 /// carry a detached `block` proxy unit that holds the `Player` marker while
-/// possessed (`Turret.java:448-450`). `RouterBuild` is a `ControlBlock` too,
-/// but the port never possesses routers, so it reads `0` (Java's value for an
-/// unpossessed router).
+/// possessed (`Turret.java:448-450`). `RouterBuild` is a `ControlBlock` too:
+/// its lazily created proxy (L06 T2) carries the marker the same way.
 fn building_is_player_controlled(world: &World, e: Entity) -> bool {
     world
         .get::<crate::world::blocks::defense::turrets::TurretState>(e)
         .and_then(|state| state.block_unit)
         .is_some_and(|unit| world.get::<crate::entities::comp::Player>(unit).is_some())
+        || crate::world::blocks::distribution::router::router_controlled_unit(world, e).is_some()
 }
 
 /// `Block.configSenseable()` (`Block.java:822-825`): the block declares an
