@@ -5544,19 +5544,28 @@ impl MindCampaign {
     /// "deconstructed", "waves"}` in Java label order.
     #[func]
     pub fn game_stats_json(&self) -> GString {
-        let stats = &self.session.stats;
-        let value = serde_json::json!({
-            "wave": stats.waves_lasted,
-            "unitsCreated": stats.units_created,
-            "enemiesDestroyed": stats.enemy_units_destroyed,
-            "built": stats.buildings_built,
-            "destroyed": stats.buildings_destroyed,
-            "deconstructed": stats.buildings_deconstructed,
-            "waves": self.session.rules.waves,
-            // `stats.coreItemCount` keyed by item name (`CoreItemObjective.text()`).
-            "coreItems": stats.core_item_count,
-        });
+        // `GameStats::context_json` owns the key names + the `rules.waves` gate
+        // (`GameOverDialog.java:78-84`); the dialog's `STAT_ROWS` mirror them.
+        let value = self.session.stats.context_json(self.session.rules.waves);
         GString::from(value.to_string().as_str())
+    }
+
+    /// `SaveSlot.getPlayTime()` for the current slot (`GameOverDialog`'s
+    /// "Time Played" row, `GameOverDialog.java:91-97`): the live accumulated
+    /// playtime, else the slot's saved meta. `-1` when no slot is current
+    /// (Java hides the row then).
+    #[func]
+    pub fn current_save_playtime_ms(&self) -> i64 {
+        let Some(slot) = self.saves.get_current() else {
+            return -1;
+        };
+        if self.saves.total_playtime > 0 {
+            return self.saves.total_playtime;
+        }
+        slot.meta
+            .as_ref()
+            .map(|meta| meta.time_played)
+            .unwrap_or_default()
     }
 
     /// `state.isCampaign()`: a live campaign sector is loaded (the same

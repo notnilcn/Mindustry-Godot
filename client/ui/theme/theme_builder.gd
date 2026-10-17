@@ -52,6 +52,12 @@ static func _apply_base_styles(theme: Theme) -> void:
 	theme.set_stylebox("hover", "Button", flat(Color(0.24, 0.27, 0.32, 1.0)))
 	theme.set_stylebox("pressed", "Button", flat(Color(0.13, 0.15, 0.18, 1.0)))
 	theme.set_stylebox("disabled", "Button", flat(Color(0.12, 0.13, 0.15, 1.0)))
+	# Arc has no keyboard focus frame (`Element` draws none); Godot's default
+	# focus stylebox shows up on mouse-driven buttons (the planet page's Go
+	# button after a click, `godot/03-sector.png`), so every button style gets an
+	# empty one — here for the unvaried base and in `_style_variation` for each
+	# manifest variation.
+	theme.set_stylebox("focus", "Button", StyleBoxEmpty.new())
 	theme.set_color("font_color", "Button", Color(0.92, 0.92, 0.92))
 	theme.set_color("font_hover_color", "Button", Color.WHITE)
 	theme.set_color("font_disabled_color", "Button", Color(0.5, 0.5, 0.5))
@@ -131,6 +137,9 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("normal", name, flat(Color(0.18, 0.20, 0.24, 1.0)))
 				theme.set_stylebox("hover", name, flat(Color(0.24, 0.27, 0.32, 1.0)))
 				theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 1.0)))
+			# No keyboard focus frame (Arc draws none): the empty focus box keeps
+			# Godot from painting one on clicked buttons.
+			theme.set_stylebox("focus", name, StyleBoxEmpty.new())
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"PanelContainer":
 			if name == "fullDialog" or name == "defaultDialog":
@@ -184,6 +193,20 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			theme.set_stylebox("normal", name, flat(Color(0.08, 0.09, 0.11, 1.0)))
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"CheckBox":
+			# `Styles.defaultCheck` (`ui/Styles.java:446-456`): the round
+			# `checkOn`/`checkOff` textures with their disabled variants
+			# (Godot's default square indicators otherwise). Godot's CheckBox
+			# has no per-hover *icons* (Java's `checkOnOver`/`checkOver`), so the
+			# hover state keeps the plain indicator.
+			for state in [
+				["checked", "check-on"],
+				["unchecked", "check-off"],
+				["checked_disabled", "check-on-disabled"],
+				["unchecked_disabled", "check-disabled"],
+			]:
+				var texture := MindWidgets.icon_texture(str(state[1]))
+				if texture != null:
+					theme.set_icon(str(state[0]), name, texture)
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
 		"Tree":
 			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL_DARK))

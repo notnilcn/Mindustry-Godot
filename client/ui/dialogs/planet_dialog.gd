@@ -1154,6 +1154,9 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 		# through the BBCode translation, not the raw bundle (PAR-0016).
 		var label := MindWidgets.label(_tm(state_key))
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		# Java's sector panel centres these status lines
+		# (`diff/03-sector-side.png`: "Under attack!" is centred).
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		column.add_child(label)
 
 	var stats: Dictionary = sector.get("stats", {})

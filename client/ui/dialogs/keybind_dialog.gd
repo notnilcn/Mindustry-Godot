@@ -17,6 +17,9 @@ const UNSET_TEXT := "Unset"
 const UNSET_COLOR := Color(0.35, 0.35, 0.35)
 const CATEGORY_COLOR := Color(0.5, 0.5, 0.5)
 const BUTTON_SIZE := Vector2(140.0, 40.0)
+## `KeybindDialog.rebuildBinds`'s `bw`/`bh` (`KeybindDialog.java:84`) and the
+## binds table's own width in the reference frame (140..985 of 1152).
+const TABLE_WIDTH := 845.0
 
 var _search := ""
 var _entries: Array = []
@@ -57,8 +60,13 @@ func _build() -> void:
 
 	# code-instantiated: the binding list is data-driven from `MindInput` and
 	# rebuilt on every search/reassign; the row count is not known at build time.
+	# `KeybindDialog.rebuildBinds` keeps the binds table at its own width and
+	# centres it (`bindsTable` inside a `ScrollPane` whose X scrolling is off):
+	# the reference frame's table spans 140..985 of 1152 (~845), not the full
+	# dialog width, so the name column stays Java-sized instead of stretching.
 	_list = MindTable.new()
-	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_list.custom_minimum_size.x = TABLE_WIDTH
+	_list.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	cont.add_child(_list)
 	_rebuild()
 
@@ -121,9 +129,17 @@ func _add_binding_row(entry: Dictionary, localized: String) -> void:
 	var label := MindWidgets.label(localized)
 	_list.add(label).grow_x_axis().set_align(3).set_pad_left(8.0).set_pad_right(40.0)
 
-	var key := MindWidgets.label(_key_text(entry))
-	key.add_theme_color_override("font_color", UNSET_COLOR if _is_unset(entry) else MindStyles.ACCENT)
-	_list.add(key).fill_x_axis().set_min_width(90.0).set_align(3).set_pad_right(20.0)
+	# `KeybindDialog.rebuildBinds` (`KeybindDialog.java:111-124`): the axis cell
+	# is `min + " [red]/[] " + max` through Arc colour markup, coloured
+	# `Pal.accent` (`Color.darkGray` while unset), left-aligned, `minWidth(90)`,
+	# `padRight(20)`. `MindLabel` is a BBCode label, so the markup must be
+	# translated by `render_markup` first (the raw `[red]`/`[]` tags would show
+	# literally).
+	var key := MindWidgets.label(MindWidgets.markup_text(_key_text(entry)))
+	key.add_theme_color_override(
+		"default_color", UNSET_COLOR if _is_unset(entry) else MindStyles.ACCENT
+	)
+	_list.add(key).set_min_width(90.0).set_align(3).set_pad_right(20.0)
 
 	var rebind := MindWidgets.button(_t("@settings.rebind"))
 	rebind.theme_type_variation = "grayt"
@@ -142,8 +158,10 @@ func _add_binding_row(entry: Dictionary, localized: String) -> void:
 
 
 func _add_reset_all() -> void:
-	var reset := MindWidgets.button(_t("@settings.reset"))
-	reset.theme_type_variation = "grayt"
+	# `KeybindDialog.rebuildBinds`'s final row: `button("@settings.reset",
+	# Icon.refresh, tstyle, KeyBind::resetAll).minWidth(200f).colspan(4)
+	# .padTop(4).margin(10f).height(50f).fill()` (`KeybindDialog.java:129-131`).
+	var reset := MindWidgets.icon_button("refresh", _t("@settings.reset"), "grayt")
 	reset.custom_minimum_size.x = 200.0
 	reset.pressed.connect(_reset_all)
 	_list.add(reset).set_colspan(4).set_min_width(200.0).set_min_height(50.0).pad(4)

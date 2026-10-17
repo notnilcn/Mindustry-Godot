@@ -67,6 +67,23 @@ pub fn supports_env_bits(def: &BlockDef, env: i32) -> bool {
     (enabled & env) != 0 && (disabled & env) == 0 && (required == 0 || (required & env) == required)
 }
 
+/// `PlacementFragment.java:313-323`: the placement palette's cell tint — `0`
+/// white, `1` gray, `2` darkGray. A block that is not placeable
+/// (`Block.isPlaceable()`: visible, not banned, `supportsEnv`) is darkGray
+/// *regardless* of affordability (Java assigns that colour after the
+/// affordability branch); otherwise white when the team has infinite resources
+/// or the player's core holds every scaled requirement **and** the player unit
+/// is a builder, gray otherwise.
+pub fn palette_tint(placeable: bool, affordable: bool, builder: bool) -> i32 {
+    if !placeable {
+        2
+    } else if affordable && builder {
+        0
+    } else {
+        1
+    }
+}
+
 /// `Block.canPlaceOn`.
 pub fn can_place_on(_def: &BlockDef, _team: u8, _rot: u8) -> bool {
     true
@@ -1041,6 +1058,18 @@ pub fn view_of<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `PlacementFragment.java:313-323`: the palette tint is white only for a
+    /// placeable *and* affordable block with a builder unit; the not-placeable
+    /// state (env mismatch) wins over the affordability colour.
+    #[test]
+    fn palette_tint_priority_matches_placement_fragment() {
+        assert_eq!(palette_tint(true, true, true), 0, "placeable + affordable");
+        assert_eq!(palette_tint(true, false, true), 1, "unaffordable");
+        assert_eq!(palette_tint(true, true, false), 1, "not a builder");
+        assert_eq!(palette_tint(false, true, true), 2, "unplaceable wins");
+        assert_eq!(palette_tint(false, false, false), 2);
+    }
 
     #[test]
     fn can_replace_same_group_and_construct() {

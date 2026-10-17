@@ -124,6 +124,25 @@ impl GameStats {
     pub fn reset(&mut self) {
         *self = Self::default();
     }
+
+    /// The `game_stats_json` context `GameOverDialog` reads
+    /// (`GameOverDialog.java:78-84`): every row's value plus the
+    /// `state.rules.waves` gate for the wave row. Field names are camelCase —
+    /// the GDScript dialog's `STAT_ROWS` keys (`stats.wave`,
+    /// `stats.unitsCreated`, …).
+    pub fn context_json(&self, waves: bool) -> serde_json::Value {
+        serde_json::json!({
+            "wave": self.waves_lasted,
+            "unitsCreated": self.units_created,
+            "enemiesDestroyed": self.enemy_units_destroyed,
+            "built": self.buildings_built,
+            "destroyed": self.buildings_destroyed,
+            "deconstructed": self.buildings_deconstructed,
+            "waves": waves,
+            // `stats.coreItemCount` keyed by item name (`CoreItemObjective.text()`).
+            "coreItems": self.core_item_count,
+        })
+    }
 }
 
 /// `Logic`'s `UnitCreateEvent` listener (`Logic.java:228-235`): a
@@ -198,5 +217,41 @@ mod tests {
         stats.reset();
         assert_eq!(stats.get_placed("conveyor"), 0);
         assert!(stats.core_item_count.is_empty());
+    }
+
+    /// T6: the `GameOverDialog` context carries every `STAT_ROWS` key the
+    /// GDScript reads (`stats.wave`, `stats.unitsCreated`,
+    /// `stats.enemiesDestroyed`, `stats.built`, `stats.destroyed`,
+    /// `stats.deconstructed`) plus the `state.rules.waves` gate.
+    #[test]
+    fn game_over_context_keys_match_dialog_rows() {
+        let stats = GameStats {
+            waves_lasted: 2,
+            units_created: 1,
+            enemy_units_destroyed: 3,
+            buildings_built: 5,
+            buildings_destroyed: 4,
+            buildings_deconstructed: 6,
+            ..Default::default()
+        };
+
+        let value = stats.context_json(true);
+        for key in [
+            "wave",
+            "unitsCreated",
+            "enemiesDestroyed",
+            "built",
+            "destroyed",
+            "deconstructed",
+            "waves",
+            "coreItems",
+        ] {
+            assert!(value.get(key).is_some(), "missing `{key}`");
+        }
+        assert_eq!(value["wave"], 2);
+        assert_eq!(value["built"], 5);
+        assert_eq!(value["deconstructed"], 6);
+        assert!(value["waves"].as_bool().unwrap_or(false));
+        assert!(!stats.context_json(false)["waves"].as_bool().unwrap_or(true));
     }
 }

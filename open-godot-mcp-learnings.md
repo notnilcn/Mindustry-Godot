@@ -2408,3 +2408,37 @@ Run: runs/20261014-s3-verify3/.
   helper used in the run: `/tmp/opencode/g4.sh <tool> <json>` and
   `/tmp/opencode/e4.py "<gdscript>"` (JSON quoting handled in Python).
 - Run: `runs/20261017-s4-J05-T{1..5}/`.
+
+## 2026-10-17 — session 3 (wave C): multi-statement `godot_exec` bodies with loops stall the frame loop
+
+- Symptom: evals with a `for` loop and `if/elif` over a parsed JSON dictionary
+  (e.g. counting palette tints) returned `MCP timeout` and the watchdog ran
+  `stop` + `play`, losing the loaded game (twice in one session).
+- Cause: the eval is parsed as a GDScript function body whose multi-statement
+  form is fragile here; the failures matched evals that used **loops plus
+  conditionals**, while `var x = …; return [ … ]` and single-expression bodies
+  are reliable. (An earlier stall came from `d.get_child(0)` on an empty
+  filtered array, and another from referencing `DialogLayer/prompt`, a node that
+  does not exist.)
+- Workaround: keep every eval to assignments of *single expressions* plus one
+  `return`; use `.map`/`.filter` chains instead of loops, index only after a
+  `.size()` guard, and probe node paths with `get_node_or_null` first
+  (`HudGroup/placement` is the placement fragment; dialog children are named by
+  the manifest entry, not the class).
+- Runs: `runs/20261017-s3-J06-T8/`, `runs/20261017-s3-J06-T9/`.
+
+## 2026-10-17 — session 3 (wave C): floating dialogs re-use their panel across rebuilds
+
+- Symptom: the Map Play dialog laid out the second map with the first map's
+  panel width — the mode table sat ~250 px off-centre and the preview hung
+  outside the panel, clipped (`godot/41-caldera.png`).
+- Cause: the dialog's `PanelContainer` is a single reused node
+  (`setFillParent(false)` dialogs size to content); the rebuilt content table
+  sorts while the panel still has the previous content's width, and the resize
+  that lands *during* that sort is dropped by `MindTable`'s `_sorting` guard, so
+  the stale offsets stick. `queue_sort()` after the fact does not help because
+  the sort is not re-queued; an explicit `_sort_children()` does.
+- Fix (landed): latch a mid-sort `NOTIFICATION_RESIZED` and re-queue after the
+  sort, plus a deferred `_resort_tables()` at the end of the dialog's build.
+- Run: `runs/20261017-s3-J06-T7/`.
+

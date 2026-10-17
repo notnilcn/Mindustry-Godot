@@ -588,15 +588,23 @@ pub fn check_game_state(session: &mut PlaySession, campaign: &mut Campaign) -> V
     }
 }
 
+/// A `GameOverEvent` raised from `Logic.checkGameState` (`Logic.java:327-374`):
+/// the event's listener records the wave the run reached
+/// (`state.stats.wavesLasted = state.wave`, `Control.java:132-133`; the remote
+/// `Logic.gameOver` does the same, `Logic.java:435-437`) — without it a
+/// core-loss game over reports `stats.wave = 0` to `GameOverDialog`.
+fn raise_game_over(session: &mut PlaySession, winner: u8) -> PlayEvent {
+    session.game_over = true;
+    session.stats.waves_lasted = session.wave;
+    PlayEvent::GameOver { winner }
+}
+
 fn check_game_state_campaign(session: &mut PlaySession, campaign: &mut Campaign) -> Vec<PlayEvent> {
     let mut events = Vec::new();
 
     // Campaign maps have no "win" state: game over on core death.
     if session.player_core_count() == 0 && !session.game_over {
-        session.game_over = true;
-        events.push(PlayEvent::GameOver {
-            winner: session.wave_team(),
-        });
+        events.push(raise_game_over(session, session.wave_team()));
     }
 
     // No enemy spawns -> waves disabled.
@@ -627,10 +635,7 @@ fn check_game_state_campaign(session: &mut PlaySession, campaign: &mut Campaign)
 fn check_game_state_default(session: &mut PlaySession) -> Vec<PlayEvent> {
     let mut events = Vec::new();
     if !session.rules.attack_mode && session.player_core_count() == 0 && !session.game_over {
-        session.game_over = true;
-        events.push(PlayEvent::GameOver {
-            winner: session.wave_team(),
-        });
+        events.push(raise_game_over(session, session.wave_team()));
     } else if session.rules.attack_mode {
         let active = session
             .teams
@@ -664,8 +669,7 @@ fn check_game_state_default(session: &mut PlaySession) -> Vec<PlayEvent> {
                             .is_some_and(|data| data.is_alive())
                 })
                 .map_or(0, |team| team.0);
-            events.push(PlayEvent::GameOver { winner });
-            session.game_over = true;
+            events.push(raise_game_over(session, winner));
         }
     } else if !session.game_over
         && session.rules.waves
@@ -674,10 +678,7 @@ fn check_game_state_default(session: &mut PlaySession) -> Vec<PlayEvent> {
         && session.wave >= session.rules.win_wave
         && !session.is_spawning
     {
-        session.game_over = true;
-        events.push(PlayEvent::GameOver {
-            winner: session.default_team(),
-        });
+        events.push(raise_game_over(session, session.default_team()));
     }
     events
 }
@@ -951,6 +952,31 @@ mod tests {
                 .map(|stats| stats.sectors_captured),
             Some(1)
         );
+    }
+
+    /// T6: `checkGameState`'s core-loss branch records the wave reached
+    /// (`Control.java:132-133` listener + `Logic.java:435-437` remote), so the
+    /// game-over dialog's "Waves Defeated" row shows the wave instead of 0.
+    #[test]
+    fn core_loss_game_over_records_waves_lasted() {
+        let registry = content();
+        let mut campaign = campaign(&registry);
+        let mut session = PlaySession::new(Rules::default());
+        // No core is registered for the default team -> `playerCores == 0`.
+        session.wave = 7;
+        let events = check_game_state(&mut session, &mut campaign);
+        assert!(
+            matches!(events.as_slice(), [PlayEvent::GameOver { .. }]),
+            "core loss raises one game over: {events:?}"
+        );
+        assert!(session.game_over);
+        assert_eq!(session.stats.waves_lasted, 7);
+
+        // A second pump must not re-raise the event (or re-touch the stat).
+        session.wave = 9;
+        let again = check_game_state(&mut session, &mut campaign);
+        assert!(again.is_empty(), "game over is one-shot: {again:?}");
+        assert_eq!(session.stats.waves_lasted, 7);
     }
 
     #[test]
