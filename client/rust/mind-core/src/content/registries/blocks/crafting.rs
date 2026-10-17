@@ -369,6 +369,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         consumes: vec![consume_liquid("oil", 0.1f32), consume_power(0.7f32)],
         craft_time: Some(30.0),
+        rotate_draw: Some(false),
         ..spec("coal-centrifuge", BlockKind::GenericCrafter)
     })?;
 
@@ -477,6 +478,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             consume_items(vec![stack("beryllium", 1)]),
             consume_power(0.5f32),
         ],
+        rotate_draw: Some(false),
         ..spec("oxidation-chamber", BlockKind::HeatProducer)
     })?;
 
@@ -494,6 +496,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_power(1.6666666f32)],
+        rotate_draw: Some(false),
         ..spec("electric-heater", BlockKind::HeatProducer)
     })?;
 
@@ -517,6 +520,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         solid: Some(true),
         update: Some(true),
         consumes: vec![consume_liquid("slag", 0.6666667f32)],
+        rotate_draw: Some(false),
         ..spec("slag-heater", BlockKind::HeatProducer)
     })?;
 
