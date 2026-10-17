@@ -373,12 +373,16 @@ pub(crate) fn read_java_unit(
     let mut stack: Option<(ItemId, i32)> = None;
     let mut statuses: Vec<StatusEntry> = Vec::new();
     let mut controller: Option<AiKind> = None;
+    let mut ability_data: Vec<f32> = Vec::new();
     for field in class.fields {
         match *field {
             "abilities" => {
-                // `TypeIO.readAbilities` (mutator): `b len` + `f data` each.
+                // `TypeIO.readAbilities` (mutator): `b len` + `f data` each;
+                // the data is restored index-aligned (L06 T4).
                 let len = r.ub()? as usize;
-                r.skip(len * 4)?;
+                for _ in 0..len {
+                    ability_data.push(r.f()?);
+                }
             }
             "baseRotation" | "elevation" | "health" | "lifetime" | "rotation" | "shield"
             | "time" | "x" | "y" => {
@@ -499,6 +503,8 @@ pub(crate) fn read_java_unit(
         command: None,
         controller,
         plans: Vec::new(),
+        ability_data,
+        spawner_unit_id: -1,
     }))
 }
 

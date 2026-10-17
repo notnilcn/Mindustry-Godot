@@ -54,9 +54,11 @@ pub const SIM_UNIT_CLASS_ID: u8 = 0xF0;
 /// v2 appends the carried payload stack (`UnitPayloads.stack`: `u16 count` then
 /// per payload `u8 tag` + fields). v3 appends the unit-save completeness fields
 /// (H04 T9): `spawnedByCore`, `elevation`, `shield`, the carried item stack,
-/// statuses, the command id + move target and the builder plan queue. v1/v2
-/// saves (without those fields) still load.
-pub const SIM_UNIT_REVISION: u16 = 3;
+/// statuses, the command id + move target and the builder plan queue. v4
+/// (L06 T4) appends `TypeIO.writeAbilities` (`u8 len` + `f data` per ability,
+/// TypeIO.java:446-451) and `UnitTetherComp.spawnerUnitId` (`i32`, -1 = none,
+/// UnitTetherComp.java:17). Older saves (without those fields) still load.
+pub const SIM_UNIT_REVISION: u16 = 4;
 
 /// Reserved class id for the native live-sim fire chunk (`FireComp`).
 pub const SIM_FIRE_CLASS_ID: u8 = 0xF1;
@@ -138,6 +140,11 @@ pub(crate) struct DecodedUnit {
     pub(crate) controller: Option<crate::ai::controller::AiKind>,
     /// Builder plan queue (revision 3+).
     pub(crate) plans: Vec<crate::sim::builder::UnitBuildPlan>,
+    /// `Ability.data` per ability, in write order (revision 4+;
+    /// `TypeIO.readAbilities`).
+    pub(crate) ability_data: Vec<f32>,
+    /// `UnitTetherComp.spawnerUnitId` (revision 4+; -1 = none).
+    pub(crate) spawner_unit_id: i32,
 }
 
 /// One decoded live fire record (`FireComp.read` sim fields).
@@ -217,6 +224,8 @@ impl EntitySink for LiveEntitySink {
                     command: None,
                     controller: None,
                     plans: Vec::new(),
+                    ability_data: Vec::new(),
+                    spawner_unit_id: -1,
                 };
                 if revision >= 2 {
                     let count = r.us()?;
@@ -277,6 +286,15 @@ impl EntitySink for LiveEntitySink {
                         let plan = crate::io::typeio::codecs::read_plan(r)?;
                         decoded.plans.push(unit_plan_from_wire(plan));
                     }
+                }
+                if revision >= 4 {
+                    // `TypeIO.readAbilities` (TypeIO.java:429-444): `b len`
+                    // then one `f data` each.
+                    let len = r.ub()? as usize;
+                    for _ in 0..len {
+                        decoded.ability_data.push(r.f()?);
+                    }
+                    decoded.spawner_unit_id = r.i()?;
                 }
                 self.units.push(decoded);
             }
@@ -520,6 +538,24 @@ impl EntitySource for LiveEntitySource<'_> {
                 for plan in &plans {
                     crate::io::typeio::codecs::write_plan(chunk, plan)?;
                 }
+                // Revision 4 (L06 T4): `TypeIO.writeAbilities`
+                // (TypeIO.java:446-451) - `Ability.data` per ability.
+                let abilities: Vec<f32> = world
+                    .get::<crate::combat::abilities::AbilityComp>(entity)
+                    .map(|comp| comp.states.iter().map(|state| state.data).collect())
+                    .unwrap_or_default();
+                chunk.ub(abilities.len().min(u8::MAX as usize) as u8);
+                for data in abilities.iter().take(u8::MAX as usize) {
+                    chunk.f(*data);
+                }
+                // `UnitTetherComp.spawnerUnitId` (UnitTetherComp.java:17,
+                // kept as `spawner.id` by `update`, :34-40): the spawner's id.
+                let spawner = world
+                    .get::<crate::entities::comp::unit::comp::UnitTetherComp>(entity)
+                    .and_then(|tether| tether.spawner)
+                    .and_then(|spawner| world.get::<crate::ecs::EntitySeq>(spawner))
+                    .map_or(-1, |seq| seq.0 as i32);
+                chunk.i(spawner);
                 Ok(())
             })?;
         }
@@ -991,6 +1027,20 @@ impl Sim {
                             });
                     }
                 }
+                // Revision 4: `UnitComp.setType` copies the read `data` into
+                // the type's abilities index-aligned (`EmptyDataAbility`
+                // placeholders when the count differs; UnitComp.java:549-557,
+                // TypeIO.java:429-444).
+                if !unit.ability_data.is_empty()
+                    && let Some(mut comp) = self
+                        .ecs
+                        .0
+                        .get_mut::<crate::combat::abilities::AbilityComp>(entity)
+                {
+                    for (state, data) in comp.states.iter_mut().zip(&unit.ability_data) {
+                        state.data = *data;
+                    }
+                }
                 // Revision 2: restore the carried payload stack.
                 if !unit.payloads.is_empty() {
                     let stack = unit.payloads.clone();
@@ -1010,6 +1060,44 @@ impl Sim {
             }
         }
         self.restore_unit_ids(&spawned);
+        // `UnitTetherComp.afterRead` (UnitTetherComp.java:20-24): `spawner =
+        // Groups.unit.getByID(spawnerUnitId)` once every unit (and its
+        // restored id) exists; a missing spawner leaves `null`, so the
+        // tethered unit despawns on its next update like Java.
+        for (unit, (entity, _)) in save
+            .entities
+            .units
+            .iter()
+            .filter(|unit| {
+                !(unit.team == default_team
+                    && (unit.spawned_by_core
+                        || (unit.revision < 3
+                            && ["alpha", "beta", "gamma", "evoke", "incite", "emanate"]
+                                .contains(&unit.name.as_str()))))
+            })
+            .zip(spawned.iter())
+        {
+            // Only a tether unit writes an id (the writer emits -1 without
+            // `UnitTetherComp`), so a saved id restores the component too.
+            if unit.spawner_unit_id < 0 {
+                continue;
+            }
+            let spawner = self
+                .ecs
+                .0
+                .iter_entities()
+                .find(|candidate| {
+                    candidate
+                        .get::<crate::ecs::EntitySeq>()
+                        .is_some_and(|seq| seq.0 as i32 == unit.spawner_unit_id)
+                        && candidate.contains::<UnitCore>()
+                })
+                .map(|candidate| candidate.id());
+            self.ecs
+                .0
+                .entity_mut(*entity)
+                .insert(crate::entities::comp::unit::comp::UnitTetherComp { spawner });
+        }
         // Fires and puddles (`Groups.fires`/`Groups.puddles` recreate from
         // their chunks; the tile-slot caches re-register on the next update
         // pass). Accumulator fields are transient upstream and start zeroed.
@@ -1884,6 +1972,8 @@ mod tests {
             command: None,
             controller: None,
             plans: Vec::new(),
+            ability_data: Vec::new(),
+            spawner_unit_id: -1,
         };
         let save_with = |units: Vec<DecodedUnit>| DecodedSave {
             grid: WorldGrid::new(0, 0),
@@ -2008,6 +2098,8 @@ mod tests {
             command: None,
             controller,
             plans: Vec::new(),
+            ability_data: Vec::new(),
+            spawner_unit_id: -1,
         };
         let save_with = |units: Vec<DecodedUnit>| DecodedSave {
             grid: WorldGrid::new(0, 0),
@@ -2133,6 +2225,8 @@ mod tests {
                     command: None,
                     controller: Some(AiKind::Logic),
                     plans: Vec::new(),
+                    ability_data: Vec::new(),
+                    spawner_unit_id: -1,
                 }],
                 fires: Vec::new(),
                 puddles: Vec::new(),
@@ -2227,7 +2321,7 @@ mod tests {
                 "class id {id} collides with an upstream class id"
             );
         }
-        assert_eq!(SIM_UNIT_REVISION, 3);
+        assert_eq!(SIM_UNIT_REVISION, 4);
         assert_eq!(SIM_FIRE_REVISION, 1);
         assert_eq!(SIM_PUDDLE_REVISION, 1);
     }
@@ -2381,6 +2475,93 @@ mod tests {
     /// A live save must carry real meta (`tick`/`playtime`) and the entities
     /// region must round-trip the placed building and the live unit: load
     /// materializes the building into the ECS runtime and respawns the unit.
+    /// L06 T4: unit revision 4 round-trips `Ability.data` (`TypeIO.writeAbilities`
+    /// / `readAbilities`, TypeIO.java:429-451, copied index-aligned by
+    /// `UnitComp.setType`, UnitComp.java:549-557) and the tether
+    /// (`UnitTetherComp.spawnerUnitId`, resolved in `afterRead`,
+    /// UnitTetherComp.java:17-24): the child stays tethered to its spawner.
+    #[test]
+    fn unit_abilities_and_tether_round_trip() {
+        use crate::combat::abilities::AbilityComp;
+        use crate::entities::comp::unit::comp::UnitTetherComp;
+        let mut sim = Sim::new(1, 48, 48, BlockId::AIR, BlockId::AIR);
+        sim.install_block_runtime().expect("block runtime");
+        sim.install_unit_runtime().expect("unit runtime");
+        let oct = sim
+            .spawn_live_unit("oct", 2, 120.0, 120.0, 0.0)
+            .expect("oct");
+        let child = sim
+            .spawn_live_unit("flare", 2, 140.0, 120.0, 0.0)
+            .expect("flare");
+        let ability_count = {
+            let mut comp = sim
+                .ecs
+                .0
+                .get_mut::<AbilityComp>(oct)
+                .expect("oct abilities");
+            for (index, state) in comp.states.iter_mut().enumerate() {
+                state.data = 10.0 + index as f32;
+            }
+            comp.states.len()
+        };
+        assert!(ability_count > 0, "oct carries abilities");
+        sim.ecs
+            .0
+            .entity_mut(child)
+            .insert(UnitTetherComp { spawner: Some(oct) });
+        let oct_seq = sim.ecs.0.get::<crate::ecs::EntitySeq>(oct).expect("seq").0;
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+        let path = temp_path("abilities-tether-roundtrip");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+
+        let find = |sim: &Sim, name: &str| {
+            let runtime = sim.unit_runtime().expect("runtime");
+            let id = runtime.content.unit_id(name).expect("type");
+            sim.ecs
+                .0
+                .iter_entities()
+                .find(|entity| {
+                    entity
+                        .get::<crate::entities::comp::unit::comp::UnitTypeComp>()
+                        .is_some_and(|comp| comp.type_id == id)
+                })
+                .map(|entity| entity.id())
+                .expect(name)
+        };
+        let oct = find(&sim, "oct");
+        let child = find(&sim, "flare");
+        let data: Vec<f32> = sim
+            .ecs
+            .0
+            .get::<AbilityComp>(oct)
+            .expect("abilities")
+            .states
+            .iter()
+            .map(|state| state.data)
+            .collect();
+        let expected: Vec<f32> = (0..ability_count).map(|i| 10.0 + i as f32).collect();
+        assert_eq!(data, expected, "Ability.data restored");
+        let spawner = sim
+            .ecs
+            .0
+            .get::<UnitTetherComp>(child)
+            .and_then(|tether| tether.spawner)
+            .expect("still tethered");
+        assert_eq!(spawner, oct);
+        assert_eq!(
+            sim.ecs.0.get::<crate::ecs::EntitySeq>(spawner).map(|s| s.0),
+            Some(oct_seq),
+            "the restored spawner id"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[test]
     fn live_sim_save_then_load_restores_entities_and_meta() {
         let mut sim = Sim::new(1, 32, 32, BlockId::AIR, BlockId::AIR);
