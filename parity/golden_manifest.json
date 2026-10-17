@@ -27,8 +27,11 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "aeff4aa110119a3a9a52fd9f2f37a1ed90e98ba4ee1f33d946d3542b470fdeb9",
-      "regen": "cargo run -p mind-headless -- content dump"
+      "sha256": "4bc6d577f7c5739b9d7c303aa4d485ee3641299db003a267e8ec76fd5852537c",
+      "regen": "cargo run -p mind-headless -- content dump",
+      "reasons": [
+        "2026-10-18 L06 batched regen (L08 T1 protocol): block[429] interplanetary-accelerator item_capacity 8000 -> 25000. eeedfbb1 (L06 T7.1) ports Accelerator.init() (world/blocks/campaign/Accelerator.java:76-85): itemCapacity = sum of launchBlock.requirements (coreNucleus copper 8000, lead 8000, silicon 5000, thorium 4000; Blocks.java:3173). The only field that moved (mind-headless content dump vs the committed file)."
+      ]
     },
     {
       "id": "harness_audio_events_blocks",

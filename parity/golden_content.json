@@ -12197,7 +12197,7 @@
             "category": "effect",
             "build_cost_multiplier": 0.5,
             "build_time": 28400.0,
-            "item_capacity": 8000,
+            "item_capacity": 25000,
             "liquid_capacity": 10.0,
             "solid": true,
             "update": true,
