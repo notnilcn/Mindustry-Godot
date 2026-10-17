@@ -3849,6 +3849,9 @@
 "2026-10-13: G03 T6 8ff98f7: hover bars for health/power/items/liquid; core Health bar evidence runs/20261013-s3-G03-T6/core-hover.png.",
 "2026-10-17 round J (J05 T4, 584a0e30): the twin walk showed the core's Capacity bar missing (runs/20261016-J-twin/diff/49-hovercore-side.png). BarExtras + family rows now emit core capacity (CoreBlock.java:148-152), drill drillspeed (Drill.java:117-119), HeatProducer/Conductor/Crafter heat, UnitFactory progress (:121-125) and the item/liquid removeBar families (ItemSource/LiquidSource/Unloader/DirectionalUnloader/LiquidVoid/LiquidJunction); the player-team guard was dropped (Java's hovered() shows any building). Verified with the real pointer: core Health+Capacity, drill Health/Water/Drill Speed, battery Power 0, conduit Liquid, heat heat (runs/20261017-s4-J05-T4/). Residual families seeded as PAR-0379."
 ],
+"PAR-0296":[
+"2026-10-17 round J (J07 T4 record, runs/20261017-s5-J07-T4/): correction — vanilla never populates Planet.launchCandidates, so the Accelerator (self-sector launch, PlanetDialog.java:610) launches to the same planet, not to Erekir; the plan's Erekir acceptance premise was wrong. Port gaps listed: progress/item-capacity state, canLaunch + config spec, planet-launch mode, core/resource carry, LaunchAnimator cutscene (Accelerator.java:42,129,276,322). Stays seeded for a follow-up."
+],
 "PAR-0188":[
 "2026-10-13: G03 T8 af283f8: code+tests landed but in-engine unconfirmed (configured sorter rendered identically; suspect Configure never reaches configured()).",
 "2026-10-15 round H: H03 T18 (9f042f98)",
@@ -5603,9 +5606,6 @@
 ],
 "PAR-0381":[
 "closed: 8b197956 (J06 T4): the axis cell renders Arc markup (`min [red]/[] max`) through render_markup, keys use Pal.accent/darkGray left-aligned at minWidth(90) padRight(20), the binds table keeps its ~845 px width and is centred; reset-all uses Icon.refresh; verified vs frame 38 (runs/20261017-s3-J06-T4/)."
-],
-"PAR-0296":[
-"2026-10-17 round J (J07 T4 record, runs/20261017-s5-J07-T4/): correction — vanilla never populates Planet.launchCandidates, so the Accelerator (self-sector launch, PlanetDialog.java:610) launches to the same planet, not to Erekir; the plan's Erekir acceptance premise was wrong. Port gaps listed: progress/item-capacity state, canLaunch + config spec, planet-launch mode, core/resource carry, LaunchAnimator cutscene (Accelerator.java:42,129,276,322). Stays seeded for a follow-up."
 ],
 "PAR-0387":[
 "closed: 6b69bded (J07 T1): the planet payload now carries per-planet orbit radius + parent centre; planet_view draws Pal.gray LINE_STRIP loops with alpha = uiAlpha, hidden <= 0.02 (PlanetRenderer.java:171-179); in-engine Erekir 17.0 + Serpulo 57.24 arcs around the sun, arc sky pixels exactly (68,68,68) (runs/20261017-s5-J07-T1/)."
