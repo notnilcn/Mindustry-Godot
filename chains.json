@@ -1,6 +1,6 @@
 {
 "schema":"mindustry-godot/chains@1",
-"updated":"2026-10-16T23:20:00+10:00",
+"updated":"2026-10-18T00:00:00+10:00",
 "sources":{"chains":"chains/*.md (49)","ledger":"parity-ledger.json (166 items)"},
 "guide":{"summary":"Lightweight chain library. Query with jq; never read the whole file. 'chains' = curated recipes from chains/*.md (steps inline; notes/failure_modes/variants in the maps below). 'ledger' = one compact record per parity item; exact call sequences are joinable via 'calls'/'seqs' refs. Notes/failure_modes/fixes are kept out of the records so a default query stays small. Keys of notes/failure_modes/variants/fixes are chain ids (kebab-case) or ledger item ids (PAR-####).","list_chains":"jq -r '.chains[] | [.id, .status, .title] | @tsv' chains.json","chain":"jq '.chains[] | select(.id==\"ground-zero-conveyor-line\")' chains.json","chain_steps":"jq -r '.chains[] | select(.id==\"<id>\") | .steps[]' chains.json","chain_notes":"jq -r '(.notes[\"<id>\"] // [])[]' chains.json","chain_failure_modes":"jq -r '(.failure_modes[\"<id>\"] // [])[]' chains.json","chain_variants":"jq -r '(.variants[\"<id>\"] // [])[]' chains.json","chains_for_item":"jq -r '.chains[] | select(.par | index(\"PAR-0049\")) | .id' chains.json","ledger_item":"jq '.ledger[\"PAR-0049\"]' chains.json  # t=title s=surface st=status par=parent item u=updated run=last run to=fork state path/rep=sequence refs conf=confirm ref","ledger_item_steps":"jq -r '(.ledger[\"PAR-0049\"].steps // [])[] | .a' chains.json","ledger_calls":"jq -r '. as $root | (.ledger[\"PAR-0049\"].rep // {}) | .[] as $s | $root.seqs[$s][] as $c | $root.calls[$c]' chains.json","ledger_notes":"jq -r '(.notes[\"PAR-0049\"] // [])[]' chains.json","ledger_failure_modes":"jq -r '(.failure_modes[\"PAR-0049\"] // [])[]' chains.json","ledger_fixes":"jq -r '(.fixes[\"PAR-0049\"] // [])[]' chains.json","find_by_title":"jq -r '.ledger | to_entries[] | select(.value.t|test(\"loadout\";\"i\")) | .key' chains.json","fields":{"ledger":"t title, s surface, st status, par parent, u updated, run run dir, chain md chain id, to fork state, path {java,godot}->seq ids, conf->pool id, rep {java,godot,compare}->seq ids, steps [{a action, v verdict}].","calls":"exact call object/string as stored in parity-ledger.json.","seqs":"ordered arrays of calls[] ids."}},
 "chains":[
@@ -1578,7 +1578,7 @@
 "PAR-0107":{"t":"`lookup` returns null for every id (mlog content-by-id lookups always fail)","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"client/rust/mind-core/src/logic/executor/mod.rs:1066 (Instruction::Lookup)","path":{"java":"s314","godot":"s315"},"rep":{"java":"s316","godot":"s317","compare":"s318"}},
 "PAR-0108":{"t":"Tapping a switch opens an empty config panel and never toggles it (no Boolean config path)","s":"world","st":"verified","u":"2026-10-12","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"client/rust/mind-gdext/src/input/desktop.rs:1059 (tile_tapped) + client/rust/mind-core/src/logic/blocks/switch.rs:24","path":{"java":"s319","godot":"s320"},"rep":{"java":"s321","godot":"s322","compare":"s323"}},
 "PAR-0109":{"t":"Map editor shows a blank canvas: the loaded map's tiles are never drawn","s":"editor","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Godot editor: standalone menu -> Editor -> click a map row (verified open in PAR-0067) -> editor shell, look at the MapView area","rep":{"java":"s324","godot":"s325","compare":"s326"}},
-"PAR-0110":{"t":"Editor maps dialog has no New Map and the editor shell has no menu: naming, save UI, resize, generate, objectives, waves, locales, processors, assets and sector-generate are unreachable","s":"editor","st":"fixing","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Standalone menu -> Editor -> maps dialog (look for New Map) -> open a map -> editor shell (look for the menu button)","rep":{"java":"s327","godot":"s328","compare":"s329"}},
+"PAR-0110":{"t":"Editor maps dialog has no New Map and the editor shell has no menu: naming, save UI, resize, generate, objectives, waves, locales, processors, assets and sector-generate are unreachable","s":"editor","st":"fixing","u":"2026-10-18","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Standalone menu -> Editor -> maps dialog (look for New Map) -> open a map -> editor shell (look for the menu button)","rep":{"java":"s327","godot":"s328","compare":"s329"}},
 "PAR-0111":{"t":"Leaving the map editor silently discards unsaved changes (no confirm)","s":"editor","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Godot editor shell -> draw a block -> click Back (or Escape)","rep":{"java":"s330","godot":"s331","compare":"s332"}},
 "PAR-0112":{"t":"Planet-generated campaign sectors have no core and no enemy base: launch loadout, ruins and base walls are skipped","s":"campaign","st":"verified","u":"2026-10-16","run":"runs/20261016-s2-I04-T17/","to":"Godot: launch a non-preset sector (planet-page hex with no preset, or MindSimHost.load_sector('serpulo', <id>) for a cell whose preset is None) and inspect the world; Java: same sector via World.loadSector","rep":{"java":"s333","godot":"s334","compare":"s335"}},
 "PAR-0113":{"t":"Editor map view cannot pan or temporarily pick/zoom: no drag/WASD pan, no shift-alt pick, no middle-click zoom","s":"input","st":"verified","u":"2026-10-16","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Godot editor shell -> MapView: drag with the zoom tool, hold WASD, middle-click, hold shift, right-click a tool button","rep":{"java":"s336","godot":"s337","compare":"s338"}},
@@ -1594,7 +1594,7 @@
 "PAR-0123":{"t":"Multiplayer: joining a running match does not sync the world (no late-join map load or snapshot catch-up)","s":"multiplayer","st":"verified","u":"2026-10-16","run":"runs/20261016-s3-I08-t1/","to":"Second client joins a match that is already Running (host created + started the match, then the joiner calls MindNet.join_match)","path":{"java":"s372","godot":"s373"},"rep":{"java":"s374","godot":"s375","compare":"s376"}},
 "PAR-0124":{"t":"Dedicated server: the host command never creates a networked match, so no client can join and kick/say/runwave do nothing","s":"multiplayer","st":"seeded","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"mind-headless serve (or server) boot, console `host <map> <mode>` then `status`, `kick <name>`, `runwave`, and a client looking at all_matches","path":{"java":"s377","godot":"s378"},"rep":{"java":"s379","godot":"s380","compare":"s381"}},
 "PAR-0125":{"t":"Chat filters/mutes are database-global and apply to every match on the SpacetimeDB database, not per match","s":"multiplayer","st":"seeded","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"One SpacetimeDB database hosting two concurrent matches; an admin adds a mute filter from one match and a player posts the pattern in the other","path":{"java":"s382","godot":"s383"},"rep":{"java":"s384","godot":"s385","compare":"s386"}},
-"PAR-0126":{"t":"Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client, player mech near the core at zoom 4, compared against the Java reference frames","path":{"java":"s387","godot":"s388"},"conf":"k63","rep":{"java":"s389","godot":"s390","compare":"s391"}},
+"PAR-0126":{"t":"Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client, player mech near the core at zoom 4, compared against the Java reference frames","path":{"java":"s387","godot":"s388"},"conf":"k63","rep":{"java":"s389","godot":"s390","compare":"s391"}},
 "PAR-0127":{"t":"Campaign weather never happens: no rain, snow, sandstorm or fog","s":"world","st":"verified","u":"2026-10-15","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"A launched campaign sector whose terrain yields weather in Java (World.java:303 calls planet.generator.addWeather on every sector load), watched for a few minutes","path":{"java":"s392","godot":"s393"},"conf":"k64","rep":{"java":"s394","godot":"s395","compare":"s396"}},
 "PAR-0128":{"t":"Effect, decal and weather sprites draw as flat colour rectangles (no atlas region execution in the FX pass)","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"MindFx dev probe: set_weather('rain', ...) or spawn_effect on the running client, screenshot and compare with the Java weather/effect art","path":{"java":"s397","godot":"s398"},"conf":"k65","rep":{"java":"s399","godot":"s400","compare":"s401"}},
 "PAR-0129":{"t":"Shields are invisible: force-projector domes and unit shield bubbles never render","s":"world","st":"verified","u":"2026-10-16","run":"runs/20261016-s4-I02-T11/","to":"A sector where a powered ForceProjector is placed (sandbox/infinite resources), stepped for a few ticks; compare the dome against Java","path":{"java":"s402","godot":"s403"},"conf":"k66","rep":{"java":"s404","godot":"s405"}},
@@ -1851,7 +1851,7 @@
 "PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"},
 "PAR-0381":{"t":"Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T4/"},
 "PAR-0382":{"t":"Game Over shows Waves Defeated 0, no Time Played row, bright accent rows and a duplicated title (9da3b3b2)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T6/"},
-"PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T7/"},
+"PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
 "PAR-0384":{"t":"Placement palette ignores affordability and clips the fourth column under the scroll bar (a35307a8)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T8/"},
 "PAR-0385":{"t":"Sidebar parent button never stays checked / Godot focus frames / square checkbox indicators (9eb88e02)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T9/"},
 "PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"seeded","u":"2026-10-17"},
@@ -1877,13 +1877,19 @@
 "PAR-0406":{"t":"`ecs::TeamId::SHARDED` is the derelict id, not Java `Team.sharded.id = 1` (ddeae35d)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T3/"},
 "PAR-0407":{"t":"J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s3-J08/"},
 "PAR-0408":{"t":"Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261017-s5-J02-T2/"},
-"PAR-0409":{"t":"F-K1: Custom Game map grid is clipped at the 5th column and does not scroll — with 19 maps only the first 10 cards are reachable, blocking Map Play (sandbox/Caldera)","s":"ui","st":"mismatch","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"},
-"PAR-0410":{"t":"F-K2: Custom Game search empties the grid for an existing map name and stays empty after reopen (needs a real-typing retest)","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"},
-"PAR-0411":{"t":"F-K3: Sandbox loads with ore 1201 but 0 boulders vs Java's scattered boulders; if real, the default ScatterFilter pass is skipped for maps carrying their own genfilters (needs a like-for-like map)","s":"world","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"},
-"PAR-0412":{"t":"F-K4: Menu background camera scale ~2x closer than MenuRenderer","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"},
-"PAR-0413":{"t":"F-K5: Graphics slider rows ~30 px vs Java 40, knob grey vs tan, plus an extra Bloom Intensity row Java does not have","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"},
-"PAR-0414":{"t":"F-K6: Planet page Erekir/Serpulo/Difficulty buttons centred top vs Java top-left; globe drawn smaller","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"},
-"PAR-0415":{"t":"F-K7: Planet-page Tech Tree button unresponsive to injected clicks (retest with input flush)","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-K-twin/"}
+"PAR-0409":{"t":"F-K1: Custom Game map grid is clipped at the 5th column and does not scroll — with 19 maps only the first 10 cards are reachable, blocking Map Play (sandbox/Caldera)","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0410":{"t":"F-K2: Custom Game search empties the grid for an existing map name and stays empty after reopen (needs a real-typing retest)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0411":{"t":"Floor decorations are guessed as '<floor>-boulder' by name, so stone/sand/ice/darksand/… floors get no boulders in custom maps and generated sectors (Java sets Floor.decoration per floor, Blocks.java:700-822)","s":"world","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0412":{"t":"F-K4: Menu background camera scale ~2x closer than MenuRenderer","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0413":{"t":"F-K5: Graphics slider rows render a ~10 px outlined track through the title with a slim grey grabber; Java's sliderBack nine-patch fills the ~32 px row with a full-height accent knob","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0414":{"t":"F-K6: Planet page Erekir/Serpulo/Difficulty buttons centred top vs Java top-left; globe drawn smaller","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0415":{"t":"F-K7: Planet-page Tech Tree button unresponsive to injected clicks (retest with input flush)","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0416":{"t":"Returning to the menu (Save & Quit / Game Over -> Menu) leaves MindCampaign in the game phase, so Core Database shows every block unlocked (Java Logic.reset(), Logic.java:299-310)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0417":{"t":"ItemSelection lists hidden items (fissile matter, dormant cyst): config_spec carries no hidden flag (Java ItemSelection.java:68 skips isHidden())","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0418":{"t":"Editor Map Info lays out at the bottom on first open and top-aligned after (stale minimum size)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0419":{"t":"Fill dialogs top-align their content (pause menu, editor menu, Game Over); Java BaseDialog centres cont vertically","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0420":{"t":"Planet orbit line drawn in the wrong plane (near-horizontal) vs Java renderOrbit's parent-XZ circle (PlanetRenderer.java:171-179)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0421":{"t":"Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4565,7 +4571,8 @@
 "PAR-0110":[
 "Code-scan 2026-10-10 (maps-editor): S2, confidence high. Player impact: a new map cannot be created or named from the UI and every metadata/content editor (resize, generate filters, objectives, wave graph, locales, processors, assets, sector generate, playtest) is unreachable; Ctrl+S on an unnamed map silently does nothing. Related: PAR-0067 (editor opens) and plan 19's deferred note 'scene parse-check only; in-engine open deferred'. The Sector Generate dialog additionally hits the MindEditor.sector_generate stub even after it is mounted. In-engine verification pending.",
 "2026-10-16 round I: I06 passes 3-8 partial: T8/T9 + T12.1-T12.8 verified; T12.4/T12.5 residual slices landed; T12.9 blocked on the plan-20 data-asset client half",
-"2026-10-17 round J (J08 T1/T2, 061ddaba + d2176386): editor buildings draw block.fullIcon with Java rotation (grey core placeholder gone) and the palette sort/filter/spawn-region/6-column/32 px rules match MapEditorDialog.java:844-895 (the red S is spawn's real block-spawn-ui); selected-entry accent frame fixed (Styles.java:310-327). Runs runs/20261017-s3-J08-T1/, -T2/."
+"2026-10-17 round J (J08 T1/T2, 061ddaba + d2176386): editor buildings draw block.fullIcon with Java rotation (grey core placeholder gone) and the palette sort/filter/spawn-region/6-column/32 px rules match MapEditorDialog.java:844-895 (the red S is spawn's real block-spawn-ui); selected-entry accent frame fixed (Styles.java:310-327). Runs runs/20261017-s3-J08-T1/, -T2/.",
+"2026-10-18 round L: spawn is still sorted with the floors in the editor palette (row 2), shifting every later entry (runs/20261017-L-twin/diff/31-editor-side.png); Java sorts it with OverlayFloor (MapEditorDialog.java:844-870). -> L07 T1."
 ],
 "PAR-0111":[
 "Code-scan 2026-10-10 (maps-editor): S2, confidence high (data loss). Player impact: closing the editor throws away unsaved drawing/metadata work with no warning, while upstream always confirms and resets the world only on accept. Compounded by the missing save UI (see the sibling editor-menu item). In-engine verification pending.",
@@ -4658,7 +4665,8 @@
 "2026-10-13 G00: flying shadow + soft shadow 100ac50, outlines 5dcd208 (in-engine vs Java crop).",
 "2026-10-13 wave-1: G03 T5 33b95ce: engines/trails/mining beam/item stack/hit flash added; in-engine partially staged.",
 "2026-10-17 round J (reopened): the round-J twin walk (docs/J-round-twin-verification.md §1 row 52, runs/20261016-J-twin/diff/52-legs-crop.png) shows a spawned atrax/arkyid drawing as bodies with no legs, and J03's audit adds no tank treads, wreck decals, neoplasm segments or payload draws in mind-gdext/src/render/units.rs. J03 wave A fixed the turret half (PAR-0363); legs/treads/wrecks/segments/payloads are J03 T4-T5 (wave B). Status reopened to fixing.",
-"2026-10-17 round J wave B (J03 T4/T5, 9f381d49 + 44401634): leg draws landed (UnitType.drawLegs order + Java hip/knee geometry in LegsComp — the old IK put joints past the feet, caught in-engine atrax/arkyid), tank treads (drawTank, stell/locus) + wreck decals (FxSink::decal; MindFx.live_decal_count()==3 after a real kill) landed. Residuals recorded as new items: segments PAR-0368, payloads PAR-0369, leg splash/drownTime/lerpDelta stepping (runs/20261017-s4-J03-T4/, -T5/). Stays fixing until segments/payloads land."
+"2026-10-17 round J wave B (J03 T4/T5, 9f381d49 + 44401634): leg draws landed (UnitType.drawLegs order + Java hip/knee geometry in LegsComp — the old IK put joints past the feet, caught in-engine atrax/arkyid), tank treads (drawTank, stell/locus) + wreck decals (FxSink::decal; MindFx.live_decal_count()==3 after a real kill) landed. Residuals recorded as new items: segments PAR-0368, payloads PAR-0369, leg splash/drownTime/lerpDelta stepping (runs/20261017-s4-J03-T4/, -T5/). Stays fixing until segments/payloads land.",
+"2026-10-18 round L: legs now drawn (godot/52-legs.png), but no Java pairing yet. -> L04 T6."
 ],
 "PAR-0127":[
 "Reference soak: staging blocker: the imported campaign's Frozen Forest save exists but its sector is not launchable (no owned/launchable hex in the visible planet state; no weather frames stored elsewhere). Needs a fresh-profile campaign branch to a weather sector.",
@@ -4894,6 +4902,39 @@
 "PAR-0301":[
 "2026-10-16 round I: I04 T4/T5/T6: content-stats families landed (blocks/units); remaining stats deviations listed in the summary",
 "2026-10-16 round I: I04 T5/T6: content_info_dialog null-amount + panel-row rendering bugs fixed"
+],
+"PAR-0410":[
+"2026-10-18 round L: confirmed in the round-L twin walk (godot/09-search-pair.png: the filtered Custom Game grid renders nothing). Root cause per L01: MindTable never calls update_minimum_size, so parents keep the stale min. -> L01 T1/T3."
+],
+"PAR-0411":[
+"2026-10-18 round L: retargeted (L-INDEX §4). Java's sandbox has no boulders either, so the original F-K3 sandbox symptom is not a defect; the real gap is block_info::decoration's name guess (filters/mod.rs:143-147) — Caldera: Java 5-7 boulders per screen incl. sand boulders, Godot 1-2 (diff/42-survival-side.png, diff/49-hovercore-side.png). -> L02 T1."
+],
+"PAR-0413":[
+"2026-10-18 round L: the 'extra Bloom Intensity row' clause is dropped — Java has that row. Skin confirmed (java/36-graphics.png vs godot/36-graphics.png). -> L03 T1."
+],
+"PAR-0414":[
+"2026-10-18 round L: confirmed (planet list + Difficulty column centred vs Java top-left, PlanetDialog.java:733-745); globe size looks comparable in the round-L pair — measure before changing camLength. Orbit plane tracked separately (new item). -> L03 T2."
+],
+"PAR-0383":[
+"2026-10-18 round L: reopened (J06 T7 regressed) — Map Play still clips (diff/41-caldera-side.png, godot/41-caldera-2.png over two opens). The 37ef2a8d re-sort never tells the parent its minimum changed. -> L01."
+],
+"PAR-0416":[
+"2026-10-18 round L G3: diff/28-coredb-side.png; database_json override !is_campaign && phase.is_game() (campaign.rs:3226). -> L02 T2."
+],
+"PAR-0417":[
+"2026-10-18 round L G4: diff/22-srccfg-zoom.png (Godot 18 vs Java 16 items). -> L02 T3."
+],
+"PAR-0418":[
+"2026-10-18 round L G1: godot/t4.png vs godot/t5.png. -> L01 T1/T3."
+],
+"PAR-0419":[
+"2026-10-18 round L G1: diff/26-pause-side.png, diff/32-edmenu-side.png, diff/44b-side.png. -> L01 T2."
+],
+"PAR-0420":[
+"2026-10-18 round L G6: java/02-planet.png vs godot/02-planet.png. Related: PAR-0387 (orbit lines drawn), PAR-0414. -> L03 T2."
+],
+"PAR-0421":[
+"2026-10-18 round L G7: diff/31-editor-open-side.png; MapEditorDialog.java:57,554,630-722, MapView.java:253-325. -> L03 T3."
 ]
 },
 "failure_modes":{
@@ -5724,6 +5765,15 @@
 ],
 "PAR-0092":[
 "2026-10-17 (0a7f40cc, 3069c447): ItemSelection widget + UnitFactory/Reconstructor command rows landed; see the item notes and runs/20261017-s4-J05-T1/, -T2/. Residual: reconstructor payload-unit branch (no payload model)."
+],
+"PAR-0409":[
+"closed 2026-10-18 (round L, L-INDEX §4): harness artefact — a real pynput wheel over the grid scrolls and 5 columns fit; the round-K finding came from injected input (runs/20261017-L-twin/godot/09-custom-scrolled.png)."
+],
+"PAR-0412":[
+"closed 2026-10-18 (round L, L-INDEX §4): F-K4 menu camera scale not reproduced in the round-L twin walk."
+],
+"PAR-0415":[
+"closed 2026-10-18 (round L, L-INDEX §4): F-K7 Tech Tree click not reproduced with real clicks in the round-L twin walk."
 ]
 }
 }
