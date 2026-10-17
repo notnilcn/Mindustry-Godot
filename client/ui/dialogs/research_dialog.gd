@@ -39,7 +39,12 @@ func _ready() -> void:
 	# the panel background and keep the dim (java/40-tech.png).
 	var panel := get_node_or_null("Center/Panel") as Control
 	if panel != null:
-		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		# `margin(0f).marginBottom(8)` plus the buttons cell pad(3) and its
+		# buttons' pad(3) (Dialog.java:211-214): the button row's bottom edge is
+		# at 648 - 15 in java/research.png (PAR-0428; the port's touched 648).
+		var empty := StyleBoxEmpty.new()
+		empty.content_margin_bottom = 15.0
+		panel.add_theme_stylebox_override("panel", empty)
 	_build()
 	add_close_button(210.0)
 	add_button(_t("@database"), _open_database, "book", 210.0)
@@ -74,7 +79,9 @@ func _build() -> void:
 	# code-instantiated: the global item pool overlays the canvas top-left
 	# (Java `cont.stack(titleTable, view, itemDisplay)`).
 	_items_display = MindResearchItemsDisplay.new()
-	_items_display.position = Vector2.ZERO
+	# The stack sits in `cont` under the Dialog's and cont's `pad(3)` cells
+	# (Dialog.java:209-213): the items box is at (6, 6) in java/research.png.
+	_items_display.position = Vector2(6.0, 6.0)
 	_view.add_child(_items_display)
 	if body != null:
 		# The canvas is not a scroll body; keep it out of the ScrollContainer

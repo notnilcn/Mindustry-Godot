@@ -33,6 +33,13 @@ func _init() -> void:
 		_panel_style.texture_margin_top = 12.0
 		_panel_style.texture_margin_right = 12.0
 		_panel_style.texture_margin_bottom = 12.0
+		# `c.margin(10).marginLeft(12).marginTop(15f).marginRight(12f)`
+		# (`ItemsDisplay.java:35-37`; PAR-0428: the box is 80 px tall in
+		# java/research.png, the port's was 68).
+		_panel_style.content_margin_left = 12.0
+		_panel_style.content_margin_top = 15.0
+		_panel_style.content_margin_right = 12.0
+		_panel_style.content_margin_bottom = 10.0
 	add_theme_stylebox_override("panel", _panel_style)
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
@@ -46,7 +53,8 @@ func _ready() -> void:
 	_toggle = Button.new()
 	_toggle.theme_type_variation = "flatTogglet"
 	_toggle.toggle_mode = true
-	_toggle.custom_minimum_size = Vector2(200.0, 40.0)
+	# `.margin(12f).minWidth(200f)` around the icon + label: 48 px tall.
+	_toggle.custom_minimum_size = Vector2(200.0, 48.0)
 	_toggle.pressed.connect(_on_toggle_pressed)
 	column.add_child(_toggle)
 	_update_toggle_content()
