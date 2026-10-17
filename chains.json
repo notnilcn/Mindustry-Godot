@@ -1769,7 +1769,7 @@
 "PAR-0298":{"t":"Generated sectors ignored the sector polygon for building (H05 T3 ab9f87e8)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0299":{"t":"No toast for sector invasions (H05 T7 6781351f)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0300":{"t":"Strings.autoFixed rounded instead of truncating (H05 T9 df856e3f)","s":"ui","st":"verified","u":"2026-10-15"},
-"PAR-0301":{"t":"Content info dialog shows no stats (T10a/T10b landed; families remain: I04 T4-T6)","s":"ui","st":"fixing","u":"2026-10-15","run":"runs/20261015-s4-H05-T10a/"},
+"PAR-0301":{"t":"Content info dialog shows no stats (T10a/T10b landed; families remain: I04 T4-T6)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
 "PAR-0302":{"t":"Hint predicates/events: fungal pass, cores destroyed, cannotupgrade, factorycontrol -> I04 T3","s":"ui","st":"seeded","u":"2026-10-15"},
 "PAR-0303":{"t":"Planet globe cannot be dragged or zoomed; last sector not stored; no preset reveal -> I04 T8","s":"ui","st":"verified","u":"2026-10-16"},
 "PAR-0304":{"t":"Planet page lacks rename/icon picker; stats dialog is a text dump -> I04 T9/T10","s":"ui","st":"verified","u":"2026-10-16"},
@@ -1848,13 +1848,13 @@
 "PAR-0377":{"t":"Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
 "PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"wontfix","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
 "PAR-0379":{"t":"Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)","s":"hud","st":"seeded","u":"2026-10-17"},
-"PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"},
+"PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"fixing","u":"2026-10-18","run":"runs/20261018-s2-L05-T2/"},
 "PAR-0381":{"t":"Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T4/"},
 "PAR-0382":{"t":"Game Over shows Waves Defeated 0, no Time Played row, bright accent rows and a duplicated title (9da3b3b2)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T6/"},
 "PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0384":{"t":"Placement palette ignores affordability and clips the fourth column under the scroll bar (a35307a8)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T8/"},
 "PAR-0385":{"t":"Sidebar parent button never stays checked / Godot focus frames / square checkbox indicators (9eb88e02)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T9/"},
-"PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"seeded","u":"2026-10-17"},
+"PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T4/"},
 "PAR-0387":{"t":"Planet orbit lines never drawn (`PlanetRenderer.renderOrbit`) (6b69bded)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T1/"},
 "PAR-0388":{"t":"Planet atmosphere drawn as a pre-body billboard quad: the veil was hidden and the rim thinner/darker (418a496b)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T2/"},
 "PAR-0389":{"t":"Tech tree rendered an opaque backdrop, generic map glyphs and an unframed planet header (aec5bde4)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T3/"},
@@ -1889,16 +1889,16 @@
 "PAR-0418":{"t":"Editor Map Info lays out at the bottom on first open and top-aligned after (stale minimum size)","s":"editor","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T2/"},
 "PAR-0419":{"t":"Fill dialogs top-align their content (pause menu, editor menu, Game Over); Java BaseDialog centres cont vertically","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T2/"},
 "PAR-0420":{"t":"Planet orbit line drawn in the wrong plane (near-horizontal) vs Java renderOrbit's parent-XZ circle (PlanetRenderer.java:171-179)","s":"ui","st":"fixing","u":"2026-10-18","run":"runs/20261018-s2-L03-T2/"},
-"PAR-0421":{"t":"Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0421":{"t":"Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)","s":"editor","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T3/"},
 "PAR-0422":{"t":"Reused dialogs (editor Map Info, editor menu/import/export, research root select) stacked a duplicate body on every reopen","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T1/"},
 "PAR-0423":{"t":"ui_widgets_check.gd is red on main (3 keybind asserts: reset-all button, 'A / D', key label width; _build_prompt arity script error) and tools/ci.sh never runs it","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0424":{"t":"Generated Serpulo sector layout differs from Java (sector 0 via editor Sector Generate: different land/water/ice layout; no derelict ruins in the Godot editor generation)","s":"world","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L02-T1/"},
-"PAR-0425":{"t":"Clicking the highlighted placement-palette block does not deselect it (Java toggles the selection off)","s":"ui","st":"seeded","u":"2026-10-18","run":"runs/20261018-s3-L02-T2/"},
+"PAR-0425":{"t":"Clicking the highlighted placement-palette block does not deselect it (Java toggles the selection off)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
 "PAR-0426":{"t":"Core Database rows sit 10-16 px lower than Java","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
-"PAR-0427":{"t":"Content info prints '0 %' where Java prints '0%' and wraps the description wider (stat formatting)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
-"PAR-0428":{"t":"Research dialog bottom buttons ~14 px low; Planet Items button 41 px tall vs Java 71","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
-"PAR-0429":{"t":"Editor Map Info: boxed unwrapped description field and separately bordered buttons vs Java's single scrolling frame","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
-"PAR-0430":{"t":"Custom Rules check rows 32 px apart vs Java 42; Banned buttons lack Java's icon and are slightly shorter","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
+"PAR-0427":{"t":"Content info prints '0 %' where Java prints '0%' and wraps the description wider (stat formatting)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
+"PAR-0428":{"t":"Research dialog bottom buttons ~14 px low; Planet Items button 41 px tall vs Java 71","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
+"PAR-0429":{"t":"Editor Map Info: boxed unwrapped description field and separately bordered buttons vs Java's single scrolling frame","s":"editor","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T3/"},
+"PAR-0430":{"t":"Custom Rules check rows 32 px apart vs Java 42; Banned buttons lack Java's icon and are slightly shorter","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
 "PAR-0431":{"t":"Banned Blocks dialog: left pane narrower, '<empty>' top-aligned instead of centred, title not red","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0432":{"t":"Editor sub-dialogs: Waves (bar graph, unit names, button order), Objectives canvas, Locales layout, Map Load (filename buttons without previews) differ from Java","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0433":{"t":"Logic editor: 'Built-in Variables' clipped on one line over Add (Java wraps to two lines); Java pauses the game behind the editor","s":"logic","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
@@ -1906,7 +1906,10 @@
 "PAR-0435":{"t":"Settings Graphics list starts 9 px higher than Java","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T1/"},
 "PAR-0436":{"t":"Planet atmosphere rim drawn on the dark side too (Java glows only on the lit side)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T2/"},
 "PAR-0437":{"t":"Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261018-s3-L06-T3/"},
-"PAR-0438":{"t":"Save Game -> New Save with a typed name writes no file, and the dialog shows the raw key 'save.name'","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"}
+"PAR-0438":{"t":"Save Game -> New Save with a typed name writes no file, and the dialog shows the raw key 'save.name'","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
+"PAR-0439":{"t":"Cultivator content info has no Affinities row: the sim gives the attribute -1 and no spores attribute","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
+"PAR-0440":{"t":"Game Over left the HUD drawn behind it (MindUi.hud_set_visible only stored a flag)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T5/"},
+"PAR-0441":{"t":"Tech tree node view clipped above the bottom button row (Java draws under the buttons)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T5/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4989,6 +4992,21 @@
 ],
 "PAR-0438":[
 "2026-10-18 found in the L02 T4 walk (runs/20261018-s3-L02-T4/notes.md). -> session A."
+],
+"PAR-0380":[
+"2026-10-18 L05 T2 (aa675500, dd05c488): LightBlock ColorPicker (ColorPicker.java; hex truncates like Arc) and MessageBlock Edit Message dialog (400 chars, newline cap, n/max counter) verified against Java sandbox captures (runs/20261018-s2-L05-T2/java-ingame/). Blocked on sim support (session B): CoreBlock team toggles need sim_host configure Int -> player team when rules.core_build_and_config (CoreBlock.java:321-330); TargetDummy needs an int-array determinism config type (mind-core/src/determinism/command.rs), sim_host parsing, TargetDummyState boosting/dummy_size/unit_team + the 5-int handler and the tethered dummy unit."
+],
+"PAR-0426":[
+"2026-10-18 root cause (L05 stretch): Java shrinks rows toward their minimum when a full-screen dialog's content overflows (title rule at y=27 vs 30); MindTable has no min/pref interpolation. Needs a layout-engine change."
+],
+"PAR-0435":[
+"2026-10-18 root cause: same as PAR-0426 (Arc min/pref interpolation on overflow, not modelled by MindTable)."
+],
+"PAR-0440":[
+"2026-10-18 found and fixed in L03 T5 (9a06374b)."
+],
+"PAR-0441":[
+"2026-10-18 fixed in L03 T5 (9a06374b), diff/40-tech-side.png."
 ]
 },
 "failure_modes":{
@@ -5865,6 +5883,30 @@
 ],
 "PAR-0378":[
 "closed 2026-10-18 (L02 T5 14151269): Java behaviour — updateProximity walks Edges.getEdges(size), which has no corners (Edges.java:22-36, BuildingComp.java:1886-1914); two tests pin orthogonal-only proximity."
+],
+"PAR-0421":[
+"closed 2026-10-18 (L03 T3 2193f78f): flati/squareTogglei (accent frame on the selected tool)/cleari styles, round Show checks, defaultSlider Brush box, Center move icon, black shell, Resize icon, 3 px accent map frame (MapEditorDialog.java:57,630-722; MapView.java:282,323-325); real-input pair in runs/20261018-s2-L03-T3/."
+],
+"PAR-0429":[
+"closed 2026-10-18 (L03 T3 2193f78f): Map Info rebuilt to MapInfoDialog.java:33-126 (two-column fields, wrapped underline description, route buttons in one framed scrolling pane); colspan cells now add only their missing width like Arc Table.computeSize (ui_layout_check case 6)."
+],
+"PAR-0386":[
+"closed 2026-10-18 (L03 T4 8ad9823b): skip button uses buttonRight sprites, wave text left-aligned and wrapping, placement panel hugs bottom-right (hover box x 840-1152 = Java) (runs/20261018-s2-L03-T4/)."
+],
+"PAR-0301":[
+"closed 2026-10-18 (L05 T3 dbb697ca): content info for duo, lancer, ripple, force projector, mono, poly, cultivator, combustion generator (+copper) row-for-row with Java: ammo rows, boost consumers, coolant panels, generator fuel efficiencies, mine-tier ore list, per-class ability text; lancer ammoMultiplier=1 and hail/ripple pyratite burning 12 s (Blocks.java:3523-3524,4030-4031). Remaining: cultivator Affinities (new item), status emoji, weapon sprite, panel spacing."
+],
+"PAR-0427":[
+"closed 2026-10-18 (L05 T3 dbb697ca): the '0 %' gap was a 6 px stat-row cell gap; info pages open scrolled to the top."
+],
+"PAR-0425":[
+"closed 2026-10-18 (bbe7b8ec): clicking the selected palette block deselects it (PlacementFragment.java:306), two real clicks."
+],
+"PAR-0428":[
+"closed 2026-10-18 (4325fba2): Research button row and Planet Items box within 1-3 px of Java."
+],
+"PAR-0430":[
+"closed 2026-10-18 (896f1622): Custom Rules check rows use the category pad(5), 42 px apart like Java."
 ]
 }
 }
