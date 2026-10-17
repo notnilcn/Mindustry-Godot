@@ -1848,7 +1848,13 @@
 "PAR-0377":{"t":"Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)","s":"ui","st":"seeded","u":"2026-10-17"},
 "PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0379":{"t":"Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)","s":"hud","st":"seeded","u":"2026-10-17"},
-"PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"}
+"PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"},
+"PAR-0381":{"t":"Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T4/"},
+"PAR-0382":{"t":"Game Over shows Waves Defeated 0, no Time Played row, bright accent rows and a duplicated title (9da3b3b2)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T6/"},
+"PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T7/"},
+"PAR-0384":{"t":"Placement palette ignores affordability and clips the fourth column under the scroll bar (a35307a8)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T8/"},
+"PAR-0385":{"t":"Sidebar parent button never stays checked / Godot focus frames / square checkbox indicators (9eb88e02)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T9/"},
+"PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"seeded","u":"2026-10-17"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -5589,6 +5595,21 @@
 ],
 "PAR-0373":[
 "closed: a17dda0f (J01 T3): map rows carry File.lastModified milliseconds (MapListDialog.java:44-50, 0 for classpath-style builtins), sorted by the persisted MapViewSettings.priority (editormapviewsettings) with the filter popup re-sorting live; Custom Game + Editor Maps match java/09-custom.png card-for-card (runs/20261017-s2-J01-T3/)."
+],
+"PAR-0381":[
+"closed: 8b197956 (J06 T4): the axis cell renders Arc markup (`min [red]/[] max`) through render_markup, keys use Pal.accent/darkGray left-aligned at minWidth(90) padRight(20), the binds table keeps its ~845 px width and is centred; reset-all uses Icon.refresh; verified vs frame 38 (runs/20261017-s3-J06-T4/)."
+],
+"PAR-0382":[
+"closed: 9da3b3b2 (J06 T6): single content headline (title table removed), 600 px centred column, Styles.black3 pane, 50 px StatLabel rows with 0.05*i delay, x-scale in, accent->darkestGray over 0.3 s, counting values after a further 0.3 s (slowFast above 10), wave row gated on rules.waves, Time Played via Strings.formatMillis/current_save_playtime_ms, @menu 140x60 / @continue 170x60. Stats fix: check_game_state's four paths raise through raise_game_over (Control.java:132-133, Logic.java:435-437) so wavesLasted records the wave; tests core_loss_game_over_records_waves_lasted + game_over_context_keys_match_dialog_rows; verified Waves Defeated 1 + Time Played vs frame 50 (runs/20261017-s3-J06-T6/)."
+],
+"PAR-0383":[
+"closed: 37ef2a8d (J06 T7): root cause was floating dialogs reusing one panel so rebuilds sorted against the previous content width and MindTable's _sorting guard dropped the resize; latched mid-sort resizes + deferred _resort_tables; swept all 27 maps with identical geometry vs java/41-caldera.png (runs/20261017-s3-J06-T7/)."
+],
+"PAR-0384":[
+"closed: a35307a8 (J06 T8): palette_tint (PlacementFragment.java:313-323: gray unless infinite/affordable+isBuilder, darkGray when unplaceable) + batched palette_tints_json on the 10-frame cadence; grid 196 px + scroll-bar reserve fixes the fourth-column clipping; verified Ground Zero 202 white/245 gray vs frame 46 (runs/20261017-s3-J06-T8/)."
+],
+"PAR-0385":[
+"closed: 9eb88e02 (J06 T9): sidebar parent checked via flatOver + the packed flat-down-base frame (MenuFragment.java:271,291, Styles.java:210-219), empty focus styleboxes remove Godot's focus frame, Core Database backdrop verified translucent, sector state lines centred, round check-on/off indicators (Styles.java:446-456); wave-panel wrap + editor selected-cell highlight recorded as PAR-0386 (runs/20261017-s3-J06-T9/)."
 ],
 "PAR-0374":[
 "closed: 44e959f6 (J01 T4): SaveSlot::write_preview_from_file + live-grid savePreview() wired for autosaves, capture/GameOver/sector saves and run_exit_save; list_save_slots backfills; import_save renders; save_slot registers the slot as current (Saves.java:265-271) which also makes autosaves/Save & Quit run; test missing_preview_renders_from_save_file; Load Game previews verified (runs/20261017-s2-J01-T4/). Note J01 T6 deviation: name-stem slot files kept (sanitize_slot_name; Java numeric saves/<index>.msav is Saves.java:265-271,283-290)."
