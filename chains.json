@@ -1870,7 +1870,12 @@
 "PAR-0399":{"t":"Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0400":{"t":"`Block.depositCooldown` ignored (global deposit gate only) (60e34db5)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T5/"},
 "PAR-0401":{"t":"Power turrets report `rangeChange`/`minRangeChange` = 0 (TurretAmmo::Power kept only the bullet id) (8986959a)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"},
-"PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"seeded","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"}
+"PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"seeded","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"},
+"PAR-0403":{"t":"Load dialog cards render white titles and a slate body with tiny buttons (23828d01)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T5/"},
+"PAR-0404":{"t":"Editor draws buildings as unrotated base regions (grey squares) (061ddaba)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T1/"},
+"PAR-0405":{"t":"Editor block palette selected entry has no accent frame (d2176386)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T2/"},
+"PAR-0406":{"t":"`ecs::TeamId::SHARDED` is the derelict id, not Java `Team.sharded.id = 1` (ddeae35d)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T3/"},
+"PAR-0407":{"t":"J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s3-J08/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -5665,6 +5670,18 @@
 ],
 "PAR-0401":[
 "closed: 8986959a (J04 T6): TurretAmmo::Power keeps a PowerAmmo snapshot so peekAmmo().rangeChange/minRangeChange read the bullet def (Turret.java:348-353); test power_turret_reads_bullet_range_change (runs/20261017-s2-J04-T6/)."
+],
+"PAR-0403":[
+"closed: 23828d01 (J06 T5): grayt/flatt/emptyi/emptyTogglei theme arms (Styles.java:147-165,272-282), accent titles at 230 px, 40 px icon buttons, 160x160 preview, 280 px meta with translated [lightgray] markup, 60 px filters, add_close_button() + a 210x64 @save.import (LoadDialog.java:30-200); verified vs frame 39 with previews/ordering unchanged (runs/20261017-s3-J06-T5/)."
+],
+"PAR-0404":[
+"closed: 061ddaba (J08 T1): BlockSpec/BlockDef gained rotate (kind_rotates, shared with world::block) + rotateDraw/rotateDrawEditor/visualRotationOffset with the five Blocks.java rotateDraw=false overrides; editor_renderer resolves block-<name>-full (base fallback) and draws the rotated unit mesh (EditorRenderer.java:223-239, Block.java:124-130); core sprite verified where the twin had a grey placeholder (runs/20261017-s3-J08-T1/)."
+],
+"PAR-0405":[
+"closed: d2176386 (J08 T2): sort/filter/spawn-region/6-column/32 px checks match MapEditorDialog.java:844-895 field by field; spawn renders its real block-spawn-ui (the red S is the sprite); clearNonei/clearNoneTogglei use the accent flat-down-base frame for checked (Styles.java:310-327); verified in-editor. Residual: Java's group-based filter presets (port search matches the localized name exactly) — folded into PAR-0407 (runs/20261017-s3-J08-T2/)."
+],
+"PAR-0406":[
+"closed: ddeae35d (J08 T3): ecs::TeamId::SHARDED unified on the canonical TeamId(1) (= Team.sharded.id); full mind-core suite green (runs/20261017-s3-J08-T3/)."
 ],
 "PAR-0382":[
 "closed: 9da3b3b2 (J06 T6): single content headline (title table removed), 600 px centred column, Styles.black3 pane, 50 px StatLabel rows with 0.05*i delay, x-scale in, accent->darkestGray over 0.3 s, counting values after a further 0.3 s (slowFast above 10), wave row gated on rules.waves, Time Played via Strings.formatMillis/current_save_playtime_ms, @menu 140x60 / @continue 170x60. Stats fix: check_game_state's four paths raise through raise_game_over (Control.java:132-133, Logic.java:435-437) so wavesLasted records the wave; tests core_loss_game_over_records_waves_lasted + game_over_context_keys_match_dialog_rows; verified Waves Defeated 1 + Time Played vs frame 50 (runs/20261017-s3-J06-T6/)."
