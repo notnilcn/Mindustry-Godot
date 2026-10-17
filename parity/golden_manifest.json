@@ -139,7 +139,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/combat.json",
       "owner_plan": "10",
-      "sha256": "536fa90af9788ef6e4145f1db3b5ce92ea1823226c5b88ca2308c1d397f4e9b6"
+      "sha256": "6a894d075287263590140aead6f246913be0b6e97c8b3b3cd4baaf80f0964594",
+      "reasons": [
+        "2026-10-18 L08 T1: tests moved to Java building positions (tile_origin = Tile.worldx; BuildingComp.java:126, Tile.java:166-177) after 8e7b68b8 (H01 T1) made building Pos = drawx and bullet rows World.toTile = round (World.java:174, BulletComp.java:187): the half-tile spawn y = 68 rounded to row 9, so basic missed its wall (health 320). With Java positions combat_basic and combat_bullet_pierce reproduce the old goldens unchanged. combat_weapon_volley 64edcedb54498910 -> abc69ea4e380cf10 and combat_turret_ammo 5b34518810df046d -> 96fe4c155a09919d: the surviving unit/turret Pos follow the Java convention (H01 T1; values verified identical at 8e7b68b8 and HEAD with the fixed test), plus for the turret b7d104af (G01 T4): building hits run BulletType.hitTile (BulletType.java:465-486) instead of a double hit pipeline."
+      ]
     },
     {
       "id": "harness_entitymeta",
