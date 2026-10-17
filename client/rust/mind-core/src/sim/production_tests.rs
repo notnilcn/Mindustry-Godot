@@ -202,6 +202,88 @@ fn electrolyzer_dumps_liquids_in_configured_directions() {
     );
 }
 
+/// J04 T4 (`PowerGenerator.onExplosion`, `PowerGenerator.java:149-201`): the
+/// sim half of a generator explosion - radius damage, ignition fires, prop
+/// breaking, fireballs and liquid puddles (the view half stays in
+/// `ExplosionSink`).
+#[test]
+fn generator_explosion_applies_sim_side_effects() {
+    use crate::world::blocks::power::explosion::{ReactorExplosion, fire_explosion};
+    use crate::world::blocks::power::generator::GeneratorConfig;
+
+    let mut sim = runtime_sim();
+    // The fireball spawn (`Bullets.fireball.createNet`) needs the unit runtime.
+    sim.install_unit_runtime().expect("unit runtime");
+    let generator = place(&mut sim, "combustion-generator", 5, 5);
+    let neoplasm = liquid(&sim, "neoplasm");
+    // A neoplasia-style footprint with every sim effect active.
+    {
+        let mut config = sim
+            .ecs
+            .0
+            .get_mut::<GeneratorConfig>(generator)
+            .expect("generator config");
+        config.explosion_radius = 3.0;
+        config.explosion_damage = 120.0;
+        config.explosion_puddles = 6;
+        config.explosion_puddle_range = 16.0;
+        config.explosion_puddle_amount = 50.0;
+        config.explosion_puddle_liquid = Some(neoplasm);
+        config.explosion_ignition_chance = 1.0;
+        config.explosion_fireballs = 3;
+    }
+    // A `unitMoveBreakable` prop in range (`boulder` is a `StaticProp`).
+    let boulder = BlockId::new(sim.world_block_id("boulder").expect("boulder"));
+    sim.grid.tiles.get_mut(6, 6).block = boulder;
+    // A nearby building takes falloff damage.
+    let wall = place(&mut sim, "conveyor", 7, 5);
+    let wall_health = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Health>(wall)
+            .map(|health| health.health)
+            .unwrap_or(0.0)
+    };
+    let before = wall_health(&sim);
+
+    let config = sim
+        .ecs
+        .0
+        .get::<GeneratorConfig>(generator)
+        .cloned()
+        .expect("config");
+    let explosion =
+        ReactorExplosion::for_building(&sim.ecs.0, generator, &config, true).expect("params");
+    assert!(fire_explosion(&mut sim.ecs.0, generator, explosion, true));
+    // The sim half drains on the following ticks (fires are delayed by
+    // `dst / explosionSpeed`).
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+
+    assert!(
+        wall_health(&sim) < before,
+        "radius damage hit the wall ({before} -> {})",
+        wall_health(&sim)
+    );
+    assert!(
+        sim.grid.tiles.get(6, 6).block != boulder,
+        "the explosion broke the unitMoveBreakable prop"
+    );
+    let mut puddle_query = sim.ecs.0.query::<&crate::combat::puddles::PuddleState>();
+    let puddles = puddle_query.iter(&sim.ecs.0).count();
+    assert!(puddles > 0, "the explosion left puddles");
+    let mut fire_query = sim.ecs.0.query::<&crate::combat::fires::FireState>();
+    let fires = fire_query.iter(&sim.ecs.0).count();
+    assert!(fires > 0, "the explosion ignited fires");
+    let mut bullet_query = sim.ecs.0.query::<&crate::combat::bullet::Bullet>();
+    let fireballs = bullet_query
+        .iter(&sim.ecs.0)
+        .filter(|bullet| bullet.def == crate::content::registries::bullets::FIREBALL)
+        .count();
+    assert!(fireballs > 0, "the explosion spawned fireballs");
+}
+
 /// J04 T2 (`ConsumeGenerator.java:126-131`, `Blocks.java:2538`):
 /// `itemDurationMultipliers` scale the burn time - pyratite burns 3x longer
 /// than coal in a combustion generator.

@@ -17,6 +17,7 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::world::World;
 
+use crate::content::LiquidId;
 use crate::entities::comp::{Building, TeamComp};
 use crate::world::block::TILE_SIZE;
 
@@ -35,15 +36,39 @@ pub struct ReactorExplosion {
     pub damage: f32,
     /// Whether the explosion can ignite tiles (plan 10 `Fires`).
     pub fire: bool,
+    /// `PowerGenerator.explosionPuddles` (count).
+    pub puddles: i32,
+    /// `PowerGenerator.explosionPuddleRange` (world pixels).
+    pub puddle_range: f32,
+    /// `PowerGenerator.explosionPuddleAmount`.
+    pub puddle_amount: f32,
+    /// `PowerGenerator.explosionPuddleLiquid` (`None` = no puddles).
+    pub puddle_liquid: Option<LiquidId>,
+    /// `PowerGenerator.explosionShake` (view-only).
+    pub shake: f32,
+    /// `PowerGenerator.explosionShakeDuration` (view-only).
+    pub shake_duration: f32,
+    /// `PowerGenerator.explosionBreaksProps`.
+    pub breaks_props: bool,
+    /// `PowerGenerator.explosionScorchSize` (`0` = off; view-only).
+    pub scorch_size: i32,
+    /// `PowerGenerator.explosionIgnitionChance`.
+    pub ignition_chance: f32,
+    /// `PowerGenerator.explosionScaleIgnitionChance`.
+    pub scale_ignition_chance: bool,
+    /// `PowerGenerator.explosionSpeed` (tiles per tick for the ignition delay).
+    pub speed: f32,
+    /// `PowerGenerator.explosionFireballs`.
+    pub fireballs: i32,
 }
 
 impl ReactorExplosion {
-    /// Builds the parameter bundle for `entity` from its tile/team and knobs.
+    /// Builds the parameter bundle for `entity` from its tile/team and the
+    /// generator config (`PowerGenerator.onExplosion` reads exactly these).
     pub fn for_building(
         world: &World,
         entity: Entity,
-        radius: f32,
-        damage: f32,
+        config: &crate::world::blocks::power::generator::GeneratorConfig,
         fire: bool,
     ) -> Option<Self> {
         let building = world.get::<Building>(entity)?;
@@ -61,11 +86,39 @@ impl ReactorExplosion {
             x,
             y,
             team,
-            radius,
-            damage,
+            radius: config.explosion_radius,
+            damage: config.explosion_damage,
             fire,
+            puddles: config.explosion_puddles,
+            puddle_range: config.explosion_puddle_range,
+            puddle_amount: config.explosion_puddle_amount,
+            puddle_liquid: config.explosion_puddle_liquid,
+            shake: config.explosion_shake,
+            shake_duration: config.explosion_shake_duration,
+            breaks_props: config.explosion_breaks_props,
+            scorch_size: config.explosion_scorch_size,
+            ignition_chance: config.explosion_ignition_chance,
+            scale_ignition_chance: config.explosion_scale_ignition_chance,
+            speed: config.explosion_speed,
+            fireballs: config.explosion_fireballs,
         })
     }
+}
+
+/// Explosions that have fired but whose sim side effects have not been applied
+/// yet (`Sim::apply_generator_explosions`, J04 T4). `fire_explosion` runs from
+/// world behavior passes that cannot reach the sim's damage/puddle/bullet
+/// seams, so it queues the bundle for the tick-level pass.
+#[derive(Debug, Default, Resource)]
+pub struct PendingGeneratorExplosions(pub Vec<ReactorExplosion>);
+
+/// Ignition fires scheduled by `Time.run(dst / explosionSpeed, ...)`
+/// (`PowerGenerator.java:180-183`), drained by
+/// `Sim::apply_generator_explosions` once their due tick arrives.
+#[derive(Debug, Default, Resource)]
+pub struct PendingExplosionFires {
+    /// `(due tick, tile x, tile y)` in scheduling (circle) order.
+    pub entries: Vec<(u64, i16, i16)>,
 }
 
 /// Plan-10 `Damage.dynamicExplosion` + plan-17 effect receiver.
@@ -102,6 +155,13 @@ pub fn fire_explosion(
         }
         world.insert_resource(sink);
     }
+    // The sim half (`onExplosion`'s damage/fires/props/fireballs/puddles) is
+    // drained by `Sim::apply_generator_explosions`; the sink owns the view half
+    // (effect, sound, shake, scorch decal).
+    world
+        .get_resource_or_insert_with(PendingGeneratorExplosions::default)
+        .0
+        .push(explosion);
     true
 }
 
@@ -154,8 +214,12 @@ mod tests {
         world.insert_resource(ExplosionSinkRes(Some(Box::new(CountingSink {
             calls: calls.clone(),
         }))));
+        let config = crate::world::blocks::power::generator::GeneratorConfig {
+            explosion_radius: 12.0,
+            ..Default::default()
+        };
         let explosion =
-            ReactorExplosion::for_building(&world, entity, 12.0, 0.0, false).expect("params");
+            ReactorExplosion::for_building(&world, entity, &config, false).expect("params");
         assert!(fire_explosion(&mut world, entity, explosion, true));
         assert!(!fire_explosion(&mut world, entity, explosion, true));
         assert_eq!(calls.load(Ordering::Relaxed), 1);
@@ -165,8 +229,12 @@ mod tests {
     #[test]
     fn gate_and_default_sink_are_inert() {
         let (mut world, entity) = building();
+        let config = crate::world::blocks::power::generator::GeneratorConfig {
+            explosion_radius: 12.0,
+            ..Default::default()
+        };
         let explosion =
-            ReactorExplosion::for_building(&world, entity, 12.0, 0.0, false).expect("params");
+            ReactorExplosion::for_building(&world, entity, &config, false).expect("params");
         // `shouldExplode()` false -> no marker, no fire.
         assert!(!fire_explosion(&mut world, entity, explosion, false));
         assert!(world.get::<ExplosionFired>(entity).is_none());
@@ -178,8 +246,13 @@ mod tests {
     #[test]
     fn params_capture_building_center_and_team() {
         let (world, entity) = building();
+        let config = crate::world::blocks::power::generator::GeneratorConfig {
+            explosion_radius: 19.0,
+            explosion_damage: 5000.0,
+            ..Default::default()
+        };
         let explosion =
-            ReactorExplosion::for_building(&world, entity, 19.0, 5000.0, true).expect("params");
+            ReactorExplosion::for_building(&world, entity, &config, true).expect("params");
         assert_eq!(explosion.team, Some(1));
         assert_eq!(explosion.radius, 19.0);
         assert_eq!(explosion.damage, 5000.0);

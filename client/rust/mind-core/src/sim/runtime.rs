@@ -1405,6 +1405,201 @@ impl Sim {
         }
     }
 
+    /// `PowerGenerator.onExplosion`'s **sim half** (J04 T4,
+    /// `PowerGenerator.java:149-201`): radius damage, ignition fires (delayed
+    /// by `dst / explosionSpeed` through the `SimClock`), boulder/prop
+    /// breaking, fireball bullets and liquid puddles. The view half
+    /// (`explodeEffect`/`explodeSound`, shake, scorch decal) stays with
+    /// `ExplosionSink`.
+    pub(crate) fn apply_generator_explosions(&mut self) {
+        use crate::world::blocks::power::explosion::PendingGeneratorExplosions;
+
+        // Due ignition fires (`Time.run(dst / explosionSpeed, ...)`): the
+        // delay is scheduled as a tick count, matching the `SimClock` unit.
+        let tick = self.state.tick;
+        let due_fires: Vec<(i16, i16)> = {
+            let mut due = Vec::new();
+            if let Some(mut pending) = self
+                .ecs
+                .0
+                .get_resource_mut::<crate::world::blocks::power::explosion::PendingExplosionFires>(
+            ) {
+                let mut rest = Vec::new();
+                for (due_tick, tx, ty) in pending.entries.drain(..) {
+                    if due_tick <= tick {
+                        due.push((tx, ty));
+                    } else {
+                        rest.push((due_tick, tx, ty));
+                    }
+                }
+                pending.entries = rest;
+            }
+            due
+        };
+        for (tx, ty) in due_fires {
+            let _ = crate::combat::fires::create(&mut self.ecs.0, tx, ty, &mut self.rng_streams);
+        }
+
+        let pending = self
+            .ecs
+            .0
+            .get_resource_mut::<PendingGeneratorExplosions>()
+            .map(|mut pending| std::mem::take(&mut pending.0))
+            .unwrap_or_default();
+        if pending.is_empty() {
+            return;
+        }
+
+        let Some(runtime) = self.block_runtime.as_ref() else {
+            return;
+        };
+        let content = &runtime.content;
+        let hooks = &runtime.hooks;
+        let render = &runtime.render;
+        let ts = crate::config::TILESIZE as f32;
+        let (width, height) = (self.grid.tiles.width, self.grid.tiles.height);
+        let mut broke_prop = false;
+        for explosion in pending {
+            // `if(explosionDamage > 0) Damage.damage(x, y, explosionRadius *
+            // tilesize, explosionDamage)`.
+            if explosion.damage > 0.0 {
+                let _ = crate::combat::damage::area::damage_area(
+                    &mut self.ecs.0,
+                    content,
+                    None,
+                    explosion.x,
+                    explosion.y,
+                    explosion.radius * ts,
+                    explosion.damage,
+                    crate::combat::damage::area::DamageOptions::default(),
+                );
+            }
+
+            // `Geometry.circle(tileX(), tileY(), explosionRadius, ...)`:
+            // ignition fires (delayed by `dst / explosionSpeed`) and prop
+            // breaking (`unitMoveBreakable`).
+            if explosion.ignition_chance > 0.0 || explosion.breaks_props {
+                let cx = (explosion.x / ts) as i32;
+                let cy = (explosion.y / ts) as i32;
+                let radius = explosion.radius.max(0.0) as i32;
+                let mut breaks: Vec<(i16, i16)> = Vec::new();
+                let mut fires: Vec<(f32, i16, i16)> = Vec::new();
+                crate::maps::generators::basic::circle(cx, cy, width, height, radius, |tx, ty| {
+                    let dst = (((cx - tx).pow(2) + (cy - ty).pow(2)) as f32).sqrt();
+                    if explosion.ignition_chance > 0.0 {
+                        let chance = explosion.ignition_chance
+                            * if explosion.scale_ignition_chance {
+                                1.0 - (dst / explosion.radius.max(0.0001)).sqrt()
+                            } else {
+                                1.0
+                            };
+                        if self.rng_streams.chance(
+                            crate::determinism::RngStream::Sim,
+                            chance.clamp(0.0, 1.0) as f64,
+                        ) {
+                            fires.push((dst / explosion.speed.max(0.0001), tx as i16, ty as i16));
+                        }
+                    }
+                    if explosion.breaks_props
+                        && self
+                            .grid
+                            .tiles
+                            .getn(tx, ty)
+                            .map(|tile| tile.block)
+                            .and_then(|block| content.block(block))
+                            .is_some_and(|def| def.unit_move_breakable)
+                    {
+                        breaks.push((tx as i16, ty as i16));
+                    }
+                });
+                if !breaks.is_empty() {
+                    // `ConstructBlock.deconstructFinish(t, t.block(), null)`:
+                    // props have no building entity, so the tile op removes
+                    // them directly.
+                    let mut log = crate::world::ops::WorldEventLog::default();
+                    for (tx, ty) in breaks {
+                        let mut ctx = crate::world::ops::WorldCtx {
+                            grid: &mut self.grid,
+                            content,
+                            ecs: &mut self.ecs.0,
+                            hooks,
+                            render,
+                            log: &mut log,
+                        };
+                        ctx.set_air(tx, ty);
+                        broke_prop = true;
+                    }
+                }
+                for (delay, tx, ty) in fires {
+                    // `Time.run(dst / explosionSpeed, () -> Fires.create(t))`.
+                    let due = tick + delay.max(0.0).ceil() as u64;
+                    self.ecs
+                        .0
+                        .get_resource_or_insert_with(
+                            crate::world::blocks::power::explosion::PendingExplosionFires::default,
+                        )
+                        .entries
+                        .push((due, tx, ty));
+                }
+            }
+
+            // `if(explosionFireballs > 0)`: `Mathf.random(1, explosionFireballs)`
+            // `Bullets.fireball.createNet(Team.derelict, ...)` — queued for the
+            // fire/puddle pass, which owns the bullet spawn seam.
+            if explosion.fireballs > 0 {
+                let amount = 1 + self.rng_streams.random(
+                    crate::determinism::RngStream::Sim,
+                    explosion.fireballs.max(1),
+                );
+                for _ in 0..amount {
+                    self.ecs
+                        .0
+                        .get_resource_or_insert_with(
+                            crate::combat::puddles::PendingFireballs::default,
+                        )
+                        .0
+                        .push((explosion.x, explosion.y));
+                }
+            }
+
+            // `if(explosionPuddleLiquid != null)`: `explosionPuddles` deposits
+            // at `Tmp.v1.trns(Mathf.random(360f), Mathf.random(range))`.
+            if let Some(liquid) = explosion.puddle_liquid {
+                for _ in 0..explosion.puddles.max(0) {
+                    let angle =
+                        self.rng_streams
+                            .range(crate::determinism::RngStream::Sim, 0.0, 360.0);
+                    let dist = self.rng_streams.range(
+                        crate::determinism::RngStream::Sim,
+                        0.0,
+                        explosion.puddle_range,
+                    );
+                    let px = explosion.x + angle.to_radians().cos() * dist;
+                    let py = explosion.y + angle.to_radians().sin() * dist;
+                    let tx = (px / ts) as i32;
+                    let ty = (py / ts) as i32;
+                    if !self.grid.tiles.in_bounds(tx, ty) {
+                        continue;
+                    }
+                    let _ = crate::combat::puddles::deposit(
+                        &mut self.ecs.0,
+                        &self.grid.tiles,
+                        content,
+                        tx as i16,
+                        ty as i16,
+                        liquid,
+                        explosion.puddle_amount,
+                        &mut self.rng_streams,
+                    );
+                }
+            }
+        }
+        if broke_prop {
+            // Prop breaking mutated blocks; rebuild placement/proximity caches.
+            self.refresh_unit_runtime();
+        }
+    }
+
     /// `BeamNode.updateTile` -> `updateDirections` (T15): rebuilds the four
     /// directional links of every registered beam node whose
     /// `WorldGrid.tile_changes` view is stale.

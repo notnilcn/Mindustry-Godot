@@ -152,6 +152,30 @@ pub struct GeneratorConfig {
     pub explosion_radius: f32,
     /// `PowerGenerator.explosionDamage`.
     pub explosion_damage: f32,
+    /// `PowerGenerator.explosionPuddles` (count).
+    pub explosion_puddles: i32,
+    /// `PowerGenerator.explosionPuddleRange` (world pixels).
+    pub explosion_puddle_range: f32,
+    /// `PowerGenerator.explosionPuddleAmount`.
+    pub explosion_puddle_amount: f32,
+    /// `PowerGenerator.explosionPuddleLiquid` (`None` = no puddles).
+    pub explosion_puddle_liquid: Option<LiquidId>,
+    /// `PowerGenerator.explosionShake` (view-only).
+    pub explosion_shake: f32,
+    /// `PowerGenerator.explosionShakeDuration` (view-only).
+    pub explosion_shake_duration: f32,
+    /// `PowerGenerator.explosionBreaksProps`.
+    pub explosion_breaks_props: bool,
+    /// `PowerGenerator.explosionScorchSize` (`0` = off; view-only).
+    pub explosion_scorch_size: i32,
+    /// `PowerGenerator.explosionIgnitionChance`.
+    pub explosion_ignition_chance: f32,
+    /// `PowerGenerator.explosionScaleIgnitionChance`.
+    pub explosion_scale_ignition_chance: bool,
+    /// `PowerGenerator.explosionSpeed` (tiles per tick for the ignition delay).
+    pub explosion_speed: f32,
+    /// `PowerGenerator.explosionFireballs`.
+    pub explosion_fireballs: i32,
 }
 
 impl Default for GeneratorConfig {
@@ -172,6 +196,18 @@ impl Default for GeneratorConfig {
             // `PowerGenerator` defaults.
             explosion_radius: 12.0,
             explosion_damage: 0.0,
+            explosion_puddles: 10,
+            explosion_puddle_range: 2.0 * crate::config::TILESIZE as f32,
+            explosion_puddle_amount: 100.0,
+            explosion_puddle_liquid: None,
+            explosion_shake: 0.0,
+            explosion_shake_duration: 6.0,
+            explosion_breaks_props: true,
+            explosion_scorch_size: 0,
+            explosion_ignition_chance: 0.0,
+            explosion_scale_ignition_chance: true,
+            explosion_speed: 0.4,
+            explosion_fireballs: 0,
         }
     }
 }
@@ -665,13 +701,8 @@ pub fn update_generator_with(
                 // `ConsumeGeneratorBuild.updateTile`: `kill()` fires `onDestroyed`
                 // (`createExplosion`), so the trigger fires before the despawn.
                 if reactor_explosions_enabled(world)
-                    && let Some(explosion) = ReactorExplosion::for_building(
-                        world,
-                        entity,
-                        config.explosion_radius,
-                        config.explosion_damage,
-                        true,
-                    )
+                    && let Some(explosion) =
+                        ReactorExplosion::for_building(world, entity, &config, true)
                 {
                     let should = state.warmup >= config.explosion_min_warmup;
                     fire_explosion(world, entity, explosion, should);
