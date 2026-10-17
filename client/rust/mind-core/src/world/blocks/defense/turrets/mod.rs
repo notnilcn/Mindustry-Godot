@@ -1956,6 +1956,17 @@ fn update_shooting(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) 
     }
 }
 
+/// `if(checkSuppression()) efficiency = potentialEfficiency = 0`
+/// (BuildTurret.java:132-134): a heal-suppressed build tower builds (and
+/// moves) at speed 0 (`buildSpeedMultiplier(potentialEfficiency * timeScale)`).
+pub fn build_turret_efficiency(world: &World, e: Entity, eff: f32) -> f32 {
+    if crate::world::blocks::defense::projectors::is_heal_suppressed(world, e) {
+        0.0
+    } else {
+        eff
+    }
+}
+
 /// `BuildTurretBuild.updateTile` (plan 10 §3.8): follow queued build plans and
 /// drive the target `ConstructBuild`'s progress through plan 07's
 /// [`ConstructState`]. Placement finalisation stays with plan 07
@@ -1970,6 +1981,7 @@ fn update_build(
     y: f32,
     eff: f32,
 ) {
+    let eff = build_turret_efficiency(ctx.world, e, eff);
     // Drop plans outside the grid (`Build.validPlace` is plan 07's).
     state
         .build_plans
@@ -2704,6 +2716,73 @@ mod tests {
         assert!(progress > 0.0, "build turret advanced the construct");
         let state = harness.build.world.get::<TurretState>(turret).unwrap();
         assert!(state.build_warmup > 0.0, "build warmup ramped");
+    }
+
+    /// L06 stretch: a heal-suppressed build tower builds at efficiency 0
+    /// (`checkSuppression`, BuildTurret.java:132-134; `update_build` routes its
+    /// efficiency through `build_turret_efficiency`).
+    #[test]
+    fn suppressed_build_turret_has_zero_efficiency() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let tower = harness.content().block_id("build-tower").expect("tower");
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("build-tower", tx, ty, 1)
+            .expect("build tower");
+        // `checkSuppression` reads the building's block (`suppressable`) and
+        // `healSuppressionTime`.
+        harness
+            .build
+            .world
+            .entity_mut(turret)
+            .insert(crate::entities::comp::Building::new(
+                crate::world::TilePos::new(4, 8),
+                tower,
+                0,
+            ));
+        assert_eq!(
+            build_turret_efficiency(&harness.build.world, turret, 1.0),
+            1.0
+        );
+        crate::world::blocks::defense::projectors::apply_suppression(
+            &mut harness.build.world,
+            2,
+            tx,
+            ty,
+            40.0,
+            600.0,
+        );
+        assert_eq!(
+            build_turret_efficiency(&harness.build.world, turret, 1.0),
+            0.0,
+            "a suppressed build turret builds nothing"
+        );
+        // Own-team suppression never applies (`Damage.applySuppression`).
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let turret = harness
+            .spawn_test_turret("build-tower", tx, ty, 1)
+            .expect("build tower");
+        harness
+            .build
+            .world
+            .entity_mut(turret)
+            .insert(crate::entities::comp::Building::new(
+                crate::world::TilePos::new(4, 8),
+                tower,
+                0,
+            ));
+        crate::world::blocks::defense::projectors::apply_suppression(
+            &mut harness.build.world,
+            1,
+            tx,
+            ty,
+            40.0,
+            600.0,
+        );
+        assert_eq!(
+            build_turret_efficiency(&harness.build.world, turret, 1.0),
+            1.0
+        );
     }
 
     #[test]

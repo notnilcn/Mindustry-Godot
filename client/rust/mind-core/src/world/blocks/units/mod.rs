@@ -530,6 +530,13 @@ pub struct RepairTower {
     pub refresh_time: f32,
     /// Suppression countdown (`healSuppression`).
     pub suppression: f32,
+    /// `RepairTowerBuild.targets`: damaged same-team units found on the last
+    /// refresh.
+    pub targets: Vec<Entity>,
+    /// `RepairTowerBuild.warmup` (draw).
+    pub warmup: f32,
+    /// `RepairTowerBuild.totalProgress` (draw).
+    pub total_progress: f32,
 }
 
 impl Default for RepairTower {
@@ -539,6 +546,9 @@ impl Default for RepairTower {
             heal_amount: 1.0,
             refresh_time: 6.0,
             suppression: 0.0,
+            targets: Vec::new(),
+            warmup: 0.0,
+            total_progress: 0.0,
         }
     }
 }
@@ -556,6 +566,80 @@ impl RepairTower {
             false
         }
     }
+}
+
+/// `RepairTowerBuild.updateTile` (`world/blocks/units/RepairTower.java:57-86`):
+/// with `potentialEfficiency > 0` the target list refreshes every 6 ticks
+/// (`Units.nearby(team, x, y, range)` = within `range + hitSize / 2`, damaged
+/// units only); a heal-suppressed tower (`checkSuppression`,
+/// `BuildingComp.java:485-495`) zeroes `warmup` and stops; otherwise every
+/// still-damaged target heals `healAmount * edelta()`; `warmup` lerps toward
+/// `efficiency` while anything healed and `totalProgress += delta /
+/// circleSpeed` (120).
+pub fn update_repair_tower(world: &mut World, e: Entity, tower: &mut RepairTower) {
+    let (efficiency, potential, time_scale) = world
+        .get::<crate::entities::comp::Building>(e)
+        .map(|building| {
+            (
+                building.efficiency,
+                building.potential_efficiency,
+                building.time_scale,
+            )
+        })
+        .unwrap_or((0.0, 0.0, 1.0));
+    if potential > 0.0 && tower.update_refresh() {
+        tower.targets.clear();
+        let pos = world.get::<Pos>(e).copied();
+        let team = world
+            .get::<crate::entities::comp::TeamComp>(e)
+            .map(|team| team.team);
+        if let Some(pos) = pos {
+            for entity_ref in world.iter_entities() {
+                let Some(core) = entity_ref.get::<crate::entities::comp::unit::comp::UnitCore>()
+                else {
+                    continue;
+                };
+                if core.dead
+                    || entity_ref
+                        .get::<crate::entities::comp::TeamComp>()
+                        .map(|target_team| target_team.team)
+                        != team
+                    || !entity_ref.get::<Health>().is_some_and(Health::damaged)
+                {
+                    continue;
+                }
+                let Some(target_pos) = entity_ref.get::<Pos>() else {
+                    continue;
+                };
+                let hit_size = entity_ref
+                    .get::<crate::entities::comp::unit::comp::HitboxComp>()
+                    .map(|hitbox| hitbox.hit_size)
+                    .unwrap_or(0.0);
+                let reach = tower.range + hit_size / 2.0;
+                let dst2 = (target_pos.x - pos.x).powi(2) + (target_pos.y - pos.y).powi(2);
+                if dst2 <= reach * reach {
+                    tower.targets.push(entity_ref.id());
+                }
+            }
+        }
+    }
+    if crate::world::blocks::defense::projectors::is_heal_suppressed(world, e) {
+        tower.warmup = 0.0;
+        return;
+    }
+    let mut any = false;
+    if efficiency > 0.0 {
+        let edelta = efficiency * time_scale;
+        for target in tower.targets.clone() {
+            if world.get::<Health>(target).is_some_and(Health::damaged) {
+                crate::combat::damage::area::heal_health(world, target, tower.heal_amount * edelta);
+                any = true;
+            }
+        }
+    }
+    let target = if any { efficiency } else { 0.0 };
+    tower.warmup += (target - tower.warmup) * 0.08f32.min(1.0);
+    tower.total_progress += time_scale / 120.0;
 }
 
 /// `RepairTurret` configuration/state.

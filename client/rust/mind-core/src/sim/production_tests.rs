@@ -5972,3 +5972,75 @@ fn accelerator_requires_campaign_and_writes_progress() {
     assert!(!sim.accelerator_can_launch(accelerator));
     assert_eq!(AcceleratorBehavior.version(&sim.ecs.0, accelerator), 1);
 }
+
+/// L06 stretch (PAR-0437): the unit repair tower heals damaged friendly
+/// units in range by `healAmount * edelta()` (RepairTower.java:57-86;
+/// unit-repair-tower range 100 / healAmount 1.5, Blocks.java:6612-6621), and
+/// a heal-suppressed tower (`checkSuppression`) heals nothing.
+#[test]
+fn repair_tower_heals_units_and_respects_suppression() {
+    use crate::entities::comp::Health;
+    use crate::world::modules::LiquidModule;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let tower = place(&mut sim, "unit-repair-tower", 10, 10);
+    // Size 2 covers tiles 10..11 (`offset`), so the source sits at x = 9.
+    let _source = place(&mut sim, "power-source", 9, 10);
+    let (dagger, ozone) = {
+        let content = sim.block_runtime().expect("runtime").content();
+        (
+            content.unit_id("dagger").expect("dagger").raw(),
+            content.liquid_id("ozone").expect("ozone"),
+        )
+    };
+    sim.ecs
+        .0
+        .get_mut::<LiquidModule>(tower)
+        .expect("liquids")
+        .add(ozone, 30.0, 30.0);
+    sim.command(SimCommand::SpawnUnit {
+        unit: dagger,
+        x: 10.5 * 8.0,
+        y: 14.0 * 8.0,
+        team: 1,
+    })
+    .expect("spawn");
+    let unit = *sim
+        .unit_runtime()
+        .expect("runtime")
+        .units
+        .last()
+        .expect("spawned");
+    let max = sim.ecs.0.get::<Health>(unit).expect("health").max_health;
+    sim.ecs.0.get_mut::<Health>(unit).expect("health").health = max - 60.0;
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+    let healed = sim.ecs.0.get::<Health>(unit).expect("health").health;
+    assert!(
+        healed > max - 60.0 + 10.0,
+        "the tower heals (1.5/tick after the 6-tick refresh): {healed} of {max}"
+    );
+
+    // Heal suppression from an enemy bullet (`applyHealSuppression`).
+    sim.ecs.0.get_mut::<Health>(unit).expect("health").health = max - 60.0;
+    let (x, y) = (10.0 * 8.0 + 4.0, 10.0 * 8.0 + 4.0);
+    crate::world::blocks::defense::projectors::apply_suppression(
+        &mut sim.ecs.0,
+        2,
+        x,
+        y,
+        40.0,
+        600.0,
+    );
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        sim.ecs.0.get::<Health>(unit).expect("health").health,
+        max - 60.0,
+        "a suppressed tower heals nothing"
+    );
+    let _ = tower;
+}

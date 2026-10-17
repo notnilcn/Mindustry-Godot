@@ -1442,9 +1442,19 @@ impl BuildingBehavior for RepairTowerBehavior {
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
-        if let Some(mut tower) = world.get_mut::<RepairTower>(e) {
-            let _ = tower.update_refresh();
-        }
+        let Some(mut tower) = world.entity_mut(e).take::<RepairTower>() else {
+            return;
+        };
+        crate::world::blocks::units::update_repair_tower(world, e, &mut tower);
+        world.entity_mut(e).insert(tower);
+    }
+
+    /// `RepairTowerBuild.shouldConsume`: `targets.size > 0`
+    /// (RepairTower.java:88-91).
+    fn should_consume(&self, world: &World, e: Entity) -> bool {
+        world
+            .get::<RepairTower>(e)
+            .is_some_and(|tower| !tower.targets.is_empty())
     }
 }
 
@@ -1658,8 +1668,17 @@ pub fn register(
             }
             BlockKind::UnitAssembler => Some(Arc::new(AssemblerBehavior::from_def(def, content))),
             BlockKind::UnitAssemblerModule => Some(Arc::new(AssemblerModuleBehavior)),
+            // `Blocks.java:6612-6621`: unit-repair-tower range 100, healAmount
+            // 1.5 (class defaults 80 / 1, RepairTower.java:21,24).
             BlockKind::RepairTower => Some(Arc::new(RepairTowerBehavior {
-                tower: RepairTower::default(),
+                tower: match def.name.as_str() {
+                    "unit-repair-tower" => RepairTower {
+                        range: 100.0,
+                        heal_amount: 1.5,
+                        ..RepairTower::default()
+                    },
+                    _ => RepairTower::default(),
+                },
             })),
             // `Blocks.java:6420-6443`: repair-point repairSpeed 0.45 /
             // repairRadius 60 (no coolant); repair-turret size 2, repairSpeed 3,
