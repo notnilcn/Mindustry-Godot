@@ -2593,7 +2593,7 @@ impl MindCampaign {
                     .unwrap_or_default(),
                 "icon": node
                     .content
-                    .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
+                    .map(|content| content_icon_name(content.type_.name(), &node.content_name))
                     .unwrap_or_default(),
                 "selected": selected,
             }));
@@ -2609,7 +2609,7 @@ impl MindCampaign {
         let root_icon = root_node
             .map(|node| {
                 node.content
-                    .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
+                    .map(|content| content_icon_name(content.type_.name(), &node.content_name))
                     .unwrap_or_default()
             })
             .unwrap_or_default();
@@ -2623,7 +2623,7 @@ impl MindCampaign {
             let content = node.content;
             let type_name = content.map(|content| content.type_.name()).unwrap_or("");
             let icon = content
-                .map(|_| format!("{type_name}-{}-ui", node.content_name))
+                .map(|_| content_icon_name(type_name, &node.content_name))
                 .unwrap_or_default();
             let name = content
                 .map(|_| self.localized_content_name(type_name, &node.content_name))
@@ -3028,7 +3028,7 @@ impl MindCampaign {
             "content": name,
             "type": type_name,
             "localized": self.localized_content_name(type_name, &name),
-            "icon": format!("{type_name}-{name}-ui"),
+            "icon": content_icon_name(type_name, &name),
             "description": self.localized_content_description(type_name, &name),
             "details": self.localized_content_field(type_name, &name, "details"),
             "credit": self.localized_content_field(type_name, &name, "credit"),
@@ -5846,6 +5846,20 @@ fn save_date_stamp() -> String {
         other => other,
     };
     format!("{} {day:02} {hour12}:{minute:02}", MONTHS[month - 1])
+}
+
+/// `UnlockableContent.load` (`UnlockableContent.java:117`) and the
+/// `SectorPreset` override (`SectorPreset.java:134`): sector presets resolve
+/// the `sector-<name>` atlas region (falling back to `Icon.terrain` -- the
+/// GDScript `MindWidgets.content_icon` supplies that glyph when the region is
+/// missing); every other content resolves `<type>-<name>-ui`. The port's
+/// content-type name for `SectorPreset` is `sector` (`ContentType` parity).
+fn content_icon_name(type_name: &str, name: &str) -> String {
+    if type_name == "sector" || type_name == "sectorpreset" {
+        format!("sector-{name}")
+    } else {
+        format!("{type_name}-{name}-ui")
+    }
 }
 
 /// Renders one stat value's cells for the `content_info_json` payload: Text
