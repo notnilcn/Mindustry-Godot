@@ -6,7 +6,7 @@ Session A reports L08 T5 (and later T6) in its own wave reports; the coordinator
 
 | Task | Status | Wave |
 |---|---|---|
-| T1 Golden suites green with attribution (PAR-0362) | **DONE** (green except the deferred L02 T1/L06 batch, see below) | 1 |
+| T1 Golden suites green with attribution (PAR-0362) | **DONE** (wave 1) + batched L02/L06 regen **DONE** (wave 3, all suites green) | 1, 3 |
 | T2 `ModDataManager` owner + decorator (PAR-0394) | pending | 5 |
 | T3 Mod content parser TODOs | pending | 5 |
 | T4 Evidence debt (PAR-0408 …) | pending | 5 |
@@ -78,6 +78,32 @@ the STDB checks of `tools/ci.sh` (no server/bench-relevant change).
   artillery despawn timing; the "shootDuo muzzle moved per H01 T1" is the same geometry.
 - The bisect tooling is kept as evidence only (not committed to `tools/`).
 
+### Wave 3 — batched L02 T1 / L06 regen (L-INDEX speed rule 3)
+
+Attribution: each moved suite was run at the boundary commits in a scratch worktree
+(`git worktree add --detach`, shared scratch target; scripts kept out of the repo), so every
+value is "old at C^, new at C, unchanged to HEAD".
+
+| Suite | Values | Cause (commit, Java) | Commit |
+|---|---|---|---|
+| mind-core `maps::planet::{serpulo,erekir,asteroid}::tests::*_generation_checksum` | serpulo 55fcac31 -> b7fbf45c -> e92c6cda; erekir daf8a3e0 -> 7e34db8a -> 56a0d8a4; asteroid 463dbb70 -> b89c2922 -> 49d193e3 | 38dc36f1 (L02 T1): `Floor.decoration` from the prop initialisers (Blocks.java:705-822, Floor.java:70); then 341d9f74 (L06 T6.0): Arc `Simplex.perm` `x & 255` + unsigned shifts (javap arc.util.noise.Simplex) | 467b6081 |
+| mind-core `maps::planet::tantros::tests::tantros_generation_checksum` | 7762880f -> e53960b4 | 341d9f74 only | 467b6081 |
+| mind-core `maps::generators::simplex::tests::simplex_generation_checksum` | bc1c505d -> 07e2c98b | 341d9f74 only | 28a4f20c |
+| `parity/golden_content.json` (`content_ids`) | block[429] `item_capacity` 8000 -> 25000 (only field) | eeedfbb1 (L06 T7.1): `Accelerator.init()` (Accelerator.java:76-85; coreNucleus requirements, Blocks.java:3173) | 7d343932 |
+| `mind-core/tests/goldens/ui/campaign.json` (`harness_ui_campaign`) | checksum 26350bc2 -> a5a580c1 -> db3aff19; dump gains `accelerator_selectable` | b73b95a0 (L06 T6.1): `PlanetView.allow_campaign_rules` (Planet.java:139/221) in the hashed views; eeedfbb1 (L06 T7.1): `SectorView.accelerator_selectable` (PlanetDialog.java:414-435) | 643169f6 |
+| `mind-headless/tests/golden/render/render_menu_world.json` | tile_hash b7104680 -> 276df838, flyers 5 -> 10, layer counts | 341d9f74 (the menu world is simplex terrain); 341d9f74^ output = committed file, 341d9f74 output = HEAD | 3fef57cd |
+
+Manifest entries gained a `reasons` line each (content_ids, harness_ui_campaign,
+harness_render_render_menu_world) and re-recorded sha256 (`tools/regen_goldens.sh --record`);
+the inline generation checksums carry the history in a comment. No unexplained delta.
+`tools/regen_goldens.sh --only content_ids` fails in a worktree (the source extractor reads a plan
+file outside the repo), so the content golden was produced by the manifest's own regen command
+(`mind-headless content dump --bundle parity/bundle_keys.json`).
+
+After the batch (branch head 52e6e6c4): `cargo test -p mind-core` 2802 passed / 0 failed,
+`mind-headless` 142 / 0, `mind-gdext` 77 / 0, `parity goldens` 97 PASS, `run-all --tier T0` 4/4,
+`regen_goldens.sh --check` 0 FAIL, fmt + clippy clean.
+
 ## T5 — harness: text input and Java focus (session A, wave 1, commit 766e9cb9)
 
 Record merged from session A (`runs/20261018-L-coordinator/L08-T5-record.md`).
@@ -108,7 +134,7 @@ is broken" (outside the repo).
 
 | Item | Change | Evidence |
 |---|---|---|
-| PAR-0362 | close (T1): every golden suite green with attribution except the deferred planet-generation batch (L02 T1 + L06) | commits c8d326ab..ee745bb3; `runs/20261018-s3-L08-T1/` |
+| PAR-0362 | close (T1): every golden suite green with attribution, including the wave-3 batched L02 T1 / L06 regen | commits c8d326ab..ee745bb3 (wave 1), 467b6081, 28a4f20c, 7d343932, 643169f6, 3fef57cd (wave 3); `runs/20261018-s3-L08-T1/` |
 | chains.json recipes pinning `a1a7b96167c9718d` (spine_place_break in-engine checks, e.g. `c420`, `c422`, `k38`, the boot/save recipes) | update the canonical spine checksum to `3e48c583a94fbea4` (J08 T3 TeamId::SHARDED) | ee745bb3 |
 
 ## Done criteria (T1)
