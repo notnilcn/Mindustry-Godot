@@ -513,7 +513,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "7bd2ecb66b9c3858064ba803afdeb7303a8c50b3143f48cf07630e813c2750d2"
+      "sha256": "1cec2fdf892a8a0ff3e0c1c1b15a12bc38864c7b3a21c25fcb0f83c6f6d6d5e3",
+      "reasons": [
+        "2026-10-18 L06 batched regen (L08 T1 protocol): checksum 26350bc2d719ed88 (341d9f74) -> a5a580c133ca632a at b73b95a0 (L06 T6.1: PlanetView.allow_campaign_rules, Planet.java:139/221, hashed in the full CampaignViews) -> db3aff19ca782bec at eeedfbb1 (L06 T7.1: SectorView.accelerator_selectable = PlanetDialog.canSelect in planetLaunch mode, PlanetDialog.java:414-435; the dump's sample sector gains the field). Scratch-worktree ui campaign dumps at each boundary; unchanged eeedfbb1..HEAD."
+      ]
     },
     {
       "id": "harness_ui_chat_console",
