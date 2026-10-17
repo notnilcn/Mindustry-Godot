@@ -836,6 +836,9 @@ impl<'a> ContentJsonParser<'a> {
             .and_then(|raw| self.resolve_planet(registry, raw));
         let radius = field_f32(object, "radius").unwrap_or(1.0);
         let mut planet = PlanetDef::new(&name, parent, radius, &self.bundle, self.store);
+        // `allowCampaignRules = isVanilla()` (`Planet.java:221`): false for mod
+        // planets unless the JSON sets it.
+        planet.allow_campaign_rules = false;
         if let Some(size) = field_i32(object, "sectorSize") {
             planet = planet.with_sector_grid(size.clamp(0, 255) as u8);
         }
@@ -859,6 +862,8 @@ impl<'a> ContentJsonParser<'a> {
             ("allowLaunchLoadout", &mut planet.allow_launch_loadout),
             ("allowSectorInvasion", &mut planet.allow_sector_invasion),
             ("allowWaves", &mut planet.allow_waves),
+            ("prebuildBase", &mut planet.prebuild_base),
+            ("allowCampaignRules", &mut planet.allow_campaign_rules),
             ("drawOrbit", &mut planet.draw_orbit),
         ] {
             if let Some(value) = field_bool(object, field) {
@@ -2446,6 +2451,44 @@ mod tests {
         );
         assert!(result.is_ok(), "{result:?}");
         assert!(reg.team_by_name("mods-test-crew").is_some());
+    }
+
+    /// L06 T6.1: `allowCampaignRules = isVanilla()` (`Planet.java:221`):
+    /// vanilla planets true, mod planets false unless the JSON sets it;
+    /// `prebuildBase` defaults true (`Planet.java:133`).
+    #[test]
+    fn planet_campaign_rule_flags() {
+        let mut reg = registry();
+        assert!(
+            reg.planet_by_name("serpulo")
+                .expect("serpulo")
+                .allow_campaign_rules
+        );
+        assert!(
+            reg.planet_by_name("erekir")
+                .expect("erekir")
+                .allow_campaign_rules
+        );
+        let (_, plain) = parse(
+            &mut reg,
+            ContentType::Planet,
+            "plain-world",
+            r#"{"radius":1.0,"sectorSize":2}"#,
+        );
+        assert!(plain.is_ok(), "{plain:?}");
+        let (_, ruled) = parse(
+            &mut reg,
+            ContentType::Planet,
+            "ruled-world",
+            r#"{"radius":1.0,"sectorSize":2,"allowCampaignRules":true,"prebuildBase":false}"#,
+        );
+        assert!(ruled.is_ok(), "{ruled:?}");
+        let plain = reg.planet_by_name("mods-plain-world").expect("plain");
+        assert!(!plain.allow_campaign_rules, "mod planets default false");
+        assert!(plain.prebuild_base);
+        let ruled = reg.planet_by_name("mods-ruled-world").expect("ruled");
+        assert!(ruled.allow_campaign_rules);
+        assert!(!ruled.prebuild_base);
     }
 
     #[test]

@@ -290,6 +290,14 @@ pub struct PlanetDef {
     pub allow_legacy_launch_pads: bool,
     /// Waves on sector loss.
     pub allow_waves: bool,
+    /// `Planet.prebuildBase` (`Planet.java:133`, default true): landing
+    /// rebuilds the base in a shockwave (`Control.java:230`).
+    pub prebuild_base: bool,
+    /// `Planet.allowCampaignRules` (`Planet.java:139`): the planet UI offers
+    /// the difficulty/rules button. The constructor sets it to `isVanilla()`
+    /// (`Planet.java:221`), so vanilla planets are true and mod planets false
+    /// unless their JSON sets it (L06 T6.1).
+    pub allow_campaign_rules: bool,
     /// Numbered-sector launches.
     pub allow_launch_to_numbered: bool,
     /// Self-sector launch.
@@ -397,6 +405,8 @@ impl PlanetDef {
             allow_sector_invasion: false,
             allow_legacy_launch_pads: false,
             allow_waves: false,
+            prebuild_base: true,
+            allow_campaign_rules: true,
             allow_launch_to_numbered: true,
             allow_self_sector_launch: false,
             show_rts_ai_rule: false,

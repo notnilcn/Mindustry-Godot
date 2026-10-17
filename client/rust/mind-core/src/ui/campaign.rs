@@ -108,6 +108,9 @@ pub struct PlanetView {
     pub show_rts_ai_rule: bool,
     /// `Planet.clearSectorOnLose` (hides `@rules.clearsectoronloss` when true).
     pub clear_sector_on_lose: bool,
+    /// `Planet.allowCampaignRules` (`PlanetDialog.java:739` shows the
+    /// `@campaign.difficulty` button only when set; L06 T6.1).
+    pub allow_campaign_rules: bool,
 }
 
 /// One sector marker (`PlanetDialog`/`SectorSelectDialog`).
@@ -843,6 +846,7 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
                     def.allow_sector_invasion,
                     def.show_rts_ai_rule,
                     def.clear_sector_on_lose,
+                    def.allow_campaign_rules,
                 ),
             )
         })
@@ -854,7 +858,7 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
             planet.start_sector,
             String::from("ffffff"),
             None,
-            (false, false, false),
+            (false, false, false, false),
         ));
     PlanetView {
         id: planet.id.raw(),
@@ -873,6 +877,7 @@ fn planet_view(registry: &ContentRegistry, planet: &Planet) -> PlanetView {
         allow_sector_invasion: flags.0,
         show_rts_ai_rule: flags.1,
         clear_sector_on_lose: flags.2,
+        allow_campaign_rules: flags.3,
     }
 }
 

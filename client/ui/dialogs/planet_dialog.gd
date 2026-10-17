@@ -1003,6 +1003,10 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 	_apply_pane_button(difficulty, OUTLINE_GRAY)
 	build_button_content(difficulty, MindWidgets.glyph("book", 20), _t("@campaign.difficulty"))
 	difficulty.pressed.connect(_open_campaign_rules)
+	# `.visible(() -> state.planet.allowCampaignRules && mode != planetLaunch)`
+	# (`PlanetDialog.java:739`; L06 T6.1).
+	var selected_planet: Dictionary = by_name.get(planet_name, {})
+	difficulty.visible = bool(selected_planet.get("allow_campaign_rules", true))
 	rail.add(difficulty).grow_x_axis().set_pad_left(0).set_pad_right(0) \
 		.set_pad_top(13).set_pad_bottom(2)
 	rail.row()
