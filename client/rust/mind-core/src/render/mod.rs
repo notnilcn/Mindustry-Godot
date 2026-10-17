@@ -27,6 +27,7 @@ pub mod drawf;
 pub mod env;
 pub mod floor_cache;
 pub mod floor_edges;
+pub mod floor_main;
 pub mod fog;
 pub mod g3d;
 pub mod hooks;

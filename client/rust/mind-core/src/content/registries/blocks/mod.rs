@@ -1367,6 +1367,17 @@ pub struct BlockSpec {
     pub speed_multiplier: Option<f32>,
     /// `Floor.isLiquid` (naval solidity/`onLiquid`; plan 11 §3.6).
     pub is_liquid: Option<bool>,
+    /// `Floor.autotile` (J02 T2): the 8-neighbour `TileBitmask` slice pick.
+    pub autotile: Option<bool>,
+    /// `Floor.autotileVariants` (`TileBitmask.loadVariants`; J02 T2).
+    pub autotile_variants: Option<i32>,
+    /// `Floor.autotileMidVariants` (the bit-13 mid slices; J02 T2).
+    pub autotile_mid_variants: Option<i32>,
+    /// `Floor.tilingVariants` (`<name>-tile<i+1>` layers; J02 T2).
+    pub tiling_variants: Option<i32>,
+    /// `Floor.overlayAlpha` (default 0.65; the liquid redraw runs at
+    /// `1 - overlayAlpha`, `Floor.java:257-261`; J02 T2).
+    pub overlay_alpha: Option<f32>,
     /// `Floor.shallow` (`ShallowLiquid.set` sets true; plan 11 §3.6).
     pub shallow: Option<bool>,
     /// `Floor.drownTime` (ticks to drown; plan 11 `isDeep`/drown; plan 10).
@@ -1517,6 +1528,11 @@ impl Default for BlockSpec {
             liquid_drop: None,
             speed_multiplier: None,
             is_liquid: None,
+            autotile: None,
+            autotile_variants: None,
+            autotile_mid_variants: None,
+            tiling_variants: None,
+            overlay_alpha: None,
             shallow: None,
             drown_time: None,
             floor_status: None,
@@ -2316,6 +2332,16 @@ pub struct BlockDef {
     pub speed_multiplier: f32,
     /// `Floor.isLiquid` (plan 11 §3.6 naval predicate).
     pub is_liquid: bool,
+    /// `Floor.autotile` (`Floor.drawMain`'s bitmask branch; J02 T2).
+    pub autotile: bool,
+    /// `Floor.autotileVariants` (`TileBitmask.loadVariants` rows; J02 T2).
+    pub autotile_variants: i32,
+    /// `Floor.autotileMidVariants` (the bit-13 mid slices; J02 T2).
+    pub autotile_mid_variants: i32,
+    /// `Floor.tilingVariants` (`<name>-tile<i+1>` layers; J02 T2).
+    pub tiling_variants: i32,
+    /// `Floor.overlayAlpha` (default 0.65; J02 T2).
+    pub overlay_alpha: f32,
     /// `Floor.shallow` (plan 11 §3.6 shallow-speed rule).
     pub shallow: bool,
     /// `Floor.isDeep()` (`drownTime > 0`; plan 11 §3.6 deep-floor dispatch).
@@ -2724,6 +2750,14 @@ impl BlockDef {
             liquid_drop,
             speed_multiplier: spec.speed_multiplier.unwrap_or(1.0),
             is_liquid: spec.is_liquid.unwrap_or(false),
+            // `Floor.autotile`/`autotileVariants`/`autotileMidVariants` and
+            // `tilingVariants` (`Floor.java:82-90`); `overlayAlpha` default
+            // 0.65 (`Floor.java:54`).
+            autotile: spec.autotile.unwrap_or(false),
+            autotile_variants: spec.autotile_variants.unwrap_or(1),
+            autotile_mid_variants: spec.autotile_mid_variants.unwrap_or(1),
+            tiling_variants: spec.tiling_variants.unwrap_or(0),
+            overlay_alpha: spec.overlay_alpha.unwrap_or(0.65),
             shallow: spec.shallow.unwrap_or(false),
             is_deep,
             drown_time,

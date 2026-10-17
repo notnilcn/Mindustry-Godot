@@ -66,7 +66,7 @@ impl EdgeQuad {
 }
 
 /// `world.tile(x, y)` with the nullable `Tiles.getn` bounds check.
-fn tile_at(world: &WorldGrid, x: i32, y: i32) -> Option<&Tile> {
+pub fn tile_at(world: &WorldGrid, x: i32, y: i32) -> Option<&Tile> {
     world.tiles.getn(x, y)
 }
 

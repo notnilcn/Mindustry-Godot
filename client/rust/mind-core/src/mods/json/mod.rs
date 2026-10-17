@@ -347,10 +347,26 @@ impl<'a> ContentJsonParser<'a> {
             // `Floor.drawEdgeIn`/`drawEdgeOut` (`Floor.java:92-94`; J02 T1).
             ("drawEdgeIn", &mut spec.draw_edge_in),
             ("drawEdgeOut", &mut spec.draw_edge_out),
+            // `Floor.autotile` (`Floor.java:82-90`; J02 T2).
+            ("autotile", &mut spec.autotile),
         ] {
             if let Some(value) = field_bool(object, field) {
                 *target = Some(value);
             }
+        }
+        // `Floor.autotileVariants`/`autotileMidVariants`/`tilingVariants`
+        // (J02 T2).
+        if let Some(value) = field_i32(object, "autotileVariants") {
+            spec.autotile_variants = Some(value);
+        }
+        if let Some(value) = field_i32(object, "autotileMidVariants") {
+            spec.autotile_mid_variants = Some(value);
+        }
+        if let Some(value) = field_i32(object, "tilingVariants") {
+            spec.tiling_variants = Some(value);
+        }
+        if let Some(value) = field_f32(object, "overlayAlpha") {
+            spec.overlay_alpha = Some(value);
         }
         // `Floor.blendGroup` (`Floor.java:62`; J02 T1). A self reference keeps
         // the `None` (self) default — the block is not registered yet, so
