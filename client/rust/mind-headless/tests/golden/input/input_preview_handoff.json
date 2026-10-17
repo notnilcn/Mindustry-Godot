@@ -2,7 +2,7 @@
   "scenario": "input_preview_handoff",
   "preview": {
     "block": 80,
-    "rotation": 1,
+    "rotation": 0,
     "mode": "placing",
     "cursor": {
       "tile": [
@@ -100,7 +100,7 @@
     "chatting": false,
     "is_building": true,
     "selected_block": 80,
-    "selected_rotation": 1,
+    "selected_rotation": 0,
     "plans": [
       {
         "x": 2,
@@ -138,5 +138,5 @@
     },
     "breaking": false
   },
-  "checksum": "b69b2fed5a88260a"
+  "checksum": "040b07adfc48c821"
 }

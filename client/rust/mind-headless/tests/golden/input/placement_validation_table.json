@@ -6,7 +6,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -70,7 +70,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -134,7 +134,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -142,7 +142,7 @@
       "x": 10,
       "y": 10,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": true
     },
     {
@@ -246,7 +246,7 @@
       "x": 32,
       "y": 32,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": true
     },
     {
@@ -254,7 +254,7 @@
       "x": 33,
       "y": 33,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -262,7 +262,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -326,7 +326,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -390,7 +390,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -454,7 +454,7 @@
       "x": 0,
       "y": 0,
       "rot": 0,
-      "valid_place": true,
+      "valid_place": false,
       "valid_break": false
     },
     {
@@ -514,5 +514,5 @@
       "valid_break": false
     }
   ],
-  "checksum": "8a082b45a2d6641a"
+  "checksum": "29ee397f8a3eb40e"
 }

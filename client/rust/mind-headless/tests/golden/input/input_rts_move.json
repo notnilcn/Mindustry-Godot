@@ -22,7 +22,8 @@
       ],
       "command": 0,
       "x": 50.0,
-      "y": 50.0
+      "y": 50.0,
+      "queue": false
     },
     {
       "action": "command_units",
@@ -44,7 +45,8 @@
       ],
       "command": 0,
       "x": 9.0,
-      "y": 0.0
+      "y": 1000000.0,
+      "queue": false
     },
     {
       "action": "command_units",
@@ -66,7 +68,8 @@
       ],
       "command": 0,
       "x": 60.0,
-      "y": 10.0
+      "y": 10.0,
+      "queue": true
     },
     {
       "action": "set_unit_command",
@@ -86,7 +89,8 @@
       ],
       "command": 1,
       "x": 0.0,
-      "y": 0.0
+      "y": 0.0,
+      "queue": false
     },
     {
       "action": "set_unit_stance",
@@ -115,5 +119,5 @@
     ],
     "second_queue": 1
   },
-  "checksum": "dd0a4f68081b2e36"
+  "checksum": "adfc1cdd803f5704"
 }
