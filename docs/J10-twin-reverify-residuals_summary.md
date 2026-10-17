@@ -289,3 +289,48 @@ No goldens moved.
 
 T2 items 1–5 are landed or recorded with in-engine evidence. T3 (round-K
 re-walk) remains **not started**.
+
+# J10 T3 — round-K twin re-walk (session 5)
+
+Status: **run and reported**. Full report:
+[`docs/K-round-twin-verification.md`](K-round-twin-verification.md). This task is
+verification-only — no code changed.
+
+### Setup
+
+- Branch `parity/session-5` @ `8903fb12` (all round-J plans merged), display
+  `:14`, Godot bridge `7010`.
+- Godot: `tools/build.sh` (flock, 6 jobs) + full `tools/session-play.sh 5`
+  restart. Java: `tools/twin.sh twin_launch` on `parity-java-home`
+  (settings.bin backed up/restored byte-identical, md5
+  `ccf9376560cae65ef62e5a25094013e8`; session saves moved out).
+- Evidence: `runs/20261017-s5-K-twin/{java,godot,diff}/` + `run.json`,
+  `walk.sh` (the exact harness invocations).
+
+### Verdict summary (see the K report for the full table)
+
+- **MATCH**: 01 Play submenu, 35 Settings categories, 38 Controls/Rebind Keys,
+  39 Load Game, 09 Custom Game (structured: all 19 custom maps including the
+  three ex-failing ones, previews + mode data, newest-first order).
+- **PARTIAL**: 00 main menu (shadows/edges/flyers now present; menu-world
+  camera scale differs), 02-03 planet page (orbit arcs + atmosphere rim now
+  present; button placement/planet size differ), 11-12 sandbox world
+  (core-zone stripes + minimap scrap ✓; boulders absent vs Java), 29-32 editor
+  Maps dialog (previews incl. the 3 user maps, mode icons, Custom/Built-In
+  rows ✓; in-editor world rows not re-staged), 36-37 Graphics sliders (framed
+  rows ✓; height/knob/extra Bloom Intensity row differ).
+- **UNVERIFIED (blocker)**: 04-07, 10, 13-17/21-28, 33-34, 40-52 — chiefly
+  the **Custom Game grid clipping/non-scrolling** finding (F-K1) that blocks
+  the sandbox/Caldera cards, a Java input stall after the sandbox run, and the
+  time-box.
+- **New findings** (ranked in the K report): F-K1 Custom Game grid clipped and
+  non-scrolling (HIGH), F-K2 search empties the grid (MEDIUM, retest with real
+  typing), F-K3 sandbox boulders absent (MEDIUM, profile map-drift caveat),
+  F-K4 menu background camera scale (LOW), F-K5 Graphics row residuals (LOW),
+  F-K6 planet page button placement (LOW), F-K7 Tech Tree button retest (LOW).
+
+### Done criteria
+
+Every §1 row carries a verdict or an UNVERIFIED entry with its blocker; the
+plan-specific acceptance table is in the K report §3; ledger notes (new
+candidates + close/annotate list) are in §5. No ledger/chain file was edited.
