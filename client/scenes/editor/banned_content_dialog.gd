@@ -94,9 +94,10 @@ func _build() -> void:
 	var root := content_table()
 
 	# `t.table(s -> s.label("@search") + field + cancel button)`.
+	# The search table is content-sized and centred (`cont.table(t -> ...)` with
+	# no grow, `BannedContentDialog.java:55-86`; L01 T3 java/ed-banned.png).
 	var top := VBoxContainer.new()
-	top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.add(top).grow_x_axis().pad(4)
+	root.add(top).pad(4)
 	root.row()
 	# code-instantiated: the search row mirrors Java's label + field + clear.
 	var search_row := HBoxContainer.new()
@@ -104,7 +105,8 @@ func _build() -> void:
 	search_row.add_child(MindWidgets.label(_t("@search")))
 	_search_field = MindWidgets.field("")
 	_search_field.text = _search
-	_search_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `s.field(...)` has no growX: Arc `TextField` prefWidth is 150.
+	_search_field.custom_minimum_size.x = 150.0
 	_search_field.text_changed.connect(_on_search)
 	search_row.add_child(_search_field)
 	var clear := MindWidgets.icon_button("cancel", "", "emptyi")
@@ -136,11 +138,12 @@ func _build() -> void:
 		top.add_child(category_row)
 
 	# `cont.table(...)` / `cont.table(...)`: the banned + unbanned panes.
+	# `.fill().expandY().uniform()` (`BannedContentDialog.java:105,128`): the
+	# panes take the height but only their content width (`50 * cols` grids).
 	var panes := HBoxContainer.new()
-	panes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panes.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panes.add_theme_constant_override("separation", 10)
-	root.add(panes).grow_x_axis().grow_y_axis().pad(4)
+	root.add(panes).grow_y_axis().pad(4)
 	panes.add_child(_pane(true))
 	panes.add_child(_pane(false))
 

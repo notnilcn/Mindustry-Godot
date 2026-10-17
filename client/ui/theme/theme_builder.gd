@@ -64,6 +64,7 @@ static func _apply_base_styles(theme: Theme) -> void:
 	theme.set_color("default_color", "RichTextLabel", Color(0.92, 0.92, 0.92))
 	theme.set_color("font_color", "Label", Color(0.92, 0.92, 0.92))
 	theme.set_stylebox("panel", "Panel", flat(MindStyles.GRAY_PANEL_DARK))
+	_apply_scroll_bar(theme)
 
 
 static func _apply_manifest(theme: Theme, manifest: Dictionary) -> void:
@@ -235,8 +236,24 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("slider", name, flat(Color(0.12, 0.13, 0.15, 1.0)))
 				theme.set_stylebox("grabber_area", name, flat(MindStyles.ACCENT))
 		"LineEdit":
-			theme.set_stylebox("normal", name, flat(Color(0.08, 0.09, 0.11, 1.0)))
-			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
+			# `Styles.defaultField` (`ui/Styles.java:398-409`): `background =
+			# underline` — the `underline` 9-patch (transparent body, 4 px #454545
+			# bottom rule, 12 px splits and padding on every edge), so a field is
+			# a bare text line ~48 px tall, not a box. L01 T3 measured
+			# java/custom.png: the search underline at y=87-90 and the map cards
+			# from y=105 (the boxed 40 px port field put them 9 px higher).
+			# `disabledBackground = underlineDisabled`; Arc draws no focus frame.
+			# Arc's field height (`TextField.getPrefHeight`: background padding +
+			# the font's line height) is 8 px taller than Godot's line box with
+			# the same 12 px padding, so the vertical padding is 16.
+			for state in [["normal", "underline"], ["read_only", "underline-disabled"]]:
+				var field_box := _nine_patch(str(state[1]), 12.0)
+				field_box.content_margin_top = 16.0
+				field_box.content_margin_bottom = 16.0
+				theme.set_stylebox(str(state[0]), name, field_box)
+			theme.set_stylebox("focus", name, StyleBoxEmpty.new())
+			theme.set_color("font_color", name, Color.WHITE)
+			theme.set_color("font_placeholder_color", name, Color.GRAY)
 		"CheckBox":
 			# `Styles.defaultCheck` (`ui/Styles.java:446-456`): the round
 			# `checkOn`/`checkOff` textures with their disabled variants
@@ -257,6 +274,35 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL_DARK))
 		_:
 			pass
+
+
+## `Styles.defaultPane` (`ui/Styles.java:358-361`): `vScroll = scroll` (a 24 px
+## 60%-black 9-patch track) and `vScrollKnob = scrollKnobVerticalBlack` (a
+## 24x40 #454545 region stretched to the knob bounds); no hover/press variants.
+## Arc lays the pane's area out beside the 24 px bar, so the bar width moves the
+## content: L01 T3 measured the Custom Game cards at x=39 in java/custom.png vs
+## x=48 with Godot's default 8 px bar.
+const SCROLL_BAR_WIDTH := 24.0
+
+
+static func _apply_scroll_bar(theme: Theme) -> void:
+	var track := _nine_patch("scroll", 6.0)
+	track.content_margin_left = SCROLL_BAR_WIDTH * 0.5
+	track.content_margin_right = SCROLL_BAR_WIDTH * 0.5
+	track.content_margin_top = 0.0
+	track.content_margin_bottom = 0.0
+	var knob: StyleBox = flat(Color8(0x45, 0x45, 0x45))
+	var knob_texture := MindWidgets.icon_texture("scroll-knob-vertical-black")
+	if knob_texture != null:
+		var knob_box := StyleBoxTexture.new()
+		knob_box.texture = knob_texture
+		knob = knob_box
+	knob.content_margin_left = SCROLL_BAR_WIDTH * 0.5
+	knob.content_margin_right = SCROLL_BAR_WIDTH * 0.5
+	for slot in ["scroll", "scroll_focus"]:
+		theme.set_stylebox(slot, "VScrollBar", track)
+	for slot in ["grabber", "grabber_highlight", "grabber_pressed"]:
+		theme.set_stylebox(slot, "VScrollBar", knob)
 
 
 ## A packed 9-patch region with uniform texture margins (the pack `splits`).

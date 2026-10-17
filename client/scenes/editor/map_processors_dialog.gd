@@ -38,9 +38,10 @@ func _ready() -> void:
 	super._ready()
 	_editor = get_node_or_null(editor_path)
 	clear_buttons()
-	# `buttons.button("@add", Icon.add, ...)` + `addCloseButton()`.
-	add_button(_t("@add"), _add_processor, "add", 210.0)
+	# `addCloseButton()` then `buttons.button("@add", Icon.add, ...)`
+	# (`MapProcessorsDialog.java:32-33`): Back is the first button.
 	add_close_button()
+	add_button(_t("@add"), _add_processor, "add", 210.0)
 	_connect_prompts()
 
 

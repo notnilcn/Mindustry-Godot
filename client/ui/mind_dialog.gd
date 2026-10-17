@@ -96,6 +96,10 @@ func _apply_cont_alignment() -> void:
 func set_cont_top(value: bool) -> void:
 	cont_top = value
 	_apply_cont_alignment()
+	if cont != null:
+		for child in cont.get_children():
+			if child is MindTable:
+				(child as MindTable).set_table_top(value)
 
 
 ## An empty Arc `buttons` table has no height, so `cont` reaches the bottom of
@@ -192,11 +196,13 @@ func context() -> Dictionary:
 ## no top inset and the rule overlapped its bottom edge (text y=3-15, rule
 ## y=16-18), lifting every dialog body by ~14 px. The 7 px above the text is the
 ## dialog background's inset (`defaultDialog`/`fullDialog` panel margin in
-## `MindThemeBuilder`, shared with untitled dialogs); keep 6 px under the text
-## (+ the Layout's 8 px separation = the rule's 4 px gap, 3 px rule, 4 px pad and
-## the 3 px cont pad) and hang the rule 4 px under the text.
+## `MindThemeBuilder`, shared with untitled dialogs); keep 8 px under the text
+## (+ the Layout's 6 px separation = the rule's 4 px gap, 3 px rule, 4 px pad and
+## the 3 px cont pad) and hang the rule 4 px under the text. The Layout's 6 px is
+## the 3 + 3 px `pad(3)` between two `cont`/`buttons` cells (Dialog.java:213-214;
+## L01 T3: the Custom Game search row and the pane, java/custom.png).
 const TITLE_INSET_TOP := 0.0
-const TITLE_INSET_BOTTOM := 6.0
+const TITLE_INSET_BOTTOM := 8.0
 
 
 func _apply_title() -> void:
@@ -224,8 +230,8 @@ func _ensure_title_underline() -> void:
 	line.name = "Underline"
 	line.color = MindStyles.ACCENT
 	line.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	# Rule 4 px under the text, 3 px tall: [bottom - 2, bottom + 1) with the
-	# 6 px bottom inset (see TITLE_INSET_BOTTOM).
+	# Rule 4 px under the text, 3 px tall: [bottom - 4, bottom - 1) with the
+	# 8 px bottom inset (see TITLE_INSET_BOTTOM).
 	line.offset_top = 4.0 - TITLE_INSET_BOTTOM
 	line.offset_bottom = 7.0 - TITLE_INSET_BOTTOM
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -586,6 +592,16 @@ func clear_content() -> void:
 func content_table() -> MindTable:
 	var table := MindTable.new()
 	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Arc `cont` is `add(cont).expand().fill()` (Dialog.java:209): the body
+	# table takes the whole content height and aligns its grid itself (centre,
+	# or top for `cont.top()`), so `grow_y` cells fill like Java's (L01 T3: the
+	# Banned Blocks lists collapsed to two rows without this).
+	table.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	table.set_table_top(cont_top)
+	# `cont.defaults().pad(3)` (arc `Dialog.java:213`): every `cont` cell
+	# without its own pad gets 3 px (L01 T3: Map Play's rows sat 3-6 px tighter
+	# than java/mapplay-caldera.png).
+	table.defaults().pad(3.0)
 	if cont != null:
 		cont.add_child(table)
 	return table

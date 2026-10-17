@@ -15,11 +15,13 @@ extends MindDialog
 signal slot_selected(slot: String)
 
 ## Gamemode filter toggles (`Gamemode.all`; sandbox uses the terrain glyph).
+## `for(Gamemode mode : Gamemode.all)` (`LoadDialog.java:66-77`) in enum order
+## (`Gamemode.java:10-27`: survival, sandbox, attack, pvp; editor is hidden).
 const FILTERS := [
 	{"mode": "survival", "icon": "mode-survival"},
+	{"mode": "sandbox", "icon": "terrain"},
 	{"mode": "attack", "icon": "mode-attack"},
 	{"mode": "pvp", "icon": "mode-pvp"},
-	{"mode": "sandbox", "icon": "terrain"},
 ]
 
 var _field: LineEdit = null
@@ -73,6 +75,9 @@ func shown() -> void:
 		_field.text = ""
 	_refresh_slots()
 	_rebuild_list()
+	# `LoadDialog.show`: desktop focuses the search field (LoadDialog.java:277).
+	if _field != null:
+		_field.grab_focus.call_deferred()
 
 
 ## Context slots (MCP/test injection) win; otherwise the live `Saves` listing.
@@ -94,22 +99,29 @@ func _build() -> void:
 
 	# code-instantiated: the search row is data-driven from the gamemode list.
 	var search_row := HBoxContainer.new()
-	search_row.add_theme_constant_override("separation", 6)
+	# The Java `search` table has no cell padding (`LoadDialog.java:59-77`).
+	search_row.add_theme_constant_override("separation", 0)
 	# code-instantiated: the zoom glyph is an icon-font run with no static scene.
-	var zoom := MindWidgets.glyph("zoom", 22)
+	var zoom := MindWidgets.glyph("zoom", 30)
 	search_row.add_child(zoom)
 	_field = MindWidgets.field(_t("@save.search"))
 	_field.max_length = 50
 	_field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# A Table cell centres the field in the 60 px row of mode buttons.
+	_field.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_field.text_changed.connect(func(_value: String) -> void: _rebuild_list())
 	search_row.add_child(_field)
 	_add_filters(search_row)
-	root.add(search_row).grow_x_axis().pad(4)
+	root.add(search_row).grow_x_axis()
 	root.row()
 
 	# code-instantiated: the save grid is a data-driven list of save slots.
 	_grid = MindTable.new()
-	root.add(_grid).grow_x_axis().grow_y_axis().pad(4)
+	# `cont.add(pane).growY()` (`LoadDialog.java:82`): the pane is as wide as the
+	# slot table (`slots.marginRight(24).marginLeft(20f)`, `:88`) and centred,
+	# and the ScrollPane stretches the table over its height, centring a short
+	# list (L01 T3: java/load-search.png centres the single card).
+	root.add(_grid).grow_y_axis().set_pad_left(20.0).set_pad_right(24.0)
 
 	# Bottom row: `addCloseButton()` (210x64) then `buttons.button("@save.import",
 	# Icon.add, ...)` (`LoadDialog.java:47-48,59-60,197-226`), also 210x64.
@@ -127,8 +139,10 @@ func _add_filters(row: HBoxContainer) -> void:
 		var button := MindWidgets.icon_button(str(filter.get("icon", "")), "", "emptyTogglei")
 		button.toggle_mode = true
 		button.button_pressed = true
-		# `search.button(...).size(60f).padLeft(-12f)` (`LoadDialog.java:71-76`).
-		button.custom_minimum_size = Vector2(60.0, 60.0)
+		# `search.button(...).size(60f).padLeft(-12f)` (`LoadDialog.java:71-76`):
+		# each button takes 48 px of the row (the -12 overlaps its neighbour),
+		# which is what leaves Java's field its width.
+		button.custom_minimum_size = Vector2(48.0, 60.0)
 		button.tooltip_text = _t("@mode.%s.name" % mode)
 		button.pressed.connect(_toggle_filter.bind(mode))
 		row.add_child(button)
@@ -171,7 +185,8 @@ func _rebuild_list() -> void:
 		if not mode.is_empty() and _hidden.has(mode):
 			continue
 		any = true
-		_grid.add(_build_card(slot)).grow_x_axis().pad(4).set_min_width(300.0)
+		# `slots.add(button).uniformX().fillX().pad(4).padRight(8f)` (`LoadDialog.java:184`).
+		_grid.add(_build_card(slot)).fill_x_axis().pad(4).set_pad_right(8.0)
 		count += 1
 		if count % columns == 0:
 			_grid.row()
@@ -187,17 +202,21 @@ func _build_card(slot: Dictionary) -> Button:
 	# code-instantiated: save cards are data-driven from the save-slot listing.
 	var card := MindWidgets.button("")
 	card.theme_type_variation = "grayt"
-	# Five meta lines (map, mode/wave, autosave, playtime, date) + the title row.
-	card.custom_minimum_size = Vector2(400, 196)
+	# `slots.add(button)...margin(10f)` around a 40 px title row (`t.defaults()
+	# .size(40f)`) and the 160 px preview + `padRight(6)` + 260 px meta row
+	# (`LoadDialog.java:115-184`): a 446x220 card (java/load.png, L01 T3).
+	card.custom_minimum_size = Vector2(446, 220)
 	card.pressed.connect(_select.bind(slot))
 
 	# code-instantiated: card body follows the slot data; ignores clicks so the
 	# card button itself handles selection.
 	var content := VBoxContainer.new()
 	content.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	content.add_theme_constant_override("separation", 4)
+	content.add_theme_constant_override("separation", 0)
 	card.add_child(content)
 	content.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		content.set_offset(side, 10.0 if side < SIDE_RIGHT else -10.0)
 
 	# code-instantiated: per-card title/action row (data-driven icon buttons).
 	var title := HBoxContainer.new()
@@ -229,7 +248,7 @@ func _build_card(slot: Dictionary) -> Button:
 	# code-instantiated: preview/meta row is per-slot presentation data.
 	var body := HBoxContainer.new()
 	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	body.add_theme_constant_override("separation", 8)
+	body.add_theme_constant_override("separation", 6)
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content.add_child(body)
 
@@ -260,8 +279,10 @@ func _build_card(slot: Dictionary) -> Button:
 	var meta := VBoxContainer.new()
 	meta.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	meta.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	# `meta.defaults().padBottom(-2).left().width(280f)` (`LoadDialog.java:167`).
-	meta.custom_minimum_size.x = 280.0
+	# `button.table(meta -> ...).left().growX().width(260f)` (`LoadDialog.java:181`):
+	# the cell is 260 wide (its rows default to 280 and overflow it), which
+	# gives Java's ~446 px card (L01 T3, java/load.png).
+	meta.custom_minimum_size.x = 260.0
 	body.add_child(meta)
 	for line in _meta_lines(slot):
 		var label := MindWidgets.label(line)
