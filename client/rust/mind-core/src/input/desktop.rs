@@ -52,9 +52,25 @@ impl DesktopController {
         }
     }
 
-    /// `canDepositItem`.
-    pub fn can_deposit_item(&self, cooldown: f32) -> bool {
-        cooldown <= 0.0
+    /// `canDepositItem` (`InputHandler.java:2310-2316`): a block with
+    /// `depositCooldown >= 0` replaces the global
+    /// `Rules.itemDepositCooldown`, gating on
+    /// `itemDepositCooldown - rules.itemDepositCooldown <= -depositCooldown`.
+    ///
+    /// `cooldown` is the live `itemDepositCooldown` timer (reset to the rules
+    /// value on every deposit); `block_cooldown` is the hovered block's
+    /// `Block.depositCooldown` (`-1` = global gate).
+    pub fn can_deposit_item(
+        &self,
+        cooldown: f32,
+        block_cooldown: f32,
+        rules_cooldown: f32,
+    ) -> bool {
+        if block_cooldown >= 0.0 {
+            cooldown - rules_cooldown <= -block_cooldown
+        } else {
+            cooldown <= 0.0
+        }
     }
 
     /// `update()` zoom/rotate gating: wheel rotates a placement unless zoom is
@@ -330,9 +346,34 @@ mod tests {
     fn deposit_cooldown_gate() {
         // ApplicationTests.inventoryDeposit (input half).
         let controller = DesktopController::new(1);
-        assert!(controller.can_deposit_item(0.0));
-        assert!(controller.can_deposit_item(-1.0));
-        assert!(!controller.can_deposit_item(0.5));
+        // No block gate: the global `Rules.itemDepositCooldown` path
+        // (`itemDepositCooldown <= 0`).
+        assert!(controller.can_deposit_item(0.0, -1.0, 0.5));
+        assert!(controller.can_deposit_item(-1.0, -1.0, 0.5));
+        assert!(!controller.can_deposit_item(0.5, -1.0, 0.5));
+
+        // J04 T5 (`InputHandler.java:2312-2313`): a block with
+        // `depositCooldown = 2.0` (duo) needs the timer to fall 2.0 below the
+        // rules value before the next deposit.
+        let rules = 0.5;
+        assert!(
+            !controller.can_deposit_item(0.5, 2.0, rules),
+            "fresh timer blocks"
+        );
+        assert!(
+            !controller.can_deposit_item(-1.0, 2.0, rules),
+            "1.5 below the rules value is not enough"
+        );
+        assert!(
+            controller.can_deposit_item(-1.5, 2.0, rules),
+            "2.0 below the rules value passes"
+        );
+        // `depositCooldown = 0.5` (scatter) gates at `rules - 0.5` (0.0 here).
+        assert!(
+            controller.can_deposit_item(0.0, 0.5, rules),
+            "at the threshold"
+        );
+        assert!(!controller.can_deposit_item(0.1, 0.5, rules));
     }
 
     #[test]
