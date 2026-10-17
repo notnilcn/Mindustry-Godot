@@ -313,3 +313,41 @@ Evidence: `runs/20261017-s3-J06-T9/` (`godot/01-menu-parent-checked.png`,
   for the wave-D queue: the wave panel's fixed-width wrap and the editor
   palette's selected-cell highlight.
 - No chain/ledger files were edited by this session.
+
+---
+
+# Wave D — J06 T5 (Load Game dialog)
+
+Session 3, 2026-10-17 (branch fast-forwarded onto main `7178b401`).
+
+## T5 — Load Game restyle — done
+
+| Task | Status | Commit |
+|---|---|---|
+| T5 — Load Game dialog cards/buttons | done (verified in-engine) | `23828d01` |
+
+Java `LoadDialog` (`ui/dialogs/LoadDialog.java:30-200`): `addCloseButton()`
+(210x64) + `buttons.button("@save.import", Icon.add, …).fillX().margin(10f)`;
+the search toggles are `emptyTogglei` `size(60)`; each card is a `Styles.grayt`
+button with `title.add("[accent]" + name).width(230).wrap()`, four `size(40)`
+`emptyTogglei`/`emptyi` icon buttons (autosave, delete, rename, export), a
+160 px `BorderImage` preview and a 280 px meta column whose values carry the
+`[lightgray]` markup.
+
+- `theme_builder.gd`: `grayt` (up `grayPanel`, over/down `flatOver`, disabled
+  `grayPanelDark`; `Styles.java:157-165`), `flatt` (`:147-155`),
+  `emptyi`/`emptyTogglei` (`:272-282`: no background, per-state icon colours).
+- `load_dialog.gd`: accent titles at 230 px, 40 px icon buttons, a 160x160
+  preview cell, the 280 px meta column with `[lightgray]` values (`_fmt` now
+  translates markup — it was rendering literally and widening the cards), 60 px
+  filter toggles, `add_close_button()` + a 210x64 import button.
+- Previews/ordering (J01 T4/T5) untouched and re-verified.
+
+Evidence: `runs/20261017-s3-J06-T5/` (`godot/01-load-cards.png`,
+`diff/load-side.png`, refs incl. the twin's pre-restyle frame).
+
+## Ledger changes to apply (wave D, J06)
+
+- New item: "Load dialog cards render white titles and a slate body with tiny
+  buttons" → closed by `23828d01` (T5), verified against frame 39.
+- No chain/ledger files were edited.
