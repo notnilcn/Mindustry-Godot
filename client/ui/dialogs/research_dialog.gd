@@ -33,6 +33,13 @@ func _ready() -> void:
 	# fills the viewport without switching to the `full_dialog` style.
 	super._ready()
 	fill_panel()
+	# `BaseDialog` sets no background (`BaseDialog.java`): Java's ResearchDialog
+	# renders straight over the (dimmed) planet page. The shared panel's
+	# `defaultDialog` style would paint an opaque slate over the globe, so clear
+	# the panel background and keep the dim (java/40-tech.png).
+	var panel := get_node_or_null("Center/Panel") as Control
+	if panel != null:
+		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
 	_build()
 	add_close_button(210.0)
 	add_button(_t("@database"), _open_database, "book", 210.0)
@@ -95,7 +102,9 @@ func shown() -> void:
 		_view.reset_view()
 		_last_root = root_name
 	_update_title_button()
-	_title_button.visible = (_tree.get("roots", []) as Array).size() > 1
+	# `ResearchDialog` ctor: the `titleTable` root button is always present
+	# (its listener opens the root selector; Java filters the rows by unlock).
+	_title_button.visible = not str(_tree.get("root", "")).is_empty()
 
 
 func hidden() -> void:

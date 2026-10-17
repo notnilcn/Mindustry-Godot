@@ -321,8 +321,10 @@ static func content_icon(icon_region: String, type_name: String, size: float) ->
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		return image
-	if type_name == "sector":
+	if type_name == "sector" or type_name == "sectorpreset":
 		# code-instantiated: the sector fallback glyph is data-driven.
+		# `SectorPreset.uiIcon` falls back to `Icon.terrain` when the
+		# `sector-<name>` region is missing (`SectorPreset.java:134`).
 		return glyph("terrain", int(size), Color.WHITE)
 	return null
 

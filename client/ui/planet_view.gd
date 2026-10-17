@@ -84,6 +84,13 @@ var _sector_icon: MeshInstance3D = null
 ## icons), rebuilt from the `campaign_views` sector rows.
 var _markers: Node3D = null
 var _sectors: Array = []
+## `PlanetRenderer.renderOrbit` loop meshes (one per system planet with a
+## parent); the shared material's alpha tracks `params.uiAlpha`.
+var _orbits: Node3D = null
+var _orbit_material: StandardMaterial3D = null
+
+## `Pal.gray` (`Pal.java:82`, `454545`) — the orbit line colour.
+const ORBIT_GRAY := Color(0.271, 0.271, 0.271)
 
 ## `Team.sharded/crux/derelict.color`.
 const SHARDED := Color(1.0, 0.827, 0.498)
@@ -152,6 +159,7 @@ func set_planet(name: String) -> bool:
 	_build_body()
 	_build_grid()
 	_build_atmosphere()
+	_build_orbits()
 	_clear_highlight()
 	return true
 
@@ -419,6 +427,11 @@ func _process(delta: float) -> void:
 	# and `absin(Time.time, 10, 1)` are baked into the marker rebuilds (Java
 	# redraws every frame; the port rebuilds when either moves).
 	ui_alpha = lerp(ui_alpha, 1.0 if zoom < 1.9 else 0.0, 1.0 - pow(1.0 - 0.1, delta * 60.0))
+	# `renderOrbit`'s `alpha = params.uiAlpha` (skipped at <= 0.02).
+	if _orbit_material != null:
+		_orbit_material.albedo_color = Color(ORBIT_GRAY.r, ORBIT_GRAY.g, ORBIT_GRAY.b, ui_alpha)
+	if _orbits != null:
+		_orbits.visible = ui_alpha > 0.02
 	if absf(ui_alpha - _built_ui_alpha) > 0.02 or absf(_preset_pulse() - _built_pulse) > 0.04:
 		_rebuild_markers()
 
@@ -666,22 +679,32 @@ func _build_grid() -> void:
 	grid.material_override = _grid_material
 
 
-## `PlanetRenderer.drawAtmosphere`: additive atmospheric scattering over a
-## billboard (`MeshBuilder.buildHex(Color.white, 2, 1.5f)`); radii are
-## `radius + atmosphereRad{In,Out}`, light is `Planet.getLightNormal()`.
+## `PlanetRenderer.drawAtmosphere`: additive atmospheric scattering over
+## `MeshBuilder.buildHex(Color.white, 2, 1.5f)` — a sphere of radius 1.5 that
+## covers the `radius + atmosphereRad{In,Out}` shell (the shader reads the
+## mesh's surface position as the ray target); light is `Planet.getLightNormal()`.
+## Drawn AFTER the body (Java's `renderTransparent`): `render_priority` -7 vs
+## the body's -8, so the additive veil covers the planet's limb instead of
+## being hidden behind it.
 func _build_atmosphere() -> void:
 	atmosphere.visible = false
 	_has_atmosphere = false
 	var atmos: Dictionary = data.get("atmosphere", {})
 	if atmos.is_empty() or not bool(atmos.get("has", false)):
 		return
-	# code-instantiated: one atmosphere billboard per planet view.
-	var quad := QuadMesh.new()
-	quad.size = Vector2(3.0, 3.0)
-	atmosphere.mesh = quad
+	# code-instantiated: one atmosphere sphere per planet view. Deviation: a
+	# smooth sphere instead of the 2-subdivision hex sphere (rotationally
+	# symmetric, so the shader's per-fragment ray is the same surface ray).
+	var sphere := SphereMesh.new()
+	sphere.radius = 1.5
+	sphere.height = 3.0
+	sphere.radial_segments = 48
+	sphere.rings = 24
+	atmosphere.mesh = sphere
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/atmosphere.gdshader")
-	material.render_priority = -9
+	# After the body (-8); Java composites the atmosphere over the planet.
+	material.render_priority = -7
 	var radius := float(data.get("radius", 1.0))
 	material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
 	material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))
@@ -696,6 +719,52 @@ func _build_atmosphere() -> void:
 	_update_atmosphere_camera()
 
 
+## `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`): a `lineLoop`
+## of `(int)(radius * 10)` points around each parent position at `orbitRadius`,
+## colour `Pal.gray` with `alpha = params.uiAlpha` (hidden below 0.02). The
+## payload pre-computes each centre in the view frame (planet at the origin).
+func _build_orbits() -> void:
+	if _orbits == null:
+		# code-instantiated: one loop mesh per solar-system planet with a
+		# parent; the count is data-driven from the system layout.
+		_orbits = Node3D.new()
+		_orbits.name = "Orbits"
+		$ViewportContainer/SubViewport.add_child(_orbits)
+	for child in _orbits.get_children():
+		_orbits.remove_child(child)
+		child.queue_free()
+	_orbit_material = StandardMaterial3D.new()
+	_orbit_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	_orbit_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	_orbit_material.albedo_color = Color(ORBIT_GRAY.r, ORBIT_GRAY.g, ORBIT_GRAY.b, ui_alpha)
+	_orbit_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	_orbit_material.render_priority = 2
+	for row_variant in data.get("orbits", []):
+		var row: Dictionary = row_variant
+		var radius := float(row.get("radius", 0.0))
+		var points := int(radius * 10.0)
+		if points < 3:
+			continue
+		var center: Vector3 = row.get("center", Vector3.ZERO)
+		# `Angles.circleVectors(points, radius, ...)` with a `Gl.lineLoop`
+		# (the strip repeats the first point to close).
+		var verts := PackedVector3Array()
+		verts.resize(points + 1)
+		for i in points + 1:
+			var angle := TAU * float(i % points) / float(points)
+			verts[i] = center + Vector3(cos(angle) * radius, 0.0, sin(angle) * radius)
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = verts
+		var mesh := ArrayMesh.new()
+		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_LINE_STRIP, arrays)
+		var node := MeshInstance3D.new()
+		node.mesh = mesh
+		node.material_override = _orbit_material
+		_orbits.add_child(node)
+	_orbits.visible = ui_alpha > 0.02
+
+
 ## `PlanetRenderer.renderTransparent` (`PlanetRenderer.java:156`): the
 ## atmosphere draws only while `Core.settings.getBool("atmosphere")` (Graphics
 ## row, default true); read every frame like Java.
@@ -708,11 +777,11 @@ func _atmosphere_setting() -> bool:
 
 ## `AtmosphereShader.apply`: `u_campos` is the camera in planet space and
 ## `u_rcampos` the camera relative to the planet (the port keeps the planet at
-## the viewport origin, so both are the camera position). The mesh faces the
-## camera like `Planet.getTransform` does in Java; the space backdrop follows.
+## the viewport origin, so both are the camera position). The sphere is
+## rotation-symmetric, so no billboard rotation is needed; the space backdrop
+## still follows the camera.
 func _update_atmosphere_camera() -> void:
 	atmosphere.visible = _has_atmosphere and _atmosphere_setting()
-	atmosphere.rotation = camera.rotation
 	background.rotation = camera.rotation
 	if atmosphere.material_override is ShaderMaterial:
 		var material := atmosphere.material_override as ShaderMaterial

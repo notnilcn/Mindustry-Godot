@@ -2593,7 +2593,7 @@ impl MindCampaign {
                     .unwrap_or_default(),
                 "icon": node
                     .content
-                    .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
+                    .map(|content| content_icon_name(content.type_.name(), &node.content_name))
                     .unwrap_or_default(),
                 "selected": selected,
             }));
@@ -2609,7 +2609,7 @@ impl MindCampaign {
         let root_icon = root_node
             .map(|node| {
                 node.content
-                    .map(|content| format!("{}-{}-ui", content.type_.name(), node.content_name))
+                    .map(|content| content_icon_name(content.type_.name(), &node.content_name))
                     .unwrap_or_default()
             })
             .unwrap_or_default();
@@ -2623,7 +2623,7 @@ impl MindCampaign {
             let content = node.content;
             let type_name = content.map(|content| content.type_.name()).unwrap_or("");
             let icon = content
-                .map(|_| format!("{type_name}-{}-ui", node.content_name))
+                .map(|_| content_icon_name(type_name, &node.content_name))
                 .unwrap_or_default();
             let name = content
                 .map(|_| self.localized_content_name(type_name, &node.content_name))
@@ -3028,7 +3028,7 @@ impl MindCampaign {
             "content": name,
             "type": type_name,
             "localized": self.localized_content_name(type_name, &name),
-            "icon": format!("{type_name}-{name}-ui"),
+            "icon": content_icon_name(type_name, &name),
             "description": self.localized_content_description(type_name, &name),
             "details": self.localized_content_field(type_name, &name, "details"),
             "credit": self.localized_content_field(type_name, &name, "credit"),
@@ -5387,6 +5387,52 @@ impl MindCampaign {
         atmos.set("rad_in", def.atmosphere_rad_in);
         atmos.set("rad_out", def.atmosphere_rad_out);
         out.set("atmosphere", &atmos);
+        // `PlanetRenderer.renderOrbit` (`PlanetRenderer.java:171-179`): every
+        // visible planet with a parent draws a `lineLoop` of `radius * 10`
+        // points around its parent's position at `orbitRadius`, colour
+        // `Pal.gray` with alpha = `params.uiAlpha`, skipped when
+        // `!planet.drawOrbit`. The port's view frame keeps the current planet
+        // at the origin, so each centre is `parent.position - planet.position`.
+        let planets = registry.planets();
+        let orbit = mind_core::render::g3d::orbit::orbit_radii(planets);
+        let seconds = self.universe_secondsf();
+        let system = mind_core::render::g3d::orbit::solar_system(planets, def.id.index());
+        let current =
+            mind_core::render::g3d::orbit::world_position(planets, &orbit, def.id.index(), seconds);
+        let mut orbits = Array::<VarDictionary>::new();
+        for (index, body) in planets.iter().enumerate() {
+            let Some(parent) = body.parent else {
+                continue;
+            };
+            if !body.visible || !body.draw_orbit {
+                continue;
+            }
+            if mind_core::render::g3d::orbit::solar_system(planets, index) != system {
+                continue;
+            }
+            let radius = orbit.get(index).copied().unwrap_or(0.0);
+            if radius <= 0.0 {
+                continue;
+            }
+            let parent_position = mind_core::render::g3d::orbit::world_position(
+                planets,
+                &orbit,
+                parent.index(),
+                seconds,
+            );
+            let mut row = VarDictionary::new();
+            row.set("radius", radius);
+            row.set(
+                "center",
+                Vector3::new(
+                    parent_position[0] - current[0],
+                    parent_position[1] - current[1],
+                    parent_position[2] - current[2],
+                ),
+            );
+            orbits.push(&row);
+        }
+        out.set("orbits", &orbits);
         out.set("tiles", &tiles);
         out.set("corners", &corners);
         out.set("tile_corners", &tile_corners);
@@ -5800,6 +5846,20 @@ fn save_date_stamp() -> String {
         other => other,
     };
     format!("{} {day:02} {hour12}:{minute:02}", MONTHS[month - 1])
+}
+
+/// `UnlockableContent.load` (`UnlockableContent.java:117`) and the
+/// `SectorPreset` override (`SectorPreset.java:134`): sector presets resolve
+/// the `sector-<name>` atlas region (falling back to `Icon.terrain` -- the
+/// GDScript `MindWidgets.content_icon` supplies that glyph when the region is
+/// missing); every other content resolves `<type>-<name>-ui`. The port's
+/// content-type name for `SectorPreset` is `sector` (`ContentType` parity).
+fn content_icon_name(type_name: &str, name: &str) -> String {
+    if type_name == "sector" || type_name == "sectorpreset" {
+        format!("sector-{name}")
+    } else {
+        format!("{type_name}-{name}-ui")
+    }
 }
 
 /// Renders one stat value's cells for the `content_info_json` payload: Text
