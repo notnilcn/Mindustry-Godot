@@ -1315,6 +1315,10 @@ impl SimIoHandler {
             .get_resource::<CampaignRuntime>()
             .map(|runtime| &runtime.session.markers as &dyn MarkersIo);
         let mut tags = live_meta_tags(sim, &content, width, height, name);
+        // `"mapname", state.map.name()` (`SaveVersion.java:133`): the loaded
+        // map / sector / save name, not the port's `sim` placeholder (L02 T4,
+        // PAR-0377: Load cards read "Map: Unknown").
+        tags.insert("mapname".to_owned(), sim.map_name().to_owned());
         tags.insert("name".to_owned(), name.to_owned());
         // `static-fog-data` (`FogControl.shouldWrite`): only when fog is on and
         // a controller with data exists.
@@ -1374,6 +1378,10 @@ impl SimIoHandler {
         if let Some(tick) = meta_tick(&save.tags) {
             sim.state.tick = tick;
         }
+        // `state.map = maps.byName(mapname) ?: new Map(name = mapname ?: "Unknown")`
+        // (`SaveVersion.java:186-191`): either way the name is the saved
+        // `mapname`.
+        sim.set_map_name(save.tags.get("mapname").cloned().unwrap_or_default());
         // Replace the live world: drop the previous entities/bookkeeping, swap
         // the grid, then rebuild the ECS the tile model points at.
         sim.clear_world_for_load();
@@ -1516,6 +1524,42 @@ mod tests {
         assert_eq!(responses[0].status, IoStatus::Ok);
         assert_eq!(sim.grid.block_at(TilePos::new(2, 3)), Some(wall));
 
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// L02 T4 (PAR-0377): the save meta carries `state.map.name()`
+    /// (`SaveVersion.java:133`), a load restores it from `mapname`
+    /// (`SaveVersion.java:186-191`), `emptyMap` writes `Unknown`
+    /// (`Map.java:151-153`) and `logic.reset()` drops it.
+    #[test]
+    fn save_meta_mapname_is_the_loaded_map() {
+        let mut sim = Sim::new(1, 8, 8, BlockId::AIR, BlockId::AIR);
+        sim.set_io_handler(Box::new(SimIoHandler::boot().expect("content")));
+        assert_eq!(sim.map_name(), "Unknown", "emptyMap before any load");
+        sim.set_map_name("Ancient Caldera");
+
+        let path = temp_path("mapname");
+        let _ = std::fs::remove_file(&path);
+        sim.request_save(&path, false);
+        sim.tick().expect("capture tick");
+        assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+        let mut content = boot_registry().expect("content");
+        let bytes = std::fs::read(&path).expect("save bytes");
+        let save = decode_save_bytes(&bytes, &mut content).expect("decodes");
+        assert_eq!(
+            save.tags.get("mapname").map(String::as_str),
+            Some("Ancient Caldera"),
+            "not the `sim` placeholder"
+        );
+
+        sim.set_map_name("");
+        sim.request_load(&path);
+        sim.tick().expect("apply tick");
+        assert_eq!(sim.take_io_responses()[0].status, IoStatus::Ok);
+        assert_eq!(sim.map_name(), "Ancient Caldera", "restored from mapname");
+
+        sim.reset();
+        assert_eq!(sim.map_name(), "Unknown", "logic.reset() -> emptyMap");
         let _ = std::fs::remove_file(&path);
     }
 

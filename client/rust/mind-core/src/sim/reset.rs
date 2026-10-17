@@ -78,6 +78,8 @@ impl super::Sim {
         self.time.clear();
         self.clock.reset();
         self.state = GameState::new(State::Menu);
+        // `state = new GameState()` also drops `state.map` (back to `emptyMap`).
+        self.map_name.clear();
         if from != State::Menu {
             self.push_event(SimEvent::StateChangeEvent(StateChangeEvent {
                 from,

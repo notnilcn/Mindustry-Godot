@@ -3136,7 +3136,18 @@ impl MindSimHost {
             self.last_map_error = Some(String::from("map.invalid"));
             return false;
         };
-        self.finish_world_load(registry, loaded, WorldLoadExtras::default())
+        // `state.map = map` (`World.java:369`); `Map.name()` = the `name` tag
+        // (`Map.java:127-129`).
+        let map_name = loaded
+            .save
+            .as_ref()
+            .and_then(|save| save.tags.get("name").cloned())
+            .unwrap_or_default();
+        let loaded_ok = self.finish_world_load(registry, loaded, WorldLoadExtras::default());
+        if loaded_ok {
+            self.sim.set_map_name(map_name);
+        }
+        loaded_ok
     }
 
     /// A fresh generation seed for the next `load_map_world` (`Mathf.rand`
@@ -3354,6 +3365,7 @@ impl MindSimHost {
                     host.sim.refresh_unit_runtime();
                 }) as GeneratedLoadout
             });
+        let map_name = sector_map_name(&registry, planet_name, sector);
         let loaded_ok = self.finish_world_load(
             registry,
             loaded,
@@ -3364,6 +3376,8 @@ impl MindSimHost {
             },
         );
         if loaded_ok {
+            // `World.setSectorRules` runs after a resume too (`World.java:266,292,300`).
+            self.sim.set_map_name(map_name);
             log::info!("loaded campaign sector `{planet_name}:{sector}`");
         }
         loaded_ok
@@ -9546,6 +9560,24 @@ struct WorldLoadExtras {
 
 /// The deferred generated-sector loadout step (`H05 T4`).
 type GeneratedLoadout = Box<dyn FnOnce(&mut MindSimHost)>;
+
+/// `World.setSectorRules` (`World.java:300`): `state.map` is named after the
+/// preset (`preset.localizedName`) or `"<planet>; Sector <id>"` for a
+/// generated sector (L02 T4).
+fn sector_map_name(registry: &ContentRegistry, planet_name: &str, sector: i32) -> String {
+    let Some(planet) = registry.planet_by_name(planet_name) else {
+        return String::new();
+    };
+    let preset = planet
+        .sectors
+        .get(sector.max(0) as usize)
+        .and_then(|cell| cell.preset)
+        .and_then(|preset| registry.sector(preset));
+    match preset {
+        Some(preset) => preset.unlock.localized_name.clone(),
+        None => format!("{}; Sector {sector}", planet.unlock.localized_name),
+    }
+}
 
 /// Native path of a campaign sector save (`user://saves/sector-<planet>-<id>.msav`).
 fn sector_save_path(planet_name: &str, sector: u16) -> String {
