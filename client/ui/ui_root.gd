@@ -219,10 +219,22 @@ func _drain_logic_messages() -> void:
 		var duration := float(row.get("duration", 0.0))
 		match str(row.get("type", "")):
 			"announce":
+				# `LExecutor.java:1939-1942`: an announce is dropped while an
+				# announcement is already up (`ui.hasAnnouncement()`).
+				if has_announcement():
+					continue
 				ui.call("announce", text, duration)
 			"notify":
+				# `LExecutor.java:1941`: a notify is dropped while a toast is
+				# on screen (`ui.hudfrag.hasToast()`).
+				if has_toast():
+					continue
 				ui.call("toast", text, "info")
 			"toast":
+				# `LExecutor.java:1940`: `showInfoToast` is dropped while an
+				# announcement is up (`ui.hasAnnouncement()`).
+				if has_announcement():
+					continue
 				# `UI.showInfoToast` visuals are H03's; fall back to the
 				# announcement box until `MindUi.show_info_toast` lands.
 				if ui.has_method("show_info_toast"):
@@ -601,17 +613,52 @@ func _refresh_join_loading() -> void:
 		loading.call("hide_loading")
 
 
+## `HudFragment.scheduleToast`'s slot (`HudFragment.java:729-740`): the
+## timestamp of the last HUD toast; 0 like Java's `long lastToast = 0`.
+var _last_toast_ms := 0.0
+## `(int)(3.5 * 1000)` (`HudFragment.java:730`).
+const TOAST_SLOT_MS := 3500.0
+
+
 func _on_toast(text: String, icon: String) -> void:
-	# `HudFragment.showToast`: `if(state.isMenu()) return;` then uiNotify.
+	# `HudFragment.showToast`: `if(state.isMenu()) return;`.
 	if menu_group.visible:
 		return
-	var ui := _ui()
-	if ui != null:
-		ui.call("play_ui_sound", "uiNotify")
 	# `showToast(Icon.warning, ..)` vs `showToast(text)` = `Icon.ok`
 	# (`HudFragment.java:745-753`).
 	var glyph := "warn" if icon in ["warning", "error", "warn"] else "ok"
+	# `scheduleToast` (`HudFragment.java:729-740`): past the 3.5 s slot the
+	# toast shows now, else it is queued for the remainder and the slot
+	# advances by another 3.5 s.
+	var now := Time.get_ticks_msec()
+	var since := now - _last_toast_ms
+	if since > TOAST_SLOT_MS:
+		_last_toast_ms = now
+		_play_toast(text, glyph)
+	else:
+		_last_toast_ms += TOAST_SLOT_MS
+		get_tree().create_timer((TOAST_SLOT_MS - since) / 1000.0).timeout.connect(
+			func() -> void: _play_toast(text, glyph)
+		)
+
+
+## The `uiNotify` sound + label of one HUD toast (`HudFragment.showToast`).
+func _play_toast(text: String, glyph: String) -> void:
+	var ui := _ui()
+	if ui != null:
+		ui.call("play_ui_sound", "uiNotify")
 	_toast_label(text, 3.5, glyph)
+
+
+## `HudFragment.hasToast` (`HudFragment.java:741-743`): a toast is on screen
+## within 3.5 s of the slot stamp (gates logic notify messages).
+func has_toast() -> bool:
+	return Time.get_ticks_msec() - _last_toast_ms < TOAST_SLOT_MS
+
+
+## `UI.hasAnnouncement` (`UI.java`): the centred announce box is up.
+func has_announcement() -> bool:
+	return _announce_node != null and is_instance_valid(_announce_node)
 
 
 func _on_announce(text: String, duration: float) -> void:
