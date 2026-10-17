@@ -3038,7 +3038,7 @@ impl MindSimHost {
         let id = registry.block_id(core)?;
         let size = registry
             .block(id)
-            .map(|def| i32::from(def.size))
+            .map(|def| def.size)
             .unwrap_or(1);
         Some(mind_core::game::schematic::Schematic::single_core(id, size))
     }
