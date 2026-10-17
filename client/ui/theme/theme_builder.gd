@@ -164,12 +164,16 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_color("icon_pressed_color", name, Color.WHITE)
 				theme.set_color("icon_disabled_color", name, Color(0.247, 0.247, 0.247))
 			elif name == "clearNonei" or name == "clearNoneTogglei":
-				# `Styles.clearNonei` (Styles.java:316): `up = none` (fully
-				# transparent at rest), hover/pressed carry the flat highlight
-				# boxes; used by the HUD input row and the research dialog.
+				# `Styles.clearNonei`/`clearNoneTogglei` (Styles.java:310-327):
+				# `up = none`, `over = flatOver`, `down`/`checked = flatDown` (the
+				# accent-bordered `flat-down-base` frame). The editor's block
+				# palette relies on the checked frame to mark the selected entry
+				# (`MapEditorDialog.java:872`).
 				theme.set_stylebox("normal", name, StyleBoxEmpty.new())
-				theme.set_stylebox("hover", name, flat(Color(0.24, 0.27, 0.32, 0.85)))
-				theme.set_stylebox("pressed", name, flat(Color(0.13, 0.15, 0.18, 0.85)))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				var none_down := _flat_down_frame()
+				theme.set_stylebox("pressed", name, none_down)
+				theme.set_stylebox("hover_pressed", name, none_down)
 				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
 			else:
 				theme.set_stylebox("normal", name, flat(Color(0.18, 0.20, 0.24, 1.0)))
