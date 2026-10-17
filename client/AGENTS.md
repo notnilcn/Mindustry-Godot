@@ -69,7 +69,7 @@ tools/build.sh                                                  # mind-gdext + m
 godot4 --path client                                            # open res://scenes/game.tscn
 bash tools/godot.sh --headless --editor --quit --path client    # import/parse gate
 godot4 --headless --path client --script res://tools/shaders_check.gd   # shader compile gate
-godot4 --headless --path client --script res://tools/ui_widgets_check.gd  # widget region/size gate
+godot4 --headless --path client --script res://tools/ui_widgets_check.gd  # widget region/size gate (in tools/ci.sh)
 godot4 --headless --path client --script res://tools/ui_layout_check.gd   # MindTable layout-engine gate (in tools/ci.sh)
 tools/ci.sh                                                     # full local gate (Rust, goldens, mirror, Godot import, STDB)
 tools/mcp-smoke.sh                                              # in-engine spine smoke (needs the editor running)

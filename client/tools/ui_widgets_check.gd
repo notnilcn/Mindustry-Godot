@@ -208,21 +208,28 @@ func _init() -> void:
 		button_texts.count("Rebind") == 2,
 		"keybind dialog renders one Rebind per binding (got %s)" % button_texts.count("Rebind")
 	)
-	_check(
-		button_texts.count("Reset to Defaults") == 1,
-		"keybind dialog renders the reset-all button"
-	)
+	# `button("@settings.reset", Icon.refresh, tstyle, ...)` (`KeybindDialog.java:129`)
+	# is an icon button: its text lives in the icon row's Label, not Button.text.
+	var reset_all := 0
+	for button in keybind.find_children("*", "Button", true, false):
+		for label in button.find_children("*", "Label", true, false):
+			if (label as Label).text == "Reset to Defaults":
+				reset_all += 1
+	_check(reset_all == 1, "keybind dialog renders the reset-all button (got %s)" % reset_all)
+	# Axis cells are `min [red]/[] max` markup (`KeybindDialog.java:98-101`) in a
+	# BBCode label: compare the parsed text.
 	var label_texts: Array = []
-	for node in keybind.find_children("*", "", true, false):
-		var text: Variant = node.get("text")
-		if text is String:
-			label_texts.append(text)
-	_check(label_texts.has("A / D"), "axis binding renders min / max (A / D)")
-	_check(label_texts.has("Move X"), "binding name resolves from the bundle")
 	var key_width := -1.0
 	for node in keybind.find_children("*", "", true, false):
-		if node.get("text") == "A / D" and node is Control:
-			key_width = (node as Control).size.x
+		var text: Variant = node.get("text")
+		if node is RichTextLabel:
+			text = (node as RichTextLabel).get_parsed_text()
+		if text is String:
+			label_texts.append(text)
+			if text == "A / D" and node is Control:
+				key_width = (node as Control).size.x
+	_check(label_texts.has("A / D"), "axis binding renders min / max (A / D)")
+	_check(label_texts.has("Move X"), "binding name resolves from the bundle")
 	_check(key_width > 1.0, "key label renders with a real width (got %s)" % key_width)
 
 	# The About dialog titles must resolve through the Links fallback, not render
@@ -533,7 +540,7 @@ func _init() -> void:
 	var ui_root: Control = load("res://scenes/ui/ui_root.tscn").instantiate()
 	root.add_child(ui_root)
 	var prompt: Dictionary = ui_root.call(
-		"_build_prompt", "", "[color=#ff0000ff]Red[/color] plain", false
+		"_build_prompt", "", "[color=#ff0000ff]Red[/color] plain", false, 400.0
 	)
 	var prompt_body: Variant = prompt.get("body")
 	_check(prompt_body is RichTextLabel, "prompt body is a BBCode label")
@@ -553,7 +560,9 @@ func _init() -> void:
 	var rules_table: Variant = rules_dialog.get("_table")
 	var rule_toggles := 0
 	if rules_table is MindTable:
-		for child in (rules_table as MindTable).get_children():
+		# The toggles sit in the options box's column (`CampaignRulesDialog`
+		# `cont.top().pane(inner -> ...)`), not directly under the table.
+		for child in (rules_table as MindTable).find_children("*", "", true, false):
 			if child is MindCheck:
 				rule_toggles += 1
 	_check(

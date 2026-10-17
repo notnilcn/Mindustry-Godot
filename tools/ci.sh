@@ -151,6 +151,15 @@ if ! bash tools/godot.sh --headless --path client --script res://tools/ui_layout
 fi
 echo "  ui layout check clean"
 
+say "godot: UI widget check (atlas regions, row sizes, dialog oracles)"
+if ! bash tools/godot.sh --headless --path client --script res://tools/ui_widgets_check.gd >"$GODOT_LOG" 2>&1 \
+    || ! grep -q 'UICHECK: failed=0' "$GODOT_LOG"; then
+  echo "FAIL: client/tools/ui_widgets_check.gd" >&2
+  grep -E 'FAIL|SCRIPT ERROR|UICHECK: failed' "$GODOT_LOG" >&2 || tail -n 40 "$GODOT_LOG" >&2
+  exit 1
+fi
+echo "  ui widget check clean"
+
 say "boundary: mind-core must stay godot-free and tokio-free"
 # NOTE: the repo path itself contains "mindustry-godot", so a naive `grep godot`
 # on the default tree (which prints the root path) always matches. `--prefix none`
