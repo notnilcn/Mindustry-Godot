@@ -103,6 +103,21 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_color("font_hover_color", name, Color.WHITE)
 				theme.set_color("font_pressed_color", name, Color.WHITE)
 				theme.set_color("font_disabled_color", name, Color.GRAY)
+			elif name == "grayt":
+				# `Styles.grayt` (Styles.java:157-165): `up = grayPanel`,
+				# `over`/`down = flatOver` (#454545), `disabled = grayPanelDark`
+				# — the save-card body style.
+				theme.set_stylebox("normal", name, flat(MindStyles.GRAY_PANEL))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
+			elif name == "flatt":
+				# `Styles.flatt` (Styles.java:147-155): `up = black`,
+				# `over`/`down = flatOver`.
+				theme.set_stylebox("normal", name, flat(Color.BLACK))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
 			elif name == "selecti":
 				# `Styles.selecti` (Styles.java:283-286): `checked = buttonSelect`
 				# (the accent 9-patch frame), `up = none`. The checked state is
@@ -125,6 +140,29 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				var flat_down := _flat_down_frame()
 				theme.set_stylebox("pressed", name, flat_down)
 				theme.set_stylebox("hover_pressed", name, flat_down)
+			elif name == "emptyi":
+				# `Styles.emptyi` (Styles.java:272-276): no background at all; the
+				# icon is white, lightGray on hover and accent on down.
+				theme.set_stylebox("normal", name, StyleBoxEmpty.new())
+				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
+				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
+				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+				theme.set_color("icon_normal_color", name, Color.WHITE)
+				theme.set_color("icon_hover_color", name, Color(0.69, 0.69, 0.69))
+				theme.set_color("icon_pressed_color", name, MindStyles.ACCENT)
+				theme.set_color("icon_disabled_color", name, Color.WHITE)
+			elif name == "emptyTogglei":
+				# `Styles.emptyTogglei` (Styles.java:277-282): no background; the
+				# icon is gray at rest, white while checked/down and darkGray when
+				# disabled (the save-slot autosave toggle).
+				theme.set_stylebox("normal", name, StyleBoxEmpty.new())
+				theme.set_stylebox("hover", name, StyleBoxEmpty.new())
+				theme.set_stylebox("pressed", name, StyleBoxEmpty.new())
+				theme.set_stylebox("disabled", name, StyleBoxEmpty.new())
+				theme.set_color("icon_normal_color", name, Color(0.498, 0.498, 0.498))
+				theme.set_color("icon_hover_color", name, Color(0.498, 0.498, 0.498))
+				theme.set_color("icon_pressed_color", name, Color.WHITE)
+				theme.set_color("icon_disabled_color", name, Color(0.247, 0.247, 0.247))
 			elif name == "clearNonei" or name == "clearNoneTogglei":
 				# `Styles.clearNonei` (Styles.java:316): `up = none` (fully
 				# transparent at rest), hover/pressed carry the flat highlight
