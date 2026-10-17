@@ -17,7 +17,7 @@
       "tier": "T0",
       "kind": "file",
       "path": "scenarios/spine_determinism.json",
-      "expect_checksum": "57bf3097cbd84349"
+      "expect_checksum": "2d61ec134e26eb10"
     },
     {
       "name": "spine_many_commands",
@@ -26,7 +26,7 @@
       "tier": "T1",
       "kind": "file",
       "path": "scenarios/spine_many_commands.json",
-      "expect_checksum": "c82143205ece24ed"
+      "expect_checksum": "08d1c5049d3375f4"
     },
     {
       "name": "spine_place_break",
@@ -35,7 +35,7 @@
       "tier": "T0",
       "kind": "file",
       "path": "scenarios/spine_place_break.json",
-      "expect_checksum": "a1a7b96167c9718d"
+      "expect_checksum": "3e48c583a94fbea4"
     },
     {
       "name": "stdb_binder_replay",
@@ -225,7 +225,7 @@
       "tier": "T0",
       "kind": "file",
       "path": "scenarios/sim_core_boot.json",
-      "expect_checksum": "eaf9472d8cf4dfd5"
+      "expect_checksum": "87ef92ca6b1f63dc"
     },
     {
       "name": "sim_core_determinism",

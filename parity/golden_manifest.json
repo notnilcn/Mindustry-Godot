@@ -425,7 +425,10 @@
       "kind": "scenario",
       "path": "scenarios/sim_core_boot.json",
       "owner_plan": "05",
-      "sha256": "3be7e0cf4e4d79c12fb57b0805e409b720beabfca0b48dda9bacedab92da5128"
+      "sha256": "82b30107fb033ece5edb5a0eb84c6e00a8233f628fceea518363bb30a71f97b7",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_sim_core_determinism",
@@ -456,21 +459,30 @@
       "kind": "scenario",
       "path": "scenarios/spine_determinism.json",
       "owner_plan": "00",
-      "sha256": "081b653c4bea89a2e38fb11c5c307891000d1afea35384abc3b71582e497a4a5"
+      "sha256": "5ffb058096e9d0ac2a56fb05eb979af87f3c4634441205a1d950f3d29dc094e3",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_spine_many_commands",
       "kind": "scenario",
       "path": "scenarios/spine_many_commands.json",
       "owner_plan": "00",
-      "sha256": "846f38a9356e8370016fe0e1288dd1c7003c53bc0e72215d949b5401a57d44f4"
+      "sha256": "8ad3a66c1cf9f222c93f86a288afc07ab6ff3408d125f1a8d0d97ec9e1a687f3",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_spine_place_break",
       "kind": "scenario",
       "path": "scenarios/spine_place_break.json",
       "owner_plan": "00",
-      "sha256": "08efdd874239045359c907f4cdec3c6b2c31f979432b590d5fb0281b4ec5f8c5"
+      "sha256": "53fec75afbb7f9d47599c149d6e557f7dcb0fb137258586ab7695ff61359866b",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_stdb_binder_replay",
