@@ -24,9 +24,6 @@
 //! * `CoreBlock`'s unit panel drops the `?` button and the `console`-settings
 //!   name row (the port's `Cell` model has neither a button nor a settings
 //!   read); the unit icon + localized name remain.
-//! * `ForceProjector`'s coolant booster panel is not ported (it needs the
-//!   `consumesLiquid` filter and per-liquid heat math); the shield/range/regen
-//!   rows and the phase-fabric item booster are.
 //! * `StatValues.itemBoosters` is a local helper here (the port's `values`
 //!   module only carries the liquid `speedBoosters` form).
 
@@ -440,8 +437,7 @@ pub fn logistics_block_stats(ctx: &StatCtx, id: BlockId, def: &BlockDef, stats: 
                     (state.shield_health / state.cooldown_broken_base / 60.0) as i32 as f32,
                     StatUnit::Seconds,
                 );
-                // The coolant panel is not ported (see the module docs); the
-                // phase-fabric item booster is.
+                // The phase-fabric item booster, then the coolant panel.
                 if projector.phase_item.is_some()
                     && let Some(items) = booster_items(def)
                 {
@@ -455,6 +451,7 @@ pub fn logistics_block_stats(ctx: &StatCtx, id: BlockId, def: &BlockDef, stats: 
                         state.phase_radius_boost,
                         items,
                     );
+                    force_projector_coolant(ctx, def, state, stats);
                 }
             }
         }
@@ -583,6 +580,69 @@ fn add_item_boosters(
         )));
     }
     stats.add(Stat::Booster, vec![Cell::Panel { cells: panel }]);
+}
+
+/// `ForceProjector.setStats` coolant booster panel (`ForceProjector.java:120-140`,
+/// L05 T3): one gray panel per liquid the coolant consumer accepts, with
+/// `coolantConsumption * 60 /sec`, the regen-rate gain and the cooldown cut
+/// for that liquid's heat (`liquidHeat = 1 + (heatCapacity - 0.4) * 0.9`).
+fn force_projector_coolant(
+    ctx: &StatCtx,
+    def: &BlockDef,
+    state: &crate::world::blocks::defense::shields::ForceProjectorState,
+    stats: &mut Stats,
+) {
+    use crate::content::registries::blocks::Consume;
+    use crate::ui::stat_display::auto_fixed;
+    let Some(consumption) = def.consumes.iter().find_map(|spec| match &spec.consume {
+        Consume::Coolant { amount, .. } => Some(*amount),
+        _ => None,
+    }) else {
+        return;
+    };
+    let mut panel = vec![Cell::Row];
+    for liquid in ctx.registry.liquids() {
+        if liquid.removed || !super::unit_blocks::coolant_accepted(liquid, def) {
+            continue;
+        }
+        let heat = 1.0 + (liquid.heat_capacity - 0.4) * 0.9;
+        let regen_boost = ((state.cooldown_normal * (state.cooldown_liquid * heat))
+            - state.cooldown_normal)
+            * 60.0;
+        let cooldown_boost = (state.shield_health
+            / (state.cooldown_broken_base * (state.cooldown_liquid * heat))
+            - state.shield_health / state.cooldown_broken_base)
+            / 60.0;
+        let name = liquid.name.clone();
+        panel.push(Cell::Panel {
+            cells: vec![
+                Cell::Icon {
+                    region: format!("liquid-{name}-ui"),
+                    amount: None,
+                    size: 40,
+                    content: Some(name.clone()),
+                },
+                Cell::Space { w: 10.0 },
+                values::text(format!(
+                    "{}\n[lightgray]{}{}",
+                    ctx.liquid_name(&name),
+                    auto_fixed(consumption * 60.0, 2),
+                    ctx.unit_label(StatUnit::PerSecond)
+                )),
+                Cell::Fill,
+                values::text(format!(
+                    "[lightgray]+{}\n{}",
+                    ctx.bundle
+                        .format("bar.regenerationrate", &[&auto_fixed(regen_boost, 2)]),
+                    ctx.bundle
+                        .format("ability.stat.cooldown", &[&auto_fixed(cooldown_boost, 2)])
+                )),
+                Cell::Space { w: 15.0 },
+            ],
+        });
+        panel.push(Cell::Row);
+    }
+    stats.add(Stat::Booster, panel);
 }
 
 #[cfg(test)]

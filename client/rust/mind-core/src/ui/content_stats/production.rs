@@ -684,7 +684,36 @@ fn consume_generator_stats(
     config: &crate::world::blocks::power::generator::GeneratorConfig,
 ) {
     generator_row(ctx, stats, config.power_production);
-    if def.has_items {
+    // `ConsumeItemFlammable`/`ConsumeItemRadioactive` (`ConsumeItemEfficiency.
+    // display`, `ConsumeItemEfficiency.java:21-23`) with `stats.timePeriod =
+    // itemDuration` (`ConsumeGenerator.setStats`): the filter consumer also makes
+    // the block `hasItems` in Java, so Item Capacity and Production Time show
+    // (L05 T3, PAR-0301: java/info-combustion.png listed coal / spore pod /
+    // pyratite / blast compound with their efficiencies; the port listed none).
+    let item_filter = match &config.filter_item {
+        Some(crate::world::blocks::power::generator::GeneratorFilter::ItemFlammable { min }) => {
+            Some((*min, true))
+        }
+        Some(crate::world::blocks::power::generator::GeneratorFilter::ItemRadioactive { min }) => {
+            Some((*min, false))
+        }
+        _ => None,
+    };
+    if let Some((min, flammable)) = item_filter {
+        if !def.has_items {
+            stats.add_number(
+                ctx,
+                Stat::ItemCapacity,
+                def.item_capacity as f32,
+                StatUnit::Items,
+            );
+        }
+        stats.add(
+            Stat::Input,
+            item_eff_multiplier(ctx, config, min, flammable),
+        );
+    }
+    if def.has_items || item_filter.is_some() {
         stats.add_number(
             ctx,
             Stat::ProductionTime,
@@ -698,6 +727,65 @@ fn consume_generator_stats(
             values::liquid(ctx, liquid, amount * 60.0, true),
         );
     }
+}
+
+/// `StatValues.itemEffMultiplier(efficiency, timePeriod, filter,
+/// itemDurationMultipliers)` (`StatValues.java:569-586`): one gray panel per
+/// unlocked, visible item passing the filter — 40 px icon, name and
+/// `1 / (timePeriod * mult / 60)` per second, right-aligned efficiency.
+fn item_eff_multiplier(
+    ctx: &StatCtx,
+    config: &crate::world::blocks::power::generator::GeneratorConfig,
+    min: f32,
+    flammable: bool,
+) -> Vec<Cell> {
+    let mut panel = vec![Cell::Row];
+    for item in ctx.registry.items() {
+        let value = if flammable {
+            item.flammability
+        } else {
+            item.radioactivity
+        };
+        if item.removed || item.hidden || value < min {
+            continue;
+        }
+        let multiplier = config
+            .item_duration_multipliers
+            .iter()
+            .find(|(id, _)| *id == item.id)
+            .map(|(_, value)| *value)
+            .unwrap_or(1.0);
+        let time = 1.0 / (config.item_duration * multiplier / 60.0);
+        let rate = crate::ui::stat_display::auto_fixed(time, if time < 0.01 { 4 } else { 2 });
+        let name = item.name.clone();
+        panel.push(Cell::Panel {
+            cells: vec![
+                Cell::Icon {
+                    region: format!("item-{name}-ui"),
+                    amount: None,
+                    size: 40,
+                    content: Some(name.clone()),
+                },
+                Cell::Space { w: 10.0 },
+                values::text(format!(
+                    "{}\n[lightgray]{rate}{}",
+                    ctx.item_name(&name),
+                    ctx.unit_label(StatUnit::PerSecond)
+                )),
+                Cell::Fill,
+                values::text(format!(
+                    "[stat]{}",
+                    ctx.bundle.format(
+                        "stat.efficiency",
+                        &[&crate::ui::stat_display::fix_value(value * 100.0)]
+                    )
+                )),
+                Cell::Space { w: 15.0 },
+            ],
+        });
+        panel.push(Cell::Row);
+    }
+    panel
 }
 
 /// `ThermalGenerator.setStats` (`ThermalGenerator.java:56-66`).
@@ -1052,23 +1140,74 @@ mod tests {
                 }
             ]]
         );
-        // Output graphite: 1 / (90/60) = 0.666 per second (Arc truncation).
+        // Output graphite: 1 / (90/60) = 0.666 per second (Arc truncation), under
+        // the item name (`displayItem(..., showName = true)`, `StatValues.java:310-315`).
         let output = row(&stats, Stat::Output);
         assert!(
-            output
-                .iter()
-                .flatten()
-                .any(|cell| matches!(cell, Cell::Text { t } if t == "[lightgray]0.666/sec")),
+            output.iter().flatten().any(
+                |cell| matches!(cell, Cell::Text { t } if t.ends_with("\n[lightgray]0.666/sec"))
+            ),
             "output row: {output:?}"
         );
         // Input coal 2: 2 / (90/60) = 1.333 per second.
         let input = row(&stats, Stat::Input);
         assert!(
+            input.iter().flatten().any(
+                |cell| matches!(cell, Cell::Text { t } if t.ends_with("\n[lightgray]1.333/sec"))
+            ),
+            "input row: {input:?}"
+        );
+    }
+
+    /// L05 T3 (PAR-0301): `ConsumeItemFlammable` lists every flammable item
+    /// with its efficiency (`StatValues.itemEffMultiplier`, `StatValues.java:
+    /// 569-586`): coal at 100%, spore pod at 115%; Production Time shows.
+    #[test]
+    fn combustion_generator_lists_flammable_items() {
+        let registry = registry();
+        let bundle = crate::assets::bundle::Bundle::from_layers(vec![
+            crate::assets::bundle::parse_properties(
+                "stat.efficiency={0}% Efficiency\nitem.coal.name=Coal\nitem.spore-pod.name=Spore Pod\n",
+            ),
+        ]);
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let id = registry
+            .block_id("combustion-generator")
+            .expect("combustion");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        let input: Vec<String> = row(&stats, Stat::Input)
+            .iter()
+            .flatten()
+            .filter_map(|cell| match cell {
+                Cell::Panel { cells } => Some(
+                    cells
+                        .iter()
+                        .filter_map(|inner| match inner {
+                            Cell::Text { t } => Some(t.clone()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("|"),
+                ),
+                _ => None,
+            })
+            .collect();
+        assert!(
             input
                 .iter()
-                .flatten()
-                .any(|cell| matches!(cell, Cell::Text { t } if t == "[lightgray]1.333/sec")),
-            "input row: {input:?}"
+                .any(|t| t.starts_with("Coal") && t.contains("100% Efficiency")),
+            "{input:?}"
+        );
+        assert!(
+            input
+                .iter()
+                .any(|t| t.starts_with("Spore Pod") && t.contains("115% Efficiency")),
+            "{input:?}"
+        );
+        assert!(
+            !row(&stats, Stat::ProductionTime).is_empty(),
+            "production time"
         );
     }
 

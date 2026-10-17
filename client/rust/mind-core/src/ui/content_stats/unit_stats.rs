@@ -10,12 +10,9 @@
 //! `world/meta/StatValues.java:655` (`weapons`) / `:682` (`abilities`).
 //!
 //! Deviations (also in the task summary):
-//! * The `abilities` table lists one panel per displayed ability with its
-//!   localized name and its knobs; Java calls each ability's own
-//!   `display(Table)` (repair fields, shields, spawn callouts) which the
-//!   port's `AbilitySpec` does not model per kind.
-//! * `mineTier`'s `StatValues.drillables` list is not emitted for units (the
-//!   port's helper is drill-def based); `mineSpeed`/`mineTier` are.
+//! * `Ability.display` is ported for the repair / shield-regen / force /
+//!   status / energy fields and regen; other ability classes show their name
+//!   and description only.
 //! * Weapon preview sprites (`showStatSprite`) are not drawn (the panel title
 //!   row carries the weapon's bundle info key when present).
 
@@ -45,18 +42,21 @@ pub fn unit_stats(ctx: &StatCtx, id: UnitTypeId) -> Stats {
         Stat::Size,
         values::squared(ctx, def.hit_size / 8.0, StatUnit::Blocks),
     );
+    // `stats.add(Stat.itemCapacity, itemCapacity)` is the float overload with
+    // `StatUnit.none` (`Stats.java:33-35`).
     stats.add_number(
         ctx,
         Stat::ItemCapacity,
         def.item_capacity as f32,
-        StatUnit::Items,
+        StatUnit::None,
     );
+    // `stats.add(Stat.range, Strings.autoFixed(...), StatUnit.blocks)` resolves to
+    // `add(Stat, String format, Object... args)` (`Stats.java:93-95`): the unit
+    // is a format arg the string never uses, so the row is the bare number
+    // (L05 T3; java/info-mono-2.png "Range: 6.2").
     stats.add(
         Stat::Range,
-        vec![
-            values::text(auto_fixed(def.max_range / 8.0, 1)),
-            values::text(format!(" {}", ctx.unit_label(StatUnit::Blocks))),
-        ],
+        vec![values::text(auto_fixed(def.max_range / 8.0, 1))],
     );
 
     if def.crush_damage > 0.0 {
@@ -109,12 +109,17 @@ pub fn unit_stats(ctx: &StatCtx, id: UnitTypeId) -> Stats {
 
     if def.mine_tier >= 1 {
         stats.add_percent(ctx, Stat::MineSpeed, def.mine_speed);
-        stats.add_number(ctx, Stat::MineTier, def.mine_tier as f32, StatUnit::None);
+        stats.add(
+            Stat::MineTier,
+            values::unit_drillables(ctx, def.mine_tier, def.mine_walls, def.mine_floor),
+        );
     }
     if def.build_speed > 0.0 {
         stats.add_percent(ctx, Stat::BuildSpeed, def.build_speed);
     }
-    if def.payload_capacity > 0.0 {
+    // `if(sample instanceof Payloadc)` (`UnitType.java:837-839`): only payload
+    // units list it (mono/poly have the default capacity but no Payloadc).
+    if def.entity_def.is_payload() {
         stats.add(
             Stat::PayloadCapacity,
             values::squared(
@@ -123,6 +128,12 @@ pub fn unit_stats(ctx: &StatCtx, id: UnitTypeId) -> Stats {
                 StatUnit::Blocks,
             ),
         );
+    }
+
+    // `var reqs = getFirstRequirements(); if(reqs != null) stats.add(Stat.buildCost,
+    // StatValues.items(reqs))` (`UnitType.java:841-845`).
+    if let Some(reqs) = crate::content::registries::units::first_requirements(def, ctx.registry) {
+        stats.add(Stat::BuildCost, values::items(ctx, &reqs, true));
     }
 
     if !def.weapons.is_empty() {
@@ -201,7 +212,10 @@ fn weapon_add_stats(ctx: &StatCtx, weapon: &WeaponDef) -> Vec<Cell> {
     // `StatValues.ammo(ObjectMap.of(u, bullet))`: unit-keyed entries are
     // compact (no title row).
     rows.push(Cell::Row);
-    rows.extend(bullet_rows(ctx, weapon.bullet.id, false));
+    // `StatValues.ammo(ObjectMap.of(unit, bullet))`: a `UnitType` key without
+    // `showUnit` is `compact` (`StatValues.java:727`) — no ammo/item, reload or
+    // range rows (L05 T3: poly's weapon showed "2 ammo/item").
+    rows.extend(bullet_rows(ctx, weapon.bullet.id, true));
     rows
 }
 
@@ -211,31 +225,14 @@ fn abilities_cells(ctx: &StatCtx, def: &UnitTypeDef) -> Vec<Cell> {
     let mut cells = vec![Cell::Row];
     let mut count = 0;
     for ability in &def.abilities {
-        let mut rows: Vec<Cell> = Vec::new();
-        if let Some(kind_name) = ability_kind_name(&ability.kind) {
-            rows.push(values::text(format!(
-                "[stat]{}",
-                ctx.bundle.get(&format!("ability.{kind_name}"))
-            )));
-            rows.push(Cell::Row);
+        // `MoveEffectAbility` sets `display = false`; the stat row lists the
+        // displayed ones (`StatValues.abilities`).
+        if matches!(ability.kind, AbilityKind::MoveEffect) {
+            continue;
         }
-        // The knobs the port's `AbilitySpec` models, in a stable order.
-        for (label, value) in [
-            (ctx.stat_label(Stat::Healing), ability.amount),
-            (ctx.stat_label(Stat::Range), ability.range),
-            (ctx.stat_label(Stat::Reload), ability.reload),
-            (ctx.stat_label(Stat::RegenerationRate), ability.regen),
-            (ctx.stat_label(Stat::CooldownTime), ability.cooldown),
-        ] {
-            if value > 0.0 {
-                rows.push(values::text(format!(
-                    "[lightgray]{label}: [white]{}",
-                    fix_value(value)
-                )));
-                rows.push(Cell::Row);
-            }
-        }
-        cells.push(Cell::Panel { cells: rows });
+        cells.push(Cell::Panel {
+            cells: ability_display(ctx, ability),
+        });
         count += 1;
         if count == 2 {
             count = 0;
@@ -243,6 +240,227 @@ fn abilities_cells(ctx: &StatCtx, def: &UnitTypeDef) -> Vec<Cell> {
         }
     }
     cells
+}
+
+/// `Ability.display(Table)` (`Ability.java:28-42`): the `[accent]` localized
+/// name, the `ability.<name>.description` when present, then each class's
+/// `addStats` rows (L05 T3, PAR-0301: the port listed raw knobs; poly's repair
+/// field now reads like java/info-poly.png).
+fn ability_display(
+    ctx: &StatCtx,
+    ability: &crate::content::registries::units::ability::AbilitySpec,
+) -> Vec<Cell> {
+    use crate::ui::stat_display::auto_fixed;
+    let mut rows: Vec<Cell> = Vec::new();
+    let line = |rows: &mut Vec<Cell>, text: String| {
+        rows.push(values::text(text));
+        rows.push(Cell::Row);
+    };
+    let Some(kind_name) = ability_kind_name(&ability.kind) else {
+        return rows;
+    };
+    let bundle = format!("ability.{kind_name}");
+    line(&mut rows, format!("[accent]{}", ctx.bundle.get(&bundle)));
+    let stat =
+        |key: &str, value: String| ctx.bundle.format(&format!("ability.stat.{key}"), &[&value]);
+    let range = |value: f32| {
+        ctx.bundle
+            .format("bullet.range", &[&auto_fixed(value / 8.0, 2)])
+    };
+    let description = format!("{bundle}.description");
+    if !matches!(ability.kind, AbilityKind::EnergyField) && ctx.bundle.has(&description) {
+        line(&mut rows, ctx.bundle.get(&description).to_string());
+    }
+    match ability.kind {
+        // `RepairFieldAbility.addStats` (`RepairFieldAbility.java:62-82`).
+        AbilityKind::RepairField => {
+            line(&mut rows, range(ability.range));
+            line(
+                &mut rows,
+                stat("firingrate", auto_fixed(60.0 / ability.reload, 2)),
+            );
+            if ability.amount > 0.0 {
+                line(
+                    &mut rows,
+                    format!(
+                        "{}[lightgray] ~ []{}",
+                        ctx.bundle
+                            .format("bullet.healamount", &[&auto_fixed(ability.amount, 2)]),
+                        stat(
+                            "repairspeed",
+                            auto_fixed(ability.amount * 60.0 / ability.reload, 2)
+                        )
+                    ),
+                );
+            }
+            if ability.heal_percent > 0.0 {
+                line(
+                    &mut rows,
+                    format!(
+                        "{}[lightgray] ~ []{}",
+                        ctx.bundle.format(
+                            "bullet.healpercent",
+                            &[&auto_fixed(ability.heal_percent, 2)]
+                        ),
+                        stat(
+                            "repairspeed",
+                            format!(
+                                "{}%",
+                                auto_fixed(ability.heal_percent * 60.0 / ability.reload, 2)
+                            )
+                        )
+                    ),
+                );
+            }
+            same_type_and_targets(ctx, ability, &mut rows);
+        }
+        // `ShieldRegenFieldAbility.addStats` (`ShieldRegenFieldAbility.java`).
+        AbilityKind::ShieldRegenField => {
+            line(&mut rows, range(ability.range));
+            line(
+                &mut rows,
+                stat("firingrate", auto_fixed(60.0 / ability.reload, 2)),
+            );
+            line(
+                &mut rows,
+                format!(
+                    "{}[lightgray] ~ []{}",
+                    stat("pulseregen", auto_fixed(ability.amount, 2)),
+                    stat(
+                        "regen",
+                        auto_fixed(ability.amount * 60.0 / ability.reload, 2)
+                    )
+                ),
+            );
+            line(&mut rows, stat("shield", auto_fixed(ability.max, 2)));
+        }
+        // `ForceFieldAbility.addStats` (`ForceFieldAbility.java`).
+        AbilityKind::ForceField => {
+            line(&mut rows, range(ability.range));
+            line(&mut rows, stat("shield", auto_fixed(ability.max, 2)));
+            line(
+                &mut rows,
+                stat("repairspeed", auto_fixed(ability.regen * 60.0, 2)),
+            );
+            line(
+                &mut rows,
+                stat("cooldown", auto_fixed(ability.cooldown / 60.0, 2)),
+            );
+        }
+        // `StatusFieldAbility.addStats` (`StatusFieldAbility.java`).
+        AbilityKind::StatusField => {
+            line(&mut rows, range(ability.range));
+            line(
+                &mut rows,
+                stat("firingrate", auto_fixed(60.0 / ability.reload, 2)),
+            );
+            if let Some(effect) = ability.effect {
+                line(
+                    &mut rows,
+                    format!("[stat]{}", ctx.localized_name("status", effect)),
+                );
+            }
+        }
+        // `RegenAbility.addStats` (`RegenAbility.java`): the flat amount form.
+        AbilityKind::Regen => {
+            if ability.amount >= 0.001 {
+                line(
+                    &mut rows,
+                    stat("regen", auto_fixed(ability.amount * 60.0, 2)),
+                );
+            }
+        }
+        // `EnergyFieldAbility.addStats` (`EnergyFieldAbility.java`).
+        AbilityKind::EnergyField => {
+            let heal = ability.heal_percent > 0.0;
+            let key = if heal {
+                "healdescription"
+            } else {
+                "description"
+            };
+            line(
+                &mut rows,
+                ctx.bundle.get(&format!("{bundle}.{key}")).to_string(),
+            );
+            line(&mut rows, range(ability.range));
+            line(
+                &mut rows,
+                stat("firingrate", auto_fixed(60.0 / ability.reload, 2)),
+            );
+            line(
+                &mut rows,
+                stat("maxtargets", format!("{}", ability.max_targets)),
+            );
+            line(
+                &mut rows,
+                ctx.bundle
+                    .format("bullet.damage", &[&fix_value(ability.amount)]),
+            );
+            if let Some(status) = ability.status {
+                line(
+                    &mut rows,
+                    format!("[stat]{}", ctx.localized_name("status", status)),
+                );
+            }
+            if heal {
+                line(
+                    &mut rows,
+                    ctx.bundle.format(
+                        "bullet.healpercent",
+                        &[&auto_fixed(ability.heal_percent, 2)],
+                    ),
+                );
+                line(
+                    &mut rows,
+                    stat(
+                        "sametypehealmultiplier",
+                        format!(
+                            "{}{}",
+                            if ability.same_type_heal_mult < 1.0 {
+                                "[negstat]"
+                            } else {
+                                ""
+                            },
+                            auto_fixed(ability.same_type_heal_mult * 100.0, 2)
+                        ),
+                    ),
+                );
+            }
+        }
+        _ => {}
+    }
+    rows
+}
+
+/// `RepairFieldAbility`'s same-type multiplier and max-target rows.
+fn same_type_and_targets(
+    ctx: &StatCtx,
+    ability: &crate::content::registries::units::ability::AbilitySpec,
+    rows: &mut Vec<Cell>,
+) {
+    use crate::ui::stat_display::auto_fixed;
+    if (ability.same_type_heal_mult - 1.0).abs() > f32::EPSILON {
+        rows.push(values::text(ctx.bundle.format(
+            "ability.stat.sametypehealmultiplier",
+            &[&format!(
+                "{}{}",
+                if ability.same_type_heal_mult < 1.0 {
+                    "[negstat]"
+                } else {
+                    ""
+                },
+                auto_fixed(ability.same_type_heal_mult * 100.0, 2)
+            )],
+        )));
+        rows.push(Cell::Row);
+    }
+    if ability.max_targets > 0 {
+        rows.push(values::text(ctx.bundle.format(
+            "ability.stat.maxtargets",
+            &[&format!("{}", ability.max_targets)],
+        )));
+        rows.push(Cell::Row);
+    }
 }
 
 /// The bundle key half of the ability kind (`Ability.java` subclasses with an

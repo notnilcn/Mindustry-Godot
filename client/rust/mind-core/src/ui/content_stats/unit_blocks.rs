@@ -357,7 +357,10 @@ fn coolant_amount(def: &BlockDef) -> Option<f32> {
 /// `ConsumeCoolant`'s default filter (`ConsumeCoolant.java:9-13`):
 /// `liquid.coolant && (allowLiquid && !gas || allowGas && gas) &&
 /// temperature <= 0.5 && flammability < 0.1`.
-fn coolant_accepted(liquid: &crate::content::registries::liquids::Liquid, def: &BlockDef) -> bool {
+pub(super) fn coolant_accepted(
+    liquid: &crate::content::registries::liquids::Liquid,
+    def: &BlockDef,
+) -> bool {
     use crate::content::registries::blocks::Consume;
     let Some(spec) = def
         .consumes

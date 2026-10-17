@@ -965,8 +965,16 @@ fn consume_display(
     spec: &crate::content::registries::blocks::ConsumeSpec,
 ) {
     use crate::content::registries::blocks::Consume;
-    // Java filter consumers use `Stat.booster` when `.booster` is set; the port
-    // does not track the flag, so every consumer reports under `Stat.input`.
+    // `stats.add(booster ? Stat.booster : Stat.input, ...)` (`ConsumeItems.java:56-58`,
+    // `ConsumeLiquid.java:50-52`). Vanilla sets optional item/liquid consumers
+    // only through `.boost()` (which also sets `booster`; `Blocks.java` has no
+    // bare `.optional(...)`), so the port's `optional` flag stands in for
+    // `booster` (L05 T3: the force projector's phase fabric listed under Input).
+    let stat = if spec.optional {
+        Stat::Booster
+    } else {
+        Stat::Input
+    };
     match &spec.consume {
         Consume::Items(stacks) => {
             let cells = if stats.time_period < 0.0 {
@@ -974,16 +982,13 @@ fn consume_display(
             } else {
                 values::items_per_second(ctx, stats.time_period, stacks)
             };
-            stats.add(Stat::Input, cells);
+            stats.add(stat, cells);
         }
         Consume::Liquid { liquid, amount } => {
-            stats.add(
-                Stat::Input,
-                values::liquid(ctx, *liquid, amount * 60.0, true),
-            );
+            stats.add(stat, values::liquid(ctx, *liquid, amount * 60.0, true));
         }
         Consume::Liquids(stacks) => {
-            stats.add(Stat::Input, values::liquids(ctx, stacks, 1.0, true));
+            stats.add(stat, values::liquids(ctx, stacks, 1.0, true));
         }
         Consume::Power { usage, buffered } => {
             if *buffered > 0.0 {

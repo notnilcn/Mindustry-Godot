@@ -146,6 +146,9 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.ammo_multiplier = 4.0;
         def.make_fire = true;
         def.hit_size = 6.5;
+        // `statusDuration = 60f * 12f` (`Blocks.java:3523-3524`; `status =
+        // burning` resolves below).
+        def.status_duration = 720.0;
     });
 
     // `salvo` (BasicBulletType).
@@ -289,6 +292,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.ammo_multiplier = 4.0;
         def.make_fire = true;
         def.hit_size = 6.5;
+        // `statusDuration = 60f * 12f` (`Blocks.java:4031`).
+        def.status_duration = 720.0;
     });
     add("ripple_blast", BulletKind::Artillery, &|def| {
         def.speed = 2.0;
@@ -368,6 +373,8 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
         def.length = 173.0;
         def.building_damage_multiplier = 0.25;
         def.armor_multiplier = 4.0;
+        // `ammoMultiplier = 1f` (`Blocks.java:3615`): no "ammo/item" stat row.
+        def.ammo_multiplier = 1.0;
         def.pierce_cap = 4;
         def.collides_air = false;
         def.hit_size = 4.0;
@@ -994,8 +1001,11 @@ pub fn register_bullets(content: &mut ContentRegistry, names: &mut BTreeMap<Stri
 
     // Status/liquid references resolve against the plan-02 registries (the
     // closure above cannot borrow `content` immutably).
-    let status_refs: [(&str, &str); 11] = [
+    let status_refs: [(&str, &str); 13] = [
         ("salvo_pyratite", "burning"),
+        // `Blocks.java:3523` / `:4030` (L05 T3).
+        ("hail_pyratite", "burning"),
+        ("ripple_pyratite", "burning"),
         ("swarmer_blast", "blasted"),
         ("swarmer_pyratite", "burning"),
         ("ripple_blast", "blasted"),
