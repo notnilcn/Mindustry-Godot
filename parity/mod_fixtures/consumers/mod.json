@@ -1,0 +1,7 @@
+{
+  "name": "Consumers",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "Every `consumes` class the parser maps (J09 T1)."
+}

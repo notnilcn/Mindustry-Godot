@@ -867,6 +867,121 @@
       "tag": "SpaceLiquidBulletType"
     },
     {
+      "alias": "ConsumeCoolant",
+      "scope": "Consume",
+      "tag": "ConsumeCoolant"
+    },
+    {
+      "alias": "ConsumeItemCharged",
+      "scope": "Consume",
+      "tag": "ConsumeItemCharged"
+    },
+    {
+      "alias": "ConsumeItemDynamic",
+      "scope": "Consume",
+      "tag": "ConsumeItemDynamic"
+    },
+    {
+      "alias": "ConsumeItemEfficiency",
+      "scope": "Consume",
+      "tag": "ConsumeItemEfficiency"
+    },
+    {
+      "alias": "ConsumeItemExplode",
+      "scope": "Consume",
+      "tag": "ConsumeItemExplode"
+    },
+    {
+      "alias": "ConsumeItemExplosive",
+      "scope": "Consume",
+      "tag": "ConsumeItemExplosive"
+    },
+    {
+      "alias": "ConsumeItemFilter",
+      "scope": "Consume",
+      "tag": "ConsumeItemFilter"
+    },
+    {
+      "alias": "ConsumeItemFlammable",
+      "scope": "Consume",
+      "tag": "ConsumeItemFlammable"
+    },
+    {
+      "alias": "ConsumeItemList",
+      "scope": "Consume",
+      "tag": "ConsumeItemList"
+    },
+    {
+      "alias": "ConsumeItemRadioactive",
+      "scope": "Consume",
+      "tag": "ConsumeItemRadioactive"
+    },
+    {
+      "alias": "ConsumeItems",
+      "scope": "Consume",
+      "tag": "ConsumeItems"
+    },
+    {
+      "alias": "ConsumeLiquid",
+      "scope": "Consume",
+      "tag": "ConsumeLiquid"
+    },
+    {
+      "alias": "ConsumeLiquidBase",
+      "scope": "Consume",
+      "tag": "ConsumeLiquidBase"
+    },
+    {
+      "alias": "ConsumeLiquidFilter",
+      "scope": "Consume",
+      "tag": "ConsumeLiquidFilter"
+    },
+    {
+      "alias": "ConsumeLiquidFlammable",
+      "scope": "Consume",
+      "tag": "ConsumeLiquidFlammable"
+    },
+    {
+      "alias": "ConsumeLiquids",
+      "scope": "Consume",
+      "tag": "ConsumeLiquids"
+    },
+    {
+      "alias": "ConsumeLiquidsDynamic",
+      "scope": "Consume",
+      "tag": "ConsumeLiquidsDynamic"
+    },
+    {
+      "alias": "ConsumePayloadDynamic",
+      "scope": "Consume",
+      "tag": "ConsumePayloadDynamic"
+    },
+    {
+      "alias": "ConsumePayloadFilter",
+      "scope": "Consume",
+      "tag": "ConsumePayloadFilter"
+    },
+    {
+      "alias": "ConsumePayloads",
+      "scope": "Consume",
+      "tag": "ConsumePayloads"
+    },
+    {
+      "alias": "ConsumePower",
+      "scope": "Consume",
+      "tag": "ConsumePower"
+    },
+    {
+      "alias": "ConsumePowerCondition",
+      "scope": "Consume",
+      "tag": "ConsumePowerCondition"
+    },
+    {
+      "alias": "ConsumePowerDynamic",
+      "scope": "Consume",
+      "tag": "ConsumePowerDynamic"
+    },
+    {
       "alias": "DrawArc",
       "scope": "DrawPart",
       "tag": "DrawArc"

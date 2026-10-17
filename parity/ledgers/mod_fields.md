@@ -42,7 +42,7 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 | `placeablePlayer`, `placeableLiquid`, `placeableOn` | `BlockSpec` | implemented |
 | `buildVisibility`, `category` | `BlockSpec` | implemented |
 | `requirements` | `BlockSpec.requirements` | implemented |
-| `consumes` | `BlockDef.consumes` | implemented (patch merge; JSON parse TODO) |
+| `consumes` | `BlockDef.consumes` | implemented (JSON parse of the `Consume*` classes + patch merge; J09 T1) |
 | `drillMultipliers` | `BlockDef.drill_multipliers` | implemented (parse TODO; patch M3b) |
 | `attributes` | `BlockDef.attributes` (name-keyed) | implemented (patch M3b) |
 | `unit_plans*` | `BlockDef.unit_plans` | implemented (patch M3) |

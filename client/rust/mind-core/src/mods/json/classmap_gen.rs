@@ -13,6 +13,94 @@ use super::classmap::{ClassScope, ClassTag};
 /// Committed `(alias, scope, tag)` entries (simple names; FQCN aliases are
 /// produced by stripping the package in [`super::classmap::ClassTagMap::resolve`]).
 pub static ENTRIES: &[ClassTag] = &[
+    // ---- Consume (`consumes` arrays; `world/consumers/*`) ----
+    ClassTag::new("ConsumeCoolant", ClassScope::Consume, "ConsumeCoolant"),
+    ClassTag::new(
+        "ConsumeItemCharged",
+        ClassScope::Consume,
+        "ConsumeItemCharged",
+    ),
+    ClassTag::new(
+        "ConsumeItemDynamic",
+        ClassScope::Consume,
+        "ConsumeItemDynamic",
+    ),
+    ClassTag::new(
+        "ConsumeItemEfficiency",
+        ClassScope::Consume,
+        "ConsumeItemEfficiency",
+    ),
+    ClassTag::new(
+        "ConsumeItemExplode",
+        ClassScope::Consume,
+        "ConsumeItemExplode",
+    ),
+    ClassTag::new(
+        "ConsumeItemExplosive",
+        ClassScope::Consume,
+        "ConsumeItemExplosive",
+    ),
+    ClassTag::new(
+        "ConsumeItemFilter",
+        ClassScope::Consume,
+        "ConsumeItemFilter",
+    ),
+    ClassTag::new(
+        "ConsumeItemFlammable",
+        ClassScope::Consume,
+        "ConsumeItemFlammable",
+    ),
+    ClassTag::new("ConsumeItemList", ClassScope::Consume, "ConsumeItemList"),
+    ClassTag::new(
+        "ConsumeItemRadioactive",
+        ClassScope::Consume,
+        "ConsumeItemRadioactive",
+    ),
+    ClassTag::new("ConsumeItems", ClassScope::Consume, "ConsumeItems"),
+    ClassTag::new("ConsumeLiquid", ClassScope::Consume, "ConsumeLiquid"),
+    ClassTag::new(
+        "ConsumeLiquidBase",
+        ClassScope::Consume,
+        "ConsumeLiquidBase",
+    ),
+    ClassTag::new(
+        "ConsumeLiquidFilter",
+        ClassScope::Consume,
+        "ConsumeLiquidFilter",
+    ),
+    ClassTag::new(
+        "ConsumeLiquidFlammable",
+        ClassScope::Consume,
+        "ConsumeLiquidFlammable",
+    ),
+    ClassTag::new("ConsumeLiquids", ClassScope::Consume, "ConsumeLiquids"),
+    ClassTag::new(
+        "ConsumeLiquidsDynamic",
+        ClassScope::Consume,
+        "ConsumeLiquidsDynamic",
+    ),
+    ClassTag::new(
+        "ConsumePayloadDynamic",
+        ClassScope::Consume,
+        "ConsumePayloadDynamic",
+    ),
+    ClassTag::new(
+        "ConsumePayloadFilter",
+        ClassScope::Consume,
+        "ConsumePayloadFilter",
+    ),
+    ClassTag::new("ConsumePayloads", ClassScope::Consume, "ConsumePayloads"),
+    ClassTag::new("ConsumePower", ClassScope::Consume, "ConsumePower"),
+    ClassTag::new(
+        "ConsumePowerCondition",
+        ClassScope::Consume,
+        "ConsumePowerCondition",
+    ),
+    ClassTag::new(
+        "ConsumePowerDynamic",
+        ClassScope::Consume,
+        "ConsumePowerDynamic",
+    ),
     // ---- BulletType ----
     ClassTag::new("BulletType", ClassScope::BulletType, "BulletType"),
     ClassTag::new("BasicBulletType", ClassScope::BulletType, "BasicBulletType"),

@@ -45,6 +45,8 @@ pub enum ClassScope {
     Planet,
     /// `mindustry.type.TeamEntry`.
     Team,
+    /// `mindustry.world.consumers.Consume` (the `consumes` array's base class).
+    Consume,
 }
 
 impl ClassScope {
@@ -66,6 +68,7 @@ impl ClassScope {
             ClassScope::Sector => "Sector",
             ClassScope::Planet => "Planet",
             ClassScope::Team => "Team",
+            ClassScope::Consume => "Consume",
         }
     }
 }
