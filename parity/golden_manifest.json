@@ -315,7 +315,7 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/units/units_legs_ik.json",
       "owner_plan": "11",
-      "sha256": "6fd0ccdc64b79e1a9f526e0398943864d2e0c2f626a7a041f8b8559435e4884d"
+      "sha256": "ededc7bf66029ee0c076f78171800fcfb59d88851c1c97d4311c94cf869ca249"
     },
     {
       "id": "harness_units_units_spawn_group",
@@ -392,7 +392,7 @@
       "kind": "oracle",
       "path": "parity/mod_classmap.json",
       "owner_plan": "20",
-      "sha256": "fecceb7bf966e76ed3e4723b025d6203734626aed4c21caeab3cca68c109dde9",
+      "sha256": "fe6eb283ffa77863a0de1ffadc6b7555927ab056e24921203bedd2e041026f0b",
       "regen": "mind-tools mods classmap"
     },
     {

@@ -33,7 +33,7 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 | JSON field | Rust target | Status |
 |---|---|---|
 | `name` / `description` | bundle + `UnlockFields` | implemented |
-| `type` | `BlockKind` (ClassMap, M2) | partial aliases |
+| `type` | `BlockKind` (ClassMap, M2) | implemented (every ported kind + the Java base classes -> behaviour kinds; interface classes fail with a clear message; J09 T1) |
 | `size`, `health`, `armor` | `BlockSpec` | implemented |
 | `itemCapacity`, `liquidCapacity` | `BlockSpec` | implemented |
 | `solid`, `floating`, `update`, `destructible` | `BlockSpec` | implemented |
@@ -42,7 +42,7 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 | `placeablePlayer`, `placeableLiquid`, `placeableOn` | `BlockSpec` | implemented |
 | `buildVisibility`, `category` | `BlockSpec` | implemented |
 | `requirements` | `BlockSpec.requirements` | implemented |
-| `consumes` | `BlockDef.consumes` | implemented (patch merge; JSON parse TODO) |
+| `consumes` | `BlockDef.consumes` | implemented (JSON parse of the `Consume*` classes + patch merge; J09 T1) |
 | `drillMultipliers` | `BlockDef.drill_multipliers` | implemented (parse TODO; patch M3b) |
 | `attributes` | `BlockDef.attributes` (name-keyed) | implemented (patch M3b) |
 | `unit_plans*` | `BlockDef.unit_plans` | implemented (patch M3) |
@@ -55,7 +55,7 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 |---|---|---|
 | `liquid` | `name`, `description`, `type` (`CellLiquid`), `color`, `gas`, `gasColor`, `barColor`, `lightColor`, `temperature`, `heatCapacity`, `viscosity`, `explosiveness`, `flammability`, `blockReactive`, `coolant`, `moveThroughBlocks`, `incinerable`, `capPuddles`, `boilPoint`, `particleSpacing`, `hidden`, `effect`, `particleEffect`, `vaporEffect`, `canStayOn` | `effect` resolves status names |
 | `status` | `name`, `description`, `damageMultiplier`, `healthMultiplier`, `speedMultiplier`, `reloadMultiplier`, `buildSpeedMultiplier`, `dragMultiplier`, `transitionDamage`, `disarm`, `damage`, `intervalDamageTime`, `intervalDamage`, `intervalDamagePierce`, `effectChance`, `parentizeEffect`, `permanent`, `reactive`, `dynamic`, `show`, `color`, `effect`, `applyEffect`, `applyExtend`, `applyColor`, `parentizeApplyEffect`, `affinities`, `opposites`, `outline` | opposites/affinities via `TransitionSpec`; effect strings via `EffectId` |
-| `unit` | `name`, `description`, `type` (entity keyword), `template` (ClassMap `UnitType`), `controller`, `aiController`, `health`, `speed`, `armor`, `hitSize`, `drag`, `accel`, `rotateSpeed`, `range`, `mineRange`, `buildRange`, `buildSpeed`, `mineSpeed`, `itemCapacity`, `mineTier`, `flying`, `targetAir`, `targetGround`, `useUnitCap`, `playerControllable`, `logicControllable`, `hidden`, `isEnemy`, `immunities`, `weapons` | weapons → inline `bullet` objects; requirements/reconstructor plans TODO (M3) |
+| `unit` | `name`, `description`, `type` (entity keyword), `template` (ClassMap `UnitType`), `controller`, `aiController` (AIs incl. `GroundAI`/`FlyingAI`/`BoostAI`/`MinerAI`/`RepairAI`/`PrebuildAI`/`LogicAI` -> the default unit AI; J09 T1), `health`, `speed`, `armor`, `hitSize`, `drag`, `accel`, `rotateSpeed`, `range`, `mineRange`, `buildRange`, `buildSpeed`, `mineSpeed`, `itemCapacity`, `mineTier`, `flying`, `targetAir`, `targetGround`, `useUnitCap`, `playerControllable`, `logicControllable`, `hidden`, `isEnemy`, `immunities`, `weapons` | weapons → inline `bullet` objects; requirements/reconstructor plans TODO (M3) |
 | `weather` | `name`, `description`, `type`, `duration`, `opacityMultiplier`, `attrs`, `sound`, `soundVol`, `soundVolMin`, `soundVolOscMag`, `soundVolOscScl`, `hidden`, `status`, `statusDuration`, `statusAir`, `statusGround`, plus particle/rain `color`/speed/density fields | `attrs` maps `Attribute` names |
 | `sector` | `name`, `description`, `planet`, `sector`, `captureWave`, `difficulty`, `startWaveTimeMultiplier`, `addStartingItems`, `noLighting`, `isLastSector`, `requireUnlock`, `showHidden`, `attackAfterWaves`, `outline`, `outlineRadius` | `planet` required; rules override TODO (plan 12) |
 | `planet` | `name`, `description`, `parent`, `radius`, `sectorSize`, `mesh`, `cloudMesh`, `bloom`, `accessible`, `visible`, `hasAtmosphere`, `updateLighting`, `lightColor`, `atmosphereColor`, `iconColor`, `generator`, `startSector`, launch flags, `drawOrbit` | `sectorSize` builds the grid |

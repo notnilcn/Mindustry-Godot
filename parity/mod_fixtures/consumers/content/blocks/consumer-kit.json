@@ -1,0 +1,15 @@
+{
+  "name": "Consumer Kit",
+  "type": "GenericCrafter",
+  "size": 2,
+  "health": 320,
+  "consumes": [
+    {"type": "ConsumeItems", "items": [{"item": "copper", "amount": 10}]},
+    {"type": "ConsumeLiquid", "liquid": "water", "amount": 0.1},
+    {"type": "ConsumeLiquids", "liquids": [{"liquid": "water", "amount": 0.05}]},
+    {"type": "ConsumePower", "usage": 1.5, "capacity": 1000, "buffered": true},
+    {"type": "ConsumeCoolant"},
+    {"type": "ConsumeItemDynamic"},
+    {"type": "ConsumeItemExplode"}
+  ]
+}

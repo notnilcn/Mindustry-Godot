@@ -1,0 +1,7 @@
+{
+  "name": "Base Generator",
+  "type": "PowerGenerator",
+  "size": 2,
+  "health": 300,
+  "powerProduction": 3
+}

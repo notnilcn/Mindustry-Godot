@@ -115,7 +115,9 @@ pub fn run_scenario(name: &str) -> Result<ScenarioOutput> {
 }
 
 /// `units_legs_ik`: a `corvus` crosses stepped terrain; every leg knee is placed
-/// by `InverseKinematics` within `legMinLength..legMaxLength` and never NaNs
+/// by `LegsComp`'s IK — `solve(legLength/2, legLength/2, foot - hip, side)`
+/// (`LegsComp.java:211-213`), so both segments measure `legLength/2` and the
+/// foot stays inside `legLength * legMaxLength` of the hip — and never NaNs
 /// (plan 11 §7b).
 fn legs_ik() -> Result<ScenarioOutput> {
     use mind_core::entities::comp::unit::LegsComp;
@@ -150,15 +152,14 @@ fn legs_ik() -> Result<ScenarioOutput> {
     } else {
         def.hit_size
     };
-    let max_len = if def.leg_max_length > 0.0 {
+    // `LegsComp.update` calls `solve(legLength/2, legLength/2, foot - hip)`
+    // (`LegsComp.java:211-213`) with the per-leg `legLengthScl` scale
+    // (`:207`), so both segments of a leg measure the same length and the foot
+    // stays inside `legLength * legMaxLength` of the hip.
+    let reach = if def.leg_max_length > 0.0 {
         base_len * def.leg_max_length
     } else {
         base_len
-    };
-    let min_len = if def.leg_min_length > 0.0 {
-        base_len * def.leg_min_length
-    } else {
-        max_len * 0.5
     };
     let mut checksummer = Checksummer::new();
     let mut pass = true;
@@ -170,7 +171,9 @@ fn legs_ik() -> Result<ScenarioOutput> {
             && leg.joint_y.is_finite()
             && leg.foot_x.is_finite()
             && leg.foot_y.is_finite();
-        pass &= finite && a <= max_len + 1.0 && b <= max_len + 1.0 && b >= min_len - 1.0;
+        let hip_distance =
+            ((leg.foot_x - leg.base_x).powi(2) + (leg.foot_y - leg.base_y).powi(2)).sqrt();
+        pass &= finite && (a - b).abs() <= 0.05 && b <= reach + 1.0 && hip_distance <= reach + 1.0;
         checksummer.part(&leg.joint_x);
         checksummer.part(&leg.joint_y);
         checksummer.part(&leg.foot_x);

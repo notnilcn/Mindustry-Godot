@@ -127,6 +127,10 @@ pub struct ModListEntry {
     pub source: &'static str,
     /// Short description (dialog subtitle).
     pub short_description: String,
+    /// Port-only state detail (`UnsupportedReason::message`; J09 T5). The
+    /// `getStateText` row shows it where upstream has no such state.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Discovery/load report (`mind-headless mods list`).
@@ -719,6 +723,12 @@ impl LoadedMod {
             hidden: self.meta.hidden,
             java: self.java,
             has_scripts: self.has_scripts,
+            // `ModsDialog.getStateText` position (J09 T5): the port-only
+            // `ScriptsUnsupported` reason reaches the row.
+            reason: self
+                .unsupported_reason
+                .as_ref()
+                .map(|reason| reason.message().to_owned()),
             source: match self.source {
                 ModSource::LocalFolder => "folder",
                 ModSource::LocalZip => "zip",

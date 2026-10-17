@@ -22,7 +22,9 @@ use serde_json::{Map, Value};
 use crate::content::UnlockStore;
 use crate::content::bundle::MemoryBundle;
 use crate::content::parser_hooks::ContentParseError;
-use crate::content::registries::blocks::{StackSpec, stack};
+use crate::content::registries::blocks::{
+    ConsumeDef, LiquidStackSpec, StackSpec, liquid_stack, stack,
+};
 use crate::content::registries::bullets::{BulletDef, BulletKind, BulletSpec};
 use crate::content::registries::fx_meta::effect_by_name;
 use crate::content::registries::planets::{CloudMeshKind, GeneratorKind, MeshKind, PlanetDef};
@@ -381,8 +383,8 @@ impl<'a> ContentJsonParser<'a> {
                 spec.build_visibility = Some(BuildVisibility::Shown);
             }
         }
-        if object.contains_key("consumes") {
-            self.warn(file, "`consumes` merging lands in M3; ignored for now");
+        if let Some(consumes) = object.get("consumes") {
+            spec.consumes = self.parse_consumes(registry, file, consumes)?;
         }
 
         let def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
@@ -924,7 +926,9 @@ impl<'a> ContentJsonParser<'a> {
                     self.warn(file, "ability entries must be objects; skipped");
                     continue;
                 };
-                abilities.push(self.parse_ability(file, registry, map)?);
+                if let Some(ability) = self.parse_ability(file, registry, map)? {
+                    abilities.push(ability);
+                }
             }
             spec.abilities = abilities;
         }
@@ -971,22 +975,50 @@ impl<'a> ContentJsonParser<'a> {
 
     /// Parses one `abilities` entry (`Ability{}`) into an [`AbilitySpec`]
     /// (plan 20 M2b; `PatcherTests.unitAbilities{,Array}`).
+    /// `ContentParser` ability entry. `None` marks a recognized-but-unsupported
+    /// class (`ArmorPlateAbility`, `EmptyDataAbility`), which warns and is left
+    /// out of the unit instead of failing the content.
     pub fn parse_ability(
         &mut self,
         file: &str,
         registry: &ContentRegistry,
         object: &Map<String, Value>,
-    ) -> Result<AbilitySpec, ContentParseError> {
+    ) -> Result<Option<AbilitySpec>, ContentParseError> {
         let class = object
             .get("type")
             .and_then(Value::as_str)
             .ok_or_else(|| ContentParseError::new(format!("{file}: ability is missing `type`")))?;
-        let kind = self
-            .classmap
-            .resolve(class, ClassScope::Ability)
-            .and_then(resolve_ability_kind)
-            .ok_or_else(|| ContentParseError::new(format!("{file}: unknown ability `{class}`")))?;
+        if let Some(tag) = self.classmap.resolve(class, ClassScope::Ability) {
+            if let Some(kind) = resolve_ability_kind(tag) {
+                return self
+                    .parse_ability_fields(file, registry, object, kind)
+                    .map(Some);
+            }
+            // `ArmorPlateAbility` (armor plates, `ArmorPlateAbility.java`) and
+            // `EmptyDataAbility` (a data holder base) have no port runtime yet:
+            // recognized aliases warn instead of failing the unit.
+            if matches!(tag, "ArmorPlateAbility" | "EmptyDataAbility") {
+                self.warn(
+                    file,
+                    format!("ability `{tag}` is unsupported in the port; ignored"),
+                );
+                return Ok(None);
+            }
+        }
+        Err(ContentParseError::new(format!(
+            "{file}: unknown ability `{class}`"
+        )))
+    }
+
+    fn parse_ability_fields(
+        &mut self,
+        _file: &str,
+        registry: &ContentRegistry,
+        object: &Map<String, Value>,
+        kind: AbilityKind,
+    ) -> Result<AbilitySpec, ContentParseError> {
         let mut spec = AbilitySpec::for_kind(kind);
+
         for (field, target) in [
             ("amount", &mut spec.amount),
             ("max", &mut spec.max),
@@ -1375,8 +1407,171 @@ impl<'a> ContentJsonParser<'a> {
 
     // ---- shared helpers ----
 
+    /// `ContentParser` `consumes` array (`mindustry/world/consumers/*`): each
+    /// entry's `type` resolves through the `ClassMap` against the `Consume` base
+    /// class and its fields are read with Java's defaults (`Consume.java:16`
+    /// `update = true`; `ConsumeCoolant.java:6` `allowLiquid = true`,
+    /// `allowGas = false`). Classes whose runtime half the port does not have
+    /// are ignored with an explicit warning — never a silent drop.
+    fn parse_consumes(
+        &mut self,
+        registry: &ContentRegistry,
+        file: &str,
+        value: &Value,
+    ) -> Result<Vec<ConsumeDef>, ContentParseError> {
+        let Value::Array(entries) = value else {
+            return Err(ContentParseError::new(format!(
+                "{file}: `consumes` must be an array"
+            )));
+        };
+        let mut out = Vec::new();
+        for entry in entries {
+            let Value::Object(map) = entry else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `consumes` entries must be objects"
+                )));
+            };
+            let Some(class) = map.get("type").and_then(Value::as_str) else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `consumes` entry missing `type`"
+                )));
+            };
+            let tag = self
+                .classmap
+                .resolve(class, ClassScope::Consume)
+                .unwrap_or(class);
+            let update = field_bool(map, "update").unwrap_or(true);
+            let optional = field_bool(map, "optional").unwrap_or(false);
+            let ignore = field_bool(map, "ignore").unwrap_or(false);
+            match tag {
+                // `ConsumeItems` (`ConsumeItems.java:11`, `ItemStack[] items`).
+                "ConsumeItems" => {
+                    let stacks = match map.get("items") {
+                        Some(items) => self.parse_stacks(registry, file, items)?,
+                        None => Vec::new(),
+                    };
+                    out.push(ConsumeDef::Items {
+                        stacks,
+                        optional,
+                        ignore,
+                        update,
+                    });
+                }
+                // `ConsumeLiquid` (`ConsumeLiquid.java:14` `final Liquid liquid`,
+                // `ConsumeLiquidBase.java:8` `float amount`).
+                "ConsumeLiquid" => {
+                    let Some(raw) = map.get("liquid").and_then(Value::as_str) else {
+                        return Err(ContentParseError::new(format!(
+                            "{file}: ConsumeLiquid requires `liquid`"
+                        )));
+                    };
+                    let liquid = resolve_name(registry, raw).ok_or_else(|| {
+                        ContentParseError::new(format!("{file}: unknown liquid `{raw}`"))
+                    })?;
+                    out.push(ConsumeDef::Liquid {
+                        liquid: Box::leak(liquid.into_boxed_str()),
+                        amount: field_f32(map, "amount").unwrap_or(0.0),
+                        optional,
+                        update,
+                    });
+                }
+                // `ConsumeLiquids` (`ConsumeLiquids.java:12` `LiquidStack[]`).
+                "ConsumeLiquids" => {
+                    let stacks = match map.get("liquids") {
+                        Some(liquids) => self.parse_liquid_stacks(registry, file, liquids)?,
+                        None => Vec::new(),
+                    };
+                    out.push(ConsumeDef::Liquids {
+                        stacks,
+                        optional,
+                        update,
+                    });
+                }
+                // `ConsumePower` (`ConsumePower.java:10-14`: `usage`, `capacity`,
+                // `buffered`); `consumePowerBuffered` sets `buffered`.
+                "ConsumePower" => {
+                    let buffered = field_bool(map, "buffered").unwrap_or(false);
+                    out.push(ConsumeDef::Power {
+                        usage: field_f32(map, "usage").unwrap_or(0.0),
+                        buffered: if buffered {
+                            field_f32(map, "capacity").unwrap_or(0.0)
+                        } else {
+                            0.0
+                        },
+                        update,
+                    });
+                }
+                // `ConsumeCoolant` (`ConsumeCoolant.java:4-6`).
+                "ConsumeCoolant" => {
+                    out.push(ConsumeDef::Coolant {
+                        amount: field_f32(map, "amount").unwrap_or(1.0),
+                        allow_liquid: field_bool(map, "allowLiquid").unwrap_or(true),
+                        allow_gas: field_bool(map, "allowGas").unwrap_or(false),
+                        optional,
+                        update,
+                    });
+                }
+                // `ConsumeItemExplode` (`ConsumeItemExplode.java:17-19`: damage,
+                // threshold, baseChance) takes an explosive-item *filter*; the
+                // explode runtime lands with J04 T2, so the entry is recognized
+                // and warned about instead of being dropped silently.
+                "ConsumeItemExplode" => {
+                    self.warn(
+                        file,
+                        "consumer `ConsumeItemExplode` recognized; its runtime lands with J04 T2",
+                    );
+                }
+                // Filter/dynamic/payload/power-condition consumers: recognized
+                // aliases without a port runtime half yet.
+                other => {
+                    self.warn(
+                        file,
+                        format!("consumer `{other}` is unsupported in the port; ignored"),
+                    );
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// `ConsumeLiquids.liquids` (`LiquidStack[]`): `{liquid, amount}` entries.
+    fn parse_liquid_stacks(
+        &mut self,
+        registry: &ContentRegistry,
+        file: &str,
+        value: &Value,
+    ) -> Result<Vec<LiquidStackSpec>, ContentParseError> {
+        let entries: Vec<&Value> = match value {
+            Value::Array(items) => items.iter().collect(),
+            Value::Object(map) => map.values().collect(),
+            _ => {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `liquids` must be an array or object"
+                )));
+            }
+        };
+        let mut out = Vec::new();
+        for entry in entries {
+            let Value::Object(map) = entry else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: invalid liquid entry"
+                )));
+            };
+            let raw = map.get("liquid").and_then(Value::as_str).ok_or_else(|| {
+                ContentParseError::new(format!("{file}: liquid stack missing `liquid`"))
+            })?;
+            let resolved = resolve_name(registry, raw)
+                .ok_or_else(|| ContentParseError::new(format!("{file}: unknown liquid `{raw}`")))?;
+            out.push(liquid_stack(
+                Box::leak(resolved.into_boxed_str()),
+                field_f32(map, "amount").unwrap_or(0.0),
+            ));
+        }
+        Ok(out)
+    }
+
     fn parse_stacks(
-        &self,
+        &mut self,
         registry: &ContentRegistry,
         file: &str,
         value: &Value,
@@ -1392,6 +1587,17 @@ impl<'a> ContentJsonParser<'a> {
             }
         };
         for entry in entries {
+            // `ItemStack`/`LiquidStack`/… aliases are recognized on stack
+            // entries (`data` scope); an unknown one is warned about.
+            if let Value::Object(map) = entry
+                && let Some(class) = map.get("type").and_then(Value::as_str)
+                && self.classmap.resolve(class, ClassScope::Data).is_none()
+            {
+                self.warn(
+                    file,
+                    format!("stack `type` `{class}` is unknown; entry parsed by fields"),
+                );
+            }
             let (raw_name, amount) = match entry {
                 Value::String(text) => parse_stack(text).ok_or_else(|| {
                     ContentParseError::new(format!("{file}: invalid stack `{text}`"))
@@ -1426,6 +1632,15 @@ impl<'a> ContentJsonParser<'a> {
             && let Some(kind) = resolve_block_kind_tag(tag)
         {
             return Ok(kind);
+        }
+        if let Some(tag) = self.classmap.resolve(class, ClassScope::Block)
+            && !resolve_block_kind_tag(tag).is_some()
+        {
+            // `ControlBlock`/`UnitTetherBlock` are interfaces upstream; naming
+            // them as a block `type` fails there too.
+            return Err(ContentParseError::new(format!(
+                "{file}: `{class}` is not a concrete block class"
+            )));
         }
         if !self.allow_class_resolution && !self.classmap.is_known(class) {
             self.warn(
@@ -1468,6 +1683,12 @@ impl<'a> ContentJsonParser<'a> {
             "FlyingFollowAI" => Some(AiControllerKind::FlyingFollow),
             "HugAI" => Some(AiControllerKind::Hug),
             "SuicideAI" => Some(AiControllerKind::Suicide),
+            // The standard AIs (`GroundAI`/`FlyingAI`/`BoostAI`/`MinerAI`/
+            // `RepairAI`/`PrebuildAI`/`LogicAI`) are the port's default unit AI
+            // (`AiControllerKind::Default` selects ground/flying by `flying`,
+            // `registries/units/mod.rs:317-325`).
+            "GroundAI" | "FlyingAI" | "BoostAI" | "MinerAI" | "RepairAI" | "PrebuildAI"
+            | "LogicAI" => Some(AiControllerKind::Default),
             _ => None,
         }
     }
@@ -1574,8 +1795,8 @@ pub fn resolve_bullet_kind(tag: &str) -> Option<BulletKind> {
         "PointLaserBulletType" => BulletKind::PointLaser,
         "ContinuousFlameBulletType" => BulletKind::ContinuousFlame,
         "InterceptorBulletType" => BulletKind::Interceptor,
-        "MassDriverBolt" => BulletKind::MassDriver,
         "EmptyBulletType" => BulletKind::Empty,
+        "MassDriverBolt" => BulletKind::MassDriver,
         _ => return None,
     })
 }
@@ -2095,6 +2316,174 @@ mod tests {
         assert!(result.is_ok(), "{result:?}");
         let sector = reg.sector_by_name("mods-test-landing").expect("sector");
         assert!((sector.difficulty - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn block_consumes_classes_parse_with_java_defaults() {
+        // J09 T1: the `consumes` array maps the `Consume*` classes with Java's
+        // field defaults; unsupported classes are warned about, never dropped
+        // silently (`Consume.java:16` update = true, `ConsumeCoolant.java:4-6`).
+        let mut reg = registry();
+        let (parser, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "test-kit",
+            r#"{"name":"Test Kit","size":2,"consumes":[
+                {"type":"ConsumeItems","items":[{"item":"copper","amount":10}]},
+                {"type":"ConsumeLiquid","liquid":"water","amount":0.1},
+                {"type":"ConsumeLiquids","liquids":[{"liquid":"water","amount":0.05}]},
+                {"type":"ConsumePower","usage":1.5,"capacity":1000,"buffered":true},
+                {"type":"ConsumeCoolant"},
+                {"type":"ConsumeItemDynamic"},
+                {"type":"ConsumeItemExplode"}]}"#,
+        );
+        use crate::content::registries::blocks::Consume;
+
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-test-kit").expect("block");
+        assert_eq!(
+            block.consumes.len(),
+            5,
+            "unsupported classes warn; the mapped five parse"
+        );
+        let copper = reg.item_by_name("copper").expect("copper").id;
+        let water = reg.liquid_by_name("water").expect("water").id;
+        let Consume::Items(items) = &block.consumes[0].consume else {
+            panic!("ConsumeItems: {:?}", block.consumes[0]);
+        };
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item, copper);
+        assert_eq!(items[0].amount, 10);
+        assert!(!block.consumes[0].optional && block.consumes[0].update);
+        let Consume::Liquid { liquid, amount } = &block.consumes[1].consume else {
+            panic!("ConsumeLiquid: {:?}", block.consumes[1]);
+        };
+        assert_eq!(*liquid, water);
+        assert_eq!(*amount, 0.1);
+        let Consume::Liquids(liquids) = &block.consumes[2].consume else {
+            panic!("ConsumeLiquids: {:?}", block.consumes[2]);
+        };
+        assert_eq!(liquids.len(), 1);
+        assert_eq!(liquids[0].liquid, water);
+        assert_eq!(liquids[0].amount, 0.05);
+        let Consume::Power { usage, buffered } = &block.consumes[3].consume else {
+            panic!("ConsumePower: {:?}", block.consumes[3]);
+        };
+        assert_eq!(*usage, 1.5);
+        assert_eq!(*buffered, 1000.0, "`capacity` when `buffered`");
+        let Consume::Coolant {
+            amount,
+            allow_liquid,
+            allow_gas,
+        } = &block.consumes[4].consume
+        else {
+            panic!("ConsumeCoolant: {:?}", block.consumes[4]);
+        };
+        assert_eq!(*amount, 1.0, "Java default `ConsumeCoolant()`");
+        assert!(*allow_liquid && !*allow_gas);
+        assert!(
+            parser
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("ConsumeItemDynamic")),
+            "unsupported consumer warned: {:?}",
+            parser.warnings
+        );
+        assert!(
+            parser
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("ConsumeItemExplode")),
+            "the explode consumer names its J04 T2 dependency: {:?}",
+            parser.warnings
+        );
+    }
+
+    #[test]
+    fn classmap_scopes_resolve_the_t1_aliases() {
+        // J09 T1: the scope tables from the plan resolve through the ClassMap
+        // (bullets, AIs, block base classes, abilities, data).
+        let map = classmap::ClassTagMap::committed();
+        for (alias, scope, tag) in [
+            ("EmptyBulletType", ClassScope::BulletType, "EmptyBulletType"),
+            (
+                "ContinuousFlameBulletType",
+                ClassScope::BulletType,
+                "ContinuousFlameBulletType",
+            ),
+            (
+                "PointLaserBulletType",
+                ClassScope::BulletType,
+                "PointLaserBulletType",
+            ),
+            ("GroundAI", ClassScope::UnitController, "GroundAI"),
+            ("MinerAI", ClassScope::UnitController, "MinerAI"),
+            ("PowerGenerator", ClassScope::Block, "ConsumeGenerator"),
+            ("Turret", ClassScope::Block, "ItemTurret"),
+            ("ControlBlock", ClassScope::Block, "ControlBlock"),
+            (
+                "ArmorPlateAbility",
+                ClassScope::Ability,
+                "ArmorPlateAbility",
+            ),
+            ("DrawMulti", ClassScope::Drawer, "DrawMulti"),
+            ("RegionPart", ClassScope::Part, "RegionPart"),
+            ("AssemblerUnitPlan", ClassScope::Data, "AssemblerUnitPlan"),
+        ] {
+            assert_eq!(
+                map.resolve(alias, scope),
+                Some(tag),
+                "{alias} ({})",
+                scope.name()
+            );
+        }
+    }
+
+    #[test]
+    fn block_base_classes_and_unsupported_abilities() {
+        // The Java block base classes map to the port's behaviour kinds; the
+        // interface-only classes fail with a clear message.
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "test-generator",
+            r#"{"name":"Test Generator","type":"PowerGenerator","size":2}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-test-generator").expect("block");
+        assert_eq!(block.kind, BlockKind::ConsumeGenerator);
+
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "test-control",
+            r#"{"name":"Test Control","type":"ControlBlock","size":2}"#,
+        );
+        let error = result.expect_err("interface block class");
+        assert!(
+            error.message.contains("not a concrete block class"),
+            "{error}"
+        );
+
+        // An unsupported ability warns and is left out of the unit.
+        let (parser, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "test-armor-mech",
+            r#"{"name":"Test Armor Mech","type":"mech","abilities":[{"type":"ArmorPlateAbility","health":100},{"type":"RegenAbility","amount":1}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-test-armor-mech").expect("unit");
+        assert_eq!(unit.abilities.len(), 1, "the supported ability parses");
+        assert!(
+            parser
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("ArmorPlateAbility")),
+            "{:?}",
+            parser.warnings
+        );
     }
 
     #[test]
