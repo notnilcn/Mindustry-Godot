@@ -102,7 +102,13 @@ func _build() -> void:
 	# code-instantiated: the search row mirrors Java's label + field + clear.
 	var search_row := HBoxContainer.new()
 	search_row.add_theme_constant_override("separation", 10)
-	search_row.add_child(MindWidgets.label(_t("@search")))
+	# `t.table(s -> ...)`: the search table is centred in `t` and its cells
+	# centre vertically (Arc cell default `Align.center`).
+	search_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	search_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	var search_label := MindWidgets.label(_t("@search"))
+	search_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	search_row.add_child(search_label)
 	_search_field = MindWidgets.field("")
 	_search_field.text = _search
 	# `s.field(...)` has no growX: Arc `TextField` prefWidth is 150.
@@ -111,6 +117,7 @@ func _build() -> void:
 	search_row.add_child(_search_field)
 	var clear := MindWidgets.icon_button("cancel", "", "emptyi")
 	clear.custom_minimum_size = Vector2(35.0, 35.0)
+	clear.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	clear.pressed.connect(func() -> void:
 		_search = ""
 		if _search_field != null:
@@ -153,13 +160,16 @@ func _build() -> void:
 ## One pane (`table.image().color(...)` + `pane(...)` + `@addall`).
 func _pane(selected: bool) -> Control:
 	var box := VBoxContainer.new()
-	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `.fill().expandY().uniform()` (`BannedContentDialog.java:105,128`): both
+	# panes take the same width (the wider pref: `50 * cols` + the scroll bar).
+	box.size_flags_horizontal = Control.SIZE_FILL
 	box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	box.custom_minimum_size.x = 300.0
 	var color := COLOR_BANNED if selected else MindStyles.ACCENT
 	var prefix := "banned" if selected else "unbanned"
 	var title := MindWidgets.label(_t("@%s%s" % [prefix, "blocks" if _kind == "block" else "units"]))
 	title.add_theme_color_override("font_color", color)
+	# `table.add(...).padBottom(-1).top()`: the title centres over the rule.
+	title.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	box.add_child(title)
 	# code-instantiated: the 3px rule under the pane header (Java `image()` row).
 	var line := ColorRect.new()
@@ -176,8 +186,15 @@ func _pane(selected: bool) -> Control:
 	# code-instantiated: the icon grid is data-driven (content rows).
 	var grid := GridContainer.new()
 	grid.columns = _columns()
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(grid)
+	# `table.pane(table2 -> ...)`: Arc sizes the pane's table to the scroll area
+	# when its content is smaller, and a table centres its cells, so `<empty>`
+	# (or a short list) sits in the middle of the pane.
+	# code-instantiated: the centring wrapper of the data-driven grid.
+	var center := CenterContainer.new()
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.add_child(center)
+	center.add_child(grid)
 	var add_all := MindWidgets.icon_button("add", _t("@addall"))
 	add_all.custom_minimum_size.y = 48.0
 	add_all.pressed.connect(func() -> void: _add_all(selected))
@@ -222,6 +239,26 @@ func _rebuild() -> void:
 	# `available.containsAll(filteredContent)` — enabled exactly when a filtered
 	# row is banned.
 	_add_all_deselected.disabled = banned_rows.is_empty()
+	_uniform_panes.call_deferred()
+
+
+## Arc `uniform()` on both pane cells: each takes the larger pref width (the
+## scrolling pane adds its bar), so the banned pane is never narrower.
+func _uniform_panes() -> void:
+	if _selected_grid == null or not is_instance_valid(_selected_grid):
+		return
+	var boxes: Array[Control] = []
+	for grid in [_selected_grid, _deselected_grid]:
+		var box := (grid as Control).get_parent().get_parent().get_parent() as Control
+		if box == null:
+			return
+		box.custom_minimum_size.x = 0.0
+		boxes.append(box)
+	var width := 0.0
+	for box in boxes:
+		width = maxf(width, box.get_combined_minimum_size().x)
+	for box in boxes:
+		box.custom_minimum_size.x = width
 
 
 ## One pane's buttons (`rebuildTable(table, isSelected)`; a click always moves
