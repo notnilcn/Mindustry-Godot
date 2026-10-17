@@ -7097,3 +7097,152 @@ fn placed_duo_idle_head_rotation_is_up() {
         "idle head drawrot is 0 (up): {drawrot}"
     );
 }
+
+/// L06 T1: `UnitAssemblerBuild.wasOccupied = checkSolid(getUnitSpawn(), false)`
+/// (`UnitAssembler.java:515,679-685`) with the vanilla `areaSize = 13`
+/// (`Blocks.java:6566`): a solid tile or a grounded unit on the spawn point
+/// occupies a ground output; a flyer or a `spawnedByCore` unit does not.
+#[test]
+fn assembler_output_area_occupancy() {
+    use crate::world::blocks::units::UnitAssembler;
+    let mut sim = live_sim(64);
+    let assembler = place(&mut sim, 20, 20, "tank-assembler", 1);
+    sim.tick().expect("tick");
+    let occupied = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<UnitAssembler>(assembler)
+            .expect("assembler")
+            .was_occupied
+    };
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<UnitAssembler>(assembler)
+            .map(|a| a.area_size),
+        Some(13)
+    );
+    assert!(!occupied(&sim), "free output area");
+    // Spawn point: rotation 0, `x + tilesize * (13 + 5) / 2` = tile (29, 20).
+    let (sx, sy) = (29.0 * 8.0, 20.0 * 8.0);
+    let flare = sim.spawn_live_unit("flare", 1, sx, sy, 0.0).expect("flare");
+    sim.tick().expect("tick");
+    assert!(!occupied(&sim), "a flyer does not block a ground output");
+    sim.ecs.0.despawn(flare);
+    let dagger = sim
+        .spawn_live_unit("dagger", 2, sx, sy, 0.0)
+        .expect("dagger");
+    if let Some(mut slot) = sim
+        .ecs
+        .0
+        .get_mut::<crate::ai::controller::ControllerSlot>(dagger)
+    {
+        slot.kind = crate::ai::controller::AiKind::NoAi;
+    }
+    sim.tick().expect("tick");
+    assert!(occupied(&sim), "a grounded unit on the spawn point");
+    if let Some(mut core) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::unit::comp::UnitCore>(dagger)
+    {
+        core.spawned_by_core = true;
+    }
+    sim.tick().expect("tick");
+    assert!(!occupied(&sim), "spawnedByCore units are ignored");
+    sim.ecs.0.despawn(dagger);
+    let _wall = place(&mut sim, 29, 20, "copper-wall", 1);
+    sim.tick().expect("tick");
+    assert!(occupied(&sim), "a solid tile under a ground output");
+}
+
+/// L06 T1: `UnitAssemblerBuild.spawned()` (`UnitAssembler.java:556-574`): the
+/// product takes `commandPos` (`CommandAI.commandPosition`) and goes into the
+/// same-team payload block under the spawn point when it accepts it
+/// (`unit.buildOn()`); otherwise it is added to the world.
+#[test]
+fn assembled_unit_takes_command_pos_and_payload_handoff() {
+    use crate::world::blocks::payloads::PayloadHolder;
+    use crate::world::blocks::units::behavior::deliver_assembled_unit;
+    let mut sim = live_sim(64);
+    // Team 1 is the player's (`rules.defaultTeam`), so products get `CommandAI`
+    // (`UnitType.controller`, UnitType.java:283).
+    if let Some(mut rules) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+    {
+        rules.default_team = 1;
+    }
+    let conveyor = place(&mut sim, 10, 10, "payload-conveyor", 1);
+    let def = sim
+        .unit_runtime()
+        .expect("runtime")
+        .content
+        .unit_by_name("dagger")
+        .cloned()
+        .expect("dagger");
+    let in_runtime = |sim: &Sim, unit: Entity| {
+        sim.unit_runtime()
+            .is_some_and(|runtime| runtime.units.contains(&unit))
+    };
+    // Payload conveyor at tile (10, 10) (size 3, centred) under the spawn.
+    let (unit, handed) = deliver_assembled_unit(
+        &mut sim.ecs.0,
+        &def,
+        1,
+        80.0,
+        80.0,
+        0.0,
+        Some((400.0, 240.0)),
+    );
+    assert!(handed, "handed to the payload conveyor");
+    assert!(!in_runtime(&sim, unit), "a payload unit is not added");
+    let held = sim
+        .ecs
+        .0
+        .get::<PayloadHolder>(conveyor)
+        .and_then(|holder| holder.payload);
+    assert_eq!(held.and_then(|p| p.entity), Some(unit), "conveyor holds it");
+    // Open ground: `unit.add()`.
+    let (free, handed) = deliver_assembled_unit(
+        &mut sim.ecs.0,
+        &def,
+        1,
+        300.0,
+        300.0,
+        0.0,
+        Some((400.0, 240.0)),
+    );
+    assert!(!handed);
+    assert!(in_runtime(&sim, free), "added to the world");
+    let slot = sim
+        .ecs
+        .0
+        .get::<crate::ai::controller::ControllerSlot>(free)
+        .cloned()
+        .expect("controller");
+    if slot.kind == crate::ai::controller::AiKind::Command {
+        assert_eq!(
+            slot.target,
+            Some(crate::world::TilePos::new(50, 30)),
+            "commandPos -> move target"
+        );
+    } else {
+        panic!(
+            "a player-team product should be commandable: {:?}",
+            slot.kind
+        );
+    }
+    // An enemy-team payload block never takes it.
+    let enemy = place(&mut sim, 40, 40, "payload-conveyor", 2);
+    let (_, handed) = deliver_assembled_unit(&mut sim.ecs.0, &def, 1, 320.0, 320.0, 0.0, None);
+    assert!(!handed, "team check");
+    assert!(
+        sim.ecs
+            .0
+            .get::<PayloadHolder>(enemy)
+            .and_then(|holder| holder.payload)
+            .is_none()
+    );
+}

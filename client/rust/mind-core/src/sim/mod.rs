@@ -1226,6 +1226,9 @@ impl Sim {
         // `Logic.java:533-535`: `fogControl.update()` when `rules.fog`, after
         // `updateTeamStats()` and before the entity pass.
         self.update_fog();
+        // `UnitAssembler.checkSolid` needs the grid (L06 T1): refresh
+        // `wasOccupied` just before the building pass reads it.
+        self.refresh_assembler_occupancy();
         self.schedule.run(&mut self.ecs.0);
         // `BeamDrill.updateFacing`/`WallCrafter.getEfficiency` (T5): the facing
         // rescan needs the grid, so it runs outside the scheduled behaviors.

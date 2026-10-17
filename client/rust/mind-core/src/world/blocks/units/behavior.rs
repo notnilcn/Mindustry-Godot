@@ -903,8 +903,19 @@ impl AssemblerBehavior {
             .unit_id("assembly-drone")
             .and_then(|id| content.unit(id))
             .map(|def| Arc::new(def.clone()));
+        let mut assembler = UnitAssembler::new(plans, 240.0);
+        // `areaSize = 13` on the three vanilla assemblers
+        // (`Blocks.java:6566,6581,6596`); the class default 11
+        // (`UnitAssembler.java:45`) stays for mod assemblers. It places the
+        // spawn point (`getUnitSpawn`) and the drone ring (L06 T1).
+        if matches!(
+            def.name.as_str(),
+            "tank-assembler" | "ship-assembler" | "mech-assembler"
+        ) {
+            assembler.area_size = 13;
+        }
         Self {
-            assembler: UnitAssembler::new(plans, 240.0),
+            assembler,
             units,
             drone_def,
             size: def.size,
@@ -914,16 +925,208 @@ impl AssemblerBehavior {
     /// `UnitAssemblerBuild.getUnitSpawn()`: the unit spawn point is
     /// `TILE_SIZE * (areaSize + size)/2` along the building rotation.
     fn unit_spawn(&self, world: &World, e: Entity) -> Option<(f32, f32)> {
-        let pos = world.get::<Pos>(e)?;
-        let rotation = world
-            .get::<crate::entities::comp::Building>(e)
-            .map(|building| building.rotation)
-            .unwrap_or(0);
-        let len =
-            crate::world::block::TILE_SIZE * (self.assembler.area_size + self.size) as f32 / 2.0;
-        let (dx, dy) = crate::world::blocks::autotiler::d4(rotation);
-        Some((pos.x + dx as f32 * len, pos.y + dy as f32 * len))
+        assembler_spawn_at(world, e, self.assembler.area_size, self.size)
     }
+}
+
+/// `UnitAssemblerBuild.getUnitSpawn()` (`UnitAssembler.java:336-340`):
+/// `len = tilesize * (areaSize + size) / 2` along `Geometry.d4(rotation)`.
+pub fn assembler_spawn_at(
+    world: &World,
+    e: Entity,
+    area_size: i32,
+    size: i32,
+) -> Option<(f32, f32)> {
+    let pos = world.get::<Pos>(e)?;
+    let rotation = world
+        .get::<crate::entities::comp::Building>(e)
+        .map(|building| building.rotation)
+        .unwrap_or(0);
+    let len = crate::world::block::TILE_SIZE * (area_size + size) as f32 / 2.0;
+    let (dx, dy) = crate::world::blocks::autotiler::d4(rotation);
+    Some((pos.x + dx as f32 * len, pos.y + dy as f32 * len))
+}
+
+/// `UnitAssemblerBuild.checkSolid(v, same)` (`UnitAssembler.java:679-685`):
+/// a ground `output` overlaps a solid tile (`EntityCollisions.overlapsTile`
+/// with `EntityCollisions::solid`, `EntityCollisions.java:98-120`), or an
+/// added unit's `hitboxTile` (`HitboxComp.java:69-76`) overlaps the
+/// `hitSize * 1.4` square at `v` (`Units.anyEntities`, `Units.java:199-209`)
+/// - not counting `spawnedByCore` units, units of the output type when
+/// `same`, and only units in the output's layer (leg-step pair, both flying,
+/// or a grounded unit for a ground output).
+///
+/// Deviation: Java's tile radius reads an unrelated temp rect
+/// (`EntityCollisions.r1`); the port scans `round(hitSize / 8) + 1`, which
+/// always covers the rect (the overlap test itself is exact).
+pub fn assembler_check_solid(
+    world: &World,
+    grid: &crate::world::WorldGrid,
+    content: &ContentRegistry,
+    output: &UnitTypeDef,
+    spawn: (f32, f32),
+    same: bool,
+) -> bool {
+    let ts = crate::world::block::TILE_SIZE;
+    let overlaps = |ax: f32, ay: f32, aw: f32, ah: f32, bx: f32, by: f32, bw: f32, bh: f32| {
+        ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by
+    };
+    if !output.flying {
+        let half = output.hit_size / 2.0;
+        let (rx, ry) = (spawn.0 - half, spawn.1 - half);
+        let radius = ((output.hit_size / ts).round() as i32).max(1) + 1;
+        let tx = crate::world::WorldGrid::to_tile(spawn.0);
+        let ty = crate::world::WorldGrid::to_tile(spawn.1);
+        for dx in -radius..=radius {
+            for dy in -radius..=radius {
+                let (wx, wy) = (tx + dx, ty + dy);
+                // `EntityCollisions.solid`: `tile == null || tile.solid()`.
+                let solid = grid
+                    .tiles
+                    .getn(wx, wy)
+                    .is_none_or(|tile| tile.solid_full(content));
+                if solid
+                    && overlaps(
+                        wx as f32 * ts - ts / 2.0,
+                        wy as f32 * ts - ts / 2.0,
+                        ts,
+                        ts,
+                        rx,
+                        ry,
+                        output.hit_size,
+                        output.hit_size,
+                    )
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    let hsize = output.hit_size * 1.4;
+    let (qx, qy) = (spawn.0 - hsize / 2.0, spawn.1 - hsize / 2.0);
+    let Some(runtime) = world.get_non_send::<crate::sim::unit_runtime::UnitRuntime>() else {
+        return false;
+    };
+    runtime.units.iter().any(|&unit| {
+        use crate::entities::comp::unit::comp::{HitboxComp, UnitCore, UnitTypeComp};
+        let Some(core) = world.get::<UnitCore>(unit) else {
+            return false;
+        };
+        if core.dead || core.spawned_by_core {
+            return false;
+        }
+        let Some(def) = world
+            .get::<UnitTypeComp>(unit)
+            .and_then(|comp| content.unit(comp.type_id))
+        else {
+            return false;
+        };
+        if same && def.id == output.id {
+            return false;
+        }
+        let flying = crate::combat::bullet::unit_is_flying(world, unit);
+        let grounded = core.elevation < 0.001;
+        let layer = (def.allow_leg_step && output.allow_leg_step)
+            || (output.flying && flying)
+            || (!output.flying && grounded);
+        if !layer {
+            return false;
+        }
+        let Some(pos) = world.get::<Pos>(unit) else {
+            return false;
+        };
+        let hit = world
+            .get::<HitboxComp>(unit)
+            .map_or(def.hit_size, |hitbox| hitbox.hit_size);
+        let size = (hit * 0.66).min(7.8);
+        overlaps(
+            pos.x - size / 2.0,
+            pos.y - size / 2.0,
+            size,
+            size,
+            qx,
+            qy,
+            hsize,
+            hsize,
+        )
+    })
+}
+
+/// `UnitAssemblerBuild.spawned()` product half (`UnitAssembler.java:556-574`):
+/// the unit takes `commandPos` when commandable, then goes to the payload
+/// block under the spawn point (`unit.buildOn()`, same team, `acceptPayload`
+/// with the target itself as the source) or is added to the world
+/// (`unit.add()`; `Units.notifyUnitSpawn`). `UnitCreateEvent` fires either
+/// way. Returns the product and whether it was handed off.
+#[allow(clippy::too_many_arguments)]
+pub fn deliver_assembled_unit(
+    world: &mut World,
+    def: &UnitTypeDef,
+    team: u8,
+    x: f32,
+    y: f32,
+    rotation: f32,
+    command_pos: Option<(f32, f32)>,
+) -> (Entity, bool) {
+    let seq = next_unit_seq(world);
+    let product = spawn_unit_def(world, seq, def, team, x, y, rotation);
+    // `if(unit.isCommandable() && commandPos != null)
+    // unit.command().commandPosition(commandPos)`: `targetPos = pos`, no
+    // attack target (`CommandAI.commandPosition`).
+    if let Some((cx, cy)) = command_pos
+        && let Some(mut slot) = world.get_mut::<crate::ai::ControllerSlot>(product)
+        && slot.kind == crate::ai::AiKind::Command
+    {
+        slot.target = Some(crate::world::TilePos::new(
+            crate::world::WorldGrid::to_tile(cx) as i16,
+            crate::world::WorldGrid::to_tile(cy) as i16,
+        ));
+        world
+            .entity_mut(product)
+            .insert(crate::ai::types::command::AttackTargetComp(None));
+    }
+    // `var targetBuild = unit.buildOn()` = `world.buildWorld(x, y)`
+    // (`World.toTile` rounding).
+    let target = world
+        .get_resource::<crate::world::TileBuilds>()
+        .and_then(|builds| {
+            builds.get(
+                crate::world::WorldGrid::to_tile(x),
+                crate::world::WorldGrid::to_tile(y),
+            )
+        });
+    let payload = crate::world::blocks::payloads::payload_ref(
+        crate::world::blocks::payloads::PayloadKind::Unit,
+        product,
+        def.id.raw(),
+    );
+    let handed =
+        target.is_some_and(|target| {
+            world
+                .get::<TeamComp>(target)
+                .is_some_and(|t| t.team == team)
+                && {
+                    world.entity_mut(product).insert(
+                        crate::world::blocks::payloads::UnitPayloadSize(def.hit_size),
+                    );
+                    crate::world::blocks::payloads::payload_conveyor::dispatch_accept_payload(
+                        world, target, target, payload,
+                    )
+                }
+        });
+    if let (true, Some(target)) = (handed, target) {
+        crate::world::blocks::payloads::payload_conveyor::dispatch_handle_payload(
+            world, target, target, payload,
+        );
+        // `UnitCreateEvent` (`UnitAssembler.java:574`) without `unit.add()`.
+        crate::game::stats::notify_unit_created(world, product, Some(&def.name));
+    } else {
+        world
+            .entity_mut(product)
+            .remove::<crate::world::blocks::payloads::UnitPayloadSize>();
+        adopt_output_unit(world, product, &def.name);
+    }
+    (product, handed)
 }
 
 /// Sets one drone's `AssemblerAI` target (`UnitAssembler.java:509-513`:
@@ -1075,13 +1278,9 @@ impl BuildingBehavior for AssemblerBehavior {
                 .get::<crate::entities::comp::Building>(e)
                 .map(|building| building.rotation as f32 * 90.0)
                 .unwrap_or(0.0);
-            let seq = next_unit_seq(world);
-            let product = spawn_unit_def(world, seq, def, team, x, y, rotation);
-            adopt_output_unit(world, product, &def.name);
-            // `spawned()` also hands `commandPos` to a commandable unit
-            // (`UnitAssembler.java:560-562`); the port's `CommandAiState` lives
-            // in the Sim-owned `UnitCommandRuntime` (not an ECS component), so
-            // the application half is deferred to the I08/T13 command wiring.
+            // `spawned()` (`UnitAssembler.java:556-574`): commandPos, payload
+            // hand-off or `unit.add()` (L06 T1).
+            let _ = deliver_assembled_unit(world, def, team, x, y, rotation, assembler.command_pos);
             // `UnitAssembler.java:568`: `createSound.at(spawn.x, spawn.y, 1 + range(0.06), 1)`.
             crate::audio::sim::emit_world_sound(
                 world,
@@ -1563,9 +1762,13 @@ mod tests {
             .map(|building| building.rotation)
             .unwrap_or(0);
         let (dx, dy) = crate::world::blocks::autotiler::d4(rotation);
-        let len = crate::world::block::TILE_SIZE * (11 + 5) as f32 / 2.0;
+        // The vanilla assemblers use `areaSize = 13` (`Blocks.java:6566,6581,6596`).
+        let area = world
+            .get::<UnitAssembler>(assembler)
+            .map_or(11, |state| state.area_size);
+        let len = crate::world::block::TILE_SIZE * (area + 5) as f32 / 2.0;
         let (sx, sy) = (pos.x + dx as f32 * len, pos.y + dy as f32 * len);
-        let radius = 11.0f32 / 2.0 * std::f32::consts::SQRT_2 * crate::world::block::TILE_SIZE;
+        let radius = area as f32 / 2.0 * std::f32::consts::SQRT_2 * crate::world::block::TILE_SIZE;
         let angle = index as f32 * 90.0 + 45.0;
         let radians = angle.to_radians();
         (

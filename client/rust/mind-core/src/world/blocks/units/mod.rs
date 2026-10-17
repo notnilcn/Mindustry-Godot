@@ -364,6 +364,11 @@ pub struct UnitAssembler {
     pub read_unit_ids: Vec<i32>,
     /// Command position handed to produced units (`commandPos`).
     pub command_pos: Option<(f32, f32)>,
+    /// `wasOccupied` (transient, not saved): `checkSolid(getUnitSpawn(),
+    /// false)` - the output area is blocked by a solid tile or a unit, so no
+    /// product progress (`UnitAssembler.java:515,523`). Refreshed by the Sim
+    /// pre-pass `Sim::refresh_assembler_occupancy` (L06 T1).
+    pub was_occupied: bool,
 }
 
 /// `UnitAssembler.areaSize` default.
@@ -398,6 +403,7 @@ impl UnitAssembler {
             units: Vec::new(),
             read_unit_ids: Vec::new(),
             command_pos: None,
+            was_occupied: false,
         }
     }
 
@@ -484,6 +490,11 @@ impl UnitAssembler {
     /// `UnitAssemblerBuild.updateTile` product half: advance with the `eff`
     /// (in-position drones) term and return the unit on completion.
     pub fn update(&mut self, time_scale: f32, eff: f32) -> Option<UnitTypeId> {
+        // `if(!wasOccupied && efficiency > 0 && Units.canCreate(team, plan.unit))`
+        // (`UnitAssembler.java:523`): an occupied output area holds progress.
+        if self.was_occupied {
+            return None;
+        }
         let plan = self.plan()?;
         let (unit, time) = (plan.unit, plan.time.max(0.0001));
         if !self.has_requirements() {
@@ -878,6 +889,27 @@ mod tests {
         assert_eq!(build.update(&recon, 0.0, 100.0), None);
         assert_eq!(build.update(&recon, 60.0, 1.0), None);
         assert_eq!(build.update(&recon, 60.0, 1.0), Some(mace));
+    }
+
+    /// L06 T1: `if(!wasOccupied && efficiency > 0 && Units.canCreate(...))`
+    /// (`UnitAssembler.java:523`): an occupied output area holds progress.
+    #[test]
+    fn occupied_output_holds_assembler_progress() {
+        let unit = UnitTypeId::new(3);
+        let plan = AssemblerUnitPlan {
+            unit,
+            payloads: Vec::new(),
+            time: 10.0,
+            drones: 4,
+        };
+        let mut assembler = UnitAssembler::new(vec![plan], 30.0);
+        assembler.was_occupied = true;
+        assert_eq!(assembler.update(5.0, 1.0), None);
+        assert_eq!(assembler.progress, 0.0, "no progress while occupied");
+        assembler.was_occupied = false;
+        assert_eq!(assembler.update(5.0, 1.0), None);
+        assert!((assembler.progress - 0.5).abs() < 1e-6);
+        assert_eq!(assembler.update(5.0, 1.0), Some(unit));
     }
 
     #[test]
