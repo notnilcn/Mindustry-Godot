@@ -26,11 +26,19 @@
 #   TWIN_GODOT_USER=<dir>     Godot user:// dir (default derived from the session)
 #   TWIN_RAISE_JAVA=0         do not restack the Java window before Java actions
 #   TWIN_RAISE_GODOT=0        do not restack the Godot editor before GP
+#   TWIN_JW_HOVER=0           JW clicks without the hover-first dwell (L08 T5)
+#   TWIN_JW_HOVER_S=0.4       JW hover dwell in seconds before the click
+#   TWIN_G_POINTER=0          GC/GW do not move the real pointer first (L08 T5)
+#   TWIN_GODOT_VIEW_W/H       Godot design viewport (1152x648) for GC/GW's
+#                             viewport -> game-window pointer mapping
 #
 # Java leg (window-relative coordinates; the origin is re-read from
 # `xwininfo -name <title>` on EVERY call — never from window_ctl.py's printout,
 # which is stale after a move; see java-leg-learnings.md 2026-10-16):
-#   JW x y [button]     click (left|right|middle)
+#   JW x y [button]     click (left|right|middle); hovers the target ~0.4 s
+#                       first (TWIN_JW_HOVER=0 to skip): the first click after
+#                       the pointer crossed another window is otherwise
+#                       sometimes swallowed (java-leg-learnings 2026-10-17)
 #   JM x y              move the pointer (hover)
 #   JD x1 y1 x2 y2 [button] [ms]   drag
 #   JK key NAME [ms] / JK keydown NAME / JK keyup NAME
@@ -39,6 +47,9 @@
 # Godot leg (viewport coordinates by default):
 #   GC x y [button] [coords]   dialog click — one godot_input `sequence`
 #   GW x y [button] [coords]   world click — separate press/release calls
+#                              GC/GW first warp the REAL pointer to the target
+#                              (GP) so hover state matches what a user sees;
+#                              TWIN_G_POINTER=0 opts out (L08 T5)
 #   GK NAME [down|up]          key by Godot name ("Escape"); default tap
 #   GT 'text'                  type into the focused Control (gmcp --text: one
 #                              unicode key press+release per char; L01 T4).
@@ -293,7 +304,7 @@ twin_java_raise() {
 
 # --- Java leg ----------------------------------------------------------------
 
-JW() { # JW x y [button] — window-relative click
+JW() { # JW x y [button] — window-relative click, hover-first by default
   local x="${1:?JW x y [button]}" y="${2:?}" btn="${3:-left}" g
   g="$(twin_win_geometry "$TWIN_JAVA_TITLE")" || {
     twin_warn "JW: no '$TWIN_JAVA_TITLE' window on $TWIN_DISPLAY"
@@ -301,6 +312,14 @@ JW() { # JW x y [button] — window-relative click
   }
   [ "${TWIN_RAISE_JAVA:-1}" = 1 ] && twin_java_raise
   set -- $g
+  # L08 T5: hover the target before clicking (round L's JWC). After the pointer
+  # crossed another window the first click is otherwise sometimes swallowed
+  # (java-leg-learnings.md 2026-10-17).
+  if [ "${TWIN_JW_HOVER:-1}" = 1 ]; then
+    DISPLAY="$TWIN_DISPLAY" timeout 30 "$TWIN_PARITY_PY" "$TWIN_SKILL_SCRIPTS/java_input.py" \
+      hover "$(($1 + x))" "$(($2 + y))" >/dev/null || true
+    sleep "${TWIN_JW_HOVER_S:-0.4}"
+  fi
   twin_java_click "$(($1 + x))" "$(($2 + y))" "$btn"
 }
 
@@ -359,14 +378,33 @@ twin_gmcp() {
   timeout "${TWIN_GMCP_TIMEOUT:-90}" python3 "$TWIN_GMCP" --timeout "${TWIN_GMCP_CALL_TIMEOUT:-80}" "$@"
 }
 
+# twin_g_pointer x y coords — L08 T5: warp the REAL pointer to a GC/GW target
+# (viewport coords scale onto the game window; window coords map 1:1). Hover UI
+# reads the real pointer, so without this the injected click lands while hover
+# state still reflects wherever the pointer was. Never fails the click.
+twin_g_pointer() {
+  [ "${TWIN_G_POINTER:-1}" = 1 ] || return 0
+  local x="$1" y="$2" coords="$3" g gw gh vw="${TWIN_GODOT_VIEW_W:-1152}" vh="${TWIN_GODOT_VIEW_H:-648}"
+  if [ "$coords" = viewport ] && g="$(twin_godot_game_window 2>/dev/null)"; then
+    set -- $g
+    gw="$3"
+    gh="$4"
+    x="$(awk -v a="$x" -v w="$gw" -v v="$vw" 'BEGIN { printf "%d", a * w / v + 0.5 }')"
+    y="$(awk -v a="$y" -v h="$gh" -v v="$vh" 'BEGIN { printf "%d", a * h / v + 0.5 }')"
+  fi
+  GP "${x%.*}" "${y%.*}" >/dev/null || twin_warn "GC/GW: real-pointer warp failed (click still injected)"
+}
+
 GC() { # GC x y [button] [coords] — dialog click = one godot_input sequence
   local x="${1:?GC x y [button] [coords]}" y="$2" btn="${3:-MOUSE_BUTTON_LEFT}" coords="${4:-viewport}"
+  twin_g_pointer "$x" "$y" "$coords"
   twin_gmcp godot_input \
     "{\"action\":\"sequence\",\"params\":{\"frame_delay\":1,\"steps\":[{\"type\":\"mouse_motion\",\"params\":{\"position\":{\"x\":$x,\"y\":$y},\"coords\":\"$coords\"}},{\"type\":\"mouse_button\",\"params\":{\"button\":\"$btn\",\"position\":{\"x\":$x,\"y\":$y},\"coords\":\"$coords\",\"pressed\":true}},{\"type\":\"mouse_button\",\"params\":{\"button\":\"$btn\",\"position\":{\"x\":$x,\"y\":$y},\"coords\":\"$coords\",\"pressed\":false}}]}}"
 }
 
 GW() { # GW x y [button] [coords] — world click = separate press/release calls
   local x="${1:?GW x y [button] [coords]}" y="$2" btn="${3:-MOUSE_BUTTON_LEFT}" coords="${4:-viewport}"
+  twin_g_pointer "$x" "$y" "$coords"
   twin_gmcp \
     godot_input "{\"action\":\"mouse_button\",\"params\":{\"button\":\"$btn\",\"position\":{\"x\":$x,\"y\":$y},\"coords\":\"$coords\",\"pressed\":true}}" \
     godot_input "{\"action\":\"mouse_button\",\"params\":{\"button\":\"$btn\",\"position\":{\"x\":$x,\"y\":$y},\"coords\":\"$coords\",\"pressed\":false}}"

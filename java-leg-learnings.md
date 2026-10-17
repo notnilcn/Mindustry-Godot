@@ -836,3 +836,12 @@ Run: runs/20261014-s3-verify3/ (java-*.png).
   landed every time.
 - Workaround: hover first (`JM x y; sleep 0.4; JW x y`); round L wrapped this as `JWC`. Proposed default for
   `tools/twin.sh` JW in docs/parity-plans/L08 T5.
+
+## 2026-10-18 — round L, session 2 (L08 T5): `JW` hovers before clicking by default
+
+- `tools/twin.sh` `JW x y` now runs `java_input.py hover` on the target, sleeps `TWIN_JW_HOVER_S` (default 0.4 s) and
+  then clicks: round L's `JWC` wrapper is the default (2026-10-17 entry above). Opt out with `TWIN_JW_HOVER=0`.
+  Cost: ~0.4 s + one hover call per click (a `JW` takes ~3 s wall on `:11`).
+- Proof (`runs/20261018-s2-L01-T2`, display `:11`): with the real pointer parked over the Godot game window
+  (`GP 900 500`), `JW 230 289` opened Java's editor maps dialog on the first click (`java/editor-maps.png`), and the
+  same cross-then-`JW 139 500` opened Map Info (`java/mapinfo.png`). No swallowed clicks in the batch.
