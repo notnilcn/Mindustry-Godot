@@ -42,7 +42,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/audio/events_sim.json",
       "owner_plan": "18",
-      "sha256": "469331a8ce08cf5f63be1e861a805709cb68513867f0b893dfdf2d64cb5ac549"
+      "sha256": "3051d06b65ea24099a4bd445b8a7b7f0ebac2793ae1e7b2000c767164e62e1bd",
+      "reasons": [
+        "2026-10-18 L08 T1: scenario fix + bless. 8e7b68b8 (H01 T1) put building Pos at tile.drawx() (BuildingComp.java:126, Tile.java:166-177) and made bullet tile lookups World.toTile = round(c/8) (World.java:174, BulletComp.java:187); the scenario still placed the duo/fuse at the half-tile centre y=68, which rounds to row 9, so the fuse passed the row-8 walls (no tick-4 hit) and the duo aimed at the moved wall (shootDuo moved). The scenario now uses tile_origin (Tile.worldx): every position is the old golden minus (4,4) (shootDuo 29.35,61.76; hit at the wall edge 60,64). The hit pitch 1.0 -> 1.0638 comes from e414cac9 (H07 T4) hitSoundPitch + Mathf.range(hitSoundPitchRange) (BulletType.java:564). The fixture fuse is a Basic bullet using explosionArtillery as its hit sound; Java ArtilleryBulletType despawn timing is not involved."
+      ]
     },
     {
       "id": "harness_audio_loops_aggregate",

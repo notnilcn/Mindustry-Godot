@@ -111,6 +111,14 @@ fn persist_and_check(
     if let Some(path) = golden_path
         && path.is_file()
     {
+        // `MIND_BLESS=1` rewrites the committed golden (L08 T1); the bless
+        // reason goes into `parity/golden_manifest.json` `reasons`.
+        if crate::paths::blessing() {
+            std::fs::write(&path, text)
+                .with_context(|| format!("blessing `{}`", path.display()))?;
+            log::warn!("audio {name}: blessed `{}`", path.display());
+            return Ok(true);
+        }
         let expected = std::fs::read_to_string(&path)
             .with_context(|| format!("reading `{}`", path.display()))?;
         if expected.trim_end() != text.trim_end() {
@@ -253,7 +261,13 @@ fn events_sim(dump: Option<&Path>, golden: Option<&Path>, json: bool) -> anyhow:
     // Phase 4: turret shoot sounds (`duo` ammo has `shootSound`).
     set_build_clock(&mut harness, 16.0);
     log.set_tick(3);
-    let (tx, ty) = CombatHarness::tile_center(4, 8);
+    // The duo sits on tile (4, 8) at Java's building position
+    // `tile.drawx()/drawy()` = `tile.worldx() + offset` (BuildingComp.java:126,
+    // Tile.java:166-177; offset 0 for size 1), so the phase-5 bullet row
+    // `World.toTile(y)` (World.java:174, BulletComp.java:187) is row 8 - the
+    // walls' row. The old half-tile centre (y = 68) rounds to row 9 since
+    // H01 T1 and the bullet never hit.
+    let (tx, ty) = CombatHarness::tile_origin(4, 8);
     let turret = harness
         .spawn_test_turret("duo", tx, ty, 1)
         .ok_or_else(|| anyhow!("duo turret missing"))?;
