@@ -245,31 +245,47 @@ func _build_link_panel() -> void:
 
 
 func _build_text_editor() -> void:
-	# `MessageBlock.buildConfiguration` opens a text dialog; the illuminator-style
-	# color spec never reaches this branch.
-	var multiline := bool(_config.get("multiline", false))
-	var field: Control
-	if multiline:
-		var edit := TextEdit.new()
-		edit.custom_minimum_size = Vector2(240, 90)
-		edit.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
-		# `MessageBlock.maxTextLength = 400` (`MessageBlock.java:29`); the
-		# dialog's `maxNewlines = 24` guard has no Godot TextEdit equivalent and
-		# stays a recorded residual.
-		edit.max_length = maxi(1, int(_config.get("max_text", 400)))
-		edit.text = str(_config.get("current", ""))
-		field = edit
-	else:
-		var line := LineEdit.new()
-		line.text = str(_config.get("current", ""))
-		field = line
-	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_child(field)
+	# `MessageBlock.buildConfiguration` (`MessageBlock.java:109-154`, desktop):
+	# one 40 px `Icon.pencil` `Styles.cleari` button; it opens the
+	# `@editmessage` floating dialog (380x160 TextArea, `maxTextLength`,
+	# `maxNewlines`, `n / max` counter, `@ok` 130x60) and `deselect()`s.
+	# L05 T2 (PAR-0380): the inline field had no counter or newline cap.
+	if not bool(_config.get("multiline", false)):
+		_build_inline_text()
+		return
+	# code-instantiated: one pencil button per message block at tap time.
+	var pencil := MindWidgets.glyph_button("pencil", "edit", "cleari")
+	pencil.custom_minimum_size = Vector2(40, 40)
+	pencil.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	pencil.pressed.connect(_open_message_edit)
+	body.add_child(pencil)
+
+
+func _open_message_edit() -> void:
+	var current := str(_config.get("current", ""))
+	var max_text := maxi(1, int(_config.get("max_text", 400)))
+	var max_newlines := maxi(0, int(_config.get("max_newlines", 24)))
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	_close()
+	if root == null or not root.has_method("show_message_edit"):
+		return
+	root.call("show_message_edit", current, max_text, max_newlines, func(text: String) -> void:
+		# `if(!a.getText().contentEquals(message)) configure(a.getText())`.
+		if text != current:
+			_submit("string", text))
+
+
+## Single-line text config (no Java block uses it today; kept for the spec).
+func _build_inline_text() -> void:
+	var line := LineEdit.new()
+	line.text = str(_config.get("current", ""))
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_child(line)
 	var row := HBoxContainer.new()
 	body.add_child(row)
 	var apply := Button.new()
 	apply.text = _t("@ok", "OK")
-	apply.pressed.connect(func() -> void: _submit("string", _text_of(field)))
+	apply.pressed.connect(func() -> void: _submit("string", line.text))
 	row.add_child(apply)
 	_add_close_button(row)
 
@@ -324,22 +340,32 @@ func _text_of(field: Control) -> String:
 	return ""
 
 
-## `LightBlock.buildConfiguration`: a color picker; the change submits the packed
-## `Color.rgba()` integer (`("int", str(color.to_rgba32()))`).
+## `LightBlock.buildConfiguration` (`LightBlock.java:109-114`): one 40 px
+## `Icon.pencil` `Styles.cleari` button; it opens `ui.picker.show(color.a(0.5),
+## false, res -> configure(res.rgba()))` and `deselect()`s (L05 T2, PAR-0380).
 func _build_color_picker() -> void:
-	# code-instantiated: the picker is one widget driven by the spec's
-	# `current` color; it has no scene-authorable per-building shape.
-	var picker := ColorPickerButton.new()
-	picker.custom_minimum_size = Vector2(160, 32)
-	picker.color = _rgba_from_int(int(_config.get("current", 0xffd37fff)))
-	body.add_child(picker)
-	var row := HBoxContainer.new()
-	body.add_child(row)
-	var apply := Button.new()
-	apply.text = _t("@ok", "OK")
-	apply.pressed.connect(func() -> void: _submit("int", str(picker.color.to_rgba32())))
-	row.add_child(apply)
-	_add_close_button(row)
+	# code-instantiated: one pencil button per illuminator at tap time.
+	var pencil := MindWidgets.glyph_button("pencil", "edit", "cleari")
+	pencil.custom_minimum_size = Vector2(40, 40)
+	pencil.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	pencil.pressed.connect(_open_color_picker)
+	body.add_child(pencil)
+
+
+func _open_color_picker() -> void:
+	var color := _rgba_from_int(int(_config.get("current", 0xffd37fff)))
+	color.a = 0.5
+	var x := int(_config.get("x", 0))
+	var y := int(_config.get("y", 0))
+	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	_close()
+	var picker: Node = root.call("dialog", "picker") if root != null and root.has_method("dialog") else null
+	if picker == null or not picker.has_method("show_picker"):
+		return
+	picker.call("show_picker", color, false, func(result: Color) -> void:
+		var input := get_node_or_null("/root/Spine/Input")
+		if input != null and input.has_method("configure_building"):
+			input.call("configure_building", x, y, "int", str(result.to_rgba32())))
 
 
 ## `Color.rgba8888` → Godot `Color` (the packed value is `0xRRGGBBAA`).

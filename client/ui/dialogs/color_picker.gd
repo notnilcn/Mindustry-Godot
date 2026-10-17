@@ -1,89 +1,231 @@
 ## SPDX-License-Identifier: GPL-3.0-only
 ## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
-## Source: core/src/mindustry/ui/dialogs/ColorPicker.java (plan 14 §3.4, M3).
+## Source: core/src/mindustry/ui/dialogs/ColorPicker.java (`ui.picker`).
 ##
-## HSV + alpha picker. Upstream draws saturation/value pads; the M3 shell maps
-## the same four components to sliders over a live preview and emits
-## `color_selected` on OK. The saturation/value pad (`color_picker_pad.tscn`) is
-## tracked in the plan changelog.
+## `ColorPicker.show(color, alpha, consumer)` (`ColorPicker.java:27-170`): a
+## 200x200 preview over `Tex.alphaBg` in a `Tex.pane` frame, then 370x44 rows
+## (`padBottom(6)`) of a slider stacked over its gradient — hue (the hue
+## texture), saturation, value and (when `alpha`) alpha over `Tex.alphaBgLine` —
+## and a 130x40 hex field; `addCloseButton()` + `@ok` (`Icon.ok`) apply.
+## L05 T2 (PAR-0380): the M3 shell's labelled plain sliders are replaced.
 
 extends MindDialog
 
 signal color_selected(color: Color)
 
+const ROW_SIZE := Vector2(370.0, 44.0)
+
 var _h := 0.0
 var _s := 0.0
 var _v := 1.0
 var _a := 1.0
+var _alpha := true
 var _current := Color.WHITE
+var _consumer: Callable = Callable()
 var _preview: ColorRect = null
+var _hex: LineEdit = null
+var _sliders: Dictionary = {}
+var _gradients: Array[Control] = []
 
 
 func _ready() -> void:
 	set_title_key("@pickcolor")
 	should_pause = false
 	super._ready()
-	_build()
 
 
-## Sets the initial color (upstream `ColorPicker.setColor`).
+## `ColorPicker.show(color, alpha, consumer)`: opens through `MindUi` so the
+## dialog stack and Escape behave like every dialog.
+func show_picker(color: Color, alpha: bool, consumer: Callable) -> void:
+	_consumer = consumer
+	_alpha = alpha
+	set_color(color)
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null and ui.has_method("open_dialog"):
+		ui.call("open_dialog", String(name), "")
+	else:
+		show_dialog()
+
+
+## Sets the initial color (`current.set(color)` + `toHsv`).
 func set_color(value: Color) -> void:
 	_current = value
-	_h = value.h
+	_h = value.h * 360.0
 	_s = value.s
 	_v = value.v
 	_a = value.a
-	_refresh()
+
+
+func shown() -> void:
+	_build()
 
 
 func _build() -> void:
+	clear_content()
 	var table := content_table()
-	table.add_theme_constant_override("separation", 6)
-
+	# `t.table(Tex.pane, i -> i.stack(alphaBg, colorImage).size(200f))
+	# .colspan(2).padBottom(5)`.
+	var frame := PanelContainer.new()
+	var box := _pane_box(Color(0, 0, 0, 0), PANE_OUTLINE_GRAY)
+	frame.add_theme_stylebox_override("panel", box)
+	var stack := Control.new()
+	stack.custom_minimum_size = Vector2(200.0, 200.0)
+	stack.add_child(_alpha_bg("alpha-bg"))
 	_preview = ColorRect.new()
-	_preview.custom_minimum_size = Vector2(200, 48)
-	_preview.color = _current
-	table.add(_preview).grow_x_axis().height(48.0).pad(6)
+	_preview.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(_preview)
+	frame.add_child(stack)
+	table.add(frame).set_pad_bottom(5.0)
 	table.row()
 
-	table.add(_component_slider("@pickcolor.h", 0.0, 360.0, _h * 360.0, func(v: float) -> void:
-		_h = v / 360.0
-		_refresh())).grow_x_axis()
+	_sliders.clear()
+	_gradients.clear()
+	table.add(_slider_row("h", 360.0, _h, null)).width(ROW_SIZE.x).height(ROW_SIZE.y).set_pad_bottom(6.0)
 	table.row()
-	table.add(_component_slider("@pickcolor.s", 0.0, 1.0, _s, func(v: float) -> void:
-		_s = v
-		_refresh())).grow_x_axis()
+	table.add(_slider_row("s", 1.0, _s, null)).width(ROW_SIZE.x).height(ROW_SIZE.y).set_pad_bottom(6.0)
 	table.row()
-	table.add(_component_slider("@pickcolor.v", 0.0, 1.0, _v, func(v: float) -> void:
-		_v = v
-		_refresh())).grow_x_axis()
+	table.add(_slider_row("v", 1.0, _v, null)).width(ROW_SIZE.x).height(ROW_SIZE.y).set_pad_bottom(6.0)
 	table.row()
-	table.add(_component_slider("@pickcolor.a", 0.0, 1.0, _a, func(v: float) -> void:
-		_a = v
-		_refresh())).grow_x_axis()
+	if _alpha:
+		table.add(_slider_row("a", 1.0, _a, "alpha-bg-line")).width(ROW_SIZE.x).height(ROW_SIZE.y).set_pad_bottom(6.0)
+		table.row()
+	# `hexField = t.field(current.toString(), ...).size(130f, 40f)` with
+	# `valid(Color.valueOf)`.
+	_hex = MindWidgets.field("")
+	_hex.custom_minimum_size = Vector2(130.0, 40.0)
+	_hex.text_changed.connect(_on_hex)
+	table.add(_hex).width(130.0).height(40.0)
 
+	clear_buttons()
 	add_close_button()
-	var ok := MindWidgets.button(_t("@ok"))
+	var ok := MindWidgets.icon_button("ok", _t("@ok"))
+	ok.custom_minimum_size = Vector2(210.0, 64.0)
 	ok.pressed.connect(_confirm)
 	buttons.add_child(ok)
+	_update_color(true)
 
 
-func _component_slider(label_key: String, minimum: float, maximum: float, value: float, on_change: Callable) -> Control:
-	var row := VBoxContainer.new()
-	row.add_child(MindWidgets.label(_t(label_key)))
-	var slider := MindWidgets.slider(minimum, maximum, 0.01)
+## `t.stack(<gradient>, slider)`: the gradient fills the 370x44 row and the
+## `defaultSlider` (transparent `sliderBack` body) draws over it.
+func _slider_row(component: String, maximum: float, value: float, backdrop: Variant) -> Control:
+	# code-instantiated: one stacked slider row per HSV(A) component.
+	var row := Control.new()
+	row.custom_minimum_size = ROW_SIZE
+	if backdrop != null:
+		row.add_child(_alpha_bg(str(backdrop)))
+	var gradient := Control.new()
+	gradient.set_anchors_preset(Control.PRESET_FULL_RECT)
+	gradient.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	gradient.draw.connect(_draw_gradient.bind(gradient, component))
+	row.add_child(gradient)
+	_gradients.append(gradient)
+	var slider := MindWidgets.slider(0.0, maximum, 0.0001)
+	slider.set_anchors_preset(Control.PRESET_FULL_RECT)
 	slider.value = value
-	slider.value_changed.connect(on_change)
+	slider.value_changed.connect(_on_slider.bind(component))
 	row.add_child(slider)
+	_sliders[component] = slider
 	return row
 
 
-func _refresh() -> void:
-	_current = Color.from_hsv(_h, _s, _v, _a)
+## `Fill.quad(x, y, first, x + w, y, second, ...)`: a left-to-right gradient of
+## the component (hue: the 128-step hue texture).
+func _draw_gradient(target: Control, component: String) -> void:
+	var size := target.size
+	if component == "h":
+		var steps := 36
+		for i in steps:
+			var x0 := size.x * float(i) / steps
+			var x1 := size.x * float(i + 1) / steps
+			var c0 := Color.from_hsv(float(i) / steps, 1.0, 1.0)
+			var c1 := Color.from_hsv(float(i + 1) / steps, 1.0, 1.0)
+			_quad(target, x0, x1, size.y, c0, c1)
+		return
+	var first := _current
+	var second := _current
+	match component:
+		"s":
+			first = Color.from_hsv(_h / 360.0, 0.0, _v)
+			second = Color.from_hsv(_h / 360.0, 1.0, _v)
+		"v":
+			first = Color.from_hsv(_h / 360.0, _s, 0.0)
+			second = Color.from_hsv(_h / 360.0, _s, 1.0)
+		"a":
+			first = Color(_current.r, _current.g, _current.b, 0.0)
+			second = Color(_current.r, _current.g, _current.b, 1.0)
+	first.a = first.a if component == "a" else 1.0
+	second.a = 1.0
+	_quad(target, 0.0, size.x, size.y, first, second)
+
+
+func _quad(target: Control, x0: float, x1: float, h: float, c0: Color, c1: Color) -> void:
+	target.draw_polygon(
+		PackedVector2Array([Vector2(x0, 0), Vector2(x1, 0), Vector2(x1, h), Vector2(x0, h)]),
+		PackedColorArray([c0, c1, c1, c0])
+	)
+
+
+## `Tex.alphaBg` / `Tex.alphaBgLine`: the checkerboard under translucent colors.
+func _alpha_bg(region: String) -> Control:
+	var texture := MindWidgets.icon_texture(region)
+	var rect := TextureRect.new()
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	rect.stretch_mode = TextureRect.STRETCH_TILE
+	rect.texture = texture
+	return rect
+
+
+func _on_slider(value: float, component: String) -> void:
+	match component:
+		"h":
+			_h = value
+		"s":
+			_s = value
+		"v":
+			_v = value
+		"a":
+			_a = value
+	_update_color(true)
+
+
+## `Color.valueOf(current, value)` on every valid edit; sliders follow.
+func _on_hex(text: String) -> void:
+	var trimmed := text.strip_edges().trim_prefix("#")
+	if not (trimmed.length() == 6 or trimmed.length() == 8) or not trimmed.is_valid_hex_number():
+		return
+	var parsed := Color.html(trimmed if trimmed.length() == 6 else trimmed)
+	_h = parsed.h * 360.0
+	_s = parsed.s
+	_v = parsed.v
+	_a = parsed.a
+	for component in _sliders:
+		var slider: HSlider = _sliders[component]
+		slider.set_value_no_signal({"h": _h, "s": _s, "v": _v, "a": _a}[component])
+	_update_color(false)
+
+
+## `updateColor(updateField)`: `current.fromHsv(h, s, v); current.a = a`; the
+## hex text drops the alpha byte while opaque.
+func _update_color(update_field: bool) -> void:
+	_current = Color.from_hsv(_h / 360.0, _s, _v, _a)
 	if _preview != null:
 		_preview.color = _current
+	for gradient in _gradients:
+		gradient.queue_redraw()
+	if update_field and _hex != null:
+		var value := _current.to_html(true)
+		if _current.a >= 0.9999:
+			value = value.substr(0, 6)
+		_hex.set_block_signals(true)
+		_hex.text = value
+		_hex.set_block_signals(false)
 
 
 func _confirm() -> void:
 	color_selected.emit(_current)
-	hide_dialog()
+	if _consumer.is_valid():
+		_consumer.call(_current)
+	_close_pressed()

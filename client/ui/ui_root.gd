@@ -817,6 +817,55 @@ func _on_show_confirm(text: String) -> void:
 	ok.grab_focus()
 
 
+## `MessageBlock.buildConfiguration` desktop dialog (`MessageBlock.java:122-150`):
+## floating `BaseDialog("@editmessage")`, a 380x160 `TextArea` capped at
+## `maxTextLength` whose filter refuses a newline past `maxNewlines`, a light
+## gray `n / max` counter, and one `@ok` 130x60 button; `closeOnBack`.
+## `on_ok` receives the text (the caller skips an unchanged message).
+func show_message_edit(text: String, max_text: int, max_newlines: int, on_ok: Callable) -> void:
+	var prompt := _build_prompt(_t("@editmessage"), "", false, 380.0)
+	var root: Control = prompt.root
+	# code-instantiated: the message editor is a one-off transient prompt.
+	var area := TextEdit.new()
+	area.text = text.replace("\r", "\n")
+	area.custom_minimum_size = Vector2(380.0, 160.0)
+	area.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	var counter := Label.new()
+	counter.add_theme_color_override("font_color", Color.LIGHT_GRAY)
+	counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	var last := [area.text]
+	var refresh := func() -> void:
+		counter.text = "%d / %d" % [area.text.length(), max_text]
+	area.text_changed.connect(func() -> void:
+		var value := area.text
+		if value.length() > max_text or value.count("\n") > max_newlines:
+			var caret := area.get_caret_column()
+			area.text = last[0]
+			area.set_caret_column(mini(caret, area.text.length()))
+		last[0] = area.text
+		refresh.call())
+	refresh.call()
+	# The prompt's message label is unused here; the area and counter take its
+	# place in the dialog column, above the buttons.
+	var message_label: Control = prompt.body
+	var column := message_label.get_parent()
+	message_label.visible = false
+	column.add_child(area)
+	column.move_child(area, message_label.get_index() + 1)
+	column.add_child(counter)
+	column.move_child(counter, area.get_index() + 1)
+	var close := func() -> void:
+		_dismiss_prompt(root)
+	prompt.cancel = close
+	_prompt_cancel = close
+	_add_prompt_button(prompt.buttons, "@ok", "", Vector2(130.0, 60.0), func() -> void:
+		var value := area.text
+		_dismiss_prompt(root)
+		if on_ok.is_valid():
+			on_ok.call(value))
+	area.grab_focus.call_deferred()
+
+
 func _on_text_input_request(title: String, message: String, max_length: int, default_text: String, numeric: bool, allow_empty: bool) -> void:
 	# `UI.java:309-355 showTextInput` (desktop): accent rule, message, 400x50
 	# field, `@cancel`/`@ok` 120x54; Enter = OK, Esc = cancel.
