@@ -1266,6 +1266,8 @@ func _rebuild() -> void:
 		selected = str(host.call("selected_block"))
 	# `ButtonGroup`: the active block is the checked button (`button.group(group)`).
 	var group := ButtonGroup.new()
+	# The checked block can be unchecked by clicking it again (below).
+	group.allow_unpress = true
 	for block_variant in category.get("blocks", []):
 		var block: Dictionary = block_variant
 		var name := str(block.get("name", ""))
@@ -1288,8 +1290,15 @@ func _rebuild() -> void:
 		if button.icon == null:
 			button.text = label
 		button.pressed.connect(func() -> void:
-			# `selectedBlocks.put(currentCategory, input.block)` (`:307`).
-			_selected_blocks[str(category.get("name", ""))] = name
-			_select_block(host, name))
+			# `control.input.block = control.input.block == block ? null : block;
+			# selectedBlocks.put(currentCategory, control.input.block)`
+			# (`PlacementFragment.java:306-307`): clicking the selected block
+			# deselects it (PAR-0425).
+			var current := ""
+			if host != null and host.has_method("selected_block"):
+				current = str(host.call("selected_block"))
+			var next := "air" if current == name else name
+			_selected_blocks[str(category.get("name", ""))] = "" if next == "air" else next
+			_select_block(host, next))
 		blocks.add_child(button)
 		_block_buttons[name] = button
