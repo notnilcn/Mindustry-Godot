@@ -803,6 +803,7 @@ impl<'a> ContentJsonParser<'a> {
             ("requireUnlock", &mut sector.require_unlock),
             ("showHidden", &mut sector.show_hidden),
             ("attackAfterWaves", &mut sector.attack_after_waves),
+            ("showSectorLandInfo", &mut sector.show_sector_land_info),
             ("outline", &mut sector.outline),
         ] {
             if let Some(value) = field_bool(object, field) {
@@ -2211,6 +2212,7 @@ const SECTOR_FIELDS: &[&str] = &[
     "requireUnlock",
     "showHidden",
     "attackAfterWaves",
+    "showSectorLandInfo",
     "outline",
     "outlineRadius",
 ];
@@ -2515,6 +2517,30 @@ mod tests {
         assert!(result.is_ok(), "{result:?}");
         let sector = reg.sector_by_name("mods-test-landing").expect("sector");
         assert!((sector.difficulty - 1.5).abs() < 1e-6);
+    }
+
+    /// L06 T6.4: `SectorPreset.showSectorLandInfo` (SectorPreset.java:34,
+    /// default true) parses from mod JSON and gates the landing announce with
+    /// `state.isCampaign() && Vars.showSectorLandInfo` (CoreBlock.java:414).
+    #[test]
+    fn sector_show_land_info_flag_and_gate() {
+        use crate::content::registries::sectors::shows_sector_land_info;
+        let mut reg = registry();
+        let ground_zero = reg.sector_by_name("groundZero").expect("groundZero");
+        assert!(ground_zero.show_sector_land_info, "vanilla default true");
+        assert!(shows_sector_land_info(true, Some(ground_zero)));
+        assert!(shows_sector_land_info(true, None), "generated sector");
+        assert!(!shows_sector_land_info(false, None), "not a campaign");
+        let planet = reg.planet_id("serpulo").expect("serpulo");
+        let json = format!(
+            r#"{{"planet":"serpulo","sector":{},"showSectorLandInfo":false}}"#,
+            planet.raw() + 200
+        );
+        let (_, result) = parse(&mut reg, ContentType::Sector, "quiet-landing", &json);
+        assert!(result.is_ok(), "{result:?}");
+        let quiet = reg.sector_by_name("mods-quiet-landing").expect("sector");
+        assert!(!quiet.show_sector_land_info);
+        assert!(!shows_sector_land_info(true, Some(quiet)));
     }
 
     #[test]

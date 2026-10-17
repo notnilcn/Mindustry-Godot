@@ -85,6 +85,16 @@ pub enum RuleOverrideKind {
     None,
 }
 
+/// `Vars.showSectorLandInfo` (Vars.java:191): the global land-info switch.
+pub const SHOW_SECTOR_LAND_INFO: bool = true;
+
+/// The landing announce gate (`CoreBlock.CoreBuild.beginLaunch`'s
+/// `Time.run(launchDuration())`, CoreBlock.java:414): `state.isCampaign() &&
+/// Vars.showSectorLandInfo && (preset == null || preset.showSectorLandInfo)`.
+pub fn shows_sector_land_info(is_campaign: bool, preset: Option<&SectorPresetDef>) -> bool {
+    is_campaign && SHOW_SECTOR_LAND_INFO && preset.is_none_or(|preset| preset.show_sector_land_info)
+}
+
 /// Sector preset record (`mindustry.type.SectorPreset`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SectorPresetDef {
@@ -128,6 +138,9 @@ pub struct SectorPresetDef {
     pub allow_launch_loadout: bool,
     /// Switches to attack mode after waves.
     pub attack_after_waves: bool,
+    /// `SectorPreset.showSectorLandInfo` (SectorPreset.java:34): the landing
+    /// announce of the sector name + resources (CoreBlock.java:414).
+    pub show_sector_land_info: bool,
     /// Sectors that must be completed before landing here.
     pub shield_sectors: Vec<u16>,
     /// Rules override kind.
@@ -172,6 +185,7 @@ impl SectorPresetDef {
             allow_launch_schematics: false,
             allow_launch_loadout: false,
             attack_after_waves: false,
+            show_sector_land_info: true,
             shield_sectors: Vec::new(),
             rules: RuleOverrideKind::Default,
             outline: true,

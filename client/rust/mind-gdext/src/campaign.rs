@@ -3573,6 +3573,21 @@ impl MindCampaign {
                 })
                 .unwrap_or_default();
             dict.set(&key("preset"), &preset_name.as_str().to_variant());
+            // The landing announce gate (CoreBlock.java:414): campaign +
+            // `Vars.showSectorLandInfo` + `preset.showSectorLandInfo`.
+            let preset_def = record.and_then(|sector| sector.preset).and_then(|preset| {
+                self.registry
+                    .as_ref()
+                    .and_then(|registry| registry.sector(preset))
+            });
+            dict.set(
+                &key("showLandInfo"),
+                &mind_core::content::registries::sectors::shows_sector_land_info(
+                    self.session.is_campaign(),
+                    preset_def,
+                )
+                .to_variant(),
+            );
             dict.set(
                 &key("captured"),
                 &record
