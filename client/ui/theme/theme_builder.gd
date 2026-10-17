@@ -155,6 +155,26 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
 				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
 				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
+			elif name == "flatTogglet":
+				# `Styles.flatTogglet` (Styles.java:190-199): `up`/`disabled =
+				# black`, `over = flatOver`, `down`/`checked = flatDown` (accent
+				# frame); gray disabled text.
+				theme.set_stylebox("normal", name, flat(Color.BLACK))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("pressed", name, _flat_down_frame())
+				theme.set_stylebox("hover_pressed", name, _flat_down_frame())
+				theme.set_stylebox("disabled", name, flat(Color.BLACK))
+				theme.set_color("font_disabled_color", name, Color.GRAY)
+			elif name == "squareTogglet":
+				# `Styles.squareTogglet` (Styles.java:250-259): `up = pane`,
+				# `over`/`down`/`checked = flatOver`, `disabled = black`.
+				var over := flat(Color8(0x45, 0x45, 0x45))
+				theme.set_stylebox("normal", name, _nine_patch("pane", 12.0))
+				theme.set_stylebox("hover", name, over)
+				theme.set_stylebox("pressed", name, over)
+				theme.set_stylebox("hover_pressed", name, over)
+				theme.set_stylebox("disabled", name, flat(Color.BLACK))
+				theme.set_color("font_disabled_color", name, Color.GRAY)
 			elif name == "fullTogglet":
 				# `Styles.fullTogglet` (Styles.java:240-249): `up`/`disabled =
 				# black`, `over`/`down`/`checked = flatOver`; gray disabled text.

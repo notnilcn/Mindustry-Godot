@@ -280,14 +280,15 @@ func _draw() -> void:
 ## `ObjectiveTilemap.draw`'s grid over the ±`bounds` play area.
 func _draw_grid() -> void:
 	var origin := _origin()
-	var color := Color(0.16, 0.16, 0.18)
+	# `Lines.stroke(3f); Draw.color(Pal.darkestGray)` (`MapObjectivesCanvas.java:152-156`).
+	var color := Color(0.1, 0.1, 0.1)
 	var start := -BOUNDS
 	for i in range(2 * BOUNDS + 1):
 		var unit := float(start + i)
 		var x := origin.x + unit * UNIT
-		draw_line(Vector2(x, origin.y - BOUNDS * UNIT), Vector2(x, origin.y + BOUNDS * UNIT), color, 1.0)
+		draw_line(Vector2(x, origin.y - BOUNDS * UNIT), Vector2(x, origin.y + BOUNDS * UNIT), color, 3.0)
 		var y := origin.y + unit * UNIT
-		draw_line(Vector2(origin.x - BOUNDS * UNIT, y), Vector2(origin.x + BOUNDS * UNIT, y), color, 1.0)
+		draw_line(Vector2(origin.x - BOUNDS * UNIT, y), Vector2(origin.x + BOUNDS * UNIT, y), color, 3.0)
 
 
 ## `obj.typeName()` (`ObjectiveMarker`-style bundle lookup with a class fallback).

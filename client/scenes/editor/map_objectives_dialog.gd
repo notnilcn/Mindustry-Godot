@@ -58,9 +58,11 @@ func _ready() -> void:
 	_editor = get_node_or_null(editor_path)
 	clear_buttons()
 	# `buttons.button("@back", Icon.left, ...)`, `@add`, `@edit.menu` (`:494-496`).
-	add_close_button()
-	add_button(_t("@add"), _add_objective, "add", 160.0)
-	add_button(_t("@edit.menu"), _edit_menu, "edit", 160.0)
+	# `buttons.button(...)` x3 with no size (`MapObjectivesDialog.java:494-
+	# 496`): each takes its pref width (java/ed-objectives.png: 153/157/158).
+	add_close_button(153.0)
+	add_button(_t("@add"), _add_objective, "add", 157.0)
+	add_button(_t("@edit.menu"), _edit_menu, "edit", 158.0)
 	_connect_confirm()
 
 
@@ -324,8 +326,10 @@ func _rebuild_panel() -> void:
 	for child in _panel.get_children():
 		_panel.remove_child(child)
 		child.queue_free()
-	if _selected < 0 or _selected >= _objectives.size():
-		_panel.add_child(MindWidgets.label(_t("@editor.objectives")))
+	# Java edits an objective in its own dialog; with none selected there is
+	# no side panel at all (java/ed-objectives.png: the canvas only).
+	_panel.visible = _selected >= 0 and _selected < _objectives.size()
+	if not _panel.visible:
 		return
 	var objective: Dictionary = _objectives[_selected] if _objectives[_selected] is Dictionary else {}
 	var tag := str(objective.get("class", ""))

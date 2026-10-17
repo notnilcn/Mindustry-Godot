@@ -26,6 +26,8 @@ const LANGUAGE_SCRIPT := preload("res://ui/dialogs/language_dialog.gd")
 
 enum Status { CORRECT, MISSING, SAME }
 
+var _main_scroll: ScrollContainer = null
+var _empty_box: CenterContainer = null
 var _editor: Node = null
 var _locales: Dictionary = {}
 var _last_saved: Dictionary = {}
@@ -68,10 +70,26 @@ func _ready() -> void:
 	_selected_locale = _default_locale()
 	clear_buttons()
 	# `buttons.table(t -> { back, apply, edit })` + `?`.
+	# `buttons.add("").uniform()` + the centred Back/Apply/Edit table + `?`
+	# (60x64, uniform): the three buttons stay centred and `?` sits at the
+	# right end (java/ed-locales.png).
+	# code-instantiated: the balancing cells of the Java button table.
+	var lead := Control.new()
+	lead.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	lead.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	buttons.add_child(lead)
 	add_button(_t("@back"), _back, "left", 210.0)
 	_apply_button = add_button(_t("@editor.apply"), _apply, "ok", 210.0)
 	add_button(_t("@edit"), _edit_dialog, "edit", 210.0)
+	var tail := Control.new()
+	tail.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tail.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	buttons.add_child(tail)
 	add_button("?", _show_info, "", 60.0)
+	# `.size(210f, 64f)` / `.size(60f, 64f)`: full-height buttons.
+	for child in buttons.get_children():
+		if child is Button:
+			(child as Button).custom_minimum_size.y = 64.0
 	_connect_prompts()
 	# `resized(this::buildMain)` (`MapLocalesDialog.java:93`).
 	resized.connect(_build_main)
@@ -98,10 +116,15 @@ func _setup() -> void:
 	row.add_theme_constant_override("separation", 10)
 	root.add(row).grow_x_axis().grow_y_axis().pad(6)
 
+	# `cont.add(langs).left()`: `langs = new Table(Tex.button)`, content-sized
+	# and vertically centred in its cell (`MapLocalesDialog.java:60,112`).
 	# code-instantiated: the locale list is data-driven from the locales tag.
+	var langs_frame := PanelContainer.new()
+	langs_frame.add_theme_stylebox_override("panel", MindThemeBuilder._button_nine_patch("button"))
+	langs_frame.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.add_child(langs_frame)
 	_langs = VBoxContainer.new()
-	_langs.custom_minimum_size.x = 260.0
-	row.add_child(_langs)
+	langs_frame.add_child(_langs)
 
 	var right := VBoxContainer.new()
 	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -111,7 +134,8 @@ func _setup() -> void:
 	# Search / collapse-all / filter row (`:124-147`).
 	# code-instantiated: the search row is a fixed four-control strip.
 	var search_row := HBoxContainer.new()
-	search_row.add_theme_constant_override("separation", 8)
+	search_row.add_theme_constant_override("separation", 10)
+	search_row.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var collapse := MindWidgets.icon_button("down-open" if not _collapsed else "up-open", "", "emptyTogglei")
 	collapse.custom_minimum_size = Vector2(SMALL, SMALL)
 	collapse.toggle_mode = true
@@ -144,8 +168,16 @@ func _setup() -> void:
 	right.add_child(search_row)
 
 	# `t.check("@locales.applytoall", applytoall, b -> applytoall = b)`.
-	right.add_child(MindWidgets.check(_t("@locales.applytoall"), _apply_to_all,
-		func(pressed: bool) -> void: _apply_to_all = pressed))
+	# `.pad(10f)`: centred under the search row.
+	var apply_all := MindWidgets.check(_t("@locales.applytoall"), _apply_to_all,
+		func(pressed: bool) -> void: _apply_to_all = pressed)
+	apply_all.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	right.add_child(apply_all)
+	# `main.image().color(Pal.gray).height(3f).growX().top()` (`buildMain`).
+	var rule := ColorRect.new()
+	rule.color = Color8(0x45, 0x45, 0x45)
+	rule.custom_minimum_size.y = 3.0
+	right.add_child(rule)
 
 	# `t.add(main).center().grow()`.
 	# code-instantiated: the property cards are data-driven (locale bundles).
@@ -159,11 +191,20 @@ func _setup() -> void:
 	_main.add_theme_constant_override("h_separation", 8)
 	_main.add_theme_constant_override("v_separation", 8)
 	scroll.add_child(_main)
+	_main_scroll = scroll
+	# `main.add("@empty").center()`: mid-column when nothing is listed.
+	_empty_box = CenterContainer.new()
+	_empty_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_empty_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_empty_box.add_child(MindWidgets.label(_t("@empty")))
+	right.add_child(_empty_box)
 
 	# `cont.table(Tex.button, t -> { name field; value area; @add })`.
 	# code-instantiated: the property-add card is a fixed three-control block.
 	var add_panel := PanelContainer.new()
-	add_panel.theme_type_variation = "smallPane"
+	# `cont.table(Tex.button, ...).right()`: its own column, vertically centred.
+	add_panel.add_theme_stylebox_override("panel", MindThemeBuilder._button_nine_patch("button"))
+	add_panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var add_box := VBoxContainer.new()
 	add_panel.add_child(add_box)
 	_prop_name = MindWidgets.field(_t("@locales.property.name"))
@@ -175,8 +216,11 @@ func _setup() -> void:
 	add_box.add_child(_prop_value)
 	var add_prop := MindWidgets.icon_button("add", _t("@add"))
 	add_prop.pressed.connect(_add_property)
+	# `.padTop(10f).size(cardWidth, 50f)`.
+	add_prop.custom_minimum_size = Vector2(CARD_WIDTH, 50.0)
+	add_box.add_theme_constant_override("separation", 10)
 	add_box.add_child(add_prop)
-	right.add_child(add_panel)
+	row.add_child(add_panel)
 
 	# `buildTables()`: the selected locale always exists before the tables build.
 	if not _locales.has(_selected_locale):
@@ -193,6 +237,14 @@ func _build_langs() -> void:
 	for child in _langs.get_children():
 		_langs.remove_child(child)
 		child.queue_free()
+	# `langs.pane(p -> ...)`: the locale rows scroll, so the Tex.button frame
+	# may be narrower than a row (Java clips the trash icon on 1152x648).
+	var pane := ScrollContainer.new()
+	pane.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
+	pane.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_langs.add_child(pane)
+	var rows := VBoxContainer.new()
+	pane.add_child(rows)
 	for name in _available_locales():
 		var locale := str(name)
 		if not _locales.has(locale):
@@ -217,11 +269,19 @@ func _build_langs() -> void:
 		trash.custom_minimum_size = Vector2(50.0, 50.0)
 		trash.pressed.connect(_confirm_delete_locale.bind(locale))
 		line.add_child(trash)
-		_langs.add_child(line)
+		rows.add_child(line)
+	pane.custom_minimum_size.y = rows.get_combined_minimum_size().y
 	var add := MindWidgets.icon_button("add", _t("@add"))
 	add.custom_minimum_size = Vector2(250.0, 50.0)
 	add.pressed.connect(_add_locale_dialog)
 	_langs.add_child(add)
+
+
+func _show_empty(empty: bool) -> void:
+	if _main_scroll != null:
+		_main_scroll.visible = not empty
+	if _empty_box != null:
+		_empty_box.visible = empty
 
 
 ## `buildMain()`: the property cards of the selected locale.
@@ -234,8 +294,8 @@ func _build_main() -> void:
 	if not _locales.has(_selected_locale):
 		_locales[_selected_locale] = {}
 	var props: Dictionary = _locales[_selected_locale] if _locales[_selected_locale] is Dictionary else {}
+	_show_empty(props.is_empty())
 	if props.is_empty():
-		_main.add_child(MindWidgets.label(_t("@empty")))
 		return
 	var keys: Array = props.keys()
 	keys.sort()
@@ -255,8 +315,7 @@ func _build_main() -> void:
 			continue
 		_main.add_child(_property_card(key, value, status))
 		shown += 1
-	if shown == 0:
-		_main.add_child(MindWidgets.label(_t("@empty")))
+	_show_empty(shown == 0)
 
 
 ## One `Tex.whitePane` property card (`:217-300`).
