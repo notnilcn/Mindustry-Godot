@@ -5486,6 +5486,56 @@ impl MindCampaign {
         out
     }
 
+    /// `Planet.cloudMesh` (`MultiMesh(HexSkyMesh ..)`, Planets.java:49-52,
+    /// 127-130): one dictionary per layer with the hex shell arrays
+    /// (`vertices`/`normals`/`colors`/`indices`) and `speed` (`relRot =
+    /// Time.globalTime * speed / 40` degrees, HexSkyMesh.java:40-42). Empty
+    /// for planets without clouds. `Planet.drawClouds` (PlanetRenderer.java:149)
+    /// is the planet view's per-frame draw.
+    #[func]
+    pub fn planet_clouds(&self, planet: GString) -> VarArray {
+        let mut out = VarArray::new();
+        let Some(def) = self
+            .registry
+            .as_ref()
+            .and_then(|registry| registry.planet_by_name(&planet.to_string()))
+        else {
+            return out;
+        };
+        for layer in &def.cloud_layers {
+            let mesh = layer.build(def.radius);
+            let mut vertices = PackedVector3Array::new();
+            for vertex in &mesh.vertices {
+                vertices.push(Vector3::new(vertex[0], vertex[1], vertex[2]));
+            }
+            let mut normals = PackedVector3Array::new();
+            for normal in &mesh.normals {
+                normals.push(Vector3::new(normal[0], normal[1], normal[2]));
+            }
+            let mut colors = PackedColorArray::new();
+            for packed in &mesh.colors {
+                colors.push(Color::from_rgba8(
+                    (packed >> 24) as u8,
+                    (packed >> 16) as u8,
+                    (packed >> 8) as u8,
+                    *packed as u8,
+                ));
+            }
+            let mut indices = PackedInt32Array::new();
+            for index in &mesh.indices {
+                indices.push(*index as i32);
+            }
+            let mut entry = VarDictionary::new();
+            entry.set("vertices", &vertices);
+            entry.set("normals", &normals);
+            entry.set("colors", &colors);
+            entry.set("indices", &indices);
+            entry.set("speed", layer.speed);
+            out.push(&entry.to_variant());
+        }
+        out
+    }
+
     /// Hex planet mesh for the globe (`HexMesh.java:11`:
     /// `MeshBuilder.buildHex(planet.generator, 6, planet.radius, 0.2f)`):
     /// vertices, flat normals, per-tile colors (`Block.mapColor` with

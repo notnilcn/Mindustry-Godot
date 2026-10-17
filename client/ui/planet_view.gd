@@ -88,6 +88,11 @@ var _sectors: Array = []
 ## parent); the shared material's alpha tracks `params.uiAlpha`.
 var _orbits: Node3D = null
 var _orbit_material: StandardMaterial3D = null
+## `Planet.cloudMesh` layers (`HexSkyMesh` shells) and their `speed`s.
+var _clouds: Array = []
+var _cloud_speeds := PackedFloat32Array()
+## Arc `Time.globalTime` in ticks (advances while paused; `HexSkyMesh.relRot`).
+var _global_time := 0.0
 
 ## `Pal.gray` (`Pal.java:82`, `454545`) — the orbit line colour.
 const ORBIT_GRAY := Color(0.271, 0.271, 0.271)
@@ -157,6 +162,7 @@ func set_planet(name: String) -> bool:
 	_tile_corners = data.get("tile_corners", [])
 	_refresh_light()
 	_build_body()
+	_build_clouds()
 	_build_grid()
 	_build_atmosphere()
 	_build_orbits()
@@ -434,6 +440,8 @@ func _process(delta: float) -> void:
 		_orbits.visible = ui_alpha > 0.02
 	if absf(ui_alpha - _built_ui_alpha) > 0.02 or absf(_preset_pulse() - _built_pulse) > 0.04:
 		_rebuild_markers()
+	_global_time += delta * 60.0
+	_update_clouds()
 
 
 ## `Mathf.absin(Time.time, 10f, 1f)` (`PlanetDialog.java:463`): a 10 s
@@ -634,6 +642,64 @@ func _build_body() -> void:
 	body.visible = true
 
 
+## `Planet.drawClouds` (`PlanetRenderer.renderTransparent`, `PlanetRenderer.java:149`):
+## each `HexSkyMesh` layer of `cloudMesh` (`MindCampaign.planet_clouds`) after the
+## body and before the atmosphere (`render_priority` -7, -6; atmosphere -5).
+func _build_clouds() -> void:
+	for node_variant in _clouds:
+		(node_variant as Node).queue_free()
+	_clouds = []
+	_cloud_speeds = PackedFloat32Array()
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign == null or not campaign.has_method("planet_clouds"):
+		return
+	var layers: Array = campaign.call("planet_clouds", planet)
+	var shader: Shader = load("res://shaders/clouds.gdshader")
+	for layer_variant in layers:
+		var layer: Dictionary = layer_variant
+		var arrays := []
+		arrays.resize(Mesh.ARRAY_MAX)
+		arrays[Mesh.ARRAY_VERTEX] = layer.get("vertices", PackedVector3Array())
+		arrays[Mesh.ARRAY_NORMAL] = layer.get("normals", PackedVector3Array())
+		arrays[Mesh.ARRAY_COLOR] = layer.get("colors", PackedColorArray())
+		arrays[Mesh.ARRAY_INDEX] = layer.get("indices", PackedInt32Array())
+		var array_mesh := ArrayMesh.new()
+		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+		var material := ShaderMaterial.new()
+		material.shader = shader
+		material.render_priority = -7 + _clouds.size()
+		# code-instantiated: one shell per data-driven `HexSkyMesh` layer
+		# (`Planet.cloudMeshLoader`'s `MultiMesh`, Planets.java:49-52,127-130).
+		var instance := MeshInstance3D.new()
+		instance.name = "Clouds%d" % _clouds.size()
+		instance.mesh = array_mesh
+		instance.material_override = material
+		body.get_parent().add_child(instance)
+		_clouds.append(instance)
+		_cloud_speeds.append(float(layer.get("speed", 0.0)))
+	_update_clouds()
+
+
+## `HexSkyMesh.render`/`preRender` (`HexSkyMesh.java:45-63`): hidden while
+## `Mathf.zero(1 - uiAlpha, 0.01)`, `u_alpha = 1 - uiAlpha` on the viewed planet,
+## spun by `relRot = Time.globalTime * speed / 40` degrees on top of the body
+## frame, with the light direction rotated by the same angle.
+func _update_clouds() -> void:
+	var alpha := 1.0 - ui_alpha
+	var hidden := absf(alpha) <= 0.01
+	for index in _clouds.size():
+		var node: MeshInstance3D = _clouds[index]
+		node.visible = not hidden
+		if hidden:
+			continue
+		var rel := deg_to_rad(_global_time * _cloud_speeds[index] / 40.0)
+		node.rotation = Vector3(0.0, rel, 0.0)
+		var material := node.material_override as ShaderMaterial
+		material.set_shader_parameter("u_alpha", alpha)
+		material.set_shader_parameter("u_lightdir", _light_dir.rotated(Vector3.UP, rel))
+		material.set_shader_parameter("u_ambientColor", Vector3(_ambient.r, _ambient.g, _ambient.b))
+
+
 ## Vendored-art fallback (no hex generator data).
 func _build_body_billboard() -> void:
 	var texture := _load_loose("planets/%s" % planet, true)
@@ -683,9 +749,9 @@ func _build_grid() -> void:
 ## `MeshBuilder.buildHex(Color.white, 2, 1.5f)` — a sphere of radius 1.5 that
 ## covers the `radius + atmosphereRad{In,Out}` shell (the shader reads the
 ## mesh's surface position as the ray target); light is `Planet.getLightNormal()`.
-## Drawn AFTER the body (Java's `renderTransparent`): `render_priority` -7 vs
-## the body's -8, so the additive veil covers the planet's limb instead of
-## being hidden behind it.
+## Drawn AFTER the body and the clouds (Java's `renderTransparent`):
+## `render_priority` -5 vs the body's -8 and the cloud layers' -7/-6, so the
+## additive veil covers the planet's limb instead of being hidden behind it.
 func _build_atmosphere() -> void:
 	atmosphere.visible = false
 	_has_atmosphere = false
@@ -703,8 +769,8 @@ func _build_atmosphere() -> void:
 	atmosphere.mesh = sphere
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/atmosphere.gdshader")
-	# After the body (-8); Java composites the atmosphere over the planet.
-	material.render_priority = -7
+	# After the body (-8) and clouds (-7, -6); Java composites it over both.
+	material.render_priority = -5
 	var radius := float(data.get("radius", 1.0))
 	material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
 	material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))

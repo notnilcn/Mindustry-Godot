@@ -242,6 +242,9 @@ pub struct PlanetDef {
     pub mesh: MeshKind,
     /// Cloud mesh kind tag.
     pub cloud_mesh: Option<CloudMeshKind>,
+    /// The `MultiMesh(HexSkyMesh ..)` layers of `cloudMeshLoader`
+    /// (Planets.java:49-52,127-130); empty = no clouds.
+    pub cloud_layers: Vec<crate::render::g3d::hex_sky::HexSkyLayer>,
     /// Bloom effect enabled.
     pub bloom: bool,
     /// Listed in the planet access UI.
@@ -375,6 +378,7 @@ impl PlanetDef {
             generator: GeneratorKind::None,
             mesh: MeshKind::ShaderSphere,
             cloud_mesh: None,
+            cloud_layers: Vec::new(),
             bloom: false,
             accessible: true,
             visible: true,
@@ -594,6 +598,7 @@ pub fn load(
         planet.generator = GeneratorKind::Erekir;
         planet.mesh = MeshKind::Hex { detail: 5 };
         planet.cloud_mesh = Some(CloudMeshKind::MultiHex);
+        planet.cloud_layers = crate::render::g3d::hex_sky::erekir_clouds();
         planet.unlock.always_unlocked = true;
         planet.land_cloud_color = Rgba::from_hex("ed6542").unwrap_or(Rgba::WHITE);
         planet.atmosphere_color = Rgba::from_hex("f07218").unwrap_or(Rgba::WHITE);
@@ -688,6 +693,7 @@ pub fn load(
         planet.generator = GeneratorKind::Serpulo;
         planet.mesh = MeshKind::Hex { detail: 6 };
         planet.cloud_mesh = Some(CloudMeshKind::MultiHex);
+        planet.cloud_layers = crate::render::g3d::hex_sky::serpulo_clouds();
         planet.enemy_factory_activation_delay = 60.0 * 60.0 * 2.0;
         planet.launch_capacity_multiplier = 0.5;
         planet.sector_seed = 2;
