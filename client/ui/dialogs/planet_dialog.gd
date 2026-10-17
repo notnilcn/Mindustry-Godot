@@ -1614,8 +1614,10 @@ func _select_view_tile(tile: int) -> void:
 		var sector: Dictionary = sector_variant
 		if view.view_tile(sector) != tile:
 			continue
-		# `PlanetDialog.tap`: only `canSelect` sectors become the selection.
-		if not bool(sector.get("selectable", false)):
+		# `PlanetDialog.tap`: only `canSelect` sectors become the selection
+		# (the accelerator rules in `planetLaunch` mode, PlanetDialog.java:414).
+		var select_key := "accelerator_selectable" if _launch_mode == "planetLaunch" else "selectable"
+		if not bool(sector.get(select_key, false)):
 			return
 		_selected_sector = int(sector.get("id", -1))
 		_show_planet(_selected_planet)

@@ -4301,11 +4301,16 @@ impl MindCampaign {
             campaign.universe.update_loadout(settings, &core, None);
         });
         self.persist();
+        // `control.playSector(sector)` = the planet dialog's `_launch` order:
+        // prime the generator, stage the loadout, load the world, then start.
+        self.prime_sector_load(GString::from(pending.planet.as_str()), pending.sector);
         if let Some(mut host) = self.host() {
             host.bind_mut().set_pending_launch_core(
                 GString::from(core.as_str()),
                 GString::from(pending.resources.as_str()),
             );
+            host.bind_mut()
+                .load_sector(GString::from(pending.planet.as_str()), pending.sector);
         }
         let payload = serde_json::json!({
             "launch_core": core,

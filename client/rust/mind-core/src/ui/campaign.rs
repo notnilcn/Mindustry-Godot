@@ -1325,7 +1325,11 @@ pub fn annotate_globe(
         // items would be overridden), then the shared gates, and
         // `generator.allowAcceleratorLanding` = `planet.allowLaunchToNumbered`
         // (PlanetGenerator.java:98-100) for numbered sectors.
-        view.accelerator_selectable = if sector.has_base()
+        // `canLaunchTo` (PlanetDialog.java:610): vanilla never fills
+        // `launchCandidates`, so only the launch sector's own planet with
+        // `allowSelfSectorLaunch` (Serpulo, Planets.java:155) is reachable.
+        view.accelerator_selectable = if !def.allow_self_sector_launch
+            || sector.has_base()
             || preset.is_some_and(|preset| preset.add_starting_items)
             || !base_gate
         {
@@ -2109,6 +2113,24 @@ mod tests {
         assert!(
             !view(ground_zero).accelerator_selectable,
             "Ground Zero's addStartingItems preset is refused"
+        );
+
+        // Erekir has no `allowSelfSectorLaunch`: nothing is selectable there.
+        let erekir = campaign.planet_id_by_name("erekir").expect("erekir");
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(erekir).expect("erekir");
+        let erekir_views = annotate_globe(
+            sector_views(planet, registry.sectors(), &registry),
+            &registry,
+            planet,
+            &ctx,
+            None,
+            0,
+            &|_| Vec::new(),
+        );
+        assert!(
+            erekir_views.iter().all(|view| !view.accelerator_selectable),
+            "canLaunchTo: only allowSelfSectorLaunch planets"
         );
     }
 

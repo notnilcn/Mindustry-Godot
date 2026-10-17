@@ -346,6 +346,9 @@ impl MindCamera2D {
         self.follow_target = Some((core_x, core_y));
         self.landing_core = Some((core_x, core_y));
         self.landing_block = core_block.to_string();
+        // A landing replaces any accelerator launch cutscene (the sector
+        // switch at `launchDuration() - 6`): drop its camera pin.
+        self.accelerator_launch = None;
         self.cutscene = Cutscene::new(self.camera.camerascale.max(0.01));
         self.cutscene
             .show_landing(Box::new(CoreLandAnimator::new()));
