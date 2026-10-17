@@ -1764,7 +1764,7 @@
 "PAR-0293":{"t":"Loaded units came back with GroundAI instead of CommandAI (H04 T13)","s":"campaign","st":"verified","u":"2026-10-15","run":"runs/20261015-s3-H04-T13/"},
 "PAR-0294":{"t":"Java save import dropped units, fires and puddles (H04 T10, headless)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0295":{"t":"Prepared sector records never reached the live campaign (69820d5b)","s":"campaign","st":"verified","u":"2026-10-15","run":"runs/20261015-s3-H04-V1/"},
-"PAR-0296":{"t":"Interplanetary Accelerator is a stub","s":"campaign","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-J07-T4/"},
+"PAR-0296":{"t":"Interplanetary Accelerator is a stub","s":"campaign","st":"fixing","u":"2026-10-18","run":"runs/20261018-s3-L06-T7/"},
 "PAR-0297":{"t":"attackSectors never marked; numbered-sector threat 0 (H05 T1 ba24fe66)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0298":{"t":"Generated sectors ignored the sector polygon for building (H05 T3 ab9f87e8)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0299":{"t":"No toast for sector invasions (H05 T7 6781351f)","s":"campaign","st":"verified","u":"2026-10-15"},
@@ -1859,7 +1859,7 @@
 "PAR-0388":{"t":"Planet atmosphere drawn as a pre-body billboard quad: the veil was hidden and the rim thinner/darker (418a496b)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T2/"},
 "PAR-0389":{"t":"Tech tree rendered an opaque backdrop, generic map glyphs and an unframed planet header (aec5bde4)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T3/"},
 "PAR-0390":{"t":"HUD toasts had no shared 3.5 s slot (`HudFragment.scheduleToast`) (9ab01188)","s":"hud","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T5/"},
-"PAR-0391":{"t":"Campaign rule/generator residuals: `prebuildBase`, `allowCampaignRules`, Erekir generator rules/Schematics/Waves, abandon semantics, sector land-info gates (J07 T5 records)","s":"campaign","st":"seeded","u":"2026-10-17"},
+"PAR-0391":{"t":"Campaign rule/generator residuals: `prebuildBase`, `allowCampaignRules`, Erekir generator rules/Schematics/Waves, abandon semantics, sector land-info gates (J07 T5 records)","s":"campaign","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
 "PAR-0392":{"t":"ClassMap: ~120 parse-relevant aliases (Consumers/Drawers/Parts/Bullets/Effects/AIs/Blocks/Abilities/Data) were unreachable and `consumes` had no JSON parse (f63ef648, 13548c98)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s4-J09-T1/"},
 "PAR-0393":{"t":"Mod content missing from the quick-select binds and map previews (base-only registries) (f45ed9ac)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s4-J09-T3/"},
 "PAR-0394":{"t":"Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)","s":"world","st":"blocked","u":"2026-10-17","run":"runs/20261017-s4-J09-T4/"},
@@ -1870,7 +1870,7 @@
 "PAR-0399":{"t":"Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0400":{"t":"`Block.depositCooldown` ignored (global deposit gate only) (60e34db5)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T5/"},
 "PAR-0401":{"t":"Power turrets report `rangeChange`/`minRangeChange` = 0 (TurretAmmo::Power kept only the bullet id) (8986959a)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"},
-"PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261017-s2-J04-T6/"},
+"PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
 "PAR-0403":{"t":"Load dialog cards render white titles and a slate body with tiny buttons (23828d01)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T5/"},
 "PAR-0404":{"t":"Editor draws buildings as unrotated base regions (grey squares) (061ddaba)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T1/"},
 "PAR-0405":{"t":"Editor block palette selected entry has no accent frame (d2176386)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T2/"},
@@ -1892,7 +1892,7 @@
 "PAR-0421":{"t":"Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)","s":"editor","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T3/"},
 "PAR-0422":{"t":"Reused dialogs (editor Map Info, editor menu/import/export, research root select) stacked a duplicate body on every reopen","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T1/"},
 "PAR-0423":{"t":"ui_widgets_check.gd is red on main (3 keybind asserts: reset-all button, 'A / D', key label width; _build_prompt arity script error) and tools/ci.sh never runs it","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
-"PAR-0424":{"t":"Generated Serpulo sector layout differs from Java (sector 0 via editor Sector Generate: different land/water/ice layout; no derelict ruins in the Godot editor generation)","s":"world","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L02-T1/"},
+"PAR-0424":{"t":"Generated Serpulo sector layout differs from Java (sector 0 via editor Sector Generate: different land/water/ice layout; no derelict ruins in the Godot editor generation)","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L02-T1/"},
 "PAR-0425":{"t":"Clicking the highlighted placement-palette block does not deselect it (Java toggles the selection off)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
 "PAR-0426":{"t":"Core Database rows sit 10-16 px lower than Java","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0427":{"t":"Content info prints '0 %' where Java prints '0%' and wraps the description wider (stat formatting)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
@@ -1905,11 +1905,13 @@
 "PAR-0434":{"t":"World Processors empty-state text left-aligned (Java centres it)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
 "PAR-0435":{"t":"Settings Graphics list starts 9 px higher than Java","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T1/"},
 "PAR-0436":{"t":"Planet atmosphere rim drawn on the dark side too (Java glows only on the lit side)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L03-T2/"},
-"PAR-0437":{"t":"Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261018-s3-L06-T3/"},
+"PAR-0437":{"t":"Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L06-T7/"},
 "PAR-0438":{"t":"Save Game -> New Save with a typed name writes no file, and the dialog shows the raw key 'save.name'","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
 "PAR-0439":{"t":"Cultivator content info has no Affinities row: the sim gives the attribute -1 and no spores attribute","s":"world","st":"seeded","u":"2026-10-18","run":"runs/20261018-s2-L05-T3/"},
 "PAR-0440":{"t":"Game Over left the HUD drawn behind it (MindUi.hud_set_visible only stored a flag)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T5/"},
-"PAR-0441":{"t":"Tech tree node view clipped above the bottom button row (Java draws under the buttons)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T5/"}
+"PAR-0441":{"t":"Tech tree node view clipped above the bottom button row (Java draws under the buttons)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L03-T5/"},
+"PAR-0442":{"t":"Campaign game-over title shows the preset id ('Sector groundZero lost!') instead of the localized name ('Ground Zero')","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
+"PAR-0443":{"t":"Planet page sector grid/selection not faded by uiAlpha when zoomed out","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.5/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -3900,7 +3902,8 @@
 "2026-10-17 round J (J05 T4, 584a0e30): the twin walk showed the core's Capacity bar missing (runs/20261016-J-twin/diff/49-hovercore-side.png). BarExtras + family rows now emit core capacity (CoreBlock.java:148-152), drill drillspeed (Drill.java:117-119), HeatProducer/Conductor/Crafter heat, UnitFactory progress (:121-125) and the item/liquid removeBar families (ItemSource/LiquidSource/Unloader/DirectionalUnloader/LiquidVoid/LiquidJunction); the player-team guard was dropped (Java's hovered() shows any building). Verified with the real pointer: core Health+Capacity, drill Health/Water/Drill Speed, battery Power 0, conduit Liquid, heat heat (runs/20261017-s4-J05-T4/). Residual families seeded as PAR-0379."
 ],
 "PAR-0296":[
-"2026-10-17 round J (J07 T4 record, runs/20261017-s5-J07-T4/): correction — vanilla never populates Planet.launchCandidates, so the Accelerator (self-sector launch, PlanetDialog.java:610) launches to the same planet, not to Erekir; the plan's Erekir acceptance premise was wrong. Port gaps listed: progress/item-capacity state, canLaunch + config spec, planet-launch mode, core/resource carry, LaunchAnimator cutscene (Accelerator.java:42,129,276,322). Stays seeded for a follow-up."
+"2026-10-17 round J (J07 T4 record, runs/20261017-s5-J07-T4/): correction — vanilla never populates Planet.launchCandidates, so the Accelerator (self-sector launch, PlanetDialog.java:610) launches to the same planet, not to Erekir; the plan's Erekir acceptance premise was wrong. Port gaps listed: progress/item-capacity state, canLaunch + config spec, planet-launch mode, core/resource carry, LaunchAnimator cutscene (Accelerator.java:42,129,276,322). Stays seeded for a follow-up.",
+"2026-10-18 L06 T7 (eeedfbb1, 4d52cb3b, ca701a9c, 52e6e6c4): accelerator block (nucleus core build, 25000 capacity, updateTile, progress I/O, canLaunch, launch step), planetLaunch mode, allowSelfSectorLaunch, nucleus + resource carry, launch cutscene; Godot walk launched to sector 63 with 500 titanium (accelerator/power/items/tap staged; destination + Launch real clicks). Open: (1) input/desktop.rs config_spec still opens the generic item panel — one-line hook `if def.kind == BlockKind::Accelerator { drop(guard); host.bind_mut().accelerator_tapped(x, y); return None; }`; (2) Java capture needs a throwaway campaign profile (rule 7); (3) unported visuals: launch lightning, dust rings, drawLaunch rings/clouds, white fade, info text."
 ],
 "PAR-0349":[
 "2026-10-17 round J (J04 T6, 8986959a): Door.updateTile now refuses to close while Units.anyEntities(tile) via a grounded non-leg-step hitbox scan (Door.java:49-53); test door_refuses_to_close_with_a_unit_on_it covers the raw config path. Run runs/20261017-s2-J04-T6/."
@@ -5855,7 +5858,8 @@
 "closed 2026-10-18: 52c0b27f (L01 T2): fill dialogs centre cont like Arc Dialog (Dialog.java:209-211), cont_top where Java calls cont.top(); pause 3 px, editor menu 2 px, Game Over <=4 px from Java (runs/20261018-s2-L01-T2/notes.md; Game Over staged by debug_kill_building after a real-input Play)."
 ],
 "PAR-0362":[
-"closed 2026-10-18 (L08 T1, c8d326ab..ee745bb3): every red golden suite green with the moving commit + Java citation in the commit body and parity/golden_manifest.json `reasons`; main had 4 more red suites than the plan listed (entitymeta, combat, sim_core_determinism, spine/run-all T0). audio/combat harness spawned at half-tile centres (wrong row since H01 T1) — the missing tick-4 explosionArtillery was that, not despawn timing. Spine checksum a1a7b96167c9718d -> 3e48c583a94fbea4 from ddeae35d (TeamId::SHARDED = 1, Team.java). Planet generation checksums deliberately left red for the L02/L06 batched regen."
+"closed 2026-10-18 (L08 T1, c8d326ab..ee745bb3): every red golden suite green with the moving commit + Java citation in the commit body and parity/golden_manifest.json `reasons`; main had 4 more red suites than the plan listed (entitymeta, combat, sim_core_determinism, spine/run-all T0). audio/combat harness spawned at half-tile centres (wrong row since H01 T1) — the missing tick-4 explosionArtillery was that, not despawn timing. Spine checksum a1a7b96167c9718d -> 3e48c583a94fbea4 from ddeae35d (TeamId::SHARDED = 1, Team.java). Planet generation checksums deliberately left red for the L02/L06 batched regen.",
+"2026-10-18 wave 3 batched regen (467b6081..3fef57cd): planet checksums (Floor.decoration 38dc36f1 + Arc Simplex.perm 341d9f74), simplex, content_ids (Accelerator.init capacity 25000), ui/campaign (allow_campaign_rules, accelerator field), render_menu_world — each delta attributed at boundary commits; mind-core 2802/0, goldens 97 PASS, regen_goldens --check 0 FAIL."
 ],
 "PAR-0411":[
 "closed 2026-10-18 (L02 T1, 38dc36f1): explicit Floor.decoration from Blocks.java:705-822 (30 floors, default air), mod `decoration` resolved in a deferred finishParsing-style pass, Serpulo `dec` fallback applied; Caldera survival MATCH (runs/20261018-s3-L02-T1/diff/42-survival-side.png). Generation goldens regenerate in the L06 batch."
@@ -5907,6 +5911,18 @@
 ],
 "PAR-0430":[
 "closed 2026-10-18 (896f1622): Custom Rules check rows use the category pad(5), 42 px apart like Java."
+],
+"PAR-0402":[
+"closed 2026-10-18 (round L L06 T1-T5): assembler gate/hand-off/commandPos/areaSize 13 (bfc8d589), router ControlBlock + playerControllable (f9403276), suppression + findPierce/findLaser (fcf2e192), tether spawnerUnitId + Ability.data save rev 4 (b71cec34), DrawLiquidOutputs sides (ebe92178). itemEffMultiplier row via L05 T3; generator effects stay with PAR-0399 (L04 T5)."
+],
+"PAR-0391":[
+"closed 2026-10-18 (L06 T6.1-T6.5: b73b95a0, 878e2bb3, 5e70eed4, f6ca1456, 3b64692d): prebuildBase/allowCampaignRules + difficulty gate, Erekir generator rules in the structures pass, abandon plays the game-over path (PlanetDialog.java:1149-1170), showSectorLandInfo gate (CoreBlock.java:414), HexSkyMesh clouds (twin frames runs/20261018-s3-L06-T6.5/). Residual: the prebuildBase base rebuild itself (Control.java:230-288) unported; Godot cloud cells read lighter than Java."
+],
+"PAR-0424":[
+"closed 2026-10-18 (341d9f74): Arc Simplex.perm now matches the pinned jar, so generated terrain matches Java; the editor Sector Generate's missing ruins are L07 T3.2."
+],
+"PAR-0437":[
+"closed 2026-10-18 (245a0fe9): repair tower heals damaged friendly units in range and stops while heal-suppressed (RepairTower.java:57-86); build turret efficiency 0 while suppressed (BuildTurret.java:132-134); failing-first tests."
 ]
 }
 }
