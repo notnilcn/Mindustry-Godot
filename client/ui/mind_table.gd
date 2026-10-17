@@ -16,6 +16,11 @@ var _current_row := 0
 var _defaults: MindCell = null
 var _background_name := ""
 var _margin_value := 0.0
+## Arc `Table.top()`: the grid hugs the top edge instead of the default
+## `Align.center` (`Table.java:39`). Dialogs map `cont.top()` onto this.
+var table_top := false
+## Arc `Table.left()`: the grid hugs the left edge.
+var table_left := false
 
 
 ## Layout invalidation (L01 T1), the port of Arc's `invalidateHierarchy`
@@ -41,6 +46,18 @@ var _margin_value := 0.0
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_SORT_CHILDREN:
 		_sort_children()
+
+
+## `Table.left()` / back to centre alignment.
+func set_table_left(value: bool) -> void:
+	table_left = value
+	queue_sort()
+
+
+## `Table.top()` / back to centre alignment.
+func set_table_top(value: bool) -> void:
+	table_top = value
+	queue_sort()
 
 
 ## Marks this table's minimum size and layout dirty and propagates up the parent
@@ -202,7 +219,8 @@ func _sort_children() -> void:
 	for value in row_heights:
 		grid_height += value
 	var origin := Vector2(
-		maxf(0.0, (size.x - grid_width) * 0.5), maxf(0.0, (size.y - grid_height) * 0.5)
+		0.0 if table_left else maxf(0.0, (size.x - grid_width) * 0.5),
+		0.0 if table_top else maxf(0.0, (size.y - grid_height) * 0.5)
 	)
 
 	for placement in grid.placements:

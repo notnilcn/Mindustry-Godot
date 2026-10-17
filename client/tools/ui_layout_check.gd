@@ -62,6 +62,7 @@ func _run() -> void:
 	await _case_scroll()
 	await _case_nested_filter()
 	await _case_hidden_and_margin()
+	await _case_table_align()
 	print("LAYOUTCHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
 
@@ -220,3 +221,24 @@ func _case_hidden_and_margin() -> void:
 	_check(_near(table.size, Vector2(120, 70)), "margin(10) grows the table by 20x20 (got %s)" % table.size)
 	_check(_near(a.position, Vector2(10, 10)), "the cell sits inside the margin (got %s)" % a.position)
 	center.free()
+
+
+func _case_table_align() -> void:
+	print("case 5: Table.top()/left() (cont.top(), rule rows) and the centred default")
+	var holder := Control.new()
+	holder.size = Vector2(400, 300)
+	root.add_child(holder)
+	var table := MindTable.new()
+	table.size = Vector2(400, 300)
+	holder.add_child(table)
+	var cell := _leaf(100, 50)
+	table.add(cell)
+	await _frames()
+	_check(_near(cell.position, Vector2(150, 125)), "default align centres the grid (got %s)" % cell.position)
+	table.set_table_top(true)
+	await _frames()
+	_check(_near(cell.position, Vector2(150, 0)), "set_table_top hugs the top edge (got %s)" % cell.position)
+	table.set_table_left(true)
+	await _frames()
+	_check(_near(cell.position, Vector2(0, 0)), "set_table_left hugs the left edge (got %s)" % cell.position)
+	holder.free()

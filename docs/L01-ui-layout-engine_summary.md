@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-# L01 — UI layout engine: minimum-size propagation and dialog centring (wave 1: T4, T1, T2)
+# L01 — UI layout engine: minimum-size propagation and dialog centring (final: T1–T4)
 
 Session A (session 2: worktree `Mindustry-Godot-session2`, branch `parity/session-2`, display `:11`,
 bridge 6980). Pure GDScript + harness, so no cargo changes. A fresh `tools/build.sh` (flock) and
@@ -13,7 +13,7 @@ bridge 6980). Pure GDScript + harness, so no cargo changes. A fresh `tools/build
 | T4 text injection | **done** | `godot_input text` repaired in the runtime autoload; `tools/gmcp.py --text`, twin `GT`. Proven on the Custom Game search. |
 | T1 min-size propagation | **done** | Root cause was bigger than the plan's diagnosis (see below). `ui_layout_check.gd` added and wired into `tools/ci.sh`. PAR-0410 fixed in-engine. |
 | T2 fill-dialog centring | **done** | Pause 3 px, editor menu 2 px, Map Info 3 px, Game Over ≤ 4 px vs Java. |
-| T3 re-verify workaround dialogs | **pending (wave 2)** | Not started, by schedule. |
+| T3 re-verify workaround dialogs | **done (wave 2)** | Every plan dialog captured with real input against a fresh Java batch; layout-engine and shared-skin mismatches fixed, the rest recorded as items (below). |
 
 ## Commits
 
@@ -23,6 +23,13 @@ bridge 6980). Pure GDScript + harness, so no cargo changes. A fresh `tools/build
 52c0b27f L01 T2: fill BaseDialog bodies centre like Arc Dialog cont
 ```
 (`766e9cb9 L08 T5` landed in the same wave; its record is in the wave report, as L08 is session B's summary.)
+
+Wave 2:
+```
+90ca8f77 L03 T1 prep: ui_widgets_check green and run by tools/ci.sh      (PAR-0423)
+aace6aca L01 T3 prep: Java text entry by XSendEvent (tools/java_xkeys.py, twin JT)
+173e1bff L01 T3: dialog acceptance pass vs Java (cont fill, fields, scroll bar, load cards)
+```
 
 ## T4 — text entry for tests
 
@@ -140,6 +147,9 @@ input.
 None for T1/T2/T4.
 
 ## Pre-existing failures (verified, not caused by this work)
+
+Resolved in wave 2 (90ca8f77, PAR-0423): the stale keybind/prompt expectations were updated against the
+(Java-correct) dialogs and the check now runs in `tools/ci.sh`.
 `ui_widgets_check.gd` (not run by `tools/ci.sh`) reports 65 ok and 3 FAILs: "keybind dialog renders the reset-all
 button", "axis binding renders min / max (A / D)" and "key label renders with a real width". It then stops on
 `SCRIPT ERROR: Invalid call to function '_build_prompt' … Expected 4 argument(s)`. The output is identical before
@@ -151,16 +161,69 @@ and after the T2 changes. The drift comes from J06 T4 (keybind axis markup) and 
 - `GT` (text) and `GC` (with the real pointer) are the T3 input path.
 
 ## Ledger changes to apply
+Wave 1 (applied by the coordinator): PAR-0410/PAR-0383 → fixing, PAR-0418/PAR-0419 verified, PAR-0422 (duplicate body
+on reopen) verified, PAR-0423 (ui_widgets_check red + not in ci.sh) new.
+
 | Item | Change | Evidence |
 |---|---|---|
-| PAR-0410 (F-K2 search empties grid) | fixed in code (T1); close after T3's Java pair | `runs/20261018-s2-L01-T1/godot/09-search-sand.png`, `ui_layout_check.gd` |
-| J06 T7 "Map Play portrait previews clip" | fixed (T1); close after T3's Java pair | `runs/20261018-s2-L01-T1/godot/41-*.png` |
-| new "Editor Map Info at the bottom on first open" | fixed (T1 + T2): centred on every open, 3 px from Java | `runs/20261018-s2-L01-T2/{java,godot}/mapinfo.png` |
-| new "Fill dialogs top-align their content (pause, editor menu, Game Over)" | fixed (T2), ±4 px | `runs/20261018-s2-L01-T2/notes.md` |
-| new | Reused dialogs (editor Map Info/menu/import/export, research root select) stacked a second body on reopen → fixed (T1) | `runs/20261018-s2-L01-T1/godot/editor-mapinfo-2.png` vs `-reopen.png` |
-| new (harness) | `ui_widgets_check.gd` red on main (keybind ×3 + `_build_prompt` arity) and absent from `ci.sh` | `/tmp` log quoted above |
+| PAR-0410 (filtered Custom Game grid empty) | close: Java pair MATCH (tile centred, 4 px) | `runs/20261018-s2-L01-T3/{java,godot}/custom-sand.png`, notes.md |
+| PAR-0383 (Map Play portrait previews clip, J06 T7) | close: Caldera/anthill/sandbox Map Play MATCH | `runs/20261018-s2-L01-T3/{java,godot}/mapplay-*.png` |
+| PAR-0423 | close: check green, run by `tools/ci.sh` | 90ca8f77 |
+| new | Core Database rows sit 10–16 px lower than Java | `runs/20261018-s2-L01-T3/diff/coredb-side.png` |
+| new | Content info: stat values `0 %` vs Java `0%`; description wraps wider (L05 stat formatting) | `diff/content-copper-side.png` |
+| new | Research: bottom buttons ~14 px low; Planet Items button 41 px vs Java 71 px | `diff/research-side.png` |
+| new | Editor Map Info: description is a boxed unwrapped TextEdit (Java wrapped areaField); buttons separate and bordered (Java one framed pane, scrolls) — L03 T3/L07 | `diff/ed-info-side.png` |
+| new | Custom Rules: check-row pitch 32 vs Java 42; Banned Blocks/Units buttons lack Java's icon and are 43 vs ~50 px | `diff/rules-banned-side.png` |
+| new | Banned Blocks: left pane narrower, `<empty>` top instead of centred, title not red | `diff/ed-banned-side.png` |
+| new | Waves dialog: stacked-bar graph vs Java line graph; lowercase uncoloured unit names, no icons; button order Edit/Random/Back vs Java Back/Edit/Random — L07 | `diff/ed-waves-side.png` |
+| new | Objectives dialog: "Objectives" label instead of Java's empty grid canvas — L07 | `diff/ed-objectives-side.png` |
+| new | Locale Bundles: different arrangement — L07 | `diff/ed-locales-side.png` |
+| new | Map Load: 2-column filename buttons without previews/title text, Back vs Java "Select a map to load" 3-column preview cards + Cancel — L07 | `diff/ed-mapload-side.png` |
+| new | Logic editor: "Built-in Variables" one clipped line overlapping Add (Java wraps to 2 lines); Java pauses behind the editor | `diff/logic-editor-side.png` |
+| new | World Processors: empty-state text left-aligned (Java centred) | `diff/ed-processors-side.png` |
+| note | Java's title rule sits at y=27 in Load/Core Database/editor dialogs vs y=30 in Custom Game/pause (3 px); the port uses 30 | — |
+| note | Map Play title rule 5 px low (48 vs 43); rest of Map Play ≤ 3 px | `diff/mapplay-caldera-side.png` |
 
-## Done criteria (wave 1 scope)
-T4 landed first. T1 and T2 landed, with `ui_layout_check.gd` in the import gate (`tools/ci.sh`). T2 acceptance
-frames are within ±4 px of Java. Still open (wave 2): T3 acceptance frames, then PAR-0410/J06 T7 closure with Java
-pairs.
+## Wave 2 — T3 (session 2, 2026-10-18)
+
+### Method
+One Java batch on :11 (`twin_launch`/`twin_stop`; in-game logic frames in a sub-run with `backgroundpause` flipped
+offline, ORIGINAL `settings.bin` restored afterwards). Java text entry needed a new harness path: XTEST keys never
+reach the Java client on the session Xvfb (the X focus stays on Godot), so `tools/java_xkeys.py` / twin `JT` sends
+XSendEvent keys (aace6aca). Godot: GC/GW/GP/GT/GK only. Staging: `place_block` (logic editor), `debug_kill_building`
+(Game Over). Per-frame verdicts: `runs/20261018-s2-L01-T3/notes.md`.
+
+### Fixes (173e1bff), all Java-cited
+- Engine: `content_table()` roots fill `cont` (Arc `add(cont).expand().fill()`, Dialog.java:209) and align their grid
+  themselves; `cont.top()` → new `MindTable.table_top`, plus `table_left` (`Table.top()/left()`); `cont.defaults().pad(3)`
+  (Dialog.java:213); shell Layout separation 6 / title bottom inset 8. These made the Banned Blocks lists fill and the
+  Custom Game/Load cards land within 3 px.
+- Escape closes a dialog whose text field has focus (arc `Dialog.closeOnBack`, Dialog.java:458-470).
+- Theme: `LineEdit` = `defaultField` underline 9-patch (Styles.java:398-409); `VScrollBar` = `defaultPane` 24 px bar
+  (Styles.java:358-361); `GRAY_PANEL`/`_DARK` = `Pal.darkestGray`/`darkestestGray` (Styles.java:113-114); placeholder
+  hidden while focused (TextField.java:340).
+- Search fields focused on show: Custom Game, Load Game, Schematics, Custom Rules (MapListDialog.java:367,
+  LoadDialog.java:277, SchematicsDialog.java:704, CustomRulesDialog.java:130-132).
+- Load Game: 446x220 cards, `growY` pane, slot margins, Gamemode filter order (LoadDialog.java:66-184,
+  Gamemode.java:10-27). Map Play: `Tex.button` 12 px mode-frame padding.
+- Custom Rules: natural-width column, plain left-aligned checks (CustomRulesDialog.java:126-144, 476-479); `MindCheck`
+  raises its `custom_minimum_size` to its row (Button ignores a script `_get_minimum_size`).
+- Banned content content-sized (BannedContentDialog.java:55-128); Resize centred (MapResizeDialog.java:21-50); Generate
+  renders `@filters.empty` markup (was the literal `[lightgray]`); World Processors Back first
+  (MapProcessorsDialog.java:32-33).
+
+### Tests
+`bash tools/godot.sh --headless --editor --quit --path client` clean; `ui_layout_check.gd` failed=0 (new case 5:
+table top/left/centre); `ui_widgets_check.gd` failed=0. T2 frames re-measured after the shell changes: pause 3 px,
+editor menu 3 px, Map Info 1–3 px, Game Over ≤ 3 px.
+
+### Deviations
+- Custom Rules rows: Java places checks directly in the category table; the port keeps one row table per rule and
+  left-aligns it (`table_left`), which reproduces the column but not Java's 42 px row pitch (item above).
+- Godot cannot overlap cells the way Java's Schematics pane runs under the button row; the port clips above the
+  buttons (recorded, not an item).
+
+## Done criteria
+T4 landed first. T1 and T2 landed with `ui_layout_check.gd` (and, from wave 2, `ui_widgets_check.gd`) in
+`tools/ci.sh`. T2 frames within ±4 px of Java. T3: every plan dialog captured with real input and paired with Java;
+each is MATCH or a recorded item. PAR-0410 and PAR-0383 close with Java pairs. L01 is complete.

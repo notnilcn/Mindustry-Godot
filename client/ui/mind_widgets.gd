@@ -208,6 +208,11 @@ static func field(placeholder: String = "") -> LineEdit:
 	var result := LineEdit.new()
 	result.placeholder_text = placeholder
 	result.theme_type_variation = "defaultField"
+	# Arc draws `messageText` only while the field is unfocused (TextField.java:340);
+	# Godot keeps the placeholder over a focused empty field. The search
+	# dialogs focus their field on show (L01 T3), so hide it while focused.
+	result.focus_entered.connect(func() -> void: result.placeholder_text = "")
+	result.focus_exited.connect(func() -> void: result.placeholder_text = placeholder)
 	return result
 
 

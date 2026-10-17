@@ -23,8 +23,12 @@ const BLACK_5 := Color(0.0, 0.0, 0.0, 0.5)
 const BLACK_6 := Color(0.0, 0.0, 0.0, 0.6)
 const BLACK_8 := Color(0.0, 0.0, 0.0, 0.8)
 const BLACK_9 := Color(0.0, 0.0, 0.0, 0.9)
-const GRAY_PANEL := Color(0.16, 0.18, 0.21, 0.95)
-const GRAY_PANEL_DARK := Color(0.10, 0.11, 0.13, 0.95)
+## `Styles.grayPanel = whiteui.tint(Pal.darkestGray)` and `grayPanelDark =
+## whiteui.tint(Pal.darkestestGray)` (`ui/Styles.java:113-114`, `Pal.java:61-62`);
+## the port's bluish 95% values showed as a (39,44,51) save card against Java's
+## (25,25,25) in L01 T3 (java/load.png).
+const GRAY_PANEL := Color(0.1, 0.1, 0.1, 1.0)
+const GRAY_PANEL_DARK := Color(0.05, 0.05, 0.05, 1.0)
 
 ## Manifest group name -> Godot base class for type variations.
 const GROUP_BASE_TYPES := {

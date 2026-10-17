@@ -845,3 +845,18 @@ Run: runs/20261014-s3-verify3/ (java-*.png).
 - Proof (`runs/20261018-s2-L01-T2`, display `:11`): with the real pointer parked over the Godot game window
   (`GP 900 500`), `JW 230 289` opened Java's editor maps dialog on the first click (`java/editor-maps.png`), and the
   same cross-then-`JW 139 500` opened Map Info (`java/mapinfo.png`). No swallowed clicks in the batch.
+
+## 2026-10-18 — round L, session 2 (L01 T3): Java text entry and keys work by XSendEvent (`JT`)
+
+- Root cause of "Java text fields take no characters" / "keyboard never reaches the client" on the session Xvfb:
+  the X input focus is the Godot window (`get_input_focus()` = 0x600002 while Java was 0xa0000f), so XTEST key
+  events (pynput, `java_input.py type|key|seq`) go to Godot. A real click focuses the Arc field (caret shows) but
+  no characters arrive.
+- Fix: `tools/java_xkeys.py` sends KeyPress/KeyRelease to the Java window with XSendEvent; SDL accepts them. twin
+  `JT sand`, `JT @BackSpace`, `JT @Escape`, `JT @space`. Proven: Custom Game search `sand`, Load Game search
+  `molten`, Custom Rules search `banned` (`runs/20261018-s2-L01-T3/java/{custom-sand,load-search,rules-banned}.png`).
+- Escape by `JT @Escape` closes the top Java dialog, but from an editor Map Info sub-dialog it returns to the editor
+  (Map Info hides itself when it opens a sub-dialog): reopen menu -> Map Info per sub-dialog.
+- A synthetic FocusIn does NOT clear background pause; for in-game frames flip `backgroundpause` offline with
+  `SetSettings` (2026-10-14 entry), relaunch into a sub-run dir (so `twin_launch` does not overwrite the original
+  `settings.bin.bak`), and copy the ORIGINAL backup back after `twin_stop` (done in `runs/20261018-s2-L01-T3/logic`).

@@ -92,6 +92,11 @@ func shown() -> void:
 	if _field != null:
 		_field.text = ""
 	_rebuild()
+	# `MapListDialog.show`: desktop focuses the search field
+	# (`Core.scene.setKeyboardFocus(searchField)`, MapListDialog.java:367-369), so
+	# the field shows a caret instead of its `@editor.search` message text.
+	if _field != null:
+		_field.grab_focus.call_deferred()
 
 
 ## `buildButtons()` hook (`EditorMapsDialog` adds New Map / Import Map).

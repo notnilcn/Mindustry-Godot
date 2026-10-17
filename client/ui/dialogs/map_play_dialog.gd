@@ -103,10 +103,12 @@ func _build() -> void:
 	# code-instantiated: `selmode.table(Tex.button, modes -> ...)` frame.
 	var mode_frame := PanelContainer.new()
 	var frame_box := _pane_box(Color.BLACK, PANE_OUTLINE_GRAY)
-	frame_box.content_margin_left = 6.0
-	frame_box.content_margin_right = 6.0
-	frame_box.content_margin_top = 6.0
-	frame_box.content_margin_bottom = 6.0
+	# `Tex.button` pads its content 12 px (the 9-patch splits): the Java mode
+	# box is 304x132 around the 2x2 140x54 buttons (java/mapplay-caldera.png).
+	frame_box.content_margin_left = 12.0
+	frame_box.content_margin_right = 12.0
+	frame_box.content_margin_top = 12.0
+	frame_box.content_margin_bottom = 12.0
 	mode_frame.add_theme_stylebox_override("panel", frame_box)
 	var mode_box := MindWidgets.table()
 	mode_frame.add_child(mode_box)

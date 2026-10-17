@@ -43,6 +43,10 @@
 #   JD x1 y1 x2 y2 [button] [ms]   drag
 #   JK key NAME [ms] / JK keydown NAME / JK keyup NAME
 #   JS name             raise + capture the window -> $RUN/java/name.png
+#   JT 'text' [@Key ...]  type into Java by XSendEvent (tools/java_xkeys.py):
+#                       XTEST keys never reach Java on the session Xvfb
+#                       (the X focus stays on Godot); focus the field with JW
+#                       first. `JT @BackSpace`, `JT @Escape`, `JT @space`.
 #
 # Godot leg (viewport coordinates by default):
 #   GC x y [button] [coords]   dialog click — one godot_input `sequence`
@@ -370,6 +374,11 @@ JS() { # JS name — raise + capture into $RUN/java/name.png
   sleep 0.2
   DISPLAY="$TWIN_DISPLAY" timeout 30 "$TWIN_PARITY_PY" "$TWIN_SKILL_SCRIPTS/capture_screen.py" \
     --window-title "$TWIN_JAVA_TITLE" --output "$TWIN_RUN/java/$name.png"
+}
+
+JT() { # JT 'text'|@Keysym ... — keys to the Java window by XSendEvent
+  DISPLAY="$TWIN_DISPLAY" timeout 30 "$TWIN_PARITY_PY" -I "$TWIN_ROOT/tools/java_xkeys.py" \
+    --title "$TWIN_JAVA_TITLE" "${@:?JT text|@Keysym ...}"
 }
 
 # --- Godot leg ---------------------------------------------------------------

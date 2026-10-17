@@ -124,6 +124,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 ## otherwise consume the first press); `closeOnBack` on the prompt dialogs.
 func _input(event: InputEvent) -> void:
 	if _active_prompt == null:
+		_release_field_on_escape(event)
 		return
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo or key.keycode != KEY_ESCAPE:
@@ -133,6 +134,21 @@ func _input(event: InputEvent) -> void:
 	if cancel.is_valid():
 		cancel.call()
 	get_viewport().set_input_as_handled()
+
+
+## Arc's `closeOnBack` key listener sits on the dialog and still sees ESC while
+## a text field inside it has keyboard focus (`Dialog.closeOnBack`, arc
+## `Dialog.java:455-470`; TextField does not consume escape). A focused Godot
+## `LineEdit`/`TextEdit` accepts the key in `gui_input`, so drop its focus
+## before the GUI pass and let `_unhandled_key_input` close the dialog (the
+## search dialogs focus their field on show since L01 T3).
+func _release_field_on_escape(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or key.keycode != KEY_ESCAPE:
+		return
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit:
+		focus.release_focus()
 
 
 func _on_escape() -> bool:

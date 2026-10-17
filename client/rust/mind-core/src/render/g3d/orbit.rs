@@ -163,6 +163,38 @@ pub fn planet_light(planets: &[PlanetDef], index: usize, seconds: f32) -> Planet
     }
 }
 
+/// An orbit loop's centre (`PlanetRenderer.renderOrbit`, `PlanetRenderer.java:
+/// 171-179`: `parent.position` in world space) expressed in the viewed
+/// planet's mesh frame, where the port keeps the planet at the origin and the
+/// camera on the sector's *unrotated* tile vector. Java rotates both the mesh
+/// (`Planet.getTransform`: `rotate(Y, getRotation())`, `Planet.java:407`) and the
+/// camera target (`Planet.lookAt`: `tile.rotate(Y, -getRotation())`, `:692-694`)
+/// while the orbit stays in world space, so the world offset must be turned by
+/// `+getRotation()` like `planet_light`'s sun direction. The XZ circle itself is
+/// invariant under a Y rotation; only its centre moves (L03 T2, PAR-0420).
+pub fn orbit_center_in_planet_frame(
+    planets: &[PlanetDef],
+    orbit: &[f32],
+    parent: usize,
+    viewed: usize,
+    seconds: f32,
+) -> [f32; 3] {
+    let parent_pos = world_position(planets, orbit, parent, seconds);
+    let pos = world_position(planets, orbit, viewed, seconds);
+    let rot = planets
+        .get(viewed)
+        .map(|def| rotation(def, orbit.get(viewed).copied().unwrap_or(0.0), seconds))
+        .unwrap_or(0.0);
+    rotate_y(
+        [
+            parent_pos[0] - pos[0],
+            parent_pos[1] - pos[1],
+            parent_pos[2] - pos[2],
+        ],
+        rot,
+    )
+}
+
 /// Uniforms `Shaders.PlanetShader.apply` receives for one planet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PlanetLight {
@@ -208,6 +240,33 @@ mod tests {
         for (name, radius) in expect {
             let got = orbit[index(&registry, name)];
             assert!((got - radius).abs() < 1e-3, "{name}: {got} != {radius}");
+        }
+    }
+
+    /// L03 T2: Serpulo's own orbit loop is centred on the sun. In the mesh
+    /// frame the port renders in, that centre must lie along the mesh-frame
+    /// light direction (`HexMesh.preRender` turns the same world offset by the
+    /// same rotation) at the orbit radius. Before the fix the centre was the raw
+    /// world offset, off by the planet's spin (the orbit drew in the wrong place).
+    #[test]
+    fn serpulo_orbit_center_is_the_sun_in_mesh_frame() {
+        let registry = registry();
+        let planets = registry.planets();
+        let serpulo = index(&registry, "serpulo");
+        let sun = index(&registry, "sun");
+        let orbit = orbit_radii(planets);
+        for seconds in [0.0f32, 777.0, 12_345.0] {
+            let center = orbit_center_in_planet_frame(planets, &orbit, sun, serpulo, seconds);
+            let light = planet_light(planets, serpulo, seconds);
+            let len = (center[0] * center[0] + center[2] * center[2]).sqrt();
+            assert!((len - orbit[serpulo]).abs() < 1e-2, "radius {len}");
+            assert!(center[1].abs() < 1e-6);
+            let dot = (center[0] * light.light_dir[0] + center[2] * light.light_dir[2]) / len;
+            assert!(
+                dot > 0.9999,
+                "t={seconds}: centre {center:?} vs light {:?}",
+                light.light_dir
+            );
         }
     }
 

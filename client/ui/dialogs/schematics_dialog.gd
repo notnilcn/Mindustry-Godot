@@ -71,6 +71,10 @@ func shown() -> void:
 		_field.text = ""
 	_rebuild_tags()
 	_rebuild_list()
+	# `SchematicsDialog.show`: desktop focuses the search field
+	# (`SchematicsDialog.java:704-706`).
+	if _field != null:
+		_field.grab_focus.call_deferred()
 
 
 ## `SchematicsDialog` tags (`Core.settings` JSON `schematic-tags`).

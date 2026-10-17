@@ -198,7 +198,9 @@ func _rebuild_filters() -> void:
 		_filter_table.remove_child(child)
 		child.queue_free()
 	if _filters.is_empty():
-		var empty := MindWidgets.label(_t("@filters.empty"))
+		# The bundle text carries `[lightgray]` Arc markup: translate it (the
+		# plain lookup printed the tag literally, L01 T3 godot/ed-generate.png).
+		var empty := MindWidgets.label(_tm("@filters.empty"))
 		empty.custom_minimum_size.x = 200.0
 		_filter_table.add_child(empty)
 		return

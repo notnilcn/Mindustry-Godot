@@ -48,9 +48,10 @@ func _build() -> void:
 		cont.remove_child(child)
 		child.queue_free()
 	var root := content_table()
+	# `cont.table(table -> ...)` with no grow (`MapResizeDialog.java:21-50`): the
+	# label/field column is content-sized and centred (L01 T3 java/ed-resize.png).
 	var table := VBoxContainer.new()
-	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.add(table).grow_x_axis().pad(4)
+	root.add(table).pad(4)
 	# `for(boolean w : Mathf.booleans)`: width then height, then the shifts.
 	table.add_child(_field_row(_t("@width"), str(_width), 3, true))
 	table.add_child(_field_row(_t("@height"), str(_height), 3, false))

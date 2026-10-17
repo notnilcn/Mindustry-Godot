@@ -92,12 +92,18 @@ func _setup() -> void:
 	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	field.text_changed.connect(_on_search)
 	search_row.add_child(field)
-	root.add(search_row).grow_x_axis().pad(8)
+	# `field.setCursorPosition(ruleSearch.length()); Core.scene
+	# .setKeyboardFocus(field)` (`CustomRulesDialog.java:130-132`).
+	field.caret_column = _search.length()
+	field.grab_focus.call_deferred()
+	# `cont.table(...).fillX()` above `cont.pane(main)` (`CustomRulesDialog.java:
+	# 126-134`): the column is as wide as the rule table's natural width, centred.
+	root.add(search_row).fill_x_axis().pad(8)
 	root.row()
 	# code-instantiated: the rule table is data-driven from the Rules model.
 	_main = MindTable.new()
 	_main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.add(_main).grow_x_axis()
+	root.add(_main).fill_x_axis()
 	_setup_main()
 
 
@@ -668,6 +674,10 @@ func _number(
 
 ## Adds a built row to a `MindTable` (`add` + `row`) or a plain `VBoxContainer`.
 func _row_into(target: Node, row: Control) -> void:
+	# `main.left().defaults().fillX().left()` (`CustomRulesDialog.java:144`):
+	# rule rows hug the left edge of the column.
+	if row is MindTable:
+		(row as MindTable).set_table_left(true)
 	if target is MindTable:
 		(target as MindTable).add(row).left().grow_x_axis().set_pad_top(0)
 		(target as MindTable).row()
@@ -687,8 +697,13 @@ func _make_check_row(
 		cons.call(v)
 		_refresh_conditions()
 	)
+	# `current.check(text, cons)` is a plain `CheckBox` (`Styles.defaultCheck`,
+	# no background) left-aligned at its own width (`CustomRulesDialog.java:
+	# 478-479`), not `Elems.check`'s grayPanel strip (L01 T3, java/rules-banned.png).
+	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+		check.add_theme_stylebox_override(state, StyleBoxEmpty.new())
 	_rule_info(check, key)
-	row.add(check).left().grow_x_axis()
+	row.add(check).left()
 	_register_row(row, cond, func(enabled: bool) -> void:
 		check.disabled = not enabled
 		check.modulate = Color(1, 1, 1, 1) if enabled else Color(1, 1, 1, 0.6)

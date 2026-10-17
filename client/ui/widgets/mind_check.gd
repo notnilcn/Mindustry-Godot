@@ -11,6 +11,21 @@ extends Button
 
 var _listener: Callable = Callable()
 var _icon: TextureRect = null
+var _row: HBoxContainer = null
+
+
+## The icon + label row is an anchored child, which a Button does not measure
+## (and Button's native `get_minimum_size` ignores a script
+## `_get_minimum_size`). Raise `custom_minimum_size` to the row's minimum so a
+## check cell that does not grow keeps its content width (Arc sizes
+## `Elems.check`/`CheckBox` to the image + label, L01 T3).
+func _sync_row_minimum() -> void:
+	if _row == null or not is_instance_valid(_row):
+		return
+	var row_min := _row.get_combined_minimum_size()
+	custom_minimum_size = Vector2(
+		maxf(custom_minimum_size.x, row_min.x), maxf(custom_minimum_size.y, row_min.y)
+	)
 
 
 ## Builds the check (`Elems.check(text, checked, listener)`).
@@ -27,6 +42,8 @@ func setup(text: String, is_checked: bool, listener: Callable) -> void:
 	row.add_theme_constant_override("separation", 8)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(row)
+	_row = row
+	row.minimum_size_changed.connect(_sync_row_minimum)
 	_icon = TextureRect.new()
 	_icon.custom_minimum_size = Vector2(32, 32)
 	_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
