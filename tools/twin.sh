@@ -40,6 +40,9 @@
 #   GC x y [button] [coords]   dialog click — one godot_input `sequence`
 #   GW x y [button] [coords]   world click — separate press/release calls
 #   GK NAME [down|up]          key by Godot name ("Escape"); default tap
+#   GT 'text'                  type into the focused Control (gmcp --text: one
+#                              unicode key press+release per char; L01 T4).
+#                              Focus the field with GC first; GK Backspace clears
 #   GS name                    game screenshot -> $RUN/godot/name.png
 #   GE 'expr'                  single-statement eval (gmcp --eval)
 #   GP x y                     warp the REAL pointer over the embedded game
@@ -379,6 +382,10 @@ GK() { # GK NAME [down|up] — Godot key by name; default tap (press+release)
             godot_input "{\"action\":\"key\",\"params\":{\"key\":\"$name\",\"pressed\":false}}" ;;
     *) twin_warn "GK: mode must be tap|down|up (got '$mode')"; return 1 ;;
   esac
+}
+
+GT() { # GT 'text' — type into the GUI focus owner (real key events, L01 T4)
+  twin_gmcp --text "${1:?GT 'text'}"
 }
 
 GS() { # GS name — game screenshot into $RUN/godot/name.png

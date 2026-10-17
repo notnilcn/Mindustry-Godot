@@ -2470,3 +2470,19 @@ Run: runs/20261014-s3-verify3/.
   Game grid; the round-K "grid does not scroll" finding was an injected-input artefact.
 - An eval on a wrong dialog node name (`DialogLayer/custom_game`; the node is `custom`) timed out; the gmcp watchdog
   restarted the game (stop+play) automatically. List `DialogLayer` children first.
+
+## 2026-10-18 — round L, session 2 (L01 T4): real text entry through `godot_input text`
+
+- Root cause of the dead `godot_input text`: the runtime autoload built ONE `InputEventKey`, parsed it pressed, set
+  `pressed = false` and parsed it again. `Input.parse_input_event` buffers until the frame flush, so both buffered
+  references were releases and `LineEdit` (inserts only on a pressed key with `unicode >= 32`) stayed empty.
+- Fix (`runtime_autoload.gd` `_input_text` / `_make_text_key`): a fresh event per edge, `unicode` set, keycode +
+  physical keycode + `key_label` + shift for ASCII letters/digits/space (what a real X key sends), flushed and one
+  process frame apart (`frame_delay`, default 1) so `text_changed` fires per character. Returns
+  `focus_before`/`focus_after`/`field_text` so a single call proves where the text went.
+- Shell: `tools/gmcp.py --text 'sand'` (repeatable; `--text-frame-delay N`), twin helper `GT 'sand'`. Focus the field
+  with a real click first (`GC`); `GK Backspace` deletes (keycode path). Proven on the Custom Game search:
+  `runs/20261018-s2-L01-T4/notes.md`.
+- The installed MCP server's `godot_input` description still says "text is broken" (that text lives in the
+  Open-Godot-MCP package, not this repo); it is stale for this checkout's runtime autoload. The game must be
+  replayed (`tools/session-play.sh N --play`) to pick up autoload changes.
