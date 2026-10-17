@@ -5,6 +5,7 @@
 //! Ported from `core/src/mindustry/core/Logic.java` (`update`, `updateEntities`)
 //! and `GameState`; the reserved slot order lives in [`crate::schedule`].
 
+pub mod accelerator;
 pub mod boot;
 pub mod builder;
 pub mod clock;

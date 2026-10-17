@@ -5816,3 +5816,159 @@ fn abandon_played_sector_kills_cores_and_plays_game_over() {
         "the game-over path ran: {events:?}"
     );
 }
+
+/// L06 T7 (PAR-0296): the Interplanetary Accelerator builds its launch core
+/// once full and powered (`progress += Time.delta * efficiency /
+/// buildDuration`, Accelerator.java:121-138), takes the core's capacity on top
+/// once built (`getMaximumAccepted`, :293-295), launches only through
+/// `canLaunch()` (:239-241; campaign + 1e6 battery buffer + progress >= 1) and
+/// the launch consumes the core, carries the rest, drains the buffer and
+/// resets `progress` (:262-272).
+#[test]
+fn accelerator_builds_core_gates_and_launches() {
+    use crate::world::behavior::BuildingBehavior;
+    use crate::world::behavior::campaign::AcceleratorBehavior;
+    use crate::world::modules::ItemModule;
+
+    let mut sim = Sim::new(3, 72, 24, BlockId::AIR, BlockId::AIR);
+    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+    sim.grid.fill(stone, BlockId::AIR);
+    sim.install_block_runtime().expect("runtime");
+    install_campaign_session(
+        &mut sim,
+        crate::game::rules::Rules {
+            default_team: 1,
+            ..Default::default()
+        },
+    );
+    if let Some(mut runtime) = sim
+        .ecs
+        .0
+        .get_resource_mut::<crate::game::runtime::CampaignRuntime>()
+    {
+        runtime.session.sector = Some((crate::content::PlanetId::new(0), 15));
+    }
+    let accelerator = place(&mut sim, "interplanetary-accelerator", 10, 10);
+    let _source = place(&mut sim, "power-source", 10, 6);
+    // 21 large batteries (50000 each, Blocks.java:2519) in a row on the top
+    // edge: > the 1_000_000 `powerBufferRequirement` (Blocks.java:6876).
+    for index in 0..21 {
+        place(&mut sim, "battery-large", 8 + index * 3, 15);
+    }
+    let copper = item(&sim, "copper");
+    let titanium = item(&sim, "titanium");
+    let behavior = AcceleratorBehavior;
+    assert_eq!(
+        behavior.get_maximum_accepted(&sim.ecs.0, accelerator, copper),
+        8000,
+        "capacities = coreNucleus.requirements before the core is built"
+    );
+    assert!(!behavior.accept_item(&sim.ecs.0, accelerator, accelerator, titanium));
+
+    for _ in 0..20 {
+        sim.tick().expect("tick");
+    }
+    let progress = |sim: &Sim| {
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::CampaignState>(accelerator)
+            .map(|state| state.progress)
+            .unwrap_or(-1.0)
+    };
+    assert_eq!(
+        progress(&sim),
+        0.0,
+        "no items -> no efficiency -> no progress"
+    );
+
+    {
+        let content = sim.block_runtime().expect("runtime").content();
+        let stacks: Vec<(crate::content::ItemId, i32)> = ["copper", "lead", "silicon", "thorium"]
+            .iter()
+            .zip([8000, 8000, 5000, 4000])
+            .map(|(name, amount)| (content.item_id(name).expect("item"), amount))
+            .collect();
+        let mut items = sim.ecs.0.get_mut::<ItemModule>(accelerator).expect("items");
+        for (item, amount) in stacks {
+            items.add(item, amount, 25000);
+        }
+    }
+    for _ in 0..60 {
+        sim.tick().expect("tick");
+    }
+    let mid = progress(&sim);
+    assert!(mid > 0.3 && mid < 0.7, "120-tick build: {mid}");
+    assert!(
+        !sim.accelerator_can_launch(accelerator),
+        "core not built yet"
+    );
+    for _ in 0..80 {
+        sim.tick().expect("tick");
+    }
+    assert_eq!(progress(&sim), 1.0);
+    assert_eq!(
+        behavior.get_maximum_accepted(&sim.ecs.0, accelerator, titanium),
+        13000,
+        "a built core adds launchBlock.itemCapacity"
+    );
+    sim.ecs
+        .0
+        .get_mut::<ItemModule>(accelerator)
+        .expect("items")
+        .add(titanium, 100, 40000);
+    assert!(
+        sim.accelerator_can_launch(accelerator),
+        "built + powered + buffered"
+    );
+    assert!(sim.accelerator_config_tapped(accelerator));
+    assert_eq!(
+        sim.triggers
+            .fire_count(crate::sim::events::Trigger::AcceleratorUse),
+        1
+    );
+
+    let resources = sim.accelerator_launch(accelerator).expect("launch");
+    assert_eq!(
+        resources,
+        vec![(titanium, 100)],
+        "consume() takes the core; the rest is carried"
+    );
+    let state = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::CampaignState>(accelerator)
+        .cloned()
+        .expect("state");
+    assert_eq!(state.progress, 0.0);
+    assert!(state.launching);
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<ItemModule>(accelerator)
+            .expect("items")
+            .total(),
+        0
+    );
+    assert!(!sim.accelerator_can_launch(accelerator), "launching");
+    assert!(sim.accelerator_launch(accelerator).is_none());
+}
+
+/// L06 T7: outside a campaign the accelerator never launches (`canLaunch`'s
+/// `state.isCampaign()`), and `version() = 1` writes `progress`.
+#[test]
+fn accelerator_requires_campaign_and_writes_progress() {
+    use crate::world::behavior::BuildingBehavior;
+    use crate::world::behavior::campaign::AcceleratorBehavior;
+
+    let mut sim = runtime_sim();
+    let accelerator = place(&mut sim, "interplanetary-accelerator", 10, 10);
+    if let Some(mut state) = sim
+        .ecs
+        .0
+        .get_mut::<crate::entities::comp::CampaignState>(accelerator)
+    {
+        state.progress = 1.0;
+    }
+    assert!(!sim.accelerator_can_launch(accelerator));
+    assert_eq!(AcceleratorBehavior.version(&sim.ecs.0, accelerator), 1);
+}

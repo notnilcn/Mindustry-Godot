@@ -368,11 +368,36 @@ pub struct SandboxPowerDef {
     pub power_production: f32,
 }
 
-/// `Accelerator` family knobs.
-#[derive(Debug, Clone, PartialEq, Default)]
+/// `Accelerator` family knobs (`world/blocks/campaign/Accelerator.java:37-73`).
+#[derive(Debug, Clone, PartialEq)]
 pub struct AcceleratorDef {
-    /// `Accelerator.heatTime`.
-    pub heat_time: f32,
+    /// `launchBlock` name (default `Blocks.coreNucleus`, :39).
+    pub launch_block: String,
+    /// `launchBlock.itemCapacity`: the extra capacity once the core is built
+    /// (`getMaximumAccepted`, :293-295); core-nucleus = 13000 (Blocks.java:3177).
+    pub launch_block_item_capacity: i32,
+    /// `powerBufferRequirement` (:40; the vanilla block 1_000_000,
+    /// Blocks.java:6876).
+    pub power_buffer_requirement: f32,
+    /// `launchDuration` (:51).
+    pub launch_duration: f32,
+    /// `chargeDuration` (:52).
+    pub charge_duration: f32,
+    /// `buildDuration` (:53): core construction time once powered and full.
+    pub build_duration: f32,
+}
+
+impl Default for AcceleratorDef {
+    fn default() -> Self {
+        Self {
+            launch_block: "core-nucleus".to_owned(),
+            launch_block_item_capacity: 13000,
+            power_buffer_requirement: 0.0,
+            launch_duration: 120.0,
+            charge_duration: 220.0,
+            build_duration: 120.0,
+        }
+    }
 }
 
 /// `LandingPad` family knobs.
@@ -694,7 +719,16 @@ impl BlockKindData {
                 power_production: 1_000_000.0 / 60.0,
             }),
             BlockKind::PowerVoid => BlockKindData::PowerVoid,
-            BlockKind::Accelerator => BlockKindData::Accelerator(AcceleratorDef::default()),
+            BlockKind::Accelerator => BlockKindData::Accelerator(AcceleratorDef {
+                // `interplanetaryAccelerator.powerBufferRequirement`
+                // (Blocks.java:6876).
+                power_buffer_requirement: if def.name == "interplanetary-accelerator" {
+                    1_000_000.0
+                } else {
+                    0.0
+                },
+                ..AcceleratorDef::default()
+            }),
             BlockKind::LandingPad => BlockKindData::LandingPad(LandingPadDef {
                 item_capacity: def.item_capacity,
                 ..LandingPadDef::default()

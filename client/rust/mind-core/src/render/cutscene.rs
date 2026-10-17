@@ -78,6 +78,95 @@ impl LaunchAnimator for CoreLandAnimator {
     }
 }
 
+/// `Accelerator.AcceleratorBuild`'s launch animator (`LaunchAnimator`,
+/// world/blocks/campaign/Accelerator.java:322-412): `launchDuration() =
+/// launchDuration + chargeDuration` (120 + 220), a charge phase that zooms
+/// `chargeZoomInterp` (pow4In) from `landZoomTo` (4) to `chargeZoomTo` (5)
+/// with a `pow10In` camera shake, then the launch zoom `landZoomInterp`
+/// (pow4In) from `landZoomFrom` (0.02) to `landZoomTo`.
+pub struct AcceleratorLaunchAnimator {
+    launch_duration: f32,
+    charge_duration: f32,
+    land_zoom_from: f32,
+    land_zoom_to: f32,
+    charge_zoom_to: f32,
+    /// Directional `getLandTimeIn()` (1 -> 0 while launching).
+    fin: f32,
+}
+
+impl AcceleratorLaunchAnimator {
+    /// The `Accelerator` field defaults (Accelerator.java:51-55).
+    pub fn new(launch_duration: f32, charge_duration: f32) -> Self {
+        Self {
+            launch_duration,
+            charge_duration,
+            land_zoom_from: 0.02,
+            land_zoom_to: 4.0,
+            charge_zoom_to: 5.0,
+            fin: 1.0,
+        }
+    }
+
+    /// `rawTime = launchDuration() - renderer.getLandTime()`: ticks since the
+    /// launch began (`getLandTime() = fin * duration` while launching).
+    pub fn raw_time(&self) -> f32 {
+        let total = self.launch_duration + self.charge_duration;
+        total - self.fin * total
+    }
+
+    /// `zoomLaunch`'s shake (Accelerator.java:396): `pow10In(rawTime /
+    /// chargeDuration)` during the charge, else 0; the camera is offset by a
+    /// random direction scaled `shake * 2`.
+    pub fn shake(&self) -> f32 {
+        let raw = self.raw_time();
+        if raw < self.charge_duration {
+            crate::math::interp::Interp::Pow10In
+                .apply((raw / self.charge_duration.max(1e-6)).clamp(0.0, 1.0))
+        } else {
+            0.0
+        }
+    }
+
+    /// `chargeFin` of `updateLaunch`/`drawLaunch` (Accelerator.java:420-421):
+    /// 1 at the start, 0 once the charge phase is over (`chargeFout = 1 -
+    /// chargeFin`).
+    pub fn charge_fin(&self) -> f32 {
+        let total = self.launch_duration + self.charge_duration;
+        1.0 - ((1.0 - self.fin) / (self.charge_duration / total)).clamp(0.0, 1.0)
+    }
+}
+
+impl LaunchAnimator for AcceleratorLaunchAnimator {
+    fn launch_duration(&self) -> f32 {
+        self.launch_duration + self.charge_duration
+    }
+
+    fn begin_launch(&mut self, _launching: bool) {}
+
+    fn update_launch(&mut self) {}
+
+    /// `AcceleratorBuild.zoomLaunch` (Accelerator.java:394-412).
+    fn zoom_launch(&self) -> f32 {
+        use crate::math::interp::Interp;
+        let raw = self.raw_time();
+        if raw < self.charge_duration {
+            let fin = raw / self.charge_duration.max(1e-6);
+            Interp::Pow4In.apply_range(self.land_zoom_to, self.charge_zoom_to, fin)
+        } else {
+            let total = self.launch_duration + self.charge_duration;
+            let charge = self.charge_duration / total;
+            let fin = 1.0 - ((1.0 - self.fin) - charge).clamp(0.0, 1.0) / (1.0 - charge);
+            Interp::Pow4In.apply_range(self.land_zoom_from, self.land_zoom_to, fin)
+        }
+    }
+
+    fn end_launch(&mut self) {}
+
+    fn set_land_time_in(&mut self, fin: f32) {
+        self.fin = fin;
+    }
+}
+
 /// `Renderer`'s launch/land state (`landTime`, `launching`, `weatherAlpha`).
 #[derive(Default)]
 pub struct Cutscene {
@@ -228,6 +317,46 @@ fn lerp_delta(from: f32, to: f32, progress: f32, delta_frames: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// L06 T7: the accelerator cutscene runs 340 ticks; the charge zoom goes
+    /// 4 -> 5 with a growing shake, then the launch zoom falls from 4 to
+    /// 0.02 (Accelerator.java:394-412).
+    #[test]
+    fn accelerator_launch_zoom_phases() {
+        let mut cutscene = Cutscene::new(4.0);
+        cutscene.show_launch(Box::new(AcceleratorLaunchAnimator::new(120.0, 220.0)));
+        assert!(cutscene.is_launching());
+        let mut probe = AcceleratorLaunchAnimator::new(120.0, 220.0);
+        probe.set_land_time_in(1.0);
+        assert!(
+            (probe.zoom_launch() - 4.0).abs() < 1e-5,
+            "charge starts at landZoomTo"
+        );
+        assert_eq!(probe.shake(), 0.0);
+        // Half the charge: pow4In(0.5) = 0.0625 -> 4.0625; shake pow10In(0.5).
+        probe.set_land_time_in(1.0 - 110.0 / 340.0);
+        assert!(
+            (probe.zoom_launch() - 4.0625).abs() < 1e-4,
+            "{}",
+            probe.zoom_launch()
+        );
+        assert!((probe.shake() - 0.5f32.powi(10)).abs() < 1e-6);
+        // Charge over: zoom back to the launch interp at fin = 1 -> landZoomTo.
+        probe.set_land_time_in(1.0 - 220.0 / 340.0 - 1e-6);
+        assert!(
+            (probe.zoom_launch() - 4.0).abs() < 1e-3,
+            "{}",
+            probe.zoom_launch()
+        );
+        assert!((probe.charge_fin()).abs() < 1e-4);
+        // End of the launch: landZoomFrom.
+        probe.set_land_time_in(0.0);
+        assert!((probe.zoom_launch() - 0.02).abs() < 1e-5);
+        for _ in 0..341 {
+            cutscene.update(1.0, false);
+        }
+        assert!(!cutscene.is_cutscene(), "340-tick cutscene ends");
+    }
 
     struct Mock {
         duration: f32,

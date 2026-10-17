@@ -253,6 +253,16 @@ pub struct PumpState {
 pub struct CampaignState {
     /// Accelerator heat `0..1`.
     pub heat: f32,
+    /// Accelerator `statusLerp` (power status, draw).
+    pub status_lerp: f32,
+    /// Accelerator `progress`: the launch core's construction `0..1`.
+    pub progress: f32,
+    /// Accelerator `time` (charge phase, draw).
+    pub time: f32,
+    /// Accelerator `launchHeat`.
+    pub launch_heat: f32,
+    /// Accelerator `launching` (set by `beginLaunch(true)`).
+    pub launching: bool,
     /// Landing-pad cooldown.
     pub cooldown: f32,
     /// Launch-pad accumulated launch time.

@@ -131,6 +131,9 @@ pub struct SectorView {
     /// `PlanetDialog.canSelect` (look mode): the globe draws the cell's status
     /// ring instead of the shadow fill.
     pub selectable: bool,
+    /// `PlanetDialog.canSelect` in `planetLaunch` mode (the Interplanetary
+    /// Accelerator's destination picker).
+    pub accelerator_selectable: bool,
     /// `preset.requireUnlock`.
     pub require_unlock: bool,
     /// `preset.unlocked()`.
@@ -913,6 +916,7 @@ fn sector_view(planet: &Planet, sector: &Sector, registry: &ContentRegistry) -> 
     SectorView {
         named,
         selectable: false,
+        accelerator_selectable: false,
         require_unlock: sector.preset_require_unlock,
         preset_unlocked: false,
         lock_icon: false,
@@ -1279,11 +1283,10 @@ pub fn annotate_globe(
             && !preset_unlocked
             && node.is_some()
             && parent_unlocked.unwrap_or(true);
-        view.selectable = if def.generator == GeneratorKind::None || sector.is_shielded() {
-            false
-        } else if sector.has_base() || sector.id == def.start_sector as u16 {
-            true
-        } else if preset.is_some_and(|preset| preset.require_unlock) {
+        // `canSelect`'s preset branch (PlanetDialog.java:427-431), shared by
+        // the look and planet-launch modes.
+        let require_unlock = preset.is_some_and(|preset| preset.require_unlock);
+        let preset_gate = require_unlock && {
             preset_unlocked
                 || node.is_none()
                 || match node.and_then(|node| node.parent) {
@@ -1303,11 +1306,36 @@ pub fn annotate_globe(
                         unlocked && preset_parent_based
                     }),
                 }
+        };
+        let base_gate = def.generator != GeneratorKind::None && !sector.is_shielded();
+        view.selectable = if !base_gate {
+            false
+        } else if sector.has_base() || sector.id == def.start_sector as u16 {
+            true
+        } else if require_unlock {
+            preset_gate
         } else {
             def.allow_launch_to_numbered
                 && near(sector.id)
                     .iter()
                     .any(|&other| allow_numbered_launch(other))
+        };
+        // `canSelect` in `planetLaunch` mode (PlanetDialog.java:414-435): no
+        // base and no `addStartingItems` preset (the accelerator's core and
+        // items would be overridden), then the shared gates, and
+        // `generator.allowAcceleratorLanding` = `planet.allowLaunchToNumbered`
+        // (PlanetGenerator.java:98-100) for numbered sectors.
+        view.accelerator_selectable = if sector.has_base()
+            || preset.is_some_and(|preset| preset.add_starting_items)
+            || !base_gate
+        {
+            false
+        } else if sector.id == def.start_sector as u16 {
+            true
+        } else if require_unlock {
+            preset_gate
+        } else {
+            def.allow_launch_to_numbered
         };
         // `updateSelected`: `isLocked(sector)` = preset locked, no base, node.
         view.objectives_locked =
@@ -2015,6 +2043,73 @@ mod tests {
             .find(|view| view.id == dest)
             .expect("dest view");
         assert_eq!(dest_view.launch_from, Some(based));
+    }
+
+    /// L06 T7 (PAR-0296): the accelerator's `planetLaunch` picker
+    /// (PlanetDialog.java:414-435) refuses based sectors and Ground Zero
+    /// (`addStartingItems`), and accepts any numbered Serpulo sector without a
+    /// based neighbour (`allowAcceleratorLanding` = `allowLaunchToNumbered`).
+    #[test]
+    fn accelerator_launch_select_rules() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let serpulo = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let ground_zero = registry.sector_by_name("groundZero").expect("gz").sector;
+        let numbered = campaign
+            .planet(serpulo)
+            .expect("serpulo")
+            .sectors
+            .iter()
+            .find(|sector| sector.preset.is_none() && sector.id != ground_zero)
+            .map(|sector| sector.id)
+            .expect("numbered sector");
+        let based = campaign
+            .planet(serpulo)
+            .expect("serpulo")
+            .sectors
+            .iter()
+            .find(|sector| sector.preset.is_none() && sector.id != numbered)
+            .map(|sector| sector.id)
+            .expect("second numbered sector");
+        {
+            let sector =
+                &mut campaign.planet_mut(serpulo).expect("serpulo").sectors[based as usize];
+            sector.save = Some(format!("sector-serpulo-{based}"));
+            sector.info.info.has_core = true;
+        }
+        let ctx = CampaignObjectiveContext::new(&registry, &campaign);
+        let planet = campaign.planet(serpulo).expect("serpulo");
+        let views = annotate_globe(
+            sector_views(planet, registry.sectors(), &registry),
+            &registry,
+            planet,
+            &ctx,
+            None,
+            0,
+            &|_| Vec::new(),
+        );
+        let view = |id: u16| views.iter().find(|view| view.id == id).expect("view");
+        assert!(
+            view(numbered).accelerator_selectable,
+            "a numbered sector is an accelerator destination"
+        );
+        assert!(
+            !view(numbered).selectable || view(numbered).launch_from.is_some(),
+            "look mode still needs a launch candidate"
+        );
+        assert!(
+            !view(based).accelerator_selectable,
+            "based sectors are refused"
+        );
+        assert!(view(based).selectable, "look mode selects a base");
+        assert!(
+            !view(ground_zero).accelerator_selectable,
+            "Ground Zero's addStartingItems preset is refused"
+        );
     }
 
     /// A require-unlock preset prefers the played (actual) launch sector even
