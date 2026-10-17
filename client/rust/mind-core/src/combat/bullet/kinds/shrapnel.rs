@@ -9,7 +9,7 @@
 use bevy_ecs::entity::Entity;
 
 use super::super::behavior::BulletBehavior;
-use super::super::{CombatCtx, HIT, collide_line_bullet};
+use super::super::{CombatCtx, HIT, collide_laser};
 use super::motion;
 
 /// `ShrapnelBulletType` behavior.
@@ -27,14 +27,15 @@ impl BulletBehavior for ShrapnelBehavior {
         let length = def.length.max(def.range);
         let pierce_cap = def.pierce_cap;
         let large = def.large_hit;
+        let laser = def.laser_absorb;
         let Some(((x, y), _vel, rotation)) = motion(ctx, b) else {
             return;
         };
         // `ShrapnelBulletType.init` -> `Damage.collideLaser(b, length,
-        // hitLarge, laserAbsorb, pierceCap)` (`ShrapnelBulletType.java:39`).
-        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, large, pierce_cap);
+        // hitLarge, laserAbsorb, pierceCap)` (`ShrapnelBulletType.java:39`):
+        // `fdata` is the pierce/absorber-cut length (L06 T3).
+        let _ = collide_laser(ctx, b, x, y, rotation, length, large, laser, pierce_cap);
         if let Some(mut bullet) = ctx.world.get_mut::<super::super::Bullet>(b) {
-            bullet.fdata = length;
             bullet.set(HIT);
         }
     }

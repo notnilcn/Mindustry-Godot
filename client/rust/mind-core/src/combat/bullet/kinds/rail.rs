@@ -32,7 +32,7 @@ impl BulletBehavior for RailBehavior {
         };
         // `RailBulletType.init` (`RailBulletType.java:59-64`): the beam runs
         // immediately with `large = false`, `laser = false`.
-        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, false, pierce_cap);
+        let _ = collide_line_bullet(ctx, b, x, y, rotation, length, false, false, pierce_cap);
         if let Some(mut bullet) = ctx.world.get_mut::<super::super::Bullet>(b) {
             bullet.set(HIT);
         }

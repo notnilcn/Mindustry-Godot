@@ -30,7 +30,10 @@ use crate::fx::TrailChannelId;
 use crate::world::WorldGrid;
 
 pub use behavior::{BulletBehavior, behavior_for};
-pub use line_hit::{collide_line_bullet, linecast_enemy};
+pub use line_hit::{
+    collide_laser, collide_line_bullet, find_laser_length, find_length, find_pierce_length,
+    linecast_enemy,
+};
 pub use spawn::{BulletSpawn, create};
 
 /// Bullet flag: `keepAlive` was requested (lifetime extension).
@@ -785,11 +788,22 @@ pub(crate) fn hit_bullet(
     if create_frags && def.frag_on_hit {
         create_frags_of(ctx, bullet, x, y);
     }
-    // `BulletType.hit` order: frags, puddles, incend, units, splash (Java
-    // `BulletType.java:562-580`). Suppression is not ported.
+    // `BulletType.hit` order: frags, puddles, incend, units, suppression,
+    // splash (Java `BulletType.java:562-580`).
     create_puddles(ctx, bullet, x, y);
     create_incend(ctx, bullet, x, y);
     create_units(ctx, bullet, x, y);
+    // `if(suppressionRange > 0) Damage.applySuppression(b.team, b.x, b.y,
+    // suppressionRange, suppressionDuration, ...)` (`BulletType.java:572-575`):
+    // centred on the bullet, not the hit point (L06 T3).
+    if def.suppression_range > 0.0 {
+        let (range, duration) = (def.suppression_range, def.suppression_duration);
+        let team = ctx.team(bullet);
+        let (bx, by) = ctx.pos(bullet).unwrap_or((x, y));
+        crate::world::blocks::defense::projectors::apply_suppression(
+            ctx.world, team, bx, by, range, duration,
+        );
+    }
     create_splash_damage(ctx, bullet, x, y);
 }
 

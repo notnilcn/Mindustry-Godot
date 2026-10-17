@@ -278,7 +278,9 @@ impl BuildingBehavior for MendProjectorBehavior {
         };
         let eff = efficiency(world, e);
         let optional = optional_efficiency(world, e);
-        update_mend_projector_world(world, e, &mut state, eff, true, optional);
+        // `boolean canHeal = !checkSuppression()` (`MendProjector.java:94`).
+        let can_heal = !crate::world::blocks::defense::projectors::is_heal_suppressed(world, e);
+        update_mend_projector_world(world, e, &mut state, eff, can_heal, optional);
         world.entity_mut(e).insert(state);
     }
     fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
