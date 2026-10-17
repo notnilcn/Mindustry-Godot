@@ -695,8 +695,11 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/maps_editor.json",
       "owner_plan": "06/19",
-      "sha256": "96f99ff7ff3d722ad7211025e30f5ed3ad77b2ef5d4b9d3af05e8e30e3a82bfa",
-      "regen": "cargo run -p mind-headless -- maps roundtrip --json; cargo run -p mind-headless -- editor playtest --json"
+      "sha256": "bf5a47538aeacb4b62eae6c79ad6071f120ac79bd75a6e6a330e3e9f59d5d49c",
+      "regen": "cargo run -p mind-headless -- maps roundtrip --json; cargo run -p mind-headless -- editor playtest --json",
+      "reasons": [
+        "2026-10-18 L08 T1 (bisected on code, 15e1050b..HEAD): maps_roundtrip 57bfde109806f8ea -> 52a37ff73b61f5f3 at 49f0268b (PAR-0114 / I06 T5), the single moving commit: MapIO.generatePreview treats the default Block.mapColor (0,0,0,1) as a no-draw sentinel, so air no longer paints (32,32,32) over the stone floor (MapIO.java:95-103), and CachedTile.setBlock writes walls on the flipped row. editor_playtest unchanged."
+      ]
     },
     {
       "id": "harness_ui_prompts",
