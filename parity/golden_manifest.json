@@ -270,7 +270,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/render/render_menu_world.json",
       "owner_plan": "16",
-      "sha256": "d83feddfb8938731729c487b45055a9ab54a2ff947d29b95a79b3d238bab2f1f"
+      "sha256": "fa95d97d950c93f23fc0e76f88738f9e6ef455a1e28ea1d03b0e25d7d77bd8b7",
+      "reasons": [
+        "2026-10-18 L06 batched regen (L08 T1 protocol): 341d9f74 (L06 T6.0, PAR-0424) Arc Simplex.perm masks x & 255 and uses unsigned shifts (javap -c arc.util.noise.Simplex); the menu world is simplex terrain, so tile_hash b7104680ca852118 -> 276df838e52313c2, flyers 5 -> 10 and the per-layer counts moved. Scratch-worktree render list: 341d9f74^ output = the committed file, 341d9f74 output = HEAD."
+      ]
     },
     {
       "id": "harness_sim_core_determinism",

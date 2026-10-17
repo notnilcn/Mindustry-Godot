@@ -4,9 +4,9 @@
   "seed": 1234,
   "width": 100,
   "height": 50,
-  "flyers": 5,
-  "tile_hash": "b7104680ca852118",
-  "floors": [{"name":"darkPanel3","count":992},{"name":"darkPanel4","count":160},{"name":"sand","count":1875},{"name":"stone","count":1973}],
-  "walls": [{"name":"darkMetal","count":613},{"name":"sandWall","count":1027},{"name":"stoneWall","count":904}],
-  "overlays": [{"name":"oreLead","count":1214},{"name":"oreScrap","count":1079}]
+  "flyers": 10,
+  "tile_hash": "276df838e52313c2",
+  "floors": [{"name":"darkPanel3","count":961},{"name":"darkPanel4","count":155},{"name":"sand","count":2018},{"name":"stone","count":1866}],
+  "walls": [{"name":"darkMetal","count":634},{"name":"sandWall","count":989},{"name":"stoneWall","count":891}],
+  "overlays": [{"name":"oreLead","count":1378},{"name":"oreScrap","count":1045}]
 }
