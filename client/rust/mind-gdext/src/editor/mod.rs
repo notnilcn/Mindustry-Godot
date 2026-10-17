@@ -221,11 +221,17 @@ impl MindEditor {
         self.last_error_message = None;
     }
 
-    /// Marks the tile grid as changed (editor-renderer invalidation;
-    /// `EditorTile.setBlock`'s `ui.editor.resetSaved()`).
+    /// Marks the tile grid as changed (editor-renderer invalidation) and the
+    /// map unsaved (`ui.editor.resetSaved()`).
     fn mark_tiles_changed(&mut self) {
-        self.tiles_rev = self.tiles_rev.wrapping_add(1);
+        self.bump_tiles_rev();
         self.editor.saved = false;
+    }
+
+    /// Editor-renderer invalidation only; the cursor paths decide `saved`
+    /// per tool kind (`MapView.java:96-98,114-116,135-137`).
+    fn bump_tiles_rev(&mut self) {
+        self.tiles_rev = self.tiles_rev.wrapping_add(1);
     }
 
     /// Read-only grid for the editor renderer (crate-internal view seam).
@@ -2078,8 +2084,11 @@ impl MindEditor {
     /// (`MapView.touchDown` press; `Zoom`/`Line` are handled by the caller).
     #[func]
     pub fn map_view_touch(&mut self, tile_x: i32, tile_y: i32) -> bool {
-        self.mark_tiles_changed();
+        self.bump_tiles_rev();
         let tool = self.editor.tool;
+        if tool.press_resets_saved() {
+            self.editor.saved = false;
+        }
         if tool == EditorTool::Line {
             return true;
         }
@@ -2113,10 +2122,13 @@ impl MindEditor {
     /// (`MapView.touchDragged` + `Bresenham2.line`).
     #[func]
     pub fn map_view_drag(&mut self, x1: i32, y1: i32, x2: i32, y2: i32) -> bool {
-        self.mark_tiles_changed();
+        self.bump_tiles_rev();
         let tool = self.editor.tool;
         if !tool.draggable() {
             return false;
+        }
+        if tool.drag_resets_saved((x1, y1), (x2, y2)) {
+            self.editor.saved = false;
         }
         let Some(content) = self.content.as_ref() else {
             return false;
@@ -2144,7 +2156,7 @@ impl MindEditor {
     /// `MapView.touchUp`: `editor.flushOp()`.
     #[func]
     pub fn map_view_flush(&mut self) {
-        self.mark_tiles_changed();
+        self.bump_tiles_rev();
         self.editor.flush_op();
     }
 
