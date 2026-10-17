@@ -91,6 +91,9 @@ pub struct MindCampaign {
     runtime_installed: bool,
     /// The last captured sector was the planet's last (campaign victory).
     campaign_complete: bool,
+    /// An Interplanetary Accelerator launch waiting for its
+    /// `Time.runTask(launchDuration() - 6f)` sector switch (L06 T7).
+    pending_accelerator: Option<PendingAcceleratorLaunch>,
     /// Last tick seen by the runtime pump (fixed-tick delta for `Saves::update`).
     last_pump_tick: u64,
     /// Tick at which an in-flight autosave clears `Saves.saving` (3-tick task).
@@ -127,6 +130,7 @@ impl INode for MindCampaign {
             bundle: Bundle::new(),
             runtime_installed: false,
             campaign_complete: false,
+            pending_accelerator: None,
             last_pump_tick: 0,
             saving_finish_tick: None,
             unlocked_since_last_take: Vec::new(),
@@ -148,8 +152,9 @@ impl INode for MindCampaign {
         }
     }
 
-    fn process(&mut self, _delta: f64) {
+    fn process(&mut self, delta: f64) {
         self.pump_runtime();
+        self.pump_accelerator_launch(delta);
     }
 
     fn exit_tree(&mut self) {
@@ -1025,6 +1030,12 @@ impl MindCampaign {
         }
         let (launch_schematic, launch_origin, launch_stacks_json) =
             parse_launch_payload(&loadout_payload);
+        // The accelerator envelope's `launch_core` (`Universe.updateLoadout(
+        // CoreBlock)`, L06 T7).
+        let launch_core: Option<String> =
+            serde_json::from_str::<serde_json::Value>(&loadout_payload)
+                .ok()
+                .and_then(|value| value.get("launch_core")?.as_str().map(str::to_owned));
         // `Control.playNewSector` (`Control.java:573-578`): the launcher sector
         // id from the dialog becomes `origin`/`destination`.
         let origin = launch_origin.map(|origin| (planet_id, origin));
@@ -1169,6 +1180,19 @@ impl MindCampaign {
             {
                 host.bind_mut()
                     .place_launch_loadout(index, GString::from(launch_stacks_json.as_str()));
+            }
+            // L06 T7: the accelerator's `updateLoadout(CoreBlock)` single-core
+            // loadout on a preset map (`FileMapGenerator` placeLaunchLoadout).
+            if !has_save
+                && self.session.allow_launch_loadout
+                && launch_schematic.is_none()
+                && let Some(core) = launch_core.as_deref()
+                && !host.bind().generated_loadout_placed()
+            {
+                host.bind_mut().place_launch_core(
+                    GString::from(core),
+                    GString::from(launch_stacks_json.as_str()),
+                );
             }
             let sync = host.bind_mut().sync_campaign_session(&registry, !has_save);
             if let Some(sync) = sync {
@@ -4132,6 +4156,174 @@ impl MindCampaign {
             .map(|sector| sector.info.info.clone())
     }
 
+    /// The planet-launch picker's confirm for the accelerator at tile `(x, y)`
+    /// (`AcceleratorBuild.buildConfiguration` callback, Accelerator.java:
+    /// 262-284): the sim half (`MindSimHost.accelerator_launch`: consume,
+    /// carry, buffer, `progress = 0`), `renderer.showLaunch(this)` (the
+    /// camera cutscene) with `beginLaunch`'s `coreLaunchConstruct` +
+    /// charge/construct sounds (:338,356-357), then after `launchDuration() -
+    /// 6` ticks the sector switch in `pump_accelerator_launch`. Returns false
+    /// when `canLaunch()` no longer holds.
+    #[func]
+    pub fn accelerator_launch_to(&mut self, x: i32, y: i32, planet: GString, sector: i32) -> bool {
+        if self.pending_accelerator.is_some() || sector < 0 {
+            return false;
+        }
+        let Some(mut host) = self.host() else {
+            return false;
+        };
+        let resources = host.bind_mut().accelerator_launch(x, y).to_string();
+        if resources.is_empty() {
+            return false;
+        }
+        let world = host
+            .bind()
+            .building_center_world(x, y)
+            .try_to::<Vector2>()
+            .map(|center| (center.x, center.y))
+            .unwrap_or((x as f32 * 8.0, y as f32 * 8.0));
+        if let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D") {
+            camera.call(
+                "show_accelerator_launch",
+                &[world.0.to_variant(), world.1.to_variant()],
+            );
+        }
+        // `Fx.coreLaunchConstruct.at(x, y, launchBlock.size)` (core-nucleus
+        // size 5) + `chargeSound`/`constructSound` (Accelerator.java:338,
+        // 356-357).
+        self.accelerator_fx("coreLaunchConstruct", world, 5.0);
+        self.accelerator_sound("acceleratorCharge", world);
+        self.accelerator_sound("acceleratorConstruct", world);
+        self.pending_accelerator = Some(PendingAcceleratorLaunch {
+            tile: (x, y),
+            world,
+            planet: planet.to_string(),
+            sector,
+            resources,
+            core: "core-nucleus".to_owned(),
+            elapsed: 0.0,
+            charged: false,
+        });
+        log::info!("accelerator launch to `{planet}:{sector}`");
+        true
+    }
+
+    /// Whether an accelerator launch is in flight (the planet-launch flow).
+    #[func]
+    pub fn accelerator_launch_pending(&self) -> bool {
+        self.pending_accelerator.is_some()
+    }
+
+    fn accelerator_fx(&self, name: &str, world: (f32, f32), rotation: f32) {
+        if let Some(mut fx) = self.base().get_node_or_null("/root/Spine/MindFx") {
+            fx.call(
+                "spawn_effect",
+                &[
+                    GString::from(name).to_variant(),
+                    world.0.to_variant(),
+                    world.1.to_variant(),
+                    rotation.to_variant(),
+                ],
+            );
+        }
+    }
+
+    fn accelerator_sound(&self, name: &str, world: (f32, f32)) {
+        if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
+            audio.call(
+                "play_at_ui",
+                &[
+                    GString::from(name).to_variant(),
+                    f64::from(world.0).to_variant(),
+                    f64::from(world.1).to_variant(),
+                    1.0f64.to_variant(),
+                    1.0f64.to_variant(),
+                ],
+            );
+        }
+    }
+
+    /// Advances an accelerator launch: the `Time.run(chargeDuration)` burst
+    /// (`coreLaunchConstruct` + `launchAccelerator` + `launchSound`,
+    /// Accelerator.java:358-362) and the `Time.runTask(launchDuration() - 6f)`
+    /// switch (:273-283): `launching = false`, `unlockedOnLand`,
+    /// `universe.clearLoadoutInfo()`, `updateLaunchResources(resources)`,
+    /// `updateLoadout((CoreBlock)launchBlock)`, `control.playSector(sector)`.
+    fn pump_accelerator_launch(&mut self, delta: f64) {
+        let Some(mut pending) = self.pending_accelerator.take() else {
+            return;
+        };
+        // Arc `Time.delta` (clamped like the camera rig's frame delta).
+        pending.elapsed += ((delta * 60.0) as f32).clamp(0.0001, 4.0);
+        if !pending.charged && pending.elapsed >= ACCELERATOR_CHARGE_TICKS {
+            pending.charged = true;
+            self.accelerator_fx("coreLaunchConstruct", pending.world, 5.0);
+            self.accelerator_fx("launchAccelerator", pending.world, 0.0);
+            self.accelerator_sound("acceleratorLaunch", pending.world);
+            if let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D") {
+                // `Effect.shake(10f, 14f, this)`.
+                camera.call(
+                    "apply_shake_event",
+                    &[10.0f64.to_variant(), 14.0f64.to_variant()],
+                );
+            }
+        }
+        if pending.elapsed < ACCELERATOR_SWITCH_TICKS {
+            self.pending_accelerator = Some(pending);
+            return;
+        }
+        if let Some(mut host) = self.host() {
+            host.bind_mut()
+                .accelerator_end_launch(pending.tile.0, pending.tile.1);
+        }
+        let stacks: Vec<mind_core::io::json::content_serde::JsonItemStack> =
+            serde_json::from_str(&pending.resources).unwrap_or_default();
+        let amounts: Option<Vec<i32>> = self.registry.as_ref().map(|registry| {
+            let mut amounts = vec![0; registry.items().len()];
+            for stack in &stacks {
+                if let Some(id) = stack
+                    .item
+                    .as_deref()
+                    .and_then(|name| registry.item_id(name))
+                {
+                    amounts[id.index()] += stack.amount;
+                }
+            }
+            amounts
+        });
+        let core = pending.core.clone();
+        let _ = self.with_campaign_mut(|campaign, settings| {
+            campaign.universe.clear_loadout_info(settings);
+            if let Some(amounts) = amounts {
+                let _ = campaign.universe.update_launch_resources(settings, amounts);
+            }
+            // `updateLoadout(CoreBlock)`: an unnamed schematic -> empty file.
+            campaign.universe.update_loadout(settings, &core, None);
+        });
+        self.persist();
+        if let Some(mut host) = self.host() {
+            host.bind_mut().set_pending_launch_core(
+                GString::from(core.as_str()),
+                GString::from(pending.resources.as_str()),
+            );
+        }
+        let payload = serde_json::json!({
+            "launch_core": core,
+            "stacks": serde_json::from_str::<serde_json::Value>(&pending.resources)
+                .unwrap_or(serde_json::Value::Array(Vec::new())),
+        });
+        let started = self.start_sector_with_loadout(
+            GString::from(pending.planet.as_str()),
+            pending.sector,
+            GString::from(payload.to_string().as_str()),
+        );
+        log::info!(
+            "accelerator launch landed on `{}:{}`: {started}",
+            pending.planet,
+            pending.sector
+        );
+    }
+
     /// `PlanetDialog.abandonSectorConfirm` for the played sector
     /// (PlanetDialog.java:1153-1161): the caller hides the planet page and
     /// 7 ticks later every player-team core dies, so the campaign game-over
@@ -6020,6 +6212,31 @@ fn parse_launch_payload(json: &str) -> (Option<i32>, Option<u16>, String) {
     let stacks = value.get("stacks").cloned().unwrap_or(value);
     (schematic, origin, stacks.to_string())
 }
+
+/// An accelerator launch in flight (`AcceleratorBuild.buildConfiguration`'s
+/// callback, Accelerator.java:262-284).
+struct PendingAcceleratorLaunch {
+    /// Accelerator anchor tile.
+    tile: (i32, i32),
+    /// Accelerator world centre (fx/sound origin).
+    world: (f32, f32),
+    /// Destination planet name and sector id.
+    planet: String,
+    sector: i32,
+    /// Carried resources `[{item, amount}]`.
+    resources: String,
+    /// The launch core (`launchBlock`).
+    core: String,
+    /// Ticks since the launch began (Arc `Time.delta`, real frames).
+    elapsed: f32,
+    /// The `chargeDuration` burst (Accelerator.java:358-362) already played.
+    charged: bool,
+}
+
+/// `launchDuration() - 6f` (Accelerator.java:273; 120 + 220 - 6).
+const ACCELERATOR_SWITCH_TICKS: f32 = 334.0;
+/// `chargeDuration` (Accelerator.java:52).
+const ACCELERATOR_CHARGE_TICKS: f32 = 220.0;
 
 /// Clears one campaign sector's persisted base/items
 /// (`PlanetDialog.abandonSectorConfirm`, non-playing branch).

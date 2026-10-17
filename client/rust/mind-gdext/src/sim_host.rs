@@ -463,6 +463,9 @@ pub struct MindSimHost {
     /// Launch payload for the next generated sector (H05 T4): schematic index
     /// (`-1` = planet default) and launch-resource stacks JSON.
     pending_launch: Option<(i32, String)>,
+    /// `Universe.updateLoadout(CoreBlock)` override for the next sector
+    /// (the Interplanetary Accelerator's launch core, Accelerator.java:277).
+    pending_launch_core: Option<String>,
     /// Whether the last `load_sector` placed a generated sector's launch
     /// loadout during the world load (`MindCampaign.start_sector_with_loadout`
     /// skips its own `place_launch_loadout` then; H05 T4).
@@ -513,6 +516,7 @@ impl INode for MindSimHost {
             last_limit_area: None,
             pending_gen_extras: None,
             pending_launch: None,
+            pending_launch_core: None,
             generated_loadout_placed: false,
             logic_last_error: String::new(),
             last_map_error: None,
@@ -2878,6 +2882,7 @@ impl MindSimHost {
         self.sector_plans.clear();
         self.sector_resume = None;
         self.pending_launch = None;
+        self.pending_launch_core = None;
         self.pending_gen_extras = None;
         self.pending_map_gen_seed = None;
         self.generated_loadout_placed = false;
@@ -3017,6 +3022,27 @@ impl MindSimHost {
         self.pending_launch = Some((schematic_index, stacks_json.to_string()));
     }
 
+    /// `Universe.updateLoadout((CoreBlock)launchBlock)` +
+    /// `updateLaunchResources(resources)` (Accelerator.java:275-277) for the
+    /// next sector: the launch loadout becomes a single `core` block
+    /// (`Universe.java:118-121`) stocked with `stacks_json`.
+    #[func]
+    pub fn set_pending_launch_core(&mut self, core: GString, stacks_json: GString) {
+        self.pending_launch_core = Some(core.to_string());
+        self.pending_launch = Some((-1, stacks_json.to_string()));
+    }
+
+    /// The single-core loadout schematic of `core` (`Schematic::single_core`).
+    fn single_core_schematic(&self, core: &str) -> Option<mind_core::game::schematic::Schematic> {
+        let registry = self.content_snapshot.as_ref()?;
+        let id = registry.block_id(core)?;
+        let size = registry
+            .block(id)
+            .map(|def| i32::from(def.size))
+            .unwrap_or(1);
+        Some(mind_core::game::schematic::Schematic::single_core(id, size))
+    }
+
     /// Whether the last `load_sector` placed the generated sector's launch
     /// loadout during the world load (H05 T4).
     pub fn generated_loadout_placed(&self) -> bool {
@@ -3057,9 +3083,15 @@ impl MindSimHost {
         planet_name: &str,
     ) -> Option<mind_core::maps::generators::planet::LaunchLoadout> {
         let (index, stacks_json) = self.pending_launch.take().unwrap_or((-1, String::new()));
+        let core_override = self
+            .pending_launch_core
+            .take()
+            .and_then(|core| self.single_core_schematic(&core));
         let schematics = self.load_user_schematics();
         let registry = self.content_snapshot.as_ref()?;
-        let index = if index >= 0 {
+        let index = if core_override.is_some() {
+            None
+        } else if index >= 0 {
             Some(index as usize)
         } else {
             registry
@@ -3068,7 +3100,9 @@ impl MindSimHost {
                 .and_then(|core| registry.block_id(&core))
                 .and_then(|core| schematics.get_default_loadout(core))
         };
-        let Some(schematic) = index.and_then(|index| schematics.all.get(index).cloned()) else {
+        let Some(schematic) =
+            core_override.or_else(|| index.and_then(|index| schematics.all.get(index).cloned()))
+        else {
             log::warn!("load_sector: no launch loadout for `{planet_name}`");
             return None;
         };
@@ -3362,6 +3396,7 @@ impl MindSimHost {
                         host.sector_rules = Some(rules);
                     }
                     host.pending_launch = None;
+                    host.pending_launch_core = None;
                     host.sim.refresh_unit_runtime();
                 }) as GeneratedLoadout
             });
@@ -5280,15 +5315,37 @@ impl MindSimHost {
     /// `stacks_json` (`[{item, amount}]`, the launch resources).
     #[func]
     pub fn place_launch_loadout(&mut self, schematic_index: i32, stacks_json: GString) -> bool {
-        if schematic_index < 0 {
+        if schematic_index < 0 || self.content_snapshot.is_none() {
             return false;
         }
-        let Some(registry) = self.content_snapshot.as_ref() else {
-            return false;
-        };
         let schematics = self.load_user_schematics();
         let Some(schem) = schematics.all.get(schematic_index as usize).cloned() else {
             log::warn!("place_launch_loadout: no schematic at index {schematic_index}");
+            return false;
+        };
+        self.place_loadout_schematic(&schem, stacks_json)
+    }
+
+    /// `place_launch_loadout` for the accelerator's single-core loadout
+    /// (`Universe.updateLoadout(CoreBlock)`, Universe.java:118-121) on a
+    /// preset map's fresh launch.
+    #[func]
+    pub fn place_launch_core(&mut self, core: GString, stacks_json: GString) -> bool {
+        let Some(schem) = self.single_core_schematic(&core.to_string()) else {
+            log::warn!("place_launch_core: unknown core `{core}`");
+            return false;
+        };
+        self.place_loadout_schematic(&schem, stacks_json)
+    }
+
+    /// `Schematics.placeLaunchLoadout` body shared by the schematic and
+    /// single-core loadouts.
+    fn place_loadout_schematic(
+        &mut self,
+        schem: &mind_core::game::schematic::Schematic,
+        stacks_json: GString,
+    ) -> bool {
+        let Some(registry) = self.content_snapshot.as_ref() else {
             return false;
         };
         let team = self.player_team();
@@ -5296,7 +5353,7 @@ impl MindSimHost {
             log::warn!("place_launch_loadout: no default-team core to replace");
             return false;
         };
-        let cores = self.sim.place_loadout(&schem, core_x, core_y, team, true);
+        let cores = self.sim.place_loadout(schem, core_x, core_y, team, true);
         let Some(entity) = cores.first().copied() else {
             log::warn!("place_launch_loadout: schematic placement produced no core");
             return false;
@@ -6050,6 +6107,133 @@ impl MindSimHost {
             return false;
         };
         mind_core::world::behavior::defense::tap_allowed(&mut self.sim.ecs.0, entity)
+    }
+
+    /// The accelerator building at tile `(x, y)` (any tile of its footprint).
+    fn accelerator_at(&self, x: i32, y: i32) -> Option<bevy_ecs::entity::Entity> {
+        let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {
+            return None;
+        };
+        let entity = self
+            .sim
+            .grid
+            .entity_at(mind_core::world::TilePos::new(tx, ty))?;
+        let block = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)?
+            .block;
+        let kind = self.content_snapshot.as_ref()?.block(block)?.kind;
+        (kind == mind_core::content::registries::blocks::BlockKind::Accelerator).then_some(entity)
+    }
+
+    /// `AcceleratorBuild.buildConfiguration` (Accelerator.java:258-291) for the
+    /// tap path: `""` for a non-accelerator; `{"accelerator": true, "open":
+    /// false}` = `deselect()` with no panel (`!canLaunch()`); `"open": true`
+    /// = open the planet-launch picker (`ui.planet.showPlanetLaunch`) for the
+    /// current sector - `Trigger.acceleratorUse` has fired. `InputHandler`'s
+    /// `config_spec` should route accelerators here instead of the item panel.
+    #[func]
+    pub fn accelerator_config_spec(&mut self, x: i32, y: i32) -> GString {
+        let Some(entity) = self.accelerator_at(x, y) else {
+            return GString::new();
+        };
+        let open = self.sim.accelerator_config_tapped(entity);
+        let (anchor_x, anchor_y) = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::Building>(entity)
+            .map(|building| (i32::from(building.tile.x()), i32::from(building.tile.y())))
+            .unwrap_or((x, y));
+        GString::from(
+            serde_json::json!({
+                "accelerator": true,
+                "open": open,
+                "x": anchor_x,
+                "y": anchor_y,
+            })
+            .to_string()
+            .as_str(),
+        )
+    }
+
+    /// The whole accelerator tap (`buildConfiguration`, Accelerator.java:
+    /// 258-291) for `InputHandler`: returns false for a non-accelerator;
+    /// otherwise the tap is consumed with no config panel (`deselect()`), and
+    /// when `canLaunch()` holds `Trigger.acceleratorUse` fires and the planet
+    /// page opens in `planetLaunch` mode (`ui.planet.showPlanetLaunch`),
+    /// deferred so no host borrow is held across the dialog build.
+    #[func]
+    pub fn accelerator_tapped(&mut self, x: i32, y: i32) -> bool {
+        let spec = self.accelerator_config_spec(x, y).to_string();
+        if spec.is_empty() {
+            return false;
+        }
+        let open = serde_json::from_str::<serde_json::Value>(&spec)
+            .ok()
+            .and_then(|value| value.get("open")?.as_bool())
+            .unwrap_or(false);
+        if open && let Some(mut ui) = self.base().get_node_or_null("/root/MindUi") {
+            let value: serde_json::Value = serde_json::from_str(&spec).unwrap_or_default();
+            let context = serde_json::json!({
+                "mode": "planetLaunch",
+                "x": value.get("x"),
+                "y": value.get("y"),
+            });
+            ui.call_deferred(
+                "open_dialog",
+                &[
+                    GString::from("planet").to_variant(),
+                    GString::from(context.to_string().as_str()).to_variant(),
+                ],
+            );
+        }
+        true
+    }
+
+    /// `AcceleratorBuild.canLaunch()` at `(x, y)` (Accelerator.java:239-241).
+    #[func]
+    pub fn accelerator_can_launch(&self, x: i32, y: i32) -> bool {
+        self.accelerator_at(x, y)
+            .is_some_and(|entity| self.sim.accelerator_can_launch(entity))
+    }
+
+    /// The planet-launch picker's confirm on the accelerator at `(x, y)`
+    /// (Accelerator.java:262-272): consumes the launch core, clears the stored
+    /// items, drains the power buffer, resets `progress` and starts
+    /// `launching`. Returns the carried resources `[{item, amount}]`, or `""`
+    /// when `canLaunch()` no longer holds.
+    #[func]
+    pub fn accelerator_launch(&mut self, x: i32, y: i32) -> GString {
+        let Some(entity) = self.accelerator_at(x, y) else {
+            return GString::new();
+        };
+        let Some(resources) = self.sim.accelerator_launch(entity) else {
+            return GString::new();
+        };
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return GString::new();
+        };
+        let stacks: Vec<serde_json::Value> = resources
+            .iter()
+            .filter_map(|(item, amount)| {
+                let name = registry.item(*item)?.name.clone();
+                Some(serde_json::json!({"item": name, "amount": amount}))
+            })
+            .collect();
+        self.world_dirty = true;
+        self.emit_state();
+        GString::from(serde_json::Value::Array(stacks).to_string().as_str())
+    }
+
+    /// `launching = false` right before the sector switch (Accelerator.java:274).
+    #[func]
+    pub fn accelerator_end_launch(&mut self, x: i32, y: i32) {
+        if let Some(entity) = self.accelerator_at(x, y) {
+            self.sim.accelerator_end_launch(entity);
+        }
     }
 
     /// Installs the opt-in live block runtime (plan-07 `BlockTable` + behaviors)

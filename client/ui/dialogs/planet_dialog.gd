@@ -67,6 +67,11 @@ var _last_sector_id := -1
 var _new_presets: Array = []
 var _preset_show := 0.0
 var _reveal_showed := false
+## `PlanetDialog.mode`: `look` or `planetLaunch` (`showPlanetLaunch`, the
+## Interplanetary Accelerator's destination picker; L06 T7).
+var _launch_mode := "look"
+## The accelerator tile that opened the `planetLaunch` picker.
+var _accelerator_tile := Vector2i(-1, -1)
 
 const MENU_GROUP_PATH := "/root/Spine/Ui/UiRoot/MenuGroup"
 const MENU_BACKGROUND_PATH := "/root/Spine/Ui/MenuBackground"
@@ -96,6 +101,10 @@ func shown() -> void:
 	# launchSector = null` — the page opens with no sector selected (no panel,
 	# no band); `lookAt(getLastSector())` below only turns the camera.
 	_selected_sector = -1
+	# `showPlanetLaunch` (`PlanetDialog.java:334-370`): opened with
+	# `{"mode": "planetLaunch", "x", "y"}` by the accelerator's configuration.
+	_launch_mode = str(_context.get("mode", "look"))
+	_accelerator_tile = Vector2i(int(_context.get("x", -1)), int(_context.get("y", -1)))
 	# "view current planet by default" (`PlanetDialog.show`): inside a campaign
 	# sector the page opens on that sector's planet, never the chooser.
 	_adopt_current_sector()
@@ -118,6 +127,13 @@ func shown() -> void:
 	# and the new-preset reveal collection. The chooser never reaches here.
 	if not chooser_shown:
 		_start_preset_reveal()
+	# `showPlanetLaunch`: `zoom = state.zoom = 1`, `state.uiAlpha = 0`.
+	if _launch_mode == "planetLaunch":
+		var launch_view := _planet_view()
+		if launch_view != null:
+			launch_view.zoom = 1.0
+			launch_view.zoom_target = 1.0
+			launch_view.ui_alpha = 0.0
 	# `PlanetDialog.java:216-222`: after a Serpulo remap the one-time "Campaign
 	# Changes Notice" shows, but only when the chooser branch was not taken.
 	if not chooser_shown:
@@ -125,6 +141,7 @@ func shown() -> void:
 
 
 func hidden() -> void:
+	_launch_mode = "look"
 	_remove_sector_list()
 	_set_planet_view_active(false)
 	# Back/ESC returns to whatever the page covered (the running sector or the
@@ -1006,7 +1023,8 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 	# `.visible(() -> state.planet.allowCampaignRules && mode != planetLaunch)`
 	# (`PlanetDialog.java:739`; L06 T6.1).
 	var selected_planet: Dictionary = by_name.get(planet_name, {})
-	difficulty.visible = bool(selected_planet.get("allow_campaign_rules", true))
+	difficulty.visible = bool(selected_planet.get("allow_campaign_rules", true)) \
+		and _launch_mode != "planetLaunch"
 	rail.add(difficulty).grow_x_axis().set_pad_left(0).set_pad_right(0) \
 		.set_pad_top(13).set_pad_bottom(2)
 	rail.row()
@@ -1202,7 +1220,12 @@ func _build_sector_panel(sector: Dictionary) -> Control:
 	var action := _sector_action(sector)
 	# `updateSelected`: the action button exists only when `(hasBase && look) ||
 	# canSelect || preset.alwaysUnlocked` (`show_action`).
-	if bool(sector.get("show_action", true)):
+	# `planetLaunch` mode: `canSelect` is the accelerator rule set
+	# (`accelerator_selectable`, PlanetDialog.java:414-435).
+	var show_action := bool(sector.get("show_action", true))
+	if _launch_mode == "planetLaunch":
+		show_action = bool(sector.get("accelerator_selectable", false))
+	if show_action:
 		var launch := MindWidgets.button("")
 		launch.custom_minimum_size = Vector2(230.0, 53.0)
 		launch.add_theme_stylebox_override("normal", _pane_box(Color(0.0, 0.0, 0.0, 1.0), MindStyles.ACCENT))
@@ -1405,6 +1428,12 @@ func _open_sector_stats(sector_id: int) -> void:
 ## `@sectors.launch`; disabled when locked or without a candidate.
 func _sector_action(sector: Dictionary) -> Dictionary:
 	var locked := bool(sector.get("objectives_locked", false))
+	# `planetLaunch`: `findLauncher` is the launch sector, so never
+	# `@sectors.nolaunchcandidate` (PlanetDialog.java:438,1340-1347).
+	if _launch_mode == "planetLaunch":
+		if locked:
+			return {"label": "@locked", "icon": "lock", "mode": "planetLaunch", "disabled": true}
+		return {"label": "@sectors.launch", "icon": "play", "mode": "planetLaunch", "disabled": false}
 	var no_candidate := bool(sector.get("no_candidate", false))
 	var disabled := locked or no_candidate
 	if _is_being_played(sector):
@@ -1432,10 +1461,27 @@ func _is_being_played(sector: Dictionary) -> bool:
 
 
 func _sector_action_pressed(planet_name: String, sector_id: int, mode: String) -> void:
+	if mode == "planetLaunch":
+		_accelerator_launch(planet_name, sector_id)
+		return
 	if mode == "resume" or mode == "go":
 		_launch(planet_name, sector_id, -1, true)
 		return
 	_launch_via_launcher(planet_name, sector_id)
+
+
+## `playSelected` in `planetLaunch` mode (`PlanetDialog.java:1445-1449`):
+## `listener.get(sector)` - the accelerator's launch callback
+## (`MindCampaign.accelerator_launch_to`) - then `hide()`.
+func _accelerator_launch(planet_name: String, sector_id: int) -> void:
+	var campaign := campaign_node()
+	if campaign != null and campaign.has_method("accelerator_launch_to"):
+		campaign.call(
+			"accelerator_launch_to", _accelerator_tile.x, _accelerator_tile.y, planet_name, sector_id
+		)
+	var ui := get_node_or_null("/root/MindUi")
+	if ui != null:
+		ui.call("close_dialog", "planet")
 
 
 ## `PlanetDialog.playSelected` look mode: the Java `findLauncher` sector (from
