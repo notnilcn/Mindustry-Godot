@@ -1,9 +1,60 @@
 {
   "mods": [
-    {"name": "all-kinds", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
-    {"name": "assets-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
-    {"name": "basic-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
-    {"name": "error-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0},
-    {"name": "patch-mod", "state": "enabled", "enabled": true, "version": "1.0", "texturescale": 1.0}
+    {
+      "name": "all-kinds",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "assets-mod",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "basic-mod",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "classes",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "consumers",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "error-mod",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "patch-mod",
+      "state": "enabled",
+      "enabled": true,
+      "version": "1.0",
+      "texturescale": 1.0
+    },
+    {
+      "name": "scripts",
+      "state": "unsupported",
+      "enabled": false,
+      "version": "1.0",
+      "texturescale": 1.0
+    }
   ]
 }

@@ -1567,6 +1567,11 @@ fn cmd_mods_list(dir: &Path, json: bool, check: bool) -> anyhow::Result<i32> {
     let report = mods
         .load(&fs, &dir, &mut settings)
         .with_context(|| format!("loading mods from `{}`", dir.display()))?;
+    // `Mods.loadScripts` (`mods/mod.rs:464`): the client marks script-only mods
+    // `ScriptsUnsupported`; the list report mirrors that state (J09 T5).
+    let mut mods = mods;
+    mods.load_scripts(&fs);
+    let report = mods.report();
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
