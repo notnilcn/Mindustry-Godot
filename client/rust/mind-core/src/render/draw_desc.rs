@@ -675,10 +675,13 @@ pub enum DrawDesc {
         /// `DrawCircles.radius`.
         radius: f32,
     },
-    /// `DrawLiquidOutputs` (region-only approximation; side data is plan 07).
+    /// `DrawLiquidOutputs` (`world/draw/DrawLiquidOutputs.java`): one region
+    /// per `outputLiquids[i]` with a `liquidOutputDirections[i]` side
+    /// (`-1` = none), `<block>-<liquid>-output1|2` (L06 T5).
     LiquidOutputs {
-        /// Region suffix per output index.
-        suffix: &'static str,
+        /// `(liquid name, liquidOutputDirections[i])` per output, in
+        /// `outputLiquids` order.
+        outputs: &'static [(&'static str, i8)],
     },
     /// `DrawMulti`.
     Multi(Vec<DrawDesc>),
@@ -1779,19 +1782,29 @@ pub fn execute(
                 ));
             }
         }
-        DrawDesc::LiquidOutputs { suffix } => {
-            let r = region(name, suffix, ids);
-            out.push(DescDraw::sprite(
-                state.layer,
-                Blend::Normal,
-                r,
-                state.x,
-                state.y,
-                quad,
-                quad,
-                0.0,
-                state.liquid_color,
-            ));
+        DrawDesc::LiquidOutputs { outputs } => {
+            // `DrawLiquidOutputs.draw` (`DrawLiquidOutputs.java:16-26`):
+            // `realRot = (side + rotation) % 4`, region row `realRot > 1 ? 1 :
+            // 0` (`-output2` / `-output1`), drawn untinted at `realRot * 90`.
+            for (liquid, side) in outputs.iter() {
+                if *side < 0 {
+                    continue;
+                }
+                let real_rot = (i32::from(*side) + state.rotation).rem_euclid(4);
+                let suffix = format!("-{liquid}-output{}", if real_rot > 1 { 2 } else { 1 });
+                let r = region(name, &suffix, ids);
+                out.push(DescDraw::sprite(
+                    state.layer,
+                    Blend::Normal,
+                    r,
+                    state.x,
+                    state.y,
+                    quad,
+                    quad,
+                    real_rot as f32 * 90.0,
+                    0xffff_ffff,
+                ));
+            }
         }
         DrawDesc::Multi(list) => {
             for d in list {
@@ -2035,6 +2048,44 @@ pub fn vanilla_chain(name: &str) -> Option<Vec<DrawDesc>> {
                 radius: 3.0,
             },
             region_desc("-top"),
+        ],
+        // `Blocks.java:1356-1398`: `DrawMulti(DrawRegion("-bottom"),
+        // DrawLiquidTile(water, 2), DrawBubbles(7693e3){sides 10, recurrence 3,
+        // spread 6, radius 1.5, amount 20}, DrawRegion(), DrawLiquidOutputs(),
+        // DrawGlowRegion(){alpha 0.7, color c4bdf3, glowIntensity 0.3,
+        // glowScale 6})`; `outputLiquids = ozone, hydrogen`,
+        // `liquidOutputDirections = {1, 3}` (L06 T5).
+        "electrolyzer" => vec![
+            region_desc("-bottom"),
+            DrawDesc::LiquidTile {
+                padding: 2.0,
+                alpha: 1.0,
+            },
+            DrawDesc::Bubbles {
+                color: 0x7693_e3ff,
+                amount: 20,
+                sides: 10,
+                stroke_min: 0.2,
+                spread: 6.0,
+                time_scl: 30.0,
+                recurrence: 3.0,
+                radius: 1.5,
+                fill: false,
+            },
+            DrawDesc::Default,
+            DrawDesc::LiquidOutputs {
+                outputs: &[("ozone", 1), ("hydrogen", 3)],
+            },
+            DrawDesc::GlowRegion {
+                suffix: "-glow",
+                color: 0xc4bd_f3ff,
+                alpha: 0.7,
+                glow_scale: 6.0,
+                glow_intensity: 0.3,
+                rotate_speed: 0.0,
+                rotate: false,
+                layer: -1.0,
+            },
         ],
         _ => return None,
     })
@@ -2289,6 +2340,55 @@ mod tests {
             &mut out,
         );
         assert_eq!(out.len(), 4);
+    }
+
+    /// L06 T5: `DrawLiquidOutputs.draw` (`DrawLiquidOutputs.java:16-26`) for the
+    /// electrolyzer (`outputLiquids` ozone, hydrogen; `liquidOutputDirections`
+    /// {1, 3}): `realRot = (side + rotation) % 4` picks `-output1` (realRot <=
+    /// 1) or `-output2` and draws at `realRot * 90`.
+    #[test]
+    fn liquid_outputs_draw_per_side_regions() {
+        let draws = |rotation: i32| {
+            let mut ids = RegionIdTable::new();
+            let mut out = Vec::new();
+            let state = DrawState::new(64.0, 64.0, rotation, 3);
+            execute(
+                &DrawDesc::LiquidOutputs {
+                    outputs: &[("ozone", 1), ("hydrogen", 3), ("water", -1)],
+                },
+                "electrolyzer",
+                &state,
+                &mut ids,
+                &mut out,
+            );
+            out.iter()
+                .map(|draw| {
+                    let DrawCmd::Sprite { region, rot, .. } = draw.cmd else {
+                        panic!("expected sprite");
+                    };
+                    (ids.name(region).unwrap_or("?").to_owned(), rot)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            draws(0),
+            vec![
+                ("electrolyzer-ozone-output1".to_owned(), 90.0),
+                ("electrolyzer-hydrogen-output2".to_owned(), 270.0),
+            ],
+            "side -1 draws nothing"
+        );
+        assert_eq!(
+            draws(1),
+            vec![
+                ("electrolyzer-ozone-output2".to_owned(), 180.0),
+                ("electrolyzer-hydrogen-output1".to_owned(), 0.0),
+            ]
+        );
+        assert!(
+            vanilla_chain("electrolyzer").is_some(),
+            "electrolyzer chain"
+        );
     }
 
     #[test]

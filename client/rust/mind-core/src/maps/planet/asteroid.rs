@@ -519,7 +519,11 @@ mod tests {
         }
         assert_eq!(
             Checksum(hasher.finish().value()).to_hex(),
-            "463dbb70d52f29a4"
+            // Golden history (L08 T1 protocol, batched L06 regen): 463dbb70d52f29a4
+            // 38dc36f1 (L02 T1, Floor.decoration, Blocks.java:705-822): -> b89c2922ab3d44d5;
+            // 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 and uses unsigned
+            // shifts, javap arc.util.noise.Simplex): -> 49d193e3e88a2aeb.
+            "49d193e3e88a2aeb"
         );
     }
 }

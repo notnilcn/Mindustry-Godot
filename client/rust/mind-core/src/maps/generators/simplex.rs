@@ -90,7 +90,10 @@ mod tests {
         let mut tiles = Tiles::new(128, 128);
         let mut generator = SimplexGenerator::new(7);
         generator.generate(&mut tiles, &crate::world::WorldParams::default(), &content);
-        assert_eq!(checksum(&tiles), "bc1c505dc6481a14");
+        // Golden history (L08 T1 protocol, batched L06 regen): bc1c505dc6481a14
+        // until 341d9f74 (L06 T6.0, Arc Simplex.perm `x & 255` + unsigned
+        // shifts, javap arc.util.noise.Simplex) -> 07e2c98b533790cc.
+        assert_eq!(checksum(&tiles), "07e2c98b533790cc");
         // Structurally valid: not all air, has at least one wall and one ore.
         assert!(tiles.iter().any(|tile| tile.block != BlockId::AIR));
         assert!(tiles.iter().any(|tile| tile.overlay != BlockId::AIR));

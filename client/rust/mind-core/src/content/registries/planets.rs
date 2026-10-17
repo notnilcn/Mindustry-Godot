@@ -242,6 +242,9 @@ pub struct PlanetDef {
     pub mesh: MeshKind,
     /// Cloud mesh kind tag.
     pub cloud_mesh: Option<CloudMeshKind>,
+    /// The `MultiMesh(HexSkyMesh ..)` layers of `cloudMeshLoader`
+    /// (Planets.java:49-52,127-130); empty = no clouds.
+    pub cloud_layers: Vec<crate::render::g3d::hex_sky::HexSkyLayer>,
     /// Bloom effect enabled.
     pub bloom: bool,
     /// Listed in the planet access UI.
@@ -290,6 +293,14 @@ pub struct PlanetDef {
     pub allow_legacy_launch_pads: bool,
     /// Waves on sector loss.
     pub allow_waves: bool,
+    /// `Planet.prebuildBase` (`Planet.java:133`, default true): landing
+    /// rebuilds the base in a shockwave (`Control.java:230`).
+    pub prebuild_base: bool,
+    /// `Planet.allowCampaignRules` (`Planet.java:139`): the planet UI offers
+    /// the difficulty/rules button. The constructor sets it to `isVanilla()`
+    /// (`Planet.java:221`), so vanilla planets are true and mod planets false
+    /// unless their JSON sets it (L06 T6.1).
+    pub allow_campaign_rules: bool,
     /// Numbered-sector launches.
     pub allow_launch_to_numbered: bool,
     /// Self-sector launch.
@@ -367,6 +378,7 @@ impl PlanetDef {
             generator: GeneratorKind::None,
             mesh: MeshKind::ShaderSphere,
             cloud_mesh: None,
+            cloud_layers: Vec::new(),
             bloom: false,
             accessible: true,
             visible: true,
@@ -397,6 +409,8 @@ impl PlanetDef {
             allow_sector_invasion: false,
             allow_legacy_launch_pads: false,
             allow_waves: false,
+            prebuild_base: true,
+            allow_campaign_rules: true,
             allow_launch_to_numbered: true,
             allow_self_sector_launch: false,
             show_rts_ai_rule: false,
@@ -584,6 +598,7 @@ pub fn load(
         planet.generator = GeneratorKind::Erekir;
         planet.mesh = MeshKind::Hex { detail: 5 };
         planet.cloud_mesh = Some(CloudMeshKind::MultiHex);
+        planet.cloud_layers = crate::render::g3d::hex_sky::erekir_clouds();
         planet.unlock.always_unlocked = true;
         planet.land_cloud_color = Rgba::from_hex("ed6542").unwrap_or(Rgba::WHITE);
         planet.atmosphere_color = Rgba::from_hex("f07218").unwrap_or(Rgba::WHITE);
@@ -678,6 +693,7 @@ pub fn load(
         planet.generator = GeneratorKind::Serpulo;
         planet.mesh = MeshKind::Hex { detail: 6 };
         planet.cloud_mesh = Some(CloudMeshKind::MultiHex);
+        planet.cloud_layers = crate::render::g3d::hex_sky::serpulo_clouds();
         planet.enemy_factory_activation_delay = 60.0 * 60.0 * 2.0;
         planet.launch_capacity_multiplier = 0.5;
         planet.sector_seed = 2;

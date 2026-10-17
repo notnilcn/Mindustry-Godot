@@ -133,6 +133,7 @@
     "name": "groundZero",
     "named": false,
     "selectable": true,
+    "accelerator_selectable": false,
     "require_unlock": true,
     "preset_unlocked": true,
     "lock_icon": false,
@@ -216,5 +217,5 @@
     "waves_lasted": 12,
     "next_planet": "erekir"
   },
-  "checksum": "26350bc2d719ed88"
+  "checksum": "db3aff19ca782bec"
 }

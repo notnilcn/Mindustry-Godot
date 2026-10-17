@@ -401,6 +401,53 @@ mod tests {
         );
     }
 
+    /// L06 T6.2: the Erekir structures pass applies the generator's rules
+    /// (`ErekirPlanetGenerator.java:423-433`): `env = defaultEnv`,
+    /// `placeRangeCheck = true`, `waves = false`, `hideSpawns = false`.
+    #[test]
+    fn erekir_structures_apply_generator_rules() {
+        use crate::maps::generators::planet::StructureCtx;
+        let content = content();
+        let def = content.planet_by_name("erekir").expect("erekir");
+        let id = (0..def.sectors.len() as u16)
+            .find(|id| def.sectors[*id as usize].preset.is_none())
+            .expect("a numbered erekir sector");
+        let generated =
+            generate_sector("erekir", id, &content, SectorGenExtras::default()).expect("erekir");
+        let GeneratedSector {
+            grid,
+            rules,
+            mut generator,
+            ..
+        } = generated;
+        let (width, height) = (grid.tiles.width, grid.tiles.height);
+        let mut sim = crate::sim::Sim::new(1, width, height, BlockId::AIR, BlockId::AIR);
+        sim.grid = grid;
+        sim.install_block_runtime().expect("live runtime");
+        let mut rules = rules;
+        rules.waves = true;
+        rules.hide_spawns = true;
+        rules.place_range_check = false;
+        let mut ctx = StructureCtx {
+            sim: &mut sim,
+            content: &content,
+            bases: None,
+            loadout: None,
+            rules: &mut rules,
+            player_team: 1,
+            wave_team: 2,
+        };
+        generator.place_structures(&mut ctx);
+        assert!(!rules.waves, "waves = false");
+        assert!(!rules.hide_spawns, "hideSpawns = false");
+        assert!(rules.place_range_check, "placeRangeCheck = true");
+        assert_eq!(
+            rules.env,
+            crate::game::planet::env_mask(&def.default_env),
+            "env = defaultEnv"
+        );
+    }
+
     #[test]
     fn ruins_placed_when_roll_positive() {
         // H05 T6: on a numbered sector whose ruin roll is > 0, the structures

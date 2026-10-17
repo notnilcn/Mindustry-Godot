@@ -232,7 +232,10 @@ mod tests {
         }
         assert_eq!(
             Checksum(hasher.finish().value()).to_hex(),
-            "7762880fe0716320"
+            // Golden history (L08 T1 protocol, batched L06 regen): 7762880fe0716320
+            // 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 and uses unsigned
+            // shifts, javap arc.util.noise.Simplex): -> e53960b4602d5ec2.
+            "e53960b4602d5ec2"
         );
     }
 }

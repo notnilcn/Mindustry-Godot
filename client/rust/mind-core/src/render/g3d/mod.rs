@@ -6,6 +6,7 @@
 //! construction lives in `mind-gdext::render::g3d`.
 
 pub mod grid;
+pub mod hex_sky;
 pub mod mesh_data;
 pub mod orbit;
 pub mod params;

@@ -18,7 +18,10 @@ use crate::world::update::edelta;
 
 use super::{BuildingBehavior, BuildingReader, BuildingWriter};
 
-/// `Accelerator` behavior (heat charge state machine).
+/// `Accelerator` behavior (`Accelerator.AcceleratorBuild`,
+/// world/blocks/campaign/Accelerator.java:111-300): heat/status/time/launch-heat
+/// lerps, the launch core's `progress`, the launch-block item capacities and
+/// `version() = 1` progress I/O. The launch itself is `Sim::accelerator_launch`.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AcceleratorBehavior;
 
@@ -29,48 +32,137 @@ impl BuildingBehavior for AcceleratorBehavior {
         }
     }
 
+    /// `AcceleratorBuild.updateTile` (Accelerator.java:121-138). `Time.delta`
+    /// is 1 at the fixed step (no `timeScale`, unlike `edelta`).
     fn update_tile(&self, world: &mut World, e: Entity) {
-        let heat_time = instance_heat_time(world, e);
+        let def = accelerator_def(world, e);
         let efficiency = world
             .get::<Building>(e)
             .map(|building| building.efficiency)
             .unwrap_or(0.0);
-        let edelta = edelta(world, e);
+        let status = world
+            .get::<crate::world::modules::PowerModule>(e)
+            .map(|power| power.status)
+            .unwrap_or(0.0);
         if let Some(mut state) = world.get_mut::<CampaignState>(e) {
-            if efficiency > 0.0 {
-                state.heat = (state.heat + edelta / heat_time.max(0.0001)).min(1.0);
+            let target = if state.launching { 1.0 } else { efficiency };
+            state.heat = lerp_delta(state.heat, target, 0.05);
+            state.status_lerp = lerp_delta(state.status_lerp, status, 0.05);
+            if !state.launching {
+                state.time += efficiency;
             } else {
-                state.heat = (state.heat - edelta / heat_time.max(0.0001)).max(0.0);
+                // `Mathf.slerpDelta(time, 0, 0.4)`.
+                state.time = slerp(state.time, 0.0, 0.4);
+            }
+            let launch_target = if state.launching { 1.0 } else { 0.0 };
+            state.launch_heat = lerp_delta(state.launch_heat, launch_target, 0.1);
+            // `if(efficiency >= 0f)` is always true upstream.
+            if efficiency >= 0.0 {
+                state.progress += efficiency / def.build_duration.max(0.0001);
+                state.progress = state.progress.min(1.0);
             }
         }
     }
 
+    /// `AcceleratorBuild.version()` (Accelerator.java:302-304).
+    fn version(&self, _world: &World, _e: Entity) -> u8 {
+        1
+    }
+
+    /// `AcceleratorBuild.write` (Accelerator.java:307-310): `progress`.
     fn write(&self, world: &World, e: Entity, w: &mut BuildingWriter) {
-        if let Some(state) = world.get::<CampaignState>(e) {
-            w.f(state.heat);
+        let progress = world
+            .get::<CampaignState>(e)
+            .map(|state| state.progress)
+            .unwrap_or(0.0);
+        w.f(progress);
+    }
+
+    /// `AcceleratorBuild.read` (Accelerator.java:313-319): revision >= 1 reads
+    /// `progress`. Revision-0 port saves wrote the old `heat` float; it is
+    /// skipped (Java revision 0 has no field, so the chunk simply ends).
+    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, revision: u8) {
+        let value = r.f().unwrap_or(0.0);
+        if revision >= 1
+            && let Some(mut state) = world.get_mut::<CampaignState>(e)
+        {
+            state.progress = value;
         }
     }
 
-    fn read(&self, world: &mut World, e: Entity, r: &mut BuildingReader, _revision: u8) {
-        let heat = r.f().unwrap_or(0.0);
-        if let Some(mut state) = world.get_mut::<CampaignState>(e) {
-            state.heat = heat;
-        }
+    /// `AcceleratorBuild.acceptItem` (Accelerator.java:298-300): no
+    /// `consumesItem` check - only the per-item maximum.
+    fn accept_item(&self, world: &World, e: Entity, _src: Entity, item: ItemId) -> bool {
+        world
+            .get::<crate::world::modules::ItemModule>(e)
+            .is_some_and(|items| items.get(item) < self.get_maximum_accepted(world, e, item))
+    }
+
+    /// `AcceleratorBuild.getMaximumAccepted` (Accelerator.java:293-295):
+    /// `capacities[item] + (isCoreBuilt() ? launchBlock.itemCapacity : 0)`.
+    fn get_maximum_accepted(&self, world: &World, e: Entity, item: ItemId) -> i32 {
+        let built = world
+            .get::<CampaignState>(e)
+            .is_some_and(|state| state.progress >= 1.0);
+        let extra = if built {
+            accelerator_def(world, e).launch_block_item_capacity
+        } else {
+            0
+        };
+        accelerator_capacity(world, e, item) + extra
     }
 }
 
-fn instance_heat_time(world: &World, e: Entity) -> f32 {
+/// `Accelerator.capacities[item]` (`init`, Accelerator.java:76-85): the
+/// launch block's requirement amount, i.e. the block's item consumer stack.
+pub fn accelerator_capacity(world: &World, e: Entity, item: ItemId) -> i32 {
     let Some(building) = world.get::<Building>(e) else {
-        return 1.0;
+        return 0;
+    };
+    world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| table.get(building.block))
+        .map(|inst| {
+            inst.consumers
+                .all
+                .iter()
+                .filter_map(|consumer| match &consumer.kind {
+                    crate::world::consumers::ConsumeInstanceKind::Items(stacks) => Some(stacks),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|stack| stack.item == item)
+                .map(|stack| stack.amount)
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// The accelerator family knobs of `e`'s block (defaults when absent).
+pub fn accelerator_def(world: &World, e: Entity) -> crate::world::block_kind_data::AcceleratorDef {
+    let Some(building) = world.get::<Building>(e) else {
+        return Default::default();
     };
     world
         .get_resource::<crate::world::block::BlockTable>()
         .and_then(|table| table.instance(building.block))
-        .map(|inst| match &inst.kind_data {
-            BlockKindData::Accelerator(def) => def.heat_time,
-            _ => 1.0,
+        .and_then(|inst| match &inst.kind_data {
+            BlockKindData::Accelerator(def) => Some(def.clone()),
+            _ => None,
         })
-        .unwrap_or(1.0)
+        .unwrap_or_default()
+}
+
+/// Arc `Mathf.lerpDelta` at `Time.delta = 1`.
+fn lerp_delta(from: f32, to: f32, progress: f32) -> f32 {
+    from + (to - from) * progress.clamp(0.0, 1.0)
+}
+
+/// Arc `Mathf.slerp(fromDegrees, toDegrees, progress)`; Java's float `%`
+/// truncates like Rust's.
+fn slerp(from: f32, to: f32, progress: f32) -> f32 {
+    let delta = ((to - from + 360.0 + 180.0) % 360.0) - 180.0;
+    (from + delta * progress + 360.0) % 360.0
 }
 
 /// `LandingPad` behavior (`LandingPad.java`): config, landing queue priority,

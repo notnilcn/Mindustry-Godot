@@ -4,10 +4,10 @@
 //! `ErekirPlanetGenerator` (plan 06 §3.11). Ported from
 //! `maps/planet/ErekirPlanetGenerator.java`.
 //!
-//! Deviations (OD6-A/OD6-B, structural parity): `state.rules.*`,
-//! `Schematics.placeLaunchLoadout` and `Waves.generate` are plan-11/12 hooks and
-//! are not applied (no tile effect); `world.getDarkness` is zero until plan 12's
-//! sector polygon lands. The `steam` floor attribute is populated for the 8
+//! `state.rules.*` and `Schematics.placeLaunchLoadout` run in
+//! `place_structures` (L06 T6.2; Java's Erekir generator has no
+//! `Waves.generate`). `world.getDarkness` is zero until plan 12's sector
+//! polygon lands. The `steam` floor attribute is populated for the 8
 //! Erekir vents (plan 02), so [`steam_attr`] now skips existing steam tiles when
 //! placing vents (the `world_gen_erekir` golden moved `b8fd9327d1d0b300` →
 //! `daf8a3e078b79de7`).
@@ -329,9 +329,20 @@ impl WorldGenerator for ErekirPlanetGenerator {
         Some(self.spawn)
     }
 
-    /// `Schematics.placeLaunchLoadout` runs inside generation (H05 T4).
+    /// The tail of `ErekirPlanetGenerator.generate`
+    /// (`ErekirPlanetGenerator.java:423-433`): `state.rules.env =
+    /// sector.planet.defaultEnv`, `placeRangeCheck = true`,
+    /// `Schematics.placeLaunchLoadout(spawnX, spawnY)`, then `waves = false`
+    /// and `hideSpawns = false` (L06 T6.2). Java's Erekir generator never calls
+    /// `Waves.generate`.
     fn place_structures(&mut self, ctx: &mut StructureCtx) {
+        if let Some(planet) = ctx.content.planet_by_name("erekir") {
+            ctx.rules.env = crate::game::planet::env_mask(&planet.default_env);
+        }
+        ctx.rules.place_range_check = true;
         place_launch_loadout(ctx, self.spawn.0, self.spawn.1);
+        ctx.rules.waves = false;
+        ctx.rules.hide_spawns = false;
     }
 
     fn generate(&mut self, tiles: &mut Tiles, params: &WorldParams, content: &ContentRegistry) {
@@ -890,8 +901,8 @@ impl WorldGenerator for ErekirPlanetGenerator {
 
         self.planet.base.decoration(tiles, content, 0.017);
 
-        // `Schematics.placeLaunchLoadout`, `state.rules.*` and `Waves.generate`
-        // are plan-11/12 hooks (no tile effect).
+        // `state.rules.*` and `Schematics.placeLaunchLoadout` run in
+        // `place_structures` (they need the live sim and the session rules).
     }
 }
 
@@ -1029,7 +1040,11 @@ mod tests {
         }
         assert_eq!(
             Checksum(hasher.finish().value()).to_hex(),
-            "daf8a3e078b79de7"
+            // Golden history (L08 T1 protocol, batched L06 regen): daf8a3e078b79de7
+            // 38dc36f1 (L02 T1, Floor.decoration, Blocks.java:705-822): -> 7e34db8a547d410e;
+            // 341d9f74 (L06 T6.0, Arc Simplex.perm masks x & 255 and uses unsigned
+            // shifts, javap arc.util.noise.Simplex): -> 56a0d8a4ad4d4a1d.
+            "56a0d8a4ad4d4a1d"
         );
     }
 }

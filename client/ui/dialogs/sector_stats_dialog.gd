@@ -279,16 +279,32 @@ func _on_confirm(confirmed: bool) -> void:
 	if not confirmed:
 		return
 	var campaign := campaign_node()
+	var played := _is_played_sector(campaign)
 	if campaign != null and campaign.has_method("abandon_sector_at"):
 		campaign.call("abandon_sector_at", _planet, _sector_id)
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
 		ui.call("close_dialog", "sector_stats")
+		# `sector.isBeingPlayed()` -> `hide()` (PlanetDialog.java:1153-1154):
+		# the cores die 7 ticks later and the game-over path plays.
+		if played:
+			ui.call("close_dialog", "planet")
+			return
 	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if root != null:
 		var planet_dialog: Node = root.call("dialog", "planet")
 		if planet_dialog != null and planet_dialog.has_method("refresh_page"):
 			planet_dialog.call("refresh_page")
+
+
+## `Sector.isBeingPlayed` for this dialog's sector (`get_sector_state`).
+func _is_played_sector(campaign: Node) -> bool:
+	if campaign == null or not campaign.has_method("get_sector_state"):
+		return false
+	var state: Dictionary = campaign.call("get_sector_state")
+	return bool(state.get("campaign", false)) \
+		and str(state.get("planet", "")) == _planet \
+		and int(state.get("sector", -1)) == _sector_id
 
 
 ## The live `campaign_views` sector row this dialog was opened for.

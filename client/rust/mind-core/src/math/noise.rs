@@ -24,12 +24,17 @@ const GRAD3: [[i32; 3]; 12] = [
     [0, -1, -1],
 ];
 
-/// Arc `Simplex.perm`: a stateless permutation hash.
+/// Arc `Simplex.perm`: a stateless permutation hash. From the jar bytecode
+/// (`javap -c arc.util.noise.Simplex`): `x = (x & 255) * 0x45d9f3b;
+/// x = ((x >>> 16) ^ x) * (0x45d9f3b + seed); x = (x >>> 16) ^ x;
+/// return x & 255` - the input is masked first and both shifts are unsigned
+/// (the port had neither, so every generated terrain differed from Java;
+/// PAR-0424).
 #[inline]
 fn perm(seed: i32, x: i32) -> i32 {
-    let mut x = x.wrapping_mul(0x45d9f3b);
-    x = ((x >> 16) ^ x).wrapping_mul(0x45d9f3b_i32.wrapping_add(seed));
-    x = (x >> 16) ^ x;
+    let mut x = (x & 0xff).wrapping_mul(0x45d9f3b);
+    x = (((x as u32) >> 16) as i32 ^ x).wrapping_mul(0x45d9f3b_i32.wrapping_add(seed));
+    x = ((x as u32) >> 16) as i32 ^ x;
     x & 0xff
 }
 

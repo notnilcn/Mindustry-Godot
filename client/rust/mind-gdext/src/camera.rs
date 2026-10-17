@@ -18,7 +18,7 @@ use godot::prelude::*;
 use mind_core::config::TILESIZE;
 use mind_core::fx::FxEvent;
 use mind_core::input::{CameraState, MinimapRegion};
-use mind_core::render::cutscene::{CoreLandAnimator, Cutscene};
+use mind_core::render::cutscene::{AcceleratorLaunchAnimator, CoreLandAnimator, Cutscene};
 
 use crate::input::MindInput;
 use crate::sim_host::MindSimHost;
@@ -65,6 +65,8 @@ pub struct MindCamera2D {
     landing_core: Option<(f32, f32)>,
     /// Block name of the dropping core (`block-<name>-full` region).
     landing_block: String,
+    /// Interplanetary Accelerator launch centre (`show_accelerator_launch`).
+    accelerator_launch: Option<(f32, f32)>,
     /// Whether the `MindInput` cutscene lock is currently raised.
     cutscene_locked: bool,
     /// Whether the `MindInput` logic-cutscene lock is currently raised (H06 T3).
@@ -93,6 +95,7 @@ impl ICamera2D for MindCamera2D {
             cutscene: Cutscene::new(1.0),
             landing_core: None,
             landing_block: String::new(),
+            accelerator_launch: None,
             cutscene_locked: false,
             logic_locked: false,
             follow_target: None,
@@ -271,6 +274,23 @@ impl ICamera2D for MindCamera2D {
             .unwrap_or(false);
         self.cutscene.update(delta_frames, sim_paused);
         let in_cutscene = self.cutscene.is_cutscene();
+        if !in_cutscene {
+            self.accelerator_launch = None;
+        }
+        // `AcceleratorBuild.zoomLaunch` (Accelerator.java:394-397):
+        // `camera.position.set(x, y).add(randomDirection * shake * 2)`.
+        if let Some((ax, ay)) = self.accelerator_launch {
+            let mut probe = AcceleratorLaunchAnimator::new(120.0, 220.0);
+            mind_core::render::cutscene::LaunchAnimator::set_land_time_in(
+                &mut probe,
+                self.cutscene.get_land_time_in(),
+            );
+            let shake = probe.shake() * 2.0;
+            // View-only jitter (Java `Tmp.v1.setToRandomDirection()`).
+            let angle = (self.view_tick as f32 * 2.399_963).rem_euclid(std::f32::consts::TAU);
+            self.camera.position = (ax + angle.cos() * shake, ay + angle.sin() * shake);
+            self.follow_target = Some(self.camera.position);
+        }
         let was_cutscene = std::mem::replace(&mut self.cutscene_locked, in_cutscene);
         if in_cutscene {
             // `Renderer.update` writes `camerascale = zoomLaunch()` into the
@@ -326,6 +346,9 @@ impl MindCamera2D {
         self.follow_target = Some((core_x, core_y));
         self.landing_core = Some((core_x, core_y));
         self.landing_block = core_block.to_string();
+        // A landing replaces any accelerator launch cutscene (the sector
+        // switch at `launchDuration() - 6`): drop its camera pin.
+        self.accelerator_launch = None;
         self.cutscene = Cutscene::new(self.camera.camerascale.max(0.01));
         self.cutscene
             .show_landing(Box::new(CoreLandAnimator::new()));
@@ -333,6 +356,42 @@ impl MindCamera2D {
         // The input lock follows in `process` (no sim-host borrow from here:
         // callers may hold one).
         true
+    }
+
+    /// `renderer.showLaunch(accelerator)` (Accelerator.java:270,
+    /// `Renderer.java:576-586`): centre on the accelerator at world `(x, y)`
+    /// and run the 340-tick `AcceleratorLaunchAnimator` (charge zoom + shake,
+    /// then the launch zoom out).
+    #[func]
+    pub fn show_accelerator_launch(&mut self, x: f32, y: f32) -> bool {
+        self.camera.position = (x, y);
+        self.follow_target = Some((x, y));
+        self.landing_core = None;
+        self.accelerator_launch = Some((x, y));
+        self.cutscene = Cutscene::new(self.camera.camerascale.max(0.01));
+        self.cutscene
+            .show_launch(Box::new(AcceleratorLaunchAnimator::new(120.0, 220.0)));
+        true
+    }
+
+    /// The accelerator launch's draw/sequence inputs for the overlay
+    /// (`accelerator_launch.gd`): `{"active", "x", "y", "fin", "raw_time",
+    /// "duration", "charge_duration"}` (`getLandTimeIn`, `launchDuration() -
+    /// getLandTime()`).
+    #[func]
+    pub fn accelerator_launch_json(&self) -> GString {
+        let (x, y) = self.accelerator_launch.unwrap_or((0.0, 0.0));
+        let fin = self.cutscene.get_land_time_in();
+        let value = serde_json::json!({
+            "active": self.accelerator_launch.is_some() && self.cutscene.is_cutscene(),
+            "x": x,
+            "y": y,
+            "fin": fin,
+            "raw_time": 340.0 - fin * 340.0,
+            "duration": 340.0,
+            "charge_duration": 220.0,
+        });
+        GString::from(value.to_string().as_str())
     }
 
     /// `CoreBlock.drawLanding` inputs for the world-space core sprite

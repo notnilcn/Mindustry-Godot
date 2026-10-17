@@ -88,6 +88,18 @@ impl Schematic {
         Self::default()
     }
 
+    /// `Universe.updateLoadout(CoreBlock)` (Universe.java:118-121): an
+    /// unnamed schematic holding one `block` core at (0, 0), `size x size`
+    /// (the Interplanetary Accelerator's launch loadout).
+    pub fn single_core(block: BlockId, size: i32) -> Self {
+        Self::from_tiles(
+            vec![Stile::new(block, 0, 0, ConfigValue::None, 0)],
+            IndexMap::new(),
+            size,
+            size,
+        )
+    }
+
     /// Builds a schematic from tiles/tags/dimensions.
     pub fn from_tiles(
         tiles: Vec<Stile>,

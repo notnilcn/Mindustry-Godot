@@ -282,7 +282,15 @@ pub struct CampaignRuntime {
     /// Destination sector records queued by `launch_payload_system` for a host
     /// `save_info` flush (legacy launch pads; H04 T6).
     pub pending_info_saves: Vec<(PlanetId, u16)>,
+    /// Ticks left before an abandoned played sector's player cores die
+    /// (`PlanetDialog.abandonSectorConfirm`: `Time.runTask(7f, ...)`,
+    /// PlanetDialog.java:1156-1161); drained by
+    /// `Sim::apply_campaign_world_requests`.
+    pub pending_abandon_kill: Option<u32>,
 }
+
+/// `Time.runTask(7f, ...)` in `abandonSectorConfirm` (PlanetDialog.java:1156).
+pub const ABANDON_KILL_DELAY_TICKS: u32 = 7;
 
 impl CampaignRuntime {
     /// Wraps the launched session/campaign.
@@ -301,6 +309,19 @@ impl CampaignRuntime {
             rules_world_dirty: false,
             pending_unlocks: Vec::new(),
             pending_info_saves: Vec::new(),
+            pending_abandon_kill: None,
+        }
+    }
+
+    /// `PlanetDialog.abandonSectorConfirm`, played-sector branch
+    /// (PlanetDialog.java:1153-1161): after the dialog hides, `Time.runTask(7f)`
+    /// kills every core of `player.team()` "to force game over in a more
+    /// dramatic fashion"; the campaign `checkGameState` (Logic.java:329-334)
+    /// then fires the `GameOverEvent`. The record is not cleared here: the
+    /// loss path owns it.
+    pub fn abandon_played_sector(&mut self) {
+        if self.session.is_campaign() {
+            self.pending_abandon_kill = Some(ABANDON_KILL_DELAY_TICKS);
         }
     }
 

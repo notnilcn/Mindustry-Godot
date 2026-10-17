@@ -100,14 +100,27 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ],
         research_cost_multiplier: Some(0.1f32),
         build_cost_multiplier: Some(0.5f32),
-        item_capacity: Some(8000),
+        // `Accelerator.init()` (Accelerator.java:76-85): `itemCapacity` = the
+        // sum of `launchBlock.requirements` and `consumeItems(requirements)`,
+        // with `launchBlock = coreNucleus` (Blocks.java:3173: copper 8000,
+        // lead 8000, silicon 5000, thorium 4000). `consumePower(10f)` was
+        // added first by the constructor block (Blocks.java:6879).
+        item_capacity: Some(25000),
         has_items: Some(true),
         has_power: Some(true),
         build_visibility: Some(BuildVisibility::CampaignOnly),
         solid: Some(true),
         update: Some(true),
         configurable: Some(true),
-        consumes: vec![consume_power(1e+01f32)],
+        consumes: vec![
+            consume_power(1e+01f32),
+            consume_items(vec![
+                stack("copper", 8000),
+                stack("lead", 8000),
+                stack("silicon", 5000),
+                stack("thorium", 4000),
+            ]),
+        ],
         ..spec("interplanetary-accelerator", BlockKind::Accelerator)
     })?;
     let _ = sink;

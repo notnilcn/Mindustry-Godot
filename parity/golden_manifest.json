@@ -27,8 +27,11 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "aeff4aa110119a3a9a52fd9f2f37a1ed90e98ba4ee1f33d946d3542b470fdeb9",
-      "regen": "cargo run -p mind-headless -- content dump"
+      "sha256": "4bc6d577f7c5739b9d7c303aa4d485ee3641299db003a267e8ec76fd5852537c",
+      "regen": "cargo run -p mind-headless -- content dump",
+      "reasons": [
+        "2026-10-18 L06 batched regen (L08 T1 protocol): block[429] interplanetary-accelerator item_capacity 8000 -> 25000. eeedfbb1 (L06 T7.1) ports Accelerator.init() (world/blocks/campaign/Accelerator.java:76-85): itemCapacity = sum of launchBlock.requirements (coreNucleus copper 8000, lead 8000, silicon 5000, thorium 4000; Blocks.java:3173). The only field that moved (mind-headless content dump vs the committed file)."
+      ]
     },
     {
       "id": "harness_audio_events_blocks",
@@ -267,7 +270,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/render/render_menu_world.json",
       "owner_plan": "16",
-      "sha256": "d83feddfb8938731729c487b45055a9ab54a2ff947d29b95a79b3d238bab2f1f"
+      "sha256": "fa95d97d950c93f23fc0e76f88738f9e6ef455a1e28ea1d03b0e25d7d77bd8b7",
+      "reasons": [
+        "2026-10-18 L06 batched regen (L08 T1 protocol): 341d9f74 (L06 T6.0, PAR-0424) Arc Simplex.perm masks x & 255 and uses unsigned shifts (javap -c arc.util.noise.Simplex); the menu world is simplex terrain, so tile_hash b7104680ca852118 -> 276df838e52313c2, flyers 5 -> 10 and the per-layer counts moved. Scratch-worktree render list: 341d9f74^ output = the committed file, 341d9f74 output = HEAD."
+      ]
     },
     {
       "id": "harness_sim_core_determinism",
@@ -510,7 +516,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/goldens/ui/campaign.json",
       "owner_plan": "14",
-      "sha256": "7bd2ecb66b9c3858064ba803afdeb7303a8c50b3143f48cf07630e813c2750d2"
+      "sha256": "1cec2fdf892a8a0ff3e0c1c1b15a12bc38864c7b3a21c25fcb0f83c6f6d6d5e3",
+      "reasons": [
+        "2026-10-18 L06 batched regen (L08 T1 protocol): checksum 26350bc2d719ed88 (341d9f74) -> a5a580c133ca632a at b73b95a0 (L06 T6.1: PlanetView.allow_campaign_rules, Planet.java:139/221, hashed in the full CampaignViews) -> db3aff19ca782bec at eeedfbb1 (L06 T7.1: SectorView.accelerator_selectable = PlanetDialog.canSelect in planetLaunch mode, PlanetDialog.java:414-435; the dump's sample sector gains the field). Scratch-worktree ui campaign dumps at each boundary; unchanged eeedfbb1..HEAD."
+      ]
     },
     {
       "id": "harness_ui_chat_console",

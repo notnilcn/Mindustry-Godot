@@ -117,6 +117,10 @@ func _finish_landing() -> void:
 	var parsed: Variant = JSON.parse_string(str(campaign.call("get_sector_state")))
 	if parsed is Dictionary:
 		state = parsed
+	# `state.isCampaign() && Vars.showSectorLandInfo && preset.showSectorLandInfo`
+	# (`CoreBlock.java:414`), resolved in mind-core.
+	if not bool(state.get("showLandInfo", false)):
+		return
 	var preset := str(state.get("preset", ""))
 	var name := str(state.get("sector", ""))
 	if not preset.is_empty():
