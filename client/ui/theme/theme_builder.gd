@@ -155,6 +155,16 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
 				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
 				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
+			elif name == "fullTogglet":
+				# `Styles.fullTogglet` (Styles.java:240-249): `up`/`disabled =
+				# black`, `over`/`down`/`checked = flatOver`; gray disabled text.
+				var over := flat(Color8(0x45, 0x45, 0x45))
+				theme.set_stylebox("normal", name, flat(Color.BLACK))
+				theme.set_stylebox("hover", name, over)
+				theme.set_stylebox("pressed", name, over)
+				theme.set_stylebox("hover_pressed", name, over)
+				theme.set_stylebox("disabled", name, flat(Color.BLACK))
+				theme.set_color("font_disabled_color", name, Color.GRAY)
 			elif name == "selecti":
 				# `Styles.selecti` (Styles.java:283-286): `checked = buttonSelect`
 				# (the accent 9-patch frame), `up = none`. The checked state is

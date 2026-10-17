@@ -129,6 +129,18 @@ impl WaveGraphData {
             max_health = max_health.max(health_sum);
         }
 
+        // `used.add(spawn.type)` only `if(spawned > 0)` (`WaveGraph.java:
+        // 282-284`): a unit that spawns nowhere in the window has no line and
+        // no legend entry.
+        let keep: Vec<usize> = (0..used.len())
+            .filter(|&unit| series.iter().any(|row| row[unit] > 0))
+            .collect();
+        let used: Vec<WaveGraphUnit> = keep.iter().map(|&unit| used[unit].clone()).collect();
+        let series: Vec<Vec<i32>> = series
+            .iter()
+            .map(|row| keep.iter().map(|&unit| row[unit]).collect())
+            .collect();
+
         Self {
             from,
             to,
@@ -234,6 +246,19 @@ mod tests {
         // health at wave 4: 4*150 + 1*600 = 1200.
         assert_eq!(data.health[4], 1200.0);
         assert_eq!(data.max_health, 1200.0);
+    }
+
+    /// `WaveGraph.rebuild` adds a type to `used` only when it spawns in the
+    /// window (`WaveGraph.java:282-284`).
+    #[test]
+    fn units_without_spawns_in_window_are_dropped() {
+        let mut m = unit("mace");
+        m.begin = 2;
+        let groups = vec![unit("dagger"), m];
+        let data = WaveGraphData::compute(&groups, 0, 1, resolve);
+        assert_eq!(data.units.len(), 1);
+        assert_eq!(data.units[0].name, "dagger");
+        assert!(data.series.iter().all(|row| row.len() == 1));
     }
 
     #[test]

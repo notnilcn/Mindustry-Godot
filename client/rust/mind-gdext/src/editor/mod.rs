@@ -1360,7 +1360,7 @@ impl MindEditor {
     /// `WaveGraph.rebuild`: the counts/health series for the `spawns` tag.
     #[func]
     pub fn wave_graph(&self, from: i64, to: i64) -> VarDictionary {
-        use mind_core::editor::wave_graph::WaveGraphData;
+        use mind_core::editor::wave_graph::{WaveGraphData, next_step};
         let Some(content) = self.content.as_ref() else {
             return dict(vec![("from", from.to_variant()), ("to", to.to_variant())]);
         };
@@ -1407,6 +1407,21 @@ impl MindEditor {
             ("max", (data.max as i64).to_variant()),
             ("max_total", (data.max_total as i64).to_variant()),
             ("max_health", (data.max_health as f64).to_variant()),
+            // `nextStep(max)`, `nextStep(maxTotal)`, `nextStep((int)maxHealth)`
+            // (`WaveGraph.java:87-91`), indexed by mode.
+            (
+                "max_y",
+                PackedInt64Array::from(
+                    &[
+                        next_step(data.max as f32) as i64,
+                        next_step(data.max_total as f32) as i64,
+                        next_step(data.max_health.trunc()) as i64,
+                    ][..],
+                )
+                .to_variant(),
+            ),
+            // `content.units().size` for `color(type)` (`WaveGraph.java:339-341`).
+            ("unit_count", (content.units().len() as i64).to_variant()),
         ])
     }
 
