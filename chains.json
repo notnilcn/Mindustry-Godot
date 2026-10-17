@@ -1851,7 +1851,7 @@
 "PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"seeded","u":"2026-10-17"},
 "PAR-0381":{"t":"Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T4/"},
 "PAR-0382":{"t":"Game Over shows Waves Defeated 0, no Time Played row, bright accent rows and a duplicated title (9da3b3b2)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T6/"},
-"PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"fixing","u":"2026-10-18","run":"runs/20261018-s2-L01-T1/"},
 "PAR-0384":{"t":"Placement palette ignores affordability and clips the fourth column under the scroll bar (a35307a8)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T8/"},
 "PAR-0385":{"t":"Sidebar parent button never stays checked / Godot focus frames / square checkbox indicators (9eb88e02)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T9/"},
 "PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"seeded","u":"2026-10-17"},
@@ -1878,7 +1878,7 @@
 "PAR-0407":{"t":"J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)","s":"ui","st":"seeded","u":"2026-10-17","run":"runs/20261017-s3-J08/"},
 "PAR-0408":{"t":"Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261017-s5-J02-T2/"},
 "PAR-0409":{"t":"F-K1: Custom Game map grid is clipped at the 5th column and does not scroll — with 19 maps only the first 10 cards are reachable, blocking Map Play (sandbox/Caldera)","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
-"PAR-0410":{"t":"F-K2: Custom Game search empties the grid for an existing map name and stays empty after reopen (needs a real-typing retest)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0410":{"t":"F-K2: Custom Game search empties the grid for an existing map name and stays empty after reopen (needs a real-typing retest)","s":"ui","st":"fixing","u":"2026-10-18","run":"runs/20261018-s2-L01-T1/"},
 "PAR-0411":{"t":"Floor decorations are guessed as '<floor>-boulder' by name, so stone/sand/ice/darksand/… floors get no boulders in custom maps and generated sectors (Java sets Floor.decoration per floor, Blocks.java:700-822)","s":"world","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
 "PAR-0412":{"t":"F-K4: Menu background camera scale ~2x closer than MenuRenderer","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
 "PAR-0413":{"t":"F-K5: Graphics slider rows render a ~10 px outlined track through the title with a slim grey grabber; Java's sliderBack nine-patch fills the ~32 px row with a full-height accent knob","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
@@ -1886,10 +1886,12 @@
 "PAR-0415":{"t":"F-K7: Planet-page Tech Tree button unresponsive to injected clicks (retest with input flush)","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
 "PAR-0416":{"t":"Returning to the menu (Save & Quit / Game Over -> Menu) leaves MindCampaign in the game phase, so Core Database shows every block unlocked (Java Logic.reset(), Logic.java:299-310)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
 "PAR-0417":{"t":"ItemSelection lists hidden items (fissile matter, dormant cyst): config_spec carries no hidden flag (Java ItemSelection.java:68 skips isHidden())","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
-"PAR-0418":{"t":"Editor Map Info lays out at the bottom on first open and top-aligned after (stale minimum size)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
-"PAR-0419":{"t":"Fill dialogs top-align their content (pause menu, editor menu, Game Over); Java BaseDialog centres cont vertically","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0418":{"t":"Editor Map Info lays out at the bottom on first open and top-aligned after (stale minimum size)","s":"editor","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T2/"},
+"PAR-0419":{"t":"Fill dialogs top-align their content (pause menu, editor menu, Game Over); Java BaseDialog centres cont vertically","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T2/"},
 "PAR-0420":{"t":"Planet orbit line drawn in the wrong plane (near-horizontal) vs Java renderOrbit's parent-XZ circle (PlanetRenderer.java:171-179)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
-"PAR-0421":{"t":"Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"}
+"PAR-0421":{"t":"Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)","s":"editor","st":"mismatch","u":"2026-10-18","run":"runs/20261017-L-twin/"},
+"PAR-0422":{"t":"Reused dialogs (editor Map Info, editor menu/import/export, research root select) stacked a duplicate body on every reopen","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T1/"},
+"PAR-0423":{"t":"ui_widgets_check.gd is red on main (3 keybind asserts: reset-all button, 'A / D', key label width; _build_prompt arity script error) and tools/ci.sh never runs it","s":"ui","st":"seeded","u":"2026-10-18","run":"runs/20261018-s2-L01-T1/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -4904,7 +4906,8 @@
 "2026-10-16 round I: I04 T5/T6: content_info_dialog null-amount + panel-row rendering bugs fixed"
 ],
 "PAR-0410":[
-"2026-10-18 round L: confirmed in the round-L twin walk (godot/09-search-pair.png: the filtered Custom Game grid renders nothing). Root cause per L01: MindTable never calls update_minimum_size, so parents keep the stale min. -> L01 T1/T3."
+"2026-10-18 round L: confirmed in the round-L twin walk (godot/09-search-pair.png: the filtered Custom Game grid renders nothing). Root cause per L01: MindTable never calls update_minimum_size, so parents keep the stale min. -> L01 T1/T3.",
+"2026-10-18 L01 T1 (57c2d00b): MindTable never handled NOTIFICATION_SORT_CHILDREN (tables laid out only on explicit sort_now) and never propagated its minimum; ported Arc invalidateHierarchy (WidgetGroup.java:98-106, Table.java:174-177,647-650); ui_layout_check.gd reproduces the stale 1080x1608 grid on the old code. Godot frame godot/09-search-sand.png (real typing via gmcp --text). Close after the L01 T3 Java pair."
 ],
 "PAR-0411":[
 "2026-10-18 round L: retargeted (L-INDEX §4). Java's sandbox has no boulders either, so the original F-K3 sandbox symptom is not a defect; the real gap is block_info::decoration's name guess (filters/mod.rs:143-147) — Caldera: Java 5-7 boulders per screen incl. sand boulders, Godot 1-2 (diff/42-survival-side.png, diff/49-hovercore-side.png). -> L02 T1."
@@ -4916,7 +4919,8 @@
 "2026-10-18 round L: confirmed (planet list + Difficulty column centred vs Java top-left, PlanetDialog.java:733-745); globe size looks comparable in the round-L pair — measure before changing camLength. Orbit plane tracked separately (new item). -> L03 T2."
 ],
 "PAR-0383":[
-"2026-10-18 round L: reopened (J06 T7 regressed) — Map Play still clips (diff/41-caldera-side.png, godot/41-caldera-2.png over two opens). The 37ef2a8d re-sort never tells the parent its minimum changed. -> L01."
+"2026-10-18 round L: reopened (J06 T7 regressed) — Map Play still clips (diff/41-caldera-side.png, godot/41-caldera-2.png over two opens). The 37ef2a8d re-sort never tells the parent its minimum changed. -> L01.",
+"2026-10-18 L01 T1 (57c2d00b): Map Play no longer clips over two opens (godot/41-caldera-1.png, 41-anthill.png, 41-caldera-2.png); deferred _resort_tables removed. Close after the L01 T3 Java pair."
 ],
 "PAR-0416":[
 "2026-10-18 round L G3: diff/28-coredb-side.png; database_json override !is_campaign && phase.is_game() (campaign.rs:3226). -> L02 T2."
@@ -4935,6 +4939,12 @@
 ],
 "PAR-0421":[
 "2026-10-18 round L G7: diff/31-editor-open-side.png; MapEditorDialog.java:57,554,630-722, MapView.java:253-325. -> L03 T3."
+],
+"PAR-0422":[
+"2026-10-18 found in the L01 T1 walk; fixed by MindDialog.clear_content() (57c2d00b): godot/editor-mapinfo-2.png vs editor-mapinfo-reopen.png."
+],
+"PAR-0423":[
+"2026-10-18 L01 wave 1: drift from J06 T4 / J07 T5; identical before and after L01. -> session A wave 2."
 ]
 },
 "failure_modes":{
@@ -5774,6 +5784,12 @@
 ],
 "PAR-0415":[
 "closed 2026-10-18 (round L, L-INDEX §4): F-K7 Tech Tree click not reproduced with real clicks in the round-L twin walk."
+],
+"PAR-0418":[
+"closed 2026-10-18: 57c2d00b + 52c0b27f (L01 T1/T2): editor Map Info lays out on first open, preview top 125 vs fresh Java 122 (runs/20261018-s2-L01-T2/{java,godot}/mapinfo.png, real clicks)."
+],
+"PAR-0419":[
+"closed 2026-10-18: 52c0b27f (L01 T2): fill dialogs centre cont like Arc Dialog (Dialog.java:209-211), cont_top where Java calls cont.top(); pause 3 px, editor menu 2 px, Game Over <=4 px from Java (runs/20261018-s2-L01-T2/notes.md; Game Over staged by debug_kill_building after a real-input Play)."
 ]
 }
 }
