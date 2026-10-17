@@ -1085,9 +1085,15 @@ impl DesktopBridge {
                     .clone()
                     .map(|camera| camera.bind().is_cutscene())
                     .unwrap_or(false);
+                // `state.is(State.paused) || state.is(State.playing)`
+                // (`Control.java:735`): the menu phase (after
+                // `MindCampaign.reset_to_menu`, L02 T2) ignores the key.
                 if !cutscene && let Some(mut host) = self.host.clone() {
-                    let paused = host.bind().is_paused();
-                    host.bind_mut().set_paused(!paused);
+                    let state = host.bind().get_state().to_string();
+                    if state == "paused" || state == "playing" {
+                        let paused = host.bind().is_paused();
+                        host.bind_mut().set_paused(!paused);
+                    }
                 }
                 self.fire_hotkey(name);
             }
@@ -3257,6 +3263,26 @@ impl DesktopBridge {
         let in_campaign = guard.in_campaign();
         let planet = guard.config_planet();
         let rules = guard.live_rules();
+        // `Block.isHidden()` reads `state.rules` (`Block.java:1553-1555`,
+        // `BuildVisibility.java:10-22`); without live rules the rules-less
+        // custom/campaign context (`block_catalog_from`).
+        let visibility = {
+            let mut context = match rules.as_ref() {
+                Some(rules) => {
+                    mind_core::ui::campaign::BlockVisibilityContext::from_rules(rules, in_campaign)
+                }
+                None if in_campaign => mind_core::ui::campaign::BlockVisibilityContext::campaign(),
+                None => mind_core::ui::campaign::BlockVisibilityContext::sandbox(),
+            };
+            // `indexer.isBlockPresent(Blocks.coreZone)` (`coreZoneOnly`).
+            context.core_zone_present =
+                content.block_id("core-zone").is_some_and(|zone| {
+                    guard.grid().tiles.iter().any(|tile| {
+                        tile.floor == zone || tile.overlay == zone || tile.block == zone
+                    })
+                });
+            context
+        };
         // `UnlockableContent.unlockedNow()` (`UnlockableContent.java:281-283`):
         // outside a campaign every option is unlocked. In a campaign the
         // client's tech-tree state lives on `MindCampaign` (the settings-backed
@@ -3336,6 +3362,7 @@ impl DesktopBridge {
                             format!("unit.{name}.name"),
                             planet,
                             &unlocked_now,
+                            &visibility,
                         ));
                     };
                     if def.unit_plans.is_empty() {
@@ -3368,9 +3395,12 @@ impl DesktopBridge {
                         let Some(candidate) = content.block_by_name(name) else {
                             continue;
                         };
+                        // `b.isVisible()` in `Constructor.canProduce`
+                        // (`Constructor.java:55`) / `PayloadSource.canProduce`
+                        // (`PayloadSource.java:89`): rules-dependent visibility
+                        // (sandbox-only, editor-only, ...) plus `isHidden`.
                         if candidate.removed
-                            || candidate.build_visibility
-                                == mind_core::content::BuildVisibility::Hidden
+                            || !visibility.block_visible(name, candidate.build_visibility)
                             || candidate.kind == BlockKind::CoreBlock
                             || candidate.size < min_size
                             || candidate.size > max_size
@@ -3387,6 +3417,7 @@ impl DesktopBridge {
                             format!("block.{name}.name"),
                             planet,
                             &unlocked_now,
+                            &visibility,
                         ));
                     }
                 }
@@ -3405,6 +3436,7 @@ impl DesktopBridge {
                         format!("item.{name}.name"),
                         planet,
                         &unlocked_now,
+                        &visibility,
                     ));
                 }
             }
@@ -3421,6 +3453,7 @@ impl DesktopBridge {
                         format!("liquid.{name}.name"),
                         planet,
                         &unlocked_now,
+                        &visibility,
                     ));
                 }
             }
@@ -3627,8 +3660,10 @@ fn content_option_json(
     label: String,
     planet: Option<mind_core::content::PlanetId>,
     unlocked_now: &dyn Fn(&str) -> bool,
+    visibility: &mind_core::ui::campaign::BlockVisibilityContext,
 ) -> serde_json::Value {
     let reference = content.get_by_name(content_type, name);
+    let hidden = content_hidden(content, content_type, name, visibility);
     let unlock = reference
         .and_then(|reference| mind_core::game::tech_tree::unlock_fields(content, reference));
     let prefix = content_type.name();
@@ -3661,8 +3696,39 @@ fn content_option_json(
         "size": size,
         "icons": icons,
         "unlocked": unlocked_now(name),
-        "on_planet": content_on_planet(content, unlock, planet),
+        // `Item.isOnPlanet` adds `&& !hidden` (`Item.java:61-64`).
+        "on_planet": content_on_planet(content, unlock, planet)
+            && !(content_type == ContentType::Item && hidden),
+        // `item.isHidden()` (`ItemSelection.java:68`; L02 T3).
+        "hidden": hidden,
     })
+}
+
+/// `UnlockableContent.isHidden()` per content type: `Item.hidden`
+/// (`Item.java:67-69`), `Liquid.hidden` (`Liquid.java:102-104`),
+/// `UnitType.hidden` (`UnitType.java:785-787`) and `Block.isHidden`
+/// (`Block.java:1553-1555`, rules-dependent build visibility).
+fn content_hidden(
+    content: &ContentRegistry,
+    content_type: ContentType,
+    name: &str,
+    visibility: &mind_core::ui::campaign::BlockVisibilityContext,
+) -> bool {
+    match content_type {
+        ContentType::Item => content
+            .item_by_name(name)
+            .is_some_and(|item| item.is_hidden()),
+        ContentType::Liquid => content
+            .liquid_by_name(name)
+            .is_some_and(|liquid| liquid.is_hidden()),
+        ContentType::Unit => content
+            .unit_by_name(name)
+            .is_some_and(|unit| unit.is_hidden()),
+        ContentType::Block => content
+            .block_by_name(name)
+            .is_some_and(|block| visibility.block_hidden(name, block.build_visibility)),
+        _ => false,
+    }
 }
 
 /// One command-row option (`UnitFactory.java:311-315`,
@@ -4091,6 +4157,12 @@ mod tests {
         let serpulo = content.planet_id("serpulo");
         // `unlockedNow()` outside a campaign (`UnlockableContent.java:281-283`).
         let always = |_: &str| true;
+        // A non-sandbox custom game (default `Rules`, `infiniteResources`
+        // false) for `Block.isHidden` (`Block.java:1553-1555`).
+        let survival = mind_core::ui::campaign::BlockVisibilityContext::from_rules(
+            &mind_core::io::json::rules::Rules::default(),
+            false,
+        );
         let item = content_option_json(
             &content,
             ContentType::Item,
@@ -4098,6 +4170,7 @@ mod tests {
             "item.copper.name".to_owned(),
             serpulo,
             &always,
+            &survival,
         );
         assert_eq!(item["icons"][0], "item-copper-ui");
         // `UnlockableContent.selectionSize` default 24 (`:44`).
@@ -4113,6 +4186,7 @@ mod tests {
             "block.duo.name".to_owned(),
             serpulo,
             &always,
+            &survival,
         );
         assert_eq!(block["size"], 28.0);
         let unit = content_option_json(
@@ -4122,6 +4196,7 @@ mod tests {
             "unit.dagger.name".to_owned(),
             serpulo,
             &always,
+            &survival,
         );
         assert_eq!(unit["size"], 30.0);
         assert_eq!(unit["icons"][0], "unit-dagger-ui");
@@ -4135,6 +4210,7 @@ mod tests {
             "item.tungsten.name".to_owned(),
             serpulo,
             &always,
+            &survival,
         );
         assert_eq!(tungsten["on_planet"], false);
         // A campaign with an empty unlock state hides locked content (the
@@ -4146,8 +4222,81 @@ mod tests {
             "block.duo.name".to_owned(),
             serpulo,
             &|_: &str| false,
+            &survival,
         );
         assert_eq!(locked["unlocked"], false);
+
+        // L02 T3: `ItemSelection.java:68` skips `isHidden()` content.
+        // `fissileMatter`/`dormantCyst` are `hidden = true`
+        // (`Items.java:130,135`) and `Item.isOnPlanet` is false for them too
+        // (`Item.java:61-64`); the Java sandbox source grid shows 16 items.
+        let option =
+            |content_type: ContentType,
+             name: &str,
+             visibility: &mind_core::ui::campaign::BlockVisibilityContext| {
+                content_option_json(
+                    &content,
+                    content_type,
+                    name,
+                    format!("{}.{name}.name", content_type.name()),
+                    serpulo,
+                    &always,
+                    visibility,
+                )
+            };
+        for name in ["fissile-matter", "dormant-cyst"] {
+            let hidden = option(ContentType::Item, name, &survival);
+            assert_eq!(hidden["hidden"], true, "{name}");
+            assert_eq!(hidden["on_planet"], false, "{name}");
+        }
+        assert_eq!(item["hidden"], false);
+        let shown: Vec<String> = content
+            .items()
+            .iter()
+            .map(|item| item.name.clone())
+            .filter(|name| {
+                let value = option(ContentType::Item, name, &survival);
+                value["unlocked"] == true && value["on_planet"] == true && value["hidden"] == false
+            })
+            .collect();
+        assert_eq!(shown.len(), 16, "Java's Serpulo item grid: {shown:?}");
+        // `Liquids.java:73` gallium; `UnitTypes.java:4318-4644` renale, latum,
+        // block, manifold, assembly-drone, dummy.
+        assert_eq!(
+            option(ContentType::Liquid, "gallium", &survival)["hidden"],
+            true
+        );
+        assert_eq!(
+            option(ContentType::Liquid, "water", &survival)["hidden"],
+            false
+        );
+        for name in [
+            "renale",
+            "latum",
+            "block",
+            "manifold",
+            "assembly-drone",
+            "dummy",
+        ] {
+            assert_eq!(
+                option(ContentType::Unit, name, &survival)["hidden"],
+                true,
+                "{name}"
+            );
+        }
+        assert_eq!(unit["hidden"], false);
+        // `Block.isHidden` follows the rules: `sandboxOnly` blocks are hidden
+        // outside `infiniteResources` (`BuildVisibility.java:16`).
+        assert_eq!(
+            option(ContentType::Block, "item-source", &survival)["hidden"],
+            true
+        );
+        let sandbox = mind_core::ui::campaign::BlockVisibilityContext::sandbox();
+        assert_eq!(
+            option(ContentType::Block, "item-source", &sandbox)["hidden"],
+            false
+        );
+        assert_eq!(block["hidden"], false);
     }
 
     #[test]

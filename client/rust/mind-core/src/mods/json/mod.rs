@@ -73,6 +73,20 @@ pub struct ContentJsonParser<'a> {
     pub allow_patching: bool,
     /// Committed ClassMap replacement.
     classmap: ClassTagMap,
+    /// Deferred `Floor.decoration` block references, resolved by
+    /// [`Self::finish_parsing`] once every mod file is registered (Java defers
+    /// all field reads to `ContentParser.finishParsing`,
+    /// `ContentParser.java:1005-1007`, so a floor may name a later prop).
+    pending_decorations: Vec<PendingDecoration>,
+}
+
+/// One deferred `decoration` read (`ContentParser.read`, `ContentParser.java:963`).
+#[derive(Debug, Clone)]
+struct PendingDecoration {
+    file: String,
+    mod_id: Option<crate::content::ModId>,
+    floor: crate::content::BlockId,
+    name: String,
 }
 
 impl Default for ContentJsonParser<'static> {
@@ -103,7 +117,37 @@ impl<'a> ContentJsonParser<'a> {
             allow_asset_loading: true,
             allow_patching: true,
             classmap: ClassTagMap::committed(),
+            pending_decorations: Vec::new(),
         }
+    }
+
+    /// `ContentParser.finishParsing` (`ContentParser.java:1005-1007`) for the
+    /// deferred reads the port keeps: each `decoration` resolves as a block
+    /// name, mod-prefixed first, then bare (`ContentParser.java:510-515`).
+    /// Returns one error per unresolved name (Java marks the content errored).
+    pub fn finish_parsing(&mut self, registry: &mut ContentRegistry) -> Vec<ContentParseError> {
+        let previous = registry.current_mod().cloned();
+        let mut errors = Vec::new();
+        for pending in std::mem::take(&mut self.pending_decorations) {
+            registry.set_current_mod(pending.mod_id.clone());
+            let prefixed = registry.transform_name(&pending.name);
+            let found = registry
+                .get_by_name(ContentType::Block, &prefixed)
+                .or_else(|| registry.get_by_name(ContentType::Block, &pending.name));
+            match found {
+                Some(reference) => {
+                    if let Some(def) = registry.block_mut(pending.floor) {
+                        def.decoration = crate::content::BlockId::new(reference.id);
+                    }
+                }
+                None => errors.push(ContentParseError::new(format!(
+                    "{}: \"decoration\": No block found with name '{}'.",
+                    pending.file, pending.name
+                ))),
+            }
+        }
+        registry.set_current_mod(previous);
+        errors
     }
 
     /// Parser restricted for data-patch content (`dp` identity).
@@ -405,10 +449,20 @@ impl<'a> ContentJsonParser<'a> {
 
         let def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
-        registry
+        let id = registry
             .add_block(def)
-            .map(ContentRef::block)
-            .map_err(|error| ContentParseError::new(format!("{file}: {error}")))
+            .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+        // `Floor.decoration` (`Floor.java:70`): a block reference read in the
+        // deferred pass (`finish_parsing`), as Java's reflective field read.
+        if let Some(decoration) = object.get("decoration").and_then(Value::as_str) {
+            self.pending_decorations.push(PendingDecoration {
+                file: file.to_owned(),
+                mod_id: registry.current_mod().cloned(),
+                floor: id,
+                name: decoration.to_owned(),
+            });
+        }
+        Ok(ContentRef::block(id))
     }
 
     // ---- liquid ----
@@ -2248,6 +2302,65 @@ mod tests {
         let mut parser = ContentJsonParser::new();
         let result = parser.parse(reg, "test.json", stem, json, folder);
         (parser, result)
+    }
+
+    /// L02 T1: `Floor.decoration` reads as a block name in the deferred pass
+    /// (`ContentParser.finishParsing`, `ContentParser.java:1005`), so a floor
+    /// may name a prop parsed after it; mod prefix first, then the bare name
+    /// (`ContentParser.java:510-515`). An unknown name is an error.
+    #[test]
+    fn floor_decoration_resolves_after_parsing() {
+        let mut reg = registry();
+        reg.set_current_mod(Some(crate::content::ModId(String::from("mods"))));
+        let mut parser = ContentJsonParser::new();
+        let floor = parser.parse(
+            &mut reg,
+            "floor.json",
+            "glow-floor",
+            r#"{"type":"Floor","decoration":"glow-rock"}"#,
+            ContentType::Block,
+        );
+        assert!(floor.is_ok(), "{floor:?}");
+        let vanilla = parser.parse(
+            &mut reg,
+            "dust.json",
+            "dust-floor",
+            r#"{"type":"Floor","decoration":"sand-boulder"}"#,
+            ContentType::Block,
+        );
+        assert!(vanilla.is_ok(), "{vanilla:?}");
+        let missing = parser.parse(
+            &mut reg,
+            "bad.json",
+            "bad-floor",
+            r#"{"type":"Floor","decoration":"no-such-rock"}"#,
+            ContentType::Block,
+        );
+        assert!(missing.is_ok(), "{missing:?}");
+        let prop = parser.parse(
+            &mut reg,
+            "rock.json",
+            "glow-rock",
+            r#"{"type":"Prop"}"#,
+            ContentType::Block,
+        );
+        assert!(prop.is_ok(), "{prop:?}");
+        let errors = parser.finish_parsing(&mut reg);
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert!(errors[0].message.contains("no-such-rock"));
+        let decoration = |floor: &str| {
+            let def = reg.block_by_name(floor).expect(floor);
+            reg.block(def.decoration).map(|block| block.name.clone())
+        };
+        assert_eq!(
+            decoration("mods-glow-floor").as_deref(),
+            Some("mods-glow-rock")
+        );
+        assert_eq!(
+            decoration("mods-dust-floor").as_deref(),
+            Some("sand-boulder")
+        );
+        assert_eq!(decoration("mods-bad-floor").as_deref(), Some("air"));
     }
 
     #[test]

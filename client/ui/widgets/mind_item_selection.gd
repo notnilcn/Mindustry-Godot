@@ -151,15 +151,18 @@ func _rebuild_grid() -> void:
 
 
 ## `if(!item.unlockedNow() || !item.isOnPlanet(state.getPlanet()) ||
-## item.isHidden()) continue;` (`ItemSelection.java:68`) — the filter result is
-## carried by the spec.
+## item.isHidden()) continue;` (`ItemSelection.java:68`) — the three filter
+## results (`unlocked`, `on_planet`, `hidden`) are carried by the spec.
 func _visible_options() -> Array:
 	var out := []
 	for option in _options:
-		if option is Dictionary and bool(option.get("unlocked", true)) and bool(
-			option.get("on_planet", true)
-		):
-			out.append(option)
+		if not (option is Dictionary):
+			continue
+		if not bool(option.get("unlocked", true)) or not bool(option.get("on_planet", true)):
+			continue
+		if bool(option.get("hidden", false)):
+			continue
+		out.append(option)
 	return out
 
 

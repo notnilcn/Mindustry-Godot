@@ -460,14 +460,12 @@ func _quit_with_exit_save() -> void:
 	_quit_to_menu()
 
 
+## `logic.reset()` + menu through the single `UiRoot.return_to_menu` path.
 func _quit_to_menu() -> void:
 	_close_pressed()
-	var host := get_node_or_null("/root/Spine/SimHost")
-	if host != null and host.has_method("set_paused"):
-		host.call("set_paused", true)
 	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
-	if root != null and root.has_method("set_menu_visible"):
-		root.call("set_menu_visible", true)
+	if root != null and root.has_method("return_to_menu"):
+		root.call("return_to_menu")
 
 
 func _ui() -> Node:

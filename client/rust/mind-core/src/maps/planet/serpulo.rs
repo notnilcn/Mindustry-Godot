@@ -1771,9 +1771,12 @@ impl WorldGenerator for SerpuloPlanetGenerator {
                     .unwrap_or(false)
                 && block == BlockId::AIR
                 && let Some(def) = content.block(floor)
-                && let Some(decoration) = block_info::decoration(content, def)
             {
-                block = ids.dec(floor).unwrap_or(decoration);
+                // `block = dec.get(floor, floor.asFloor().decoration)`
+                // (`SerpuloPlanetGenerator.java:628`): the `dec` map first
+                // (spore moss / moss -> spore cluster), else the floor's
+                // explicit decoration (L02 T1; `Blocks.air` when none).
+                block = ids.dec(floor).unwrap_or(block_info::decoration(def));
             }
 
             let tile = tiles.geti_mut(index);

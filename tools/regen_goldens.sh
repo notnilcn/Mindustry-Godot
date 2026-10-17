@@ -6,6 +6,8 @@
 #   --check            verify every `parity/golden_manifest.json` sha256 (no JVM)
 #   --only <id>        regenerate one golden and update its manifest hash
 #   --all              regenerate every oracle golden the fallback knows
+#   --record <id>      re-record one manifest sha256 from its committed file
+#                      (harness goldens blessed with `MIND_BLESS=1 cargo test`)
 #
 # Regeneration uses the JVM dumps in `parity/java/` when MIND_JAVA_PARITY=1 and a
 # Gradle-built checkout is present; otherwise it falls back to the reproducible
@@ -74,7 +76,8 @@ while [[ $# -gt 0 ]]; do
     --check) MODE=check; shift ;;
     --only) MODE=only; ONLY="${2:?--only needs a golden id}"; shift 2 ;;
     --all) MODE=all; shift ;;
-    -h|--help) sed -n '2,14p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --record) MODE=record; ONLY="${2:?--record needs a golden id}"; shift 2 ;;
+    -h|--help) sed -n '2,16p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "regen_goldens.sh: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -87,4 +90,5 @@ case "$MODE" in
   check) check_all ;;
   only) regenerate "$ONLY"; check_all ;;
   all) regenerate ""; check_all ;;
+  record) record_hash "$ONLY" ;;
 esac

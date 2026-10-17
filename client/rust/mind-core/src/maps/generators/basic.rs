@@ -834,9 +834,10 @@ impl BasicGenerator {
                 && has_surface(content, floor)
                 && tiles.geti(index).block == BlockId::AIR
                 && let Some(def) = content.block(floor)
-                && let Some(decoration) = crate::maps::filters::block_info::decoration(content, def)
             {
-                tiles.geti_mut(index).block = decoration;
+                // `block = floor.asFloor().decoration` (`BasicGenerator.java:402`);
+                // `Blocks.air` (no decoration) leaves the tile empty.
+                tiles.geti_mut(index).block = crate::maps::filters::block_info::decoration(def);
             }
         }
     }

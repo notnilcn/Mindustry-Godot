@@ -654,9 +654,16 @@ impl BlockVisibilityContext {
     /// !isBanned())`, where `isHidden()` is `!buildVisibility.visible() &&
     /// !revealedBlocks.contains(this)`.
     pub fn block_visible(&self, name: &str, visibility: crate::content::BuildVisibility) -> bool {
-        let hidden = !self.build_visible(visibility)
-            && !self.revealed_blocks.iter().any(|revealed| revealed == name);
-        !hidden && (self.editor || !self.hide_banned_blocks || !self.is_banned(name))
+        !self.block_hidden(name, visibility)
+            && (self.editor || !self.hide_banned_blocks || !self.is_banned(name))
+    }
+
+    /// `Block.isHidden()` (`Block.java:1553-1555`): `!buildVisibility.visible()
+    /// && !state.rules.revealedBlocks.contains(this)` — the `ItemSelection`
+    /// filter term for block lists (`ItemSelection.java:68`; L02 T3).
+    pub fn block_hidden(&self, name: &str, visibility: crate::content::BuildVisibility) -> bool {
+        !self.build_visible(visibility)
+            && !self.revealed_blocks.iter().any(|revealed| revealed == name)
     }
 }
 

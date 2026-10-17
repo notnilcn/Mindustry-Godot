@@ -42,7 +42,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/audio/events_sim.json",
       "owner_plan": "18",
-      "sha256": "469331a8ce08cf5f63be1e861a805709cb68513867f0b893dfdf2d64cb5ac549"
+      "sha256": "3051d06b65ea24099a4bd445b8a7b7f0ebac2793ae1e7b2000c767164e62e1bd",
+      "reasons": [
+        "2026-10-18 L08 T1: scenario fix + bless. 8e7b68b8 (H01 T1) put building Pos at tile.drawx() (BuildingComp.java:126, Tile.java:166-177) and made bullet tile lookups World.toTile = round(c/8) (World.java:174, BulletComp.java:187); the scenario still placed the duo/fuse at the half-tile centre y=68, which rounds to row 9, so the fuse passed the row-8 walls (no tick-4 hit) and the duo aimed at the moved wall (shootDuo moved). The scenario now uses tile_origin (Tile.worldx): every position is the old golden minus (4,4) (shootDuo 29.35,61.76; hit at the wall edge 60,64). The hit pitch 1.0 -> 1.0638 comes from e414cac9 (H07 T4) hitSoundPitch + Mathf.range(hitSoundPitchRange) (BulletType.java:564). The fixture fuse is a Basic bullet using explosionArtillery as its hit sound; Java ArtilleryBulletType despawn timing is not involved."
+      ]
     },
     {
       "id": "harness_audio_loops_aggregate",
@@ -70,7 +73,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/blocks_families.json",
       "owner_plan": "02",
-      "sha256": "c1e1f5d6a9a1e283f5b16eeedf32fe02a77758d88bef214dc535c675409c1db6"
+      "sha256": "6e8b921a1a7454846b0b153c43db9ff7aa2ec4421706d9a766ef55cd64e1f80c",
+      "reasons": [
+        "2026-10-18 L08 T1: families other 164->158, production 45->51. 390b1bc3 (G02 T1) maps BlockKind::HeatProducer to BlockKindData::Crafter (HeatProducer extends GenericCrafter, world/blocks/heat/HeatProducer.java:13); the six HeatProducer blocks oxidation-chamber, electric-heater, slag-heater, phase-heater, heat-reactor, heat-source (content/Blocks.java:1429,1452,1467,1485,1689,6792) are now production."
+      ]
     },
     {
       "id": "harness_campaign_fog",
@@ -133,14 +139,20 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/combat.json",
       "owner_plan": "10",
-      "sha256": "536fa90af9788ef6e4145f1db3b5ce92ea1823226c5b88ca2308c1d397f4e9b6"
+      "sha256": "6a894d075287263590140aead6f246913be0b6e97c8b3b3cd4baaf80f0964594",
+      "reasons": [
+        "2026-10-18 L08 T1: tests moved to Java building positions (tile_origin = Tile.worldx; BuildingComp.java:126, Tile.java:166-177) after 8e7b68b8 (H01 T1) made building Pos = drawx and bullet rows World.toTile = round (World.java:174, BulletComp.java:187): the half-tile spawn y = 68 rounded to row 9, so basic missed its wall (health 320). With Java positions combat_basic and combat_bullet_pierce reproduce the old goldens unchanged. combat_weapon_volley 64edcedb54498910 -> abc69ea4e380cf10 and combat_turret_ammo 5b34518810df046d -> 96fe4c155a09919d: the surviving unit/turret Pos follow the Java convention (H01 T1; values verified identical at 8e7b68b8 and HEAD with the fixed test), plus for the turret b7d104af (G01 T4): building hits run BulletType.hitTile (BulletType.java:465-486) instead of a double hit pipeline."
+      ]
     },
     {
       "id": "harness_entitymeta",
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/entitymeta.json",
       "owner_plan": "05",
-      "sha256": "cd5e8e3b5ecaabb57d1012d648c8da74c1cbdeadc98db516a8e52a046eb14bf4"
+      "sha256": "a0755630b05e63bca26328f5cee6e051b73f3c70dc30e8a862acd8d6ee4b2734",
+      "reasons": [
+        "2026-10-18 L08 T1: BuildingComp gains the transient should_consume field after should_consume_power. b1ea8694 (Audit fix T1) caches Building.shouldConsume() (BuildingComp.java:761; consumption gate BuildingComp.java:1955-2005, ConsumePower.java:56-60) on the component; not serialized (write_base unchanged)."
+      ]
     },
     {
       "id": "harness_fx_fx_lifecycle",
@@ -175,7 +187,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/logistics.json",
       "owner_plan": "23",
-      "sha256": "8b9cea2bbeba4b57335f856d119251f2e739d22a3dc55832363a3745251c14ed"
+      "sha256": "c978cc3bad123492e08202a01cda5974af85aebb91af48b84fbe5b20ed7da09b",
+      "reasons": [
+        "2026-10-18 L08 T1 (bisected on code): logistics_unloader_drain b76379c35ecbbede -> 8c5f026bbdfa9da4 at 9c4f0e80 (H02 T14): UnloaderBehavior::VANILLA.speed 1.0 -> 60f/11f (Blocks.java:2164). logistics_payload_driver_throw a60fa1bc8cd3af62 -> 26cca81680646162 at 4f467a42 (PAR-0139): world/pos.rs pack/unpack follow Arc Point2.pack (x in the high half), so the payload-mass-driver link stored from Point2(12,0)/(-12,0) packs differently. Each was the single moving commit (value at the first bad commit = current)."
+      ]
     },
     {
       "id": "harness_network_heat_network_equilibrium",
@@ -259,7 +274,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/sim_core_determinism.checksums",
       "owner_plan": "05",
-      "sha256": "4c8326ce662925cb2976eeae0455e8f753a25cca2ed8b0b2d5e6bda60bae9093"
+      "sha256": "ed42f3eef130385a25c2ca9c6ac3994e69c201f19602cd0a983b308db21b254c",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3) - ecs::TeamId::SHARDED 0 -> 1, the canonical sharded id (game/Team.java: sharded = new Team(1, ...), derelict = Team 0); the scenario's placed blocks now belong to sharded instead of derelict. Verified: the test passes at ddeae35d^ and gives today's values at ddeae35d (mainline first-parent bisect -> merge 4137ea80, then its 6-commit branch). Samples 1-4 unchanged (no buildings yet); final checksum 155716ca1b7b210f -> f2631084cabb7526."
+      ]
     },
     {
       "id": "harness_sim_core_schedule_order",
@@ -407,14 +425,20 @@
       "kind": "scenario",
       "path": "scenarios/sim_core_boot.json",
       "owner_plan": "05",
-      "sha256": "3be7e0cf4e4d79c12fb57b0805e409b720beabfca0b48dda9bacedab92da5128"
+      "sha256": "82b30107fb033ece5edb5a0eb84c6e00a8233f628fceea518363bb30a71f97b7",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_sim_core_determinism",
       "kind": "scenario",
       "path": "scenarios/sim_core_determinism.json",
       "owner_plan": "05",
-      "sha256": "8d413688bfbe53aa40d02ed2eb26ea5d81ecc22abbf84b648f5328bc5ad411f3"
+      "sha256": "765ccc446186f121adacf13552e6ff73c70df666993b0f8111b1b1171d6986f0",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3) - ecs::TeamId::SHARDED 0 -> 1, the canonical sharded id (game/Team.java: sharded = new Team(1, ...), derelict = Team 0); the scenario's placed blocks now belong to sharded instead of derelict. Verified: the test passes at ddeae35d^ and gives today's values at ddeae35d (mainline first-parent bisect -> merge 4137ea80, then its 6-commit branch). Samples 1-4 unchanged (no buildings yet); final checksum 155716ca1b7b210f -> f2631084cabb7526."
+      ]
     },
     {
       "id": "scenario_sim_core_many_commands",
@@ -435,21 +459,30 @@
       "kind": "scenario",
       "path": "scenarios/spine_determinism.json",
       "owner_plan": "00",
-      "sha256": "081b653c4bea89a2e38fb11c5c307891000d1afea35384abc3b71582e497a4a5"
+      "sha256": "5ffb058096e9d0ac2a56fb05eb979af87f3c4634441205a1d950f3d29dc094e3",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_spine_many_commands",
       "kind": "scenario",
       "path": "scenarios/spine_many_commands.json",
       "owner_plan": "00",
-      "sha256": "846f38a9356e8370016fe0e1288dd1c7003c53bc0e72215d949b5401a57d44f4"
+      "sha256": "8ad3a66c1cf9f222c93f86a288afc07ab6ff3408d125f1a8d0d97ec9e1a687f3",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_spine_place_break",
       "kind": "scenario",
       "path": "scenarios/spine_place_break.json",
       "owner_plan": "00",
-      "sha256": "08efdd874239045359c907f4cdec3c6b2c31f979432b590d5fb0281b4ec5f8c5"
+      "sha256": "53fec75afbb7f9d47599c149d6e557f7dcb0fb137258586ab7695ff61359866b",
+      "reasons": [
+        "2026-10-18 L08 T1: moved at ddeae35d (J08 T3): ecs::TeamId::SHARDED 0 -> 1, Java's sharded team id (game/Team.java: sharded = new Team(1, ...); derelict = 0). The scenario's placed blocks are now sharded instead of derelict, which the checksum hashes. Verified directly: old value at ddeae35d^, today's value at ddeae35d."
+      ]
     },
     {
       "id": "scenario_stdb_binder_replay",
@@ -533,7 +566,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/input/placement_validation_table.json",
       "owner_plan": "15",
-      "sha256": "dcdeb69947d5df5274a351bacf312d8f137587ea86ca2d4c6853e87e01e45788"
+      "sha256": "468cfd2ee8370dce583c8f0e0360579fa2e75cc2997d2576614a9759ebac3b16",
+      "reasons": [
+        "2026-10-18 L08 T1: 10 rows valid_place true->false. (0,0) for conveyor/router/copper-wall/mechanical-drill/combustion-generator/solar-panel/battery: b1e2f543 (G04 T5) added the World.getDarkness edge term to the Build.validPlace darkness check (Build.java:229, World.java:483-503: edgeDst 0 -> dark 4 >= 3). copper-wall onto the copper-wall at (10,10) and core-shard at (32,32)/(33,33) over the core-shard: 4ee70402 (H02 T3) dropped the port's same-block bypass; Build.java:260 requires canReplace, which is false for the same block (Block.java:798 other != this; CoreBlock.java:182 other != this)."
+      ]
     },
     {
       "id": "harness_input_camera_pan_zoom",
@@ -568,14 +604,20 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/input/input_preview_handoff.json",
       "owner_plan": "15",
-      "sha256": "978172734e1e0a20c4f040f98d801028be6da00fa1752f512439d9ea50640b33"
+      "sha256": "fba830f88665f3f75cf2e5f46c9887ae010bc4e00629911d9b4d5ebcc682c560",
+      "reasons": [
+        "2026-10-18 L08 T1: preview rotation and player_sync selected_rotation 1->0 (+checksum). 29ebd1b3 (H08 T1): updateLine sets input.rotation = l.rotation per step (InputHandler.java:1945-1946); the horizontal (2,2)->(6,2) line has base rotation 0 (InputHandler.java:2467-2469), overriding the LineParams rotation 1."
+      ]
     },
     {
       "id": "harness_input_replay_mobile",
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/input/input_replay_mobile.json",
       "owner_plan": "15",
-      "sha256": "773243b0087c7cc74811170509d7cc85b3b8cf845b42d2951dbf368cc61fee4b"
+      "sha256": "16439366a3db0fc995525e8be5891bb42aaff2fdfe2ba05d8d060ad67f62d640",
+      "reasons": [
+        "2026-10-18 L08 T1: rotation 1->0. 29ebd1b3 (H08 T1): updateLine carries each line step's rotation into input.rotation (InputHandler.java:1945-1946) and the base rotation is the drag angle ((int)((angle+45)/90))%4 (InputHandler.java:2467-2469); the +x conveyor drag gives 0."
+      ]
     },
     {
       "id": "harness_input_mobile_parity",
@@ -589,7 +631,10 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/input/input_rts_move.json",
       "owner_plan": "15",
-      "sha256": "c576d142e4dabfe2572029283977353e948e5319a5b30805e8477d3403daa2a9"
+      "sha256": "d6e152bfd36efa476fbc14a80cbcc38b70b2d64c38b86c5d5eed6fb8735aba81",
+      "reasons": [
+        "2026-10-18 L08 T1: unit_command ops gain \"queue\" (1eaf4bed I01 T13: SimCommand::UnitCommand.queue, InputHandler.commandUnits queueCommand, InputHandler.java:340-352); the Unit(9) attack target encodes as x=9, y=1_000_000+0 (2b6d7cd1 PAR-0157: lossless split of the unit id; the old x=id as f32 rounded ids >= 2^24). Checksum moves with the op stream."
+      ]
     },
     {
       "id": "harness_units_base_build",
@@ -671,8 +716,11 @@
       "kind": "harness",
       "path": "client/rust/mind-headless/tests/golden/maps_editor.json",
       "owner_plan": "06/19",
-      "sha256": "96f99ff7ff3d722ad7211025e30f5ed3ad77b2ef5d4b9d3af05e8e30e3a82bfa",
-      "regen": "cargo run -p mind-headless -- maps roundtrip --json; cargo run -p mind-headless -- editor playtest --json"
+      "sha256": "bf5a47538aeacb4b62eae6c79ad6071f120ac79bd75a6e6a330e3e9f59d5d49c",
+      "regen": "cargo run -p mind-headless -- maps roundtrip --json; cargo run -p mind-headless -- editor playtest --json",
+      "reasons": [
+        "2026-10-18 L08 T1 (bisected on code, 15e1050b..HEAD): maps_roundtrip 57bfde109806f8ea -> 52a37ff73b61f5f3 at 49f0268b (PAR-0114 / I06 T5), the single moving commit: MapIO.generatePreview treats the default Block.mapColor (0,0,0,1) as a no-draw sentinel, so air no longer paints (32,32,32) over the stone floor (MapIO.java:95-103), and CachedTile.setBlock writes walls on the flipped row. editor_playtest unchanged."
+      ]
     },
     {
       "id": "harness_ui_prompts",

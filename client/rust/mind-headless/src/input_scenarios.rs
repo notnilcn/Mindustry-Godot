@@ -74,6 +74,12 @@ fn emit(value: &serde_json::Value, out: Option<&Path>, golden: Option<&Path>) ->
         std::fs::write(path, &text)?;
     }
     if let Some(path) = golden {
+        // `MIND_BLESS=1` rewrites the committed golden (L08 T1).
+        if crate::paths::blessing() {
+            std::fs::write(path, &text)?;
+            log::warn!("input golden blessed: {}", path.display());
+            return Ok(());
+        }
         let expected = std::fs::read_to_string(path)?;
         if expected != text {
             bail!("input golden mismatch at {}", path.display());

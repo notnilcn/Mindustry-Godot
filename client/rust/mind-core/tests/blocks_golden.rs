@@ -1,21 +1,51 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 //! Plan 07 committed block goldens (`tests/golden/blocks_families.json`).
+//!
+//! `MIND_BLESS=1 cargo test -p mind-core --test blocks_golden` rewrites the
+//! golden from the current build instead of asserting (L08 T1). A bless must
+//! carry its reason (commit + Java citation) in `parity/golden_manifest.json`
+//! `reasons` and the commit body; then re-record the manifest sha256 with
+//! `tools/regen_goldens.sh --record harness_blocks_families`.
 
 #![allow(clippy::expect_used)]
+
+use std::sync::Mutex;
 
 use mind_core::world::BuildHarness;
 use mind_core::world::config::ConfigValue;
 use mind_core::world::modules::{ItemModule, PowerModule};
 use serde_json::Value;
 
+const GOLDEN_PATH: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/golden/blocks_families.json"
+);
+
+/// Serialises read-modify-write blesses across the parallel tests.
+static BLESS_LOCK: Mutex<()> = Mutex::new(());
+
 fn golden() -> Value {
-    let text = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/golden/blocks_families.json"
-    ))
-    .expect("blocks_families.json");
+    let text = std::fs::read_to_string(GOLDEN_PATH).expect("blocks_families.json");
     serde_json::from_str(&text).expect("parse golden")
+}
+
+fn blessing() -> bool {
+    std::env::var("MIND_BLESS").is_ok_and(|v| v == "1")
+}
+
+/// Rewrites one top-level-or-nested golden field (`path` of object keys).
+fn bless(path: &[&str], value: Value) {
+    let _guard = BLESS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut root = golden();
+    let mut node = &mut root;
+    for key in &path[..path.len() - 1] {
+        node = node.get_mut(*key).expect("golden path");
+    }
+    node[path[path.len() - 1]] = value;
+    let mut text = serde_json::to_string_pretty(&root).expect("serialize golden");
+    text.push('\n');
+    std::fs::write(GOLDEN_PATH, text).expect("write golden");
 }
 
 #[test]
@@ -25,6 +55,14 @@ fn family_counts_match_golden() {
     let mut families: std::collections::BTreeMap<&'static str, u64> = Default::default();
     for inst in harness.table().iter() {
         *families.entry(inst.kind_data.family_name()).or_default() += 1;
+    }
+    if blessing() {
+        bless(&["blocks"], Value::from(harness.table().len() as u64));
+        bless(
+            &["families"],
+            serde_json::to_value(&families).expect("families"),
+        );
+        return;
     }
     assert_eq!(
         Some(harness.table().len() as u64),
@@ -50,6 +88,13 @@ fn wall_door_checksum_matches_golden() {
     harness.construct_tick(10_000.0);
     harness.configure(5, 4, ConfigValue::Bool(true));
     harness.configure(5, 4, ConfigValue::Bool(false));
+    if blessing() {
+        bless(
+            &["scenarios", "wall_door"],
+            Value::from(harness.checksum_hex()),
+        );
+        return;
+    }
     assert_eq!(
         harness.checksum_hex(),
         golden["scenarios"]["wall_door"].as_str().expect("golden")
@@ -78,6 +123,13 @@ fn consumer_efficiency_checksum_matches_golden() {
     }
     for _ in 0..90 {
         harness.tick();
+    }
+    if blessing() {
+        bless(
+            &["scenarios", "consumer_efficiency"],
+            Value::from(harness.checksum_hex()),
+        );
+        return;
     }
     assert_eq!(
         harness.checksum_hex(),

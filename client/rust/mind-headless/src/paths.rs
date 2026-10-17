@@ -134,3 +134,11 @@ pub fn find_mind_core_dir(explicit: Option<&Path>) -> anyhow::Result<PathBuf> {
         }
     }
 }
+
+/// `MIND_BLESS=1`: golden harnesses rewrite their committed goldens from the
+/// current build instead of comparing (L08 T1). Every bless needs its reason
+/// (commit + Java citation) in `parity/golden_manifest.json` `reasons` and a
+/// re-recorded sha256 (`tools/regen_goldens.sh --record <id>`).
+pub fn blessing() -> bool {
+    std::env::var("MIND_BLESS").is_ok_and(|value| value == "1")
+}

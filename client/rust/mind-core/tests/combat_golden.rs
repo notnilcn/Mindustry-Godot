@@ -26,18 +26,39 @@ fn scenario(name: &str) -> String {
         .to_owned()
 }
 
+static BLESS_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Asserts `actual` against the scenario golden, or with `MIND_BLESS=1`
+/// rewrites it (L08 T1; the reason goes into `parity/golden_manifest.json`).
+fn check(name: &str, actual: String) {
+    if std::env::var("MIND_BLESS").is_ok_and(|v| v == "1") {
+        let _guard = BLESS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/golden/combat.json");
+        let mut root = golden();
+        root["scenarios"][name] = Value::from(actual);
+        let text = format!("{}\n", serde_json::to_string_pretty(&root).expect("json"));
+        std::fs::write(path, text).expect("write combat golden");
+        return;
+    }
+    assert_eq!(actual, scenario(name), "{name}");
+}
+
 #[test]
 fn basic_bullet_hits_building_matches_golden() {
     let mut harness = CombatHarness::new(32, 32, 7);
     let wall = harness.content().block_id("copper-wall").expect("wall");
     assert!(harness.place(10, 10, wall, 0, true));
-    let (x, y) = CombatHarness::tile_center(8, 10);
+    // Java building position `tile.drawx()` = `tile.worldx()` for size 1
+    // (BuildingComp.java:126, Tile.java:166-177); bullet rows use
+    // `World.toTile` = round (World.java:174). The half-tile centre sits on
+    // the row boundary since H01 T1 (L08 T1).
+    let (x, y) = CombatHarness::tile_origin(8, 10);
     assert!(harness.spawn_bullet("fuse", x, y, 0.0, 1).is_some());
     for _ in 0..120 {
         harness.tick();
     }
     assert_eq!(harness.building_health_at(10, 10), 280.0);
-    assert_eq!(harness.checksum_hex(), scenario("combat_basic"));
+    check("combat_basic", harness.checksum_hex());
 }
 
 #[test]
@@ -47,12 +68,16 @@ fn rail_pierces_three_walls_matches_golden() {
     for x in 12..=14 {
         assert!(harness.place(x, 8, wall, 0, true));
     }
-    let (x, y) = CombatHarness::tile_center(4, 8);
+    // Java building position `tile.drawx()` = `tile.worldx()` for size 1
+    // (BuildingComp.java:126, Tile.java:166-177); bullet rows use
+    // `World.toTile` = round (World.java:174). The half-tile centre sits on
+    // the row boundary since H01 T1 (L08 T1).
+    let (x, y) = CombatHarness::tile_origin(4, 8);
     assert!(harness.spawn_bullet("rail", x, y, 0.0, 1).is_some());
     for _ in 0..80 {
         harness.tick();
     }
-    assert_eq!(harness.checksum_hex(), scenario("combat_bullet_pierce"));
+    check("combat_bullet_pierce", harness.checksum_hex());
 }
 
 #[test]
@@ -75,7 +100,7 @@ fn determinism_samples_are_identical_and_match_golden() {
     }
     let first = sample(29);
     assert_eq!(first, sample(29));
-    assert_eq!(first[0], scenario("combat_determinism_first"));
+    check("combat_determinism_first", first[0].clone());
 }
 
 #[test]
@@ -113,9 +138,13 @@ fn weapon_volley_matches_golden() {
         registry,
     )
     .expect("weapon");
-    let (ux, uy) = CombatHarness::tile_center(4, 8);
+    // Java building position `tile.drawx()` = `tile.worldx()` for size 1
+    // (BuildingComp.java:126, Tile.java:166-177); bullet rows use
+    // `World.toTile` = round (World.java:174). The half-tile centre sits on
+    // the row boundary since H01 T1 (L08 T1).
+    let (ux, uy) = CombatHarness::tile_origin(4, 8);
     let unit = harness.spawn_test_unit(ux, uy, 1, vec![weapon]);
-    harness.set_unit_aim(unit, 0, CombatHarness::tile_center(12, 8));
+    harness.set_unit_aim(unit, 0, CombatHarness::tile_origin(12, 8));
     harness.set_unit_shoot(unit, 0, true);
     for _ in 0..120 {
         harness.tick();
@@ -124,7 +153,7 @@ fn weapon_volley_matches_golden() {
         harness.unit_weapons(unit).expect("unit weapons").mounts[0].total_shots,
         12
     );
-    assert_eq!(harness.checksum_hex(), scenario("combat_weapon_volley"));
+    check("combat_weapon_volley", harness.checksum_hex());
 }
 
 #[test]
@@ -205,10 +234,7 @@ fn liquid_floor_react_matches_golden() {
         .map(|p| p.amount)
         .unwrap_or(0.0);
     assert!((after - (before + 5.0)).abs() < 1e-5);
-    assert_eq!(
-        harness.checksum_hex(),
-        scenario("combat_liquid_floor_react")
-    );
+    check("combat_liquid_floor_react", harness.checksum_hex());
 }
 
 #[test]
@@ -216,7 +242,11 @@ fn turret_ammo_fire_matches_golden() {
     let mut harness = CombatHarness::new(48, 16, 37);
     let wall = harness.content().block_id("copper-wall").expect("wall");
     assert!(harness.place(12, 8, wall, 0, true));
-    let (tx, ty) = CombatHarness::tile_center(4, 8);
+    // Java building position `tile.drawx()` = `tile.worldx()` for size 1
+    // (BuildingComp.java:126, Tile.java:166-177); bullet rows use
+    // `World.toTile` = round (World.java:174). The half-tile centre sits on
+    // the row boundary since H01 T1 (L08 T1).
+    let (tx, ty) = CombatHarness::tile_origin(4, 8);
     let turret = harness
         .spawn_test_turret("duo", tx, ty, 1)
         .expect("duo turret");
@@ -231,5 +261,5 @@ fn turret_ammo_fire_matches_golden() {
     for _ in 0..120 {
         harness.tick();
     }
-    assert_eq!(harness.checksum_hex(), scenario("combat_turret_ammo"));
+    check("combat_turret_ammo", harness.checksum_hex());
 }

@@ -3223,7 +3223,7 @@ impl MindCampaign {
         let Some(registry) = self.registry.as_ref() else {
             return GString::from("{}");
         };
-        let unlocked_override = !self.session.is_campaign() && self.session.phase.is_game();
+        let unlocked_override = mind_core::ui::database::custom_game_unlock_override(&self.session);
         // `Block.isBanned()`: `state.isGame() && rules.bannedBlocks.contains`
         // (`DatabaseDialog.rebuild` draws the cross and sorts banned last).
         let banned = self
@@ -3924,11 +3924,18 @@ impl MindCampaign {
         status(true, resumed)
     }
 
-    /// `logic.reset()`'s saves/session half shared by [`Self::run_exit_save`]
-    /// and [`Self::check_playtest`]: persists the sector record, drops the
-    /// session runtime and returns to the menu phase (`state = new
-    /// GameState()`, so `playtestingMap` is cleared too; `Logic.java:299-311`).
-    fn reset_to_menu(&mut self) {
+    /// `logic.reset()` (`Logic.java:299-311`): THE return-to-menu path (L02
+    /// T2). [`Self::run_exit_save`] and [`Self::check_playtest`] end in it,
+    /// and the UI calls it for the game-over `@menu` button
+    /// (`GameOverDialog.java:134-138`), the editor exit
+    /// (`MapEditorDialog.java:789-795`) and the abandon/quit fallbacks
+    /// (`UiRoot.return_to_menu`). Saves/session half: persists the sector
+    /// record, drops the session runtime and returns to the menu phase
+    /// (`state = new GameState()`, so `playtestingMap` is cleared too); world
+    /// half: `MindSimHost.reset_to_menu` empties the sim and sets its phase to
+    /// menu. Idempotent.
+    #[func]
+    pub fn reset_to_menu(&mut self) {
         self.playtesting_map = None;
         // `SectorInfo.write()`/`saveInfo` on exit: the live wave/attack bookkeeping
         // lands in the stored record before the runtime is dropped (PAR-0081).
@@ -3953,6 +3960,9 @@ impl MindCampaign {
         self.mirror_runtime_campaign();
         if let Some(mut host) = self.host() {
             host.bind_mut().clear_campaign_runtime();
+            // `Groups.clear(); world.tiles = new Tiles(0, 0); state = new
+            // GameState()` (`Logic.java:300-307`).
+            host.bind_mut().reset_to_menu();
         }
         self.persist();
     }

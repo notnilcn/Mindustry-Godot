@@ -37,11 +37,31 @@ fn run(args: &[&str]) -> serde_json::Value {
         .unwrap_or_else(|error| panic!("{args:?}: bad json {error}"))
 }
 
+/// `MIND_BLESS=1` rewrites one key of `tests/golden/maps_editor.json` from
+/// this build (L08 T1); the reason goes into `parity/golden_manifest.json`.
+fn bless(key: &str, value: &serde_json::Value) -> bool {
+    if !std::env::var("MIND_BLESS").is_ok_and(|v| v == "1") {
+        return false;
+    }
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/maps_editor.json");
+    let mut golden = golden();
+    golden[key] = value.clone();
+    let text = format!(
+        "{}\n",
+        serde_json::to_string_pretty(&golden).expect("golden")
+    );
+    std::fs::write(&path, text).expect("write maps_editor golden");
+    true
+}
+
 #[test]
 fn maps_roundtrip_matches_golden() {
     let golden = golden();
     let report = run(&["maps", "roundtrip"]);
     assert_eq!(report["ok"].as_bool(), Some(true), "scenario failed");
+    if bless("maps_roundtrip", &report["preview_checksum_save"]) {
+        return;
+    }
     assert_eq!(
         report["preview_checksum_save"].as_str(),
         golden["maps_roundtrip"].as_str(),
@@ -59,6 +79,9 @@ fn editor_playtest_matches_golden() {
     let golden = golden();
     let report = run(&["editor", "playtest"]);
     assert_eq!(report["ok"].as_bool(), Some(true), "scenario failed");
+    if bless("editor_playtest", &report["checksum"]) {
+        return;
+    }
     assert_eq!(
         report["checksum"].as_str(),
         golden["editor_playtest"].as_str(),

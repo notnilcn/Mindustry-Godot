@@ -44,6 +44,13 @@ fn sampled_checksums_match_golden_across_runs() {
     let first = sampled_checksums(&scenario, 60);
     let second = sampled_checksums(&scenario, 60);
     assert_eq!(first, second, "two in-process runs must agree");
+    // `MIND_BLESS=1` rewrites the sampled golden (L08 T1); the scenario's own
+    // `expect.checksum` (the final sample) is updated by hand with the reason
+    // in `parity/golden_manifest.json`.
+    if std::env::var("MIND_BLESS").is_ok_and(|v| v == "1") {
+        std::fs::write(golden_path(), format!("{}\n", first.join("\n"))).expect("bless");
+        return;
+    }
     let golden_text = std::fs::read_to_string(golden_path()).expect("golden committed");
     let golden: Vec<String> = golden_text
         .lines()
