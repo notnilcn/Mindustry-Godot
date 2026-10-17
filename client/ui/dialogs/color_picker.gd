@@ -67,6 +67,10 @@ func _build() -> void:
 	# .colspan(2).padBottom(5)`.
 	var frame := PanelContainer.new()
 	var box := _pane_box(Color(0, 0, 0, 0), PANE_OUTLINE_GRAY)
+	# `Tex.pane` pads its content 12 px (java/picker.png: frame 228 px around the
+	# 200 px preview).
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		box.set_content_margin(side, 12.0)
 	frame.add_theme_stylebox_override("panel", box)
 	var stack := Control.new()
 	stack.custom_minimum_size = Vector2(200.0, 200.0)
@@ -216,12 +220,26 @@ func _update_color(update_field: bool) -> void:
 	for gradient in _gradients:
 		gradient.queue_redraw()
 	if update_field and _hex != null:
-		var value := _current.to_html(true)
+		var value := arc_hex(_current)
 		if _current.a >= 0.9999:
 			value = value.substr(0, 6)
 		_hex.set_block_signals(true)
 		_hex.text = value
 		_hex.set_block_signals(false)
+
+
+## Arc `Color.toString()` / `rgba8888`: each channel is `(int)(c * 255)`
+## (truncated), so a 0.5 alpha is `7f`, where Godot's `to_html` rounds to `80`.
+static func arc_rgba(color: Color) -> int:
+	var r := int(clampf(color.r, 0.0, 1.0) * 255.0)
+	var g := int(clampf(color.g, 0.0, 1.0) * 255.0)
+	var b := int(clampf(color.b, 0.0, 1.0) * 255.0)
+	var a := int(clampf(color.a, 0.0, 1.0) * 255.0)
+	return (r << 24) | (g << 16) | (b << 8) | a
+
+
+static func arc_hex(color: Color) -> String:
+	return "%08x" % arc_rgba(color)
 
 
 func _confirm() -> void:

@@ -365,7 +365,9 @@ func _open_color_picker() -> void:
 	picker.call("show_picker", color, false, func(result: Color) -> void:
 		var input := get_node_or_null("/root/Spine/Input")
 		if input != null and input.has_method("configure_building"):
-			input.call("configure_building", x, y, "int", str(result.to_rgba32())))
+			# `res.rgba()` truncates like Arc (`(int)(c * 255)`).
+			var packed: int = load("res://ui/dialogs/color_picker.gd").arc_rgba(result)
+			input.call("configure_building", x, y, "int", str(packed)))
 
 
 ## `Color.rgba8888` → Godot `Color` (the packed value is `0xRRGGBBAA`).
