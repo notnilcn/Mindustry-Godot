@@ -43,7 +43,7 @@ main-checkout learnings writes were captured in `ca55ff5c`, `2f6d74be`.
 | **J07** planet/campaign | **T1–T3 landed; T4 recorded (premise corrected); T5.4 landed** | `6b69bded` T1, `418a496b` T2, `aec5bde4` T3, `9ab01188` T5.4 |
 | **J08** editor/logic | **T1–T3 landed (T3 partial); T4/T6–T8 recorded; T5 blocked** | `061ddaba` T1, `d2176386` T2, `ddeae35d` T3 |
 | **J09** mods/content | **T1–T3, T5 complete; T2 partial; T4 blocker recorded** | `f63ef648`/`13548c98` T1, `f45ed9ac` T3, `9f33ceaa` T5, `45e1a55e` golden maintenance |
-| **J10** harness/re-walk | **T1, T2 items 1–6 complete; T3 in `K-round-twin-verification.md`** | `574e085a` T1, `78f42bf5` T2.6, `5325720c` T2.1, `3afd8b70` T2.3 |
+| **J10** harness/re-walk | **T1, T2 items 1–6 complete; T3 complete (`docs/K-round-twin-verification.md`)** | `574e085a` T1, `78f42bf5` T2.6, `5325720c` T2.1, `3afd8b70` T2.3, `89c7de9e` T3 report |
 
 ## 3. Gates
 
@@ -96,10 +96,31 @@ moved to the Java IK invariant in J09 (with manifest hash + reason).
    configs), PAR-0386 (wave panel wrap / editor highlight), PAR-0407 (J08 logic/editor records).
 5. **J09 T4** — the `ModDataManager` owner+decorator is the one recorded blocker; landing it
    unblocks J08 T5 (map assets dialog) and map `patches`.
-6. **J10 T3** — the round-K re-walk verdicts and any new ledger findings are in
-   `docs/K-round-twin-verification.md`.
+6. **J10 T3 findings** — F-K1..F-K7 are seeded as PAR-0409..PAR-0415; the HIGH one
+   (PAR-0409, Custom Game grid clipping/non-scrolling) blocks the Map Play row and should be
+   the first fix of the next wave. The K report's UNVERIFIED rows need a re-walk with a stable
+   Java input leg (or a fresh Java capture) before they can be closed.
 
-## 6. Deviations recorded (summary)
+## 6. Round-K twin re-walk outcome (`docs/K-round-twin-verification.md`)
+
+Independent re-walk on fresh builds after all merges (Java + Godot on session 5). MATCH with fresh
+frames: Play submenu, Settings categories, Controls/keybinds, Load Game, planet orbit arcs +
+atmosphere rim, main-menu shadows/edges/flyers. PARTIAL: main menu (camera scale), planet page
+(button placement/globe size), Graphics sliders (framing landed; row height/knob/extra row),
+Custom Game (19 maps + previews + order verified; grid clipping blocks the cards), sandbox world
+(core-zone stripes + scrap minimap verified; boulders observation), editor Maps dialog (previews
+match; in-editor rows not re-staged). UNVERIFIED rows are listed with their blockers in the K
+report (mostly the Java client's input dying after the sandbox run and the F-K1 grid block) — none
+contradict the J-round verdicts.
+
+New findings (ledger F-K1..F-K7): **PAR-0409** Custom Game grid clipped/non-scrolling (HIGH,
+`mismatch`, blocks Map Play/Caldera); **PAR-0410** search empties the grid (needs a real-typing
+retest); **PAR-0411** sandbox boulders 0 vs Java (needs a like-for-like map; possible
+ScatterFilter skip when a map carries its own `genfilters`); **PAR-0412** menu camera scale;
+**PAR-0413** slider row height/knob/extra Bloom Intensity row; **PAR-0414** planet button
+placement/globe size; **PAR-0415** Tech Tree button retest with input flush.
+
+## 7. Deviations recorded (summary)
 
 All per-plan deviations with Java locations are in the `docs/J<NN>-*_summary.md` files. The
 cross-cutting ones: name-stem save slots kept (J01 T6); filter application before `endMapLoad`
