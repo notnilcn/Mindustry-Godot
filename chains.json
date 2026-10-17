@@ -1764,7 +1764,7 @@
 "PAR-0293":{"t":"Loaded units came back with GroundAI instead of CommandAI (H04 T13)","s":"campaign","st":"verified","u":"2026-10-15","run":"runs/20261015-s3-H04-T13/"},
 "PAR-0294":{"t":"Java save import dropped units, fires and puddles (H04 T10, headless)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0295":{"t":"Prepared sector records never reached the live campaign (69820d5b)","s":"campaign","st":"verified","u":"2026-10-15","run":"runs/20261015-s3-H04-V1/"},
-"PAR-0296":{"t":"Interplanetary Accelerator is a stub","s":"campaign","st":"seeded","u":"2026-10-15"},
+"PAR-0296":{"t":"Interplanetary Accelerator is a stub","s":"campaign","st":"seeded","u":"2026-10-17","run":"runs/20261017-s5-J07-T4/"},
 "PAR-0297":{"t":"attackSectors never marked; numbered-sector threat 0 (H05 T1 ba24fe66)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0298":{"t":"Generated sectors ignored the sector polygon for building (H05 T3 ab9f87e8)","s":"campaign","st":"verified","u":"2026-10-15"},
 "PAR-0299":{"t":"No toast for sector invasions (H05 T7 6781351f)","s":"campaign","st":"verified","u":"2026-10-15"},
@@ -1854,7 +1854,12 @@
 "PAR-0383":{"t":"Map Play lays out against the previous map's panel width (portrait previews clip) (37ef2a8d)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T7/"},
 "PAR-0384":{"t":"Placement palette ignores affordability and clips the fourth column under the scroll bar (a35307a8)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T8/"},
 "PAR-0385":{"t":"Sidebar parent button never stays checked / Godot focus frames / square checkbox indicators (9eb88e02)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T9/"},
-"PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"seeded","u":"2026-10-17"}
+"PAR-0386":{"t":"Wave panel does not wrap '2 Enemies / Remaining' at Java's fixed width; editor palette's selected-cell highlight too faint (J06 T9 residuals)","s":"ui","st":"seeded","u":"2026-10-17"},
+"PAR-0387":{"t":"Planet orbit lines never drawn (`PlanetRenderer.renderOrbit`) (6b69bded)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T1/"},
+"PAR-0388":{"t":"Planet atmosphere drawn as a pre-body billboard quad: the veil was hidden and the rim thinner/darker (418a496b)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T2/"},
+"PAR-0389":{"t":"Tech tree rendered an opaque backdrop, generic map glyphs and an unframed planet header (aec5bde4)","s":"campaign","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T3/"},
+"PAR-0390":{"t":"HUD toasts had no shared 3.5 s slot (`HudFragment.scheduleToast`) (9ab01188)","s":"hud","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J07-T5/"},
+"PAR-0391":{"t":"Campaign rule/generator residuals: `prebuildBase`, `allowCampaignRules`, Erekir generator rules/Schematics/Waves, abandon semantics, sector land-info gates (J07 T5 records)","s":"campaign","st":"seeded","u":"2026-10-17"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -5598,6 +5603,21 @@
 ],
 "PAR-0381":[
 "closed: 8b197956 (J06 T4): the axis cell renders Arc markup (`min [red]/[] max`) through render_markup, keys use Pal.accent/darkGray left-aligned at minWidth(90) padRight(20), the binds table keeps its ~845 px width and is centred; reset-all uses Icon.refresh; verified vs frame 38 (runs/20261017-s3-J06-T4/)."
+],
+"PAR-0296":[
+"2026-10-17 round J (J07 T4 record, runs/20261017-s5-J07-T4/): correction — vanilla never populates Planet.launchCandidates, so the Accelerator (self-sector launch, PlanetDialog.java:610) launches to the same planet, not to Erekir; the plan's Erekir acceptance premise was wrong. Port gaps listed: progress/item-capacity state, canLaunch + config spec, planet-launch mode, core/resource carry, LaunchAnimator cutscene (Accelerator.java:42,129,276,322). Stays seeded for a follow-up."
+],
+"PAR-0387":[
+"closed: 6b69bded (J07 T1): the planet payload now carries per-planet orbit radius + parent centre; planet_view draws Pal.gray LINE_STRIP loops with alpha = uiAlpha, hidden <= 0.02 (PlanetRenderer.java:171-179); in-engine Erekir 17.0 + Serpulo 57.24 arcs around the sun, arc sky pixels exactly (68,68,68) (runs/20261017-s5-J07-T1/)."
+],
+"PAR-0388":[
+"closed: 418a496b (J07 T2): Java renders the radius-1.5 atmosphere hex sphere after the planet; the port's billboard drew at priority -9 (before the body) so the veil was hidden. Now SphereMesh(1.5) at priority -7, no billboard rotation; purple-halo radial profile matches Java (29/36/49/39 vs 31/45/43/30) and collapses with the atmosphere setting off (runs/20261017-s5-J07-T2/). Residuals: drawClouds (HexSkyMesh) unported (alpha = 1-uiAlpha, 0 at the acceptance pose) and the planet Bloom tail weaker than Java (23-27 vs 14-20)."
+],
+"PAR-0389":[
+"closed: aec5bde4 (J07 T3): research panel backdrop now transparent (dim kept; right band byte-matches Java), sector nodes use sector-<name> icons (SectorPreset.java:134; payload icon verified), root header always visible + framed in defaultt; remaining = sector-node state differences (runs/20261017-s5-J07-T3/)."
+],
+"PAR-0390":[
+"closed: 9ab01188 (J07 T5): the 3.5 s HUD toast slot + the LExecutor.java:1939-1942 message gates (ui_root.gd); in-engine three queued toasts fired on slot stamps 40827/44327/47827 (runs/20261017-s5-J07-T5/)."
 ],
 "PAR-0382":[
 "closed: 9da3b3b2 (J06 T6): single content headline (title table removed), 600 px centred column, Styles.black3 pane, 50 px StatLabel rows with 0.05*i delay, x-scale in, accent->darkestGray over 0.3 s, counting values after a further 0.3 s (slowFast above 10), wave row gated on rules.waves, Time Played via Strings.formatMillis/current_save_playtime_ms, @menu 140x60 / @continue 170x60. Stats fix: check_game_state's four paths raise through raise_game_over (Control.java:132-133, Logic.java:435-437) so wavesLasted records the wave; tests core_loss_game_over_records_waves_lasted + game_over_context_keys_match_dialog_rows; verified Waves Defeated 1 + Time Played vs frame 50 (runs/20261017-s3-J06-T6/)."
