@@ -1,0 +1,18 @@
+{
+  "name": "Class Mech",
+  "type": "mech",
+  "health": 400,
+  "speed": 0.5,
+  "aiController": "GroundAI",
+  "abilities": [
+    {"type": "RegenAbility", "amount": 0.5},
+    {"type": "ArmorPlateAbility", "health": 100}
+  ],
+  "weapons": [
+    {
+      "name": "class-gun",
+      "reload": 40,
+      "bullet": {"type": "EmptyBulletType", "damage": 0}
+    }
+  ]
+}

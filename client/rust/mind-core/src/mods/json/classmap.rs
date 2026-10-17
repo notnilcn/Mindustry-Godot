@@ -47,6 +47,12 @@ pub enum ClassScope {
     Team,
     /// `mindustry.world.consumers.Consume` (the `consumes` array's base class).
     Consume,
+    /// `mindustry.world.draw.DrawBlock` (block `drawer` objects).
+    Drawer,
+    /// `mindustry.entities.part.Part` (weapon/block `parts` arrays).
+    Part,
+    /// Stack/plan records (`mindustry.type.ItemStack`, `UnitPlan`, …).
+    Data,
 }
 
 impl ClassScope {
@@ -69,6 +75,9 @@ impl ClassScope {
             ClassScope::Planet => "Planet",
             ClassScope::Team => "Team",
             ClassScope::Consume => "Consume",
+            ClassScope::Drawer => "Drawer",
+            ClassScope::Part => "Part",
+            ClassScope::Data => "Data",
         }
     }
 }

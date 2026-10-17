@@ -7,9 +7,19 @@
       "tag": "Ability"
     },
     {
+      "alias": "ArmorPlateAbility",
+      "scope": "Ability",
+      "tag": "ArmorPlateAbility"
+    },
+    {
       "alias": "BuildSpeedAbility",
       "scope": "Ability",
       "tag": "BuildSpeedAbility"
+    },
+    {
+      "alias": "EmptyDataAbility",
+      "scope": "Ability",
+      "tag": "EmptyDataAbility"
     },
     {
       "alias": "EnergyFieldAbility",
@@ -127,6 +137,11 @@
       "tag": "BaseShield"
     },
     {
+      "alias": "BaseTurret",
+      "scope": "Block",
+      "tag": "ItemTurret"
+    },
+    {
       "alias": "Battery",
       "scope": "Block",
       "tag": "Battery"
@@ -145,6 +160,11 @@
       "alias": "Block",
       "scope": "Block",
       "tag": "Block"
+    },
+    {
+      "alias": "BlockProducer",
+      "scope": "Block",
+      "tag": "Constructor"
     },
     {
       "alias": "BufferedItemBridge",
@@ -217,6 +237,11 @@
       "tag": "ContinuousTurret"
     },
     {
+      "alias": "ControlBlock",
+      "scope": "Block",
+      "tag": "ControlBlock"
+    },
+    {
       "alias": "Conveyor",
       "scope": "Block",
       "tag": "Conveyor"
@@ -225,6 +250,11 @@
       "alias": "CoreBlock",
       "scope": "Block",
       "tag": "CoreBlock"
+    },
+    {
+      "alias": "DirectionBridge",
+      "scope": "Block",
+      "tag": "DuctBridge"
     },
     {
       "alias": "DirectionLiquidBridge",
@@ -257,6 +287,11 @@
       "tag": "DuctBridge"
     },
     {
+      "alias": "DuctJunction",
+      "scope": "Block",
+      "tag": "Junction"
+    },
+    {
       "alias": "DuctRouter",
       "scope": "Block",
       "tag": "DuctRouter"
@@ -287,9 +322,19 @@
       "tag": "GenericCrafter"
     },
     {
+      "alias": "HeatBlock",
+      "scope": "Block",
+      "tag": "HeatProducer"
+    },
+    {
       "alias": "HeatConductor",
       "scope": "Block",
       "tag": "HeatConductor"
+    },
+    {
+      "alias": "HeatConsumer",
+      "scope": "Block",
+      "tag": "HeatCrafter"
     },
     {
       "alias": "HeatCrafter",
@@ -380,6 +425,11 @@
       "alias": "LightBlock",
       "scope": "Block",
       "tag": "LightBlock"
+    },
+    {
+      "alias": "LiquidBlock",
+      "scope": "Block",
+      "tag": "LiquidRouter"
     },
     {
       "alias": "LiquidBridge",
@@ -477,6 +527,16 @@
       "tag": "OverlayFloor"
     },
     {
+      "alias": "PayloadAmmoTurret",
+      "scope": "Block",
+      "tag": "ItemTurret"
+    },
+    {
+      "alias": "PayloadBlock",
+      "scope": "Block",
+      "tag": "PayloadVoid"
+    },
+    {
       "alias": "PayloadConveyor",
       "scope": "Block",
       "tag": "PayloadConveyor"
@@ -522,9 +582,24 @@
       "tag": "PointDefenseTurret"
     },
     {
+      "alias": "PowerBlock",
+      "scope": "Block",
+      "tag": "PowerNode"
+    },
+    {
       "alias": "PowerDiode",
       "scope": "Block",
       "tag": "PowerDiode"
+    },
+    {
+      "alias": "PowerDistributor",
+      "scope": "Block",
+      "tag": "PowerNode"
+    },
+    {
+      "alias": "PowerGenerator",
+      "scope": "Block",
+      "tag": "ConsumeGenerator"
     },
     {
       "alias": "PowerNode",
@@ -572,6 +647,11 @@
       "tag": "RegenProjector"
     },
     {
+      "alias": "ReloadTurret",
+      "scope": "Block",
+      "tag": "ItemTurret"
+    },
+    {
       "alias": "RemoveOre",
       "scope": "Block",
       "tag": "RemoveOre"
@@ -590,6 +670,11 @@
       "alias": "RepairTurret",
       "scope": "Block",
       "tag": "RepairTurret"
+    },
+    {
+      "alias": "RotBlock",
+      "scope": "Block",
+      "tag": "GenericCrafter"
     },
     {
       "alias": "Router",
@@ -635,6 +720,11 @@
       "alias": "ShockwaveTower",
       "scope": "Block",
       "tag": "ShockwaveTower"
+    },
+    {
+      "alias": "SingleBlockProducer",
+      "scope": "Block",
+      "tag": "Constructor"
     },
     {
       "alias": "SolarGenerator",
@@ -722,6 +812,16 @@
       "tag": "TileableLogicDisplay"
     },
     {
+      "alias": "TiledFloor",
+      "scope": "Block",
+      "tag": "Floor"
+    },
+    {
+      "alias": "TiledWall",
+      "scope": "Block",
+      "tag": "StaticWall"
+    },
+    {
       "alias": "TractorBeamTurret",
       "scope": "Block",
       "tag": "TractorBeamTurret"
@@ -732,6 +832,11 @@
       "tag": "TreeBlock"
     },
     {
+      "alias": "Turret",
+      "scope": "Block",
+      "tag": "ItemTurret"
+    },
+    {
       "alias": "UnitAssembler",
       "scope": "Block",
       "tag": "UnitAssembler"
@@ -740,6 +845,11 @@
       "alias": "UnitAssemblerModule",
       "scope": "Block",
       "tag": "UnitAssemblerModule"
+    },
+    {
+      "alias": "UnitBlock",
+      "scope": "Block",
+      "tag": "UnitFactory"
     },
     {
       "alias": "UnitCargoLoader",
@@ -755,6 +865,11 @@
       "alias": "UnitFactory",
       "scope": "Block",
       "tag": "UnitFactory"
+    },
+    {
+      "alias": "UnitTetherBlock",
+      "scope": "Block",
+      "tag": "UnitTetherBlock"
     },
     {
       "alias": "Unloader",
@@ -777,6 +892,11 @@
       "tag": "WallCrafter"
     },
     {
+      "alias": "WobbleProp",
+      "scope": "Block",
+      "tag": "Prop"
+    },
+    {
       "alias": "ArtilleryBulletType",
       "scope": "BulletType",
       "tag": "ArtilleryBulletType"
@@ -797,6 +917,16 @@
       "tag": "BulletType"
     },
     {
+      "alias": "ContinuousBulletType",
+      "scope": "BulletType",
+      "tag": "ContinuousBulletType"
+    },
+    {
+      "alias": "ContinuousFlameBulletType",
+      "scope": "BulletType",
+      "tag": "ContinuousFlameBulletType"
+    },
+    {
       "alias": "ContinuousLaserBulletType",
       "scope": "BulletType",
       "tag": "ContinuousLaserBulletType"
@@ -805,6 +935,11 @@
       "alias": "EmpBulletType",
       "scope": "BulletType",
       "tag": "EmpBulletType"
+    },
+    {
+      "alias": "EmptyBulletType",
+      "scope": "BulletType",
+      "tag": "EmptyBulletType"
     },
     {
       "alias": "ExplosionBulletType",
@@ -820,6 +955,11 @@
       "alias": "FlakBulletType",
       "scope": "BulletType",
       "tag": "FlakBulletType"
+    },
+    {
+      "alias": "InterceptorBulletType",
+      "scope": "BulletType",
+      "tag": "InterceptorBulletType"
     },
     {
       "alias": "LaserBoltBulletType",
@@ -845,6 +985,21 @@
       "alias": "MissileBulletType",
       "scope": "BulletType",
       "tag": "MissileBulletType"
+    },
+    {
+      "alias": "MultiBulletType",
+      "scope": "BulletType",
+      "tag": "MultiBulletType"
+    },
+    {
+      "alias": "PointBulletType",
+      "scope": "BulletType",
+      "tag": "PointBulletType"
+    },
+    {
+      "alias": "PointLaserBulletType",
+      "scope": "BulletType",
+      "tag": "PointLaserBulletType"
     },
     {
       "alias": "RailBulletType",
@@ -982,6 +1137,56 @@
       "tag": "ConsumePowerDynamic"
     },
     {
+      "alias": "AmmoEntry",
+      "scope": "Data",
+      "tag": "AmmoEntry"
+    },
+    {
+      "alias": "AssemblerUnitPlan",
+      "scope": "Data",
+      "tag": "AssemblerUnitPlan"
+    },
+    {
+      "alias": "Attributes",
+      "scope": "Data",
+      "tag": "Attributes"
+    },
+    {
+      "alias": "Category",
+      "scope": "Data",
+      "tag": "Category"
+    },
+    {
+      "alias": "ItemStack",
+      "scope": "Data",
+      "tag": "ItemStack"
+    },
+    {
+      "alias": "LiquidStack",
+      "scope": "Data",
+      "tag": "LiquidStack"
+    },
+    {
+      "alias": "Objective",
+      "scope": "Data",
+      "tag": "Objective"
+    },
+    {
+      "alias": "Objectives",
+      "scope": "Data",
+      "tag": "Objectives"
+    },
+    {
+      "alias": "PayloadStack",
+      "scope": "Data",
+      "tag": "PayloadStack"
+    },
+    {
+      "alias": "UnitPlan",
+      "scope": "Data",
+      "tag": "UnitPlan"
+    },
+    {
       "alias": "DrawArc",
       "scope": "DrawPart",
       "tag": "DrawArc"
@@ -1042,6 +1247,151 @@
       "tag": "DrawWeapon"
     },
     {
+      "alias": "DrawArcSmelt",
+      "scope": "Drawer",
+      "tag": "DrawArcSmelt"
+    },
+    {
+      "alias": "DrawBlock",
+      "scope": "Drawer",
+      "tag": "DrawBlock"
+    },
+    {
+      "alias": "DrawBlockParts",
+      "scope": "Drawer",
+      "tag": "DrawBlockParts"
+    },
+    {
+      "alias": "DrawBubbles",
+      "scope": "Drawer",
+      "tag": "DrawBubbles"
+    },
+    {
+      "alias": "DrawCells",
+      "scope": "Drawer",
+      "tag": "DrawCells"
+    },
+    {
+      "alias": "DrawCircles",
+      "scope": "Drawer",
+      "tag": "DrawCircles"
+    },
+    {
+      "alias": "DrawCrucibleFlame",
+      "scope": "Drawer",
+      "tag": "DrawCrucibleFlame"
+    },
+    {
+      "alias": "DrawCultivator",
+      "scope": "Drawer",
+      "tag": "DrawCultivator"
+    },
+    {
+      "alias": "DrawDefault",
+      "scope": "Drawer",
+      "tag": "DrawDefault"
+    },
+    {
+      "alias": "DrawFade",
+      "scope": "Drawer",
+      "tag": "DrawFade"
+    },
+    {
+      "alias": "DrawFlame",
+      "scope": "Drawer",
+      "tag": "DrawFlame"
+    },
+    {
+      "alias": "DrawFrames",
+      "scope": "Drawer",
+      "tag": "DrawFrames"
+    },
+    {
+      "alias": "DrawHeatInput",
+      "scope": "Drawer",
+      "tag": "DrawHeatInput"
+    },
+    {
+      "alias": "DrawHeatOutput",
+      "scope": "Drawer",
+      "tag": "DrawHeatOutput"
+    },
+    {
+      "alias": "DrawHeatRegion",
+      "scope": "Drawer",
+      "tag": "DrawHeatRegion"
+    },
+    {
+      "alias": "DrawLiquidOutputs",
+      "scope": "Drawer",
+      "tag": "DrawLiquidOutputs"
+    },
+    {
+      "alias": "DrawLiquidRegion",
+      "scope": "Drawer",
+      "tag": "DrawLiquidRegion"
+    },
+    {
+      "alias": "DrawLiquidTile",
+      "scope": "Drawer",
+      "tag": "DrawLiquidTile"
+    },
+    {
+      "alias": "DrawMulti",
+      "scope": "Drawer",
+      "tag": "DrawMulti"
+    },
+    {
+      "alias": "DrawMultiWeave",
+      "scope": "Drawer",
+      "tag": "DrawMultiWeave"
+    },
+    {
+      "alias": "DrawParticles",
+      "scope": "Drawer",
+      "tag": "DrawParticles"
+    },
+    {
+      "alias": "DrawPistons",
+      "scope": "Drawer",
+      "tag": "DrawPistons"
+    },
+    {
+      "alias": "DrawPlasma",
+      "scope": "Drawer",
+      "tag": "DrawPlasma"
+    },
+    {
+      "alias": "DrawPower",
+      "scope": "Drawer",
+      "tag": "DrawPower"
+    },
+    {
+      "alias": "DrawPulseShape",
+      "scope": "Drawer",
+      "tag": "DrawPulseShape"
+    },
+    {
+      "alias": "DrawPumpLiquid",
+      "scope": "Drawer",
+      "tag": "DrawPumpLiquid"
+    },
+    {
+      "alias": "DrawSoftParticles",
+      "scope": "Drawer",
+      "tag": "DrawSoftParticles"
+    },
+    {
+      "alias": "DrawSpikes",
+      "scope": "Drawer",
+      "tag": "DrawSpikes"
+    },
+    {
+      "alias": "DrawWeave",
+      "scope": "Drawer",
+      "tag": "DrawWeave"
+    },
+    {
       "alias": "Effect",
       "scope": "Effect",
       "tag": "Effect"
@@ -1052,9 +1402,44 @@
       "tag": "ExplosionEffect"
     },
     {
+      "alias": "ExplosionShield",
+      "scope": "Effect",
+      "tag": "ExplosionShield"
+    },
+    {
       "alias": "MultiEffect",
       "scope": "Effect",
       "tag": "MultiEffect"
+    },
+    {
+      "alias": "NoiseEffect",
+      "scope": "Effect",
+      "tag": "NoiseEffect"
+    },
+    {
+      "alias": "ParticleEffect",
+      "scope": "Effect",
+      "tag": "ParticleEffect"
+    },
+    {
+      "alias": "RadialEffect",
+      "scope": "Effect",
+      "tag": "RadialEffect"
+    },
+    {
+      "alias": "SeqEffect",
+      "scope": "Effect",
+      "tag": "SeqEffect"
+    },
+    {
+      "alias": "SoundEffect",
+      "scope": "Effect",
+      "tag": "SoundEffect"
+    },
+    {
+      "alias": "TriangleEffect",
+      "scope": "Effect",
+      "tag": "TriangleEffect"
     },
     {
       "alias": "WaveEffect",
@@ -1080,6 +1465,61 @@
       "alias": "Liquid",
       "scope": "Liquid",
       "tag": "Liquid"
+    },
+    {
+      "alias": "DrawPart",
+      "scope": "Part",
+      "tag": "DrawPart"
+    },
+    {
+      "alias": "EffectSpawnerPart",
+      "scope": "Part",
+      "tag": "EffectSpawnerPart"
+    },
+    {
+      "alias": "FlarePart",
+      "scope": "Part",
+      "tag": "FlarePart"
+    },
+    {
+      "alias": "HaloPart",
+      "scope": "Part",
+      "tag": "HaloPart"
+    },
+    {
+      "alias": "HoverPart",
+      "scope": "Part",
+      "tag": "HoverPart"
+    },
+    {
+      "alias": "PartFunc",
+      "scope": "Part",
+      "tag": "PartFunc"
+    },
+    {
+      "alias": "PartMove",
+      "scope": "Part",
+      "tag": "PartMove"
+    },
+    {
+      "alias": "PartParams",
+      "scope": "Part",
+      "tag": "PartParams"
+    },
+    {
+      "alias": "PartProgress",
+      "scope": "Part",
+      "tag": "PartProgress"
+    },
+    {
+      "alias": "RegionPart",
+      "scope": "Part",
+      "tag": "RegionPart"
+    },
+    {
+      "alias": "ShapePart",
+      "scope": "Part",
+      "tag": "ShapePart"
     },
     {
       "alias": "Planet",
@@ -1142,6 +1582,11 @@
       "tag": "AssemblerAI"
     },
     {
+      "alias": "BoostAI",
+      "scope": "UnitController",
+      "tag": "BoostAI"
+    },
+    {
       "alias": "BuilderAI",
       "scope": "UnitController",
       "tag": "BuilderAI"
@@ -1162,14 +1607,34 @@
       "tag": "DefenderAI"
     },
     {
+      "alias": "FlyingAI",
+      "scope": "UnitController",
+      "tag": "FlyingAI"
+    },
+    {
       "alias": "FlyingFollowAI",
       "scope": "UnitController",
       "tag": "FlyingFollowAI"
     },
     {
+      "alias": "GroundAI",
+      "scope": "UnitController",
+      "tag": "GroundAI"
+    },
+    {
       "alias": "HugAI",
       "scope": "UnitController",
       "tag": "HugAI"
+    },
+    {
+      "alias": "LogicAI",
+      "scope": "UnitController",
+      "tag": "LogicAI"
+    },
+    {
+      "alias": "MinerAI",
+      "scope": "UnitController",
+      "tag": "MinerAI"
     },
     {
       "alias": "MissileAI",
@@ -1180,6 +1645,16 @@
       "alias": "NoAI",
       "scope": "UnitController",
       "tag": "NoAI"
+    },
+    {
+      "alias": "PrebuildAI",
+      "scope": "UnitController",
+      "tag": "PrebuildAI"
+    },
+    {
+      "alias": "RepairAI",
+      "scope": "UnitController",
+      "tag": "RepairAI"
     },
     {
       "alias": "SuicideAI",

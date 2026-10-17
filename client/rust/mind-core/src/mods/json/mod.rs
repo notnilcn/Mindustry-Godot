@@ -926,7 +926,9 @@ impl<'a> ContentJsonParser<'a> {
                     self.warn(file, "ability entries must be objects; skipped");
                     continue;
                 };
-                abilities.push(self.parse_ability(file, registry, map)?);
+                if let Some(ability) = self.parse_ability(file, registry, map)? {
+                    abilities.push(ability);
+                }
             }
             spec.abilities = abilities;
         }
@@ -973,22 +975,50 @@ impl<'a> ContentJsonParser<'a> {
 
     /// Parses one `abilities` entry (`Ability{}`) into an [`AbilitySpec`]
     /// (plan 20 M2b; `PatcherTests.unitAbilities{,Array}`).
+    /// `ContentParser` ability entry. `None` marks a recognized-but-unsupported
+    /// class (`ArmorPlateAbility`, `EmptyDataAbility`), which warns and is left
+    /// out of the unit instead of failing the content.
     pub fn parse_ability(
         &mut self,
         file: &str,
         registry: &ContentRegistry,
         object: &Map<String, Value>,
-    ) -> Result<AbilitySpec, ContentParseError> {
+    ) -> Result<Option<AbilitySpec>, ContentParseError> {
         let class = object
             .get("type")
             .and_then(Value::as_str)
             .ok_or_else(|| ContentParseError::new(format!("{file}: ability is missing `type`")))?;
-        let kind = self
-            .classmap
-            .resolve(class, ClassScope::Ability)
-            .and_then(resolve_ability_kind)
-            .ok_or_else(|| ContentParseError::new(format!("{file}: unknown ability `{class}`")))?;
+        if let Some(tag) = self.classmap.resolve(class, ClassScope::Ability) {
+            if let Some(kind) = resolve_ability_kind(tag) {
+                return self
+                    .parse_ability_fields(file, registry, object, kind)
+                    .map(Some);
+            }
+            // `ArmorPlateAbility` (armor plates, `ArmorPlateAbility.java`) and
+            // `EmptyDataAbility` (a data holder base) have no port runtime yet:
+            // recognized aliases warn instead of failing the unit.
+            if matches!(tag, "ArmorPlateAbility" | "EmptyDataAbility") {
+                self.warn(
+                    file,
+                    format!("ability `{tag}` is unsupported in the port; ignored"),
+                );
+                return Ok(None);
+            }
+        }
+        Err(ContentParseError::new(format!(
+            "{file}: unknown ability `{class}`"
+        )))
+    }
+
+    fn parse_ability_fields(
+        &mut self,
+        _file: &str,
+        registry: &ContentRegistry,
+        object: &Map<String, Value>,
+        kind: AbilityKind,
+    ) -> Result<AbilitySpec, ContentParseError> {
         let mut spec = AbilitySpec::for_kind(kind);
+
         for (field, target) in [
             ("amount", &mut spec.amount),
             ("max", &mut spec.max),
@@ -1506,7 +1536,7 @@ impl<'a> ContentJsonParser<'a> {
 
     /// `ConsumeLiquids.liquids` (`LiquidStack[]`): `{liquid, amount}` entries.
     fn parse_liquid_stacks(
-        &self,
+        &mut self,
         registry: &ContentRegistry,
         file: &str,
         value: &Value,
@@ -1541,7 +1571,7 @@ impl<'a> ContentJsonParser<'a> {
     }
 
     fn parse_stacks(
-        &self,
+        &mut self,
         registry: &ContentRegistry,
         file: &str,
         value: &Value,
@@ -1557,6 +1587,17 @@ impl<'a> ContentJsonParser<'a> {
             }
         };
         for entry in entries {
+            // `ItemStack`/`LiquidStack`/… aliases are recognized on stack
+            // entries (`data` scope); an unknown one is warned about.
+            if let Value::Object(map) = entry
+                && let Some(class) = map.get("type").and_then(Value::as_str)
+                && self.classmap.resolve(class, ClassScope::Data).is_none()
+            {
+                self.warn(
+                    file,
+                    format!("stack `type` `{class}` is unknown; entry parsed by fields"),
+                );
+            }
             let (raw_name, amount) = match entry {
                 Value::String(text) => parse_stack(text).ok_or_else(|| {
                     ContentParseError::new(format!("{file}: invalid stack `{text}`"))
@@ -1591,6 +1632,15 @@ impl<'a> ContentJsonParser<'a> {
             && let Some(kind) = resolve_block_kind_tag(tag)
         {
             return Ok(kind);
+        }
+        if let Some(tag) = self.classmap.resolve(class, ClassScope::Block)
+            && !resolve_block_kind_tag(tag).is_some()
+        {
+            // `ControlBlock`/`UnitTetherBlock` are interfaces upstream; naming
+            // them as a block `type` fails there too.
+            return Err(ContentParseError::new(format!(
+                "{file}: `{class}` is not a concrete block class"
+            )));
         }
         if !self.allow_class_resolution && !self.classmap.is_known(class) {
             self.warn(
@@ -1633,6 +1683,12 @@ impl<'a> ContentJsonParser<'a> {
             "FlyingFollowAI" => Some(AiControllerKind::FlyingFollow),
             "HugAI" => Some(AiControllerKind::Hug),
             "SuicideAI" => Some(AiControllerKind::Suicide),
+            // The standard AIs (`GroundAI`/`FlyingAI`/`BoostAI`/`MinerAI`/
+            // `RepairAI`/`PrebuildAI`/`LogicAI`) are the port's default unit AI
+            // (`AiControllerKind::Default` selects ground/flying by `flying`,
+            // `registries/units/mod.rs:317-325`).
+            "GroundAI" | "FlyingAI" | "BoostAI" | "MinerAI" | "RepairAI" | "PrebuildAI"
+            | "LogicAI" => Some(AiControllerKind::Default),
             _ => None,
         }
     }
@@ -1739,8 +1795,8 @@ pub fn resolve_bullet_kind(tag: &str) -> Option<BulletKind> {
         "PointLaserBulletType" => BulletKind::PointLaser,
         "ContinuousFlameBulletType" => BulletKind::ContinuousFlame,
         "InterceptorBulletType" => BulletKind::Interceptor,
-        "MassDriverBolt" => BulletKind::MassDriver,
         "EmptyBulletType" => BulletKind::Empty,
+        "MassDriverBolt" => BulletKind::MassDriver,
         _ => return None,
     })
 }
@@ -2339,6 +2395,93 @@ mod tests {
                 .iter()
                 .any(|warning| warning.message.contains("ConsumeItemExplode")),
             "the explode consumer names its J04 T2 dependency: {:?}",
+            parser.warnings
+        );
+    }
+
+    #[test]
+    fn classmap_scopes_resolve_the_t1_aliases() {
+        // J09 T1: the scope tables from the plan resolve through the ClassMap
+        // (bullets, AIs, block base classes, abilities, data).
+        let map = classmap::ClassTagMap::committed();
+        for (alias, scope, tag) in [
+            ("EmptyBulletType", ClassScope::BulletType, "EmptyBulletType"),
+            (
+                "ContinuousFlameBulletType",
+                ClassScope::BulletType,
+                "ContinuousFlameBulletType",
+            ),
+            (
+                "PointLaserBulletType",
+                ClassScope::BulletType,
+                "PointLaserBulletType",
+            ),
+            ("GroundAI", ClassScope::UnitController, "GroundAI"),
+            ("MinerAI", ClassScope::UnitController, "MinerAI"),
+            ("PowerGenerator", ClassScope::Block, "ConsumeGenerator"),
+            ("Turret", ClassScope::Block, "ItemTurret"),
+            ("ControlBlock", ClassScope::Block, "ControlBlock"),
+            (
+                "ArmorPlateAbility",
+                ClassScope::Ability,
+                "ArmorPlateAbility",
+            ),
+            ("DrawMulti", ClassScope::Drawer, "DrawMulti"),
+            ("RegionPart", ClassScope::Part, "RegionPart"),
+            ("AssemblerUnitPlan", ClassScope::Data, "AssemblerUnitPlan"),
+        ] {
+            assert_eq!(
+                map.resolve(alias, scope),
+                Some(tag),
+                "{alias} ({})",
+                scope.name()
+            );
+        }
+    }
+
+    #[test]
+    fn block_base_classes_and_unsupported_abilities() {
+        // The Java block base classes map to the port's behaviour kinds; the
+        // interface-only classes fail with a clear message.
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "test-generator",
+            r#"{"name":"Test Generator","type":"PowerGenerator","size":2}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let block = reg.block_by_name("mods-test-generator").expect("block");
+        assert_eq!(block.kind, BlockKind::ConsumeGenerator);
+
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Block,
+            "test-control",
+            r#"{"name":"Test Control","type":"ControlBlock","size":2}"#,
+        );
+        let error = result.expect_err("interface block class");
+        assert!(
+            error.message.contains("not a concrete block class"),
+            "{error}"
+        );
+
+        // An unsupported ability warns and is left out of the unit.
+        let (parser, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "test-armor-mech",
+            r#"{"name":"Test Armor Mech","type":"mech","abilities":[{"type":"ArmorPlateAbility","health":100},{"type":"RegenAbility","amount":1}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-test-armor-mech").expect("unit");
+        assert_eq!(unit.abilities.len(), 1, "the supported ability parses");
+        assert!(
+            parser
+                .warnings
+                .iter()
+                .any(|warning| warning.message.contains("ArmorPlateAbility")),
+            "{:?}",
             parser.warnings
         );
     }

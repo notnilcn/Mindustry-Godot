@@ -1704,7 +1704,12 @@ impl DataPatcher {
         let mut created = Vec::with_capacity(entries.len());
         for object in &entries {
             match parser.parse_ability("patch", registry, object) {
-                Ok(ability) => created.push(ability),
+                Ok(Some(ability)) => created.push(ability),
+                Ok(None) => {
+                    for warning in &parser.warnings {
+                        self.warn(warning.message.clone());
+                    }
+                }
                 Err(error) => {
                     self.warn(error.message);
                     return;

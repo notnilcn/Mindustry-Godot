@@ -129,6 +129,60 @@ mod tests {
         assert!(registry.bullet_by_name("duo_copper").is_some());
     }
 
+    /// J09 T1: the `classes` fixture resolves the Java base classes through the
+    /// ClassMap (`PowerGenerator` -> the port's generator kind, `GroundAI`,
+    /// `EmptyBulletType`) and warns for the unsupported ability.
+    #[test]
+    fn classes_fixture_maps_base_classes() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../parity/mod_fixtures/classes");
+        let fs = NativeFs;
+        let mut mods = Mods::new(true, &dir);
+        mods.load_single(&fs, &dir, &SettingsStore::new())
+            .expect("load classes");
+        let boot = collect_boot_content(&mut mods, &fs);
+        let (registry, report) =
+            build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
+                .expect("boot with mods");
+        assert!(report.failures.is_empty(), "{:?}", report.failures);
+
+        let block = registry
+            .block_by_name("classes-base-generator")
+            .expect("modded block");
+        assert_eq!(block.kind, crate::content::BlockKind::ConsumeGenerator);
+        let unit = registry
+            .unit_by_name("classes-class-mech")
+            .expect("modded unit");
+        // `UnitType.init` duplicates a `mirror` weapon (`UnitType.java:1121-1135`),
+        // so the loaded unit carries the original + its mirrored copy.
+        assert_eq!(
+            unit.weapons.len(),
+            2,
+            "weapons: {:?}",
+            unit.weapons
+                .iter()
+                .map(|weapon| weapon.name.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(unit.weapons[0].name, unit.weapons[1].name);
+        let bullet = registry
+            .bullet(unit.weapons[0].bullet.id)
+            .expect("inline bullet");
+        assert_eq!(
+            bullet.kind,
+            crate::content::registries::bullets::BulletKind::Empty
+        );
+        assert_eq!(
+            unit.abilities.len(),
+            1,
+            "ArmorPlateAbility warns and skips; got {:?}",
+            unit.abilities
+                .iter()
+                .map(|ability| ability.kind.name())
+                .collect::<Vec<_>>()
+        );
+    }
+
     /// J09 T1: the `consumers` fixture's `consumes` array parses the mapped
     /// `Consume*` classes (with Java's defaults); the unsupported ones warn.
     #[test]
