@@ -192,9 +192,12 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				var empty := StyleBoxEmpty.new()
 				empty.content_margin_left = 8.0
 				empty.content_margin_right = 8.0
-				# The Java title text starts at y=6 in the reference frame (no
-				# top inset above the title row).
-				empty.content_margin_top = 0.0
+				# Top inset of the `windowEmpty` background (L01 T2, measured in
+				# runs/20261017-L-twin): titled dialogs draw their title text at
+				# y=10 (java/26-pause.png, java/09-custom.png) and the untitled
+				# Game Over its headline at y=19 (java/44b.png, `titleTable.remove()`
+				# + `cont` pad 3 + cell pad 6). 7 px puts both within 3 px.
+				empty.content_margin_top = 7.0
 				empty.content_margin_bottom = 8.0
 				theme.set_stylebox("panel", name, empty)
 			elif name == "none":

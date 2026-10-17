@@ -38,6 +38,8 @@ var _pending_tag := false
 
 
 func _ready() -> void:
+	# `cont.top()` (`SchematicsDialog.java:78`): the body sticks to the top (L01 T2).
+	cont_top = true
 	set_title_key("@schematics")
 	should_pause = true
 	full_dialog = true

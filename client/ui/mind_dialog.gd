@@ -23,6 +23,11 @@ extends Control
 @export var fill_parent := true
 ## Accent color of the title row.
 @export var title_color := Color.WHITE
+## Java `cont.top()`: the body content sticks to the top of the content area
+## instead of centring (`SchematicsDialog.java:78`, `DatabaseDialog.java:57`,
+## `SectorSelectDialog.java:27`, `CampaignRulesDialog.java:42`,
+## `MapProcessorsDialog.java:58`). Default false = Arc `Table` centre alignment.
+@export var cont_top := false
 
 @onready var title_label: Label = get_node_or_null("Center/Panel/Layout/Title")
 @onready var body: ScrollContainer = get_node_or_null("Center/Panel/Layout/Body")
@@ -55,6 +60,8 @@ func _ready() -> void:
 	visible = false
 	_apply_title()
 	_apply_full_dialog()
+	_apply_cont_alignment()
+	_watch_buttons_row()
 	# `BaseDialog.java:22` fills the parent for every dialog; the floating mode
 	# (`set_fill_parent(false)`) keeps the panel at its content size
 	# (`Dialog.setFillParent(false)`, `UI.java:582-606`).
@@ -64,6 +71,62 @@ func _ready() -> void:
 	# constructed before any `open_dialog` call), so `shown()` never re-enters the
 	# `&mut` Rust endpoint through the lazy fallback.
 	_ensure_campaign_views_loaded()
+
+
+## L01 T2 — Arc `Dialog` lays out `add(cont).expand().fill(); row();
+## add(buttons).fillX()` (arc/scene/ui/Dialog.java:209-211): `cont` takes all the
+## height between the title and the button row and, as a `Table` (default
+## `Align.center`, Table.java), centres its content both ways unless the dialog
+## calls `cont.top()`. The shell's `Content` VBox (alignment centre) sits in the
+## `Body` scroll; without vertical EXPAND the ScrollContainer gave it only its
+## minimum height, so every fill dialog's body stuck to the top (pause menu,
+## editor menu, Map Info, Game Over in runs/20261017-L-twin). Expanding it lets
+## the VBox centre (or top-align) a short body; a tall body still scrolls.
+func _apply_cont_alignment() -> void:
+	if cont == null:
+		return
+	cont.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	if cont is BoxContainer:
+		(cont as BoxContainer).alignment = (
+			BoxContainer.ALIGNMENT_BEGIN if cont_top else BoxContainer.ALIGNMENT_CENTER
+		)
+
+
+## `cont.top()` at runtime (see [member cont_top]).
+func set_cont_top(value: bool) -> void:
+	cont_top = value
+	_apply_cont_alignment()
+
+
+## An empty Arc `buttons` table has no height, so `cont` reaches the bottom of
+## the dialog (the pause menu's rows centre on the full height under the title,
+## `PausedDialog` adds nothing to `buttons`). Hide the shell's button row while
+## it holds no visible button so it reserves neither height nor separation.
+func _watch_buttons_row() -> void:
+	if buttons == null:
+		return
+	buttons.child_entered_tree.connect(_on_buttons_child_entered)
+	buttons.child_exiting_tree.connect(func(_node: Node) -> void: _sync_buttons_row.call_deferred())
+	for child in buttons.get_children():
+		_on_buttons_child_entered(child)
+	_sync_buttons_row()
+
+
+func _on_buttons_child_entered(node: Node) -> void:
+	if node is CanvasItem and not node.visibility_changed.is_connected(_sync_buttons_row):
+		node.visibility_changed.connect(_sync_buttons_row)
+	_sync_buttons_row.call_deferred()
+
+
+func _sync_buttons_row() -> void:
+	if buttons == null or not is_instance_valid(buttons):
+		return
+	var any := false
+	for child in buttons.get_children():
+		if child is CanvasItem and child.visible and not child.is_queued_for_deletion():
+			any = true
+			break
+	buttons.visible = any
 
 
 ## `Dialog.setFillParent(false)`: sizes the panel to its content (floating
@@ -122,9 +185,28 @@ func context() -> Dictionary:
 	return _context
 
 
+## Title row geometry (`BaseDialog.java:23-25`): the centred label, then
+## `titleTable.image(whiteui, accent).growX().height(3f).pad(4f)`. Measured in
+## runs/20261017-L-twin (java/26-pause.png, java/09-custom.png): text y=10-22,
+## rule y=30-32, `cont` (pad 3, Dialog.java:213) from y~40. The port's label had
+## no top inset and the rule overlapped its bottom edge (text y=3-15, rule
+## y=16-18), lifting every dialog body by ~14 px. The 7 px above the text is the
+## dialog background's inset (`defaultDialog`/`fullDialog` panel margin in
+## `MindThemeBuilder`, shared with untitled dialogs); keep 6 px under the text
+## (+ the Layout's 8 px separation = the rule's 4 px gap, 3 px rule, 4 px pad and
+## the 3 px cont pad) and hang the rule 4 px under the text.
+const TITLE_INSET_TOP := 0.0
+const TITLE_INSET_BOTTOM := 6.0
+
+
 func _apply_title() -> void:
 	if title_label == null:
 		return
+	if not title_label.has_theme_stylebox_override("normal"):
+		var inset := StyleBoxEmpty.new()
+		inset.content_margin_top = TITLE_INSET_TOP
+		inset.content_margin_bottom = TITLE_INSET_BOTTOM
+		title_label.add_theme_stylebox_override("normal", inset)
 	title_label.text = title_text
 	title_label.visible = not title_text.is_empty()
 	title_label.add_theme_color_override("font_color", title_color)
@@ -142,8 +224,10 @@ func _ensure_title_underline() -> void:
 	line.name = "Underline"
 	line.color = MindStyles.ACCENT
 	line.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	line.offset_top = -3.0
-	line.offset_bottom = 0.0
+	# Rule 4 px under the text, 3 px tall: [bottom - 2, bottom + 1) with the
+	# 6 px bottom inset (see TITLE_INSET_BOTTOM).
+	line.offset_top = 4.0 - TITLE_INSET_BOTTOM
+	line.offset_bottom = 7.0 - TITLE_INSET_BOTTOM
 	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	title_label.add_child(line)
 
@@ -161,14 +245,11 @@ func show_dialog() -> void:
 	shown()
 	# `UI.java:132-133`: showing fades in over 0.1 s.
 	MindWidgets.fade_in(self, 0.1)
-	# `MindTable` layout is manual: place now (min sizes) and again next frame
-	# once the containers have assigned their final size, so grow cells fill.
-	_resort_tables()
-	call_deferred("_resort_tables")
 
 
-## Re-runs layout on every nested `MindTable` (grow cells otherwise stay at their
-## minimum size when a grid is built while the dialog is hidden).
+## Immediate layout pass over every nested `MindTable`. Not needed for layout
+## since L01 T1 (tables sort on `NOTIFICATION_SORT_CHILDREN` and propagate their
+## minimum size); kept for dialogs that read child rects in the same frame.
 func _resort_tables() -> void:
 	for node in find_children("*", "", true, false):
 		if node is MindTable:
@@ -487,7 +568,20 @@ func campaign_section(name: String) -> Array:
 	return campaign_views().get(name, []) as Array
 
 
-## The dialog's content column as a fresh `MindTable` (clears prior content).
+## `cont.clearChildren()`: drops every body child. Dialogs whose Java original
+## builds a new `BaseDialog` per open (e.g. `EditorMapsDialog.showMap`,
+## `EditorMapsDialog.java:101`) reuse this node, so a rebuild must clear first or
+## the previous body stays stacked above the new one.
+func clear_content() -> void:
+	if cont == null:
+		return
+	for child in cont.get_children():
+		cont.remove_child(child)
+		child.queue_free()
+
+
+## The dialog's content column as a new `MindTable` appended to `cont` (call
+## [method clear_content] first when rebuilding).
 ## code-instantiated: dialog bodies are data-driven and rebuilt on `shown()`.
 func content_table() -> MindTable:
 	var table := MindTable.new()

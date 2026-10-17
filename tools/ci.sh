@@ -142,6 +142,15 @@ if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Ca
 fi
 echo "  godot headless import clean"
 
+say "godot: UI layout-engine check (MindTable min-size propagation, L01 T1)"
+if ! bash tools/godot.sh --headless --path client --script res://tools/ui_layout_check.gd >"$GODOT_LOG" 2>&1 \
+    || ! grep -q 'LAYOUTCHECK: failed=0' "$GODOT_LOG"; then
+  echo "FAIL: client/tools/ui_layout_check.gd" >&2
+  grep -E 'FAIL|SCRIPT ERROR|LAYOUTCHECK' "$GODOT_LOG" >&2 || tail -n 40 "$GODOT_LOG" >&2
+  exit 1
+fi
+echo "  ui layout check clean"
+
 say "boundary: mind-core must stay godot-free and tokio-free"
 # NOTE: the repo path itself contains "mindustry-godot", so a naive `grep godot`
 # on the default tree (which prints the root path) always matches. `--prefix none`

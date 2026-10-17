@@ -8,10 +8,19 @@
 #   tools/gmcp.py godot_exec '{"action":"eval","params":{"code":"OS.get_process_id()"}}'
 #   tools/gmcp.py --eval 'get_node("/root/Spine/SimHost").get_tick()'
 #   tools/gmcp.py --screenshot out.png          # game viewport -> PNG
+#   tools/gmcp.py --text 'sand'                 # type into the focused Control
 #   echo '[["godot_game",{"action":"status"}], ...]' | tools/gmcp.py --batch
 #
 # Several TOOL JSON pairs on one command line run in order in one MCP session.
 # Prints one JSON result per call. Exit 1 on the first tool error.
+#
+# Text entry (L01 T4): --text sends godot_input `text`, which the runtime
+# autoload (_input_text) turns into one fresh InputEventKey press + release per
+# character with `unicode` set (plus keycode/shift for ASCII letters, digits and
+# space), one process frame apart, delivered to the GUI focus owner. Focus the
+# field first with a real click (GC). The result reports focus_before/after and
+# the LineEdit's text. `godot_input key` carries no unicode, so it cannot type.
+# --text-frame-delay N spaces characters N process frames apart (default 1).
 #
 # Harness guards for eval calls (J10 T2):
 #   * Leading whitespace is normalised to tabs before the body is sent: the
@@ -87,6 +96,11 @@ def prepare_call(tool: str, args: dict, quiet: bool = False) -> dict:
     return args
 
 
+def text_call(text: str, frame_delay: int = 1) -> dict:
+    """godot_input args that type `text` into the focused Control (L01 T4)."""
+    return {"action": "text", "params": {"text": text, "frame_delay": max(int(frame_delay), 0)}}
+
+
 def watchdog_recover(mcp: McpClient, scene: str, wait: float) -> dict:
     """stop + play (bounded wait) after a pinned eval; prints the summary."""
     summary: dict = {"watchdog": "eval stalled the frame loop; stop+play", "actions": []}
@@ -140,6 +154,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--eval", action="append", default=[], help="GDScript expression for godot_exec eval")
     ap.add_argument("--screenshot", help="write a game screenshot PNG to this path")
+    ap.add_argument(
+        "--text",
+        action="append",
+        default=[],
+        help="type this string into the GUI focus owner (godot_input text: one unicode key press+release per char)",
+    )
+    ap.add_argument("--text-frame-delay", type=int, default=1, help="process frames between typed characters")
     ap.add_argument("--batch", action="store_true", help="read [[tool, args], ...] JSON from stdin")
     ap.add_argument("--timeout", type=float, default=60.0)
     ap.add_argument(
@@ -173,6 +194,8 @@ def main() -> int:
         ap.error("positional args must be TOOL JSON pairs")
     for i in range(0, len(a.pairs), 2):
         calls.append((a.pairs[i], json.loads(a.pairs[i + 1])))
+    for text in a.text:
+        calls.append(("godot_input", text_call(text, a.text_frame_delay)))
     for code in a.eval:
         calls.append(("godot_exec", {"action": "eval", "params": {"code": code}}))
     if a.batch:

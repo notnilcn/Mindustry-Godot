@@ -24,6 +24,8 @@ var _tab := ALL_TAB
 
 
 func _ready() -> void:
+	# `cont.top()` (`DatabaseDialog.java:57`): the body sticks to the top (L01 T2).
+	cont_top = true
 	set_title_key("@database")
 	should_pause = true
 	super._ready()

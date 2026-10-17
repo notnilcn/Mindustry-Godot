@@ -38,6 +38,10 @@ func shown() -> void:
 
 
 func _build() -> void:
+	# Java builds a fresh dialog per `showMap` (`EditorMapsDialog.java:101`);
+	# this node is reused, so drop the previous open's body (L01 T1: the second
+	# open stacked a second copy under the first).
+	clear_content()
 	var root := content_table()
 	_row = _row_for(_name)
 	# `EditorMapsDialog.showMap` (`ui/dialogs/EditorMapsDialog.java:100-163`): a

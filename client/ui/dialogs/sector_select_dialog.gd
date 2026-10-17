@@ -18,6 +18,8 @@ var _planet := ""
 
 
 func _ready() -> void:
+	# `cont.top()` (`SectorSelectDialog.java:27`): the body sticks to the top (L01 T2).
+	cont_top = true
 	should_pause = false
 	full_dialog = true
 	super._ready()

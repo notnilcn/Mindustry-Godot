@@ -2470,3 +2470,31 @@ Run: runs/20261014-s3-verify3/.
   Game grid; the round-K "grid does not scroll" finding was an injected-input artefact.
 - An eval on a wrong dialog node name (`DialogLayer/custom_game`; the node is `custom`) timed out; the gmcp watchdog
   restarted the game (stop+play) automatically. List `DialogLayer` children first.
+
+## 2026-10-18 — round L, session 2 (L01 T4): real text entry through `godot_input text`
+
+- Root cause of the dead `godot_input text`: the runtime autoload built ONE `InputEventKey`, parsed it pressed, set
+  `pressed = false` and parsed it again. `Input.parse_input_event` buffers until the frame flush, so both buffered
+  references were releases and `LineEdit` (inserts only on a pressed key with `unicode >= 32`) stayed empty.
+- Fix (`runtime_autoload.gd` `_input_text` / `_make_text_key`): a fresh event per edge, `unicode` set, keycode +
+  physical keycode + `key_label` + shift for ASCII letters/digits/space (what a real X key sends), flushed and one
+  process frame apart (`frame_delay`, default 1) so `text_changed` fires per character. Returns
+  `focus_before`/`focus_after`/`field_text` so a single call proves where the text went.
+- Shell: `tools/gmcp.py --text 'sand'` (repeatable; `--text-frame-delay N`), twin helper `GT 'sand'`. Focus the field
+  with a real click first (`GC`); `GK Backspace` deletes (keycode path). Proven on the Custom Game search:
+  `runs/20261018-s2-L01-T4/notes.md`.
+- The installed MCP server's `godot_input` description still says "text is broken" (that text lives in the
+  Open-Godot-MCP package, not this repo); it is stale for this checkout's runtime autoload. The game must be
+  replayed (`tools/session-play.sh N --play`) to pick up autoload changes.
+
+## 2026-10-18 — round L, session 2 (L08 T5): `GC`/`GW` move the real pointer by default
+
+- `tools/twin.sh` `GC`/`GW` first warp the REAL X pointer to the target (`twin_g_pointer` -> `GP`), then inject the
+  click as before, so hover-driven UI (hover boxes, tooltips, button hover skins) matches what a user sees and
+  `get_viewport().get_mouse_position()` reads the click point. Viewport coordinates scale onto the game window
+  (`TWIN_GODOT_VIEW_W/H`, default 1152x648; identity on the parity-session 1152x648 window). A failed warp warns and
+  still injects the click. Opt out with `TWIN_G_POINTER=0`. Cost: ~0.5 s per click (window lookup + raise).
+- Proof (`runs/20261018-s2-L01-T1`/`-T2`): `GC 575 607` -> pointer at (639,671) = window origin (64,64) + target,
+  `get_mouse_position() == (575,607)`, dialog closed; `GW 700 380 MOUSE_BUTTON_RIGHT` -> pointer (764,444);
+  `TWIN_G_POINTER=0 GC ...` left the pointer where it was. Every L01 walk this session used the new default.
+- Text entry (L08 T5 item 1) is the L01 T4 `GT`/`gmcp.py --text` path (entry above).

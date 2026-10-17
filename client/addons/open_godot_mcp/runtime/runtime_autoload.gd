@@ -358,7 +358,7 @@ func mcp_input(action: String, params: Dictionary) -> Dictionary:
 		"joypad":
 			return _input_joypad(params)
 		"text":
-			return _input_text(params)
+			return await _input_text(params)
 		"record_start":
 			return _record_start(params)
 		"record_stop":
@@ -575,16 +575,54 @@ func _input_joypad(params: Dictionary) -> Dictionary:
 	return _EC.ok()
 
 
+## Types `text` into the GUI focus owner, one key press + release per
+## character, the way a real keyboard delivers it (L01 T4). Each edge is a
+## FRESH InputEventKey: Input buffers parsed events until the frame flush, so
+## mutating one event between the two parse calls (the old path) delivered two
+## releases and LineEdit, which only inserts on a pressed event with
+## unicode >= 32, stayed empty. keycode/physical_keycode and shift are set for
+## ASCII letters, digits and space so hotkey listeners see what a real key
+## would send. `frame_delay` (default 1) process frames separate characters so
+## text_changed fires per character, like typing.
+func _make_text_key(ch: String, pressed: bool) -> InputEventKey:
+	var event := InputEventKey.new()
+	event.unicode = ch.unicode_at(0)
+	var code := ch.unicode_at(0)
+	if ch == " ":
+		event.keycode = KEY_SPACE
+	elif (code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122):
+		event.keycode = OS.find_keycode_from_string(ch.to_upper())
+	event.physical_keycode = event.keycode
+	event.key_label = event.keycode
+	event.shift_pressed = ch != ch.to_lower()
+	event.pressed = pressed
+	return event
+
+
 func _input_text(params: Dictionary) -> Dictionary:
 	var text: String = params.get("text", "")
+	var frame_delay: int = int(params.get("frame_delay", 1))
+	if text.is_empty():
+		return _EC.fail("INVALID_ARGUMENT", "text required")
+	var vp := get_viewport()
+	var focus: Control = vp.gui_get_focus_owner() if vp != null else null
+	var focus_path := str(focus.get_path()) if focus != null else ""
 	for ch in text:
-		var event := InputEventKey.new()
-		event.unicode = ch.unicode_at(0)
-		event.pressed = true
-		Input.parse_input_event(event)
-		event.pressed = false
-		Input.parse_input_event(event)
-	return _EC.ok()
+		Input.parse_input_event(_make_text_key(ch, true))
+		Input.parse_input_event(_make_text_key(ch, false))
+		Input.flush_buffered_events()
+		for i in frame_delay:
+			await get_tree().process_frame
+	var after: Control = vp.gui_get_focus_owner() if vp != null else null
+	var field_text: Variant = null
+	if after is LineEdit or after is TextEdit:
+		field_text = after.text
+	return _EC.ok({
+		"typed": text.length(),
+		"focus_before": focus_path,
+		"focus_after": str(after.get_path()) if after != null else "",
+		"field_text": field_text,
+	})
 
 
 # ---- State observation (godot_runtime_state) ----

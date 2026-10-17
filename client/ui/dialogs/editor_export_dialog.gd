@@ -30,6 +30,9 @@ func shown() -> void:
 
 
 func _build() -> void:
+	# A reused dialog node: drop the previous open's body before rebuilding
+	# (`shown()` rebuilds on every open; L01 T1).
+	clear_content()
 	var root := content_table()
 	_add_entry(root, "@editor.exportfile", "@editor.exportfile.description", "file-text",
 		func() -> void: _open_chooser("exportfile", "msav"))
