@@ -26,10 +26,12 @@ use godot::obj::NewGd;
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
+use mind_core::content::registries::blocks::BlockDef;
 use mind_core::content::{BlockId, BlockKind, ContentRegistry, is_overlay_floor_kind};
 use mind_core::math::rand_arc::{pack_point2, random_seed_int};
 use mind_core::render::floor_cache::{CHUNK_SIZE, FloorChunkGrid};
-use mind_core::render::floor_edges::{draw_edges, draw_non_layer};
+use mind_core::render::floor_edges::{draw_edges, draw_non_layer, tile_at};
+use mind_core::render::floor_main;
 use mind_core::render::layer::CacheLayerId;
 use mind_core::render::list::{block_cache_layer, floor_cache_layer, is_accessible};
 use mind_core::render::scan::CameraView;
@@ -93,6 +95,7 @@ pub(crate) struct Quad {
 }
 
 /// A quad before its region is resolved.
+#[derive(Clone)]
 pub(crate) struct PendingQuad {
     pub region: String,
     pub cx: f32,
@@ -107,6 +110,10 @@ pub(crate) struct PendingQuad {
     /// `Some((cols, rows, col, row))`: draw one cell of the region's split
     /// (`Floor.edge`'s 3×3 `<blendGroup>-edge` crop, `Floor.java:421-423`).
     pub crop: Option<(u8, u8, u8, u8)>,
+    /// `Some((variants, x, y))`: the region is a `<name>-tile<i+1>` tiling
+    /// layer and the resolver picks the variant + cell from the sprite-derived
+    /// `tilingSize` (`Floor.drawMain:265-269`; `Floor.load:131-146`).
+    pub tiling: Option<(i32, i32, i32)>,
 }
 
 /// A tile-sized edge cell from a `<blendGroup>-edge` region (`Floor.edge`).
@@ -132,6 +139,7 @@ fn edge_quad(
         // Upright edge cell (Arc `Draw.rect` orientation, J02 T1).
         v_flip: true,
         crop: Some((3, 3, edge.col, edge.row)),
+        tiling: None,
     }
 }
 
@@ -223,6 +231,43 @@ impl RegionAtlas {
         }
         let index = random_seed_int(pack_point2(x, y), 0, count as i32 - 1);
         self.resolve(&format!("{name}{}", index + 1))
+    }
+
+    /// `Floor.drawMain`'s tiling branch (`Floor.java:265-269`): the region is
+    /// `<name>-tile<v+1>` with `v = randomSeed(pack(x / tilingSize, y /
+    /// tilingSize), 0, tilingVariants - 1)` and the drawn cell is `[x %
+    /// tilingSize][tilingSize - 1 - y % tilingSize]`.
+    ///
+    /// `tilingSize` (`Floor.load:133-142`) is the cell count of the `-tile1`
+    /// region at `tsize = tilesize / Draw.scl` = 32 px (`Control.java:330`);
+    /// upstream disables tiling when a sprite's split is inconsistent with the
+    /// first one, so a non-square split falls back to the plain region.
+    pub(crate) fn resolve_tiling(
+        &mut self,
+        name: &str,
+        variants: i32,
+        x: i32,
+        y: i32,
+    ) -> (i32, Option<Gd<Texture2D>>, [f32; 4]) {
+        let probe = self.resolve(&format!("{name}-tile1"));
+        let (cols, rows) = match probe.as_ref() {
+            Some(region) => floor_main::tiling_split(region.w as i32, region.h as i32),
+            None => (1, 1),
+        };
+        if cols != rows {
+            let resolved = self.resolve(name);
+            return resolved_uv(&resolved);
+        }
+        let (block_x, block_y) = floor_main::tiling_block(x, y, cols);
+        let index = random_seed_int(pack_point2(block_x, block_y), 0, variants - 1) as u32;
+        let resolved = if index == 0 {
+            probe
+        } else {
+            self.resolve(&format!("{name}-tile{}", index + 1))
+        };
+        let (page, texture, uv) = resolved_uv(&resolved);
+        let (col, row) = floor_main::tiling_cell(x, y, cols);
+        (page, texture, crop_uv(uv, cols, cols, col, row))
     }
 
     fn lookup(&mut self, name: &str) -> Option<ResolvedRegion> {
@@ -426,15 +471,27 @@ impl FloorRenderer {
                     // Collect first; region resolution (a `&mut self.atlas`
                     // borrow) must not nest inside the host bind.
                     for quad in quads {
-                        let resolved = if quad.variant {
-                            self.atlas.resolve_variant(&quad.region, tx, ty)
-                        } else {
-                            self.atlas.resolve(&quad.region)
-                        };
-                        let (page, texture, uv) = resolved_uv(&resolved);
-                        let uv = match quad.crop {
-                            Some((cols, rows, col, row)) => crop_uv(uv, cols, rows, col, row),
-                            None => uv,
+                        // Tiling layers resolve their region and crop from the
+                        // sprite-derived `tilingSize` (`resolve_tiling`).
+                        let (page, texture, uv) = match quad.tiling {
+                            Some((variants, tqx, tqy)) => {
+                                self.atlas.resolve_tiling(&quad.region, variants, tqx, tqy)
+                            }
+                            None => {
+                                let resolved = if quad.variant {
+                                    self.atlas.resolve_variant(&quad.region, tx, ty)
+                                } else {
+                                    self.atlas.resolve(&quad.region)
+                                };
+                                let (page, texture, uv) = resolved_uv(&resolved);
+                                let uv = match quad.crop {
+                                    Some((cols, rows, col, row)) => {
+                                        crop_uv(uv, cols, rows, col, row)
+                                    }
+                                    None => uv,
+                                };
+                                (page, texture, uv)
+                            }
                         };
                         let entry = groups.entry(page).or_insert((texture, Vec::new()));
                         entry.1.push(Quad {
@@ -568,6 +625,7 @@ pub(crate) fn tile_quads(
                 // had, "round 18").
                 v_flip: true,
                 crop: None,
+                tiling: None,
             });
         }
         return out;
@@ -626,18 +684,10 @@ pub(crate) fn floor_draw_base_quads(
         return out;
     }
 
-    out.push(PendingQuad {
-        region: floor.region.clone(),
-        cx,
-        cy,
-        w: size,
-        h: size,
-        color: 0xffff_ffff,
-        variant: true,
-        // Arc `Draw.rect` orientation through the y-flip camera (J02 T1).
-        v_flip: true,
-        crop: None,
-    });
+    // `Floor.drawMain` (`Floor.java:264-292`): the tiling, autotile or plain
+    // variant branch (J02 T2).
+    let main = main_quad(world, content, tile, floor, false);
+    out.push(main.clone());
 
     // `Floor.drawBase`: `drawEdges` when `drawEdgeIn` (`Floor.java:252`).
     // The tile's own edge sprites plus the neighbours' — this is the
@@ -654,17 +704,9 @@ pub(crate) fn floor_draw_base_quads(
         && tile.overlay != tile.floor
         && let Some(overlay) = content.block(tile.overlay)
     {
-        out.push(PendingQuad {
-            region: overlay.region.clone(),
-            cx,
-            cy,
-            w: size,
-            h: size,
-            color: 0xffff_ffff,
-            variant: true,
-            v_flip: true,
-            crop: None,
-        });
+        // The overlay's own `drawMain` (`Floor.drawOverlay` → `overlay.drawBase`,
+        // `Floor.java:304-309`): its autotile same-check reads `tile.overlay`.
+        out.push(main_quad(world, content, tile, overlay, true));
         // `OverlayFloor.drawBase` (`OverlayFloor.java:22-24`) draws the
         // variant only; a plain floor used as an overlay runs the full
         // `Floor.drawBase` (its own edges; the overlay-of-overlay step
@@ -676,7 +718,138 @@ pub(crate) fn floor_draw_base_quads(
         }
     }
 
+    // `Floor.drawBase` (`Floor.java:257-261`): when the tile has an overlay and
+    // this (liquid) floor is the tile's floor, `drawMain` runs again at
+    // `1 - overlayAlpha` over the overlay (no edges, no overlay pass).
+    if tile.overlay != BlockId::AIR && floor.is_liquid {
+        let mut repeat = main;
+        repeat.color = 0xffff_ff00u32 | overlay_redraw_alpha(floor.overlay_alpha);
+        out.push(repeat);
+    }
+
     out
+}
+
+/// The `Draw.alpha(1f - overlayAlpha)` byte of the liquid-overlay redraw
+/// (`Floor.java:258`).
+fn overlay_redraw_alpha(overlay_alpha: f32) -> u32 {
+    let value = (1.0 - overlay_alpha).clamp(0.0, 1.0);
+    (value * 255.0).round() as u32
+}
+
+/// `Floor.checkAutotileSame` (`Floor.java:284-286`): the neighbour on the same
+/// layer as the drawn def (`other.floor` when `this == tile.floor`, else
+/// `other.overlay`) shares the drawn def's `blendGroup`. An out-of-bounds
+/// neighbour (`Tile.nearby` returns null) is never the same.
+fn autotile_same(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    tile: &Tile,
+    group: BlockId,
+    is_overlay: bool,
+    dx: i32,
+    dy: i32,
+) -> bool {
+    let Some(other) = tile_at(world, tile.x as i32 + dx, tile.y as i32 + dy) else {
+        return false;
+    };
+    let id = if is_overlay {
+        other.overlay
+    } else {
+        other.floor
+    };
+    content
+        .block(id)
+        .is_some_and(|def| def.blend_group_id() == group)
+}
+
+/// `Floor.drawMain` (`Floor.java:264-292`): the tiling, autotile or plain
+/// variant region for one tile of a floor layer. `is_overlay` picks the
+/// `tile.overlay` layer for the autotile same-check.
+fn main_quad(
+    world: &WorldGrid,
+    content: &ContentRegistry,
+    tile: &Tile,
+    def: &BlockDef,
+    is_overlay: bool,
+) -> PendingQuad {
+    let x = tile.x as i32;
+    let y = tile.y as i32;
+    // Same frame as `tile_quads` (`Tile.worldx()` × `tilesize`).
+    let size = TILESIZE as f32;
+    let cx = tile.x as f32 * size;
+    let cy = tile.y as f32 * size;
+    let plain = |region: String,
+                 crop: Option<(u8, u8, u8, u8)>,
+                 tiling: Option<(i32, i32, i32)>| PendingQuad {
+        region,
+        cx,
+        cy,
+        w: size,
+        h: size,
+        color: 0xffff_ffff,
+        variant: false,
+        v_flip: true,
+        crop,
+        tiling,
+    };
+    if def.tiling_variants > 0 {
+        // `Floor.drawMain:265-269`: the variant is chosen per block of
+        // `tilingSize` tiles and the drawn cell is `[x % tilingSize][tilingSize
+        // - 1 - y % tilingSize]`. Both need the sprite-derived `tilingSize`
+        // (`Floor.load:133-142`), so the resolver (`resolve_tiling`) owns the
+        // region name and the crop.
+        return plain(def.name.clone(), None, Some((def.tiling_variants, x, y)));
+    }
+
+    if def.autotile {
+        // `Floor.drawMain:270-283`: 8-neighbour bitmask through
+        // `TileBitmask.values`, with `autotileVariants`/`autotileMidVariants`
+        // rows and the bit-13 mid slices.
+        let group = def.blend_group_id();
+        let mut same = [false; 8];
+        for (index, (dx, dy)) in floor_main::D8.iter().enumerate() {
+            same[index] = autotile_same(world, content, tile, group, is_overlay, *dx, *dy);
+        }
+        let bit = floor_main::autotile_index(floor_main::autotile_bits(same));
+        let variant_pick = if def.autotile_variants > 1 {
+            random_seed_int(pack_point2(x, y), 0, def.autotile_variants - 1) as u32
+        } else {
+            0
+        };
+        let mid_pick = if def.autotile_mid_variants > 1 {
+            random_seed_int(pack_point2(x, y), 0, def.autotile_mid_variants - 1) as u32
+        } else {
+            0
+        };
+        return plain(
+            floor_main::autotile_region(
+                &def.name,
+                bit,
+                def.autotile_variants,
+                variant_pick,
+                def.autotile_mid_variants,
+                mid_pick,
+            ),
+            None,
+            None,
+        );
+    }
+
+    // The plain random variant (`Floor.drawMain:285-287`); the resolver picks
+    // the numbered region.
+    PendingQuad {
+        region: def.region.clone(),
+        cx,
+        cy,
+        w: size,
+        h: size,
+        color: 0xffff_ffff,
+        variant: true,
+        v_flip: true,
+        crop: None,
+        tiling: None,
+    }
 }
 
 /// The page/UV tuple for a resolved (or placeholder) region.
@@ -752,6 +925,8 @@ fn lin(cx: i32, cy: i32, chunks_x: i32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mind_core::content::registries::create_base_content;
+    use mind_core::content::{MemoryBundle, MemoryUnlockStore};
 
     #[test]
     fn color_from_rgba() {
@@ -767,5 +942,148 @@ mod tests {
         assert_eq!(lin(1, 0, 3), 1);
         assert_eq!(lin(0, 1, 3), 3);
         assert_eq!(lin(2, 2, 3), 8);
+    }
+
+    fn test_registry() -> ContentRegistry {
+        let bundle = MemoryBundle::new();
+        let store = MemoryUnlockStore::new();
+        let Ok(mut registry) = create_base_content(&bundle, &store, true) else {
+            panic!("base content");
+        };
+        if registry.init().is_err() {
+            panic!("content init");
+        }
+        if registry.post_init().is_err() {
+            panic!("content post init");
+        }
+        registry
+    }
+
+    fn block(registry: &ContentRegistry, name: &str) -> BlockId {
+        match registry.block_id(name) {
+            Some(id) => id,
+            None => panic!("block {name}"),
+        }
+    }
+
+    fn base_region(quads: &[PendingQuad]) -> &str {
+        match quads.first() {
+            Some(quad) => &quad.region,
+            None => panic!("base quad"),
+        }
+    }
+
+    fn fill(world: &mut WorldGrid, floor: BlockId) {
+        for y in 0..world.height() {
+            for x in 0..world.width() {
+                world.tiles.get_mut(x, y).floor = floor;
+            }
+        }
+    }
+
+    /// `Floor.drawMain`'s tiling branch (`Floor.java:265-269`): the variant is
+    /// picked per block of `tilingSize` tiles (`resolve_tiling`) and the quad
+    /// carries the def's variant count plus the raw tile coords. Vanilla has no
+    /// tiling floors, so the branch runs on a patched `stone` def.
+    #[test]
+    fn tiling_floor_picks_tile_layer_and_carries_cell_coords() {
+        let mut registry = test_registry();
+        let stone = block(&registry, "stone");
+        match registry.block_mut(stone) {
+            Some(def) => def.tiling_variants = 2,
+            None => panic!("stone def"),
+        }
+        let mut world = WorldGrid::new(4, 4);
+        fill(&mut world, stone);
+        let quads = tile_quads(&world, &registry, world.tile(0, 0), CacheLayerId::Normal);
+        let base = match quads.first() {
+            Some(quad) => quad,
+            None => panic!("base quad"),
+        };
+        // The region name is the def's; the resolver picks the `-tile<v+1>`
+        // region and the cell once the sprite-derived split is known.
+        assert_eq!(base.region, "stone");
+        assert_eq!(base.tiling, Some((2, 0, 0)));
+        assert!(!base.variant);
+        let other = tile_quads(&world, &registry, world.tile(1, 2), CacheLayerId::Normal);
+        let other = match other.first() {
+            Some(quad) => quad,
+            None => panic!("base quad"),
+        };
+        assert_eq!(other.region, "stone");
+        assert_eq!(other.tiling, Some((2, 1, 2)));
+    }
+
+    /// `Floor.drawMain`'s autotile branch (`Floor.java:270-283`): the 8-neighbour
+    /// bitmask through `TileBitmask.values` picks `metal-tiles-1-<index>` —
+    /// 0 bits (all neighbours different) → 39, E/NE/N (a 2×2 block corner) → 24,
+    /// W/SW/S (the opposite corner) → 2.
+    #[test]
+    fn autotile_floor_uses_the_bitmask_region() {
+        let registry = test_registry();
+        let metal = block(&registry, "metal-tiles-1");
+        let stone = block(&registry, "stone");
+        let mut world = WorldGrid::new(4, 4);
+        fill(&mut world, stone);
+        // A lone tile at (0, 0) and a 2×2 block at x∈{2,3}, y∈{1,2}.
+        world.tiles.get_mut(0, 0).floor = metal;
+        for (x, y) in [(2, 1), (3, 1), (2, 2), (3, 2)] {
+            world.tiles.get_mut(x, y).floor = metal;
+        }
+        let lone = tile_quads(&world, &registry, world.tile(0, 0), CacheLayerId::Normal);
+        assert_eq!(base_region(&lone), "metal-tiles-1-39");
+        // The block's south-west corner: E, NE and N are the same floor.
+        let corner = tile_quads(&world, &registry, world.tile(2, 1), CacheLayerId::Normal);
+        assert_eq!(base_region(&corner), "metal-tiles-1-24");
+        // The block's north-east corner: W, SW and S are the same floor.
+        let far = tile_quads(&world, &registry, world.tile(3, 2), CacheLayerId::Normal);
+        assert_eq!(base_region(&far), "metal-tiles-1-2");
+    }
+
+    /// The bit-13 mid slices (`Floor.autotileMidVariants`): a fully surrounded
+    /// `metal-tiles-7` tile picks `-13` or `-mid-<i+1>` by the shared
+    /// `variant(x, y, len)` pick.
+    #[test]
+    fn autotile_mid_variants_take_the_fully_surrounded_tile() {
+        let registry = test_registry();
+        let metal = block(&registry, "metal-tiles-7");
+        let mut world = WorldGrid::new(3, 3);
+        fill(&mut world, metal);
+        let mid_index = random_seed_int(pack_point2(1, 1), 0, 8) as u32;
+        let expected = if mid_index == 0 {
+            "metal-tiles-7-13".to_owned()
+        } else {
+            format!("metal-tiles-7-mid-{}", mid_index + 1)
+        };
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Normal);
+        assert_eq!(base_region(&quads), expected);
+    }
+
+    /// `Floor.drawBase`'s liquid pass (`Floor.java:257-261`): a liquid floor
+    /// under any overlay redraws its main quad at `1 - overlayAlpha` (0.65 →
+    /// alpha 89) after the overlay.
+    #[test]
+    fn liquid_floor_redraws_main_over_its_overlay() {
+        let registry = test_registry();
+        let water = block(&registry, "shallow-water");
+        let sand = block(&registry, "sand-floor");
+        let mut world = WorldGrid::new(3, 3);
+        fill(&mut world, sand);
+        let tile = world.tiles.get_mut(1, 1);
+        tile.floor = water;
+        tile.overlay = sand;
+        let quads = tile_quads(&world, &registry, world.tile(1, 1), CacheLayerId::Water);
+        let (Some(base), Some(last)) = (quads.first(), quads.last()) else {
+            panic!("base and redraw quads");
+        };
+        assert_eq!(last.region, base.region);
+        assert_eq!(last.color, 0xffff_ff59);
+        // `pooled-cryofluid` sets `overlayAlpha = 0.35f` (`Blocks.java:300`).
+        assert_eq!(overlay_redraw_alpha(0.35), 166);
+        // A liquid without an overlay draws no redraw pass.
+        world.tiles.get_mut(2, 2).floor = water;
+        let bare = tile_quads(&world, &registry, world.tile(2, 2), CacheLayerId::Water);
+        assert!(!bare.is_empty());
+        assert!(bare.iter().all(|quad| quad.color != 0xffff_ff59));
     }
 }

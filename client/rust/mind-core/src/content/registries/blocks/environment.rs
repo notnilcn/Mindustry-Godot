@@ -301,6 +301,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         liquid_multiplier: Some(0.5),
         floor_status: Some("freezing"),
         floor_status_duration: Some(240.0),
+        // `Blocks.java:300`: `overlayAlpha = 0.35f` (the liquid redraw over
+        // its overlay runs at `1 - overlayAlpha`; `Floor.java:257-261`).
+        overlay_alpha: Some(0.35),
         // `Blocks.java:309`: `cacheLayer = CacheLayer.cryofluid`.
         cache_layer: Some(CacheLayerId::Cryofluid),
         ..spec("pooled-cryofluid", BlockKind::Floor)
@@ -877,27 +880,30 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ..spec("dark-metal", BlockKind::StaticWall)
     })?;
 
-    // `Blocks.java:842-930`: every `metal-tiles-*` sets `drawEdgeOut = false`
-    // and `drawEdgeIn = false` (the J02 T1 floor-edge flags; autotile metadata
-    // is J02 T2).
-    for name in [
-        "metal-tiles-1",
-        "metal-tiles-2",
-        "metal-tiles-3",
-        "metal-tiles-4",
-        "metal-tiles-5",
-        "metal-tiles-6",
-        "metal-tiles-7",
-        "metal-tiles-8",
-        "metal-tiles-9",
-        "metal-tiles-10",
-        "metal-tiles-11",
-        "metal-tiles-12",
-        "metal-tiles-13",
+    // `Blocks.java:842-930`: every `metal-tiles-*` sets `autotile = true`,
+    // `drawEdgeOut = false` and `drawEdgeIn = false`; metal-tiles-7/8/13 add
+    // mid variants (9/2/6) and metal-tiles-11/12 variant rows (3/4) (J02 T2).
+    for (name, variants, mids) in [
+        ("metal-tiles-1", 1, 1),
+        ("metal-tiles-2", 1, 1),
+        ("metal-tiles-3", 1, 1),
+        ("metal-tiles-4", 1, 1),
+        ("metal-tiles-5", 1, 1),
+        ("metal-tiles-6", 1, 1),
+        ("metal-tiles-7", 1, 9),
+        ("metal-tiles-8", 1, 2),
+        ("metal-tiles-9", 1, 1),
+        ("metal-tiles-10", 1, 1),
+        ("metal-tiles-11", 3, 1),
+        ("metal-tiles-12", 4, 1),
+        ("metal-tiles-13", 1, 6),
     ] {
         sink.push(BlockSpec {
             draw_edge_in: Some(false),
             draw_edge_out: Some(false),
+            autotile: Some(true),
+            autotile_variants: Some(variants),
+            autotile_mid_variants: Some(mids),
             ..spec(name, BlockKind::Floor)
         })?;
     }
@@ -924,7 +930,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         save_data: Some(true),
         save_config: Some(true),
         // `Blocks.java:945-949`: `autotile = true`, `drawEdgeOut = false`,
-        // `drawEdgeIn = false` (autotile metadata is J02 T2).
+        // `drawEdgeIn = false` (J02 T2 wires the bitmask).
+        autotile: Some(true),
         draw_edge_in: Some(false),
         draw_edge_out: Some(false),
         ..spec("colored-floor", BlockKind::ColoredFloor)
