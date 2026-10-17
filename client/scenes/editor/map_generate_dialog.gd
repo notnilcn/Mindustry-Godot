@@ -487,8 +487,17 @@ func _remove_filter(index: int) -> void:
 	_refresh_preview()
 
 
-## `buttons.button("@editor.apply", Icon.ok, () -> { apply(); hide(); })`.
+## `buttons.button("@editor.apply", Icon.ok, () -> ui.loadAnd(() -> { apply();
+## hide(); }))` (`MapGenerateDialog.java:79-85`).
 func _apply() -> void:
+	var ui := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui != null and ui.has_method("load_and"):
+		ui.call("load_and", _apply_now)
+	else:
+		_apply_now()
+
+
+func _apply_now() -> void:
 	if _editor != null:
 		_write(_filters)
 		if _editor.has_method("apply_filters"):

@@ -157,11 +157,11 @@ func _row(entry: Dictionary) -> Control:
 	row.add_child(name_button)
 
 	# `t.button(Icon.pencil, Styles.graySquarei, ...)` — rename.
-	row.add_child(_square_icon("edit", "@editor.worldprocessors.editname", func() -> void:
+	row.add_child(_square_icon("pencil", "@editor.worldprocessors.editname", func() -> void:
 		_rename_processor(entry)))
 
 	# `t.button(Icon.trash, ...)` — delete with confirm.
-	row.add_child(_square_icon("cancel", "@editor.worldprocessors.delete.confirm", func() -> void:
+	row.add_child(_square_icon("trash", "@editor.worldprocessors.delete.confirm", func() -> void:
 		_confirm_delete(entry)))
 	return row
 

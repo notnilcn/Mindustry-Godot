@@ -1075,3 +1075,14 @@ func _background_resume() -> void:
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if bool(host.call("is_paused")):
 		host.call("set_paused", false)
+
+## `UI.loadAnd(text, call)` (`core/UI.java:292-302`): the loading overlay shows
+## `text`, `call` runs 7 ticks later, then the overlay hides.
+func load_and(call: Callable, text: String = "@loading") -> void:
+	var loading := get_node_or_null("LoadingLayer/loading") as Control
+	if loading != null and loading.has_method("show_text"):
+		loading.call("show_text", _t(text))
+	await get_tree().create_timer(7.0 / 60.0).timeout
+	call.call()
+	if loading != null and loading.has_method("hide_loading"):
+		loading.call("hide_loading")
