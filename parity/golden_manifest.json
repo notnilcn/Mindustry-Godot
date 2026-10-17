@@ -70,7 +70,10 @@
       "kind": "harness",
       "path": "client/rust/mind-core/tests/golden/blocks_families.json",
       "owner_plan": "02",
-      "sha256": "c1e1f5d6a9a1e283f5b16eeedf32fe02a77758d88bef214dc535c675409c1db6"
+      "sha256": "6e8b921a1a7454846b0b153c43db9ff7aa2ec4421706d9a766ef55cd64e1f80c",
+      "reasons": [
+        "2026-10-18 L08 T1: families other 164->158, production 45->51. 390b1bc3 (G02 T1) maps BlockKind::HeatProducer to BlockKindData::Crafter (HeatProducer extends GenericCrafter, world/blocks/heat/HeatProducer.java:13); the six HeatProducer blocks oxidation-chamber, electric-heater, slag-heater, phase-heater, heat-reactor, heat-source (content/Blocks.java:1429,1452,1467,1485,1689,6792) are now production."
+      ]
     },
     {
       "id": "harness_campaign_fog",

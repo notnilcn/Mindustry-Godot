@@ -36,6 +36,10 @@ pub struct Golden {
     /// Optional regeneration command.
     #[serde(default)]
     pub regen: Option<String>,
+    /// Attributed regeneration history (newest last): why each bless moved
+    /// the file, with the porting commit and the Java citation (L08 T1).
+    #[serde(default)]
+    pub reasons: Vec<String>,
 }
 
 /// The parsed manifest.
