@@ -63,6 +63,7 @@ func _run() -> void:
 	await _case_nested_filter()
 	await _case_hidden_and_margin()
 	await _case_table_align()
+	await _case_colspan()
 	print("LAYOUTCHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
 
@@ -242,3 +243,28 @@ func _case_table_align() -> void:
 	await _frames()
 	_check(_near(cell.position, Vector2(0, 0)), "set_table_left hugs the left edge (got %s)" % cell.position)
 	holder.free()
+
+
+func _case_colspan() -> void:
+	print("case 6: colspan cells add only their deficit (Arc Table.computeSize)")
+	var center := CenterContainer.new()
+	center.size = Vector2(800, 400)
+	root.add_child(center)
+	var table := MindTable.new()
+	center.add_child(table)
+	var label := _leaf(100, 20)
+	var field := _leaf(400, 20)
+	table.add(label)
+	table.add(field)
+	table.row()
+	var wide := _leaf(484, 30)
+	table.add(wide).set_colspan(2)
+	await _frames()
+	_check(_near(table.size, Vector2(500, 50)), "label + field columns stay 100 + 400 (got %s)" % table.size)
+	_check(is_equal_approx(field.position.x, 100.0), "the field starts after the 100 px label column (got %s)" % field.position.x)
+	wide.custom_minimum_size.x = 600.0
+	await _frames()
+	_check(is_equal_approx(table.size.x, 600.0), "a wider span spreads its 100 px deficit (got %s)" % table.size.x)
+	# Columns 150 + 450; the 400 px field centres in its column (150 + 25).
+	_check(is_equal_approx(field.position.x, 175.0), "deficit split evenly: columns 150 + 450 (field x %s)" % field.position.x)
+	center.free()

@@ -22,7 +22,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-color = Color(0.03, 0.04, 0.06, 0.94)
+color = Color(0, 0, 0, 1)
 
 [node name="MapView" parent="." unique_id=345889062 instance=ExtResource("1_view")]
 layout_mode = 1
@@ -131,8 +131,9 @@ theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 2
 
 [node name="BrushSlider" type="HSlider" parent="LeftTools/BrushStack" unique_id=1864859013]
-custom_minimum_size = Vector2(154, 30)
+custom_minimum_size = Vector2(154, 42)
 layout_mode = 2
+theme_type_variation = &"defaultSlider"
 max_value = 8.0
 
 [node name="BrushLabel" type="Label" parent="LeftTools/BrushStack" unique_id=1913791396]
@@ -153,16 +154,19 @@ layout_mode = 2
 
 [node name="ShowBlocks" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=1228478403]
 layout_mode = 2
+theme_type_variation = &"defaultCheck"
 button_pressed = true
 text = "Show Blocks"
 
 [node name="ShowTerrain" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=1248652680]
 layout_mode = 2
+theme_type_variation = &"defaultCheck"
 button_pressed = true
 text = "Show Terrain"
 
 [node name="ShowFloor" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=2004911415]
 layout_mode = 2
+theme_type_variation = &"defaultCheck"
 button_pressed = true
 text = "Show Floor"
 

@@ -21,7 +21,7 @@ const ENTRIES := [
 	{"key": "@editor.savemap", "icon": "save", "action": "save"},
 	{"key": "@editor.mapinfo", "icon": "pencil", "action": "map_info"},
 	{"key": "@editor.generate", "icon": "terrain", "action": "map_generate"},
-	{"key": "@editor.resize", "icon": "grid", "action": "map_resize"},
+	{"key": "@editor.resize", "icon": "resize", "action": "map_resize"},
 	{"key": "@editor.import", "icon": "download", "action": "editor_import"},
 	{"key": "@editor.export", "icon": "upload", "action": "editor_export"},
 	{"key": "@editor.ingame", "icon": "right", "action": "ingame"},

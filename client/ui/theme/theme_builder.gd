@@ -65,6 +65,15 @@ static func _apply_base_styles(theme: Theme) -> void:
 	theme.set_color("font_color", "Label", Color(0.92, 0.92, 0.92))
 	theme.set_stylebox("panel", "Panel", flat(MindStyles.GRAY_PANEL_DARK))
 	_apply_scroll_bar(theme)
+	# `Styles.areaField` (`ui/Styles.java:424-433`): a `TextArea` on the same
+	# `underline` 9-patch as the fields, no box, no focus frame (L03 T3: the
+	# editor Map Info description, java/ed-info.png).
+	var area_box := _nine_patch("underline", 12.0)
+	theme.set_stylebox("normal", "TextEdit", area_box)
+	theme.set_stylebox("read_only", "TextEdit", _nine_patch("underline-disabled", 12.0))
+	theme.set_stylebox("focus", "TextEdit", StyleBoxEmpty.new())
+	theme.set_color("font_color", "TextEdit", Color.WHITE)
+	theme.set_color("background_color", "TextEdit", Color(0, 0, 0, 0))
 
 
 static func _apply_manifest(theme: Theme, manifest: Dictionary) -> void:
@@ -112,6 +121,33 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
 				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
 				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
+			elif name == "flati":
+				# `Styles.flati` (Styles.java:306-310): `up = black`, `over` /
+				# `down = flatOver`; no disabled drawable (Arc keeps `up`). The
+				# editor's menu/undo/redo/rotate cells (L03 T3, PAR-0421).
+				theme.set_stylebox("normal", name, flat(Color.BLACK))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("disabled", name, flat(Color.BLACK))
+			elif name == "squareTogglei":
+				# `Styles.squareTogglei` (Styles.java:324-329): `up = black`,
+				# `over = flatOver`, `down`/`checked = flatDown` (the accent
+				# frame) — the editor tool/grid cells, the selected tool framed.
+				theme.set_stylebox("normal", name, flat(Color.BLACK))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("pressed", name, _flat_down_frame())
+				theme.set_stylebox("hover_pressed", name, _flat_down_frame())
+				theme.set_stylebox("disabled", name, flat(Color.BLACK))
+			elif name == "cleari":
+				# `Styles.cleari` (Styles.java:337-344): `up`/`disabled = black6`,
+				# `over = flatOver`, `down = flatDown`; image white, light gray
+				# when disabled.
+				theme.set_stylebox("normal", name, flat(MindStyles.BLACK_6))
+				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
+				theme.set_stylebox("pressed", name, _flat_down_frame())
+				theme.set_stylebox("disabled", name, flat(MindStyles.BLACK_6))
+				theme.set_color("icon_normal_color", name, Color.WHITE)
+				theme.set_color("icon_disabled_color", name, Color.LIGHT_GRAY)
 			elif name == "flatt":
 				# `Styles.flatt` (Styles.java:147-155): `up = black`,
 				# `over`/`down = flatOver`.
@@ -276,6 +312,12 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				if texture != null:
 					theme.set_icon(str(state[0]), name, texture)
 			theme.set_color("font_color", name, Color(0.92, 0.92, 0.92))
+			# Arc `CheckBox` draws no background in any state (`CheckBoxStyle`
+			# has only the check drawables); Godot's CheckBox inherits the base
+			# Button boxes and painted checked rows grey (L03 T3: the editor's
+			# Show Blocks/Terrain/Floor rows, java/editor-view.png).
+			for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
+				theme.set_stylebox(state, name, StyleBoxEmpty.new())
 		"Tree":
 			theme.set_stylebox("panel", name, flat(MindStyles.GRAY_PANEL_DARK))
 		_:

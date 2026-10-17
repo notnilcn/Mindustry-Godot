@@ -38,23 +38,39 @@ func shown() -> void:
 	_build()
 
 
-## `MapInfoDialog.setup`: fields then the button grid.
+## `MapInfoDialog.setup` (`MapInfoDialog.java:33-126`): `cont.pane(t -> ...)`, a
+## two-column table (label `padRight(8).left()`, field 400 wide, `defaults()
+## .padTop(15)`), then the route buttons inside one `Tex.button` frame
+## (`r.defaults().width(230f).height(60f)`, `Styles.flatt`, `marginLeft(10f)`),
+## `colspan(2).center()`. The body scrolls when it is taller than the screen, so
+## the last row sits below the fold like Java (L03 T3, PAR-0429).
 func _build() -> void:
 	var root := content_table()
-	_add_field(root, "@editor.mapname", "name", 50, "@unknown", false)
-	_add_field(root, "@editor.description", "description", 1000, "", true)
-	_add_field(root, "@editor.author", "author", 50, "@unknown", false)
+	# code-instantiated: the field table is the dialog's data-driven body.
+	var table := MindTable.new()
+	table.defaults().set_pad_top(15.0)
+	root.add(table)
+	_add_field(table, "@editor.mapname", "name", 50, "@unknown", false)
+	_add_field(table, "@editor.description", "description", 1000, "", true)
+	_add_field(table, "@editor.author", "author", 50, "@unknown", false)
 
-	# code-instantiated: route buttons are data-driven from `ROUTES`.
+	# code-instantiated: `t.table(Tex.button, r -> ...)` frame around the routes.
+	var frame := PanelContainer.new()
+	var box := _pane_box(Color.BLACK, PANE_OUTLINE_GRAY)
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		box.set_content_margin(side, 12.0)
+	frame.add_theme_stylebox_override("panel", box)
 	var grid := MindWidgets.table()
+	frame.add_child(grid)
 	var column := 0
 	for route_variant in ROUTES:
 		var route: Dictionary = route_variant
 		var wide := bool(route.get("wide", false))
 		# code-instantiated: one route button per `MapInfoDialog` entry.
-		var button := MindWidgets.icon_button(str(route.get("icon", "")), _t(str(route.get("key", ""))))
+		var button := MindWidgets.icon_button(str(route.get("icon", "")), _t(str(route.get("key", ""))), "flatt")
+		_inset_icon_row(button, 10.0)
 		button.pressed.connect(_open_route.bind(str(route.get("action", ""))))
-		grid.add(button).width(460.0 if wide else 230.0).height(60.0).pad(2).set_colspan(2 if wide else 1)
+		grid.add(button).width(460.0 if wide else 230.0).height(60.0).set_colspan(2 if wide else 1)
 		if wide:
 			grid.row()
 			column = 0
@@ -64,33 +80,44 @@ func _build() -> void:
 				grid.row()
 	if column % 2 != 0:
 		grid.row()
-	root.add(grid).pad(6)
+	table.add(frame).set_colspan(2)
+	table.row()
 
 
-## One label + field row (Java `t.add(key); t.field(...)`).
-func _add_field(root: MindTable, label_key: String, tag: String, max_length: int, placeholder: String, multiline: bool) -> void:
-	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 8)
+## `.marginLeft(10f)`: the icon row starts 10 px in from the button edge.
+func _inset_icon_row(button: Button, margin: float) -> void:
+	for child in button.get_children():
+		if child is HBoxContainer:
+			(child as HBoxContainer).offset_left = margin
+
+
+## One label + field row (`t.add(key).padRight(8).left(); t.field(...)
+## .size(400, 55)` / `t.area(..., Styles.areaField, ...).size(400, 140)`).
+func _add_field(table: MindTable, label_key: String, tag: String, max_length: int, placeholder: String, multiline: bool) -> void:
 	var label := MindWidgets.label(_t(label_key))
-	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(label)
+	table.add(label).left().set_pad_right(8.0)
 	if multiline:
 		# code-instantiated: the description is the only multi-line field.
+		# Arc `TextArea` wraps at the field width and has no horizontal scroll;
+		# `Styles.areaField` is the same `underline` background as the fields.
 		var area := TextEdit.new()
 		area.text = str(_tags().get(tag, ""))
+		area.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+		area.scroll_fit_content_height = false
 		area.custom_minimum_size = Vector2(400.0, 140.0)
-		area.text_changed.connect(func() -> void: _set_tag(tag, area.text))
-		row.add_child(area)
+		area.text_changed.connect(func() -> void:
+			if area.text.length() > max_length:
+				area.text = area.text.substr(0, max_length)
+			_set_tag(tag, area.text))
+		table.add(area).width(400.0).height(140.0)
 	else:
-		var field := MindWidgets.field("")
+		var field := MindWidgets.field(_t(placeholder) if not placeholder.is_empty() else "")
 		field.text = str(_tags().get(tag, ""))
-		field.placeholder_text = _t(placeholder) if not placeholder.is_empty() else ""
 		field.max_length = max_length
 		field.custom_minimum_size = Vector2(400.0, 55.0)
 		field.text_changed.connect(func(text: String) -> void: _set_tag(tag, text))
-		row.add_child(field)
-	root.add(row).pad(4)
-	root.row()
+		table.add(field).width(400.0).height(55.0)
+	table.row()
 
 
 func _tags() -> Dictionary:
