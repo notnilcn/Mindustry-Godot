@@ -331,6 +331,7 @@ func _grid() -> Dictionary:
 	for i in order.size():
 		row_min[i] = 0.0
 
+	var spanning: Array = []
 	for placement in placements:
 		var cell: MindCell = placement.cell
 		var control: Control = placement.control
@@ -357,10 +358,27 @@ func _grid() -> Dictionary:
 			h = minf(h, cell.max_height)
 		w += cell.pad_left + cell.pad_right
 		h += cell.pad_top + cell.pad_bottom
-		var per := w / float(placement.span)
-		for s in placement.span:
-			col_min[placement.col + s] = maxf(col_min[placement.col + s], per)
+		if placement.span == 1:
+			col_min[placement.col] = maxf(col_min[placement.col], w)
+		else:
+			spanning.append([placement, w])
 		row_min[placement.row_index] = maxf(row_min[placement.row_index], h)
+
+	# Arc `Table.computeSize`: "Distribute any additional min and pref width
+	# added by colspanned cells to the columns spanned" — only the deficit a
+	# spanning cell adds over its columns' own widths, spread evenly. Splitting
+	# the whole width (the old behaviour) widened narrow columns, e.g. the
+	# editor Map Info label column next to the colspan-2 route frame (L03 T3).
+	for entry in spanning:
+		var placement: Dictionary = entry[0]
+		var need: float = entry[1]
+		var have := 0.0
+		for s in placement.span:
+			have += col_min[placement.col + s]
+		if need > have:
+			var extra := (need - have) / float(placement.span)
+			for s in placement.span:
+				col_min[placement.col + s] += extra
 
 	return {
 		"placements": placements,

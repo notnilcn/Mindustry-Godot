@@ -241,8 +241,6 @@ func _draw() -> void:
 	var map_h := int(status.get("height", 0))
 	if map_w <= 0 or map_h <= 0:
 		return
-	# Canvas border (`Pal.remove`).
-	draw_rect(Rect2(Vector2.ZERO, size), Color(0.85, 0.42, 0.33), false, 2.0)
 	if bool(status.get("grid", false)):
 		_draw_grid(map_w, map_h)
 	if _cursor.x >= 0 and _cursor.y >= 0:
@@ -252,7 +250,12 @@ func _draw() -> void:
 		if points.size() >= 2:
 			var closed := points.duplicate()
 			closed.append(points[0])
-			draw_polyline(closed, Color(0.85, 0.42, 0.33), 2.0)
+			# `Draw.color(Pal.accent); Lines.stroke(Scl.scl(2f))` (MapView.java:282-283).
+			draw_polyline(closed, MindStyles.ACCENT, 2.0)
+	# The view frame, drawn last: `Draw.color(Pal.accent); Lines.stroke(Scl.scl(3f));
+	# Lines.rect(x, y, width, height)` (MapView.java:323-325). Inset so the 3 px
+	# stroke stays inside the clipped view (L03 T3, PAR-0421: was a 2 px Pal.remove line).
+	draw_rect(Rect2(Vector2(1.5, 1.5), size - Vector2(3.0, 3.0)), MindStyles.ACCENT, false, 3.0)
 
 
 func _draw_grid(map_w: int, map_h: int) -> void:

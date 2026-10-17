@@ -144,8 +144,12 @@ pub fn items_per_second(ctx: &StatCtx, time_period: f32, stacks: &[ItemStack]) -
             stack.amount as f32
         };
         cells.push(Cell::Space { w: 2.0 });
+        // `displayItem(item, amount, timePeriod, showName = true)`
+        // (`StatValues.java:157-163, 310-315`): the localized name above the
+        // rate (L05 T3: java/info-cultivator.png "Spore Pod / 0.6/sec").
         cells.push(text(format!(
-            "[lightgray]{}{}",
+            "{}\n[lightgray]{}{}",
+            ctx.item_name(&name),
             auto_fixed(rate, 3),
             ctx.unit_label(StatUnit::PerSecond)
         )));
@@ -288,6 +292,79 @@ pub enum DrillablesScope {
     Floor,
     /// `BeamDrill.setStats` (`BeamDrill.java:122-125`).
     WallOre,
+}
+
+/// `UnitType.setStats` mine-tier list (`UnitType.java:824-833`):
+/// `StatValues.drillables(mineSpeed, 1f, 1, null, filter)` — `multipliers` is
+/// null, so each 40 px panel has only the block icon, its localized name and
+/// the item emoji (no rate). Filter: an item drop, floors by `wallOre` vs
+/// `mineWalls`/`mineFloor`, non-floors only with `mineWalls`, `hardness <=
+/// mineTier` and not `playerUnmineable` (`doubletapmine` defaults off).
+pub fn unit_drillables(
+    ctx: &StatCtx,
+    mine_tier: i32,
+    mine_walls: bool,
+    mine_floor: bool,
+) -> Vec<Cell> {
+    use crate::content::registries::blocks::BlockKind;
+
+    let is_floor = |kind: BlockKind| {
+        matches!(
+            kind,
+            BlockKind::Floor
+                | BlockKind::EmptyFloor
+                | BlockKind::ColoredFloor
+                | BlockKind::OreBlock
+                | BlockKind::ShallowLiquid
+                | BlockKind::SteamVent
+        )
+    };
+    let mut cells = vec![Cell::Row];
+    let mut index = 0usize;
+    for def in ctx.registry.blocks() {
+        let Some(drop) = def.item_drop else {
+            continue;
+        };
+        let minable = if is_floor(def.kind) {
+            (def.wall_ore && mine_walls) || (!def.wall_ore && mine_floor)
+        } else {
+            mine_walls
+        };
+        if !minable || def.player_unmineable {
+            continue;
+        }
+        let Some(item) = ctx.registry.item(drop) else {
+            continue;
+        };
+        if item.hardness > mine_tier {
+            continue;
+        }
+        cells.push(Cell::Panel {
+            cells: vec![
+                Cell::Icon {
+                    region: format!("block-{}-ui", def.name),
+                    amount: None,
+                    size: 40,
+                    content: Some(def.name.clone()),
+                },
+                Cell::Space { w: 10.0 },
+                text(block_display_name(ctx, def)),
+                Cell::Row,
+                Cell::Space { w: 50.0 },
+                Cell::Icon {
+                    region: format!("item-{}-ui", item.name),
+                    amount: None,
+                    size: 16,
+                    content: Some(item.name.clone()),
+                },
+            ],
+        });
+        index += 1;
+        if index.is_multiple_of(2) {
+            cells.push(Cell::Row);
+        }
+    }
+    cells
 }
 
 /// `StatValues.drillables(drillTime, drillMultiplier, size, multipliers, filter)`:

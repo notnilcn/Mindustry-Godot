@@ -301,6 +301,24 @@ func _build_wave_buttons() -> void:
 		return
 	_skip_button = MindWidgets.icon_button(SKIP_ICON, "")
 	_skip_button.name = "skip"
+	# `rightStyle` (HudFragment.java:493-500): `up = buttonRight`, `over =
+	# buttonRightOver`, `down = buttonRightDown`, `disabled =
+	# buttonRightDisabled` — the 9-patch with the bevelled bottom-right corner,
+	# not the generic `defaultt` pill (L03 T4, diff/11-sandbox-side.png).
+	for state in [
+		["normal", "button-right"], ["hover", "button-right-over"],
+		["pressed", "button-right-down"], ["hover_pressed", "button-right-down"],
+		["disabled", "button-right-disabled"],
+	]:
+		var texture: Variant = MindWidgets.icon_texture(str(state[1]))
+		if texture is Texture2D:
+			var box := StyleBoxTexture.new()
+			box.texture = texture
+			for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+				box.set_texture_margin(side, 12.0)
+				box.set_content_margin(side, 0.0)
+			_skip_button.add_theme_stylebox_override(str(state[0]), box)
+	_skip_button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	_skip_button.custom_minimum_size = Vector2(40.0, 0.0)
 	_skip_button.size_flags_vertical = Control.SIZE_FILL
 	_skip_button.pressed.connect(_on_skip_wave)
@@ -321,9 +339,10 @@ func refresh() -> void:
 		_unlock_grid = null
 	var status := str(_hud.get("status_text"))
 	if status_label != null:
-		# Java's `makeStatusTable` labelWrap cell is centred in the wavepane table
-		# (HudFragment: `table.labelWrap(...)`), not left-aligned.
-		status_label.text = "[center]" + status
+		# `table.labelWrap(...)` (HudFragment.java:1066): an Arc `Label` with
+		# wrap on and the default left alignment, wrapping at the cell width
+		# ("2 Enemies / Remaining" breaks left-aligned; PAR-0386, L03 T4).
+		status_label.text = status
 		status_label.visible = not status.is_empty()
 	if info_label != null:
 		info_label.visible = false

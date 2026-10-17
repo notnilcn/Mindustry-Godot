@@ -102,7 +102,34 @@ func _apply_labels() -> void:
 	($LeftTools/ShowChecks/ShowBlocks as Button).text = _t("@editor.showblocks")
 	($LeftTools/ShowChecks/ShowTerrain as Button).text = _t("@editor.showterrain")
 	($LeftTools/ShowChecks/ShowFloor as Button).text = _t("@editor.showfloor")
-	($LeftTools/CenterButton as Button).text = _t("@editor.center")
+	_set_icon_text($LeftTools/CenterButton, "move", _t("@editor.center"))
+
+
+## `mid.button("@editor.center", Icon.move, Styles.flatt, view::center)
+## .margin(9f)` (MapEditorDialog.java:720-722): an image text button — the icon
+## at the left margin and the label centred in the rest (L03 T3, PAR-0421).
+## code-instantiated: icon-font glyphs need `MindAssets.icon_font()` at runtime.
+func _set_icon_text(button: Button, icon_name: String, text_value: String) -> void:
+	button.text = text_value
+	if MindIcons.glyph(icon_name).is_empty():
+		return
+	button.text = ""
+	var row := HBoxContainer.new()
+	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	row.offset_left = 9.0
+	row.offset_right = -9.0
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var glyph := MindWidgets.glyph(icon_name, 28)
+	glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(glyph)
+	var label := Label.new()
+	label.text = text_value
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(label)
+	button.add_child(row)
 
 
 ## code-instantiated: icon-font glyphs need `MindAssets.icon_font()` at runtime.

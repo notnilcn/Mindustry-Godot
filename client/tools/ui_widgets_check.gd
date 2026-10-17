@@ -594,5 +594,22 @@ func _init() -> void:
 	)
 	probe.free()
 
+	# L05 T2 (PAR-0380): `ColorPicker.show(color, alpha, ...)` builds hue / sat /
+	# value rows (+ alpha only when asked) at 370x44 and a hex field that drops
+	# the alpha byte while opaque (`ColorPicker.java:47-167`).
+	var picker: Control = load("res://scenes/ui/dialogs/color_picker.tscn").instantiate()
+	root.add_child(picker)
+	picker.call("set_color", Color(1.0, 0.0, 0.0, 1.0))
+	picker.set("_alpha", false)
+	picker.call("shown")
+	var picker_sliders: Dictionary = picker.get("_sliders")
+	_check(picker_sliders.size() == 3, "color picker without alpha has 3 slider rows (got %s)" % picker_sliders.size())
+	var picker_hex: LineEdit = picker.get("_hex")
+	_check(picker_hex != null and picker_hex.text == "ff0000", "opaque hex drops alpha (got %s)" % (picker_hex.text if picker_hex else "null"))
+	picker.set("_alpha", true)
+	picker.call("shown")
+	_check((picker.get("_sliders") as Dictionary).size() == 4, "color picker with alpha has 4 slider rows")
+	picker.free()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)

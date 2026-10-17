@@ -27,7 +27,7 @@ use super::values;
 use super::{Cell, Stat, StatCtx, StatUnit, Stats};
 use crate::content::registries::blocks::{BlockDef, BlockKind};
 use crate::content::{BlockId, BulletId};
-use crate::ui::stat_display::{ammo_stat, fix_value};
+use crate::ui::stat_display::ammo_stat;
 use crate::world::blocks::defense::turrets::TurretAmmo;
 use crate::world::blocks::defense::turrets::behavior::TurretBehavior;
 use crate::world::blocks::payloads::PayloadKind;
@@ -125,17 +125,25 @@ fn status_text(
     duration: f32,
     chance: f32,
 ) -> String {
-    let name = ctx
-        .registry
-        .status(status)
+    // `StatValues.statusText` (`StatValues.java:229-236`): chance with
+    // `autoFixed(chance * 100, 4)`, then the name; reactive effects (blasted,
+    // ...) have no duration.
+    let def = ctx.registry.status(status);
+    let name = def
         .map(|def| ctx.localized_name("status", &def.name))
         .unwrap_or_default();
+    let reactive = def.is_some_and(|def| def.reactive);
     let chance_text = if chance < 1.0 {
-        ctx.bundle
-            .format("stat.chance", &[&fix_value(chance * 100.0)])
+        ctx.bundle.format(
+            "stat.chance",
+            &[&crate::ui::stat_display::auto_fixed(chance * 100.0, 4)],
+        )
     } else {
         String::new()
     };
+    if reactive {
+        return format!("{chance_text}[stat]{name}");
+    }
     format!(
         "{chance_text}[stat]{name}[lightgray] ~ [stat]{}[lightgray] {}",
         crate::ui::stat_display::auto_fixed(duration / 60.0, 1),
@@ -197,7 +205,8 @@ pub(super) fn bullet_rows(ctx: &StatCtx, bullet: BulletId, nested: bool) -> Vec<
                 "bullet.splashdamage",
                 &[
                     &format!("{}", def.splash_damage as i32),
-                    &format!("{:.1}", def.splash_damage_radius / 8.0),
+                    // `Strings.fixed(radius / tilesize, 1)` truncates (37.5 -> 4.6).
+                    &crate::ui::stat_display::fixed(def.splash_damage_radius / 8.0, 1),
                 ],
             ),
         );
@@ -227,6 +236,26 @@ pub(super) fn bullet_rows(ctx: &StatCtx, bullet: BulletId, nested: bool) -> Vec<
             ),
         );
     }
+    // `healPercent` / `healAmount` (`StatValues.java:794-800`; L05 T3: poly's
+    // weapon "5.5% repair", java/info-poly-2.png).
+    if def.heal_percent > 0.0 {
+        sep(
+            &mut rows,
+            ctx.bundle.format(
+                "bullet.healpercent",
+                &[&crate::ui::stat_display::auto_fixed(def.heal_percent, 2)],
+            ),
+        );
+    }
+    if def.heal_amount > 0.0 {
+        sep(
+            &mut rows,
+            ctx.bundle.format(
+                "bullet.healamount",
+                &[&crate::ui::stat_display::auto_fixed(def.heal_amount, 2)],
+            ),
+        );
+    }
     if def.pierce || def.pierce_cap != -1 {
         let text = if def.pierce_cap == -1 {
             ctx.bundle.get("bullet.infinitepierce").to_string()
@@ -235,6 +264,10 @@ pub(super) fn bullet_rows(ctx: &StatCtx, bullet: BulletId, nested: bool) -> Vec<
                 .format("bullet.pierce", &[&format!("{}", def.pierce_cap)])
         };
         sep(&mut rows, text);
+    }
+    // `if(type.incendAmount > 0) sep(bt, "@bullet.incendiary")` (`StatValues.java:806-808`).
+    if def.incend_amount > 0 {
+        sep(&mut rows, ctx.bundle.get("bullet.incendiary"));
     }
     if def.homing_power > 0.01 {
         sep(&mut rows, ctx.bundle.get("bullet.homing"));
@@ -252,6 +285,43 @@ pub(super) fn bullet_rows(ctx: &StatCtx, bullet: BulletId, nested: bool) -> Vec<
                 &[&format!("{}", def.lightning), &format!("{damage}")],
             ),
         );
+    }
+    // `StatValues.ammo` armor rows (`StatValues.java:853-876`): armor piercing,
+    // else the unit and building armor multipliers (weakness > 1, partial
+    // pierce in (0, 1), anti-armor <= 0). L05 T3: java/info-lancer-2.png
+    // "4x armor weakness".
+    if def.pierce_armor {
+        sep(&mut rows, ctx.bundle.get("bullet.armorpierce"));
+    } else {
+        for (value, weakness, partial, anti) in [
+            (
+                def.armor_multiplier,
+                "bullet.armorweakness",
+                "bullet.partialarmorpierce",
+                "bullet.antiarmor",
+            ),
+            (
+                def.block_armor_multiplier,
+                "bullet.blockarmorweakness",
+                "bullet.blockpartialarmorpierce",
+                "bullet.blockantiarmor",
+            ),
+        ] {
+            if (value - 1.0).abs() <= f32::EPSILON {
+                continue;
+            }
+            let text = if value > 1.0 {
+                ctx.bundle
+                    .format(weakness, &[&crate::ui::stat_display::auto_fixed(value, 2)])
+            } else if value > 0.0 {
+                ctx.bundle
+                    .format(partial, &[&format!("{}", ((1.0 - value) * 100.0) as i32)])
+            } else {
+                ctx.bundle
+                    .format(anti, &[&crate::ui::stat_display::auto_fixed(-value, 2)])
+            };
+            sep(&mut rows, text);
+        }
     }
     if def.max_damage_fraction > 0.0 {
         sep(
@@ -703,6 +773,166 @@ mod tests {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// Every `Cell::Text` anywhere in `stat`'s first value row (panels flattened).
+    fn all_texts(stats: &Stats, stat: Stat) -> String {
+        fn walk(cells: &[Cell], out: &mut String) {
+            for cell in cells {
+                match cell {
+                    Cell::Text { t } => {
+                        out.push_str(t);
+                        out.push('|');
+                    }
+                    Cell::Panel { cells } => walk(cells, out),
+                    _ => {}
+                }
+            }
+        }
+        let mut out = String::new();
+        for value in row(stats, stat) {
+            walk(&value, &mut out);
+        }
+        out
+    }
+
+    fn l05_bundle() -> crate::assets::bundle::Bundle {
+        crate::assets::bundle::Bundle::from_layers(vec![parse_properties(
+            "bullet.damage=[stat]{0}[lightgray] damage\n\
+             bullet.multiplier=[stat]{0}[lightgray] ammo/item\n\
+             bullet.armorweakness=[red]{0}x[lightgray] armor weakness\n\
+             bullet.splashdamage=[stat]{0}[lightgray] area dmg ~ [stat] {1}[lightgray] tiles\n\
+             unit.seconds=seconds\nstatus.burning.name=Burning\nstatus.blasted.name=Blasted\n\
+             bar.regenerationrate=[stat]{0}/sec[lightgray] regen rate\n\
+             ability.stat.cooldown=[stat]{0} sec[lightgray] cooldown\n\
+             liquid.water.name=Water\nliquid.cryofluid.name=Cryofluid\nunit.persecond=/sec\n",
+        )])
+    }
+
+    /// L05 T3: mono (`UnitType.setStats`, `UnitType.java:790-850`): Item
+    /// Capacity / Range carry no unit (the float and `String` overloads), Payload
+    /// Capacity only for `Payloadc` units, Build Cost from the factory plan, and
+    /// Mine Tier lists the minable ore blocks (java/info-mono.png).
+    #[test]
+    fn mono_unit_stats_follow_java() {
+        let registry = registry();
+        let bundle = l05_bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let id = registry.unit_id("mono").expect("mono");
+        let stats = content_stats(
+            &ctx,
+            crate::content::ContentRef::new(crate::content::ContentType::Unit, id.raw()),
+        );
+        assert!(
+            row(&stats, Stat::PayloadCapacity).is_empty(),
+            "mono has no Payloadc"
+        );
+        assert_eq!(
+            texts(&stats, Stat::Range).len(),
+            1,
+            "range is the bare number"
+        );
+        assert_eq!(texts(&stats, Stat::ItemCapacity), vec!["20".to_owned()]);
+        assert!(
+            !row(&stats, Stat::BuildCost).is_empty(),
+            "build cost from the factory plan"
+        );
+        let ores: Vec<String> = row(&stats, Stat::MineTier)
+            .iter()
+            .flat_map(|value| value.iter())
+            .filter_map(|cell| match cell {
+                Cell::Panel { cells } => cells.iter().find_map(|inner| match inner {
+                    Cell::Icon {
+                        content: Some(name),
+                        size: 40,
+                        ..
+                    } => Some(name.clone()),
+                    _ => None,
+                }),
+                _ => None,
+            })
+            .collect();
+        assert!(ores.contains(&"ore-copper".to_owned()), "{ores:?}");
+        assert!(ores.contains(&"ore-lead".to_owned()), "{ores:?}");
+        assert!(
+            !ores.contains(&"ore-titanium".to_owned()),
+            "tier 1 cannot mine titanium: {ores:?}"
+        );
+    }
+
+    /// L05 T3 (PAR-0301): lancer's laser has `ammoMultiplier = 1f` and
+    /// `armorMultiplier = 4f` (`Blocks.java:3608-3615`): no "ammo/item" row and a
+    /// "4x armor weakness" row (`StatValues.java:857-861`); java/info-lancer-2.png.
+    #[test]
+    fn lancer_ammo_has_armor_weakness_and_no_ammo_per_item() {
+        let registry = registry();
+        let bundle = l05_bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let id = registry.block_id("lancer").expect("lancer");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        let text = all_texts(&stats, Stat::Ammo);
+        assert!(text.contains("4x[lightgray] armor weakness"), "{text}");
+        assert!(!text.contains("ammo/item"), "{text}");
+    }
+
+    /// L05 T3: ripple pyratite applies burning for 12 s (`Blocks.java:4030-4031`);
+    /// blasted is reactive, so no duration (`StatValues.statusText`,
+    /// `StatValues.java:229-236`); the blast radius truncates like
+    /// `Strings.fixed` (37.5 / 8 -> "4.6").
+    #[test]
+    fn ripple_status_rows_follow_java() {
+        let registry = registry();
+        let bundle = l05_bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let id = registry.block_id("ripple").expect("ripple");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        let text = all_texts(&stats, Stat::Ammo);
+        assert!(text.contains("Burning[lightgray] ~ [stat]12"), "{text}");
+        assert!(text.contains("[stat]Blasted[lightgray]|"), "{text}");
+        assert!(!text.contains("Blasted[lightgray] ~"), "{text}");
+        assert!(text.contains(" 4.6[lightgray] tiles"), "{text}");
+    }
+
+    /// L05 T3: the force projector's phase fabric is a booster, not an input
+    /// (`ConsumeItems.display` with `.boost()`), and water / cryofluid coolant
+    /// panels follow it (`ForceProjector.java:120-140`).
+    #[test]
+    fn force_projector_lists_coolant_boosters() {
+        let registry = registry();
+        let bundle = l05_bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        let id = registry
+            .block_id("force-projector")
+            .expect("force-projector");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        assert!(
+            row(&stats, Stat::Input).is_empty(),
+            "phase fabric is not an Input"
+        );
+        let boosters: String = row(&stats, Stat::Booster)
+            .iter()
+            .map(|value| {
+                let mut out = String::new();
+                fn walk(cells: &[Cell], out: &mut String) {
+                    for cell in cells {
+                        match cell {
+                            Cell::Text { t } => out.push_str(t),
+                            Cell::Panel { cells } => walk(cells, out),
+                            _ => {}
+                        }
+                    }
+                }
+                walk(value, &mut out);
+                out
+            })
+            .collect();
+        assert!(boosters.contains("Water"), "{boosters}");
+        assert!(boosters.contains("Cryofluid"), "{boosters}");
+        assert!(boosters.contains("regen rate"), "{boosters}");
     }
 
     /// I04 T6: duo's ammo lists copper -> graphite -> silicon (sorted by

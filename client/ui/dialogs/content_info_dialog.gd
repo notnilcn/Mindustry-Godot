@@ -34,6 +34,11 @@ func shown() -> void:
 	if _table == null:
 		return
 	_table.clear_children()
+	# `ContentInfoDialog.show` rebuilds `cont.pane(...)` per open, so every page
+	# starts at the top; the reused port body kept the previous page's scroll
+	# (L05 T3).
+	if body != null:
+		body.scroll_vertical = 0
 	var content_name := str(_context.get("content", _context.get("name", "")))
 	if content_name.is_empty():
 		_table.add(MindWidgets.label(_t("@none"))).pad(8)
@@ -175,8 +180,12 @@ func _render_stat(stat_variant: Variant) -> void:
 	# code-instantiated: one stat row per computed stat (data-driven).
 	var column := VBoxContainer.new()
 	column.add_theme_constant_override("separation", 2)
+	# `table.table(inset -> ...)` (`ContentInfoDialog.java:89-97`): Arc cells
+	# have no spacing — the label carries its own trailing space (": ") and
+	# values are split by the explicit `inset.add().size(10f)`. The old 6 px
+	# HBox gap rendered `0%` as `0 %` (PAR-0427, L05 T3).
 	var line := HBoxContainer.new()
-	line.add_theme_constant_override("separation", 6)
+	line.add_theme_constant_override("separation", 0)
 	column.add_child(line)
 	var label := MindWidgets.label(
 		MindWidgets.markup_text("[lightgray]%s:[] " % str(stat.get("label", "")))
@@ -216,7 +225,7 @@ func _add_cell(column: Container, line: HBoxContainer, cell_variant: Variant) ->
 		"row":
 			# code-instantiated: multi-line stat values split into extra lines.
 			var next := HBoxContainer.new()
-			next.add_theme_constant_override("separation", 6)
+			next.add_theme_constant_override("separation", 0)
 			column.add_child(next)
 			return next
 		"icon":

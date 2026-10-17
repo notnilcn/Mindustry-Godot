@@ -589,6 +589,10 @@ func _sort_all(node: Node) -> void:
 func _category(name: String) -> void:
 	var table := MindTable.new()
 	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# `current.left().defaults().fillX().expandX().left().pad(5)`
+	# (`CustomRulesDialog.java:377-383`): every rule cell has a 5 px pad, so a
+	# 32 px check row sits on a 42 px pitch (PAR-0430).
+	table.defaults().pad(5.0)
 	_current = table
 	_categories.append({"name": name, "table": table})
 
@@ -642,7 +646,7 @@ func _on_search(text: String) -> void:
 func _check(key: String, cons: Callable, prov: Callable, cond: Callable = Callable()) -> void:
 	var row := _make_check_row(key, cons, prov, cond)
 	if row != null:
-		_row_into(_current, row)
+		_row_into(_current, row, false)
 
 
 func _numberi(
@@ -673,13 +677,18 @@ func _number(
 
 
 ## Adds a built row to a `MindTable` (`add` + `row`) or a plain `VBoxContainer`.
-func _row_into(target: Node, row: Control) -> void:
+## `pad_top_zero`: the table-built rows (`number`, `team`) end in
+## `.padTop(0)` (`CustomRulesDialog.java:404, 437, 452, 467`); checks keep the
+## category's `pad(5)` (`:478`).
+func _row_into(target: Node, row: Control, pad_top_zero: bool = true) -> void:
 	# `main.left().defaults().fillX().left()` (`CustomRulesDialog.java:144`):
 	# rule rows hug the left edge of the column.
 	if row is MindTable:
 		(row as MindTable).set_table_left(true)
 	if target is MindTable:
-		(target as MindTable).add(row).left().grow_x_axis().set_pad_top(0)
+		var cell := (target as MindTable).add(row).left().grow_x_axis()
+		if pad_top_zero:
+			cell.set_pad_top(0)
 		(target as MindTable).row()
 	else:
 		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -759,7 +768,7 @@ func _check_in(
 ) -> void:
 	var row := _make_check_row(key, cons, prov, cond)
 	if row != null:
-		_row_into(table, row)
+		_row_into(table, row, false)
 
 
 ## A `number` row inside a plain container (the team collapsers).
