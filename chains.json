@@ -4557,7 +4557,8 @@
 ],
 "PAR-0110":[
 "Code-scan 2026-10-10 (maps-editor): S2, confidence high. Player impact: a new map cannot be created or named from the UI and every metadata/content editor (resize, generate filters, objectives, wave graph, locales, processors, assets, sector generate, playtest) is unreachable; Ctrl+S on an unnamed map silently does nothing. Related: PAR-0067 (editor opens) and plan 19's deferred note 'scene parse-check only; in-engine open deferred'. The Sector Generate dialog additionally hits the MindEditor.sector_generate stub even after it is mounted. In-engine verification pending.",
-"2026-10-16 round I: I06 passes 3-8 partial: T8/T9 + T12.1-T12.8 verified; T12.4/T12.5 residual slices landed; T12.9 blocked on the plan-20 data-asset client half"
+"2026-10-16 round I: I06 passes 3-8 partial: T8/T9 + T12.1-T12.8 verified; T12.4/T12.5 residual slices landed; T12.9 blocked on the plan-20 data-asset client half",
+"2026-10-17 round J (J08 T1/T2, 061ddaba + d2176386): editor buildings draw block.fullIcon with Java rotation (grey core placeholder gone) and the palette sort/filter/spawn-region/6-column/32 px rules match MapEditorDialog.java:844-895 (the red S is spawn's real block-spawn-ui); selected-entry accent frame fixed (Styles.java:310-327). Runs runs/20261017-s3-J08-T1/, -T2/."
 ],
 "PAR-0111":[
 "Code-scan 2026-10-10 (maps-editor): S2, confidence high (data loss). Player impact: closing the editor throws away unsaved drawing/metadata work with no warning, while upstream always confirms and resets the world only on accept. Compounded by the missing save UI (see the sibling editor-menu item). In-engine verification pending.",
@@ -4747,7 +4748,8 @@
 ],
 "PAR-0144":[
 "Revealed by PAR-0034. Java DatabaseDialog planet tabs draw Icon.eye / the planet UI icons; the port's text buttons keep the planet colors but not the icon surface.",
-"2026-10-16 round I: I04 T11: database planet tabs"
+"2026-10-16 round I: I04 T11: database planet tabs",
+"2026-10-17 round J (J06 T9, 9eb88e02): the Core Database backdrop is now the Java translucent dim (verified after the defaultDialog windowEmpty change); the tech-tree backdrop is separately J07 T3 (aec5bde4)."
 ],
 "PAR-0145":[
 "Revealed by PAR-0035. Java: ResearchDialog.treeLayout() (ResearchDialog.java:332-353) positions TechTreeNode cells as a connected graph (yellow connector lines, planet tab, pan/zoom, hover popups, purchase). Port: research_dialog.gd builds a root rail + node rows; the rail shows 'techtree.<null>' for nodes without a root (campaign_views.research has 223 nodes, only node[0] carries root 'serpulo'), and the rows overlap the rail. Requires: the view's tech-tree root grouping (or the Rust TechStore's roots) + a TreeLayout port (client/ui/layout/tree_layout.gd is a cursor-row stub) + the TechTreeNode widget. Cross-link PAR-0047.",
