@@ -165,6 +165,11 @@ mod tests {
     use bevy_ecs::world::World as EcsWorld;
 
     fn two_walls() -> (EcsWorld, WorldGrid, ContentRegistry, Entity, Entity) {
+        walls_at(5, 4)
+    }
+
+    /// A copper wall at (4, 4) and a second one at `(x, y)`.
+    fn walls_at(x: i16, y: i16) -> (EcsWorld, WorldGrid, ContentRegistry, Entity, Entity) {
         let content = test_registry();
         let table = BlockTable::build_default(&content).expect("table");
         let wall_id = content.block_id("copper-wall").expect("wall");
@@ -185,7 +190,7 @@ mod tests {
         let second = inst.spawn(
             &mut world,
             1,
-            TilePos::new(5, 4),
+            TilePos::new(x, y),
             0,
             0,
             item_count,
@@ -194,8 +199,34 @@ mod tests {
         world.insert_resource(table);
         let mut grid = WorldGrid::new(8, 8);
         grid.tiles.get_mut(4, 4).build = Some(first);
-        grid.tiles.get_mut(5, 4).build = Some(second);
+        grid.tiles.get_mut(x as i32, y as i32).build = Some(second);
         (world, grid, content, first, second)
+    }
+
+    /// L02 T5 (PAR-0378, wontfix): Java links proximity through
+    /// `Edges.getEdges(block.size)` only (`BuildingComp.updateProximity`,
+    /// BuildingComp.java:1886-1914), and for size 1 those are the four
+    /// orthogonal neighbours (`Edges.java:22-36`); there is no diagonal term.
+    /// A diagonally touching building is therefore not in `proximity`, so it
+    /// is neither dumped into nor fed from - same as the port.
+    #[test]
+    fn diagonal_neighbours_do_not_link() {
+        let (mut world, grid, content, first, second) = walls_at(5, 5);
+        update_proximity(&mut world, &grid, &content, first);
+        assert!(
+            !world
+                .get::<Building>(first)
+                .expect("first")
+                .proximity
+                .contains(&second)
+        );
+        assert!(
+            !world
+                .get::<Building>(second)
+                .expect("second")
+                .proximity
+                .contains(&first)
+        );
     }
 
     #[test]

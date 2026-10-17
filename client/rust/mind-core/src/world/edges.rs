@@ -156,6 +156,36 @@ mod tests {
         assert_eq!(e2.len(), 8);
     }
 
+    /// L02 T5 (PAR-0378): the edge ring is exactly Java's static table
+    /// (`Edges.java:22-36`) for every size - `(size) * 4` points on the four
+    /// sides, never a corner - so proximity has no diagonal term.
+    #[test]
+    fn edges_match_java_table_without_corners() {
+        for size in 1..=MAX_BLOCK_SIZE {
+            let i = size - 1;
+            let bot = -((i as f32 / 2.0) as i32) - 1;
+            let top = (i as f32 / 2.0 + 0.5) as i32 + 1;
+            let mut java: Vec<(i32, i32)> = Vec::new();
+            for j in 0..=i {
+                java.push((bot + 1 + j, bot));
+                java.push((bot + 1 + j, top));
+                java.push((bot, bot + j + 1));
+                java.push((top, bot + j + 1));
+            }
+            let mut port: Vec<(i32, i32)> = edges(size)
+                .iter()
+                .map(|p| (p.x() as i32, p.y() as i32))
+                .collect();
+            java.sort_unstable();
+            port.sort_unstable();
+            assert_eq!(port, java, "size {size}");
+            for (x, y) in &port {
+                let corner = (*x == bot || *x == top) && (*y == bot || *y == top);
+                assert!(!corner, "size {size}: corner ({x}, {y})");
+            }
+        }
+    }
+
     #[test]
     fn inside_edges_are_clamped() {
         for size in 1..=MAX_BLOCK_SIZE {
