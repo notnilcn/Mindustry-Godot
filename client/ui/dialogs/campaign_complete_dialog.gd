@@ -57,8 +57,8 @@ func _exit_to_menu() -> void:
 		ui.call("close_dialog", "campaign_complete")
 		ui.call("close_dialog", "planet")
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
-	if ui_root != null and ui_root.has_method("set_menu_visible"):
-		ui_root.call("set_menu_visible", true)
+	if ui_root != null and ui_root.has_method("return_to_menu"):
+		ui_root.call("return_to_menu")
 
 
 func _make_button(text: String, callback: Callable) -> Button:

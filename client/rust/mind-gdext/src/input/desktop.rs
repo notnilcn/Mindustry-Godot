@@ -1085,9 +1085,15 @@ impl DesktopBridge {
                     .clone()
                     .map(|camera| camera.bind().is_cutscene())
                     .unwrap_or(false);
+                // `state.is(State.paused) || state.is(State.playing)`
+                // (`Control.java:735`): the menu phase (after
+                // `MindCampaign.reset_to_menu`, L02 T2) ignores the key.
                 if !cutscene && let Some(mut host) = self.host.clone() {
-                    let paused = host.bind().is_paused();
-                    host.bind_mut().set_paused(!paused);
+                    let state = host.bind().get_state().to_string();
+                    if state == "paused" || state == "playing" {
+                        let paused = host.bind().is_paused();
+                        host.bind_mut().set_paused(!paused);
+                    }
                 }
                 self.fire_hotkey(name);
             }

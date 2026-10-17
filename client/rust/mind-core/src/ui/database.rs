@@ -100,6 +100,14 @@ impl DatabaseView {
     }
 }
 
+/// `DatabaseDialog.unlocked`'s override term (`DatabaseDialog.java:244`):
+/// `!state.isCampaign() && !state.isMenu()` - a custom game shows every entry
+/// unlocked; the menu (after `logic.reset()`) and the campaign read the
+/// persisted unlocks (L02 T2).
+pub fn custom_game_unlock_override(session: &crate::game::play::PlaySession) -> bool {
+    !session.is_campaign() && session.phase.is_game()
+}
+
 /// Builds the database model for `registry`.
 ///
 /// `unlocked_override` mirrors `DatabaseDialog.unlocked`: custom (non-campaign)
@@ -262,6 +270,43 @@ fn label(type_name: &str, name: &str, localized_name: &str) -> String {
 mod tests {
     use super::*;
     use crate::content::test_support::test_registry;
+
+    /// L02 T2: a custom game forces every entry unlocked; quitting runs
+    /// `logic.reset()` (`PlaySession::reset_world`, menu phase) and the Core
+    /// Database reads the persisted locks again (`DatabaseDialog.java:244`).
+    #[test]
+    fn database_locks_return_after_reset_to_menu() {
+        use crate::game::State;
+        use crate::game::play::PlaySession;
+        let registry = test_registry();
+        let mut session = PlaySession::default();
+        assert!(!custom_game_unlock_override(&session), "boot menu");
+        session.phase = State::Playing;
+        assert!(custom_game_unlock_override(&session), "custom game");
+        let locked = |session: &PlaySession| {
+            database_view(&registry, custom_game_unlock_override(session), None)
+                .categories
+                .iter()
+                .flat_map(|category| category.tags.iter())
+                .flat_map(|tag| tag.entries.iter())
+                .filter(|entry| !entry.unlocked)
+                .count()
+        };
+        assert_eq!(locked(&session), 0, "custom games show everything");
+        session.phase = State::Paused;
+        assert!(
+            custom_game_unlock_override(&session),
+            "paused is still a game"
+        );
+        session.reset_world();
+        assert_eq!(session.phase, State::Menu);
+        assert!(!custom_game_unlock_override(&session));
+        assert!(locked(&session) > 0, "menu shows the persisted locks");
+        // The campaign never overrides.
+        session.phase = State::Playing;
+        session.sector = Some((crate::content::PlanetId::new(0), 15));
+        assert!(!custom_game_unlock_override(&session));
+    }
 
     #[test]
     fn tabs_and_categories_match_the_reference() {

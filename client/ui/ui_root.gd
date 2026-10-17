@@ -286,6 +286,19 @@ func _boot() -> void:
 		fade.call("start")
 
 
+## The single return-to-menu path (L02 T2): `logic.reset()`
+## (`Logic.java:299-311`) through `MindCampaign.reset_to_menu` (saves/session +
+## sim world half; idempotent after `run_exit_save`), then the standalone menu.
+## Every quit surface ends here: pause-menu quit and abandon, game-over `@menu`
+## (`GameOverDialog.java:134-138`), campaign complete, the editor exit
+## (`MapEditorDialog.java:789-795`).
+func return_to_menu() -> void:
+	var campaign := get_node_or_null("/root/Spine/MindCampaign")
+	if campaign != null and campaign.has_method("reset_to_menu"):
+		campaign.call("reset_to_menu")
+	set_menu_visible(true)
+
+
 ## Shows the standalone menu (`MenuGroup`/`MenuBackground`) and hides the
 ## in-game HUD group (parity: `state.isMenu()` gates both), clearing the loading
 ## overlay too.
@@ -376,8 +389,7 @@ func has_modal() -> bool:
 ## pause-menu quit (`runExitSave`) and the game-over `@menu` button: when the
 ## match is a playtest, `MindCampaign.check_playtest` resets it without the exit
 ## save and reopens the playtested map in `MindEditor`
-## (`ui.editor.resumeAfterPlaytest`); this then parks the sim and shows the
-## editor shell. Returns false (nothing done) for a normal match, so the caller
+## (`ui.editor.resumeAfterPlaytest`); this then shows the editor shell. Returns false (nothing done) for a normal match, so the caller
 ## runs its usual quit-to-menu path.
 func check_playtest() -> bool:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
@@ -386,9 +398,8 @@ func check_playtest() -> bool:
 	var result: Variant = campaign.call("check_playtest")
 	if not (result is Dictionary) or not bool(result.get("playtest", false)):
 		return false
-	var host := get_node_or_null("/root/Spine/SimHost")
-	if host != null and host.has_method("set_paused"):
-		host.call("set_paused", true)
+	# `check_playtest` already ran `logic.reset()`: the sim is in the menu
+	# phase (pausing it here would flip it back to `paused`).
 	var shell := get_node_or_null("/root/Spine/Ui/EditorDialog")
 	if bool(result.get("resumed", false)) and shell != null and shell.has_method("show_dialog"):
 		# `beginEditMap` -> `show()`; the shell hides the standalone menu.

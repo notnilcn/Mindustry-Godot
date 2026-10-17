@@ -208,9 +208,10 @@ func _exit_to_menu() -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("close_dialog"):
 		ui.call("close_dialog", "editor_menu")
+	# `logic.reset(); hide()` (`MapEditorDialog.java:792-793`).
 	var ui_root := _ui_root()
-	if ui_root != null and ui_root.has_method("set_menu_visible"):
-		ui_root.call("set_menu_visible", true)
+	if ui_root != null and ui_root.has_method("return_to_menu"):
+		ui_root.call("return_to_menu")
 
 
 ## `MapEditorDialog.tryExit` (`MapEditorDialog.java:789-795`): always

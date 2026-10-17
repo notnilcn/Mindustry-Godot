@@ -2862,6 +2862,36 @@ impl MindSimHost {
         true
     }
 
+    /// `Logic.reset()` world half (`Logic.java:299-311`): `Groups.clear()`,
+    /// `Time.clear()`, `world.tiles` emptied and `state = new GameState()`
+    /// (menu), through [`Sim::reset`]. The host's per-match leftovers (sector
+    /// rules/plans/resume, pending launch/generation, the scenario player, the
+    /// cutscene input lock) go with it, so `get_state_json().phase` reads
+    /// `menu` and `live_rules()` is empty once a game ends (L02 T2). Called
+    /// only from `MindCampaign.reset_to_menu`, the single return-to-menu path.
+    #[func]
+    pub fn reset_to_menu(&mut self) {
+        self.sim.reset();
+        self.sim.reset_logic_presentation();
+        self.player = None;
+        self.sector_rules = None;
+        self.sector_plans.clear();
+        self.sector_resume = None;
+        self.pending_launch = None;
+        self.pending_gen_extras = None;
+        self.pending_map_gen_seed = None;
+        self.generated_loadout_placed = false;
+        self.input_locked = false;
+        self.pending_commands.clear();
+        self.runner = FixedStepRunner::for_rate(
+            self.sim.config().fixed_hz,
+            self.sim.config().max_ticks_per_frame,
+        );
+        self.world_dirty = true;
+        self.emit_state();
+        self.emit_world_changed();
+    }
+
     /// Pauses/resumes the fixed-step pump (resets the accumulator).
     #[func]
     pub fn set_paused(&mut self, paused: bool) {

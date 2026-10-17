@@ -247,7 +247,8 @@ func _continue_pressed() -> void:
 		ui.call("open_dialog", "planet", "")
 
 
-## Non-campaign `@menu`: park the sim paused behind the standalone menu.
+## Non-campaign `@menu` (`GameOverDialog.java:134-138`):
+## `if(!ui.paused.checkPlaytest()) logic.reset();` and the standalone menu.
 func _menu_pressed() -> void:
 	_close_pressed()
 	# `if(!ui.paused.checkPlaytest()) logic.reset();` (`GameOverDialog.java:134-139`):
@@ -255,12 +256,8 @@ func _menu_pressed() -> void:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root != null and ui_root.has_method("check_playtest") and bool(ui_root.call("check_playtest")):
 		return
-	var host := get_node_or_null("/root/Spine/SimHost")
-	if host != null and host.has_method("set_paused"):
-		host.call("set_paused", true)
-	var root := get_node_or_null("/root/Spine/Ui/UiRoot")
-	if root != null and root.has_method("set_menu_visible"):
-		root.call("set_menu_visible", true)
+	if ui_root != null and ui_root.has_method("return_to_menu"):
+		ui_root.call("return_to_menu")
 
 
 func _is_campaign() -> bool:
