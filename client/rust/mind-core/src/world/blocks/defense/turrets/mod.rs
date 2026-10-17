@@ -137,10 +137,23 @@ pub enum TurretAmmo {
     Item(Vec<ItemAmmo>),
     /// `LiquidTurret.ammoTypes`.
     Liquid(Vec<LiquidAmmo>),
-    /// `PowerTurret.shootType`.
-    Power(BulletId),
+    /// `PowerTurret.shootType` with its bullet def's range knobs snapshotted
+    /// at config time (J04 T6.2: `peekAmmo().rangeChange`/`minRangeChange`
+    /// read the fired bullet, `Turret.java:348-353`,`:340-344`).
+    Power(PowerAmmo),
     /// `PayloadAmmoTurret.ammoTypes` (content → bullet).
     Payload(Vec<PayloadAmmo>),
+}
+
+/// One resolved power-ammo entry (`PowerTurret.shootType`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PowerAmmo {
+    /// Bullet fired.
+    pub bullet: BulletId,
+    /// `BulletType.rangeChange` of the fired bullet.
+    pub range_change: f32,
+    /// `BulletType.minRangeChange` of the fired bullet.
+    pub min_range_change: f32,
 }
 
 /// Turret behavior class (`BaseTurret` subclass dispatch, M5/M6).
@@ -1008,8 +1021,13 @@ fn config_for_inner(
         }
         "test-power" => {
             let bullet = bullet("fuse")?;
+            let def = content.bullet(bullet);
             Some(TurretConfig {
-                ammo: TurretAmmo::Power(bullet),
+                ammo: TurretAmmo::Power(PowerAmmo {
+                    bullet,
+                    range_change: def.map(|d| d.range_change).unwrap_or(0.0),
+                    min_range_change: def.map(|d| d.min_range_change).unwrap_or(0.0),
+                }),
                 liquid_consumed: 1.0 / 60.0,
                 range: 120.0,
                 reload: 10.0,
@@ -1152,7 +1170,7 @@ fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> Option<Bull
             let liquids = world.get::<LiquidModule>(e)?;
             current_liquid_ammo(liquids, ammo).map(|entry| entry.bullet)
         }
-        TurretAmmo::Power(bullet) => Some(*bullet),
+        TurretAmmo::Power(ammo) => Some(ammo.bullet),
         TurretAmmo::Payload(ammo) => ammo
             .iter()
             .find(|entry| {
@@ -1168,9 +1186,9 @@ fn peek_ammo_state(state: &TurretState, world: &World, e: Entity) -> Option<Bull
 /// `TurretBuild.peekAmmo().rangeChange` (`BulletType.rangeChange`).
 ///
 /// Mirrors [`peek_ammo_state`]'s selection: the last item entry, the entry of
-/// `liquids.current()`, or the first stocked payload entry. `Power` turrets hold only
-/// the bullet id, so their `rangeChange` reads `0` (no vanilla power turret sets
-/// one).
+/// `liquids.current()`, the power bullet def or the first stocked payload entry
+/// (`Power` resolves the def from the runtime content because the ammo enum
+/// keeps only the bullet id).
 pub fn peek_ammo_range_change(world: &World, e: Entity) -> f32 {
     let Some(state) = world.get::<TurretState>(e) else {
         return 0.0;
@@ -1196,7 +1214,7 @@ pub fn peek_ammo_range_change_of(state: &TurretState, world: &World, e: Entity) 
             };
             current_liquid_ammo(liquids, ammo).map_or(0.0, |entry| entry.range_change)
         }
-        TurretAmmo::Power(_) => 0.0,
+        TurretAmmo::Power(ammo) => ammo.range_change,
         TurretAmmo::Payload(ammo) => ammo
             .iter()
             .find(|entry| {
@@ -1211,9 +1229,9 @@ pub fn peek_ammo_range_change_of(state: &TurretState, world: &World, e: Entity) 
 
 /// `TurretBuild.peekAmmo().minRangeChange` (`BulletType.minRangeChange`):
 /// mirrors [`peek_ammo_range_change_of`]'s ammo selection for the minimum
-/// range (`Turret.TurretBuild.minRange()`, `Turret.java:340-344`). `Power`
-/// turrets hold only the bullet id, so their change reads `0` (no vanilla
-/// power turret sets one).
+/// range (`Turret.TurretBuild.minRange()`, `Turret.java:340-344`); `Power`
+/// resolves the bullet def from the runtime content like
+/// [`peek_ammo_range_change_of`].
 pub fn peek_ammo_min_range_change_of(state: &TurretState, world: &World, e: Entity) -> f32 {
     match &state.config.ammo {
         TurretAmmo::Item(ammo) => state
@@ -1227,7 +1245,7 @@ pub fn peek_ammo_min_range_change_of(state: &TurretState, world: &World, e: Enti
             };
             current_liquid_ammo(liquids, ammo).map_or(0.0, |entry| entry.min_range_change)
         }
-        TurretAmmo::Power(_) => 0.0,
+        TurretAmmo::Power(ammo) => ammo.min_range_change,
         TurretAmmo::Payload(ammo) => ammo
             .iter()
             .find(|entry| {

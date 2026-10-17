@@ -629,7 +629,7 @@ fn ammo_in_content(config: &super::turrets::TurretConfig, content: &ContentRegis
     match &config.ammo {
         TurretAmmo::Item(entries) => entries.iter().all(|entry| valid(entry.bullet)),
         TurretAmmo::Liquid(entries) => entries.iter().all(|entry| valid(entry.bullet)),
-        TurretAmmo::Power(bullet) => valid(*bullet),
+        TurretAmmo::Power(ammo) => valid(ammo.bullet),
         TurretAmmo::Payload(entries) => entries.iter().all(|entry| valid(entry.bullet)),
     }
 }

@@ -271,14 +271,86 @@ impl BuildingBehavior for DoorBehavior {
 }
 
 /// Sets `open` on a door and every door chained to it (`DoorBuild` config body).
+///
+/// `Door.java:49-53`: a door with units standing in its footprint is skipped
+/// while closing (`Units.anyEntities(entity.tile) && !open`), and doors already
+/// in the requested state are skipped.
 pub fn set_open(world: &mut World, e: Entity, open: bool) {
     for door in chain_of(world, e) {
+        let already = world
+            .get::<DoorState>(door)
+            .is_some_and(|state| state.open == open);
+        if already || (!open && unit_on_footprint(world, door)) {
+            continue;
+        }
         if let Some(mut state) = world.get_mut::<DoorState>(door) {
             state.open = open;
         }
         // `pathfinder.updateTile(entity.tile)` (Door.java:56) is the sim's
         // `world::sync_dynamic_solid` + unit-runtime refresh (`Sim::configure`).
     }
+}
+
+/// `Units.anyEntities(tile)` (`Units.java:170-178`, `ground = true`): whether a
+/// grounded non-leg-step unit's hitbox overlaps the building's footprint
+/// square.
+fn unit_on_footprint(world: &World, entity: Entity) -> bool {
+    let Some((cx, cy)) = crate::audio::sim::building_centre_of(world, entity) else {
+        return false;
+    };
+    let Some(size) = world
+        .get_resource::<crate::world::block::BlockTable>()
+        .and_then(|table| {
+            world
+                .get::<crate::entities::comp::Building>(entity)
+                .and_then(|building| table.get(building.block))
+        })
+        .map(|instance| instance.def.size)
+    else {
+        return false;
+    };
+    let ts = crate::config::TILESIZE as f32;
+    let half = size as f32 * ts / 2.0;
+    let (left, top) = (cx - half, cy - half);
+    world
+        .iter_entities()
+        .filter_map(|entity_ref| {
+            entity_ref.get::<crate::entities::comp::Unit>()?;
+            if entity_ref
+                .get::<crate::entities::comp::unit::comp::BlockUnitComp>()
+                .is_some()
+            {
+                return None;
+            }
+            let pos = entity_ref.get::<crate::entities::comp::Pos>()?;
+            Some((entity_ref.id(), *pos))
+        })
+        .any(|(unit, pos)| {
+            // `(unit.isGrounded() && !unit.type.allowLegStep) == ground`.
+            if crate::combat::bullet::unit_is_flying(world, unit) {
+                return false;
+            }
+            let leg_step = world
+                .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+                .and_then(|runtime| {
+                    world
+                        .get::<crate::entities::comp::unit::comp::UnitTypeComp>(unit)
+                        .and_then(|comp| runtime.content.unit(comp.type_id))
+                        .map(|def| def.allow_leg_step)
+                })
+                .unwrap_or(false);
+            if leg_step {
+                return false;
+            }
+            let hit = world
+                .get::<crate::entities::comp::unit::comp::HitboxComp>(unit)
+                .map(|hitbox| hitbox.hit_size / 2.0)
+                .unwrap_or(0.0);
+            pos.x - hit < left + size as f32 * ts
+                && pos.x + hit > left
+                && pos.y - hit < top + size as f32 * ts
+                && pos.y + hit > top
+        })
 }
 
 fn chain_of(world: &World, e: Entity) -> SmallVec<[Entity; 6]> {

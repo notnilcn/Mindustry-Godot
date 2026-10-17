@@ -202,6 +202,96 @@ fn electrolyzer_dumps_liquids_in_configured_directions() {
     );
 }
 
+/// J04 T6.2 (`Turret.java:348-353`): `TurretAmmo::Power` keeps only the bullet
+/// id, so a power turret's `peekAmmo().rangeChange` used to read 0; the bullet
+/// def's knobs are now snapshotted into the ammo at config time.
+#[test]
+fn power_turret_reads_bullet_range_change() {
+    use crate::world::blocks::defense::turrets::{TurretAmmo, TurretState, turret_range_of};
+
+    // The snapshot happens when the block runtime builds the turret configs,
+    // so mutate the bullet def before installing the runtime.
+    let mut content = super::runtime::load_vanilla_content().expect("content");
+    let bullet = content.bullet_names()["lancer_laser"];
+    content.bullet_mut(bullet).expect("bullet").range_change = 24.0;
+    let mut sim = Sim::new(3, 32, 32, BlockId::AIR, BlockId::AIR);
+    let stone = BlockId::new(sim.world_block_id("stone").expect("stone"));
+    sim.grid.fill(stone, BlockId::AIR);
+    sim.install_block_runtime_from(crate::sim::runtime::SimRuntimeConfig::default(), content)
+        .expect("runtime");
+    let turret = place(&mut sim, "lancer", 5, 5);
+    let (config_range, ammo_change) = {
+        let state = sim.ecs.0.get::<TurretState>(turret).expect("state");
+        let TurretAmmo::Power(ammo) = &state.config.ammo else {
+            panic!("lancer is a power turret");
+        };
+        (state.config.range, ammo.range_change)
+    };
+    assert!(
+        (ammo_change - 24.0).abs() < 0.001,
+        "the power ammo snapshots the bullet's rangeChange ({ammo_change})"
+    );
+    let range = sim
+        .ecs
+        .0
+        .get::<TurretState>(turret)
+        .map(|state| turret_range_of(state, &sim.ecs.0, turret))
+        .expect("state");
+    assert!(
+        (range - (config_range + 24.0)).abs() < 0.001,
+        "turret range {range} vs {}",
+        config_range + 24.0
+    );
+}
+
+/// J04 T6.1 (PAR-0349, `Door.java:49-53`): a door refuses to close while a
+/// unit stands in its footprint (`Units.anyEntities(tile)`); it closes once
+/// the unit leaves.
+#[test]
+fn door_refuses_to_close_with_a_unit_on_it() {
+    use crate::entities::comp::DoorState;
+    use crate::world::behavior::defense::set_open;
+
+    let mut sim = runtime_sim();
+    sim.install_unit_runtime().expect("unit runtime");
+    let door = place(&mut sim, "door", 5, 5);
+    let unit = sim
+        .ecs
+        .0
+        .spawn((
+            crate::entities::comp::Unit,
+            crate::entities::comp::Pos {
+                x: 5.0 * 8.0 + 4.0,
+                y: 5.0 * 8.0 + 4.0,
+            },
+            crate::entities::comp::TeamComp { team: 1 },
+            crate::entities::comp::unit::comp::HitboxComp { hit_size: 8.0 },
+        ))
+        .id();
+    // Open, then try to close: the unit keeps it open.
+    set_open(&mut sim.ecs.0, door, true);
+    set_open(&mut sim.ecs.0, door, false);
+    assert!(
+        sim.ecs
+            .0
+            .get::<DoorState>(door)
+            .is_some_and(|state| state.open),
+        "a door with a unit in its footprint stays open"
+    );
+    // Move the unit off the tile: the door closes.
+    if let Some(mut pos) = sim.ecs.0.get_mut::<crate::entities::comp::Pos>(unit) {
+        pos.x = 20.0 * 8.0 + 4.0;
+    }
+    set_open(&mut sim.ecs.0, door, false);
+    assert!(
+        !sim.ecs
+            .0
+            .get::<DoorState>(door)
+            .is_some_and(|state| state.open),
+        "the door closes once the unit leaves"
+    );
+}
+
 /// J04 T4 (`PowerGenerator.onExplosion`, `PowerGenerator.java:149-201`): the
 /// sim half of a generator explosion - radius damage, ignition fires, prop
 /// breaking, fireballs and liquid puddles (the view half stays in
