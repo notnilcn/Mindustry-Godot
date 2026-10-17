@@ -30,6 +30,9 @@ func shown() -> void:
 
 
 func _build() -> void:
+	# A reused dialog node: drop the previous open's body before rebuilding
+	# (`shown()` rebuilds on every open; L01 T1).
+	clear_content()
 	var root := content_table()
 	_add_entry(root, "@editor.importmap", "@editor.importmap.description", "download", _open_map_load)
 	_add_entry(root, "@editor.importfile", "@editor.importfile.description", "file-text",

@@ -9,6 +9,9 @@ class_name MindCell
 extends RefCounted
 
 var control: Control = null
+## The owning [MindTable] (set by `MindTable.add`); size-affecting setters
+## invalidate it (L01 T1). Null for `MindTable.defaults()` and detached cells.
+var table: MindTable = null
 
 var grow_x := false
 var grow_y := false
@@ -43,6 +46,16 @@ func _init(c: Control = null) -> void:
 	control = c
 
 
+## Size-affecting change: re-measure the owning table and its ancestors
+## (`Table.invalidateHierarchy`, Arc `WidgetGroup.java:98-101`). Arc cells are
+## read in the table's next `layout()`; Godot caches minimum sizes, so the
+## chained `add(x).width(...)`/`.pad(...)` after `add()` must drop that cache.
+func _changed() -> MindCell:
+	if table != null and is_instance_valid(table):
+		table.invalidate()
+	return self
+
+
 ## Copies layout defaults into this cell (used by `MindTable.defaults()`).
 func copy_from(other: MindCell) -> void:
 	grow_x = other.grow_x
@@ -72,119 +85,119 @@ func copy_from(other: MindCell) -> void:
 func grow() -> MindCell:
 	grow_x = true
 	grow_y = true
-	return self
+	return _changed()
 
 
 func grow_x_axis() -> MindCell:
 	grow_x = true
-	return self
+	return _changed()
 
 
 func grow_y_axis() -> MindCell:
 	grow_y = true
-	return self
+	return _changed()
 
 
 func fill() -> MindCell:
 	fill_x = true
 	fill_y = true
-	return self
+	return _changed()
 
 
 func fill_x_axis() -> MindCell:
 	fill_x = true
-	return self
+	return _changed()
 
 
 func fill_y_axis() -> MindCell:
 	fill_y = true
-	return self
+	return _changed()
 
 
 func expand() -> MindCell:
 	expand_x = true
 	expand_y = true
-	return self
+	return _changed()
 
 
 func expand_x_axis() -> MindCell:
 	expand_x = true
-	return self
+	return _changed()
 
 
 func expand_y_axis() -> MindCell:
 	expand_y = true
-	return self
+	return _changed()
 
 
 func set_uniform() -> MindCell:
 	uniform = true
-	return self
+	return _changed()
 
 
 func set_uniform_x() -> MindCell:
 	uniform_x = true
-	return self
+	return _changed()
 
 
 func set_uniform_y() -> MindCell:
 	uniform_y = true
-	return self
+	return _changed()
 
 
 func top() -> MindCell:
 	align = 1
-	return self
+	return _changed()
 
 
 func left() -> MindCell:
 	align = 3
-	return self
+	return _changed()
 
 
 func bottom() -> MindCell:
 	align = 2
-	return self
+	return _changed()
 
 
 func right() -> MindCell:
 	align = 4
-	return self
+	return _changed()
 
 
 func width(w: float) -> MindCell:
 	width_value = w
-	return self
+	return _changed()
 
 
 func height(h: float) -> MindCell:
 	height_value = h
-	return self
+	return _changed()
 
 
 func size(s: float) -> MindCell:
 	size_value = s
-	return self
+	return _changed()
 
 
 func set_min_width(w: float) -> MindCell:
 	min_width = w
-	return self
+	return _changed()
 
 
 func set_max_width(w: float) -> MindCell:
 	max_width = w
-	return self
+	return _changed()
 
 
 func set_min_height(h: float) -> MindCell:
 	min_height = h
-	return self
+	return _changed()
 
 
 func set_max_height(h: float) -> MindCell:
 	max_height = h
-	return self
+	return _changed()
 
 
 func pad(p: float) -> MindCell:
@@ -192,32 +205,32 @@ func pad(p: float) -> MindCell:
 	pad_right = p
 	pad_top = p
 	pad_bottom = p
-	return self
+	return _changed()
 
 
 func set_pad_top(p: float) -> MindCell:
 	pad_top = p
-	return self
+	return _changed()
 
 
 func set_pad_left(p: float) -> MindCell:
 	pad_left = p
-	return self
+	return _changed()
 
 
 func set_pad_bottom(p: float) -> MindCell:
 	pad_bottom = p
-	return self
+	return _changed()
 
 
 func set_pad_right(p: float) -> MindCell:
 	pad_right = p
-	return self
+	return _changed()
 
 
 func set_align(value: int) -> MindCell:
 	align = value
-	return self
+	return _changed()
 
 
 func set_label_align(value: int) -> MindCell:
@@ -227,7 +240,7 @@ func set_label_align(value: int) -> MindCell:
 
 func set_colspan(value: int) -> MindCell:
 	colspan = max(1, value)
-	return self
+	return _changed()
 
 
 func set_color(value: Color) -> MindCell:

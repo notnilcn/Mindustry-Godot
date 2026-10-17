@@ -506,10 +506,6 @@ func _rebuild() -> void:
 		index += 1
 	if not shown_any:
 		_grid.add(MindWidgets.label(_tm("@maps.none"))).pad(8)
-	# Grids nested in another container miss the deferred sort; place now and
-	# again next frame once the container has assigned the grid its final size.
-	_grid.sort_now()
-	_grid.call_deferred("sort_now")
 
 
 ## The gamemode filter (`invalid |= !mode.valid(map)`) and the search over

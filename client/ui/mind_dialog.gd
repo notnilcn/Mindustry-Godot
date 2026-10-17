@@ -161,14 +161,11 @@ func show_dialog() -> void:
 	shown()
 	# `UI.java:132-133`: showing fades in over 0.1 s.
 	MindWidgets.fade_in(self, 0.1)
-	# `MindTable` layout is manual: place now (min sizes) and again next frame
-	# once the containers have assigned their final size, so grow cells fill.
-	_resort_tables()
-	call_deferred("_resort_tables")
 
 
-## Re-runs layout on every nested `MindTable` (grow cells otherwise stay at their
-## minimum size when a grid is built while the dialog is hidden).
+## Immediate layout pass over every nested `MindTable`. Not needed for layout
+## since L01 T1 (tables sort on `NOTIFICATION_SORT_CHILDREN` and propagate their
+## minimum size); kept for dialogs that read child rects in the same frame.
 func _resort_tables() -> void:
 	for node in find_children("*", "", true, false):
 		if node is MindTable:
@@ -487,7 +484,20 @@ func campaign_section(name: String) -> Array:
 	return campaign_views().get(name, []) as Array
 
 
-## The dialog's content column as a fresh `MindTable` (clears prior content).
+## `cont.clearChildren()`: drops every body child. Dialogs whose Java original
+## builds a new `BaseDialog` per open (e.g. `EditorMapsDialog.showMap`,
+## `EditorMapsDialog.java:101`) reuse this node, so a rebuild must clear first or
+## the previous body stays stacked above the new one.
+func clear_content() -> void:
+	if cont == null:
+		return
+	for child in cont.get_children():
+		cont.remove_child(child)
+		child.queue_free()
+
+
+## The dialog's content column as a new `MindTable` appended to `cont` (call
+## [method clear_content] first when rebuilding).
 ## code-instantiated: dialog bodies are data-driven and rebuilt on `shown()`.
 func content_table() -> MindTable:
 	var table := MindTable.new()

@@ -180,9 +180,6 @@ func _rebuild_list() -> void:
 		var none := MindWidgets.label(_tm("@save.none"))
 		none.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		_grid.add(none).grow_x_axis().grow_y_axis().pad(16).set_align(0)
-	# Nested grids miss the deferred sort; place now and again next frame.
-	_grid.sort_now()
-	_grid.call_deferred("sort_now")
 
 
 func _build_card(slot: Dictionary) -> Button:

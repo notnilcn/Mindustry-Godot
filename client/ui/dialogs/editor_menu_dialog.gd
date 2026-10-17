@@ -46,6 +46,9 @@ func shown() -> void:
 
 
 func _build() -> void:
+	# A reused dialog node: drop the previous open's body before rebuilding
+	# (`shown()` rebuilds on every open; L01 T1).
+	clear_content()
 	var root := content_table()
 	# `BaseDialog` fills the parent; the fixed menu rows centre in the full
 	# screen (Java's `MapEditorDialog` menu table).

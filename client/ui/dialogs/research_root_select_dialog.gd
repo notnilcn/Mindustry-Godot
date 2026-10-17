@@ -27,6 +27,9 @@ func shown() -> void:
 
 
 func _rebuild() -> void:
+	# A reused dialog node: drop the previous open's body before rebuilding
+	# (`shown()` rebuilds on every open; L01 T1).
+	clear_content()
 	var table := content_table()
 	table.add_theme_constant_override("separation", 0)
 	# Java centers the 300-wide `Tex.button` table inside the pane.

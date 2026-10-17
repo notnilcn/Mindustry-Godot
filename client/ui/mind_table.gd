@@ -16,25 +16,39 @@ var _current_row := 0
 var _defaults: MindCell = null
 var _background_name := ""
 var _margin_value := 0.0
-var _sorting := false
-## A resize that arrived mid-sort; re-queued once the current sort finishes.
-var _resort_after_sort := false
 
 
+## Layout invalidation (L01 T1), the port of Arc's `invalidateHierarchy`
+## (`arc/scene/ui/layout/WidgetGroup.java:98-106`: every add/remove and
+## `Table.row()`/`Table.invalidate()` (`Table.java:174-177`, `:647-650`) marks the
+## table and each ancestor for layout on the next `validate`).
+##
+## Godot's analogue is the minimum-size chain: `update_minimum_size()` drops the
+## cached minimum of this node and every ancestor and emits
+## `minimum_size_changed` (deferred), which each parent `Container` turns into its
+## own `update_minimum_size()` + `queue_sort()`. Children are wired by
+## `Container.add_child_notify` (their `minimum_size_changed`,
+## `visibility_changed` and `size_flags_changed` re-sort this table), so the cases
+## the engine cannot see are the ones that live in [MindCell]/table fields:
+## cell setters after `add()`, `row()` and `margin()`. Those call [method invalidate].
+##
+## `queue_sort()` defers to the native `Container::_sort_children`, which only
+## sends `NOTIFICATION_SORT_CHILDREN`; a script `_sort_children()` is not a
+## virtual and is never called by it. Before L01 T1 this table did not handle the
+## notification, so it laid out only when a dialog called [method sort_now] —
+## the root of the stale-rect bugs (PAR-0410: the filtered Custom Game grid kept
+## the unfiltered grid's 1608 px height and centred its single tile off-screen).
 func _notification(what: int) -> void:
-	# Re-run layout when the container is resized. A deferred `queue_sort()` can
-	# fire before the parent assigns the final size, leaving grow cells at their
-	# minimum; re-sorting here lets them fill once the size is known. The guard
-	# stops a child min-size change from recursing mid-sort, but a resize that
-	# lands *while* a sort runs (a floating dialog panel shrinking to the new
-	# content's width in the same pass) must not be dropped — the cells would
-	# keep the stale width's positions. Latch it and re-queue at the end of the
-	# sort instead.
-	if what == NOTIFICATION_RESIZED:
-		if _sorting:
-			_resort_after_sort = true
-		else:
-			queue_sort()
+	if what == NOTIFICATION_SORT_CHILDREN:
+		_sort_children()
+
+
+## Marks this table's minimum size and layout dirty and propagates up the parent
+## chain (`WidgetGroup.invalidateHierarchy`). Cheap: both calls coalesce into one
+## deferred update per frame.
+func invalidate() -> void:
+	update_minimum_size()
+	queue_sort()
 
 
 ## Appends `child` to the current row and returns its [MindCell].
@@ -42,15 +56,18 @@ func add(child: Control) -> MindCell:
 	var cell := MindCell.new(child)
 	if _defaults != null:
 		cell.copy_from(_defaults)
+	cell.table = self
 	_cells.append({"control": child, "cell": cell, "row": _current_row})
 	add_child(child)
-	queue_sort()
+	invalidate()
 	return cell
 
 
-## Starts a new row (subsequent `add` calls land in it).
+## Starts a new row (subsequent `add` calls land in it; `Table.row()`
+## invalidates, `Table.java:647-650`).
 func row() -> void:
 	_current_row += 1
+	invalidate()
 
 
 ## Removes every cell and child, resetting the row cursor (dialogs that
@@ -64,7 +81,7 @@ func clear() -> void:
 			control.queue_free()
 	_cells.clear()
 	_current_row = 0
-	queue_sort()
+	invalidate()
 
 
 ## Returns the cell whose flags apply to subsequent `add` calls (`defaults()`).
@@ -83,13 +100,13 @@ func background(style_name: String) -> void:
 ## Sets the table's outer margin.
 func margin(value: float) -> void:
 	_margin_value = value
-	queue_sort()
+	invalidate()
 	queue_redraw()
 
 
-## Forces an immediate layout pass. Grids nested inside another container do not
-## always receive the deferred `NOTIFICATION_SORT_CHILDREN` after a runtime
-## rebuild, so dialogs call this (and a deferred repeat) once the cells are added.
+## Forces an immediate layout pass at the current size. Layout normally runs from
+## `NOTIFICATION_SORT_CHILDREN` (see [method _notification]); this stays for
+## headless checks and callers that must read child rects in the same frame.
 func sort_now() -> void:
 	_sort_children()
 
@@ -103,7 +120,7 @@ func clear_children() -> void:
 			control.queue_free()
 	_cells.clear()
 	_current_row = 0
-	queue_sort()
+	invalidate()
 
 
 func _draw() -> void:
@@ -126,12 +143,6 @@ func _get_minimum_size() -> Vector2:
 
 
 func _sort_children() -> void:
-	_sorting = true
-	_sort_children_inner()
-	_sorting = false
-
-
-func _sort_children_inner() -> void:
 	var grid := _grid()
 	var min_size := _get_minimum_size()
 	var extra := size - min_size
@@ -212,10 +223,6 @@ func _sort_children_inner() -> void:
 			)
 		)
 		_place(control, inner, cell)
-
-	if _resort_after_sort:
-		_resort_after_sort = false
-		queue_sort()
 
 
 func _place(control: Control, rect: Rect2, cell: MindCell) -> void:
