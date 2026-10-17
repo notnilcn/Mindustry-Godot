@@ -5392,13 +5392,12 @@ impl MindCampaign {
         // points around its parent's position at `orbitRadius`, colour
         // `Pal.gray` with alpha = `params.uiAlpha`, skipped when
         // `!planet.drawOrbit`. The port's view frame keeps the current planet
-        // at the origin, so each centre is `parent.position - planet.position`.
+        // at the origin in its mesh frame, so each centre is
+        // `(parent.position - planet.position).rotate(Y, getRotation())`.
         let planets = registry.planets();
         let orbit = mind_core::render::g3d::orbit::orbit_radii(planets);
         let seconds = self.universe_secondsf();
         let system = mind_core::render::g3d::orbit::solar_system(planets, def.id.index());
-        let current =
-            mind_core::render::g3d::orbit::world_position(planets, &orbit, def.id.index(), seconds);
         let mut orbits = Array::<VarDictionary>::new();
         for (index, body) in planets.iter().enumerate() {
             let Some(parent) = body.parent else {
@@ -5414,22 +5413,20 @@ impl MindCampaign {
             if radius <= 0.0 {
                 continue;
             }
-            let parent_position = mind_core::render::g3d::orbit::world_position(
+            // In the viewed planet's mesh frame (the frame the port renders the
+            // globe and places the camera in), not raw world space: Java's
+            // planet + camera are rotated by `getRotation()` while the orbit
+            // stays in world space (L03 T2, PAR-0420).
+            let center = mind_core::render::g3d::orbit::orbit_center_in_planet_frame(
                 planets,
                 &orbit,
                 parent.index(),
+                def.id.index(),
                 seconds,
             );
             let mut row = VarDictionary::new();
             row.set("radius", radius);
-            row.set(
-                "center",
-                Vector3::new(
-                    parent_position[0] - current[0],
-                    parent_position[1] - current[1],
-                    parent_position[2] - current[2],
-                ),
-            );
+            row.set("center", Vector3::new(center[0], center[1], center[2]));
             orbits.push(&row);
         }
         out.set("orbits", &orbits);

@@ -497,6 +497,12 @@ func _set_body_centered(centered: bool) -> void:
 		cont.size_flags_vertical = (
 			Control.SIZE_EXPAND_FILL if centered else Control.SIZE_FILL
 		)
+	# The planet rail table is `t.top().left()` (`PlanetDialog.java:732-735`):
+	# pinned to the top-left corner, not centred along the top (PAR-0414, L03
+	# T2). The chooser keeps the centred layout.
+	if _root != null:
+		_root.set_table_top(not centered)
+		_root.set_table_left(not centered)
 
 
 ## Java `Styles.button` OK states at the reference frames: enabled = black fill
