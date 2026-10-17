@@ -1449,6 +1449,8 @@ pub struct BlockSpec {
     /// registry sink writes the back-reference when this block is pushed
     /// (L02 T1).
     pub decorates: Vec<&'static str>,
+    /// `Turret.playerControllable` (`Turret.java:103`, default true; mod knob).
+    pub player_controllable: Option<bool>,
 }
 
 impl Default for BlockSpec {
@@ -1570,6 +1572,7 @@ impl Default for BlockSpec {
             draw_edge_out: None,
             use_color: None,
             decorates: Vec::new(),
+            player_controllable: None,
         }
     }
 }
@@ -2427,6 +2430,10 @@ pub struct BlockDef {
     /// Set by the decorating prop (`BlockSpec::decorates`) or a mod's
     /// `decoration` field; `AIR` = none (L02 T1).
     pub decoration: BlockId,
+    /// `Turret.playerControllable` (`Turret.java:103`; `canControl()`,
+    /// `:382-384`): whether the player may possess this turret's proxy unit.
+    /// Default true; no vanilla turret clears it (mods may). L06 T2.
+    pub player_controllable: bool,
 }
 
 /// Whether the kind extends `Floor` (`world/blocks/environment/*`): base and
@@ -2811,6 +2818,7 @@ impl BlockDef {
             // `Floor.decoration = Blocks.air` (`Floor.java:70`); the decorating
             // prop writes it on registration (`RegistrySink::push`).
             decoration: BlockId::AIR,
+            player_controllable: spec.player_controllable.unwrap_or(true),
             // `Block.useColor` (`Block.java:183`); `OverlayFloor.java:13` and
             // `AirBlock.java:14` clear it, `OreBlock.java:23` re-enables it.
             use_color: spec.use_color.unwrap_or(!matches!(

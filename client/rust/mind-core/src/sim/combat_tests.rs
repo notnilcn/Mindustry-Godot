@@ -7246,3 +7246,117 @@ fn assembled_unit_takes_command_pos_and_payload_handoff() {
             .is_none()
     );
 }
+
+/// L06 T2: `RouterBuild implements ControlBlock` (`Router.java:30-53`): an own
+/// size-1 router yields a lazily created, stable `block` proxy
+/// (`unit()`, `:37-44`); the distributor (size 2) cannot be controlled
+/// (`canControl() = size == 1`); turrets keep theirs (`playerControllable`).
+#[test]
+fn router_is_a_control_block() {
+    let mut sim = live_sim(48);
+    sim.set_player_team(1);
+    let router = place(&mut sim, 10, 10, "router", 1);
+    let _distributor = place(&mut sim, 20, 20, "distributor", 1);
+    let _duo = place(&mut sim, 30, 30, "duo", 1);
+    let _enemy = place(&mut sim, 40, 40, "router", 2);
+    let pos = |x: i16, y: i16| crate::world::TilePos::new(x, y);
+    let first = sim
+        .control_block_unit_id(pos(10, 10))
+        .expect("router proxy");
+    assert_eq!(
+        sim.control_block_unit_id(pos(10, 10)),
+        Some(first),
+        "stable"
+    );
+    let proxy = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::distribution::router::RouterBuild>(router)
+        .and_then(|state| state.block_unit)
+        .expect("proxy stored");
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::unit::comp::BlockUnitComp>(proxy)
+            .is_some()
+    );
+    assert!(
+        !sim.unit_runtime().expect("runtime").units.contains(&proxy),
+        "never added to the unit pass"
+    );
+    assert_eq!(sim.control_block_unit_id(pos(20, 20)), None, "distributor");
+    assert!(sim.control_block_unit_id(pos(30, 30)).is_some(), "duo");
+    assert_eq!(sim.control_block_unit_id(pos(40, 40)), None, "enemy team");
+}
+
+/// L06 T2: a possessed router (`Router.java:102-117`) routes only toward the
+/// aimed quadrant and only while shooting; unpossessed it round-robins.
+#[test]
+fn possessed_router_routes_toward_aim_while_shooting() {
+    use crate::ai::types::player::PlayerInput;
+    use crate::world::blocks::distribution::transfer;
+    let mut sim = live_sim(48);
+    sim.set_player_team(1);
+    let router = place(&mut sim, 10, 10, "router", 1);
+    let east = place(&mut sim, 11, 10, "container", 1);
+    let north = place(&mut sim, 9, 11, "container", 1);
+    let copper = sim
+        .unit_runtime()
+        .expect("runtime")
+        .content
+        .item_id("copper")
+        .expect("copper");
+    let proxy_seq = sim
+        .control_block_unit_id(crate::world::TilePos::new(10, 10))
+        .expect("proxy");
+    let proxy = sim
+        .ecs
+        .0
+        .get::<crate::world::blocks::distribution::router::RouterBuild>(router)
+        .and_then(|state| state.block_unit)
+        .expect("proxy");
+    // `InputHandler.unitControl` on the proxy (the Ctrl+click path).
+    assert!(sim.possess_unit(proxy_seq), "possess the router proxy");
+    assert!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::Player>(proxy)
+            .is_some()
+    );
+    let set_input = |sim: &mut Sim, shooting: bool| {
+        let mut input = sim
+            .ecs
+            .0
+            .remove_resource::<PlayerInput>()
+            .unwrap_or_default();
+        // Aim at tile (14, 10): due east of the router.
+        input.aim_x = 14.0 * 8.0;
+        input.aim_y = 10.0 * 8.0;
+        input.shooting = shooting;
+        sim.ecs.0.insert_resource(input);
+    };
+    let stored = |sim: &Sim, e: Entity| {
+        sim.ecs
+            .0
+            .get::<crate::world::modules::ItemModule>(e)
+            .map_or(0, |items| items.get(copper))
+    };
+    set_input(&mut sim, false);
+    transfer::dispatch_handle_item(&mut sim.ecs.0, router, router, copper);
+    for _ in 0..30 {
+        set_input(&mut sim, false);
+        sim.tick().expect("tick");
+    }
+    assert_eq!(
+        stored(&sim, east) + stored(&sim, north),
+        0,
+        "holds while not shooting"
+    );
+    assert_eq!(stored(&sim, router), 1);
+    for _ in 0..30 {
+        set_input(&mut sim, true);
+        sim.tick().expect("tick");
+    }
+    assert_eq!(stored(&sim, east), 1, "aimed side");
+    assert_eq!(stored(&sim, north), 0, "never the other side");
+}

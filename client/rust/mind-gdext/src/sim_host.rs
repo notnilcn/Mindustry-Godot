@@ -1594,7 +1594,7 @@ impl MindSimHost {
     /// the tile holds no turret, the team differs, or the turret is the
     /// player's own unit already. Rust-only seam (`#[func]`-free, like
     /// `building_team`); the desktop input calls it through `bind()`.
-    pub fn control_block_unit_id(&self, x: i32, y: i32) -> Option<i32> {
+    pub fn control_block_unit_id(&mut self, x: i32, y: i32) -> Option<i32> {
         if !self.sim.grid.tiles.in_bounds(x, y) {
             return None;
         }
