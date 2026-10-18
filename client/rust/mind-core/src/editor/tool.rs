@@ -119,6 +119,20 @@ impl EditorTool {
         )
     }
 
+    /// Whether a press with this tool marks the map unsaved
+    /// (`MapView.touchDown`: `if(tool.edit) ui.editor.resetSaved()`,
+    /// `editor/MapView.java:96-98`). Pick/zoom/line presses do not.
+    pub fn press_resets_saved(self) -> bool {
+        self.edit()
+    }
+
+    /// Whether a drag from `from` to `to` marks the map unsaved
+    /// (`MapView.touchDragged`: `drawing && tool.draggable` and the tile
+    /// moved, `editor/MapView.java:135-137`).
+    pub fn drag_resets_saved(self, from: (i32, i32), to: (i32, i32)) -> bool {
+        self.draggable() && from != to
+    }
+
     /// Whether the tool drags across tiles (`EditorTool.draggable`).
     pub fn draggable(self) -> bool {
         matches!(
@@ -133,9 +147,9 @@ pub fn is_floor(def: Option<&BlockDef>) -> bool {
     def.is_some_and(crate::maps::filters::block_info::is_floor)
 }
 
-/// `OverlayFloor` classification.
+/// `instanceof OverlayFloor` (ores, `spawn`, `remove-ore`, character/rune overlays).
 pub fn is_overlay(def: Option<&BlockDef>) -> bool {
-    def.is_some_and(crate::maps::filters::block_info::is_overlay)
+    def.is_some_and(super::palette::is_overlay_floor)
 }
 
 /// `Floor.isLiquid` classification.
@@ -492,6 +506,15 @@ mod tests {
         assert!(EditorTool::Spray.draggable());
         assert!(!EditorTool::Line.draggable());
         assert!(!EditorTool::Pick.edit());
+        // `MapView.java:96-98,135-137`: only editing presses and moved
+        // draggable drags reset `saved` (the line resets on release).
+        assert!(EditorTool::Pencil.press_resets_saved());
+        assert!(!EditorTool::Pick.press_resets_saved());
+        assert!(!EditorTool::Zoom.press_resets_saved());
+        assert!(!EditorTool::Line.press_resets_saved());
+        assert!(EditorTool::Eraser.drag_resets_saved((1, 1), (2, 1)));
+        assert!(!EditorTool::Eraser.drag_resets_saved((1, 1), (1, 1)));
+        assert!(!EditorTool::Fill.drag_resets_saved((1, 1), (2, 1)));
         assert_eq!(EditorTool::from_name("PENCIL"), Some(EditorTool::Pencil));
         assert_eq!(EditorTool::from_name("nope"), None);
         assert_eq!(EditorTool::default(), EditorTool::Zoom);

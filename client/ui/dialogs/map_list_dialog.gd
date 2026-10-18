@@ -603,7 +603,7 @@ func _build_map_tile(map: Dictionary) -> Button:
 		var type_label := Label.new()
 		type_label.text = _source_label(map)
 		type_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		type_label.add_theme_color_override("font_color", Color.GRAY)
+		type_label.add_theme_color_override("font_color", MindStyles.ARC_GRAY)
 		type_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		# code-instantiated: `padTop(3f)` spacer above the source label.
 		var spacer := Control.new()

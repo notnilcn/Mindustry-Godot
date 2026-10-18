@@ -259,7 +259,9 @@ func _hint_complete(hint_name: String, state: Dictionary, hints: Dictionary) -> 
 		"serpuloCoreZone":
 			return int(hints.get("cores", 0)) > 1
 		"presetLaunch":
-			return bool(state.get("campaign", false)) and not str(state.get("preset", "")).is_empty()
+			# `state.getSector().preset == SectorPresets.frozenForest`
+			# (`HintsFragment.java:289-292`): only reaching Frozen Forest completes it.
+			return bool(state.get("campaign", false)) and str(state.get("preset", "")) == "frozenForest"
 		"presetDifficulty":
 			return bool(state.get("campaign", false)) and not str(state.get("preset", "")).is_empty()
 		"coreIncinerate":

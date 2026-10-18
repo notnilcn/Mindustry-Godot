@@ -434,6 +434,10 @@ func _refresh_core_items() -> void:
 		core_items_panel.custom_minimum_size.x = width
 
 
+## Whether `_refresh_loading` raised the overlay (it hides only its own).
+var _io_loading_shown := false
+
+
 ## `LoadingFragment` driver: shows the overlay while the Rust IO queue has
 ## pending save/load work (`MindSimHost.io_pending`) and hides it after.
 func _refresh_loading() -> void:
@@ -450,8 +454,14 @@ func _refresh_loading() -> void:
 	# (`HudFragment.java:668-673`; previously any IO covered the screen).
 	if pending > 0 and not saving and not shown:
 		loading.call("set_progress", 0.0, "")
-	elif (pending == 0 or saving) and shown:
+		_io_loading_shown = true
+	elif (pending == 0 or saving) and shown and _io_loading_shown:
+		# Only the overlay this driver raised: `ui.loadAnd` (editor generate)
+		# owns its own show/hide.
 		loading.call("hide_loading")
+		_io_loading_shown = false
+	elif not shown:
+		_io_loading_shown = false
 
 
 ## Opens the game-over dialog on the campaign loss (`gameOver`) or sector

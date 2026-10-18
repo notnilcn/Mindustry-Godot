@@ -29,6 +29,25 @@ func _init() -> void:
 
 func _ready() -> void:
 	_add_icon_effect()
+	_mirror_font_color()
+
+
+## Arc `Label.setColor` / `.color(...)` callers port as the `Label`
+## `font_color` override, but a `RichTextLabel` draws with `default_color`:
+## mirror the override so `label.add_theme_color_override("font_color", c)`
+## colours this label too (L07 T3: the Banned Blocks pane titles stayed white).
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:
+		_mirror_font_color()
+
+
+func _mirror_font_color() -> void:
+	if not has_theme_color_override("font_color"):
+		return
+	var color := get_theme_color("font_color")
+	if has_theme_color_override("default_color") and get_theme_color("default_color") == color:
+		return
+	add_theme_color_override("default_color", color)
 
 
 ## Assigns already-translated BBCode text.

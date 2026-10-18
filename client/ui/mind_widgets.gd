@@ -143,6 +143,20 @@ static func icon_button(
 			label.add_theme_font_override("font", default_font)
 	label.add_theme_font_size_override("font_size", 18)
 	row.add_child(label)
+	# The text is a child Label, so it never sees the button's disabled state:
+	# Arc `TextButtonStyle.disabledFontColor` (gray for `defaultt`, Styles.java
+	# :138) only reaches it through this hook. `BaseButton.set_disabled`
+	# redraws the button; the override changes only on a state flip.
+	result.draw.connect(
+		func():
+			if result.disabled == bool(result.get_meta("_shown_disabled", false)):
+				return
+			result.set_meta("_shown_disabled", result.disabled)
+			if result.disabled:
+				label.add_theme_color_override("font_color", result.get_theme_color("font_disabled_color"))
+			else:
+				label.remove_theme_color_override("font_color")
+	)
 	# A `Button` is not a container, so children do not contribute to its minimum
 	# size. Theme metrics only resolve once the button is inside the tree, so
 	# measure the row and apply its minimum on `ready` (measuring at construction

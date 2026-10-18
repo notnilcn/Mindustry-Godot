@@ -25,6 +25,8 @@ enum Sort { BEGIN, HEALTH, TYPE }
 var _editor: Node = null
 var _list: VBoxContainer = null
 var _graph: Control = null
+## Unit names in content-id order for the `type` sort keys.
+var _type_order: Array = []
 ## Working group list (`WaveInfoDialog.groups`); written back on every edit.
 var _groups: Array = []
 ## Expanded group index (`expandedGroup`), -1 for none.
@@ -48,10 +50,11 @@ func _ready() -> void:
 	super._ready()
 	_editor = get_node_or_null(editor_path)
 	clear_buttons()
-	# `buttons.button("@edit.menu", ...)` and `@waves.random`.
-	add_button(_t("@edit.menu"), _toggle_edit_panel, "pencil", 250.0)
-	add_button(_t("@waves.random"), _randomize, "refresh", 200.0)
+	# `addCloseButton()` first, then `@edit.menu` (Icon.edit, 250x64) and
+	# `waves.random` (Icon.refresh, width 200) (`WaveInfoDialog.java:48-95`).
 	add_close_button()
+	add_button(_t("@edit.menu"), _toggle_edit_panel, "edit", 250.0)
+	add_button(_t("@waves.random"), _randomize, "refresh", 200.0)
 	_connect_picker()
 
 
@@ -90,7 +93,9 @@ func _build() -> void:
 		_search = (int(text) - 1) if text.is_valid_int() else -1
 		_rebuild())
 	search.add_child(search_field)
-	var filter_button := MindWidgets.icon_button("units", "", "emptyi")
+	# `imageUp = filterType != null ? filterType.uiIcon : Icon.filter`, 46 px.
+	var filter_button := MindWidgets.icon_button("filter", "", "emptyi")
+	filter_button.custom_minimum_size = Vector2(46.0, 46.0)
 	filter_button.tooltip_text = _t("@waves.filter")
 	filter_button.pressed.connect(_show_unit_filter)
 	search.add_child(filter_button)
@@ -112,7 +117,13 @@ func _build() -> void:
 	add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_button.pressed.connect(_show_unit_add)
 	actions.add_child(add_button)
-	var sort_button := MindWidgets.icon_button("filter", "", "emptyi")
+	# `t.button(Icon.filter, ...)`: default `ImageButton` (Tex.button frame),
+	# `size(64f, 70f).padLeft(6f)` (`WaveInfoDialog.java:121-139`).
+	var sort_button := MindWidgets.icon_button("filter", "", "defaulti")
+	sort_button.custom_minimum_size = Vector2(64.0, 70.0)
+	for slot in [["normal", "button"], ["hover", "button-over"], ["pressed", "button-down"]]:
+		sort_button.add_theme_stylebox_override(slot[0], MindThemeBuilder._button_nine_patch(slot[1]))
+	actions.add_theme_constant_override("separation", 6)
 	sort_button.pressed.connect(_toggle_sort_panel)
 	actions.add_child(sort_button)
 	left.add_child(actions)
@@ -250,17 +261,23 @@ func _rebuild() -> void:
 	elif not any:
 		_list.add_child(MindWidgets.label(_t("@none.found")))
 	if _graph != null:
-		_graph.queue_redraw()
+		_graph.call("refresh")
 
 
 ## `groups.sort(Structs.comps(comparingFloat(sort.sort), comparingFloat(sort.secondary)))`.
 func _sort_groups() -> void:
+	# `type.id` order, read once per sort (not per comparison).
+	_type_order = _unit_names()
 	_groups.sort_custom(func(a: Variant, b: Variant) -> bool:
 		var group_a: Dictionary = a if a is Dictionary else {}
 		var group_b: Dictionary = b if b is Dictionary else {}
 		var key_a := _sort_key(group_a, _sort)
 		var key_b := _sort_key(group_b, _sort)
 		if key_a == key_b:
+			# `Sort.secondary`: `begin` ties break on `type.id`, the others
+			# on `begin` (`WaveInfoDialog.java:432-447`).
+			if _sort == Sort.BEGIN:
+				return _sort_key(group_a, Sort.TYPE) < _sort_key(group_b, Sort.TYPE)
 			return float(group_a.get("begin", 0)) < float(group_b.get("begin", 0))
 		return key_a < key_b)
 	if _reverse:
@@ -274,7 +291,8 @@ func _sort_key(group: Dictionary, sort_value: int) -> float:
 			var health: Dictionary = _unit_health()
 			return float(health.get(name, 0.0))
 		Sort.TYPE:
-			return float(_unit_names().find(str(group.get("type", ""))))
+			var order: Array = _type_order if not _type_order.is_empty() else _unit_names()
+			return float(order.find(str(group.get("type", ""))))
 		_:
 			return float(group.get("begin", 0))
 
@@ -293,34 +311,73 @@ func _spawned_at(group: Dictionary, wave: int) -> int:
 
 ## One group card (`table.table(Tex.button, t -> ...)`).
 func _group_card(group: Dictionary, index: int) -> Control:
+	# `table.table(Tex.button, t -> t.button(b -> ..., () -> expand))`
+	# (`WaveInfoDialog.java:170-206`): the whole header row is the expand
+	# button; icon + accent name (ellipsis, 110) + spacer + light-gray wave +
+	# the four 46px `emptyi` icon buttons.
 	var card := PanelContainer.new()
-	card.theme_type_variation = "smallPane"
+	card.add_theme_stylebox_override("panel", MindThemeBuilder._button_nine_patch("button"))
 	var box := VBoxContainer.new()
 	card.add_child(box)
-	var header := HBoxContainer.new()
-	box.add_child(header)
-	# `b.image(group.type.uiIcon)` has no port equivalent; the name is the icon.
-	var name_button := MindWidgets.button(str(group.get("type", "?")))
-	name_button.theme_type_variation = "flatt"
-	name_button.custom_minimum_size.x = 150.0
-	name_button.pressed.connect(func() -> void:
+	var header := Button.new()
+	header.theme_type_variation = "nonet"
+	header.custom_minimum_size.y = 46.0 - 12.0
+	header.pressed.connect(func() -> void:
 		_expanded = -1 if _expanded == index else index
 		_rebuild())
-	header.add_child(name_button)
+	box.add_child(header)
+	var row := HBoxContainer.new()
+	row.set_anchors_preset(Control.PRESET_FULL_RECT)
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_theme_constant_override("separation", 0)
+	header.add_child(row)
+	var type := str(group.get("type", "?"))
+	var icon := TextureRect.new()
+	icon.texture = MindWidgets.icon_texture("unit-%s-ui" % type)
+	icon.custom_minimum_size = Vector2(32.0, 32.0)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(icon)
+	var gap := Control.new()
+	gap.custom_minimum_size.x = 3.0
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(gap)
+	var name_label := MindWidgets.label(_unit_name(type))
+	name_label.add_theme_color_override("font_color", MindStyles.ACCENT)
+	name_label.custom_minimum_size.x = 110.0
+	name_label.clip_contents = true
+	name_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(name_label)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(spacer)
-	header.add_child(MindWidgets.label(str(int(group.get("begin", 0)) + 1)))
-	header.add_child(_small_icon("copy", "@editor.copy", func() -> void: _copy_group(index)))
+	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(spacer)
+	var begin := MindWidgets.label(str(int(group.get("begin", 0)) + 1))
+	begin.add_theme_color_override("font_color", MindStyles.ARC_LIGHT_GRAY)
+	begin.custom_minimum_size.x = 45.0
+	begin.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	begin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(begin)
+	row.add_child(_small_icon("copy", "@editor.copy", func() -> void: _copy_group(index)))
 	var effect := str(group.get("effect", ""))
-	header.add_child(_small_icon("logic" if effect.is_empty() else "warn",
+	row.add_child(_small_icon("logic" if effect.is_empty() else "warn",
 		effect if not effect.is_empty() else _t("@none"),
 		func() -> void: _show_effect_picker(index)))
-	header.add_child(_small_icon("units", "@stat.unittype", func() -> void: _show_unit_picker(index)))
-	header.add_child(_small_icon("cancel", "@waves.remove", func() -> void: _remove_group(index)))
+	row.add_child(_small_icon("units", "@stat.unittype", func() -> void: _show_unit_picker(index)))
+	row.add_child(_small_icon("cancel", "@waves.remove", func() -> void: _remove_group(index)))
 	if _expanded == index:
 		box.add_child(_group_fields(group, index))
 	return card
+
+
+## `group.type.localizedName` (`unit.<name>.name`).
+func _unit_name(type: String) -> String:
+	var key := "@unit.%s.name" % type
+	var value := _t(key)
+	return type if value == key or value.is_empty() else value
 
 
 func _group_fields(group: Dictionary, index: int) -> Control:
@@ -413,7 +470,12 @@ func effect_is_boss(group: Dictionary) -> bool:
 
 func _small_icon(icon: String, tooltip: String, handler: Callable) -> Button:
 	var button := MindWidgets.icon_button(icon, "", "emptyi")
+	# `size(46f)` with `pad(-6)`: a 34 px slot; `Icon.*Small` glyphs draw at
+	# the small icon size (~20 px), not the 30 px default.
 	button.custom_minimum_size = Vector2(34.0, 34.0)
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	for child in button.find_children("*", "Label", true, false):
+		(child as Label).add_theme_font_size_override("font_size", 20)
 	button.tooltip_text = tooltip
 	button.pressed.connect(handler)
 	return button
@@ -656,7 +718,7 @@ func _commit() -> void:
 	if _editor != null and _editor.has_method("set_waves_json"):
 		_editor.call("set_waves_json", JSON.stringify(_groups))
 	if _graph != null:
-		_graph.queue_redraw()
+		_graph.call("refresh")
 
 
 func _dialog(name: String) -> Node:

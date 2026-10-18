@@ -831,7 +831,7 @@ func show_message_edit(text: String, max_text: int, max_newlines: int, on_ok: Ca
 	area.custom_minimum_size = Vector2(380.0, 160.0)
 	area.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	var counter := Label.new()
-	counter.add_theme_color_override("font_color", Color.LIGHT_GRAY)
+	counter.add_theme_color_override("font_color", MindStyles.ARC_LIGHT_GRAY)
 	counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var last := [area.text]
 	var refresh := func() -> void:
@@ -945,14 +945,18 @@ func _t(key: String) -> String:
 
 ## Prompt title row: accent label + 3 px rule (`BaseDialog.java:24-25`, the same
 ## shape as `mind_dialog.gd _ensure_title_underline`).
-func _add_prompt_title(layout: VBoxContainer, title_text: String) -> void:
+func _add_prompt_title(layout: VBoxContainer, title_text: String, plain: bool = false) -> void:
 	if title_text.is_empty():
 		return
 	# code-instantiated: prompt titles are transient and parameterized.
-	var title := MindWidgets.label("[center]%s[/center]" % title_text)
+	# `showTextInput` builds a plain `Dialog(titleText)` (`UI.java:324`): the
+	# title sits at the left with no rule under it (java/newsave-prompt.png).
+	var title := MindWidgets.label(title_text if plain else "[center]%s[/center]" % title_text)
 	title.add_theme_color_override("default_color", MindStyles.ACCENT)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.add_child(title)
+	if plain:
+		return
 	var rule := ColorRect.new()
 	rule.color = MindStyles.ACCENT
 	rule.custom_minimum_size = Vector2(0.0, 3.0)
@@ -986,7 +990,7 @@ func _build_prompt(
 	var layout := VBoxContainer.new()
 	layout.add_theme_constant_override("separation", 6)
 	panel.add_child(layout)
-	_add_prompt_title(layout, title_text)
+	_add_prompt_title(layout, title_text, with_field)
 	if with_field:
 		# `UI.java:325`: the 400x4 accent rule above the text-input message.
 		var rule := ColorRect.new()
@@ -999,6 +1003,8 @@ func _build_prompt(
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	layout.add_child(body)
 	var field := LineEdit.new()
+	# `cont.field(def, ...)`: Arc's default underline `TextField` style.
+	field.theme_type_variation = "defaultField"
 	field.custom_minimum_size = Vector2(400.0, 50.0)
 	if with_field:
 		layout.add_child(field)
@@ -1075,3 +1081,14 @@ func _background_resume() -> void:
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if bool(host.call("is_paused")):
 		host.call("set_paused", false)
+
+## `UI.loadAnd(text, call)` (`core/UI.java:292-302`): the loading overlay shows
+## `text`, `call` runs 7 ticks later, then the overlay hides.
+func load_and(call: Callable, text: String = "@loading") -> void:
+	var loading := get_node_or_null("LoadingLayer/loading") as Control
+	if loading != null and loading.has_method("show_text"):
+		loading.call("show_text", _t(text))
+	await get_tree().create_timer(7.0 / 60.0).timeout
+	call.call()
+	if loading != null and loading.has_method("hide_loading"):
+		loading.call("hide_loading")

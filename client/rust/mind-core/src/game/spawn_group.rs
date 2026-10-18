@@ -264,16 +264,16 @@ impl SpawnGroup {
         if let Some(name) = obj.get("type").and_then(Value::as_str) {
             group.unit = name.to_owned();
         }
-        if let Some(v) = obj.get("begin").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("begin").and_then(json_int) {
             group.begin = v as i32;
         }
-        if let Some(v) = obj.get("end").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("end").and_then(json_int) {
             group.end = v as i32;
         }
-        if let Some(v) = obj.get("spacing").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("spacing").and_then(json_int) {
             group.spacing = v as i32;
         }
-        if let Some(v) = obj.get("max").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("max").and_then(json_int) {
             group.max = v as i32;
         }
         if let Some(v) = obj.get("scaling").and_then(Value::as_f64) {
@@ -285,10 +285,10 @@ impl SpawnGroup {
         if let Some(v) = obj.get("shieldScaling").and_then(Value::as_f64) {
             group.shield_scaling = v as f32;
         }
-        if let Some(v) = obj.get("amount").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("amount").and_then(json_int) {
             group.unit_amount = v as i32;
         }
-        if let Some(v) = obj.get("spawn").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("spawn").and_then(json_int) {
             group.spawn = v as i32;
         }
         if let Some(v) = obj.get("payloads").and_then(Value::as_array) {
@@ -302,7 +302,7 @@ impl SpawnGroup {
         match obj.get("effect") {
             Some(Value::String(effect)) => group.effect = Some(effect.clone()),
             // Legacy numeric boss effect (`8` => `StatusEffects.boss`).
-            Some(Value::Number(number)) if number.as_i64() == Some(8) => {
+            Some(Value::Number(number)) if json_int(&Value::Number(number.clone())) == Some(8) => {
                 group.effect = Some(String::from("boss"));
             }
             _ => {}
@@ -312,14 +312,23 @@ impl SpawnGroup {
                 .get("item")
                 .and_then(Value::as_str)
                 .ok_or_else(|| String::from("spawn group items.item missing"))?;
-            let amount = items.get("amount").and_then(Value::as_i64).unwrap_or(0) as i32;
+            let amount = items.get("amount").and_then(json_int).unwrap_or(0) as i32;
             group.items = Some(ItemStack::new(item, amount));
         }
-        if let Some(v) = obj.get("team").and_then(Value::as_i64) {
+        if let Some(v) = obj.get("team").and_then(json_int) {
             group.team = Some(v as u8);
         }
         Ok(group)
     }
+}
+
+/// Arc `JsonValue.getInt`: a JSON number read as `int`, truncating a double
+/// (`(int)doubleValue`). GDScript's `JSON.parse` turns every number into a
+/// float, so a group round-tripped through the editor UI arrives as `10.0`.
+fn json_int(value: &Value) -> Option<i64> {
+    value
+        .as_i64()
+        .or_else(|| value.as_f64().filter(|v| v.is_finite()).map(|v| v as i64))
 }
 
 #[cfg(test)]
@@ -371,6 +380,19 @@ mod tests {
         group.shield_scaling = -10.0;
         assert_eq!(group.get_shield(5), 20.0);
         assert_eq!(group.get_shield(10), 0.0);
+    }
+
+    #[test]
+    fn spawn_group_json_reads_float_ints() {
+        // GDScript's JSON.parse yields floats; Arc getInt truncates them.
+        let value: Value = serde_json::from_str(
+            r#"{"type":"dagger","begin":2.0,"end":10.0,"spacing":2.0,"max":4.0,"amount":2.0}"#,
+        )
+        .unwrap();
+        let group = SpawnGroup::from_json(&value).unwrap();
+        assert_eq!((group.begin, group.end, group.spacing), (2, 10, 2));
+        assert_eq!((group.max, group.unit_amount), (4, 2));
+        assert_eq!(group.get_spawned(12), 0);
     }
 
     #[test]

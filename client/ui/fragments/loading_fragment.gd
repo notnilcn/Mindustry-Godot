@@ -29,10 +29,47 @@ func _ready() -> void:
 ## Shows the overlay at `fraction` (0..1) with an optional `text` message.
 func set_progress(fraction: float, text: String = "") -> void:
 	visible = true
+	# Undo `show_text`'s text-only layout and colour.
+	if _button != null:
+		_button.visible = true
+	if _text != null:
+		_text.remove_theme_color_override("font_color")
 	if _bar != null:
+		_bar.visible = true
 		_bar.value = clampf(fraction, 0.0, 1.0) * 100.0
 	if _text != null and not text.is_empty():
 		_text.text = text
+
+
+## `show(String text)` (`LoadingFragment.java:111-122`): text only, no bar and
+## no cancel button.
+func show_text(text: String) -> void:
+	visible = true
+	if _bar != null:
+		_bar.visible = false
+	if _button != null:
+		_button.visible = false
+	if _text != null:
+		_set_markup(text)
+
+
+## `nameLabel` is an Arc markup label: `@loading` is `[accent]Loading...`. The
+## scene's plain `Label` takes the leading colour tag as its font colour and
+## drops the tags.
+func _set_markup(text: String) -> void:
+	var color := Color.WHITE
+	var tag := RegEx.create_from_string("^\\[([#a-zA-Z0-9]+)\\]")
+	var found := tag.search(text)
+	if found != null:
+		var name := found.get_string(1)
+		if name == "accent":
+			color = MindStyles.ACCENT
+		elif Color.html_is_valid(name):
+			color = Color.html(name)
+		elif Color.from_string(name, Color(0, 0, 0, 0)).a > 0.0:
+			color = Color.from_string(name, Color.WHITE)
+	_text.add_theme_color_override("font_color", color)
+	_text.text = RegEx.create_from_string("\\[[#a-zA-Z0-9]*\\]").sub(text, "", true)
 
 
 ## Updates the label only.

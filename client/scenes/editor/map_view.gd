@@ -41,8 +41,11 @@ func _process(delta: float) -> void:
 		queue_redraw()
 
 
-## `MapView.act`: WASD/arrows pan (`offset -= axis * 15 * delta / zoom`) unless a
-## text field has focus or Ctrl is held. Keys belong to a dialog on top
+## `MapView.act` (`editor/MapView.java:180-185`): pan by the `move_x`/`move_y`
+## binding axes (`Core.input.axis(Binding.moveX/moveY)`, rebindable; default
+## A/D and S/W, no arrows), `offset -= axis * 15 * Time.delta / zoom`, unless a
+## text field has focus or Ctrl is held. `Time.delta` is in 60 Hz ticks, so
+## one second of `delta` is 60 of them. Keys belong to a dialog on top
 ## (`Core.scene.hasField()` / the editor not being the top dialog).
 func _pan_keys(delta: float) -> void:
 	if _modal():
@@ -52,18 +55,16 @@ func _pan_keys(delta: float) -> void:
 		return
 	if Input.is_key_pressed(KEY_CTRL):
 		return
-	var ax := 0.0
-	var ay := 0.0
-	if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
-		ax -= 1.0
-	if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
-		ax += 1.0
-	if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
-		ay -= 1.0
-	if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
-		ay += 1.0
+	var input := get_node_or_null("/root/Spine/Input")
+	if input == null or not input.has_method("binding_axis"):
+		return
+	var ax := float(input.call("binding_axis", "move_x"))
+	var ay := float(input.call("binding_axis", "move_y"))
 	if ax != 0.0 or ay != 0.0:
-		_editor.call("map_view_pan", -ax * 15.0 * delta, -ay * 15.0 * delta)
+		var step := 15.0 * delta * 60.0
+		# `offset_y` is Godot y-down (`-MapView.offsety`): Java's
+		# `offsety -= ay * step` is `offset_y += ay * step`.
+		_editor.call("map_view_pan", -ax * step, ay * step)
 
 
 ## `MapView.draw`: the `EditorRenderer` is drawn into the view rect

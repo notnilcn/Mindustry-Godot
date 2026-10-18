@@ -1101,6 +1101,23 @@ impl MindInput {
         Vector2::new(x, y)
     }
 
+    /// Raw binding axis by name (`Core.input.axis(Binding)`): -1/0/1 from the
+    /// pressed keys of an `Axis` bind, with no gameplay/dialog gate. The map
+    /// editor polls `move_x`/`move_y` through this while its dialog is open
+    /// (`MapView.act`, `editor/MapView.java:180-185`); unknown or non-axis
+    /// binds read 0.
+    #[func]
+    pub fn binding_axis(&self, name: GString) -> f32 {
+        let name = name.to_string();
+        let Some(index) = KeyBindTable::all()
+            .iter()
+            .position(|bind| bind.name == name)
+        else {
+            return 0.0;
+        };
+        self.bridge.key_axis(&self.bindings, index as u16)
+    }
+
     /// `DesktopInput.updateMovement` inputs for the sim host:
     /// `(axis_x, axis_y, shooting, aim_x, aim_y, boosting)`. Only `bind`s the
     /// camera (the caller may hold the host) — never touches `MindSimHost`.

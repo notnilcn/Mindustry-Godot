@@ -14,6 +14,7 @@ Usage (run with the parity-eval venv python, DISPLAY set):
     java_xkeys.py [--title Mindustry] sand            # type characters
     java_xkeys.py @BackSpace @BackSpace @Escape        # @<X keysym name>
     java_xkeys.py @space                               # e.g. pause toggle
+    java_xkeys.py --hold-ms 1000 d                     # hold D for 1 s (editor pan)
 
 Each argument is either literal text (one key per character) or `@Keysym`.
 Prints one JSON object. Exit 1 when the window is not found.
@@ -58,6 +59,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--title", default="Mindustry")
     ap.add_argument("--gap-ms", type=int, default=80, help="delay between keys")
+    ap.add_argument("--hold-ms", type=int, default=0,
+                    help="hold each key this long between press and release (held movement keys)")
     ap.add_argument("keys", nargs="+")
     a = ap.parse_args()
     d = display.Display()
@@ -78,7 +81,9 @@ def main() -> int:
             ev = cls(time=X.CurrentTime, root=root, window=win, same_screen=1, child=X.NONE,
                      root_x=0, root_y=0, event_x=0, event_y=0, state=shift, detail=keycode)
             win.send_event(ev, propagate=True)
-        d.sync()
+            d.sync()
+            if cls is event.KeyPress and a.hold_ms > 0:
+                time.sleep(a.hold_ms / 1000.0)
         sent.append(name)
         time.sleep(a.gap_ms / 1000.0)
     print(json.dumps({"ok": True, "window": hex(win.id), "sent": sent}))

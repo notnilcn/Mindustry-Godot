@@ -161,8 +161,17 @@ func _refresh_size() -> void:
 
 
 ## `ui.loadAnd(() -> { apply(); hide(); })` + `editor.tags.put("genfilters", "{}")`
-## (`:79-110`); the port generates synchronously (no UI loading screen).
+## (`SectorGenerateDialog.java:79-110`): the loading overlay is up while the
+## sector generates.
 func _apply() -> void:
+	var ui := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui != null and ui.has_method("load_and"):
+		ui.call("load_and", _apply_now)
+	else:
+		_apply_now()
+
+
+func _apply_now() -> void:
 	if _editor == null or not bool(_editor.call("sector_generate", _planet, _sector, _seed)):
 		_notify("@editor.sectorgenerate")
 		return
