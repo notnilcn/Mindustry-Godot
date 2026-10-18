@@ -161,6 +161,120 @@ pub fn flying_shadow_offset(elevation: f32) -> (f32, f32) {
     (-12.0 * e, -13.0 * e)
 }
 
+// ---- `UnitType.drawCrawl` (L04 T3) ----
+
+/// Which `drawCrawl` pass a [`CrawlOp`] belongs to (`UnitType.java:1902-1937`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CrawlLayer {
+    /// `p == 0`: `segmentOutlineRegions` (`<name>-segment-outline<i>`).
+    Outline,
+    /// `p == 1`: `segmentRegions` (`<name>-segment<i>`).
+    Segment,
+    /// `drawCell && p != 0 && segmentCellRegions[i].found()`:
+    /// `<name>-segment-cell<i>`, tinted by `UnitType.cellColor`.
+    Cell,
+}
+
+/// One crawl-segment quad in Java emission order (world space, world units).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrawlOp {
+    /// Which pass this quad belongs to.
+    pub layer: CrawlLayer,
+    /// Segment index (`0` = head).
+    pub index: usize,
+    /// Center x (`unit.x + tx`).
+    pub x: f32,
+    /// Center y (`unit.y + ty`).
+    pub y: f32,
+    /// Sprite rotation in degrees (`rot - 90`).
+    pub rot: f32,
+}
+
+/// Inputs of one `UnitType.drawCrawl` evaluation (`UnitType.java:1902-1937`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CrawlDrawParams {
+    /// Unit center x.
+    pub x: f32,
+    /// Unit center y.
+    pub y: f32,
+    /// Body rotation (`unit.rotation`).
+    pub rotation: f32,
+    /// Trailing segment rotation (`CrawlComp.segmentRot`).
+    pub segment_rot: f32,
+    /// Distance travelled (`CrawlComp.crawlTime`).
+    pub crawl_time: f32,
+    /// `UnitType.segments`.
+    pub segments: usize,
+    /// `segmentScl`.
+    pub segment_scl: f32,
+    /// `segmentMag`.
+    pub segment_mag: f32,
+    /// `segmentPhase`.
+    pub segment_phase: f32,
+    /// `UnitType.drawCell` (gates the segment cell pass).
+    pub draw_cell: bool,
+}
+
+/// `Mathf.slerp(from, to, progress)` in degrees: shortest-arc lerp
+/// (`Mathf.java:455-458`).
+fn slerp_deg(from: f32, to: f32, progress: f32) -> f32 {
+    let delta = ((to - from + 360.0 + 180.0) % 360.0) - 180.0;
+    (from + delta * progress + 360.0) % 360.0
+}
+
+/// Pure port of `UnitType.drawCrawl` (`UnitType.java:1902-1937`): the outline
+/// pass over every segment first, then the segment pass (with the optional
+/// per-segment cell), exactly in Java's `p` loop order.
+pub fn crawl_draw_ops(p: &CrawlDrawParams) -> Vec<CrawlOp> {
+    if p.segments == 0 {
+        return Vec::new();
+    }
+    let denom = (p.segments as f32 - 1.0).max(1.0);
+    let mut placed = Vec::with_capacity(p.segments);
+    for i in 0..p.segments {
+        // `float trns = Mathf.sin(crawlTime + i * segmentPhase, segmentScl, segmentMag)`.
+        let offset = sin_scaled(
+            p.crawl_time + i as f32 * p.segment_phase,
+            p.segment_scl,
+            p.segment_mag,
+        );
+        // `rot = Mathf.slerp(crawl.segmentRot(), unit.rotation, i / (segments - 1))`.
+        let rot = slerp_deg(p.segment_rot, p.rotation, i as f32 / denom);
+        let (tx, ty) = trns(rot, offset, 0.0);
+        placed.push((p.x + tx, p.y + ty, rot - 90.0));
+    }
+
+    let mut ops = Vec::with_capacity(p.segments * if p.draw_cell { 3 } else { 2 });
+    for (index, (x, y, rot)) in placed.iter().copied().enumerate() {
+        ops.push(CrawlOp {
+            layer: CrawlLayer::Outline,
+            index,
+            x,
+            y,
+            rot,
+        });
+    }
+    for (index, (x, y, rot)) in placed.iter().copied().enumerate() {
+        ops.push(CrawlOp {
+            layer: CrawlLayer::Segment,
+            index,
+            x,
+            y,
+            rot,
+        });
+        if p.draw_cell {
+            ops.push(CrawlOp {
+                layer: CrawlLayer::Cell,
+                index,
+                x,
+                y,
+                rot,
+            });
+        }
+    }
+    ops
+}
+
 // ---- `UnitType.drawLegs` (J03 T4) ----
 
 use crate::entities::comp::unit::legs::leg_offset;
@@ -1076,5 +1190,87 @@ mod tests {
         let (_emitter, target) = mine_beam_points(0.0, 0.0, 0.0, 4.0, (130, 48), 0.0);
         assert!((target.0 - (130.0 * 8.0 - 0.756_802_4)).abs() < 1e-3);
         assert!((target.1 - (48.0 * 8.0 - 0.283_626_5)).abs() < 1e-3);
+    }
+
+    /// L04 T3: `UnitType.drawCrawl` (`UnitType.java:1902-1937`) — the outline
+    /// pass covers every segment before the body pass, each segment's rotation
+    /// slerps from `segmentRot` to `unit.rotation`, and the sine offset runs
+    /// along that rotation with `segmentScl`/`segmentMag`/`segmentPhase`.
+    #[test]
+    fn crawl_draw_ops_follow_java_order_and_geometry() {
+        let params = CrawlDrawParams {
+            x: 100.0,
+            y: 200.0,
+            rotation: 90.0,
+            segment_rot: 0.0,
+            crawl_time: 0.0,
+            segments: 3,
+            segment_scl: 3.0,
+            segment_mag: 0.5,
+            segment_phase: 5.0,
+            draw_cell: false,
+        };
+        let ops = crawl_draw_ops(&params);
+        assert_eq!(ops.len(), 6, "3 outlines + 3 body segments");
+        // p loop order: every outline, then every body segment.
+        assert_eq!(
+            ops.iter().map(|op| op.layer).collect::<Vec<_>>(),
+            vec![
+                CrawlLayer::Outline,
+                CrawlLayer::Outline,
+                CrawlLayer::Outline,
+                CrawlLayer::Segment,
+                CrawlLayer::Segment,
+                CrawlLayer::Segment,
+            ]
+        );
+        // Head segment: trns = sin(0) * 0.5 = 0, rot = 0.
+        assert_eq!((ops[0].index, ops[3].index), (0, 0));
+        assert!((ops[3].x - 100.0).abs() < 1e-4);
+        assert!((ops[3].y - 200.0).abs() < 1e-4);
+        assert!((ops[3].rot + 90.0).abs() < 1e-4);
+
+        // Mid segment: rot = slerp(0, 90, 0.5) = 45, trns =
+        // sin(5/3)*0.5, offset (trns*cos45, trns*sin45).
+        let trns = (5.0f32 / 3.0).sin() * 0.5;
+        let half = trns / 2.0f32.sqrt();
+        assert!((ops[4].x - (100.0 + half)).abs() < 1e-4, "{:?}", ops[4]);
+        assert!((ops[4].y - (200.0 + half)).abs() < 1e-4, "{:?}", ops[4]);
+        assert!((ops[4].rot + 45.0).abs() < 1e-4);
+
+        // Tail: rot = 90 -> offset along +y, sprite rotation 0.
+        let trns = (10.0f32 / 3.0).sin() * 0.5;
+        assert!((ops[5].x - 100.0).abs() < 1e-4);
+        assert!((ops[5].y - (200.0 + trns)).abs() < 1e-4, "{:?}", ops[5]);
+        assert!(ops[5].rot.abs() < 1e-4);
+
+        // Cells interleave with the body pass, one per segment.
+        let with_cells = crawl_draw_ops(&CrawlDrawParams {
+            draw_cell: true,
+            ..params
+        });
+        assert_eq!(with_cells.len(), 9);
+        assert_eq!(
+            with_cells[3..]
+                .iter()
+                .map(|op| op.layer)
+                .collect::<Vec<_>>(),
+            vec![
+                CrawlLayer::Segment,
+                CrawlLayer::Cell,
+                CrawlLayer::Segment,
+                CrawlLayer::Cell,
+                CrawlLayer::Segment,
+                CrawlLayer::Cell,
+            ]
+        );
+        // One segment degenerates to the head at the trailing rotation (Java
+        // divides by `segments - 1`; a single crawl segment has no tail rot).
+        let single = crawl_draw_ops(&CrawlDrawParams {
+            segments: 1,
+            ..params
+        });
+        assert_eq!(single.len(), 2);
+        assert!((single[1].rot + 90.0).abs() < 1e-4);
     }
 }
