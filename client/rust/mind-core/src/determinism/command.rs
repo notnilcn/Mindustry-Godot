@@ -48,6 +48,8 @@ pub enum ConfigValue {
         /// Per-type raw content id (`Content.id`).
         id: u16,
     },
+    /// `int[]` config (TargetDummy 5-int handler); tag 10.
+    IntArray(Vec<i32>),
 }
 
 /// A single simulation command (plan 05 §6.4).
@@ -731,6 +733,13 @@ fn encode_config(out: &mut Vec<u8>, value: &ConfigValue) {
             put_u8(out, *kind);
             put_u16(out, *id);
         }
+        ConfigValue::IntArray(values) => {
+            put_u8(out, 10);
+            put_u32(out, values.len() as u32);
+            for value in values {
+                put_i32(out, *value);
+            }
+        }
     }
 }
 
@@ -1005,6 +1014,17 @@ fn decode_config(cur: &mut Cursor<'_>) -> Result<ConfigValue, CommandLogError> {
             kind: cur.u8()?,
             id: cur.u16()?,
         }),
+        10 => {
+            let count = cur.u32()?;
+            if count > MAX_SIMLOG_UNITS {
+                return Err(CommandLogError::LengthOverflow(count, MAX_SIMLOG_UNITS));
+            }
+            let mut values = Vec::with_capacity(count.min(1024) as usize);
+            for _ in 0..count {
+                values.push(cur.i32()?);
+            }
+            Ok(ConfigValue::IntArray(values))
+        }
         other => Err(CommandLogError::UnknownOp(other)),
     }
 }
@@ -1425,6 +1445,8 @@ mod tests {
                 crate::world::TilePos::new(0, 3).pack(),
             ]),
             ConfigValue::Point2Array(Vec::new()),
+            ConfigValue::IntArray(vec![1, 0, 50, 90, 0x4148_0000]),
+            ConfigValue::IntArray(Vec::new()),
         ];
         for value in cases {
             let mut log = CommandLog::new(LogHeader::new(1, "flat"));

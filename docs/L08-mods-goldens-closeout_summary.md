@@ -141,3 +141,20 @@ is broken" (outside the repo).
 
 `tools/ci.sh` gates green except the documented host bench gate and the deferred
 generation checksums, which are batched with L06 by plan.
+
+
+---
+
+## Continuation (later 2026-10-18 session)
+
+| Task | Status | Notes |
+|---|---|---|
+| T1 goldens | **kept green** | Two content-golden moves from this session were recorded with reasons: the four `solid = true` blocks (PAR-0446) and `target-dummy configurable = true` (PAR-0380/L05 T2). `content::parity` passes. |
+| T2 `ModDataManager` | pending | Not started. |
+| T3 mod parser TODOs | **partial** | `drillMultipliers` now parses (`BlockSpec.drill_multipliers` → resolved `BlockDef.drill_multipliers`; `Drill.drillMultipliers`). The `UnlockableContent` fields, assembler/factory plans, weapon `parts`/effects, inline `MultiEffect` and `draw`/drawer rows remain. No fixture/test was added for the new row. |
+| T4 evidence debt | pending | No Java captures in this session. |
+| T6 closing walk | pending | No round-M walk. |
+
+`parity/golden_content.json` + `golden_manifest.json` were re-recorded with
+`tools/regen_goldens.sh --record content_ids`; the manifest `reasons` list now
+carries both attribution lines.

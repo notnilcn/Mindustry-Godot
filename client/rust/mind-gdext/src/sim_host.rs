@@ -851,6 +851,13 @@ impl MindSimHost {
         else {
             return;
         };
+        // Reactor/generator explosions (`ExplosionSink`) share the same bus so
+        // their effect/sound/shake/scorch reach the view (PAR-0399).
+        self.sim.ecs.0.insert_resource(
+            mind_core::world::blocks::power::explosion::ExplosionSinkRes(Some(Box::new(
+                crate::fx::explosion_sink::HostExplosionSink { bus: bus.clone() },
+            ))),
+        );
         if let Some(mut runtime) = self.sim.unit_runtime_mut() {
             runtime.fx = bus;
         }
@@ -1742,6 +1749,18 @@ impl MindSimHost {
         let config = mind_core::world::config::read_config(&self.sim.ecs.0, entity);
         let value = config_to_json(&config);
         GString::from(value.to_string().as_str())
+    }
+
+    /// `StatusEffect.permanent` for a `@status-<name>` content reference
+    /// (`LStatements.java:1465-1474` hides `seconds` for permanent statuses).
+    #[func]
+    pub fn status_permanent(&self, effect: GString) -> bool {
+        let name = effect.to_string();
+        let name = name.trim_start_matches("@status-");
+        self.content_snapshot
+            .as_ref()
+            .and_then(|content| content.status_by_name(name))
+            .is_some_and(|status| status.permanent)
     }
 
     /// Read-only `Building.onConfigureBuildTapped` preview for the tap handler
@@ -8147,12 +8166,23 @@ impl MindSimHost {
             .get::<mind_core::entities::comp::health::Health>(entity)
             .map(mind_core::entities::comp::health::Health::fraction)
             .unwrap_or(1.0);
-        let power_status = self
-            .sim
-            .ecs
-            .0
-            .get::<PowerModule>(entity)
-            .map(|module| module.status);
+        // `Block.setBars` adds the base `power` bar only when `consPower != null`
+        // (a power *consumer*); producers like generators show only their own
+        // `poweroutput` row.
+        let power_status = (def.consumes.iter().any(|spec| {
+            matches!(
+                &spec.consume,
+                mind_core::content::registries::blocks::Consume::Power { .. }
+            )
+        }))
+        .then(|| {
+            self.sim
+                .ecs
+                .0
+                .get::<PowerModule>(entity)
+                .map(|module| module.status)
+        })
+        .flatten();
         let items_total = self
             .sim
             .ecs
@@ -8183,23 +8213,205 @@ impl MindSimHost {
         // `Block.setBars` family overrides read live component state (J05
         // T4): heat, drill speed/warmup, `storageCapacity` + the unlocked item
         // count for a core, and the factory's progress.
+        let world = &self.sim.ecs.0;
+        let table = world.get_resource::<mind_core::world::block::BlockTable>();
+        let instance = table.and_then(|table| table.instance(tile.block));
+        let power_module = world.get::<PowerModule>(entity);
+        let turret = world
+            .get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)
+            .map(|state| TurretBars {
+                total_ammo: state.total_ammo,
+                max_ammo: state.config.max_ammo,
+                heat_req: state.heat_req,
+                heat_requirement: state.config.heat_requirement,
+                max_heat_efficiency: state.config.max_heat_efficiency,
+                activation_timer: state.activation_timer,
+                activation_time: state.config.activation_time,
+            });
+        let power = power_module.and_then(|module| {
+            let graph = world
+                .get_resource::<PowerGrids>()
+                .and_then(|grids| grids.graph(module.graph))?;
+            let diode_fraction = |dx: i32, dy: i32| {
+                let target = self.tile_at(tile.x as i32 + dx, tile.y as i32 + dy)?;
+                let target_entity = target.build?;
+                let target_module = world.get::<PowerModule>(target_entity)?;
+                let target_graph = world
+                    .get_resource::<PowerGrids>()
+                    .and_then(|grids| grids.graph(target_module.graph))?;
+                let capacity = target_graph.get_total_battery_capacity(world);
+                (capacity > 0.0).then(|| target_graph.get_battery_stored(world) / capacity)
+            };
+            let (back, front) = {
+                let rotation = world
+                    .get::<mind_core::entities::comp::Building>(entity)
+                    .map(|building| building.rotation)
+                    .unwrap_or(0);
+                let (dx, dy) = match rotation & 3 {
+                    0 => (0, 1),
+                    1 => (1, 0),
+                    2 => (0, -1),
+                    _ => (-1, 0),
+                };
+                (diode_fraction(-dx, -dy), diode_fraction(dx, dy))
+            };
+            Some(PowerBars {
+                balance: graph.power_balance(),
+                produced: graph.last_power_produced(),
+                needed: graph.last_power_needed(),
+                stored: graph.get_battery_stored(world),
+                capacity: graph.get_total_battery_capacity(world),
+                links: module.links.len(),
+                max_nodes: world
+                    .get::<mind_core::world::blocks::power::PowerNodeConfig>(entity)
+                    .map_or(0, |config| config.max_nodes as usize),
+                back,
+                front,
+            })
+        });
+        let generator = world
+            .get::<mind_core::world::blocks::power::generator::GeneratorConfig>(entity)
+            .map(|config| GeneratorBars {
+                production: config.power_production
+                    * world
+                        .get::<mind_core::world::blocks::power::generator::GeneratorState>(entity)
+                        .map_or(0.0, |state| state.production_efficiency),
+                usage: def
+                    .consumes
+                    .iter()
+                    .find_map(|spec| match &spec.consume {
+                        mind_core::content::registries::blocks::Consume::Power {
+                            usage, ..
+                        } => Some(*usage),
+                        _ => None,
+                    })
+                    .unwrap_or(0.0),
+                efficiency: world
+                    .get::<mind_core::world::blocks::power::generator::GeneratorState>(entity)
+                    .map_or(0.0, |state| state.production_efficiency),
+            });
+        let team = world
+            .get::<mind_core::entities::comp::TeamComp>(entity)
+            .map_or(0, |team| team.team);
+        let unit_bars = |unit: mind_core::content::UnitTypeId| {
+            let def = content.units().get(unit.index())?;
+            Some(UnitCapBars {
+                name: def.name.clone(),
+                count: mind_core::entities::comp::unit::queries::live_type_count(world, team, unit),
+                cap: mind_core::entities::comp::unit::queries::unit_cap(world, team)
+                    .map(|cap| cap as i32),
+                use_cap: def.use_unit_cap,
+                has_unit: true,
+            })
+        };
+        let factory_units = world
+            .get::<mind_core::world::blocks::units::UnitFactoryBuild>(entity)
+            .and_then(|state| {
+                usize::try_from(state.current_plan)
+                    .ok()
+                    .and_then(|index| def.unit_plans.get(index))
+                    .and_then(|plan| unit_bars(plan.unit))
+            });
+        let assembler = world
+            .get::<mind_core::world::blocks::units::UnitAssembler>(entity)
+            .map(|state| {
+                (
+                    state.progress,
+                    state.plan().map_or(0.0, |plan| plan.time),
+                    state.plan().and_then(|plan| unit_bars(plan.unit)),
+                )
+            });
+        let cargo_units = world
+            .get::<mind_core::world::blocks::units::CargoLoaderState>(entity)
+            .and_then(|state| {
+                let unit = state.unit?;
+                let type_id = world
+                    .get::<mind_core::entities::comp::unit::comp::UnitTypeComp>(unit)?
+                    .type_id;
+                unit_bars(type_id)
+            });
+        let campaign_state = world.get::<mind_core::entities::comp::CampaignState>(entity);
+        let launch = campaign_state.and_then(|state| {
+            instance
+                .as_ref()
+                .and_then(|instance| match &instance.kind_data {
+                    mind_core::world::BlockKindData::LaunchPad(def) => {
+                        Some((state.launch_time, def.launch_time))
+                    }
+                    _ => None,
+                })
+        });
+        let variable_reactor = world
+            .get::<mind_core::world::blocks::power::behavior::VariableReactorState>(entity)
+            .map(|state| (state.heat, 150.0, state.instability));
+        let overdrive = world
+            .get::<mind_core::world::blocks::defense::projectors::OverdriveProjectorState>(entity)
+            .map(|state| {
+                let boost = state.real_boost(
+                    world
+                        .get::<mind_core::entities::comp::Building>(entity)
+                        .map_or(0.0, |building| building.efficiency),
+                );
+                (boost, state.speed_boost + state.speed_boost_phase)
+            });
+        let shield = world
+            .get::<mind_core::world::blocks::defense::shields::ForceProjectorState>(entity)
+            .map(|state| {
+                if state.broken {
+                    0.0
+                } else {
+                    1.0 - state.buildup
+                        / (state.shield_health + state.phase_shield_boost * state.phase_heat)
+                }
+            });
+        let pump = world
+            .get::<mind_core::entities::comp::PumpState>(entity)
+            .map(|state| {
+                (
+                    state.amount,
+                    state.warmup,
+                    world
+                        .get::<mind_core::entities::comp::Building>(entity)
+                        .map_or(0.0, |building| building.efficiency),
+                )
+            });
+        let target_dummy = world
+            .get::<mind_core::world::blocks::defense::shields::TargetDummyState>(entity)
+            .map(|state| (state.reset, state.reset_time));
+        let output_liquids = instance
+            .as_ref()
+            .and_then(|instance| match &instance.kind_data {
+                mind_core::world::BlockKindData::Crafter(crafter) => Some(&crafter.output_liquids),
+                _ => None,
+            })
+            .map(|outputs| {
+                outputs
+                    .iter()
+                    .filter_map(|(liquid, _amount)| {
+                        let liquid = mind_core::content::LiquidId::new(*liquid);
+                        let (name, color) = liquid_info.get(liquid.index())?;
+                        Some((
+                            name.clone(),
+                            *color,
+                            liquids
+                                .as_deref()
+                                .and_then(|amounts| amounts.get(liquid.index()))
+                                .copied()
+                                .unwrap_or(0.0),
+                            def.liquid_capacity,
+                        ))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         let extras = BarExtras {
-            heat: self
-                .sim
-                .ecs
-                .0
+            heat: world
                 .get::<mind_core::world::blocks::heat::HeatState>(entity)
                 .map(|state| (state.heat, state.heat_output)),
-            drill: self
-                .sim
-                .ecs
-                .0
+            drill: world
                 .get::<mind_core::entities::comp::DrillState>(entity)
                 .map(|state| (state.last_drill_speed, state.warmup)),
-            time_scale: self
-                .sim
-                .ecs
-                .0
+            time_scale: world
                 .get::<mind_core::entities::comp::Building>(entity)
                 .map(|building| building.time_scale)
                 .unwrap_or(1.0),
@@ -8215,21 +8427,47 @@ impl MindSimHost {
                             .count() as f32
                     })
                     .unwrap_or(0.0);
-                let capacity = self
-                    .sim
-                    .ecs
-                    .0
+                let capacity = world
                     .get::<mind_core::world::blocks::storage::CoreBuild>(entity)
                     .map(|core| core.storage_capacity as f32)
                     .unwrap_or(0.0);
                 (capacity, unlocked)
             }),
-            factory: self
-                .sim
-                .ecs
-                .0
+            factory: world
                 .get::<mind_core::world::blocks::units::UnitFactoryBuild>(entity)
                 .map(|state| (state.progress, state.current_plan)),
+            turret,
+            power: power.clone(),
+            generator,
+            reactor_heat: world
+                .get::<mind_core::world::blocks::power::behavior::NuclearReactorState>(entity)
+                .map(|state| state.heat),
+            variable_reactor,
+            overdrive,
+            shield,
+            pump,
+            payload_loader: None,
+            assembler,
+            factory_units,
+            cargo_units,
+            launch,
+            landing_cooldown: campaign_state.map(|state| state.cooldown),
+            accelerator: power.map(|power| {
+                (
+                    power.stored,
+                    instance
+                        .as_ref()
+                        .and_then(|instance| match &instance.kind_data {
+                            mind_core::world::BlockKindData::Accelerator(def) => {
+                                Some(def.power_buffer_requirement)
+                            }
+                            _ => None,
+                        })
+                        .unwrap_or(0.0),
+                )
+            }),
+            target_dummy,
+            output_liquids,
         };
         let rows = building_bar_rows(
             def,
@@ -8246,7 +8484,7 @@ impl MindSimHost {
                 serde_json::json!({
                     "key": row.key,
                     "label_key": row.label_key,
-                    "label_arg": row.label_arg,
+                    "label_args": row.label_args,
                     "color": format!("{:08x}", row.color),
                     "value": row.value,
                 })
@@ -8770,14 +9008,27 @@ impl MindSimHost {
         }
         if def.is_some_and(|def| def.kind == BlockKind::LogicBlock) {
             // `LogicBuild.drawSelect` (`LogicBlock.java:685-725`).
+            let icon_assets = self
+                .base()
+                .try_get_node_as::<crate::assets::MindAssets>("/root/MindAssets");
             let (tag, icon) = self
                 .sim
                 .ecs
                 .0
                 .get::<mind_core::logic::blocks::LogicBlockState>(entity)
-                // The icon tag needs `Fonts.unicodeToName`, which the port has
-                // not ported; the tag text is drawn, the icon is deferred.
-                .map(|state| (state.tag.clone(), None))
+                .map(|state| {
+                    let icon = (state.icon_tag != '\0')
+                        .then(|| {
+                            icon_assets.as_ref().map(|assets| {
+                                let name = assets.bind().icon_name_for_code(state.icon_tag as i32);
+                                let region = assets.bind().icon_region_for_name(name.clone());
+                                (name.to_string(), region.to_string())
+                            })
+                        })
+                        .flatten()
+                        .filter(|(_, region)| !region.is_empty());
+                    (state.tag.clone(), icon)
+                })
                 .unwrap_or((None, None));
             let mut units = Vec::new();
             for unit in self.sim.ecs.0.iter_entities() {
@@ -8864,7 +9115,7 @@ impl MindSimHost {
                 "x": x,
                 "y": y,
                 "tag": tag,
-                "icon": icon,
+                "icon": icon.as_ref().map(|(name, _)| name.as_str()),
                 "units": units
                     .iter()
                     .map(|(ux, uy, hit, rotation)| serde_json::json!({
@@ -9245,8 +9496,8 @@ pub(crate) enum SelectOverlay {
         y: f32,
         /// World-processor tag text (drawn above the block).
         tag: Option<String>,
-        /// World-processor icon tag name (`Fonts.unicodeToName`).
-        icon: Option<String>,
+        /// World-processor icon tag: `(Fonts.unicodeToName, UI region name)`.
+        icon: Option<(String, String)>,
         /// Driven units: `(x, y, hit size, rotation)` (`LogicAI.controller == e`).
         units: Vec<(f32, f32, f32, f32)>,
     },
@@ -9668,6 +9919,7 @@ fn config_to_json(value: &mind_core::world::config::ConfigValue) -> serde_json::
             "data": bytes.iter().copied().collect::<Vec<u8>>()
         }),
         V::String(text) => json!({"type": "string", "value": text}),
+        V::IntArray(values) => json!({"type": "int_array", "values": values}),
     }
 }
 
@@ -10054,27 +10306,80 @@ pub fn player_near_drop_zone_predicate(
 
 /// One hovered-building bar row (`Block.setBars`, G03 T6).
 pub struct BarRow {
-    /// `"health" | "power" | "items" | "liquid"`.
+    /// Bar key (`"health"`, `"power"`, `"liquid"`, `"progress"`, ...).
     pub key: &'static str,
     /// Bundle key (no `@`).
     pub label_key: String,
-    /// `{0}` argument for the bundle format (`None` = no argument).
-    pub label_arg: Option<String>,
+    /// Arguments for the bundle format (`{0}`, `{1}`, `{2}`).
+    pub label_args: Vec<String>,
     /// `Bar` colour RGBA8888.
     pub color: u32,
     /// Fraction `0..=1`.
     pub value: f32,
 }
 
-/// `Block.setBars` base rows (`Block.java:709-760`) in Java order: health,
-/// power (when consumed), items (when `hasItems && configurable`) and liquids
-/// (per consumed liquid, else the dynamic current=max entry bar).
-///
-/// `health` is the health **fraction** (`Health.fraction`); `liquid_info` is
-/// `(name, rgba8888)` per liquid in id order (colour for the bar; `name` for
-/// the `liquid.<name>.name` label key).
-/// Live values the `Block.setBars` family overrides read (J05 T4).
-#[derive(Debug, Clone, Copy, Default)]
+/// `Turret` family bar state (`BaseTurret.java:104-110`,
+/// `Turret.java:201-207`, `ItemTurret.java:61-67`).
+#[derive(Debug, Clone, Default)]
+pub struct TurretBars {
+    pub total_ammo: i32,
+    pub max_ammo: i32,
+    pub heat_req: f32,
+    pub heat_requirement: f32,
+    pub max_heat_efficiency: f32,
+    pub activation_timer: f32,
+    pub activation_time: f32,
+}
+
+/// Power-graph bar state (`PowerNode.java:112-141`, `PowerDiode.java:33-52`).
+#[derive(Debug, Clone, Default)]
+pub struct PowerBars {
+    pub balance: f32,
+    pub produced: f32,
+    pub needed: f32,
+    pub stored: f32,
+    pub capacity: f32,
+    pub links: usize,
+    pub max_nodes: usize,
+    /// Diode back/front graph stored fractions (`PowerDiode.bar`).
+    pub back: Option<f32>,
+    pub front: Option<f32>,
+}
+
+/// `PowerGenerator`/`ImpactReactor` bar state
+/// (`PowerGenerator.java:88-96`, `ImpactReactor.java:47-54`).
+#[derive(Debug, Clone, Default)]
+pub struct GeneratorBars {
+    /// `getPowerProduction()` (per tick, efficiency included).
+    pub production: f32,
+    /// `ConsPower.usage` (ImpactReactor net output).
+    pub usage: f32,
+    /// `productionEfficiency`.
+    pub efficiency: f32,
+}
+
+/// A factory/reconstructor/cargo-loader `units` bar (three arguments).
+#[derive(Debug, Clone, Default)]
+pub struct UnitCapBars {
+    pub name: String,
+    pub count: i32,
+    /// `None` = uncapped (`∞`).
+    pub cap: Option<i32>,
+    pub use_cap: bool,
+    /// `false` when the factory has no current plan (`[lightgray]✖`).
+    pub has_unit: bool,
+}
+
+/// `PayloadLoader` bar state (`PayloadLoader.java:60-66`).
+#[derive(Debug, Clone, Default)]
+pub struct PayloadLoaderBars {
+    pub progress: f32,
+    pub payload_has_items: bool,
+    pub payload_items: i32,
+}
+
+/// Live values the `Block.setBars` family overrides read (J05 T4, L05 T1).
+#[derive(Debug, Clone, Default)]
 pub struct BarExtras {
     /// `HeatBlock.heat()` and `heatOutput`/`heatRequirement`
     /// (`HeatProducer.java:40`, `HeatConductor.java:34`, `HeatCrafter.java:28`).
@@ -10089,6 +10394,86 @@ pub struct BarExtras {
     /// `UnitFactoryBuild`: `(progress, currentPlan)`
     /// (`UnitFactory.java:121-125`).
     pub factory: Option<(f32, i32)>,
+    pub turret: Option<TurretBars>,
+    pub power: Option<PowerBars>,
+    pub generator: Option<GeneratorBars>,
+    /// `NuclearReactorBuild.heat` (`NuclearReactor.java:103`).
+    pub reactor_heat: Option<f32>,
+    /// `VariableReactorBuild`: `(heat, maxHeat, instability)`
+    /// (`VariableReactor.java:57-63`).
+    pub variable_reactor: Option<(f32, f32, f32)>,
+    /// `OverdriveBuild`: `(realBoost, maxBoost)` (`OverdriveProjector.java:80`).
+    pub overdrive: Option<(f32, f32)>,
+    /// `ForceBuild` shield fill (`ForceProjector.java:99`).
+    pub shield: Option<f32>,
+    /// `SolidPumpBuild`: `(lastPump, warmup, efficiency)`
+    /// (`SolidPump.java:51-55`).
+    pub pump: Option<(f32, f32, f32)>,
+    pub payload_loader: Option<PayloadLoaderBars>,
+    /// `UnitAssemblerBuild`: `(progress, time, unit bars)`
+    /// (`UnitAssembler.java:128-143`).
+    pub assembler: Option<(f32, f32, Option<UnitCapBars>)>,
+    /// `Reconstructor`/`UnitFactory` `units` bar (`UnitFactory.java:127-136`).
+    pub factory_units: Option<UnitCapBars>,
+    /// `UnitCargoLoader` `units` bar (`UnitCargoLoader.java:51-61`).
+    pub cargo_units: Option<UnitCapBars>,
+    /// `LaunchPadBuild`: `(launchCounter, launchTime)`
+    /// (`LaunchPad.java:69-70`).
+    pub launch: Option<(f32, f32)>,
+    /// `LandingPadBuild.cooldown` (`LandingPad.java:113-115`).
+    pub landing_cooldown: Option<f32>,
+    /// `Accelerator` graph battery stored and `powerBufferRequirement`.
+    pub accelerator: Option<(f32, f32)>,
+    /// `TargetDummyBuild`: `(reset, resetTime)` (`TargetDummy.java:64-73`).
+    pub target_dummy: Option<(f32, f32)>,
+    /// `GenericCrafter.outputLiquids` output bars: `(name, rgba8888, amount,
+    /// capacity)` (`GenericCrafter.java:81-98`).
+    pub output_liquids: Vec<(String, u32, f32, f32)>,
+}
+
+impl BarExtras {
+    fn turret_heat_efficiency(&self) -> f32 {
+        self.turret
+            .as_ref()
+            .map_or(1.0, |turret| turret.max_heat_efficiency.max(1.0))
+    }
+}
+
+fn amount(value: f32) -> String {
+    mind_core::ui::text::format_amount_default(value as i64)
+        .replace("[gray]", "")
+        .replace("[]", "")
+}
+
+fn cap_text(cap: Option<i32>) -> String {
+    cap.map_or_else(|| String::from("∞"), |cap| cap.to_string())
+}
+
+fn push_unit_cap_rows(rows: &mut Vec<BarRow>, bars: &UnitCapBars) {
+    // `bar.unitcap` = `{0} {1}/{2}` (`UnitFactory.java:127-136`).
+    let name = format!(":{}:", bars.name);
+    if !bars.has_unit {
+        rows.push(BarRow {
+            key: "units",
+            label_key: String::from("bar.unitcap"),
+            label_args: vec![name, String::from("0"), cap_text(bars.cap)],
+            color: 0xec7b_4cff,
+            value: 0.0,
+        });
+        return;
+    }
+    let cap = if bars.use_cap { bars.cap } else { None };
+    let value = match (bars.use_cap, cap) {
+        (true, Some(cap)) if cap > 0 => (bars.count as f32 / cap as f32).clamp(0.0, 1.0),
+        _ => 1.0,
+    };
+    rows.push(BarRow {
+        key: "units",
+        label_key: String::from("bar.unitcap"),
+        label_args: vec![name, bars.count.to_string(), cap_text(cap)],
+        color: 0xec7b_4cff,
+        value,
+    });
 }
 
 pub fn building_bar_rows(
@@ -10100,31 +10485,50 @@ pub fn building_bar_rows(
     liquid_info: &[(String, u32)],
     extras: &BarExtras,
 ) -> Vec<BarRow> {
+    use mind_core::content::BlockKind;
     use mind_core::content::registries::blocks::Consume;
     let mut rows = Vec::new();
-    rows.push(BarRow {
-        key: "health",
-        label_key: String::from("stat.health"),
-        label_arg: None,
-        color: 0xff34_1cff,
-        value: health.clamp(0.0, 1.0),
-    });
+    // `TargetDummy.java:64-73`: `removeBar("health")` and a `dps` bar.
+    if def.kind == BlockKind::TargetDummy {
+        if let Some((reset, reset_time)) = extras.target_dummy {
+            let fraction = if reset_time > 0.0 {
+                (1.0 - reset / reset_time).clamp(0.0, 1.0)
+            } else {
+                0.0
+            };
+            rows.push(BarRow {
+                key: "dps",
+                label_key: String::from("bar.dps"),
+                label_args: Vec::new(),
+                color: 0xff89_47ff,
+                value: fraction,
+            });
+        }
+    } else {
+        rows.push(BarRow {
+            key: "health",
+            label_key: String::from("stat.health"),
+            label_args: Vec::new(),
+            color: 0xff34_1cff,
+            value: health.clamp(0.0, 1.0),
+        });
+    }
     if let Some(status) = power_status {
         let buffered = def.consumes.iter().find_map(|spec| match &spec.consume {
             Consume::Power { buffered, .. } if *buffered > 0.0 => Some(*buffered),
             _ => None,
         });
-        let (label_key, label_arg) = match buffered {
+        let (label_key, label_args) = match buffered {
             Some(capacity) => (
                 String::from("bar.poweramount"),
-                Some(((status * capacity) as i32).to_string()),
+                vec![((status * capacity) as i32).to_string()],
             ),
-            None => (String::from("bar.power"), None),
+            None => (String::from("bar.power"), Vec::new()),
         };
         rows.push(BarRow {
             key: "power",
             label_key,
-            label_arg,
+            label_args,
             color: 0xec7b_4cff,
             value: status.clamp(0.0, 1.0),
         });
@@ -10133,33 +10537,47 @@ pub fn building_bar_rows(
     // the item bar is removed for these families.
     let removes_items = matches!(
         def.kind,
-        mind_core::content::BlockKind::ItemSource
-            | mind_core::content::BlockKind::Unloader
-            | mind_core::content::BlockKind::DirectionalUnloader
+        BlockKind::ItemSource | BlockKind::Unloader | BlockKind::DirectionalUnloader
     );
     // `LiquidSource.java:45`, `LiquidVoid.java:23`, `LiquidJunction.java:29`:
     // the liquid bar is removed for these families.
     let removes_liquid = matches!(
         def.kind,
-        mind_core::content::BlockKind::LiquidSource
-            | mind_core::content::BlockKind::LiquidVoid
-            | mind_core::content::BlockKind::LiquidJunction
+        BlockKind::LiquidSource | BlockKind::LiquidVoid | BlockKind::LiquidJunction
     );
+    // `LaunchPad.java:69-70` appends its own `items` bar after the base rows.
+    let launch_items = def.kind == BlockKind::LaunchPad;
     if def.has_items
         && def.configurable
         && def.item_capacity > 0
         && !removes_items
+        && !launch_items
         && let Some(total) = items_total
     {
         rows.push(BarRow {
             key: "items",
             label_key: String::from("bar.items"),
-            label_arg: Some(total.to_string()),
+            label_args: vec![total.to_string()],
             color: 0x2ea7_56ff,
             value: (total as f32 / def.item_capacity as f32).clamp(0.0, 1.0),
         });
     }
-    if def.has_liquids && def.liquid_capacity > 0.0 && !removes_liquid {
+    // `GenericCrafter.java:81-98`: output liquids replace the dynamic bar.
+    if !extras.output_liquids.is_empty() {
+        for (name, color, amount, capacity) in &extras.output_liquids {
+            rows.push(BarRow {
+                key: "liquid",
+                label_key: format!("liquid.{name}.name"),
+                label_args: Vec::new(),
+                color: *color,
+                value: if *capacity > 0.0 {
+                    (amount / capacity).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                },
+            });
+        }
+    } else if def.has_liquids && def.liquid_capacity > 0.0 && !removes_liquid {
         let amounts = liquids.unwrap_or(&[]);
         let mut added = false;
         for spec in &def.consumes {
@@ -10176,7 +10594,7 @@ pub fn building_bar_rows(
                 rows.push(BarRow {
                     key: "liquid",
                     label_key: format!("liquid.{name}.name"),
-                    label_arg: None,
+                    label_args: Vec::new(),
                     color: *color,
                     value: (amount / def.liquid_capacity).clamp(0.0, 1.0),
                 });
@@ -10206,91 +10624,75 @@ pub fn building_bar_rows(
             rows.push(BarRow {
                 key: "liquid",
                 label_key,
-                label_arg: None,
+                label_args: Vec::new(),
                 color,
                 value: (amount / def.liquid_capacity).clamp(0.0, 1.0),
             });
         }
     }
-    // `Block.setBars` overrides append after the defaults, in each family's
-    // `addBar` order (`CoreBlock.java:145-153`, `Drill.java:117-119`,
-    // `HeatProducer.java:40`, `HeatConductor.java:34`,
-    // `HeatCrafter.java:28-34`, `UnitFactory.java:121-135`).
+    // Family `addBar` calls append after the defaults, in `setBars` order.
     match def.kind {
-        mind_core::content::BlockKind::CoreBlock => {
+        BlockKind::CoreBlock => {
             if let Some((capacity, unlocked)) = extras.core_capacity
                 && capacity > 0.0
                 && unlocked > 0.0
             {
-                // `bar.capacity` = `UI.formatAmount(storageCapacity)`;
-                // `Pal.items`; fill = `items.total() / (storageCapacity *
-                // unlockedItems)`.
-                let denominator = capacity * unlocked;
-                // `UI.formatAmount` carries `[gray]`/`[]` markup for Arc's
-                // label renderer; the hover bar label is plain text, so the
-                // markers are stripped ("13k").
-                let capacity_text = mind_core::ui::text::format_amount_default(capacity as i64)
-                    .replace("[gray]", "")
-                    .replace("[]", "");
                 rows.push(BarRow {
                     key: "capacity",
                     label_key: String::from("bar.capacity"),
-                    label_arg: Some(capacity_text),
+                    label_args: vec![amount(capacity)],
                     color: 0x2ea7_56ff,
-                    value: (items_total.unwrap_or(0) as f32 / denominator).clamp(0.0, 1.0),
+                    value: (items_total.unwrap_or(0) as f32 / (capacity * unlocked))
+                        .clamp(0.0, 1.0),
                 });
             }
         }
-        mind_core::content::BlockKind::Drill => {
+        BlockKind::Drill => {
             if let Some((speed, warmup)) = extras.drill {
-                // `bar.drillspeed` = `lastDrillSpeed * 60 * timeScale`
-                // (two decimals); `Pal.ammo`; fraction = `warmup`.
                 rows.push(BarRow {
                     key: "drillspeed",
                     label_key: String::from("bar.drillspeed"),
-                    label_arg: Some(format!("{:.2}", speed * 60.0 * extras.time_scale)),
+                    label_args: vec![format!("{:.2}", speed * 60.0 * extras.time_scale)],
                     color: 0xff89_47ff,
                     value: warmup.clamp(0.0, 1.0),
                 });
             }
         }
-        mind_core::content::BlockKind::HeatProducer
-        | mind_core::content::BlockKind::HeatConductor => {
+        BlockKind::HeatProducer | BlockKind::HeatConductor => {
             if let Some((heat, output)) = extras.heat
                 && output > 0.0
             {
-                // `bar.heat` (`HeatProducer.java:40`); `Pal.lightOrange`;
-                // `heat / heatOutput`.
                 rows.push(BarRow {
                     key: "heat",
                     label_key: String::from("bar.heat"),
-                    label_arg: None,
+                    label_args: Vec::new(),
                     color: 0xf680_21ff,
                     value: (heat / output).clamp(0.0, 1.0),
                 });
             }
         }
-        mind_core::content::BlockKind::HeatCrafter => {
+        BlockKind::HeatCrafter => {
             if let Some((heat, requirement)) = extras.heat
                 && requirement > 0.0
             {
-                // `HeatCrafter.java:28-34`: `bar.heatpercent` (a two-argument
-                // label; the port's bar row carries one argument, so the value
-                // fraction and colour match Java and the label stays the
-                // single-argument `bar.heat` fallback).
+                // `HeatCrafter.java:28-34`: `bar.heatpercent` = `{0} ({1}%)`.
                 rows.push(BarRow {
                     key: "heat",
                     label_key: String::from("bar.heatpercent"),
-                    label_arg: Some(format!("{}", (heat + 0.01) as i32)),
+                    label_args: vec![
+                        format!("{}", heat as i32),
+                        format!(
+                            "{}",
+                            (heat / requirement).min(extras.turret_heat_efficiency()) * 100.0
+                        ),
+                    ],
                     color: 0xf680_21ff,
                     value: (heat / requirement).clamp(0.0, 1.0),
                 });
             }
         }
-        mind_core::content::BlockKind::UnitFactory => {
+        BlockKind::UnitFactory | BlockKind::Reconstructor => {
             if let Some((progress, plan)) = extras.factory {
-                // `UnitFactory.java:121-125`: `bar.progress` (percent);
-                // `Pal.ammo`; `fraction()`.
                 let time = usize::try_from(plan)
                     .ok()
                     .and_then(|index| def.unit_plans.get(index))
@@ -10304,9 +10706,312 @@ pub fn building_bar_rows(
                 rows.push(BarRow {
                     key: "progress",
                     label_key: String::from("bar.progress"),
-                    label_arg: Some(format!("{}", (fraction * 100.0) as i32)),
+                    label_args: vec![format!("{}", (fraction * 100.0) as i32)],
                     color: 0xff89_47ff,
                     value: fraction,
+                });
+            }
+            if let Some(units) = &extras.factory_units {
+                push_unit_cap_rows(&mut rows, units);
+            }
+        }
+        BlockKind::UnitAssembler => {
+            if let Some((progress, _time, units)) = &extras.assembler {
+                rows.push(BarRow {
+                    key: "progress",
+                    label_key: String::from("bar.progress"),
+                    label_args: vec![format!("{}", (progress * 100.0) as i32)],
+                    color: 0xff89_47ff,
+                    value: progress.clamp(0.0, 1.0),
+                });
+                if let Some(units) = units {
+                    push_unit_cap_rows(&mut rows, units);
+                }
+            }
+        }
+        BlockKind::UnitCargoLoader => {
+            if let Some(units) = &extras.cargo_units {
+                push_unit_cap_rows(&mut rows, units);
+            }
+        }
+        BlockKind::ItemTurret
+        | BlockKind::LiquidTurret
+        | BlockKind::PowerTurret
+        | BlockKind::LaserTurret
+        | BlockKind::ContinuousLiquidTurret
+        | BlockKind::ContinuousTurret
+        | BlockKind::PointDefenseTurret
+        | BlockKind::TractorBeamTurret
+        | BlockKind::RepairTurret
+        | BlockKind::BuildTurret => {
+            if let Some(turret) = &extras.turret {
+                if turret.activation_time > 0.0 {
+                    // `BaseTurret.java:104-110`.
+                    let active = turret.activation_timer > 0.0;
+                    rows.push(BarRow {
+                        key: "activationtimer",
+                        label_key: String::from(if active {
+                            "bar.activationtimer"
+                        } else {
+                            "bar.activated"
+                        }),
+                        label_args: if active {
+                            vec![format!(
+                                "{}",
+                                (turret.activation_timer / 60.0).ceil() as i32
+                            )]
+                        } else {
+                            Vec::new()
+                        },
+                        color: if active { 0xf680_21ff } else { 0x8ca9_e8ff },
+                        value: (1.0 - turret.activation_timer / turret.activation_time)
+                            .clamp(0.0, 1.0),
+                    });
+                }
+                if turret.heat_requirement > 0.0 {
+                    // `Turret.java:201-207`.
+                    let percent = (turret.heat_req / turret.heat_requirement)
+                        .min(turret.max_heat_efficiency)
+                        * 100.0;
+                    rows.push(BarRow {
+                        key: "heat",
+                        label_key: String::from("bar.heatpercent"),
+                        label_args: vec![
+                            format!("{}", turret.heat_req as i32),
+                            format!("{}", percent as i32),
+                        ],
+                        color: 0xf680_21ff,
+                        value: (turret.heat_req / turret.heat_requirement).clamp(0.0, 1.0),
+                    });
+                }
+                if turret.max_ammo > 0 {
+                    // `ItemTurret.java:61-67`.
+                    rows.push(BarRow {
+                        key: "ammo",
+                        label_key: String::from("stat.ammo"),
+                        label_args: Vec::new(),
+                        color: 0xff89_47ff,
+                        value: (turret.total_ammo as f32 / turret.max_ammo as f32).clamp(0.0, 1.0),
+                    });
+                }
+            }
+        }
+        BlockKind::PowerNode
+        | BlockKind::LongPowerNode
+        | BlockKind::BeamNode
+        | BlockKind::PowerDiode
+        | BlockKind::Accelerator => {
+            if let Some(power) = &extras.power {
+                if def.kind != BlockKind::PowerDiode {
+                    // `PowerNode.java:115-122`, `BeamNode.java:53-54`.
+                    rows.push(BarRow {
+                        key: "power",
+                        label_key: String::from("bar.powerbalance"),
+                        label_args: vec![format!(
+                            "{}{}",
+                            if power.balance >= 0.0 { "+" } else { "" },
+                            amount(power.balance * 60.0)
+                        )],
+                        color: 0xec7b_4cff,
+                        value: if power.needed > 0.0 {
+                            (power.produced / power.needed).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        },
+                    });
+                    rows.push(BarRow {
+                        key: "batteries",
+                        label_key: String::from("bar.powerstored"),
+                        label_args: vec![amount(power.stored), amount(power.capacity)],
+                        color: 0xec7b_4cff,
+                        value: if power.capacity > 0.0 {
+                            (power.stored / power.capacity).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        },
+                    });
+                    if def.kind != BlockKind::BeamNode && power.max_nodes > 0 {
+                        rows.push(BarRow {
+                            key: "connections",
+                            label_key: String::from("bar.powerlines"),
+                            label_args: vec![power.links.to_string(), power.max_nodes.to_string()],
+                            color: 0x2ea7_56ff,
+                            value: (power.links as f32 / power.max_nodes as f32).clamp(0.0, 1.0),
+                        });
+                    }
+                }
+                if def.kind == BlockKind::PowerDiode {
+                    for (key, label, value) in [
+                        ("back", "bar.input", power.back),
+                        ("front", "bar.output", power.front),
+                    ] {
+                        rows.push(BarRow {
+                            key,
+                            label_key: String::from(label),
+                            label_args: Vec::new(),
+                            color: 0xec7b_4cff,
+                            value: value.unwrap_or(0.0).clamp(0.0, 1.0),
+                        });
+                    }
+                }
+            }
+            if def.kind == BlockKind::Accelerator
+                && let Some((stored, requirement)) = extras.accelerator
+                && requirement > 0.0
+            {
+                rows.push(BarRow {
+                    key: "powerBufferRequirement",
+                    label_key: String::from("bar.powerbuffer"),
+                    label_args: vec![amount(stored), amount(requirement)],
+                    color: 0xec7b_4cff,
+                    value: (stored / requirement).clamp(0.0, 1.0),
+                });
+            }
+        }
+        BlockKind::NuclearReactor => {
+            if let Some(heat) = extras.reactor_heat {
+                rows.push(BarRow {
+                    key: "heat",
+                    label_key: String::from("bar.heat"),
+                    label_args: Vec::new(),
+                    color: 0xf680_21ff,
+                    value: heat.clamp(0.0, 1.0),
+                });
+            }
+        }
+        BlockKind::VariableReactor => {
+            if let Some((heat, max_heat, instability)) = extras.variable_reactor {
+                rows.push(BarRow {
+                    key: "instability",
+                    label_key: String::from("bar.instability"),
+                    label_args: Vec::new(),
+                    color: 0x665c_9fff,
+                    value: instability.clamp(0.0, 1.0),
+                });
+                if max_heat > 0.0 {
+                    rows.push(BarRow {
+                        key: "heat",
+                        label_key: String::from("bar.heatpercent"),
+                        label_args: vec![
+                            format!("{}", heat as i32),
+                            format!("{}", (heat / max_heat).clamp(0.0, 1.0) * 100.0),
+                        ],
+                        color: 0xf680_21ff,
+                        value: (heat / max_heat).clamp(0.0, 1.0),
+                    });
+                }
+            }
+        }
+        BlockKind::ConsumeGenerator
+        | BlockKind::ThermalGenerator
+        | BlockKind::SolarGenerator
+        | BlockKind::HeaterGenerator
+        | BlockKind::ImpactReactor => {
+            if let Some(generator) = &extras.generator {
+                // `PowerGenerator.java:88-96`; `ImpactReactor.java:44-54` nets
+                // the consumed power.
+                let production = (generator.production - generator.usage).max(0.0);
+                rows.push(BarRow {
+                    key: "power",
+                    label_key: String::from("bar.poweroutput"),
+                    label_args: vec![format!("{:.1}", production * 60.0 * extras.time_scale)],
+                    color: 0xec7b_4cff,
+                    value: generator.efficiency.clamp(0.0, 1.0),
+                });
+            }
+        }
+        BlockKind::OverdriveProjector => {
+            if let Some((boost, max)) = extras.overdrive {
+                rows.push(BarRow {
+                    key: "boost",
+                    label_key: String::from("bar.boost"),
+                    label_args: vec![format!(
+                        "{}",
+                        ((boost * 100.0 - 100.0).max(0.0)).round() as i32
+                    )],
+                    color: 0xffd3_7fff,
+                    value: if max > 0.0 {
+                        (boost / max).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    },
+                });
+            }
+        }
+        BlockKind::ForceProjector => {
+            if let Some(fill) = extras.shield {
+                rows.push(BarRow {
+                    key: "shield",
+                    label_key: String::from("stat.shieldhealth"),
+                    label_args: Vec::new(),
+                    color: 0xffd3_7fff,
+                    value: fill.clamp(0.0, 1.0),
+                });
+            }
+        }
+        BlockKind::SolidPump | BlockKind::Fracker => {
+            if let Some((last_pump, warmup, efficiency)) = extras.pump {
+                rows.push(BarRow {
+                    key: "efficiency",
+                    label_key: String::from("bar.pumpspeed"),
+                    label_args: vec![format!("{:.1}", last_pump * 60.0)],
+                    color: 0xff89_47ff,
+                    value: (warmup * efficiency).clamp(0.0, 1.0),
+                });
+            }
+        }
+        BlockKind::PayloadLoader | BlockKind::PayloadUnloader => {
+            if let Some(loader) = &extras.payload_loader {
+                let has_items = loader.payload_has_items;
+                rows.push(BarRow {
+                    key: "progress",
+                    label_key: String::from(if has_items {
+                        "bar.items"
+                    } else {
+                        "bar.loadprogress"
+                    }),
+                    label_args: if has_items {
+                        vec![loader.payload_items.to_string()]
+                    } else {
+                        Vec::new()
+                    },
+                    color: 0x2ea7_56ff,
+                    value: loader.progress.clamp(0.0, 1.0),
+                });
+            }
+        }
+        BlockKind::LaunchPad => {
+            if let Some(total) = items_total {
+                rows.push(BarRow {
+                    key: "items",
+                    label_key: String::from("bar.items"),
+                    label_args: vec![total.to_string()],
+                    color: 0x2ea7_56ff,
+                    value: (total as f32 / def.item_capacity.max(1) as f32).clamp(0.0, 1.0),
+                });
+            }
+            if let Some((counter, time)) = extras.launch {
+                rows.push(BarRow {
+                    key: "progress",
+                    label_key: String::from("bar.launchcooldown"),
+                    label_args: Vec::new(),
+                    color: 0xff89_47ff,
+                    value: if time > 0.0 {
+                        (counter / time).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    },
+                });
+            }
+        }
+        BlockKind::LandingPad => {
+            if let Some(cooldown) = extras.landing_cooldown {
+                rows.push(BarRow {
+                    key: "cooldown",
+                    label_key: String::from("bar.cooldown"),
+                    label_args: Vec::new(),
+                    color: 0xf680_21ff,
+                    value: cooldown.clamp(0.0, 1.0),
                 });
             }
         }
@@ -10355,6 +11060,7 @@ mod tests {
             heat: Some((5.0, 10.0)),
             time_scale: 1.0,
             factory: Some((450.0, 0)),
+            ..BarExtras::default()
         };
         // `CoreBlock.java:148-152`: `bar.capacity` appended after the defaults.
         let core = bar_rows("core-shard", &extras, &content);
@@ -10365,7 +11071,7 @@ mod tests {
         assert_eq!(capacity.color, 0x2ea7_56ff);
         assert_eq!(capacity.value, 0.0, "0 items over 4000 * 16");
         assert_eq!(
-            capacity.label_arg.as_deref(),
+            capacity.label_args.first().map(String::as_str),
             Some(
                 mind_core::ui::text::format_amount_default(4000)
                     .replace("[gray]", "")
@@ -10398,7 +11104,7 @@ mod tests {
             panic!("drill speed bar missing");
         };
         assert_eq!(speed.label_key, "bar.drillspeed");
-        assert_eq!(speed.label_arg.as_deref(), Some("750.00"));
+        assert_eq!(speed.label_args.first().map(String::as_str), Some("750.00"));
         assert_eq!(speed.value, 0.5, "warmup");
         assert_eq!(speed.color, 0xff89_47ff);
         // `HeatProducer.java:40` / `HeatConductor.java:34`: `bar.heat`, heat/output.
@@ -10429,6 +11135,302 @@ mod tests {
             duo.iter().map(|row| row.key).collect::<Vec<_>>(),
             ["health", "power", "liquid"]
         );
+    }
+
+    /// L05 T1: the remaining `Block.setBars` families (turrets, power,
+    /// generators/reactors, projectors, pumps, assemblers, pads, accelerator).
+    #[test]
+    fn bar_rows_for_the_remaining_families() {
+        use mind_core::content::BlockKind;
+        let content = base_registry();
+        let def = |name: &str| {
+            content
+                .block_by_name(name)
+                .unwrap_or_else(|| panic!("{name}"))
+        };
+        let rows_for = |name: &str, extras: &BarExtras| {
+            building_bar_rows(def(name), 1.0, None, Some(0), None, &[], extras)
+        };
+        let keys = |rows: &[BarRow]| rows.iter().map(|row| row.key).collect::<Vec<_>>();
+
+        // `ItemTurret.java:61-67`, `Turret.java:201-207`,
+        // `BaseTurret.java:104-110`.
+        let turret = BarExtras {
+            turret: Some(TurretBars {
+                total_ammo: 15,
+                max_ammo: 30,
+                heat_req: 2.0,
+                heat_requirement: 4.0,
+                max_heat_efficiency: 1.0,
+                activation_timer: 0.0,
+                activation_time: 0.0,
+            }),
+            ..BarExtras::default()
+        };
+        let duo = rows_for("duo", &turret);
+        let Some(ammo) = duo.iter().find(|row| row.key == "ammo") else {
+            panic!("ammo bar");
+        };
+        assert_eq!(ammo.label_key, "stat.ammo");
+        assert_eq!(ammo.value, 0.5);
+        let Some(heat) = duo.iter().find(|row| row.key == "heat") else {
+            panic!("heat bar");
+        };
+        assert_eq!(heat.label_key, "bar.heatpercent");
+        assert_eq!(heat.label_args, ["2", "50"]);
+
+        // `PowerNode.java:115-122`: power, batteries, connections.
+        let power = BarExtras {
+            power: Some(PowerBars {
+                balance: 10.0,
+                produced: 30.0,
+                needed: 60.0,
+                stored: 500.0,
+                capacity: 1000.0,
+                links: 2,
+                max_nodes: 3,
+                back: None,
+                front: None,
+            }),
+            ..BarExtras::default()
+        };
+        let node = rows_for("power-node", &power);
+        assert_eq!(keys(&node), ["health", "power", "batteries", "connections"]);
+        assert_eq!(node[1].label_args, ["+600"]);
+        assert_eq!(node[1].value, 0.5);
+        assert_eq!(
+            node[2].label_args,
+            [
+                mind_core::ui::text::format_amount_default(500)
+                    .replace("[gray]", "")
+                    .replace("[]", ""),
+                mind_core::ui::text::format_amount_default(1000)
+                    .replace("[gray]", "")
+                    .replace("[]", "")
+            ]
+        );
+        assert_eq!(node[3].label_args, ["2", "3"]);
+
+        // `PowerDiode.java:33-48`: `bar.input`/`bar.output`, no balance rows.
+        let diode = rows_for(
+            "diode",
+            &BarExtras {
+                power: Some(PowerBars {
+                    back: Some(0.25),
+                    front: Some(0.75),
+                    ..PowerBars::default()
+                }),
+                ..BarExtras::default()
+            },
+        );
+        assert_eq!(keys(&diode), ["health", "back", "front"]);
+        assert_eq!(diode[1].label_key, "bar.input");
+        assert_eq!(diode[2].label_key, "bar.output");
+        assert_eq!((diode[1].value, diode[2].value), (0.25, 0.75));
+
+        // `PowerGenerator.java:88-96`.
+        let generator = rows_for(
+            "combustion-generator",
+            &BarExtras {
+                generator: Some(GeneratorBars {
+                    production: 1.0,
+                    usage: 0.0,
+                    efficiency: 0.5,
+                }),
+                time_scale: 1.0,
+                ..BarExtras::default()
+            },
+        );
+        let Some(output) = generator.iter().find(|row| row.key == "power") else {
+            panic!("power output bar");
+        };
+        assert_eq!(output.label_key, "bar.poweroutput");
+        assert_eq!(output.label_args, ["60.0"]);
+        assert_eq!(output.value, 0.5);
+
+        // `NuclearReactor.java:103`, `VariableReactor.java:57-63`.
+        let reactor = rows_for(
+            "thorium-reactor",
+            &BarExtras {
+                reactor_heat: Some(0.25),
+                ..BarExtras::default()
+            },
+        );
+        assert_eq!(
+            reactor
+                .iter()
+                .find(|row| row.key == "heat")
+                .map(|row| row.value),
+            Some(0.25)
+        );
+        let flux = rows_for(
+            "flux-reactor",
+            &BarExtras {
+                variable_reactor: Some((30.0, 150.0, 0.4)),
+                ..BarExtras::default()
+            },
+        );
+        let Some(instability) = flux.iter().find(|row| row.key == "instability") else {
+            panic!("instability bar");
+        };
+        assert_eq!(instability.value, 0.4);
+        assert_eq!(instability.color, 0x665c_9fff);
+
+        // `OverdriveProjector.java:80`, `ForceProjector.java:99`.
+        let overdrive = rows_for(
+            "overdrive-projector",
+            &BarExtras {
+                overdrive: Some((2.25, 2.25)),
+                ..BarExtras::default()
+            },
+        );
+        let Some(boost) = overdrive.iter().find(|row| row.key == "boost") else {
+            panic!("boost bar");
+        };
+        assert_eq!(boost.label_args, ["125"]);
+        assert_eq!(boost.value, 1.0);
+        let shield = rows_for(
+            "force-projector",
+            &BarExtras {
+                shield: Some(0.5),
+                ..BarExtras::default()
+            },
+        );
+        assert_eq!(
+            shield
+                .iter()
+                .find(|row| row.key == "shield")
+                .map(|row| row.value),
+            Some(0.5)
+        );
+
+        // `SolidPump.java:51-55`.
+        let pump = rows_for(
+            "water-extractor",
+            &BarExtras {
+                pump: Some((0.25, 0.5, 0.5)),
+                ..BarExtras::default()
+            },
+        );
+        let Some(efficiency) = pump.iter().find(|row| row.key == "efficiency") else {
+            panic!("pump speed bar");
+        };
+        assert_eq!(efficiency.label_args, ["15.0"]);
+        assert_eq!(efficiency.value, 0.25);
+
+        // `UnitAssembler.java:128-143` `units` bar is the 3-argument form.
+        let assembler = rows_for(
+            "tank-assembler",
+            &BarExtras {
+                assembler: Some((
+                    0.5,
+                    100.0,
+                    Some(UnitCapBars {
+                        name: String::from("vanquish"),
+                        count: 3,
+                        cap: Some(8),
+                        use_cap: true,
+                        has_unit: true,
+                    }),
+                )),
+                ..BarExtras::default()
+            },
+        );
+        let Some(units) = assembler.iter().find(|row| row.key == "units") else {
+            panic!("assembler units bar");
+        };
+        assert_eq!(units.label_key, "bar.unitcap");
+        assert_eq!(units.label_args, [":vanquish:", "3", "8"]);
+        assert_eq!(units.value, 3.0 / 8.0);
+        assert_eq!(units.color, 0xec7b_4cff);
+
+        // `LaunchPad.java:69-70`, `LandingPad.java:113-115`.
+        let launch = rows_for(
+            "launch-pad",
+            &BarExtras {
+                launch: Some((50.0, 100.0)),
+                ..BarExtras::default()
+            },
+        );
+        assert_eq!(keys(&launch), ["health", "items", "progress"]);
+        assert_eq!(launch[2].label_key, "bar.launchcooldown");
+        assert_eq!(launch[2].value, 0.5);
+        let landing = rows_for(
+            "landing-pad",
+            &BarExtras {
+                landing_cooldown: Some(0.25),
+                ..BarExtras::default()
+            },
+        );
+        assert_eq!(
+            landing
+                .iter()
+                .find(|row| row.key == "cooldown")
+                .map(|row| row.value),
+            Some(0.25)
+        );
+
+        // `Accelerator.java:106-110`.
+        let accelerator = rows_for(
+            "interplanetary-accelerator",
+            &BarExtras {
+                accelerator: Some((250_000.0, 1_000_000.0)),
+                ..BarExtras::default()
+            },
+        );
+        let Some(buffer) = accelerator
+            .iter()
+            .find(|row| row.key == "powerBufferRequirement")
+        else {
+            panic!("power buffer bar");
+        };
+        assert_eq!(buffer.label_key, "bar.powerbuffer");
+        assert_eq!(
+            buffer.label_args,
+            [
+                mind_core::ui::text::format_amount_default(250_000)
+                    .replace("[gray]", "")
+                    .replace("[]", ""),
+                mind_core::ui::text::format_amount_default(1_000_000)
+                    .replace("[gray]", "")
+                    .replace("[]", "")
+            ]
+        );
+        assert_eq!(buffer.value, 0.25);
+
+        // `TargetDummy.java:64-73`: health removed, `dps` over the reset timer.
+        let dummy = rows_for(
+            "target-dummy",
+            &BarExtras {
+                target_dummy: Some((30.0, 120.0)),
+                ..BarExtras::default()
+            },
+        );
+        assert_eq!(keys(&dummy), ["dps"]);
+        assert_eq!(dummy[0].value, 0.75);
+
+        // `GenericCrafter.java:81-98`: output liquids replace the dynamic bar.
+        let electrolyzer = def("electrolyzer");
+        assert_eq!(electrolyzer.kind, BlockKind::GenericCrafter);
+        let crafter = building_bar_rows(
+            electrolyzer,
+            1.0,
+            None,
+            Some(0),
+            Some(&[]),
+            &[],
+            &BarExtras {
+                output_liquids: vec![
+                    (String::from("ozone"), 0xaabb_ccff, 10.0, 20.0),
+                    (String::from("hydrogen"), 0xddee_ffff, 5.0, 20.0),
+                ],
+                ..BarExtras::default()
+            },
+        );
+        let liquids: Vec<_> = crafter.iter().filter(|row| row.key == "liquid").collect();
+        assert_eq!(liquids.len(), 2);
+        assert_eq!(liquids[0].label_key, "liquid.ozone.name");
+        assert_eq!((liquids[0].value, liquids[1].value), (0.5, 0.25));
     }
 
     #[test]
@@ -10589,7 +11591,7 @@ mod tests {
         assert_eq!(rows[0].key, "health");
         assert_eq!(rows[1].key, "items");
         assert_eq!(rows[1].label_key, "bar.items");
-        assert_eq!(rows[1].label_arg.as_deref(), Some("5"));
+        assert_eq!(rows[1].label_args.first().map(String::as_str), Some("5"));
         let expected = 5.0 / def.item_capacity as f32;
         assert!((rows[1].value - expected).abs() < 1e-4);
     }

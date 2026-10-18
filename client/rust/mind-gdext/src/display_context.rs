@@ -5,9 +5,9 @@
 //!
 //! `LogicDisplay.commandImage` draws `UnlockableContent.fullIcon`
 //! (`LogicDisplay.java:222-225`); the port crops the icon out of the packed
-//! atlas page and hands it to `mind_core::logic::display_raster`. Logic-font
-//! glyphs (`commandPrint`) are deferred: `glyph` always misses until a glyph
-//! rasterizer lands.
+//! atlas page and hands it to `mind_core::logic::display_raster`.
+//! `commandPrint`/`printchar` glyphs come from the `Fonts.logic` font
+//! (`logic.ttf`) rasterised through Godot's `FontFile` at 16 px (L07 T4).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -58,6 +58,7 @@ pub(crate) struct AtlasIcons<'a> {
     assets: Option<Gd<MindAssets>>,
     names: &'a IconNames,
     cache: RefCell<HashMap<(u8, u16), Option<RgbaImage>>>,
+    glyphs: RefCell<HashMap<char, Option<Glyph>>>,
 }
 
 impl<'a> AtlasIcons<'a> {
@@ -67,7 +68,62 @@ impl<'a> AtlasIcons<'a> {
             assets,
             names,
             cache: RefCell::new(HashMap::new()),
+            glyphs: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// Rasterises one `Fonts.logic` glyph at 16 px (`LogicDisplay.java:227-235`).
+    fn logic_glyph(&self, c: char) -> Option<Glyph> {
+        let assets = self.assets.clone()?;
+        let mut font = assets.bind().logic_font()?;
+        let size = Vector2i::new(16, 0);
+        let index = font.get_glyph_index(16, c as u32, 0);
+        if index <= 0 {
+            return None;
+        }
+        font.render_glyph(0, size, index);
+        let texture_index = font.get_glyph_texture_idx(0, size, index);
+        let image = font.get_texture_image(0, size, texture_index)?;
+        let uv = font.get_glyph_uv_rect(0, size, index);
+        let (image_width, image_height) = (image.get_width() as f32, image.get_height() as f32);
+        if image_width <= 0.0 || image_height <= 0.0 {
+            return None;
+        }
+        let rect = if uv.size.x <= 1.0 && uv.size.y <= 1.0 && image_width > 1.0 {
+            Rect2i::new(
+                Vector2i::new(
+                    (uv.position.x * image_width).floor() as i32,
+                    (uv.position.y * image_height).floor() as i32,
+                ),
+                Vector2i::new(
+                    (uv.size.x * image_width).round().max(1.0) as i32,
+                    (uv.size.y * image_height).round().max(1.0) as i32,
+                ),
+            )
+        } else {
+            Rect2i::new(
+                Vector2i::new(uv.position.x as i32, uv.position.y as i32),
+                Vector2i::new(uv.size.x as i32, uv.size.y as i32),
+            )
+        };
+        let glyph_image = image.get_region(rect)?;
+        let image = rgba_from_image(&glyph_image)?;
+        let offset = font.get_glyph_offset(0, size, index);
+        let ascent = font.get_ascent();
+        // `BitmapFontData.capHeight`: the capital glyph's pixel height.
+        let cap_index = font.get_glyph_index(16, 'H' as u32, 0);
+        let cap_height = if cap_index > 0 {
+            font.get_glyph_size(0, size, cap_index).y
+        } else {
+            ascent * 0.75
+        };
+        Some(Glyph {
+            image,
+            x_offset: offset.x,
+            y_offset: offset.y,
+            cap_height,
+            ascent,
+        })
     }
 
     /// `[x, y, w, h, page]` crop of one atlas region as RGBA8888.
@@ -126,9 +182,13 @@ impl DisplayDrawContext for AtlasIcons<'_> {
         found
     }
 
-    fn glyph(&self, _c: char) -> Option<Glyph> {
-        // Deferred: the logic font rasterizer is not ported yet.
-        None
+    fn glyph(&self, c: char) -> Option<Glyph> {
+        if let Some(cached) = self.glyphs.borrow().get(&c) {
+            return cached.clone();
+        }
+        let glyph = self.logic_glyph(c);
+        self.glyphs.borrow_mut().insert(c, glyph.clone());
+        glyph
     }
 }
 

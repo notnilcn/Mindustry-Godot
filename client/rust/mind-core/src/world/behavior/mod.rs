@@ -646,9 +646,9 @@ pub fn default_behavior(def: &BlockDef) -> Arc<dyn BuildingBehavior> {
         K::Wall | K::ShieldWall => Arc::new(defense::WallBehavior),
         K::Radar => Arc::new(defense::RadarBehavior),
         K::Thruster => Arc::new(defense::ThrusterBehavior),
-        K::TargetDummy => {
-            Arc::new(crate::world::blocks::defense::behaviors::TargetDummyDefenseBehavior)
-        }
+        K::TargetDummy => Arc::new(
+            crate::world::blocks::defense::behaviors::TargetDummyDefenseBehavior { dummy: None },
+        ),
         // Projector/mine/shield state machines (`world/blocks/defense`); the
         // exact per-block knobs are installed by `defense::register`.
         K::MendProjector => Arc::new(

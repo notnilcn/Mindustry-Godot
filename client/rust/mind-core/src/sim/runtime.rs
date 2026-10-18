@@ -248,6 +248,7 @@ impl SimRuntime {
             Wire::Point2Array(points) => {
                 WorldConfigValue::Point2Array(points.iter().copied().collect())
             }
+            Wire::IntArray(values) => WorldConfigValue::IntArray(values.clone()),
             Wire::ContentId { kind, id } => {
                 let content_type = ContentType::ALL
                     .iter()
@@ -1449,8 +1450,15 @@ impl Sim {
             if let Some(mut health) = self.ecs.0.get_mut::<crate::entities::comp::Health>(entity) {
                 health.health -= explode.damage;
             }
-            // `Fx.generatespark.at(...)` is view-only (no generator-effect
-            // seam yet; the damage and the trigger are the sim-visible halves).
+            // `Fx.generatespark.at(x + range, y + range)` (`range` = the
+            // building's `size * tilesize / 2`, Java `ConsumeItemExplode`).
+            let (x, y) = self
+                .ecs
+                .0
+                .get::<crate::entities::comp::Pos>(entity)
+                .map(|pos| (pos.x, pos.y))
+                .unwrap_or((0.0, 0.0));
+            crate::world::blocks::power::explosion::generatespark(&mut self.ecs.0, x, y);
             self.triggers
                 .fire(super::Trigger::BlastGenerator, &mut self.ecs.0);
         }

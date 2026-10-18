@@ -87,6 +87,8 @@ func _frameless() -> bool:
 		or bool(_config.get("selection", false))
 		or _config.get("commands", null) is Dictionary
 		or bool(_config.get("launch", false))
+		or bool(_config.get("target_dummy", false))
+		or _config.get("core_teams", null) is Array
 	)
 
 
@@ -171,6 +173,10 @@ func _rebuild() -> void:
 		_build_text_editor()
 	elif bool(_config.get("launch", false)):
 		_build_launch_panel()
+	elif bool(_config.get("target_dummy", false)):
+		_build_target_dummy()
+	elif _config.get("core_teams", null) is Array:
+		_build_core_teams()
 	elif bool(_config.get("selection", false)) or _config.get("commands", null) is Dictionary:
 		body.add_theme_constant_override("separation", 0)
 		_build_selection()
@@ -409,6 +415,114 @@ func _on_selection_pick(value: String) -> void:
 	else:
 		_submit(kind, value)
 	_close()
+
+
+## `TargetDummy.buildConfiguration` (`TargetDummy.java:240-262`): the
+## enemy-team/flying checks and the armor / reset-time / hit-size fields.
+## Every edit sends the whole 5-int array (`configureInt`).
+func _build_target_dummy() -> void:
+	var values: Array = []
+	var current: Variant = _config.get("current", {})
+	if current is Dictionary and (current as Dictionary).get("values", null) is Array:
+		values = (current as Dictionary)["values"]
+	while values.size() < 5:
+		values.append(0)
+	var enemy := CheckBox.new()
+	enemy.text = _t("@rules.enemyteam", "Enemy team")
+	enemy.button_pressed = int(values[0]) == 1
+	body.add_child(enemy)
+	var flying := CheckBox.new()
+	flying.text = _t("@stat.flying", "Flying")
+	flying.button_pressed = int(values[1]) == 1
+	body.add_child(flying)
+	var armor := _dummy_field("stat.armor", str(int(values[2])), "digits")
+	var reset := _dummy_field("stat.resettime", _fixed(float(int(values[3])) / 60.0, 2), "floats")
+	var size_bits := int(values[4])
+	if size_bits == 0:
+		size_bits = _float_to_bits(12.0)
+	var size_blocks := _bits_to_float(size_bits) / float(mind_tilesize())
+	var hit := _dummy_field("stat.hitsize", _fixed(size_blocks, 2), "floats")
+	var buttons := HBoxContainer.new()
+	body.add_child(buttons)
+	var ok := Button.new()
+	ok.text = _t("@ok", "OK")
+	buttons.add_child(ok)
+	_add_close_button(buttons)
+	ok.pressed.connect(func() -> void:
+		var size := float(hit.text.to_float()) * float(mind_tilesize())
+		var packed := [
+			1 if enemy.button_pressed else 0,
+			1 if flying.button_pressed else 0,
+			clampi(armor.text.to_int(), 0, 100_000),
+			int(reset.text.to_float() * 60.0),
+			_float_to_bits(size),
+		]
+		var parts := PackedStringArray()
+		for value in packed:
+			parts.append(str(value))
+		_submit("ints", ",".join(parts))
+	)
+
+
+func _dummy_field(label_key: String, value: String, filter: String) -> LineEdit:
+	var row := HBoxContainer.new()
+	body.add_child(row)
+	var label := Label.new()
+	label.text = _t("@" + label_key, label_key)
+	label.custom_minimum_size = Vector2(130, 0)
+	row.add_child(label)
+	var field := LineEdit.new()
+	field.text = value
+	field.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	field.custom_minimum_size = Vector2(200, 0)
+	if filter == "digits":
+		field.virtual_keyboard_type = LineEdit.KEYBOARD_TYPE_NUMBER
+	row.add_child(field)
+	return field
+
+
+## `CoreBlock.buildConfiguration` (`CoreBlock.java:289-319`): 32 px team-colour
+## toggles, 3 per row, only while `rules.coreBuildAndConfig` is on.
+func _build_core_teams() -> void:
+	var grid := GridContainer.new()
+	grid.columns = 3
+	body.add_child(grid)
+	var current := int((_config.get("current", {}) as Dictionary).get("team", -1))
+	for team in _config.get("core_teams", []):
+		if not (team is Dictionary):
+			continue
+		var entry: Dictionary = team
+		var button := Button.new()
+		button.custom_minimum_size = Vector2(32, 32)
+		button.tooltip_text = _t("@team.%s.name" % str(entry.get("name", "")), str(entry.get("name", "")))
+		button.modulate = Color(str(entry.get("color", "ffffffff")))
+		if int(entry.get("id", -1)) == current:
+			button.modulate = button.modulate.lightened(0.35)
+		button.pressed.connect(func() -> void:
+			_submit("int", str(int(entry.get("id", 0)))))
+		grid.add_child(button)
+
+
+func mind_tilesize() -> int:
+	return 8
+
+
+func _bits_to_float(bits: int) -> float:
+	var buffer := StreamPeerBuffer.new()
+	buffer.put_32(bits)
+	buffer.seek(0)
+	return buffer.get_float()
+
+
+func _float_to_bits(value: float) -> int:
+	var buffer := StreamPeerBuffer.new()
+	buffer.put_float(value)
+	buffer.seek(0)
+	return buffer.get_32()
+
+
+func _fixed(value: float, decimals: int) -> String:
+	return ("%." + str(decimals) + "f") % value
 
 
 ## A command-row pick configures the command (`configure(item)`); the

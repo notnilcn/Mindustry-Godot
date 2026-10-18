@@ -49,6 +49,8 @@ pub struct RadarCandidate {
     pub targetable: bool,
     /// `RadarTarget.attacker`: `type.hasWeapons() && !disarmed`.
     pub attacker: bool,
+    /// `u.isBoss()` (`hasEffect(StatusEffects.boss)`).
+    pub boss: bool,
 }
 
 impl RadarCandidate {
@@ -60,6 +62,9 @@ impl RadarCandidate {
 
 /// Collects radar candidates from the world in stable entity-slot order.
 pub fn candidates(world: &World) -> Vec<RadarCandidate> {
+    let boss_status = world
+        .get_non_send::<crate::sim::unit_runtime::UnitRuntime>()
+        .and_then(|runtime| runtime.content.status_id("boss"));
     let mut out: Vec<RadarCandidate> = Vec::new();
     for entity_ref in world.iter_entities() {
         let entity = entity_ref.id();
@@ -112,6 +117,7 @@ pub fn candidates(world: &World) -> Vec<RadarCandidate> {
             dead: core.is_some_and(|c| c.dead),
             targetable,
             attacker: has_weapons && !status.is_some_and(|s| s.disarmed),
+            boss: boss_status.is_some_and(|boss| status.is_some_and(|s| s.has_effect_of(boss))),
         });
     }
     out.sort_by_key(|c| c.entity.index());
@@ -128,9 +134,8 @@ pub fn matches_target(c: &RadarCandidate, team: u8, target: RadarTarget) -> bool
         RadarTarget::Player => c.player,
         // `RadarTarget.attacker`: `u.type.hasWeapons() && !u.disarmed`.
         RadarTarget::Attacker => c.attacker,
-        // `RadarTarget.boss`: `u.isBoss()` — the port has no boss flag on
-        // `UnitTypeDef` yet, so no candidate matches (documented).
-        RadarTarget::Boss => false,
+        // `RadarTarget.boss`: `u.isBoss()` (`StatusEffects.boss`).
+        RadarTarget::Boss => c.boss,
         RadarTarget::Flying => c.flying,
         RadarTarget::Ground => !c.flying,
     }
@@ -292,6 +297,7 @@ mod tests {
             dead: false,
             targetable: true,
             attacker: false,
+            boss: false,
         }
     }
 

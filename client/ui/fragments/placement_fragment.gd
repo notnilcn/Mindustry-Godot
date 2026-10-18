@@ -801,7 +801,7 @@ func _refresh_hover_bars() -> void:
 		var pair: Array = _hover_bars[i]
 		var bar: MindBar = pair[1]
 		bar.fraction = float(entry.get("value", 0.0))
-		if str(entry.get("label_arg", "")) != str((pair[0] as Dictionary).get("label_arg", "")):
+		if str(entry.get("label_args", [])) != str((pair[0] as Dictionary).get("label_args", [])):
 			bar.setup(_bar_text(entry), _bar_color(entry), float(entry.get("value", 0.0)))
 			_hover_bars[i] = [entry, bar]
 
@@ -817,9 +817,9 @@ func _hover_bar_rows() -> Variant:
 
 func _bar_text(entry: Dictionary) -> String:
 	var key := str(entry.get("label_key", ""))
-	var arg: Variant = entry.get("label_arg", null)
-	if arg != null:
-		return MindWidgets.markup(_bundle(key, key).replace("{0}", str(arg)))
+	var args: Variant = entry.get("label_args", [])
+	if args is Array and not (args as Array).is_empty():
+		return MindWidgets.markup_format(key, args)
 	return MindWidgets.markup("@%s" % key)
 
 

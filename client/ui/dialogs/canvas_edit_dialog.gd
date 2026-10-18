@@ -10,8 +10,8 @@
 ## them through `MindInput.configure_building_bytes` (`CanvasEditDialog.save`
 ## -> `canvas.configure(packPixmap(pix))`).
 ##
-## Deferred vs Java: the `@import`/`@export` PNG buttons (FileChooser), the
-## 2-second auto-save timer and the hover-cell outline.
+## `@import`/`@export` PNG and the 2-second auto-save mirror
+## `CanvasEditDialog.java:46-71,216-254`; the hover-cell outline stays deferred.
 
 extends MindDialog
 
@@ -32,6 +32,8 @@ var _palette_row: HBoxContainer = null
 var _swatches: Array[Button] = []
 var _last_cell := Vector2i(-1, -1)
 var _texture: ImageTexture = null
+## `refreshTime = 60 * 2` (`CanvasEditDialog.java:24`): auto-save accumulator.
+var _save_timer := 0.0
 
 
 func _ready() -> void:
@@ -49,10 +51,8 @@ func _build() -> void:
 	_canvas = Control.new()
 	# code-instantiated: the paint surface size is the block's canvas size; it
 	# has no scene-authorable shape.
-	# Java uses 480px (`CanvasEditDialog.java:185`); the port's viewport is
-	# 1152x648 and the panel does not grow, so 300 keeps every cell (and the
-	# palette row) inside the panel without scrolling.
-	_canvas.custom_minimum_size = Vector2(300, 300)
+	# `CanvasEditDialog.java:185`: 480 px on desktop.
+	_canvas.custom_minimum_size = Vector2(480, 480)
 	_canvas.gui_input.connect(_on_canvas_input)
 	_canvas.draw.connect(_draw_canvas)
 	table.add(_canvas)
@@ -84,6 +84,20 @@ func _build() -> void:
 	controls.add_child(fill_button)
 
 	add_close_button(160.0)
+	var import_button := add_button(_t("@import"), _import_png, "download", 160.0)
+	import_button.custom_minimum_size.y = 64.0
+	var export_button := add_button(_t("@export"), _export_png, "upload", 160.0)
+	export_button.custom_minimum_size.y = 64.0
+
+
+## `CanvasEditDialog.update`: `if(refreshTime >= 60*2) save()`.
+func _process(delta: float) -> void:
+	if not visible or not _modified:
+		return
+	_save_timer += delta * 60.0
+	if _save_timer >= 120.0:
+		_save_timer = 0.0
+		_save()
 
 
 func shown() -> void:
@@ -180,6 +194,89 @@ func _save() -> void:
 		return
 	input.call("configure_building_bytes", _x, _y, _pack())
 	_modified = false
+
+
+## `@export`: `file.writePng(pix)` (`CanvasEditDialog.java:216-222`).
+func _export_png() -> void:
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_SAVE_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.add_filter("*.png", "PNG")
+	dialog.file_selected.connect(func(path: String) -> void:
+		var image := _pixels_image()
+		if image != null:
+			image.save_png(path)
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+
+
+## `@import`: decode, scale/centre and map every pixel to the nearest palette
+## entry (`CanvasEditDialog.java:224-274`).
+func _import_png() -> void:
+	var dialog := FileDialog.new()
+	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILE
+	dialog.access = FileDialog.ACCESS_FILESYSTEM
+	dialog.add_filter("*.png,*.jpg,*.jpeg", "Images")
+	dialog.file_selected.connect(func(path: String) -> void:
+		_import_image(path)
+		dialog.queue_free())
+	dialog.canceled.connect(dialog.queue_free)
+	add_child(dialog)
+	dialog.popup_centered()
+
+
+func _import_image(path: String) -> void:
+	var image := Image.load_from_file(path)
+	if image == null:
+		return
+	image.convert(Image.FORMAT_RGBA8)
+	# Scale preserving aspect when larger, else fill with palette[0] and centre.
+	var base := _rgba8(int(_palette[0])) if not _palette.is_empty() else Color.BLACK
+	var target := _size
+	var scaled := image
+	if image.get_width() > target or image.get_height() > target:
+		var ratio := minf(float(target) / float(image.get_width()), float(target) / float(image.get_height()))
+		var w := maxi(1, roundi(image.get_width() * ratio))
+		var h := maxi(1, roundi(image.get_height() * ratio))
+		image.resize(w, h, Image.INTERPOLATE_BILINEAR)
+		scaled = image
+	var ox := (target - scaled.get_width()) / 2
+	var oy := (target - scaled.get_height()) / 2
+	for y in target:
+		for x in target:
+			var color := base
+			var sx := x - ox
+			var sy := y - oy
+			if sx >= 0 and sy >= 0 and sx < scaled.get_width() and sy < scaled.get_height():
+				var pixel := scaled.get_pixel(sx, sy)
+				# `findClosest`: blend the source alpha over palette[0].
+				color = base.blend(pixel) if pixel.a < 1.0 else pixel
+			_pixels[y * target + x] = _nearest_palette(color)
+	_modified = true
+	_refresh_texture()
+	_canvas.queue_redraw()
+
+
+func _pixels_image() -> Image:
+	var image := Image.create(_size, _size, false, Image.FORMAT_RGBA8)
+	for y in _size:
+		for x in _size:
+			image.set_pixel(x, y, _rgba8(int(_palette[_pixels[y * _size + x]])) if _palette.size() > 0 else Color.BLACK)
+	return image
+
+
+func _nearest_palette(color: Color) -> int:
+	var best := 0
+	var best_distance := INF
+	for index in _palette.size():
+		var candidate := _rgba8(int(_palette[index]))
+		var distance := pow(color.r - candidate.r, 2.0) + pow(color.g - candidate.g, 2.0) + pow(color.b - candidate.b, 2.0)
+		if distance < best_distance:
+			best_distance = distance
+			best = index
+	return best
 
 
 ## Paint surface input (`CanvasEditDialog`'s `InputListener`; `:87-135`).

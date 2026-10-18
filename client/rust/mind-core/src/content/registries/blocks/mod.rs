@@ -1245,6 +1245,8 @@ pub struct BlockSpec {
     pub upgrades: Vec<(&'static str, &'static str)>,
     /// Assembler plans (`UnitAssembler.plans`).
     pub assembler_plans: Vec<AssemblerUnitPlanSpec>,
+    /// `Drill.drillMultipliers` (item name -> multiplier).
+    pub drill_multipliers: Vec<(&'static str, f32)>,
     /// Item capacity.
     pub item_capacity: Option<i32>,
     /// Liquid capacity.
@@ -1478,6 +1480,7 @@ impl Default for BlockSpec {
             unit_plans: Vec::new(),
             upgrades: Vec::new(),
             assembler_plans: Vec::new(),
+            drill_multipliers: Vec::new(),
             item_capacity: None,
             liquid_capacity: None,
             has_items: None,
@@ -2767,7 +2770,13 @@ impl BlockDef {
                 .iter()
                 .map(|(name, value)| ((*name).to_string(), *value))
                 .collect(),
-            drill_multipliers: Vec::new(),
+            drill_multipliers: spec
+                .drill_multipliers
+                .iter()
+                .filter_map(|(name, value)| {
+                    registry.item_by_name(name).map(|item| (item.id, *value))
+                })
+                .collect(),
             liquid_drop,
             speed_multiplier: spec.speed_multiplier.unwrap_or(1.0),
             is_liquid: spec.is_liquid.unwrap_or(false),
@@ -3867,6 +3876,13 @@ mod tests {
         let message = get("message");
         assert_eq!(message.group, BlockGroup::Logic);
         assert!(message.solid && message.destructible && message.configurable);
+
+        // PAR-0446: `update = solid = true` (`UnitCargoUnloadPoint.java:26`,
+        // `UnitAssembler.java:62`).
+        assert!(get("unit-cargo-unload-point").solid);
+        for name in ["tank-assembler", "ship-assembler", "mech-assembler"] {
+            assert!(get(name).solid, "{name} is solid (UnitAssembler.java:62)");
+        }
     }
 
     /// Generated item references resolve and `get_dependencies` covers inputs.

@@ -31,6 +31,7 @@ use mind_core::fx::{
 
 pub mod draw_turret;
 pub mod env;
+pub mod explosion_sink;
 
 use draw_turret::TurretDrawInput;
 use env::EnvFxInput;

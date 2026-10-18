@@ -209,7 +209,66 @@ pub fn canvas_rows(
 #[derive(Debug, Default, Clone, Copy)]
 pub struct CanvasBehavior;
 
+impl CanvasBehavior {
+    /// `CanvasBlock.onProximityUpdate` (`CanvasBlock.java:208-216,251-253`):
+    /// bit `i` is set when the `d4` neighbour (order `(1,0),(0,1),(-1,0),
+    /// (0,-1)`) is the same block at that neighbour's origin tile.
+    fn refresh_blending(world: &mut World, e: Entity) {
+        let Some(building) = world.get::<crate::entities::comp::Building>(e).cloned() else {
+            return;
+        };
+        let block = building.block;
+        let size = world
+            .get_resource::<crate::world::block::BlockTable>()
+            .and_then(|table| table.get(block))
+            .map_or(1, |instance| instance.def.size.max(1));
+        let builds = world
+            .get_resource::<crate::world::tile_index::TileBuilds>()
+            .cloned();
+        let grid = world.get_resource::<crate::world::WorldGrid>().cloned();
+        let mut mask = 0u8;
+        for i in 0..4 {
+            let x = i32::from(building.tile.x()) + crate::world::blocks::autotiler::D4X[i] * size;
+            let y = i32::from(building.tile.y()) + crate::world::blocks::autotiler::D4Y[i] * size;
+            let neighbor = builds
+                .as_ref()
+                .and_then(|builds| builds.get(x, y))
+                .or_else(|| {
+                    grid.as_ref().and_then(|grid| {
+                        grid.tiles
+                            .in_bounds(x, y)
+                            .then(|| grid.tile(x, y).build)
+                            .flatten()
+                    })
+                });
+            let Some(neighbor) = neighbor else {
+                continue;
+            };
+            let Some(other) = world.get::<crate::entities::comp::Building>(neighbor) else {
+                continue;
+            };
+            if other.block == block
+                && i32::from(other.tile.x()) == x
+                && i32::from(other.tile.y()) == y
+            {
+                mask |= 1 << i;
+            }
+        }
+        if let Some(mut state) = world.get_mut::<CanvasBlockState>(e) {
+            state.blending = mask;
+        }
+    }
+}
+
 impl BuildingBehavior for CanvasBehavior {
+    fn created(&self, world: &mut World, e: Entity) {
+        Self::refresh_blending(world, e);
+    }
+
+    fn on_proximity_update(&self, world: &mut World, e: Entity) {
+        Self::refresh_blending(world, e);
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
         let def = canvas_def_of(world, e).unwrap_or_default();
         world.entity_mut(e).insert(CanvasBlockState::new(
@@ -273,5 +332,45 @@ impl BuildingBehavior for CanvasBehavior {
             state.data = bytes;
             state.invalidated = true;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::world::BuildHarness;
+
+    /// `CanvasBlock.onProximityUpdate`: only the d4 neighbours of the same
+    /// block set blending bits (`CanvasBlock.java:208-216,251-253`).
+    #[test]
+    fn adjacent_canvases_set_the_blending_mask() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let Some(canvas) = harness.content.block_id("canvas") else {
+            panic!("canvas missing");
+        };
+        assert!(harness.place(4, 4, canvas, 0, true));
+        assert!(harness.place(6, 4, canvas, 0, true));
+        assert!(harness.place(4, 6, canvas, 0, true));
+        // The harness keeps the grid outside the ECS; the live runtime reads
+        // the `TileBuilds` mirror, so lend it the grid for this check.
+        harness.world.insert_resource(harness.grid.clone());
+        for (x, y) in [(4, 4), (6, 4), (4, 6)] {
+            let entity = harness.grid.tile(x, y).build.expect("canvas");
+            let _ = crate::world::proximity::update_proximity(
+                &mut harness.world,
+                &harness.grid,
+                &harness.content,
+                entity,
+            );
+        }
+        let left = harness.grid.tile(4, 4).build.expect("left canvas");
+        let state = harness
+            .world
+            .get::<CanvasBlockState>(left)
+            .cloned()
+            .expect("canvas state");
+        assert_eq!(state.blending & 0b0001, 0b0001, "east neighbour");
+        assert_eq!(state.blending & 0b0010, 0b0010, "north neighbour");
+        assert_eq!(state.blending & 0b1100, 0, "no west/south neighbours");
     }
 }

@@ -553,6 +553,42 @@ impl Sim {
         if self.configure_power_node(entity, &value) {
             return true;
         }
+        // `CoreBlock.java:322-332`: with `coreBuildAndConfig`, an integer
+        // config sets the player's team (and the core's).
+        if let crate::world::config::ConfigValue::Number(number) = &value
+            && (crate::game::runtime::rules_of(&self.ecs.0)
+                .is_some_and(|rules| rules.core_build_and_config)
+                || self
+                    .ecs
+                    .0
+                    .get_resource::<crate::world::limits::BuildRules>()
+                    .is_some_and(|rules| rules.core_build_and_config))
+            && let Some(building) = self.ecs.0.get::<crate::entities::comp::Building>(entity)
+        {
+            let is_core = self
+                .block_runtime
+                .as_ref()
+                .and_then(|runtime| runtime.content().block(building.block))
+                .is_some_and(|def| def.kind == crate::content::BlockKind::CoreBlock);
+            if is_core {
+                let team = (*number as i64 & 0xFF) as u8;
+                if let Some(mut comp) = self
+                    .ecs
+                    .0
+                    .get_mut::<crate::entities::comp::TeamComp>(entity)
+                {
+                    comp.team = team;
+                }
+                if let Some(unit) = self.player_unit()
+                    && let Some(mut comp) =
+                        self.ecs.0.get_mut::<crate::entities::comp::TeamComp>(unit)
+                {
+                    comp.team = team;
+                }
+                self.set_player_team(team);
+                return true;
+            }
+        }
         let applied = crate::world::config::configure(&mut self.ecs.0, entity, None, value);
         // A door toggle changes `Tile.solid()` (Java calls
         // `pathfinder.updateTile(entity.tile)` inline, `Door.java:56`); mirror

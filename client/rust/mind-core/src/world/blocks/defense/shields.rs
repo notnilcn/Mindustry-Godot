@@ -641,6 +641,16 @@ pub struct TargetDummyState {
     pub dps_timer: f32,
     /// `TargetDummyBuild.unitArmor`.
     pub armor: f32,
+    /// `TargetDummyBuild.boosting` (the dummy's flying check).
+    pub boosting: bool,
+    /// `TargetDummyBuild.dummySize` (world units, default 12).
+    pub dummy_size: f32,
+    /// `TargetDummyBuild.unitTeam`.
+    pub unit_team: u8,
+    /// Tethered dummy unit (`unit`; transient, resolved on update).
+    pub unit: Option<bevy_ecs::entity::Entity>,
+    /// `TargetDummyBuild.readUnitId` (`-1` = none).
+    pub read_unit_id: i32,
 }
 
 impl Default for TargetDummyState {
@@ -654,6 +664,11 @@ impl Default for TargetDummyState {
             hits: 0,
             dps_timer: 20.0,
             armor: 0.0,
+            boosting: false,
+            dummy_size: 12.0,
+            unit_team: 0,
+            unit: None,
+            read_unit_id: -1,
         }
     }
 }

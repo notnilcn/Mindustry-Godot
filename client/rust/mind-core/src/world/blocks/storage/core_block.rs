@@ -426,6 +426,13 @@ impl BuildingBehavior for CoreBehavior {
         hooks(world).allow_core_unloaders()
     }
 
+    fn config_kinds(&self) -> &'static [crate::world::config::ConfigKind] {
+        &[
+            crate::world::config::ConfigKind::Point,
+            crate::world::config::ConfigKind::Number,
+        ]
+    }
+
     fn config(&self, world: &World, e: Entity) -> ConfigValue {
         match world.get::<CoreBuild>(e).and_then(|c| c.command_pos) {
             Some((x, y)) => ConfigValue::Point2(x as i32, y as i32),
@@ -440,6 +447,8 @@ impl BuildingBehavior for CoreBehavior {
         _player: Option<Entity>,
         value: ConfigValue,
     ) {
+        // Integer team configs are handled by `Sim::apply_world_config` (it
+        // must also move the player unit/team, which a behavior cannot reach).
         if let Some(mut core) = world.get_mut::<CoreBuild>(e) {
             core.command_pos = match value {
                 ConfigValue::Point2(x, y) => Some((x as f32, y as f32)),

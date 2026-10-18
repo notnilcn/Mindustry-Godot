@@ -234,8 +234,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             ),
         ],
         consumes: vec![consume_power(2.5f32), consume_liquid("cyanogen", 0.15f32)],
-        // `update = true` (`UnitAssembler.java:62`): `synthetic()` (editor palette order).
+        // `update = solid = true` (`UnitAssembler.java:62`).
         update: Some(true),
+        solid: Some(true),
         ..spec("tank-assembler", BlockKind::UnitAssembler)
     })?;
 
@@ -270,8 +271,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             ),
         ],
         consumes: vec![consume_power(2.5f32), consume_liquid("cyanogen", 0.2f32)],
-        // `update = true` (`UnitAssembler.java:62`): `synthetic()` (editor palette order).
+        // `update = solid = true` (`UnitAssembler.java:62`).
         update: Some(true),
+        solid: Some(true),
         ..spec("ship-assembler", BlockKind::UnitAssembler)
     })?;
 
@@ -306,8 +308,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
             ),
         ],
         consumes: vec![consume_power(3.0f32), consume_liquid("cyanogen", 0.2f32)],
-        // `update = true` (`UnitAssembler.java:62`): `synthetic()` (editor palette order).
+        // `update = solid = true` (`UnitAssembler.java:62`).
         update: Some(true),
+        solid: Some(true),
         ..spec("mech-assembler", BlockKind::UnitAssembler)
     })?;
 

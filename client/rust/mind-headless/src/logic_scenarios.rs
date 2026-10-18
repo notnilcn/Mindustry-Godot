@@ -719,6 +719,7 @@ pub fn radar_filters() -> RadarFiltersReport {
         dead: false,
         targetable: true,
         attacker: true,
+        boss: false,
     };
     let derelict = mind_core::game::team::DERELICT.0;
     let list = vec![

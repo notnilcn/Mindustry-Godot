@@ -448,6 +448,25 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(consumes) = object.get("consumes") {
             spec.consumes = self.parse_consumes(registry, file, consumes)?;
         }
+        // `Drill.drillMultipliers` (an `ObjectFloatMap<Item>` in Java's JSON
+        // content format).
+        if let Some(multipliers) = object.get("drillMultipliers").and_then(Value::as_object) {
+            for (item, value) in multipliers {
+                let Some(value) = value.as_f64() else {
+                    continue;
+                };
+                let resolved = self
+                    .resolve_prefixed(registry, crate::content::ContentType::Item, item)
+                    .and_then(|reference| {
+                        registry
+                            .item(crate::content::ItemId::new(reference.id))
+                            .map(|def| def.name.clone())
+                    })
+                    .unwrap_or_else(|| item.clone());
+                spec.drill_multipliers
+                    .push((Box::leak(resolved.into_boxed_str()), value as f32));
+            }
+        }
 
         let def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;

@@ -636,6 +636,32 @@ impl MindAssets {
         self.fonts.icon.clone()
     }
 
+    /// Logic `FontFile` (`logic.ttf`, `Fonts.logic`): the CPU display's
+    /// `print`/`printchar` glyph source (L07 T4).
+    #[func]
+    pub fn logic_font(&self) -> Option<Gd<godot::classes::FontFile>> {
+        self.fonts.logic.clone()
+    }
+
+    /// `Fonts.unicodeToName`: icon name for a registered PUA code point
+    /// (`0`/unknown -> empty).
+    #[func]
+    pub fn icon_name_for_code(&self, code: i32) -> GString {
+        self.iconc
+            .name(code.max(0) as u32)
+            .map(GString::from)
+            .unwrap_or_default()
+    }
+
+    /// `Fonts.getLargeIcon(name)` region name (`Iconc::texture`).
+    #[func]
+    pub fn icon_region_for_name(&self, name: GString) -> GString {
+        self.iconc
+            .texture(&name.to_string())
+            .map(GString::from)
+            .unwrap_or_default()
+    }
+
     /// Mods-first virtual FS (plan 20 hook); vanilla reads stay on disk.
     #[func]
     pub fn file_tree(&self) -> VarDictionary {

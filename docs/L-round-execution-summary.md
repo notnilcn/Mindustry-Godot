@@ -106,3 +106,68 @@ re-recorded with `regen_goldens.sh --record content_ids` and both reasons kept).
   at `~/g/.opencode/skills/playtest/SKILL.md` still says `a1a7b96167c9718d` (outside this repo; not edited).
 - Uncommitted in the main checkout on purpose: the operator's archival deletions of the round-I/J/K summaries and
   plans plus the modified `archived_plans_do_not_read.zip` (left for the operator to commit).
+
+
+---
+
+## 7. Continuation after the pause (later 2026-10-18 session)
+
+Start point for the next session: `docs/L-round-continuation-handoff.md`.
+
+The paused backlog was continued on `main` in the coordinator's working tree.
+No new worktrees or Java captures were created; verification used `mind-core`
+tests, `mind-gdext` tests, the Godot import gate and live state probes on
+display `:10`. The operator asked to stop rebuilding mid-way, so the last
+source-only delta (the generator base-power-row gate) is tests/check clean but
+was not re-smoked in the running `.so`.
+
+### Landed
+
+| Area | Result | Evidence |
+|---|---|---|
+| PAR-0446 | `solid = true` for `unit-cargo-unload-point` + tank/ship/mech assemblers (`UnitCargoUnloadPoint.java:26`, `UnitAssembler.java:62`); content golden re-recorded with reason | content test + `content::parity` |
+| PAR-0447 | map-filter `is_overlay`/`is_floor` include `SpawnBlock`/`RemoveOre` (`SpawnBlock.java:6`, `RemoveOre.java:11`) | `spawn_and_remove_ore_are_floor_overlays` |
+| L05 T1 (PAR-0379) | all remaining hover-bar families + multi-arg labels; base power row only for consumers | `bar_rows_for_the_remaining_families`, 80 gdext tests |
+| L05 T2 (PAR-0380) | `int[]` config wire (determinism/relay/TypeIO), TargetDummy state/config/tether unit, CoreBlock team config + spec, both GDScript panels | two new mind-core tests; live `building_config_json`/`config_spec_json` probes |
+| L04 T5 (PAR-0399) | `ExplosionSink` host (effects/shake/scorch/sound) installed on every world load; reactor effect/sound fields filled; `Fx.generatespark` seam | explosion + sink tests |
+| L07 T4 | logic font glyph rasteriser + `unicodeToName`/`getLargeIcon` icon tag | code; live `logic_font`/`icon_name_for_code` probes |
+| L07 T5 partial | 480 px canvas, PNG import/export, 2 s auto-save, canvas blending mask | canvas test + GDScript parse gate |
+| L07 T6 partial | permanent-status `seconds` hiding, unit `@id` NaN, boss radar | code/tests |
+| L08 T3 partial | `drillMultipliers` parsing | code only |
+| PAR-0296 | accelerator tap now opens the planet launch page instead of the item panel (`Accelerator.java:258-261`) | code |
+
+### Still open
+
+- L04 T0–T4/T6 (unit parts, abilities, crawl/payload/layerOffset, turret trees,
+  live leg pairs).
+- L05 T2: the live core team change did not move in the sandbox because the
+  rule mirror was not applied to the running `BuildRules`; the Sim test covers
+  the apply path.
+- L07 T5 off-screen display pre-pass + canvas edge rendering; L07 T6 pickers.
+- L08 T2 (`ModDataManager`), T4 (Java evidence), T6 (round-M walk).
+- PAR-0445 Save Game dialog layout.
+- PAR-0420 orbit like-for-like frame (code was already fixed in L03).
+
+### Gates run
+
+```
+cargo test -p mind-core --lib                 # 2803 passed, 0 failed, 4 ignored
+cargo test -p mind-gdext --lib                # 80 passed, 0 failed
+cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings  # clean
+cargo fmt --all -- --check                    # clean
+bash tools/godot.sh --headless --editor --quit --path client          # no script errors
+ui_layout_check.gd / ui_widgets_check.gd      # failed=0 / failed=0
+```
+
+### Ledger changes to apply
+
+| Item | Change |
+|---|---|
+| PAR-0446 | close (solid flags; content golden re-recorded) |
+| PAR-0447 | close (filters include SpawnBlock/RemoveOre) |
+| PAR-0379 | close for the enumerated families; record the payload-loader progress approximation and the unpaired Java hover frames |
+| PAR-0380 | complete TargetDummy + CoreBlock halves; keep the live core-rule mirror check |
+| PAR-0399 | close (host installed + tests); keep the Java meltdown pair as evidence debt |
+| PAR-0407 | T4 landed; T5/T6 partial as listed |
+| PAR-0296 | tap hook landed; launch visuals and the Java capture remain |
+| PAR-0126 | still fixing (live leg pair) |

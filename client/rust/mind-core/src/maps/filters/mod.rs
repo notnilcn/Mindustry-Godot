@@ -65,7 +65,9 @@ pub mod block_info {
         "arkycite-floor",
     ];
 
-    /// `Block instanceof Floor` (overlay floors included).
+    /// `Block instanceof Floor` (overlay floors included). `SpawnBlock` and
+    /// `RemoveOre` both extend `OverlayFloor` (`SpawnBlock.java:6`,
+    /// `RemoveOre.java:11`), so they are floors too (PAR-0447).
     pub fn is_floor(def: &BlockDef) -> bool {
         matches!(
             def.kind,
@@ -77,6 +79,8 @@ pub mod block_info {
                 | BlockKind::ColoredFloor
                 | BlockKind::CharacterOverlay
                 | BlockKind::RuneOverlay
+                | BlockKind::SpawnBlock
+                | BlockKind::RemoveOre
                 | BlockKind::SteamVent
         )
     }
@@ -89,6 +93,8 @@ pub mod block_info {
                 | BlockKind::OreBlock
                 | BlockKind::CharacterOverlay
                 | BlockKind::RuneOverlay
+                | BlockKind::SpawnBlock
+                | BlockKind::RemoveOre
         )
     }
 
@@ -983,6 +989,26 @@ mod tests {
         let last_scatter = stack.iter().rposition(|f| f.class_tag() == "scatter");
         if let (Some(ore), Some(scatter)) = (first_ore, last_scatter) {
             assert!(scatter < ore, "scatter filters precede ore filters");
+        }
+    }
+
+    /// PAR-0447: `SpawnBlock` and `RemoveOre` extend `OverlayFloor`
+    /// (`SpawnBlock.java:6`, `RemoveOre.java:11`), so Java's
+    /// `instanceof Floor` / `instanceof OverlayFloor` sees them as both.
+    #[test]
+    fn spawn_and_remove_ore_are_floor_overlays() {
+        let content = test_registry();
+        for name in ["spawn", "remove-ore"] {
+            let def = content
+                .block_by_name(name)
+                .unwrap_or_else(|| panic!("{name} missing"));
+            assert!(block_info::is_floor(def), "{name} is a Floor");
+            assert!(block_info::is_overlay(def), "{name} is an OverlayFloor");
+            assert!(
+                !block_info::floors_only(def),
+                "{name} is an overlay, not a plain floor"
+            );
+            assert!(!block_info::walls_only(def), "{name} is not a wall");
         }
     }
 

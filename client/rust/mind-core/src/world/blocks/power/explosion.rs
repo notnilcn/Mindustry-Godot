@@ -60,6 +60,10 @@ pub struct ReactorExplosion {
     pub speed: f32,
     /// `PowerGenerator.explosionFireballs`.
     pub fireballs: i32,
+    /// `PowerGenerator.explodeEffect` slots (`Fx.none` when unset).
+    pub explode_effects: [crate::content::registries::fx_meta::EffectId; 3],
+    /// `PowerGenerator.explodeSound`.
+    pub explode_sound: crate::content::registries::sound_meta::SoundId,
 }
 
 impl ReactorExplosion {
@@ -101,6 +105,8 @@ impl ReactorExplosion {
             scale_ignition_chance: config.explosion_scale_ignition_chance,
             speed: config.explosion_speed,
             fireballs: config.explosion_fireballs,
+            explode_effects: config.explode_effects,
+            explode_sound: config.explode_sound,
         })
     }
 }
@@ -125,11 +131,24 @@ pub struct PendingExplosionFires {
 pub trait ExplosionSink: Send + Sync {
     /// Applies the explosion (`PowerGenerator.onExplosion` body).
     fn explode(&self, world: &mut World, explosion: ReactorExplosion);
+
+    /// `Fx.generatespark.at(x, y)` (`ConsumeItemExplode.java:20-42`).
+    fn generatespark(&self, _world: &mut World, _x: f32, _y: f32) {}
 }
 
 /// Host-installed [`ExplosionSink`]. `None` is the inert headless default.
 #[derive(Resource, Default)]
 pub struct ExplosionSinkRes(pub Option<Box<dyn ExplosionSink>>);
+
+/// Emits `Fx.generatespark` through the installed [`ExplosionSinkRes`].
+pub fn generatespark(world: &mut World, x: f32, y: f32) {
+    if let Some(mut sink) = world.remove_resource::<ExplosionSinkRes>() {
+        if let Some(implementation) = sink.0.as_mut() {
+            implementation.generatespark(world, x, y);
+        }
+        world.insert_resource(sink);
+    }
+}
 
 /// Marker inserted the first time a building fires its reactor explosion, so a
 /// self-destruct (`kill()`) followed by `onDestroyed()` cannot double-fire.
@@ -224,6 +243,30 @@ mod tests {
         assert!(!fire_explosion(&mut world, entity, explosion, true));
         assert_eq!(calls.load(Ordering::Relaxed), 1);
         assert!(world.get::<ExplosionFired>(entity).is_some());
+    }
+
+    #[test]
+    fn params_carry_the_explode_effect_and_sound() {
+        let (world, entity) = building();
+        let config = crate::world::blocks::power::generator::GeneratorConfig {
+            explode_effects: [
+                crate::content::registries::fx_meta::EffectId::REACTOR_EXPLOSION,
+                crate::content::registries::fx_meta::EffectId::NONE,
+                crate::content::registries::fx_meta::EffectId::NONE,
+            ],
+            explode_sound: crate::content::registries::sound_meta::SoundId::EXPLOSION_REACTOR,
+            ..Default::default()
+        };
+        let explosion =
+            ReactorExplosion::for_building(&world, entity, &config, false).expect("params");
+        assert_eq!(
+            explosion.explode_effects[0],
+            crate::content::registries::fx_meta::EffectId::REACTOR_EXPLOSION
+        );
+        assert_eq!(
+            explosion.explode_sound,
+            crate::content::registries::sound_meta::SoundId::EXPLOSION_REACTOR
+        );
     }
 
     #[test]

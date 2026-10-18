@@ -146,6 +146,7 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         category: Some(Category::Defense),
         build_visibility: Some(BuildVisibility::SandboxOnly),
         save_config: Some(true),
+        configurable: Some(true),
         always_unlocked: Some(true),
         // `update = true` (`TargetDummy.java:38`): `synthetic()` (editor palette order).
         update: Some(true),

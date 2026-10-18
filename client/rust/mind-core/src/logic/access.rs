@@ -1080,7 +1080,8 @@ fn sense_unit(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .unwrap_or(-1.0);
             Sensed::Num(value)
         }
-        LAccess::Id => Sensed::Num(e.index().index() as f64),
+        // `UnitComp.sense` has no `id` case (Java default `NaN`).
+        LAccess::Id => Sensed::Num(f64::NAN),
         LAccess::Type => match crate::entities::comp::unit::unit_type_of(world, e) {
             Some(t) => Sensed::Obj(Some(LogicObject::Content(crate::content::ContentRef::new(
                 ContentType::Unit,

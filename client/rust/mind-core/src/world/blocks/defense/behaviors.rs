@@ -16,8 +16,14 @@ use bevy_ecs::entity::Entity;
 use bevy_ecs::world::World;
 
 use crate::content::ContentRegistry;
+use crate::content::registries::units::UnitTypeDef;
+use crate::entities::comp::unit::comp::{
+    BuildingTetherComp, HitboxComp, StatusComp, UnitCore, UnitTetherComp,
+};
+use crate::entities::comp::unit::lifecycle::spawn_unit_def;
 use crate::entities::comp::{Building, Pos, TeamComp};
 use crate::world::behavior::{BehaviorRegistry, BuildingBehavior, PendingShockMineTriggers};
+use crate::world::config::{ConfigKind, ConfigValue};
 use crate::world::modules::PowerModule;
 
 use super::projectors::{
@@ -404,18 +410,191 @@ impl BuildingBehavior for ShockMineBehavior {
     }
 }
 
-/// `TargetDummy` behavior (`TargetDummyBuild` construction + dps tick).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct TargetDummyDefenseBehavior;
+/// `TargetDummy` behavior (`TargetDummyBuild` construction, tether unit and
+/// the 5-int config; `TargetDummy.java:35-60,82-163`).
+#[derive(Debug, Clone)]
+pub struct TargetDummyDefenseBehavior {
+    /// `TargetDummy.unitType` (`UnitTypes.dummy`); `None` in the fallback
+    /// behavior when the registry has no dummy (never the vanilla case).
+    pub dummy: Option<Arc<UnitTypeDef>>,
+}
+
+impl TargetDummyDefenseBehavior {
+    /// `TargetDummyBuild.dummyTeam()`: the wave team (or the next team when
+    /// the dummy already is on the wave team).
+    fn dummy_team(team: u8, wave: u8) -> u8 {
+        if team != wave { wave } else { (team % 7) + 1 }
+    }
+
+    /// Applies the 5-int config (`TargetDummy.java:44-55`).
+    fn configure(state: &mut TargetDummyState, team: u8, wave: u8, values: &[i32]) {
+        if values.len() != 5 {
+            return;
+        }
+        state.unit_team = if values[0] == 1 {
+            Self::dummy_team(team, wave)
+        } else {
+            team
+        };
+        state.boosting = values[1] == 1;
+        state.armor = (values[2] as f32).clamp(0.0, 100_000.0);
+        state.reset_time = values[3] as f32;
+        let size = f32::from_bits(values[4] as u32);
+        state.dummy_size = if size.is_nan() || size.is_infinite() {
+            8.0
+        } else {
+            size.clamp(0.1, 30.0 * crate::config::TILESIZE as f32)
+        };
+    }
+}
 
 impl BuildingBehavior for TargetDummyDefenseBehavior {
     fn create_state(&self, world: &mut World, e: Entity) {
-        world.entity_mut(e).insert(TargetDummyState::default());
+        let team = world.get::<TeamComp>(e).map_or(0, |team| team.team);
+        world.entity_mut(e).insert(TargetDummyState {
+            unit_team: team,
+            ..TargetDummyState::default()
+        });
+    }
+
+    fn created(&self, world: &mut World, e: Entity) {
+        let team = world.get::<TeamComp>(e).map_or(0, |team| team.team);
+        if let Some(mut state) = world.get_mut::<TargetDummyState>(e)
+            && state.unit_team == crate::game::team::DERELICT.0
+        {
+            state.unit_team = team;
+        }
+    }
+
+    fn config_kinds(&self) -> &'static [ConfigKind] {
+        &[ConfigKind::IntArray]
+    }
+
+    fn config(&self, world: &World, e: Entity) -> ConfigValue {
+        let Some(state) = world.get::<TargetDummyState>(e) else {
+            return ConfigValue::None;
+        };
+        let team = world.get::<TeamComp>(e).map_or(0, |team| team.team);
+        ConfigValue::IntArray(vec![
+            i32::from(state.unit_team != team),
+            i32::from(state.boosting),
+            state.armor as i32,
+            state.reset_time as i32,
+            state.dummy_size.to_bits() as i32,
+        ])
+    }
+
+    fn configured(
+        &self,
+        world: &mut World,
+        e: Entity,
+        _player: Option<Entity>,
+        value: ConfigValue,
+    ) {
+        let ConfigValue::IntArray(values) = value else {
+            return;
+        };
+        let team = world.get::<TeamComp>(e).map_or(0, |team| team.team);
+        let wave = world
+            .get_resource::<crate::game::runtime::CampaignRuntime>()
+            .map(|runtime| runtime.session.rules.wave_team)
+            .or_else(|| {
+                world
+                    .get_resource::<crate::world::limits::BuildRules>()
+                    .map(|rules| rules.wave_team)
+            })
+            .unwrap_or(team);
+        if let Some(mut state) = world.get_mut::<TargetDummyState>(e) {
+            Self::configure(&mut state, team, wave, &values);
+        }
     }
 
     fn update_tile(&self, world: &mut World, e: Entity) {
+        let Some(mut state) = world.entity_mut(e).take::<TargetDummyState>() else {
+            return;
+        };
+        // `TargetDummy.java:106-140`: resolve the saved unit id, spawn the
+        // tethered dummy, then mirror boosting/armor/team/hit size.
+        if state.read_unit_id != -1 {
+            state.unit = crate::sim::unit_runtime::unit_by_id(world, state.read_unit_id);
+            state.read_unit_id = -1;
+        }
+        if state
+            .unit
+            .is_some_and(|unit| !world.get::<UnitCore>(unit).is_some_and(|core| !core.dead))
+        {
+            state.unit = None;
+        }
+        if state.unit.is_none()
+            && let Some(dummy) = self.dummy.as_ref()
+            && let Some(pos) = world.get::<Pos>(e).copied()
+        {
+            let seq = crate::world::blocks::units::behavior::next_unit_seq(world);
+            let unit = spawn_unit_def(world, seq, dummy, state.unit_team, pos.x, pos.y, 90.0);
+            world
+                .entity_mut(unit)
+                .insert(BuildingTetherComp { building: Some(e) });
+            world
+                .entity_mut(unit)
+                .insert(UnitTetherComp { spawner: Some(e) });
+            crate::world::blocks::units::behavior::adopt_output_unit(world, unit, &dummy.name);
+            state.unit = Some(unit);
+        }
+        if let Some(unit) = state.unit {
+            if let Some(mut core) = world.get_mut::<UnitCore>(unit) {
+                core.boosting = state.boosting;
+            }
+            if let Some(mut hitbox) = world.get_mut::<HitboxComp>(unit) {
+                hitbox.hit_size = state.dummy_size;
+            }
+            if let Some(mut status) = world.get_mut::<StatusComp>(unit) {
+                status.armor_override = state.armor;
+            }
+            world.entity_mut(unit).insert(TeamComp {
+                team: state.unit_team,
+            });
+        }
+        update_target_dummy(&mut state);
+        world.entity_mut(e).insert(state);
+    }
+
+    fn write(&self, world: &World, e: Entity, w: &mut crate::world::BuildingWriter) {
+        let state = world
+            .get::<TargetDummyState>(e)
+            .cloned()
+            .unwrap_or_default();
+        w.i(state.unit.map_or(-1, |unit| {
+            world
+                .get::<crate::ecs::EntitySeq>(unit)
+                .map_or(-1, |seq| seq.0 as i32)
+        }));
+        w.bool(state.boosting);
+        w.f(state.armor);
+        w.f(state.reset_time);
+        w.f(state.dummy_size);
+        w.i(i32::from(state.unit_team));
+    }
+
+    fn read(
+        &self,
+        world: &mut World,
+        e: Entity,
+        r: &mut crate::world::BuildingReader,
+        _revision: u8,
+    ) {
+        let unit_id = r.i().unwrap_or(-1);
+        let boosting = r.bool().unwrap_or(false);
+        let armor = r.f().unwrap_or(0.0);
+        let reset_time = r.f().unwrap_or(120.0);
+        let dummy_size = r.f().unwrap_or(12.0);
+        let unit_team = r.i().unwrap_or(i32::from(crate::game::team::DERELICT.0));
         if let Some(mut state) = world.get_mut::<TargetDummyState>(e) {
-            update_target_dummy(&mut state);
+            state.read_unit_id = unit_id;
+            state.boosting = boosting;
+            state.armor = armor;
+            state.reset_time = reset_time;
+            state.dummy_size = dummy_size;
+            state.unit_team = (unit_team & 0xFF) as u8;
         }
     }
 }
@@ -720,7 +899,16 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             },
         }),
     );
-    registry.register_named("target-dummy", Arc::new(TargetDummyDefenseBehavior));
+    let dummy = content
+        .units()
+        .iter()
+        .find(|unit| unit.name == "dummy")
+        .cloned()
+        .map(Arc::new);
+    registry.register_named(
+        "target-dummy",
+        Arc::new(TargetDummyDefenseBehavior { dummy }),
+    );
     // `Blocks.java:2011 regen-projector`.
     registry.register_named(
         "regen-projector",
@@ -792,8 +980,13 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
 
 #[cfg(test)]
 mod tests {
+    use crate::entities::comp::TeamComp;
+    use crate::entities::comp::unit::comp::{BuildingTetherComp, HitboxComp, UnitCore};
     use crate::world::BuildHarness;
     use crate::world::blocks::default_registry;
+    use crate::world::config::ConfigValue;
+
+    use super::*;
 
     #[test]
     fn default_registry_installs_defense_behaviors() {
@@ -818,6 +1011,65 @@ mod tests {
                 "defense override missing for {name}"
             );
         }
+    }
+
+    /// L05 T2 (PAR-0380): the 5-int `TargetDummy` config and its tether unit.
+    #[test]
+    fn target_dummy_config_roundtrips_and_spawns_the_dummy() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let Some(block) = harness.content.block_id("target-dummy") else {
+            panic!("target-dummy missing");
+        };
+        assert!(harness.place(8, 8, block, 0, true));
+        let state = harness
+            .world
+            .get::<TargetDummyState>(harness.grid.tile(8, 8).build.expect("dummy"))
+            .cloned()
+            .expect("state");
+        assert_eq!(state.reset_time, 120.0);
+        assert_eq!(state.unit_team, harness.rules.default_team);
+        let bits = (12.0f32).to_bits() as i32;
+        assert!(harness.configure(8, 8, ConfigValue::IntArray(vec![1, 1, 50, 90, bits]),));
+        let entity = harness.grid.tile(8, 8).build.expect("dummy");
+        let state = harness
+            .world
+            .get::<TargetDummyState>(entity)
+            .cloned()
+            .expect("state");
+        assert!(state.boosting);
+        assert_eq!(state.armor, 50.0);
+        assert_eq!(state.reset_time, 90.0);
+        assert!((state.dummy_size - 12.0).abs() < 1e-4);
+        assert_ne!(state.unit_team, harness.rules.default_team);
+        // `config()` is the exact inverse (Java `config(int[])`).
+        let readback = harness
+            .table()
+            .instance(block)
+            .expect("instance")
+            .behavior
+            .config(&harness.world, entity);
+        assert_eq!(readback, ConfigValue::IntArray(vec![1, 1, 50, 90, bits]));
+        // The next update spawns and tethers the dummy unit.
+        harness.tick();
+        let state = harness
+            .world
+            .get::<TargetDummyState>(entity)
+            .cloned()
+            .expect("state");
+        let unit = state.unit.expect("dummy unit spawned");
+        assert!(harness.world.get::<UnitCore>(unit).is_some());
+        assert_eq!(
+            harness.world.get::<TeamComp>(unit).map(|team| team.team),
+            Some(state.unit_team)
+        );
+        assert!(harness.world.get::<BuildingTetherComp>(unit).is_some());
+        assert_eq!(
+            harness
+                .world
+                .get::<HitboxComp>(unit)
+                .map(|hit| hit.hit_size),
+            Some(state.dummy_size)
+        );
     }
 
     /// gap5 GAP-5 / K-2: `overdrive-projector` boosts a nearby building's

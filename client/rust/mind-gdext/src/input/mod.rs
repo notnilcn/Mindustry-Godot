@@ -1322,6 +1322,16 @@ impl MindInput {
         visible.then_some((x, y))
     }
 
+    /// `DesktopBridge::config_spec` as JSON (probe/test seam): the panel the
+    /// tap handler would open for the building at `(x, y)`.
+    #[func]
+    pub fn config_spec_json(&self, x: i32, y: i32) -> GString {
+        self.bridge
+            .config_spec(x, y)
+            .map(|spec| GString::from(spec.as_str()))
+            .unwrap_or_default()
+    }
+
     /// Clears the config-panel selection (`config.hideConfig()`): the close
     /// button calls this so the tap dispatch stops treating the panel as open
     /// (H02 T6, PAR-0220).
@@ -1497,6 +1507,18 @@ impl MindInput {
                 Ok(number) => Some(mind_core::determinism::ConfigValue::Int(number as i32)),
                 Err(_) => return false,
             },
+            // `int[]` config (`TargetDummy.config(int[])`): comma-separated
+            // values submitted by the 5-int panel.
+            "ints" => {
+                let mut values = Vec::new();
+                for part in value.split(',') {
+                    let Ok(number) = part.trim().parse::<i64>() else {
+                        return false;
+                    };
+                    values.push(number as i32);
+                }
+                Some(mind_core::determinism::ConfigValue::IntArray(values))
+            }
             _ => None,
         };
         if let Some(config) = direct {

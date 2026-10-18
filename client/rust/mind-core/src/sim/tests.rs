@@ -545,6 +545,48 @@ fn factory_command_records_hint() {
 }
 
 #[test]
+fn core_team_config_sets_the_player_team_when_allowed() {
+    use crate::determinism::{ConfigValue, SimCommand};
+    let mut sim = super::production_tests::runtime_sim();
+    let core = sim.world_block_id("core-shard").expect("core-shard");
+    sim.apply(Command::Place {
+        x: 20,
+        y: 20,
+        block: BlockId::new(core),
+    })
+    .expect("place core");
+    // `CoreBlock.java:322-332`: the integer config is ignored unless
+    // `rules.coreBuildAndConfig` is on.
+    sim.command(SimCommand::Configure {
+        x: 20,
+        y: 20,
+        value: ConfigValue::Int(5),
+    })
+    .expect("configure");
+    assert_ne!(sim.player_team, Some(5), "rule off: team unchanged");
+    sim.ecs
+        .0
+        .get_resource_mut::<crate::world::limits::BuildRules>()
+        .expect("build rules")
+        .core_build_and_config = true;
+    sim.command(SimCommand::Configure {
+        x: 20,
+        y: 20,
+        value: ConfigValue::Int(5),
+    })
+    .expect("configure with rule on");
+    assert_eq!(sim.player_team, Some(5));
+    let entity = sim.grid.entity_at(TilePos::new(20, 20)).expect("core");
+    assert_eq!(
+        sim.ecs
+            .0
+            .get::<crate::entities::comp::TeamComp>(entity)
+            .map(|team| team.team),
+        Some(5)
+    );
+}
+
+#[test]
 fn sim_command_world_apply_is_deterministic() {
     use crate::input::plan::ClientPlan;
     use crate::world::TilePos;

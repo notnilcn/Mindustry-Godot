@@ -665,6 +665,13 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 	var items: Variant = logic.call("editor_layout", name, PackedStringArray(values))
 	if not (items is Array):
 		return fields_box
+	# `LStatements.java:1465-1474`: a permanent status has no `seconds` field.
+	if name == "status" and not values.is_empty() and str(values[0]) != "true":
+		var host := get_node_or_null("/root/Spine/SimHost")
+		if host != null and host.has_method("status_permanent") \
+				and bool(host.call("status_permanent", str(values[0]))):
+			items = (items as Array).filter(func(entry: Variant) -> bool:
+				return not (entry is Dictionary) or str((entry as Dictionary).get("label", "")) != "seconds")
 	for entry in items:
 		if not (entry is Dictionary):
 			continue

@@ -85,7 +85,7 @@ fn spawn_output_unit(world: &mut World, e: Entity, def: &UnitTypeDef) -> Option<
 /// Adopts a block-produced unit into the live [`UnitRuntime`] list (the same
 /// bookkeeping `UnitRuntime::spawn`/`SpawnedByBullet` do), so its controller
 /// updates, fights and is selectable instead of sitting inert.
-fn adopt_output_unit(world: &mut World, entity: Entity, name: &str) {
+pub(crate) fn adopt_output_unit(world: &mut World, entity: Entity, name: &str) {
     if let Some(mut runtime) = world.get_non_send_mut::<crate::sim::unit_runtime::UnitRuntime>() {
         runtime.units.push(entity);
         runtime.units_created += 1;

@@ -198,3 +198,85 @@ Method:
 - T3: the plan's pages match Java row for row, with the residue recorded.
 - T1 is session B's in wave 4.
 - Wave 4: T4's table test landed; T5 landed and matched in-engine.
+
+
+---
+
+## Continuation (later 2026-10-18 session)
+
+### T1 — hovered-block bars (PAR-0379) — **DONE (code + unit tests)**
+
+`building_bars_json` now emits Java's remaining `addBar` families, in
+`setBars` order, with the multi-argument label form:
+
+- The row model is `label_args: Vec<String>` (JSON `label_args`); GDScript
+  substitutes `{0}`/`{1}`/`{2}` through `MindWidgets.markup_format`
+  (`placement_fragment.gd`).
+- Bundled handlers now cover:
+  - turrets: `ammo` (`ItemTurret.java:61-67`), `heatpercent` (two args,
+    `Turret.java:201-207`), `activationtimer`/`activated`
+    (`BaseTurret.java:104-110`);
+  - power nodes/beam nodes: `power` (`bar.powerbalance`), `batteries`,
+    `connections` (`PowerNode.java:115-122`), diodes: `back`/`front`
+    (`PowerDiode.java:33-48`);
+  - generators/impact: `poweroutput` with the net `ImpactReactor` term,
+    nuclear `heat` (`NuclearReactor.java:103`), variable reactor
+    `instability` + `heatpercent` (`VariableReactor.java:57-63`);
+  - overdrive `boost`, force-projector `shield`, solid pumps `pumpspeed`,
+    payload loader/unloader `loadprogress`, assembler/factory/reconstructor
+    `units` (three args, `bar.unitcap`), cargo loader `units`,
+    launch-pad `items` + `launchcooldown`, landing-pad `cooldown`,
+    accelerator `powerbuffer` (`Accelerator.java:106-110`),
+    target-dummy `dps` with health removed, and GenericCrafter output-liquid
+    bars replacing the dynamic liquid bar.
+- The base `power` bar is gated on a `Consume::Power` consumer
+  (`Block.java:712-722`), so generators no longer show a spurious base row.
+- Tests: `bar_rows_for_the_remaining_families` (all families above) and the
+  updated `bar_rows_follow_the_java_overrides`; 80 `mind-gdext` tests pass.
+- In-engine state check on display `:10`: a combustion generator at (50,50)
+  returned `health`, `poweroutput` rows (the base `power` row was removed by the
+  consumer gate after the check). A screenshot/Java pair was not captured
+  because the session ended before another build.
+
+### T2 — bespoke config panels (PAR-0380) — **DONE for TargetDummy + CoreBlock**
+
+- `ConfigValue` gained an `int[]` variant end-to-end: determinism tag 10
+  (`encode_config`/`decode_config`), relay tag 10, `world::config::ConfigValue::
+  IntArray`, `resolve_config`, `command_emit`, `config_to_json`, and
+  `MindInput.configure_building`'s `"ints"` (comma-separated) route.
+- `TargetDummyState` gained `boosting`, `dummy_size`, `unit_team`, `unit` and
+  `read_unit_id`; the behavior now:
+  - accepts `ConfigKind::IntArray`, applies the exact 5-int Java handler
+    (`TargetDummy.java:44-55`), round-trips `config()`, `write`/`read`;
+  - spawns and tethers the `dummy` unit on update, mirrors
+    boosting/armor/team/hit size (`TargetDummy.java:106-163`) and adopts it into
+    the live `UnitRuntime`;
+  - `configurable = true` in the content spec (`TargetDummy.java:38`).
+- `CoreBlock` team toggles:
+  - `CoreBehavior::config_kinds` accepts Number/Point;
+  - `Sim::apply_world_config` sets the core's team, the player unit's team and
+    `player_team` when `rules.coreBuildAndConfig` (either the campaign
+    `CampaignRuntime` rules or the `BuildRules` fallback);
+  - `config_spec` emits `core_teams` (six 32 px base-team toggles) and treats a
+    core as configurable only while the rule is on (`CoreBlock.java:588,648`).
+- GDScript: `block_config_fragment.gd` builds the TargetDummy panel (enemy-team
+  and flying checks, armor / reset-time / hit-size fields, full 5-int submit;
+  `TargetDummy.java:240-262`) and the core team-colour grid; both are frameless.
+- Tests: `target_dummy_config_roundtrips_and_spawns_the_dummy`,
+  `core_team_config_sets_the_player_team_when_allowed`,
+  `config_wire_point2_roundtrip` (IntArray case), plus the existing widget gate.
+- In-engine state checks on display `:10`:
+  - placing a target dummy and configuring `1,1,50,90,<12.0 bits>` returned
+    `{"type":"int_array","values":[1,1,50,90,1094713344]}` from
+    `building_config_json`;
+  - `Input.config_spec_json(40,40)` returned the `target_dummy` spec with the
+    current int array;
+  - after `rules.coreBuildAndConfig` was set, `config_spec_json` for a
+    `core-shard` returned the six-team `core_teams` payload with `current.team`;
+  - the core team change itself did not move in the live sandbox (the rule
+    mirror was not applied to the running `BuildRules`); the `mind-core` Sim
+    test covers the apply path.
+
+### T3/T4/T5
+
+Unchanged from wave 3/4: T3 done, T4 done, T5 done/MATCH.

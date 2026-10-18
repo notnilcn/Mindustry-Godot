@@ -395,8 +395,9 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         has_items: Some(true),
         save_config: Some(true),
         configurable: Some(true),
-        // `update = true` (`UnitCargoUnloadPoint.java:26`): `synthetic()` (editor palette order).
+        // `update = solid = true` (`UnitCargoUnloadPoint.java:26`).
         update: Some(true),
+        solid: Some(true),
         ..spec("unit-cargo-unload-point", BlockKind::UnitCargoUnloadPoint)
     })?;
     let _ = sink;

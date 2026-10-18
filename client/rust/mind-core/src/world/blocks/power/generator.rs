@@ -176,6 +176,10 @@ pub struct GeneratorConfig {
     pub explosion_speed: f32,
     /// `PowerGenerator.explosionFireballs`.
     pub explosion_fireballs: i32,
+    /// `PowerGenerator.explodeEffect` (`Fx.none` default; `MultiEffect` slots).
+    pub explode_effects: [crate::content::registries::fx_meta::EffectId; 3],
+    /// `PowerGenerator.explodeSound` (`Sounds.none` default).
+    pub explode_sound: crate::content::registries::sound_meta::SoundId,
 }
 
 impl Default for GeneratorConfig {
@@ -208,6 +212,12 @@ impl Default for GeneratorConfig {
             explosion_scale_ignition_chance: true,
             explosion_speed: 0.4,
             explosion_fireballs: 0,
+            explode_effects: [
+                crate::content::registries::fx_meta::EffectId::NONE,
+                crate::content::registries::fx_meta::EffectId::NONE,
+                crate::content::registries::fx_meta::EffectId::NONE,
+            ],
+            explode_sound: crate::content::registries::sound_meta::SoundId::NONE,
         }
     }
 }

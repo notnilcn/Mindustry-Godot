@@ -47,6 +47,8 @@ pub enum ConfigValue {
     Bytes(SmallVec<[u8; 32]>),
     /// A string.
     String(String),
+    /// An `int[]` config (`TargetDummy.config(int[])`).
+    IntArray(Vec<i32>),
 }
 
 impl ConfigValue {
@@ -66,6 +68,7 @@ impl ConfigValue {
             ConfigValue::Building(_) => ConfigKind::Building,
             ConfigValue::Bytes(_) => ConfigKind::Bytes,
             ConfigValue::String(_) => ConfigKind::String,
+            ConfigValue::IntArray(_) => ConfigKind::IntArray,
         }
     }
 
@@ -87,6 +90,7 @@ impl ConfigValue {
                 | ConfigValue::Content(..)
                 | ConfigValue::Number(_)
                 | ConfigValue::Bool(_)
+                | ConfigValue::IntArray(_)
         )
     }
 }
@@ -121,6 +125,8 @@ pub enum ConfigKind {
     Bytes,
     /// String.
     String,
+    /// `int[]`.
+    IntArray,
 }
 
 /// A configuration handler (`Block.configured` closure body).
@@ -200,6 +206,7 @@ pub fn config_to_type_value(value: &ConfigValue) -> TypeValue {
         ConfigValue::Building(_entity) => TypeValue::Building(EntityRef::Id(0)),
         ConfigValue::Bytes(bytes) => TypeValue::ByteArray(bytes.to_vec()),
         ConfigValue::String(text) => TypeValue::Str(Some(text.clone())),
+        ConfigValue::IntArray(values) => TypeValue::IntArray(values.clone()),
     }
 }
 
@@ -226,6 +233,7 @@ pub fn type_value_to_config(value: &TypeValue) -> ConfigValue {
         TypeValue::ByteArray(bytes) => ConfigValue::Bytes(bytes.iter().copied().collect()),
         TypeValue::Str(Some(text)) => ConfigValue::String(text.clone()),
         TypeValue::Str(None) => ConfigValue::None,
+        TypeValue::IntArray(values) => ConfigValue::IntArray(values.clone()),
         other => {
             let _ = other;
             ConfigValue::None

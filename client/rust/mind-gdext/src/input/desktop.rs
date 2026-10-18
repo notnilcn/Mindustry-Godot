@@ -2540,6 +2540,17 @@ impl DesktopBridge {
             self.effects.push(Effect::HideInventory);
             return false;
         }
+        // `Accelerator.configTapped` (`Accelerator.java:258-261`):
+        // `configure()`/`deselect()` opens the planet launch page, never the
+        // generic item panel (PAR-0296).
+        if self.block_kind_at(x, y) == Some(BlockKind::Accelerator) {
+            let Some(mut host) = self.host.clone() else {
+                return false;
+            };
+            host.bind_mut().accelerator_tapped(x, y);
+            self.effects.push(Effect::HideInventory);
+            return true;
+        }
         // `build.block.configurable && build.interactable(team)`.
         // `SwitchBlock.SwitchBuild.configTapped`: a tap toggles `enabled` and
         // returns false, so no panel opens (PAR-0108).
@@ -3183,7 +3194,14 @@ impl DesktopBridge {
         };
         let block = guard.grid().block_at(TilePos::new(tx, ty))?;
         let def = content.block(block)?;
-        if !def.configurable {
+        let rules = guard.live_rules();
+        // `CoreBlock.configurable` is set from `rules.coreBuildAndConfig`
+        // (`CoreBlock.java:588,648`), not the static content flag.
+        let core_configurable = def.kind == BlockKind::CoreBlock
+            && rules
+                .as_ref()
+                .is_some_and(|rules| rules.core_build_and_config);
+        if !def.configurable && !core_configurable {
             return None;
         }
         // `SwitchBlock.configTapped` toggles on tap; it never opens a panel.
@@ -3258,11 +3276,63 @@ impl DesktopBridge {
             }
             return Some(spec.to_string());
         }
+        // `TargetDummy.buildConfiguration` (`TargetDummy.java:240-262`): the
+        // enemy/flying checks and armor/reset/hit-size fields. The panel sends
+        // the full `int[]` (`int_array` wire config).
+        if def.kind == BlockKind::TargetDummy {
+            let current = serde_json::from_str::<serde_json::Value>(
+                guard.building_config_json(x, y).to_string().as_str(),
+            )
+            .ok()
+            .filter(|value| value.get("type").and_then(|kind| kind.as_str()) == Some("int_array"));
+            let mut spec = serde_json::json!({
+                "title": format!("block.{}.name", def.name),
+                "block": def.name,
+                "x": x,
+                "y": y,
+                "target_dummy": true,
+            });
+            if let Some(current) = current {
+                spec["current"] = current;
+            }
+            return Some(spec.to_string());
+        }
+        // `CoreBlock.buildConfiguration` (`CoreBlock.java:289-319`): team
+        // toggles only while `rules.coreBuildAndConfig` is on.
+        if def.kind == BlockKind::CoreBlock
+            && rules
+                .as_ref()
+                .is_some_and(|rules| rules.core_build_and_config)
+        {
+            let teams: Vec<serde_json::Value> = mind_core::game::team::Team::base_teams()
+                .iter()
+                .map(|team| {
+                    serde_json::json!({
+                        "id": team.id,
+                        "name": team.name,
+                        "color": format!(
+                            "{:02x}{:02x}{:02x}ff",
+                            (team.color.r * 255.0) as u8,
+                            (team.color.g * 255.0) as u8,
+                            (team.color.b * 255.0) as u8
+                        ),
+                    })
+                })
+                .collect();
+            let spec = serde_json::json!({
+                "title": format!("block.{}.name", def.name),
+                "block": def.name,
+                "x": x,
+                "y": y,
+                "core_teams": teams,
+                "current": { "team": guard.building_team_at(x, y) },
+            });
+            return Some(spec.to_string());
+        }
         // `state.isCampaign()`/`state.getPlanet()`/`Rules.researched` feed the
         // `ItemSelection` filter (`ItemSelection.java:68`).
         let in_campaign = guard.in_campaign();
         let planet = guard.config_planet();
-        let rules = guard.live_rules();
         // `Block.isHidden()` reads `state.rules` (`Block.java:1553-1555`,
         // `BuildVisibility.java:10-22`); without live rules the rules-less
         // custom/campaign context (`block_catalog_from`).

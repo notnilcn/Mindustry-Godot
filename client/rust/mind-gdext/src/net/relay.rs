@@ -33,6 +33,7 @@ mod config_tag {
     pub const POINT2: u8 = 7;
     pub const POINT2_ARRAY: u8 = 8;
     pub const CONTENT_ID: u8 = 9;
+    pub const INT_ARRAY: u8 = 10;
 }
 
 /// Content-name resolution for relay commands: the live registry on a client
@@ -97,6 +98,13 @@ pub fn config_to_bytes(value: &ConfigValue) -> Vec<u8> {
             writer.ub(*kind);
             writer.us(*id);
         }
+        ConfigValue::IntArray(values) => {
+            writer.ub(config_tag::INT_ARRAY);
+            writer.us(values.len().min(u16::MAX as usize) as u16);
+            for value in values {
+                writer.i(*value);
+            }
+        }
     }
     out
 }
@@ -129,6 +137,14 @@ pub fn config_from_bytes(bytes: &[u8]) -> Option<ConfigValue> {
             kind: reader.ub().ok()?,
             id: reader.us().ok()?,
         },
+        config_tag::INT_ARRAY => {
+            let count = reader.us().ok()? as usize;
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                values.push(reader.i().ok()?);
+            }
+            ConfigValue::IntArray(values)
+        }
         _ => return None,
     };
     Some(value)

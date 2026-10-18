@@ -27,11 +27,13 @@
       "kind": "oracle",
       "path": "parity/golden_content.json",
       "owner_plan": "02",
-      "sha256": "679ea0464e5bfe35d6996f1415273d94c7a0e93440268568d9907ed328eee2f0",
+      "sha256": "0962f1f72788e5309ebd4189afe9802448f9d455c0a98259232da1bae464794e",
       "regen": "cargo run -p mind-headless -- content dump",
       "reasons": [
         "2026-10-18 L06 batched regen (L08 T1 protocol): block[429] interplanetary-accelerator item_capacity 8000 -> 25000. eeedfbb1 (L06 T7.1) ports Accelerator.init() (world/blocks/campaign/Accelerator.java:76-85): itemCapacity = sum of launchBlock.requirements (coreNucleus copper 8000, lead 8000, silicon 5000, thorium 4000; Blocks.java:3173). The only field that moved (mind-headless content dump vs the committed file).",
-        "2026-10-18 L07 T1 (cbee76a4, 2b060e9b): target-dummy, unit-cargo-unload-point and the three Erekir unit assemblers carry update = true like Java (TargetDummy.java:38, UnitAssembler.java:62, UnitCargoUnloadPoint.java:26); merged with the L06 accelerator capacity change by the round-L coordinator."
+        "2026-10-18 L07 T1 (cbee76a4, 2b060e9b): target-dummy, unit-cargo-unload-point and the three Erekir unit assemblers carry update = true like Java (TargetDummy.java:38, UnitAssembler.java:62, UnitCargoUnloadPoint.java:26); merged with the L06 accelerator capacity change by the round-L coordinator.",
+        "2026-10-18 L05 T2 / PAR-0446: unit-cargo-unload-point and tank/ship/mech-assembler carry solid = true (UnitCargoUnloadPoint.java:26, UnitAssembler.java:62). Only the four solid fields moved.",
+        "2026-10-18 L05 T2 / PAR-0380: target-dummy configurable = true (TargetDummy.java:38 `configurable = logicConfigurable = true`), needed for the 5-int config panel."
       ]
     },
     {

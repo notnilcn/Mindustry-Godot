@@ -285,6 +285,13 @@ pub fn to_sim_config(value: &WorldConfigValue) -> crate::determinism::ConfigValu
         WorldConfigValue::Unit(id) => content_id(ContentType::Unit, id.raw()),
         WorldConfigValue::Content(type_, id) => content_id(*type_, *id),
         WorldConfigValue::Building(_) => SimValue::Content("complex".to_owned()),
+        WorldConfigValue::IntArray(values) => SimValue::Content(
+            values
+                .iter()
+                .map(i32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        ),
     }
 }
 

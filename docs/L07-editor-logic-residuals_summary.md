@@ -193,3 +193,59 @@ godot --script res://tools/ui_widgets_check.gd    # UICHECK failed=0
 
 T1 and T2 landed and verified in-engine with real input against a fresh Java capture. T3 landed (items 1 and the
 in-game eye recorded). PAR-0110 closes: the editor walk is MATCH. T4 is session B's; T5–T6 are wave 5.
+
+
+---
+
+## Continuation (later 2026-10-18 session)
+
+### T4 — logic display font + printchar + world-processor icon tag — **DONE (code)**
+
+- `MindAssets.logic_font()` exposes `Fonts.logic` (`logic.ttf`).
+- `display_context.rs` now rasterises `commandPrint`/`printchar` glyphs through
+  the Godot `FontFile` at 16 px: glyph index, `render_glyph`, texture crop
+  (`get_glyph_uv_rect` with a normalized-UV fallback), `glyph.xoffset/yoffset`,
+  `get_ascent()` and a cap height from the `H` glyph. `Glyph` caching is per
+  character. `LogicDisplay.commandPrint`'s existing placement math is unchanged.
+- `Fonts.unicodeToName`/`getLargeIcon` are ported through
+  `MindAssets.icon_name_for_code` (`Iconc::name`) and
+  `icon_region_for_name` (`Iconc::texture`). `select_overlay` now returns the
+  icon `(name, region)` pair and `overlay_top.rs` draws the region above the
+  processor at `tilesize` width, matching `LogicBlock.java:715-724`.
+- Recorded deviation: the per-call `Draw.alpha(0.5)` has no Godot
+  `draw_texture_rect` modulate equivalent, so the icon draws opaque; the atlas
+  region is used instead of a 48 px `iconLarge` bitmap font.
+- No live text/`printchar` frame pair was captured this session (a display +
+  processor walk needs a Java reference capture).
+
+### T5 — display/canvas residuals — **PARTIAL**
+
+- 480 px canvas: `canvas_edit_dialog.gd` now uses `480x480`
+  (`CanvasEditDialog.java:185`).
+- Canvas PNG import/export + 2 s auto-save: implemented with `FileDialog`,
+  `Image.load_from_file`/`save_png`, nearest-palette mapping and an alpha blend
+  over `palette[0]` (`CanvasEditDialog.java:60-71,216-274`).
+- Canvas edge sprites: `CanvasBehavior` now computes the 4-bit `blending` mask
+  (`CanvasBlock.java:208-216,251-253`, with the `d4 * size` offset) and a test
+  pins adjacent 2x2 canvases. The renderer still draws no side/corner sprites:
+  the blending data is ready but the edge-quad pass is deferred.
+- Off-screen image-source pre-pass (T5.1) is unchanged (still deferred).
+
+### T6 — logic pickers/polish — **PARTIAL**
+
+- Permanent statuses hide the `seconds` field: `MindSimHost.status_permanent`
+  + a GDScript filter in `logic_dialog.gd` (`LStatements.java:1465-1474`).
+- Sensors: unit `@id` now returns `NaN` (Java `UnitComp.sense` has no `id` case)
+  and `RadarTarget.boss` tests the `boss` status (`u.isBoss()`), with
+  `RadarCandidate.boss` populated from `StatusComp`.
+- The icon-grid pickers, enum popup columns/tooltips, drag-follow and jump
+  release capture remain open.
+
+### Other
+
+- `Input.config_spec_json(x,y)` was added as a probe/test seam for the config
+  panels (the same `DesktopBridge::config_spec` the tap handler uses).
+
+### PAR-0445
+
+Not implemented: the Save Game dialog still uses the plain text list.

@@ -11,6 +11,7 @@
 //! (`ConfigOverlay::Logic` / `SelectOverlay::MessageText`/`LogicTag`) into the
 //! same pass — one node only.
 
+use godot::builtin::Rect2;
 use godot::classes::notify::CanvasItemNotification;
 use godot::classes::{Camera2D, INode2D, Node, Node2D, Time};
 use godot::obj::{Base, Singleton};
@@ -118,6 +119,9 @@ impl INode2D for OverlayTop {
         };
         let visible = self.visible_rect();
         let time = Time::singleton().get_ticks_msec() as f32 * 0.06;
+        let icon_assets = self
+            .base()
+            .try_get_node_as::<crate::assets::MindAssets>("/root/MindAssets");
         let mut base = self.base_mut();
         // 1. Enemy indicators (`OverlayRenderer.java:110-121`).
         if indicators_enabled && !rules.fog {
@@ -327,7 +331,7 @@ impl INode2D for OverlayTop {
                 x,
                 y,
                 tag,
-                icon: _,
+                icon,
                 units,
             }) => {
                 for (ux, uy, hit, rotation) in &units {
@@ -339,6 +343,30 @@ impl INode2D for OverlayTop {
                         canvas::color_u32(to_bits(pal::PLACE)),
                     );
                     let _ = rotation;
+                }
+                if let Some((_, region)) = icon
+                    && let Some(mut assets) = icon_assets
+                    && let Some(texture) = assets
+                        .bind_mut()
+                        .find_region(GString::from(region.as_str()))
+                {
+                    let size = texture.get_size();
+                    let height = if size.x > 0.0 {
+                        TILESIZE * size.y / size.x
+                    } else {
+                        TILESIZE
+                    };
+                    // `LogicBlock.java:715-724`: `Draw.alpha(0.5)`; the
+                    // per-call modulate has no Godot equivalent on
+                    // `draw_texture_rect`, so the icon is drawn opaque.
+                    base.draw_texture_rect(
+                        &texture,
+                        Rect2::new(
+                            Vector2::new(x - TILESIZE / 2.0, y - TILESIZE / 2.0),
+                            Vector2::new(TILESIZE, height),
+                        ),
+                        false,
+                    );
                 }
                 if let Some(tag) = tag {
                     let font = godot::classes::ThemeDb::singleton().get_fallback_font();

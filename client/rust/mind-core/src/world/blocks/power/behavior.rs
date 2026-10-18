@@ -1319,6 +1319,15 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
             explosion_puddle_range: 7.0 * crate::config::TILESIZE as f32,
             explosion_puddle_liquid: content.liquid_id("neoplasm"),
             explosion_puddle_amount: 200.0,
+            // `Blocks.java:2836-2837`: `MultiEffect(bigShockwave,
+            // WrapEffect(titanSmoke, neoplasm), neoplasmSplat)`.
+            explode_effects: [
+                crate::content::registries::fx_meta::EffectId::BIG_SHOCKWAVE,
+                crate::content::registries::fx_meta::EffectId::TITAN_SMOKE,
+                crate::content::registries::fx_meta::EffectId::NEOPLASM_SPLAT,
+            ],
+            explode_sound:
+                crate::content::registries::sound_meta::SoundId::EXPLOSION_REACTOR_NEOPLASM,
             ..GeneratorConfig::default()
         }),
         heat_output: 60.0,
@@ -1379,6 +1388,13 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 // `explosionShakeDuration = 16f` (no puddles/fireballs).
                 explosion_shake: 6.0,
                 explosion_shake_duration: 16.0,
+                // `NuclearReactor.java:72-73`.
+                explode_effects: [
+                    crate::content::registries::fx_meta::EffectId::REACTOR_EXPLOSION,
+                    crate::content::registries::fx_meta::EffectId::NONE,
+                    crate::content::registries::fx_meta::EffectId::NONE,
+                ],
+                explode_sound: crate::content::registries::sound_meta::SoundId::EXPLOSION_REACTOR,
                 ..GeneratorConfig::default()
             },
             heating: 0.005,
@@ -1409,6 +1425,13 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 // `explosionShakeDuration = 16f`.
                 explosion_shake: 6.0,
                 explosion_shake_duration: 16.0,
+                // `ImpactReactor.java:40-41`.
+                explode_effects: [
+                    crate::content::registries::fx_meta::EffectId::IMPACT_REACTOR_EXPLOSION,
+                    crate::content::registries::fx_meta::EffectId::NONE,
+                    crate::content::registries::fx_meta::EffectId::NONE,
+                ],
+                explode_sound: crate::content::registries::sound_meta::SoundId::EXPLOSION_REACTOR2,
                 ..GeneratorConfig::default()
             },
             item_count,
@@ -1434,6 +1457,14 @@ pub fn register(registry: &mut BehaviorRegistry, content: &ContentRegistry) {
                 explosion_puddle_range: 6.0 * crate::config::TILESIZE as f32,
                 explosion_puddle_liquid: content.liquid_id("slag"),
                 explosion_puddle_amount: 100.0,
+                // `VariableReactor.java:44-45`: `MultiEffect(bigShockwave,
+                // WrapEffect(titanSmoke, e3ae6f))`.
+                explode_effects: [
+                    crate::content::registries::fx_meta::EffectId::BIG_SHOCKWAVE,
+                    crate::content::registries::fx_meta::EffectId::TITAN_SMOKE,
+                    crate::content::registries::fx_meta::EffectId::NONE,
+                ],
+                explode_sound: crate::content::registries::sound_meta::SoundId::EXPLOSION_REACTOR2,
                 ..GeneratorConfig::default()
             },
             max_heat: 150.0,

@@ -1,6 +1,11 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # Round L — plan index (2026-10-17)
 
+**Continuation:** the round was paused after wave 4; the remaining backlog and
+the exact next-session start point are in
+[`../L-round-continuation-handoff.md`](../L-round-continuation-handoff.md).
+Read it before starting new work.
+
 Source: `docs/L-round-twin-verification.md` (an independent twin walk after every round-J merge,
 evidence in `runs/20261017-L-twin/`) plus the round-J residuals still open in `chains.json`.
 Answer to "are there gaps left besides multiplayer?": **yes**. A handful are confirmed live
