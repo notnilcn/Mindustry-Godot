@@ -79,6 +79,9 @@ pub struct MindAudio {
     lowpass_wet: f32,
     sound_paused: bool,
     audition: bool,
+    /// `PlaySoundStatement.lastPreview` voice (`showSoundSelect` stops the
+    /// previous preview before playing the next one).
+    preview_voice: Option<i64>,
     /// `_process` dispatch counter (T1 liveness probe / PAR-0072 gate).
     frames: u64,
     /// Plan-18 sim→client sink, fetched from `/root/Spine/SimHost`.
@@ -154,6 +157,7 @@ impl INode for MindAudio {
             lowpass_wet: 0.0,
             sound_paused: false,
             audition: false,
+            preview_voice: None,
             frames: 0,
             audio_log: None,
             events_applied: 0,
@@ -1269,6 +1273,35 @@ impl MindAudio {
     pub fn on_ui_sound(&mut self, name: GString) {
         let volume = self.sfx_scale() as f64;
         let _ = self.play_oneshot(name, volume, 1.0, 0.0);
+    }
+
+    /// `PlaySoundStatement.previewSound`: play a sound picker row on the UI bus
+    /// (`sound.play(..., control.sound.uiBus)`) and stop the previous preview.
+    #[func]
+    pub fn preview_sound(&mut self, name: GString, volume: f64) -> bool {
+        self.stop_sound_preview();
+        let name = name.to_string();
+        let Some(stream) = self.streams.sound(&name, false) else {
+            self.log_missing(&name);
+            return false;
+        };
+        let scaled = (volume as f32) * self.sfx_scale();
+        let Some(pool) = self.pool.as_mut() else {
+            return false;
+        };
+        let voice = pool.play_ui(stream, scaled, 1.0);
+        self.preview_voice = Some(voice);
+        true
+    }
+
+    /// Stops the picker preview (`showSoundSelect`'s hide callback).
+    #[func]
+    pub fn stop_sound_preview(&mut self) {
+        if let Some(voice) = self.preview_voice.take()
+            && let Some(pool) = self.pool.as_ref()
+        {
+            pool.stop_ui(voice);
+        }
     }
 
     /// T13: UI sound with an explicit volume/pitch (`HudFragment` favourite:

@@ -438,6 +438,47 @@ impl MindAssets {
         self.audio.music_count() as i64
     }
 
+    /// `PlaySoundStatement.showSoundSelect`'s asset walk: every non-dummy
+    /// sound as `{name, id, category, file}`. `name` is the Java
+    /// `file.nameWithoutExtension()` used by `@sfx-*`; `id` is the registry
+    /// name the audio mixer resolves (keyword-mangled names differ).
+    #[func]
+    pub fn sound_entries(&self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for entry in self.audio.entries() {
+            if entry.is_dummy() {
+                continue;
+            }
+            let Some(file) = entry.file.as_deref() else {
+                continue;
+            };
+            let name = file
+                .rsplit('/')
+                .next()
+                .unwrap_or(file)
+                .rsplit_once('.')
+                .map_or_else(|| file.rsplit('/').next().unwrap_or(file), |(stem, _)| stem);
+            // `soundCategory`: the folder between the file and the asset root
+            // (`sounds/ui/click` -> `ui`); `data patch` only without a slash.
+            let mut parts = file.rsplit('/');
+            parts.next();
+            let category = parts.next().unwrap_or("data patch");
+            let mut row = VarDictionary::new();
+            row.set(&GString::from("name"), &GString::from(name).to_variant());
+            row.set(
+                &GString::from("id"),
+                &GString::from(entry.name.as_str()).to_variant(),
+            );
+            row.set(
+                &GString::from("category"),
+                &GString::from(category).to_variant(),
+            );
+            row.set(&GString::from("file"), &GString::from(file).to_variant());
+            out.push(&row.to_variant());
+        }
+        out
+    }
+
     /// Resolved sound file path (empty when absent).
     #[func]
     pub fn sound_path(&self, name: GString) -> GString {

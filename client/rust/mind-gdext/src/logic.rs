@@ -441,6 +441,70 @@ impl MindLogic {
         out
     }
 
+    /// `LogicFx` entries for `EffectsDialog` (`EffectsDialog.java`): the effect
+    /// name plus the parameter flags the statement's field row consumes.
+    #[func]
+    pub fn effect_entries(&self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for entry in mind_core::logic::fx::all() {
+            out.push(
+                &dict(vec![
+                    ("name", GString::from(entry.name).to_variant()),
+                    ("bounds", (entry.bounds as f64).to_variant()),
+                    ("size", entry.size.to_variant()),
+                    ("rotate", entry.rotate.to_variant()),
+                    ("color", entry.color.to_variant()),
+                    ("data", GString::from(entry.data.unwrap_or("")).to_variant()),
+                ])
+                .to_variant(),
+            );
+        }
+        out
+    }
+
+    /// `Layer` fields for `SetMarkerStatement`'s draw-layer list
+    /// (`LStatements.java:2415-2428`): `[{name, value}]` in reflection order.
+    #[func]
+    pub fn marker_layers(&self) -> Array<Variant> {
+        let mut out = Array::<Variant>::new();
+        for (name, value) in mind_core::logic::statement::MARKER_LAYERS {
+            out.push(
+                &dict(vec![
+                    ("name", GString::from(*name).to_variant()),
+                    ("value", (*value as f64).to_variant()),
+                ])
+                .to_variant(),
+            );
+        }
+        out
+    }
+
+    /// `LAccess.settable` names (`SetPropStatement`'s sensors tab).
+    #[func]
+    pub fn settable_accesses(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for access in mind_core::logic::access::LAccess::SETTABLE {
+            out.push(&GString::from(access.name()));
+        }
+        out
+    }
+
+    /// `LAccess.senseable`/`senseablePrivileged` names (`SensorStatement`'s
+    /// sensors tab; the world-processor flag picks the privileged table).
+    #[func]
+    pub fn senseable_accesses(&self, privileged: bool) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        let entries = if privileged {
+            mind_core::logic::access::LAccess::senseable_privileged()
+        } else {
+            mind_core::logic::access::LAccess::senseable()
+        };
+        for access in entries {
+            out.push(&GString::from(access.name()));
+        }
+        out
+    }
+
     /// The built-in global entries (`GlobalVarsDialog`: `@logic.globals`).
     ///
     /// Rows are `{name, description}`; the description falls back to the

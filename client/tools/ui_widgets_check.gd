@@ -91,6 +91,27 @@ class SaveCampaignStub:
 		return true
 
 
+## `/root/Spine/SimHost` double for the logic-editor status oracle: only the
+## permanent-status probe is needed (`LStatements.java:1483-1485`).
+class StatusPermanentStub:
+	extends Node
+
+	func status_permanent(effect: String) -> bool:
+		return effect == "@status-boss"
+
+
+## `/root/Spine/MindLogic` double for the effects-dialog grid oracle.
+class LogicPickerStub:
+	extends Node
+
+	func effect_entries() -> Array:
+		return [
+			{"name": "warn", "bounds": -1.0, "size": false, "rotate": false, "color": false, "data": ""},
+			{"name": "explosion", "bounds": -1.0, "size": true, "rotate": false, "color": false, "data": ""},
+			{"name": "trail", "bounds": -1.0, "size": true, "rotate": false, "color": true, "data": ""},
+		]
+
+
 ## `/root/Spine/MindCampaign` double for the pause-dialog oracle: serves the
 ## sector summary and records an abandoned sector.
 class PauseCampaignStub:
@@ -628,6 +649,54 @@ func _init() -> void:
 		"selection icon clamps to 40 px (got %s)" % big_icon.get_combined_minimum_size())
 	item_icon.free()
 	big_icon.free()
+
+	# L07 T6 (PAR-0407): the enum popups use Java's per-call-site columns
+	# (`showSelect(..., cols, sizer)`), not a fixed four.
+	var logic_dialog: Control = load("res://ui/dialogs/logic_dialog.gd").new()
+	root.add_child(logic_dialog)
+	_check(logic_dialog.call("_select_columns", "radar", 0) == 2,
+		"radar target popup uses two columns")
+	_check(logic_dialog.call("_select_columns", "ucontrol", 0) == 2,
+		"ucontrol popup uses two columns")
+	_check(logic_dialog.call("_select_columns", "setmarker", 0) == 3,
+		"marker control popup uses three columns")
+	_check(logic_dialog.call("_select_columns", "query", 1) == 4,
+		"query type popup keeps four columns")
+	_check(logic_dialog.call("_select_cell_size", "radar", 0) == Vector2(110, 50),
+		"radar target cells are 110x50")
+	_check(logic_dialog.call("_select_cell_size", "setmarker", 0) == Vector2(140, 50),
+		"marker control cells are 140x50")
+	# `ApplyStatusStatement.isPermanent` drops the `seconds` field
+	# (`LStatements.java:1483-1485`); the effect is field 1, not the clear flag.
+	var status_stub := StatusPermanentStub.new()
+	status_stub.name = "SimHost"
+	spine.add_child(status_stub)
+	var status_items := [{"kind": "field", "index": 3, "label": "seconds"}]
+	var status_filtered: Array = logic_dialog.call(
+		"_filter_layout", "status", ["false", "@status-boss", "unit", "10"], status_items
+	)
+	_check(status_filtered.is_empty(),
+		"permanent status hides the seconds field")
+	var timed_filtered: Array = logic_dialog.call(
+		"_filter_layout", "status", ["false", "@status-wet", "unit", "10"], status_items
+	)
+	_check(timed_filtered.size() == 1,
+		"timed status keeps the seconds field")
+	status_stub.free()
+	logic_dialog.free()
+
+	# `EffectsDialog` is registered and its grid lists every `LogicFx` entry.
+	var effect_stub := LogicPickerStub.new()
+	effect_stub.name = "MindLogic"
+	spine.add_child(effect_stub)
+	var effects_dialog: Control = load("res://scenes/ui/dialogs/effects_dialog.tscn").instantiate()
+	root.add_child(effects_dialog)
+	effects_dialog.call("shown")
+	_check((effects_dialog.get("_cells") as Array).size() == 3,
+		"effects dialog builds one cell per LogicFx entry (got %s)"
+			% (effects_dialog.get("_cells") as Array).size())
+	effects_dialog.free()
+	effect_stub.free()
 
 	_check_hint_table()
 
