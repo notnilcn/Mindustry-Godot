@@ -3036,10 +3036,7 @@ impl MindSimHost {
     fn single_core_schematic(&self, core: &str) -> Option<mind_core::game::schematic::Schematic> {
         let registry = self.content_snapshot.as_ref()?;
         let id = registry.block_id(core)?;
-        let size = registry
-            .block(id)
-            .map(|def| def.size)
-            .unwrap_or(1);
+        let size = registry.block(id).map(|def| def.size).unwrap_or(1);
         Some(mind_core::game::schematic::Schematic::single_core(id, size))
     }
 
