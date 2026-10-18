@@ -918,6 +918,8 @@ func _select_cell_size(name: String, field_index: int) -> Vector2:
 			return Vector2(150, 38) if field_index == 0 else Vector2(60, 38)
 		"cutscene":
 			return Vector2(120, 40) if field_index == 0 else Vector2(60, 38)
+		"op":
+			return Vector2(64, 38) if field_index == 0 else Vector2(60, 38)
 	return Vector2(60, 38)
 
 
@@ -953,6 +955,12 @@ func _select_button_size(name: String, field_index: int, value: String) -> Vecto
 			return Vector2(160, 40) if field_index == 0 else Vector2(90, 40)
 		"cutscene":
 			return Vector2(120, 40) if field_index == 0 else Vector2(90, 40)
+		"op", "lookup":
+			return Vector2(64, 40) if field_index == 0 else Vector2(90, 40)
+		"getblock":
+			return Vector2(120, 40) if field_index == 0 else Vector2(90, 40)
+		"setblock":
+			return Vector2(100, 40) if field_index == 0 else Vector2(90, 40)
 	return Vector2(90, 40)
 
 
