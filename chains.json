@@ -1,6 +1,6 @@
 {
 "schema":"mindustry-godot/chains@1",
-"updated":"2026-10-18T00:00:00+10:00",
+"updated":"2026-10-19T00:00:00+10:00",
 "sources":{"chains":"chains/*.md (49)","ledger":"parity-ledger.json (166 items)"},
 "guide":{"summary":"Lightweight chain library. Query with jq; never read the whole file. 'chains' = curated recipes from chains/*.md (steps inline; notes/failure_modes/variants in the maps below). 'ledger' = one compact record per parity item; exact call sequences are joinable via 'calls'/'seqs' refs. Notes/failure_modes/fixes are kept out of the records so a default query stays small. Keys of notes/failure_modes/variants/fixes are chain ids (kebab-case) or ledger item ids (PAR-####).","list_chains":"jq -r '.chains[] | [.id, .status, .title] | @tsv' chains.json","chain":"jq '.chains[] | select(.id==\"ground-zero-conveyor-line\")' chains.json","chain_steps":"jq -r '.chains[] | select(.id==\"<id>\") | .steps[]' chains.json","chain_notes":"jq -r '(.notes[\"<id>\"] // [])[]' chains.json","chain_failure_modes":"jq -r '(.failure_modes[\"<id>\"] // [])[]' chains.json","chain_variants":"jq -r '(.variants[\"<id>\"] // [])[]' chains.json","chains_for_item":"jq -r '.chains[] | select(.par | index(\"PAR-0049\")) | .id' chains.json","ledger_item":"jq '.ledger[\"PAR-0049\"]' chains.json  # t=title s=surface st=status par=parent item u=updated run=last run to=fork state path/rep=sequence refs conf=confirm ref","ledger_item_steps":"jq -r '(.ledger[\"PAR-0049\"].steps // [])[] | .a' chains.json","ledger_calls":"jq -r '. as $root | (.ledger[\"PAR-0049\"].rep // {}) | .[] as $s | $root.seqs[$s][] as $c | $root.calls[$c]' chains.json","ledger_notes":"jq -r '(.notes[\"PAR-0049\"] // [])[]' chains.json","ledger_failure_modes":"jq -r '(.failure_modes[\"PAR-0049\"] // [])[]' chains.json","ledger_fixes":"jq -r '(.fixes[\"PAR-0049\"] // [])[]' chains.json","find_by_title":"jq -r '.ledger | to_entries[] | select(.value.t|test(\"loadout\";\"i\")) | .key' chains.json","fields":{"ledger":"t title, s surface, st status, par parent, u updated, run run dir, chain md chain id, to fork state, path {java,godot}->seq ids, conf->pool id, rep {java,godot,compare}->seq ids, steps [{a action, v verdict}].","calls":"exact call object/string as stored in parity-ledger.json.","seqs":"ordered arrays of calls[] ids."}},
 "chains":[
@@ -1594,7 +1594,7 @@
 "PAR-0123":{"t":"Multiplayer: joining a running match does not sync the world (no late-join map load or snapshot catch-up)","s":"multiplayer","st":"verified","u":"2026-10-16","run":"runs/20261016-s3-I08-t1/","to":"Second client joins a match that is already Running (host created + started the match, then the joiner calls MindNet.join_match)","path":{"java":"s372","godot":"s373"},"rep":{"java":"s374","godot":"s375","compare":"s376"}},
 "PAR-0124":{"t":"Dedicated server: the host command never creates a networked match, so no client can join and kick/say/runwave do nothing","s":"multiplayer","st":"seeded","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"mind-headless serve (or server) boot, console `host <map> <mode>` then `status`, `kick <name>`, `runwave`, and a client looking at all_matches","path":{"java":"s377","godot":"s378"},"rep":{"java":"s379","godot":"s380","compare":"s381"}},
 "PAR-0125":{"t":"Chat filters/mutes are database-global and apply to every match on the SpacetimeDB database, not per match","s":"multiplayer","st":"seeded","u":"2026-10-10","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"One SpacetimeDB database hosting two concurrent matches; an admin adds a mute filter from one match and a player posts the pattern in the other","path":{"java":"s382","godot":"s383"},"rep":{"java":"s384","godot":"s385","compare":"s386"}},
-"PAR-0126":{"t":"Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client, player mech near the core at zoom 4, compared against the Java reference frames","path":{"java":"s387","godot":"s388"},"conf":"k63","rep":{"java":"s389","godot":"s390","compare":"s391"}},
+"PAR-0126":{"t":"Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"Ground Zero launched in the Godot client, player mech near the core at zoom 4, compared against the Java reference frames","path":{"java":"s387","godot":"s388"},"conf":"k63","rep":{"java":"s389","godot":"s390","compare":"s391"}},
 "PAR-0127":{"t":"Campaign weather never happens: no rain, snow, sandstorm or fog","s":"world","st":"verified","u":"2026-10-15","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"A launched campaign sector whose terrain yields weather in Java (World.java:303 calls planet.generator.addWeather on every sector load), watched for a few minutes","path":{"java":"s392","godot":"s393"},"conf":"k64","rep":{"java":"s394","godot":"s395","compare":"s396"}},
 "PAR-0128":{"t":"Effect, decal and weather sprites draw as flat colour rectangles (no atlas region execution in the FX pass)","s":"world","st":"verified","u":"2026-10-13","run":"runs/20261010-234250-ref-PAR-0070-combat-fx/","to":"MindFx dev probe: set_weather('rain', ...) or spawn_effect on the running client, screenshot and compare with the Java weather/effect art","path":{"java":"s397","godot":"s398"},"conf":"k65","rep":{"java":"s399","godot":"s400","compare":"s401"}},
 "PAR-0129":{"t":"Shields are invisible: force-projector domes and unit shield bubbles never render","s":"world","st":"verified","u":"2026-10-16","run":"runs/20261016-s4-I02-T11/","to":"A sector where a powered ForceProjector is placed (sandbox/infinite resources), stepped for a few ticks; compare the dome against Java","path":{"java":"s402","godot":"s403"},"conf":"k66","rep":{"java":"s404","godot":"s405"}},
@@ -1831,13 +1831,13 @@
 "PAR-0360":{"t":"Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s3-J02-T1/"},
 "PAR-0361":{"t":"Custom maps load without generation filters (no ores/boulders): `World.loadMap` never ran `FilterContext`/`applyFilters` (396c9886)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s2-J01-T1/"},
 "PAR-0362":{"t":"Committed goldens predate deliberate H01-T1 position and I-round content changes: `blocks_golden`, `audio_golden` (audio_events_sim), `input_golden`, `logistics_golden`, `maps_editor_golden` all fail on main (regen pending)","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L08-T1/"},
-"PAR-0363":{"t":"Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261017-s4-J03-T1/"},
+"PAR-0363":{"t":"Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261017-s4-J03-T1/"},
 "PAR-0364":{"t":"Inert graphics settings: `bloomintensity`/`bloomblur` and `linear` never reached the renderer (5325720c)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J10-T2-1/"},
-"PAR-0365":{"t":"Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
-"PAR-0366":{"t":"Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
-"PAR-0367":{"t":"Weapon `layerOffset` not applied when drawing weapons","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
-"PAR-0368":{"t":"`drawCrawl` segments (renale/latum) not drawn","s":"world","st":"seeded","u":"2026-10-17"},
-"PAR-0369":{"t":"`drawPayload` (mega/quad/oct carrying units/blocks) not drawn","s":"world","st":"seeded","u":"2026-10-17"},
+"PAR-0365":{"t":"Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-continue/"},
+"PAR-0366":{"t":"Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-continue/"},
+"PAR-0367":{"t":"Weapon `layerOffset` not applied when drawing weapons","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-continue/"},
+"PAR-0368":{"t":"`drawCrawl` segments (renale/latum) not drawn","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-accept/"},
+"PAR-0369":{"t":"`drawPayload` (mega/quad/oct carrying units/blocks) not drawn","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-accept/"},
 "PAR-0370":{"t":"Text buttons render the glyph inline in the label with a flat slate fill (no `defaultt` nine-patch/cell layout) (0cf55155)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T1/"},
 "PAR-0371":{"t":"Dialogs draw boxed slate panels instead of the Java fill/floating shells (988ec70d)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T2/"},
 "PAR-0372":{"t":"Sliders render as thin Godot sliders through the text (no `defaultSlider` skin) (65dd3052)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T3/"},
@@ -1847,7 +1847,7 @@
 "PAR-0376":{"t":"Turrets always target the closest unit (no UnitSorts/minRange/trackingRange/newTargetInterval) (e5b94549)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T1/"},
 "PAR-0377":{"t":"Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
 "PAR-0378":{"t":"`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)","s":"world","st":"wontfix","u":"2026-10-18","run":"runs/20261018-s3-L02-T4/"},
-"PAR-0379":{"t":"Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)","s":"hud","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
+"PAR-0379":{"t":"Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)","s":"hud","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-accept/"},
 "PAR-0380":{"t":"Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)","s":"hud","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
 "PAR-0381":{"t":"Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T4/"},
 "PAR-0382":{"t":"Game Over shows Waves Defeated 0, no Time Played row, bright accent rows and a duplicated title (9da3b3b2)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T6/"},
@@ -1862,12 +1862,12 @@
 "PAR-0391":{"t":"Campaign rule/generator residuals: `prebuildBase`, `allowCampaignRules`, Erekir generator rules/Schematics/Waves, abandon semantics, sector land-info gates (J07 T5 records)","s":"campaign","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
 "PAR-0392":{"t":"ClassMap: ~120 parse-relevant aliases (Consumers/Drawers/Parts/Bullets/Effects/AIs/Blocks/Abilities/Data) were unreachable and `consumes` had no JSON parse (f63ef648, 13548c98)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s4-J09-T1/"},
 "PAR-0393":{"t":"Mod content missing from the quick-select binds and map previews (base-only registries) (f45ed9ac)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s4-J09-T3/"},
-"PAR-0394":{"t":"Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)","s":"world","st":"blocked","u":"2026-10-17","run":"runs/20261017-s4-J09-T4/"},
+"PAR-0394":{"t":"Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-accept/"},
 "PAR-0395":{"t":"Script mods: unsupported reason was not shown in the Mods dialog row (9f33ceaa)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s4-J09-T5/"},
 "PAR-0396":{"t":"Explosive items never damage generators or fire `Trigger.blastGenerator`; `itemDurationMultipliers` ignored (fefc574)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T2/"},
 "PAR-0397":{"t":"Crafters dump output liquids on every side (`liquidOutputDirections` ignored) (d236e4a7)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T3/"},
 "PAR-0398":{"t":"Generator/reactor explosions apply no side effects (radius damage, fires, props, fireballs, puddles) — sim half (501f2727)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T4/"},
-"PAR-0399":{"t":"Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
+"PAR-0399":{"t":"Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible","s":"world","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-remaining/"},
 "PAR-0400":{"t":"`Block.depositCooldown` ignored (global deposit gate only) (60e34db5)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T5/"},
 "PAR-0401":{"t":"Power turrets report `rangeChange`/`minRangeChange` = 0 (TurretAmmo::Power kept only the bullet id) (8986959a)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s2-J04-T6/"},
 "PAR-0402":{"t":"J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
@@ -1875,7 +1875,7 @@
 "PAR-0404":{"t":"Editor draws buildings as unrotated base regions (grey squares) (061ddaba)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T1/"},
 "PAR-0405":{"t":"Editor block palette selected entry has no accent frame (d2176386)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T2/"},
 "PAR-0406":{"t":"`ecs::TeamId::SHARDED` is the derelict id, not Java `Team.sharded.id = 1` (ddeae35d)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J08-T3/"},
-"PAR-0407":{"t":"J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)","s":"ui","st":"seeded","u":"2026-10-18","run":"docs/L07-editor-logic-residuals_summary.md"},
+"PAR-0407":{"t":"J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)","s":"ui","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-accept/"},
 "PAR-0408":{"t":"Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261017-s5-J02-T2/"},
 "PAR-0409":{"t":"F-K1: Custom Game map grid is clipped at the 5th column and does not scroll — with 19 maps only the first 10 cards are reachable, blocking Map Play (sandbox/Caldera)","s":"ui","st":"wontfix","u":"2026-10-18","run":"runs/20261017-L-twin/"},
 "PAR-0410":{"t":"F-K2: Custom Game search empties the grid for an existing map name and stays empty after reopen (needs a real-typing retest)","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L01-T3/"},
@@ -1913,9 +1913,11 @@
 "PAR-0442":{"t":"Campaign game-over title shows the preset id ('Sector groundZero lost!') instead of the localized name ('Ground Zero')","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
 "PAR-0443":{"t":"Planet page sector grid/selection not faded by uiAlpha when zoomed out","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.5/"},
 "PAR-0444":{"t":"HUD IO loading driver hid every loading overlay one frame after it appeared; MindLabel ignored font_color overrides and 25 sites used Godot's X11 grays for Arc gray/lightGray","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L07-T3/"},
-"PAR-0445":{"t":"Save Game dialog is a plain text list; Java uses the Load-dialog layout (search, mode filters, two-column slot cards, New Save in the button row)","s":"ui","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
+"PAR-0445":{"t":"Save Game dialog is a plain text list; Java uses the Load-dialog layout (search, mode filters, two-column slot cards, New Save in the button row)","s":"ui","st":"fixing","u":"2026-10-19","run":"runs/20261018-L-continue/"},
 "PAR-0446":{"t":"unit-cargo-unload-point and the Erekir unit assemblers lack solid = true (UnitCargoUnloadPoint.java:26, UnitAssembler.java:62); affects sim/pathing","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
-"PAR-0447":{"t":"maps/filters block_info::is_overlay/is_floor omit SpawnBlock and RemoveOre, which Java counts as OverlayFloor/Floor — check whether the map filters are affected","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"}
+"PAR-0447":{"t":"maps/filters block_info::is_overlay/is_floor omit SpawnBlock and RemoveOre, which Java counts as OverlayFloor/Floor — check whether the map filters are affected","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
+"PAR-0448":{"t":"Hover bar unit icons render as literal [icon name=...] markup (MindBar draws text with a plain font; Java draws the unit icon)","s":"hud","st":"seeded","u":"2026-10-19","run":"runs/20261018-L-accept/"},
+"PAR-0449":{"t":"Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped","s":"hud","st":"seeded","u":"2026-10-19","run":"runs/20261018-L-accept/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -3914,7 +3916,8 @@
 "2026-10-17 round J (J04 T6, 8986959a): Door.updateTile now refuses to close while Units.anyEntities(tile) via a grounded non-leg-step hitbox scan (Door.java:49-53); test door_refuses_to_close_with_a_unit_on_it covers the raw config path. Run runs/20261017-s2-J04-T6/."
 ],
 "PAR-0394":[
-"2026-10-17 round J (J09 T4, recorded blocker): nothing holds a ModDataManager in gdext. Seams to add: (1) owner node (MindMods + boot ordering), (2) image decorator (runtime atlas packing/region registration in mind-gdext/src/assets), (3) audio decorator (AudioStream registration in mind-gdext/src/audio), (4) bundle merge seam, (5) map patches load/save (maps/mod.rs:463 writes None; WriteContext.patches exists but nothing fills it). J08 T5 (map assets dialog) stays blocked on this. See runs/20261017-s4-J09-T4/notes.md."
+"2026-10-17 round J (J09 T4, recorded blocker): nothing holds a ModDataManager in gdext. Seams to add: (1) owner node (MindMods + boot ordering), (2) image decorator (runtime atlas packing/region registration in mind-gdext/src/assets), (3) audio decorator (AudioStream registration in mind-gdext/src/audio), (4) bundle merge seam, (5) map patches load/save (maps/mod.rs:463 writes None; WriteContext.patches exists but nothing fills it). J08 T5 (map assets dialog) stays blocked on this. See runs/20261017-s4-J09-T4/notes.md.",
+"L08 T2 merged (d65ecc54/a4a1f7a2/2a9454b7): MindMods owns ModDataManager before content; atlas/audio/bundle decorators; map patches save/load round-trip; MapAssetsDialog body. Six gaps recorded in the L08 summary: content sprites, per-asset warnings, non-embedded cache, non-editor map data application, audio/image view chrome, unload restore."
 ],
 
 "PAR-0188":[
@@ -4643,7 +4646,8 @@
 ],
 "PAR-0363":[
 "2026-10-17 round J (J03 T1-T3, 16d2a336): live turret pass ported from DrawTurret.java:72-170 — base lookup chain (reinforced- prefix for Erekir), Drawf.shadow, region drawrot, liquid + top, additive heat (heatColor overrides), outline at turretLayer-0.01 when parts exist, per-part params/curRecoils, ammoParts (titan); hand-ported parts for duo/scatter/salvo/cyclone/diffuse/sublimate/titan/disperse/afflict; live TurretState feed + real AtlasLookup (no AllRegions); two in-engine-only bugs fixed (drawrot vs raw rotation, !heat.found() guard). T2 diagnosed the idle head as a state mismatch (test placed_duo_idle_head_rotation_is_up; no sim bug). T3: pack arm correct; live duo ring comes from duo-outline (DrawTurret.java:90-96) not an in-place duo replacement; outline_icon_in_place guarded + fixture-pinned. Residual: scathe/smite/malign/lustre part trees, firing/heat pixel frames (prim-level + test evidence instead). Run runs/20261017-s4-J03-T1/ (T2 runs/20261017-s4-J03-T2/, T3 runs/20261017-s4-J03-T3/).",
-"L04 T4 landed: DrawPartSpec now models HaloPart + the SinTime progress wave; turret_parts.rs ports lustre, scathe (base + per-ammo missiles), smite and malign trees, pinned by turret_parts_cover_the_vanilla_drawers. Live firing frames still need the L04 T0 Java batch."
+"L04 T4 landed: DrawPartSpec now models HaloPart + the SinTime progress wave; turret_parts.rs ports lustre, scathe (base + per-ammo missiles), smite and malign trees, pinned by turret_parts_cover_the_vanilla_drawers. Live firing frames still need the L04 T0 Java batch.",
+"L04 T4 code landed earlier (HaloPart + lustre/scathe/smite/malign trees, turret_parts_cover_the_vanilla_drawers); live firing frames still need the T0 batch."
 ],
 "PAR-0115":[
 "Reference soak: staging blocker: no mod fixture in parity-java-home (the Mods dialog reads 'No mods found'); a content-mod zip must be installed to stage the loading half.",
@@ -4696,7 +4700,8 @@
 "2026-10-17 round J (reopened): the round-J twin walk (docs/J-round-twin-verification.md §1 row 52, runs/20261016-J-twin/diff/52-legs-crop.png) shows a spawned atrax/arkyid drawing as bodies with no legs, and J03's audit adds no tank treads, wreck decals, neoplasm segments or payload draws in mind-gdext/src/render/units.rs. J03 wave A fixed the turret half (PAR-0363); legs/treads/wrecks/segments/payloads are J03 T4-T5 (wave B). Status reopened to fixing.",
 "2026-10-17 round J wave B (J03 T4/T5, 9f381d49 + 44401634): leg draws landed (UnitType.drawLegs order + Java hip/knee geometry in LegsComp — the old IK put joints past the feet, caught in-engine atrax/arkyid), tank treads (drawTank, stell/locus) + wreck decals (FxSink::decal; MindFx.live_decal_count()==3 after a real kill) landed. Residuals recorded as new items: segments PAR-0368, payloads PAR-0369, leg splash/drownTime/lerpDelta stepping (runs/20261017-s4-J03-T4/, -T5/). Stays fixing until segments/payloads land.",
 "2026-10-18 round L: legs now drawn (godot/52-legs.png), but no Java pairing yet. -> L04 T6.",
-"2026-10-18 continuation: no live Java leg pair was captured; L04 T6 remains a frame-verification task."
+"2026-10-18 continuation: no live Java leg pair was captured; L04 T6 remains a frame-verification task.",
+"No live Java leg pair was captured on 2026-10-19; L04 T6 remains the frame-verification task."
 ],
 "PAR-0127":[
 "Reference soak: staging blocker: the imported campaign's Frozen Forest save exists but its sector is not launchable (no owned/launchable hex in the visible planet state; no weather frames stored elsewhere). Needs a fresh-profile campaign branch to a weather sector.",
@@ -5023,14 +5028,16 @@
 "PAR-0407":[
 "2026-10-18 round L: L07 T1-T3 landed (palette, WASD bindings + resetSaved guard, sub-dialog residue); remaining L07 T4 (logic font/printchar/icon tag, session B), T5 (display/canvas), T6 (logic pickers). Resize OK-disable premise is wrong (Java never disables OK) — recorded, no change.",
 "2026-10-18 continuation: T4 landed (logic font glyph rasteriser, unicodeToName/getLargeIcon icon tag); T5 partial (480px canvas, PNG import/export, 2s autosave, canvas blending mask; off-screen pre-pass and edge sprites open); T6 partial (permanent status seconds, unit @id NaN, boss radar; pickers/enum columns/drag open).",
-"L07 T5: canvas side/corner edge sprites (CanvasBlock.java:274-288) and the off-screen display image-source pre-pass (LogicDisplay.java:163-178) landed. Icon-grid pickers and drag-follow remain open."
+"L07 T5: canvas side/corner edge sprites (CanvasBlock.java:274-288) and the off-screen display image-source pre-pass (LogicDisplay.java:163-178) landed. Icon-grid pickers and drag-follow remain open.",
+"L07 T6 merged (0ab54d20..f0241834): ui.effects dialog, content/sound pickers, per-call-site enum columns/cell sizes and tooltip(Enum), permanent-status seconds, drag-follow, pinned Layer order. Effects preview render and sound-picker play/pause state remain (L07 summary)."
 ],
 "PAR-0444":[
 "2026-10-18 found and fixed in L07 wave 4 (5bb046cd, 109a6b2f, d1d3bff4)."
 ],
 "PAR-0445":[
 "2026-10-18 L07 wave 4: java/savedialog.png.",
-"SaveDialog now extends LoadDialog: shared search/gamemode filters, 2-column save cards, per-card actions, and the @save.new button in the button row (SaveDialog.java). Live frame runs/20261018-L-continue/live/savedialog2.png; ui_widgets_check.gd updated."
+"SaveDialog now extends LoadDialog: shared search/gamemode filters, 2-column save cards, per-card actions, and the @save.new button in the button row (SaveDialog.java). Live frame runs/20261018-L-continue/live/savedialog2.png; ui_widgets_check.gd updated.",
+"Final pair sources: Java runs/20261018-s2-L07-java/java/savedialog.png; Godot runs/20261018-L-continue/live/savedialog2.png. SaveDialog extends LoadDialog and ui_widgets_check passes; the like-for-like comparison is still to record."
 ],
 "PAR-0446":[
 "2026-10-18 found in L07 T1; left unchanged by session A (sim change). -> session B.",
@@ -5042,20 +5049,39 @@
 ],
 "PAR-0379":[
 "2026-10-18 continuation: building_bars_json emits turret ammo/heatpercent/activation, power nodes/beam nodes/diode, generators/impact/nuclear/variable, overdrive/force, solid pumps, payload loaders, assembler/factory/reconstructor/cargo units, launch/landing pads, accelerator, target-dummy dps and GenericCrafter output liquids. Multi-arg labels via label_args. Unit tests cover each family; the base power row is consumer-gated.",
-"Status note: code + unit tests are landed; the Java hover-box pair per family is still outstanding, so this is fixing rather than verified."
+"Status note: code + unit tests are landed; the Java hover-box pair per family is still outstanding, so this is fixing rather than verified.",
+"2026-10-19 live batch (runs/20261018-L-accept/): Java/Godot pairs match row-for-row for duo (Health/Liquid/Ammo), power node (Health/Power/Stored/Connections) and core (Health/Capacity); the Mud Flats Ground Factory units row matches but the unit icon is raw markup.",
+"Fixed live (aa57179d): standalone diode now Health/Input/Output (PowerDiode.java:33-48 always adds both; the rows were gated on a live graph), payload loader/unloader always Health/Power/Liquid/Progress (PayloadLoader.java:60-66, fraction :219-224; extras were hard-coded None). Frames godot-diode-hover-fixed.png / godot-loader-hover-fixed.png.",
+"Residuals: MindBar draws [icon name=...] literally (OD-UI3 icon path); the accelerator powerBufferRequirement row is clipped by the block palette; the mechanical pump pair is deferred (dry mini map). Java palette recipe in runs/20261018-L-accept/notes.md."
 ],
 "PAR-0399":[
 "2026-10-18 continuation: HostExplosionSink installed by MindSimHost::install_fx_sink pushes explodeEffect/shake/scorch and the explodeSound audio event; reactor effect/sound ids filled (NuclearReactor.java:72-73, ImpactReactor.java:40-41, VariableReactor.java:44-45, Blocks.java:2836-2837); ConsumeItemExplode emits Fx.generatespark. Java meltdown pair still outstanding.",
-"Status note: host + tests are landed; a live Java/Godot meltdown pair is still outstanding, so this is fixing rather than verified."
+"Status note: host + tests are landed; a live Java/Godot meltdown pair is still outstanding, so this is fixing rather than verified.",
+"No live thorium-meltdown/blast-compound pair was captured on 2026-10-19; the ExplosionSink host and tests remain the evidence."
 ],
 "PAR-0365":[
-"L04 T1 landed (2026-10-18): UnitDraw carries parts/fin/draw_body/draw_cell/ground_layer and the resolved weapon def+mount; render/unit_parts.rs executes unit parts and weapon under/over parts in three per-band programs; body/cell gated. Live sandbox probes for quasar/quell/tecta/merui; the Java T0 pair is still pending."
+"L04 T1 landed (2026-10-18): UnitDraw carries parts/fin/draw_body/draw_cell/ground_layer and the resolved weapon def+mount; render/unit_parts.rs executes unit parts and weapon under/over parts in three per-band programs; body/cell gated. Live sandbox probes for quasar/quell/tecta/merui; the Java T0 pair is still pending.",
+"L04 T1 code landed; the Java T0 pair (merui/cleroi/anthicus/tecta/collaris/elude/avert/obviate idle+firing) is still outstanding."
 ],
 "PAR-0366":[
-"L04 T2 landed for the vanilla kinds: ForceField + ShieldArc in the shield pass, EnergyField + SuppressionField in render/unit_abilities.rs; AbilityState view mirrors and AbilitySpec draw fields added with tests. ArmorPlate/UnitSpawn/MoveLightning are mod-only kinds and remain unmodelled (recorded deviation); EnergyField light is not routed to the light pass."
+"L04 T2 landed for the vanilla kinds: ForceField + ShieldArc in the shield pass, EnergyField + SuppressionField in render/unit_abilities.rs; AbilityState view mirrors and AbilitySpec draw fields added with tests. ArmorPlate/UnitSpawn/MoveLightning are mod-only kinds and remain unmodelled (recorded deviation); EnergyField light is not routed to the light pass.",
+"L04 T2 vanilla ability kinds landed; the Java T0 pair (quasar/oct/aegires/quell/disrupt) is still outstanding."
 ],
 "PAR-0367":[
-"Weapon-part draw now applies Weapon.layerOffset through the unit parts pass. The hand-drawn weapon region/cell quads still bypass it (single mesh, no per-quad z); crawl segments and payload composition remain open."
+"Weapon-part draw now applies Weapon.layerOffset through the unit parts pass. The hand-drawn weapon region/cell quads still bypass it (single mesh, no per-quad z); crawl segments and payload composition remain open.",
+"L04 T3 92ba15aa: Weapon.layerOffset is applied to hand-drawn weapon region/cell quads through Java sprite-batch z; no live Java pair yet (T0 blocker)."
+],
+"PAR-0368":[
+"L04 T3 ffadad44/92ba15aa: UnitType.drawCrawl geometry (outline/segment/optional cell, slerp/sine) in mind-core plus CrawlComp/segment draws in render/units.rs; content assertions for renale/latum. No live Java pair yet."
+],
+"PAR-0369":[
+"L04 T3 92ba15aa: carried payload snapshot and drawPayload composition under the carrier; body/outline/cell only and no nested payloads. No live Java pair yet."
+],
+"PAR-0448":[
+"2026-10-19 live pair: Godot godot-assembler-hover.png shows [icon name=\"vanquish\"][/icon] 0/8; Java runs/20261018-L-accept/java/54-mudflats.png (Ground Factory dagger row) draws the icon. OD-UI3 icon-atlas effect is still approximated; MindBar needs the icon run or an atlas blit."
+],
+"PAR-0449":[
+"2026-10-19: godot-accelerator-hover-fixed.png shows the 6th row ending at the palette edge; building_bars_json contains the powerBufferRequirement row. Java draws the info panel above the palette. The panel is in Panel/Frame/TopTable under a fixed-height bottom-right Panel, so the VBox cannot push the palette down."
 ]
 },
 "failure_modes":{

@@ -280,3 +280,58 @@ Method:
 ### T3/T4/T5
 
 Unchanged from wave 3/4: T3 done, T4 done, T5 done/MATCH.
+
+---
+
+## Continuation (2026-10-19): live hover-bar acceptance batch
+
+Run dir: `runs/20261018-L-accept/` (Java + Godot frames, `notes.md` recipe).
+One Godot sandbox (`mini map`) and one Java sandbox, plus the Mud Flats save for
+the units bar.
+
+### Live pairs captured
+
+| Family | Godot | Java | Result |
+|---|---|---|---|
+| duo | `godot/godot-duo-hover3.png` | `java/42-java-duo-bars.png` | Health, Liquid, Ammo — MATCH |
+| power node | `godot/godot-power-node-hover.png` | `java/45-java-powernode.png` | Health, Power, Stored, Connections — MATCH |
+| core | (earlier J05 T4) | `java/57-mf-core.png` | Health, Capacity 9.0k — MATCH |
+| units bar | `godot/godot-assembler-hover.png` | `java/54-mudflats.png`, `56` | rows match; icon is raw markup (residual) |
+
+Godot-only state frames: cyclone, combustion generator, thorium reactor,
+overdrive, force projector, tank assembler, interplanetary accelerator.
+
+### Fixes landed (`aa57179d`, merged)
+
+- **Standalone diode** now shows `Input`/`Output` (0 when unconnected).
+  `PowerDiode.java:33-48` always adds both bars; the port gated them on a live
+  power graph. `godot/godot-diode-hover-fixed.png`.
+- **Payload loader/unloader** now always shows `Progress`
+  (`bar.loadprogress`, or `bar.items` with the carried item count).
+  `PayloadLoader.java:60-66`; the port's extras were hard-coded `None`.
+  `godot/godot-loader-hover-fixed.png`.
+- `bar_rows_for_the_remaining_families` extended with the unconnected-diode and
+  no-payload-loader cases; `mind-gdext` 81 tests pass.
+
+### Residuals found live (recorded)
+
+1. **Unit icon markup is raw in the hover box**: the assembler units row shows
+   `[icon name="vanquish"][/icon] 0/8`; Java draws the unit icon
+   (`java/54-mudflats.png`, Ground Factory dagger row). This is the known OD-UI3
+   icon path (the `MindIconEffect` does not blit the atlas); `MindBar` draws its
+   text with a plain font, so the tag is literal.
+2. **The accelerator `powerbuffer` row is clipped** by the block palette: the
+   hover panel grows downward under the palette (Java draws it above). The data
+   row is present in `building_bars_json`.
+3. **Pump pair deferred**: `mechanical-pump` needs a liquid floor; the mini map
+   is dry. Needs a water map or a recorded deferral.
+4. Java palette recipe: categories at x=1058/1122, rows y=410/457/505/553; the
+   info panel covers the grid's top rows, so clear the selection (right-click)
+   before picking; Space toggles pause (world placement is ignored while paused).
+   The Java and Godot windows must not overlap in X, or palette clicks land on
+   the editor.
+
+### Ledger
+
+PAR-0379: keep `fixing` for the remaining Java pairs (cyclone/reactor/generator/
+projectors/pump/assembler/accelerator), the icon markup and the panel clipping.

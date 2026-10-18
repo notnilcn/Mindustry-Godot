@@ -158,3 +158,77 @@ generation checksums, which are batched with L06 by plan.
 `parity/golden_content.json` + `golden_manifest.json` were re-recorded with
 `tools/regen_goldens.sh --record content_ids`; the manifest `reasons` list now
 carries both attribution lines.
+
+---
+
+## Continuation (2026-10-19): T2 owner/decorators + T3 parser rows merged
+
+Two branches merged:
+
+```
+d3936804 Merge L08 T3 mod content parser rows and fixtures
+3adc976f Merge L08 T2 ModDataManager owner, decorators and map assets dialog (PAR-0394)
+```
+
+### T3 — mod content parser rows (agent/l08t3)
+
+```
+fa16c8fd L08 T3: close the mod content parser rows with fixtures
+143b7d5b L08 T3: mark the mod field ledger rows implemented
+```
+
+- Parser/content model support for `UnlockableContent` (`UnlockFields`),
+  `drillMultipliers`, factory/assembler plans, weapon effect/draw parts,
+  inline/array `EffectRef` forms and `Block.drawer` (`DrawerSpec`); `EffectRef`
+  propagates through liquid/status effect fields and the view FX snapshot uses
+  named ids.
+- One fixture mod per row under `parity/mod_fixtures/`: `unlock/`, `drill/`,
+  `plans/`, `weapon_fx/`, `effects/`, `drawer/`; boot-path assertions cover each.
+- `cargo test -p mind-core --lib` → 2813 pass / 4 ignored in the branch (2823
+  after the merge), clippy/fmt clean. No golden moved.
+- Remaining ledger TODOs are unrelated: unit `requirements`/reconstructor
+  plans, sector rules override, `spawnUnit`, runtime `register_kind!` factories.
+
+### T2 — `ModDataManager` owner + decorators + MapAssetsDialog (agent/l08t2)
+
+```
+d65ecc54 L08 T2: ModDataManager map patches save/load and record edits (PAR-0394)
+a4a1f7a2 L08 T2: MindMods data owner, image/audio/bundle decorators (PAR-0394)
+2a9454b7 L08 T2: port MapAssetsDialog and its five asset views (PAR-0394)
+```
+
+- `MindMods` autoload now owns `ModDataManager` (Java `GameState.data`), boots
+  before content and publishes records to the runtime atlas (`dp-`/`net-`
+  regions), the live bundle, the `MindAssets` sound registry and the `MindAudio`
+  stream cache.
+- Map `patches` are written into `WriteContext.patches` and read back into
+  `MapEditor`; record-edit APIs and `AtlasIndex::remove_region` added; the
+  editor applies patches and exposes the dialog mutations (including zip).
+- `client/scenes/editor/data/map_assets_dialog.gd` replaces the stub with the
+  type strip/search/pane shell and patches/content/bundles/images/audio bodies.
+- `cargo test -p mind-core --lib` 2812 / 4 ignored (2823 after merge),
+  `mind-gdext` 80 (81 after merge), clippy/fmt clean, Godot import exit 0.
+- Live smoke: `/root/MindMods` is present, `data_region_count() == 0` with no
+  mods and `data_errors() == []`.
+
+### Remaining gaps (precise)
+
+1. Generated content sprites (`regenerateContentSprites`) only record
+   `generated/*`; there is no content-icon renderer/packer, so `dp-<content>` is
+   not registered and the content view uses the type glyph.
+2. Per-asset warnings (`PatchAsset.warnings`, `ContentAsset.warnings/errored`)
+   are a dialog-level list, not per-row warning buttons.
+3. External (non-embedded) asset records loaded from a plain map save carry only
+   SHA256; the decorators skip them. Exported maps (`embed_assets=true`)
+   round-trip.
+4. Map data application is editor-only: `MindEditor.begin_edit_map` feeds
+   `patches`; `MindSimHost`/`MindCampaign` load paths do not (Java `state.data`
+   is global), so playtest/new-game patches are not applied outside the editor.
+5. Audio view: no music seek/elapsed label or `countPlaying`; image view:
+   text-only info, no `Pixmaps.bleed`, no import-results dialog; unload restore
+   has no live bundle snapshot; prompt chrome uses `AcceptDialog`/`show_text`.
+
+### Ledger
+
+PAR-0394: T2 owner/decorators + dialog structure landed; keep `fixing` for the
+six gaps above.

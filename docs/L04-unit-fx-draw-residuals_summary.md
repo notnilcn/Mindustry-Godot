@@ -114,3 +114,57 @@ no leg-stage frames).
   and `malign` (four circle shapes, spike, five regions, two halo shapes, five
   halos, three spines). `turret_parts_cover_the_vanilla_drawers` pins the names,
   counts and halo kinds. Live firing frames still need the L04 T0 Java batch.
+
+---
+
+## Continuation (2026-10-19): T3 merged
+
+The T3 branch (`agent/l04`, merged as `7e2df1ca`) lands the crawl/payload/layer
+residue:
+
+```
+ffadad44 L04 T3: crawl segment draw math and content feeds (PAR-0367)
+92ba15aa L04 T3: crawl/payload unit draws and weapon layerOffset z (PAR-0367/0368/0369)
+```
+
+### What landed
+
+- `mind-core/src/render/unit_draw.rs` ports `UnitType.drawCrawl`: the outline
+  pass, segment pass and optional cell pass, with slerped rotations and sine
+  offsets; content assertions pin the segment regions for `renale`/`latum` and
+  the payload capacity of `mega`/`quad`/`oct`/`evoke`.
+- `UnitDraw` carries `CrawlComp` and payload snapshots; `render/units.rs` draws
+  segment/outline/cell regions and the carried payload under the carrier.
+- Unit quads carry Java sprite-batch z, so `Weapon.layerOffset` now applies to
+  the hand-drawn weapon region/cell quads while the single-mesh batching stays
+  intact.
+
+### Tests and gates
+
+```
+cargo test -p mind-core --lib render::unit_draw             # 16 pass
+cargo test -p mind-core --lib content::...::crawl_and_payload_draw_fields  # pass
+cargo test -p mind-core --lib                               # 2823 pass / 4 ignored (merged)
+cargo test -p mind-gdext --lib                              # 81 pass
+cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings  # clean
+cargo fmt --all -- --check                                  # clean
+```
+
+### Residuals (recorded)
+
+- No live Java-paired crawl/payload/weapon-z frames yet: the L04 T0 batch is
+  still the blocker. Code + geometry tests only.
+- Carried-unit payloads draw body/outline/cell only; the pickup snapshot keeps
+  no weapon mounts/abilities/items or nested payloads.
+- Carried buildings draw the composed `block-<name>-full` icon + shadow; no
+  dynamic block overlays/team top while carried.
+- Java's flying-carrier payload z clamp is approximated by keeping the payload
+  quads in the carrier's band (documented in `units.rs`).
+- Multi-unit worm chains (`segmentUnits`/`segmentLayerOrder`/`Segmentc`) are not
+  modelled; single-unit crawl is covered. Crawl `applyColor` heal flash is not
+  ported (same existing unit-pass limitation as body/legs).
+
+### Ledger
+
+PAR-0367/0368/0369: code landed; keep `fixing` until the Java T0 frames pair the
+crawl, payload and weapon-z draws.

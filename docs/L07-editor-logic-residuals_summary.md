@@ -11,9 +11,9 @@ Owner of this summary; session B reports L07 T4 (logic font / printchar / icon t
 | T1 palette order + `spawn` (PAR-0110) | **done, MATCH** | Comparator moved to mind-core with Java's `instanceof OverlayFloor`; five `update` flags fixed; the editor now paints overlay floors onto the overlay layer. |
 | T2 WASD binding seam + `resetSaved` guard | **done, MATCH** | `MindInput.binding_axis`; the pan speed was 60x slow; `saved` resets only for editing tools. |
 | T3 sub-dialog residue (PAR-0431, PAR-0432, PAR-0434) | **done** (plan items 1 and 5-eye recorded) | Banned Blocks, World Processors, Waves (line graph), Objectives, Locales and Map Load all match Java; generate runs through `ui.loadAnd`. |
-| T4 logic font / printchar / icon tag | session B (wave 5) | — |
-| T5 display/canvas residuals | pending (wave 5) | — |
-| T6 logic pickers | pending (wave 5) | — |
+| T4 logic font / printchar / icon tag | **done (code)** | glyph rasteriser + `unicodeToName`/`getLargeIcon`; no live display pair yet (see continuation). |
+| T5 display/canvas residuals | **partial** | canvas size/PNG/autosave/edges/pre-pass landed; off-screen image pre-pass landed. |
+| T6 logic pickers | **done (code + widget checks)** | pickers, enum columns, permanent-status seconds, drag-follow, sensors; residuals below (2026-10-19 merge). |
 | PAR-0438 (Save Game -> New Save) | **done, MATCH** | Saves while paused; Java's keys and prompt layout. |
 | Stretch | done | `MindRichLabel` `font_color` bridge; Arc gray constants; `fullTogglet`/`flatTogglet`/`squareTogglet` theme styles; disabled icon-button text. |
 
@@ -258,3 +258,65 @@ in-game eye recorded). PAR-0110 closes: the editor walk is MATCH. T4 is session 
   routes a card click through `@save.overwrite` before `save_slot`.
 - `ui_widgets_check.gd` EV-0066 updated to the Java layout (one card + the
   bottom New Save button); the prompt still queues the entered name.
+
+---
+
+## Continuation (2026-10-19): T6 pickers merged
+
+The T6 branch (`agent/l07t6`, merged as `d694829b`) lands the logic-editor
+picker work on top of the earlier T4/T5/T6 code:
+
+```
+0ab54d20 L07 T6: port ui.effects and expose logic picker metadata
+09987959 L07 T6: expose content, sound and preview seams for logic pickers
+f70b44f2 L07 T6: logic editor content pickers, enum columns and drag-follow
+96f9e31c L07 T6: widget checks for picker columns and permanent statuses
+73550716 L07 T6: match the remaining enum button and cell sizes
+4e8874f3 L07 T6: cap the sensor tab's unit/block panes
+f0241834 L07 T6: pin the Layer reflection order for SetMarker
+```
+
+### What landed
+
+- `ui.effects.show` is a manifest dialog (`effects_dialog.gd/.tscn`) ported from
+  `EffectsDialog.java`; `MindLogic` exposes `fx_entries`, the reflected `Layer`
+  list and `LAccess.settable`/`senseable` for `setprop`/sensor tabs.
+- `MindSimHost.logic_picker_json` returns unit/item/liquid/status/weather/block
+  rows with Java's unlocked/hidden/logicControllable filters; `MindAssets`
+  exposes sound entries and a UI-bus preview with stop-previous.
+- `logic_dialog.gd` uses icon-grid pickers for `ubind`, `playsound`, status,
+  weather, `setmarker` layers, `setprop`/sensor tabs, ore and `ui.effects`.
+- Enum popup columns/cell sizes follow the call site (2/3/4 columns), with
+  `LCanvas.tooltip(Enum)`; the 35-entry `Layer.java` order is pinned.
+- Permanent statuses hide `seconds` (the earlier filter read field 0 instead of
+  field 1); drag-follow, jump-release clearing and the two-pass
+  `setJumpHeights` are in place; building `@name`/`@id` are null and unit `@id`
+  is NaN (as recorded), boss radar uses the `boss` status.
+
+### Tests and gates
+
+```
+cargo test -p mind-core --lib logic::statement      # 13 pass
+cargo test -p mind-core --lib ui::manifest          # 6 pass
+cargo test -p mind-core --lib                       # 2823 pass / 4 ignored (merged)
+cargo test -p mind-gdext --lib                      # 81 pass
+cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings  # clean
+cargo fmt --all -- --check                          # clean
+bash tools/godot.sh --headless --editor --quit --path client          # exit 0
+ui_widgets_check.gd                                 # UICHECK failed=0 (merged tree)
+```
+
+### Residuals (recorded)
+
+- Effects preview cells draw an animated HSV/checker wash rather than Java's
+  live `EffectCell.draw` particle render; `calculateSize` is unused.
+- Sound picker: no play/pause icon state and no `countPlaying` polling; preview
+  stops when the popup closes.
+- Drag draws the dragged row and a drop line but not Java's placeholder gap.
+- `setJumpHeights`, jump release, building/unit `@id` and boss radar were
+  already correct from the earlier T6 code (no change needed).
+
+### Ledger
+
+PAR-0407: T4/T5/T6 code landed; keep open only for the listed residuals and the
+live Java display/picker frames.

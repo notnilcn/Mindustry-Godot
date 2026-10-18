@@ -215,3 +215,66 @@ Live probes also confirmed no `Invalid polygon data` after the degenerate-fill
 filter; an MCP `open_dialog` eval produced one pre-existing
 `MindWorldRenderer` bind_mut panic (no repro on the next call) recorded as
 harness interaction, not a render-pass failure.
+
+---
+
+## 9. Continuation — agent-branch merge and live hover-bar batch (2026-10-19)
+
+The four continuation branches from the 2026-10-18 handoff were merged into
+`main` in dependency order, with no textual conflicts:
+
+```
+d3936804 Merge L08 T3 mod content parser rows and fixtures
+7e2df1ca Merge L04 T3 crawl segments, payload draws and weapon layerOffset
+d694829b Merge L07 T6 logic pickers, enum columns and drag-follow (PAR-0407)
+3adc976f Merge L08 T2 ModDataManager owner, decorators and map assets dialog (PAR-0394)
+aa57179d L05 T1: hover bar diode and payload-loader rows (PAR-0379)
+```
+
+### Landed
+
+| Area | Result | Evidence |
+|---|---|---|
+| L04 T3 (PAR-0367/0368/0369) | `UnitType.drawCrawl` geometry + `CrawlComp`/payload snapshots in `UnitDraw`, segment/outline/cell draws and carried payload under the carrier; unit quads carry Java sprite-batch z so `Weapon.layerOffset` applies to the hand-drawn weapon quads | `render/unit_draw` tests, 81 `mind-gdext`, live build |
+| L07 T6 (PAR-0407) | `ui.effects` dialog, content/sound pickers, enum columns/cell sizes + `tooltip(Enum)`, permanent-status seconds, drag-follow; Layer order pinned | logic/widget tests, `UICHECK failed=0` |
+| L08 T3 | Parser rows + one fixture per row (`unlock`, `drill`, `plans`, `weapon_fx`, `effects`, `drawer`) | 2823 `mind-core` lib tests |
+| L08 T2 (PAR-0394) | `MindMods` owner, atlas/audio/bundle decorators, map `patches` round-trip, MapAssetsDialog body | 2823/81 tests, import gate, live `MindMods` smoke |
+| L05 T1 (PAR-0379) | diode `Input`/`Output` always present; payload loader `Progress` always present and fed from the carried build | `runs/20261018-L-accept/`, `bar_rows` test |
+
+### Live acceptance (`runs/20261018-L-accept/`)
+
+- Java/Godot pairs match row-for-row for duo, power node and core; the units
+  bar rows match but the unit icon is raw markup.
+- Fixed live: standalone diode now Health/Input/Output; payload loader now
+  Health/Power/Liquid/Progress (`godot-*-hover-fixed.png`).
+- Residuals: unit icon markup in `MindBar`, accelerator `powerbuffer` row
+  clipped by the palette, pump pair deferred (dry mini map), Java palette recipe
+  recorded in `notes.md`.
+
+### Gates (merged tree)
+
+```
+cargo test -p mind-core --lib                 # 2823 passed, 0 failed, 4 ignored
+cargo test -p mind-gdext --lib                # 81 passed
+cargo test -p mind-headless --no-fail-fast    # 133 + all suites pass
+cargo run -p mind-headless -- parity goldens  # 0 FAIL
+cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings  # clean
+cargo fmt --all -- --check                    # clean
+bash tools/build.sh                           # mind-gdext + mind-headless
+godot --headless --editor --quit              # exit 0, no parse/load errors
+ui_layout_check.gd / ui_widgets_check.gd      # failed=0 / failed=0
+shaders_check.gd                              # total=29 failed=0
+```
+
+Live smoke on the merged build: sandbox world starts, `MindMods` is present
+with no data errors, and the diode/loader rows return the fixed JSON. The known
+boot-time `MindWorldRenderer::bind_mut` panic still appears in the log (no
+frame-loop impact; recorded in §8 as harness interaction).
+
+### Still open
+
+- L04 T0/T1/T2/T4/T6 live Java pairs (code landed; frames outstanding).
+- L08 T2 six residual seams and L08 T4 evidence debt / T6 round-M walk.
+- L07 T6 effects-preview render and sound-picker chrome.
+- PAR-0379 remaining families, icon markup and hover-panel clipping.
+- PAR-0399 meltdown pair, PAR-0126 leg pair, PAR-0445 final Java frame.

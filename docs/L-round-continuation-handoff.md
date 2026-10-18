@@ -8,10 +8,11 @@ per-plan summaries. The paused-round coordinator summary is
 
 ## 1. Where the tree is
 
-- Branch `main`; the late 2026-10-18 batch is committed as the last three
-  commits (`L04: unit parts, ability draws, halo trees`; `L07 T5 canvas
-  edges/pre-pass + PAR-0445 SaveDialog layout`; the docs/ledger commit that
-  carries this file). The only uncommitted files left on purpose are the
+- Branch `main`; the 2026-10-19 continuation merged the four agent branches
+  (`d3936804`, `7e2df1ca`, `d694829b`, `3adc976f`), the live PAR-0379 fixes
+  (`aa57179d`) and the docs/ledger commit (`5da933aa`). See §7 for the current
+  state and the new next work. The late 2026-10-18 batch is the three commits
+  before those. The only uncommitted files left on purpose are the
   operator's archival deletions under `docs/` and the
   `docs/parity-plans/archived_plans_do_not_read.zip` change. Do not commit or
   restore those.
@@ -130,3 +131,52 @@ detail in the L04/L07 summaries and `docs/L-round-execution-summary.md` §8.
 > finish L04 T3 (crawl/payload/weapon z), L08 T2/T3, L07 T6 and the round-M
 > closing walk. Keep the ledger and per-plan summaries updated, and do not touch
 > the operator's archived-docs deletions.
+
+---
+
+## 7. Update 2026-10-19 — four branches merged, live hover batch
+
+The four branches from §2's continuation are now merged on `main` (merge commits
+`d3936804`, `7e2df1ca`, `d694829b`, `3adc976f`), plus `aa57179d` for the live
+PAR-0379 diode/loader fixes. The tree is clean except the operator's archival
+deletions under `docs/` and the
+`docs/parity-plans/archived_plans_do_not_read.zip` change; do not commit them.
+
+New evidence: `runs/20261018-L-accept/` (Java/Godot hover frames + `notes.md`
+recipe). `docs/L-round-execution-summary.md` §9 is the batch record.
+
+What changed since §2:
+
+- L04 T3 crawl/payload/weapon-z code landed (`render/unit_draw.rs`,
+  `render/units.rs`, `sim_host.rs`, content assertions). Java frames still open.
+- L07 T6 pickers/enum columns/drag-follow landed; effects-preview render and
+  sound-picker chrome remain.
+- L08 T3 parser rows + fixtures landed (six fixture mods).
+- L08 T2 `MindMods` owner, atlas/audio/bundle decorators, map `patches`
+  round-trip and MapAssetsDialog body landed; six precise gaps in the L08
+  summary.
+- L05 T1 live findings: standalone diode and payload-loader bars fixed; unit
+  icon markup raw in `MindBar`, accelerator `powerbuffer` row clipped by the
+  palette, pump pair deferred (dry mini map).
+
+Gates on the merged tree: `mind-core` 2823 (4 ignored), `mind-gdext` 81,
+`mind-headless` 133 + all suites, `parity goldens` 0 FAIL, clippy/fmt clean,
+Godot import exit 0, `ui_layout_check`/`ui_widgets_check` failed=0,
+`shaders_check` 29/0. The known boot-time `MindWorldRenderer::bind_mut` panic
+still appears (no frame-loop impact).
+
+Next work, in order:
+
+1. **L04 T0 Java capture batch** — the remaining blocker for T1/T2/T3/T4/T5/T6
+   live pairs. Use the `runs/20261018-L-accept/notes.md` recipe and the Mud
+   Flats save; capture merui/cleroi/anthicus/tecta/collaris/elude/avert/
+   obviate, quasar/oct/aegires/quell/disrupt, renale/latum crawl and
+   mega/quad/oct payloads, scathe/smite/malign/lustre firing, the reactor/
+   generator pair, and atrax/spiroct/arkyid/toxopid.
+2. **PAR-0379 remaining pairs** (cyclone, generator, reactor, overdrive, force,
+   pump on a water map, loader, assembler, accelerator) plus the unit-icon
+   markup and hover-panel clipping residuals.
+3. **L08 T2 gaps** (content sprites, per-asset warnings, non-embedded cache,
+   non-editor map data application, audio/image view chrome) and **L08 T4/T6**.
+4. **L07 T6** effects-preview render and sound-picker play/pause state.
+5. PAR-0399 meltdown pair, PAR-0126 leg pair, PAR-0445 final Java frame.
