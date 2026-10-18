@@ -63,8 +63,8 @@ pub(crate) struct LogicDisplayRenderer {
     textures: HashMap<(i32, i32), (Gd<ImageTexture>, i32, i32)>,
     /// Canvas tile → (texture, canvas size in pixels).
     canvas_textures: HashMap<(i32, i32), (Gd<ImageTexture>, i32)>,
-    /// Cached draw list: `(texture, centre x, centre y, w, h)`.
-    cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32)>,
+    /// Cached draw list: `(texture, centre x, centre y, w, h, rotation)`.
+    cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32, f32)>,
     regions: RegionCache,
 }
 
@@ -102,9 +102,9 @@ impl INode2D for LogicDisplayRenderer {
     fn draw(&mut self) {
         let cmds = std::mem::take(&mut self.cmds);
         let mut base = self.base_mut();
-        for (texture, x, y, w, h) in &cmds {
+        for (texture, x, y, w, h, rot) in &cmds {
             // `Draw.blend(disabled)`; the camera flip lives in `draw_region`.
-            canvas::draw_region(&mut base, texture, *x, *y, *w, *h, 0.0, Color::WHITE);
+            canvas::draw_region(&mut base, texture, *x, *y, *w, *h, *rot, Color::WHITE);
         }
         drop(base);
         self.cmds = cmds;
@@ -162,7 +162,7 @@ impl LogicDisplayRenderer {
             self.update_texture(&host, key);
         }
         // Canvases (`CanvasBlock.draw`; T14): one texture per canvas tile.
-        let mut cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32)> = Vec::new();
+        let mut cmds: Vec<(Gd<Texture2D>, f32, f32, f32, f32, f32)> = Vec::new();
         let canvases = if draw_displays {
             host.bind().logic_canvas_sync(min_x, min_y, max_x, max_y)
         } else {
@@ -211,13 +211,46 @@ impl LogicDisplayRenderer {
             }
             if let Some((texture, _)) = self.canvas_textures.get(&key) {
                 let world_size = dict_f32(&dict, "size").max(1.0);
+                let cx = dict_f32(&dict, "cx");
+                let cy = dict_f32(&dict, "cy");
                 cmds.push((
                     texture.clone().upcast::<Texture2D>(),
-                    dict_f32(&dict, "cx"),
-                    dict_f32(&dict, "cy"),
+                    cx,
+                    cy,
                     world_size,
                     world_size,
+                    0.0,
                 ));
+                // `CanvasBlock.draw` (`CanvasBlock.java:274-288`): an edge
+                // sprite for every side with no same-block neighbour, plus the
+                // corner sprites where the neighbouring side joins (the
+                // second corner is y-flipped).
+                let blending = dict_i64(&dict, "blending") as u8;
+                if blending != 0 {
+                    for side in 0..4u8 {
+                        if blending & (1 << side) != 0 {
+                            continue;
+                        }
+                        let side_region = if side >= 2 { "side2" } else { "side1" };
+                        if let Some(texture) = self.regions.get(&node, side_region) {
+                            let (w, h) = RegionCache::natural_size(&texture);
+                            cmds.push((texture, cx, cy, w, h, side as f32 * 90.0));
+                        }
+                        let corner_region = if side >= 2 { "corner2" } else { "corner1" };
+                        if blending & (1 << ((side + 1) % 4)) != 0
+                            && let Some(texture) = self.regions.get(&node, corner_region)
+                        {
+                            let (w, h) = RegionCache::natural_size(&texture);
+                            cmds.push((texture, cx, cy, w, h, side as f32 * 90.0));
+                        }
+                        if blending & (1 << ((side + 3) % 4)) != 0
+                            && let Some(texture) = self.regions.get(&node, corner_region)
+                        {
+                            let (w, h) = RegionCache::natural_size(&texture);
+                            cmds.push((texture, cx, cy, w, -h, side as f32 * 90.0));
+                        }
+                    }
+                }
             }
         }
         // Rebuild the display draw list (resolves frame regions through the cache).
@@ -234,6 +267,7 @@ impl LogicDisplayRenderer {
                         dict_f32(row, "y"),
                         dict_f32(row, "w"),
                         dict_f32(row, "h"),
+                        0.0,
                     ));
                 }
             }
@@ -248,6 +282,7 @@ impl LogicDisplayRenderer {
                         dict_f32(row, "frame_y"),
                         w,
                         h,
+                        0.0,
                     ));
                 }
             }

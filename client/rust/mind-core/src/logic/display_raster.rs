@@ -683,6 +683,73 @@ fn root_geometry(world: &World, root: Entity, state: &LogicDisplayState) -> (u32
 /// command was processed. The VIEW calls this (T13); the sim never does,
 /// matching Java (Java only processes when the display is drawn).
 pub fn process_display(world: &mut World, root: Entity, ctx: &dyn DisplayDrawContext) -> bool {
+    process_display_inner(world, root, ctx, &mut std::collections::HashSet::new())
+}
+
+/// `LogicDisplayBuild.processCommands`'s off-screen image-source pre-pass
+/// (`LogicDisplay.java:163-178`): a `draw image` referencing another display
+/// forces that display's queued commands through its own buffer first.
+fn process_display_inner(
+    world: &mut World,
+    root: Entity,
+    ctx: &dyn DisplayDrawContext,
+    visiting: &mut std::collections::HashSet<Entity>,
+) -> bool {
+    if !visiting.insert(root) {
+        // `!source.processing` guard: a reference cycle stops here.
+        return false;
+    }
+    let sources = world
+        .get::<LogicDisplayState>(root)
+        .map(|state| referenced_display_roots(world, root, &state.commands))
+        .unwrap_or_default();
+    for source in sources {
+        process_display_inner(world, source, ctx, visiting);
+    }
+    let processed = process_one_display(world, root, ctx);
+    visiting.remove(&root);
+    processed
+}
+
+/// `displays.get(id).rootDisplay` targets referenced by `draw image`.
+fn referenced_display_roots(world: &World, root: Entity, commands: &VecDeque<u64>) -> Vec<Entity> {
+    let mut out = Vec::new();
+    for &command in commands {
+        if cmd_type(command) != COMMAND_IMAGE {
+            continue;
+        }
+        let p1 = unpack_sign(cmd_p1(command));
+        let p4 = unpack_sign(cmd_p4(command));
+        let packed = (p4 << 10) | p1;
+        if packed & 0x1f != DISPLAY_DRAW_TYPE {
+            continue;
+        }
+        let id = packed >> 5;
+        if id < 0 {
+            continue;
+        }
+        let Some(displays) = world.get_resource::<crate::logic::blocks::LogicDisplays>() else {
+            continue;
+        };
+        let Some(Some(entity)) = displays.slots.get(id as usize) else {
+            continue;
+        };
+        let source = if *entity == root {
+            root
+        } else {
+            world
+                .get::<LogicDisplayState>(*entity)
+                .and_then(|state| state.root_display)
+                .unwrap_or(*entity)
+        };
+        if source != root && !out.contains(&source) {
+            out.push(source);
+        }
+    }
+    out
+}
+
+fn process_one_display(world: &mut World, root: Entity, ctx: &dyn DisplayDrawContext) -> bool {
     let Some(mut state) = world.entity_mut(root).take::<LogicDisplayState>() else {
         return false;
     };

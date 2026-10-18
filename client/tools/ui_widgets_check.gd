@@ -377,23 +377,27 @@ func _init() -> void:
 		)
 	load_dialog.free()
 
-	# EV-0066: the Save dialog lists the new-save row plus the live slots, and
-	# the row's prompt hands the name to `MindCampaign.save_slot`.
+	# EV-0066 / PAR-0445: `SaveDialog extends LoadDialog`, so the grid lists the
+	# live slots as cards and the `@save.new` button sits in the button row
+	# (`SaveDialog.java:19-28`). Its prompt hands the name to
+	# `MindCampaign.save_slot`.
 	var save_dialog: Control = load("res://scenes/ui/dialogs/save_dialog.tscn").instantiate()
 	root.add_child(save_dialog)
 	save_dialog.call("shown")
 	var save_grid: Variant = save_dialog.get("_grid")
 	var save_rows := 0
-	var new_row: Button = null
 	if save_grid is MindTable:
 		for child in (save_grid as MindTable).get_children():
 			if child is Button:
-				if new_row == null:
-					new_row = child
 				save_rows += 1
 	_check(
-		save_rows == 2,
-		"save dialog lists the new-save row plus the live slot (got %s row(s))" % save_rows
+		save_rows == 1,
+		"save dialog lists the live slot as a card (got %s card(s))" % save_rows
+	)
+	var new_row := save_dialog.find_child("new_save", true, false) as Button
+	_check(
+		new_row != null,
+		"save dialog has the @save.new button in the button row"
 	)
 	if new_row != null and ui != null:
 		new_row.emit_signal("pressed")

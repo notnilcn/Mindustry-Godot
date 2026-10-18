@@ -24,6 +24,8 @@ const FILTERS := [
 	{"mode": "pvp", "icon": "mode-pvp"},
 ]
 
+## Dialog title key; `SaveDialog` overrides it (`LoadDialog(String title)`).
+var title_key := "@loadgame"
 var _field: LineEdit = null
 var _grid: MindTable = null
 ## Gamemode names whose saves are hidden from the grid (`hidden` upstream).
@@ -40,7 +42,7 @@ var _pending_export := ""
 
 
 func _ready() -> void:
-	set_title_key("@loadgame")
+	set_title_key(title_key)
 	should_pause = false
 	full_dialog = true
 	super._ready()
@@ -123,13 +125,19 @@ func _build() -> void:
 	# list (L01 T3: java/load-search.png centres the single card).
 	root.add(_grid).grow_y_axis().set_pad_left(20.0).set_pad_right(24.0)
 
-	# Bottom row: `addCloseButton()` (210x64) then `buttons.button("@save.import",
-	# Icon.add, ...)` (`LoadDialog.java:47-48,59-60,197-226`), also 210x64.
+	# Bottom row: `addCloseButton()` then the dialog's own setup button
+	# (`LoadDialog.java:47-48,59-60`; `SaveDialog.addSetup` overrides the row).
 	add_close_button()
-	var import_button := add_button(_t("@save.import"), _open_import, "add", 210.0)
-	import_button.custom_minimum_size.y = 64.0
+	_add_setup_buttons()
 
 	_rebuild_list()
+
+
+## `LoadDialog.addSetup`: the `@save.import` button. `SaveDialog` replaces it
+## with `@save.new` (`SaveDialog.java:19-28`).
+func _add_setup_buttons() -> void:
+	var import_button := add_button(_t("@save.import"), _open_import, "add", 210.0)
+	import_button.custom_minimum_size.y = 64.0
 
 
 func _add_filters(row: HBoxContainer) -> void:
@@ -206,7 +214,7 @@ func _build_card(slot: Dictionary) -> Button:
 	# .size(40f)`) and the 160 px preview + `padRight(6)` + 260 px meta row
 	# (`LoadDialog.java:115-184`): a 446x220 card (java/load.png, L01 T3).
 	card.custom_minimum_size = Vector2(446, 220)
-	card.pressed.connect(_select.bind(slot))
+	card.pressed.connect(_card_pressed.bind(slot))
 
 	# code-instantiated: card body follows the slot data; ignores clicks so the
 	# card button itself handles selection.
@@ -390,7 +398,9 @@ func _meta_lines(slot: Dictionary) -> Array:
 	return lines
 
 
-func _select(slot: Dictionary) -> void:
+## Card body click. `LoadDialog` loads; `SaveDialog.modifyButton` overrides
+## this with the overwrite prompt (`SaveDialog.java:31-39`).
+func _card_pressed(slot: Dictionary) -> void:
 	slot_selected.emit(str(slot.get("name", "")))
 	_load_slot(slot)
 	_close()

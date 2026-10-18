@@ -225,11 +225,12 @@ in-game eye recorded). PAR-0110 closes: the editor walk is MATCH. T4 is session 
 - Canvas PNG import/export + 2 s auto-save: implemented with `FileDialog`,
   `Image.load_from_file`/`save_png`, nearest-palette mapping and an alpha blend
   over `palette[0]` (`CanvasEditDialog.java:60-71,216-274`).
-- Canvas edge sprites: `CanvasBehavior` now computes the 4-bit `blending` mask
-  (`CanvasBlock.java:208-216,251-253`, with the `d4 * size` offset) and a test
-  pins adjacent 2x2 canvases. The renderer still draws no side/corner sprites:
-  the blending data is ready but the edge-quad pass is deferred.
-- Off-screen image-source pre-pass (T5.1) is unchanged (still deferred).
+- Canvas edge sprites (**landed**): `logic_displays.rs` now draws `side1`/
+  `side2`/`corner1`/`corner2` for every mask side with no same-block
+  neighbour, including the y-flipped second corner (`CanvasBlock.java:274-288`).
+- Off-screen image-source pre-pass (**landed**): `process_display` now walks
+  `draw image` source slots first and recursively processes their buffers with
+  a visiting set (`LogicDisplay.java:163-178`).
 
 ### T6 — logic pickers/polish — **PARTIAL**
 
@@ -246,6 +247,14 @@ in-game eye recorded). PAR-0110 closes: the editor walk is MATCH. T4 is session 
 - `Input.config_spec_json(x,y)` was added as a probe/test seam for the config
   panels (the same `DesktopBridge::config_spec` the tap handler uses).
 
-### PAR-0445
+### PAR-0445 — Save Game layout — **DONE (code + UI gate)**
 
-Not implemented: the Save Game dialog still uses the plain text list.
+- `save_dialog.gd` now extends `load_dialog.gd` (`SaveDialog extends
+  LoadDialog`): shared search row, gamemode toggles, two-column save cards and
+  the per-card autosave/delete/rename/export buttons.
+- `LoadDialog` exposes `title_key`, `_add_setup_buttons()` and
+  `_card_pressed()`; Save overrides the title (`@savegame`), replaces the
+  `@save.import` button with `@save.new` (`new_save`) in the button row and
+  routes a card click through `@save.overwrite` before `save_slot`.
+- `ui_widgets_check.gd` EV-0066 updated to the Java layout (one card + the
+  bottom New Save button); the prompt still queues the entered name.
