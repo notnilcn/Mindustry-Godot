@@ -3,13 +3,16 @@
 
 Read this first, then `docs/parity-plans/L-INDEX.md`, `L-environment.md` and the
 per-plan summaries. The paused-round coordinator summary is
-`docs/L-round-execution-summary.md` (§7 is this session's continuation).
+`docs/L-round-execution-summary.md` (§7 is the first continuation, §8 the late
+2026-10-18 L04/L07/PAR-0445 batch).
 
 ## 1. Where the tree is
 
-- Branch `main`; the continuation batch is committed as the last commit
-  (`round-L continuation: ...`). The only uncommitted files left on purpose are
-  the operator's archival deletions under `docs/` and the
+- Branch `main`; the late 2026-10-18 batch is committed as the last three
+  commits (`L04: unit parts, ability draws, halo trees`; `L07 T5 canvas
+  edges/pre-pass + PAR-0445 SaveDialog layout`; the docs/ledger commit that
+  carries this file). The only uncommitted files left on purpose are the
+  operator's archival deletions under `docs/` and the
   `docs/parity-plans/archived_plans_do_not_read.zip` change. Do not commit or
   restore those.
 - `.opencode/parity-session/**` churn and `.claude/worktrees/` are session
@@ -17,7 +20,8 @@ per-plan summaries. The paused-round coordinator summary is
 - `runs/` is gitignored; evidence/run dirs and the ledger op files live there.
 - `chains.json` was updated in this batch (PAR-0446/0447 verified;
   PAR-0379/0380/0399 fixing; PAR-0407 seeded with T4/T5/T6 notes;
-  PAR-0296/0126 notes).
+  PAR-0296/0126 notes) and in the late batch (PAR-0363/0365/0366/0367 fixing,
+  PAR-0445 fixing, PAR-0407 T5 note).
 
 ## 2. What this continuation landed
 
@@ -51,9 +55,20 @@ cargo fmt --all -- --check
 bash tools/godot.sh --headless --editor --quit --path client   # no script errors
 ```
 
-One source change landed after the last `.so` build: the base `power` hover row
-is now gated on a `Consume::Power` consumer. Run `tools/build.sh` once before the
-first live check (the running editor was stopped to free CPU).
+Late 2026-10-18 batch (after L04/L07/PAR-0445): `mind-core` 2805 pass (4
+ignored) + all integration goldens, `mind-gdext` 80, `mind-headless` 133,
+`parity goldens` 0 FAIL, clippy/fmt clean, Godot import exit 0,
+`ui_layout_check` / `ui_widgets_check` failed=0. The `.so` was rebuilt and the
+editor stopped; run `tools/build.sh` once before the first live check only if
+the tree changed since commit.
+
+### Landed after this handoff was written (late 2026-10-18)
+
+L04 T1 (`render/unit_parts.rs`), T2 (ForceField/EnergyField/SuppressionField/
+ShieldArc draws + state mirrors), T3 partial (weapon-part `layerOffset`),
+T4 (`HaloPart` + lustre/scathe/smite/malign trees); L07 T5 canvas edge sprites
++ off-screen image pre-pass; PAR-0445 SaveDialog/LoadDialog inheritance. Per-plan
+detail in the L04/L07 summaries and `docs/L-round-execution-summary.md` §8.
 
 ## 4. Next work, in order
 
@@ -66,25 +81,21 @@ first live check (the running editor was stopped to free CPU).
      core check, verify the live `BuildRules.core_build_and_config` is true
      (`CampaignRuntime` mirror did not reach it in the sandbox probe);
    - PAR-0399 thorium meltdown + blast-compound combustion generator pair;
-   - PAR-0126 live Java leg pair (L04 T6).
-2. **L04 T1** unit `UnitType.parts` feed. Start from
-   `mind-gdext/src/fx/draw_turret.rs` (working DrawPart executor) and
-   `fx/parts/weapons.rs::draw_unit_weapons`; `UnitDraw` needs `parts`, `fin`,
-   `draw_body`/`draw_cell`/`ground_layer`; add a `render/unit_parts.rs` program
-   pass and stop the hand-drawn weapon path in `render/units.rs`.
-3. **L04 T2/T3/T4** ability draws (`AbilityState` view fields + `AbilitySpec`
-   knobs + a `render/unit_abilities.rs`), crawl/payload/layerOffset, then the
-   scathe/smite/malign/lustre part trees (needs a `HaloPart` arm on
-   `DrawPartSpec`/`PartEmit::draw_part`).
-4. **L08 T2** `ModDataManager` owner/decorators and patch threading
+   - PAR-0126 live Java leg pair (L04 T6);
+   - L04 T1 unit parts + T2 abilities + T4 turret trees against Java (the code
+     is landed; the frames are the remaining acceptance evidence).
+2. **L04 T3 residue** crawl segments (`drawCrawl`), payload composition
+   (`drawPayload` for unit/building payloads) and the hand-drawn weapon
+   region/cell z (`layerOffset`; weapon parts already apply it).
+3. **L08 T2** `ModDataManager` owner/decorators and patch threading
    (`mods/assets`, `maps/mod.rs:463`, `editor/assets.rs`, map assets dialog).
    **L08 T3** remaining parser rows (`UnlockableContent`, plans, weapon parts/
    effects, inline effects, drawer), one fixture per row.
    **L08 T4/T6** evidence debt and the round-M closing walk.
-5. **PAR-0445** Save Game dialog: make it inherit/share the Load-dialog slot
-   grid (search, mode filters, 2-column cards, New Save bottom button).
-6. **L07 T5/T6 residue** canvas edge quads, off-screen image pre-pass, icon
-   pickers/enum columns/drag capture.
+4. **L07 T6 residue** icon pickers/enum columns/drag capture (T5 edge sprites
+   and the off-screen image pre-pass are landed).
+5. **PAR-0445** is landed (SaveDialog now extends LoadDialog); keep only the
+   final Java like-for-like frame on its ledger item.
 
 ## 5. Environment and harness notes from this session
 
@@ -111,7 +122,11 @@ first live check (the running editor was stopped to free CPU).
 
 ## 6. Suggested opening prompt for the new session
 
-> Continue round L from `docs/L-round-continuation-handoff.md`. Run
-> `bash tools/build.sh` once, start session 1, and work §4 in order. Start with
-> the live acceptance batch; then L04 T1. Keep the ledger and per-plan summaries
-> updated, and do not touch the operator's archived-docs deletions.
+> Continue round L from `docs/L-round-continuation-handoff.md`. The late
+> 2026-10-18 batch is committed on `main` (L04 T1/T2/T4, L07 T5 edges/pre-pass,
+> PAR-0445, ledger/summary updates). Start with §4: run `bash tools/build.sh`
+> once, start session 1, and stage the Java acceptance batch (L-environment
+> rules 7–8) for PAR-0379/0380/0399, PAR-0126 and the L04 T1/T2/T4 pairs; then
+> finish L04 T3 (crawl/payload/weapon z), L08 T2/T3, L07 T6 and the round-M
+> closing walk. Keep the ledger and per-plan summaries updated, and do not touch
+> the operator's archived-docs deletions.

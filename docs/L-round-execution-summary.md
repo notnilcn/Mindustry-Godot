@@ -171,3 +171,47 @@ ui_layout_check.gd / ui_widgets_check.gd      # failed=0 / failed=0
 | PAR-0407 | T4 landed; T5/T6 partial as listed |
 | PAR-0296 | tap hook landed; launch visuals and the Java capture remain |
 | PAR-0126 | still fixing (live leg pair) |
+
+---
+
+## 8. Continuation — L04 draw and L07/PAR-0445 padding (2026-10-18, later session)
+
+One build, one editor session (display :10); no Java captures (the Java reference
+staging remains the blocker for the pairs).
+
+### Landed
+
+| Area | Result | Evidence |
+|---|---|---|
+| L04 T1 (PAR-0365) | `UnitDraw` gained `parts`/`fin`/`draw_body`/`draw_cell`/`ground_layer` and `WeaponDraw` the resolved def + mount; new `render/unit_parts.rs` (three programs per band: under / over / additive) draws unit `UnitType.parts` and weapon under/over parts through the shared `PartEmit`; `units.rs` gates body/cell | code + live sandbox frames (quasar/quell/tecta/merui) |
+| L04 T2 (PAR-0366) | ForceField/ShieldArc in `shields.rs`, EnergyField/SuppressionField in new `render/unit_abilities.rs`; `AbilityState` view mirrors (`cur_stroke`, `radius_scale`, `alpha`) advanced in the sim; `AbilitySpec` draw knobs; `ability_view_state_lerps` test | code + tests + live frames |
+| L04 T3 (partial) | weapon-part `layerOffset` through the parts pass; unit-part polygons filtered for degenerate triangulation | code |
+| L04 T4 | `HaloPart` kind/fields + `SinTime` progress; `lustre`/`scathe` (+ammo missiles)/`smite`/`malign` turret trees ported | `turret_parts_cover_the_vanilla_drawers`; live frames still need T0 |
+| L07 T5 (edge/pre-pass) | canvas `side1`/`side2`/`corner1`/`corner2` edge sprites incl. y-flipped corners; recursive `draw image` source pre-pass in `process_display` | code |
+| PAR-0445 | `SaveDialog` now extends `LoadDialog` (search, filters, card grid, per-card actions) and puts `@save.new` in the button row | live `runs/20261018-L-continue/live/savedialog2.png`; `ui_widgets_check` |
+
+### Still open in L04/L07
+
+- L04 T0 Java staging; T1/T2 Java pairs; T3 crawl segments + payload composition
+  + hand-drawn weapon z; T4 turret part trees (HaloPart); T6 live leg pairs.
+- L07 T5 canvas off-screen image pre-pass is landed; the remaining T6 icon
+  pickers/enum columns/drag-follow are unchanged.
+- L08 T2/T4/T6 were not started in this session.
+
+### Gates run
+
+```
+cargo test -p mind-core --lib        # 2805 passed, 0 failed, 4 ignored
+cargo test -p mind-gdext --lib       # 80 passed
+cargo clippy -p mind-core -p mind-gdext --all-targets -- -D warnings  # clean
+cargo fmt --all -- --check           # clean
+mind-headless parity goldens         # 0 FAIL
+godot --headless --editor --quit     # exit 0
+ui_layout_check.gd                   # failed=0
+ui_widgets_check.gd                  # failed=0
+```
+
+Live probes also confirmed no `Invalid polygon data` after the degenerate-fill
+filter; an MCP `open_dialog` eval produced one pre-existing
+`MindWorldRenderer` bind_mut panic (no repro on the next call) recorded as
+harness interaction, not a render-pass failure.

@@ -1831,11 +1831,11 @@
 "PAR-0360":{"t":"Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s3-J02-T1/"},
 "PAR-0361":{"t":"Custom maps load without generation filters (no ores/boulders): `World.loadMap` never ran `FilterContext`/`applyFilters` (396c9886)","s":"world","st":"verified","u":"2026-10-17","run":"runs/20261016-s2-J01-T1/"},
 "PAR-0362":{"t":"Committed goldens predate deliberate H01-T1 position and I-round content changes: `blocks_golden`, `audio_golden` (audio_events_sim), `input_golden`, `logistics_golden`, `maps_editor_golden` all fail on main (regen pending)","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-s3-L08-T1/"},
-"PAR-0363":{"t":"Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames","s":"world","st":"fixing","u":"2026-10-17","run":"runs/20261017-s4-J03-T1/"},
+"PAR-0363":{"t":"Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261017-s4-J03-T1/"},
 "PAR-0364":{"t":"Inert graphics settings: `bloomintensity`/`bloomblur` and `linear` never reached the renderer (5325720c)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s5-J10-T2-1/"},
-"PAR-0365":{"t":"Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)","s":"world","st":"seeded","u":"2026-10-17"},
-"PAR-0366":{"t":"Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc","s":"world","st":"seeded","u":"2026-10-17"},
-"PAR-0367":{"t":"Weapon `layerOffset` not applied when drawing weapons","s":"world","st":"seeded","u":"2026-10-17"},
+"PAR-0365":{"t":"Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
+"PAR-0366":{"t":"Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
+"PAR-0367":{"t":"Weapon `layerOffset` not applied when drawing weapons","s":"world","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
 "PAR-0368":{"t":"`drawCrawl` segments (renale/latum) not drawn","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0369":{"t":"`drawPayload` (mega/quad/oct carrying units/blocks) not drawn","s":"world","st":"seeded","u":"2026-10-17"},
 "PAR-0370":{"t":"Text buttons render the glyph inline in the label with a flat slate fill (no `defaultt` nine-patch/cell layout) (0cf55155)","s":"ui","st":"verified","u":"2026-10-17","run":"runs/20261017-s3-J06-T1/"},
@@ -1913,7 +1913,7 @@
 "PAR-0442":{"t":"Campaign game-over title shows the preset id ('Sector groundZero lost!') instead of the localized name ('Ground Zero')","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.3/"},
 "PAR-0443":{"t":"Planet page sector grid/selection not faded by uiAlpha when zoomed out","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s3-L06-T6.5/"},
 "PAR-0444":{"t":"HUD IO loading driver hid every loading overlay one frame after it appeared; MindLabel ignored font_color overrides and 25 sites used Godot's X11 grays for Arc gray/lightGray","s":"ui","st":"verified","u":"2026-10-18","run":"runs/20261018-s2-L07-T3/"},
-"PAR-0445":{"t":"Save Game dialog is a plain text list; Java uses the Load-dialog layout (search, mode filters, two-column slot cards, New Save in the button row)","s":"ui","st":"mismatch","u":"2026-10-18","run":"runs/20261018-s2-L07-java/"},
+"PAR-0445":{"t":"Save Game dialog is a plain text list; Java uses the Load-dialog layout (search, mode filters, two-column slot cards, New Save in the button row)","s":"ui","st":"fixing","u":"2026-10-18","run":"runs/20261018-L-continue/"},
 "PAR-0446":{"t":"unit-cargo-unload-point and the Erekir unit assemblers lack solid = true (UnitCargoUnloadPoint.java:26, UnitAssembler.java:62); affects sim/pathing","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
 "PAR-0447":{"t":"maps/filters block_info::is_overlay/is_floor omit SpawnBlock and RemoveOre, which Java counts as OverlayFloor/Floor — check whether the map filters are affected","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"}
 },
@@ -4642,7 +4642,8 @@
 "2026-10-17 round J (J10 T2.1, 5325720c): the world bloom pass is implemented (bullet..effect band baked through a CanvasGroup with a camera-tracked CaptureRect; client/shaders/bloom.gdshader ports Arc alpha_{threshold,gaussian,bloom}.frag; mind-core blur_radius) and bloom/bloomintensity/bloomblur + linear are wired to the settings store (Renderer.java:391-394; SettingsMenuDialog.java:531,540-550). In-engine: uniforms follow settings (2.5->5.0, 1.4142->2.8284, gate on/off), bullet frames change 1.5-2.2% across bloom off/default/max, linear 0.53% at a fractional camera offset. Deviations: single-pass sqrt-scaled blur vs Java ping-pong; /root/Spine/MindFx outside the capture; pack-time linear bleed not ported. Run runs/20261017-s5-J10-T2-1/."
 ],
 "PAR-0363":[
-"2026-10-17 round J (J03 T1-T3, 16d2a336): live turret pass ported from DrawTurret.java:72-170 — base lookup chain (reinforced- prefix for Erekir), Drawf.shadow, region drawrot, liquid + top, additive heat (heatColor overrides), outline at turretLayer-0.01 when parts exist, per-part params/curRecoils, ammoParts (titan); hand-ported parts for duo/scatter/salvo/cyclone/diffuse/sublimate/titan/disperse/afflict; live TurretState feed + real AtlasLookup (no AllRegions); two in-engine-only bugs fixed (drawrot vs raw rotation, !heat.found() guard). T2 diagnosed the idle head as a state mismatch (test placed_duo_idle_head_rotation_is_up; no sim bug). T3: pack arm correct; live duo ring comes from duo-outline (DrawTurret.java:90-96) not an in-place duo replacement; outline_icon_in_place guarded + fixture-pinned. Residual: scathe/smite/malign/lustre part trees, firing/heat pixel frames (prim-level + test evidence instead). Run runs/20261017-s4-J03-T1/ (T2 runs/20261017-s4-J03-T2/, T3 runs/20261017-s4-J03-T3/)."
+"2026-10-17 round J (J03 T1-T3, 16d2a336): live turret pass ported from DrawTurret.java:72-170 — base lookup chain (reinforced- prefix for Erekir), Drawf.shadow, region drawrot, liquid + top, additive heat (heatColor overrides), outline at turretLayer-0.01 when parts exist, per-part params/curRecoils, ammoParts (titan); hand-ported parts for duo/scatter/salvo/cyclone/diffuse/sublimate/titan/disperse/afflict; live TurretState feed + real AtlasLookup (no AllRegions); two in-engine-only bugs fixed (drawrot vs raw rotation, !heat.found() guard). T2 diagnosed the idle head as a state mismatch (test placed_duo_idle_head_rotation_is_up; no sim bug). T3: pack arm correct; live duo ring comes from duo-outline (DrawTurret.java:90-96) not an in-place duo replacement; outline_icon_in_place guarded + fixture-pinned. Residual: scathe/smite/malign/lustre part trees, firing/heat pixel frames (prim-level + test evidence instead). Run runs/20261017-s4-J03-T1/ (T2 runs/20261017-s4-J03-T2/, T3 runs/20261017-s4-J03-T3/).",
+"L04 T4 landed: DrawPartSpec now models HaloPart + the SinTime progress wave; turret_parts.rs ports lustre, scathe (base + per-ammo missiles), smite and malign trees, pinned by turret_parts_cover_the_vanilla_drawers. Live firing frames still need the L04 T0 Java batch."
 ],
 "PAR-0115":[
 "Reference soak: staging blocker: no mod fixture in parity-java-home (the Mods dialog reads 'No mods found'); a content-mod zip must be installed to stage the loading half.",
@@ -5021,13 +5022,15 @@
 ],
 "PAR-0407":[
 "2026-10-18 round L: L07 T1-T3 landed (palette, WASD bindings + resetSaved guard, sub-dialog residue); remaining L07 T4 (logic font/printchar/icon tag, session B), T5 (display/canvas), T6 (logic pickers). Resize OK-disable premise is wrong (Java never disables OK) — recorded, no change.",
-"2026-10-18 continuation: T4 landed (logic font glyph rasteriser, unicodeToName/getLargeIcon icon tag); T5 partial (480px canvas, PNG import/export, 2s autosave, canvas blending mask; off-screen pre-pass and edge sprites open); T6 partial (permanent status seconds, unit @id NaN, boss radar; pickers/enum columns/drag open)."
+"2026-10-18 continuation: T4 landed (logic font glyph rasteriser, unicodeToName/getLargeIcon icon tag); T5 partial (480px canvas, PNG import/export, 2s autosave, canvas blending mask; off-screen pre-pass and edge sprites open); T6 partial (permanent status seconds, unit @id NaN, boss radar; pickers/enum columns/drag open).",
+"L07 T5: canvas side/corner edge sprites (CanvasBlock.java:274-288) and the off-screen display image-source pre-pass (LogicDisplay.java:163-178) landed. Icon-grid pickers and drag-follow remain open."
 ],
 "PAR-0444":[
 "2026-10-18 found and fixed in L07 wave 4 (5bb046cd, 109a6b2f, d1d3bff4)."
 ],
 "PAR-0445":[
-"2026-10-18 L07 wave 4: java/savedialog.png."
+"2026-10-18 L07 wave 4: java/savedialog.png.",
+"SaveDialog now extends LoadDialog: shared search/gamemode filters, 2-column save cards, per-card actions, and the @save.new button in the button row (SaveDialog.java). Live frame runs/20261018-L-continue/live/savedialog2.png; ui_widgets_check.gd updated."
 ],
 "PAR-0446":[
 "2026-10-18 found in L07 T1; left unchanged by session A (sim change). -> session B.",
@@ -5044,6 +5047,15 @@
 "PAR-0399":[
 "2026-10-18 continuation: HostExplosionSink installed by MindSimHost::install_fx_sink pushes explodeEffect/shake/scorch and the explodeSound audio event; reactor effect/sound ids filled (NuclearReactor.java:72-73, ImpactReactor.java:40-41, VariableReactor.java:44-45, Blocks.java:2836-2837); ConsumeItemExplode emits Fx.generatespark. Java meltdown pair still outstanding.",
 "Status note: host + tests are landed; a live Java/Godot meltdown pair is still outstanding, so this is fixing rather than verified."
+],
+"PAR-0365":[
+"L04 T1 landed (2026-10-18): UnitDraw carries parts/fin/draw_body/draw_cell/ground_layer and the resolved weapon def+mount; render/unit_parts.rs executes unit parts and weapon under/over parts in three per-band programs; body/cell gated. Live sandbox probes for quasar/quell/tecta/merui; the Java T0 pair is still pending."
+],
+"PAR-0366":[
+"L04 T2 landed for the vanilla kinds: ForceField + ShieldArc in the shield pass, EnergyField + SuppressionField in render/unit_abilities.rs; AbilityState view mirrors and AbilitySpec draw fields added with tests. ArmorPlate/UnitSpawn/MoveLightning are mod-only kinds and remain unmodelled (recorded deviation); EnergyField light is not routed to the light pass."
+],
+"PAR-0367":[
+"Weapon-part draw now applies Weapon.layerOffset through the unit parts pass. The hand-drawn weapon region/cell quads still bypass it (single mesh, no per-quad z); crawl segments and payload composition remain open."
 ]
 },
 "failure_modes":{
