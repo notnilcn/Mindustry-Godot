@@ -2929,4 +2929,56 @@ mod tests {
         assert!(alpha.supports_env(233), "serpulo allows the mech");
         assert!(!alpha.supports_env(17), "erekir: envDisabled = scorching");
     }
+
+    /// L04 T3: the crawl and payload draw feeds read these content fields —
+    /// `UnitType.segments`/`segment*` knobs (`UnitTypes.java:4316,4335`) and
+    /// the `Payloadc` capacity/pickup gates (`UnitTypes.java:1422,1473,1547`).
+    #[test]
+    fn crawl_and_payload_draw_fields() {
+        let registry = test_registry();
+        let renale = get(&registry, "renale");
+        assert!(
+            renale.entity_def.components.contains(&UnitComponent::Crawl),
+            "renale is a Crawlc"
+        );
+        assert_eq!(renale.segments, 3);
+        assert!(!renale.draw_body, "segments replace the body");
+        // `NeoplasmUnitType` sets `drawCell = false`, so vanilla renale/latum
+        // never draw the segment-cell pass; the port keeps the branch for mods.
+        assert!(!renale.draw_cell, "segment cells gate on drawCell");
+        assert_eq!(renale.segment_scl, 3.0);
+        assert_eq!(renale.segment_phase, 5.0);
+        assert_eq!(renale.segment_mag, 0.5);
+        // `init`: `segmentSpacing < 0` derives from `hitSize`
+        // (`UnitType.java:1003-1004`).
+        assert_eq!(renale.segment_spacing, renale.hit_size);
+        assert_eq!(renale.segment_rot_speed, 1.0);
+        assert_eq!(renale.segment_max_rot, 30.0);
+
+        let latum = get(&registry, "latum");
+        assert!(latum.entity_def.components.contains(&UnitComponent::Crawl));
+        assert_eq!(latum.segments, 4);
+        assert!(!latum.draw_body);
+        assert_eq!(latum.segment_scl, 4.0);
+        assert_eq!(latum.segment_phase, 5.0);
+        assert_eq!(latum.segment_mag, 2.0, "default");
+        assert_eq!(latum.segment_spacing, latum.hit_size);
+        assert_eq!(latum.segment_rotation_range, 80.0);
+
+        for name in ["mega", "quad", "oct"] {
+            let unit = get(&registry, name);
+            assert!(unit.entity_def.is_payload(), "{name} is a Payloadc");
+            assert!(unit.payload_capacity > 0.0, "{name} capacity");
+            assert!(unit.pickup_units, "{name} picks up units");
+        }
+        assert_eq!(get(&registry, "mega").payload_capacity, 256.0);
+        assert_eq!(get(&registry, "quad").payload_capacity, 576.0);
+        assert_eq!(get(&registry, "oct").payload_capacity, 1936.0);
+        // Erekir payload builders keep the capacity but cannot lift units
+        // (`UnitTypes.java`, `evoke`/`incite`/`emanate`).
+        let evoke = get(&registry, "evoke");
+        assert!(evoke.entity_def.is_payload());
+        assert!(!evoke.pickup_units);
+        assert!(evoke.payload_capacity > 0.0);
+    }
 }
