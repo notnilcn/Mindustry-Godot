@@ -8574,7 +8574,64 @@ impl MindSimHost {
             overdrive,
             shield,
             pump,
-            payload_loader: None,
+            payload_loader: matches!(
+                def.kind,
+                mind_core::content::BlockKind::PayloadLoader
+                    | mind_core::content::BlockKind::PayloadUnloader
+            )
+            .then(|| {
+                // `PayloadLoader.fraction()` (`PayloadLoader.java:219-224`): the
+                // carried build's items / liquids / battery status; 0 without a
+                // payload. The bar itself is always present (`:60-66`).
+                let payload_entity = world
+                    .get::<mind_core::world::blocks::payloads::PayloadHolder>(entity)
+                    .and_then(|holder| holder.payload)
+                    .and_then(|payload| payload.entity);
+                let Some(payload_entity) = payload_entity else {
+                    return PayloadLoaderBars::default();
+                };
+                let Some(payload_def) = world
+                    .get::<mind_core::entities::comp::Building>(payload_entity)
+                    .and_then(|building| {
+                        self.content_snapshot
+                            .as_ref()
+                            .and_then(|content| content.block(building.block))
+                    })
+                else {
+                    return PayloadLoaderBars::default();
+                };
+                let items = world
+                    .get::<ItemModule>(payload_entity)
+                    .map_or(0, |module| module.total);
+                let progress = if payload_def.has_items {
+                    if payload_def.item_capacity > 0 {
+                        items as f32 / payload_def.item_capacity as f32
+                    } else {
+                        0.0
+                    }
+                } else if payload_def.has_liquids {
+                    if payload_def.liquid_capacity > 0.0 {
+                        world
+                            .get::<LiquidModule>(payload_entity)
+                            .map_or(0.0, |module| {
+                                module.current_amount / payload_def.liquid_capacity
+                            })
+                    } else {
+                        0.0
+                    }
+                } else if payload_def.has_power {
+                    world
+                        .get::<PowerModule>(payload_entity)
+                        .map_or(0.0, |module| module.status)
+                } else {
+                    0.0
+                };
+                PayloadLoaderBars {
+                    progress: progress.clamp(0.0, 1.0),
+                    payload_has_items: payload_def.has_items,
+                    payload_items: items,
+                }
+            }),
             assembler,
             factory_units,
             cargo_units,
@@ -10929,58 +10986,62 @@ pub fn building_bar_rows(
         | BlockKind::BeamNode
         | BlockKind::PowerDiode
         | BlockKind::Accelerator => {
-            if let Some(power) = &extras.power {
-                if def.kind != BlockKind::PowerDiode {
-                    // `PowerNode.java:115-122`, `BeamNode.java:53-54`.
+            if let Some(power) = &extras.power
+                && def.kind != BlockKind::PowerDiode
+            {
+                // `PowerNode.java:115-122`, `BeamNode.java:53-54`.
+                rows.push(BarRow {
+                    key: "power",
+                    label_key: String::from("bar.powerbalance"),
+                    label_args: vec![format!(
+                        "{}{}",
+                        if power.balance >= 0.0 { "+" } else { "" },
+                        amount(power.balance * 60.0)
+                    )],
+                    color: 0xec7b_4cff,
+                    value: if power.needed > 0.0 {
+                        (power.produced / power.needed).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    },
+                });
+                rows.push(BarRow {
+                    key: "batteries",
+                    label_key: String::from("bar.powerstored"),
+                    label_args: vec![amount(power.stored), amount(power.capacity)],
+                    color: 0xec7b_4cff,
+                    value: if power.capacity > 0.0 {
+                        (power.stored / power.capacity).clamp(0.0, 1.0)
+                    } else {
+                        0.0
+                    },
+                });
+                if def.kind != BlockKind::BeamNode && power.max_nodes > 0 {
                     rows.push(BarRow {
-                        key: "power",
-                        label_key: String::from("bar.powerbalance"),
-                        label_args: vec![format!(
-                            "{}{}",
-                            if power.balance >= 0.0 { "+" } else { "" },
-                            amount(power.balance * 60.0)
-                        )],
-                        color: 0xec7b_4cff,
-                        value: if power.needed > 0.0 {
-                            (power.produced / power.needed).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        },
+                        key: "connections",
+                        label_key: String::from("bar.powerlines"),
+                        label_args: vec![power.links.to_string(), power.max_nodes.to_string()],
+                        color: 0x2ea7_56ff,
+                        value: (power.links as f32 / power.max_nodes as f32).clamp(0.0, 1.0),
                     });
-                    rows.push(BarRow {
-                        key: "batteries",
-                        label_key: String::from("bar.powerstored"),
-                        label_args: vec![amount(power.stored), amount(power.capacity)],
-                        color: 0xec7b_4cff,
-                        value: if power.capacity > 0.0 {
-                            (power.stored / power.capacity).clamp(0.0, 1.0)
-                        } else {
-                            0.0
-                        },
-                    });
-                    if def.kind != BlockKind::BeamNode && power.max_nodes > 0 {
-                        rows.push(BarRow {
-                            key: "connections",
-                            label_key: String::from("bar.powerlines"),
-                            label_args: vec![power.links.to_string(), power.max_nodes.to_string()],
-                            color: 0x2ea7_56ff,
-                            value: (power.links as f32 / power.max_nodes as f32).clamp(0.0, 1.0),
-                        });
-                    }
                 }
-                if def.kind == BlockKind::PowerDiode {
-                    for (key, label, value) in [
-                        ("back", "bar.input", power.back),
-                        ("front", "bar.output", power.front),
-                    ] {
-                        rows.push(BarRow {
-                            key,
-                            label_key: String::from(label),
-                            label_args: Vec::new(),
-                            color: 0xec7b_4cff,
-                            value: value.unwrap_or(0.0).clamp(0.0, 1.0),
-                        });
-                    }
+            }
+            // `PowerDiode.java:33-48`: `bar.input`/`bar.output` are always
+            // present; `bar(Building)` returns 0 when the side has no graph.
+            if def.kind == BlockKind::PowerDiode {
+                let (back, front) = extras.power.as_ref().map_or((0.0, 0.0), |power| {
+                    (power.back.unwrap_or(0.0), power.front.unwrap_or(0.0))
+                });
+                for (key, label, value) in
+                    [("back", "bar.input", back), ("front", "bar.output", front)]
+                {
+                    rows.push(BarRow {
+                        key,
+                        label_key: String::from(label),
+                        label_args: Vec::new(),
+                        color: 0xec7b_4cff,
+                        value: value.clamp(0.0, 1.0),
+                    });
                 }
             }
             if def.kind == BlockKind::Accelerator
@@ -11089,24 +11150,25 @@ pub fn building_bar_rows(
             }
         }
         BlockKind::PayloadLoader | BlockKind::PayloadUnloader => {
-            if let Some(loader) = &extras.payload_loader {
-                let has_items = loader.payload_has_items;
-                rows.push(BarRow {
-                    key: "progress",
-                    label_key: String::from(if has_items {
-                        "bar.items"
-                    } else {
-                        "bar.loadprogress"
-                    }),
-                    label_args: if has_items {
-                        vec![loader.payload_items.to_string()]
-                    } else {
-                        Vec::new()
-                    },
-                    color: 0x2ea7_56ff,
-                    value: loader.progress.clamp(0.0, 1.0),
-                });
-            }
+            // `PayloadLoader.java:60-66`: the bar is added unconditionally;
+            // the live extras carry the carried build's fill.
+            let loader = extras.payload_loader.clone().unwrap_or_default();
+            let has_items = loader.payload_has_items;
+            rows.push(BarRow {
+                key: "progress",
+                label_key: String::from(if has_items {
+                    "bar.items"
+                } else {
+                    "bar.loadprogress"
+                }),
+                label_args: if has_items {
+                    vec![loader.payload_items.to_string()]
+                } else {
+                    Vec::new()
+                },
+                color: 0x2ea7_56ff,
+                value: loader.progress.clamp(0.0, 1.0),
+            });
         }
         BlockKind::LaunchPad => {
             if let Some(total) = items_total {
@@ -11355,6 +11417,18 @@ mod tests {
         assert_eq!(diode[1].label_key, "bar.input");
         assert_eq!(diode[2].label_key, "bar.output");
         assert_eq!((diode[1].value, diode[2].value), (0.25, 0.75));
+        // Java always adds both rows; `bar(Building)` returns 0 for an
+        // unconnected diode (`PowerDiode.java:33-48`).
+        let unconnected = rows_for("diode", &BarExtras::default());
+        assert_eq!(keys(&unconnected), ["health", "back", "front"]);
+        assert_eq!((unconnected[1].value, unconnected[2].value), (0.0, 0.0));
+
+        // `PayloadLoader.java:60-66`: the progress bar exists even without a
+        // payload (`bar.loadprogress`, 0).
+        let loader = rows_for("payload-loader", &BarExtras::default());
+        assert_eq!(keys(&loader), ["health", "liquid", "progress"]);
+        assert_eq!(loader[2].label_key, "bar.loadprogress");
+        assert_eq!(loader[2].value, 0.0);
 
         // `PowerGenerator.java:88-96`.
         let generator = rows_for(
