@@ -625,5 +625,121 @@ func _init() -> void:
 	item_icon.free()
 	big_icon.free()
 
+	_check_hint_table()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
+
+
+## L05 T4 (PAR-0302): the table over every `HintsFragment.DefaultHint`
+## (`HintsFragment.java:169-304`). Each desktop hint must be in the port's
+## `HINTS`, read only producer-backed state, show for a fixture that satisfies
+## Java's `shown` predicate and stay hidden on an empty state.
+## `respawn` is `visibleMobile` and is not part of the desktop port.
+func _check_hint_table() -> void:
+	const JAVA_HINTS := [
+		"desktopMove", "zoom", "breaking", "desktopShoot", "depositItems", "desktopPause",
+		"unitControl", "unitSelectControl", "respawn", "launch", "schematicSelect",
+		"conveyorPathfind", "boost", "blockInfo", "derelict", "payloadPickup", "payloadDrop",
+		"waveFire", "rebuildSelect", "guardian", "cannotUpgrade", "factoryControl",
+		"coreUpgrade", "serpuloCoreZone", "presetLaunch", "presetDifficulty", "coreIncinerate",
+	]
+	const MOBILE_ONLY := ["respawn"]
+	var alive := {"player_dead": false, "serpulo": true}
+	# name -> [sector state, hint state (merged over `alive`), selected block]
+	var fixtures := {
+		"desktopMove": [{}, {}, ""],
+		"zoom": [{}, {}, ""],
+		"breaking": [{"preset": "groundZero"}, {"conveyors": 6}, ""],
+		"desktopShoot": [{}, {"enemies": 1}, ""],
+		"depositItems": [{}, {"player_has_item": true}, ""],
+		"desktopPause": [{"preset": "groundZero", "wave": 2}, {}, ""],
+		"unitControl": [{}, {"team_units": 3}, ""],
+		"unitSelectControl": [{}, {"team_units": 4, "fungal_pass_saved": false}, ""],
+		"launch": [{"preset": "onset", "captured": true}, {}, ""],
+		"schematicSelect": [{}, {"placed": ["router"]}, ""],
+		"conveyorPathfind": [{}, {}, "titanium-conveyor"],
+		"boost": [{}, {"player_can_boost": true}, ""],
+		"blockInfo": [{}, {}, "graphite-press"],
+		"derelict": [{}, {"events": ["derelictmouse"]}, ""],
+		"payloadPickup": [{}, {"player_payload": 0}, ""],
+		"payloadDrop": [{}, {"player_payload": 1}, ""],
+		"waveFire": [{}, {"events": ["fire"]}, ""],
+		"rebuildSelect": [{}, {"team_rebuild_plans": 10}, ""],
+		"guardian": [{}, {"boss": {"count": 1, "first": {"armor": 4.0, "flying": false}}}, ""],
+		"cannotUpgrade": [{}, {"events": ["cannotupgrade"]}, ""],
+		"factoryControl": [{}, {"fabricators": 1}, ""],
+		"coreUpgrade": [{"campaign": true, "planet": "serpulo"},
+				{"core_block": "core-shard", "core_has_foundation_cost": true}, ""],
+		"serpuloCoreZone": [{"campaign": true, "planet": "serpulo"},
+				{"core_zone_present": true, "attack_mode": false}, ""],
+		"presetLaunch": [{"campaign": true, "preset": "", "sector": 15}, {}, ""],
+		"presetDifficulty": [{"campaign": true, "preset": ""},
+				{"sector_threat": 0.5, "tar_fields_captured": false}, ""],
+		"coreIncinerate": [{"campaign": true},
+				{"core_block": "core-shard", "core_copper": 3990, "core_capacity": 4000}, ""],
+	}
+	# Every key the fixtures read must come from `MindSimHost.hint_state_json`
+	# (`sim_host.rs` `hint_state_value`) or the campaign sector state.
+	const PRODUCED := [
+		"placed", "events", "player_dead", "player_has_item", "player_can_boost",
+		"player_spawned_by_core", "player_payload", "team_units", "enemies", "conveyors",
+		"core_block", "core_copper", "core_capacity", "core_has_foundation_cost", "cores",
+		"fabricators", "extinguishers", "core_zone_present", "cores_destroyed", "boss",
+		"team_rebuild_plans", "serpulo", "fungal_pass_saved", "tar_fields_captured",
+		"sector_threat", "attack_mode",
+	]
+	var stub := GDScript.new()
+	stub.source_code = "extends Node\nvar block := \"\"\nfunc selected_block() -> String:\n\treturn block\n"
+	stub.reload()
+	# Earlier checks may already have built `/root/Spine` (and a SimHost):
+	# reuse it and park the real host while the stub answers `selected_block`.
+	var spine := root.get_node_or_null("Spine")
+	var own_spine := spine == null
+	if own_spine:
+		spine = Node.new()
+		spine.name = "Spine"
+		root.add_child(spine)
+	var parked := spine.get_node_or_null("SimHost")
+	if parked != null:
+		parked.name = "SimHostParked"
+	var host := Node.new()
+	host.name = "SimHost"
+	host.set_script(stub)
+	spine.add_child(host)
+	var hints_script: GDScript = load("res://ui/fragments/hints_fragment.gd")
+	var fragment: Control = hints_script.new()
+	spine.add_child(fragment)
+	var port_hints: Array = hints_script.get_script_constant_map().get("HINTS", [])
+	for hint_name in JAVA_HINTS:
+		if hint_name in MOBILE_ONLY:
+			_check(not port_hints.has(hint_name), "mobile-only hint %s stays out of the desktop HINTS" % hint_name)
+			continue
+		_check(port_hints.has(hint_name), "hint %s is in HINTS" % hint_name)
+		_check(fixtures.has(hint_name), "hint %s has a table fixture" % hint_name)
+		if not fixtures.has(hint_name):
+			continue
+		var row: Array = fixtures[hint_name]
+		var hint_state: Dictionary = alive.duplicate()
+		hint_state.merge(row[1], true)
+		for key in (row[1] as Dictionary).keys():
+			_check(PRODUCED.has(key), "hint %s reads produced key %s" % [hint_name, key])
+		host.set("block", row[2])
+		_check(bool(fragment.call("_hint_shown", hint_name, row[0], hint_state)),
+			"hint %s shows for its Java predicate" % hint_name)
+		host.set("block", "")
+		var always: bool = hint_name == "desktopMove" or hint_name == "zoom"
+		_check(always or not bool(fragment.call("_hint_shown", hint_name, {}, {})),
+			"hint %s stays hidden on an empty state" % hint_name)
+	# `presetLaunch` completes only on Frozen Forest (`HintsFragment.java:289-292`).
+	_check(bool(fragment.call("_hint_complete", "presetLaunch", {"campaign": true, "preset": "frozenForest"}, {})),
+		"presetLaunch completes on frozenForest")
+	_check(not bool(fragment.call("_hint_complete", "presetLaunch", {"campaign": true, "preset": "groundZero"}, {})),
+		"presetLaunch does not complete on another preset")
+	fragment.free()
+	host.free()
+	if parked != null:
+		parked.name = "SimHost"
+	if own_spine:
+		spine.free()
+
