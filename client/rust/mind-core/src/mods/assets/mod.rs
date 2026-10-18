@@ -91,6 +91,24 @@ impl DataAssetType {
         }
     }
 
+    /// Dialog/UI kind (`MapAssetsDialog` tab identity; differs from
+    /// [`folder`](Self::folder) only for images).
+    pub const fn kind(self) -> &'static str {
+        match self {
+            DataAssetType::Patch => "patch",
+            DataAssetType::Content => "content",
+            DataAssetType::Bundle => "bundle",
+            DataAssetType::Image => "image",
+            DataAssetType::Sound => "sound",
+            DataAssetType::Music => "music",
+        }
+    }
+
+    /// Parses a UI kind (`kind()` inverse).
+    pub fn from_kind(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|type_| type_.kind() == value)
+    }
+
     /// `DataAssetType.extension`.
     pub const fn extensions(self) -> &'static [&'static str] {
         match self {
@@ -260,9 +278,21 @@ impl DataAsset {
 
     /// Writes the per-asset binary record (plan 20 §6.5, inside 04's region).
     pub fn write(&self, writer: &mut WireWriter) -> Result<(), IoError> {
+        self.write_with_embed(writer, false)
+    }
+
+    /// [`DataAsset::write`] with `SaveVersion.writeDataPatches`'s
+    /// `forceEmbed` flag: external records write their payload instead of the
+    /// SHA256 when the save is an external export (`MapIO.writeMap(..., true)`).
+    pub fn write_with_embed(
+        &self,
+        writer: &mut WireWriter,
+        force_embed: bool,
+    ) -> Result<(), IoError> {
         writer.ub(self.type_.ordinal());
         writer.str(&self.path)?;
-        writer.bool(self.embedded);
+        let embedded = self.embedded || force_embed;
+        writer.bool(embedded);
         let mut payload = Vec::new();
         match &self.data {
             DataAssetData::Patch(text) => payload.extend_from_slice(text.as_bytes()),
@@ -277,7 +307,7 @@ impl DataAsset {
             }
             DataAssetData::Blob(bytes) => payload.extend_from_slice(bytes),
         }
-        if self.embedded {
+        if embedded {
             writer.u(payload.len() as u32);
             writer.bytes(&payload);
         } else {
@@ -357,8 +387,17 @@ pub fn write_assets(writer: &mut WireWriter, assets: &[DataAsset]) -> Result<(),
 /// 04's `patches` region, which frames the `i32` format version + count itself
 /// (plan 20 §6.8 `PatchSetIo`).
 pub fn write_asset_records(writer: &mut WireWriter, assets: &[DataAsset]) -> Result<(), IoError> {
+    write_asset_records_with_embed(writer, assets, false)
+}
+
+/// [`write_asset_records`] with `SaveVersion.writeDataPatches`'s `forceEmbed`.
+pub fn write_asset_records_with_embed(
+    writer: &mut WireWriter,
+    assets: &[DataAsset],
+    force_embed: bool,
+) -> Result<(), IoError> {
     for asset in assets {
-        asset.write(writer)?;
+        asset.write_with_embed(writer, force_embed)?;
     }
     Ok(())
 }
@@ -653,6 +692,169 @@ impl ModDataManager {
         self.assets.push(asset);
     }
 
+    /// All records in insertion order (inherent shortcut for the
+    /// [`DataAssets::all_assets`] trait method).
+    pub fn all(&self) -> &[DataAsset] {
+        &self.assets
+    }
+
+    /// Assets of one type, path-ordered (inherent shortcut).
+    pub fn assets_of(&self, type_: DataAssetType) -> Vec<&DataAsset> {
+        let mut out: Vec<&DataAsset> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == type_)
+            .collect();
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        out
+    }
+
+    /// `DataManager.hasAssetNameOrPath`: an asset of `type_` with the same
+    /// display name or path already exists.
+    pub fn has_asset_name_or_path(&self, type_: DataAssetType, name: &str, path: &str) -> bool {
+        self.assets.iter().any(|asset| {
+            asset.type_ == type_
+                && (asset.path.eq_ignore_ascii_case(path) || asset.name.eq_ignore_ascii_case(name))
+        })
+    }
+
+    /// Adds an asset unless its path/name collides (`DataManager` dialog
+    /// guard). Returns whether it was inserted.
+    pub fn try_push(&mut self, asset: DataAsset) -> bool {
+        if self
+            .assets
+            .iter()
+            .any(|existing| existing.type_ == asset.type_ && existing.path == asset.path)
+        {
+            return false;
+        }
+        self.assets.push(asset);
+        true
+    }
+
+    /// Removes one record by type + name (path stem) and returns its type.
+    pub fn remove_asset(&mut self, type_: DataAssetType, name: &str) -> Option<DataAsset> {
+        let index = self
+            .assets
+            .iter()
+            .position(|asset| asset.type_ == type_ && (asset.name == name || asset.path == name))?;
+        Some(self.assets.remove(index))
+    }
+
+    /// Renames one record's path (`MapImagesView` pencil / bundle path edit).
+    ///
+    /// For images the recorded region name is refreshed too
+    /// (`DataImagePacker` region rename + `Core.atlas.getRegionMap` move).
+    /// Returns `false` for an unknown record or a colliding new path.
+    pub fn rename_asset(&mut self, type_: DataAssetType, old: &str, new_path: &str) -> bool {
+        if self
+            .assets
+            .iter()
+            .any(|asset| asset.type_ == type_ && asset.path == new_path)
+        {
+            return false;
+        }
+        let Some(index) = self
+            .assets
+            .iter()
+            .position(|asset| asset.type_ == type_ && (asset.path == old || asset.name == old))
+        else {
+            return false;
+        };
+        let old_path = self.assets[index].path.clone();
+        self.assets[index].path = new_path.to_owned();
+        self.assets[index].name = image::image_stem(new_path);
+        if type_ == DataAssetType::Image {
+            self.image_applier.rename(&old_path, new_path);
+        }
+        true
+    }
+
+    /// The current patch set as [`PatchAsset`]s (`DataManager.getPatches`).
+    pub fn patch_records(&self) -> Vec<PatchAsset> {
+        self.assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Patch(text) => Some(PatchAsset {
+                    name: asset.path.clone(),
+                    json: text.clone(),
+                }),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Replaces one patch's JSON (`MapPatchesView.addPatch(replaceIndex)`).
+    ///
+    /// `None` removes the patch. The stored records and the applied patch set
+    /// both change; `reload_patches` is replace-only upstream.
+    pub fn set_patch_record(
+        &mut self,
+        index: usize,
+        json: Option<String>,
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        let mut records = self.patch_records();
+        match json {
+            Some(json) => {
+                if index < records.len() {
+                    records[index].json = json;
+                } else {
+                    records.push(PatchAsset {
+                        name: format!("patches/patch-{}.json", records.len()),
+                        json,
+                    });
+                }
+            }
+            None => {
+                if index >= records.len() {
+                    return Err(ModError::Invalid(format!(
+                        "patch index {index} out of range"
+                    )));
+                }
+                records.remove(index);
+            }
+        }
+        self.replace_patch_records(&records, registry)
+    }
+
+    /// Rewrites the stored `patches` records and re-applies them.
+    pub fn replace_patch_records(
+        &mut self,
+        records: &[PatchAsset],
+        registry: &mut ContentRegistry,
+    ) -> Result<(), ModError> {
+        self.assets
+            .retain(|asset| asset.type_ != DataAssetType::Patch);
+        for record in records {
+            self.assets
+                .push(DataAsset::patch(record.name.clone(), record.json.clone()));
+        }
+        self.reload_patches(records, registry)
+    }
+
+    /// Properties text of a stored bundle asset (`MapBundlesView` cache text).
+    pub fn bundle_text(&self, path: &str) -> Option<String> {
+        self.assets.iter().find_map(|asset| match &asset.data {
+            DataAssetData::Bundle(map) if asset.path == path => Some(render_properties(map)),
+            _ => None,
+        })
+    }
+
+    /// Raw JSON text of a stored patch/content asset.
+    pub fn asset_text(&self, type_: DataAssetType, name: &str) -> Option<&str> {
+        self.assets.iter().find_map(|asset| {
+            if asset.type_ != type_ || (asset.name != name && asset.path != name) {
+                return None;
+            }
+            match &asset.data {
+                DataAssetData::Patch(text) => Some(text.as_str()),
+                DataAssetData::Content(record) => Some(record.json.as_str()),
+                _ => None,
+            }
+        })
+    }
+
     /// All assets ordered by `DataAssetType` then path (`orderedAssets`).
     pub fn ordered_assets(&self) -> Vec<&DataAsset> {
         let mut out: Vec<&DataAsset> = self.assets.iter().collect();
@@ -936,6 +1138,63 @@ impl ModDataManager {
         self.audio_applier.load_music(music);
     }
 
+    /// Rebuilds the recorded bundle merges from the current bundle assets
+    /// (`DataBundleLoader` replace-only reload, used by `MapBundlesView`).
+    pub fn reload_bundles(&mut self) {
+        self.merged_bundles.clear();
+        self.bundle_applier.clear();
+        let bundle_assets: Vec<(String, IndexMap<String, String>)> = self
+            .assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Bundle(map) => Some((asset.path.clone(), map.clone())),
+                _ => None,
+            })
+            .collect();
+        for (path, properties) in bundle_assets {
+            let target = self.merged_bundles.entry(path.clone()).or_default();
+            self.bundle_applier.merge(&path, target, &properties);
+        }
+    }
+
+    /// Re-applies every asset family after a record edit (`DataManager`
+    /// dialog actions: content/patches/images/audio/bundles).
+    pub fn refresh_all(&mut self, registry: &mut ContentRegistry) -> Result<(), ModError> {
+        let patches = self.patch_records();
+        self.reload_patches(&patches, registry)?;
+        let content: Vec<ContentRecord> = self
+            .assets
+            .iter()
+            .filter_map(|asset| match &asset.data {
+                DataAssetData::Content(record) => Some(record.clone()),
+                _ => None,
+            })
+            .collect();
+        self.reload_content(&content, registry, true)?;
+        let images: Vec<DataAsset> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == DataAssetType::Image)
+            .cloned()
+            .collect();
+        self.reload_images(&images);
+        let sounds: Vec<AudioAsset> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == DataAssetType::Sound)
+            .filter_map(blob_len)
+            .collect();
+        let music: Vec<AudioAsset> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.type_ == DataAssetType::Music)
+            .filter_map(blob_len)
+            .collect();
+        self.reload_audio(&sounds, &music);
+        self.reload_bundles();
+        Ok(())
+    }
+
     /// `DataManager.regenerateContentSprites`: create one generated icon record
     /// per content asset, skipping content whose hash is already generated
     /// unless `force_pack`.
@@ -986,8 +1245,8 @@ fn blob_is_empty(asset: &DataAsset) -> bool {
 /// Plan 20 §6.8 / plan 04 `PatchSetIo`: writes the manager's asset records into
 /// the `patches` region (the region framing writes the format version + count).
 impl crate::io::save::state::PatchSetIo for ModDataManager {
-    fn write_patches(&self, w: &mut WireWriter, _embed: bool) -> Result<(), IoError> {
-        write_asset_records(w, &self.assets)
+    fn write_patches(&self, w: &mut WireWriter, embed: bool) -> Result<(), IoError> {
+        write_asset_records_with_embed(w, &self.assets, embed)
     }
 
     fn patch_count(&self) -> usize {
@@ -1296,6 +1555,37 @@ mod tests {
         }
     }
 
+    /// `SaveVersion.writeDataPatches(forceEmbed)` (`MapIO.writeMap(..., true)`):
+    /// an external asset writes its payload so the exported map is standalone.
+    #[test]
+    fn force_embed_writes_external_payload() {
+        let asset = DataAsset::blob("sprites/x.png", DataAssetType::Image, vec![1, 2, 3], false);
+        let mut plain = Vec::new();
+        write_asset_records(
+            &mut WireWriter::new(&mut plain),
+            std::slice::from_ref(&asset),
+        )
+        .expect("write external");
+        let decoded = DataAsset::read(&mut WireReader::new(&plain)).expect("read external");
+        assert!(decoded.is_external());
+        assert!(blob_is_empty(&decoded));
+
+        let mut embedded = Vec::new();
+        write_asset_records_with_embed(
+            &mut WireWriter::new(&mut embedded),
+            std::slice::from_ref(&asset),
+            true,
+        )
+        .expect("write embedded");
+        let decoded = DataAsset::read(&mut WireReader::new(&embedded)).expect("read embedded");
+        assert!(decoded.embedded);
+        assert_eq!(
+            decoded.data,
+            DataAssetData::Blob(vec![1, 2, 3]),
+            "forceEmbed writes the payload"
+        );
+    }
+
     #[test]
     fn read_assets_rejects_bad_version() {
         let mut bytes = Vec::new();
@@ -1348,6 +1638,70 @@ mod tests {
         assert!(manager.image_applier().is_empty());
         assert!(manager.bundle_applier().files().next().is_none());
         assert!(manager.content_errors().is_empty());
+    }
+
+    /// T2 (PAR-0394): `MapPatchesView` edits go through the stored records and
+    /// re-apply replace-only against the live registry.
+    #[test]
+    fn patch_records_edit_and_reapply() {
+        let mut registry = content_registry();
+        let mut manager = ModDataManager::new();
+        manager.push(DataAsset::patch(
+            "patches/a.json",
+            r#"{"block.router.health": 11}"#,
+        ));
+        manager.push(DataAsset::patch(
+            "patches/b.json",
+            r#"{"block.router.health": 22}"#,
+        ));
+        assert_eq!(manager.patch_records().len(), 2);
+        manager
+            .replace_patch_records(&manager.patch_records(), &mut registry)
+            .expect("apply");
+        let id = registry.block_id("router").expect("router");
+        assert_eq!(registry.block(id).expect("block").health, 22);
+
+        // Replace the first patch: the second still wins (declaration order).
+        manager
+            .set_patch_record(
+                0,
+                Some(r#"{"block.router.health": 99}"#.to_owned()),
+                &mut registry,
+            )
+            .expect("replace");
+        assert_eq!(
+            manager.patch_records()[0].json,
+            r#"{"block.router.health": 99}"#
+        );
+        assert_eq!(registry.block(id).expect("block").health, 22);
+
+        // Removing the last patch exposes the first one's value.
+        manager
+            .set_patch_record(1, None, &mut registry)
+            .expect("remove");
+        assert_eq!(manager.patch_records().len(), 1);
+        assert_eq!(registry.block(id).expect("block").health, 99);
+        assert!(manager.set_patch_record(4, None, &mut registry).is_err());
+    }
+
+    /// T2 (PAR-0394): the dialog's duplicate guards and record accessors.
+    #[test]
+    fn asset_lookup_and_duplicate_guards() {
+        let mut manager = ModDataManager::new();
+        assert!(manager.try_push(DataAsset::patch("patches/a.json", "{}")));
+        assert!(!manager.try_push(DataAsset::patch("patches/a.json", "{}")));
+        assert!(manager.try_push(DataAsset::bundle("bundles/bundle.properties", "a=b\n",)));
+        assert!(manager.has_asset_name_or_path(DataAssetType::Patch, "a", "patches/a.json"));
+        assert!(!manager.has_asset_name_or_path(DataAssetType::Patch, "b", "patches/b.json"));
+        assert_eq!(manager.assets_of(DataAssetType::Bundle).len(), 1);
+        assert_eq!(
+            manager.bundle_text("bundles/bundle.properties").as_deref(),
+            Some("a=b\n")
+        );
+        assert_eq!(manager.asset_text(DataAssetType::Patch, "a"), Some("{}"));
+        assert!(manager.remove_asset(DataAssetType::Patch, "a").is_some());
+        assert!(manager.remove_asset(DataAssetType::Patch, "a").is_none());
+        assert_eq!(manager.all().len(), 1);
     }
 
     fn content_registry() -> crate::content::ContentRegistry {

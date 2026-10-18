@@ -235,6 +235,26 @@ impl AtlasIndex {
         self.regions.push(region);
     }
 
+    /// Removes a runtime overlay region (`DataManager.unload` /
+    /// `Core.atlas.getRegionMap().remove`). Manifest regions are never removed
+    /// by upstream; this is only used by the `dp-`/`net-` decorator, which
+    /// replaces its own overlay set on every reload. Returns `false` when the
+    /// name is unknown.
+    pub fn remove_region(&mut self, name: &str) -> bool {
+        if !self.by_name.contains_key(name) {
+            return false;
+        }
+        self.regions.retain(|region| region.name != name);
+        // Indices shifted; rebuild the name map (overlay counts are small).
+        self.by_name = self
+            .regions
+            .iter()
+            .enumerate()
+            .map(|(index, region)| (region.name.clone(), index))
+            .collect();
+        true
+    }
+
     /// Appends an overlay page (no manifest file; pixels live in the runtime)
     /// and returns its index.
     pub fn add_overlay_page(&mut self, type_: PageType, width: i32, height: i32) -> usize {
@@ -382,6 +402,34 @@ mod tests {
             AtlasIndex::from_manifest_json(&text),
             Err(AtlasLoadError::DuplicateRegion(name)) if name == "copper-wall"
         ));
+    }
+
+    /// T2 (PAR-0394): the `dp-` decorator removes its own overlay regions
+    /// between reloads; the remaining names keep resolving after the shift.
+    #[test]
+    fn remove_overlay_region_rebuilds_indices() {
+        let mut index = AtlasIndex::from_manifest_json(FIXTURE).unwrap();
+        index.add_overlay_page(PageType::Main, 8, 8);
+        let region = |name: &str| Region {
+            name: name.to_owned(),
+            page: 1,
+            x: 0,
+            y: 0,
+            w: 8,
+            h: 8,
+            splits: None,
+            pads: None,
+            offsets: [0, 0],
+            page_type: PageType::Main,
+        };
+        index.add_overlay_region(region("dp-a"));
+        index.add_overlay_region(region("dp-b"));
+        assert!(index.has("dp-a") && index.has("dp-b"));
+        assert!(index.remove_region("dp-a"));
+        assert!(!index.has("dp-a"));
+        assert_eq!(index.find("dp-b").unwrap().name, "dp-b");
+        assert_eq!(index.find("bar").unwrap().w, 24);
+        assert!(!index.remove_region("dp-a"), "second removal is a no-op");
     }
 
     #[test]

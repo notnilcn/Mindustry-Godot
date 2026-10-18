@@ -51,6 +51,7 @@ impl MapEditor {
         map: &Map,
     ) -> Result<(), MapError> {
         self.tags = map.tags.clone();
+        self.patches.clear();
         self.loading = true;
         let result = {
             let mut context = EditorContext::new(grid, content);
@@ -59,10 +60,24 @@ impl MapEditor {
                 content: Some(content),
                 ..SaveReadState::default()
             };
-            crate::io::map::MapIo::load_map(fs, &map.file, &mut state)
+            let result = crate::io::map::MapIo::load_map(fs, &map.file, &mut state);
+            // `SaveVersion.readDataPatches` -> `state.data.load(assets)`: the
+            // host applies this set to its `ModDataManager` (PAR-0394).
+            self.patches = state.patches.take().unwrap_or_default();
+            result
         };
         self.loading = false;
         result.map_err(MapError::from)
+    }
+
+    /// Data assets read from the last [`Self::begin_edit_map`] (`state.data`).
+    pub fn patches(&self) -> &[crate::mods::assets::DataAsset] {
+        &self.patches
+    }
+
+    /// Takes the last loaded data-asset set (the host hands it to the owner).
+    pub fn take_patches(&mut self) -> Vec<crate::mods::assets::DataAsset> {
+        std::mem::take(&mut self.patches)
     }
 
     /// `beginEdit(Pixmap)`: resize to the image then import its color-mapped tiles.

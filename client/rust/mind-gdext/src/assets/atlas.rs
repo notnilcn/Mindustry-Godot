@@ -41,24 +41,24 @@ use crate::assets::loader::{resolve_assets_dir, resolve_locale};
 pub struct MindAssets {
     base: Base<Node>,
     /// Region metadata index (empty until [`MindAssets::load_assets`]).
-    index: AtlasIndex,
+    pub(crate) index: AtlasIndex,
     /// Mods-first virtual FS (populated by plan 20; empty for vanilla).
     tree: FileTree,
     /// Resolved asset root.
     assets_dir: String,
     /// Decoded page textures, indexed by page index.
-    pages: Vec<Gd<ImageTexture>>,
+    pub(crate) pages: Vec<Gd<ImageTexture>>,
     /// Lazily built region textures.
-    region_textures: HashMap<String, Gd<AtlasTexture>>,
+    pub(crate) region_textures: HashMap<String, Gd<AtlasTexture>>,
     /// Loose textures (`sprites/<name>.png` not in the atlas).
     loose_textures: HashMap<String, Gd<ImageTexture>>,
     /// Loose textures with alpha derived from luminance (planet renders whose
     /// opaque black background must cut out over the starfield).
     cutout_textures: HashMap<String, Gd<ImageTexture>>,
     /// Locale bundle (`Core.bundle`).
-    bundle: Bundle,
+    pub(crate) bundle: Bundle,
     /// Active locale resolved at boot (`Vars.locale`).
-    locale: String,
+    pub(crate) locale: String,
     /// Content icon code table (`Iconc`).
     iconc: Iconc,
     /// Selectable locales (`assets/locales`).
@@ -66,13 +66,16 @@ pub struct MindAssets {
     /// Loaded dynamic fonts.
     fonts: FontSet,
     /// Sounds/Musics registry + lazy audio stream cache.
-    audio: AudioRegistry,
+    pub(crate) audio: AudioRegistry,
     /// Loose cursor textures (`cursors/<name>.png`).
     cursors: HashMap<String, Gd<ImageTexture>>,
     /// Whether [`MindAssets::load_assets`] completed.
     loaded: bool,
     /// Whether the mods' asset overlay (bundles/sprites/sounds) was applied.
     mod_overlay_applied: bool,
+    /// `dp-`/`net-` region names added by the data decorator (removed on the
+    /// next [`MindAssets::apply_data_images`]).
+    pub(crate) data_regions: Vec<String>,
 }
 
 #[godot_api]
@@ -96,6 +99,7 @@ impl INode for MindAssets {
             cursors: HashMap::new(),
             loaded: false,
             mod_overlay_applied: false,
+            data_regions: Vec::new(),
         }
     }
 
@@ -200,6 +204,12 @@ impl MindAssets {
     #[func]
     pub fn region_count(&self) -> i64 {
         self.index.len() as i64
+    }
+
+    /// Number of `dp-`/`net-` regions the data decorator (PAR-0394) added.
+    #[func]
+    pub fn data_region_count(&self) -> i64 {
+        self.data_regions.len() as i64
     }
 
     /// Region names appearing more than once (always empty for a valid pack).

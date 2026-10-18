@@ -18,6 +18,8 @@ pub struct StreamCache {
     assets_dir: String,
     sounds: Sounds,
     streams: HashMap<(String, bool), Gd<AudioStream>>,
+    /// Data-asset streams (`dp-<name>`, PAR-0394): name → (music, bytes).
+    data: HashMap<String, (bool, Vec<u8>)>,
 }
 
 impl StreamCache {
@@ -54,6 +56,14 @@ impl StreamCache {
         if let Some(stream) = self.streams.get(&(name.to_owned(), looping)) {
             return Some(stream.clone());
         }
+        if let Some((music, bytes)) = self.data.get(name)
+            && !music
+        {
+            let stream = decode_looping(bytes.as_slice(), looping)?;
+            self.streams
+                .insert((name.to_owned(), looping), stream.clone());
+            return Some(stream);
+        }
         let file = self.sounds.get(name)?.file.clone()?;
         let stream = decode_stream(&self.assets_dir, &file, looping)?;
         self.streams
@@ -66,6 +76,13 @@ impl StreamCache {
         let key = (name.to_owned(), true);
         if let Some(stream) = self.streams.get(&key) {
             return Some(stream.clone());
+        }
+        if let Some((is_music, bytes)) = self.data.get(name)
+            && *is_music
+        {
+            let stream = decode_looping(bytes.as_slice(), true)?;
+            self.streams.insert(key, stream.clone());
+            return Some(stream);
         }
         // Music names may or may not carry an extension; try `music/<name>` then
         // the raw name (plan 18 `findMusic` fallbacks).
@@ -85,6 +102,31 @@ impl StreamCache {
             }
         }
         None
+    }
+
+    /// Registers one data-asset stream (`DataAudioLoader` → `Sound`/`Music`).
+    /// Names are the manager's `dp-<name>` entries; the decoded stream is
+    /// cached per loop flag and the override beats a base sound of that name.
+    pub fn add_data_stream(&mut self, name: &str, bytes: Vec<u8>, music: bool) {
+        self.data.insert(name.to_owned(), (music, bytes));
+        self.streams
+            .retain(|(stream_name, _), _| stream_name != name);
+    }
+
+    /// Drops every data-asset stream (`DataManager.unload`).
+    pub fn clear_data_streams(&mut self) {
+        self.data.clear();
+        self.streams.retain(|(name, _), _| !name.starts_with("dp-"));
+    }
+
+    /// Number of registered data-asset streams.
+    pub fn data_stream_count(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Whether a name is backed by a data-asset stream (`dp-<name>`).
+    pub fn is_data_stream(&self, name: &str) -> bool {
+        self.data.contains_key(name)
     }
 }
 
@@ -119,4 +161,20 @@ fn decode_bytes(file: &str, bytes: &PackedByteArray, looping: bool) -> Option<Gd
     } else {
         None
     }
+}
+
+/// Decodes data-asset bytes without an extension hint (`dp-` assets keep the
+/// source name, whose extension may be `.ogg` or `.mp3`); tries OGG first,
+/// then MP3, mirroring `DataAudioLoader`'s format sniffing.
+fn decode_looping(bytes: &[u8], looping: bool) -> Option<Gd<AudioStream>> {
+    let data = PackedByteArray::from(bytes);
+    if let Some(mut stream) = AudioStreamOggVorbis::load_from_buffer(&data) {
+        stream.set_loop(looping);
+        return Some(stream.upcast::<AudioStream>());
+    }
+    if let Some(mut stream) = AudioStreamMp3::load_from_buffer(&data) {
+        stream.set_loop(looping);
+        return Some(stream.upcast::<AudioStream>());
+    }
+    None
 }
