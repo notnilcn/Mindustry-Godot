@@ -65,6 +65,12 @@ impl AudioRegistry {
         self.sounds.len()
     }
 
+    /// All sound entries in registry order (`PlaySoundStatement`'s picker
+    /// walks the loaded `Sound` assets like Java's `Core.assets`).
+    pub fn entries(&self) -> &[SoundEntry] {
+        self.sounds.entries()
+    }
+
     /// Number of music entries.
     pub fn music_count(&self) -> usize {
         self.musics.len()

@@ -1804,6 +1804,91 @@ impl MindSimHost {
             .is_some_and(|status| status.permanent)
     }
 
+    /// Logic-editor content picker rows (`LStatements.java` `showSelectTable`
+    /// content grids): `unit`/`item`/`liquid`/`status`/`weather`/`block`.
+    ///
+    /// Rows are `{name, hidden, unlocked, always_unlocked, unlocked_now}`
+    /// (`unlocked_now` is `UnlockableContent.unlockedNow`: unlocked outside a
+    /// campaign), plus `logic_controllable` for units and `permanent`/`show`
+    /// for statuses. Unknown kinds return `[]`.
+    #[func]
+    pub fn logic_picker_json(&self, kind: GString) -> GString {
+        let Some(registry) = self.content_snapshot.as_ref() else {
+            return GString::from("[]");
+        };
+        let campaign = self
+            .sim
+            .ecs
+            .0
+            .get_resource::<mind_core::game::runtime::CampaignRuntime>()
+            .is_some();
+        let unlocked_now = |unlock: &mind_core::content::UnlockFields| {
+            unlock.unlocked || unlock.always_unlocked || !campaign
+        };
+        let base_row = |name: &str, unlock: &mind_core::content::UnlockFields, hidden: bool| {
+            serde_json::json!({
+                "name": name,
+                "hidden": hidden,
+                "unlocked": unlock.unlocked,
+                "always_unlocked": unlock.always_unlocked,
+                "unlocked_now": unlocked_now(unlock),
+            })
+        };
+        let rows: Vec<serde_json::Value> = match kind.to_string().as_str() {
+            "unit" => registry
+                .units()
+                .iter()
+                .filter(|unit| !unit.removed)
+                .map(|unit| {
+                    let mut row = base_row(&unit.name, &unit.unlock, unit.hidden);
+                    row["logic_controllable"] = unit.logic_controllable.into();
+                    row
+                })
+                .collect(),
+            "item" => registry
+                .items()
+                .iter()
+                .filter(|item| !item.removed)
+                .map(|item| base_row(&item.name, &item.unlock, item.hidden))
+                .collect(),
+            "liquid" => registry
+                .liquids()
+                .iter()
+                .filter(|liquid| !liquid.removed)
+                .map(|liquid| base_row(&liquid.name, &liquid.unlock, liquid.hidden))
+                .collect(),
+            "status" => registry
+                .statuses()
+                .iter()
+                .filter(|status| !status.removed)
+                .map(|status| {
+                    let mut row = base_row(&status.name, &status.unlock, !status.show);
+                    row["permanent"] = status.permanent.into();
+                    row["show"] = status.show.into();
+                    row
+                })
+                .collect(),
+            "weather" => registry
+                .weathers()
+                .iter()
+                .filter(|weather| !weather.removed)
+                .map(|weather| base_row(&weather.name, &weather.unlock, weather.hidden))
+                .collect(),
+            "block" => registry
+                .blocks()
+                .iter()
+                .filter(|block| !block.removed)
+                .map(|block| base_row(&block.name, &block.unlock, block.is_hidden()))
+                .collect(),
+            _ => Vec::new(),
+        };
+        GString::from(
+            serde_json::to_string(&rows)
+                .unwrap_or_else(|_| String::from("[]"))
+                .as_str(),
+        )
+    }
+
     /// Read-only `Building.onConfigureBuildTapped` preview for the tap handler
     /// (H02 T6, PAR-0220): `0` = Java `return false` (panel stays), `1` =
     /// `deselect(); return false` (panel closes), `2` = `return true` (switch

@@ -121,6 +121,15 @@ impl VoicePool {
         }
     }
 
+    /// Stops a UI voice by the index `play_ui` returned (`PlaySoundStatement`'s
+    /// preview stop; the UI pool has no reusable voice ids).
+    pub fn stop_ui(&self, voice: i64) {
+        let index = voice.max(0) as usize % self.ui.len().max(1);
+        if let Some(player) = self.ui.get(index) {
+            player.clone().stop();
+        }
+    }
+
     /// Plays a non-positional UI voice; returns the voice index (always `>= 0`).
     pub fn play_ui(&mut self, stream: Gd<AudioStream>, volume: f32, pitch: f32) -> i64 {
         let index = self.ui_cursor % self.ui.len();
