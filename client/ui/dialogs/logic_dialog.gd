@@ -55,6 +55,20 @@ const ELEMENT_SPACE := 10
 ## `JumpButton` cell size (`JumpStatement.build`: `.size(30)`).
 const JUMP_BUTTON_SIZE := 30.0
 
+## `LStatement.showSelect` content pickers (Java `showSelectTable` grids).
+## `name -> {field index: picker kind}` (`LStatements.java`).
+const CONTENT_PICKERS := {
+	"ubind": {0: "unit"},
+	"playsound": {1: "sound"},
+	"status": {1: "status"},
+	"weathersense": {1: "weather"},
+	"weatherset": {0: "weather"},
+	"setprop": {0: "prop"},
+	"sensor": {2: "sensor"},
+	"setmarker": {2: "layer"},
+	"ulocate": {3: "ore"},
+}
+
 var _x := 0
 var _y := 0
 var _privileged := false
@@ -102,10 +116,17 @@ var _drag_index := -1
 var _drag_active := false
 var _drag_start := Vector2.ZERO
 var _drop_index := -1
+## The statement element currently following the pointer
+## (`StatementElem.touchDragged` translates it; `DragLayout` skips it).
+var _drag_row: Control = null
+## Pointer offset inside the dragged element (overlay coordinates).
+var _drag_grab := Vector2.ZERO
 ## Jump-target selection state (`LCanvas.JumpButton` touch drag).
 var _jump_selecting := -1
 var _jump_hover := -1
 var _jump_pointer := Vector2.ZERO
+## `EffectStatement`'s pending `ui.effects` listener target (element, field).
+var _effect_target := Vector2i(-1, -1)
 ## The nested `BaseDialog` (Add / Edit menu) currently stacked on top.
 var _sub_dialog: Control = null
 ## `@clear` waits for `ui.showConfirm("@logic.clear.confirm", ...)`.
@@ -321,6 +342,15 @@ func _update_buttons() -> void:
 func _rebuild_list() -> void:
 	if _list == null:
 		return
+	# A dragged element lives under the overlay while it follows the pointer;
+	# the rebuild always owns the final element list (`finishLayout`).
+	if _drag_row != null and is_instance_valid(_drag_row):
+		var parent := _drag_row.get_parent()
+		if parent != null:
+			parent.remove_child(_drag_row)
+		_drag_row.queue_free()
+	_drag_row = null
+	_drag_active = false
 	var keep_scroll := _scroll.scroll_vertical if _scroll != null else 0
 	for child in _list.get_children():
 		_list.remove_child(child)
@@ -613,22 +643,48 @@ func _header_input(event: InputEvent, index: int, box: Control) -> void:
 			box.accept_event()
 			var finish := _drag_active
 			_drag_index = -1
-			_drag_active = false
 			if finish:
 				_drag_index = index
 				_finish_drag()
 				_drag_index = -1
+			_drag_active = false
 			if _overlay != null:
 				_overlay.queue_redraw()
 		return
 	if event is InputEventMouseMotion and _drag_index == index:
-		if not _drag_active and event.position.distance_to(_drag_start) > 8.0:
-			_drag_active = true
+		var global: Vector2 = box.get_global_transform() * event.position
+		var start_global: Vector2 = box.get_global_transform() * _drag_start
+		if not _drag_active and global.distance_to(start_global) > 4.0:
+			_begin_drag(index, global)
 		if _drag_active:
-			_drop_index = _drop_index_at(box.get_global_transform() * event.position)
+			# `touchDragged`: `translation.add(v - last)` keeps the element under
+			# the pointer while `DragLayout` skips it in the normal layout.
+			if _drag_row != null and is_instance_valid(_drag_row) and _overlay != null:
+				var local: Vector2 = _overlay.get_global_transform().affine_inverse() * global
+				_drag_row.position = local - _drag_grab
+			_drop_index = _drop_index_at(global)
 			if _overlay != null:
 				_overlay.queue_redraw()
 		box.accept_event()
+
+
+## `StatementElem.touchDown` + `touchDragged`: remove the element from the
+## `DragLayout` flow and translate it under the pointer.
+func _begin_drag(index: int, global: Vector2) -> void:
+	if index < 0 or index >= _row_nodes.size() or _overlay == null or _list == null:
+		return
+	var row: Control = _row_nodes[index]
+	if row == null or not is_instance_valid(row):
+		return
+	var overlay_local := _overlay.get_global_transform().affine_inverse()
+	var row_rect := row.get_global_rect()
+	_drag_grab = overlay_local * global - overlay_local * row_rect.position
+	_drag_row = row
+	_list.remove_child(row)
+	_overlay.add_child(row)
+	row.position = overlay_local * row_rect.position
+	row.size = Vector2(maxf(row.size.x, _target_width()), row.size.y)
+	_drag_active = true
 
 
 ## The per-statement field row (`LStatement.build(Table)`): `MindLogic.editor_layout`
@@ -665,13 +721,7 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 	var items: Variant = logic.call("editor_layout", name, PackedStringArray(values))
 	if not (items is Array):
 		return fields_box
-	# `LStatements.java:1465-1474`: a permanent status has no `seconds` field.
-	if name == "status" and not values.is_empty() and str(values[0]) != "true":
-		var host := get_node_or_null("/root/Spine/SimHost")
-		if host != null and host.has_method("status_permanent") \
-				and bool(host.call("status_permanent", str(values[0]))):
-			items = (items as Array).filter(func(entry: Variant) -> bool:
-				return not (entry is Dictionary) or str((entry as Dictionary).get("label", "")) != "seconds")
+	items = _filter_layout(name, values, items)
 	for entry in items:
 		if not (entry is Dictionary):
 			continue
@@ -694,6 +744,10 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 				var edit := LineEdit.new()
 				edit.text = value
 				edit.custom_minimum_size = Vector2(180, 40)
+				# `ApplyStatusStatement`'s effect field is `.width(240f)`
+				# (`LStatements.java:1447`).
+				if name == "status" and field_index == 1:
+					edit.custom_minimum_size.x = 240
 				if bool((entry as Dictionary).get("wide", false)):
 					edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				_apply_node_field(edit, color)
@@ -701,16 +755,46 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 				edit.text_submitted.connect(_set_field.bind(index, field_index))
 				edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
 				fields_box.add_child(edit)
+				var picker := _picker_kind(name, field_index, values)
+				if not picker.is_empty():
+					fields_box.add_child(_picker_button(index, field_index, picker, color))
 				if not label_before and not label.is_empty():
 					fields_box.add_child(_field_label(label))
 			"select":
 				if label_before and not label.is_empty():
 					fields_box.add_child(_field_label(label))
+				# `EffectStatement.build` swaps the enum select for a 150-wide
+				# wrapped button that opens `ui.effects`
+				# (`LStatements.java:1801-1812`).
+				if name == "effect" and field_index == 0:
+					fields_box.add_child(_effect_button(index, field_index, color))
+					continue
+				# Java's two-state `table.button`s, not `showSelect` popups:
+				# apply/clear (`:1437-1444`), global/positional (`:2192-2196`),
+				# circle/rect (`:1227-1231`).
+				if name == "status" and field_index == 0:
+					fields_box.add_child(_field_toggle(
+						index, field_index, value, "true", "false",
+						"clear", "apply", Vector2(80, 40), color
+					))
+					continue
+				if name == "playsound" and field_index == 0:
+					fields_box.add_child(_field_toggle(
+						index, field_index, value, "true", "false",
+						"positional", "global", Vector2(160, 40), color
+					))
+					continue
+				if name == "query" and field_index == 0:
+					fields_box.add_child(_field_toggle(
+						index, field_index, value, "rect", "circle",
+						"rect", "circle", Vector2(80, 40), color
+					))
+					continue
 				var button := MindWidgets.button(_select_text(name, field_index, value))
 				# `Styles.logict` tinted with the element colour.
 				button.theme_type_variation = "logict"
 				_apply_logict(button, color)
-				button.custom_minimum_size = Vector2(90, 40)
+				button.custom_minimum_size = _select_button_size(name, field_index, value)
 				button.pressed.connect(_open_select.bind(index, field_index, name, button))
 				fields_box.add_child(button)
 			"color":
@@ -740,6 +824,187 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 				fields_box.add_child(push)
 				fields_box.add_child(_jump_button(index))
 	return fields_box
+
+
+## `LStatements.java:1483-1485` (`ApplyStatusStatement.isPermanent`): the
+## `seconds` field disappears for a `permanent` status.
+func _filter_layout(name: String, values: Array, items: Variant) -> Array:
+	var out: Array = items if items is Array else []
+	if name != "status" or values.size() < 2 or str(values[0]) == "true":
+		return out
+	var effect := str(values[1])
+	if not _status_permanent(effect):
+		return out
+	return out.filter(func(entry: Variant) -> bool:
+		return not (entry is Dictionary) or str((entry as Dictionary).get("label", "")) != "seconds")
+
+
+## `content.statusEffect(effect.substring(8)).permanent`, through the sim's
+## content snapshot (`MindSimHost.status_permanent`).
+func _status_permanent(effect: String) -> bool:
+	if not effect.begins_with("@status-"):
+		return false
+	var host := get_node_or_null("/root/Spine/SimHost")
+	return host != null and host.has_method("status_permanent") \
+		and bool(host.call("status_permanent", effect))
+
+
+## The content picker bound to a statement field, if any (`CONTENT_PICKERS`;
+## `LStatements.java` `showSelectTable` call sites).
+func _picker_kind(name: String, field_index: int, values: Array) -> String:
+	if name == "setmarker" and str(values[0] if not values.is_empty() else "") != "drawLayer":
+		return ""
+	if name == "ulocate" and str(values[0] if not values.is_empty() else "") != "ore":
+		return ""
+	var fields: Dictionary = CONTENT_PICKERS.get(name, {})
+	return str(fields.get(field_index, ""))
+
+
+## `LStatement.showSelect`'s `cols` argument per call site.
+func _select_columns(name: String, field_index: int) -> int:
+	match name:
+		"draw", "control":
+			return 2 if field_index == 0 else 4
+		"radar", "uradar":
+			return 2 if field_index <= 3 else 4
+		"ucontrol":
+			return 2 if field_index == 0 else 4
+		"ulocate":
+			return 2 if field_index <= 1 else 4
+		"query":
+			return 4
+		"select", "jump":
+			return 3 if field_index == 1 else 4
+		"setmarker":
+			return 3 if field_index == 0 else 4
+		"makemarker":
+			return 2 if field_index == 0 else 4
+		"setrule", "message", "fetch":
+			return 2 if field_index == 0 else 4
+		"cutscene":
+			return 3 if field_index == 0 else 4
+	return 4
+
+
+## The `sizer` cell override for a select (`showSelect(..., cols, sizer)`),
+## else the 60x38 default (`LStatement.showSelect`).
+func _select_cell_size(name: String, field_index: int) -> Vector2:
+	match name:
+		"draw":
+			return Vector2(120, 50) if field_index == 0 else Vector2(60, 38)
+		"control":
+			return Vector2(110, 50) if field_index == 0 else Vector2(60, 38)
+		"radar", "uradar":
+			if field_index <= 2:
+				return Vector2(110, 50)
+			if field_index == 3:
+				return Vector2(100, 50)
+		"ucontrol":
+			return Vector2(120, 50) if field_index == 0 else Vector2(60, 38)
+		"ulocate":
+			if field_index == 0:
+				return Vector2(110, 50)
+			if field_index == 1:
+				return Vector2(120, 50)
+		"query":
+			return Vector2(100, 38) if field_index == 1 else Vector2(60, 38)
+		"select", "jump":
+			return Vector2(95, 38) if field_index == 1 else Vector2(60, 38)
+		"setmarker":
+			return Vector2(140, 50) if field_index == 0 else Vector2(60, 38)
+		"makemarker":
+			return Vector2(160, 50) if field_index == 0 else Vector2(60, 38)
+		"setrule", "message", "fetch":
+			return Vector2(150, 38) if field_index == 0 else Vector2(60, 38)
+		"cutscene":
+			return Vector2(120, 40) if field_index == 0 else Vector2(60, 38)
+	return Vector2(60, 38)
+
+
+## The select button's size (`table.button(...).size(...)` per call site).
+func _select_button_size(name: String, field_index: int, value: String) -> Vector2:
+	match name:
+		"draw":
+			return Vector2(120, 40) if field_index == 0 else Vector2(90, 40)
+		"control":
+			return Vector2(110, 40) if field_index == 0 else Vector2(90, 40)
+		"radar", "uradar":
+			if field_index <= 2:
+				return Vector2(110, 40)
+			if field_index == 3:
+				return Vector2(180, 40)
+		"ucontrol":
+			return Vector2(180, 40) if field_index == 0 else Vector2(90, 40)
+		"ulocate":
+			if field_index == 0:
+				return Vector2(110, 40)
+			if field_index == 1:
+				return Vector2(120, 40)
+		"query":
+			return Vector2(100, 40) if field_index == 1 else Vector2(90, 40)
+		"select", "jump":
+			if field_index == 1:
+				return Vector2(90, 40) if value == "always" else Vector2(48, 40)
+		"setmarker":
+			return Vector2(190, 40) if field_index == 0 else Vector2(90, 40)
+		"makemarker":
+			return Vector2(180, 40) if field_index == 0 else Vector2(90, 40)
+		"setrule", "message", "fetch":
+			return Vector2(160, 40) if field_index == 0 else Vector2(90, 40)
+		"cutscene":
+			return Vector2(120, 40) if field_index == 0 else Vector2(90, 40)
+	return Vector2(90, 40)
+
+
+## A `Icon.pencilSmall` content-picker button (`LStatements.java`
+## `t.button(b -> { b.image(Icon.pencilSmall); ... }, Styles.logict, ...)`).
+func _picker_button(index: int, field_index: int, kind: String, color: Color) -> Button:
+	# code-instantiated: one picker pencil per statement field.
+	var button := MindWidgets.icon_button("pencil", "", "logict")
+	_apply_logict(button, color)
+	button.custom_minimum_size = Vector2(40, 40)
+	button.pressed.connect(_open_picker.bind(index, field_index, kind))
+	return button
+
+
+## A two-state `logict` button (`Table.button(label, style, ...)`): pressing
+## commits the other value and rebuilds the element (`build(table)`).
+func _field_toggle(
+	index: int,
+	field_index: int,
+	value: String,
+	on_value: String,
+	off_value: String,
+	on_label: String,
+	off_label: String,
+	size: Vector2,
+	color: Color
+) -> Button:
+	# code-instantiated: one toggle per two-state statement field.
+	var button := Button.new()
+	button.theme_type_variation = "logict"
+	_apply_logict(button, color)
+	button.custom_minimum_size = size
+	button.text = _field_label_text(on_label if value == on_value else off_label)
+	var next := off_value if value == on_value else on_value
+	button.pressed.connect(func() -> void:
+		_commit_field_value(next, index, field_index)
+		_modified = true
+		_rebuild_list())
+	return button
+
+
+## `EffectStatement`'s 150x40 wrapped effect button (`LStatements.java:1804`).
+func _effect_button(index: int, field_index: int, color: Color) -> Button:
+	# code-instantiated: one effect picker button per element.
+	var button := Button.new()
+	button.theme_type_variation = "logict"
+	_apply_logict(button, color)
+	button.custom_minimum_size = Vector2(150, 40)
+	button.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	button.text = _field_label_text(_current_field_value(index, field_index))
+	button.pressed.connect(_open_effects.bind(index, field_index))
+	return button
 
 
 ## `LCanvas.JumpButton` (`LCanvas.java:551-624`): a `Tex.logicNode` image,
@@ -868,6 +1133,27 @@ func _option_text(option: Variant) -> String:
 	return text
 
 
+## `LCanvas.tooltip(Cell, Enum)` (`LCanvas.java:98-105`): the
+## `<enum-class>.<name>` bundle key first, then `lenum.<name>`. String selects
+## (`showSelect` over plain tokens) carry no enum tooltip in Java.
+func _select_tooltip(name: String, field_index: int, option: Variant) -> String:
+	var option_name := str((option as Dictionary).get("name", ""))
+	var enum_class := ""
+	if name == "op":
+		enum_class = "logicop"
+	elif (name == "select" or name == "jump") and field_index == 1:
+		enum_class = "conditionop"
+	else:
+		var key := str((option as Dictionary).get("key", ""))
+		var suffix := ".label." + option_name.to_lower()
+		if key.ends_with(suffix):
+			enum_class = key.substr(0, key.length() - suffix.length())
+	if enum_class.is_empty():
+		return ""
+	var text := _bundle_tooltip("%s.%s" % [enum_class, option_name.to_lower()])
+	return text if not text.is_empty() else _bundle_tooltip("lenum." + option_name)
+
+
 ## `showSelect`: a popup of `logicTogglet` buttons (`LStatement.java:233-253`).
 func _open_select(index: int, field_index: int, name: String, button: Button) -> void:
 	var logic := get_node_or_null("/root/Spine/MindLogic")
@@ -880,9 +1166,10 @@ func _open_select(index: int, field_index: int, name: String, button: Button) ->
 	# code-instantiated: one transient enum-select popup per open.
 	add_child(popup)
 	var grid := GridContainer.new()
-	grid.columns = 4
+	grid.columns = _select_columns(name, field_index)
 	popup.add_child(grid)
 	var unit_actions := _unit_actions_enabled()
+	var cell_size := _select_cell_size(name, field_index)
 	for option in options:
 		if not (option is Dictionary):
 			continue
@@ -895,10 +1182,11 @@ func _open_select(index: int, field_index: int, name: String, button: Button) ->
 		toggle.toggle_mode = true
 		toggle.theme_type_variation = "logicTogglet"
 		toggle.button_pressed = option_name == _current_field_value(index, field_index)
-		toggle.custom_minimum_size = Vector2(60, 38)
-		toggle.tooltip_text = _bundle_tooltip("lenum." + option_name)
+		toggle.custom_minimum_size = cell_size
+		toggle.tooltip_text = _select_tooltip(name, field_index, option)
 		toggle.pressed.connect(_select_enum.bind(index, field_index, option_name, popup))
 		grid.add_child(toggle)
+	popup.popup_hide.connect(popup.queue_free)
 	popup.popup_centered()
 
 
@@ -942,6 +1230,550 @@ func _open_char_select(index: int, field_index: int) -> void:
 		toggle.pressed.connect(_select_enum.bind(index, field_index, str(code), popup))
 		grid.add_child(toggle)
 	popup.popup_centered()
+
+
+## `showSelectTable`: a transient `PaneSolid`-style popup anchored over the
+## editor. Godot's `PopupPanel` owns the click-outside dismissal.
+func _picker_popup() -> Dictionary:
+	# code-instantiated: one transient picker per open (`showSelectTable`).
+	var popup := PopupPanel.new()
+	add_child(popup)
+	popup.popup_hide.connect(popup.queue_free)
+	var root := VBoxContainer.new()
+	root.add_theme_constant_override("separation", 2)
+	popup.add_child(root)
+	return {"popup": popup, "root": root}
+
+
+## Dispatches the content pencil to its `showSelectTable` equivalent.
+func _open_picker(index: int, field_index: int, kind: String) -> void:
+	match kind:
+		"unit":
+			_open_icon_grid(index, field_index, "unit", "unit-control")
+		"ore":
+			_open_icon_grid(index, field_index, "item", "item-ore")
+		"status":
+			_open_status_picker(index, field_index)
+		"weather":
+			_open_weather_picker(index, field_index)
+		"layer":
+			_open_layer_picker(index, field_index)
+		"prop":
+			_open_prop_picker(index, field_index)
+		"sensor":
+			_open_sensor_picker(index, field_index)
+		"sound":
+			_open_sound_picker(index, field_index)
+
+
+## `Picker` rows from the live content snapshot (`MindSimHost.logic_picker_json`
+## `{name, hidden, unlocked_now, ...}`); falls back to `content_list` when the
+## extension predates the picker seam.
+func _picker_rows(kind: String) -> Array:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null:
+		return []
+	if host.has_method("logic_picker_json"):
+		var parsed: Variant = JSON.parse_string(str(host.call("logic_picker_json", kind)))
+		return parsed if parsed is Array else []
+	if host.has_method("content_list"):
+		var rows: Array = []
+		for name in host.call("content_list", kind):
+			rows.append({"name": str(name), "unlocked_now": true})
+		return rows
+	return []
+
+
+## Java content filters at each `showSelectTable` call site.
+func _picker_visible(row: Dictionary, filter: String) -> bool:
+	var name := str(row.get("name", ""))
+	if name.is_empty():
+		return false
+	var hidden := bool(row.get("hidden", false))
+	var unlocked_now := bool(row.get("unlocked_now", true))
+	match filter:
+		"unit-control":
+			return unlocked_now and not hidden and bool(row.get("logic_controllable", true))
+		"unit", "block", "item":
+			return unlocked_now and not hidden
+		"item-prop":
+			return not hidden
+		"item-ore":
+			return unlocked_now
+		"liquid-prop":
+			return unlocked_now and not hidden
+		"status":
+			return name != "none"
+		"status-prop":
+			return name != "none" and unlocked_now and bool(row.get("show", true))
+	return true
+
+
+func _content_label(kind: String, name: String) -> String:
+	if kind == "weather":
+		return _field_label_text(name)
+	if kind == "laccess":
+		var access_key := "laccess.label." + name.to_lower()
+		var access_text := _t(access_key)
+		return name if access_text == access_key else access_text
+	var key := "%s.%s.name" % [kind, name]
+	var label := _t(key)
+	return name if label == key else label
+
+
+func _content_texture(kind: String, name: String) -> Texture2D:
+	var texture := MindWidgets.icon_texture("%s-%s-ui" % [kind, name])
+	if texture == null and kind == "block":
+		texture = MindWidgets.icon_texture("block-%s-full" % name)
+	return texture
+
+
+## `t.button(new TextureRegionDrawable(item.uiIcon), Styles.flati, iconSmall,
+## ...).size(40f)` (`LStatements.java:544-552`, 6 per row).
+func _icon_grid(
+	kind: String,
+	filter: String,
+	on_pick: Callable,
+	columns: int = 6,
+	cell: float = 40.0
+) -> Control:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(300, 300)
+	var grid := GridContainer.new()
+	grid.columns = columns
+	scroll.add_child(grid)
+	var count := 0
+	for row_value in _picker_rows(kind):
+		if not (row_value is Dictionary):
+			continue
+		var row: Dictionary = row_value
+		if not _picker_visible(row, filter):
+			continue
+		var name := str(row.get("name", ""))
+		var button := Button.new()
+		button.theme_type_variation = "flati"
+		button.custom_minimum_size = Vector2(cell, cell)
+		var texture := _content_texture(kind, name)
+		if texture != null:
+			var image := TextureRect.new()
+			image.texture = texture
+			image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			button.add_child(image)
+		else:
+			button.text = _content_label(kind, name).left(1).to_upper()
+		button.tooltip_text = _content_label(kind, name)
+		button.pressed.connect(on_pick.bind(name))
+		grid.add_child(button)
+		count += 1
+	if count == 0:
+		grid.add_child(MindWidgets.label(_t("@none.found")))
+	return scroll
+
+
+## `showSelectTable` icon grid (ubind units, ore items).
+func _open_icon_grid(index: int, field_index: int, kind: String, filter: String) -> void:
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var prefix := "@status-" if kind == "status" else "@"
+	root.add_child(_icon_grid(kind, filter, func(name: String) -> void:
+		_pick_value(prefix + name, index, field_index, popup)))
+	popup.popup_centered()
+
+
+## `ApplyStatusStatement`'s 240x40 status rows (`LStatements.java:1450-1461`).
+func _open_status_picker(index: int, field_index: int) -> void:
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(260, 360)
+	root.add_child(scroll)
+	var list := VBoxContainer.new()
+	scroll.add_child(list)
+	for row_value in _picker_rows("status"):
+		if not (row_value is Dictionary):
+			continue
+		var row: Dictionary = row_value
+		if not _picker_visible(row, "status"):
+			continue
+		var name := str(row.get("name", ""))
+		var button := Button.new()
+		button.theme_type_variation = "flatt"
+		button.custom_minimum_size = Vector2(240, 40)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.text = _content_label("status", name)
+		button.icon = _content_texture("status", name)
+		button.pressed.connect(_pick_value.bind("@status-" + name, index, field_index, popup))
+		list.add_child(button)
+	if list.get_child_count() == 0:
+		list.add_child(MindWidgets.label(_t("@none.found")))
+	popup.popup_centered()
+
+
+## `WeatherSense`/`WeatherSet`'s two-column weather list
+## (`LStatements.java:1512-1531`, `:1560-1579`).
+func _open_weather_picker(index: int, field_index: int) -> void:
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var grid := GridContainer.new()
+	grid.columns = 2
+	root.add_child(grid)
+	for row_value in _picker_rows("weather"):
+		if not (row_value is Dictionary):
+			continue
+		var name := str((row_value as Dictionary).get("name", ""))
+		var button := Button.new()
+		button.theme_type_variation = "flatt"
+		button.custom_minimum_size = Vector2(210, 40)
+		button.text = _content_label("weather", name)
+		button.pressed.connect(_pick_value.bind("@" + name, index, field_index, popup))
+		grid.add_child(button)
+	if grid.get_child_count() == 0:
+		grid.add_child(MindWidgets.label(_t("@none.found")))
+	popup.popup_centered()
+
+
+## `SetMarkerStatement`'s draw-layer list (`LStatements.java:2415-2428`):
+## every `Layer` field as `name = value` (`Reflect.get` + `Float.toString`).
+func _open_layer_picker(index: int, field_index: int) -> void:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null or not logic.has_method("marker_layers"):
+		return
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var list := VBoxContainer.new()
+	root.add_child(list)
+	var rows: Variant = logic.call("marker_layers")
+	if rows is Array:
+		for row_value in rows:
+			if not (row_value is Dictionary):
+				continue
+			var row: Dictionary = row_value
+			var name := str(row.get("name", ""))
+			var value := String.num(float(row.get("value", 0.0)), 1)
+			var button := Button.new()
+			button.theme_type_variation = "logicTogglet"
+			button.custom_minimum_size = Vector2(240, 40)
+			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			button.text = "%s = %s" % [name, value]
+			button.pressed.connect(_pick_value.bind(value, index, field_index, popup))
+			list.add_child(button)
+	popup.popup_centered()
+
+
+## A `squareTogglei` tab row over a `Stack` of content tables
+## (`LStatements.java:2160-2176` sensor, `:2110-2125` setprop).
+func _picker_tabs(root: VBoxContainer, icons: Array, tables: Array) -> void:
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 0)
+	root.add_child(tabs)
+	var holder := VBoxContainer.new()
+	holder.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(holder)
+	var selected := [0]
+	var pages: Array = []
+	for icon in icons:
+		var page := Control.new()
+		page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		pages.append(page)
+	for page in pages:
+		page.visible = false
+		holder.add_child(page)
+		if page == pages[0]:
+			page.visible = true
+	for i in icons.size():
+		var toggle := MindWidgets.glyph_button(str(icons[i]), "", "squareTogglei")
+		toggle.custom_minimum_size = Vector2(0, 50)
+		toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		toggle.toggle_mode = true
+		toggle.button_pressed = i == 0
+		toggle.pressed.connect(func() -> void:
+			selected[0] = i
+			for j in pages.size():
+				(pages[j] as Control).visible = j == i
+				(tabs.get_child(j) as Button).button_pressed = j == i)
+		tabs.add_child(toggle)
+		if tables[i] != null:
+			(pages[i] as Control).add_child(tables[i])
+
+
+## `SetPropStatement`'s item/liquid/status/sensor tabs (`LStatements.java`
+## `:2106-2175`; the sensor tab is `LAccess.settable`).
+func _open_prop_picker(index: int, field_index: int) -> void:
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var pick := func(value: String) -> void: _pick_value(value, index, field_index, popup)
+	var tables: Array = [
+		_icon_grid("item", "item-prop", func(name: String) -> void: pick.call("@" + name)),
+		_icon_grid("liquid", "liquid-prop", func(name: String) -> void: pick.call("@" + name)),
+		_legacy_status_list(func(name: String) -> void: pick.call("@status-" + name)),
+		_access_list("settable", func(name: String) -> void: pick.call("@" + name)),
+	]
+	_picker_tabs(root, ["box", "liquid", "effect", "tree"], tables)
+	popup.popup_centered()
+
+
+## `SensorStatement`'s item/liquid/unit+block/sensor tabs
+## (`LStatements.java:545-630`; the unit and block lists share the third tab).
+func _open_sensor_picker(index: int, field_index: int) -> void:
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var pick := func(value: String) -> void: _pick_value(value, index, field_index, popup)
+	var units_blocks := VBoxContainer.new()
+	units_blocks.add_child(_icon_grid("unit", "unit", func(name: String) -> void:
+		pick.call("@" + name)))
+	units_blocks.add_child(_icon_grid("block", "block", func(name: String) -> void:
+		pick.call("@" + name)))
+	var tables: Array = [
+		_icon_grid("item", "item", func(name: String) -> void: pick.call("@" + name)),
+		_icon_grid("liquid", "liquid-prop", func(name: String) -> void: pick.call("@" + name)),
+		units_blocks,
+		_access_list("senseable", func(name: String) -> void: pick.call("@" + name)),
+	]
+	_picker_tabs(root, ["box", "liquid", "units", "tree"], tables)
+	popup.popup_centered()
+
+
+## A 240x40 name list from `MindLogic.settable_accesses`/`senseable_accesses`
+## (`bundle(LAccess)` + `LCanvas.tooltip(cell, sensor)`).
+func _access_list(kind: String, on_pick: Callable) -> Control:
+	var logic := get_node_or_null("/root/Spine/MindLogic")
+	if logic == null:
+		return MindWidgets.label(_t("@none.found"))
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(260, 300)
+	var list := VBoxContainer.new()
+	scroll.add_child(list)
+	var rows: Variant = []
+	if kind == "settable" and logic.has_method("settable_accesses"):
+		rows = logic.call("settable_accesses")
+	elif kind == "senseable" and logic.has_method("senseable_accesses"):
+		rows = logic.call("senseable_accesses", _privileged)
+	if rows is Array or rows is PackedStringArray:
+		for name_value in rows:
+			var name := str(name_value)
+			var button := Button.new()
+			button.theme_type_variation = "flatt"
+			button.custom_minimum_size = Vector2(240, 40)
+			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			button.text = _content_label("laccess", name)
+			button.tooltip_text = _bundle_tooltip("laccess." + name.to_lower())
+			button.pressed.connect(on_pick.bind(name))
+			list.add_child(button)
+	if list.get_child_count() == 0:
+		list.add_child(MindWidgets.label(_t("@none.found")))
+	return scroll
+
+
+## ApplyStatus's effect rows are reused by SetProp's status tab
+## (`LStatements.java:2138-2150`).
+func _legacy_status_list(on_pick: Callable) -> Control:
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(260, 300)
+	var list := VBoxContainer.new()
+	scroll.add_child(list)
+	for row_value in _picker_rows("status"):
+		if not (row_value is Dictionary):
+			continue
+		var row: Dictionary = row_value
+		if not _picker_visible(row, "status-prop"):
+			continue
+		var name := str(row.get("name", ""))
+		var button := Button.new()
+		button.theme_type_variation = "flatt"
+		button.custom_minimum_size = Vector2(240, 40)
+		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		button.text = _content_label("status", name)
+		button.icon = _content_texture("status", name)
+		button.pressed.connect(on_pick.bind(name))
+		list.add_child(button)
+	if list.get_child_count() == 0:
+		list.add_child(MindWidgets.label(_t("@none.found")))
+	return scroll
+
+
+## `PlaySoundStatement.showSoundSelect` (`LStatements.java:2282-2380`): the
+## category tab list on the left and the sound rows (preview + select) on the
+## right, with the current sound's category preselected.
+func _open_sound_picker(index: int, field_index: int) -> void:
+	var assets := get_node_or_null("/root/MindAssets")
+	if assets == null or not assets.has_method("sound_entries"):
+		return
+	var choices: Array = []
+	var categories: Dictionary = {}
+	for row_value in assets.call("sound_entries"):
+		if not (row_value is Dictionary):
+			continue
+		var row: Dictionary = row_value
+		var name := str(row.get("name", ""))
+		var category := str(row.get("category", ""))
+		choices.append(row)
+		var list: Array = categories.get(category, [])
+		list.append(row)
+		categories[category] = list
+	if choices.is_empty():
+		return
+	choices.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		if str(a.get("category", "")) != str(b.get("category", "")):
+			return str(a.get("category", "")) < str(b.get("category", ""))
+		return str(a.get("name", "")) < str(b.get("name", "")))
+	var category_names: Array = ["all"]
+	for category in categories.keys():
+		category_names.append(str(category))
+	category_names.sort()
+	var current := _current_field_value(index, field_index)
+	current = current.trim_prefix("@sfx-")
+	var current_category := "all"
+	for row_value in choices:
+		if str((row_value as Dictionary).get("name", "")) == current:
+			current_category = str((row_value as Dictionary).get("category", "all"))
+			break
+	var parts := _picker_popup()
+	var popup: PopupPanel = parts["popup"]
+	var root: VBoxContainer = parts["root"]
+	var body := HBoxContainer.new()
+	body.add_theme_constant_override("separation", 4)
+	root.add_child(body)
+	var tabs := VBoxContainer.new()
+	tabs.custom_minimum_size = Vector2(160, 0)
+	body.add_child(tabs)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(450, 420)
+	body.add_child(scroll)
+	var list := VBoxContainer.new()
+	list.add_theme_constant_override("separation", 3)
+	scroll.add_child(list)
+	var selected_category := [current_category]
+	var rebuild := func() -> void:
+		for child in list.get_children():
+			list.remove_child(child)
+			child.queue_free()
+		var visible: Array = choices
+		if str(selected_category[0]) != "all":
+			visible = categories.get(str(selected_category[0]), [])
+		if visible.is_empty():
+			list.add_child(MindWidgets.label(_t("@none.found")))
+			return
+		for row_value in visible:
+			var row: Dictionary = row_value
+			var sound_name := str(row.get("name", ""))
+			var sound_id := str(row.get("id", sound_name))
+			var row_box := HBoxContainer.new()
+			row_box.custom_minimum_size = Vector2(0, 40)
+			list.add_child(row_box)
+			var play := MindWidgets.icon_button("play", "", "cleari")
+			play.custom_minimum_size = Vector2(40, 40)
+			play.pressed.connect(func() -> void:
+				var audio := get_node_or_null("/root/Spine/MindAudio")
+				if audio == null:
+					return
+				if audio.has_method("preview_sound"):
+					audio.call("preview_sound", sound_id, 1.0)
+				elif audio.has_method("on_ui_sound"):
+					audio.call("on_ui_sound", sound_id))
+			row_box.add_child(play)
+			var label := sound_name
+			if str(selected_category[0]) == "all":
+				label = "%s/%s" % [_field_label_text(str(row.get("category", ""))), sound_name]
+			var toggle := Button.new()
+			toggle.theme_type_variation = "logicTogglet"
+			toggle.custom_minimum_size = Vector2(0, 40)
+			toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+			toggle.text = label
+			toggle.toggle_mode = true
+			toggle.button_pressed = sound_name == current
+			toggle.pressed.connect(_pick_value.bind(
+				"@sfx-" + sound_name, index, field_index, popup
+			))
+			row_box.add_child(toggle)
+	for category in category_names:
+		var toggle := Button.new()
+		toggle.theme_type_variation = "logicTogglet"
+		toggle.custom_minimum_size = Vector2(140, 34)
+		toggle.text = _field_label_text(str(category))
+		toggle.toggle_mode = true
+		toggle.set_meta("category", str(category))
+		toggle.button_pressed = str(selected_category[0]) == str(category)
+		toggle.pressed.connect(_select_sound_category.bind(
+			str(category), selected_category, tabs, rebuild
+		))
+		tabs.add_child(toggle)
+	rebuild.call()
+	popup.popup_hide.connect(func() -> void:
+		var audio := get_node_or_null("/root/Spine/MindAudio")
+		if audio != null and audio.has_method("stop_sound_preview"):
+			audio.call("stop_sound_preview"))
+	popup.popup_centered()
+
+
+## Sound category tab (`String[] selectedCategory` in Java): flips the group
+## and rebuilds the right-hand list.
+func _select_sound_category(
+	category: String, selected: Array, tabs: VBoxContainer, rebuild: Callable
+) -> void:
+	selected[0] = category
+	for child in tabs.get_children():
+		var button := child as Button
+		if button != null:
+			button.button_pressed = str(button.get_meta("category", "")) == category
+	rebuild.call()
+
+
+## Commits a picker selection and rebuilds the element (`build(table)` after
+## every content selection in `LStatements.java`).
+func _pick_value(value: String, index: int, field_index: int, popup: PopupPanel) -> void:
+	if popup != null:
+		popup.hide()
+	_commit_field_value(value, index, field_index)
+	_rebuild_list()
+
+
+## `ui.effects.show(entry -> ...)` for `EffectStatement`
+## (`LStatements.java:1806`).
+func _open_effects(index: int, field_index: int) -> void:
+	var ui := get_node_or_null("/root/MindUi")
+	var effects := _dialog("effects")
+	if ui == null or effects == null or not ui.has_method("open_dialog"):
+		_open_select(index, field_index, "effect", null)
+		return
+	_effect_target = Vector2i(index, field_index)
+	if effects.has_signal("effect_selected") \
+			and not effects.is_connected("effect_selected", _on_effect_selected):
+		effects.connect("effect_selected", _on_effect_selected)
+	ui.call("open_dialog", "effects", "{}")
+
+
+func _on_effect_selected(name: String) -> void:
+	if _effect_target.x < 0 or name.is_empty():
+		return
+	var target := _effect_target
+	_effect_target = Vector2i(-1, -1)
+	_commit_field_value(name, target.x, target.y)
+	_rebuild_list()
+
+
+## A sibling manifest dialog from the static `UiRoot` tree
+## (`wave_info_dialog.gd:_dialog`).
+func _dialog(dialog_name: String) -> Node:
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root == null or not ui_root.has_method("dialog"):
+		return null
+	return ui_root.call("dialog", dialog_name)
 
 
 func _current_field_value(index: int, field_index: int) -> String:
@@ -1127,8 +1959,9 @@ func _finish_drag() -> void:
 	var from := _drag_index
 	if from < 0 or from >= _statements.size():
 		return
-	var drop := clampi(_drop_index, 0, _statements.size())
-	var to := drop if drop <= from else drop - 1
+	# `_drop_index_at` already excludes the dragged element, so the index is
+	# the insertion position after removal (`DragLayout.insertPosition`).
+	var to := clampi(_drop_index, 0, _statements.size() - 1)
 	if to != from:
 		for row in _statements:
 			if not (row is Dictionary) or str((row as Dictionary).get("name", "")) != "jump":
@@ -1155,17 +1988,37 @@ func _finish_drag() -> void:
 ## The insertion index for a global pointer position (`DragLayout.layout`'s
 ## `insertPosition`).
 func _drop_index_at(global_pos: Vector2) -> int:
+	# `DragLayout.layout` builds `seq` without the dragged element and inserts
+	# at the first row whose midpoint is below the dragged top.
+	var position := 0
 	for i in _row_nodes.size():
-		var rect := (_row_nodes[i] as Control).get_global_rect()
+		var row: Control = _row_nodes[i]
+		if row == _drag_row:
+			continue
+		var rect := row.get_global_rect()
 		if global_pos.y < rect.position.y + rect.size.y * 0.5:
-			return i
-	return _row_nodes.size()
+			return position
+		position += 1
+	return position
+
+
+## Rows currently in the normal layout (the dragged element is under the
+## overlay, not in `_list`).
+func _visible_rows() -> Array:
+	var rows: Array = []
+	for node in _row_nodes:
+		if node != _drag_row:
+			rows.append(node)
+	return rows
 
 
 ## The statement element under a global pointer position (`canvas.hovered`).
 func _row_at(global_pos: Vector2) -> int:
 	for i in _row_nodes.size():
-		if (_row_nodes[i] as Control).get_global_rect().has_point(global_pos):
+		var row: Control = _row_nodes[i]
+		if row == _drag_row:
+			continue
+		if row.get_global_rect().has_point(global_pos):
 			return i
 	return -1
 
@@ -1333,16 +2186,17 @@ func _jump_height(processed: Array, index: int, occupiers: Array, occupied: Dict
 func _draw_overlay() -> void:
 	if _overlay == null:
 		return
-	if _drag_active and _drop_index >= 0 and not _row_nodes.is_empty():
-		var first := (_row_nodes[0] as Control).get_global_rect()
+	var rows := _visible_rows()
+	if _drag_active and _drop_index >= 0 and not rows.is_empty():
+		var first := (rows[0] as Control).get_global_rect()
 		var y := 0.0
 		if _drop_index <= 0:
 			y = first.position.y - 3.0
-		elif _drop_index >= _row_nodes.size():
-			y = (_row_nodes[_row_nodes.size() - 1] as Control).get_global_rect().end.y + 3.0
+		elif _drop_index >= rows.size():
+			y = (rows[rows.size() - 1] as Control).get_global_rect().end.y + 3.0
 		else:
-			var above := (_row_nodes[_drop_index - 1] as Control).get_global_rect()
-			var below := (_row_nodes[_drop_index] as Control).get_global_rect()
+			var above := (rows[_drop_index - 1] as Control).get_global_rect()
+			var below := (rows[_drop_index] as Control).get_global_rect()
 			y = (above.end.y + below.position.y) * 0.5
 		var left := first.position.x
 		var right := left + first.size.x
