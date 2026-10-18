@@ -344,6 +344,10 @@ pub struct MapEditor {
     draw_scratch: Vec<(i32, i32)>,
     /// Shared buffer of the installed [`context::TileOpSink`] (`EditorTile.op`).
     recorder: Option<Arc<Mutex<Vec<u64>>>>,
+    /// Data assets read from the last `beginEdit(Map)` (`state.data` contents,
+    /// PAR-0394). The Godot host feeds them to the `ModDataManager` owner;
+    /// `MapEditor` stays Godot-free.
+    patches: Vec<crate::mods::assets::DataAsset>,
 }
 
 impl Default for MapEditor {
@@ -378,6 +382,7 @@ impl MapEditor {
             line_scratch: Vec::new(),
             draw_scratch: Vec::new(),
             recorder: None,
+            patches: Vec::new(),
         }
     }
 

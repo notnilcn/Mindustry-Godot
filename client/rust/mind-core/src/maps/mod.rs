@@ -321,7 +321,43 @@ impl Maps {
         map_tags: StringMap,
         embed_assets: bool,
     ) -> Result<Map, MapError> {
-        write_map_source(fs, file, source, content, base_tags, map_tags, embed_assets)?;
+        self.save_map_with_patches(
+            fs,
+            paths,
+            file,
+            source,
+            content,
+            base_tags,
+            map_tags,
+            embed_assets,
+            None,
+        )
+    }
+
+    /// [`Maps::save_map`] with the map's data assets (`state.data`, PAR-0394).
+    #[allow(clippy::too_many_arguments)]
+    pub fn save_map_with_patches(
+        &mut self,
+        fs: &dyn FileSystem,
+        paths: &Paths,
+        file: &Path,
+        source: &dyn MapSource,
+        content: &ContentRegistry,
+        base_tags: StringMap,
+        map_tags: StringMap,
+        embed_assets: bool,
+        patches: Option<&dyn crate::io::save::state::PatchSetIo>,
+    ) -> Result<Map, MapError> {
+        write_map_source_with_patches(
+            fs,
+            file,
+            source,
+            content,
+            base_tags,
+            map_tags,
+            embed_assets,
+            patches,
+        )?;
         let header = MapIo::create_map(fs, file, true)?;
         let mut map = Map::from_header(&header, true);
         let scan = scan_map_source(source, content);
@@ -450,6 +486,33 @@ pub fn write_map_source(
     map_tags: StringMap,
     embed_assets: bool,
 ) -> Result<(), MapError> {
+    write_map_source_with_patches(
+        fs,
+        file,
+        source,
+        content,
+        base_tags,
+        map_tags,
+        embed_assets,
+        None,
+    )
+}
+
+/// [`write_map_source`] with the map's embedded data assets (`patches` region).
+///
+/// `SaveVersion.writeDataPatches` always writes `state.data.getAllAssets()`;
+/// the port's context takes the owning manager as a [`PatchSetIo`] (PAR-0394).
+#[allow(clippy::too_many_arguments)]
+pub fn write_map_source_with_patches(
+    fs: &dyn FileSystem,
+    file: &Path,
+    source: &dyn MapSource,
+    content: &ContentRegistry,
+    base_tags: StringMap,
+    map_tags: StringMap,
+    embed_assets: bool,
+    patches: Option<&dyn crate::io::save::state::PatchSetIo>,
+) -> Result<(), MapError> {
     let mut tags = base_tags;
     for (key, value) in &map_tags {
         tags.insert(key.clone(), value.clone());
@@ -460,7 +523,7 @@ pub fn write_map_source(
         map: Some(source),
         entities: None,
         markers: None,
-        patches: None,
+        patches,
         custom_chunks: None,
     };
     MapIo::write_map(fs, file, &ctx, map_tags, embed_assets).map_err(MapError::from)
@@ -594,5 +657,140 @@ mod tests {
         let map = Map::from_header(&header, true);
         assert!(map.validate_name().is_ok());
         assert_eq!(map.width, 16);
+    }
+
+    /// T2 (PAR-0394): a map written with the owning `ModDataManager` carries
+    /// the `patches` region (`SaveVersion.writeDataPatches`), the load side
+    /// decodes it and the decoded set applies to a live registry.
+    #[test]
+    fn map_patches_roundtrip_save_load() {
+        use crate::io::save::SaveReadState;
+        use crate::mods::assets::{DataAsset, DataAssetType, DataAssets, ModDataManager};
+
+        let fs = MockFs::new();
+        let content = test_registry();
+        let world = FixtureWorld::synthetic(&content, 16, 16);
+        let file = PathBuf::from("/data/maps/patched.msav");
+
+        let mut manager = ModDataManager::new();
+        manager.push(DataAsset::patch(
+            "patches/a.json",
+            r#"{"block.router.health": 123}"#,
+        ));
+        manager.push(DataAsset::bundle(
+            "bundles/bundle.properties",
+            "mod.key=Value\n",
+        ));
+        manager.push(DataAsset::blob(
+            "sprites/x.png",
+            DataAssetType::Image,
+            vec![1, 2, 3],
+            false,
+        ));
+
+        let mut tags = base_meta_tags(16, 16, 0, "patched");
+        tags.insert("name".to_owned(), "Patched".to_owned());
+        write_map_source_with_patches(
+            &fs,
+            &file,
+            &world,
+            &content,
+            tags,
+            StringMap::new(),
+            false,
+            Some(&manager),
+        )
+        .expect("write patched map");
+
+        let bytes = fs.read(&file).expect("read map");
+        let meta = SaveIo::get_meta_bytes(&bytes).expect("meta");
+        assert_eq!(
+            meta.tags.get("hasExternalAssets").map(String::as_str),
+            Some("true")
+        );
+
+        let mut state = SaveReadState::default();
+        SaveIo::load_bytes(&bytes, &mut state).expect("load map");
+        let decoded = state.patches.expect("patches region decoded");
+        assert_eq!(decoded.len(), 3);
+        assert_eq!(decoded[0].path, "patches/a.json");
+        assert_eq!(decoded[1].path, "bundles/bundle.properties");
+        // External records keep only their content hash.
+        assert_eq!(
+            decoded[2].byte_hash,
+            Some(crate::mods::assets::sha256(&[1, 2, 3]))
+        );
+
+        let mut registry = test_registry();
+        let id = registry.block_id("router").expect("router");
+        let original = registry.block(id).expect("block").health;
+        assert_ne!(original, 123);
+        let mut loaded = ModDataManager::new();
+        loaded.load(decoded, &mut registry).expect("apply patches");
+        assert_eq!(registry.block(id).expect("block").health, 123);
+        loaded.unload(&mut registry);
+        assert_eq!(registry.block(id).expect("block").health, original);
+    }
+
+    /// `MapIO.writeMap(map, embed = true)` (`SaveOptions.embedAssets`): an
+    /// exported map embeds external images/sounds so it carries its data assets
+    /// (`SaveVersion.writeDataPatches` `forceEmbed`).
+    #[test]
+    fn map_patches_export_embeds_external_assets() {
+        use crate::io::save::SaveReadState;
+        use crate::mods::assets::{DataAsset, DataAssetData, DataAssetType};
+
+        let fs = MockFs::new();
+        let content = test_registry();
+        let world = FixtureWorld::synthetic(&content, 16, 16);
+        let file = PathBuf::from("/data/maps/exported.msav");
+
+        let mut manager = crate::mods::assets::ModDataManager::new();
+        manager.push(DataAsset::blob(
+            "sprites/x.png",
+            DataAssetType::Image,
+            vec![0x89, b'P', b'N', b'G'],
+            false,
+        ));
+        manager.push(DataAsset::blob(
+            "sounds/s.ogg",
+            DataAssetType::Sound,
+            vec![1, 2, 3, 4, 5],
+            false,
+        ));
+        manager.push(DataAsset::bundle(
+            "bundles/bundle.properties",
+            "mod.key=Value\n",
+        ));
+
+        let tags = base_meta_tags(16, 16, 0, "exported");
+        write_map_source_with_patches(
+            &fs,
+            &file,
+            &world,
+            &content,
+            tags,
+            StringMap::new(),
+            true,
+            Some(&manager),
+        )
+        .expect("export patched map");
+
+        let bytes = fs.read(&file).expect("read map");
+        let mut state = SaveReadState::default();
+        SaveIo::load_bytes(&bytes, &mut state).expect("load map");
+        let decoded = state.patches.expect("patches region decoded");
+        assert_eq!(decoded.len(), 3);
+        assert!(decoded[0].embedded, "image payload is embedded on export");
+        assert_eq!(
+            decoded[0].data,
+            DataAssetData::Blob(vec![0x89, b'P', b'N', b'G'])
+        );
+        assert!(decoded[1].embedded, "sound payload is embedded on export");
+        assert_eq!(decoded[1].data, DataAssetData::Blob(vec![1, 2, 3, 4, 5]));
+        assert!(matches!(
+            &decoded[2].data,
+            DataAssetData::Bundle(map) if map.get("mod.key").map(String::as_str) == Some("Value")
+        ));
     }
 }

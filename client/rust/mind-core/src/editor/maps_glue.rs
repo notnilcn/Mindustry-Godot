@@ -188,12 +188,41 @@ pub fn save_editor_map_with_ecs(
     content: &ContentRegistry,
     ecs: &bevy_ecs::world::World,
     base_tags: StringMap,
+    map_tags: StringMap,
+    embed_assets: bool,
+) -> Result<(), MapError> {
+    save_editor_map_with_ecs_and_patches(
+        fs,
+        file,
+        grid,
+        content,
+        ecs,
+        base_tags,
+        map_tags,
+        embed_assets,
+        None,
+    )
+}
+
+/// [`save_editor_map_with_ecs`] with the map's data assets (`state.data`).
+///
+/// `MapIO.writeMap` -> `SaveIO.write` always writes the owning manager's
+/// assets; the Godot editor passes the `MindMods` owner here (PAR-0394).
+#[allow(clippy::too_many_arguments)]
+pub fn save_editor_map_with_ecs_and_patches(
+    fs: &dyn FileSystem,
+    file: &Path,
+    grid: &WorldGrid,
+    content: &ContentRegistry,
+    ecs: &bevy_ecs::world::World,
+    base_tags: StringMap,
     mut map_tags: StringMap,
     embed_assets: bool,
+    patches: Option<&dyn crate::io::save::state::PatchSetIo>,
 ) -> Result<(), MapError> {
     fold_dialog_tags(&mut map_tags)?;
     let source = EditorMapSource::with_ecs(grid, content, ecs);
-    crate::maps::write_map_source(
+    crate::maps::write_map_source_with_patches(
         fs,
         file,
         &source,
@@ -201,6 +230,7 @@ pub fn save_editor_map_with_ecs(
         base_tags,
         map_tags,
         embed_assets,
+        patches,
     )
 }
 

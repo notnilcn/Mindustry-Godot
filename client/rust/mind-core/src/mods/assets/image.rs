@@ -91,6 +91,19 @@ impl ImageApplier {
         &self.entries
     }
 
+    /// Renames one recorded image (`MapImagesView` pencil action): the region
+    /// name follows `dp-<stem>`; page/scale stay unchanged. Returns the new
+    /// region name, or `None` when `old_path` is unknown.
+    pub fn rename(&mut self, old_path: &str, new_path: &str) -> Option<String> {
+        let entry = self
+            .entries
+            .iter_mut()
+            .find(|entry| entry.path == old_path)?;
+        entry.path = new_path.to_owned();
+        entry.name = image_asset_name(&image_stem(new_path), entry.generated);
+        Some(entry.name.clone())
+    }
+
     /// Number of entries.
     pub fn len(&self) -> usize {
         self.entries.len()
@@ -202,5 +215,21 @@ mod tests {
         assert!(applier.is_empty());
         assert!(applier.generated_hashes().is_empty());
         assert!(applier.add_generated("item", "{}", "x"));
+    }
+
+    /// `MapImagesView` pencil: the recorded path/name follow the new file name.
+    #[test]
+    fn rename_updates_path_and_region() {
+        let mut applier = ImageApplier::new();
+        applier.load_images(&[("sprites/old.png".to_owned(), false)], 1.0);
+        assert_eq!(
+            applier
+                .rename("sprites/old.png", "sprites/blocks/new.png")
+                .as_deref(),
+            Some("dp-new")
+        );
+        assert_eq!(applier.entries()[0].path, "sprites/blocks/new.png");
+        assert_eq!(applier.entries()[0].name, "dp-new");
+        assert!(applier.rename("missing.png", "x.png").is_none());
     }
 }
