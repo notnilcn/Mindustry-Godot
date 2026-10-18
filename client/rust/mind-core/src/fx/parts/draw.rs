@@ -243,6 +243,41 @@ impl<'a> PartEmit<'a> {
             DrawPartKind::ShapePart => self.draw_shape(part, params),
             DrawPartKind::HoverPart => self.draw_hover(part, params),
             DrawPartKind::FlarePart => self.draw_flare(part, params),
+            DrawPartKind::HaloPart => {
+                let spec = HaloPartSpec {
+                    under: part.under && part.turret_shading,
+                    hollow: part.hollow,
+                    tri: part.tri,
+                    shapes: part.shapes,
+                    sides: part.sides,
+                    radius: part.radius,
+                    radius_to: part.radius_to,
+                    stroke: part.stroke,
+                    stroke_to: part.stroke_to,
+                    tri_length: part.tri_length,
+                    tri_length_to: part.tri_length_to,
+                    halo_radius: part.halo_radius,
+                    halo_radius_to: part.halo_radius_to,
+                    x: part.x,
+                    y: part.y,
+                    shape_rotation: part.shape_rotation,
+                    move_x: part.move_x,
+                    move_y: part.move_y,
+                    shape_move_rot: part.shape_move_rot,
+                    halo_rotate_speed: part.halo_rotate_speed,
+                    halo_rotation: part.halo_rotation,
+                    rotate_speed: part.rotate_speed,
+                    color: part.color.unwrap_or(Rgba::WHITE),
+                    color_to: part.color_to,
+                    mirror: part.mirror,
+                    clamp_progress: part.clamp_progress,
+                    layer: part.layer,
+                    layer_offset: part.layer_offset,
+                    progress: convert_progress(&part.progress),
+                    children: Vec::new(),
+                };
+                self.draw_halo(&spec, params);
+            }
         }
     }
 
@@ -636,6 +671,9 @@ impl<'a> PartEmit<'a> {
         if p.layer > 0.0 {
             self.z = p.layer;
         }
+        if p.under {
+            self.z = z - 0.0001;
+        }
         self.z += p.layer_offset;
         let prog = if p.clamp_progress {
             p.progress.get_clamp(params, self.tick)
@@ -1009,6 +1047,9 @@ pub fn convert_progress(spec: &ContentProgress) -> PartProgressSpec {
         C::Loop(a, t) => P::Loop(b(a), *t),
         C::AbsinTime { offset, scl, mag } => {
             P::AbsinTime(Box::new(P::Constant(0.0)), *offset, *scl, *mag)
+        }
+        C::SinTime { offset, scl, mag } => {
+            P::SinTime(Box::new(P::Constant(0.0)), *offset, *scl, *mag)
         }
     }
 }

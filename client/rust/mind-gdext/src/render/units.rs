@@ -528,7 +528,7 @@ impl UnitRenderer {
             }
             // `drawBody` (`rotation - 90`; the port draws trimmed sizes, which
             // is what Arc's `Draw.rect(region, x, y)` does for centered trims).
-            {
+            if unit.draw_body {
                 let quad = UnitQuad {
                     cx: unit.x,
                     cy: unit.y,
@@ -562,7 +562,9 @@ impl UnitRenderer {
                 .resolver
                 .find(&format!("{}-cell", unit.name))
                 .or_else(|| self.resolver.find("power-cell"));
-            if let Some(cell) = cell {
+            if unit.draw_cell
+                && let Some(cell) = cell
+            {
                 let team = mind_core::game::team::Team::get(unit.team)
                     .color
                     .to_rgba8888();

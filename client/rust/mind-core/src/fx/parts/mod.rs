@@ -182,6 +182,8 @@ impl Default for ShapePartSpec {
 /// `HaloPart` fields (`entities/part/HaloPart.java`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct HaloPartSpec {
+    /// `under` (only meaningful with turret shading).
+    pub under: bool,
     /// `hollow`.
     pub hollow: bool,
     /// `tri`.
@@ -245,6 +247,7 @@ pub struct HaloPartSpec {
 impl Default for HaloPartSpec {
     fn default() -> Self {
         Self {
+            under: false,
             hollow: false,
             tri: false,
             shapes: 3,

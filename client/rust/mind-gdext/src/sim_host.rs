@@ -21,6 +21,9 @@ use godot::prelude::*;
 use crate::camera::MindCamera2D;
 use crate::input::MindInput;
 use crate::settings;
+use mind_core::content::registries::units::parts::DrawPartSpec;
+use mind_core::content::registries::units::weapon::WeaponDef;
+use mind_core::weapons::WeaponMount;
 
 /// One belt slot as the renderer consumes it: `(item, xs, ys)` (`Conveyor.draw`
 /// item loop; `ConveyorBuild.ids/xs/ys`).
@@ -58,6 +61,17 @@ pub struct UnitDraw {
     pub treads: Option<TreadsDraw>,
     /// Live weapon mounts (`UnitWeapons`).
     pub weapons: Vec<WeaponDraw>,
+    /// `UnitType.parts` (drawn after body/weapons/items, `UnitType.java:1561-1578`).
+    pub parts: Vec<DrawPartSpec>,
+    /// `Scaled.fin()` (`TimedKillComp.fin`, `time / lifetime`); `0` when the
+    /// unit is not timed.
+    pub fin: f32,
+    /// `UnitType.drawBody` (gates the body quad).
+    pub draw_body: bool,
+    /// `UnitType.drawCell` (gates the team cell quad).
+    pub draw_cell: bool,
+    /// `UnitType.groundLayer` (draw z base; `Layer.groundUnit` default).
+    pub ground_layer: f32,
     /// `EntitySeq.0` (view-state key; entities are reused).
     pub id: u64,
     /// `MinerComp.mine_tile` when `MinerComp.mining` (world tile).
@@ -132,6 +146,28 @@ pub struct LegsDraw {
 /// (`InputHandler.drawCommanded` inputs).
 pub type UnitCommandRow = (f32, f32, f32, bool, Option<(f32, f32)>);
 
+/// One ability's live draw state (`Ability.draw(Unit)`; L04 T2).
+pub struct UnitAbilityDraw {
+    /// Ability class tag.
+    pub kind: mind_core::content::registries::units::ability::AbilityKind,
+    /// Unit center x.
+    pub x: f32,
+    /// Unit center y.
+    pub y: f32,
+    /// Unit rotation (degrees).
+    pub rotation: f32,
+    /// Unit team id.
+    pub team: u8,
+    /// Ability metadata.
+    pub spec: mind_core::content::registries::units::ability::AbilitySpec,
+    /// Index-aligned runtime state (shield pools, view lerps).
+    pub state: mind_core::combat::abilities::AbilityState,
+    /// `Unit.shield` (`ShieldComp.shield`).
+    pub shield: f32,
+    /// `EntitySeq.0` (deterministic suppression particle seed).
+    pub id: u64,
+}
+
 /// One live weapon mount (`Weapon.draw` inputs).
 pub struct WeaponDraw {
     /// Weapon region name (`Weapon.name`).
@@ -153,6 +189,11 @@ pub struct WeaponDraw {
     pub top: bool,
     /// Visual recoil `0..1`.
     pub recoil: f32,
+    /// The resolved weapon definition (`Weapon.draw` layer offset, parts,
+    /// heat colour, flip sprite).
+    pub def: WeaponDef,
+    /// The live mount state (`DrawPart.params` warmup/reload/heat/recoil).
+    pub mount: WeaponMount,
 }
 use mind_core::ai::StanceBits;
 use mind_core::audio::{AudioSinkRes, SharedAudioLog};
@@ -5697,6 +5738,10 @@ impl MindSimHost {
                                     flip: weapon.flip_sprite,
                                     top: weapon.top,
                                     recoil: mount.map(|mount| mount.recoil).unwrap_or(0.0),
+                                    def: weapon.clone(),
+                                    mount: mount
+                                        .cloned()
+                                        .unwrap_or_else(|| WeaponMount::new(weapon)),
                                 }
                             })
                             .collect()
@@ -5770,6 +5815,19 @@ impl MindSimHost {
                             .unwrap_or(mind_core::content::Rgba::WHITE),
                     )
                 };
+                let fin = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::TimedKillComp>(*entity)
+                    .map(|timed| {
+                        if timed.lifetime > 0.0 {
+                            (timed.time / timed.lifetime).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        }
+                    })
+                    .unwrap_or(0.0);
                 Some(UnitDraw {
                     x: pos.x,
                     y: pos.y,
@@ -5785,6 +5843,11 @@ impl MindSimHost {
                     legs,
                     treads,
                     weapons,
+                    parts: def.parts.clone(),
+                    fin,
+                    draw_body: def.draw_body,
+                    draw_cell: def.draw_cell,
+                    ground_layer: def.ground_layer,
                     id,
                     mine_tile,
                     item,
@@ -6851,6 +6914,71 @@ impl MindSimHost {
                 // the unit renderer, so the port passes 0 (deviation).
                 0.0,
             ));
+        }
+        out
+    }
+
+    /// Live unit abilities with a `draw(Unit)` override (L04 T2): ForceField,
+    /// EnergyField, SuppressionField and ShieldArc. Mod-only ArmorPlate/
+    /// UnitSpawn/MoveLightning kinds are not modelled in the content registry.
+    pub fn unit_ability_draws(&self) -> Vec<UnitAbilityDraw> {
+        use mind_core::combat::abilities::AbilityComp;
+        use mind_core::content::registries::units::ability::AbilityKind;
+        use mind_core::entities::comp::Pos;
+        use mind_core::entities::comp::unit::comp::{ShieldComp, UnitCore, UnitTypeComp};
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entity in self.sim.ecs.0.iter_entities() {
+            let Some(comp) = entity.get::<AbilityComp>() else {
+                continue;
+            };
+            let Some(pos) = entity.get::<Pos>() else {
+                continue;
+            };
+            let Some(rotation) = entity.get::<UnitCore>().map(|core| core.rotation) else {
+                continue;
+            };
+            let Some(type_comp) = entity.get::<UnitTypeComp>() else {
+                continue;
+            };
+            let Some(def) = content.unit(type_comp.type_id) else {
+                continue;
+            };
+            let team = entity
+                .get::<mind_core::entities::comp::TeamComp>()
+                .map(|team| team.team)
+                .unwrap_or(0);
+            let shield = entity
+                .get::<ShieldComp>()
+                .map(|shield| shield.shield)
+                .unwrap_or(0.0);
+            let id = entity
+                .get::<mind_core::ecs::EntitySeq>()
+                .map(|seq| seq.0)
+                .unwrap_or(0);
+            for (spec, state) in def.abilities.iter().zip(&comp.states) {
+                if matches!(
+                    spec.kind,
+                    AbilityKind::ForceField
+                        | AbilityKind::EnergyField
+                        | AbilityKind::SuppressionField
+                        | AbilityKind::ShieldArc
+                ) {
+                    out.push(UnitAbilityDraw {
+                        kind: spec.kind,
+                        x: pos.x,
+                        y: pos.y,
+                        rotation,
+                        team,
+                        spec: spec.clone(),
+                        state: *state,
+                        shield,
+                        id,
+                    });
+                }
+            }
         }
         out
     }

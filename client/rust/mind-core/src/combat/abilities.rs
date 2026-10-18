@@ -61,8 +61,14 @@ pub struct AbilityState {
     pub timer: f32,
     /// Synced `Ability.data` (ShieldArc shield pool).
     pub data: f32,
-    /// Scratch: EnergyField `curStroke`, ShieldArc `alpha`.
+    /// Scratch: EnergyField `anyNearby` (0/1), RepairField bookkeeping.
     pub aux: f32,
+    /// EnergyField `curStroke` (view lerp toward `anyNearby`).
+    pub cur_stroke: f32,
+    /// ForceField `radiusScale` / ShieldArc `widthScale` (view lerp).
+    pub radius_scale: f32,
+    /// ForceField/ShieldArc `alpha` (hit flash, decays `delta / 10`).
+    pub alpha: f32,
     /// ForceField `wasBroken`.
     pub was_broken: bool,
     /// RepairField `hasHealed`.
@@ -326,6 +332,12 @@ fn update_ability(
             if let Some(mut comp) = world.get_mut::<ShieldComp>(entity) {
                 comp.shield = shield;
             }
+            // `ForceFieldAbility.update` (`ForceFieldAbility.java:91-100`):
+            // `alpha = max(alpha - delta/10, 0)`; `radiusScale` lerps to 1
+            // while the shield holds and to 0 when broken (`lerpDelta(..., 0.06)`).
+            state.alpha = (state.alpha - 0.1).max(0.0);
+            let target = if shield > 0.0 { 1.0 } else { 0.0 };
+            state.radius_scale += (target - state.radius_scale) * 0.06;
         }
         // `StatusFieldAbility.update` (`onShoot` is never set by vanilla).
         AbilityKind::StatusField => {
@@ -341,11 +353,15 @@ fn update_ability(
                 state.timer = 0.0;
             }
         }
-        // `EnergyFieldAbility.update`.
+        // `EnergyFieldAbility.update` (`EnergyFieldAbility.java:118-124`):
+        // `curStroke` lerps toward the previous tick's `anyNearby`.
         AbilityKind::EnergyField => {
+            let target = if state.aux > 0.0 { 1.0 } else { 0.0 };
+            state.cur_stroke += (target - state.cur_stroke) * 0.09;
             state.timer += 1.0;
             if state.timer >= spec.reload {
-                energy_field_tick(world, content, entity, spec, x, y, team);
+                let any_nearby = energy_field_tick(world, content, entity, spec, x, y, team);
+                state.aux = if any_nearby { 1.0 } else { 0.0 };
                 state.timer = 0.0;
             }
         }
@@ -370,15 +386,19 @@ fn update_ability(
                 state.timer = 0.0;
             }
         }
-        // `ShieldArcAbility.update`.
+        // `ShieldArcAbility.update` (`ShieldArcAbility.java:199-220`).
         AbilityKind::ShieldArc => {
             if state.data < spec.max {
                 state.data += spec.regen;
             }
             let active =
                 state.data > 0.0 && (device_is_shooting(world, entity) || !spec.when_shooting);
+            state.alpha = (state.alpha - 0.1).max(0.0);
             if active {
+                state.radius_scale += (1.0 - state.radius_scale) * 0.06;
                 shield_arc_absorb(world, content, entity, spec, state, x, y, team);
+            } else {
+                state.radius_scale += (0.0 - state.radius_scale) * 0.11;
             }
         }
         // `RegenAbility.update`.
@@ -568,7 +588,7 @@ fn energy_field_tick(
     x: f32,
     y: f32,
     team: u8,
-) {
+) -> bool {
     let (rx, ry) = rotate_offset(x, y, spec.x, spec.y, unit_rotation(world, entity));
     let unit_type = world.get::<UnitTypeComp>(entity).map(|comp| comp.type_id);
     // `EnergyFieldAbility.update` (`EnergyFieldAbility.java:147`):
@@ -646,6 +666,7 @@ fn energy_field_tick(
             0.1,
         );
     }
+    any_nearby
 }
 
 /// `LiquidRegenAbility.update`.
@@ -1137,6 +1158,56 @@ mod tests {
         assert!(
             (shield - (100.0 + 0.4)).abs() < 1e-4,
             "ForceFieldAbility.regen applied (100 -> {shield})"
+        );
+    }
+
+    /// L04 T2: the view mirrors (`ForceFieldAbility.radiusScale`/`alpha`,
+    /// `EnergyFieldAbility.curStroke`, `ShieldArcAbility.widthScale`) advance
+    /// with the ability update.
+    #[test]
+    fn ability_view_state_lerps() {
+        use crate::combat::abilities::AbilityComp;
+
+        let mut harness = UnitHarness::new(32, 32, 7);
+        let quasar = harness.spawn("quasar", 0, 64.0, 64.0, 0.0).expect("quasar");
+        update_unit_abilities(&mut harness.build.world, &harness.build.content, quasar);
+        let index = ability_index(&harness, "quasar", AbilityKind::ForceField);
+        let state = harness
+            .build
+            .world
+            .get::<AbilityComp>(quasar)
+            .map(|comp| comp.states[index])
+            .expect("ability state");
+        assert!(
+            (state.radius_scale - 0.06).abs() < 1e-4,
+            "radiusScale lerps toward 1: {}",
+            state.radius_scale
+        );
+
+        let tecta = harness.spawn("tecta", 0, 96.0, 64.0, 0.0).expect("tecta");
+        let index = ability_index(&harness, "tecta", AbilityKind::ShieldArc);
+        harness
+            .build
+            .world
+            .get_mut::<AbilityComp>(tecta)
+            .unwrap()
+            .states[index]
+            .alpha = 1.0;
+        update_unit_abilities(&mut harness.build.world, &harness.build.content, tecta);
+        let state = harness
+            .build
+            .world
+            .get::<AbilityComp>(tecta)
+            .unwrap()
+            .states[index];
+        assert!(
+            (state.alpha - 0.9).abs() < 1e-4,
+            "alpha decays: {}",
+            state.alpha
+        );
+        assert!(
+            state.radius_scale > 0.0,
+            "shield arc widthScale lerps while active"
         );
     }
 

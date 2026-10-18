@@ -53,3 +53,64 @@ no leg-stage frames).
 - T4 scathe/smite/malign/lustre part trees (HaloPart kind; `DrawPartSpec` has no
   halo arm). This session did not start them.
 - T6 live Java leg pairs (PAR-0126 closes on a MATCH frame, not on code).
+
+## Continuation (2026-10-18, PAR-0365/PAR-0366)
+
+### T1 — unit `parts` feed — **DONE (code + live probe)**
+
+- `UnitDraw` now carries `parts`, `fin` (`TimedKillComp.time / lifetime`),
+  `draw_body`/`draw_cell`/`ground_layer`; `WeaponDraw` carries the resolved
+  `WeaponDef` and live `WeaponMount`.
+- New `mind-gdext/src/render/unit_parts.rs`: three nodes per unit band
+  (`Under`/`Over`/`OverAdditive`) execute `DrawPart.draw` for every unit part
+  (`UnitType.java:1561-1578`) and `Weapon.draw`'s under/over parts
+  (`Weapon.java:236-278`) through the shared `PartEmit` program. The part
+  params come from the part's `weaponIndex` mount (`warmup`,
+  `reload/weapon.reload`, `smoothReload`, `heat`, `recoil`, `charge`, unit
+  position/rotation) plus `fin`; weapon parts apply `Weapon.layerOffset`.
+- `render/units.rs` gates the body/cell quads on `draw_body`/`draw_cell`.
+- `mind-core` exposes `weapon_part_params`; a unit test pins the mount fields.
+- Live (sandbox, display :10): quasar renders its force-field hexagon, quell
+  its suppression orb, tecta its legs + `tecta-shield` arc without script
+  errors. Unit-part quads themselves still need the Java pair (T0 staging).
+
+### T2 — ability draws — **DONE (vanilla kinds) / recorded**
+
+- `AbilityState` gained the view mirrors: `cur_stroke` (EnergyField),
+  `radius_scale` + `alpha` (ForceField/ShieldArc), advanced in
+  `update_unit_abilities` (`ForceFieldAbility.java:91-100`,
+  `EnergyFieldAbility.java:118-124`, `ShieldArcAbility.java:199-220`).
+  Test: `ability_view_state_lerps`.
+- `AbilitySpec` gained the draw fields (`effect_radius`, blink/sector/rotate
+  knobs, `layer`, orb/particle knobs, `angle_offset`, `draw_arc`,
+  `offset_region`) with the Java defaults, plus the EnergyField `Pal.heal`
+  colour and layer.
+- `MindSimHost::unit_ability_draws` exposes the live rows. New
+  `render/unit_abilities.rs` draws EnergyField (`Layer.bullet - 0.001`) and
+  SuppressionField (`Layer.effect`, deterministic splitmix particle scatter);
+  `render/shields.rs` draws ForceField polygons and ShieldArc regions/arcs in
+  the existing shield group.
+- Remaining: ArmorPlate/UnitSpawn/MoveLightning are mod-only kinds and are not
+  modelled in the content registry (no vanilla unit uses them); record as a
+  deviation. EnergyField `Drawf.light` is not routed to the light pass.
+
+### T3 — partial
+
+- Weapon-part `layerOffset` now lands in the parts pass. The hand-drawn weapon
+  region/cell quads still bypass `layerOffset` (single mesh, no per-quad z);
+  crawl segments and payload composition remain open.
+
+### T4 — turret part trees — **DONE (code + unit test)**
+
+- `DrawPartKind::HaloPart` and the `HaloPart` fields (`tri`, `shapes`,
+  `triLength*`, `haloRadius*`, `shapeRotation`, `shapeMoveRot`,
+  `haloRotateSpeed`, `haloRotation`) are on `DrawPartSpec`;
+  `PartEmit::draw_part` adapts them onto the existing `draw_halo` and honours
+  `under && turretShading` plus `layerOffset`.
+- `PartProgressSpec` gained the time-wave `SinTime` expression.
+- `turret_parts.rs` now carries `lustre` (three regions with the blended heat
+  progress), `scathe` (blade + child side, mid heat wave, base missile + the
+  three ammo missile variants), `smite` (four regions, two shapes, five halos)
+  and `malign` (four circle shapes, spike, five regions, two halo shapes, five
+  halos, three spines). `turret_parts_cover_the_vanilla_drawers` pins the names,
+  counts and halo kinds. Live firing frames still need the L04 T0 Java batch.

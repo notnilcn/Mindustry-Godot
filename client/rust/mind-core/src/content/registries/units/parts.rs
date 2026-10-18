@@ -24,6 +24,8 @@ pub enum DrawPartKind {
     HoverPart = 2,
     /// `FlarePart`.
     FlarePart = 3,
+    /// `HaloPart` (vanilla turret trees; `malign` et al.).
+    HaloPart = 4,
 }
 
 impl DrawPartKind {
@@ -34,6 +36,7 @@ impl DrawPartKind {
             DrawPartKind::ShapePart => "ShapePart",
             DrawPartKind::HoverPart => "HoverPart",
             DrawPartKind::FlarePart => "FlarePart",
+            DrawPartKind::HaloPart => "HaloPart",
         }
     }
 }
@@ -153,6 +156,16 @@ pub enum PartProgressSpec {
     /// `p -> Mathf.absin(Time.time + offset, scl, mag)` (custom time-wave
     /// progress used by the anthicus blades).
     AbsinTime {
+        /// Time offset.
+        offset: f32,
+        /// Period scale.
+        scl: f32,
+        /// Amplitude.
+        mag: f32,
+    },
+    /// `p -> Mathf.sin(Time.time + offset, scl, mag)` (scathe/malign heat
+    /// waves).
+    SinTime {
         /// Time offset.
         offset: f32,
         /// Period scale.
@@ -305,6 +318,26 @@ pub struct DrawPartSpec {
     pub color1: Rgba,
     /// `FlarePart.color2`.
     pub color2: Rgba,
+    /// `HaloPart.tri`.
+    pub tri: bool,
+    /// `HaloPart.shapes`.
+    pub shapes: i32,
+    /// `HaloPart.triLength`.
+    pub tri_length: f32,
+    /// `HaloPart.triLengthTo` (`<0` = none).
+    pub tri_length_to: f32,
+    /// `HaloPart.haloRadius`.
+    pub halo_radius: f32,
+    /// `HaloPart.haloRadiusTo` (`<0` = none).
+    pub halo_radius_to: f32,
+    /// `HaloPart.shapeRotation`.
+    pub shape_rotation: f32,
+    /// `HaloPart.shapeMoveRot`.
+    pub shape_move_rot: f32,
+    /// `HaloPart.haloRotateSpeed`.
+    pub halo_rotate_speed: f32,
+    /// `HaloPart.haloRotation`.
+    pub halo_rotation: f32,
 }
 
 impl DrawPartSpec {
@@ -370,6 +403,16 @@ impl DrawPartSpec {
             follow_rotation: false,
             color1: pal::TECH_BLUE,
             color2: Rgba::WHITE,
+            tri: false,
+            shapes: 3,
+            tri_length: 1.0,
+            tri_length_to: -1.0,
+            halo_radius: 10.0,
+            halo_radius_to: -1.0,
+            shape_rotation: 0.0,
+            shape_move_rot: 0.0,
+            halo_rotate_speed: 0.0,
+            halo_rotation: 0.0,
         };
         match kind {
             DrawPartKind::RegionPart => {}
@@ -380,6 +423,9 @@ impl DrawPartSpec {
                 spec.radius = 4.0;
                 spec.stroke = 3.0;
                 spec.sides = 4;
+                spec.color = Some(Rgba::WHITE);
+            }
+            DrawPartKind::HaloPart => {
                 spec.color = Some(Rgba::WHITE);
             }
             DrawPartKind::FlarePart => {
@@ -413,5 +459,10 @@ impl DrawPartSpec {
     /// `new FlarePart()` with default fields.
     pub fn flare() -> Self {
         Self::for_kind(DrawPartKind::FlarePart)
+    }
+
+    /// `new HaloPart()` with default fields.
+    pub fn halo() -> Self {
+        Self::for_kind(DrawPartKind::HaloPart)
     }
 }

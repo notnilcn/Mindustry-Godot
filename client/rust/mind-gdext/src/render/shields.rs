@@ -16,11 +16,15 @@
 //! `UnitType.java:1643-1650`).
 
 use godot::classes::notify::CanvasItemNotification;
-use godot::classes::{CanvasGroup, INode2D, Material, Node, Node2D, ShaderMaterial, Time};
+use godot::classes::{
+    CanvasGroup, INode2D, Material, Node, Node2D, ShaderMaterial, Texture2D, Time,
+};
 use godot::obj::Base;
 use godot::prelude::*;
 
 use crate::sim_host::MindSimHost;
+
+use super::canvas::RegionCache;
 
 /// Team colour (`Team.color`) lerped toward white by `clamp(hit)`.
 fn shield_color(team: u8, hit: f32) -> Color {
@@ -63,6 +67,8 @@ pub struct ShieldRenderer {
     /// Group-composite material (`shield_group.gdshader`), installed by
     /// `build_floor`.
     material: Option<Gd<ShaderMaterial>>,
+    /// Shield-arc region textures (L04 T2).
+    regions: RegionCache,
 }
 
 #[godot_api]
@@ -74,6 +80,7 @@ impl INode2D for ShieldRenderer {
             animated: false,
             last_animated: None,
             material: None,
+            regions: RegionCache::new(),
         }
     }
 
@@ -104,11 +111,177 @@ impl INode2D for ShieldRenderer {
         let host = host.bind();
         let domes = host.force_shields();
         let bubbles = host.unit_shields();
-        if domes.is_empty() && bubbles.is_empty() {
+        // L04 T2: `ForceFieldAbility.draw`/`ShieldArcAbility.draw` both land
+        // on `Layer.shields`, so they share this pass and its group material.
+        let abilities = host.unit_ability_draws();
+        let mut force_fields: Vec<(f32, f32, f32, u8, f32, u8, f32)> = Vec::new();
+        // (pos x, pos y, radius, width, angle, angleOffset, unit rotation,
+        //  team, alpha, region texture, region w, region h, unit x, unit y,
+        //  offsetRegion, widthScale)
+        #[allow(clippy::type_complexity)]
+        let mut arcs: Vec<(
+            f32,
+            f32,
+            f32,
+            f32,
+            f32,
+            f32,
+            f32,
+            u8,
+            f32,
+            Option<Gd<Texture2D>>,
+            f32,
+            f32,
+            f32,
+            f32,
+            bool,
+            f32,
+        )> = Vec::new();
+        let node = self.to_gd().upcast::<Node2D>();
+        for ability in &abilities {
+            match ability.kind {
+                mind_core::content::registries::units::ability::AbilityKind::ForceField => {
+                    if ability.shield <= 0.0 {
+                        continue;
+                    }
+                    let radius = ability.spec.range * ability.state.radius_scale;
+                    if radius <= 0.001 {
+                        continue;
+                    }
+                    force_fields.push((
+                        ability.x,
+                        ability.y,
+                        radius,
+                        ability.spec.sides.clamp(3, 300) as u8,
+                        ability.spec.rotation,
+                        ability.team,
+                        ability.state.alpha,
+                    ));
+                }
+                mind_core::content::registries::units::ability::AbilityKind::ShieldArc => {
+                    if ability.state.radius_scale <= 0.001 {
+                        continue;
+                    }
+                    let (dx, dy) = (
+                        mind_core::fx::angles::trnsx_vec(
+                            ability.rotation - 90.0,
+                            ability.spec.x,
+                            ability.spec.y,
+                        ),
+                        mind_core::fx::angles::trnsy_vec(
+                            ability.rotation - 90.0,
+                            ability.spec.x,
+                            ability.spec.y,
+                        ),
+                    );
+                    let texture = if ability.spec.region.is_empty() {
+                        None
+                    } else {
+                        self.regions.get(&node, &ability.spec.region)
+                    };
+                    let (w, h) = texture
+                        .as_ref()
+                        .map(RegionCache::natural_size)
+                        .unwrap_or((0.0, 0.0));
+                    arcs.push((
+                        ability.x + dx,
+                        ability.y + dy,
+                        ability.spec.range,
+                        ability.spec.width,
+                        ability.spec.angle,
+                        ability.spec.angle_offset,
+                        ability.rotation,
+                        ability.team,
+                        ability.state.alpha,
+                        texture,
+                        w,
+                        h,
+                        ability.x,
+                        ability.y,
+                        ability.spec.offset_region,
+                        ability.state.radius_scale,
+                    ));
+                }
+                _ => {}
+            }
+        }
+        if domes.is_empty() && bubbles.is_empty() && force_fields.is_empty() && arcs.is_empty() {
             return;
         }
         let animated = self.animated;
         let mut base = self.base_mut();
+        for (x, y, radius, sides, rotation, team, alpha) in force_fields {
+            // `ForceFieldAbility.draw` (`ForceFieldAbility.java:129-147`).
+            let color = shield_color(team, alpha.clamp(0.0, 1.0));
+            let points = polygon(sides, x, y, radius, rotation);
+            let packed: PackedVector2Array = points.iter().copied().collect();
+            if animated {
+                base.draw_colored_polygon(&packed, color);
+                continue;
+            }
+            base.draw_colored_polygon(&packed, Color::from_rgba(color.r, color.g, color.b, 0.09));
+            let mut ring = points;
+            if let Some(first) = ring.first().copied() {
+                ring.push(first);
+            }
+            let closed: PackedVector2Array = ring.into_iter().collect();
+            base.draw_polyline_ex(&closed, color).width(1.5).done();
+        }
+        for (
+            px,
+            py,
+            radius,
+            width,
+            angle,
+            angle_offset,
+            rotation,
+            team,
+            alpha,
+            texture,
+            tw,
+            th,
+            unit_x,
+            unit_y,
+            offset_region,
+            width_scale,
+        ) in arcs
+        {
+            // `ShieldArcAbility.draw` (`ShieldArcAbility.java:216-240`).
+            let color = shield_color(team, alpha.clamp(0.0, 1.0));
+            let color = if animated {
+                color
+            } else {
+                Color::from_rgba(color.r, color.g, color.b, 0.4)
+            };
+            if let Some(texture) = texture {
+                let (rx, ry) = if offset_region {
+                    (px, py)
+                } else {
+                    (unit_x, unit_y)
+                };
+                base.draw_set_transform_ex(Vector2::new(rx, ry))
+                    .rotation((rotation - 90.0).to_radians())
+                    .scale(Vector2::new(1.0, width_scale))
+                    .done();
+                base.draw_texture_rect(
+                    &texture,
+                    Rect2::new(Vector2::new(-tw / 2.0, -th / 2.0), Vector2::new(tw, -th)),
+                    false,
+                );
+                base.draw_set_transform(Vector2::ZERO);
+            }
+            // `Lines.arc(pos, radius, angle / 360, rotation + angleOffset - angle / 2)`.
+            let sweep = angle;
+            let start = rotation + angle_offset - angle / 2.0;
+            let steps = ((sweep.abs() / 5.0).ceil() as usize).max(2);
+            let mut points = Vec::with_capacity(steps + 1);
+            for i in 0..=steps {
+                let a = start + sweep * i as f32 / steps as f32;
+                let (sin, cos) = a.to_radians().sin_cos();
+                points.push((px + cos * radius, py + sin * radius));
+            }
+            super::canvas::poly_line(&mut base, &points, width * width_scale, color);
+        }
         for (x, y, radius, sides, rotation, team, hit) in domes {
             let color = shield_color(team, hit);
             let points = polygon(sides, x, y, radius, rotation);

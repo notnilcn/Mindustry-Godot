@@ -189,6 +189,13 @@ pub fn draw_weapon_outline(emit: &mut PartEmit, pose: WeaponPose, weapon: &Weapo
     emit.xscl = prev;
 }
 
+/// The `DrawPart.params` a weapon's parts see (`Weapon.draw`,
+/// `Weapon.java:236-239`): mount warmup/reload/smoothReload/heat/recoil/charge
+/// at the weapon pose.
+pub fn weapon_part_params(pose: WeaponPose, mount: &WeaponMount, weapon: &WeaponDef) -> PartParams {
+    base_params(pose, mount, weapon)
+}
+
 fn base_params(pose: WeaponPose, mount: &WeaponMount, weapon: &WeaponDef) -> PartParams {
     let mut params = PartParams::default();
     let reload = if weapon.reload != 0.0 {
@@ -391,6 +398,29 @@ mod tests {
             &registry,
         )
         .expect("weapon")
+    }
+
+    #[test]
+    fn weapon_part_params_carry_the_mount_state() {
+        let w = weapon();
+        let mut mount = WeaponMount::new(&w);
+        mount.warmup = 0.5;
+        mount.reload = w.reload * 0.25;
+        mount.smooth_reload = 0.75;
+        mount.heat = 0.3;
+        mount.recoil = 0.2;
+        mount.charge = 0.1;
+        let pose = weapon_pose(10.0, 20.0, 90.0, &mount, &w);
+        let params = weapon_part_params(pose, &mount, &w);
+        assert_eq!(params.warmup, 0.5);
+        assert!((params.reload - 0.25).abs() < 1e-5);
+        assert_eq!(params.smooth_reload, 0.75);
+        assert_eq!(params.heat, 0.3);
+        assert_eq!(params.recoil, 0.2);
+        assert_eq!(params.charge, 0.1);
+        assert_eq!(params.x, pose.x);
+        assert_eq!(params.y, pose.y);
+        assert_eq!(params.rotation, pose.rotation + 90.0);
     }
 
     #[test]

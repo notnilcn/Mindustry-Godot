@@ -103,6 +103,38 @@ pub struct AbilitySpec {
     pub cooldown: f32,
     /// `ForceFieldAbility.breakSound`.
     pub break_sound: SoundId,
+    /// `EnergyFieldAbility.effectRadius`.
+    pub effect_radius: f32,
+    /// `EnergyFieldAbility.blinkScl`.
+    pub blink_scl: f32,
+    /// `EnergyFieldAbility.blinkSize`.
+    pub blink_size: f32,
+    /// `EnergyFieldAbility.sectorRad`.
+    pub sector_rad: f32,
+    /// `EnergyFieldAbility.rotateSpeed`.
+    pub rotate_speed: f32,
+    /// `EnergyFieldAbility.sectors`.
+    pub sectors: i32,
+    /// `EnergyFieldAbility.layer` / `SuppressionFieldAbility.layer`.
+    pub layer: f32,
+    /// `SuppressionFieldAbility.orbMidScl`.
+    pub orb_mid_scl: f32,
+    /// `SuppressionFieldAbility.orbSinScl`.
+    pub orb_sin_scl: f32,
+    /// `SuppressionFieldAbility.orbSinMag`.
+    pub orb_sin_mag: f32,
+    /// `SuppressionFieldAbility.particleLen`.
+    pub particle_len: f32,
+    /// `SuppressionFieldAbility.rotateScl`.
+    pub rotate_scl: f32,
+    /// `SuppressionFieldAbility.particleLife`.
+    pub particle_life: f32,
+    /// `ShieldArcAbility.angleOffset`.
+    pub angle_offset: f32,
+    /// `ShieldArcAbility.drawArc`.
+    pub draw_arc: bool,
+    /// `ShieldArcAbility.offsetRegion`.
+    pub offset_region: bool,
     /// `StatusFieldAbility.effect` (status name).
     pub effect: Option<&'static str>,
     /// `StatusFieldAbility.duration` / `EnergyFieldAbility.statusDuration`.
@@ -178,6 +210,22 @@ impl AbilitySpec {
             regen: 0.1,
             cooldown: 60.0 * 5.0,
             break_sound: SoundId::SHIELD_BREAK_SMALL,
+            effect_radius: 5.0,
+            blink_scl: 20.0,
+            blink_size: 0.1,
+            sector_rad: 0.14,
+            rotate_speed: 0.5,
+            sectors: 5,
+            layer: crate::render::layer::Layer::Effect.z(),
+            orb_mid_scl: 0.33,
+            orb_sin_scl: 8.0,
+            orb_sin_mag: 1.0,
+            particle_len: 7.0,
+            rotate_scl: 3.0,
+            particle_life: 110.0,
+            angle_offset: 0.0,
+            draw_arc: true,
+            offset_region: false,
             effect: None,
             duration: 60.0,
             status: None,
@@ -210,6 +258,7 @@ impl AbilitySpec {
             AbilityKind::ShieldRegenField | AbilityKind::RepairField => {}
             AbilityKind::ForceField | AbilityKind::ShieldArc => {
                 spec.max = 200.0;
+                spec.layer = crate::render::layer::Layer::Shields.z();
             }
             AbilityKind::StatusField => {}
             AbilityKind::EnergyField => {
@@ -217,6 +266,8 @@ impl AbilitySpec {
                 spec.heal_percent = 3.0;
                 spec.duration = 60.0 * 6.0;
                 spec.status = Some("electrified");
+                spec.color = Some(pal::HEAL);
+                spec.layer = crate::render::layer::Layer::Bullet.z() - 0.001;
             }
             AbilityKind::SuppressionField => {
                 spec.reload = 60.0 * 1.5;

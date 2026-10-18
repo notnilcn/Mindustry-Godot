@@ -73,8 +73,10 @@ mod shadow;
 mod shields;
 mod status;
 mod turret;
+mod unit_abilities;
 mod unit_build;
 mod unit_overlays;
+mod unit_parts;
 pub(crate) mod units;
 mod weather;
 
@@ -939,11 +941,50 @@ impl MindWorldRenderer {
             // z - 1f)`, `UnitType.java:1494-1497`).
             self.band_node_at(BandKey::base(Layer::Darkness)),
         ];
+        // L04 T1: unit/weapon `DrawPart` pass. Three nodes per unit band:
+        // weapon under-parts (below the body mesh), unit parts + weapon
+        // over-parts, and the additive half. `z_index` keeps the pass above
+        // the lazily-created body meshes regardless of child order.
+        for (band_index, band) in unit_bands.iter().take(3).enumerate() {
+            let Some(band) = band else {
+                continue;
+            };
+            for phase in [
+                unit_parts::PartsPhase::Under,
+                unit_parts::PartsPhase::Over,
+                unit_parts::PartsPhase::OverAdditive,
+            ] {
+                let mut node = unit_parts::UnitPartsRenderer::new_alloc();
+                node.bind_mut().band = band_index;
+                node.bind_mut().phase = phase;
+                node.set_name(&format!("UnitParts-{band_index}-{phase:?}"));
+                // code-instantiated: one part pass per (unit band, blend);
+                // the count is fixed by the pipeline, not by content.
+                band.clone().add_child(&node);
+            }
+        }
         self.units = Some(UnitRenderer::new(
             host.clone(),
             self.assets.clone(),
             unit_bands,
         ));
+        // L04 T2: energy fields draw under bullets (`Layer.bullet - 0.001`),
+        // suppression fields at `Layer.effect`.
+        if let Some(bullet_band) = self.band_node_at(BandKey::base(Layer::Bullet)) {
+            let mut node = unit_abilities::AbilityFieldRenderer::new_alloc();
+            node.set_name("EnergyFieldRenderer");
+            node.bind_mut().mode = unit_abilities::AbilityFieldMode::EnergyField;
+            node.set_z_index(-1);
+            // code-instantiated: one ability-field pass per layer.
+            bullet_band.clone().add_child(&node);
+        }
+        if let Some(effect_band) = self.band_node_at(BandKey::base(Layer::Effect)) {
+            let mut node = unit_abilities::AbilityFieldRenderer::new_alloc();
+            node.set_name("SuppressionFieldRenderer");
+            node.bind_mut().mode = unit_abilities::AbilityFieldMode::SuppressionField;
+            // code-instantiated: one ability-field pass per layer.
+            effect_band.clone().add_child(&node);
+        }
         if let Some(light_band) = self.band_node_at(BandKey::base(Layer::Light)) {
             self.light = Some(LightRenderer::new(host.clone(), light_band, &self.shaders));
         }
