@@ -52,6 +52,10 @@ __pycache__/
 session.json
 .kimi-code/
 
+# Per-session parity runtime (tools/parity-session.sh): XDG data/cache, pids,
+# MCP shim, Godot shader caches and identity tokens. Regenerated on start.
+.opencode/parity-session/
+
 # OpenCode loop/goal plugin runtime state
 .opencode/opencode-loop/
 .opencode/goals/
