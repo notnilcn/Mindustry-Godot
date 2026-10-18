@@ -725,6 +725,49 @@ pub struct EditorItem {
     pub wide: bool,
 }
 
+/// `Layer` constants in `Layer.java` declaration order.
+///
+/// `SetMarkerStatement.rebuild` reflects every public static float field of
+/// `Layer` into the draw-layer list (`LStatements.java:2415-2428`), so the
+/// order and values are the display ABI.
+pub const MARKER_LAYERS: &[(&str, f32)] = &[
+    ("min", -11.0),
+    ("background", -10.0),
+    ("floor", 0.0),
+    ("scorch", 10.0),
+    ("debris", 20.0),
+    ("blockUnder", 29.5),
+    ("block", 30.0),
+    ("blockCracks", 30.1),
+    ("blockAfterCracks", 30.2),
+    ("blockAdditive", 31.0),
+    ("blockProp", 32.0),
+    ("blockOver", 35.0),
+    ("blockBuilding", 40.0),
+    ("turret", 50.0),
+    ("turretHeat", 50.1),
+    ("groundUnit", 60.0),
+    ("power", 70.0),
+    ("legUnit", 75.0),
+    ("darkness", 80.0),
+    ("plans", 85.0),
+    ("flyingUnitLow", 90.0),
+    ("bullet", 100.0),
+    ("effect", 110.0),
+    ("flyingUnit", 115.0),
+    ("overlayUI", 120.0),
+    ("buildBeam", 122.0),
+    ("shields", 125.0),
+    ("weather", 130.0),
+    ("light", 140.0),
+    ("playerName", 150.0),
+    ("fogOfWar", 155.0),
+    ("space", 160.0),
+    ("end", 200.0),
+    ("endPixeled", 210.0),
+    ("max", 220.0),
+];
+
 /// One option of an editor enum select (`LStatement.showSelect`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EditorOption {
