@@ -1656,6 +1656,16 @@ mod tests {
     }
 
     #[test]
+    fn marker_layers_follow_layer_java() {
+        // `Layer.class.getFields()`: 35 public static floats in source order.
+        assert_eq!(MARKER_LAYERS.len(), 35);
+        assert_eq!(MARKER_LAYERS[0], ("min", -11.0));
+        assert_eq!(MARKER_LAYERS[6], ("block", 30.0));
+        assert_eq!(MARKER_LAYERS[8], ("blockAfterCracks", 30.2));
+        assert_eq!(MARKER_LAYERS[34], ("max", 220.0));
+    }
+
+    #[test]
     fn statement_count_is_53() {
         assert_eq!(STATEMENT_COUNT, 53);
         assert_eq!(all_statements().len(), 53);
