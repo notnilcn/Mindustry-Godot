@@ -108,7 +108,7 @@ func _tag(name: String) -> String:
 
 func _add_info(parent: VBoxContainer, label_key: String, value: String) -> void:
 	var label := MindWidgets.label(_t(label_key))
-	label.add_theme_color_override("default_color", Color.GRAY)
+	label.add_theme_color_override("default_color", MindStyles.ARC_GRAY)
 	parent.add_child(label)
 	var text := MindWidgets.label(value)
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

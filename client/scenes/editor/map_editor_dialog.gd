@@ -481,7 +481,7 @@ func _refresh() -> void:
 func _refresh_undo(button: Button, glyph: Label, enabled: bool) -> void:
 	button.disabled = not enabled
 	if glyph != null:
-		glyph.modulate = Color.WHITE if enabled else Color.GRAY
+		glyph.modulate = Color.WHITE if enabled else MindStyles.ARC_GRAY
 
 
 func _refresh_config(block: String) -> void:

@@ -27,6 +27,11 @@ const BLACK_9 := Color(0.0, 0.0, 0.0, 0.9)
 ## whiteui.tint(Pal.darkestestGray)` (`ui/Styles.java:113-114`, `Pal.java:61-62`);
 ## the port's bluish 95% values showed as a (39,44,51) save card against Java's
 ## (25,25,25) in L01 T3 (java/load.png).
+## Arc `Color.gray` (0x7f7f7fff) and `Color.lightGray` (0xbfbfbfff). Godot's
+## named `Color.GRAY` is X11 #BEBEBE (~Arc lightGray) and `LIGHT_GRAY` #D3D3D3,
+## so ports of Arc's names use these instead.
+const ARC_GRAY := Color(0x7f7f7fff)
+const ARC_LIGHT_GRAY := Color(0xbfbfbfff)
 const GRAY_PANEL := Color(0.1, 0.1, 0.1, 1.0)
 const GRAY_PANEL_DARK := Color(0.05, 0.05, 0.05, 1.0)
 

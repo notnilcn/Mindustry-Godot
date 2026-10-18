@@ -211,7 +211,7 @@ static func _apply_flat_toggle_menu(button: Button) -> void:
 	button.add_theme_color_override("font_hover_color", Color.WHITE)
 	button.add_theme_color_override("font_pressed_color", Color.WHITE)
 	button.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
-	button.add_theme_color_override("font_disabled_color", Color.GRAY)
+	button.add_theme_color_override("font_disabled_color", MindStyles.ARC_GRAY)
 
 
 ## `Gamemode.valid(map)` per visible mode (`Gamemode.all`, `MindPreview.map_modes`).

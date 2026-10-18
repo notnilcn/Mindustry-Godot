@@ -209,7 +209,7 @@ func _draw_plot() -> void:
 	var mark := 0
 	while mark < int(max_y):
 		var cy := base_y - mark * graph_h / max_y
-		_plot.draw_line(Vector2(0.0, cy), Vector2(width, cy), Color(Color.LIGHT_GRAY, 0.1), STROKE)
+		_plot.draw_line(Vector2(0.0, cy), Vector2(width, cy), Color(MindStyles.ARC_LIGHT_GRAY, 0.1), STROKE)
 		_plot.draw_string(font, Vector2(0.0, cy + fh / 2.0), str(mark), HORIZONTAL_ALIGNMENT_LEFT,
 			-1, font_size, Color.WHITE)
 		mark += mark_space
@@ -220,12 +220,12 @@ func _draw_plot() -> void:
 	for i in columns:
 		var cx := graph_x + spacing * (i + _from)
 		if cx >= 0.0 and cx <= width:
-			_plot.draw_line(Vector2(cx, tick_y), Vector2(cx, tick_y - 4.0), Color.LIGHT_GRAY, STROKE)
+			_plot.draw_line(Vector2(cx, tick_y), Vector2(cx, tick_y - 4.0), MindStyles.ARC_LIGHT_GRAY, STROKE)
 		if i == selcol:
 			var text := str(i + _from + 1)
 			var text_w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 			_plot.draw_string(font, Vector2(cx - text_w / 2.0, tick_y + 2.0 + fh), text,
-				HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color.LIGHT_GRAY)
+				HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, MindStyles.ARC_LIGHT_GRAY)
 
 
 ## `endLine()`: 3 px segments with round joints, a bigger dot on the last point.
@@ -363,7 +363,7 @@ func _sync_legend(units: Array) -> void:
 		var color: Color = (parts[1] as ColorRect).get_meta("color")
 		(parts[1] as ColorRect).color = Color(color.r * 0.5, color.g * 0.5, color.b * 0.5, color.a * 0.5) \
 			if hidden else color
-		(parts[2] as TextureRect).modulate = Color.GRAY if hidden else Color.WHITE
+		(parts[2] as TextureRect).modulate = MindStyles.ARC_GRAY if hidden else Color.WHITE
 
 
 func _bundle(key: String) -> String:

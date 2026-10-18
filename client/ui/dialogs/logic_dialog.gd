@@ -776,7 +776,7 @@ func _apply_node_field(edit: LineEdit, color: Color) -> void:
 	var normal := _underline_box(color)
 	edit.add_theme_stylebox_override("normal", normal)
 	edit.add_theme_stylebox_override("focus", _underline_box(color))
-	edit.add_theme_stylebox_override("read_only", _underline_box(Color.GRAY))
+	edit.add_theme_stylebox_override("read_only", _underline_box(MindStyles.ARC_GRAY))
 	edit.add_theme_color_override("font_color", Color.WHITE)
 
 

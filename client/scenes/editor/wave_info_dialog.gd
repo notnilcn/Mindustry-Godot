@@ -356,7 +356,7 @@ func _group_card(group: Dictionary, index: int) -> Control:
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(spacer)
 	var begin := MindWidgets.label(str(int(group.get("begin", 0)) + 1))
-	begin.add_theme_color_override("font_color", Color.LIGHT_GRAY)
+	begin.add_theme_color_override("font_color", MindStyles.ARC_LIGHT_GRAY)
 	begin.custom_minimum_size.x = 45.0
 	begin.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	begin.mouse_filter = Control.MOUSE_FILTER_IGNORE

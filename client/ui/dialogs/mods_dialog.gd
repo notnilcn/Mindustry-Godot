@@ -493,7 +493,7 @@ func _add_mod_row(entry: Dictionary) -> void:
 		# code-instantiated: update row from the `withUpdates` set (browser listing).
 		var update := _gray_button()
 		var update_row := _button_row(update, BoxContainer.ALIGNMENT_BEGIN)
-		update_row.add_child(MindWidgets.glyph("download", 24, Color.LIGHT_GRAY))
+		update_row.add_child(MindWidgets.glyph("download", 24, MindStyles.ARC_LIGHT_GRAY))
 		update_row.add_child(_row_label(MindWidgets.markup_format("@mods.update.available", [_updates[name]])))
 		update.pressed.connect(_update_mod.bind(name))
 		_list.add(update).grow_x_axis().height(48.0).set_pad_left(4.0).set_pad_right(4.0)

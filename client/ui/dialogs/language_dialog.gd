@@ -138,7 +138,7 @@ func _apply_flat_toggle_style(button: Button) -> void:
 	button.add_theme_color_override("font_hover_color", Color.WHITE)
 	button.add_theme_color_override("font_pressed_color", Color.WHITE)
 	button.add_theme_color_override("font_hover_pressed_color", Color.WHITE)
-	button.add_theme_color_override("font_disabled_color", Color.GRAY)
+	button.add_theme_color_override("font_disabled_color", MindStyles.ARC_GRAY)
 
 
 func _flat_box(fill: Color, border: int) -> StyleBoxFlat:

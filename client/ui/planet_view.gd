@@ -229,7 +229,7 @@ func _status_color(sector: Dictionary) -> Variant:
 		return SHARDED.lerp(CRUX, 0.5 if bool(sector.get("has_enemy_base", false)) else 0.0)
 	if not str(sector.get("preset", "")).is_empty() and bool(sector.get("require_unlock", false)):
 		# `derelict.lerp(white, absin(time, 10, 1))` (`PlanetDialog.java:463`).
-		return DERELICT.lerp(Color.WHITE, _preset_pulse()) if bool(sector.get("preset_unlocked", false)) else Color.GRAY
+		return DERELICT.lerp(Color.WHITE, _preset_pulse()) if bool(sector.get("preset_unlocked", false)) else MindStyles.ARC_GRAY
 	if bool(sector.get("has_enemy_base", false)):
 		return CRUX
 	return null

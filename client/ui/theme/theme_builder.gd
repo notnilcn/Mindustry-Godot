@@ -112,7 +112,7 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_color("font_color", name, Color.WHITE)
 				theme.set_color("font_hover_color", name, Color.WHITE)
 				theme.set_color("font_pressed_color", name, Color.WHITE)
-				theme.set_color("font_disabled_color", name, Color.GRAY)
+				theme.set_color("font_disabled_color", name, MindStyles.ARC_GRAY)
 			elif name == "grayt":
 				# `Styles.grayt` (Styles.java:157-165): `up = grayPanel`,
 				# `over`/`down = flatOver` (#454545), `disabled = grayPanelDark`
@@ -147,7 +147,7 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("pressed", name, _flat_down_frame())
 				theme.set_stylebox("disabled", name, flat(MindStyles.BLACK_6))
 				theme.set_color("icon_normal_color", name, Color.WHITE)
-				theme.set_color("icon_disabled_color", name, Color.LIGHT_GRAY)
+				theme.set_color("icon_disabled_color", name, MindStyles.ARC_LIGHT_GRAY)
 			elif name == "flatt":
 				# `Styles.flatt` (Styles.java:147-155): `up = black`,
 				# `over`/`down = flatOver`.
@@ -164,7 +164,7 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("pressed", name, _flat_down_frame())
 				theme.set_stylebox("hover_pressed", name, _flat_down_frame())
 				theme.set_stylebox("disabled", name, flat(Color.BLACK))
-				theme.set_color("font_disabled_color", name, Color.GRAY)
+				theme.set_color("font_disabled_color", name, MindStyles.ARC_GRAY)
 			elif name == "squareTogglet":
 				# `Styles.squareTogglet` (Styles.java:250-259): `up = pane`,
 				# `over`/`down`/`checked = flatOver`, `disabled = black`.
@@ -174,7 +174,7 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("pressed", name, over)
 				theme.set_stylebox("hover_pressed", name, over)
 				theme.set_stylebox("disabled", name, flat(Color.BLACK))
-				theme.set_color("font_disabled_color", name, Color.GRAY)
+				theme.set_color("font_disabled_color", name, MindStyles.ARC_GRAY)
 			elif name == "fullTogglet":
 				# `Styles.fullTogglet` (Styles.java:240-249): `up`/`disabled =
 				# black`, `over`/`down`/`checked = flatOver`; gray disabled text.
@@ -184,7 +184,7 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("pressed", name, over)
 				theme.set_stylebox("hover_pressed", name, over)
 				theme.set_stylebox("disabled", name, flat(Color.BLACK))
-				theme.set_color("font_disabled_color", name, Color.GRAY)
+				theme.set_color("font_disabled_color", name, MindStyles.ARC_GRAY)
 			elif name == "selecti":
 				# `Styles.selecti` (Styles.java:283-286): `checked = buttonSelect`
 				# (the accent 9-patch frame), `up = none`. The checked state is
@@ -325,7 +325,7 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox(str(state[0]), name, field_box)
 			theme.set_stylebox("focus", name, StyleBoxEmpty.new())
 			theme.set_color("font_color", name, Color.WHITE)
-			theme.set_color("font_placeholder_color", name, Color.GRAY)
+			theme.set_color("font_placeholder_color", name, MindStyles.ARC_GRAY)
 		"CheckBox":
 			# `Styles.defaultCheck` (`ui/Styles.java:446-456`): the round
 			# `checkOn`/`checkOff` textures with their disabled variants

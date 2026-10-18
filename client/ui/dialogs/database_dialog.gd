@@ -305,11 +305,11 @@ func _entry_button(entry_variant: Variant) -> Button:
 		button.expand_icon = true
 		button.add_theme_constant_override("icon_max_width", int(ICON_MED))
 		# `new Image(uiIcon, Color.lightGray)` lerping to white while hovered.
-		button.add_theme_color_override("icon_normal_color", Color.LIGHT_GRAY)
+		button.add_theme_color_override("icon_normal_color", MindStyles.ARC_LIGHT_GRAY)
 		button.add_theme_color_override("icon_hover_color", Color.WHITE)
 		button.add_theme_color_override("icon_pressed_color", Color.WHITE)
 		button.add_theme_color_override("icon_hover_pressed_color", Color.WHITE)
-		button.add_theme_color_override("icon_focus_color", Color.LIGHT_GRAY)
+		button.add_theme_color_override("icon_focus_color", MindStyles.ARC_LIGHT_GRAY)
 		button.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
 		button.add_theme_stylebox_override("hover", StyleBoxEmpty.new())
 		button.add_theme_stylebox_override("pressed", StyleBoxEmpty.new())

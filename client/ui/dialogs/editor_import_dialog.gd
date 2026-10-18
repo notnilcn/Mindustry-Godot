@@ -65,7 +65,7 @@ func _add_entry(root: MindTable, name_key: String, desc_key: String, icon: Strin
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text.add_child(name_label)
 	var description := MindWidgets.label(_t(desc_key))
-	description.add_theme_color_override("default_color", Color.GRAY)
+	description.add_theme_color_override("default_color", MindStyles.ARC_GRAY)
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	description.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	text.add_child(description)

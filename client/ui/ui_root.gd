@@ -831,7 +831,7 @@ func show_message_edit(text: String, max_text: int, max_newlines: int, on_ok: Ca
 	area.custom_minimum_size = Vector2(380.0, 160.0)
 	area.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	var counter := Label.new()
-	counter.add_theme_color_override("font_color", Color.LIGHT_GRAY)
+	counter.add_theme_color_override("font_color", MindStyles.ARC_LIGHT_GRAY)
 	counter.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	var last := [area.text]
 	var refresh := func() -> void:

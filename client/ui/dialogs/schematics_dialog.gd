@@ -261,7 +261,7 @@ func _rebuild_list() -> void:
 			_list.add(MindWidgets.label(_t("@none.found")))
 		else:
 			var none := MindWidgets.label(_t("@none"))
-			none.modulate = Color.LIGHT_GRAY
+			none.modulate = MindStyles.ARC_LIGHT_GRAY
 			_list.add(none)
 		_list.row()
 	_list.call_deferred("sort_now")
