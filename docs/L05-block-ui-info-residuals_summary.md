@@ -1,5 +1,5 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
-# L05 — Block UI, hover bars, content info, hints (wave 3: T2, T3 + stretch; T1 session B, T4–T5 wave 4)
+# L05 — Block UI, hover bars, content info, hints (wave 3: T2, T3 + stretch; wave 4: T4, T5; T1 session B)
 
 Session A (session 2: worktree `Mindustry-Godot-session2`, branch `parity/session-2`, display `:11`, bridge 6980).
 Owner of this summary; session B reports L05 T1 (hover bars, PAR-0379) for merging in.
@@ -11,8 +11,8 @@ Owner of this summary; session B reports L05 T1 (hover bars, PAR-0379) for mergi
 | T1 hover bars (PAR-0379) | session B, wave 4 | — |
 | T2 bespoke config panels (PAR-0380) | **partial** | LightBlock ColorPicker and the MessageBlock edit dialog match Java. TargetDummy and CoreBlock team toggles are blocked on sim support (below). |
 | T3 content info stat families (PAR-0301, PAR-0427) | **done** | The plan's eight contents plus copper are row-for-row with Java; layout residue is recorded. |
-| T4 hint predicates (PAR-0302) | pending (wave 4) | |
-| T5 | pending (wave 4) | |
+| T4 hint predicates (PAR-0302) | **done (wave 4)** | A table test covers all 27 `DefaultHint`s; the `presetLaunch` completion is fixed; `respawn` is mobile-only; the `desktopPause` completion is a recorded deviation. |
+| T5 `ItemSelection` icon size | **done (wave 4), MATCH** | Icons at `clamp(selectionSize, 0, 40)`: 24 px for items (were ~32). |
 | Stretch | PAR-0425, PAR-0428, PAR-0430 fixed; PAR-0426 and PAR-0435 root cause recorded | |
 
 ## Commits
@@ -24,6 +24,8 @@ dbb697ca L05 T3: content info stat families row-for-row with Java (PAR-0301, PAR
 bbe7b8ec L05 stretch: clicking the selected palette block deselects it (PAR-0425)
 896f1622 L05 stretch: Custom Rules rows use the category pad(5) (PAR-0430)
 4325fba2 L05 stretch: Research items box and button row match Java (PAR-0428)
+5d99cb45 L05 T5: ItemSelection icons at clamp(selectionSize, 0, 40)            (wave 4)
+0b8a8296 L05 T4: hint predicate table over every DefaultHint (PAR-0302)          (wave 4)
 ```
 
 ## T2 — bespoke config panels (`runs/20261018-s2-L05-T2/notes.md`)
@@ -143,6 +145,38 @@ Method:
   out at the minimum. That is a layout-engine change, best done with an Arc-style min/pref interpolation in
   `MindTable`.
 
+## T4 — hint predicates (wave 4)
+
+- **Table test.** `ui_widgets_check.gd` `_check_hint_table` runs over all 27 `HintsFragment.DefaultHint` entries
+  (`HintsFragment.java:169-304`). For every desktop hint it checks:
+  - the hint is in the port's `HINTS`;
+  - each key its fixture reads is produced by `MindSimHost.hint_state_json` (`hint_state_value`) or the campaign
+    sector state;
+  - `_hint_shown` is true for a fixture that satisfies Java's `shown` predicate (the selected block comes from a
+    SimHost stub) and false on an empty state.
+- **Producers.** Every one exists:
+  - events `break`/`derelictbreak` (`sim/builder.rs`), `fire`, `cannotupgrade`, `factorycontrol` (`sim/mod.rs`
+    hint events), `derelictmouse` (`sim_host.rs`);
+  - hint keys `shoot`, `pick_tap`, `diagonal_release`, `schematic_select_release`, `boost_down`, `rebuild_selecting`
+    (`input/desktop.rs`).
+  - No hint is left without a producer. The "fungal pass" hint is `unitSelectControl`, gated on
+    `fungal_pass_saved` (produced).
+- **Fixed.** `presetLaunch` completed on any preset; Java completes it only on `frozenForest`
+  (`HintsFragment.java:289-292`).
+- **Recorded:**
+  - `respawn` is `visibleMobile`, so it is not in the desktop `HINTS`;
+  - `desktopPause` completes when the game is paused by any path, where Java requires `keyTap(Binding.pause)`. No
+    pause-tap hint key exists, and the pause binding is not routed through MindInput.
+
+## T5 — `ItemSelection` icon size (wave 4, `runs/20261018-s2-L05-T5/notes.md`)
+
+- **Root cause.** The port set `clamp(selectionSize, 0, 40)` as the icon `TextureRect`'s minimum but kept
+  `EXPAND_KEEP_SIZE`, so the rect never shrank below the ~32 px texture.
+- **Fix.** `MindItemSelection.icon_rect` uses `EXPAND_IGNORE_SIZE` (`ItemSelection.java:70`; `selectionSize` 24/28/30
+  from `desktop.rs`). `ui_widgets_check` pins 24 px and the 40 px clamp.
+- **In-engine.** Item source STAGED with `place_block(95,100)`, opened with a real click.
+  `diff/srccfg-zoom.png` MATCH against `runs/20261017-L-twin/java/22-srccfg.png`.
+
 ## Ledger changes to apply
 
 | Item | Change | Evidence |
@@ -156,8 +190,11 @@ Method:
 | PAR-0426, PAR-0435 | keep open; root cause = Arc min/pref row compression on overflow (layout engine) | this summary |
 | new | Cultivator Affinities missing (sim attribute `-1`, no spores attribute) | `diff/info-cultivator-side.png` |
 | new | TargetDummy config needs an int-array `ConfigValue` + dummy state | T2 above |
+| PAR-0302 | close: table test over every DefaultHint; `presetLaunch` fixed; `respawn` mobile-only and `desktopPause` completion recorded | `0b8a8296` |
+| (L05 T5) | `ItemSelection` icon size verified | `runs/20261018-s2-L05-T5/diff/srccfg-zoom.png` |
 
 ## Done criteria (wave 3 scope)
 - T2: two of four panels match a Java capture; the other two have precise blockers.
 - T3: the plan's pages match Java row for row, with the residue recorded.
-- T1 is session B's in wave 4; T4–T5 are wave 4.
+- T1 is session B's in wave 4.
+- Wave 4: T4's table test landed; T5 landed and matched in-engine.
