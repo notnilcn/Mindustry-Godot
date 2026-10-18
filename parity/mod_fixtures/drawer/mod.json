@@ -1,0 +1,7 @@
+{
+  "name": "Drawer",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "`Block.drawer` string/array/object parse (L08 T3)."
+}

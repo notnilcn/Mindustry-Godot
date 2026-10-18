@@ -1,0 +1,16 @@
+{
+  "name": "Plan Assembler",
+  "type": "UnitAssembler",
+  "size": 3,
+  "health": 900,
+  "plans": [
+    {
+      "unit": "dagger",
+      "time": 600,
+      "requirements": [
+        {"item": "flare", "amount": 4},
+        {"item": "copper-wall-large", "amount": 2}
+      ]
+    }
+  ]
+}

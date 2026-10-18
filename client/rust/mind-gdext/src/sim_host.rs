@@ -84,7 +84,11 @@ pub struct UnitDraw {
     pub health: f32,
     /// Active status effects with view parameters `(effect, chance, color)`
     /// (`StatusEffect.update` particles; H03 T10).
-    pub statuses: Vec<(mind_core::content::EffectId, f32, mind_core::content::Rgba)>,
+    pub statuses: Vec<(
+        mind_core::content::registries::fx_meta::EffectRef,
+        f32,
+        mind_core::content::Rgba,
+    )>,
     /// `isGrounded()` = `elevation < 0.001` (`UnitComp.java:80-82`; H03 T10).
     pub grounded: bool,
     /// `UnitType.hovering` (walk-effect gate; H03 T10).
@@ -5793,10 +5797,13 @@ impl MindSimHost {
                             .iter()
                             .filter_map(|entry| content.status(entry.effect))
                             .filter(|def| {
-                                def.effect != mind_core::content::EffectId::NONE
-                                    && def.effect_chance > 0.0
+                                !matches!(
+                                    &def.effect,
+                                    mind_core::content::registries::fx_meta::EffectRef::Named(id)
+                                        if *id == mind_core::content::EffectId::NONE
+                                ) && def.effect_chance > 0.0
                             })
-                            .map(|def| (def.effect, def.effect_chance, def.color))
+                            .map(|def| (def.effect.clone(), def.effect_chance, def.color))
                             .collect()
                     })
                     .unwrap_or_default();

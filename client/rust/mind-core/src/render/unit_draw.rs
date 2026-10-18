@@ -25,6 +25,7 @@
 //! Mathf.absin(Time.time, max(f*5, 1), 1-f))` with Arc's
 //! `absin(in, scl, mag) = (sin(in/(scl*2))*mag + mag)/2`.
 
+use crate::content::registries::fx_meta::EffectRef;
 use crate::render::drawf;
 
 /// `MechComp.walkExtend` (`MechComp.java:75-88`).
@@ -521,13 +522,18 @@ pub struct UnitFxInput {
 pub fn advance_unit_fx(
     state: &mut UnitViewState,
     input: &UnitFxInput,
-    statuses: &[(crate::content::EffectId, f32, crate::content::Rgba)],
+    statuses: &[(EffectRef, f32, crate::content::Rgba)],
     delta_ticks: f32,
     rand: &mut dyn FnMut() -> f32,
     out: &mut Vec<ViewEffect>,
 ) {
     for (effect, chance, color) in statuses {
         if rand() < chance * delta_ticks {
+            // Inline effects (mod `MultiEffect`/`ExplosionEffect` specs) are
+            // content metadata for plan 17; the view FX sink plays named ids.
+            let EffectRef::Named(effect) = effect else {
+                continue;
+            };
             let angle = rand() * std::f32::consts::TAU;
             let length = (rand() * 2.0 - 1.0) * input.hit_size / 2.0;
             out.push((
@@ -995,7 +1001,7 @@ mod tests {
             unit_land: EffectId::NONE,
             ripple: EffectId(9),
         };
-        let statuses = [(EffectId(7), 0.5, Rgba::default())];
+        let statuses = [(EffectRef::Named(EffectId(7)), 0.5, Rgba::default())];
         let mut state = UnitViewState::default();
         // Rolls in order: chance 0.1 (< 0.5) emits, angle 0.25 turn, length
         // (0.75*2-1)*hitSize/2 = +2.

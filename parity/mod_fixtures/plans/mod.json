@@ -1,0 +1,7 @@
+{
+  "name": "Plans",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "Unit factory and assembler `plans` JSON parse (L08 T3)."
+}

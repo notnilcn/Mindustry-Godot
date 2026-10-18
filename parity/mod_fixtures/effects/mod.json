@@ -1,0 +1,7 @@
+{
+  "name": "Effects",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "Inline `MultiEffect`/array effect JSON (L08 T3)."
+}

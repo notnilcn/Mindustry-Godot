@@ -1,0 +1,53 @@
+{
+  "name": "FX Mech",
+  "type": "mech",
+  "health": 350,
+  "speed": 0.55,
+  "weapons": [
+    {
+      "name": "fx-gun",
+      "reload": 25,
+      "mirror": false,
+      "shootSound": "shoot",
+      "activeSound": "loopUnitBuilding",
+      "ejectEffect": "smoke",
+      "shootOnDeathEffect": {
+        "type": "ExplosionEffect",
+        "waveRad": 24,
+        "sparks": 8
+      },
+      "shootStatus": "wet",
+      "shootStatusDuration": 120,
+      "heatColor": "ff0000",
+      "recoil": 2.5,
+      "inaccuracy": 3,
+      "parts": [
+        {
+          "type": "RegionPart",
+          "suffix": "-barrel",
+          "x": 1,
+          "y": 2,
+          "mirror": true,
+          "progress": "recoil",
+          "moveY": -2,
+          "blending": "additive",
+          "color": "00ff00",
+          "heatColor": "ff0000"
+        },
+        {
+          "type": "ShapePart",
+          "circle": true,
+          "radius": 4,
+          "color": [1, 0, 0, 1]
+        }
+      ],
+      "bullet": {
+        "type": "BasicBulletType",
+        "damage": 12,
+        "speed": 5,
+        "shootEffect": "shootSmall",
+        "hitEffect": "hitBulletSmall"
+      }
+    }
+  ]
+}

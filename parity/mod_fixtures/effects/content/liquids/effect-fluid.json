@@ -1,0 +1,9 @@
+{
+  "name": "Effect Fluid",
+  "color": "00ffff",
+  "particleEffect": {
+    "type": "WaveEffect",
+    "sizeTo": 9
+  },
+  "vaporEffect": ["smoke", "explosion"]
+}

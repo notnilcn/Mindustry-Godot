@@ -1,0 +1,21 @@
+{
+  "name": "Plan Factory",
+  "type": "UnitFactory",
+  "size": 3,
+  "health": 600,
+  "plans": [
+    {
+      "unit": "dagger",
+      "time": 120,
+      "requirements": [
+        {"item": "copper", "amount": 10},
+        {"item": "lead", "amount": 5}
+      ]
+    },
+    {
+      "unit": "flare",
+      "time": 240,
+      "requirements": ["silicon/15"]
+    }
+  ]
+}

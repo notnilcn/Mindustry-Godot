@@ -1,0 +1,12 @@
+{
+  "name": "Effect Aura",
+  "effect": {
+    "type": "MultiEffect",
+    "effects": [
+      "smoke",
+      {"type": "WrapEffect", "effect": "sparkShoot", "color": "ff00ff"}
+    ]
+  },
+  "applyEffect": ["explosion", "smoke"],
+  "effectChance": 0.5
+}

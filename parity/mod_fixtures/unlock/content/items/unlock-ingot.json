@@ -1,0 +1,20 @@
+{
+  "name": "Unlock Ingot",
+  "description": "A fixture ingot.",
+  "details": "Details line.",
+  "credit": "Fixture Author",
+  "alwaysUnlocked": true,
+  "inlineDescription": false,
+  "hideDetails": false,
+  "hideDatabase": true,
+  "generateIcons": false,
+  "selectionSize": 32,
+  "fullOverride": "item-copper",
+  "allDatabaseTabs": true,
+  "shownPlanets": ["serpulo"],
+  "databaseTabs": ["copper", "serpulo"],
+  "databaseCategory": "material",
+  "databaseTag": "custom",
+  "hardness": 2,
+  "cost": 1.25
+}

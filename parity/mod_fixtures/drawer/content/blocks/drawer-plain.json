@@ -1,0 +1,7 @@
+{
+  "name": "Drawer Plain",
+  "type": "GenericCrafter",
+  "size": 2,
+  "health": 160,
+  "drawer": "DrawDefault"
+}
