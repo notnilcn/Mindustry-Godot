@@ -1,0 +1,44 @@
+{
+  "name": "Effect Mech",
+  "type": "mech",
+  "health": 300,
+  "speed": 0.5,
+  "weapons": [
+    {
+      "name": "effect-gun",
+      "reload": 30,
+      "ejectEffect": ["smoke", "explosion"],
+      "shootOnDeathEffect": {
+        "type": "ExplosionEffect",
+        "waveRad": 20,
+        "sparks": 6
+      },
+      "bullet": {
+        "type": "BasicBulletType",
+        "damage": 5,
+        "speed": 4,
+        "shootEffect": {
+          "type": "MultiEffect",
+          "effects": [
+            "shootSmall",
+            {"type": "WaveEffect", "sizeTo": 12}
+          ]
+        },
+        "hitEffect": ["hitBulletSmall", "explosion"],
+        "despawnEffect": {
+          "type": "WrapEffect",
+          "effect": "smoke",
+          "color": "ff0000"
+        },
+        "smokeEffect": "smoke",
+        "trailEffect": {
+          "type": "MultiEffect",
+          "effects": ["smoke"]
+        },
+        "shootSound": "shoot",
+        "hitSound": "explosion",
+        "hitSoundVolume": 0.5
+      }
+    }
+  ]
+}

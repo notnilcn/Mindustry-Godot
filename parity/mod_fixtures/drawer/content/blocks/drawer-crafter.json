@@ -1,0 +1,25 @@
+{
+  "name": "Drawer Crafter",
+  "type": "GenericCrafter",
+  "size": 3,
+  "health": 420,
+  "drawer": {
+    "type": "DrawMulti",
+    "drawers": [
+      {
+        "type": "DrawRegion",
+        "suffix": "-glow",
+        "rotateSpeed": 1.5,
+        "spinSprite": true,
+        "color": "00ff00",
+        "layer": 10
+      },
+      {
+        "type": "DrawFlame",
+        "flameColor": "ff8800",
+        "flameRadius": 5,
+        "x": 2
+      }
+    ]
+  }
+}

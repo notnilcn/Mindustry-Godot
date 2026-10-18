@@ -1,0 +1,7 @@
+{
+  "name": "Weapon FX",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "Weapon effect, sound and draw-part fields (L08 T3)."
+}

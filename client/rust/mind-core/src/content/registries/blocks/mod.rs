@@ -22,6 +22,7 @@ pub mod campaign;
 pub mod crafting;
 pub mod defense;
 pub mod distribution;
+pub mod drawer;
 pub mod environment;
 pub mod legacy;
 pub mod liquid;
@@ -39,6 +40,7 @@ pub mod units_erekir;
 
 use indexmap::IndexMap;
 
+use self::drawer::DrawerSpec;
 use super::super::bundle::BundleView;
 use super::super::category::Category;
 use super::super::color::Rgba;
@@ -1245,6 +1247,8 @@ pub struct BlockSpec {
     pub upgrades: Vec<(&'static str, &'static str)>,
     /// Assembler plans (`UnitAssembler.plans`).
     pub assembler_plans: Vec<AssemblerUnitPlanSpec>,
+    /// `Block.drawer` (`DrawBlock` tree; plan 17 executes it).
+    pub drawer: Option<DrawerSpec>,
     /// `Drill.drillMultipliers` (item name -> multiplier).
     pub drill_multipliers: Vec<(&'static str, f32)>,
     /// Item capacity.
@@ -1480,6 +1484,7 @@ impl Default for BlockSpec {
             unit_plans: Vec::new(),
             upgrades: Vec::new(),
             assembler_plans: Vec::new(),
+            drawer: None,
             drill_multipliers: Vec::new(),
             item_capacity: None,
             liquid_capacity: None,
@@ -2197,6 +2202,8 @@ pub struct BlockDef {
     pub reconstructor_upgrades: Vec<(UnitTypeId, UnitTypeId)>,
     /// Assembler plans (`UnitAssembler.plans`).
     pub assembler_plans: Vec<AssemblerUnitPlanDef>,
+    /// `Block.drawer` (`DrawBlock` tree; plan 17 executes it).
+    pub drawer: DrawerSpec,
     /// Indices of optional, non-ignored consumers.
     pub optional_consumers: Vec<usize>,
     /// Indices of non-optional, non-ignored consumers.
@@ -2689,6 +2696,7 @@ impl BlockDef {
             unit_plans,
             reconstructor_upgrades,
             assembler_plans,
+            drawer: spec.drawer.unwrap_or_default(),
             optional_consumers: Vec::new(),
             non_optional_consumers: Vec::new(),
             update_consumers: Vec::new(),

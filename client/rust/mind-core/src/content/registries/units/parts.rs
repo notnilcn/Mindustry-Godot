@@ -211,6 +211,8 @@ pub struct DrawPartSpec {
     pub recoil_index: i32,
     /// `RegionPart.suffix` (region suffix, e.g. `"-blade"`).
     pub suffix: String,
+    /// `RegionPart.name` (overrides the region suffix when set).
+    pub name: Option<String>,
     /// `RegionPart.mirror` (drawn on both sides).
     pub mirror: bool,
     /// `RegionPart.outline`.
@@ -350,6 +352,7 @@ impl DrawPartSpec {
             weapon_index: 0,
             recoil_index: -1,
             suffix: String::new(),
+            name: None,
             mirror: false,
             outline: true,
             draw_region: true,

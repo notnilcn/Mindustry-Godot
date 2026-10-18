@@ -1,0 +1,11 @@
+{
+  "name": "Unlock Wall",
+  "description": "A fixture wall.",
+  "alwaysUnlocked": true,
+  "hideDatabase": true,
+  "selectionSize": 16,
+  "databaseCategory": "defense",
+  "databaseTag": "wall",
+  "size": 2,
+  "health": 240
+}

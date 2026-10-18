@@ -1,0 +1,11 @@
+{
+  "name": "Drill Rig",
+  "type": "Drill",
+  "size": 2,
+  "health": 240,
+  "hardnessDrillMultiplier": 1.5,
+  "drillMultipliers": {
+    "copper": 2.5,
+    "lead": 1.25
+  }
+}

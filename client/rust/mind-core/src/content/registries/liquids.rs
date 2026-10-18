@@ -13,7 +13,7 @@ use super::super::id::{LiquidId, StatusId};
 use super::super::load::ContentRegistry;
 use super::super::settings_store::UnlockStore;
 use super::super::{ContentError, ContentType};
-use super::fx_meta::EffectId;
+use super::fx_meta::{EffectId, EffectRef};
 
 /// `CellLiquid` extra fields (neoplasm).
 #[derive(Debug, Clone, PartialEq)]
@@ -95,7 +95,7 @@ pub struct Liquid {
     /// Associated status effect.
     pub effect: StatusId,
     /// Effect shown in puddles.
-    pub particle_effect: EffectId,
+    pub particle_effect: EffectRef,
     /// Particle effect rate spacing in ticks.
     pub particle_spacing: f32,
     /// Temperature at which this liquid vaporizes.
@@ -103,7 +103,7 @@ pub struct Liquid {
     /// If true, puddle size is capped.
     pub cap_puddles: bool,
     /// Effect when this liquid vaporizes.
-    pub vapor_effect: EffectId,
+    pub vapor_effect: EffectRef,
     /// If true, this liquid is hidden in most UI.
     pub hidden: bool,
     /// Liquids this puddle can stay on (insertion-ordered set).
@@ -136,11 +136,11 @@ impl Liquid {
             move_through_blocks: false,
             incinerable: true,
             effect: StatusId::NONE,
-            particle_effect: EffectId::NONE,
+            particle_effect: EffectRef::Named(EffectId::NONE),
             particle_spacing: 60.0,
             boil_point: 2.0,
             cap_puddles: true,
-            vapor_effect: EffectId::VAPOR,
+            vapor_effect: EffectRef::Named(EffectId::VAPOR),
             hidden: false,
             can_stay_on: Vec::new(),
             cell: None,

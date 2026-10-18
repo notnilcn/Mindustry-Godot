@@ -1,0 +1,10 @@
+{
+  "name": "Drawer Array",
+  "type": "GenericCrafter",
+  "size": 2,
+  "health": 180,
+  "drawer": [
+    "DrawDefault",
+    {"type": "DrawRegion", "suffix": "-top"}
+  ]
+}

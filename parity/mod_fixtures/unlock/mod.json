@@ -1,0 +1,7 @@
+{
+  "name": "Unlock",
+  "version": "1.0",
+  "minGameVersion": "146",
+  "author": "fixture",
+  "description": "Every `UnlockableContent` field on mod content (L08 T3)."
+}

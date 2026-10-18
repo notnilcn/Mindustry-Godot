@@ -17,7 +17,7 @@ use super::super::id::StatusId;
 use super::super::load::ContentRegistry;
 use super::super::settings_store::UnlockStore;
 use super::super::{ContentError, ContentType};
-use super::fx_meta::EffectId;
+use super::fx_meta::{EffectId, EffectRef};
 
 /// Game trigger fired by a transition handler (`Trigger.shock`/`blastFreeze`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,9 +151,9 @@ pub struct StatusEffect {
     /// Tint color.
     pub color: Rgba,
     /// Effect that happens randomly on the affected unit.
-    pub effect: EffectId,
+    pub effect: EffectRef,
     /// Effect displayed once when applied.
-    pub apply_effect: EffectId,
+    pub apply_effect: EffectRef,
     /// Whether the apply effect displays when already applied.
     pub apply_extend: bool,
     /// Tint color of the apply effect.
@@ -202,8 +202,8 @@ impl StatusEffect {
             dynamic: false,
             show: true,
             color: Rgba::WHITE,
-            effect: EffectId::NONE,
-            apply_effect: EffectId::NONE,
+            effect: EffectRef::Named(EffectId::NONE),
+            apply_effect: EffectRef::Named(EffectId::NONE),
             apply_extend: false,
             apply_color: Rgba::WHITE,
             parentize_apply_effect: false,
@@ -411,7 +411,7 @@ pub fn load(
         let mut status = StatusEffect::new("burning", bundle, store);
         status.color = hex("ffc455");
         status.damage = 0.167;
-        status.effect = EffectId::BURNING;
+        status.effect = EffectRef::Named(EffectId::BURNING);
         status.transition_damage = 8.0;
         status
     })?;
@@ -421,7 +421,7 @@ pub fn load(
         status.color = hex("6ecdec");
         status.speed_multiplier = 0.6;
         status.health_multiplier = 0.8;
-        status.effect = EffectId::FREEZING;
+        status.effect = EffectRef::Named(EffectId::FREEZING);
         status.transition_damage = 18.0;
         status
     })?;
@@ -452,7 +452,7 @@ pub fn load(
         let mut status = StatusEffect::new("wet", bundle, store);
         status.color = Rgba::ROYAL;
         status.speed_multiplier = 0.94;
-        status.effect = EffectId::WET;
+        status.effect = EffectRef::Named(EffectId::WET);
         status.effect_chance = 0.09;
         status.transition_damage = 14.0;
         status
@@ -462,7 +462,7 @@ pub fn load(
         let mut status = StatusEffect::new("muddy", bundle, store);
         status.color = hex("46382a");
         status.speed_multiplier = 0.94;
-        status.effect = EffectId::MUDDY;
+        status.effect = EffectRef::Named(EffectId::MUDDY);
         status.effect_chance = 0.09;
         status.show = false;
         status
@@ -474,7 +474,7 @@ pub fn load(
         status.speed_multiplier = 0.8;
         status.health_multiplier = 0.8;
         status.damage = 0.3;
-        status.effect = EffectId::MELTING;
+        status.effect = EffectRef::Named(EffectId::MELTING);
         status
     })?;
 
@@ -483,7 +483,7 @@ pub fn load(
         status.color = hex("665c9f");
         status.speed_multiplier = 0.7;
         status.health_multiplier = 0.8;
-        status.effect = EffectId::SAPPED;
+        status.effect = EffectRef::Named(EffectId::SAPPED);
         status.effect_chance = 0.1;
         status
     })?;
@@ -493,7 +493,7 @@ pub fn load(
         status.color = hex("98ffa9");
         status.speed_multiplier = 0.7;
         status.reload_multiplier = 0.6;
-        status.effect = EffectId::ELECTRIFIED;
+        status.effect = EffectRef::Named(EffectId::ELECTRIFIED);
         status.effect_chance = 0.1;
         status
     })?;
@@ -502,7 +502,7 @@ pub fn load(
         let mut status = StatusEffect::new("spore-slowed", bundle, store);
         status.color = hex("7457ce");
         status.speed_multiplier = 0.8;
-        status.effect = EffectId::SAPPED;
+        status.effect = EffectRef::Named(EffectId::SAPPED);
         status.effect_chance = 0.04;
         status
     })?;
@@ -511,7 +511,7 @@ pub fn load(
         let mut status = StatusEffect::new("tarred", bundle, store);
         status.color = hex("313131");
         status.speed_multiplier = 0.6;
-        status.effect = EffectId::OILY;
+        status.effect = EffectRef::Named(EffectId::OILY);
         status
     })?;
 
@@ -522,7 +522,7 @@ pub fn load(
         status.speed_multiplier = 1.15;
         status.damage_multiplier = 1.4;
         status.damage = -0.01;
-        status.effect = EffectId::OVERDRIVEN;
+        status.effect = EffectRef::Named(EffectId::OVERDRIVEN);
         status.permanent = true;
         status
     })?;
@@ -534,7 +534,7 @@ pub fn load(
         status.damage_multiplier = 1.15;
         status.reload_multiplier = 1.25;
         status.effect_chance = 0.07;
-        status.effect = EffectId::OVERCLOCKED;
+        status.effect = EffectRef::Named(EffectId::OVERCLOCKED);
         status
     })?;
 
@@ -575,7 +575,7 @@ pub fn load(
         status.interval_damage = 20.0;
         status.interval_damage_time = 15.0;
         status.effect_chance = 0.1;
-        status.effect = EffectId::CORROSION_VAPOR;
+        status.effect = EffectRef::Named(EffectId::CORROSION_VAPOR);
         status
     })?;
 

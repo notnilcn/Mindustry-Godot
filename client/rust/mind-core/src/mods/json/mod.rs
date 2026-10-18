@@ -22,14 +22,22 @@ use serde_json::{Map, Value};
 use crate::content::UnlockStore;
 use crate::content::bundle::MemoryBundle;
 use crate::content::parser_hooks::ContentParseError;
+use crate::content::registries::blocks::drawer::{DrawerKind, DrawerSpec};
 use crate::content::registries::blocks::{
-    ConsumeDef, LiquidStackSpec, StackSpec, liquid_stack, stack,
+    AssemblerUnitPlanSpec, ConsumeDef, LiquidStackSpec, PayloadStackSpec, StackSpec, UnitPlanSpec,
+    liquid_stack, stack,
 };
 use crate::content::registries::bullets::{BulletDef, BulletKind, BulletSpec};
-use crate::content::registries::fx_meta::effect_by_name;
+use crate::content::registries::fx_meta::{
+    EffectRef, EffectSpec, InlineEffectKind, effect_by_name,
+};
 use crate::content::registries::planets::{CloudMeshKind, GeneratorKind, MeshKind, PlanetDef};
 use crate::content::registries::sectors::SectorPresetDef;
+use crate::content::registries::sound_meta::SoundId;
 use crate::content::registries::units::ability::{AbilityKind, AbilitySpec};
+use crate::content::registries::units::parts::{
+    BlendingKind, DrawPartKind, DrawPartSpec, InterpKind, PartMoveSpec, PartProgressSpec,
+};
 use crate::content::registries::units::weapon::{
     BulletRef, ShootPatternKind, ShootPatternSpec, WeaponDef, WeaponSpec,
 };
@@ -41,7 +49,7 @@ use crate::content::registries::weathers::{Attribute, WeatherDef, WeatherKind};
 use crate::content::settings_store::MemoryUnlockStore;
 use crate::content::{
     BlockDef, BlockKind, BlockSpec, BuildVisibility, Category, ContentRef, ContentRegistry,
-    ContentType, Item, Liquid, PlanetId, Rgba, StatusEffect, StatusId, TeamEntry,
+    ContentType, Item, Liquid, PlanetId, Rgba, StatusEffect, StatusId, TeamEntry, UnlockFields,
 };
 
 use classmap::{ClassScope, ClassTagMap};
@@ -241,6 +249,104 @@ impl<'a> ContentJsonParser<'a> {
         }
     }
 
+    /// Applies the `UnlockableContent` JSON fields (`UnlockableContent.java:34-79`)
+    /// to a freshly constructed record.
+    ///
+    /// Upstream reads these through reflection like any other public field:
+    /// `alwaysUnlocked`, `inlineDescription`, `hideDetails`, `hideDatabase`,
+    /// `generateIcons`, `selectionSize`, `fullOverride`, `allDatabaseTabs`,
+    /// `shownPlanets`, `databaseTabs`, `databaseCategory`, `databaseTag`, plus
+    /// the standalone `details`/`credit` strings. `shownPlanets` entries resolve
+    /// as planet names; `databaseTabs` entries may name any unlockable kind
+    /// (`ObjectSet<UnlockableContent>` upstream).
+    fn apply_unlock_fields(
+        &mut self,
+        registry: &ContentRegistry,
+        file: &str,
+        object: &Map<String, Value>,
+        unlock: &mut UnlockFields,
+    ) {
+        for (field, target) in [
+            ("alwaysUnlocked", &mut unlock.always_unlocked),
+            ("inlineDescription", &mut unlock.inline_description),
+            ("hideDetails", &mut unlock.hide_details),
+            ("hideDatabase", &mut unlock.hide_database),
+            ("generateIcons", &mut unlock.generate_icons),
+            ("allDatabaseTabs", &mut unlock.all_database_tabs),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = value;
+            }
+        }
+        if let Some(value) = field_f32(object, "selectionSize") {
+            unlock.selection_size = value;
+        }
+        if let Some(value) = object.get("fullOverride").and_then(Value::as_str) {
+            unlock.full_override = value.to_owned();
+        }
+        if let Some(value) = object.get("details").and_then(Value::as_str) {
+            unlock.details = Some(value.to_owned());
+        }
+        if let Some(value) = object.get("credit").and_then(Value::as_str) {
+            unlock.credit = Some(value.to_owned());
+        }
+        if let Some(value) = object.get("databaseCategory").and_then(Value::as_str) {
+            unlock.database_category = Some(value.to_owned());
+        }
+        if let Some(value) = object.get("databaseTag").and_then(Value::as_str) {
+            unlock.database_tag = Some(value.to_owned());
+        }
+        if let Some(Value::Array(entries)) = object.get("shownPlanets") {
+            for entry in entries {
+                let Some(raw) = entry.as_str() else {
+                    continue;
+                };
+                match self.resolve_planet(registry, raw) {
+                    Some(planet) => unlock.shown_planets.push(planet),
+                    None => self.warn(
+                        file,
+                        format!("`shownPlanets`: unknown planet `{raw}`; ignored"),
+                    ),
+                }
+            }
+        }
+        if let Some(Value::Array(entries)) = object.get("databaseTabs") {
+            for entry in entries {
+                let Some(raw) = entry.as_str() else {
+                    continue;
+                };
+                match self.resolve_any_content(registry, raw) {
+                    Some(reference) => unlock.database_tabs.push(reference),
+                    None => self.warn(
+                        file,
+                        format!("`databaseTabs`: unknown content `{raw}`; ignored"),
+                    ),
+                }
+            }
+        }
+    }
+
+    /// Resolves a name against every unlockable content kind
+    /// (`ObjectSet<UnlockableContent>` field reads upstream).
+    fn resolve_any_content(&self, registry: &ContentRegistry, raw: &str) -> Option<ContentRef> {
+        for content_type in [
+            ContentType::Item,
+            ContentType::Block,
+            ContentType::Liquid,
+            ContentType::Status,
+            ContentType::Unit,
+            ContentType::Weather,
+            ContentType::Sector,
+            ContentType::Planet,
+            ContentType::Team,
+        ] {
+            if let Some(reference) = self.resolve_prefixed(registry, content_type, raw) {
+                return Some(reference);
+            }
+        }
+        None
+    }
+
     /// `locate`: returns the (prefixed) content name. Typeless files matching
     /// vanilla content are patched in place by M3; M2 surfaces a warning and
     /// creates a prefixed copy so names never collide.
@@ -330,6 +436,7 @@ impl<'a> ContentJsonParser<'a> {
                 *target = value;
             }
         }
+        self.apply_unlock_fields(registry, file, object, &mut item.unlock);
         self.warn_unknown(file, "item", object, ITEM_FIELDS);
         registry
             .add_item(item)
@@ -448,6 +555,34 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(consumes) = object.get("consumes") {
             spec.consumes = self.parse_consumes(registry, file, consumes)?;
         }
+        // `UnitFactory.plans` (`Seq<UnitPlan>`) and `UnitAssembler.plans`
+        // (`Seq<AssemblerUnitPlan>`): both are plain `plans` arrays upstream;
+        // the field type comes from the declared block class
+        // (`UnitFactory.java:206`, `UnitAssembler.java:52`).
+        if let Some(plans) = object.get("plans") {
+            let Value::Array(entries) = plans else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `plans` must be an array"
+                )));
+            };
+            match spec.kind {
+                BlockKind::UnitFactory | BlockKind::LegacyUnitFactory => {
+                    spec.unit_plans = self.parse_unit_plans(registry, file, entries)?;
+                }
+                BlockKind::UnitAssembler => {
+                    spec.assembler_plans = self.parse_assembler_plans(registry, file, entries)?;
+                }
+                kind => self.warn(
+                    file,
+                    format!("`plans` is not a field of `{}`; ignored", kind.name()),
+                ),
+            }
+        }
+        // `Block.drawer` (`ContentParser.java:182-198`): string class, array
+        // shorthand for `DrawMulti`, or an object with `type`.
+        if let Some(drawer) = object.get("drawer") {
+            spec.drawer = self.parse_drawer(file, drawer);
+        }
         // `Drill.drillMultipliers` (an `ObjectFloatMap<Item>` in Java's JSON
         // content format).
         if let Some(multipliers) = object.get("drillMultipliers").and_then(Value::as_object) {
@@ -468,8 +603,9 @@ impl<'a> ContentJsonParser<'a> {
             }
         }
 
-        let def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
+        let mut def = BlockDef::from_spec(spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+        self.apply_unlock_fields(registry, file, object, &mut def.unlock);
         let id = registry
             .add_block(def)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
@@ -484,6 +620,115 @@ impl<'a> ContentJsonParser<'a> {
             });
         }
         Ok(ContentRef::block(id))
+    }
+
+    /// `UnitFactory.plans` entries (`UnitPlan{unit, time, requirements}`,
+    /// `UnitFactory.java:211-223`). `requirements` is an `ItemStack[]`; the
+    /// plan's unit resolves against the registry in `BlockDef::from_spec`.
+    fn parse_unit_plans(
+        &mut self,
+        registry: &ContentRegistry,
+        file: &str,
+        entries: &[Value],
+    ) -> Result<Vec<UnitPlanSpec>, ContentParseError> {
+        let mut plans = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let Some(plan) = entry.as_object() else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `plans` entries must be objects"
+                )));
+            };
+            let unit = plan.get("unit").and_then(Value::as_str).ok_or_else(|| {
+                ContentParseError::new(format!("{file}: unit plan is missing `unit`"))
+            })?;
+            let requirements = match plan.get("requirements") {
+                Some(value) => self.parse_stacks(registry, file, value)?,
+                None => Vec::new(),
+            };
+            plans.push(UnitPlanSpec {
+                unit: Box::leak(unit.to_owned().into_boxed_str()),
+                time: field_f32(plan, "time").unwrap_or(0.0),
+                requirements,
+            });
+        }
+        Ok(plans)
+    }
+
+    /// `UnitAssembler.plans` entries (`AssemblerUnitPlan{unit, time,
+    /// requirements}`, `UnitAssembler.java:280-294`). `requirements` is a
+    /// `Seq<PayloadStack>`; each `item` is a unit or block content name
+    /// (`PayloadStack.item` is an `UnlockableContent`).
+    fn parse_assembler_plans(
+        &mut self,
+        registry: &ContentRegistry,
+        file: &str,
+        entries: &[Value],
+    ) -> Result<Vec<AssemblerUnitPlanSpec>, ContentParseError> {
+        let mut plans = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let Some(plan) = entry.as_object() else {
+                return Err(ContentParseError::new(format!(
+                    "{file}: `plans` entries must be objects"
+                )));
+            };
+            let unit = plan.get("unit").and_then(Value::as_str).ok_or_else(|| {
+                ContentParseError::new(format!("{file}: assembler plan is missing `unit`"))
+            })?;
+            let mut payloads = Vec::new();
+            if let Some(Value::Array(stacks)) = plan.get("requirements") {
+                for stack in stacks {
+                    let Some(map) = stack.as_object() else {
+                        return Err(ContentParseError::new(format!(
+                            "{file}: assembler plan requirements must be objects"
+                        )));
+                    };
+                    let raw = map.get("item").and_then(Value::as_str).ok_or_else(|| {
+                        ContentParseError::new(format!(
+                            "{file}: assembler plan requirement is missing `item`"
+                        ))
+                    })?;
+                    let amount = field_i32(map, "amount").unwrap_or(1);
+                    // Payloads are units or blocks; resolve the unit table first
+                    // (the common case) then the block table.
+                    let payload = if let Some(reference) =
+                        self.resolve_prefixed(registry, ContentType::Unit, raw)
+                    {
+                        let name = registry
+                            .unit(crate::content::UnitTypeId::new(reference.id))
+                            .map_or(raw, |record| record.name.as_str())
+                            .to_owned();
+                        PayloadStackSpec {
+                            name: Box::leak(name.into_boxed_str()),
+                            block: false,
+                            amount,
+                        }
+                    } else if let Some(reference) =
+                        self.resolve_prefixed(registry, ContentType::Block, raw)
+                    {
+                        let name = registry
+                            .block(crate::content::BlockId::new(reference.id))
+                            .map_or(raw, |record| record.name.as_str())
+                            .to_owned();
+                        PayloadStackSpec {
+                            name: Box::leak(name.into_boxed_str()),
+                            block: true,
+                            amount,
+                        }
+                    } else {
+                        return Err(ContentParseError::new(format!(
+                            "{file}: unknown assembler payload `{raw}`"
+                        )));
+                    };
+                    payloads.push(payload);
+                }
+            }
+            plans.push(AssemblerUnitPlanSpec {
+                unit: Box::leak(unit.to_owned().into_boxed_str()),
+                time: field_f32(plan, "time").unwrap_or(0.0),
+                payloads,
+            });
+        }
+        Ok(plans)
     }
 
     // ---- liquid ----
@@ -542,11 +787,15 @@ impl<'a> ContentJsonParser<'a> {
                 .resolve_status(registry, status)
                 .unwrap_or(StatusId::NONE);
         }
-        if let Some(effect) = object.get("particleEffect").and_then(Value::as_str) {
-            liquid.particle_effect = effect_by_name(effect).unwrap_or(liquid.particle_effect);
+        if let Some(effect) = object.get("particleEffect")
+            && let Some(effect) = self.parse_effect_ref(file, effect)
+        {
+            liquid.particle_effect = effect;
         }
-        if let Some(effect) = object.get("vaporEffect").and_then(Value::as_str) {
-            liquid.vapor_effect = effect_by_name(effect).unwrap_or(liquid.vapor_effect);
+        if let Some(effect) = object.get("vaporEffect")
+            && let Some(effect) = self.parse_effect_ref(file, effect)
+        {
+            liquid.vapor_effect = effect;
         }
         if let Some(Value::Array(entries)) = object.get("canStayOn") {
             for entry in entries {
@@ -561,6 +810,7 @@ impl<'a> ContentJsonParser<'a> {
         if object.get("type").and_then(Value::as_str) == Some("CellLiquid") {
             liquid.cell = Some(crate::content::CellLiquidFields::default());
         }
+        self.apply_unlock_fields(registry, file, object, &mut liquid.unlock);
         self.warn_unknown(file, "liquid", object, LIQUID_FIELDS);
         registry
             .add_liquid(liquid)
@@ -619,11 +869,15 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(color) = object.get("applyColor").and_then(parse_color) {
             status.apply_color = color;
         }
-        if let Some(effect) = object.get("effect").and_then(Value::as_str) {
-            status.effect = effect_by_name(effect).unwrap_or(status.effect);
+        if let Some(effect) = object.get("effect")
+            && let Some(effect) = self.parse_effect_ref(file, effect)
+        {
+            status.effect = effect;
         }
-        if let Some(effect) = object.get("applyEffect").and_then(Value::as_str) {
-            status.apply_effect = effect_by_name(effect).unwrap_or(status.apply_effect);
+        if let Some(effect) = object.get("applyEffect")
+            && let Some(effect) = self.parse_effect_ref(file, effect)
+        {
+            status.apply_effect = effect;
         }
         if let Some(Value::Array(entries)) = object.get("opposites") {
             for entry in entries {
@@ -645,6 +899,7 @@ impl<'a> ContentJsonParser<'a> {
                 }
             }
         }
+        self.apply_unlock_fields(registry, file, object, &mut status.unlock);
         self.warn_unknown(file, "status", object, STATUS_FIELDS);
         registry
             .add_status(status)
@@ -754,6 +1009,7 @@ impl<'a> ContentJsonParser<'a> {
                 rain.liquid = crate::content::LiquidId::new(reference.id);
             }
         }
+        self.apply_unlock_fields(registry, file, object, &mut weather.unlock);
         self.warn_unknown(file, "weather", object, WEATHER_FIELDS);
         let id = registry
             .add_weather(weather)
@@ -776,7 +1032,8 @@ impl<'a> ContentJsonParser<'a> {
             .get("team")
             .and_then(Value::as_str)
             .unwrap_or(name.as_str());
-        let entry = TeamEntry::new(&name, team, &self.bundle, self.store);
+        let mut entry = TeamEntry::new(&name, team, &self.bundle, self.store);
+        self.apply_unlock_fields(registry, file, object, &mut entry.unlock);
         self.warn_unknown(file, "team", object, TEAM_FIELDS);
         let id = registry
             .add_team(entry)
@@ -832,6 +1089,7 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(value) = field_i32(object, "outlineRadius") {
             sector.outline_radius = value;
         }
+        self.apply_unlock_fields(registry, file, object, &mut sector.unlock);
         self.warn_unknown(file, "sector", object, SECTOR_FIELDS);
         let id = registry
             .add_sector(sector)
@@ -907,6 +1165,7 @@ impl<'a> ContentJsonParser<'a> {
         {
             planet.generator = kind;
         }
+        self.apply_unlock_fields(registry, file, object, &mut planet.unlock);
         self.warn_unknown(file, "planet", object, PLANET_FIELDS);
         let id = registry
             .add_planet(planet)
@@ -1030,8 +1289,9 @@ impl<'a> ContentJsonParser<'a> {
             spec.abilities = abilities;
         }
 
-        let def = UnitTypeDef::from_spec(&spec, registry, &self.bundle, self.store)
+        let mut def = UnitTypeDef::from_spec(&spec, registry, &self.bundle, self.store)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
+        self.apply_unlock_fields(registry, file, object, &mut def.unlock);
         let unit_id = registry
             .add_unit(def)
             .map_err(|error| ContentParseError::new(format!("{file}: {error}")))?;
@@ -1247,6 +1507,125 @@ impl<'a> ContentJsonParser<'a> {
         if let Some(value) = field_bool(weapon, "shootOnDeath") {
             spec.shoot_on_death = Some(value);
         }
+        // Remaining `Weapon` fields (`Weapon.java:30-180`), including the
+        // effect/draw-part surface: `ejectEffect`/`shootOnDeathEffect`/
+        // `beamEffect`, the sound slots, `shootStatus` and `parts`.
+        for (field, target) in [
+            ("display", &mut spec.display),
+            ("showStatSprite", &mut spec.show_stat_sprite),
+            ("top", &mut spec.top),
+            ("continuous", &mut spec.continuous),
+            ("alwaysContinuous", &mut spec.always_continuous),
+            ("controllable", &mut spec.controllable),
+            ("aiControllable", &mut spec.ai_controllable),
+            ("alwaysShooting", &mut spec.always_shooting),
+            ("autoTarget", &mut spec.auto_target),
+            ("predictTarget", &mut spec.predict_target),
+            ("useAttackRange", &mut spec.use_attack_range),
+            ("linearWarmup", &mut spec.linear_warmup),
+            ("ignoreRotation", &mut spec.ignore_rotation),
+            ("noAttack", &mut spec.no_attack),
+            ("parentizeEffects", &mut spec.parentize_effects),
+            ("targetBuildings", &mut spec.target_buildings),
+            ("targetUnits", &mut spec.target_units),
+            ("healBeamMount", &mut spec.heal_beam_mount),
+        ] {
+            if let Some(value) = field_bool(weapon, field) {
+                *target = Some(value);
+            }
+        }
+        for (field, target) in [
+            ("baseRotation", &mut spec.base_rotation),
+            ("aimChangeSpeed", &mut spec.aim_change_speed),
+            ("targetInterval", &mut spec.target_interval),
+            ("targetSwitchInterval", &mut spec.target_switch_interval),
+            ("rotateSpeed", &mut spec.rotate_speed),
+            ("inaccuracy", &mut spec.inaccuracy),
+            ("shake", &mut spec.shake),
+            ("recoil", &mut spec.recoil),
+            ("recoilTime", &mut spec.recoil_time),
+            ("recoilPow", &mut spec.recoil_pow),
+            ("cooldownTime", &mut spec.cooldown_time),
+            ("shootX", &mut spec.shoot_x),
+            ("shootY", &mut spec.shoot_y),
+            ("xRand", &mut spec.x_rand),
+            ("yRand", &mut spec.y_rand),
+            ("shadow", &mut spec.shadow),
+            ("velocityRnd", &mut spec.velocity_rnd),
+            ("extraVelocity", &mut spec.extra_velocity),
+            ("lifeRnd", &mut spec.life_rnd),
+            ("extraLife", &mut spec.extra_life),
+            ("shootCone", &mut spec.shoot_cone),
+            ("rotationLimit", &mut spec.rotation_limit),
+            ("minWarmup", &mut spec.min_warmup),
+            ("shootWarmupSpeed", &mut spec.shoot_warmup_speed),
+            ("smoothReloadSpeed", &mut spec.smooth_reload_speed),
+            ("soundPitchMin", &mut spec.sound_pitch_min),
+            ("soundPitchMax", &mut spec.sound_pitch_max),
+            ("minShootVelocity", &mut spec.min_shoot_velocity),
+            ("maxShootVelocity", &mut spec.max_shoot_velocity),
+            ("layerOffset", &mut spec.layer_offset),
+            ("activeSoundVolume", &mut spec.active_sound_volume),
+            ("shootSoundVolume", &mut spec.shoot_sound_volume),
+            ("shootStatusDuration", &mut spec.shoot_status_duration),
+            ("damageTargetWeight", &mut spec.damage_target_weight),
+            ("repairSpeed", &mut spec.repair_speed),
+            ("fractionRepairSpeed", &mut spec.fraction_repair_speed),
+            ("beamWidth", &mut spec.beam_width),
+            ("pulseRadius", &mut spec.pulse_radius),
+            ("pulseStroke", &mut spec.pulse_stroke),
+            ("widthSinMag", &mut spec.width_sin_mag),
+            ("widthSinScl", &mut spec.width_sin_scl),
+        ] {
+            if let Some(value) = field_f32(weapon, field) {
+                *target = Some(value);
+            }
+        }
+        if let Some(value) = field_i32(weapon, "recoils") {
+            spec.recoils = Some(value);
+        }
+        for (field, target) in [
+            ("heatColor", &mut spec.heat_color),
+            ("beamColor", &mut spec.beam_color),
+            ("laserColor", &mut spec.laser_color),
+            ("healColor", &mut spec.heal_color),
+        ] {
+            if let Some(color) = weapon.get(field).and_then(parse_color) {
+                *target = Some(color);
+            }
+        }
+        for (field, target) in [
+            ("activeSound", &mut spec.active_sound),
+            ("shootSound", &mut spec.shoot_sound),
+            ("initialShootSound", &mut spec.initial_shoot_sound),
+            ("chargeSound", &mut spec.charge_sound),
+        ] {
+            if let Some(sound) = self.parse_sound(file, weapon.get(field)) {
+                *target = Some(sound);
+            }
+        }
+        for (field, target) in [
+            ("ejectEffect", &mut spec.eject_effect),
+            ("shootOnDeathEffect", &mut spec.shoot_on_death_effect),
+        ] {
+            if let Some(value) = weapon.get(field)
+                && let Some(effect) = self.parse_effect_ref(file, value)
+            {
+                *target = Some(effect);
+            }
+        }
+        if let Some(raw) = weapon.get("beamEffect").and_then(Value::as_str) {
+            match effect_by_name(raw) {
+                Some(effect) => spec.beam_effect = Some(effect),
+                None => self.warn(file, format!("unknown beamEffect `{raw}`")),
+            }
+        }
+        if let Some(status) = weapon.get("shootStatus").and_then(Value::as_str) {
+            spec.shoot_status = Some(Box::leak(status.to_owned().into_boxed_str()));
+        }
+        if let Some(value) = weapon.get("parts") {
+            spec.parts = self.parse_draw_parts(file, value);
+        }
         match weapon.get("bullet") {
             Some(Value::Object(bullet)) => {
                 let bullet_spec = self.parse_bullet(file, bullet)?;
@@ -1435,6 +1814,40 @@ impl<'a> ContentJsonParser<'a> {
             // Bullet status is a name resolved during the unit load pass; keep raw.
             spec.status = Some(Box::leak(status.to_owned().into_boxed_str()));
         }
+        // Bullet visual/audio fields (`BulletType.hitEffect`/`shootEffect`/…,
+        // `BulletType.java:95-160`).
+        for (field, target) in [
+            ("hitEffect", &mut spec.hit_effect),
+            ("despawnEffect", &mut spec.despawn_effect),
+            ("shootEffect", &mut spec.shoot_effect),
+            ("smokeEffect", &mut spec.smoke_effect),
+            ("chargeEffect", &mut spec.charge_effect),
+            ("trailEffect", &mut spec.trail_effect),
+        ] {
+            if let Some(value) = object.get(field)
+                && let Some(effect) = self.parse_effect_ref(file, value)
+            {
+                *target = Some(effect);
+            }
+        }
+        for (field, target) in [
+            ("shootSound", &mut spec.shoot_sound),
+            ("hitSound", &mut spec.hit_sound),
+            ("despawnSound", &mut spec.despawn_sound),
+        ] {
+            if let Some(sound) = self.parse_sound(file, object.get(field)) {
+                *target = Some(sound);
+            }
+        }
+        for (field, target) in [
+            ("hitSoundVolume", &mut spec.hit_sound_volume),
+            ("hitSoundPitch", &mut spec.hit_sound_pitch),
+            ("hitSoundPitchRange", &mut spec.hit_sound_pitch_range),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = Some(value);
+            }
+        }
         // Nested bullets (`frag`/`intervalBullet`/`spawnBullets`); plan 20 M2b.
         if let Some(Value::Object(frag)) = object.get("frag") {
             spec.frag_bullet = Some(Box::new(self.parse_bullet(file, frag)?));
@@ -1503,6 +1916,638 @@ impl<'a> ContentJsonParser<'a> {
     }
 
     // ---- shared helpers ----
+
+    /// Parses the `Block.drawer` JSON value (`ContentParser.java:182-198`):
+    /// a class-name string, an array shorthand for `DrawMulti`, or an object
+    /// with `type` (default `DrawDefault`) and fields.
+    fn parse_drawer(&mut self, file: &str, value: &Value) -> Option<DrawerSpec> {
+        match value {
+            Value::String(class) => match self.resolve_drawer_class(class) {
+                Some(kind) => Some(DrawerSpec::for_kind(kind)),
+                None => {
+                    self.warn(file, format!("unknown drawer `{class}`"));
+                    None
+                }
+            },
+            Value::Array(entries) => {
+                let mut spec = DrawerSpec::for_kind(DrawerKind::Multi);
+                for entry in entries {
+                    if let Some(child) = self.parse_drawer(file, entry) {
+                        spec.children.push(child);
+                    }
+                }
+                Some(spec)
+            }
+            Value::Object(object) => {
+                let class = object
+                    .get("type")
+                    .and_then(Value::as_str)
+                    .unwrap_or("DrawDefault");
+                let Some(kind) = self.resolve_drawer_class(class) else {
+                    self.warn(file, format!("unknown drawer `{class}`"));
+                    return None;
+                };
+                let mut spec = DrawerSpec::for_kind(kind);
+                for (field, target) in [
+                    ("spinSprite", &mut spec.spin_sprite),
+                    ("drawPlan", &mut spec.draw_plan),
+                    ("buildingRotate", &mut spec.building_rotate),
+                ] {
+                    if let Some(value) = field_bool(object, field) {
+                        *target = value;
+                    }
+                }
+                for (field, target) in [
+                    ("x", &mut spec.x),
+                    ("y", &mut spec.y),
+                    ("rotation", &mut spec.rotation),
+                    ("rotateSpeed", &mut spec.rotate_speed),
+                    ("layer", &mut spec.layer),
+                    ("alpha", &mut spec.alpha),
+                    ("scale", &mut spec.scale),
+                    ("pulse", &mut spec.pulse),
+                    ("pulseScl", &mut spec.pulse_scl),
+                    ("flameRadius", &mut spec.flame_radius),
+                ] {
+                    if let Some(value) = field_f32(object, field) {
+                        *target = value;
+                    }
+                }
+                if let Some(value) = field_f32(object, "heatPulse") {
+                    spec.pulse = value;
+                }
+                if let Some(value) = field_f32(object, "heatPulseScl") {
+                    spec.pulse_scl = value;
+                }
+                if let Some(color) = object.get("color").and_then(parse_color) {
+                    spec.color = Some(color);
+                }
+                if let Some(color) = object.get("flameColor").and_then(parse_color) {
+                    spec.flame_color = Some(color);
+                }
+                if let Some(value) = object.get("suffix").and_then(Value::as_str) {
+                    spec.suffix = value.to_owned();
+                }
+                if let Some(value) = object.get("name").and_then(Value::as_str) {
+                    spec.name = Some(value.to_owned());
+                }
+                if let Some(value) = object.get("basePrefix").and_then(Value::as_str) {
+                    spec.base_prefix = value.to_owned();
+                }
+                if let Some(value) = object
+                    .get("liquid")
+                    .or_else(|| object.get("drawLiquid"))
+                    .and_then(Value::as_str)
+                {
+                    spec.liquid = Some(value.to_owned());
+                }
+                if let Some(drawers) = object.get("drawers") {
+                    match drawers {
+                        Value::Array(entries) => {
+                            for entry in entries {
+                                if let Some(child) = self.parse_drawer(file, entry) {
+                                    spec.children.push(child);
+                                }
+                            }
+                        }
+                        _ => self.warn(file, "`drawers` must be an array"),
+                    }
+                }
+                if let Some(parts) = object.get("parts") {
+                    spec.parts = self.parse_draw_parts(file, parts);
+                }
+                Some(spec)
+            }
+            _ => {
+                self.warn(file, "`drawer` must be a string, array or object");
+                None
+            }
+        }
+    }
+
+    /// Resolves a drawer class name. Most aliases live in the `Drawer` scope;
+    /// the committed ClassMap lists a few `world/draw` classes under the
+    /// `DrawPart` scope (J09 T1), so both are accepted.
+    fn resolve_drawer_class(&self, class: &str) -> Option<DrawerKind> {
+        self.classmap
+            .resolve(class, ClassScope::Drawer)
+            .and_then(resolve_drawer_kind)
+            .or_else(|| {
+                self.classmap
+                    .resolve(class, ClassScope::DrawPart)
+                    .and_then(resolve_drawer_kind)
+            })
+    }
+
+    /// Parses a `DrawPart[]` (`Weapon.parts`, `DrawBlockParts.parts`,
+    /// `DrawTurret.parts`; `ContentParser.java:212-218`).
+    fn parse_draw_parts(&mut self, file: &str, value: &Value) -> Vec<DrawPartSpec> {
+        let Value::Array(entries) = value else {
+            self.warn(file, "`parts` must be an array");
+            return Vec::new();
+        };
+        let mut parts = Vec::with_capacity(entries.len());
+        for entry in entries {
+            let Some(object) = entry.as_object() else {
+                self.warn(file, "draw-part entries must be objects");
+                continue;
+            };
+            parts.push(self.parse_draw_part(file, object));
+        }
+        parts
+    }
+
+    /// Reads one `DrawPart` (`entities/part/*`). The class defaults come from
+    /// [`DrawPartSpec::for_kind`]; fields not modelled yet are ignored like
+    /// upstream `ignoreUnknownFields`.
+    fn parse_draw_part(&mut self, file: &str, object: &Map<String, Value>) -> DrawPartSpec {
+        let class = object
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("RegionPart");
+        let kind = self
+            .classmap
+            .resolve(class, ClassScope::Part)
+            .and_then(resolve_draw_part_kind)
+            .unwrap_or_else(|| {
+                self.warn(
+                    file,
+                    format!("unknown draw part `{class}`; using RegionPart"),
+                );
+                DrawPartKind::RegionPart
+            });
+        let mut part = DrawPartSpec::for_kind(kind);
+        for (field, target) in [
+            ("under", &mut part.under),
+            ("turretShading", &mut part.turret_shading),
+            ("mirror", &mut part.mirror),
+            ("outline", &mut part.outline),
+            ("drawRegion", &mut part.draw_region),
+            ("heatLight", &mut part.heat_light),
+            ("clampProgress", &mut part.clamp_progress),
+            ("replaceOutline", &mut part.replace_outline),
+            ("followRotation", &mut part.follow_rotation),
+            ("circle", &mut part.circle),
+            ("hollow", &mut part.hollow),
+            ("tri", &mut part.tri),
+        ] {
+            if let Some(value) = field_bool(object, field) {
+                *target = value;
+            }
+        }
+        for (field, target) in [
+            ("weaponIndex", &mut part.weapon_index),
+            ("recoilIndex", &mut part.recoil_index),
+            ("sides", &mut part.sides),
+            ("circles", &mut part.circles),
+            ("shapes", &mut part.shapes),
+        ] {
+            if let Some(value) = field_i32(object, field) {
+                *target = value;
+            }
+        }
+        for (field, target) in [
+            ("layer", &mut part.layer),
+            ("layerOffset", &mut part.layer_offset),
+            ("heatLayerOffset", &mut part.heat_layer_offset),
+            ("outlineLayerOffset", &mut part.outline_layer_offset),
+            ("x", &mut part.x),
+            ("y", &mut part.y),
+            ("xScl", &mut part.x_scl),
+            ("yScl", &mut part.y_scl),
+            ("rotation", &mut part.rotation),
+            ("originX", &mut part.origin_x),
+            ("originY", &mut part.origin_y),
+            ("moveX", &mut part.move_x),
+            ("moveY", &mut part.move_y),
+            ("growX", &mut part.grow_x),
+            ("growY", &mut part.grow_y),
+            ("moveRot", &mut part.move_rot),
+            ("heatLightOpacity", &mut part.heat_light_opacity),
+            ("radius", &mut part.radius),
+            ("radiusTo", &mut part.radius_to),
+            ("stroke", &mut part.stroke),
+            ("strokeTo", &mut part.stroke_to),
+            ("rotateSpeed", &mut part.rotate_speed),
+            ("phase", &mut part.phase),
+            ("minStroke", &mut part.min_stroke),
+            ("innerScl", &mut part.inner_scl),
+            ("innerRadScl", &mut part.inner_rad_scl),
+            ("rotMove", &mut part.rot_move),
+            ("spinSpeed", &mut part.spin_speed),
+            ("triLength", &mut part.tri_length),
+            ("triLengthTo", &mut part.tri_length_to),
+            ("haloRadius", &mut part.halo_radius),
+            ("haloRadiusTo", &mut part.halo_radius_to),
+            ("shapeRotation", &mut part.shape_rotation),
+            ("shapeMoveRot", &mut part.shape_move_rot),
+            ("haloRotateSpeed", &mut part.halo_rotate_speed),
+            ("haloRotation", &mut part.halo_rotation),
+        ] {
+            if let Some(value) = field_f32(object, field) {
+                *target = value;
+            }
+        }
+        for (field, target) in [
+            ("heatColor", &mut part.heat_color),
+            ("color", &mut part.color),
+            ("colorTo", &mut part.color_to),
+            ("mixColor", &mut part.mix_color),
+            ("mixColorTo", &mut part.mix_color_to),
+        ] {
+            if let Some(color) = object.get(field).and_then(parse_color) {
+                *target = Some(color);
+            }
+        }
+        if let Some(color) = object.get("color1").and_then(parse_color) {
+            part.color1 = color;
+        }
+        if let Some(color) = object.get("color2").and_then(parse_color) {
+            part.color2 = color;
+        }
+        if let Some(suffix) = object.get("suffix").and_then(Value::as_str) {
+            part.suffix = suffix.to_owned();
+        }
+        if let Some(name) = object.get("name").and_then(Value::as_str) {
+            part.name = Some(name.to_owned());
+        }
+        if let Some(blending) = object.get("blending").and_then(Value::as_str) {
+            part.blending = match blending {
+                "additive" => BlendingKind::Additive,
+                "normal" => BlendingKind::Normal,
+                other => {
+                    self.warn(file, format!("unknown blending `{other}`; using normal"));
+                    BlendingKind::Normal
+                }
+            };
+        }
+        for (field, target) in [
+            ("progress", &mut part.progress),
+            ("growProgress", &mut part.grow_progress),
+            ("heatProgress", &mut part.heat_progress),
+        ] {
+            if let Some(value) = object.get(field) {
+                *target = self.parse_part_progress(file, value);
+            }
+        }
+        if let Some(value) = object.get("children") {
+            part.children = self.parse_draw_parts(file, value);
+        }
+        if let Some(Value::Array(moves)) = object.get("moves") {
+            for entry in moves {
+                let Some(map) = entry.as_object() else {
+                    continue;
+                };
+                let progress = map
+                    .get("progress")
+                    .map_or(PartProgressSpec::Warmup, |value| {
+                        self.parse_part_progress(file, value)
+                    });
+                part.moves.push(PartMoveSpec {
+                    progress,
+                    x: field_f32(map, "x").unwrap_or(0.0),
+                    y: field_f32(map, "y").unwrap_or(0.0),
+                    gx: field_f32(map, "gx").unwrap_or(0.0),
+                    gy: field_f32(map, "gy").unwrap_or(0.0),
+                    rot: field_f32(map, "rot").unwrap_or(0.0),
+                });
+            }
+        }
+        part
+    }
+
+    /// Reads a `PartProgress` (`ContentParser.parseProgressOp`,
+    /// `ContentParser.java:1174-1200`): a constant name, a number
+    /// (`PartProgress.constant`), or a base `type` plus `operation`/`op` or an
+    /// `operations`/`ops` chain.
+    fn parse_part_progress(&mut self, file: &str, value: &Value) -> PartProgressSpec {
+        match value {
+            Value::String(name) => part_progress_constant(name).unwrap_or_else(|| {
+                self.warn(file, format!("unknown PartProgress `{name}`; using warmup"));
+                PartProgressSpec::Warmup
+            }),
+            Value::Number(number) => {
+                PartProgressSpec::Constant(number.as_f64().unwrap_or(0.0) as f32)
+            }
+            Value::Object(object) => {
+                let Some(base_name) = object.get("type").and_then(Value::as_str) else {
+                    self.warn(file, "PartProgress objects need a `type`");
+                    return PartProgressSpec::Warmup;
+                };
+                let mut progress = part_progress_constant(base_name).unwrap_or_else(|| {
+                    self.warn(
+                        file,
+                        format!("unknown PartProgress `{base_name}`; using warmup"),
+                    );
+                    PartProgressSpec::Warmup
+                });
+                if let Some(operation) = object
+                    .get("operation")
+                    .or_else(|| object.get("op"))
+                    .and_then(Value::as_str)
+                {
+                    progress = self.apply_part_progress_op(file, progress, operation, object);
+                } else if let Some(ops) = object.get("operations").or_else(|| object.get("ops")) {
+                    if let Value::Array(entries) = ops {
+                        for entry in entries {
+                            let Some(map) = entry.as_object() else {
+                                continue;
+                            };
+                            let Some(operation) = map
+                                .get("operation")
+                                .or_else(|| map.get("op"))
+                                .and_then(Value::as_str)
+                            else {
+                                continue;
+                            };
+                            progress = self.apply_part_progress_op(file, progress, operation, map);
+                        }
+                    } else {
+                        self.warn(file, "chained PartProgress operations must be an array");
+                    }
+                }
+                progress
+            }
+            _ => {
+                self.warn(file, "PartProgress must be a string, number or object");
+                PartProgressSpec::Warmup
+            }
+        }
+    }
+
+    /// Applies one `PartProgress` operation (`ContentParser.parseProgressOp`).
+    fn apply_part_progress_op(
+        &mut self,
+        file: &str,
+        base: PartProgressSpec,
+        operation: &str,
+        object: &Map<String, Value>,
+    ) -> PartProgressSpec {
+        let amount = |key: &str| field_f32(object, key).unwrap_or(0.0);
+        let other = |parser: &mut Self, object: &Map<String, Value>| {
+            object
+                .get("other")
+                .map_or(PartProgressSpec::Warmup, |value| {
+                    parser.parse_part_progress(file, value)
+                })
+        };
+        let boxed = Box::new(base);
+        match operation {
+            "inv" => PartProgressSpec::Inv(boxed),
+            "slope" => PartProgressSpec::Slope(boxed),
+            "clamp" => PartProgressSpec::Clamp(boxed),
+            "delay" => PartProgressSpec::Delay(boxed, amount("amount")),
+            "sustain" => PartProgressSpec::Sustain(
+                boxed,
+                amount("offset"),
+                amount("grow"),
+                amount("sustain"),
+            ),
+            "shorten" => PartProgressSpec::Shorten(boxed, amount("amount")),
+            "compress" => PartProgressSpec::Compress(boxed, amount("start"), amount("end")),
+            "add" => {
+                if object.contains_key("other") {
+                    PartProgressSpec::AddProgress(boxed, Box::new(other(self, object)))
+                } else {
+                    PartProgressSpec::Add(boxed, amount("amount"))
+                }
+            }
+            "blend" => {
+                PartProgressSpec::Blend(boxed, Box::new(other(self, object)), amount("amount"))
+            }
+            "mul" => {
+                if object.contains_key("other") {
+                    PartProgressSpec::MulProgress(boxed, Box::new(other(self, object)))
+                } else {
+                    PartProgressSpec::Mul(boxed, amount("amount"))
+                }
+            }
+            "min" => PartProgressSpec::Min(boxed, Box::new(other(self, object))),
+            "sin" => {
+                let offset = if object.contains_key("offset") {
+                    amount("offset")
+                } else {
+                    0.0
+                };
+                PartProgressSpec::Sin(boxed, offset, amount("scl"), amount("mag"))
+            }
+            "absin" => PartProgressSpec::Absin(boxed, amount("scl"), amount("mag")),
+            "mod" => PartProgressSpec::Mod(boxed, amount("amount")),
+            "loop" => PartProgressSpec::Loop(boxed, amount("time")),
+            "curve" => {
+                if let Some(interp) = object.get("interp").and_then(Value::as_str) {
+                    PartProgressSpec::CurveInterp(boxed, parse_interp(interp))
+                } else {
+                    PartProgressSpec::CurveRange(boxed, amount("offset"), amount("duration"))
+                }
+            }
+            other => {
+                self.warn(
+                    file,
+                    format!("unknown PartProgress operation `{other}`; ignored"),
+                );
+                *boxed
+            }
+        }
+    }
+
+    /// Parses an `Effect` JSON value (`ContentParser.java:72-82`): a string
+    /// names an `Fx` field, an array is a `MultiEffect` shorthand, and an object
+    /// is an inline effect class (`Effect`/`MultiEffect`/`ExplosionEffect`/
+    /// `WaveEffect`/`WrapEffect`) read by field.
+    ///
+    /// The renderer body is plan 17; this records the data fields on
+    /// [`EffectSpec`]. Unknown names/classes warn and leave the field at its
+    /// default rather than failing the whole unit.
+    fn parse_effect_ref(&mut self, file: &str, value: &Value) -> Option<EffectRef> {
+        match value {
+            Value::String(raw) => match effect_by_name(raw) {
+                Some(effect) => Some(EffectRef::Named(effect)),
+                None => {
+                    self.warn(file, format!("unknown effect `{raw}`"));
+                    None
+                }
+            },
+            Value::Array(_) => {
+                let mut children = Vec::new();
+                if let Value::Array(entries) = value {
+                    for entry in entries {
+                        if let Some(child) = self.parse_effect_ref(file, entry) {
+                            children.push(child);
+                        }
+                    }
+                }
+                // `MultiEffect(Effect...)` carries the `Effect` default lifetime;
+                // the port's content generator derives the composite lifetime
+                // from the longest child (`EffectSpec::multi`).
+                let lifetime = children
+                    .iter()
+                    .map(EffectRef::lifetime)
+                    .fold(0.0_f32, f32::max);
+                let lifetime = if lifetime > 0.0 { lifetime } else { 50.0 };
+                Some(EffectRef::Inline(Box::new(EffectSpec::multi(
+                    lifetime, children,
+                ))))
+            }
+            Value::Object(object) => self.parse_inline_effect(file, object),
+            _ => {
+                self.warn(file, "effect values must be strings, arrays or objects");
+                None
+            }
+        }
+    }
+
+    /// Reads one inline effect object (`Effect.class` field parser,
+    /// `ContentParser.java:72-82`).
+    fn parse_inline_effect(
+        &mut self,
+        file: &str,
+        object: &Map<String, Value>,
+    ) -> Option<EffectRef> {
+        let Some(class) = object.get("type").and_then(Value::as_str) else {
+            // Upstream's default class is `ParticleEffect`; the port has no
+            // particle-config model yet, so the object is reported, not guessed.
+            self.warn(
+                file,
+                "inline effect without `type` defaults to ParticleEffect (unsupported); ignored",
+            );
+            return None;
+        };
+        let Some(tag) = self.classmap.resolve(class, ClassScope::Effect) else {
+            self.warn(file, format!("unknown effect type `{class}`"));
+            return None;
+        };
+        let mut spec = match tag {
+            "Effect" => EffectSpec::plain(50.0),
+            "MultiEffect" => {
+                let mut children = Vec::new();
+                if let Some(Value::Array(entries)) = object
+                    .get("effects")
+                    .or_else(|| object.get("children"))
+                    .filter(|value| value.is_array())
+                {
+                    for entry in entries {
+                        if let Some(child) = self.parse_effect_ref(file, entry) {
+                            children.push(child);
+                        }
+                    }
+                }
+                let lifetime = children
+                    .iter()
+                    .map(EffectRef::lifetime)
+                    .fold(0.0_f32, f32::max);
+                EffectSpec::multi(if lifetime > 0.0 { lifetime } else { 50.0 }, children)
+            }
+            "ExplosionEffect" => {
+                let mut effect = EffectSpec::explosion();
+                // `ExplosionEffect()` (`ExplosionEffect.java:18-20`).
+                effect.lifetime = 22.0;
+                effect.clip = 100.0;
+                if let Some(color) = object.get("waveColor").and_then(parse_color) {
+                    effect.wave_color = Some(color);
+                }
+                if let Some(color) = object.get("smokeColor").and_then(parse_color) {
+                    effect.smoke_color = Some(color);
+                }
+                if let Some(color) = object.get("sparkColor").and_then(parse_color) {
+                    effect.spark_color = Some(color);
+                }
+                for (field, target) in [
+                    ("waveLife", &mut effect.wave_life),
+                    ("waveStroke", &mut effect.wave_stroke),
+                    ("waveRad", &mut effect.wave_rad),
+                    ("waveRadBase", &mut effect.wave_rad_base),
+                    ("sparkStroke", &mut effect.spark_stroke),
+                    ("sparkRad", &mut effect.spark_rad),
+                    ("sparkLen", &mut effect.spark_len),
+                    ("smokeSize", &mut effect.smoke_size),
+                    ("smokeSizeBase", &mut effect.smoke_size_base),
+                ] {
+                    if let Some(value) = field_f32(object, field) {
+                        *target = value;
+                    }
+                }
+                for (field, target) in [
+                    ("smokes", &mut effect.smokes),
+                    ("sparks", &mut effect.sparks),
+                ] {
+                    if let Some(value) = field_i32(object, field) {
+                        *target = value;
+                    }
+                }
+                effect
+            }
+            "WaveEffect" => {
+                let mut effect = EffectSpec::wave();
+                effect.lifetime = 50.0;
+                if let Some(color) = object.get("colorFrom").and_then(parse_color) {
+                    effect.wave_color = Some(color);
+                }
+                if let Some(color) = object.get("colorTo").and_then(parse_color) {
+                    effect.color_to = Some(color);
+                }
+                for (field, target) in [
+                    ("sizeFrom", &mut effect.size_from),
+                    ("sizeTo", &mut effect.size_to),
+                    ("strokeFrom", &mut effect.stroke_from),
+                    ("strokeTo", &mut effect.stroke_to),
+                ] {
+                    if let Some(value) = field_f32(object, field) {
+                        *target = value;
+                    }
+                }
+                effect
+            }
+            "WrapEffect" => {
+                let child = object
+                    .get("effect")
+                    .and_then(|value| self.parse_effect_ref(file, value));
+                let Some(child) = child else {
+                    self.warn(file, "`WrapEffect` requires an `effect`");
+                    return None;
+                };
+                let color = object
+                    .get("color")
+                    .and_then(parse_color)
+                    .unwrap_or(crate::content::Rgba::WHITE);
+                EffectSpec::wrap(child, color, 0.0)
+            }
+            other => {
+                self.warn(
+                    file,
+                    format!("inline effect `{other}` has no port metadata model yet; ignored"),
+                );
+                return None;
+            }
+        };
+        // `Effect.lifetime`/`clip` are plain fields upstream; readFields lets
+        // any inline class override them after construction.
+        if let Some(value) = field_f32(object, "lifetime") {
+            spec.lifetime = value;
+        }
+        if let Some(value) = field_f32(object, "clip") {
+            spec.clip = value;
+        }
+        if matches!(spec.kind, InlineEffectKind::WrapEffect) {
+            // `WrapEffect.init()` copies the child lifetime.
+            if let Some(child) = spec.children.first() {
+                spec.lifetime = child.lifetime();
+            }
+        }
+        Some(EffectRef::Inline(Box::new(spec)))
+    }
+
+    /// Parses a sound name (`SoundId::by_name`; `Sounds.<field>` upstream).
+    fn parse_sound(&mut self, file: &str, value: Option<&Value>) -> Option<SoundId> {
+        let raw = value.and_then(Value::as_str)?;
+        match SoundId::by_name(raw) {
+            Some(sound) => Some(sound),
+            None => {
+                self.warn(file, format!("unknown sound `{raw}`"));
+                None
+            }
+        }
+    }
 
     /// `ContentParser` `consumes` array (`mindustry/world/consumers/*`): each
     /// entry's `type` resolves through the `ClassMap` against the `Consume` base
@@ -1806,7 +2851,7 @@ impl<'a> ContentJsonParser<'a> {
         known: &[&str],
     ) {
         for key in object.keys() {
-            if !known.contains(&key.as_str()) {
+            if !known.contains(&key.as_str()) && !UNLOCK_FIELDS.contains(&key.as_str()) {
                 self.warn(file, format!("unknown {kind} field `{key}`"));
             }
         }
@@ -1915,6 +2960,92 @@ pub fn resolve_ability_kind(tag: &str) -> Option<AbilityKind> {
         "LiquidRegenAbility" => AbilityKind::LiquidRegen,
         _ => return None,
     })
+}
+
+/// Resolves a drawer class tag to a [`DrawerKind`].
+pub fn resolve_drawer_kind(tag: &str) -> Option<DrawerKind> {
+    Some(match tag {
+        "DrawBlock" => DrawerKind::Block,
+        "DrawDefault" => DrawerKind::Default,
+        "DrawMulti" => DrawerKind::Multi,
+        "DrawArcSmelt" => DrawerKind::ArcSmelt,
+        "DrawBubbles" => DrawerKind::Bubbles,
+        "DrawCells" => DrawerKind::Cells,
+        "DrawCircles" => DrawerKind::Circles,
+        "DrawCrucibleFlame" => DrawerKind::CrucibleFlame,
+        "DrawCultivator" => DrawerKind::Cultivator,
+        "DrawFade" => DrawerKind::Fade,
+        "DrawFlame" => DrawerKind::Flame,
+        "DrawFrames" => DrawerKind::Frames,
+        "DrawHeatInput" => DrawerKind::HeatInput,
+        "DrawHeatOutput" => DrawerKind::HeatOutput,
+        "DrawHeatRegion" => DrawerKind::HeatRegion,
+        "DrawLiquidOutputs" => DrawerKind::LiquidOutputs,
+        "DrawLiquidRegion" => DrawerKind::LiquidRegion,
+        "DrawLiquidTile" => DrawerKind::LiquidTile,
+        "DrawMultiWeave" => DrawerKind::MultiWeave,
+        "DrawParticles" => DrawerKind::Particles,
+        "DrawPistons" => DrawerKind::Pistons,
+        "DrawPlasma" => DrawerKind::Plasma,
+        "DrawPower" => DrawerKind::Power,
+        "DrawPulseShape" => DrawerKind::PulseShape,
+        "DrawPumpLiquid" => DrawerKind::PumpLiquid,
+        "DrawSoftParticles" => DrawerKind::SoftParticles,
+        "DrawSpikes" => DrawerKind::Spikes,
+        "DrawWeave" => DrawerKind::Weave,
+        "DrawBlockParts" => DrawerKind::BlockParts,
+        "DrawRegion" => DrawerKind::Region,
+        "DrawRegionSpin" => DrawerKind::RegionSpin,
+        "DrawTurret" => DrawerKind::Turret,
+        "DrawWeapon" => DrawerKind::Weapon,
+        "DrawSideRegion" => DrawerKind::SideRegion,
+        "DrawGlowRegion" => DrawerKind::GlowRegion,
+        "DrawArc" => DrawerKind::Arc,
+        "DrawBlurSpin" => DrawerKind::BlurSpin,
+        "DrawParticle" => DrawerKind::Particle,
+        "DrawShape" => DrawerKind::Shape,
+        "DrawSoftShadow" => DrawerKind::SoftShadow,
+        "DrawWarmupRegion" => DrawerKind::WarmupRegion,
+        _ => return None,
+    })
+}
+
+/// Resolves a draw-part class tag to a [`DrawPartKind`].
+pub fn resolve_draw_part_kind(tag: &str) -> Option<DrawPartKind> {
+    Some(match tag {
+        "RegionPart" | "DrawPart" => DrawPartKind::RegionPart,
+        "ShapePart" => DrawPartKind::ShapePart,
+        "HoverPart" => DrawPartKind::HoverPart,
+        "FlarePart" => DrawPartKind::FlarePart,
+        "HaloPart" => DrawPartKind::HaloPart,
+        _ => return None,
+    })
+}
+
+/// Resolves a `PartProgress` constant name (`PartProgress.java:75-95`).
+pub fn part_progress_constant(name: &str) -> Option<PartProgressSpec> {
+    Some(match name {
+        "reload" => PartProgressSpec::Reload,
+        "smoothReload" => PartProgressSpec::SmoothReload,
+        "warmup" => PartProgressSpec::Warmup,
+        "charge" => PartProgressSpec::Charge,
+        "recoil" => PartProgressSpec::Recoil,
+        "heat" => PartProgressSpec::Heat,
+        "life" => PartProgressSpec::Life,
+        "time" => PartProgressSpec::Time,
+        _ => return None,
+    })
+}
+
+/// Resolves an `Interp` name to the ported [`InterpKind`] subset.
+pub fn parse_interp(name: &str) -> InterpKind {
+    match name {
+        "one" => InterpKind::One,
+        "slope" => InterpKind::Slope,
+        "pow2In" => InterpKind::Pow2In,
+        "pow5In" => InterpKind::Pow5In,
+        _ => InterpKind::Linear,
+    }
 }
 
 /// Resolves a shoot-pattern class tag to a [`ShootPatternKind`].
@@ -2104,6 +3235,26 @@ fn field_i32(object: &Map<String, Value>, key: &str) -> Option<i32> {
 fn field_bool(object: &Map<String, Value>, key: &str) -> Option<bool> {
     object.get(key).and_then(Value::as_bool)
 }
+
+/// `UnlockableContent` fields shared by every unlockable kind
+/// (`UnlockableContent.java:34-79`). Read by [`ContentJsonParser::apply_unlock_fields`]
+/// and accepted by every top-level kind's field list.
+const UNLOCK_FIELDS: &[&str] = &[
+    "details",
+    "credit",
+    "alwaysUnlocked",
+    "inlineDescription",
+    "hideDetails",
+    "hideDatabase",
+    "generateIcons",
+    "selectionSize",
+    "fullOverride",
+    "allDatabaseTabs",
+    "shownPlanets",
+    "databaseTabs",
+    "databaseCategory",
+    "databaseTag",
+];
 
 /// Known JSON fields per kind (ledger-backed; unknown keys warn).
 const ITEM_FIELDS: &[&str] = &[
@@ -2787,6 +3938,42 @@ mod tests {
         assert_eq!(unit.weapons.len(), 1);
         assert_eq!(unit.weapons[0].shoot.kind, ShootPatternKind::ShootAlternate);
         assert!((unit.weapons[0].shoot.spread - 3.5).abs() < 1e-6);
+    }
+
+    /// L08 T3: `PartProgress` JSON (`ContentParser.parseProgressOp`): the
+    /// constant-name form, the numeric `constant(...)` form and chained
+    /// `operation`/`operations` builders map onto the ported expression tree.
+    #[test]
+    fn draw_part_progress_expressions_parse() {
+        let mut reg = registry();
+        let (_, result) = parse(
+            &mut reg,
+            ContentType::Unit,
+            "test-parts",
+            r#"{"name":"Test Parts","type":"mech","weapons":[
+                {"name":"w","parts":[
+                    {"type":"RegionPart","progress":{"type":"reload","operations":[
+                        {"op":"inv"},{"op":"add","amount":0.5}]}},
+                    {"type":"ShapePart","progress":{"type":"warmup","operation":"sin","scl":10,"mag":2}},
+                    {"type":"HoverPart","progress":0.25}
+                ],"bullet":{"type":"BasicBulletType","damage":1}}]}"#,
+        );
+        assert!(result.is_ok(), "{result:?}");
+        let unit = reg.unit_by_name("mods-test-parts").expect("unit");
+        let parts = &unit.weapons[0].parts;
+        assert_eq!(parts.len(), 3);
+        assert_eq!(
+            parts[0].progress,
+            PartProgressSpec::Add(
+                Box::new(PartProgressSpec::Inv(Box::new(PartProgressSpec::Reload))),
+                0.5
+            )
+        );
+        assert_eq!(
+            parts[1].progress,
+            PartProgressSpec::Sin(Box::new(PartProgressSpec::Warmup), 0.0, 10.0, 2.0)
+        );
+        assert_eq!(parts[2].progress, PartProgressSpec::Constant(0.25));
     }
 
     #[test]
