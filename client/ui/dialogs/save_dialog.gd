@@ -94,14 +94,32 @@ func _request_new() -> void:
 	if ui == null:
 		return
 	# code-instantiated: the save-name prompt is a one-off transient overlay.
-	ui.call("show_text_input", _t("@save.name"), _t("@save.name"), 64, "", false, false)
+	# `ui.showTextInput("@save", "@save.newslot", 30, "", ...)`
+	# (`SaveDialog.java:26-27`); `@save.name` is not a bundle key (PAR-0438).
+	ui.call("show_text_input", _t("@save"), _t("@save.newslot"), 30, "", false, false)
+	# One answer per prompt (a cancel resolves with ""): a lasting connection
+	# would turn every later text prompt into a save.
 	if not ui.is_connected("text_input_result", _on_name):
-		ui.connect("text_input_result", _on_name)
+		ui.connect("text_input_result", _on_name, CONNECT_ONE_SHOT)
 
 
+## `text -> ui.loadAnd("@saving", () -> control.saves.addSave(text))`.
 func _on_name(text: String) -> void:
-	if not text.is_empty():
-		_emit_save(text)
+	if text.is_empty():
+		return
+	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
+	if ui_root != null and ui_root.has_method("load_and"):
+		ui_root.call("load_and", _add_save.bind(text), "@saving")
+	else:
+		_add_save(text)
+
+
+## `control.saves.addSave(text)` then `Core.app.post(this::setup)`: the dialog
+## stays open and relists the slots (the overwrite path hides instead).
+func _add_save(text: String) -> void:
+	save_requested.emit(text)
+	_refresh_slots()
+	_rebuild()
 
 
 ## `SaveDialog.modifyButton`: an existing slot asks before overwriting

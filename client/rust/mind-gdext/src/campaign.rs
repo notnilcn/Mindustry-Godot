@@ -3781,6 +3781,13 @@ impl MindCampaign {
             GString::from(format!("user://saves/{slot}.msav").as_str()),
             false,
         );
+        // `control.saves.addSave(text)` writes at once (`SaveDialog.java:26-31`
+        // inside `ui.loadAnd`), and the pause menu that offers it has the sim
+        // paused: with the pump halted no IO boundary would ever run the
+        // queued save (PAR-0438). Flush it now, like the exit save.
+        if host.bind().is_paused() {
+            host.bind_mut().flush_io();
+        }
         true
     }
 
