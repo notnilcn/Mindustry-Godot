@@ -1343,11 +1343,12 @@ func _icon_grid(
 	filter: String,
 	on_pick: Callable,
 	columns: int = 6,
-	cell: float = 40.0
+	cell: float = 40.0,
+	height: float = 300.0
 ) -> Control:
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scroll.custom_minimum_size = Vector2(300, 300)
+	scroll.custom_minimum_size = Vector2(300, height)
 	var grid := GridContainer.new()
 	grid.columns = columns
 	scroll.add_child(grid)
@@ -1540,9 +1541,9 @@ func _open_sensor_picker(index: int, field_index: int) -> void:
 	var pick := func(value: String) -> void: _pick_value(value, index, field_index, popup)
 	var units_blocks := VBoxContainer.new()
 	units_blocks.add_child(_icon_grid("unit", "unit", func(name: String) -> void:
-		pick.call("@" + name)))
+		pick.call("@" + name), 6, 40.0, 220.0))
 	units_blocks.add_child(_icon_grid("block", "block", func(name: String) -> void:
-		pick.call("@" + name)))
+		pick.call("@" + name), 6, 40.0, 220.0))
 	var tables: Array = [
 		_icon_grid("item", "item", func(name: String) -> void: pick.call("@" + name)),
 		_icon_grid("liquid", "liquid-prop", func(name: String) -> void: pick.call("@" + name)),
