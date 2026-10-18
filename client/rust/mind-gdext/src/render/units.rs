@@ -19,12 +19,26 @@ use godot::classes::{
 use godot::obj::{NewGd, Singleton};
 use godot::prelude::*;
 
+use mind_core::config::TILESIZE;
 use mind_core::content::registries::fx_meta::{EffectId, effect_by_name};
-use mind_core::render::unit_draw::{self, UnitFxInput, UnitViewState, ViewEffect};
+use mind_core::render::unit_draw::{
+    self, CrawlDrawParams, CrawlLayer, UnitFxInput, UnitViewState, ViewEffect, crawl_draw_ops,
+};
+use mind_core::render::{block_region_candidates, cell_color};
 
-use crate::sim_host::MindSimHost;
+use crate::sim_host::{MindSimHost, PayloadDraw};
 
 use super::atlas_bind::{RegionResolver, color_from};
+
+/// `UnitType.draw` local z for mech/tank/legs (`Draw.z(z - 0.02)`,
+/// `UnitType.java:1506-1513`).
+const LEG_Z: f32 = -0.02;
+/// `drawPayload`: `Draw.z(prev - 0.02)` with `prev = min(z - 0.01,
+/// Layer.bullet - 1)` (`UnitType.java:1508-1525,1632-1640`). The port keeps
+/// the payload in the carrier's band instead of Java's cross-band clamp.
+const PAYLOAD_Z: f32 = -0.03;
+/// `drawSoftShadow` at `min(z - 0.01, Layer.bullet - 1)`.
+const SOFT_SHADOW_Z: f32 = -0.01;
 
 /// Unit sprite counters forwarded to the renderer stats.
 #[derive(Clone, Copy, Debug, Default)]
@@ -48,8 +62,24 @@ pub(crate) struct UnitQuad {
     pub(crate) color: u32,
 }
 
+/// One unit quad plus its Java sprite-batch z. Quads are stably sorted by
+/// `z` before the bucket mesh is built, so `Weapon.layerOffset` and the
+/// payload/leg offsets land on the same side of the body as upstream while
+/// the pass keeps one mesh per `(band, atlas page)`.
+#[derive(Clone, Copy)]
+struct ZQuad {
+    z: f32,
+    quad: UnitQuad,
+}
+
 /// One `(band, atlas page)` bucket: its texture and quads.
-type UnitBucket = (Option<Gd<Texture2D>>, Vec<UnitQuad>);
+type UnitBucket = (Option<Gd<Texture2D>>, Vec<ZQuad>);
+
+/// Stable sort by Java sprite-batch z (`Arc` `SpriteBatch` sorts requests by
+/// `z`; equal z keeps emission order).
+fn sort_unit_quads(quads: &mut [ZQuad]) {
+    quads.sort_by(|a, b| a.z.total_cmp(&b.z));
+}
 
 /// Live unit draw pass, one bucket per unit layer.
 pub struct UnitRenderer {
@@ -186,14 +216,17 @@ impl UnitRenderer {
                     let entry = groups
                         .entry((3, shadow.page))
                         .or_insert((shadow.texture.clone(), Vec::new()));
-                    entry.1.push(UnitQuad {
-                        cx: unit.x + ox,
-                        cy: unit.y + oy,
-                        w: shadow.w * self.sprite_scale,
-                        h: shadow.h * self.sprite_scale,
-                        rot: unit.rotation - 90.0,
-                        uv: shadow.uv,
-                        color: 0x0000_0038,
+                    entry.1.push(ZQuad {
+                        z: 0.0,
+                        quad: UnitQuad {
+                            cx: unit.x + ox,
+                            cy: unit.y + oy,
+                            w: shadow.w * self.sprite_scale,
+                            h: shadow.h * self.sprite_scale,
+                            rot: unit.rotation - 90.0,
+                            uv: shadow.uv,
+                            color: 0x0000_0038,
+                        },
                     });
                     sprites += 1;
                 }
@@ -224,14 +257,17 @@ impl UnitRenderer {
                     let entry = groups
                         .entry((bucket, leg.page))
                         .or_insert((leg.texture.clone(), Vec::new()));
-                    entry.1.push(UnitQuad {
-                        cx: unit.x + dx,
-                        cy: unit.y + dy,
-                        w: leg.w * self.sprite_scale,
-                        h: leg.h * self.sprite_scale * *sy,
-                        rot: *rot,
-                        uv,
-                        color: mix_rgba(0xffff_ffff, tint, alpha),
+                    entry.1.push(ZQuad {
+                        z: LEG_Z,
+                        quad: UnitQuad {
+                            cx: unit.x + dx,
+                            cy: unit.y + dy,
+                            w: leg.w * self.sprite_scale,
+                            h: leg.h * self.sprite_scale * *sy,
+                            rot: *rot,
+                            uv,
+                            color: mix_rgba(0xffff_ffff, tint, alpha),
+                        },
                     });
                     sprites += 1;
                 }
@@ -246,14 +282,17 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, base_tread.page))
                     .or_insert((base_tread.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: unit.x,
-                    cy: unit.y,
-                    w: base_tread.w * self.sprite_scale,
-                    h: base_tread.h * self.sprite_scale,
-                    rot: unit.rotation - 90.0,
-                    uv: base_tread.uv,
-                    color: 0xffff_ffff,
+                entry.1.push(ZQuad {
+                    z: LEG_Z,
+                    quad: UnitQuad {
+                        cx: unit.x,
+                        cy: unit.y,
+                        w: base_tread.w * self.sprite_scale,
+                        h: base_tread.h * self.sprite_scale,
+                        rot: unit.rotation - 90.0,
+                        uv: base_tread.uv,
+                        color: 0xffff_ffff,
+                    },
                 });
                 sprites += 1;
                 let frame = (treads.tread_time as i32).rem_euclid(treads.frames.max(1));
@@ -276,14 +315,17 @@ impl UnitRenderer {
                         let entry = groups
                             .entry((bucket, region.page))
                             .or_insert((region.texture.clone(), Vec::new()));
-                        entry.1.push(UnitQuad {
-                            cx: unit.x + vx / 4.0,
-                            cy: unit.y + vy / 4.0,
-                            w: rect.width / 4.0,
-                            h: region.h * self.sprite_scale,
-                            rot: unit.rotation - 90.0,
-                            uv: region.uv,
-                            color: 0xffff_ffff,
+                        entry.1.push(ZQuad {
+                            z: LEG_Z,
+                            quad: UnitQuad {
+                                cx: unit.x + vx / 4.0,
+                                cy: unit.y + vy / 4.0,
+                                w: rect.width / 4.0,
+                                h: region.h * self.sprite_scale,
+                                rot: unit.rotation - 90.0,
+                                uv: region.uv,
+                                color: 0xffff_ffff,
+                            },
                         });
                         sprites += 1;
                     }
@@ -445,8 +487,145 @@ impl UnitRenderer {
                     let entry = groups
                         .entry((bucket, region.page))
                         .or_insert((region.texture.clone(), Vec::new()));
-                    entry.1.push(quad);
+                    entry.1.push(ZQuad { z: LEG_Z, quad });
                     sprites += 1;
+                }
+            }
+            // `drawPayload` (`UnitType.java:1508-1526,1632-1640`): the first
+            // carried payload draws under the carrier. The port keeps only the
+            // pickup snapshot (`CarriedPayload`), so a unit payload draws its
+            // body/outline/cell and a build payload its composed `-full` icon
+            // instead of the live `UnitType.draw`/`Building.payloadDraw`.
+            if let Some(payload) = &unit.payload {
+                match payload {
+                    PayloadDraw::Unit {
+                        name,
+                        rotation,
+                        team,
+                        healthf,
+                        draw_body,
+                        draw_cell,
+                        segments,
+                    } => {
+                        let rot = *rotation - 90.0;
+                        if let Some(outline) = self.resolver.find(&format!("{name}-outline")) {
+                            let entry = groups
+                                .entry((bucket, outline.page))
+                                .or_insert((outline.texture.clone(), Vec::new()));
+                            entry.1.push(ZQuad {
+                                z: PAYLOAD_Z,
+                                quad: UnitQuad {
+                                    cx: unit.x,
+                                    cy: unit.y,
+                                    w: outline.w * self.sprite_scale,
+                                    h: outline.h * self.sprite_scale,
+                                    rot,
+                                    uv: outline.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            });
+                            sprites += 1;
+                        }
+                        if (*draw_body || *segments > 0)
+                            && let Some(body) = self.resolver.find(name)
+                        {
+                            let entry = groups
+                                .entry((bucket, body.page))
+                                .or_insert((body.texture.clone(), Vec::new()));
+                            entry.1.push(ZQuad {
+                                z: PAYLOAD_Z,
+                                quad: UnitQuad {
+                                    cx: unit.x,
+                                    cy: unit.y,
+                                    w: body.w * self.sprite_scale,
+                                    h: body.h * self.sprite_scale,
+                                    rot,
+                                    uv: body.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            });
+                            sprites += 1;
+                        }
+                        if *draw_cell {
+                            let cell = self
+                                .resolver
+                                .find(&format!("{name}-cell"))
+                                .or_else(|| self.resolver.find("power-cell"));
+                            if let Some(cell) = cell {
+                                let entry = groups
+                                    .entry((bucket, cell.page))
+                                    .or_insert((cell.texture.clone(), Vec::new()));
+                                entry.1.push(ZQuad {
+                                    z: PAYLOAD_Z,
+                                    quad: UnitQuad {
+                                        cx: unit.x,
+                                        cy: unit.y,
+                                        w: cell.w * self.sprite_scale,
+                                        h: cell.h * self.sprite_scale,
+                                        rot,
+                                        uv: cell.uv,
+                                        color: cell_color(
+                                            mind_core::game::team::Team::get(*team)
+                                                .color
+                                                .to_rgba8888(),
+                                            *healthf,
+                                            time,
+                                        ),
+                                    },
+                                });
+                                sprites += 1;
+                            }
+                        }
+                    }
+                    PayloadDraw::Build {
+                        block,
+                        region,
+                        size,
+                    } => {
+                        // `BuildPayload.draw`: `squareShadow(1.85 * size)` then
+                        // the block icon (`Payload.draw` passes no rotation).
+                        if let Some(shadow) = self.resolver.find("square-shadow") {
+                            let rad = *size as f32 * TILESIZE as f32 * 1.85;
+                            let entry = groups
+                                .entry((bucket, shadow.page))
+                                .or_insert((shadow.texture.clone(), Vec::new()));
+                            entry.1.push(ZQuad {
+                                z: PAYLOAD_Z - 0.001,
+                                quad: UnitQuad {
+                                    cx: unit.x,
+                                    cy: unit.y,
+                                    w: rad,
+                                    h: rad,
+                                    rot: 0.0,
+                                    uv: shadow.uv,
+                                    color: 0x0000_0066,
+                                },
+                            });
+                            sprites += 1;
+                        }
+                        if let Some(icon) = block_region_candidates(block, region)
+                            .into_iter()
+                            .find_map(|name| self.resolver.find(&name))
+                        {
+                            let w = *size as f32 * TILESIZE as f32;
+                            let entry = groups
+                                .entry((bucket, icon.page))
+                                .or_insert((icon.texture.clone(), Vec::new()));
+                            entry.1.push(ZQuad {
+                                z: PAYLOAD_Z,
+                                quad: UnitQuad {
+                                    cx: unit.x,
+                                    cy: unit.y,
+                                    w,
+                                    h: w,
+                                    rot: 0.0,
+                                    uv: icon.uv,
+                                    color: 0xffff_ffff,
+                                },
+                            });
+                            sprites += 1;
+                        }
+                    }
                 }
             }
             // `drawSoftShadow`: `max(region.w, region.h) * region.scl() *
@@ -457,16 +636,77 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, shadow.page))
                     .or_insert((shadow.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: unit.x,
-                    cy: unit.y,
-                    w: size * 1.6,
-                    h: size * 1.6,
-                    rot: 0.0,
-                    uv: shadow.uv,
-                    color: 0x0000_0066,
+                entry.1.push(ZQuad {
+                    z: SOFT_SHADOW_Z,
+                    quad: UnitQuad {
+                        cx: unit.x,
+                        cy: unit.y,
+                        w: size * 1.6,
+                        h: size * 1.6,
+                        rot: 0.0,
+                        uv: shadow.uv,
+                        color: 0x0000_0066,
+                    },
                 });
                 sprites += 1;
+            }
+            // `drawCrawl` (`UnitType.java:1902-1937`): outline pass then
+            // segment/body pass (and the optional per-segment cell), all at the
+            // unit z. `drawCell` on the carrier itself is skipped in Java for
+            // `Crawlc`, so the segment cells replace it.
+            if let Some(crawl) = &unit.crawl {
+                let params = CrawlDrawParams {
+                    x: unit.x,
+                    y: unit.y,
+                    rotation: unit.rotation,
+                    segment_rot: crawl.segment_rot,
+                    crawl_time: crawl.crawl_time,
+                    segments: crawl.segments.max(0) as usize,
+                    segment_scl: crawl.segment_scl,
+                    segment_mag: crawl.segment_mag,
+                    segment_phase: crawl.segment_phase,
+                    draw_cell: unit.draw_cell,
+                };
+                let team = mind_core::game::team::Team::get(unit.team)
+                    .color
+                    .to_rgba8888();
+                for op in crawl_draw_ops(&params) {
+                    let region = match op.layer {
+                        CrawlLayer::Outline => self
+                            .resolver
+                            .find(&format!("{}-segment-outline{}", unit.name, op.index)),
+                        CrawlLayer::Segment => self
+                            .resolver
+                            .find(&format!("{}-segment{}", unit.name, op.index)),
+                        CrawlLayer::Cell => self
+                            .resolver
+                            .find(&format!("{}-segment-cell{}", unit.name, op.index)),
+                    };
+                    let Some(region) = region else {
+                        continue;
+                    };
+                    let color = if op.layer == CrawlLayer::Cell {
+                        cell_color(team, unit.healthf, time)
+                    } else {
+                        0xffff_ffff
+                    };
+                    let entry = groups
+                        .entry((bucket, region.page))
+                        .or_insert((region.texture.clone(), Vec::new()));
+                    entry.1.push(ZQuad {
+                        z: 0.0,
+                        quad: UnitQuad {
+                            cx: op.x,
+                            cy: op.y,
+                            w: region.w * self.sprite_scale,
+                            h: region.h * self.sprite_scale,
+                            rot: op.rot,
+                            uv: region.uv,
+                            color,
+                        },
+                    });
+                    sprites += 1;
+                }
             }
             // `drawOutline`/`drawWeaponOutlines` (`UnitType.java:1537-1539`):
             // the unit's own `<name>-outline` (present for modded units with
@@ -477,14 +717,17 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, outline.page))
                     .or_insert((outline.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: unit.x,
-                    cy: unit.y,
-                    w: outline.w * self.sprite_scale,
-                    h: outline.h * self.sprite_scale,
-                    rot: unit.rotation - 90.0,
-                    uv: outline.uv,
-                    color: 0xffff_ffff,
+                entry.1.push(ZQuad {
+                    z: 0.0,
+                    quad: UnitQuad {
+                        cx: unit.x,
+                        cy: unit.y,
+                        w: outline.w * self.sprite_scale,
+                        h: outline.h * self.sprite_scale,
+                        rot: unit.rotation - 90.0,
+                        uv: outline.uv,
+                        color: 0xffff_ffff,
+                    },
                 });
                 sprites += 1;
             }
@@ -515,14 +758,17 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, outline.page))
                     .or_insert((outline.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: wx,
-                    cy: wy,
-                    w: outline.w * self.sprite_scale,
-                    h: outline.h * self.sprite_scale,
-                    rot: wr,
-                    uv,
-                    color: 0xffff_ffff,
+                entry.1.push(ZQuad {
+                    z: 0.0,
+                    quad: UnitQuad {
+                        cx: wx,
+                        cy: wy,
+                        w: outline.w * self.sprite_scale,
+                        h: outline.h * self.sprite_scale,
+                        rot: wr,
+                        uv,
+                        color: 0xffff_ffff,
+                    },
                 });
                 sprites += 1;
             }
@@ -541,7 +787,7 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, body.page))
                     .or_insert((body.texture.clone(), Vec::new()));
-                entry.1.push(quad);
+                entry.1.push(ZQuad { z: 0.0, quad });
                 sprites += 1;
                 // `UnitType.applyColor`: `Draw.mixcol(white, hitTime)` — the
                 // port draws the flash as an additive duplicate body quad.
@@ -550,19 +796,24 @@ impl UnitRenderer {
                     let entry = flash_groups
                         .entry((bucket, body.page))
                         .or_insert((body.texture.clone(), Vec::new()));
-                    entry.1.push(UnitQuad {
-                        color: 0xffff_ff00 | alpha,
-                        ..quad
+                    entry.1.push(ZQuad {
+                        z: 0.0,
+                        quad: UnitQuad {
+                            color: 0xffff_ff00 | alpha,
+                            ..quad
+                        },
                     });
                 }
             }
             // `drawCell`: `<name>-cell` else `power-cell`, tinted by
-            // `UnitType.cellColor`.
+            // `UnitType.cellColor`. Java skips the carrier cell for `Crawlc`
+            // (`drawCrawl` draws the segment cells instead).
             let cell = self
                 .resolver
                 .find(&format!("{}-cell", unit.name))
                 .or_else(|| self.resolver.find("power-cell"));
             if unit.draw_cell
+                && unit.crawl.is_none()
                 && let Some(cell) = cell
             {
                 let team = mind_core::game::team::Team::get(unit.team)
@@ -571,14 +822,17 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, cell.page))
                     .or_insert((cell.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: unit.x,
-                    cy: unit.y,
-                    w: cell.w * self.sprite_scale,
-                    h: cell.h * self.sprite_scale,
-                    rot: unit.rotation - 90.0,
-                    uv: cell.uv,
-                    color: mind_core::render::cell_color(team, unit.healthf, time),
+                entry.1.push(ZQuad {
+                    z: 0.0,
+                    quad: UnitQuad {
+                        cx: unit.x,
+                        cy: unit.y,
+                        w: cell.w * self.sprite_scale,
+                        h: cell.h * self.sprite_scale,
+                        rot: unit.rotation - 90.0,
+                        uv: cell.uv,
+                        color: cell_color(team, unit.healthf, time),
+                    },
                 });
                 sprites += 1;
             }
@@ -607,14 +861,20 @@ impl UnitRenderer {
                 let entry = groups
                     .entry((bucket, region.page))
                     .or_insert((region.texture.clone(), Vec::new()));
-                entry.1.push(UnitQuad {
-                    cx: wx,
-                    cy: wy,
-                    w: region.w * self.sprite_scale,
-                    h: region.h * self.sprite_scale,
-                    rot: wr,
-                    uv,
-                    color: 0xffff_ffff,
+                // `Weapon.draw` (`Weapon.java:219-221`): `Draw.z(z +
+                // layerOffset)` for the region/cell quads (the parts pass
+                // already applies it).
+                entry.1.push(ZQuad {
+                    z: weapon.def.layer_offset,
+                    quad: UnitQuad {
+                        cx: wx,
+                        cy: wy,
+                        w: region.w * self.sprite_scale,
+                        h: region.h * self.sprite_scale,
+                        rot: wr,
+                        uv,
+                        color: 0xffff_ffff,
+                    },
                 });
                 sprites += 1;
                 // `Weapon.draw` (`Weapon.java:261-265`): `<weapon>-cell` tinted
@@ -632,14 +892,17 @@ impl UnitRenderer {
                     let entry = groups
                         .entry((bucket, cell.page))
                         .or_insert((cell.texture.clone(), Vec::new()));
-                    entry.1.push(UnitQuad {
-                        cx: wx,
-                        cy: wy,
-                        w: cell.w * self.sprite_scale,
-                        h: cell.h * self.sprite_scale,
-                        rot: wr,
-                        uv,
-                        color: mind_core::render::cell_color(team, unit.healthf, time),
+                    entry.1.push(ZQuad {
+                        z: weapon.def.layer_offset,
+                        quad: UnitQuad {
+                            cx: wx,
+                            cy: wy,
+                            w: cell.w * self.sprite_scale,
+                            h: cell.h * self.sprite_scale,
+                            rot: wr,
+                            uv,
+                            color: cell_color(team, unit.healthf, time),
+                        },
                     });
                     sprites += 1;
                 }
@@ -662,7 +925,7 @@ impl UnitRenderer {
         }
 
         for (key, (texture, quads)) in groups {
-            let Some(mesh) = build_unit_mesh(&quads) else {
+            let Some(mesh) = build_sorted_unit_mesh(quads) else {
                 continue;
             };
             let node = if let Some(node) = self.nodes.get(&key) {
@@ -687,7 +950,7 @@ impl UnitRenderer {
         }
 
         for (key, (texture, quads)) in flash_groups {
-            let Some(mesh) = build_unit_mesh(&quads) else {
+            let Some(mesh) = build_sorted_unit_mesh(quads) else {
                 continue;
             };
             let node = if let Some(node) = self.flash_nodes.get(&key) {
@@ -734,6 +997,13 @@ fn mix_rgba(base: u32, target: u32, t: f32) -> u32 {
     (channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | 0xff
 }
 
+/// Builds a bucket mesh in Java sprite-batch z order (stable for equal z).
+fn build_sorted_unit_mesh(mut quads: Vec<ZQuad>) -> Option<Gd<ArrayMesh>> {
+    sort_unit_quads(&mut quads);
+    let flat: Vec<UnitQuad> = quads.into_iter().map(|quad| quad.quad).collect();
+    build_unit_mesh(&flat)
+}
+
 /// Builds an `ArrayMesh` from rotated quads (two triangles each).
 pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
     // I02 T2: an empty slice gets no mesh (see `atlas_bind::has_mesh_quads`).
@@ -766,4 +1036,43 @@ pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
         }
     }
     tool.commit()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{UnitQuad, ZQuad, sort_unit_quads};
+
+    fn zquad(z: f32, color: u32) -> ZQuad {
+        ZQuad {
+            z,
+            quad: UnitQuad {
+                cx: 0.0,
+                cy: 0.0,
+                w: 1.0,
+                h: 1.0,
+                rot: 0.0,
+                uv: [0.0, 0.0, 1.0, 1.0],
+                color,
+            },
+        }
+    }
+
+    /// L04 T3: `Weapon.layerOffset` and the payload/leg offsets are Java
+    /// sprite-batch z values (`Weapon.java:219-221`); the bucket mesh must emit
+    /// them in ascending z while keeping equal-z emission order (body outline
+    /// before body, etc.).
+    #[test]
+    fn unit_quads_sort_by_java_z_stably() {
+        let mut quads = vec![
+            zquad(0.0, 1),    // body
+            zquad(-0.002, 2), // cleroi point-defense (below the body)
+            zquad(0.0001, 3), // stell main weapon (above the body)
+            zquad(0.0, 4),    // cell / outline
+            zquad(-0.03, 5),  // payload
+            zquad(0.1, 6),    // conquer weapon (draws over nearby units)
+        ];
+        sort_unit_quads(&mut quads);
+        let order: Vec<u32> = quads.iter().map(|q| q.quad.color).collect();
+        assert_eq!(order, vec![5, 2, 1, 4, 3, 6]);
+    }
 }

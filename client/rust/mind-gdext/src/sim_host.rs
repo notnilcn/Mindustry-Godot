@@ -59,6 +59,12 @@ pub struct UnitDraw {
     /// Tank tread state (`TankComp` + `UnitType` tread knobs); `None` for
     /// non-tanks (J03 T5).
     pub treads: Option<TreadsDraw>,
+    /// Crawl segment state (`CrawlComp` + `UnitType` segment knobs); `None`
+    /// for non-crawl units (`UnitType.drawCrawl`, L04 T3).
+    pub crawl: Option<CrawlDraw>,
+    /// First carried payload (`PayloadComp.payloads().first()`;
+    /// `UnitType.drawPayload`, L04 T3).
+    pub payload: Option<PayloadDraw>,
     /// Live weapon mounts (`UnitWeapons`).
     pub weapons: Vec<WeaponDraw>,
     /// `UnitType.parts` (drawn after body/weapons/items, `UnitType.java:1561-1578`).
@@ -116,6 +122,58 @@ pub struct TreadsDraw {
     pub rects: Vec<mind_core::content::registries::units::TreadRect>,
     /// `UnitType.treadFrames`.
     pub frames: i32,
+}
+
+/// `CrawlComp` state + `UnitType` segment knobs resolved for `drawCrawl`
+/// (`UnitType.java:1902-1937`; L04 T3).
+pub struct CrawlDraw {
+    /// `CrawlComp.crawlTime` (distance travelled).
+    pub crawl_time: f32,
+    /// `CrawlComp.segmentRot` (trailing segment rotation).
+    pub segment_rot: f32,
+    /// `UnitType.segments`.
+    pub segments: i32,
+    /// `UnitType.segmentScl`.
+    pub segment_scl: f32,
+    /// `UnitType.segmentMag`.
+    pub segment_mag: f32,
+    /// `UnitType.segmentPhase`.
+    pub segment_phase: f32,
+}
+
+/// The first payload on a carrier's stack (`PayloadComp.payloads().first()`),
+/// resolved to the draw data the hand-written unit pass consumes
+/// (`UnitType.drawPayload` + `UnitPayload.draw`/`BuildPayload.draw`; L04 T3).
+pub enum PayloadDraw {
+    /// A carried unit (`UnitPayload`): its type and pickup snapshot.
+    Unit {
+        /// `UnitType.name` (body/cell region prefix).
+        name: String,
+        /// Pickup rotation in degrees (`Payload.set` writes `unit.rotation`).
+        rotation: f32,
+        /// Owning team (segment/unit cell tint).
+        team: u8,
+        /// `health / type.health` (the carried unit's body tint).
+        healthf: f32,
+        /// `UnitType.drawBody`.
+        draw_body: bool,
+        /// `UnitType.drawCell`.
+        draw_cell: bool,
+        /// `UnitType.segments` (`0` = normal body); a carried crawl unit has
+        /// no live segment state, so the composed body region stands in.
+        segments: i32,
+    },
+    /// A carried building (`BuildPayload`): the composed `-full` icon and
+    /// `Block.size` (`Building.payloadDraw`; `BuildPayload.set` ignores the
+    /// payload rotation).
+    Build {
+        /// `Block.name` (resolves `block-<name>-full`).
+        block: String,
+        /// `Block.region` (second icon candidate).
+        region: String,
+        /// `Block.size` in tiles.
+        size: i32,
+    },
 }
 
 /// `LegsComp` state + `UnitType` leg knobs resolved for `drawLegs` (J03 T4).
@@ -5686,6 +5744,64 @@ impl MindSimHost {
                         rects: def.tread_rects.clone(),
                         frames: def.tread_frames.max(1),
                     });
+                // L04 T3: `CrawlComp` draw state (`UnitType.drawCrawl`).
+                let crawl = if def.segments > 0 {
+                    self.sim
+                        .ecs
+                        .0
+                        .get::<mind_core::entities::comp::unit::comp::CrawlComp>(*entity)
+                } else {
+                    None
+                }
+                .map(|comp| CrawlDraw {
+                    crawl_time: comp.crawl_time,
+                    segment_rot: comp.segment_rot,
+                    segments: def.segments,
+                    segment_scl: def.segment_scl,
+                    segment_mag: def.segment_mag,
+                    segment_phase: def.segment_phase,
+                });
+                // L04 T3: `drawPayload` reads `payloads().first()` (oldest).
+                let payload = self
+                    .sim
+                    .ecs
+                    .0
+                    .get::<mind_core::entities::comp::unit::comp::UnitPayloads>(*entity)
+                    .and_then(|payloads| payloads.stack.first())
+                    .and_then(|payload| match payload {
+                        mind_core::entities::comp::unit::comp::CarriedPayload::Unit {
+                            type_id,
+                            team,
+                            health,
+                            rotation,
+                        } => {
+                            let carried = content.unit(*type_id)?;
+                            Some(PayloadDraw::Unit {
+                                name: carried.name.clone(),
+                                rotation: *rotation,
+                                team: *team,
+                                healthf: if carried.health > 0.0 {
+                                    (*health / carried.health).clamp(0.0, 1.0)
+                                } else {
+                                    0.0
+                                },
+                                draw_body: carried.draw_body,
+                                draw_cell: carried.draw_cell,
+                                segments: carried.segments,
+                            })
+                        }
+                        mind_core::entities::comp::unit::comp::CarriedPayload::Build {
+                            block,
+                            ..
+                        } => {
+                            let carried = content.block(*block)?;
+                            Some(PayloadDraw::Build {
+                                block: carried.name.clone(),
+                                region: carried.region.clone(),
+                                size: carried.size,
+                            })
+                        }
+                    });
                 let legs = self
                     .sim
                     .ecs
@@ -5842,6 +5958,8 @@ impl MindSimHost {
                     mech,
                     legs,
                     treads,
+                    crawl,
+                    payload,
                     weapons,
                     parts: def.parts.clone(),
                     fin,
