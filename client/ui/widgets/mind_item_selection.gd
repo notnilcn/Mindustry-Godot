@@ -188,13 +188,7 @@ func _make_button(option: Dictionary) -> Button:
 		center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		center.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		button.add_child(center)
-		var icon := TextureRect.new()
-		icon.texture = texture
-		var size := clampf(float(option.get("size", 24.0)), 0.0, CELL)
-		icon.custom_minimum_size = Vector2(size, size)
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		center.add_child(icon)
+		center.add_child(icon_rect(texture, float(option.get("size", 24.0))))
 	else:
 		button.text = _label(option)
 	if name == _current:
@@ -203,6 +197,21 @@ func _make_button(option: Dictionary) -> Button:
 		button.set_pressed_no_signal(true)
 	button.toggled.connect(func(on: bool) -> void: picked.emit(name if on else ""))
 	return button
+
+
+## The option icon at `Mathf.clamp(selectionSize, 0, 40)` (`ItemSelection.java:70`;
+## `selectionSize` 24 for items/liquids, 28 blocks, 30 units). EXPAND_IGNORE_SIZE:
+## a `TextureRect` otherwise never shrinks below its ~32 px texture, so the clamp
+## had no effect (L05 T5, `diff/22-srccfg-zoom.png`).
+static func icon_rect(texture: Texture2D, selection_size: float) -> TextureRect:
+	var size := clampf(selection_size, 0.0, CELL)
+	var icon := TextureRect.new()
+	icon.texture = texture
+	icon.custom_minimum_size = Vector2(size, size)
+	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	return icon
 
 
 ## `Styles.clearNoneTogglei` (`Styles.java:351-356`): `up = none`,

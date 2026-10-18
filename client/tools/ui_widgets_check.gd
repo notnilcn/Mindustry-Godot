@@ -611,5 +611,19 @@ func _init() -> void:
 	_check((picker.get("_sliders") as Dictionary).size() == 4, "color picker with alpha has 4 slider rows")
 	picker.free()
 
+	# L05 T5: `ItemSelection` icons at `clamp(selectionSize, 0, 40)`
+	# (`ItemSelection.java:70`): a 32 px texture shrinks to 24 for an item and
+	# a 50 clamps to the 40 px cell.
+	var icon_image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	var icon_texture := ImageTexture.create_from_image(icon_image)
+	var item_icon := MindItemSelection.icon_rect(icon_texture, 24.0)
+	_check(item_icon.get_combined_minimum_size() == Vector2(24, 24),
+		"item selection icon is 24 px (got %s)" % item_icon.get_combined_minimum_size())
+	var big_icon := MindItemSelection.icon_rect(icon_texture, 50.0)
+	_check(big_icon.get_combined_minimum_size() == Vector2(40, 40),
+		"selection icon clamps to 40 px (got %s)" % big_icon.get_combined_minimum_size())
+	item_icon.free()
+	big_icon.free()
+
 	print("UICHECK: failed=", _failures)
 	quit(1 if _failures > 0 else 0)
