@@ -81,6 +81,13 @@ impl AudioRegistry {
         }
     }
 
+    /// Registers one data-asset sound by logical name (`dp-<name>`,
+    /// PAR-0394). Decoded lazily like a mod override.
+    pub fn add_named_sound(&mut self, name: &str, bytes: Vec<u8>) {
+        self.mod_sounds.insert(name.to_owned(), bytes);
+        self.streams.remove(name);
+    }
+
     /// Lazily decodes and caches a sound's stream (`None` for dummies/missing).
     /// Mod overrides win over the base index (`SoundControl` by-name lookup).
     pub fn sound_stream(&mut self, name: &str) -> Option<Gd<AudioStream>> {

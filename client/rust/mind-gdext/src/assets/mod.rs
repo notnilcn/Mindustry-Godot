@@ -11,6 +11,7 @@
 mod atlas;
 mod audio;
 pub(crate) mod bundle;
+pub(crate) mod decorator;
 mod fonts;
 pub(crate) mod loader;
 

@@ -20,6 +20,7 @@ use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
 use mind_core::io::{NativeFs, Paths};
+use mind_core::mods::assets::{DataAsset, DataAssetData, DataAssetType, ModDataManager};
 use mind_core::mods::provider::{ModBootContent, ModContentFailure};
 use mind_core::mods::{ModListEntry, ModListing, Mods};
 use mind_core::version::BuildInfo;
@@ -35,6 +36,9 @@ const MODS_PATH: &str = "user://mods";
 pub struct MindMods {
     base: Base<GdNode>,
     mods: Mods,
+    /// `GameState.data` (`core/GameState.java:47`, PAR-0394): the single owner
+    /// of map/mod data assets (patches, content, bundles, images, audio).
+    data: ModDataManager,
     /// `bootstrap()` ran at least once (autoloads `_ready` after scene init).
     bootstrapped: bool,
 }
@@ -45,6 +49,7 @@ impl INode for MindMods {
         MindMods {
             base,
             mods: Mods::new(false, PathBuf::new()),
+            data: ModDataManager::new(),
             bootstrapped: false,
         }
     }
@@ -92,6 +97,10 @@ impl MindMods {
         // I07 T4/T5: the assets autoload entered first (project.godot order), so
         // its atlas is loaded; merge mod bundles/sprites/sounds now.
         self.push_asset_overlay();
+        // PAR-0394: (re)start the data-asset owner for this boot. Map data is
+        // replaced whenever a map loads (`load_map_data`).
+        self.data = ModDataManager::new();
+        self.publish_data_assets();
         self.bootstrapped = true;
     }
 
@@ -282,6 +291,126 @@ impl MindMods {
             log::warn!("[mods] {warning}");
         }
         assets.bind_mut().apply_mod_overlay(&overlay);
+    }
+
+    // --- data assets (PAR-0394, Java `state.data`) ---
+
+    /// Emitted after the data-asset set (or its applied state) changes.
+    #[signal]
+    fn data_changed();
+
+    /// The owning `ModDataManager` (`GameState.data`).
+    pub fn data(&self) -> &ModDataManager {
+        &self.data
+    }
+
+    /// Mutable access for the editor facade (mutations must be followed by
+    /// [`MindMods::publish_data_assets`]).
+    pub fn data_mut(&mut self) -> &mut ModDataManager {
+        &mut self.data
+    }
+
+    /// Applies a map's `patches` region records (`SaveVersion.readDataPatches`
+    /// → `state.data.load(assets)`) and refreshes the live decorators.
+    pub fn load_map_data(
+        &mut self,
+        assets: Vec<DataAsset>,
+        registry: &mut mind_core::content::ContentRegistry,
+    ) -> Result<(), String> {
+        self.data
+            .load_assets(assets, registry)
+            .map_err(|error| error.to_string())?;
+        self.publish_data_assets();
+        Ok(())
+    }
+
+    /// Pushes the manager's records into the live asset/audio decorators and
+    /// notifies the dialogs (`DataManager` apply half, PAR-0394).
+    pub fn publish_data_assets(&mut self) {
+        if let Some(mut assets) = crate::content_boot::assets_node() {
+            let mut assets = assets.bind_mut();
+            assets.apply_data_images(&self.data);
+            assets.apply_data_bundles(&self.data);
+            assets.apply_data_audio(&self.data);
+        }
+        if let Some(mut audio) = self
+            .base()
+            .get_node_or_null("/root/Spine/MindAudio")
+            .and_then(|node| node.try_cast::<crate::audio::MindAudio>().ok())
+        {
+            audio.bind_mut().apply_data_audio(&self.data);
+        }
+        let _ = self.base_mut().emit_signal("data_changed", &[]);
+    }
+
+    /// Data-asset rows for `MapAssetsDialog` (all types, manager order).
+    ///
+    /// Fields per row: `kind`, `type` (folder), `name`, `path`, `embedded`,
+    /// `size`, `data` (patch/content JSON or bundle properties text),
+    /// `index` (patch order), `contentType`, `region`, `found`, `width`,
+    /// `height`, `generated`, `id`, `streaming`.
+    #[func]
+    pub fn data_assets(&self) -> Array<VarDictionary> {
+        let assets = crate::content_boot::assets_node();
+        let assets = assets.as_ref().map(|node| node.bind());
+        let probe = |name: &str| -> Option<(bool, i64, i64)> {
+            let assets = assets.as_ref()?;
+            let payload = assets.probe(GString::from(name));
+            let found = payload
+                .get("found")
+                .and_then(|value| value.try_to::<bool>().ok())
+                .unwrap_or(false);
+            let width = payload
+                .get("w")
+                .and_then(|value| value.try_to::<i64>().ok())
+                .unwrap_or(0);
+            let height = payload
+                .get("h")
+                .and_then(|value| value.try_to::<i64>().ok())
+                .unwrap_or(0);
+            Some((found, width, height))
+        };
+        let mut out = Array::<VarDictionary>::new();
+        for type_ in DataAssetType::ALL {
+            let records: Vec<&DataAsset> = if type_ == DataAssetType::Patch {
+                // Patch rows follow `patch_records()` order: the dialog's
+                // replace/remove actions are index-based.
+                let patches = self.data.patch_records();
+                patches
+                    .iter()
+                    .filter_map(|patch| {
+                        self.data
+                            .all()
+                            .iter()
+                            .find(|asset| asset.type_ == type_ && asset.path == patch.name)
+                    })
+                    .collect()
+            } else {
+                self.data.assets_of(type_)
+            };
+            for (index, asset) in records.into_iter().enumerate() {
+                out.push(&data_row(&self.data, asset, index, &probe));
+            }
+        }
+        out
+    }
+
+    /// Content parse/load errors from the last data reload.
+    #[func]
+    pub fn data_errors(&self) -> PackedStringArray {
+        let mut out = PackedStringArray::new();
+        for error in self.data.content_errors() {
+            out.push(&GString::from(error.as_str()));
+        }
+        out
+    }
+
+    /// Number of `dp-`/`net-` regions the decorator registered (probe).
+    #[func]
+    pub fn data_region_count(&self) -> i64 {
+        crate::content_boot::assets_node()
+            .map(|node| node.bind().data_region_count())
+            .unwrap_or(0)
     }
 
     /// Records per-file content failures on the owning mods
@@ -555,6 +684,87 @@ impl MindMods {
             log::warn!("[mods] settings save failed: {error}");
         }
     }
+}
+
+/// `(found, width, height)` probe result for a `dp-` atlas region.
+type RegionProbe<'a> = &'a dyn Fn(&str) -> Option<(bool, i64, i64)>;
+
+/// One `MapAssetsDialog` row for a data asset (`AssetView.build` input).
+fn data_row(
+    manager: &ModDataManager,
+    asset: &DataAsset,
+    index: usize,
+    probe: RegionProbe<'_>,
+) -> VarDictionary {
+    let mut row = VarDictionary::new();
+    let key = |name: &str| GString::from(name);
+    row.set(
+        &key("kind"),
+        &GString::from(asset.type_.kind()).to_variant(),
+    );
+    row.set(
+        &key("type"),
+        &GString::from(asset.type_.folder()).to_variant(),
+    );
+    row.set(
+        &key("name"),
+        &GString::from(asset.name.as_str()).to_variant(),
+    );
+    row.set(
+        &key("path"),
+        &GString::from(asset.path.as_str()).to_variant(),
+    );
+    row.set(&key("embedded"), &asset.embedded.to_variant());
+    row.set(&key("index"), &(index as i64).to_variant());
+    let (data, size) = match &asset.data {
+        DataAssetData::Patch(text) => (text.clone(), text.len()),
+        DataAssetData::Content(record) => (record.json.clone(), record.json.len()),
+        DataAssetData::Bundle(map) => (mind_core::mods::assets::render_properties(map), map.len()),
+        DataAssetData::Blob(bytes) => (String::new(), bytes.len()),
+    };
+    row.set(&key("data"), &GString::from(data.as_str()).to_variant());
+    row.set(&key("size"), &(size as i64).to_variant());
+    if let DataAssetData::Content(record) = &asset.data {
+        row.set(
+            &key("contentType"),
+            &GString::from(record.type_.name()).to_variant(),
+        );
+    }
+    let mut region = String::new();
+    match asset.type_ {
+        DataAssetType::Image => {
+            if let Some(entry) = manager
+                .image_applier()
+                .entries()
+                .iter()
+                .find(|entry| entry.path == asset.path)
+            {
+                region = entry.name.clone();
+                row.set(&key("generated"), &entry.generated.to_variant());
+                row.set(&key("scale"), &(entry.scale as f64).to_variant());
+            }
+        }
+        DataAssetType::Sound | DataAssetType::Music => {
+            if let Some(entry) = manager
+                .audio_applier()
+                .entries()
+                .iter()
+                .find(|entry| entry.path == asset.path)
+            {
+                row.set(&key("id"), &entry.id.to_variant());
+                row.set(&key("streaming"), &entry.streaming.to_variant());
+            }
+        }
+        _ => {}
+    }
+    if !region.is_empty() {
+        row.set(&key("region"), &GString::from(region.as_str()).to_variant());
+        let (found, width, height) = probe(&region).unwrap_or((false, 0, 0));
+        row.set(&key("found"), &found.to_variant());
+        row.set(&key("width"), &width.to_variant());
+        row.set(&key("height"), &height.to_variant());
+    }
+    row
 }
 
 /// Packs a `Vec<String>` into a Godot string array.

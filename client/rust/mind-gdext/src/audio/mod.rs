@@ -10,6 +10,7 @@
 //! API from the plan.
 
 pub mod buses;
+pub mod decorator;
 pub mod streams;
 pub mod voices;
 
@@ -1051,6 +1052,18 @@ impl MindAudio {
             .is_some_and(|player| player.is_playing())
     }
 
+    /// Number of data-asset streams registered by the PAR-0394 decorator.
+    #[func]
+    pub fn data_audio_count(&self) -> i64 {
+        self.streams.data_stream_count() as i64
+    }
+
+    /// Whether a `dp-<name>` data-asset stream is registered.
+    #[func]
+    pub fn has_data_audio(&self, name: GString) -> bool {
+        self.streams.is_data_stream(&name.to_string())
+    }
+
     /// T7 inspector: in-game music context state.
     #[func]
     pub fn music_debug(&self) -> VarDictionary {
@@ -1230,6 +1243,37 @@ impl MindAudio {
             out.push(line);
         }
         out
+    }
+
+    /// Plays a data-asset sound/music (`dp-<name>`, PAR-0394). The listener
+    /// half of `MapAudioView`: sounds go to the UI pool, music to the Music
+    /// player (replacing the track, like Java's `Music.play`).
+    #[func]
+    pub fn play_data_audio(&mut self, name: GString, music: bool) -> bool {
+        let name = name.to_string();
+        if music {
+            let Some(mut player) = self.music_player.clone() else {
+                return false;
+            };
+            let Some(stream) = self.streams.music(&name) else {
+                return false;
+            };
+            player.set_stream(&stream);
+            player.set_volume_linear(self.settings.musicvol as f32 / 100.0);
+            player.play();
+            self.music_override = true;
+            self.current = Some(MusicRef::new(name));
+            true
+        } else {
+            let Some(stream) = self.streams.sound(&name, false) else {
+                return false;
+            };
+            let sfx = self.sfx_scale();
+            let Some(pool) = self.pool.as_mut() else {
+                return false;
+            };
+            pool.play_ui(stream, sfx, 1.0) != 0
+        }
     }
 
     /// Plays a one-shot on the UI bus (or the world pool for non-UI sounds).
