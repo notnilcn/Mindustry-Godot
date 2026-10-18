@@ -6,6 +6,8 @@ so drift from upstream Java fields is visible.
 
 Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented; M2 all nine top-level kinds + unit weapons/bullets/abilities/shoot patterns parsed; M2b nested frag/interval/spawn bullets + `mind-tools mods classmap --check`; M3b patch surface (`drillMultipliers`, `attributes`, deep weapon/bullet paths, abilities, reconstructor `upgrades`, typed `consumes`).**
 
+L08 T3 (2026-10-18): **`UnlockableContent` fields, `drillMultipliers`, factory/assembler `plans`, weapon effect/draw parts, inline/array effects and `drawer` are parsed and covered by one `parity/mod_fixtures/` fixture each** (`unlock`, `drill`, `plans`, `weapon_fx`, `effects`, `drawer`).
+
 ## Item (`mindustry.type.Item`)
 
 | JSON field | Rust target | Status |
@@ -26,7 +28,7 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 | `frameTime` | `Item.frame_time` | implemented |
 | `buildable` | `Item.buildable` | implemented |
 | `hidden` | `Item.hidden` | implemented |
-| (all other `UnlockableContent` fields) | `UnlockFields` | TODO (M2+) |
+| (all other `UnlockableContent` fields) | `UnlockFields` (`details`, `credit`, `alwaysUnlocked`, `inlineDescription`, `hideDetails`, `hideDatabase`, `generateIcons`, `selectionSize`, `fullOverride`, `allDatabaseTabs`, `shownPlanets`, `databaseTabs`, `databaseCategory`, `databaseTag`) | implemented (L08 T3, all nine top-level kinds) |
 
 ## Block (`mindustry.world.Block` and subclasses)
 
@@ -43,11 +45,12 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 | `buildVisibility`, `category` | `BlockSpec` | implemented |
 | `requirements` | `BlockSpec.requirements` | implemented |
 | `consumes` | `BlockDef.consumes` | implemented (JSON parse of the `Consume*` classes + patch merge; J09 T1) |
-| `drillMultipliers` | `BlockDef.drill_multipliers` | implemented (parse TODO; patch M3b) |
+| `drillMultipliers` | `BlockDef.drill_multipliers` | implemented (JSON parse L08 T3 + patch M3b) |
 | `attributes` | `BlockDef.attributes` (name-keyed) | implemented (patch M3b) |
 | `unit_plans*` | `BlockDef.unit_plans` | implemented (patch M3) |
 | `upgrades` | `BlockDef.reconstructor_upgrades` | implemented (patch M3b) |
-| `assembler plans` | `BlockDef.assembler_plans` | TODO (M2/M3) |
+| `assembler plans` (`plans`) | `BlockDef.assembler_plans` / `BlockDef.unit_plans` | implemented (L08 T3; `UnitFactory` / `UnitAssembler`) |
+| `drawer` | `BlockDef.drawer` (`DrawerSpec` tree) | implemented (L08 T3; plan 17 executes it) |
 
 ## M2 top-level kinds
 
@@ -65,12 +68,13 @@ Status as of 2026-10-03 (lane/f16-20): **M1 item + block core fields implemented
 
 | Nested kind | Implemented fields | Notes |
 |---|---|---|
-| `bullet` (unit weapon) | `type` (ClassMap `BulletType`), `damage`, `speed`, `lifetime`, `hitSize`, `drawSize`, `width`, `height`, `length`, `splashDamage`, `splashDamageRadius`, `ammoMultiplier`, `reloadMultiplier`, `pierceCap`, `pierceDamageFactor`, `pierce`, `pierceBuilding`, `keepVelocity`, `collides`, `frontColor`/`backColor`/`colors`, `lightning`/`lightningLength`/`lightningLengthRand`, `status`, `frag`, `intervalBullet`, `spawnBullets` | registered recursively as non-mappable `BulletDef`; `spawnUnit` TODO (plan 11) |
-| `weapon` | `name`, `mirror`, `reload`, `x`, `y`, `alternate`, `rotate`, `shootOnDeath`, `shoot`, `bullet` | `WeaponDef::from_spec`; effect/draw parts TODO |
+| `bullet` (unit weapon) | `type` (ClassMap `BulletType`), `damage`, `speed`, `lifetime`, `hitSize`, `drawSize`, `width`, `height`, `length`, `splashDamage`, `splashDamageRadius`, `ammoMultiplier`, `reloadMultiplier`, `pierceCap`, `pierceDamageFactor`, `pierce`, `pierceBuilding`, `keepVelocity`, `collides`, `frontColor`/`backColor`/`colors`, `lightning`/`lightningLength`/`lightningLengthRand`, `status`, `frag`, `intervalBullet`, `spawnBullets`, `hitEffect`/`despawnEffect`/`shootEffect`/`smokeEffect`/`chargeEffect`/`trailEffect` (named/array/inline), `shootSound`/`hitSound`/`despawnSound`, `hitSoundVolume`/`hitSoundPitch`/`hitSoundPitchRange` | registered recursively as non-mappable `BulletDef`; `spawnUnit` TODO (plan 11) |
+| `weapon` | `name`, `mirror`, `reload`, `x`, `y`, `alternate`, `rotate`, `shootOnDeath`, `shoot`, `bullet`, `display`, `showStatSprite`, `top`, `continuous`, `alwaysContinuous`, `aimChangeSpeed`, `controllable`, `aiControllable`, `alwaysShooting`, `autoTarget`, `predictTarget`, `useAttackRange`, `targetInterval`, `targetSwitchInterval`, `rotateSpeed`, `inaccuracy`, `shake`, `recoil`, `recoils`, `recoilTime`, `recoilPow`, `cooldownTime`, `shootX`/`shootY`, `xRand`/`yRand`, `shadow`, `velocityRnd`/`extraVelocity`, `lifeRnd`/`extraLife`, `shootCone`, `rotationLimit`, `minWarmup`, `shootWarmupSpeed`/`smoothReloadSpeed`, `linearWarmup`, `soundPitchMin`/`soundPitchMax`, `ignoreRotation`, `noAttack`, `minShootVelocity`/`maxShootVelocity`, `parentizeEffects`, `layerOffset`, `activeSound`/`shootSound`/`initialShootSound`/`chargeSound`, `activeSoundVolume`/`shootSoundVolume`, `ejectEffect`, `heatColor`, `shootStatus`, `shootStatusDuration`, `shootOnDeathEffect`, `parts`, `beamColor`, `beamEffect`, `damageTargetWeight`, `targetBuildings`/`targetUnits`, `repairSpeed`/`fractionRepairSpeed`, `beamWidth`, `pulseRadius`/`pulseStroke`, `widthSinMag`/`widthSinScl`, `laserColor`/`healColor` | `WeaponDef::from_spec`; effect/draw parts implemented (L08 T3) |
+| `parts` | array of `DrawPart` (`type`, `under`, `turretShading`, `weaponIndex`, `recoilIndex`, `suffix`, `name`, `mirror`, `outline`, `drawRegion`, `heatLight`, `clampProgress`, `replaceOutline`, `progress`/`growProgress`/`heatProgress`, `blending`, `layer`/`layerOffset`/`heatLayerOffset`/`outlineLayerOffset`, `x`/`y`/`xScl`/`yScl`/`rotation`, `originX`/`originY`, `moveX`/`moveY`/`growX`/`growY`/`moveRot`, `heatLightOpacity`, `color`/`colorTo`/`mixColor`/`mixColorTo`/`heatColor`, `children`, `moves`, ShapePart/HoverPart/FlarePart/HaloPart fields) | `DrawPartSpec`; `PartProgress` constants/numbers/`operation`/`operations` chains (L08 T3) |
 | `shoot` | `type` (ClassMap `ShootPattern`: ShootPattern/Alternate/Spread/Helix/Barrel/Multi/Sine/Summon), `shots`, `barrels`, `barrelOffset`, `firstShotDelay`, `shotDelay`, `spread`, `scl`, `mag`, `offset`, `sineScl`, `sineMag`, `x`, `y`, `radius`, `mirror` | `ShootPatternSpec` |
 | `ability` | `type` (ClassMap `Ability`), `amount`, `max`, `reload`, `range`, `healPercent`, `sameTypeHealMult`, `smartDowntime`, `rotation`, `regen`, `cooldown`, `duration`, `orbRadius`, `particleSize`, `x`, `y`, `angle`, `width`, `chanceDeflect`, `minVelocity`, `interval`, `spread`, `percentAmount`, `particles`, `maxTargets`, `sides`, `randAmount`, `smartHeal`, `active`, `whenShooting`, `teamColor`, `color`/`effectColor`/`particleColor`, `status`, `effect`, `unit`, `liquid` | `AbilitySpec`; `ShieldArcAbility`/`SuppressionFieldAbility` aliases added |
-| `effect` | string names via `effect_by_name` (`effect`/`applyEffect`/`particleEffect`/`vaporEffect`) | inline `MultiEffect`/array forms TODO (plan 17 registry) |
-| `draw` | not yet parsed | TODO (M2b; plan 17) |
+| `effect` | string names via `effect_by_name`; array shorthand for `MultiEffect`; inline `Effect`/`MultiEffect`/`ExplosionEffect`/`WaveEffect`/`WrapEffect` objects (`effect`/`applyEffect`/`particleEffect`/`vaporEffect`) | implemented (L08 T3; `EffectRef`) |
+| `drawer` | string class name, array shorthand for `DrawMulti`, or object with `type`; `drawers` children, `parts` | `DrawerSpec` (`BlockDef.drawer`); plan 17 executes it (L08 T3) |
 
 ## ClassMap replacement (M2)
 
@@ -98,7 +102,7 @@ on patch-created content and embedded `ContentAsset` records. Nested scalar
 sugar (`{"block":{"router.health":9}}`) is handled. `isPatched` reflects the
 patcher's touched content for plan 19.
 
-Blocked (other plans): block `drawer` draw parts (plan 17) and `craftTime`
+Blocked (other plans): block `drawer` execution (plan 17; parsing landed in L08 T3) and `craftTime`
 (plan 07 behavior field) block the `bigPatch`/`singleValue` cases; `ammoReassign`
 needs plan-10 typed `ammoTypes`. 10 of the 30 upstream `PatcherTests` cases
 beyond the earlier slice are ported here (`reconstructorPlans{,EditSpecific,Add}`,
