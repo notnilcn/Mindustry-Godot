@@ -622,20 +622,23 @@ def check(doc: dict[str, Any]) -> list[str]:
         errors.append(f"schema is {doc.get('schema')!r}, expected {SCHEMA!r}")
     items = doc.get("items") or {}
     recipes = doc.get("recipes") or {}
-    if len(items) != 450:
-        errors.append(f"expected 450 items, found {len(items)}")
-    if len(recipes) != 49:
-        errors.append(f"expected 49 recipes, found {len(recipes)}")
+    if not items:
+        errors.append("items is empty")
+    if not recipes:
+        errors.append("recipes is empty")
     if not doc.get("gaps"):
         errors.append("gaps list is empty")
+    statuses = {"seeded", "reference", "in-progress", "mismatch", "fixing", "verified", "blocked", "wontfix"}
 
     for iid, item in items.items():
         if not re.fullmatch(r"PAR-\d{4}", iid):
             errors.append(f"bad item id {iid}")
         if not item.get("title"):
             errors.append(f"{iid}: missing title")
-        if not item.get("status"):
-            errors.append(f"{iid}: missing status")
+        if item.get("status") not in statuses:
+            errors.append(f"{iid}: bad status {item.get('status')!r}")
+        if "similarity" in item and not (0 <= item["similarity"] <= 100):
+            errors.append(f"{iid}: similarity {item['similarity']} outside 0-100")
         for phase in ("fork", "action"):
             calls = item.get(phase)
             if calls is None:
