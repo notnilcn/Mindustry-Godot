@@ -140,16 +140,23 @@ func _build_title_row() -> void:
 	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_title_button.add_child(row)
+	# The button's `Tex.button` background pads its cells (Arc
+	# `Table.setBackground`), so the icon sits inside the border.
+	MindWidgets.inset_to_content(_title_button, row)
+	_title_button.theme_changed.connect(MindWidgets.inset_to_content.bind(_title_button, row))
 	# code-instantiated: root icon follows the tree data (atlas region or the
 	# `terrain` glyph for a sector root).
 	_title_icon_holder = Control.new()
 	_title_icon_holder.custom_minimum_size = Vector2(ICON_SIZE, ICON_SIZE)
+	# Arc cells centre vertically by default (`Cell.align = center`).
+	_title_icon_holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_title_icon_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(_title_icon_holder)
 	row.add_child(_title_spacer(8.0))
 	row.add_child(_title_spacer(-1.0))
 	_title_label = MindWidgets.label("")
 	_title_label.add_theme_color_override("default_color", MindStyles.ACCENT)
+	_title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(_title_label)
 	row.add_child(_title_spacer(-1.0))

@@ -116,16 +116,32 @@ func _update_toggle_content() -> void:
 	for child in _toggle.get_children():
 		child.queue_free()
 	# code-instantiated: glyph + `@globalitems` label row.
+	# `c.button("@globalitems", Icon.downOpen, Styles.flatTogglet, ...)
+	# .margin(12f)` (`ItemsDisplay.java:57-61`, `Table.java:544-550`): the icon
+	# cell at the glyph's natural size, then the label growing over the rest
+	# with its text centred, both vertically centred inside the 12 px margin.
 	var row := HBoxContainer.new()
 	row.alignment = BoxContainer.ALIGNMENT_BEGIN
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.add_theme_constant_override("separation", 8)
+	row.offset_left = 12.0
+	row.offset_top = 12.0
+	row.offset_right = -12.0
+	row.offset_bottom = -12.0
+	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	row.grow_vertical = Control.GROW_DIRECTION_BOTH
+	row.add_theme_constant_override("separation", 0)
 	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_toggle.add_child(row)
-	_toggle_glyph = MindWidgets.glyph("down-open", 20)
+	# `Fonts.icon` is a 30 px font (`MindWidgets.icon_button`).
+	_toggle_glyph = MindWidgets.glyph("down-open", 30)
+	_toggle_glyph.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_toggle_glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(_toggle_glyph)
 	var label := MindWidgets.label(MindWidgets.markup("@globalitems"))
 	label.add_theme_color_override("default_color", MindStyles.ACCENT)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(label)
 

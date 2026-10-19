@@ -776,22 +776,22 @@ func _show_planet(planet_name: String, select_default := true) -> void:
 		lead.custom_minimum_size.x = 2.0
 		buttons.add_child(lead)
 		buttons.move_child(lead, 0)
-	var back := MindWidgets.button("")
+	# `buttons.button("@back", Icon.left, this::hide).size(200f, 54f)`
+	# (`PlanetDialog.java:312`): the default `TextButton` skin (`Tex.button`)
+	# with the shared icon-cell layout.
+	var back := MindWidgets.icon_button("left", _t("@back"))
 	back.custom_minimum_size = Vector2(200.0, 54.0)
 	back.size_flags_vertical = Control.SIZE_SHRINK_END
-	_apply_pane_button(back, OUTLINE_GRAY)
-	build_button_content(back, MindWidgets.glyph("left", 20), _t("@back"))
 	back.pressed.connect(_close)
 	buttons.add_child(back)
 	buttons.add_child(_spacer())
 	if not selected.is_empty():
 		buttons.add_child(_build_sector_panel(selected))
 	buttons.add_child(_spacer())
-	var tech_tree := MindWidgets.button("")
+	# `buttons.button("@techtree", Icon.tree, ...)` (`PlanetDialog.java:316`).
+	var tech_tree := MindWidgets.icon_button("tree", _t("@techtree"))
 	tech_tree.custom_minimum_size = Vector2(200.0, 54.0)
 	tech_tree.size_flags_vertical = Control.SIZE_SHRINK_END
-	_apply_pane_button(tech_tree, OUTLINE_GRAY)
-	build_button_content(tech_tree, MindWidgets.glyph("tree", 20), _t("@techtree"))
 	tech_tree.pressed.connect(_open_tech_tree)
 	buttons.add_child(tech_tree)
 	# Cells added after `show_dialog` need an explicit re-sort (MinTable is manual).

@@ -2431,8 +2431,10 @@ func _edit_row(icon: String, key: String, listener: Callable) -> Button:
 	button.add_theme_stylebox_override("normal", _flat_box(Color.BLACK))
 	button.add_theme_stylebox_override("hover", _flat_box(FLAT_OVER))
 	button.add_theme_stylebox_override("pressed", _flat_box(FLAT_OVER))
-	if button.get_child_count() > 0:
-		(button.get_child(0) as Control).offset_left = 12.0
+	# `.marginLeft(12f)`: the icon row is inset by the style box content margin
+	# (`MindWidgets.inset_to_content`).
+	for state in ["normal", "hover", "pressed"]:
+		(button.get_theme_stylebox(state) as StyleBoxFlat).content_margin_left = 12.0
 	button.pressed.connect(listener)
 	return button
 
