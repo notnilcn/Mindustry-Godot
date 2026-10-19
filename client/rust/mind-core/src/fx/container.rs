@@ -31,6 +31,10 @@ pub struct EffectContainer {
     pub color: Rgba,
     /// Typed payload.
     pub data: EffectData,
+    /// Per-instance seed (Java `e.id`, the effect entity id that
+    /// `rand.setSeed(e.id)` uses); `0` = unset (seeded bodies fall back to
+    /// `id`).
+    pub seed: u32,
     /// Shared inner container for `scaled` (plan parity).
     pub(crate) inner: Option<Box<EffectContainer>>,
 }
@@ -46,6 +50,7 @@ impl Default for EffectContainer {
             rotation: 0.0,
             color: Rgba::WHITE,
             data: EffectData::None,
+            seed: 0,
             inner: None,
         }
     }
@@ -142,8 +147,9 @@ impl EffectContainer {
     /// container when `time <= lifetime`.
     pub fn scaled(&mut self, lifetime: f32, f: impl FnOnce(&EffectContainer)) {
         if self.time <= lifetime {
-            let (id, x, y, time, rotation, color) = (
+            let (id, seed, x, y, time, rotation, color) = (
                 self.id,
+                self.seed,
                 self.x,
                 self.y,
                 self.time,
@@ -155,6 +161,7 @@ impl EffectContainer {
                 .inner
                 .get_or_insert_with(|| Box::new(EffectContainer::default()));
             inner.id = id;
+            inner.seed = seed;
             inner.x = x;
             inner.y = y;
             inner.time = time;

@@ -69,7 +69,14 @@ fn lerp_rgba(a: Rgba, b: Rgba, f: f32) -> Rgba {
 }
 
 fn seeded(e: &EffectContainer) -> ArcRand {
-    ArcRand::new(e.id.raw() as u64)
+    // `rand.setSeed(e.id)`: the per-instance entity id, so every spawn of the
+    // same effect scatters differently (e.g. `Fx.coreLandDust`).
+    let seed = if e.seed != 0 {
+        u64::from(e.seed)
+    } else {
+        e.id.raw() as u64
+    };
+    ArcRand::new(seed)
 }
 
 /// `randLenVectors(e.id, amount, length, cons)` emitting filled circles.
@@ -2088,6 +2095,7 @@ mod tests {
                 rotation: 30.0,
                 color: Rgba::WHITE,
                 data: EffectData::None,
+                seed: 0,
                 inner: None,
             };
             dispatch(def.name, &mut emit, &e, &crate::fx::data::EmptySnapshot);

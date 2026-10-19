@@ -50,6 +50,8 @@ pub struct EffectState {
     pub lifetime_override: Option<f32>,
     /// Whether the state is alive.
     pub alive: bool,
+    /// Per-instance seed (Java effect entity `id`; `0` = unset).
+    pub seed: u32,
 }
 
 impl EffectState {
@@ -71,6 +73,7 @@ impl EffectState {
             offset_rot: 0.0,
             lifetime_override: None,
             alive: false,
+            seed: 0,
         }
     }
 }
@@ -319,6 +322,8 @@ impl FxPool {
         state.lifetime = def.lifetime;
         state.data = data.clone();
         state.alive = true;
+        // `EffectState.create()` assigns a fresh entity id (`e.id`).
+        state.seed = (self.spawned as u32).wrapping_add(1);
 
         // ChildComp.add: bind parent and compute offsets.
         if def.follow_parent {

@@ -4952,7 +4952,8 @@ impl MindSimHost {
     }
 
     /// Player-team colour as packed `rgba8888` (landing flame circles,
-    /// `CoreBlock.java:505-512`; G03 T18).
+    /// `Draw.color(team.color)`, `CoreBlock.java:505-512`; G03 T18): the real
+    /// `Team.color` (sharded = `Pal.accent` `ffd37f`).
     #[func]
     pub fn player_team_color(&self) -> i64 {
         i64::from(crate::render::overlays::team_color(self.player_team()))

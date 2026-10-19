@@ -78,6 +78,52 @@ impl LaunchAnimator for CoreLandAnimator {
     }
 }
 
+/// `CoreBlock.thrusterSizes` (`CoreBlock.java:44`): the landing flame size
+/// sampled over the cutscene progress.
+pub const THRUSTER_SIZES: [f32; 14] = [
+    0.0, 0.0, 0.0, 0.0, 0.3, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0,
+];
+
+/// Arc `Mathf.sample(values, time)`: linear interpolation over
+/// `time * (len - 1)` with `time` clamped to `0..1`.
+pub fn sample(values: &[f32], time: f32) -> f32 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let time = time.clamp(0.0, 1.0);
+    let last = values.len() - 1;
+    let pos = time * last as f32;
+    let cur = (pos as usize).min(last);
+    let next = (cur + 1).min(last);
+    let a = values[cur];
+    a + (values[next] - a) * (pos - cur as f32)
+}
+
+/// `CoreBuild.landParticleTimer` (`CoreBlock.java:660-673`, `updateLaunch`):
+/// accumulates `thrusterSizes` sampled 35 ticks ahead; each time it reaches 1
+/// every linked core tile rolls `Fx.coreLandDust` and the timer resets.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct LandDustTimer {
+    timer: f32,
+}
+
+impl LandDustTimer {
+    /// One `updateLaunch` step at directional progress `fin` (`getLandTimeIn`)
+    /// with `delta` ticks; `true` when the dust burst fires this step.
+    pub fn step(&mut self, fin: f32, duration: f32, delta: f32) -> bool {
+        let duration = duration.max(1e-6);
+        let ticks_in = fin * duration;
+        let tsize = sample(&THRUSTER_SIZES, (ticks_in + 35.0) / duration);
+        self.timer += tsize * delta;
+        if self.timer >= 1.0 {
+            self.timer = 0.0;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// `Accelerator.AcceleratorBuild`'s launch animator (`LaunchAnimator`,
 /// world/blocks/campaign/Accelerator.java:322-412): `launchDuration() =
 /// launchDuration + chargeDuration` (120 + 220), a charge phase that zooms
@@ -393,6 +439,32 @@ mod tests {
             began: false,
             ended: false,
         }
+    }
+
+    /// `updateLaunch` dust bursts (CoreBlock.java:660-673): none while the
+    /// sampled thruster size is 0 (the first ~0.11 of the landing, 35 ticks
+    /// ahead), then one burst per tick once `thrusterSizes` reaches 1, and
+    /// none in the last 35 ticks (`thrusterSizes` ends at 0).
+    #[test]
+    fn land_dust_timer_follows_thruster_sizes() {
+        assert_eq!(sample(&THRUSTER_SIZES, 0.0), 0.0);
+        assert!((sample(&THRUSTER_SIZES, 4.0 / 13.0) - 0.3).abs() < 1e-6);
+        assert!((sample(&THRUSTER_SIZES, 4.5 / 13.0) - 0.65).abs() < 1e-6);
+        assert_eq!(sample(&THRUSTER_SIZES, 1.0), 0.0);
+        let mut timer = LandDustTimer::default();
+        let mut fired = Vec::new();
+        for tick in 0..160 {
+            fired.push(timer.step(tick as f32 / 160.0, 160.0, 1.0));
+        }
+        // (in + 35) / 160 < 3/13 -> size 0: no dust before tick ~2.
+        assert!(!fired[0]);
+        let first = fired.iter().position(|f| *f).expect("dust fires");
+        assert!(first > 2 && first < 30, "first burst at tick {first}");
+        // Mid-landing every tick bursts (size 1).
+        assert!(fired[60..100].iter().all(|f| *f));
+        // `thrusterSizes` reaches 0 again 35 ticks before the end.
+        assert!(fired.iter().filter(|f| **f).count() > 80);
+        assert!(fired[130..].iter().all(|f| !*f));
     }
 
     #[test]
