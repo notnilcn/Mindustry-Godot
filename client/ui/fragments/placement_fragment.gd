@@ -1249,8 +1249,9 @@ func _rebuild() -> void:
 		child.queue_free()
 	_block_buttons.clear()
 	# A rebuild re-creates the cells; force the next frame's highlight pass to
-	# re-apply instead of trusting the cached selection.
-	_last_selected = "\u0000"
+	# re-apply instead of trusting the cached selection. (An empty block name
+	# needs no highlight, so clearing the cache is enough.)
+	_last_selected = ""
 	# code-instantiated: block buttons come from the content catalogue filtered by
 	# category/search (data-driven, plan 02/07).
 	var list: Array = _catalog.get("categories", [])

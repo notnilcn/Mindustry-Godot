@@ -1,6 +1,8 @@
 # Build outputs and caches
 client/.godot/
-client/bin/
+# Keep the Godot import guard tracked; everything else under bin/ is generated.
+client/bin/*
+!client/bin/.gdignore
 client/rust/target/
 server/spacetimedb/target/
 
