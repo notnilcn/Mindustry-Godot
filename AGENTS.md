@@ -66,4 +66,4 @@ bash tools/ci.sh            # full local gate
 - Godot scene, dialog, widget or theme: `client/AGENTS.md`.
 - Networking: `server/spacetimedb/AGENTS.md` for schema/reducers, `client/rust/mind-stdb/AGENTS.md` for the client.
 - Asset pipeline, atlas or icons: `client/rust/mind-tools/AGENTS.md`.
-- Parity evidence: `parity/AGENTS.md` and `parity-ledger.json`; in-engine checks use the `playtest` skill, Java↔Godot walks use `parity-eval`.
+- Parity evidence: `parity/AGENTS.md` and `TWIN-VERIFICATION.json` (minimal items: `title`/`status`/`similarity`/`fork`/`action`/`images`, plus paired recipes and gaps); in-engine checks use the `playtest` skill, Java↔Godot walks use `parity-eval`.

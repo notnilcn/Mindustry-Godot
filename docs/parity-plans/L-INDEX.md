@@ -7,7 +7,7 @@ the exact next-session start point are in
 Read it before starting new work.
 
 Source: `docs/L-round-twin-verification.md` (an independent twin walk after every round-J merge,
-evidence in `runs/20261017-L-twin/`) plus the round-J residuals still open in `chains.json`.
+evidence in `runs/20261017-L-twin/`) plus the round-J residuals still open in `TWIN-VERIFICATION.json`.
 Answer to "are there gaps left besides multiplayer?": **yes**. A handful are confirmed live
 (layout engine, world decorations, menu state, item filter, slider/editor/planet skin). A longer
 list is behaviour that round J recorded but did not port.
@@ -79,7 +79,7 @@ Sessions run the Java reference client for their acceptance frames under
 - Platform: Steam, Discord RPC, mobile/iOS packaging, Web (`docs/platform/`).
 - Script (JS) mods: recorded deviation.
 
-## 4. Ledger changes proposed by round L (coordinator → `chains.json`)
+## 4. Ledger changes proposed by round L (coordinator → `TWIN-VERIFICATION.json`)
 
 | Item | Change |
 |---|---|

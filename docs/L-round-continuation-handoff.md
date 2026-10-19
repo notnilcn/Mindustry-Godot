@@ -1,4 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
+
+> Historical note (2026-10-19): `chains.json` and `parity-ledger.json` were retired and replaced by `TWIN-VERIFICATION.json`. The names below are updated for navigation; the original paths remain in git history.
+
 # Round L — continuation handoff (2026-10-18)
 
 Read this first, then `docs/parity-plans/L-INDEX.md`, `L-environment.md` and the
@@ -19,7 +22,7 @@ per-plan summaries. The paused-round coordinator summary is
 - `.opencode/parity-session/**` churn and `.claude/worktrees/` are session
   state, not source. Do not commit them.
 - `runs/` is gitignored; evidence/run dirs and the ledger op files live there.
-- `chains.json` was updated in this batch (PAR-0446/0447 verified;
+- `TWIN-VERIFICATION.json` was updated in this batch (PAR-0446/0447 verified;
   PAR-0379/0380/0399 fixing; PAR-0407 seeded with T4/T5/T6 notes;
   PAR-0296/0126 notes) and in the late batch (PAR-0363/0365/0366/0367 fixing,
   PAR-0445 fixing, PAR-0407 T5 note).

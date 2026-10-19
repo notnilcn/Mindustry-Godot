@@ -2,7 +2,7 @@
 
 `parity/` is the cross-cutting verification oracle for Mindustry-Godot: the machine-readable registries, sha256-pinned goldens and their JVM/source provenance, the fixed-pose screenshot manifest, generated gate reports and source-derived audit ledgers. The `mind-headless parity` harness (`client/rust/mind-headless/src/parity/`) validates that state; it never drives the Godot editor and never mutates a registry. It answers one question per file: *is the committed parity state internally consistent and drift-free?*
 
-Read the root [`AGENTS.md`](../AGENTS.md) first. [`README.md`](README.md) owns the file-by-file format/validator table; this file owns the semantics an agent must preserve. The repo-root [`parity-ledger.json`](../parity-ledger.json) is the parity work queue: claim, reproduce and update items there, not here.
+Read the root [`AGENTS.md`](../AGENTS.md) first. [`README.md`](README.md) owns the file-by-file format/validator table; this file owns the semantics an agent must preserve. The repo-root [`TWIN-VERIFICATION.json`](../TWIN-VERIFICATION.json) is the parity work queue: reproduce and update the minimal item record (`status`, `fork`, `action`, `similarity`, `images`) there, not here. `chains.json` and `parity-ledger.json` were retired on 2026-10-19; their detailed notes, fix plans and call interning live only in git history.
 
 ## Provenance
 

@@ -14,9 +14,10 @@
 # bridge 6970. `--session N` (N >= 2) prepares a parallel session in the
 # sibling worktree `../Mindustry-Godot-sessionN` on display :(9+N) and bridge
 # 6970+10(N-1), with session-local MCP wiring (PATH shims + `opencode.json` in
-# the worktree). The ledger (`parity-ledger.json`) and `runs/` stay shared with
-# the main checkout through symlinks, so claims and reference frames are
-# visible to every session; everything else is per-session.
+# the worktree). The twin-verification file (`TWIN-VERIFICATION.json`) and
+# `runs/` stay shared with the main checkout through symlinks, so writes and
+# reference frames are visible to every session; everything else is
+# per-session.
 #
 # The Java reference is NOT started here: the parity-eval skill §0 launches it
 # per run (detached, with parity-java-home/), and a session must never have two
@@ -62,7 +63,7 @@ RUNS=""
 RUNTIME=""
 SHIM_DIR=""
 
-# The main checkout owns the shared ledger/runs; a session worktree resolves
+# The main checkout owns the shared twin file/runs; a session worktree resolves
 # back to it through the git common dir.
 git_common="$(git -C "$REPO_ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
 if [ -n "$git_common" ]; then
@@ -258,15 +259,15 @@ session_prepare() {
     cp -a --reflink=auto "$MAIN_REPO/parity-java-home" "$SESSION_REPO/parity-java-home"
   fi
 
-  # 4) shared queue and run store: one ledger, one flock, one set of reference
-  #    frames across sessions. `runs/` is gitignored, so a symlink is invisible
-  #    to git; `parity-ledger.json` is tracked, so hide the symlink from
+  # 4) shared queue and run store: one twin file, one flock, one set of
+  #    reference frames across sessions. `runs/` is gitignored, so a symlink is invisible
+  #    to git; `TWIN-VERIFICATION.json` is tracked, so hide the symlink from
   #    status/add with skip-worktree.
-  link_shared "$SESSION_REPO/parity-ledger.json" "../Mindustry-Godot/parity-ledger.json"
-  link_shared "$SESSION_REPO/parity-ledger.json.lock" "../Mindustry-Godot/parity-ledger.json.lock"
+  link_shared "$SESSION_REPO/TWIN-VERIFICATION.json" "../Mindustry-Godot/TWIN-VERIFICATION.json"
+  link_shared "$SESSION_REPO/TWIN-VERIFICATION.json.lock" "../Mindustry-Godot/TWIN-VERIFICATION.json.lock"
   [ -e "$SESSION_REPO/runs" ] || ln -s "../Mindustry-Godot/runs" "$SESSION_REPO/runs"
-  if git -C "$SESSION_REPO" ls-files --error-unmatch parity-ledger.json >/dev/null 2>&1; then
-    git -C "$SESSION_REPO" update-index --skip-worktree -- parity-ledger.json
+  if git -C "$SESSION_REPO" ls-files --error-unmatch TWIN-VERIFICATION.json >/dev/null 2>&1; then
+    git -C "$SESSION_REPO" update-index --skip-worktree -- TWIN-VERIFICATION.json
   fi
 
   # 5) session-local Godot MCP wiring. The opencode project config overrides
@@ -292,7 +293,7 @@ EOF
   exclude="$(git -C "$SESSION_REPO" rev-parse --git-path info/exclude 2>/dev/null || true)"
   if [ -n "$exclude" ]; then
     mkdir -p "$(dirname "$exclude")"
-    for pat in /opencode.json /runs /parity-ledger.json.lock; do
+    for pat in /opencode.json /runs /TWIN-VERIFICATION.json.lock; do
       grep -qxF "$pat" "$exclude" 2>/dev/null || echo "$pat" >>"$exclude"
     done
   fi
@@ -508,7 +509,7 @@ cat <<EOF
 EOF
 if [ "$session" -ge 2 ]; then
   cat <<EOF
-  ledger:       shared with main (${MAIN_REPO#"$WORKSPACE_ROOT"/}/parity-ledger.json, symlinked)
+  twin file:    shared with main (${MAIN_REPO#"$WORKSPACE_ROOT"/}/TWIN-VERIFICATION.json, symlinked)
   runs:         shared with main (${MAIN_REPO#"$WORKSPACE_ROOT"/}/runs, symlinked)
   java home:    $SESSION_REPO/parity-java-home   (isolated copy)
   MCP shims:    $SHIM_DIR   (open-godot-mcp; prepended to PATH by --run)
@@ -517,7 +518,7 @@ if [ "$session" -ge 2 ]; then
 EOF
 else
   cat <<EOF
-  ledger:       ${MAIN_REPO#"$WORKSPACE_ROOT"/}/parity-ledger.json   (items embed path/reproduce/steps)
+  twin file:    ${MAIN_REPO#"$WORKSPACE_ROOT"/}/TWIN-VERIFICATION.json   (items: fork/action/images/status/similarity)
   run prefix:   '${MAIN_REPO#"$WORKSPACE_ROOT"/}/runs/'
   prompts:      ${MAIN_REPO#"$WORKSPACE_ROOT"/}/WORKFLOW_PROMPTS.md
 EOF

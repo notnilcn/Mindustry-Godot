@@ -1,4 +1,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
+
+> Historical note (2026-10-19): `chains.json` and `parity-ledger.json` were retired and replaced by `TWIN-VERIFICATION.json`. The names below are updated for navigation; the original paths remain in git history.
+
 # L08 — Mod data host, goldens, evidence, closing walk — summary
 
 Owner: session B (session 3 worktree, branch `parity/session-3`). Round L, wave 1.
@@ -135,7 +138,7 @@ is broken" (outside the repo).
 | Item | Change | Evidence |
 |---|---|---|
 | PAR-0362 | close (T1): every golden suite green with attribution, including the wave-3 batched L02 T1 / L06 regen | commits c8d326ab..ee745bb3 (wave 1), 467b6081, 28a4f20c, 7d343932, 643169f6, 3fef57cd (wave 3); `runs/20261018-s3-L08-T1/` |
-| chains.json recipes pinning `a1a7b96167c9718d` (spine_place_break in-engine checks, e.g. `c420`, `c422`, `k38`, the boot/save recipes) | update the canonical spine checksum to `3e48c583a94fbea4` (J08 T3 TeamId::SHARDED) | ee745bb3 |
+| TWIN-VERIFICATION.json recipes pinning `a1a7b96167c9718d` (spine_place_break in-engine checks, e.g. `c420`, `c422`, `k38`, the boot/save recipes) | update the canonical spine checksum to `3e48c583a94fbea4` (J08 T3 TeamId::SHARDED) | ee745bb3 |
 
 ## Done criteria (T1)
 

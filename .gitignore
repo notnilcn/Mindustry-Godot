@@ -67,8 +67,8 @@ session.json
 # Parity run artifacts + persistent Java reference data dir
 runs/
 parity-java-home/
-# Shared ledger claim lock (parity-session.sh also adds it to .git/info/exclude)
-parity-ledger.json.lock
+# Shared twin-verification write lock (parity-session.sh also adds it to .git/info/exclude)
+TWIN-VERIFICATION.json.lock
 
 screenshots_for_ai/
 # Vars.checkLaunch marker (Vars.java:398-408); never commit a crash marker

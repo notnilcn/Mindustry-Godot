@@ -2,7 +2,7 @@
 
 > Historical plan-23 snapshot. Run/ledger references under `.opencode/evals/`
 > (and `EV-####` ids) describe the retired workflow; current parity runs live
-> in `runs/<stamp>-<item>/` and `parity-ledger.json` at the repo root.
+> in `runs/<stamp>-<item>/` and `TWIN-VERIFICATION.json` at the repo root.
 
 Roll-up of `parity report` at the current branch tip. Status vocabulary
 (plan 23 §3.7): `parity-complete | in-progress | deviation | deferred(owner) | not-started`.

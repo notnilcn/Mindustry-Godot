@@ -1,11 +1,14 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
+
+> Historical note (2026-10-19): `chains.json` and `parity-ledger.json` were retired and replaced by `TWIN-VERIFICATION.json`. The names below are updated for navigation; the original paths remain in git history.
+
 # Round L — coordinator execution summary (paused after wave 4 / session-B wave 3)
 
 Round L ran as two parallel sessions per `docs/parity-plans/L-INDEX.md` §2:
 - session A = UI + harness, worktree `../Mindustry-Godot-session2`, display :11, bridge 6980;
 - session B = Rust, worktree `../Mindustry-Godot-session3`, display :12, bridge 6990.
 
-The coordinator merged each wave into `main` and applied the ledger changes to `chains.json`. The operator
+The coordinator merged each wave into `main` and applied the ledger changes to `TWIN-VERIFICATION.json`. The operator
 paused the round after session A's wave 4 and session B's wave 3. Everything below is on `main`; both session
 branches are fast-forwarded to `main` and both sessions are stopped.
 
@@ -54,11 +57,11 @@ The waves that were not run, in L-INDEX order (ownership rules of L-INDEX §2 st
   (`UnitCargoUnloadPoint.java:26`, `UnitAssembler.java:62`); a sim/pathing change, so it was left for B.
 - **PAR-0445 (session A):** the Save Game dialog should use the Load-dialog layout (`runs/20261018-s2-L07-java/java/savedialog.png`).
 
-## 4. Ledger (applied to `chains.json` by the coordinator)
+## 4. Ledger (applied to `TWIN-VERIFICATION.json` by the coordinator)
 
 Coordinator commits on `main` carry each batch (`Coordinator: round-L …`); the op files are in
 `runs/20261018-L-coordinator/ledger-*.json`, applied with `runs/20261018-L-coordinator/ledger.py` (line-level
-edits that keep `chains.json`'s hand layout, then re-validate the JSON).
+edits that keep `TWIN-VERIFICATION.json`'s hand layout, then re-validate the JSON).
 
 - Closed (verified): PAR-0301, 0362, 0377, 0383, 0386, 0391, 0402, 0410, 0411, 0413, 0414, 0416, 0417, 0418,
   0419, 0421, 0422, 0423, 0424, 0425, 0427, 0428, 0429, 0430, 0437, 0440, 0441; wave 4: 0110, 0302, 0431, 0432, 0434, 0438, 0444.
