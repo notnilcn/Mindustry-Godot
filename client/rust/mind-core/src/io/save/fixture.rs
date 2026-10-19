@@ -357,6 +357,7 @@ pub fn creates_building_kind(kind: BlockKind) -> bool {
             | BlockKind::CharacterOverlay
             | BlockKind::RuneOverlay
             | BlockKind::ColoredFloor
+            | BlockKind::ColoredWall
             | BlockKind::SteamVent
     )
 }

@@ -170,6 +170,22 @@ impl BlockPalette {
         self.map_color(id)
     }
 
+    /// `Block.minimapColor(tile)` over the tile's `extraData`
+    /// (`MapIO.java:164-178`, `CachedTile.onReadTileData`): only the tinted
+    /// environment blocks override the default colour. Every other block
+    /// returns `None`, so the caller keeps the pixel `setBlock`/`colorFor`
+    /// produced (Java's `Block.minimapColor` default is `0`).
+    pub fn minimap_color(&self, id: u16, extra_data: i32) -> Option<u32> {
+        match self.kind(id) {
+            Some(BlockKind::ColoredFloor | BlockKind::ColoredWall) => {
+                // `ColoredFloor.java:202-204` / `ColoredWall.java:91-93`:
+                // `tile.extraData | 0xff` (the low byte is a blend flag).
+                Some(extra_data as u32 | 0xff)
+            }
+            _ => None,
+        }
+    }
+
     /// `Block.synthetic` approximation (plan 16/19 refine the flag set).
     pub fn synthetic(&self, id: u16) -> bool {
         if id == 0 {
@@ -277,11 +293,16 @@ pub fn generate_preview_from_tiles(palette: &BlockPalette, map: &dyn MapSource) 
         let wall = map.block_id(i);
         let floor = map.floor_id(i);
         let overlay = map.overlay_id(i);
+        let extra_data = map.tile_data(i).3;
         let mut color = 0u32;
         if !palette.synthetic(wall) && wall != 0 {
-            color = palette.block_color(wall);
+            color = palette
+                .minimap_color(wall, extra_data)
+                .unwrap_or_else(|| palette.block_color(wall));
         } else if overlay == 0 && wall == 0 {
-            color = palette.block_color(floor);
+            color = palette
+                .minimap_color(floor, extra_data)
+                .unwrap_or_else(|| palette.block_color(floor));
         }
         if color == 0 {
             color = color_for(palette, wall, floor, overlay, 0);
@@ -311,6 +332,8 @@ pub struct PreviewContext {
     floor_ids: Vec<u16>,
     overlays: Vec<u16>,
     block_ids: Vec<u16>,
+    /// Per-tile `extraData` (`ColoredFloor`/`ColoredWall.minimapColor`).
+    extra_data: Vec<i32>,
     /// Teams with core buildings.
     pub teams: std::collections::BTreeSet<u8>,
     /// Spawn overlay count.
@@ -330,6 +353,7 @@ impl PreviewContext {
             floor_ids: Vec::new(),
             overlays: Vec::new(),
             block_ids: Vec::new(),
+            extra_data: Vec::new(),
             teams: std::collections::BTreeSet::new(),
             spawns: 0,
             generating: false,
@@ -409,6 +433,7 @@ impl WorldContext for PreviewContext {
         self.floor_ids = vec![0; len];
         self.overlays = vec![0; len];
         self.block_ids = vec![0; len];
+        self.extra_data = vec![0; len];
     }
 
     fn create(&mut self, x: u16, y: u16, floor: u16, overlay: u16, _wall: u16) {
@@ -463,7 +488,13 @@ impl WorldContext for PreviewContext {
         self.palette.creates_building(self.block_ids[index])
     }
 
-    fn set_tile_data(&mut self, _index: usize, _d: u8, _fd: u8, _od: u8, _ed: i32) {}
+    fn set_tile_data(&mut self, index: usize, _d: u8, _fd: u8, _od: u8, extra_data: i32) {
+        // Only the tile colour config reaches the preview
+        // (`ColoredFloor`/`ColoredWall.minimapColor(tile)`).
+        if let Some(slot) = self.extra_data.get_mut(index) {
+            *slot = extra_data;
+        }
+    }
 
     fn read_building(
         &mut self,
@@ -509,21 +540,23 @@ impl WorldContext for PreviewContext {
     fn on_read_building(&mut self, _index: usize) {}
 
     fn on_read_tile_data(&mut self, index: usize) {
-        // `CachedTile.onReadTileData`: minimap colors for data tiles.
-        // Both layers are written on the flipped row (`walls.height - 1 -
-        // tile.y`, `MapIO.java:168-178`).
+        // `CachedTile.onReadTileData` (`MapIO.java:164-178`): a non-synthetic
+        // wall (or the bare floor when no block/overlay is present) may
+        // override its layer with `Block.minimapColor(tile)`. The default 0
+        // leaves the `setBlock`/`create` pixel untouched, so only the tinted
+        // environment blocks repaint here. Both layers are written on the
+        // flipped row (`walls.height - 1 - tile.y`).
         let block = self.block_ids[index];
+        let extra = self.extra_data.get(index).copied().unwrap_or(0);
         let x = (index % self.image.width as usize) as u32;
         let y = self.image.height - 1 - (index / self.image.width as usize) as u32;
         if !self.palette.synthetic(block) && block != 0 {
-            let color = self.palette.block_color(block);
-            if color != 0 {
+            if let Some(color) = self.palette.minimap_color(block, extra) {
                 self.image.set(x, y, color);
             }
         } else if self.overlays[index] == 0 && block == 0 {
             let floor = self.floor_ids[index];
-            let color = self.palette.block_color(floor);
-            if color != 0 {
+            if let Some(color) = self.palette.minimap_color(floor, extra) {
                 self.floors.set(x, y, color);
             }
         }
@@ -810,6 +843,36 @@ mod tests {
         assert_eq!(ctx.image().get(6, 5), ctx.palette.block_color(wall));
         // Nothing lands on the unflipped row.
         assert_eq!(ctx.image().get(6, 0), 0);
+    }
+
+    /// `ColoredFloor`/`ColoredWall.minimapColor(tile)`: the tile's `extraData`
+    /// (written by the save's 7-byte data group) is the preview colour,
+    /// replacing the static `mapColor` (`MapIO.java:164-178`).
+    #[test]
+    fn colored_tiles_use_extra_data_as_minimap_color() {
+        let registry = test_registry();
+        let colored_floor = registry
+            .block_id("colored-floor")
+            .expect("colored-floor")
+            .raw();
+        let colored_wall = registry
+            .block_id("colored-wall")
+            .expect("colored-wall")
+            .raw();
+        let mut ctx = PreviewContext::new(BlockPalette::of(&registry));
+        ctx.resize(2, 1);
+
+        let floor_tile = ctx.index(0, 0);
+        ctx.create(0, 0, colored_floor, 0, 0);
+        ctx.set_tile_data(floor_tile, 0, 0, 0, 0xff00_00ff_u32 as i32);
+        ctx.on_read_tile_data(floor_tile);
+        assert_eq!(ctx.image().get(0, 0), 0xff00_00ff);
+
+        let wall_tile = ctx.index(1, 0);
+        ctx.set_block(wall_tile, colored_wall);
+        ctx.set_tile_data(wall_tile, 0, 0, 0, 0x00ff_00ff_u32 as i32);
+        ctx.on_read_tile_data(wall_tile);
+        assert_eq!(ctx.image().get(1, 0), 0x00ff_00ff);
     }
 
     #[test]

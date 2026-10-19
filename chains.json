@@ -1917,7 +1917,8 @@
 "PAR-0446":{"t":"unit-cargo-unload-point and the Erekir unit assemblers lack solid = true (UnitCargoUnloadPoint.java:26, UnitAssembler.java:62); affects sim/pathing","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
 "PAR-0447":{"t":"maps/filters block_info::is_overlay/is_floor omit SpawnBlock and RemoveOre, which Java counts as OverlayFloor/Floor — check whether the map filters are affected","s":"world","st":"verified","u":"2026-10-18","run":"runs/20261018-L-remaining/"},
 "PAR-0448":{"t":"Hover bar unit icons render as literal [icon name=...] markup (MindBar draws text with a plain font; Java draws the unit icon)","s":"hud","st":"seeded","u":"2026-10-19","run":"runs/20261018-L-accept/"},
-"PAR-0449":{"t":"Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped","s":"hud","st":"seeded","u":"2026-10-19","run":"runs/20261018-L-accept/"}
+"PAR-0449":{"t":"Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped","s":"hud","st":"seeded","u":"2026-10-19","run":"runs/20261018-L-accept/"},
+"PAR-0450":{"t":"Map previews ignore the tinted ColoredFloor/ColoredWall tile colour (extraData), drawing the default block colour","s":"ui","st":"verified","u":"2026-10-19","run":"runs/20261019-colortint-PAR-0450/"}
 },
 "calls":{
 "c1":{"tool":"shell","params":{"cmd":"setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/<run>/java/game.log 2>&1 </dev/null &"}},
@@ -5082,6 +5083,10 @@
 ],
 "PAR-0449":[
 "2026-10-19: godot-accelerator-hover-fixed.png shows the 6th row ending at the palette edge; building_bars_json contains the powerBufferRequirement row. Java draws the info panel above the palette. The panel is in Panel/Frame/TopTable under a fixed-height bottom-right Panel, so the VBox cannot push the palette down."
+],
+"PAR-0450":[
+"2026-10-19 in-engine pair (Custom Game list, map `245`, live Java vs Godot): Java preview draws the red tinted area from the tile `extraData`; Godot drew a grey square. After `BlockPalette::minimap_color` (ColoredFloor/ColoredWall -> extraData|0xff) both read (255,0,0) at the sampled tile; frame pair in runs/20261019-colortint-PAR-0450/diff/00-card-before-side.png and 01-card-after-side.png.",
+"The same helper now feeds `generate_preview_from_tiles` and the HUD `MinimapRenderer::color_for` seam. The fixture map is hidden/245 with a 100x100 tinted floor rectangle (runs/20261019-colortint-PAR-0450/fixture); loading that map in-game crashes the renderer in this build (MindWorldRenderer bind_mut re-entry), so the HUD minimap half is code-verified only, not visually re-walked. The preview cache name bumps `_v3` -> `_v4` so old previews regenerate."
 ]
 },
 "failure_modes":{

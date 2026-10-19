@@ -298,9 +298,16 @@ impl MindMinimap {
         let overlay = tile.overlay.raw();
         let real = wall;
 
-        // `real.minimapColor(tile)` falls through to `MapIO.colorFor`.
-        // `real.synthetic() -> tile.getTeam().color`.
-        let mut color = color_for(palette, real, floor, overlay, team);
+        // `MinimapRenderer.colorFor` (`MinimapRenderer.java:383-390`):
+        // `real.minimapColor(tile)` overrides `MapIO.colorFor`; with no
+        // block/overlay the floor's override applies. The tinted environment
+        // blocks read their colour from the tile's `extraData`.
+        let mut override_color = palette.minimap_color(real, tile.extra_data);
+        if override_color.is_none() && real == 0 && overlay == 0 {
+            override_color = palette.minimap_color(floor, tile.extra_data);
+        }
+        let mut color =
+            override_color.unwrap_or_else(|| color_for(palette, real, floor, overlay, team));
         color = shade(
             color,
             mind_core::render::minimap::darkness_multiplier(
