@@ -33,6 +33,10 @@ MindHud="*res://scenes/autoloads/mind_hud.tscn"
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[dotnet]
+
+project/assembly_name="Mindustry-Godot"
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/open_godot_mcp/plugin.cfg")
