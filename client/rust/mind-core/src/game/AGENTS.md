@@ -1,11 +1,10 @@
 # AGENTS.md — mind-core/src/game (game orchestration)
 
-This folder is the high-level game and rules orchestration layer of `mind-core`: the coarse game-state
-header, match rules and their runtime behavior, teams, waves and difficulty, sector/campaign
-progression, objectives, fog, saves policy and schematics. It ties content, world, entities, IO and
-the `sim` spine together by holding the rule state and the ordered play-flow state machine, while the
-ECS world, the fixed-step pump and byte-level serialization stay in their own modules. Read the root
-[`AGENTS.md`](../../../../../AGENTS.md) first; the crate map is `mind-core/AGENTS.md` (`../../AGENTS.md`).
+This folder is the high-level game and rules orchestration layer: the coarse game-state header,
+match rules and their runtime behavior, teams, waves and difficulty, sector/campaign progression,
+objectives, fog, saves policy and schematics. It holds the rule state and ordered play-flow state
+machine while the ECS world, fixed-step pump and byte-level serialization stay in their own modules;
+crate-wide rules are in [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 ## Layout
 
@@ -13,6 +12,7 @@ ECS world, the fixed-step pump and byte-level serialization stay in their own mo
 |---|---|
 | `../game.rs` | Module root: declares the submodules and defines `State` (`Menu`/`Playing`/`Paused`) and `GameState` (`tick`, `update_id`, `advance` and the coarse-state helpers). |
 | `play.rs` | Campaign play flows and the `PlaySession` match state: `play_map`/`play_new_sector`/`play_sector`, `logic_play`, `run_wave_campaign`, `check_game_state`, `sector_capture`, `game_over`/`update_game_over`/`sector_lose`; emits ordered `PlayEvent`s. |
+| `runtime.rs` | Live campaign ECS glue: the `CampaignRuntime` resource plus the `TickSet::Campaign`/`Objectives`/`GameStateCheck` systems; all are no-ops when no campaign is loaded. |
 | `rules.rs` | Runtime behavior on the persisted `Rules`: `copy`, `retain_content_fields`, `mode`, per-team multiplier accessors, bans, env masks, `checksum_part`, and the campaign/tuning constants (`TURN_DURATION_TICKS`, `SAVE_EXTENSION`, …). |
 | `rules_event.rs` | Rules application: `RulesEpoch`, `RulesLoad`, `decode_rules` (100 kB cap), `guard_set_rules`, `apply_set_rules`, `apply_rules_load`, `SetRulesError`. |
 | `campaign_rules.rs` | Per-planet `CampaignRules`/`Difficulty` presets and `apply` folding into `Rules`; settings `read`/`write`. |
@@ -23,25 +23,24 @@ ECS world, the fixed-step pump and byte-level serialization stay in their own mo
 | `stats.rs` | `CampaignStats` (per-planet lifetime totals) plus `GameStats` mutation helpers. |
 | `waves.rs` | `Waves`: the built-in 28-group table and the seeded `ArcRand` generator; `WaveDifficulty`, `table_units_registered`. |
 | `spawn_group.rs` | `SpawnGroup`/`ItemStack`: wave descriptor, `get_spawned`/`get_shield` scaling, JSON codec, `create_unit`. |
-| `teams.rs` | `Teams` registry and `TeamData` caches: `BuildingRecord`/`UnitRecord` snapshots, quadtrees, clustered counts, team inventory, `destroy_to_derelict`, core/enemy queries. |
+| `teams.rs` | `Teams` registry and `TeamData` caches: `BuildingRecord`/`UnitRecord` snapshots, the insertion-stable `QuadTree<T>`, clustered counts, team inventory, `destroy_to_derelict`, core/enemy queries. |
 | `team.rs` | The 256-entry `Team` registry (`all`/`get`/`base_teams`), colors/palettes and AI predicates. |
-| `quad_tree.rs` | Insertion-stable `QuadTree<T>` point index used by `TeamData`. |
 | `tech_tree.rs` | Research runtime over `content::tech`: `requirements_complete`, `can_spend`/`spend`/`unlock`, `check_auto_unlocks`, `content_unlocked`, `reset_all`. |
 | `objectives.rs` | Tech-tree `Objective` predicates (`Research`/`Produce`/`SectorComplete`/`OnSector`/`OnPlanet`) over `ObjectiveContext`. |
 | `map_objectives.rs` | `MapObjectivesRuntime` executor: `update`/`complete`/`qualified`/`dependency_finished`, transient timer/completion state, flag application. |
 | `map_markers.rs` | `MapMarkers` containers: the three index vectors, `MarkerKind` index fix-ups, `control` and save-region `write`/`read`. |
 | `saves.rs` | Save-slot policy on `io::save`: `load`/listing, autosave cadence, playtime, `save_sector`, `cautious_load`, remap. |
-| `schematics.rs` | `.msch` codec and the `Schematics` registry: `read`/`write`/base64, `place`/`place_loadout`, loadouts, `rotate`/`rotated`. |
-| `schematic.rs` | `Schematic`/`Stile` values and `SchematicPreviewSpec`. |
-| `fog.rs` | `FogControl`: static/dynamic per-team fog buffers, `is_discovered`/`is_visible`, save chunk `read`/`write`. |
+| `schematics.rs` | `.msch` codec, `Schematic`/`Stile` values and the `Schematics` registry: `read`/`write`/base64, `place`/`place_loadout`, loadouts, `rotate`/`rotated`. |
+| `fog.rs`, `fog_gate.rs` | `FogControl` static/dynamic per-team fog buffers, discovery/visibility, save chunk IO; `fog_gate` applies `inFogTo`/`isDiscovered` to targeting and placement. |
 | `attack_indicators.rs` | Minimap `AttackIndicators` insertion-ordered timers. |
+| `landing_pad.rs`, `launch_payload.rs` | Campaign transport: landing-pad import cooldowns/queue and launch-pod entities with their 120-tick lifetime/export record. |
 | `world_reloader.rs` | `WorldReloader` trait plus `HostReloader`/`ClientReloader` handshakes around a world reload. |
 
 ## Key types
 
-- State: `State`, `GameState` (`../game.rs`); `PlaySession`, `PlayEvent`, `SectorRef` (`play.rs`).
-- Rules: `Rules` (re-exported from `io::json::rules`; behavior added in `rules.rs`), `Gamemode`,
-  `CampaignRules`, `Difficulty`, `CampaignApply`, `RulesEpoch`, `RulesLoad`.
+- State and rules: `State`, `GameState` (`../game.rs`), `CampaignRuntime` (`runtime.rs`); `Rules`
+  (re-exported from `io::json::rules`; behavior added in `rules.rs`), `Gamemode`, `CampaignRules`,
+  `Difficulty`, `CampaignApply`, `RulesEpoch`, `RulesLoad`.
 - Campaign: `Universe`, `Campaign`, `TurnContext`, `TurnReport`, `CampaignEvent` (`universe.rs`);
   `Planet`, `Sector`, `SectorInfoState`, `CoreSnapshot`, `WriteTarget`, `InfoWindows`, `SectorKey`.
 - Teams and waves: `Teams`, `TeamData`, `BuildingRecord`, `UnitRecord`, `BlockPlan`,
@@ -55,10 +54,9 @@ ECS world, the fixed-step pump and byte-level serialization stay in their own mo
 
 ## Invariants
 
-- **Fixed 60 Hz, no wall clock.** `Universe::advance` converts `delta_ticks` to seconds and turns;
-  `fog` flushes are quantized to `DYNAMIC_UPDATE_INTERVAL_TICKS`, `attack_indicators` age in ticks,
-  and `saves` accrues playtime from `delta_ticks`. Randomness flows only through `JavaRandom` and
-  `ArcRand` (e.g. `Campaign::run_turn`, `Planet::from_def`).
+- **Tick-driven time.** `Universe::advance` converts `delta_ticks` to seconds and turns; fog flushes
+  are quantized to `DYNAMIC_UPDATE_INTERVAL_TICKS`, `attack_indicators` age in ticks, and `saves`
+  accrues playtime from `delta_ticks`. Randomness uses only `JavaRandom`/`ArcRand`.
 - **Ordered containers on persisted/compared paths.** `Campaign.planets` is an `IndexMap` in content
   order, `MapMarkers.map` is a `BTreeMap` iterated by ascending id, `MapMarkers`' index vectors stay
   explicit, and `QuadTree` queries return insertion order.
@@ -68,40 +66,35 @@ ECS world, the fixed-step pump and byte-level serialization stay in their own mo
 - **Transient vs persisted state.** `MapObjectivesRuntime` keeps `completed`/`dep_finished`/`countup`
   out of the persisted `MapObjectives` data; `SectorInfoState` keeps the `WindowedMean` windows in a
   sibling `InfoWindows` so the persisted `SectorInfo` JSON stays unchanged.
-- **No `unwrap`/`expect` on runtime data.** Fallible paths return `IoError`/`SchematicError`/
-  `SetRulesError`; tests opt out via the crate-level `cfg_attr(test, …)`.
 
 ## Boundaries
 
-- `mind-core::sim` owns `Sim`, `FixedStepRunner`, `SimClock`, the schedule and the checksum;
-  `game.rs`'s `GameState` is the state header those read. `sim::logic::check_game_state` is a stub —
-  the real transitions live in `play.rs` (and `event::RulesLoadEvent` / `RulesEpoch` carry the rules
-  reload to the bus).
-- `mind-core::io` owns the save container, `TypeIO`, `JsonIO` and settings. `game::rules` re-exports
-  the persisted `Rules` and adds inherent behavior; `saves.rs`, `schematics.rs`, `map_markers.rs` and
-  `fog.rs` drive their region writers/readers through `io`.
-- `world`/`entities` own the ECS grid and components. `game` operates on snapshot records
-  (`BuildingRecord`/`UnitRecord`) and exposes seams rather than holding a `World`: `SpawnGroup::create_unit`,
+- [`../sim/AGENTS.md`](../sim/AGENTS.md) owns `Sim`, `FixedStepRunner`, `SimClock`, the schedule and
+  the checksum; `game.rs`'s `GameState` is the state header those read. `sim::logic::check_game_state`
+  is a stub — the real transitions live in `play.rs` (`RulesLoadEvent`/`RulesEpoch` carry reloads).
+- [`../io/AGENTS.md`](../io/AGENTS.md) owns the save container, `TypeIO`, `JsonIO` and settings.
+  `game::rules` re-exports the persisted `Rules` and adds inherent behavior; `saves.rs`,
+  `schematics.rs`, `map_markers.rs` and `fog.rs` drive their region writers/readers through `io`.
+- [`../world/AGENTS.md`](../world/AGENTS.md) and `entities` own the ECS grid and components. `game`
+  operates on snapshot records and exposes seams rather than holding a `World`: `SpawnGroup::create_unit`,
   `SchematicWorld`, `ObjectiveEnv` and `ObjectiveContext` are the adapters.
 
 ## Rules
 
 - Add runtime behavior to existing persisted structs through inherent `impl` blocks in this folder
-  (Rust permits one inherent `impl` per type per crate); do not redefine the JSON shape owned by `io`.
+  (Rust permits one inherent `impl` per type per crate); do not redefine the JSON shape owned by
+  `io`.
 - Keep field order and camelCase JSON frozen; extend shapes append-only and gate new optional fields
   with `serde(default)`.
-- Port upstream Mindustry and cite it in the file header; files are UTF-8/LF, GPL-3.0-only.
 
 ## Verification
 
-Run from `client/rust/`, or add `--manifest-path client/rust/Cargo.toml` from the repo root.
+Run from `client/rust/` (or add `--manifest-path client/rust/Cargo.toml` from the repo root).
 
 ```bash
-cargo test -p mind-core game
-cargo test -p mind-core
-cargo clippy -p mind-core --all-targets -- -D warnings
+cargo test -p mind-core game             # rules, campaign, objectives, settings round-trips
+cargo test -p mind-core game::waves      # wave generator vs the JVM golden
 ```
 
 The wave generator is pinned to the JVM golden `tests/golden/units/wave_generate.json`
-(`waves::tests::generate_matches_java_golden`), and the settings/JSON round-trips
-(`Universe`, `SectorInfo`, `CampaignRules`, `CampaignStats`) run under `cargo test -p mind-core game`.
+(`waves::tests::generate_matches_java_golden`).

@@ -1,23 +1,24 @@
-# AGENTS.md — `addons/open_godot_mcp` (GDScript Editor Bridge)
+# AGENTS.md — `addons/open_godot_mcp` (GDScript editor bridge)
 
-This folder is the **Godot-side half** of Open-Godot-MCP: an `EditorPlugin` that exposes the editor and the running game to the Python MCP server over a WebSocket bridge. The Python side lives in `src/open_godot_mcp/`; the contract docs live in `Docs/` (notably `01-Architecture/`, `02-Tools/`). Read this file before touching any `.gd` here.
+This folder is the **Godot-side half** of Open-Godot-MCP: an `EditorPlugin` that exposes the editor and the running game to the Python MCP server over a WebSocket bridge. Only this Godot half is vendored in this checkout; the upstream Python server (`src/open_godot_mcp/`), its `tests/`, and `Docs/` are **external** and not present here, so `Docs:` references below point at upstream documentation rather than local files.
 
-Downstream projects consume this folder as a plain addon copy (sometimes symlinked). Keep it self-contained: no imports from outside `res://addons/open_godot_mcp/`.
+Downstream projects consume this folder as a plain addon copy (sometimes symlinked). Keep it self-contained: no imports from outside `res://addons/open_godot_mcp/`. Read the root [`AGENTS.md`](../../../AGENTS.md) and the client project map [`client/AGENTS.md`](../../AGENTS.md) first.
 
 ## Layout
 
 | Path | Role |
 |---|---|
-| `plugin.gd` / `plugin.cfg` | Entry point. `_enter_tree()` order: EditorSettings defaults → bridge `start_server()` → dock → export plugin → debugger plugin → editor logger → runtime autoload inject. `_exit_tree()` tears down in reverse. |
-| `bridge/websocket_server.gd` | TCPServer + WebSocketPeer bridge (Godot 4 `WebSocketPeer` is client-only, so TCP accept + wrap). JSON-RPC 2.0, `tool_invoke` → `tool_result`/`event`, handshake carries `session_id`, versions, `auth_token`. Heartbeat: ping every 5 s. |
-| `bridge/dispatcher.gd` | `tool_name` → handler instance registry. Owns `set_bridge()` fan-out (called from server `_ready`). |
-| `handlers/*_handler.gd` | One file per tool family (`godot_game`+`godot_game_time` share `game_handler`). Editor-direct ops run locally; game-runtime ops forward over the debugger channel. |
+| `plugin.gd` / `plugin.cfg` | Entry point (v0.1.10). `_enter_tree()` order: EditorSettings/ProjectSettings defaults → bridge `start_server()` → dock → export plugin → debugger plugin → editor logger → runtime autoload inject. `_exit_tree()` tears down in reverse. |
+| `bridge/websocket_server.gd` | TCPServer + `WebSocketPeer` bridge (Godot 4's peer is client-only, so TCP accept + wrap). JSON-RPC 2.0 `tool_invoke` → `tool_result`/`event`; handshake carries `session_id`, versions, `auth_token`. Heartbeat ping every 5 s. |
+| `bridge/dispatcher.gd` | `tool_name` → handler instance registry; fans out `set_bridge()` from the server's `_ready`. One handler may serve several tools (`godot_game`/`godot_game_time`, `godot_editor_read`/`_edit`, `godot_filesystem`/`godot_docs`/`godot_log`). |
+| `handlers/*_handler.gd` | One file per tool family (24 files). Editor-direct ops run locally; game-runtime ops forward over the debugger channel. |
 | `debugger/mcp_debugger_plugin.gd` | Editor ↔ game IPC over `EditorDebuggerSession` / `EngineDebugger`. Prefix `ogm`: editor→game `ogm:call [request_id, method, params]`, game→editor `ogm:response` / `ogm:error` / boot beacon `ogm:hello [pid, args]`. |
-| `runtime/runtime_autoload.gd` | Runs **in the game process** as `McpRuntimeAutoload`. Input sim, state observation (`_mcp_state()` protocol), eval, screenshots, `Engine.time_scale` clock. Also serves standalone-WebSocket mode for `godot_network launch_instance`. |
-| `runtime/mcp_test_suite.gd` (`OgmTestSuite`) | Base class for `godot_test` suites: `res://tests/` scripts with `test_*()` funcs + `set_up()`/`tear_down()` + `assert_*` helpers. |
+| `runtime/runtime_autoload.gd` | Runs **in the game process** as `McpRuntimeAutoload`: input sim, state observation (`_mcp_state()` protocol), eval, screenshots, `Engine.time_scale` clock; also serves standalone-WebSocket mode for `godot_network launch_instance`. |
+| `runtime/network_conditioner.gd` | `McpNetworkConditioner` (`MultiplayerPeerExtension`) wrapping a peer to inject latency/loss/jitter; installed explicitly by the test under `godot_network`. |
+| `runtime/mcp_test_suite.gd` | `OgmTestSuite` base class for `godot_test`: project-side `res://tests/` scripts with `test_*()` funcs, `set_up()`/`tear_down()` and `assert_*` helpers. |
 | `utils/` | Shared: `error_codes.gd` (`MCPErrorCodes`), `variant_codec.gd` (`VariantCodec`), `port_resolver.gd` (`PortResolver`), `scene_path.gd` (`OgmScenePath`), `screenshot_cleanup.gd`, `update_manager.gd`, `update_reload_runner.gd`. |
-| `dock/` | Status dock + language + Agnes/NVIDIA opt-in config + update banner. Strings in `dock/i18n/*.json` (`en.json` is the source). |
-| `export/mcp_export_plugin.gd` | Strips the runtime autoload entry from exported `project.godot` (restores it in-editor after export). |
+| `dock/` | Status dock + language selector + Agnes/NVIDIA opt-in config + update banner. Strings in `dock/i18n/*.json` (`en.json` is the source). |
+| `export/mcp_export_plugin.gd` | Clears the runtime autoload from the in-memory `project.godot` during export and restores it in-editor afterwards. |
 
 ## Handler contract
 
@@ -36,52 +37,33 @@ func handle(tool: String, action: String, params: Dictionary) -> Dictionary:
             return _EC.fail("INVALID_ARGUMENT", "Unknown action: %s" % action)
 ```
 
-- Return **only** `_EC.ok(payload)` / `_EC.fail(code, message, extra?)` — never a raw dict. Codes match `Docs/02-Tools/Index.md §錯誤回傳格式`; the list is not closed.
+- Return **only** `_EC.ok(payload)` / `_EC.fail(code, message, extra?)` — never a raw dict. Codes follow the upstream `Docs/02-Tools/Index.md` error table; the list is not closed.
 - Runtime-bound handlers forward via `dbg.call_runtime(method, call_params)` (awaited). Null-guard in order: `_bridge` → `get_debugger()` → `RUNTIME_NOT_CONNECTED`.
 - `params.instance` is **1-based launch order** (`godot_game instances`); `0`/omitted = first instance. Never renumber; `_game_sessions` order in the debugger plugin is the source of truth.
-- JSON boundary: encode outbound Variants with `VariantCodec.encode_variant`, decode inbound with `decode_variant` (Vector2↔`{"x","y"}`, etc., per `Docs/02-Tools/Index.md §Godot 型別的 JSON 編碼`).
+- JSON boundary: encode outbound Variants with `VariantCodec.encode_variant`, decode inbound with `decode_variant` (Vector2↔`{"x","y"}`, etc., per upstream `Docs/02-Tools/Index.md`).
 
 ## Conventions
 
 - **Tabs, GDScript, `@tool` only where the engine needs it** (plugin, debugger/export plugins, dock). Plain `extends RefCounted` elsewhere.
-- **No `class_name` on handlers.** Only shared utils declare one (`MCPErrorCodes`, `VariantCodec`, `PortResolver`, `OgmScenePath`, `OgmTestSuite`) to avoid polluting consuming projects. Everything else is referenced via `const X = preload("res://addons/open_godot_mcp/...")`.
-- Every file opens with a `##` doc header naming its tool(s) and `Docs:` reference, e.g. `## Input handler — godot_input … Docs: 02-Tools/Input.md`.
+- **No `class_name` on handlers.** Only shared utils/components declare one (`MCPErrorCodes`, `VariantCodec`, `PortResolver`, `OgmScenePath`, `OgmTestSuite`, `McpNetworkConditioner`) to avoid polluting consuming projects. Everything else is referenced via `const X = preload("res://addons/open_godot_mcp/...")`.
+- Every file opens with a `##` doc header naming its tool(s) and its upstream `Docs:` reference, e.g. `## Input handler — godot_input … Docs: 02-Tools/Input.md`.
 - **Never hand-edit `.uid` files** — Godot manages them; editing breaks script UIDs.
-- Settings keys (don't rename without updating `plugin.gd` + `Docs/06-Installation/`): `open_godot_mcp/bridge/*` (port, auto_port, heartbeat), `open_godot_mcp/runtime/*` (auto_inject, strip_on_export), `open_godot_mcp/security/*` (allow_eval, read_only, auth_token), `open_godot_mcp/ui/language`; ProjectSettings `open_godot_mcp/screenshot_max_count|_max_age_hours` and `autoload/McpRuntimeAutoload`.
+- Settings keys (don't rename without updating `plugin.gd` and the upstream installation docs): `open_godot_mcp/bridge/*` (port, auto_port, heartbeat), `open_godot_mcp/runtime/*` (auto_inject, strip_on_export), `open_godot_mcp/security/*` (allow_eval, read_only, auth_token), `open_godot_mcp/ui/language`; ProjectSettings `open_godot_mcp/screenshot_max_count|_max_age_hours` and `autoload/McpRuntimeAutoload`.
 - Timeouts: debugger `call_runtime` default **15 s**, game-ready wait **20 s**. An eval timeout usually means the evaluated body errored — surface it, don't raise the timeout.
 
 ## Adding a tool or action
 
 1. Implement/extend the `handlers/` file (match on `action`, fail `INVALID_ARGUMENT` on unknown).
 2. Register the tool name in `bridge/dispatcher.gd` (`_register("godot_x", _XHandler)`); one handler may serve several tool names.
-3. Add the Python wrapper in `src/open_godot_mcp/tools/` + tool description, and document it under `Docs/02-Tools/` (keep the zh-TW doc language; code examples stay English).
+3. Upstream only (not in this checkout): add the Python wrapper under `src/open_godot_mcp/tools/`, its tool description, and the doc under `Docs/02-Tools/` (zh-TW docs; code examples stay English).
 4. If the runtime must serve it, add the method to `runtime/runtime_autoload.gd` behind the same `method` string the handler passes to `call_runtime`.
 
 ## Verification
 
-- Python side: `pytest tests/` from the repo root (needs dev extras).
-- GDScript side: no local unit runner here — verify live via `godot_health check` then the relevant tool (`godot_game status`, `godot_test` for `res://tests/` suites extending `OgmTestSuite`).
+- GDScript: no local unit runner. Verify live with `godot_health check`, then the relevant tool (`godot_game status`, `godot_test` for project-side `res://tests/` suites extending `OgmTestSuite` — none are committed in this checkout).
+- Upstream Python: `pytest tests/` runs in the upstream repo only; this checkout has no Python package or tests.
 - After touching the bridge/dispatcher/runtime channel, re-run a play/stop cycle plus one runtime round-trip (`digest` or `eval`) before calling it done.
-
-## Consuming-project call-chain ledger (recommended)
-
-Downstream projects should keep a ledger of proven MCP call sequences — for
-example a single machine-readable ledger file with one entry per flow (the
-Mindustry-Godot project uses `parity-ledger.json`) — and have their agents
-consult it before composing calls. Each entry records when the flow applies,
-its preconditions (including process-start environment such as `DISPLAY` for
-servers that need one), the exact tool calls, success signals, failure modes,
-and the last run that verified it. Treat seeded entries as claims and promote
-them to verified only with a run artifact.
-
-Keep that ledger in the consuming project. This addon and `Docs/` stay generic:
-they describe the tools, not any one project's flow. `README.md` carries the
-longer rationale.
-
-Start agent sessions inside the consuming project root: MCP config files such as
-`.mcp.json` are only picked up when the session starts in that directory (or from
-the client's global config) — a session launched from a parent directory silently
-sees no `godot_*` tools at all.
+- Start agent sessions at the consuming project root: `.mcp.json` (repo root here) launches the stdio `open-godot-mcp` server with `OPEN_GODOT_MCP_PORT=6970`, and is only discovered when the session starts there (or via the client's global config).
 
 ## Pitfalls
 

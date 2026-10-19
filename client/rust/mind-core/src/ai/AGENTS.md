@@ -5,8 +5,7 @@ This folder owns unit AI, pathfinding and the headless unit harness: the control
 `CommandAI`, …), the flowfield `Pathfinder` and cluster/portal `ControlPathfinder` alongside the
 synchronous `Astar`, RTS squad assignment, unit commands/stances and `UnitGroup` formation, the
 `WaveSpawner`, and the deterministic `UnitHarness`. All of it runs inside the fixed 60 Hz simulation
-and participates in the checksum. Read the root [`AGENTS.md`](../../../../../AGENTS.md) first, then
-the crate notes [`mind-core/AGENTS.md`](../../AGENTS.md).
+and participates in the checksum. Crate-wide rules live in [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 ## Layout
 
@@ -14,9 +13,9 @@ the crate notes [`mind-core/AGENTS.md`](../../AGENTS.md).
 |---|---|
 | `mod.rs` | Module root; declares the submodules and re-exports the public AI surface. |
 | `controller.rs` | `UnitController` trait, `AiKind` (append-only controller kinds), `ControllerSlot` component, `select_ai`. |
-| `controller_registry.rs` | `select_controller` (player/RTS/AI matrix), `keep_state`, `is_logic_controllable`. |
+| `controller_registry.rs` | `select_controller` (player/RTS/AI matrix), `keep_state`, `is_logic_controllable`, `unit_is_logic_controllable`. |
 | `ai_controller.rs` | `AiCtx` per-tick context and the `AIController` free-function helper set (targeting, movement, steering, `pathfind`). |
-| `types/` | The 18 controllers: `ground`, `flying`, `hug`, `flying_follow`, `command`, `logic`, `missile`, `builder`, `miner`, `cargo`, `defender`, `suicide`, `boost`, `assembler`, `prebuild`, `repair`, `player_bridge`, `no_ai`. |
+| `types/` | 19 controller/helper files (plus `mod.rs`): the 18 `AiKind` controllers — `ground`, `flying`, `hug`, `flying_follow`, `command`, `logic`, `missile`, `builder`, `miner`, `cargo`, `defender`, `suicide`, `boost`, `assembler`, `prebuild`, `repair`, `player`, `no_ai` — and `player_bridge.rs` (`PlayerBridge`, serialized state only, not an `AiKind` or controller). |
 | `pathfinder/` | `Pathfinder` flowfield cache, `Flowfield`, `PathTile`, `Cost`, `PathfindQueue`, deterministic budget constants (`worker`). |
 | `astar.rs` | Synchronous 4-connected grid A* (`AstarScratch`, `TileHeuristic`, `manhattan`/`euclidean`/`octile`). |
 | `control_pathfinder.rs` | `ControlPathfinder` cluster/portal build, per-goal `FieldCache` fields, `raycast`/`raycast_fast_avoid`, `PathfindResult`. |
@@ -35,7 +34,8 @@ the crate notes [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 - Framework: `UnitController`, `AiKind`, `ControllerSlot`, `AiCtx`; selection via `select_ai`,
   `select_controller`, `keep_state`.
-- Controllers: `GroundAi`, `FlyingAi`, `CommandAiState` (`CommandQueueEntry`, `AttackTarget`), plus
+- Controllers: `GroundAi`, `FlyingAi`, `CommandAiState` (`CommandQueueEntry`, `AttackTarget`), the
+  `Player` controller (`update_player`/`PlayerInput`) and the inert `PlayerBridge`, plus
   `update_ground`/`update_flying`/`update_command` entry functions.
 - Pathfinding: `Pathfinder`, `Flowfield`, `PathTile`, `Cost`, `PathfindQueue`; `AstarScratch`,
   `DistanceHeuristic`, `TileHeuristic`, `UniformCost`; `ControlPathfinder`, `FieldCache`, `Portal`,
@@ -76,24 +76,20 @@ the crate notes [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 ## Rules
 
-- Port upstream Mindustry and cite the source in the file header; files are UTF-8/LF and
-  `SPDX-License-Identifier: GPL-3.0-only`.
-- Keep the subsystem Godot-free and tokio-free, runnable under a plain `cargo test -p mind-core`.
 - Rebuild path state after terrain changes: `Pathfinder::rebuild`/`update_tile` and
   `UnitHarness::refresh_path_tiles`; `BlockIndexer::rebuild` after building changes.
 - Add new controllers as an `ai/types/*` module, an `AiKind` variant and a `controller_registry`
   arm — never reorder existing `AiKind`/`Cost` variants.
+- The player path has two pieces: `types/player.rs` (live input → movement, plan 15) and
+  `types/player_bridge.rs` (the serialized `PlayerBridge` id holder). Keep them distinct.
 
 ## Verification
 
-Run from `client/rust/`, or add `--manifest-path client/rust/Cargo.toml` from the repo root.
+From `client/rust/` (or add `--manifest-path client/rust/Cargo.toml` from the repo root):
 
 ```bash
-cargo test -p mind-core
-cargo clippy -p mind-core --all-targets -- -D warnings
-cargo fmt --all -- --check
+cargo test -p mind-core ai::harness              # harness determinism/fuzz
+cargo test -p mind-core ai::control_pathfinder   # cached-vs-A* parity
+cargo test -p mind-core ai::unit_group           # formation
+cargo test -p mind-core ai::controller_registry  # selection matrix
 ```
-
-Focused runs: `cargo test -p mind-core ai::harness` (harness determinism/fuzz),
-`cargo test -p mind-core ai::control_pathfinder` (cached-vs-A* parity) and
-`cargo test -p mind-core ai::unit_group` (formation).

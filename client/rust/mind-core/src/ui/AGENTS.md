@@ -1,13 +1,11 @@
 # AGENTS.md — mind-core/src/ui (Godot-free UI logic)
 
-`mind-core::ui` is the Godot-free data, format and model half of the UI. It owns the MSUI builder and
-DSL, text/HUD/stat formatting, the campaign/chat/console/player-list/file-chooser/prompt view models,
-the pause-governor state machine and the manifest validators that pin the UI ABI. It links no Godot,
-tokio or network code and runs under plain `cargo test -p mind-core`. Read the root
-[`AGENTS.md`](../../../../../AGENTS.md) first; the crate map is `mind-core/AGENTS.md`
-(`../../AGENTS.md`). The Godot-facing widget layer lives in `mind-gdext::ui` (`MindUi`, `MindHud`) plus
-GDScript under `client/ui` and `client/scenes/ui`; the Rust↔GDScript contract is
-[`client/ui/README.md`](../../../../ui/README.md).
+`mind-core::ui` is the Rust-side data/model half of the UI: the MSUI builder and DSL, text/HUD/stat
+formatting, the campaign/chat/console/player-list/file-chooser/prompt view models, settings rows,
+tree layout, the pause-governor state machine and the manifest validators that pin the UI ABI. It
+links no Godot, tokio or network code and runs under plain `cargo test -p mind-core`. Crate-wide
+rules are in [`mind-core/AGENTS.md`](../../AGENTS.md); the repo map is the root
+[`AGENTS.md`](../../../../../AGENTS.md).
 
 ## Layout
 
@@ -27,6 +25,7 @@ GDScript under `client/ui` and `client/scenes/ui`; the Rust↔GDScript contract 
 | `campaign.rs` | Campaign read models (`CampaignViews` and `PlanetView`/`SectorView`/`ResearchView`/`SchematicView`/`LoadoutView`/`CampaignRulesView`/`CampaignCompleteView`/`MapEntryView`) with `vanilla_fixture`/`empty`. |
 | `chat.rs` | `ChatState`, `ChatMode`, `ChatSend`, `Ping` and `check_ping`. |
 | `console.rs` | `ConsoleRegistry`/`ConsoleCommand`/`ConsoleEntry` line dispatch and `help_text`. |
+| `content_stats/` | Content-info (`?`) stat model: `Stats`/`Stat`/`StatCat`/`StatUnit`/`Cell`, base block/item/liquid stats and the `logistics`/`production`/`turret_ammo`/`unit_blocks`/`unit_stats`/`values` bodies. |
 | `database.rs` | Core Database view model (`DatabaseView` planet tabs + `databaseCategory`/`databaseTag` grid) with `empty`. |
 | `display.rs` | `DisplayRow`/`HoverInfo` hover rows and the `Displayable` provider trait. |
 | `file_chooser.rs` | `FileChooserParams` title/name/extension validation and `sanitize_filename`. |
@@ -34,25 +33,36 @@ GDScript under `client/ui` and `client/scenes/ui`; the Rust↔GDScript contract 
 | `manifest.rs` | `DialogsManifest`/`StylesManifest` parsers + validators and the `EXPECTED_*` ABI tables. |
 | `pause.rs` | `PauseGovernor`/`PauseAction`/`should_govern` reference-counted pause state machine. |
 | `player_list.rs` | `PlayerListModel`/`PlayerSummary`/`PlayerAction` rows, sort/filter and the relay seam. |
-| `prompts.rs` | `PromptKind`, `TextInputSpec`, `ConfirmSpec`, `PopupRegistry`, `AnnouncementTracker`. |
+| `prompts.rs` | `PromptKind`, `TextInputSpec`, `ConfirmSpec`, `PopupRegistry`, `AnnouncementTracker` and `PROMPT_HELPERS`. |
+| `settings.rs` | Ordered `SettingRow`/`SettingsCategory` model (kind, default, range, formatting tag); values live in `io::settings`. |
 | `stat_display.rs` | `StatDisplay`, `fix_value`, `ammo_stat`, `mult_stat` content-stat formatting. |
 | `text.rs` | `format_icons`, `render_markup`, `format_time`, `format_amount`, `round_amount`, `color_tag`. |
+| `tree_layout.rs` | Arena `LayoutNode` tree layout and research-tree placement (exact abego walker; do not simplify). |
+
+## Boundaries
+
+- This module owns Rust-side UI *data*: read models, MSUI builder/DSL, formatting, pause state,
+  settings rows, tree layout, manifest JSON parsing and the `EXPECTED_*` validators.
+- [`client/AGENTS.md`](../../../../AGENTS.md) owns the Godot layer: static `.tscn` instances
+  (`ui_root.tscn`, dialogs/fragments/widgets), theme construction/verification in
+  `MindThemeBuilder`, GDScript bindings and the `# code-instantiated:` rule. `mind-gdext::ui`
+  (`MindUi`, `MindHud`) is the runtime bridge; its read-model JSON contract is
+  [`client/ui/README.md`](../../../../ui/README.md).
 
 ## Key types
 
 - Builder: `builder::ui_node::{UiNode, UiEntry, UiValue}`, `builder::ui_key::UiKey`,
   `builder::dsl::{parse, DslError}`, `builder::menu_host::{MenuHost, MenuSelection}`,
   `builder::menu_result::MenuResult`, `builder::ui_relay::{RelayCommand, wire_fixtures}`.
-- Models: `campaign::CampaignViews`, `hud_text::HudStatus`, `display::HoverInfo`,
-  `player_list::PlayerListModel`, `file_chooser::FileChooserParams`, `prompts::TextInputSpec`.
+- Models: `campaign::CampaignViews`, `content_stats::Stats`, `hud_text::HudStatus`,
+  `display::HoverInfo`, `player_list::PlayerListModel`, `file_chooser::FileChooserParams`,
+  `prompts::TextInputSpec`, `settings::SettingRow`, `tree_layout::LayoutNode`.
 - Formatting: `text::{render_markup, format_icons, format_amount}`, `stat_display::StatDisplay`.
-- ABI: `manifest::EXPECTED_STYLES`, `manifest::EXPECTED_PROMPTS`, `manifest::EXPECTED_M3_DIALOGS`,
-  `manifest::EXPECTED_M5_DIALOGS`, `manifest::EXPECTED_M7_DIALOGS`, `manifest::expected_pause`.
+- ABI: `manifest::EXPECTED_STYLES`, `manifest::EXPECTED_PROMPTS`, `manifest::EXPECTED_*_DIALOGS`
+  (M3/M5/M7/logic/editor), `manifest::expected_pause`.
 
 ## Invariants
 
-- **No Godot, tokio or network.** Everything is pure data/format/parse; bundles (`assets::bundle::Bundle`),
-  icon tables (`assets::icons::Iconc`) and read models are injected by callers.
 - **View-only.** The module computes view data and never feeds the simulation, saves, sync or checksum.
 - **Manifests are the ABI.** `client/ui/dialogs_manifest.json` and `client/ui/styles_manifest.json`
   carry `format: 1`; `manifest.rs` rejects bad format, duplicate names, missing scenes/fragments,
@@ -67,23 +77,18 @@ GDScript under `client/ui` and `client/scenes/ui`; the Rust↔GDScript contract 
 
 ## Rules
 
-- The Godot widget layer is `mind-gdext::ui` plus GDScript in `client/ui` and `client/scenes/ui`; this
-  crate exposes read-model JSON that GDScript consumes through `MindUi` endpoints such as
-  `campaign_views()`, `chat_send(text, mode)`, `console_execute(line)`, `player_list_json()` and
-  `player_action(...)`; `DisplayServer.file_dialog_show` is handled natively by `mind-gdext`.
-- A new dialog or fragment must be added to the static instance under its layer group in
-  `client/scenes/ui/ui_root.tscn`, `ui/dialogs_manifest.json`, and the matching
-  `EXPECTED_*_DIALOGS`/fragment list; a new style to `styles_manifest.json` and `EXPECTED_STYLES`; a
-  new prompt to `prompts::PROMPT_HELPERS`, `EXPECTED_PROMPTS` and the manifest `prompts[]`.
+- A new dialog/fragment/style/prompt is not done until the manifest validators pass; the three-place
+  checklist (static scene, manifest, `EXPECTED_*`) is in [`client/AGENTS.md`](../../../../AGENTS.md).
+  `prompts::PROMPT_HELPERS` is the single ordered prompt list and must match the manifest `prompts[]`.
 - Dialogs and `.tscn` files may reference only styles that `StyleLookup` resolves against the manifest.
-- Keep `use godot`/`use tokio` out of this tree and avoid `unwrap`/`expect` on runtime data.
+- Keep user-visible strings in bundles; this tree composes text, it does not decide game rules.
 
 ## Verification
 
+Run from `client/rust/`.
+
 ```bash
-cd client/rust
 cargo test -p mind-core ui
-cargo clippy -p mind-core --all-targets -- -D warnings
 cargo run -p mind-headless -- ui manifest --repo ../..
 cargo run -p mind-headless -- ui campaign
 cargo run -p mind-headless -- ui relay

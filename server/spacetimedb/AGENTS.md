@@ -5,7 +5,9 @@ private ordered command relay and persistent state (identity, chat, moderation,
 campaign, schematics, mods) for Mindustry-Godot. Reducers return no data, use
 `ctx.sender()` as the only principal and perform cheap validation only; there is
 no server-side simulation. Read the root [`AGENTS.md`](../../AGENTS.md) first,
-then [`server/AGENTS.md`](../AGENTS.md).
+then [`server/AGENTS.md`](../AGENTS.md). Publishing, database naming and generated
+bindings are owned by `server/AGENTS.md`; client binders and subscription waves by
+[`client/rust/mind-stdb/AGENTS.md`](../../client/rust/mind-stdb/AGENTS.md).
 
 ## Layout
 
@@ -20,7 +22,6 @@ then [`server/AGENTS.md`](../AGENTS.md).
 | `mods/mod.rs` | `match_mod`, `content_catalog`; `check_mods` and `content_name_allowed`. |
 | `relay/` | Match directory/membership, the private `match_command` log, rate/session state, rules, plan snapshots, checksums, snapshots, UI events, LWW player state and the maintenance sweep; every relay reducer and view. |
 | `Cargo.toml` | `cdylib` crate `mindustry_godot`, its own workspace, pinned to `spacetimedb = "=2.10.1"`. |
-| `../spacetime.json` | Server/db defaults and the Rust generate target (`../client/rust/mind-stdb/src/module_bindings`). |
 
 ## Responsibilities
 
@@ -71,17 +72,17 @@ then [`server/AGENTS.md`](../AGENTS.md).
   only; full-table views range-unbounded over a btree index with
   `(Bound::<T>::Unbounded, Bound::<T>::Unbounded)`. String-column filters pass
   `&str`, never `String`.
-- **Generated bindings are never hand-edited.** Regenerate with `server/build.sh`
-  (or `spacetime generate --lang rust --out-dir
-  client/rust/mind-stdb/src/module_bindings --module-path server/spacetimedb -y`).
+- **A schema change is a bindings change.** Never hand-edit the generated bindings;
+  the regeneration/publish flow is owned by `server/AGENTS.md`.
 - **`content_catalog.name` is `#[unique]`**; the generated seed is deduped.
 
 ## Invariants
 
-- **Server-only tables** (no `public`): `audit_log`, `match_command`,
-  `command_rate`, `sender_command_state`, `match_kick`, `match_snapshot_request`,
-  `match_snapshot_chunk`, `snapshot_rate`, `checksum_rate`,
-  `match_player_state_rate`, `chat_rate`, `admin_rate`, `maintenance_schedule`.
+- **Server-only tables** (no `public`): `audit_log`, `relay_member`,
+  `match_command`, `command_rate`, `sender_command_state`, `match_kick`,
+  `match_snapshot_request`, `match_snapshot_chunk`, `snapshot_rate`,
+  `checksum_rate`, `match_player_state_rate`, `chat_rate`, `admin_rate`,
+  `maintenance_schedule`.
   Clients reach them through member semijoin views (`my_match_commands`,
   `my_kick`, `my_match_snapshot_chunks`, `my_sender_command_state`, ...).
 - **Member semijoin views.** `all_matches` lists public non-ended matches; the
@@ -101,9 +102,7 @@ then [`server/AGENTS.md`](../AGENTS.md).
 
 ```bash
 cargo check --manifest-path server/spacetimedb/Cargo.toml --tests
-server/build.sh --check                 # bindings drift gate
-GEN_CONTENT_SEED=1 server/build.sh      # publish + regenerate content_seed.rs
-spacetime describe mindustry --server local   # tables/reducers/views
+spacetime describe mindustry --server local --json   # tables/reducers/views
 ```
 
 The `#[cfg(test)]` suites (`admin`, `mods`, `chat`, `campaign`, `identity`,

@@ -11,7 +11,7 @@ The workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 
 | Module | Responsibility |
 |---|---|
-| `ai` | Unit AI and pathfinding: controllers, `Astar`/`ControlPathfinder`, RTS squads, `WaveSpawner`, `UnitHarness`. |
+| `ai` | Unit AI and pathfinding: 18 `AiKind` controllers (including `Player`), `Astar`/`ControlPathfinder`, RTS squads, `WaveSpawner`, `UnitHarness`. |
 | `assets` | Godot-free asset runtime: `FileTree` virtual FS, atlas index, bundles, icons and sound/music registries. |
 | `async_work` | `AsyncCore` deterministic physics/avoidance workers (`std::thread`, shard-indexed, joined in order). |
 | `audio` | `SoundControl`/priority/music semantics and the `AudioSink` event boundary; playback lives in `mind-gdext`. |
@@ -30,7 +30,7 @@ The workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
 | `fx` | Effect registry, pools, trails, decals, shake and draw-part program resolution (view-only). |
 | `game` | `State`/`GameState` runtime model plus campaign, universe, rules, waves and schematics. |
 | `input` | Pure input state machine, placement algorithms, plan mirror and RTS selection. |
-| `io` | Persistence: `MGRS` saves, `TypeIO`, entity revision IO, `JsonIO`, settings and maps. |
+| `io` | Persistence: `MGRS` saves, `TypeIO`, entity revision IO, `JsonIO`, settings, map headers/previews; the map registry and generation live in `maps`. |
 | `log` | Logging facade (`arc.util.Log` port) with console + `last_log.txt` output. |
 | `logic` | The mlog system: parser, assembler, `Executor` VM, statements, values and globals. |
 | `maps` | Map registry (`Maps`), generators, previews, shuffle and planet/sector map glue. |
@@ -100,16 +100,16 @@ The workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
   ordinals, names, bundle keys and sprite region names are frozen parity ABI. Entity field order is
   serialization order: append `#[entity(since = N)]` fields, never reorder.
 - **Ordered containers on serialized paths.** `io::StringMap` is an `IndexMap` and `serde_json` uses
-  `preserve_order`. No `unwrap`/`expect` on runtime data: lints deny `unsafe_code`, `unwrap_used` and
-  `expect_used` (tests opt out via the crate-level `cfg_attr(test, ...)`).
+  `preserve_order`. No `unwrap`/`expect` on runtime data (lint policy:
+  [`client/rust/AGENTS.md`](../AGENTS.md)).
 
 ## Rules
 
-- Add external crates through `[workspace.dependencies]` and reference them with `crate.workspace =
-  true`; opt into `[lints] workspace = true`. Do not relax the boundary to land a feature — move
-  shared logic into `mind-core` instead; hosts call in, `mind-core` never calls back out.
+- Workspace dependency, lint and toolchain policy lives in [`client/rust/AGENTS.md`](../AGENTS.md).
+  Do not relax the boundary to land a feature — move shared logic into `mind-core` instead; hosts
+  call in, `mind-core` never calls back out.
 - Keep every feature runnable with a plain `cargo test -p mind-core`, with no Godot or network.
-- Port upstream Mindustry and cite it in file headers; files are UTF-8/LF, GPL-3.0-only.
+- Header/license/upstream-citation rules follow the root [`AGENTS.md`](../../../AGENTS.md).
 
 ## Conventions
 
@@ -117,24 +117,31 @@ The workspace map is [`client/rust/AGENTS.md`](../AGENTS.md).
   save import), `alloc-audit` (allocation counting) and `profile-build` (per-tick cost attribution).
 - `extern crate self as mind_core;` lets `mind_derive` output reference `::mind_core` inside the
   crate; the root re-exports `version::MIND_VERSION` and `sim::dump`.
-- Deeper subsystem notes live in the major subfolders: `src/world/AGENTS.md`,
-  `src/world/blocks/AGENTS.md`, `src/content/AGENTS.md`, `src/io/AGENTS.md`, `src/logic/AGENTS.md`,
-  `src/game/AGENTS.md`, `src/render/AGENTS.md`, `src/ai/AGENTS.md`, `src/combat/AGENTS.md`,
-  `src/ui/AGENTS.md` and `src/input/AGENTS.md`.
+
+## Deeper subsystem notes
+
+Child guides own only local layout, invariants and focused commands; crate-wide rules stay here.
+
+- Simulation and data: [`sim`](src/sim/AGENTS.md), [`ai`](src/ai/AGENTS.md),
+  [`combat`](src/combat/AGENTS.md), [`content`](src/content/AGENTS.md),
+  [`maps`](src/maps/AGENTS.md), [`mods`](src/mods/AGENTS.md).
+- World, game and persistence: [`world`](src/world/AGENTS.md),
+  [`world/blocks`](src/world/blocks/AGENTS.md), [`game`](src/game/AGENTS.md),
+  [`io`](src/io/AGENTS.md).
+- View, control and scripting: [`fx`](src/fx/AGENTS.md), [`render`](src/render/AGENTS.md),
+  [`ui`](src/ui/AGENTS.md), [`input`](src/input/AGENTS.md), [`logic`](src/logic/AGENTS.md).
 
 ## Verification
 
-Run from `client/rust/`, or add `--manifest-path client/rust/Cargo.toml` from the repo root.
+Run from the repo root (Linux).
 
 ```bash
-cargo test -p mind-core
-cargo clippy -p mind-core --all-targets -- -D warnings
-cargo fmt --all -- --check
+cargo test --manifest-path client/rust/Cargo.toml -p mind-core
 
 # boundary gate (must print nothing / find nothing)
-cargo tree -p mind-core --prefix none | grep -Eq '^(godot|tokio)( |$)' && echo FAIL
+cargo tree --manifest-path client/rust/Cargo.toml -p mind-core --prefix none | grep -Eq '^(godot|tokio)( |$)' && echo FAIL
 grep -RnE --include='*.rs' 'use (godot|tokio)' client/rust/mind-core && echo FAIL
 
-# headless oracle golden: spine_place_break -> e53c9277bb8c28d1
-cargo run -p mind-headless -- run spine_place_break --json
+# headless oracle golden: spine_place_break -> 3e48c583a94fbea4
+cargo run --manifest-path client/rust/Cargo.toml -p mind-headless -- run spine_place_break --json
 ```

@@ -1,17 +1,18 @@
 # AGENTS.md — mind-core/src/combat (combat systems)
 
-The combat subsystem of `mind-core`: the `Bullet` component and its behavior half, bullet spawning
-and per-kind dispatch, the `Damage` math, `Fires` and `Puddles` tile entities, chain `Lightning`,
-deterministic target selection, the headless `CombatHarness`, and the renderer-free `view::FxSink`
-seam. It is Godot-free and tokio-free; every sim random draw goes through `crate::determinism` and
-every view/FX emission through `view::FxSink`. Read the root [`AGENTS.md`](../../../../../AGENTS.md)
-first; the crate map is `mind-core/AGENTS.md` (`../../AGENTS.md`).
+The combat subsystem: the `Bullet` component and its behavior half, bullet spawning and per-kind
+dispatch, the `Damage` math, `Fires` and `Puddles` tile entities, chain `Lightning`, deterministic
+targeting, the headless `CombatHarness`, and the renderer-free `view::FxSink` seam. Every sim random
+draw goes through `crate::determinism` and every view/FX emission through `view::FxSink`; effect
+definitions, pools, trails, decals and draw-part resolution are view-only and live in
+[`../fx/AGENTS.md`](../fx/AGENTS.md). Crate-wide rules are in [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 ## Layout
 
 | Path | Responsibility |
 |---|---|
 | `mod.rs` | Module list, the public re-exports (`Bullet`, `BulletData`, `BulletSpawn`, `create`, `CombatHarness`, `TargetQueries`, `FxSink`, draw states) and the thin `CombatPlugin` host seam. |
+| `abilities.rs` | Unit ability runtime: `AbilityComp`/`AbilityState`, `init_unit_abilities`, `update_unit_abilities`, `run_death_abilities`; field/shield/regen kinds plus `SpawnDeath`/`LiquidExplode`. |
 | `bullet/mod.rs` | `Bullet` component, flags (`KEEP_ALIVE`/`JUST_SPAWNED`/`ABSORBED`/`HIT`/`OWNER_LOCAL`/`EXPIRED`), `BulletData`, `ShotMover`, `CombatCtx`, motion/collision/hit/despawn/finish (`update_bullet`, `collide_bullet`, `hit_bullet`, `finish_bullet`). |
 | `bullet/spawn.rs` | `BulletSpawn` request and the single creation path `create` (`create_net` aliases it); applies damage/velocity/lifetime scaling and deterministic inaccuracy. |
 | `bullet/behavior.rs` | `BulletBehavior` trait, `BaseBehavior`, and `behavior_for(BulletKind)` dispatch to the per-kind statics. |
@@ -64,17 +65,15 @@ bullets through the same `CombatCtx`: `CombatHarness::update_weapons_only` calls
 
 ## Invariants
 
-- **Godot-free and tokio-free.** No source here may `use godot`/`use tokio`; the crate boundary is
-  enforced by `cargo tree -p mind-core` and the CI `grep -RnE 'use (godot|tokio)'` gate.
-- **All sim randomness through `crate::determinism`.** Uses of `SimRng`/`RngStream` (and the
-  seeded `random::Rand` in lightning) keep combat replay-stable; `LightningCounter` is a monotonic
-  resource rather than a process global.
-- **Combat state is simulation state.** Bullets, building health, `FireState` and `PuddleState`
-  contribute to `CombatHarness::checksum_value` (FNV-1a-64 via `determinism::Checksummer`).
+- **Replay-stable draws.** Combat uses `SimRng`/`RngStream` (and a seeded `random::Rand` in
+  lightning); `LightningCounter` is a monotonic resource rather than a process global.
+- **Combat state is simulation state.** Bullets, building health, `FireState`, `PuddleState` and
+  `AbilityState` contribute to `CombatHarness::checksum_value`.
 - **Deterministic ordering.** Bullets advance in spawn order, area/line targets sort by
   `(EntitySeq, entity.index())`, and no `HashMap` iteration appears on a sim path.
 - **FX is view-only.** Effects, shake, lights, sounds and trails are emitted through `view::FxSink`
-  and never feed the simulation or the checksum; `NoopFx` is the headless default.
+  and never feed the simulation or the checksum; `NoopFx` is the headless default. The effect
+  registry/pools themselves belong to `fx/`, not here.
 
 ## Rules
 
@@ -83,14 +82,13 @@ bullets through the same `CombatCtx`: `CombatHarness::update_weapons_only` calls
 - Route new sim randomness through `CombatCtx::rng`/`SimRng` and new view output through
   `CombatCtx::fx`; do not add a second FX dispatch path (`FxSink` is the single seam).
 - Keep bullet creation on the `spawn::create` path so relayed and local creation stay identical.
-- Port upstream Mindustry and cite it in the file header; files are UTF-8/LF, GPL-3.0-only.
 
 ## Verification
 
 From `client/rust/` (or add `--manifest-path client/rust/Cargo.toml` from the repo root):
 
 ```bash
-cargo test -p mind-core combat
-cargo clippy -p mind-core
-cargo test -p mind-core
+cargo test -p mind-core combat            # whole subsystem
+cargo test -p mind-core combat::harness   # bullet tick + checksum fixtures
+cargo test -p mind-core combat::abilities # ability update/death hooks
 ```

@@ -1,12 +1,12 @@
 # AGENTS.md — mind-core/src/world/blocks (block families)
 
-The block-family subtree of `mind-core`'s `world` module: a Rust mirror of upstream
-Mindustry `core/src/mindustry/world/blocks/`. Each family owns the per-tick behavior, item/liquid/
-power transport, IO and save shape for one class of placed building, plus the shared autotiling and
-join machinery every family consumes. Families register through
-`world::behavior::BehaviorRegistry`; `mod.rs::default_registry` is the composition root. Read the
-root [`AGENTS.md`](../../../../../../AGENTS.md) first, then `world/AGENTS.md` (`../AGENTS.md`) and
-`mind-core/AGENTS.md` (`../../AGENTS.md`).
+The block-family subtree of `mind-core`'s `world` module: a Rust mirror of upstream Mindustry
+`core/src/mindustry/world/blocks/`. Each family owns the per-tick behavior, item/liquid/power
+transport, IO and save shape for one class of placed building, plus the shared autotiling and join
+machinery every family consumes. Registration goes through `world::behavior::BehaviorRegistry`;
+`mod.rs::default_registry` is the composition root. Grid/tile mutation and the behavior trait belong
+to [`world`](../AGENTS.md); crate-wide rules are in [`mind-core/AGENTS.md`](../../../AGENTS.md), and
+the repo map is the root [`AGENTS.md`](../../../../../../AGENTS.md).
 
 ## Layout
 
@@ -21,16 +21,14 @@ root [`AGENTS.md`](../../../../../../AGENTS.md) first, then `world/AGENTS.md` (`
 | `liquid/` | Conduit/router/junction behaviors, `LiquidNode`, `movement` primitives, `LiquidFlowCache`, bridges. |
 | `heat/` | Erekir heat network: `HeatState`, `HeatConductor`, `HeatCrafter`, `calculate_heat`, producer ramp. |
 | `payloads/` | Payload core (`PayloadRef`, `PayloadHolder`, `PayloadCarried`) plus conveyors, loaders, unloaders, routers, constructors/deconstructors, block producers, sources and voids. |
-| `defense/` | `shields.rs` projectors/walls/mines/dummies, and `turrets/` targeting/shooting. |
+| `defense/` | Projector/shield family (`behaviors.rs`, `projectors.rs`, `shields.rs`) and `turrets/` targeting/shooting; turret save lives in `turrets/save.rs`. |
 | `units/` | Unit-producing blocks: factories, reconstructors, assemblers/modules, repair tower/turret, cargo loader/unload point. |
+| `production.rs` | Content-dependent production registrations: drills (`DrillBehavior`) and wall miners/plasma bores (`BeamDrillBehavior`) that read the item-hardness/wall-ore tables. |
 
 ## Key types
 
-- `world::behavior::BuildingBehavior` (in `world/behavior/mod.rs`) is the shared block trait:
-  `create_state`, `update_tile`, `update_batch`, lifecycle hooks (`created`/`placed`/`dropped`/
-  `on_removed`/`on_deconstructed`/`on_destroyed`/`after_destroyed`/`overwrote`), proximity hooks,
-  config read/write, and item/liquid/payload/IO methods. `BehaviorRegistry` maps `BlockId` →
-  `Arc<dyn BuildingBehavior>`.
+- `world::behavior::BuildingBehavior` + `BehaviorRegistry` are the registration surface (see
+  [`world`](../AGENTS.md)); families implement only the hooks they need and are keyed by `BlockId`.
 - `world::block::{BlockTable, BlockInstance}` supplies `BlockDef` metadata (`size`, `item_capacity`,
   `requirements`, `outputs_power`, `insulated`, `attributes`, `kind`); `TILE_SIZE` and `TilePos` are
   the shared geometry.
@@ -55,16 +53,16 @@ slice index used by `<name>-<i>` atlas regions; `load`/`load_variants` resolve t
 ## Rules
 
 - Register every block by name or `BlockId` from the family's `register`; `default_registry`
-  aggregates `distribution`, `storage`, `payloads`, `liquid`, `heat`, `power` and `units::behavior`.
+  aggregates `distribution`, `storage`, `payloads`, `liquid`, `heat`, `power`, `units::behavior`,
+  `production` and `defense`.
 - Implement per-tick work in `update_tile`; hot logistics behaviors override `update_batch` to use
   `world::update::building_update_no_consumers`.
 - Route item movement through `distribution::transfer`; route liquid movement through
   `liquid::movement`; call `power::module`/`power::graph` for graph links.
 - Persist family state with `write`/`read` on the behavior using `BuildingWriter`/`BuildingReader`
-  and a `version`; keep item/liquid/power storage in the shared modules. Turret save lives in
-  `defense/turrets/save.rs`.
-- Cite the ported upstream class in the file header; files are UTF-8/LF with
-  `SPDX-License-Identifier: GPL-3.0-only`.
+  and a `version`; keep item/liquid/power storage in the shared modules.
+- Grid/tile reads and writes use `WorldGrid`/`WorldCtx` as described in [`world`](../AGENTS.md); do
+  not duplicate footprint, neighbor or placement logic here.
 
 ## Invariants
 
@@ -85,8 +83,8 @@ slice index used by `<name>-<i>` atlas regions; `load`/`load_variants` resolve t
 `liquid/tests.rs`, `heat/tests.rs`) alongside per-family `#[cfg(test)]` modules. From `client/rust/`:
 
 ```bash
-cargo test -p mind-core
-cargo clippy -p mind-core
+cargo test -p mind-core world
+cargo test -p mind-core power
+cargo test -p mind-core liquid
+cargo test -p mind-core heat
 ```
-
-Equivalent from the repo root with `--manifest-path client/rust/Cargo.toml`.

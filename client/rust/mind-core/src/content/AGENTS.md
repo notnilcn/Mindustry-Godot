@@ -1,6 +1,11 @@
 # AGENTS.md — mind-core/src/content (content framework & registries)
 
-The content framework for `mind-core`: the `Content` record model, dense per-type content IDs, the name/unlock tables, the tech-tree graph and the generated vanilla registries (items, blocks, units, bullets, liquids, statuses, planets, sectors, weathers, commands, stances, teams and loadouts). `create_base_content` boots every registry in `ContentLoader.createBaseContent()` order and returns a `ContentRegistry`. Read the root [`AGENTS.md`](../../../../../AGENTS.md) first; the crate-level map is `mind-core/AGENTS.md` (`../../AGENTS.md`).
+The content framework for `mind-core`: the `Content` record model, dense per-type content IDs, the
+name/unlock tables, the tech-tree graph and the generated vanilla registries (items, blocks, units,
+bullets, liquids, statuses, planets, sectors, weathers, commands, stances, teams and loadouts).
+`create_base_content` boots every registry in `ContentLoader.createBaseContent()` order and returns a
+`ContentRegistry`; [`boot.rs`](boot.rs) is the one construction path that also folds in enabled mods,
+the lifecycle and data patches. Crate-wide rules are in [`mind-core/AGENTS.md`](../../AGENTS.md).
 
 ## Layout
 
@@ -10,6 +15,7 @@ The content framework for `mind-core`: the `Content` record model, dense per-typ
 | `id.rs` | `ContentId<T>` (phantom `u16`) and typed aliases (`ItemId`, `BlockId`, `BulletId`, `LiquidId`, `StatusId`, `UnitTypeId`, `WeatherId`, `SectorId`, `PlanetId`, `TeamEntryId`, `UnitCommandId`, `UnitStanceId`) |
 | `ctype.rs` | `Content`/`Mappable`/`Unlockable` traits, `UnlockFields`, `ModContentInfo`, `ModId`, `ErrorContent` |
 | `load.rs` | `ContentRegistry`, dense-ID assignment, lifecycle sweeps, `link`, `TemporaryMapper`, `MappedId`, `content_counts` |
+| `boot.rs` | Mod-aware boot: `collect_boot_content` → `build_registry_with_mods` (base content → mod JSON content → `init`/`post_init` → mod data patches), matching `ClientLauncher.java:166-189`. |
 | `names.rs` | `NameMaps` (per-type + global), `transform_name` mod prefixing, save-name fallbacks |
 | `category.rs` | `Category` block place-menu enum (`prev`/`next` cycling) |
 | `color.rs` | `Rgba` value type (`from_hex`, `from_rgba8888`) |
@@ -30,34 +36,64 @@ The content framework for `mind-core`: the `Content` record model, dense per-typ
 
 ## Key types
 
-- `Content` is the root trait: `const TYPE: ContentType`, `content_id`/`set_content_id`, `minfo`, `kind_name` and defaulted hooks `init_self`, `post_init`, `load_icon`, `load`, `after_patch`, `remove_content`. `Mappable` adds `name()`; `Unlockable` adds `unlock()`/`unlock_mut()` over `UnlockFields` (localized name/description, database category/tag, tech node, `unlocked` flag keyed `<name>-unlocked`).
-- `ContentId<T>` is `#[repr(transparent)]` over `u16`; the phantom tag keeps id spaces from mixing. `.raw()`/`.get()` return the number and `.index()` casts to the vector index.
-- `ContentRegistry` owns one `Vec<Record>` per live type plus `NameMaps`. Per-type accessors (`add_item`, `items`, `item`, `item_mut`, `item_by_name`, and the same for blocks/liquids/statuses/units/weathers/sectors/planets/teams/commands/stances) and `add_bullet`/`bullet` come from the `mappable_accessors!` macro.
-- Name/id lookup: `get_by_name(type_, name)`, `by_name(name)` (global), `get_by_id(type_, id)`, and convenience `item_id`/`block_id`/`unit_id`/`liquid_id`/`status_id`/`planet_id`. `entries` exposes ordered id/name/kind rows and `type_len` reports per-type counts.
-- `ContentRef { type_, id }` is the type-erased handle for cross-registry references; `ContentType::{name, folder, kind, ordinal}` and `ContentKind` mirror the upstream enum for bundles and audit.
-- `create_base_content` runs `commands → teams → items → stances → statuses → liquids → bullets → units → blocks → loadouts → weathers → planets → sectors`, then builds the Serpulo and Erekir tech trees. `create_base_content_bad_order` is the negative load-order fixture.
+- `Content` is the root trait: `const TYPE: ContentType`, `content_id`/`set_content_id`, `minfo`,
+  `kind_name` and defaulted hooks `init_self`, `post_init`, `load_icon`, `load`, `after_patch`,
+  `remove_content`. `Mappable` adds `name()`; `Unlockable` adds `unlock()`/`unlock_mut()` over
+  `UnlockFields` (localized name/description, database category/tag, tech node, `unlocked` flag
+  keyed `<name>-unlocked`).
+- `ContentId<T>` is `#[repr(transparent)]` over `u16`; the phantom tag keeps id spaces from mixing.
+  `.raw()`/`.get()` return the number and `.index()` casts to the vector index.
+- `ContentRegistry` owns one `Vec<Record>` per live type plus `NameMaps`. Per-type accessors
+  (`add_item`, `items`, `item`, `item_mut`, `item_by_name`, and the same for
+  blocks/liquids/statuses/units/weathers/sectors/planets/teams/commands/stances) and
+  `add_bullet`/`bullet` come from the `mappable_accessors!` macro.
+- Name/id lookup: `get_by_name(type_, name)`, `by_name(name)` (global), `get_by_id(type_, id)`, and
+  convenience `item_id`/`block_id`/`unit_id`/`liquid_id`/`status_id`/`planet_id`. `entries` exposes
+  ordered id/name/kind rows and `type_len` reports per-type counts.
+- `ContentRef { type_, id }` is the type-erased handle for cross-registry references;
+  `ContentType::{name, folder, kind, ordinal}` and `ContentKind` mirror the upstream enum for
+  bundles and audit.
+- `create_base_content` runs `commands → teams → items → stances → statuses → liquids → bullets →
+  units → blocks → loadouts → weathers → planets → sectors`, then builds the Serpulo and Erekir tech
+  trees. `create_base_content_bad_order` is the negative load-order fixture.
 
 ## Invariants
 
-- Construction order defines IDs. IDs are dense `0..len` per type, append-only and never reordered: `register_mappable`/`register_content` assign `records.len()`, and `log_content()` raises `ContentError::OutOfOrderIds` when an entry id differs from its index.
-- `ContentType` ordinals, content names, bundle keys and sprite region names are parity/mod ABI and are never renamed. `_UNUSED` variants (`MechUnused`, `EffectUnused`, `LoadoutUnused`, `TypeIdUnused`, `AmmoUnused`) reserve historical ordinals and are never repurposed.
-- Every vanilla record is appended in upstream `load()` order, so ids form an upstream prefix. `Blocks::assert_invariants` pins `air` at id `0` and `stone-wall` at id `80`.
-- Per-type names are unique (`ContentError::DuplicateName`); the global name map is last-registration-wins. `remove` shifts later records without rewriting their stored ids, so the dense invariant is restored only by recreating content or `restore_index`.
-- Maps use `IndexMap`; iteration is insertion-ordered and deterministic. Registry access on the hot path neither mutates the registry nor allocates. The id space is `u16` (`ContentError::IdSpaceExhausted`).
+- Construction order defines IDs. IDs are dense `0..len` per type, append-only and never reordered:
+  `register_mappable`/`register_content` assign `records.len()`, and `log_content()` raises
+  `ContentError::OutOfOrderIds` when an entry id differs from its index.
+- `ContentType` ordinals, content names, bundle keys and sprite region names are parity/mod ABI and
+  are never renamed. `_UNUSED` variants (`MechUnused`, `EffectUnused`, `LoadoutUnused`,
+  `TypeIdUnused`, `AmmoUnused`) reserve historical ordinals and are never repurposed.
+- Every vanilla record is appended in upstream `load()` order, so ids form an upstream prefix.
+  `Blocks::assert_invariants` pins `air` at id `0` and `stone-wall` at id `80`.
+- Per-type names are unique (`ContentError::DuplicateName`); the global name map is
+  last-registration-wins. `remove` shifts later records without rewriting their stored ids, so the
+  dense invariant is restored only by recreating content or `restore_index`.
+- Registry maps use `IndexMap`; iteration is insertion-ordered and deterministic. Registry access on
+  the hot path neither mutates the registry nor allocates. The id space is `u16`
+  (`ContentError::IdSpaceExhausted`).
 
 ## Rules
 
-- Add a record by calling the kind's `add_*` from its wave, preserving upstream declaration order; never insert, reorder or rename existing names, bundle keys or sprite regions.
-- Register a new kind only by appending a `ContentType` variant with the next ordinal (never rearranging), then give it a `Content` record, an id alias, an accessor and a load wave.
-- Mods extend registries through `set_current_mod` + `transform_name` (`<mod>-<name>` prefix) or `create_mod_content(&mut dyn ModContentProvider)`; per-content failures route through `ModErrorSink`.
-- Cross-content references are typed `ContentId<T>` values or `ContentRef`s, never Rust pointers; resolves go through the registry accessors. Lifecycle is `init`/`link` then `post_init`/`post_init_link`, guarded by the registry so each sweep runs once.
+- Add a record by calling the kind's `add_*` from its wave, preserving upstream declaration order;
+  never insert, reorder or rename existing names, bundle keys or sprite regions.
+- Register a new kind only by appending a `ContentType` variant with the next ordinal (never
+  rearranging), then give it a `Content` record, an id alias, an accessor and a load wave.
+- Mods extend registries through `set_current_mod` + `transform_name` (`<mod>-<name>` prefix) or
+  `create_mod_content(&mut dyn ModContentProvider)`; per-content failures route through
+  `ModErrorSink`. The mod loader itself is [`../mods/AGENTS.md`](../mods/AGENTS.md).
+- Cross-content references are typed `ContentId<T>` values or `ContentRef`s, never Rust pointers;
+  resolves go through the registry accessors. Lifecycle is `init`/`link` then
+  `post_init`/`post_init_link`, guarded by the registry so each sweep runs once.
 
 ## Verification
 
 ```bash
-cargo test -p mind-core
-cargo clippy -p mind-core
-cargo fmt -p mind-core -- --check
+cargo test -p mind-core content          # records, IDs, names, lifecycle
+cargo test -p mind-core content::parity  # golden fields + parity audit
+cargo test -p mind-core content::tech    # tech-node graph/counts
 ```
 
-The `content`, `content::registries`, `content::tech` and `content::parity` tests assert golden item/liquid/unit fields, dense ids, name maps, tech-node counts and the parity audit.
+The `content`, `content::registries`, `content::tech` and `content::parity` tests assert golden
+item/liquid/unit fields, dense ids, name maps, tech-node counts and the parity audit.

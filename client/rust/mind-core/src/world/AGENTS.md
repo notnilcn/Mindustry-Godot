@@ -1,6 +1,11 @@
 # AGENTS.md — mind-core/src/world (world & terrain)
 
-The world/terrain subsystem: the tile grid, every tile-mutation path, building construction and IO, world generation and map sources, and the geometry/query helpers the rest of the simulation builds on. It is Godot-free `mind-core` code. Read the root [`AGENTS.md`](../../../../../AGENTS.md) first; the crate map is `mind-core/AGENTS.md` (`../../AGENTS.md`).
+The world/terrain subsystem: the tile grid, every tile-mutation path, building construction and the
+building codec, the boot resources the generation/map paths install, and the geometry/query helpers
+the rest of the simulation builds on. Terrain generation itself belongs to `maps` (see Boundaries).
+Crate-wide rules are in
+[`mind-core/AGENTS.md`](../../AGENTS.md); the repo map is the root
+[`AGENTS.md`](../../../../../AGENTS.md).
 
 ## Layout
 
@@ -17,7 +22,7 @@ The world/terrain subsystem: the tile grid, every tile-mutation path, building c
 | `building_io.rs` | `BuildingCodec`/`write_base`/`read_base`, `DecodedBase` and module bitmask for revisioned save/sync IO. |
 | `consumers.rs` | `Consumers`/`ConsumeInstance`: lowered item/liquid/power/coolant consumers and the partition arrays. |
 | `checksum.rs` | `impl ChecksumPart for WorldGrid` — the world's simulation checksum stream. |
-| `generation.rs` | Installs `WorldGrid` plus the logic resources map-generation scripts read. |
+| `generation.rs` | Installs `WorldGrid` plus the logic resources map-generation scripts read (boot resources only). |
 | `map_source.rs` | `EcsMapSource`: `io::save::MapSource` over a live grid, resolving core teams/centers from ECS. |
 | `raycast.rs` | Bresenham grid raycasts (`raycast_each`, `raycast`, `raycast_first`, world-space variants). |
 | `proximity.rs` | `update_proximity`/`remove_from_proximity` with `Edges` neighbor order and `ProximityUpdateEvent`. |
@@ -26,10 +31,19 @@ The world/terrain subsystem: the tile grid, every tile-mutation path, building c
 | `update.rs` | `BlockInstance::spawn`, `update_buildings`/`update_consumption`, timer/sleep helpers and `delta`/`edelta`. |
 | `block.rs`, `block_kind_data.rs` | `BlockTable`/`BlockInstance`/`BlockView` runtime side table and typed per-family knobs. |
 | `behavior/` | `BuildingBehavior` trait + `BehaviorRegistry` and the campaign/defense/environment/production/sandbox families. |
-| `blocks/` | Block-family subtree (`autotiler`, `defense`, `distribution`, `heat`, `liquid`, `payloads`, `power`, `storage`, `units`, `tile_bitmask`); it has its own `AGENTS.md`. |
+| `blocks/` | Block-family subtree (`autotiler`, `defense`, `distribution`, `heat`, `liquid`, `payloads`, `power`, `production`, `storage`, `units`, `tile_bitmask`); it has its own `AGENTS.md`. |
 | `fixtures/` | Deterministic test fixtures (`fixtures/logistics.rs`). |
 | `modules/` | Item/liquid/power building modules and `FlowWindow`. |
-| support | `events.rs`, `hooks.rs`, `limits.rs`, `config.rs`, `draw.rs`, `cached.rs`, `context.rs`, `params.rs`, `pos.rs`, `attributes.rs`, `color_mapper.rs`, `darkness.rs`, `edges.rs`, `item_buffer.rs`, `network_state.rs`, `harness.rs`. |
+| support | `events.rs`, `hooks.rs`, `limits.rs`, `config.rs`, `allow_update.rs`, `config_tap.rs`, `draw.rs`, `cached.rs`, `context.rs`, `params.rs`, `pos.rs`, `attributes.rs`, `color_mapper.rs`, `darkness.rs`, `edges.rs`, `item_buffer.rs`, `network_state.rs`, `harness.rs`. |
+
+## Boundaries
+
+- The save container, `SaveVersion`, `TypeIO` and the `MapSource` trait belong to
+  [`io`](../io/AGENTS.md); this tree owns only the building codec (`building_io.rs`, dispatched by
+  `io::entity::EntityCodec`) and the live-grid adapter in `map_source.rs`.
+- Terrain generation belongs to [`maps::generators`](../maps/generators/mod.rs) (`WorldGenerator`,
+  `BasicGenerator`, `PlanetGenerator`); `generation.rs` only installs the boot resources those
+  scripts and the privileged logic VM read.
 
 ## Key types
 
@@ -46,21 +60,19 @@ The world/terrain subsystem: the tile grid, every tile-mutation path, building c
 - Iteration order is a determinism contract: `Tiles::each` is x-outer/y-inner while `Tiles::iter` and `WorldGrid::iter_row_major` are row-major.
 - `Tile.x`/`Tile.y` stay `i16`; do not widen them.
 - Building field order is serialization order (`BuildingCodec`).
-- `mind-core` stays Godot-free; `world` never imports Godot or tokio.
 
 ## Rules
 
 - Add tile behavior by extending `ops` + `BuildingBehavior`, not by mutating `Tile` fields from unrelated modules.
 - Register new block families through `BehaviorRegistry`/`default_registry`; keep `BlockInstance` data-driven.
-- Port Mindustry source and cite it in file headers; new files are LF/UTF-8, GPL-3.0-only.
 - Do not change the checksum stream casually: `WorldGrid` participates in the simulation checksum, so goldens depend on it.
+- Keep generation policy out of this tree: `world` provides the grid/resources, `maps` decides terrain.
 
 ## Verification
 
+Run from `client/rust/` (or add `--manifest-path client/rust/Cargo.toml`).
+
 ```bash
 cargo test -p mind-core world
-cargo clippy -p mind-core
-cargo test -p mind-core
+cargo test -p mind-core building_io
 ```
-
-Run from `client/rust/` (or add `--manifest-path client/rust/Cargo.toml`).

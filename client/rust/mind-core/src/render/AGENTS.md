@@ -5,9 +5,8 @@ constant table, `CacheLayerId` ordering, the append-only `BandPlan` band allocat
 `RenderQueue`, region-id interning, floor/block chunk bookkeeping, draw descriptors/metadata,
 bloom/cutscene data and the visible-set scan. It is view-only: its output never feeds simulation
 state, saves, sync or the checksum. The Godot-facing half — band replay, `SubViewport` bakes,
-materials, shaders and screenshots — lives in `mind-gdext::render`. Read the root
-[`AGENTS.md`](../../../../../AGENTS.md) first. The crate map is
-[`mind-core/AGENTS.md`](../../AGENTS.md).
+materials, shaders and screenshots — lives in `mind-gdext::render`. Crate-wide rules are in
+[`mind-core/AGENTS.md`](../../AGENTS.md); the repo map is the root [`AGENTS.md`](../../../../../AGENTS.md).
 
 ## Layout
 
@@ -18,12 +17,15 @@ materials, shaders and screenshots — lives in `mind-gdext::render`. Read the r
 | `bands.rs` | Append-only `BandPlan`/`BandKey`/`BandEntry`: `(Layer, sub, Blend)` → integer `z_index`, `to_json` audit. |
 | `queue.rs` | Stable `RenderQueue` sorted by `(z, seq)`; `QueueItem::Cmd`/`RangeBegin`/`RangeEnd` brackets. |
 | `commands.rs` | POD `DrawCmd`, reusable `CommandBuffer`, `Blend`/`ShapeKind`/`LineKind`/`FillKind`, `SpriteBatch`. |
+| `autotile.rs`, `conveyor_items.rs` | Belt draw math: `conveyor_frame` scrolling frame index and `belt_item_positions` item slots. |
 | `ids.rs` | `RegionId`/`RegionIdTable`: dense, append-only region-name interner. |
 | `list.rs` | Sprite render-list extraction (`RenderList`, `RenderEntry`, `build_entries`, `sort_entries`, `is_accessible`). |
 | `layers.rs` | Full-layer list (`LayerRenderList`, `build_layers`, `count_entries`) plus `DrawCounters`. |
 | `scan.rs` | Visible-set scan: `CameraView`, `ChunkSet`, `process_blocks`, `visible_blocks`, `visible_cached_blocks`, `floor_layers_in_view`. |
 | `floor_cache.rs` | `FloorChunkGrid` dirty/used-layer/epoch bookkeeping; `CHUNK_SIZE`, `CHUNK_UNITS`, `chunk_aabb`. |
+| `floor_main.rs`, `floor_edges.rs`, `tile_bitmask.rs` | Floor autotiling: 8-neighbor bits/region names, ordered edge sprites (`EdgeQuad`) and the 256→47 `VALUES` table. |
 | `block_cache.rs` | `BuildingCacheGrid` per-chunk/per-layer dirty/epoch state; `recache_wall_tiles`, `update_shadow_tiles`. |
+| `block_sprite.rs`, `block_status.rs` | Placed-block sprite chain/cracks/cached bakes (`block_region_candidates`, `cached_bake_sprites`) and the F6 `status_corner` marker. |
 | `hooks.rs` | `RenderInvalidation` implements `world::hooks::RenderHooks` over both grids and the minimap pixel queue. |
 | `draw.rs` | FX geometry contract: `DrawPrim`/`DrawProgram`/`PrimKind`, `RegionKey`/`TextureKey`/`ShaderKey`, deterministic hashing. |
 | `draw_desc.rs` | Ported `world/draw/*` bodies: `DrawDesc`, `DrawState`, `execute`, `execute_extras`, `vanilla_chain`, `global_layer_markers`. |
@@ -44,7 +46,8 @@ materials, shaders and screenshots — lives in `mind-gdext::render`. Read the r
 | `rules.rs` | `RulesRenderView`: the render-relevant slice of `Rules`/`FogControl`/`MapMarkers`. |
 | `shaders.rs` | `EXPECTED`/`AUXILIARY`/`UNPORTED` shader keys, `Uniforms` parsing and drift helpers. |
 | `trail.rs` | `Trail` ribbon state machine and quad emitter. |
-| `g3d/` | `PlanetGrid` icosphere (`grid.rs`), `PlanetParams` (`params.rs`) and `MeshData` builder data (`mesh_data.rs`). |
+| `bullet_draw.rs`, `unit_draw.rs` | Combat/unit draw math: bullet size curves, mech legs, weapon mounts, crawl layers and unit cell color. |
+| `g3d/` | `PlanetGrid` icosphere (`grid.rs`), `PlanetParams` (`params.rs`), `MeshData` builder data (`mesh_data.rs`), cloud layers (`hex_sky.rs`) and orbit/light layout (`orbit.rs`). |
 | `math/` | `voronoi` (Fortune sweepline core edges) and `inverse_kinematics` (two-segment joint solver). |
 
 ## Key types
@@ -58,9 +61,6 @@ materials, shaders and screenshots — lives in `mind-gdext::render`. Read the r
 
 ## Invariants
 
-- **Godot-free.** No source here may reference `godot`; the Godot `CanvasItem`/mesh/shader work is in
-  `mind-gdext::render`.
-- **View never feeds sim.** These values are excluded from saves, sync and the canonical checksum.
 - **Append-only ABI.** `Layer::ALL`, `CacheLayerId::ALL` (id `0..=8`, frozen order) and interned
   `RegionId`s never renumber; `BandPlan` band numbers only append.
 - **Stable ordering.** `RenderQueue` is stable-sorted by `z` using its monotonic `seq`; band entries
@@ -71,11 +71,11 @@ materials, shaders and screenshots — lives in `mind-gdext::render`. Read the r
 
 ## Rules
 
-- Port upstream Mindustry and cite it in file headers; files are UTF-8/LF, GPL-3.0-only.
-- Keep rendering data and math here; add anything that touches Godot on the `mind-gdext` side.
-- Add crates through `[workspace.dependencies]` and opt into `[lints] workspace = true`; no
-  `unwrap`/`expect` on runtime data.
-- Determinism is behavioral: keep iteration, sort and hashing orders exactly as the goldens expect.
+- Keep render data and math here; anything that touches Godot (`CanvasItem`, meshes, shaders,
+  textures) belongs in `mind-gdext::render`.
+- Keep iteration, sort and hash order exactly as the goldens expect; equal-`z` queue commands keep
+  emission order, and region interning and band numbering are ABI.
+- New data here must be derivable from sim state each frame and add no checksum fields.
 
 ## Verification
 
@@ -83,6 +83,4 @@ Run from `client/rust/`.
 
 ```bash
 cargo test -p mind-core render
-cargo clippy -p mind-core
-cargo fmt --all -- --check
 ```
