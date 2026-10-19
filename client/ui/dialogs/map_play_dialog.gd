@@ -46,6 +46,15 @@ func _apply_floating_layout() -> void:
 	if panel != null:
 		panel.theme_type_variation = "none"
 		panel.custom_minimum_size = Vector2.ZERO
+		# The floating table still carries `windowEmpty`'s 4 px inset above
+		# the (unpadded) title row, and under the buttons the button's own
+		# `pad(3)` plus the `buttons` cell's `pad(3)` (`Dialog.java:208-214`)
+		# before that inset: java/05-sbplay.png puts the title rule at y=56
+		# and the mode frame at y=90 for the 1152x648 sandbox dialog.
+		var inset := StyleBoxEmpty.new()
+		inset.content_margin_top = 4.0
+		inset.content_margin_bottom = 4.0 + 3.0 + 3.0
+		panel.add_theme_stylebox_override("panel", inset)
 	if body != null:
 		# The body reports its content height so nothing is clipped/scrolled.
 		body.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -159,6 +168,10 @@ func _build() -> void:
 		var image := MindBorderImage.new()
 		image.texture = texture
 		image.thickness = 3.0
+		# `map.safeTexture()` is an Arc `Texture` with the default
+		# `TextureFilter.nearest` (Arc `GLTexture.java:18-19`): crisp pixels.
+		# `MindBorderImage._ready` resets `texture_filter` from `force_nearest`.
+		image.force_nearest = true
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.custom_minimum_size = PREVIEW_SIZE

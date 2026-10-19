@@ -28,6 +28,16 @@ extends Control
 ## `SectorSelectDialog.java:27`, `CampaignRulesDialog.java:42`,
 ## `MapProcessorsDialog.java:58`). Default false = Arc `Table` centre alignment.
 @export var cont_top := false
+## Java `BaseDialog.makeButtonOverlay()` (`BaseDialog.java:51-56`) and
+## `PausedDialog` (`PausedDialog.java:24-25`): `clearChildren(); add(titleTable)`
+## re-adds the title row *after* the Dialog constructor set `defaults().pad(3)`
+## (arc `Dialog.java:208`), so the title cell is padded 3 px on every side and
+## `cont` sits in a padded `stack` cell. Every other dialog keeps the
+## constructor's unpadded title cell (`add(titleTable)` before the defaults):
+## its title text and rule sit 3 px higher (java/15-coredb.png and
+## java/09-settings.png: rule y=27-29; java/02-custom.png and java/08-pause.png:
+## y=30-32).
+@export var button_overlay := false
 
 @onready var title_label: Label = get_node_or_null("Center/Panel/Layout/Title")
 @onready var body: ScrollContainer = get_node_or_null("Center/Panel/Layout/Body")
@@ -59,6 +69,7 @@ var _hiding := false
 func _ready() -> void:
 	visible = false
 	_apply_title()
+	_watch_title_shift()
 	_apply_full_dialog()
 	_apply_cont_alignment()
 	_watch_buttons_row()
@@ -131,6 +142,27 @@ func _sync_buttons_row() -> void:
 			any = true
 			break
 	buttons.visible = any
+	_apply_body_bottom(any)
+
+
+## Arc's `buttons` table pads every button by its own `defaults().pad(3)`
+## (`Dialog.java:214`), so a button sits 9 px under `cont` (cont cell 3 +
+## buttons cell 3 + button 3) where the Layout leaves 6: java/17-mapinfo.png
+## and java/19-edmenu.png centre `cont` on y=37..567 above Back at y=576. The
+## shell's `Body` takes the extra 3 px as a bottom inset while a button row is
+## shown. `makeButtonOverlay` dialogs stack the buttons over `cont` instead,
+## and a dialog that restyles its body keeps its own insets.
+func _apply_body_bottom(has_buttons: bool) -> void:
+	if body == null:
+		return
+	if body.has_theme_stylebox_override("panel"):
+		var current := body.get_theme_stylebox("panel")
+		if not current.has_meta("mind_body_inset"):
+			return
+	var inset := StyleBoxEmpty.new()
+	inset.set_meta("mind_body_inset", true)
+	inset.content_margin_bottom = BUTTON_CELL_PAD if has_buttons and not button_overlay else 0.0
+	body.add_theme_stylebox_override("panel", inset)
 
 
 ## `Dialog.setFillParent(false)`: sizes the panel to its content (floating
@@ -196,46 +228,108 @@ func context() -> Dictionary:
 ## no top inset and the rule overlapped its bottom edge (text y=3-15, rule
 ## y=16-18), lifting every dialog body by ~14 px. The 7 px above the text is the
 ## dialog background's inset (`defaultDialog`/`fullDialog` panel margin in
-## `MindThemeBuilder`, shared with untitled dialogs); keep 8 px under the text
-## (+ the Layout's 6 px separation = the rule's 4 px gap, 3 px rule, 4 px pad and
-## the 3 px cont pad) and hang the rule 4 px under the text. The Layout's 6 px is
-## the 3 + 3 px `pad(3)` between two `cont`/`buttons` cells (Dialog.java:213-214;
-## L01 T3: the Custom Game search row and the pane, java/custom.png).
+## `MindThemeBuilder`, shared with untitled dialogs) and includes the padded
+## title cell of [member button_overlay] dialogs; an unpadded title row (the
+## default) is lifted by [constant TITLE_CELL_PAD] (see `_shift_title_row`).
+## Keep 8 px under the text (+ the Layout's 6 px separation = the rule's 4 px
+## gap, 3 px rule, 4 px pad and the 3 px cont pad) and hang the rule 4 px under
+## the text. The Layout's 6 px is the 3 + 3 px `pad(3)` between two
+## `cont`/`buttons` cells (Dialog.java:213-214; L01 T3: the Custom Game search
+## row and the pane, java/custom.png).
 const TITLE_INSET_TOP := 0.0
 const TITLE_INSET_BOTTOM := 8.0
+## Arc `Dialog` `defaults().pad(3)` (`Dialog.java:208`) on a re-added title cell.
+const TITLE_CELL_PAD := 3.0
+## Arc `buttons.defaults().pad(3)` (`Dialog.java:214`) above each button.
+const BUTTON_CELL_PAD := 3.0
+
+
+## Bottom inset under the title text: the rule's 4 px gap, 3 px rule and 1 px,
+## plus the padded title cell's bottom pad for [member button_overlay] dialogs
+## (`BaseDialog.java:51-56`: `cont` then sits `pad(3)` + the stack's `pad(3)`
+## under the title row instead of the plain `cont` cell's 3 px).
+func _title_inset_bottom() -> float:
+	return TITLE_INSET_BOTTOM + (TITLE_CELL_PAD if button_overlay else 0.0)
 
 
 func _apply_title() -> void:
 	if title_label == null:
 		return
+	# The shell's own inset box (a dialog-supplied override is left alone).
 	if not title_label.has_theme_stylebox_override("normal"):
-		var inset := StyleBoxEmpty.new()
+		var fresh := StyleBoxEmpty.new()
+		fresh.set_meta("mind_title_inset", true)
+		title_label.add_theme_stylebox_override("normal", fresh)
+	var inset := title_label.get_theme_stylebox("normal")
+	if inset.has_meta("mind_title_inset"):
 		inset.content_margin_top = TITLE_INSET_TOP
-		inset.content_margin_bottom = TITLE_INSET_BOTTOM
-		title_label.add_theme_stylebox_override("normal", inset)
+		inset.content_margin_bottom = _title_inset_bottom()
 	title_label.text = title_text
 	title_label.visible = not title_text.is_empty()
 	title_label.add_theme_color_override("font_color", title_color)
 	_ensure_title_underline()
+	var panel := get_node_or_null("Center/Panel") as Control
+	if panel != null:
+		panel.queue_sort()
+
+
+## `makeButtonOverlay()` at runtime (see [member button_overlay]).
+func set_button_overlay(value: bool) -> void:
+	button_overlay = value
+	_apply_title()
+	_sync_buttons_row()
 
 
 ## `BaseDialog.java:24-25`: a 3 px accent rule (white texture tinted `Pal.accent`)
-## under the title row spanning the dialog width, sitting flush with the title
-## cell's bottom padding — the port's flat title row lacked it.
+## under the title row spanning the dialog width (less the image's `pad(4f)`,
+## which the panel's 8 px side margin carries), sitting flush with the title
+## cell's bottom padding. A padded title cell (`button_overlay`) narrows it by
+## 3 px a side (java/02-custom.png: 1130 px vs 1136 px wide).
 func _ensure_title_underline() -> void:
-	if title_label.get_node_or_null("Underline") != null:
+	var line := title_label.get_node_or_null("Underline") as ColorRect
+	if line == null:
+		# code-instantiated: the rule is part of the shared dialog shell.
+		line = ColorRect.new()
+		line.name = "Underline"
+		line.color = MindStyles.ACCENT
+		line.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		title_label.add_child(line)
+	# Rule 4 px under the text, 3 px tall: [text_bottom + 4, text_bottom + 7).
+	var bottom := _title_inset_bottom()
+	line.offset_top = 4.0 - bottom
+	line.offset_bottom = 7.0 - bottom
+	var side := TITLE_CELL_PAD if button_overlay else 0.0
+	line.offset_left = side
+	line.offset_right = -side
+
+
+## Lifts the shell's `Layout` by [constant TITLE_CELL_PAD] after the panel
+## fits it, for a titled dialog whose title cell is unpadded (the default Arc
+## `Dialog` layout: `add(titleTable)` precedes `defaults().pad(3)`,
+## `Dialog.java:70-79,208`). The panel inset stays shared with the padded
+## (`button_overlay`) and untitled dialogs; only the stock `defaultDialog`/
+## `fullDialog` panels shift (dialogs that restyle their panel own its insets).
+func _watch_title_shift() -> void:
+	var panel := get_node_or_null("Center/Panel") as Container
+	if panel != null and not panel.sort_children.is_connected(_shift_title_row):
+		panel.sort_children.connect(_shift_title_row)
+
+
+func _shift_title_row() -> void:
+	if title_label == null or button_overlay or not title_label.visible:
 		return
-	# code-instantiated: the rule is part of the shared dialog shell.
-	var line := ColorRect.new()
-	line.name = "Underline"
-	line.color = MindStyles.ACCENT
-	line.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	# Rule 4 px under the text, 3 px tall: [bottom - 4, bottom - 1) with the
-	# 8 px bottom inset (see TITLE_INSET_BOTTOM).
-	line.offset_top = 4.0 - TITLE_INSET_BOTTOM
-	line.offset_bottom = 7.0 - TITLE_INSET_BOTTOM
-	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	title_label.add_child(line)
+	var panel := get_node_or_null("Center/Panel") as PanelContainer
+	var layout := get_node_or_null("Center/Panel/Layout") as Control
+	if panel == null or layout == null or panel.has_theme_stylebox_override("panel"):
+		return
+	var variation := String(panel.theme_type_variation)
+	if variation != "defaultDialog" and variation != "fullDialog":
+		return
+	if panel.get_theme_stylebox("panel").get_margin(SIDE_TOP) < TITLE_CELL_PAD:
+		return
+	layout.position.y -= TITLE_CELL_PAD
+	layout.size.y += TITLE_CELL_PAD
 
 
 ## Shows the dialog (called by `MindUi`; also safe to call directly).

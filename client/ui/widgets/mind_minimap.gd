@@ -43,6 +43,8 @@ var _drag_last := Vector2.ZERO
 var map_extent := Vector2(200.0, 200.0)
 var _provider: Node = null
 var _pane: StyleBox = null
+## `unit-<name>-ui` white masks for the `mixcol` unit draw (`_unit_silhouette`).
+var _silhouettes: Dictionary = {}
 
 
 func _ready() -> void:
@@ -145,7 +147,9 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 					false,
 					stroke
 				)
-	# Units (`drawEntities`): `unit.icon()` tinted `unit.team.color`.
+	# Units (`drawEntities`, `MinimapRenderer.java:157-166`): `unit.icon()`
+	# drawn under `Draw.mixcol(unit.team.color, 1f)` — a solid team-colour
+	# silhouette (a white alpha mask modulated by the team colour).
 	if node.has_method("minimap_units_json"):
 		var parsed: Variant = JSON.parse_string(str(node.call("minimap_units_json")))
 		if parsed is Array:
@@ -157,8 +161,8 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 				if row.size() < 5:
 					continue
 				var name := str(row[3])
-				var texture_icon: Variant = MindWidgets.icon_texture("unit-%s-ui" % name)
-				if not (texture_icon is Texture2D):
+				var texture_icon := _unit_silhouette(name)
+				if texture_icon == null:
 					continue
 				var position := _map_point(
 					inner, region, tex_size, float(row[0]) / TILE_SIZE, float(row[1]) / TILE_SIZE
@@ -172,6 +176,27 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 					tint
 				)
 				draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+## `Draw.mixcol(color, 1f)` source: the `unit-<name>-ui` icon as a white
+## mask (rgb = 1, alpha kept), so the draw modulate yields the team colour
+## exactly. Cached per unit type.
+func _unit_silhouette(unit_name: String) -> Texture2D:
+	if _silhouettes.has(unit_name):
+		return _silhouettes[unit_name]
+	var result: Texture2D = null
+	var icon := MindWidgets.icon_texture("unit-%s-ui" % unit_name)
+	var image: Image = icon.get_image() if icon != null else null
+	if image != null and not image.is_empty():
+		if image.is_compressed():
+			image.decompress()
+		image.convert(Image.FORMAT_RGBA8)
+		for y in image.get_height():
+			for x in image.get_width():
+				image.set_pixel(x, y, Color(1.0, 1.0, 1.0, image.get_pixel(x, y).a))
+		result = ImageTexture.create_from_image(image)
+	_silhouettes[unit_name] = result
+	return result
 
 
 ## Tile `(tx, ty)` (world-pixel centre 0.5 offsets) → widget px inside the crop

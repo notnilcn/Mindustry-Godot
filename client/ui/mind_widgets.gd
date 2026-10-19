@@ -157,18 +157,56 @@ static func icon_button(
 			else:
 				label.remove_theme_color_override("font_color")
 	)
+	# Arc `Button` is a `Table` whose background drawable pads its cells
+	# (`Table.setBackground` -> `getLeftWidth()`...; `Tex.button`'s 9-patch
+	# splits), so the icon cell starts inside the border and the label centres in
+	# the padded width. A Godot `Button` does not lay out children, so inset the
+	# row by the style box's content margins (12 px for `defaultt`).
+	inset_to_content(result, row)
+	result.theme_changed.connect(inset_to_content.bind(result, row))
 	# A `Button` is not a container, so children do not contribute to its minimum
 	# size. Theme metrics only resolve once the button is inside the tree, so
 	# measure the row and apply its minimum on `ready` (measuring at construction
-	# returns a zero-height label); size it from the icon+label row so labels are
-	# not clipped.
+	# returns a zero-height label); size it from the padded icon+label row so
+	# labels are not clipped (Arc `Table.getPrefWidth` adds the padding).
 	result.ready.connect(
 		func():
+			inset_to_content(result, row)
 			var row_min := row.get_combined_minimum_size()
-			result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x)
-			result.custom_minimum_size.y = maxf(result.custom_minimum_size.y, row_min.y)
+			var box := result.get_theme_stylebox("normal")
+			var pad := Vector2.ZERO
+			if box != null:
+				pad = Vector2(
+					box.get_margin(SIDE_LEFT) + box.get_margin(SIDE_RIGHT),
+					box.get_margin(SIDE_TOP) + box.get_margin(SIDE_BOTTOM)
+				)
+			result.custom_minimum_size.x = maxf(result.custom_minimum_size.x, row_min.x + pad.x)
+			result.custom_minimum_size.y = maxf(result.custom_minimum_size.y, row_min.y + pad.y)
 	)
 	return result
+
+
+## Insets a full-rect content `row` inside `button` by the button's `normal`
+## style box content margins: Arc's background padding (`Table.setBackground`
+## pads by the drawable's left/right/top/bottom widths). The row grows from its
+## centre when its content is wider than the padded area, like an Arc `Table`
+## centring an over-wide cell run (`Table.layout`, `align = center`).
+static func inset_to_content(button: Control, row: Control) -> void:
+	if not is_instance_valid(button) or not is_instance_valid(row):
+		return
+	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	row.grow_vertical = Control.GROW_DIRECTION_BOTH
+	# The themed variation (`defaultt`, ...) only resolves inside the tree;
+	# `ready`/`theme_changed` re-apply once it does.
+	if not button.is_inside_tree():
+		return
+	var box := button.get_theme_stylebox("normal")
+	if box == null:
+		return
+	row.offset_left = box.get_margin(SIDE_LEFT)
+	row.offset_top = box.get_margin(SIDE_TOP)
+	row.offset_right = -box.get_margin(SIDE_RIGHT)
+	row.offset_bottom = -box.get_margin(SIDE_BOTTOM)
 
 
 ## A standalone icon-glyph label (section headers, rail entries).

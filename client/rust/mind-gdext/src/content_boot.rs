@@ -85,7 +85,15 @@ pub fn build_registry(
     bundle: &dyn BundleView,
     unlocks: &dyn UnlockStore,
 ) -> Result<ContentRegistry, String> {
-    let (registry, report) = build_registry_with_mods(bundle, unlocks, true, &session_boot())?;
+    // `content.loadColors()` (`ClientLauncher.java:168`): every client
+    // registry carries the real `Block.mapColor`s (floors included).
+    let (registry, report) = build_registry_with_mods(
+        bundle,
+        unlocks,
+        true,
+        &session_boot(),
+        &crate::render::minimap::load_block_colors(),
+    )?;
     apply_report(&report);
     Ok(registry)
 }

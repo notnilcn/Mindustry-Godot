@@ -32,6 +32,10 @@ func _ready() -> void:
 	super._ready()
 	_editor = get_node_or_null(editor_path)
 	add_close_button()
+	# `cont.pane(t -> ...)` (`MapInfoDialog.java:38`): the pane is a padded
+	# `cont` cell (see `_build`), so the shell body itself must not scroll.
+	if body != null:
+		body.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 
 
 func shown() -> void:
@@ -45,12 +49,30 @@ func shown() -> void:
 ## `colspan(2).center()`. The body scrolls when it is taller than the screen, so
 ## the last row sits below the fold like Java (L03 T3, PAR-0429).
 func _build() -> void:
+	# `cont.clear()` (`MapInfoDialog.java:34`): a re-open rebuilds the body.
+	clear_content()
 	var root := content_table()
+	# `cont.pane(t -> ...).growX().scrollX(false)`: a `cont` cell, so
+	# `cont.defaults().pad(3)` (arc `Dialog.java:213`) insets the pane and it
+	# clips 3 px inside `cont` (java/20-edinfo.png: the route frame is cut at
+	# y=564, the bar spans x=1118..1141). The body is always taller than the
+	# screen at 648 px, so the pane takes the whole `cont` height.
+	# code-instantiated: the pane wraps the runtime-built field table.
+	var pane := MindScroll.new()
+	pane.set_scrolling_disabled(true, false)
 	# code-instantiated: the field table is the dialog's data-driven body.
 	var table := MindTable.new()
+	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	table.set_table_top(true)
+	# `t.margin(16f)` (`MapInfoDialog.java:123`).
+	table.margin(16.0)
 	table.defaults().set_pad_top(15.0)
-	root.add(table)
-	_add_field(table, "@editor.mapname", "name", 50, "@unknown", false)
+	pane.add_child(table)
+	root.add(pane).grow()
+	# `t.add("@editor.mapname")` precedes `t.defaults().padTop(15)`
+	# (`MapInfoDialog.java:41-42`): only the first label has no top pad, so it
+	# centres on the whole 70 px row while the field sits 15 px down.
+	_add_field(table, "@editor.mapname", "name", 50, "@unknown", false, 0.0)
 	_add_field(table, "@editor.description", "description", 1000, "", true)
 	_add_field(table, "@editor.author", "author", 50, "@unknown", false)
 
@@ -93,9 +115,9 @@ func _inset_icon_row(button: Button, margin: float) -> void:
 
 ## One label + field row (`t.add(key).padRight(8).left(); t.field(...)
 ## .size(400, 55)` / `t.area(..., Styles.areaField, ...).size(400, 140)`).
-func _add_field(table: MindTable, label_key: String, tag: String, max_length: int, placeholder: String, multiline: bool) -> void:
+func _add_field(table: MindTable, label_key: String, tag: String, max_length: int, placeholder: String, multiline: bool, label_pad_top: float = 15.0) -> void:
 	var label := MindWidgets.label(_t(label_key))
-	table.add(label).left().set_pad_right(8.0)
+	table.add(label).left().set_pad_right(8.0).set_pad_top(label_pad_top)
 	if multiline:
 		# code-instantiated: the description is the only multi-line field.
 		# Arc `TextArea` wraps at the field width and has no horizontal scroll;

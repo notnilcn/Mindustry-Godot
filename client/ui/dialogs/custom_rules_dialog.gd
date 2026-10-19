@@ -711,6 +711,7 @@ func _make_check_row(
 	# 478-479`), not `Elems.check`'s grayPanel strip (L01 T3, java/rules-banned.png).
 	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
 		check.add_theme_stylebox_override(state, StyleBoxEmpty.new())
+	check.set_content_inset(0.0, 0.0)
 	_rule_info(check, key)
 	row.add(check).left()
 	_register_row(row, cond, func(enabled: bool) -> void:

@@ -286,6 +286,7 @@ fn synthetic_state(id: EffectId, tick: f32) -> EffectState {
         offset_rot: 0.0,
         lifetime_override: None,
         alive: true,
+        seed: 0,
     }
 }
 

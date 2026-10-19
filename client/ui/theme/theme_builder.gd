@@ -116,11 +116,12 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			elif name == "grayt":
 				# `Styles.grayt` (Styles.java:157-165): `up = grayPanel`,
 				# `over`/`down = flatOver` (#454545), `disabled = grayPanelDark`
-				# — the save-card body style.
-				theme.set_stylebox("normal", name, flat(MindStyles.GRAY_PANEL))
-				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
-				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
-				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
+				# — the save-card body style and `Elems.check` rows. All four are
+				# `whiteui` tints: square corners.
+				theme.set_stylebox("normal", name, _square(flat(MindStyles.GRAY_PANEL)))
+				theme.set_stylebox("hover", name, _square(flat(Color8(0x45, 0x45, 0x45))))
+				theme.set_stylebox("pressed", name, _square(flat(Color8(0x45, 0x45, 0x45))))
+				theme.set_stylebox("disabled", name, _square(flat(MindStyles.GRAY_PANEL_DARK)))
 			elif name == "flati":
 				# `Styles.flati` (Styles.java:306-310): `up = black`, `over` /
 				# `down = flatOver`; no disabled drawable (Arc keeps `up`). The
@@ -201,9 +202,11 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				# `over = flatOver` (#454545), `down = checked = flatDown` (the
 				# accent-bordered `flat-down-base` 9-patch). The checked frame is
 				# what marks the selected `PlacementFragment` category.
-				theme.set_stylebox("normal", name, flat(MindStyles.BLACK_6))
-				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
-				theme.set_stylebox("disabled", name, flat(MindStyles.BLACK_6))
+				# `black6`/`flatOver` are `whiteui` tints: square, no rounding, so
+				# the stacked category cells tile without corner gaps.
+				theme.set_stylebox("normal", name, _square(flat(MindStyles.BLACK_6)))
+				theme.set_stylebox("hover", name, _square(flat(Color8(0x45, 0x45, 0x45))))
+				theme.set_stylebox("disabled", name, _square(flat(MindStyles.BLACK_6)))
 				var flat_down := _flat_down_frame()
 				theme.set_stylebox("pressed", name, flat_down)
 				theme.set_stylebox("hover_pressed", name, flat_down)
@@ -276,6 +279,15 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("panel", name, flat(_drawable_color(name)))
 		"RichTextLabel":
 			theme.set_color("default_color", name, Color(0.92, 0.92, 0.92))
+			if name == "outlineLabel":
+				# `Styles.outlineLabel` (`ui/Styles.java:385-388`): white
+				# `Fonts.outline`, the default font rasterized with a 2 px
+				# `Color.darkGray` (#3f3f3f) border (`ui/Fonts.java:247-249,
+				# 264-271`). Godot's glyph stroke radius is `outline_size / 4` px
+				# (measured: 4 drew a 1 px ring), so 8 gives Java's 2 px border.
+				theme.set_color("default_color", name, Color.WHITE)
+				theme.set_color("font_outline_color", name, Color8(0x3f, 0x3f, 0x3f))
+				theme.set_constant("outline_size", name, 8)
 		"HSlider":
 			if name == "defaultSlider":
 				# `Styles.defaultSlider` (`Styles.java:374-378`): the
@@ -311,17 +323,20 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			# `Styles.defaultField` (`ui/Styles.java:398-409`): `background =
 			# underline` — the `underline` 9-patch (transparent body, 4 px #454545
 			# bottom rule, 12 px splits and padding on every edge), so a field is
-			# a bare text line ~48 px tall, not a box. L01 T3 measured
-			# java/custom.png: the search underline at y=87-90 and the map cards
-			# from y=105 (the boxed 40 px port field put them 9 px higher).
+			# a bare text line 45 px tall, not a box.
 			# `disabledBackground = underlineDisabled`; Arc draws no focus frame.
-			# Arc's field height (`TextField.getPrefHeight`: background padding +
-			# the font's line height) is 8 px taller than Godot's line box with
-			# the same 12 px padding, so the vertical padding is 16.
+			# Arc's field height (`TextField.getPrefHeight`, arc
+			# `TextField.java:750-767`: background top + bottom padding (12 + 12)
+			# + `textHeight = capHeight - 2 * descent`, 21 px for `Fonts.def`) is
+			# 45 px with the glyphs centred in it (`TextField.java:376-380`).
+			# Godot's line box for the same font is 19 px, so 14/12 vertical
+			# padding lands the same pixels (java/18-editorview.png: field
+			# y=1..46, rule 42-45; java/15-coredb.png: rule 81-84;
+			# java/02-custom.png: the search rule at y=87-90).
 			for state in [["normal", "underline"], ["read_only", "underline-disabled"]]:
 				var field_box := _nine_patch(str(state[1]), 12.0)
-				field_box.content_margin_top = 16.0
-				field_box.content_margin_bottom = 16.0
+				field_box.content_margin_top = FIELD_PAD_TOP
+				field_box.content_margin_bottom = FIELD_PAD_BOTTOM
 				theme.set_stylebox(str(state[0]), name, field_box)
 			theme.set_stylebox("focus", name, StyleBoxEmpty.new())
 			theme.set_color("font_color", name, Color.WHITE)
@@ -364,6 +379,10 @@ const SCROLL_BAR_WIDTH := 24.0
 ## `sliderKnob` height (29x42 region): the Arc slider's pref height and the
 ## height its `sliderBack` box fills.
 const SLIDER_ROW_HEIGHT := 42.0
+## `Styles.defaultField` vertical padding: Arc's 12 + 21 + 12 = 45 px field on
+## Godot's 19 px line box (see the `LineEdit` case in `_apply_manifest`).
+const FIELD_PAD_TOP := 14.0
+const FIELD_PAD_BOTTOM := 12.0
 
 
 static func _apply_scroll_bar(theme: Theme) -> void:
@@ -453,6 +472,12 @@ static func _flat_down_frame() -> StyleBox:
 	frame.texture_margin_bottom = 12.0
 	frame.set_content_margin_all(0.0)
 	return frame
+
+
+## `whiteui` tint drawable: a flat box with square corners.
+static func _square(box: StyleBoxFlat) -> StyleBoxFlat:
+	box.set_corner_radius_all(0)
+	return box
 
 
 ## Flat stylebox with the standard content margins (ninepatch replaces at M1).

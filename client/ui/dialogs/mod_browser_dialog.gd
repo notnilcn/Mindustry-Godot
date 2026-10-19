@@ -58,6 +58,8 @@ var _zip_http: HTTPRequest = null
 func _ready() -> void:
 	set_title_key("@mods.browser")
 	should_pause = false
+	# `makeButtonOverlay()` (`ModBrowserDialog.java:61`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	_add_http()
 	_build()

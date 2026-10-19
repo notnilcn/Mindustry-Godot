@@ -69,11 +69,16 @@ func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
 	for node in get_tree().root.find_children("*", "BaseButton", true, false):
 		_hook_button(node)
+	# Arc `ScrollPane` wheel step + smooth scroll on every pane (MindScroll).
+	for node in get_tree().root.find_children("*", "ScrollContainer", true, false):
+		MindScroll.hook_arc_wheel(node)
 
 
 func _on_node_added(node: Node) -> void:
 	if node is BaseButton:
 		_hook_button(node)
+	elif node is ScrollContainer:
+		MindScroll.hook_arc_wheel(node)
 
 
 func _hook_button(button: BaseButton) -> void:
@@ -794,6 +799,7 @@ func _on_show_confirm(text: String) -> void:
 	# `UI.java:582-606 showConfirm(text, cb)`: `@confirm` title, 500 px wrapped
 	# body, `@cancel`/`@ok` 200x54 with icons, Enter = OK, Esc = cancel.
 	var prompt := _build_prompt(_t("@confirm"), text, false, 500.0)
+	_apply_base_dialog_spacing(prompt)
 	var root: Control = prompt.root
 	# Connected after every listener, one-shot: the prompt closes once the
 	# answer has been delivered, whichever path resolved it.
@@ -1012,7 +1018,38 @@ func _build_prompt(
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	buttons.add_theme_constant_override("separation", 4)
 	layout.add_child(buttons)
-	return {"root": root, "field": field, "buttons": buttons, "body": body}
+	return {"root": root, "field": field, "buttons": buttons, "body": body, "layout": layout}
+
+
+## `BaseDialog` cell padding for a titled prompt (`showConfirm`): the title
+## rule's `pad(4f)` (`BaseDialog.java:25`), `Dialog.defaults().pad(3)` around
+## `cont`/`buttons` and their `defaults().pad(3)` (`Dialog.java:208-214`), the
+## body's `pad(4f)` and the buttons' `pad(2f)` (`UI.java:584-585`). Arc labels
+## carry ~2 px more line box above the cap and ~1 px below than `MindLabel`,
+## folded into the rule->body and body->buttons gaps (measured in
+## runs/20261019-M-twin java/12-quit.png: cap->rule 17, rule->cap 22,
+## cap->button top 26).
+func _apply_base_dialog_spacing(prompt: Dictionary) -> void:
+	var layout: VBoxContainer = prompt.layout
+	var body: Control = prompt.body
+	var buttons: Control = prompt.buttons
+	layout.add_theme_constant_override("separation", 0)
+	var body_index := body.get_index()
+	if body_index >= 2:
+		# title | pad 4 | rule | pad 4 + cont 3 + body 4 (+2 line box) | body
+		_insert_prompt_gap(layout, 1, 4.0)
+		_insert_prompt_gap(layout, body.get_index(), 4.0 + 3.0 + 4.0 + 2.0)
+	# body | body 4 + cont 3 + buttons 3 + button 2 (+1 line box) | buttons
+	_insert_prompt_gap(layout, buttons.get_index(), 4.0 + 3.0 + 3.0 + 2.0 + 1.0)
+
+
+func _insert_prompt_gap(layout: VBoxContainer, index: int, height: float) -> void:
+	# code-instantiated: fixed spacer inside a transient prompt.
+	var gap := Control.new()
+	gap.custom_minimum_size = Vector2(0.0, height)
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layout.add_child(gap)
+	layout.move_child(gap, index)
 
 
 ## Prompt action button (`buttons.defaults().size(...)` + `button("@key", Icon)`).

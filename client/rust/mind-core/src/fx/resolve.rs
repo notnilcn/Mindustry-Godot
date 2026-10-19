@@ -62,6 +62,7 @@ pub fn build_program_into_lod(
         rotation: state.rotation,
         color: state.color,
         data: state.data.clone(),
+        seed: state.seed,
         inner: None,
     };
     render_def(def, &container, snapshot, program, l2);
@@ -487,6 +488,7 @@ mod tests {
             offset_rot: 0.0,
             lifetime_override: None,
             alive: true,
+            seed: 0,
         }
     }
 
@@ -598,6 +600,7 @@ mod tests {
             offset_rot: 0.0,
             lifetime_override: None,
             alive: true,
+            seed: 0,
         }
     }
 

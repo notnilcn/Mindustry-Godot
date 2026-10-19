@@ -6,8 +6,11 @@ shader_type spatial;
 // Java `Planet.drawAtmosphere` maps to `Gl.depthMask(false)` + additive; the
 // port draws it inside the opaque SubViewport (3D space backdrop + body), so
 // the depth test is disabled and draw order (render_priority) keeps the body
-// on top of the glow.
-render_mode unshaded, blend_add, cull_disabled, depth_test_disabled, depth_draw_never;
+// on top of the glow. `PlanetRenderer.render` keeps `Gl.cullFace(Gl.back)`
+// enabled for the whole scene (`PlanetRenderer.java:53-54`), so only the near
+// hemisphere of the 1.5 sphere scatters; drawing both faces added every ray
+// twice.
+render_mode unshaded, blend_add, cull_back, depth_test_disabled, depth_draw_never;
 
 uniform float u_innerRadius;
 uniform float u_outerRadius;
@@ -20,6 +23,9 @@ uniform mat4 u_invproj;
 uniform vec3 u_light;
 uniform mat4 u_model;
 uniform mat4 u_projection;
+// The opaque pass (space backdrop + planet body) under this fragment, in the
+// linear colour of Godot's 3D buffer.
+uniform sampler2D u_screen : hint_screen_texture, filter_nearest;
 
 varying vec3 v_world;
 
@@ -103,6 +109,25 @@ void vertex() {
 	v_world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
+// `atmosphere.frag` is added (`Blending.additive`) straight onto Java's
+// gamma-space 8-bit framebuffer. Godot blends in linear and encodes to sRGB on
+// output, which lifted the faint night-side and outer-shell scatter into a
+// thick uniform halo with a hard edge and all but erased the purple tint over
+// the lit disk. Reproduce Java's sum instead: read what is under the fragment,
+// add in gamma space (clamped like the RGBA8 target), and emit the linear
+// difference through the additive blend.
+vec3 srgb_to_linear(vec3 c) {
+	vec3 lo = c / 12.92;
+	vec3 hi = pow((c + vec3(0.055)) / 1.055, vec3(2.4));
+	return mix(hi, lo, lessThan(c, vec3(0.04045)));
+}
+
+vec3 linear_to_srgb(vec3 c) {
+	vec3 lo = c * 12.92;
+	vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - vec3(0.055);
+	return mix(hi, lo, lessThan(c, vec3(0.0031308)));
+}
+
 void fragment() {
 	vec3 dir = normalize(v_world - u_campos);
 	vec3 eye = u_rcampos;
@@ -116,6 +141,8 @@ void fragment() {
 	// Java adds the scattering over the skybox inside the world frame; the port
 	// draws it additively inside the SubViewport, whose 3D space backdrop keeps
 	// the starfield inside the same frame (alpha 1 = the container copy).
-	ALBEDO = result;
+	vec3 under = clamp(texture(u_screen, SCREEN_UV).rgb, vec3(0.0), vec3(1.0));
+	vec3 sum = clamp(linear_to_srgb(under) + max(result, vec3(0.0)), vec3(0.0), vec3(1.0));
+	ALBEDO = max(srgb_to_linear(sum) - under, vec3(0.0));
 	ALPHA = 1.0;
 }

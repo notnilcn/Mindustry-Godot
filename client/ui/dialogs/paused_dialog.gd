@@ -34,6 +34,8 @@ func _ready() -> void:
 	set_title_key("@menu")
 	should_pause = true
 	full_dialog = true
+	# `clearChildren(); add(titleTable)` (`PausedDialog.java:24-25`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	# `Styles.defaultDialog` background (`Tex.windowEmpty`): the shared
 	# `MindDialog` dim is already black 0.9 (`Styles.java:458-469`,

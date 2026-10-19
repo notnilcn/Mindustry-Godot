@@ -4952,10 +4952,69 @@ impl MindSimHost {
     }
 
     /// Player-team colour as packed `rgba8888` (landing flame circles,
-    /// `CoreBlock.java:505-512`; G03 T18).
+    /// `Draw.color(team.color)`, `CoreBlock.java:505-512`; G03 T18): the real
+    /// `Team.color` (sharded = `Pal.accent` `ffd37f`).
     #[func]
     pub fn player_team_color(&self) -> i64 {
-        i64::from(crate::render::overlays::team_color(self.player_team()))
+        i64::from(
+            mind_core::game::team::Team::get(self.player_team())
+                .color
+                .to_rgba8888(),
+        )
+    }
+
+    /// `tile.getLinkedTiles` of the building covering world `(wx, wy)` with
+    /// each tile's floor (`CoreBuild.updateLaunch`, `CoreBlock.java:665-669`):
+    /// `(worldx, worldy, floor block id, registry mapColor)`. The registry
+    /// `mapColor` is the `block_colors.png` entry for the floor id
+    /// (`ContentLoader.loadColors` in the content boot). Empty without a
+    /// building.
+    pub fn linked_tile_floors(
+        &self,
+        wx: f32,
+        wy: f32,
+    ) -> Vec<(f32, f32, usize, Option<mind_core::content::Rgba>)> {
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return Vec::new();
+        };
+        // `World.toTile`: `Math.round(coord / tilesize)`.
+        let tx = (wx / TILESIZE_F).round() as i32;
+        let ty = (wy / TILESIZE_F).round() as i32;
+        let Some(entity) = self.tile_at(tx, ty).and_then(|tile| tile.build) else {
+            return Vec::new();
+        };
+        let Some(building) = self
+            .sim
+            .ecs
+            .0
+            .get::<mind_core::entities::comp::building::Building>(entity)
+        else {
+            return Vec::new();
+        };
+        let size = content
+            .block(building.block)
+            .map(|def| def.size.max(1))
+            .unwrap_or(1);
+        // `Block.sizeOffset = -(size - 1) / 2`.
+        let offset = -(size - 1) / 2;
+        let (cx, cy) = (i32::from(building.tile.0), i32::from(building.tile.1));
+        let mut out = Vec::with_capacity((size * size) as usize);
+        for dx in 0..size {
+            for dy in 0..size {
+                let (x, y) = (cx + dx + offset, cy + dy + offset);
+                let Some(tile) = self.tile_at(x, y) else {
+                    continue;
+                };
+                let color = content.block(tile.floor).and_then(|def| def.map_color);
+                out.push((
+                    x as f32 * TILESIZE_F,
+                    y as f32 * TILESIZE_F,
+                    tile.floor.raw() as usize,
+                    color,
+                ));
+            }
+        }
+        out
     }
 
     // ---- G03 T7 power/bridge link seams (Rust-only) ----
@@ -4980,7 +5039,9 @@ impl MindSimHost {
             let Some(def) = content.block(tile.block) else {
                 continue;
             };
-            if def.kind != BlockKind::PowerNode {
+            // `PowerSource extends PowerNode` (`PowerSource.java:6`): it draws
+            // its node lasers too.
+            if !matches!(def.kind, BlockKind::PowerNode | BlockKind::PowerSource) {
                 continue;
             }
             let Some(entity) = self.sim.grid.tile(tile.x, tile.y).build else {
@@ -5022,7 +5083,11 @@ impl MindSimHost {
                     continue;
                 };
                 // Each node pair once (`link.id >= id` skip on the other node).
-                if other_def.kind == BlockKind::PowerNode && other.index() >= entity.index() {
+                if matches!(
+                    other_def.kind,
+                    BlockKind::PowerNode | BlockKind::PowerSource
+                ) && other.index() >= entity.index()
+                {
                     continue;
                 }
                 let (x2, y2) = building_center(lx as i32, ly as i32, other_def);
@@ -8886,6 +8951,60 @@ impl MindSimHost {
             })
             .collect();
         GString::from(serde_json::Value::Array(json).to_string().as_str())
+    }
+
+    /// `BuildingComp.displayConsumption` rows for the hovered building
+    /// (`BuildingComp.java:1580,1659-1665`), shown under the bar table only for
+    /// the player's team (`:1573`). Each row is one `Consume.build` element as
+    /// a `MultiReqImage` list `[[{"icon","valid"}...]...]`.
+    ///
+    /// Ported consumer: `ItemTurret`'s ammo `ConsumeItemFilter.build`
+    /// (`ItemTurret.java:72-81`): one `ReqImage(item.uiIcon)` per ammo item in
+    /// content order (`filter.get(i) && i.unlockedNow()`), valid while that
+    /// item is the top ammo entry (`ammo.peek()`). Other consumers' `build`
+    /// rows are not ported yet; optional boosters (coolant) are skipped by
+    /// Java (`cons.optional && cons.booster`).
+    #[func]
+    pub fn building_consumption_json(&self, x: i32, y: i32) -> GString {
+        let empty = || GString::from("[]");
+        let Some(entity) = self.tile_at(x, y).and_then(|tile| tile.build) else {
+            return empty();
+        };
+        let Some(content) = self.content_snapshot.as_ref() else {
+            return empty();
+        };
+        let world = &self.sim.ecs.0;
+        let team = world
+            .get::<mind_core::entities::comp::TeamComp>(entity)
+            .map(|team| team.team);
+        if team != Some(self.player_team()) {
+            return empty();
+        }
+        let Some(state) =
+            world.get::<mind_core::world::blocks::defense::turrets::TurretState>(entity)
+        else {
+            return empty();
+        };
+        let mind_core::world::blocks::defense::turrets::TurretAmmo::Item(ammo_types) =
+            &state.config.ammo
+        else {
+            return empty();
+        };
+        let current = state.ammo.last().map(|entry| entry.item);
+        let campaign = self.in_campaign();
+        let images: Vec<serde_json::Value> = content
+            .items()
+            .iter()
+            .filter(|item| ammo_types.iter().any(|ammo| ammo.item == item.id))
+            .filter(|item| item.unlock.unlocked() || !campaign)
+            .map(|item| {
+                serde_json::json!({
+                    "icon": format!("item-{}-ui", item.name),
+                    "valid": current == Some(item.id),
+                })
+            })
+            .collect();
+        GString::from(serde_json::json!([images]).to_string().as_str())
     }
 
     /// Discovered (static) fog bits for `team`, one byte per tile (`0`/`255`,

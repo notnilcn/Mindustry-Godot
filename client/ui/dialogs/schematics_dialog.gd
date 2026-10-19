@@ -43,6 +43,8 @@ func _ready() -> void:
 	set_title_key("@schematics")
 	should_pause = true
 	full_dialog = true
+	# `makeButtonOverlay()` (`SchematicsDialog.java:64`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	_build()
 	add_close_button()

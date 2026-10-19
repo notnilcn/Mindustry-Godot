@@ -28,6 +28,8 @@ var _cells: Array = []
 
 func _ready() -> void:
 	should_pause = false
+	# `makeButtonOverlay()` (`EffectsDialog.java:34`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	add_close_button(210.0)
 

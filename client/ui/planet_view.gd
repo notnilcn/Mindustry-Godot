@@ -94,6 +94,14 @@ var _cloud_speeds := PackedFloat32Array()
 ## Arc `Time.globalTime` in ticks (advances while paused; `HexSkyMesh.relRot`).
 var _global_time := 0.0
 
+## Transparent draw order, mirroring `PlanetRenderer.render`/`renderTransparent`
+## (`PlanetRenderer.java:105-127,147-168`): clouds (-7/-6) -> `renderSectors`
+## (grid 4, rings/fills/hover 5, selection/outline 6) -> `drawAtmosphere` ->
+## `renderOrbit` -> `renderProjections` (sector icons).
+const ATMOSPHERE_PRIORITY := 7
+const ORBIT_PRIORITY := 8
+const ICON_PRIORITY := 9
+
 ## `Pal.gray` (`Pal.java:82`, `454545`) — the orbit line colour.
 const ORBIT_GRAY := Color(0.271, 0.271, 0.271)
 
@@ -208,7 +216,7 @@ func _rebuild_markers() -> void:
 				ring = Color(ring.r * 0.8, ring.g * 0.8, ring.b * 0.8, ui_alpha)
 				_append_ring(verts, colors, tile, arad, 0.026, ring)
 		else:
-			var shadow := Color(SHADOW.r, SHADOW.g, SHADOW.b, SHADOW.a * ui_alpha)
+			var shadow := Color(SHADOW.r, SHADOW.g, SHADOW.b, _gamma_shadow_alpha(SHADOW.a * ui_alpha))
 			_append_fill(verts, colors, tile, arad, shadow)
 		_add_icon(sector, tile)
 	if verts.is_empty():
@@ -227,6 +235,15 @@ func _rebuild_markers() -> void:
 	material.render_priority = 5
 	instance.material_override = material
 	_markers.add_child(instance)
+
+
+## Java alpha-blends the black `shadowColor` fill in its gamma-space
+## framebuffer (`dst * (1 - a)`); Godot blends in linear, where the same alpha
+## only darkens the encoded result by `(1 - a)^(1/2.2)` (a 70% shadow left the
+## locked part of the globe at ~58% instead of 30%). Raise the alpha so the
+## linear blend lands on Java's value: `1 - (1 - a)^2.2`.
+func _gamma_shadow_alpha(alpha: float) -> float:
+	return 1.0 - pow(1.0 - clampf(alpha, 0.0, 1.0), 2.2)
 
 
 ## `renderSectors` ring color (null = no ring).
@@ -279,11 +296,10 @@ func _append_ring(verts: PackedVector3Array, colors: PackedColorArray, tile: int
 
 
 ## `renderProjections` icon for one sector.
+## Java has no facing cull here: each icon lies flat on the sector's plane
+## (`planets.drawPlane` -> `Planet.setPlane`), so icons near the limb are seen
+## edge-on and those behind the globe fail the depth test.
 func _add_icon(sector: Dictionary, tile: int) -> void:
-	# `drawSectors`/`renderProjections`: icons behind the limb (the camera
-	# hemisphere's back side) are culled (`tile_v · camera_dir <= 0`).
-	if _tiles[tile].dot(cam_pos.normalized()) <= 0.0:
-		return
 	var preset := str(sector.get("preset", ""))
 	var has_base := bool(sector.get("has_base", false))
 	var glyph := ""
@@ -308,7 +324,7 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 			glyph = icon
 		elif not preset.is_empty() and bool(sector.get("require_unlock", false)) and bool(sector.get("preset_unlocked", false)):
 			region = "sector-%s" % preset
-	var position := _tiles[tile].normalized() * (float(data.get("outline", 1.17)) + 0.004)
+	var plane := _sector_plane(tile)
 	if not region.is_empty():
 		var assets := MindWidgets.assets()
 		var texture: Texture2D = null
@@ -321,14 +337,13 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 						break
 		if texture == null:
 			return
-		# code-instantiated: one billboard per marked sector.
+		# code-instantiated: one sector-plane sprite per marked sector.
 		var sprite := Sprite3D.new()
 		sprite.texture = texture
 		sprite.pixel_size = SECTOR_ICON_SIZE / maxf(float(texture.get_width()), 1.0)
-		sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-		sprite.render_priority = 7
-		sprite.position = position
+		sprite.render_priority = ICON_PRIORITY
+		sprite.transform = plane
 		sprite.modulate = Color(1.0, 1.0, 1.0, ui_alpha)
 		_markers.add_child(sprite)
 		return
@@ -347,10 +362,38 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 	label.outline_size = 0
 	label.pixel_size = SECTOR_ICON_SIZE / 64.0
 	label.modulate = Color(color.r, color.g, color.b, color.a * ui_alpha)
-	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	label.render_priority = 7
-	label.position = position
+	label.render_priority = ICON_PRIORITY
+	label.transform = plane
 	_markers.add_child(label)
+
+
+## `Planet.setPlane` (`Planet.java:700-712`) in the mesh frame the port renders
+## in (Java's `rotate(Y, -getRotation())` and `+ position` cancel out): origin
+## `tile.v * (outlineRad + 0.01) * radius`; up = `Vec3.Y` projected onto the
+## sector plane (`Sector.plane` through corners 0/2/4, `Sector.java:271`) minus
+## `tile.v * radius`; right = up turned by Arc's `rotate(tile.v, 90)` (a
+## clockwise quarter turn seen from outside). The local +Z faces outward, so a
+## Sprite3D/Label3D/QuadMesh drawn in its XY plane matches `PlaneBatch3D`.
+func _sector_plane(tile: int) -> Transform3D:
+	var radius := float(data.get("radius", 1.0))
+	var v := _tiles[tile]
+	var origin := v.normalized() * (float(data.get("outline", 1.17)) + 0.01 * radius)
+	var up := Vector3.UP
+	var ids: PackedInt32Array = _tile_corners[tile] if tile < _tile_corners.size() else PackedInt32Array()
+	if ids.size() >= 5:
+		var p1 := _corners[ids[0]]
+		var p2 := _corners[ids[2]]
+		var p3 := _corners[ids[4]]
+		var normal := (p1 - p2).cross(p2 - p3).normalized()
+		var top := v + Vector3.UP
+		top -= normal * (normal.dot(top) - p1.dot(normal))
+		up = top - v * radius
+	if up.length_squared() < 1e-10:
+		up = Vector3.UP
+	up = up.normalized()
+	# Arc `Vec3.rotate(axis, 90)` is Godot's `rotated(axis, -PI / 2)`.
+	var right := up.rotated(v.normalized(), -PI * 0.5).normalized()
+	return Transform3D(Basis(right, up, right.cross(up).normalized()), origin)
 
 
 ## Optional string field of a read-model row (`null` -> "").
@@ -607,7 +650,7 @@ func _build_body() -> void:
 	arrays[Mesh.ARRAY_VERTEX] = mesh_data.get("vertices", PackedVector3Array())
 	arrays[Mesh.ARRAY_NORMAL] = mesh_data.get("normals", PackedVector3Array())
 	arrays[Mesh.ARRAY_COLOR] = mesh_data.get("colors", PackedColorArray())
-	arrays[Mesh.ARRAY_INDEX] = mesh_data.get("indices", PackedInt32Array())
+	arrays[Mesh.ARRAY_INDEX] = _godot_winding(mesh_data.get("indices", PackedInt32Array()))
 	var flags := 0
 	var emissive: PackedColorArray = mesh_data.get("emissive_colors", PackedColorArray())
 	if not emissive.is_empty():
@@ -632,7 +675,7 @@ func _build_body() -> void:
 	material.shader = load("res://shaders/planet.gdshader")
 	material.render_priority = -8
 	material.set_shader_parameter("u_lightdir", _light_dir)
-	material.set_shader_parameter("u_ambientColor", _ambient)
+	material.set_shader_parameter("u_ambientColor", _vec3(_ambient))
 	material.set_shader_parameter(
 		"u_emissive", 1.0 if bool(mesh_data.get("emissive", false)) else 0.0
 	)
@@ -642,9 +685,22 @@ func _build_body() -> void:
 	body.visible = true
 
 
+## `MeshBuilder.buildHex` emits OpenGL counter-clockwise front faces and
+## `PlanetRenderer.render` culls `Gl.back` (`PlanetRenderer.java:53-54`). Godot's
+## front faces are clockwise, so the same index order culled the near hemisphere
+## and the globe showed the inside of its far side (wrong terrain, lit from
+## behind). Swap the last two indices of every triangle.
+func _godot_winding(indices: PackedInt32Array) -> PackedInt32Array:
+	var out := indices.duplicate()
+	for start in range(0, out.size() - 2, 3):
+		out[start + 1] = indices[start + 2]
+		out[start + 2] = indices[start + 1]
+	return out
+
+
 ## `Planet.drawClouds` (`PlanetRenderer.renderTransparent`, `PlanetRenderer.java:149`):
 ## each `HexSkyMesh` layer of `cloudMesh` (`MindCampaign.planet_clouds`) after the
-## body and before the atmosphere (`render_priority` -7, -6; atmosphere -5).
+## body and before the atmosphere (`render_priority` -7, -6; see ATMOSPHERE_PRIORITY).
 func _build_clouds() -> void:
 	for node_variant in _clouds:
 		(node_variant as Node).queue_free()
@@ -749,9 +805,10 @@ func _build_grid() -> void:
 ## `MeshBuilder.buildHex(Color.white, 2, 1.5f)` — a sphere of radius 1.5 that
 ## covers the `radius + atmosphereRad{In,Out}` shell (the shader reads the
 ## mesh's surface position as the ray target); light is `Planet.getLightNormal()`.
-## Drawn AFTER the body and the clouds (Java's `renderTransparent`):
-## `render_priority` -5 vs the body's -8 and the cloud layers' -7/-6, so the
-## additive veil covers the planet's limb instead of being hidden behind it.
+## Drawn in Java's `renderTransparent` order (`PlanetRenderer.java:147-168`):
+## after the body, the clouds and `renderSectors` (grid, status rings, fills,
+## hover, selection), so the additive veil tints the limb and the rings near it;
+## before `renderOrbit` and `renderProjections` (icons), which stay untinted.
 func _build_atmosphere() -> void:
 	atmosphere.visible = false
 	_has_atmosphere = false
@@ -769,12 +826,11 @@ func _build_atmosphere() -> void:
 	atmosphere.mesh = sphere
 	var material := ShaderMaterial.new()
 	material.shader = load("res://shaders/atmosphere.gdshader")
-	# After the body (-8) and clouds (-7, -6); Java composites it over both.
-	material.render_priority = -5
+	material.render_priority = ATMOSPHERE_PRIORITY
 	var radius := float(data.get("radius", 1.0))
 	material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
 	material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))
-	material.set_shader_parameter("u_color", atmos.get("color", Color(0.3, 0.7, 1.0)))
+	material.set_shader_parameter("u_color", _vec3(atmos.get("color", Color(0.3, 0.7, 1.0))))
 	# `AtmosphereShader.apply` passes `planet.getLightNormal()` against a
 	# world-space camera; the port's camera lives in the planet mesh frame, so
 	# the same sun direction is used in that frame.
@@ -804,7 +860,7 @@ func _build_orbits() -> void:
 	_orbit_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	_orbit_material.albedo_color = Color(ORBIT_GRAY.r, ORBIT_GRAY.g, ORBIT_GRAY.b, ui_alpha)
 	_orbit_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	_orbit_material.render_priority = 2
+	_orbit_material.render_priority = ORBIT_PRIORITY
 	for row_variant in data.get("orbits", []):
 		var row: Dictionary = row_variant
 		var radius := float(row.get("radius", 0.0))
@@ -871,7 +927,7 @@ func _refresh_light() -> void:
 	_ambient = light.get("ambient", Color(1.0, 1.0, 1.0))
 	if _body_material != null:
 		_body_material.set_shader_parameter("u_lightdir", _light_dir)
-		_body_material.set_shader_parameter("u_ambientColor", _ambient)
+		_body_material.set_shader_parameter("u_ambientColor", _vec3(_ambient))
 	if atmosphere.material_override is ShaderMaterial:
 		(atmosphere.material_override as ShaderMaterial).set_shader_parameter("u_light", _light_dir)
 
@@ -958,7 +1014,7 @@ func _clear_highlight() -> void:
 ## sector draws its preset icon; the port draws the selected one).
 func _rebuild_sector_icon() -> void:
 	if _sector_icon == null:
-		# code-instantiated: one data-driven billboard for the selected sector.
+		# code-instantiated: one data-driven sector-plane quad for the selected sector.
 		_sector_icon = MeshInstance3D.new()
 		_sector_icon.name = "SectorIcon"
 		_sector_icon.mesh = null
@@ -971,21 +1027,19 @@ func _rebuild_sector_icon() -> void:
 	if texture == null or selected_tile < 0 or selected_tile >= _tiles.size():
 		_sector_icon.mesh = null
 		return
-	# `renderProjections` `iw = 64f/4f` at the sector plane scale (~0.026 world
-	# units on screen); billboard quad slightly outside the outline shell.
+	# `renderProjections` `iw = 64f/4f` at the `PlaneBatch3D` scaling (1/150),
+	# flat on the sector plane (`Planet.setPlane`) like every other icon.
 	var quad := QuadMesh.new()
 	quad.size = Vector2(SECTOR_ICON_SIZE, SECTOR_ICON_SIZE)
 	_sector_icon.mesh = quad
-	var arad := float(data.get("outline", 1.17)) + 0.004
-	_sector_icon.position = _tiles[selected_tile].normalized() * arad
+	_sector_icon.transform = _sector_plane(selected_tile)
 	var material := StandardMaterial3D.new()
 	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	material.albedo_texture = texture
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	material.no_depth_test = true
-	material.render_priority = 7
+	material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	material.render_priority = ICON_PRIORITY
 	_sector_icon.material_override = material
 
 
@@ -998,6 +1052,14 @@ func _overlay_material() -> StandardMaterial3D:
 	material.no_depth_test = true
 	material.render_priority = 6
 	return material
+
+
+## A `Color` handed to a plain `vec3` uniform is converted sRGB -> linear by
+## Godot, which darkened Java's raw `setUniformf(r, g, b)` values (the
+## atmosphere lost most of its red/green and turned a dim blue). Pass the
+## components verbatim.
+func _vec3(color: Color) -> Vector3:
+	return Vector3(color.r, color.g, color.b)
 
 
 func _load_loose(key: String, cutout: bool) -> Texture2D:

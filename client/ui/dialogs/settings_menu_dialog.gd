@@ -58,6 +58,9 @@ const ICON_CELL := 32.0
 const ICON_FONT_SIZE := 28
 ## `prefs.margin(14f)`.
 const PREFS_MARGIN := 14
+## The pane's inset inside the shared shell body (see `_setup_prefs`).
+const PANE_INSET_TOP := 12.0
+const PANE_INSET_BOTTOM := 3.0
 ## `Math.min(Core.graphics.getWidth() / 1.2f / Scl.scl(1f), 500f)` row width.
 const ROW_MAX_WIDTH := 500.0
 ## `Styles.flatOver` (`whiteui.tint(#454545)`); `flatt.up = black`.
@@ -105,6 +108,16 @@ func shown() -> void:
 func _setup_prefs() -> void:
 	if body != null:
 		body.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		# The pane is not the shell's `cont` cell: it sits below the removed
+		# (still padded, `defaults().pad(3)`) `cont` cell in its own padded row
+		# (`SettingsMenuDialog.java:294-297`, `Dialog.java:208-214`). Measured in
+		# runs/20261019-M-fix-settings (java/01.png, the pane's scroll track):
+		# Java's pane spans y=49..567 at 1152x648, the shared shell body 37..570
+		# (the unpadded title row, `MindDialog.button_overlay` false).
+		var pane_inset := StyleBoxEmpty.new()
+		pane_inset.content_margin_top = PANE_INSET_TOP
+		pane_inset.content_margin_bottom = PANE_INSET_BOTTOM
+		body.add_theme_stylebox_override("panel", pane_inset)
 	if cont == null:
 		return
 	cont.size_flags_vertical = Control.SIZE_EXPAND_FILL

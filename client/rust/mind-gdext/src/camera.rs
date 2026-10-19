@@ -18,7 +18,9 @@ use godot::prelude::*;
 use mind_core::config::TILESIZE;
 use mind_core::fx::FxEvent;
 use mind_core::input::{CameraState, MinimapRegion};
-use mind_core::render::cutscene::{AcceleratorLaunchAnimator, CoreLandAnimator, Cutscene};
+use mind_core::render::cutscene::{
+    AcceleratorLaunchAnimator, CoreLandAnimator, Cutscene, LandDustTimer,
+};
 
 use crate::input::MindInput;
 use crate::sim_host::MindSimHost;
@@ -65,6 +67,13 @@ pub struct MindCamera2D {
     landing_core: Option<(f32, f32)>,
     /// Block name of the dropping core (`block-<name>-full` region).
     landing_block: String,
+    /// `CoreBuild.landParticleTimer` (`updateLaunch` dust bursts).
+    land_dust: LandDustTimer,
+    /// View-side `Mathf.rand` for the dust rolls (`chance`/`range`).
+    land_dust_rand: mind_core::math::ArcRand,
+    /// `Block.mapColor` per block id (`sprites/block_colors.png`), loaded on
+    /// the first landing.
+    block_colors: Option<Vec<u32>>,
     /// Interplanetary Accelerator launch centre (`show_accelerator_launch`).
     accelerator_launch: Option<(f32, f32)>,
     /// Whether the `MindInput` cutscene lock is currently raised.
@@ -95,6 +104,9 @@ impl ICamera2D for MindCamera2D {
             cutscene: Cutscene::new(1.0),
             landing_core: None,
             landing_block: String::new(),
+            land_dust: LandDustTimer::default(),
+            land_dust_rand: mind_core::math::ArcRand::new(0x1a4d),
+            block_colors: None,
             accelerator_launch: None,
             cutscene_locked: false,
             logic_locked: false,
@@ -272,6 +284,11 @@ impl ICamera2D for MindCamera2D {
             .as_ref()
             .map(|host| host.bind().is_paused())
             .unwrap_or(false);
+        // `Renderer.update`: `if(!state.isPaused()) launchAnimator.updateLaunch()`
+        // runs before `landTime -= delta` (Renderer.java:183-188).
+        if !sim_paused && self.cutscene.is_cutscene() && !self.cutscene.is_launching() {
+            self.update_land_dust(delta_frames);
+        }
         self.cutscene.update(delta_frames, sim_paused);
         let in_cutscene = self.cutscene.is_cutscene();
         if !in_cutscene {
@@ -346,6 +363,7 @@ impl MindCamera2D {
         self.follow_target = Some((core_x, core_y));
         self.landing_core = Some((core_x, core_y));
         self.landing_block = core_block.to_string();
+        self.land_dust = LandDustTimer::default();
         // A landing replaces any accelerator launch cutscene (the sector
         // switch at `launchDuration() - 6`): drop its camera pin.
         self.accelerator_launch = None;
@@ -401,12 +419,24 @@ impl MindCamera2D {
     #[func]
     pub fn landing_draw_json(&self) -> GString {
         let (x, y) = self.landing_core.unwrap_or((0.0, 0.0));
+        // `CoreBuild.team` name for the `<block>-team-<team>` region
+        // (`teamRegions[team.id]`, CoreBlock.java:523-525).
+        let team = self
+            .host
+            .as_ref()
+            .map(|host| host.bind().player_team())
+            .map(|id| mind_core::game::team::Team::get(id).name.clone())
+            .unwrap_or_default();
         let value = serde_json::json!({
             "active": self.cutscene.is_cutscene(),
+            "team": team,
             "x": x,
             "y": y,
             "block": self.landing_block,
             "fin": self.cutscene.get_land_time_in(),
+            // `renderer.getDisplayScale()` (the cutscene camera scale): the
+            // landing draw scales by `Scl.scl(4) / getDisplayScale()`.
+            "scale": self.cutscene.camerascale(),
         });
         GString::from(value.to_string().as_str())
     }
@@ -441,6 +471,69 @@ impl MindCamera2D {
     #[func]
     pub fn get_land_time_in(&self) -> f32 {
         self.cutscene.get_land_time_in()
+    }
+
+    /// `CoreBuild.updateLaunch` (`CoreBlock.java:660-673`): when the
+    /// `landParticleTimer` fills, every linked core tile spawns
+    /// `Fx.coreLandDust` with chance 0.4, aimed away from the core
+    /// (`angleTo(tile) + range(30)`) and tinted `floor.mapColor * (1.5 +
+    /// range(0.15))`. View-only effect spawn (`MindFx`).
+    fn update_land_dust(&mut self, delta_frames: f32) {
+        use mind_core::render::cutscene::LaunchAnimator;
+        let Some((cx, cy)) = self.landing_core else {
+            return;
+        };
+        let fin = self.cutscene.get_land_time_in();
+        if !self
+            .land_dust
+            .step(fin, CoreLandAnimator::new().launch_duration(), delta_frames)
+        {
+            return;
+        }
+        let Some(host) = self.host.as_ref() else {
+            return;
+        };
+        let tiles = host.bind().linked_tile_floors(cx, cy);
+        let Some(effect) = mind_core::content::effect_by_name("coreLandDust") else {
+            return;
+        };
+        let Some(mut fx) = self
+            .base()
+            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+        else {
+            return;
+        };
+        let mut fx = fx.bind_mut();
+        let colors = self
+            .block_colors
+            .get_or_insert_with(crate::render::minimap::load_block_colors);
+        for (tx, ty, floor, registry_color) in tiles {
+            // `floor().mapColor`: the registry colour `ContentLoader.loadColors`
+            // filled from `block_colors.png` (alpha forced to 1); the raw row
+            // is only a fallback for a registry without colours.
+            let color = registry_color
+                .or_else(|| {
+                    colors
+                        .get(floor)
+                        .map(|packed| mind_core::content::Rgba::from_rgba8888(*packed | 0xff))
+                })
+                .unwrap_or(mind_core::content::Rgba::WHITE);
+            if !self.land_dust_rand.chance(0.4) {
+                continue;
+            }
+            // `Angles.angle(x, y, tx, ty)` in degrees `0..360`.
+            let angle = (ty - cy).atan2(tx - cx).to_degrees().rem_euclid(360.0)
+                + self.land_dust_rand.range_float(30.0);
+            // `Tmp.c1.set(mapColor).mul(1.5 + range(0.15))`: rgb only, clamped.
+            let mul = 1.5 + self.land_dust_rand.range_float(0.15);
+            let tint = mind_core::content::Rgba {
+                r: (color.r * mul).clamp(0.0, 1.0),
+                g: (color.g * mul).clamp(0.0, 1.0),
+                b: (color.b * mul).clamp(0.0, 1.0),
+                a: color.a.clamp(0.0, 1.0),
+            };
+            fx.spawn_view_effect(effect, tx, ty, angle, tint);
+        }
     }
 
     /// Rebuilds the rig's Godot-derived state (runs from `ready()` and on

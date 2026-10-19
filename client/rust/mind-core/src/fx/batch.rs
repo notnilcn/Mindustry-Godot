@@ -326,6 +326,7 @@ mod tests {
                     offset_rot: 0.0,
                     lifetime_override: None,
                     alive: true,
+                    seed: 0,
                 };
                 build_program(def, &state, &EmptySnapshot, program);
             }

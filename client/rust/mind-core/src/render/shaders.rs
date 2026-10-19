@@ -81,6 +81,7 @@ pub const AUXILIARY: &[&str] = &[
     "shield_group",
     "buildbeam_group",
     "bloom",
+    "water_group",
 ];
 
 /// Upstream shaders explicitly not ported (`Shaders.java` disabled / dead).

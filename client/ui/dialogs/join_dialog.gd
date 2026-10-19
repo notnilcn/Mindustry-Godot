@@ -60,6 +60,8 @@ func _ready() -> void:
 	set_title_key("@joingame")
 	should_pause = false
 	full_dialog = true
+	# `makeButtonOverlay()` (`JoinDialog.java:59`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	_load_servers()
 	_build()

@@ -1688,6 +1688,43 @@ fn consumer_autolinks_to_node_in_range() {
     assert_eq!(node_graph, drill_graph, "graphs merged");
 }
 
+/// `PowerSource extends PowerNode` (`PowerSource.java:6-12`): a consumer placed
+/// in the sandbox source's laser range autolinks to it (`BuildingComp.placed`
+/// -> `PowerNode.getNodeLinks`) and its `power.status` reaches 1 (the hover
+/// `Power` bar, `Block.java:716-721`).
+#[test]
+fn consumer_autolinks_to_power_source_in_range() {
+    let mut sim = runtime_sim();
+    let source = place(&mut sim, "power-source", 5, 5);
+    let conveyor = place(&mut sim, "phase-conveyor", 8, 5);
+    let conveyor_pack = sim
+        .ecs
+        .0
+        .get::<crate::entities::comp::Building>(conveyor)
+        .map(|building| building.tile.pack())
+        .expect("conveyor building");
+    let links = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(source)
+        .map(|module| module.links.clone())
+        .unwrap_or_default();
+    assert!(
+        links.contains(&conveyor_pack),
+        "source linked to the consumer: {links:?}"
+    );
+    for _ in 0..5 {
+        sim.tick().expect("tick");
+    }
+    let status = sim
+        .ecs
+        .0
+        .get::<crate::world::modules::PowerModule>(conveyor)
+        .map(|module| module.status)
+        .unwrap_or(0.0);
+    assert!((status - 1.0).abs() < 1e-6, "consumer satisfied: {status}");
+}
+
 /// T7 (`SolidPump.updateTile`, `SolidPump.java:116-135`; `Blocks.java:2941-2948`):
 /// the water extractor's yield is `pumpAmount * (validTiles + boost)` where
 /// `validTiles = 1` on any pumpable floor (`baseEfficiency = 1`) and `boost` is
