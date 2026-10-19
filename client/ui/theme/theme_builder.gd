@@ -116,11 +116,12 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			elif name == "grayt":
 				# `Styles.grayt` (Styles.java:157-165): `up = grayPanel`,
 				# `over`/`down = flatOver` (#454545), `disabled = grayPanelDark`
-				# — the save-card body style.
-				theme.set_stylebox("normal", name, flat(MindStyles.GRAY_PANEL))
-				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
-				theme.set_stylebox("pressed", name, flat(Color8(0x45, 0x45, 0x45)))
-				theme.set_stylebox("disabled", name, flat(MindStyles.GRAY_PANEL_DARK))
+				# — the save-card body style and `Elems.check` rows. All four are
+				# `whiteui` tints: square corners.
+				theme.set_stylebox("normal", name, _square(flat(MindStyles.GRAY_PANEL)))
+				theme.set_stylebox("hover", name, _square(flat(Color8(0x45, 0x45, 0x45))))
+				theme.set_stylebox("pressed", name, _square(flat(Color8(0x45, 0x45, 0x45))))
+				theme.set_stylebox("disabled", name, _square(flat(MindStyles.GRAY_PANEL_DARK)))
 			elif name == "flati":
 				# `Styles.flati` (Styles.java:306-310): `up = black`, `over` /
 				# `down = flatOver`; no disabled drawable (Arc keeps `up`). The
@@ -278,6 +279,15 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				theme.set_stylebox("panel", name, flat(_drawable_color(name)))
 		"RichTextLabel":
 			theme.set_color("default_color", name, Color(0.92, 0.92, 0.92))
+			if name == "outlineLabel":
+				# `Styles.outlineLabel` (`ui/Styles.java:385-388`): white
+				# `Fonts.outline`, the default font rasterized with a 2 px
+				# `Color.darkGray` (#3f3f3f) border (`ui/Fonts.java:247-249,
+				# 264-271`). Godot's glyph stroke radius is `outline_size / 4` px
+				# (measured: 4 drew a 1 px ring), so 8 gives Java's 2 px border.
+				theme.set_color("default_color", name, Color.WHITE)
+				theme.set_color("font_outline_color", name, Color8(0x3f, 0x3f, 0x3f))
+				theme.set_constant("outline_size", name, 8)
 		"HSlider":
 			if name == "defaultSlider":
 				# `Styles.defaultSlider` (`Styles.java:374-378`): the
