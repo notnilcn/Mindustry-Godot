@@ -228,7 +228,7 @@ Stage each one and capture a twin pair:
 - Category glyphs are slightly thinner than Java's icon images (icon-font glyph vs texture region).
 - Requirement rows on the placement header are ordered and laid out differently from Java
   (`runs/20261019-M-fix-followups/diff/s2-side.png`; `PlacementFragment.java:398-421`).
-- The ledger probe paths in `TWIN-VERIFICATION.json`/`TWIN-VERIFICATION.json` still point at
+- The ledger probe paths in `TWIN-VERIFICATION.json` still point at
   `.../placement/Panel/Layout/Left/InputBar/...`. Change them to `Panel/Frame/Layout/Left/Rows/InputBar`.
 
 ## T13 — Runtime panics seen during gates — LOW
