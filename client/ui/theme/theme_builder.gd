@@ -323,17 +323,20 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 			# `Styles.defaultField` (`ui/Styles.java:398-409`): `background =
 			# underline` — the `underline` 9-patch (transparent body, 4 px #454545
 			# bottom rule, 12 px splits and padding on every edge), so a field is
-			# a bare text line ~48 px tall, not a box. L01 T3 measured
-			# java/custom.png: the search underline at y=87-90 and the map cards
-			# from y=105 (the boxed 40 px port field put them 9 px higher).
+			# a bare text line 45 px tall, not a box.
 			# `disabledBackground = underlineDisabled`; Arc draws no focus frame.
-			# Arc's field height (`TextField.getPrefHeight`: background padding +
-			# the font's line height) is 8 px taller than Godot's line box with
-			# the same 12 px padding, so the vertical padding is 16.
+			# Arc's field height (`TextField.getPrefHeight`, arc
+			# `TextField.java:750-767`: background top + bottom padding (12 + 12)
+			# + `textHeight = capHeight - 2 * descent`, 21 px for `Fonts.def`) is
+			# 45 px with the glyphs centred in it (`TextField.java:376-380`).
+			# Godot's line box for the same font is 19 px, so 14/12 vertical
+			# padding lands the same pixels (java/18-editorview.png: field
+			# y=1..46, rule 42-45; java/15-coredb.png: rule 81-84;
+			# java/02-custom.png: the search rule at y=87-90).
 			for state in [["normal", "underline"], ["read_only", "underline-disabled"]]:
 				var field_box := _nine_patch(str(state[1]), 12.0)
-				field_box.content_margin_top = 16.0
-				field_box.content_margin_bottom = 16.0
+				field_box.content_margin_top = FIELD_PAD_TOP
+				field_box.content_margin_bottom = FIELD_PAD_BOTTOM
 				theme.set_stylebox(str(state[0]), name, field_box)
 			theme.set_stylebox("focus", name, StyleBoxEmpty.new())
 			theme.set_color("font_color", name, Color.WHITE)
@@ -376,6 +379,10 @@ const SCROLL_BAR_WIDTH := 24.0
 ## `sliderKnob` height (29x42 region): the Arc slider's pref height and the
 ## height its `sliderBack` box fills.
 const SLIDER_ROW_HEIGHT := 42.0
+## `Styles.defaultField` vertical padding: Arc's 12 + 21 + 12 = 45 px field on
+## Godot's 19 px line box (see the `LineEdit` case in `_apply_manifest`).
+const FIELD_PAD_TOP := 14.0
+const FIELD_PAD_BOTTOM := 12.0
 
 
 static func _apply_scroll_bar(theme: Theme) -> void:

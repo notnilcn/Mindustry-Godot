@@ -26,6 +26,8 @@ var _group := ButtonGroup.new()
 
 func _ready() -> void:
 	set_title_key("@editor.loadmap")
+	# `makeButtonOverlay()` (`MapLoadDialog.java:34`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	_editor = get_node_or_null(editor_path)
 	clear_buttons()

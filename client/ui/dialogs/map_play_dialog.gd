@@ -46,6 +46,15 @@ func _apply_floating_layout() -> void:
 	if panel != null:
 		panel.theme_type_variation = "none"
 		panel.custom_minimum_size = Vector2.ZERO
+		# The floating table still carries `windowEmpty`'s 4 px inset above
+		# the (unpadded) title row, and under the buttons the button's own
+		# `pad(3)` plus the `buttons` cell's `pad(3)` (`Dialog.java:208-214`)
+		# before that inset: java/05-sbplay.png puts the title rule at y=56
+		# and the mode frame at y=90 for the 1152x648 sandbox dialog.
+		var inset := StyleBoxEmpty.new()
+		inset.content_margin_top = 4.0
+		inset.content_margin_bottom = 4.0 + 3.0 + 3.0
+		panel.add_theme_stylebox_override("panel", inset)
 	if body != null:
 		# The body reports its content height so nothing is clipped/scrolled.
 		body.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED

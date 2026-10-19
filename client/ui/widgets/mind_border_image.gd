@@ -49,12 +49,13 @@ func _draw() -> void:
 		if texture != null:
 			# The backdrop covers the base draw; repaint the image over it.
 			draw_texture_rect(texture, rect, false)
-	draw_rect(
-		Rect2(rect.position - Vector2(pad, pad), rect.size + Vector2(pad, pad) * 2.0),
-		border_color,
-		false,
-		thickness
-	)
+	# `Lines.rect(x + imageX - pad, ...)` (`BorderImage.java:69-70`) fills the
+	# four `stroke`-wide edges *inside* the rect (arc `Lines.java:511-522`);
+	# Godot's unfilled `draw_rect` centres the stroke on the edge, so inset by
+	# half the stroke (a 300 px preview stays 300 px, java/17-mapinfo.png).
+	var outer := Rect2(rect.position - Vector2(pad, pad), rect.size + Vector2(pad, pad) * 2.0)
+	var half := Vector2(thickness, thickness) * 0.5
+	draw_rect(Rect2(outer.position + half, outer.size - half * 2.0), border_color, false, thickness)
 
 
 ## `Image.layout`: the image rect inside the widget for the current

@@ -78,6 +78,8 @@ var _color_tags: RegEx = null
 func _ready() -> void:
 	should_pause = false
 	full_dialog = true
+	# `makeButtonOverlay()` (`MapListDialog.java:103`): the padded title cell.
+	button_overlay = true
 	super._ready()
 	_load_settings()
 	_build()
@@ -158,8 +160,16 @@ func _build_search() -> void:
 	_filter_panel.visible = false
 	var layout := get_node_or_null("Center/Panel/Layout") as Container
 	if layout != null and body != null:
-		layout.add_child(search)
-		layout.move_child(search, body.get_index())
+		# `cont.add(search)` takes `cont.defaults().pad(3)` above it (the 3 px
+		# under it plus the pane cell's 3 px are the Layout's separation): the
+		# 45 px field spans y=46..91, rule 87-90 (java/02-custom.png).
+		# code-instantiated: wraps the code-built search row.
+		var search_pad := MarginContainer.new()
+		search_pad.name = "SearchPad"
+		search_pad.add_theme_constant_override("margin_top", 3)
+		search_pad.add_child(search)
+		layout.add_child(search_pad)
+		layout.move_child(search_pad, body.get_index())
 		layout.add_child(_filter_panel)
 		layout.move_child(_filter_panel, body.get_index())
 	else:
