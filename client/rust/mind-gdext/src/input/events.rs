@@ -38,6 +38,14 @@ pub fn translate(event: &Gd<InputEvent>, out: &mut Vec<RawEvent>) {
             | MouseButton::WHEEL_DOWN
             | MouseButton::WHEEL_LEFT
             | MouseButton::WHEEL_RIGHT => {
+                // Godot reports every wheel notch as a press AND a release
+                // (X11 buttons 4-7); SDL delivers one `SDL_EVENT_MOUSE_WHEEL`
+                // per notch (`SdlInput.java:80-84` -> `queue.scrolled`), so
+                // only the press is a scroll. Translating both doubled every
+                // tick (`Renderer.scaleCamera` ran twice: 4 -> 2.25, not 3).
+                if !mouse.is_pressed() {
+                    return;
+                }
                 let mut x = 0.0;
                 let mut y = 0.0;
                 let amount = mouse.get_factor();

@@ -69,11 +69,16 @@ func _ready() -> void:
 	get_tree().node_added.connect(_on_node_added)
 	for node in get_tree().root.find_children("*", "BaseButton", true, false):
 		_hook_button(node)
+	# Arc `ScrollPane` wheel step + smooth scroll on every pane (MindScroll).
+	for node in get_tree().root.find_children("*", "ScrollContainer", true, false):
+		MindScroll.hook_arc_wheel(node)
 
 
 func _on_node_added(node: Node) -> void:
 	if node is BaseButton:
 		_hook_button(node)
+	elif node is ScrollContainer:
+		MindScroll.hook_arc_wheel(node)
 
 
 func _hook_button(button: BaseButton) -> void:
