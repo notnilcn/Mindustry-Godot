@@ -157,7 +157,11 @@ impl MindEditorRenderer {
             // band-node pattern; one child holding per-layer meshes).
             let mut floors = Node2D::new_alloc();
             floors.set_name("EditorFloors");
-            self.base_mut().add_child(&floors);
+            // `add_child` emits NOTIFICATION_CHILD_ORDER_CHANGED on self;
+            // defer it so `on_notification` does not re-enter while the
+            // `&mut self` borrow is held.
+            self.base_mut()
+                .call_deferred("add_child", &[floors.to_variant()]);
             self.floors = Some(floors);
         }
         if self.blocks.is_none() {
@@ -165,7 +169,9 @@ impl MindEditorRenderer {
             let mut blocks = Node2D::new_alloc();
             blocks.set_name("EditorBlocks");
             blocks.set_z_index(10);
-            self.base_mut().add_child(&blocks);
+            // See `EditorFloors` above: defer the parent notification.
+            self.base_mut()
+                .call_deferred("add_child", &[blocks.to_variant()]);
             self.blocks = Some(blocks);
         }
         if self.atlas.is_none() {

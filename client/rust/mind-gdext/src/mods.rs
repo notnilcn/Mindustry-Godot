@@ -156,8 +156,11 @@ impl MindMods {
     }
 
     /// One mod row by internal name (`{}` when absent).
+    ///
+    /// Named `mod_info` rather than `get`: `get` shadows `Object::get` and
+    /// becomes a registration error in godot-rust 0.6.
     #[func]
-    pub fn get(&self, name: GString) -> VarDictionary {
+    pub fn mod_info(&self, name: GString) -> VarDictionary {
         let target = name.to_string();
         self.mods
             .report()

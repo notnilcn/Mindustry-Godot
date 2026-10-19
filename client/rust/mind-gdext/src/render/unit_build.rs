@@ -227,10 +227,13 @@ impl UnitBuildRenderer {
             let mut top = MeshInstance2D::new_alloc();
             top.set_name("UnitBuildTop");
             top.set_visible(false);
-            self.base_mut().add_child(&payload);
-            self.base_mut().add_child(&construct);
-            self.base_mut().add_child(&line);
-            self.base_mut().add_child(&top);
+            // `add_child` emits NOTIFICATION_CHILD_ORDER_CHANGED on self;
+            // defer it so `on_notification` does not re-enter while the
+            // `&mut self` borrow is held.
+            for node in [&payload, &construct, &line, &top] {
+                self.base_mut()
+                    .call_deferred("add_child", &[node.to_variant()]);
+            }
             self.payload_nodes.push(payload);
             self.nodes.push(construct);
             self.materials.push(material);

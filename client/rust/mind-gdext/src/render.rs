@@ -467,7 +467,11 @@ impl MindWorldRenderer {
             None => {
                 let mut layer = CanvasLayer::new_alloc();
                 layer.set_name("ObjectiveMarkers");
-                self.base_mut().add_child(&layer);
+                // `add_child` emits NOTIFICATION_CHILD_ORDER_CHANGED on self;
+                // defer it so `on_notification` does not re-enter while the
+                // `&mut self` borrow is held.
+                self.base_mut()
+                    .call_deferred("add_child", &[layer.to_variant()]);
                 layer
             }
         };
@@ -525,7 +529,15 @@ impl MindWorldRenderer {
             } else {
                 let mut node = Node2D::new_alloc();
                 node.set_name(name.as_str());
-                parent.add_child(&node);
+                if capture {
+                    parent.add_child(&node);
+                } else {
+                    // `add_child` emits NOTIFICATION_CHILD_ORDER_CHANGED on
+                    // self; defer it so `on_notification` does not re-enter
+                    // while the `&mut self` borrow is held.
+                    self.base_mut()
+                        .call_deferred("add_child", &[node.to_variant()]);
+                }
                 node
             };
             let walls = entry.layer == Layer::Floor && entry.sub == CacheLayerId::Walls.id();
@@ -638,7 +650,10 @@ impl MindWorldRenderer {
         group.set_z_index(effect_z);
         // code-instantiated: bloom capture composite; one per frame, fixed by
         // the pipeline (mirrors the shield/build-beam group passes).
-        self.base_mut().add_child(&group);
+        // `add_child` emits NOTIFICATION_CHILD_ORDER_CHANGED on self; defer it
+        // so `on_notification` does not re-enter while `&mut self` is bound.
+        self.base_mut()
+            .call_deferred("add_child", &[group.to_variant()]);
         self.ensure_bloom_rect(&group);
         self.bloom_group = Some(group.clone());
         group
