@@ -201,9 +201,11 @@ static func _style_variation(theme: Theme, base: String, name: String) -> void:
 				# `over = flatOver` (#454545), `down = checked = flatDown` (the
 				# accent-bordered `flat-down-base` 9-patch). The checked frame is
 				# what marks the selected `PlacementFragment` category.
-				theme.set_stylebox("normal", name, flat(MindStyles.BLACK_6))
-				theme.set_stylebox("hover", name, flat(Color8(0x45, 0x45, 0x45)))
-				theme.set_stylebox("disabled", name, flat(MindStyles.BLACK_6))
+				# `black6`/`flatOver` are `whiteui` tints: square, no rounding, so
+				# the stacked category cells tile without corner gaps.
+				theme.set_stylebox("normal", name, _square(flat(MindStyles.BLACK_6)))
+				theme.set_stylebox("hover", name, _square(flat(Color8(0x45, 0x45, 0x45))))
+				theme.set_stylebox("disabled", name, _square(flat(MindStyles.BLACK_6)))
 				var flat_down := _flat_down_frame()
 				theme.set_stylebox("pressed", name, flat_down)
 				theme.set_stylebox("hover_pressed", name, flat_down)
@@ -453,6 +455,12 @@ static func _flat_down_frame() -> StyleBox:
 	frame.texture_margin_bottom = 12.0
 	frame.set_content_margin_all(0.0)
 	return frame
+
+
+## `whiteui` tint drawable: a flat box with square corners.
+static func _square(box: StyleBoxFlat) -> StyleBoxFlat:
+	box.set_corner_radius_all(0)
+	return box
 
 
 ## Flat stylebox with the standard content margins (ninepatch replaces at M1).

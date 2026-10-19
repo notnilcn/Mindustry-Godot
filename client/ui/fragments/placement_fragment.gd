@@ -33,8 +33,9 @@ var _bar_campaign := false
 @onready var panel: PanelContainer = get_node_or_null("Panel")
 @onready var search: LineEdit = get_node_or_null("Panel/Frame/Layout/Search")
 @onready var categories: GridContainer = get_node_or_null("Panel/Frame/Layout/Categories")
-@onready var blocks: GridContainer = get_node_or_null("Panel/Frame/Layout/Left/Scroll/Blocks")
-@onready var input_bar: HBoxContainer = get_node_or_null("Panel/Frame/Layout/Left/InputBar")
+@onready var blocks: GridContainer = get_node_or_null("Panel/Frame/Layout/Left/Rows/Scroll/Pad/Blocks")
+@onready var input_bar: HBoxContainer = get_node_or_null("Panel/Frame/Layout/Left/Rows/InputBar")
+@onready var block_scroll: ScrollContainer = get_node_or_null("Panel/Frame/Layout/Left/Rows/Scroll")
 @onready var top_table: PanelContainer = get_node_or_null("Panel/Frame/TopTable")
 @onready var top_rows: VBoxContainer = get_node_or_null("Panel/Frame/TopTable/Rows")
 @onready var top_divider: ColorRect = get_node_or_null("Panel/Frame/TopDivider")
@@ -241,31 +242,86 @@ func _update_selection_highlight() -> void:
 ## java:282`): the frame hugs the screen's bottom-right corner, and the hover
 ## table is exactly as wide as the palette. The panel's themed `black6` box
 ## carried 8 px margins that pushed the whole stack 8 px left (L03 T4:
-## java/49-hovercore.png has the hover box at x=840..1152). The blocks column
-## draws `Tex.pane2` behind itself (`blockCatTable.table(Tex.pane2, ...)`,
-## `:677`) and the category column draws the `black6` filler behind its cells
-## (`categories.add(new Image(Styles.black6))`, `:697`).
+## java/49-hovercore.png has the hover box at x=840..1152).
+##
+## Blocks column (`blockCatTable.table(Tex.pane2, blocksSelect -> blocksSelect
+## .margin(4).marginTop(0))`, `:677-678`): the `pane2` box with an explicit
+## 4/0/4/4 margin (the explicit margin replaces the 9-patch padding), the
+## `Styles.smallPane` block pane (`:687`) and `blockTable.margin(5)` (`:286`,
+## the `Pad` node). Category column (`:693-700`): `categories.bottom()` with a
+## `black6` filler image growing above the 50 px `clearTogglei` cells — the
+## cells carry their own translucent `black6` `up` drawable, so nothing else is
+## drawn behind them.
 func _setup_frame_style() -> void:
 	if panel != null:
 		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
-	var left := get_node_or_null("Panel/Frame/Layout/Left") as Control
+	var left := get_node_or_null("Panel/Frame/Layout/Left") as PanelContainer
 	var pane: Variant = MindWidgets.icon_texture("pane-2")
 	if left != null and pane is Texture2D:
 		var box := StyleBoxTexture.new()
 		box.texture = pane
 		for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
 			box.set_texture_margin(side, 12.0)
-		left.draw.connect(func() -> void: left.draw_style_box(box, Rect2(Vector2.ZERO, left.size)))
-		left.queue_redraw()
-	if categories != null:
-		categories.draw.connect(func() -> void:
-			categories.draw_rect(Rect2(Vector2.ZERO, categories.size), MindStyles.BLACK_6))
-		categories.queue_redraw()
+		box.content_margin_left = 4.0
+		box.content_margin_top = 0.0
+		box.content_margin_right = 4.0
+		box.content_margin_bottom = 4.0
+		left.add_theme_stylebox_override("panel", box)
+	if block_scroll != null:
+		_apply_small_pane(block_scroll.get_v_scroll_bar())
 	if layout != null:
 		layout.add_theme_constant_override("separation", 0)
+		# `new Image(Styles.black6)` filler: `colspan(2).growX().growY()
+		# .padTop(-3f)` drawn `height - 3`, i.e. from the column top down to the
+		# first category row.
+		layout.draw.connect(func() -> void:
+			if categories == null or categories.position.y <= 3.0:
+				return
+			layout.draw_rect(
+				Rect2(Vector2(categories.position.x, 0.0), Vector2(categories.size.x, categories.position.y)),
+				MindStyles.BLACK_6
+			))
+		# The filler follows the column's placement; a container re-sort does
+		# not redraw the layout by itself.
+		if categories != null:
+			categories.item_rect_changed.connect(layout.queue_redraw)
+		layout.queue_redraw()
 
 
-## `Tex.buttonEdge2` ninepatch frame for the top table (splits 12, margin 5).
+## `Styles.smallPane` (`Styles.java:368-371`): `vScroll = clear` (no track) and
+## the 12 px `scroll-knob-vertical-thin` knob; Arc takes the knob's width out of
+## the pane area (`ScrollPane.layout`), so the 194 px block table sits left of a
+## 12 px bar inside the 206 px pane.
+func _apply_small_pane(bar: VScrollBar) -> void:
+	if bar == null:
+		return
+	var track := StyleBoxEmpty.new()
+	track.content_margin_left = 6.0
+	track.content_margin_right = 6.0
+	bar.add_theme_stylebox_override("scroll", track)
+	bar.add_theme_stylebox_override("scroll_focus", track)
+	var texture := MindWidgets.icon_texture("scroll-knob-vertical-thin")
+	if texture == null:
+		return
+	var knob := StyleBoxTexture.new()
+	knob.texture = texture
+	knob.content_margin_left = 6.0
+	knob.content_margin_right = 6.0
+	knob.content_margin_top = 0.0
+	knob.content_margin_bottom = 0.0
+	for slot in ["grabber", "grabber_highlight", "grabber_pressed"]:
+		bar.add_theme_stylebox_override(slot, knob)
+
+
+## `Tex.buttonEdge2` 9-patch padding (splits 12) and the inner `topTable
+## .margin(5)` (`PlacementFragment.java:358`): content starts 17 px in.
+const TOP_PAD := 12.0
+const TOP_MARGIN := 5.0
+
+
+## `Tex.buttonEdge2` ninepatch frame for the top table (splits 12). Arc pads the
+## outer table by the 9-patch's 12 px splits and the inner `topTable` adds
+## `margin(5)`, so content starts 17 px in.
 func _setup_top_style() -> void:
 	if top_table == null:
 		return
@@ -274,14 +330,22 @@ func _setup_top_style() -> void:
 		return
 	var box := StyleBoxTexture.new()
 	box.texture = texture
-	box.texture_margin_left = 12.0
-	box.texture_margin_top = 12.0
-	box.texture_margin_right = 12.0
-	box.texture_margin_bottom = 12.0
-	box.content_margin_left = 5.0
-	box.content_margin_top = 5.0
-	box.content_margin_right = 5.0
-	box.content_margin_bottom = 5.0
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		box.set_texture_margin(side, TOP_PAD)
+		box.set_content_margin(side, TOP_PAD + TOP_MARGIN)
+	top_table.add_theme_stylebox_override("panel", box)
+
+
+## Sets the top table's bottom content margin (`topTable.marginBottom`); a new
+## box per change so the PanelContainer re-reads its minimum size.
+func _set_top_bottom_margin(margin: float) -> void:
+	if top_table == null or not top_table.has_theme_stylebox_override("panel"):
+		return
+	var current := top_table.get_theme_stylebox("panel")
+	if current == null or is_equal_approx(current.content_margin_bottom, margin):
+		return
+	var box := current.duplicate() as StyleBox
+	box.content_margin_bottom = margin
 	top_table.add_theme_stylebox_override("panel", box)
 
 
@@ -560,11 +624,11 @@ func _update_top_table() -> void:
 	_rebuild_top(display, hover)
 
 
-## `visible(this::hasInfoBox)` on the top table and its `Pal.gray` rule.
+## `visible(this::hasInfoBox)` on the top table. The `Pal.gray` rule below it
+## (`frame.image().color(Pal.gray).colspan(3).height(4)`, `:430`) has no
+## visibility gate: it always caps the palette.
 func _set_top_visible(shown: bool) -> void:
 	top_table.visible = shown
-	if top_divider != null:
-		top_divider.visible = shown
 
 
 ## The world tile under the cursor, or `null` while any UI holds the mouse
@@ -603,6 +667,7 @@ func _rebuild_top(display: String, hover: Dictionary) -> void:
 	_top_amounts.clear()
 	_top_requirements.clear()
 	_hover_bars.clear()
+	_set_top_bottom_margin(TOP_PAD + TOP_MARGIN)
 	if display.is_empty():
 		_build_hover_row(hover)
 		return
@@ -616,7 +681,8 @@ func _build_block_header(display: String) -> void:
 	# code-instantiated: header cells are rebuilt per displayed block
 	# (`topTable.clear()`; plan 14 §3.5).
 	var header := HBoxContainer.new()
-	header.add_theme_constant_override("separation", 4)
+	# `.padLeft(5)` on the name label; the spacer/`?` gaps vanish in `growX`.
+	header.add_theme_constant_override("separation", 5)
 	var icon := TextureRect.new()
 	icon.custom_minimum_size = Vector2(32, 32)
 	# `.size(8 * 4)` + `Scaling.fit`: never the texture's native size.
@@ -634,18 +700,63 @@ func _build_block_header(display: String) -> void:
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.custom_minimum_size = Vector2(190, 0)
 	label.size_flags_horizontal = Control.SIZE_FILL
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	label.text = MindWidgets.markup("@block.%s.name" % display) + _key_combo(display)
 	header.add_child(label)
 	var spacer := Control.new()
 	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_child(spacer)
+	# `header.button("?", Styles.flatBordert, ...).size(8 * 5).padTop(-5)
+	# .padRight(-5)` (`PlacementFragment.java:385-389`): the cell reserves
+	# 35x35 and the 40 px button pokes 5 px into the top/right table margin.
+	var info_cell := Control.new()
+	info_cell.custom_minimum_size = Vector2(35, 35)
+	info_cell.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	info_cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var info := MindWidgets.button("?")
 	info.name = "blockinfo"
-	info.custom_minimum_size = Vector2(40, 40)
+	_apply_flat_bordered(info)
+	info.position = Vector2(0, -5)
+	info.size = Vector2(40, 40)
 	info.tooltip_text = _bundle("database", "Database")
 	info.pressed.connect(_open_content_info.bind(display))
-	header.add_child(info)
+	info_cell.add_child(info)
+	header.add_child(info_cell)
 	top_rows.add_child(header)
+
+
+## `Styles.flatBordert` (`Styles.java:174-181`): `up = pane` (the gray-bordered
+## `black6` 9-patch, a small square), `over = flatDownBase` (the accent-framed
+## 9-patch), `down = flatOver` (#454545).
+func _apply_flat_bordered(button: Button) -> void:
+	var up := _nine_patch_box("pane")
+	if up != null:
+		button.add_theme_stylebox_override("normal", up)
+		button.add_theme_stylebox_override("disabled", up)
+	var over := _nine_patch_box("flat-down-base")
+	if over != null:
+		button.add_theme_stylebox_override("hover", over)
+	var down := StyleBoxFlat.new()
+	down.bg_color = Color8(0x45, 0x45, 0x45)
+	button.add_theme_stylebox_override("pressed", down)
+	button.add_theme_stylebox_override("hover_pressed", down)
+	button.add_theme_color_override("font_color", Color.WHITE)
+	button.add_theme_color_override("font_hover_color", Color.WHITE)
+	button.add_theme_color_override("font_pressed_color", Color.WHITE)
+
+
+## A 12 px-split atlas 9-patch with no content padding (the `?` label centres
+## in the 40 px cell).
+func _nine_patch_box(region: String) -> StyleBoxTexture:
+	var texture: Variant = MindWidgets.icon_texture(region)
+	if not (texture is Texture2D):
+		return null
+	var box := StyleBoxTexture.new()
+	box.texture = texture
+	for side in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		box.set_texture_margin(side, 12.0)
+		box.set_content_margin(side, 0.0)
+	return box
 
 
 ## `?` button: `ui.content.show(displayBlock)` (`ContentInfoDialog`).
@@ -665,6 +776,15 @@ func _build_requirement_rows(display: String) -> void:
 	var parsed: Variant = JSON.parse_string(str(host.call("block_requirements_json", display)))
 	if not (parsed is Array):
 		return
+	# `topTable.table(req -> ...).growX().left().margin(3)` (`:398-421`): the
+	# requirement table keeps its 3 px margin even when it has no rows.
+	var req_margin := MarginContainer.new()
+	for side in ["margin_left", "margin_top", "margin_right", "margin_bottom"]:
+		req_margin.add_theme_constant_override(side, 3)
+	var req := VBoxContainer.new()
+	req.add_theme_constant_override("separation", 0)
+	req_margin.add_child(req)
+	top_rows.add_child(req_margin)
 	for entry_variant in parsed as Array:
 		if not (entry_variant is Dictionary):
 			continue
@@ -686,7 +806,7 @@ func _build_requirement_rows(display: String) -> void:
 		var amount_label := MindRichLabel.new()
 		amount_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		line.add_child(amount_label)
-		top_rows.add_child(line)
+		req.add_child(line)
 		_top_amounts.append(amount_label)
 		_top_requirements.append(entry)
 
@@ -734,7 +854,8 @@ func _build_hover_row(hover: Dictionary) -> void:
 	# code-instantiated: the hover row follows the cursor's target
 	# (`topTable.clear()`; plan 14 §3.5).
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 4)
+	# `labelWrap(...).left().width(190f).padLeft(5)` (`BuildingComp.java:1567`).
+	row.add_theme_constant_override("separation", 5)
 	var icon := TextureRect.new()
 	icon.custom_minimum_size = Vector2(32, 32)
 	# `.size(8 * 4)` + `Scaling.fit`: never the texture's native size.
@@ -748,6 +869,9 @@ func _build_hover_row(hover: Dictionary) -> void:
 	var label := MindRichLabel.new()
 	label.custom_minimum_size = Vector2(190, 0)
 	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Arc cells centre their element vertically: the one-line name sits on
+	# the 32 px icon's midline.
+	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var label_key := str(hover.get("label", ""))
 	if label_key.is_empty():
 		label_key = "block.%s.name" % str(hover.get("name", ""))
@@ -758,6 +882,11 @@ func _build_hover_row(hover: Dictionary) -> void:
 	# `building_bars_json` gates the team).
 	if str(hover.get("kind", "")) == "building" and _hover_tile.x >= 0:
 		_rebuild_hover_bars()
+		# `table.marginBottom(-5)` closes the building's bar branch
+		# (`BuildingComp.java:1655`): the inner table's bottom margin flips
+		# from 5 to -5, so only 7 px of the 9-patch padding remain under the
+		# bars.
+		_set_top_bottom_margin(TOP_PAD - 5.0)
 
 
 ## `Block.setBars` rows from `building_bars_json` (`Block.java:709-760`): one
@@ -1287,6 +1416,10 @@ func _rebuild() -> void:
 		# `Button.resizeImage(iconMed)`: 46px cell, 32px centred icon.
 		button.expand_icon = true
 		button.add_theme_constant_override("icon_max_width", 32)
+		# Arc's `ImageButton` centres its image cell; Godot's default left
+		# icon alignment slid the icon off the `buttonSelect` frame.
+		button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		button.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
 		if button.icon == null:
 			button.text = label
 		button.pressed.connect(func() -> void:

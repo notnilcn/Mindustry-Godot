@@ -23,8 +23,8 @@ anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -312.0
-offset_top = -272.0
+offset_left = -314.0
+offset_top = -254.0
 grow_horizontal = 0
 grow_vertical = 0
 theme_type_variation = &"black6"
@@ -39,10 +39,9 @@ layout_mode = 2
 
 [node name="Rows" type="VBoxContainer" parent="Panel/Frame/TopTable"]
 layout_mode = 2
-theme_override_constants/separation = 2
+theme_override_constants/separation = 0
 
 [node name="TopDivider" type="ColorRect" parent="Panel/Frame"]
-visible = false
 custom_minimum_size = Vector2(0, 4)
 layout_mode = 2
 color = Color(0.271, 0.271, 0.271, 1)
@@ -51,34 +50,49 @@ color = Color(0.271, 0.271, 0.271, 1)
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="Left" type="VBoxContainer" parent="Panel/Frame/Layout"]
+[node name="Left" type="PanelContainer" parent="Panel/Frame/Layout"]
 layout_mode = 2
 size_flags_horizontal = 3
-theme_override_constants/separation = 4
 
-[node name="Scroll" type="ScrollContainer" parent="Panel/Frame/Layout/Left"]
+[node name="Rows" type="VBoxContainer" parent="Panel/Frame/Layout/Left"]
 layout_mode = 2
-custom_minimum_size = Vector2(204, 194)
+theme_override_constants/separation = 0
+
+[node name="Scroll" type="ScrollContainer" parent="Panel/Frame/Layout/Left/Rows"]
+custom_minimum_size = Vector2(206, 194)
+layout_mode = 2
 size_flags_vertical = 3
+horizontal_scroll_mode = 0
 
-[node name="Blocks" type="GridContainer" parent="Panel/Frame/Layout/Left/Scroll" unique_id=1692868212]
+[node name="Pad" type="MarginContainer" parent="Panel/Frame/Layout/Left/Rows/Scroll"]
 layout_mode = 2
-custom_minimum_size = Vector2(196, 0)
-size_flags_horizontal = 3
+size_flags_horizontal = 6
+size_flags_vertical = 0
+theme_override_constants/margin_left = 5
+theme_override_constants/margin_top = 5
+theme_override_constants/margin_right = 5
+theme_override_constants/margin_bottom = 5
+
+[node name="Blocks" type="GridContainer" parent="Panel/Frame/Layout/Left/Rows/Scroll/Pad" unique_id=1692868212]
+layout_mode = 2
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
 columns = 4
 
-[node name="Divider" type="ColorRect" parent="Panel/Frame/Layout/Left"]
+[node name="Divider" type="ColorRect" parent="Panel/Frame/Layout/Left/Rows"]
 custom_minimum_size = Vector2(0, 4)
 layout_mode = 2
-color = Color(0.271, 0.294, 0.329, 1)
+color = Color(0.271, 0.271, 0.271, 1)
 
-[node name="InputBar" type="HBoxContainer" parent="Panel/Frame/Layout/Left"]
+[node name="InputBar" type="HBoxContainer" parent="Panel/Frame/Layout/Left/Rows"]
 layout_mode = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 0
 
 [node name="Categories" type="GridContainer" parent="Panel/Frame/Layout" unique_id=110755601]
 layout_mode = 2
-size_flags_vertical = 0
+size_flags_vertical = 8
+theme_override_constants/h_separation = 0
+theme_override_constants/v_separation = 0
 columns = 2
 
 [node name="CommandPanel" type="PanelContainer" parent="Panel/Frame"]
