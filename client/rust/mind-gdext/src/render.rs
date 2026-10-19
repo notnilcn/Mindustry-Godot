@@ -17,8 +17,8 @@ use godot::builtin::{
 use godot::classes::canvas_item::TextureFilter;
 use godot::classes::notify::{CanvasItemNotification, NodeNotification};
 use godot::classes::{
-    Camera2D, CanvasGroup, CanvasLayer, INode, INode2D, Image, ImageTexture, Node, Node2D,
-    ShaderMaterial, Viewport,
+    Camera2D, CanvasGroup, CanvasLayer, INode, INode2D, Image, ImageTexture, Material, Node,
+    Node2D, ShaderMaterial, Time, Viewport,
 };
 use godot::obj::{Base, NewGd, WithBaseField};
 use godot::prelude::*;
@@ -316,6 +316,15 @@ pub struct MindWorldRenderer {
     bloom_material: Option<Gd<ShaderMaterial>>,
     /// Last adopted `(bloom, bloomintensity, bloomblur)`.
     bloom_setting: Option<(bool, i32, i32)>,
+    /// `CacheLayer.water` effect-buffer capture (`CacheLayer.java:97-111`):
+    /// the water floor band bakes inside this `CanvasGroup` and the
+    /// `water_group` material blits it like `effectBuffer.blit(Shaders.water)`.
+    water_group: Option<Gd<CanvasGroup>>,
+    /// The `water_group.gdshader` material; absent when the shader failed to
+    /// load, which leaves the plain floor bake.
+    water_material: Option<Gd<ShaderMaterial>>,
+    /// Last adopted `animatedwater` (`Renderer.animateWater`).
+    water_animated: Option<bool>,
     /// Last adopted `linear` value (world + UI texture filter).
     linear_setting: Option<bool>,
     planet: PlanetRenderer,
@@ -388,6 +397,9 @@ impl INode2D for MindWorldRenderer {
             bloom_group: None,
             bloom_material: None,
             bloom_setting: None,
+            water_animated: None,
+            water_group: None,
+            water_material: None,
             linear_setting: None,
             planet: PlanetRenderer::new(),
             menu: MenuRenderer::new(),
@@ -717,6 +729,46 @@ impl MindWorldRenderer {
         }
     }
 
+    /// `CacheLayer.ShaderLayer.begin/end` (`CacheLayer.java:97-111`): with
+    /// `renderer.animateWater` the water cache is captured and blitted through
+    /// `Shaders.water`; otherwise it draws plain. Refreshes the
+    /// `Shaders.SurfaceShader.apply` uniforms (`Shaders.java:357-360`) per
+    /// frame.
+    fn sync_water(&mut self, view: &CameraView) {
+        let (Some(mut group), Some(material)) =
+            (self.water_group.clone(), self.water_material.clone())
+        else {
+            return;
+        };
+        let animated = crate::settings_hub::row_bool("animatedwater");
+        if self.water_animated != Some(animated) {
+            if animated {
+                group.set_material(&material.clone().upcast::<Material>());
+            } else {
+                group.set_material(Gd::<Material>::null_arg());
+            }
+            self.water_animated = Some(animated);
+        }
+        if !animated {
+            return;
+        }
+        let mut material = material;
+        // `u_campos = camera.position - camera.size / 2` (bottom-left; the
+        // world is y-up), `u_resolution = camera.size`, `u_time = Time.time`.
+        material.set_shader_parameter(
+            "u_campos",
+            &Vector2::new(view.x - view.w / 2.0, view.y - view.h / 2.0).to_variant(),
+        );
+        material.set_shader_parameter(
+            "u_resolution",
+            &Vector2::new(view.w.max(1.0), view.h.max(1.0)).to_variant(),
+        );
+        material.set_shader_parameter(
+            "u_time",
+            &(Time::singleton().get_ticks_msec() as f32 * 0.06).to_variant(),
+        );
+    }
+
     /// `SettingsMenuDialog.java:540-550`: the `linear` checkbox re-filters
     /// every atlas page (`Core.atlas.getTextures()`). The port approximates a
     /// texture-level filter with the canvas-item filter inherited by the world
@@ -779,8 +831,25 @@ impl MindWorldRenderer {
             group.set_material(&material);
             self.bloom_material = Some(material);
         }
-        let band_nodes = self.floor_band_nodes();
+        let mut band_nodes = self.floor_band_nodes();
+        // `CacheLayer.water` is a `ShaderLayer(Shaders.water)`
+        // (`CacheLayer.java:63`): its floor cache draws into the effect buffer
+        // and blits through the water shader. The water meshes bake into a
+        // `CanvasGroup` under the water band whose material is that blit.
+        self.water_group = None;
+        self.water_material = None;
+        self.water_animated = None;
+        if let Some(band) = self.band_node_at(BandKey::floor(CacheLayerId::Water)) {
+            let group = self.canvas_group(band, "WaterGroup");
+            if let Some(slot) = band_nodes.get_mut(CacheLayerId::Water.id() as usize) {
+                *slot = group.clone();
+            }
+            self.water_group = group.try_cast::<CanvasGroup>().ok();
+            self.water_material = self.group_material("water_group");
+        }
         self.floor = Some(FloorRenderer::new(host.clone(), assets.clone(), band_nodes));
+        let view = self.camera_view();
+        self.sync_water(&view);
         if let (Some(shadow_band), Some(dark_band)) = (
             self.band_node_at(BandKey::base(Layer::BlockUnder)),
             self.band_node_at(BandKey::base(Layer::Darkness)),
@@ -1264,6 +1333,7 @@ impl MindWorldRenderer {
         // `mesh_rebuilds` is cumulative per pass; each pass reports its own boot
         // total, so the frame total is the sum (never an accumulation).
         let mut mesh_rebuilds = 0i64;
+        self.sync_water(&view);
         if let Some(floor) = self.floor.as_mut() {
             floor.update(&view);
             let floor_stats = floor.stats();
