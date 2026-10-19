@@ -26,20 +26,26 @@ color = Color(0, 0, 0, 1)
 
 [node name="MapView" parent="." unique_id=345889062 instance=ExtResource("1_view")]
 layout_mode = 1
-offset_left = 174.0
-offset_right = -310.0
+offset_left = 181.0
+offset_top = 3.0
+offset_right = -315.0
+offset_bottom = -3.0
 
 [node name="LeftTools" type="VBoxContainer" parent="." unique_id=1580297551]
 layout_mode = 1
 anchors_preset = 9
 anchor_bottom = 1.0
-offset_right = 174.0
+offset_left = 3.0
+offset_top = 3.0
+offset_right = 181.0
+offset_bottom = -3.0
 grow_vertical = 2
 theme_override_constants/separation = 0
 
 [node name="ToolGrid" type="GridContainer" parent="LeftTools" unique_id=1806637987]
 layout_mode = 2
-theme_override_constants/h_separation = 0
+size_flags_horizontal = 8
+theme_override_constants/h_separation = 1
 theme_override_constants/v_separation = 0
 columns = 3
 
@@ -112,23 +118,25 @@ layout_mode = 2
 theme_type_variation = &"flati"
 
 [node name="ToolSeparator" type="ColorRect" parent="LeftTools" unique_id=386471429]
-custom_minimum_size = Vector2(174, 4)
+custom_minimum_size = Vector2(177, 4)
 layout_mode = 2
+size_flags_horizontal = 8
 mouse_filter = 2
 color = Color(0.27058825, 0.27058825, 0.27058825, 1)
 
 [node name="TeamGrid" type="GridContainer" parent="LeftTools" unique_id=1096618317]
 layout_mode = 2
-theme_override_constants/h_separation = 0
+size_flags_horizontal = 8
+theme_override_constants/h_separation = 1
 theme_override_constants/v_separation = 0
 columns = 3
 
 [node name="BrushStack" type="MarginContainer" parent="LeftTools" unique_id=1663879839]
 layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 9
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 15
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 8
 
 [node name="BrushSlider" type="HSlider" parent="LeftTools/BrushStack" unique_id=1864859013]
 custom_minimum_size = Vector2(154, 42)
@@ -144,27 +152,35 @@ horizontal_alignment = 1
 vertical_alignment = 1
 
 [node name="BrushUnderline" type="ColorRect" parent="LeftTools" unique_id=1304073663]
-custom_minimum_size = Vector2(174, 3)
+custom_minimum_size = Vector2(0, 4)
 layout_mode = 2
 mouse_filter = 2
 color = Color(0.27058825, 0.27058825, 0.27058825, 1)
 
-[node name="ShowChecks" type="VBoxContainer" parent="LeftTools" unique_id=1936155251]
+[node name="ChecksPad" type="MarginContainer" parent="LeftTools" unique_id=1936155252]
 layout_mode = 2
+theme_override_constants/margin_left = 2
+theme_override_constants/margin_top = 2
+theme_override_constants/margin_right = 2
+theme_override_constants/margin_bottom = 2
 
-[node name="ShowBlocks" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=1228478403]
+[node name="ShowChecks" type="VBoxContainer" parent="LeftTools/ChecksPad" unique_id=1936155251]
+layout_mode = 2
+theme_override_constants/separation = 4
+
+[node name="ShowBlocks" type="CheckBox" parent="LeftTools/ChecksPad/ShowChecks" unique_id=1228478403]
 layout_mode = 2
 theme_type_variation = &"defaultCheck"
 button_pressed = true
 text = "Show Blocks"
 
-[node name="ShowTerrain" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=1248652680]
+[node name="ShowTerrain" type="CheckBox" parent="LeftTools/ChecksPad/ShowChecks" unique_id=1248652680]
 layout_mode = 2
 theme_type_variation = &"defaultCheck"
 button_pressed = true
 text = "Show Terrain"
 
-[node name="ShowFloor" type="CheckBox" parent="LeftTools/ShowChecks" unique_id=2004911415]
+[node name="ShowFloor" type="CheckBox" parent="LeftTools/ChecksPad/ShowChecks" unique_id=2004911415]
 layout_mode = 2
 theme_type_variation = &"defaultCheck"
 button_pressed = true
@@ -182,38 +198,46 @@ anchors_preset = 11
 anchor_left = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = -310.0
+offset_left = -315.0
+offset_top = 3.0
+offset_right = -3.0
+offset_bottom = -3.0
 grow_horizontal = 0
 grow_vertical = 2
-theme_override_constants/separation = 4
+theme_override_constants/separation = 0
 
-[node name="SearchRow" type="HBoxContainer" parent="RightPalette" unique_id=1525797150]
+[node name="SearchPad" type="MarginContainer" parent="RightPalette" unique_id=1525797151]
+layout_mode = 2
+theme_override_constants/margin_left = 6
+theme_override_constants/margin_top = -2
+theme_override_constants/margin_right = -2
+theme_override_constants/margin_bottom = -2
+
+[node name="SearchRow" type="HBoxContainer" parent="RightPalette/SearchPad" unique_id=1525797150]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="SearchIcon" type="Label" parent="RightPalette/SearchRow" unique_id=1562615358]
+[node name="SearchIcon" type="Label" parent="RightPalette/SearchPad/SearchRow" unique_id=1562615358]
 layout_mode = 2
 mouse_filter = 2
 vertical_alignment = 1
 
-[node name="SearchField" type="LineEdit" parent="RightPalette/SearchRow" unique_id=681532099]
+[node name="SearchField" type="LineEdit" parent="RightPalette/SearchPad/SearchRow" unique_id=681532099]
 layout_mode = 2
 size_flags_horizontal = 3
+theme_type_variation = &"defaultField"
 placeholder_text = "Search..."
 
-[node name="SelectedLabel" type="Label" parent="RightPalette" unique_id=1992759346]
+[node name="SelectedPanel" type="PanelContainer" parent="RightPalette" unique_id=980918996]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="SelectedLabel" type="Label" parent="RightPalette/SelectedPanel" unique_id=1992759346]
 custom_minimum_size = Vector2(200, 0)
 layout_mode = 2
 size_flags_horizontal = 4
 text = "-"
-horizontal_alignment = 1
 autowrap_mode = 2
-
-[node name="SelectedUnderline" type="ColorRect" parent="RightPalette" unique_id=980918996]
-custom_minimum_size = Vector2(0, 3)
-layout_mode = 2
-mouse_filter = 2
-color = Color(0.27058825, 0.27058825, 0.27058825, 1)
 
 [node name="ConfigPanel" type="VBoxContainer" parent="RightPalette" unique_id=1724509812]
 visible = false

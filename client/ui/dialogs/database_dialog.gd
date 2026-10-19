@@ -13,6 +13,9 @@ extends MindDialog
 const ALL_TAB := "sun"
 ## `Vars.iconMed` (grid cell size).
 const ICON_MED := 32.0
+## `Styles.defaultPane` bar width (`MindThemeBuilder.SCROLL_BAR_WIDTH`): how
+## much narrower than its pref Arc lays out `all` (see `_build`).
+const ARC_BAR_SQUEEZE := 24
 ## `Pal.gray` (#454545): tag headers and lock icons.
 const PAL_GRAY := Color(0x45 / 255.0, 0x45 / 255.0, 0x45 / 255.0, 1.0)
 
@@ -54,7 +57,8 @@ func _build() -> void:
 	# code-instantiated: the search row is part of the dialog body built in code.
 	var search_row := HBoxContainer.new()
 	search_row.add_theme_constant_override("separation", 8)
-	search_row.add_child(MindWidgets.glyph("zoom", 22))
+	# `s.image(Icon.zoom)` at its natural size (`Fonts.icon` is a 30 px font).
+	search_row.add_child(MindWidgets.glyph("zoom", 30))
 	_search = MindWidgets.field(_t("@players.search"))
 	_search.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_search.text_changed.connect(func(_value: String) -> void: _rebuild())
@@ -62,31 +66,57 @@ func _build() -> void:
 	table.add(search_row).grow_x_axis().set_pad_bottom(4)
 	table.row()
 
+	# `cont.pane(all).scrollX(false)` (`DatabaseDialog.java:64`): only `all`
+	# (tab rail + grid) scrolls; the search row stays above it. The pane cell
+	# neither grows nor fills, so the pane hugs `all` and its scrollbar sits
+	# right beside the grid (java/15-coredb.png), not at the window edge. The
+	# shell's Body is itself a ScrollContainer, so stop it scrolling and let
+	# the pane take the height down to the button row.
+	if body != null:
+		body.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# code-instantiated: the pane wraps the runtime-built `all` table.
+	var pane := MindScroll.new()
+	pane.set_scrolling_disabled(true, false)
+	# code-instantiated: `all` holds the live tab rail and category grid.
+	var all := MindTable.new()
+	all.set_table_top(true)
+	pane.add_child(all)
+	table.add(pane).grow_y_axis()
+
+	# `all.margin(20).marginTop(0f).marginRight(30f)`; `rebuild()` starts `all`
+	# with the tab table (`all.table(t -> ...).row()`, no pad), then the grid.
 	# code-instantiated: the tab rail is the data-driven `checkTabList` planets
 	# (`t.button(..., Styles.clearNoneTogglei, iconMed, ...).size(50f)`, 10 per
 	# row).
 	_tabs = GridContainer.new()
 	_tabs.columns = 10
 	_tabs.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_tabs.add_theme_constant_override("h_separation", 4)
-	table.add(_tabs).pad(4)
-	table.row()
+	_tabs.add_theme_constant_override("h_separation", 0)
+	_tabs.add_theme_constant_override("v_separation", 0)
+	all.add(_tabs).set_pad_left(20).set_pad_right(30)
+	all.row()
 
-	# `all.margin(20).marginTop(0f).marginRight(30f)` inside `cont.pane(all)`:
-	# the grid keeps its natural width (`cols` icon cells) and sits centred
-	# instead of stretching across the viewport.
+	# The grid keeps its natural width (`cols` icon cells). Arc sizes the
+	# pane from `all`'s pref width *before* it knows it scrolls
+	# (`ScrollPane.getPrefWidth` adds the bar only once `scrollY` is set), then
+	# lays `all` out in the area left of the 24 px bar: `all` ends up 24 px
+	# narrower than its pref, so its growX category rules stop 24 px short
+	# while the `sub` tables (min width = the icon grid) keep their width and
+	# run on into the 30 px right margin (java/15-coredb.png: pane
+	# x=133..1019, accent rules 153..964, tag rules to 975, icons 156..986,
+	# knob 995..1018). Godot's pane adds the bar to its minimum width, so the
+	# right margin gives the bar's width back here and the category rule takes
+	# it as extra right padding.
 	# code-instantiated: the category/tag grid is live content, not scene state.
 	var margin := MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_right", 30)
+	margin.add_theme_constant_override("margin_right", 30 - ARC_BAR_SQUEEZE)
 	margin.add_theme_constant_override("margin_top", 0)
 	margin.add_theme_constant_override("margin_bottom", 20)
-	margin.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_grid = VBoxContainer.new()
 	_grid.add_theme_constant_override("separation", 0)
-	_grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	margin.add_child(_grid)
-	table.add(margin).grow_y_axis()
+	all.add(margin).grow_x_axis()
 	_load_view()
 
 
@@ -200,7 +230,7 @@ func _rebuild() -> void:
 		category_label.modulate = MindStyles.ACCENT
 		_grid.add_child(category_label)
 		# `all.image().pad(5).padLeft(0).padRight(0).height(3).color(Pal.accent).growX()`.
-		_grid.add_child(_padded(_divider(MindStyles.ACCENT), 0, 5, 0, 5))
+		_grid.add_child(_padded(_divider(MindStyles.ACCENT), 0, 5, ARC_BAR_SQUEEZE, 5))
 		# `all.table(sub -> ...).growX().left().padBottom(10)`.
 		# code-instantiated: one section per category with live tag rows.
 		var sub := VBoxContainer.new()

@@ -28,6 +28,20 @@ const TOOL_SIZE := 58.0
 ## `button.resizeImage(8 * 4f)`.
 const BLOCK_BUTTON_SIZE := 50.0
 const BLOCK_ICON_SIZE := 32.0
+## `search.image(Icon.zoom)`: `Fonts.icon` glyphs are 30 px (`Fonts.java:78-82`).
+const SEARCH_ICON_SIZE := 30
+## `Tex.underline` padding (the 9-patch's 12 px pads) around the block name.
+const UNDERLINE_PAD := 12.0
+## Arc's line box is 2 px taller than Godot's for the same font (21 vs 19 px),
+## and Arc centres the glyphs in it: java/18-editorview.png has the name table
+## at y=44..89 ("Stone" cap top at 62, rule 85-88), a 45 px row of
+## 12 + 21 + 12. Godot's 19 px line gets 14/12 to land the same pixels (the
+## search field above is the same 45 px `Styles.defaultField` row, themed in
+## `MindThemeBuilder`).
+const UNDERLINE_PAD_TOP := 14.0
+const UNDERLINE_PAD_BOTTOM := 12.0
+## `scroll-knob-vertical-thin` width (`Styles.smallPane`).
+const SMALL_PANE_BAR := 12.0
 ## `_last_block` value that never matches a block name (forces a refresh).
 const NO_BLOCK := "<none>"
 
@@ -50,8 +64,8 @@ var _last_block := NO_BLOCK
 var _pending_exit := false
 
 @onready var _tool_grid: GridContainer = $LeftTools/ToolGrid
-@onready var _search: LineEdit = $RightPalette/SearchRow/SearchField
-@onready var _selected: Label = $RightPalette/SelectedLabel
+@onready var _search: LineEdit = $RightPalette/SearchPad/SearchRow/SearchField
+@onready var _selected: Label = $RightPalette/SelectedPanel/SelectedLabel
 @onready var _config_panel: VBoxContainer = $RightPalette/ConfigPanel
 @onready var _config_label: Label = $RightPalette/ConfigPanel/ConfigLabel
 @onready var _block_grid: GridContainer = $RightPalette/BlockScroll/BlockGrid
@@ -94,15 +108,52 @@ func _apply_labels() -> void:
 		var button: Button = _tool_grid.get_node(button_name)
 		_set_glyph(button, tool, tool)
 		_mode_labels[tool] = _add_mode_label(button)
-	var search_icon: Label = $RightPalette/SearchRow/SearchIcon
+	# `search.image(Icon.zoom).padRight(8)` (MapEditorDialog.java:812): the
+	# icon at its natural size (`Fonts.icon` is a 30 px font).
+	var search_icon: Label = $RightPalette/SearchPad/SearchRow/SearchIcon
 	search_icon.text = MindIcons.glyph("zoom")
 	MindIcons.apply_icon_font(search_icon)
+	search_icon.add_theme_font_size_override("font_size", SEARCH_ICON_SIZE)
 	_search.placeholder_text = _t("@players.search")
+	_apply_block_panel_styles()
 	($LeftTools/BrushStack/BrushLabel as Label).text = _t("@editor.brush")
-	($LeftTools/ShowChecks/ShowBlocks as Button).text = _t("@editor.showblocks")
-	($LeftTools/ShowChecks/ShowTerrain as Button).text = _t("@editor.showterrain")
-	($LeftTools/ShowChecks/ShowFloor as Button).text = _t("@editor.showfloor")
+	($LeftTools/ChecksPad/ShowChecks/ShowBlocks as Button).text = _t("@editor.showblocks")
+	($LeftTools/ChecksPad/ShowChecks/ShowTerrain as Button).text = _t("@editor.showterrain")
+	($LeftTools/ChecksPad/ShowChecks/ShowFloor as Button).text = _t("@editor.showfloor")
 	_set_icon_text($LeftTools/CenterButton, "move", _t("@editor.center"))
+
+
+## `addBlockSelection` (MapEditorDialog.java:797-832) drawables the theme has
+## no type for:
+## - `cont.table(Tex.underline, extra -> extra.labelWrap(...).width(200f)
+##   .center()).growX()`: the selected-block name sits in a full-width
+##   `underline` table (12 px padding, 4 px #454545 bottom rule); the 200 px
+##   label is centred but its text is left-aligned (Arc `Label` default).
+## - `new ScrollPane(blockSelection, Styles.smallPane)`: `vScroll = clear`, the
+##   knob the 12 px `scroll-knob-vertical-thin` region (`Styles.java:368-371`).
+##   Arc lays the bar beside the 6x50 px grid, so the pane is 312 px wide.
+func _apply_block_panel_styles() -> void:
+	var underline := MindWidgets.icon_texture("underline")
+	if underline != null:
+		var box := StyleBoxTexture.new()
+		box.texture = underline
+		box.set_texture_margin_all(12.0)
+		box.set_content_margin_all(UNDERLINE_PAD)
+		box.content_margin_top = UNDERLINE_PAD_TOP
+		box.content_margin_bottom = UNDERLINE_PAD_BOTTOM
+		($RightPalette/SelectedPanel as PanelContainer).add_theme_stylebox_override("panel", box)
+	var bar := ($RightPalette/BlockScroll as ScrollContainer).get_v_scroll_bar()
+	var track := StyleBoxEmpty.new()
+	track.content_margin_left = SMALL_PANE_BAR * 0.5
+	track.content_margin_right = SMALL_PANE_BAR * 0.5
+	bar.add_theme_stylebox_override("scroll", track)
+	bar.add_theme_stylebox_override("scroll_focus", track)
+	var thin := MindWidgets.icon_texture("scroll-knob-vertical-thin")
+	if thin != null:
+		var knob := StyleBoxTexture.new()
+		knob.texture = thin
+		for slot in ["grabber", "grabber_highlight", "grabber_pressed"]:
+			bar.add_theme_stylebox_override(slot, knob)
 
 
 ## `mid.button("@editor.center", Icon.move, Styles.flatt, view::center)
@@ -293,13 +344,13 @@ func _bind_toolbar() -> void:
 
 
 func _bind_toggles() -> void:
-	$LeftTools/ShowChecks/ShowBlocks.toggled.connect(
+	$LeftTools/ChecksPad/ShowChecks/ShowBlocks.toggled.connect(
 		func(pressed: bool) -> void: _call("set_show_buildings", pressed)
 	)
-	$LeftTools/ShowChecks/ShowTerrain.toggled.connect(
+	$LeftTools/ChecksPad/ShowChecks/ShowTerrain.toggled.connect(
 		func(pressed: bool) -> void: _call("set_show_terrain", pressed)
 	)
-	$LeftTools/ShowChecks/ShowFloor.toggled.connect(
+	$LeftTools/ChecksPad/ShowChecks/ShowFloor.toggled.connect(
 		func(pressed: bool) -> void: _call("set_show_floor", pressed)
 	)
 
