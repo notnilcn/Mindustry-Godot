@@ -49,7 +49,11 @@ vec3 srgb_to_linear(vec3 c) {
 	return mix(hi, lo, lessThan(c, vec3(0.04045)));
 }
 
+// `planet.vert` always emits alpha 1 (`vec4(..., 1.0) * vec4(..., 1.0)`). Writing
+// ALPHA would move the body into Godot's transparent pass, where it stops
+// writing depth; Java draws it opaque with `Gl.depthMask(true)`
+// (`PlanetRenderer.java:49-50`), so the globe occludes the orbit loop and the
+// far-side sector overlays.
 void fragment() {
 	ALBEDO = srgb_to_linear(max(v_col.rgb, vec3(0.0)));
-	ALPHA = v_col.a;
 }
