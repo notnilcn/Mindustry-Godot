@@ -158,18 +158,18 @@ func _build_tabs() -> void:
 	var tabs: Array = _view.get("tabs", [])
 	for index in tabs.size():
 		var tab: Dictionary = tabs[index]
-		var name := str(tab.get("name", ""))
+		var tab_name := str(tab.get("name", ""))
 		var is_all := bool(tab.get("is_all", false))
 		var label := _tab_label(tab, is_all)
 		var color := Color.WHITE if is_all else _hex_color(str(tab.get("color", "")))
 		var icon_name := str(tab.get("icon", ""))
 		var button := Button.new()
-		button.name = "tab-%s" % name
+		button.name = "tab-%s" % tab_name
 		button.theme_type_variation = "clearNoneTogglei"
 		button.tooltip_text = label
 		button.toggle_mode = true
 		button.button_group = group
-		button.button_pressed = name == _tab
+		button.button_pressed = tab_name == _tab
 		button.custom_minimum_size = Vector2(50, 50)
 		_apply_clear_none_toggle(button)
 		if MindIcons.glyph(icon_name).is_empty():
@@ -179,7 +179,7 @@ func _build_tabs() -> void:
 			glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 			glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			button.add_child(glyph)
-		button.pressed.connect(_select_tab.bind(name))
+		button.pressed.connect(_select_tab.bind(tab_name))
 		_tabs.add_child(button)
 
 
@@ -201,8 +201,8 @@ func _apply_clear_none_toggle(button: Button) -> void:
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 
 
-func _select_tab(name: String) -> void:
-	_tab = name
+func _select_tab(tab_name: String) -> void:
+	_tab = tab_name
 	_build_tabs()
 	_rebuild()
 

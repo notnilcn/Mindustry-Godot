@@ -117,13 +117,13 @@ func _open_planet_picker() -> void:
 	box.add_child(grid)
 	for value in parsed:
 		var row: Dictionary = value
-		var name := str(row.get("name", ""))
-		var button := MindWidgets.button(_planet_label(name))
+		var planet_name := str(row.get("name", ""))
+		var button := MindWidgets.button(_planet_label(planet_name))
 		button.theme_type_variation = "flatTogglet"
 		button.custom_minimum_size = Vector2(110.0, 45.0)
 		button.toggle_mode = true
-		button.button_pressed = name == _planet
-		button.pressed.connect(_select_planet.bind(name, overlay))
+		button.button_pressed = planet_name == _planet
+		button.pressed.connect(_select_planet.bind(planet_name, overlay))
 		grid.add_child(button)
 	var close := MindWidgets.button(_t("@back"))
 	close.pressed.connect(overlay.queue_free)
@@ -131,8 +131,8 @@ func _open_planet_picker() -> void:
 
 
 ## `planet = plan; sector = min(sector, sectors.size - 1); seed = 0`.
-func _select_planet(name: String, overlay: Control) -> void:
-	_planet = name
+func _select_planet(planet_name: String, overlay: Control) -> void:
+	_planet = planet_name
 	var sectors := _planet_sector_count()
 	if sectors > 0:
 		_sector = mini(_sector, sectors - 1)
@@ -156,8 +156,8 @@ func _on_sector_changed(text: String) -> void:
 func _refresh_size() -> void:
 	if _size_label == null or _editor == null:
 		return
-	var size := int(_editor.call("sector_size", _planet, _sector))
-	_size_label.text = "[ %dx%d ]" % [size, size]
+	var sector_size := int(_editor.call("sector_size", _planet, _sector))
+	_size_label.text = "[ %dx%d ]" % [sector_size, sector_size]
 
 
 ## `ui.loadAnd(() -> { apply(); hide(); })` + `editor.tags.put("genfilters", "{}")`

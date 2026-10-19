@@ -84,12 +84,12 @@ func _add_link(link: Dictionary) -> void:
 ## fallback over the hyphen-replaced name (`Links.java`). The bundle has no
 ## `link.*.title` keys, so the fallback is what the Java reference renders
 ## ("Google play", "F droid", "Dev builds").
-func _link_title(name: String) -> String:
-	var key := "link.%s.title" % name
+func _link_title(link_name: String) -> String:
+	var key := "link.%s.title" % link_name
 	var value := _t("@" + key)
 	if value != key:
 		return value
-	return _capitalize(name.replace("-", " "))
+	return _capitalize(link_name.replace("-", " "))
 
 
 ## Arc `Strings.capitalize`: upper-cases the first character and any character

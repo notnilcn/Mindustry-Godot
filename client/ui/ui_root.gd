@@ -292,8 +292,8 @@ func _apply_ui_scale() -> void:
 		return
 	for row in parsed:
 		if row is Dictionary and str(row.get("key", "")) == "uiscale":
-			var scale := maxf(float(row.get("value", 100)), 25.0) / 100.0
-			get_window().content_scale_factor = scale
+			var ui_scale := maxf(float(row.get("value", 100)), 25.0) / 100.0
+			get_window().content_scale_factor = ui_scale
 			return
 
 
@@ -460,12 +460,12 @@ func _ui() -> Node:
 func _apply_theme() -> void:
 	var assets := MindWidgets.assets()
 	var started := Time.get_ticks_msec()
-	var theme := MindThemeBuilder.build(assets)
+	var built_theme := MindThemeBuilder.build(assets)
 	theme_build_ms = int(Time.get_ticks_msec() - started)
 	var manifest := MindThemeBuilder.load_manifest()
-	if not MindThemeBuilder.verify(theme, manifest):
+	if not MindThemeBuilder.verify(built_theme, manifest):
 		push_warning("[ui] theme verification failed (styles_manifest)")
-	self.theme = theme
+	self.theme = built_theme
 
 
 func _bind_manifest() -> void:
@@ -529,8 +529,8 @@ func _group_for(group_name: String) -> Control:
 
 
 ## The instantiated dialog node by manifest name (null when absent).
-func dialog(name: String) -> Node:
-	return _dialogs.get(name)
+func dialog(dialog_name: String) -> Node:
+	return _dialogs.get(dialog_name)
 
 
 func _connect_prompts() -> void:
@@ -1054,10 +1054,10 @@ func _insert_prompt_gap(layout: VBoxContainer, index: int, height: float) -> voi
 
 ## Prompt action button (`buttons.defaults().size(...)` + `button("@key", Icon)`).
 func _add_prompt_button(
-	container: Container, label_key: String, glyph: String, size: Vector2, callback: Callable
+	container: Container, label_key: String, glyph: String, button_size: Vector2, callback: Callable
 ) -> Button:
 	var button := MindWidgets.icon_button(glyph, _t(label_key))
-	button.custom_minimum_size = size
+	button.custom_minimum_size = button_size
 	button.pressed.connect(callback)
 	container.add_child(button)
 	return button
@@ -1121,11 +1121,11 @@ func _background_resume() -> void:
 
 ## `UI.loadAnd(text, call)` (`core/UI.java:292-302`): the loading overlay shows
 ## `text`, `call` runs 7 ticks later, then the overlay hides.
-func load_and(call: Callable, text: String = "@loading") -> void:
+func load_and(callback: Callable, text: String = "@loading") -> void:
 	var loading := get_node_or_null("LoadingLayer/loading") as Control
 	if loading != null and loading.has_method("show_text"):
 		loading.call("show_text", _t(text))
 	await get_tree().create_timer(7.0 / 60.0).timeout
-	call.call()
+	callback.call()
 	if loading != null and loading.has_method("hide_loading"):
 		loading.call("hide_loading")

@@ -81,10 +81,10 @@ func _draw() -> void:
 	# rotated by `rotation * 90` when the block rotates).
 	for tile_variant in _tiles:
 		var tile: Dictionary = tile_variant
-		var name := str(tile.get("block", ""))
-		var texture := MindWidgets.icon_texture("block-%s-full" % name)
+		var block_name := str(tile.get("block", ""))
+		var texture := MindWidgets.icon_texture("block-%s-full" % block_name)
 		if texture == null:
-			texture = MindWidgets.icon_texture("block-%s-ui" % name)
+			texture = MindWidgets.icon_texture("block-%s-ui" % block_name)
 		if texture == null:
 			continue
 		var footprint := float(int(tile.get("size", 1)))
@@ -211,6 +211,7 @@ func _build_silhouette() -> ImageTexture:
 	for tile_variant in _tiles:
 		var tile: Dictionary = tile_variant
 		var footprint := int(tile.get("size", 1))
+		@warning_ignore("integer_division")
 		var offset := -int((footprint - 1) / 2)
 		for dx in footprint:
 			for dy in footprint:

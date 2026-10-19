@@ -124,7 +124,7 @@ func _add_category_header(category: String) -> void:
 
 
 func _add_binding_row(entry: Dictionary, localized: String) -> void:
-	var name := str(entry.get("name", ""))
+	var bind_name := str(entry.get("name", ""))
 	# code-instantiated: keybind rows are data-driven from the registry.
 	var label := MindWidgets.label(localized)
 	_list.add(label).grow_x_axis().set_align(3).set_pad_left(8.0).set_pad_right(40.0)
@@ -144,15 +144,15 @@ func _add_binding_row(entry: Dictionary, localized: String) -> void:
 	var rebind := MindWidgets.button(_t("@settings.rebind"))
 	rebind.theme_type_variation = "grayt"
 	rebind.custom_minimum_size = BUTTON_SIZE
-	rebind.pressed.connect(_start_capture.bind(name))
+	rebind.pressed.connect(_start_capture.bind(bind_name))
 	_list.add(rebind).set_min_width(BUTTON_SIZE.x).set_min_height(BUTTON_SIZE.y)
 
-	if not NO_RESET.has(name):
+	if not NO_RESET.has(bind_name):
 		var reset := MindWidgets.button(_t("@settings.resetKey"))
 		reset.theme_type_variation = "grayt"
 		reset.custom_minimum_size = BUTTON_SIZE
 		reset.disabled = bool(entry.get("default", false))
-		reset.pressed.connect(_reset_binding.bind(name))
+		reset.pressed.connect(_reset_binding.bind(bind_name))
 		_list.add(reset).set_min_width(BUTTON_SIZE.x).set_min_height(BUTTON_SIZE.y).pad(2.0).set_pad_left(4.0)
 	_list.row()
 
@@ -182,10 +182,10 @@ func _is_unset(entry: Dictionary) -> bool:
 	return entry.get("display") == null and entry.get("negativeDisplay") == null
 
 
-func _reset_binding(name: String) -> void:
+func _reset_binding(bind_name: String) -> void:
 	var input := _mind_input()
 	if input != null:
-		input.call("reset_keybind", name)
+		input.call("reset_keybind", bind_name)
 	_rebuild()
 
 
@@ -199,9 +199,9 @@ func _reset_all() -> void:
 ## Opens the capture prompt (`KeybindDialog.openDialog`): the next key or mouse
 ## button rebinds; Back cancels and Unbind clears the binding. Axis rows ask
 ## twice (`keybind.press.axis` then `keybind.press`, KeybindDialog.java:96-145).
-func _start_capture(name: String) -> void:
-	_capture_name = name
-	_capture_axis = _entry_axis(name)
+func _start_capture(bind_name: String) -> void:
+	_capture_name = bind_name
+	_capture_axis = _entry_axis(bind_name)
 	_axis_min = ""
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus != null:
@@ -244,9 +244,9 @@ func _start_capture(name: String) -> void:
 
 
 ## Registry `axis` flag for a binding row (`KeyKind.Axis`).
-func _entry_axis(name: String) -> bool:
+func _entry_axis(bind_name: String) -> bool:
 	for entry in _entries:
-		if str(entry.get("name", "")) == name:
+		if str(entry.get("name", "")) == bind_name:
 			return bool(entry.get("axis", false))
 	return false
 

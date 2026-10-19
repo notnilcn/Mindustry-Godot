@@ -90,7 +90,7 @@ func _build() -> void:
 		list.add_child(MindWidgets.label("@none.found"))
 
 
-func _pick(name: String) -> void:
+func _pick(item_name: String) -> void:
 	_chosen = true
-	selected.emit(name)
+	selected.emit(item_name)
 	_close_pressed()

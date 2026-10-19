@@ -170,6 +170,7 @@ func _refresh_swatches() -> void:
 ## `packPixmap`: LSB-first `bpp`-bit packing (`CanvasBlock.java:216-227`).
 func _pack() -> PackedByteArray:
 	var packed := PackedByteArray()
+	@warning_ignore("integer_division")
 	var bytes := (_size * _size * _bpp + 7) / 8
 	packed.resize(bytes)
 	for pos in _size * _size:
@@ -242,7 +243,9 @@ func _import_image(path: String) -> void:
 		var h := maxi(1, roundi(image.get_height() * ratio))
 		image.resize(w, h, Image.INTERPOLATE_BILINEAR)
 		scaled = image
+	@warning_ignore("integer_division")
 	var ox := (target - scaled.get_width()) / 2
+	@warning_ignore("integer_division")
 	var oy := (target - scaled.get_height()) / 2
 	for y in target:
 		for x in target:
@@ -319,10 +322,10 @@ func _cell_size() -> Vector2:
 
 
 ## `convertX`/`convertY` (`:78-84`): screen cell -> canvas cell (row 0 = top).
-func _cell_at(position: Vector2) -> Vector2i:
+func _cell_at(screen_pos: Vector2) -> Vector2i:
 	var cell := _cell_size()
 	return Vector2i(
-		int(position.x / cell.x), int(position.y / cell.y)
+		int(screen_pos.x / cell.x), int(screen_pos.y / cell.y)
 	)
 
 
@@ -356,6 +359,7 @@ func _flood_fill(cell: Vector2i) -> void:
 	while not stack.is_empty():
 		var pos: int = stack.pop_back()
 		var cx := pos % _size
+		@warning_ignore("integer_division")
 		var cy := pos / _size
 		_pixels[pos] = _cur_color
 		_modified = true
@@ -403,6 +407,7 @@ func _refresh_texture() -> void:
 	for pos in _size * _size:
 		var index := int(_pixels[pos]) if pos < _pixels.size() else 0
 		var color := _rgba8(int(_palette[index]) if index < _palette.size() else 0)
+		@warning_ignore("integer_division")
 		image.set_pixel(pos % _size, pos / _size, color)
 	_texture = ImageTexture.create_from_image(image)
 	if _canvas != null:

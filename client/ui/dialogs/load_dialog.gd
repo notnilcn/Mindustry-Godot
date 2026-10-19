@@ -186,8 +186,8 @@ func _rebuild_list() -> void:
 		# `SaveSlot.isHidden`: sector saves are hidden from the load list.
 		if bool(slot.get("sector", false)):
 			continue
-		var name := str(slot.get("name", ""))
-		if not needle.is_empty() and not name.to_lower().contains(needle):
+		var slot_name := str(slot.get("name", ""))
+		if not needle.is_empty() and not slot_name.to_lower().contains(needle):
 			continue
 		var mode := str(slot.get("mode", ""))
 		if not mode.is_empty() and _hidden.has(mode):
@@ -206,7 +206,7 @@ func _rebuild_list() -> void:
 
 
 func _build_card(slot: Dictionary) -> Button:
-	var name := str(slot.get("name", ""))
+	var slot_name := str(slot.get("name", ""))
 	# code-instantiated: save cards are data-driven from the save-slot listing.
 	var card := MindWidgets.button("")
 	card.theme_type_variation = "grayt"
@@ -232,7 +232,7 @@ func _build_card(slot: Dictionary) -> Button:
 	content.add_child(title)
 	# `title.add("[accent]" + slot.getName()).left().growX().width(230f).wrap()`
 	# (`LoadDialog.java:105-107`); the markup needs the BBCode translation.
-	var name_label := MindWidgets.styled_label(MindWidgets.markup_text("[accent]" + name), "techLabel")
+	var name_label := MindWidgets.styled_label(MindWidgets.markup_text("[accent]" + slot_name), "techLabel")
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	name_label.custom_minimum_size.x = 230.0
@@ -254,11 +254,11 @@ func _build_card(slot: Dictionary) -> Button:
 	title.add_child(export_button)
 
 	# code-instantiated: preview/meta row is per-slot presentation data.
-	var body := HBoxContainer.new()
-	body.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	body.add_theme_constant_override("separation", 6)
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content.add_child(body)
+	var card_body := HBoxContainer.new()
+	card_body.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_body.add_theme_constant_override("separation", 6)
+	card_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content.add_child(card_body)
 
 	# `Saves.SaveSlot.previewTexture()`: the saved `<previews>/save_slot_<stem>.png`
 	# (`Saves.java:359-370`); the `nomap` glyph stays until one exists.
@@ -271,13 +271,13 @@ func _build_card(slot: Dictionary) -> Button:
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.custom_minimum_size = Vector2(160, 160)
 		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		body.add_child(image)
+		card_body.add_child(image)
 	else:
 		# code-instantiated: `nomap` placeholder glyph is an icon-font run.
 		var preview := Panel.new()
 		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		preview.custom_minimum_size = Vector2(160, 160)
-		body.add_child(preview)
+		card_body.add_child(preview)
 		var map_icon := MindWidgets.glyph("map", 40)
 		map_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		preview.add_child(map_icon)
@@ -291,7 +291,7 @@ func _build_card(slot: Dictionary) -> Button:
 	# the cell is 260 wide (its rows default to 280 and overflow it), which
 	# gives Java's ~446 px card (L01 T3, java/load.png).
 	meta.custom_minimum_size.x = 260.0
-	body.add_child(meta)
+	card_body.add_child(meta)
 	for line in _meta_lines(slot):
 		var label := MindWidgets.label(line)
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -316,9 +316,10 @@ func _resolve_map(map_name: String) -> String:
 
 ## `Strings.formatMillis`: `H:MM:SS`.
 func _format_millis(millis: int) -> String:
-	var sign := "-" if millis < 0 else ""
+	var sign_value := "-" if millis < 0 else ""
 	millis = absi(millis)
-	return "%s%d:%02d:%02d" % [sign, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000]
+	@warning_ignore("integer_division")
+	return "%s%d:%02d:%02d" % [sign_value, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000]
 
 
 ## `Saves.SaveSlot.previewTexture()` for a slot row (`save_preview_texture`).
@@ -340,6 +341,7 @@ func _save_preview_texture(slot: Dictionary) -> Texture2D:
 ## `Oct 12, 2026, 12:54:33 AM`) in the local time zone.
 func _format_date(timestamp_ms: int) -> String:
 	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	@warning_ignore("integer_division")
 	var dt := Time.get_datetime_dict_from_unix_time(timestamp_ms / 1000 + bias)
 	var months := ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 	var hour := int(dt.hour) % 12

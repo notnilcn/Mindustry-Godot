@@ -449,13 +449,13 @@ func _build_target_dummy() -> void:
 	buttons.add_child(ok)
 	_add_close_button(buttons)
 	ok.pressed.connect(func() -> void:
-		var size := float(hit.text.to_float()) * float(mind_tilesize())
+		var tile_size := float(hit.text.to_float()) * float(mind_tilesize())
 		var packed := [
 			1 if enemy.button_pressed else 0,
 			1 if flying.button_pressed else 0,
 			clampi(armor.text.to_int(), 0, 100_000),
 			int(reset.text.to_float() * 60.0),
-			_float_to_bits(size),
+			_float_to_bits(tile_size),
 		]
 		var parts := PackedStringArray()
 		for value in packed:
@@ -528,8 +528,8 @@ func _fixed(value: float, decimals: int) -> String:
 ## A command-row pick configures the command (`configure(item)`); the
 ## reconstructor also closes the panel (`deselect()`, `Reconstructor.java:230`)
 ## while the factory's row leaves it open (`UnitFactory.java:311-315`).
-func _on_command_pick(name: String, row: Node) -> void:
-	_submit("content", name)
+func _on_command_pick(content_name: String, row: Node) -> void:
+	_submit("content", content_name)
 	if row != null and row.has_method("close_select") and bool(row.call("close_select")):
 		_close()
 
@@ -551,12 +551,12 @@ func _build_options() -> void:
 	for option in _config.get("options", []):
 		if not (option is Dictionary):
 			continue
-		var name := str(option.get("name", ""))
-		var label := _t(str(option.get("label", "")), name)
+		var option_name := str(option.get("name", ""))
+		var label := _t(str(option.get("label", "")), option_name)
 		var button := Button.new()
 		button.text = label
 		button.tooltip_text = label
-		button.pressed.connect(func() -> void: _submit("content", name))
+		button.pressed.connect(func() -> void: _submit("content", option_name))
 		grid.add_child(button)
 
 

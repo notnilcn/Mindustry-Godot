@@ -291,11 +291,13 @@ func _rebuild_layout() -> void:
 	if not any_unplaced:
 		return
 	var width := 5 + 2
-	var len := _objectives.size() * width
+	var total_width := _objectives.size() * width
 	var columns := _objectives.size()
 	var rows := 1
-	if len > 100:
-		rows = len / 100
+	if total_width > 100:
+		@warning_ignore("integer_division")
+		rows = total_width / 100
+		@warning_ignore("integer_division")
 		columns = 100 / width
 	var index := 0
 	for y in rows:
@@ -359,23 +361,23 @@ func _rebuild_panel() -> void:
 ##
 ## Java renders one interpreter per field kind; `Seq` fields own their header
 ## (the name is drawn inside), so they dispatch before the label row.
-func _field_row(objective: Dictionary, tag: String, field: Dictionary) -> Control:
-	var name := str(field.get("name", ""))
+func _field_row(objective: Dictionary, _tag: String, field: Dictionary) -> Control:
+	var field_name := str(field.get("name", ""))
 	var kind := str(field.get("kind", ""))
 	var flags: Array = field.get("flags", [])
-	if name == "class" or name == "editorPos":
+	if field_name == "class" or field_name == "editorPos":
 		return null
-	if name == "parents" or flags.has("synthetic"):
+	if field_name == "parents" or flags.has("synthetic"):
 		return null
-	var getter := func() -> Variant: return objective.get(name, _default_of(field))
+	var getter := func() -> Variant: return objective.get(field_name, _default_of(field))
 	var setter := func(value: Variant) -> void:
-		objective[name] = value
+		objective[field_name] = value
 		_commit()
 	if kind.begins_with("seq:"):
 		# Java's Seq interpreter writes `name:` in its own accent header.
-		return _seq_editor(name, getter, setter, kind.trim_prefix("seq:"), flags)
+		return _seq_editor(field_name, getter, setter, kind.trim_prefix("seq:"), flags)
 	var box := VBoxContainer.new()
-	box.add_child(MindWidgets.label("%s:" % name))
+	box.add_child(MindWidgets.label("%s:" % field_name))
 	box.add_child(_make_editor(getter, setter, kind, flags))
 	return box
 
@@ -413,12 +415,12 @@ func _make_editor(get_value: Callable, set_value: Callable, kind: String, flags:
 		return MindWidgets.check("", enabled, func(pressed: bool) -> void:
 			set_value.call(1 if pressed else -1))
 	if kind == "byte" or kind == "int" or kind == "float":
-		var scale := 1.0
+		var field_scale := 1.0
 		if flags.has("second"):
-			scale = 60.0
+			field_scale = 60.0
 		elif flags.has("tilepos"):
-			scale = 8.0
-		return _number_value_field(kind == "float", scale, get_value, set_value)
+			field_scale = 8.0
+		return _number_value_field(kind == "float", field_scale, get_value, set_value)
 	if kind.begins_with("content:"):
 		var button := MindWidgets.button(str(value))
 		button.pressed.connect(func() -> void:
@@ -435,13 +437,13 @@ func _make_editor(get_value: Callable, set_value: Callable, kind: String, flags:
 		var pair: Dictionary = value if value is Dictionary else {"x": 0, "y": 0}
 		var row := HBoxContainer.new()
 		var is_float := kind == "vec2f"
-		var scale := 8.0 if flags.has("tilepos") else 1.0
-		row.add_child(_number_value_field(is_float, scale,
+		var pair_scale := 8.0 if flags.has("tilepos") else 1.0
+		row.add_child(_number_value_field(is_float, pair_scale,
 			func() -> Variant: return pair.get("x", 0),
 			func(number: Variant) -> void:
 				pair["x"] = number if is_float else int(number)
 				set_value.call(pair)))
-		row.add_child(_number_value_field(is_float, scale,
+		row.add_child(_number_value_field(is_float, pair_scale,
 			func() -> Variant: return pair.get("y", 0),
 			func(number: Variant) -> void:
 				pair["y"] = number if is_float else int(number)
@@ -482,13 +484,13 @@ func _element_row(get_value: Callable, set_value: Callable, kind: String, flags:
 
 
 ## `Seq` interpreter (`:335-402`): name header + add / per-element editors.
-func _seq_editor(name: String, get_arr: Callable, set_arr: Callable,
+func _seq_editor(field_name: String, get_arr: Callable, set_arr: Callable,
 		inner_kind: String, flags: Array) -> Control:
 	var box := VBoxContainer.new()
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 4)
-	if not name.is_empty():
-		var label := MindWidgets.label("%s:" % name)
+	if not field_name.is_empty():
+		var label := MindWidgets.label("%s:" % field_name)
 		label.add_theme_color_override("font_color", Color("ffd37f"))
 		header.add_child(label)
 	var spacer := Control.new()
@@ -645,9 +647,9 @@ func _align_editor(get_value: Callable, set_value: Callable, flags: Array) -> Co
 
 
 func _align_name(align: int) -> String:
-	for name in ALIGN_ORDER:
-		if ALIGN_NAMES[name] == align:
-			return name
+	for entry_name in ALIGN_ORDER:
+		if ALIGN_NAMES[entry_name] == align:
+			return entry_name
 	return "center"
 
 
@@ -659,14 +661,14 @@ func _open_align_picker(get_value: Callable, set_value: Callable, flags: Array) 
 	grid.columns = 3
 	popup.add_child(grid)
 	var current := int(get_value.call())
-	for name in ALIGN_ORDER:
-		var value: int = ALIGN_NAMES[name]
+	for entry_name in ALIGN_ORDER:
+		var value: int = ALIGN_NAMES[entry_name]
 		if flags.has("align-nover") and value != 1 and value != 8 and value != 16:
 			continue
 		if flags.has("align-nohor") and value != 1 and value != 2 and value != 4:
 			continue
 		var choice := Button.new()
-		choice.text = name
+		choice.text = entry_name
 		choice.custom_minimum_size = Vector2(100.0, 38.0)
 		choice.theme_type_variation = "flatt"
 		if value == current:
@@ -699,13 +701,13 @@ func _marker_editor(get_value: Callable, set_value: Callable) -> Control:
 		var field: Dictionary = value_row
 		if not _is_visible_field(field):
 			continue
-		var name := str(field.get("name", ""))
+		var field_name := str(field.get("name", ""))
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 4)
-		row.add_child(MindWidgets.label("%s:" % name))
-		var field_get := func() -> Variant: return marker.get(name, _default_of(field))
+		row.add_child(MindWidgets.label("%s:" % field_name))
+		var field_get := func() -> Variant: return marker.get(field_name, _default_of(field))
 		var field_set := func(new_value: Variant) -> void:
-			marker[name] = new_value
+			marker[field_name] = new_value
 			set_value.call(marker)
 		row.add_child(_make_editor(field_get, field_set,
 			str(field.get("kind", "")), field.get("flags", [])))
@@ -800,20 +802,20 @@ func _on_logic_code_edited(code: String, setter: Callable) -> void:
 
 ## `@Second` x60 / `@TilePos` x8 display scaling (`interpret_number`); the
 ## display re-syncs from the model on focus loss (Java's `field.update`).
-func _number_value_field(is_float: bool, scale: float, get_value: Callable, set_value: Callable) -> LineEdit:
+func _number_value_field(is_float: bool, value_scale: float, get_value: Callable, set_value: Callable) -> LineEdit:
 	var edit := MindWidgets.field("")
 	edit.custom_minimum_size.x = 120.0
 	var sync := func() -> void:
 		var raw := float(get_value.call())
-		edit.text = ("%f" % (raw / scale)) if is_float else str(int(raw / scale))
+		edit.text = ("%f" % (raw / value_scale)) if is_float else str(int(raw / value_scale))
 	sync.call()
 	edit.text_changed.connect(func(text: String) -> void:
 		if text.is_empty() or text == "-":
 			return
 		if is_float and text.is_valid_float():
-			set_value.call(float(text) * scale)
+			set_value.call(float(text) * value_scale)
 		elif not is_float and text.is_valid_int():
-			set_value.call(float(text) * scale))
+			set_value.call(float(text) * value_scale))
 	edit.focus_exited.connect(func() -> void: sync.call())
 	return edit
 
@@ -912,8 +914,8 @@ func _open_content_picker(content_type_name: String, setter: Callable) -> void:
 	var listed: Variant = host.call("content_list", content_type_name)
 	var items: Array = []
 	if listed is PackedStringArray:
-		for name in listed:
-			items.append(str(name))
+		for item_name in listed:
+			items.append(str(item_name))
 	elif listed is Array:
 		items = listed
 	else:
@@ -929,8 +931,8 @@ func _open_team_picker(setter: Callable) -> void:
 	for row_value in get_node_or_null("/root/Spine/MindEditor").call("palette_teams"):
 		var team_row: Dictionary = row_value
 		names.append(str(team_row.get("name", "")))
-	_open_list_picker(names, func(name: String) -> void:
-		setter.call(_team_id(name)))
+	_open_list_picker(names, func(team_name: String) -> void:
+		setter.call(_team_id(team_name)))
 
 
 ## `list_select` + the `selected` signal (`showContentSelect`/`showTeamSelect`).
@@ -955,27 +957,27 @@ func _open_list_picker(items: Array, on_selected: Callable) -> void:
 	}))
 
 
-func _on_picked(name: String) -> void:
-	if name.is_empty() or not _pending_pick_set.is_valid():
+func _on_picked(selected_name: String) -> void:
+	if selected_name.is_empty() or not _pending_pick_set.is_valid():
 		return
 	var setter := _pending_pick_set
 	_pending_pick_set = Callable()
-	setter.call(name)
+	setter.call(selected_name)
 	_rebuild_panel()
 
 
 ## `/root/Spine/Ui/UiRoot.dialog(name)` (`MapProcessorsDialog` route).
-func _dialog(name: String) -> Node:
+func _dialog(dialog_name: String) -> Node:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root == null or not ui_root.has_method("dialog"):
 		return null
-	return ui_root.call("dialog", name)
+	return ui_root.call("dialog", dialog_name)
 
 
-func _team_id(name: String) -> int:
+func _team_id(team_name: String) -> int:
 	for row_value in get_node_or_null("/root/Spine/MindEditor").call("palette_teams"):
 		var team_row: Dictionary = row_value
-		if str(team_row.get("name", "")) == name:
+		if str(team_row.get("name", "")) == team_name:
 			return int(team_row.get("id", -1))
 	return -1
 

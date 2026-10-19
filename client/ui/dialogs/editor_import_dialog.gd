@@ -91,13 +91,13 @@ func _open_chooser(action: String, extension: String) -> void:
 	ui.call("open_dialog", "file_chooser", JSON.stringify({"open": true, "extensions": [extension]}))
 
 
-func _connect_chooser(connect: bool) -> void:
+func _connect_chooser(should_connect: bool) -> void:
 	var chooser := get_node_or_null("/root/Spine/Ui/UiRoot/DialogLayer/file_chooser")
 	if chooser == null or not chooser.has_signal("file_chosen"):
 		return
-	if connect and not chooser.is_connected("file_chosen", _on_file_chosen):
+	if should_connect and not chooser.is_connected("file_chosen", _on_file_chosen):
 		chooser.connect("file_chosen", _on_file_chosen)
-	elif not connect and chooser.is_connected("file_chosen", _on_file_chosen):
+	elif not should_connect and chooser.is_connected("file_chosen", _on_file_chosen):
 		chooser.disconnect("file_chosen", _on_file_chosen)
 
 

@@ -225,9 +225,9 @@ func _build_mobile() -> void:
 ## Builds one icon+label menu button. code-instantiated: the icon glyph + label
 ## row is data-driven from the button table and has no static scene (the desktop
 ## set is `width`/`height` uniform, upstream `buttons(Table, MenuButton...)`).
-func _make_button(entry: Dictionary, size: Vector2) -> Button:
+func _make_button(entry: Dictionary, button_size: Vector2) -> Button:
 	var button := Button.new()
-	button.custom_minimum_size = size
+	button.custom_minimum_size = button_size
 	button.focus_mode = Control.FOCUS_NONE
 	button.toggle_mode = entry.has("submenu")
 	button.add_theme_stylebox_override("normal", _menu_style(Color(0.0, 0.0, 0.0, 0.0)))

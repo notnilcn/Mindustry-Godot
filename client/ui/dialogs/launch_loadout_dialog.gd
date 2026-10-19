@@ -86,14 +86,14 @@ func _launch_plan() -> Dictionary:
 ## The launcher's localized name (`Sector.name()` + the planet dialog's
 ## `sector.<preset>.name` rule).
 func _localized_from() -> String:
-	var name := str(_plan.get("from", ""))
+	var from_name := str(_plan.get("from", ""))
 	var preset := str(_plan.get("from_preset", ""))
 	if not preset.is_empty():
 		var key := "sector.%s.name" % preset
 		var localized := _t("@%s" % key)
 		if not localized.is_empty() and localized != key:
 			return localized
-	return name
+	return from_name
 
 
 func _rebuild() -> void:

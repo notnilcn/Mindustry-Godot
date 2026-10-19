@@ -63,10 +63,10 @@ func shown() -> void:
 			_table.add(_accent_label(_t("@category.purpose"))).grow_x_axis().set_pad_top(10).left()
 			_table.row()
 		# code-instantiated: description text comes from the live content.
-		var body := MindWidgets.label(MindWidgets.markup_text("[lightgray]" + description))
-		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		body.custom_minimum_size.x = 500.0
-		_table.add(body).grow_x_axis().set_pad_left(10 if has_stats else 0).left()
+		var description_label := MindWidgets.label(MindWidgets.markup_text("[lightgray]" + description))
+		description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		description_label.custom_minimum_size.x = 500.0
+		_table.add(description_label).grow_x_axis().set_pad_left(10 if has_stats else 0).left()
 		_table.row()
 		if not bool(info.get("use_categories", false)) and has_stats:
 			_table.add(_accent_label(_t("@category.general"))).grow_x_axis().left()
@@ -241,22 +241,22 @@ func _add_cell(column: Container, line: HBoxContainer, cell_variant: Variant) ->
 ## through to the item/liquid info dialog. Unit icons (`power`, `liquid`,
 ## `waves`) have no atlas region and draw the icon-font glyph instead.
 func _icon_cell(cell: Dictionary) -> Control:
-	var size := float(cell.get("size", 32))
+	var icon_size := float(cell.get("size", 32))
 	var region := str(cell.get("region", ""))
 	if MindWidgets.icon_texture(region) == null:
 		# code-instantiated: Iconc unit glyphs (`StatUnit.icon`) are font glyphs,
 		# not atlas regions.
 		var holder := Control.new()
-		holder.custom_minimum_size = Vector2(size, size)
+		holder.custom_minimum_size = Vector2(icon_size, icon_size)
 		holder.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		var glyph := MindWidgets.glyph(region, int(size), Color.WHITE)
+		var glyph := MindWidgets.glyph(region, int(icon_size), Color.WHITE)
 		glyph.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		holder.add_child(glyph)
 		return holder
 	# code-instantiated: content icons are data-driven stat cells.
 	var button := MindWidgets.image_button(region, "cleari")
-	button.custom_minimum_size = Vector2(size, size)
+	button.custom_minimum_size = Vector2(icon_size, icon_size)
 	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	var content := str(cell.get("content", ""))
 	if not content.is_empty():

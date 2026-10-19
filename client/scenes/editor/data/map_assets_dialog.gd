@@ -298,8 +298,8 @@ func _row_width() -> float:
 
 
 func _portrait() -> bool:
-	var size := get_viewport_rect().size
-	return size.y > size.x
+	var viewport_size := get_viewport_rect().size
+	return viewport_size.y > viewport_size.x
 
 
 ## A 50×50 icon button (`list.button(Icon.x, Styles.graySquarei, iconMed, ...)`).
@@ -340,12 +340,12 @@ func _entry_button(row: Dictionary, title: String, subtitle: String, width: floa
 	return button
 
 
-func _show_text(title: String, body: String) -> void:
+func _show_text(title: String, text_body: String) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("show_text"):
-		ui.call("show_text", title, body)
+		ui.call("show_text", title, text_body)
 	else:
-		show_toast(body)
+		show_toast(text_body)
 
 
 func _error(message: String) -> void:
@@ -514,22 +514,22 @@ func _show_edit_menu() -> void:
 
 func _build_patches() -> void:
 	var rows := _rows_of("patch")
-	var shown := 0
+	var shown_count := 0
 	for value in rows:
 		var row: Dictionary = value
 		if not _matches(row, "name"):
 			continue
-		shown += 1
+		shown_count += 1
 		_list.add_child(_patch_row(row))
-	if shown == 0:
+	if shown_count == 0:
 		_list.add_child(MindWidgets.label(MindWidgets.markup("@patch.none")))
 
 
 func _patch_row(row: Dictionary) -> Control:
 	var index := int(row.get("index", 0))
-	var name := str(row.get("name", ""))
+	var patch_name := str(row.get("name", ""))
 	var json := str(row.get("data", ""))
-	var label := "<unnamed>" if name.is_empty() else name
+	var label := "<unnamed>" if patch_name.is_empty() else patch_name
 	var fields := _count_fields(_parse_json(json))
 	var box := HBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
@@ -580,19 +580,19 @@ func _parse_json(text: String) -> Variant:
 
 func _build_content() -> void:
 	var rows := _rows_of("content")
-	var shown := 0
+	var shown_count := 0
 	var last_type := ""
 	for value in rows:
 		var row: Dictionary = value
 		if not _matches(row, "name"):
 			continue
-		shown += 1
+		shown_count += 1
 		var content_type := str(row.get("contentType", ""))
 		if content_type != last_type:
 			last_type = content_type
 			_list.add_child(_content_header(content_type))
 		_list.add_child(_content_row(row, content_type))
-	if shown == 0:
+	if shown_count == 0:
 		_list.add_child(MindWidgets.label(MindWidgets.markup("@none.found")))
 
 
@@ -617,7 +617,7 @@ func _content_header(content_type: String) -> Control:
 
 
 func _content_row(row: Dictionary, content_type: String) -> Control:
-	var name := str(row.get("name", ""))
+	var content_name := str(row.get("name", ""))
 	var json := str(row.get("data", ""))
 	var box := HBoxContainer.new()
 	box.add_theme_constant_override("separation", 4)
@@ -631,22 +631,22 @@ func _content_row(row: Dictionary, content_type: String) -> Control:
 	icon.disabled = true
 	box.add_child(icon)
 
-	box.add_child(_entry_button(row, name, _t("@content.%s" % content_type), _row_width(),
-		func() -> void: _show_text(name, json)))
+	box.add_child(_entry_button(row, content_name, _t("@content.%s" % content_type), _row_width(),
+		func() -> void: _show_text(content_name, json)))
 	box.add_child(_square("refresh", _t("@editor.import"), func() -> void:
 		_import_choices(func(text: String) -> void:
 			# Java overwrites `content.data`; replace then re-add.
-			var removed: Dictionary = _editor.call("data_asset_delete", "content", name)
+			var removed: Dictionary = _editor.call("data_asset_delete", "content", content_name)
 			if not bool(removed.get("ok", false)):
 				_error(str(removed.get("error", "")))
 				return
-			_apply(_editor.call("data_content_add", name, content_type, text)), _text_filters())))
+			_apply(_editor.call("data_content_add", content_name, content_type, text)), _text_filters())))
 	box.add_child(_square("export", _t("@export.file"), func() -> void:
-		_save_file(_t("@editor.export"), name + ".json", "*.json",
+		_save_file(_t("@editor.export"), content_name + ".json", "*.json",
 			func(path: String) -> void: FileAccess.open(path, FileAccess.WRITE).store_string(json))))
 	box.add_child(_square("trash", _t("@asset.delete.confirm"), func() -> void:
 		_confirm(_t("@asset.delete.confirm"), func() -> void:
-			_apply(_editor.call("data_asset_delete", "content", name)))))
+			_apply(_editor.call("data_asset_delete", "content", content_name)))))
 	return box
 
 
@@ -670,7 +670,7 @@ func _add_content() -> void:
 	# GDScript lambdas capture locals by value: keep the live selection in a
 	# dictionary the toggle lambdas mutate.
 	var selection := {"type": "item"}
-	var buttons: Array[Button] = []
+	var type_buttons: Array[Button] = []
 	for content_type in CONTENT_TYPES:
 		var button := MindWidgets.glyph_button(str(CONTENT_ICONS.get(content_type, "box")),
 			_t("@content.%s" % content_type), "squareTogglei")
@@ -680,9 +680,9 @@ func _add_content() -> void:
 		button.tooltip_text = _t("@content.%s" % content_type)
 		button.pressed.connect(func() -> void:
 			selection["type"] = content_type
-			for other in buttons:
+			for other in type_buttons:
 				other.button_pressed = other == button)
-		buttons.append(button)
+		type_buttons.append(button)
 		type_row.add_child(button)
 	box.add_child(type_row)
 	dialog.add_child(box)
@@ -718,19 +718,19 @@ func _add_content() -> void:
 
 func _build_bundles() -> void:
 	var rows := _rows_of("bundle")
-	var shown := 0
+	var shown_count := 0
 	for value in rows:
 		var row: Dictionary = value
 		if not _matches(row, "name"):
 			continue
-		shown += 1
+		shown_count += 1
 		_list.add_child(_bundle_row(row))
-	if shown == 0:
+	if shown_count == 0:
 		_list.add_child(MindWidgets.label(MindWidgets.markup("@patch.none")))
 
 
 func _bundle_row(row: Dictionary) -> Control:
-	var name := str(row.get("name", ""))
+	var bundle_name := str(row.get("name", ""))
 	var path := str(row.get("path", ""))
 	var text := str(row.get("data", ""))
 	var lines := int(row.get("size", 0))
@@ -738,14 +738,14 @@ func _bundle_row(row: Dictionary) -> Control:
 	box.add_theme_constant_override("separation", 4)
 	box.alignment = BoxContainer.ALIGNMENT_CENTER
 	box.add_child(_empty_cell())
-	box.add_child(_entry_button(row, name, _t("@bundle.lines").format([lines]),
-		_row_width(), func() -> void: _show_text(name, text)))
+	box.add_child(_entry_button(row, bundle_name, _t("@bundle.lines").format([lines]),
+		_row_width(), func() -> void: _show_text(bundle_name, text)))
 	box.add_child(_square("refresh", _t("@editor.import"), func() -> void:
 		_import_choices(func(updated: String) -> void:
 			_apply(_editor.call("data_bundle_set", path, updated)),
 			PackedStringArray(["*.properties", "*.txt"]))))
 	box.add_child(_square("export", _t("@export.file"), func() -> void:
-		_save_file(_t("@editor.export"), name, "*.properties",
+		_save_file(_t("@editor.export"), bundle_name, "*.properties",
 			func(target: String) -> void: FileAccess.open(target, FileAccess.WRITE).store_string(text))))
 	box.add_child(_square("trash", _t("@asset.delete.confirm"), func() -> void:
 		_confirm(_t("@asset.delete.confirm"), func() -> void:
@@ -792,13 +792,13 @@ func _build_images() -> void:
 
 
 func _image_cell(row: Dictionary) -> Control:
-	var name := str(row.get("name", ""))
+	var image_name := str(row.get("name", ""))
 	var path := str(row.get("path", ""))
 	var region := str(row.get("region", ""))
 	var found := bool(row.get("found", false))
 	var width := int(row.get("width", 1))
 	var height := int(row.get("height", 1))
-	var size := int(row.get("size", 0))
+	var file_size := int(row.get("size", 0))
 
 	# code-instantiated: one `Styles.grayPanel` card per image record.
 	var panel := PanelContainer.new()
@@ -830,13 +830,13 @@ func _image_cell(row: Dictionary) -> Control:
 		missing.tooltip_text = _t("@asset.image.packfailed")
 		box.add_child(missing)
 
-	var label := MindWidgets.label(("" if found else "[red]⚠[] ") + name)
+	var label := MindWidgets.label(("" if found else "[red]⚠[] ") + image_name)
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	label.tooltip_text = "%s\n%s" % [region, path]
 	label.mouse_filter = Control.MOUSE_FILTER_PASS
 	label.gui_input.connect(func(event: InputEvent) -> void:
 		if event is InputEventMouseButton and event.pressed:
-			_show_image_info(name, path, region, found, width, height, size))
+			_show_image_info(image_name, path, region, found, width, height, file_size))
 	box.add_child(label)
 	var dims := MindWidgets.label("%dx%d" % [width, height])
 	dims.add_theme_color_override("font_color", Color.LIGHT_GRAY)
@@ -854,13 +854,13 @@ func _image_cell(row: Dictionary) -> Control:
 	info.custom_minimum_size = Vector2(cell, cell)
 	info.tooltip_text = _t("@asset.image.info")
 	info.pressed.connect(func() -> void:
-		_show_image_info(name, path, region, found, width, height, size))
+		_show_image_info(image_name, path, region, found, width, height, file_size))
 	actions.add_child(info)
 	var export := MindWidgets.icon_button("export", "", "emptyi")
 	export.custom_minimum_size = Vector2(cell, cell)
 	export.tooltip_text = _t("@export.file")
 	export.pressed.connect(func() -> void:
-		_save_file(_t("@editor.export"), name + ".png", "*.png",
+		_save_file(_t("@editor.export"), image_name + ".png", "*.png",
 			func(target: String) -> void:
 				if not bool(_editor.call("data_asset_export", "image", path, target)):
 					_error(_t("@asset.broken"))))
@@ -870,26 +870,26 @@ func _image_cell(row: Dictionary) -> Control:
 	trash.tooltip_text = _t("@asset.image.delete.confirm")
 	trash.pressed.connect(func() -> void:
 		_confirm(_t("@asset.image.delete.confirm"), func() -> void:
-			_apply(_editor.call("data_asset_delete", "image", name))))
+			_apply(_editor.call("data_asset_delete", "image", image_name))))
 	actions.add_child(trash)
 	box.add_child(actions)
 	return panel
 
 
-func _show_image_info(name: String, path: String, region: String, found: bool,
-		width: int, height: int, size: int) -> void:
+func _show_image_info(image_name: String, path: String, region: String, found: bool,
+		width: int, height: int, file_size: int) -> void:
 	var env := path.contains("blocks/environment/")
 	var lines := PackedStringArray()
 	if not found:
 		lines.append(_t("@asset.image.packfailed"))
 		if env:
 			lines.append(_t("@asset.image.packfailed.env"))
-	lines.append(_t("@asset.image.name").format([name]))
+	lines.append(_t("@asset.image.name").format([image_name]))
 	lines.append(_t("@asset.image.region.name").format([region]))
 	lines.append(_t("@asset.image.path").format([path]))
 	lines.append(_t("@asset.image.env").format([str(env)]))
 	lines.append(_t("@asset.image.size").format([width, height]))
-	lines.append(_t("@asset.image.filesize").format([size]))
+	lines.append(_t("@asset.image.filesize").format([file_size]))
 	_show_text(_t("@asset.image.info"), "\n".join(lines))
 
 
@@ -930,19 +930,19 @@ func _on_image_rename(text: String) -> void:
 
 func _build_audio(kind: String) -> void:
 	var rows := _rows_of(kind)
-	var shown := 0
+	var shown_count := 0
 	for value in rows:
 		var row: Dictionary = value
 		if not _matches(row, "name"):
 			continue
-		shown += 1
+		shown_count += 1
 		_list.add_child(_audio_row(row, kind))
-	if shown == 0:
+	if shown_count == 0:
 		_list.add_child(MindWidgets.label(MindWidgets.markup("@none.found")))
 
 
 func _audio_row(row: Dictionary, kind: String) -> Control:
-	var name := str(row.get("name", ""))
+	var audio_name := str(row.get("name", ""))
 	var path := str(row.get("path", ""))
 	var music := kind == "music"
 	var stream_name := _audio_stream_name(row, music)
@@ -964,7 +964,7 @@ func _audio_row(row: Dictionary, kind: String) -> Control:
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var lines := VBoxContainer.new()
 	lines.add_theme_constant_override("separation", 0)
-	var title := MindWidgets.label(MindWidgets.markup_text("[accent]%s" % name))
+	var title := MindWidgets.label(MindWidgets.markup_text("[accent]%s" % audio_name))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
 	lines.add_child(title)
 	var seconds := _audio_length(stream_name, music)
@@ -976,20 +976,20 @@ func _audio_row(row: Dictionary, kind: String) -> Control:
 
 	box.add_child(_square("export", _t("@export.file"), func() -> void:
 		var extension := "*.ogg" if path.to_lower().ends_with(".ogg") else "*.mp3"
-		_save_file(_t("@editor.export"), name, extension,
+		_save_file(_t("@editor.export"), audio_name, extension,
 			func(target: String) -> void:
 				if not bool(_editor.call("data_asset_export", kind, path, target)):
 					_error(_t("@asset.broken")))))
 	box.add_child(_square("trash", _t("@asset.delete.confirm"), func() -> void:
 		_confirm(_t("@asset.delete.confirm"), func() -> void:
-			_apply(_editor.call("data_asset_delete", kind, name)))))
+			_apply(_editor.call("data_asset_delete", kind, audio_name)))))
 	return box
 
 
 ## `DataAudioLoader.prefix + asset.name.replace(' ', '_')` (`dp-`).
 func _audio_stream_name(row: Dictionary, _music: bool) -> String:
-	var name := str(row.get("name", "")).replace(" ", "_")
-	return "dp-" + name.to_lower()
+	var asset_name := str(row.get("name", "")).replace(" ", "_")
+	return "dp-" + asset_name.to_lower()
 
 
 func _audio_length(stream_name: String, music: bool) -> float:
@@ -1005,6 +1005,7 @@ func _audio_length(stream_name: String, music: bool) -> float:
 
 func _format_seconds(seconds: float) -> String:
 	var total := int(seconds)
+	@warning_ignore("integer_division")
 	return "%d:%02d" % [total / 60, total % 60]
 
 

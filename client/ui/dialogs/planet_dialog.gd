@@ -561,9 +561,9 @@ func _campaign_planets() -> Array:
 		var planet: Dictionary = planet_variant
 		by_name[str(planet.get("name", ""))] = planet
 	var out: Array = []
-	for name in ["serpulo", "erekir"]:
-		if by_name.has(name):
-			out.append(by_name[name])
+	for planet_key in ["serpulo", "erekir"]:
+		if by_name.has(planet_key):
+			out.append(by_name[planet_key])
 	return out
 
 
@@ -654,8 +654,8 @@ func _planet_texture(planet: Dictionary) -> Texture2D:
 	var assets := MindWidgets.assets()
 	if assets == null:
 		return null
-	var name := str(planet.get("name", ""))
-	var texture: Variant = assets.call("find_loose", "planets/%s" % name)
+	var planet_name := str(planet.get("name", ""))
+	var texture: Variant = assets.call("find_loose", "planets/%s" % planet_name)
 	if texture is Texture2D:
 		return texture
 	return null
@@ -1002,13 +1002,13 @@ func _build_rail(rail: MindTable, planet_name: String) -> void:
 		var planet: Dictionary = planet_variant
 		by_name[str(planet.get("name", ""))] = planet
 	var first_planet := true
-	for name in ["erekir", "serpulo"]:
-		if not by_name.has(name):
+	for rail_name in ["erekir", "serpulo"]:
+		if not by_name.has(rail_name):
 			continue
-		var planet: Dictionary = by_name[name]
+		var planet: Dictionary = by_name[rail_name]
 		if not bool(planet.get("visible", true)):
 			continue
-		var cell := rail.add(_make_planet_button(planet, name == planet_name)).grow_x_axis()
+		var cell := rail.add(_make_planet_button(planet, rail_name == planet_name)).grow_x_axis()
 		cell.set_pad_left(0).set_pad_right(0).set_pad_bottom(0)
 		cell.set_pad_top(2 if first_planet else 0)
 		first_planet = false
@@ -1753,11 +1753,11 @@ func _over_ui(point: Vector2) -> bool:
 ## Localized planet label (`planet.<name>.name`), falling back to the read model
 ## (which carries the lowercase content name until the bundle is bound).
 func _localized_planet(planet: Dictionary) -> String:
-	var name := str(planet.get("name", ""))
-	var key := "planet.%s.name" % name
+	var planet_name := str(planet.get("name", ""))
+	var key := "planet.%s.name" % planet_name
 	var localized := _t("@%s" % key)
 	if localized.is_empty() or localized == key:
-		return str(planet.get("localized", name))
+		return str(planet.get("localized", planet_name))
 	return localized
 
 

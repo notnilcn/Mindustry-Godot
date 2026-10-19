@@ -1,5 +1,5 @@
 ## SPDX-License-Identifier: GPL-3.0-only
-## Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
+## Ported from Mindustry (https://github.com/Anuken/Mindustry) â€” GPL-3.0.
 ## Source: core/src/mindustry/ui/dialogs/GameOverDialog.java (43-140).
 ##
 ## Game-over summary. Shown by the in-game HUD watcher (`hud_fragment.gd`) when
@@ -15,7 +15,7 @@ var _table: MindTable = null
 
 func _ready() -> void:
 	# `GameOverDialog` (`GameOverDialog.java:25-30`): `super("@gameover")` then
-	# `titleTable.remove()` — the content headline *is* the dialog's only title,
+	# `titleTable.remove()` â€” the content headline *is* the dialog's only title,
 	# so no title row (and no accent rule) is built.
 	should_pause = false
 	super._ready()
@@ -151,7 +151,7 @@ func _headline_label() -> MindLabel:
 ## One `StatLabel` (`GameOverDialog.java:143-184`): a 50 px `Tex.whiteui` bar
 ## tinted `Pal.accent`, name left / value right, scaled in from x=0 after
 ## `0.05 * i` s while the tint animates to `Pal.darkestGray` over 0.3 s
-## (`pow3Out`); the value then counts up from 0 over 60 frames — linearly below
+## (`pow3Out`); the value then counts up from 0 over 60 frames â€” linearly below
 ## 10, `Interp.slowFast` (= `pow2In` = `a * a`, `Interp.java:30`) above.
 func _add_stat_row(
 	parent: VBoxContainer, stats: Dictionary, key: String, field: String, index: int
@@ -227,10 +227,11 @@ func _playtime_row(millis: int) -> Control:
 ## `arc/util/Strings.java:814-827`): hours unpadded, minutes/seconds two digits
 ## ("0:05:24"), the same shape as the reference frame.
 func _format_playtime(millis: int) -> String:
-	var sign := "-" if millis < 0 else ""
+	var sign_text := "-" if millis < 0 else ""
 	var value := absi(millis)
+	@warning_ignore("integer_division")
 	return "%s%d:%02d:%02d" % [
-		sign, value / 3600000, (value % 3600000) / 60000, (value % 60000) / 1000
+		sign_text, value / 3600000, (value % 3600000) / 60000, (value % 60000) / 1000
 	]
 
 
@@ -315,14 +316,14 @@ func _is_campaign() -> bool:
 var _hidden_hud: Array = []
 
 
-func _hud_set(visible: bool) -> void:
+func _hud_set(hud_visible: bool) -> void:
 	var ui := _ui()
 	if ui != null:
-		ui.call("hud_set_visible", visible)
+		ui.call("hud_set_visible", hud_visible)
 	var group := get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
 	if group == null:
 		return
-	if not visible:
+	if not hud_visible:
 		_hidden_hud.clear()
 		for child in group.get_children():
 			if child is CanvasItem and (child as CanvasItem).visible:

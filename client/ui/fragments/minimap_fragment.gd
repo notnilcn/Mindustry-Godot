@@ -30,8 +30,8 @@ func _on_pan(world_delta: Vector2) -> void:
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
 	if camera == null or not camera.has_method("pan_to"):
 		return
-	var position: Vector2 = camera.get("position")
-	camera.call("pan_to", position.x + world_delta.x, position.y + world_delta.y)
+	var camera_pos: Vector2 = camera.get("position")
+	camera.call("pan_to", camera_pos.x + world_delta.x, camera_pos.y + world_delta.y)
 
 
 ## `Renderer.scaleCamera`: 4.0 is `ZOOM_STEP_DIVISOR`, so a factor ratio `r`

@@ -133,13 +133,13 @@ func _build() -> void:
 		category_row.alignment = BoxContainer.ALIGNMENT_CENTER
 		category_row.add_theme_constant_override("separation", 4)
 		for category in _categories:
-			var name := str(category)
-			var button := MindWidgets.glyph_button(name, name, "squareTogglei")
+			var category_name := str(category)
+			var button := MindWidgets.glyph_button(category_name, category_name, "squareTogglei")
 			button.custom_minimum_size = Vector2(45.0, 45.0)
 			button.toggle_mode = true
-			button.button_pressed = _category == name
+			button.button_pressed = _category == category_name
 			button.pressed.connect(func() -> void:
-				_category = "" if _category == name else name
+				_category = "" if _category == category_name else category_name
 				_rebuild())
 			category_row.add_child(button)
 		top.add_child(category_row)
@@ -149,7 +149,11 @@ func _build() -> void:
 	# panes take the height but only their content width (`50 * cols` grids).
 	# Portrait stacks the panes (`if(Core.graphics.isPortrait()) cont.row()`,
 	# `cell2.padTop(10f)`), landscape puts them side by side (`padLeft(10f)`).
-	var panes: BoxContainer = VBoxContainer.new() if _portrait() else HBoxContainer.new()
+	var panes: BoxContainer
+	if _portrait():
+		panes = VBoxContainer.new()
+	else:
+		panes = HBoxContainer.new()
 	panes.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	panes.add_theme_constant_override("separation", 10)
 	root.add(panes).grow_y_axis().pad(4)
@@ -222,8 +226,8 @@ func _columns() -> int:
 
 ## Arc `Core.graphics.isPortrait()`: taller than wide.
 func _portrait() -> bool:
-	var size := get_viewport_rect().size
-	return size.y > size.x
+	var view_size := get_viewport_rect().size
+	return view_size.y > view_size.x
 
 
 ## `rebuildTables()`: refilter and repaint both panes.
@@ -283,19 +287,19 @@ func _fill_grid(grid: GridContainer, rows: Array) -> void:
 		return
 	for row_value in rows:
 		var row: Dictionary = row_value
-		var name := str(row.get("name", ""))
+		var content_name := str(row.get("name", ""))
 		var icon := str(row.get("ui_icon", ""))
 		# code-instantiated: one 50px content cell per bannable row.
 		var button := MindWidgets.image_button_first(
-			PackedStringArray([icon, name]), "clearNonei"
+			PackedStringArray([icon, content_name]), "clearNonei"
 		)
 		button.custom_minimum_size = Vector2(CELL, CELL)
 		button.expand_icon = true
 		button.add_theme_constant_override("icon_max_width", int(ICON))
 		if button.icon == null:
-			button.text = name
-		button.tooltip_text = _localized(name)
-		button.pressed.connect(_toggle.bind(name))
+			button.text = content_name
+		button.tooltip_text = _localized(content_name)
+		button.pressed.connect(_toggle.bind(content_name))
 		grid.add_child(button)
 
 
@@ -308,10 +312,10 @@ func _filtered_rows() -> Array:
 		if not _category.is_empty() and str(row.get("category", "")) != _category:
 			continue
 		if not _search.is_empty():
-			var name := str(row.get("name", ""))
+			var content_name := str(row.get("name", ""))
 			# `content.localizedName.toLowerCase().contains(contentSearch)` only
 			# (`BannedContentDialog.java:89,141`), never the internal name.
-			if not _localized(name).to_lower().contains(_search):
+			if not _localized(content_name).to_lower().contains(_search):
 				continue
 		out.append(row)
 	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -320,11 +324,11 @@ func _filtered_rows() -> Array:
 
 
 ## Clicking a cell moves the content between panes (`contentSet.add/remove`).
-func _toggle(name: String) -> void:
-	if _banned.has(name):
-		_banned.erase(name)
+func _toggle(content_name: String) -> void:
+	if _banned.has(content_name):
+		_banned.erase(content_name)
 	else:
-		_banned.append(name)
+		_banned.append(content_name)
 	_commit()
 	_rebuild()
 
@@ -334,12 +338,12 @@ func _toggle(name: String) -> void:
 func _add_all(banned_pane: bool) -> void:
 	var filtered := _filtered_rows()
 	for row_value in filtered:
-		var name := str((row_value as Dictionary).get("name", ""))
+		var content_name := str((row_value as Dictionary).get("name", ""))
 		if banned_pane:
-			if not _banned.has(name):
-				_banned.append(name)
+			if not _banned.has(content_name):
+				_banned.append(content_name)
 		else:
-			_banned.erase(name)
+			_banned.erase(content_name)
 	_commit()
 	_rebuild()
 
@@ -404,6 +408,6 @@ func _on_search(text: String) -> void:
 
 
 ## `content.localizedName` (`Core.bundle`), falling back to the content name.
-func _localized(name: String) -> String:
+func _localized(content_name: String) -> String:
 	var prefix := "block" if _kind == "block" else "unit"
-	return _t("@%s.%s.name" % [prefix, name])
+	return _t("@%s.%s.name" % [prefix, content_name])

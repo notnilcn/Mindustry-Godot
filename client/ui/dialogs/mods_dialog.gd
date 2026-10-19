@@ -403,7 +403,7 @@ func _title_markup(entry: Dictionary, enabled: bool) -> String:
 ## One `cont.button(t -> ..., Styles.grayt, () -> showMod(mod)).size(w, h)
 ## .growX().pad(4f).padTop(8f)` card (`:222-296`).
 func _add_mod_row(entry: Dictionary) -> void:
-	var name := str(entry.get("name", ""))
+	var mod_name := str(entry.get("name", ""))
 	var enabled := bool(entry.get("enabled", false))
 	var state := str(entry.get("state", ""))
 	# `.disabled(!mod.isSupported())` on the toggle.
@@ -413,7 +413,7 @@ func _add_mod_row(entry: Dictionary) -> void:
 	var card := _gray_button()
 	# `t.addListener(new Tooltip(... add(stateDetails) ...))` (plain-text tooltip).
 	card.tooltip_text = _strip_colors(_state_details(entry))
-	card.pressed.connect(_toggle_details.bind(name))
+	card.pressed.connect(_toggle_details.bind(mod_name))
 	# code-instantiated: the card's content row (`t.margin(12f)`, top-left).
 	var row := HBoxContainer.new()
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -476,31 +476,31 @@ func _add_mod_row(entry: Dictionary) -> void:
 	toggle.custom_minimum_size = Vector2(50.0, 50.0)
 	toggle.focus_mode = Control.FOCUS_NONE
 	toggle.disabled = not supported
-	toggle.pressed.connect(_set_enabled.bind(name, not enabled))
+	toggle.pressed.connect(_set_enabled.bind(mod_name, not enabled))
 	right.add_child(toggle)
 	var remove := MindWidgets.glyph_button("trash", _t("@delete"), "clearNonei")
 	remove.custom_minimum_size = Vector2(50.0, 50.0)
 	remove.focus_mode = Control.FOCUS_NONE
-	remove.pressed.connect(_confirm_delete.bind(name))
+	remove.pressed.connect(_confirm_delete.bind(mod_name))
 	right.add_child(remove)
 
 	_list.add(card).grow_x_axis().height(ROW_HEIGHT).pad(4).set_pad_top(8.0)
 	_list.row()
 
-	if _updates.has(name):
+	if _updates.has(mod_name):
 		# `hasUpdate(mod)`: `Styles.grayt` row, `Icon.download` + `@mods.update.available`
 		# (`width(w).height(48f).padTop(-4f)`).
 		# code-instantiated: update row from the `withUpdates` set (browser listing).
 		var update := _gray_button()
 		var update_row := _button_row(update, BoxContainer.ALIGNMENT_BEGIN)
 		update_row.add_child(MindWidgets.glyph("download", 24, MindStyles.ARC_LIGHT_GRAY))
-		update_row.add_child(_row_label(MindWidgets.markup_format("@mods.update.available", [_updates[name]])))
-		update.pressed.connect(_update_mod.bind(name))
+		update_row.add_child(_row_label(MindWidgets.markup_format("@mods.update.available", [_updates[mod_name]])))
+		update.pressed.connect(_update_mod.bind(mod_name))
 		_list.add(update).grow_x_axis().height(48.0).set_pad_left(4.0).set_pad_right(4.0)
 		_list.row()
 
-	if _open_details == name:
-		_add_details(name)
+	if _open_details == mod_name:
+		_add_details(mod_name)
 
 
 ## `Styles.grayt` (`Styles.java:157-165`): `up = grayPanel`, `over`/`down =
@@ -549,9 +549,9 @@ func _flat(color: Color) -> StyleBoxFlat:
 
 
 ## `showMod`: the expanded details block (upstream opens a BaseDialog).
-func _add_details(name: String) -> void:
+func _add_details(mod_name: String) -> void:
 	var mods := _mods()
-	var details: Dictionary = mods.call("details", name) if mods != null else {}
+	var details: Dictionary = mods.call("details", mod_name) if mods != null else {}
 	# code-instantiated: details are data-driven from `MindMods.details(name)`.
 	var box := VBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -595,17 +595,17 @@ func _add_details(name: String) -> void:
 	_list.row()
 
 
-func _toggle_details(name: String) -> void:
-	_open_details = "" if _open_details == name else name
+func _toggle_details(mod_name: String) -> void:
+	_open_details = "" if _open_details == mod_name else mod_name
 	_rebuild_list(_search.text if is_instance_valid(_search) else "")
 
 
 ## `mods.setEnabled(mod, !mod.enabled()); setup();` (`MindMods` emits
 ## `mods_changed`, which re-runs `_refresh`).
-func _set_enabled(name: String, enabled: bool) -> void:
+func _set_enabled(mod_name: String, enabled: bool) -> void:
 	var mods := _mods()
 	if mods != null:
-		mods.call("set_enabled", name, enabled)
+		mods.call("set_enabled", mod_name, enabled)
 	_refresh()
 
 
@@ -622,8 +622,8 @@ func _restore_failed() -> void:
 
 
 ## `ui.showConfirm("@confirm", "@mod.remove.confirm", ...)`.
-func _confirm_delete(name: String) -> void:
-	_pending_delete = name
+func _confirm_delete(mod_name: String) -> void:
+	_pending_delete = mod_name
 	var ui := _ui()
 	if ui != null:
 		ui.call("show_confirm", _t("@mod.remove.confirm"))
@@ -634,17 +634,17 @@ func _confirm_delete(name: String) -> void:
 func _on_confirm(confirmed: bool) -> void:
 	if _pending_delete.is_empty():
 		return
-	var name := _pending_delete
+	var mod_name := _pending_delete
 	_pending_delete = ""
 	if not confirmed:
 		return
 	var mods := _mods()
 	if mods == null:
 		return
-	var result: Dictionary = mods.call("remove_mod", name)
+	var result: Dictionary = mods.call("remove_mod", mod_name)
 	if not bool(result.get("ok", false)):
 		_show_error(str(result.get("error", _t("@mod.delete.error"))))
-	_updates.erase(name)
+	_updates.erase(mod_name)
 
 
 ## `@mod.import` (`:145-198`): `new BaseDialog("@mod.import")` with a
@@ -851,11 +851,11 @@ func _open_browser() -> void:
 
 
 ## `githubImportMod(mod.getRepo(), mod.isJava(), null, false)` via the browser.
-func _update_mod(name: String) -> void:
+func _update_mod(mod_name: String) -> void:
 	var mods := _mods()
 	var repo := ""
 	if mods != null:
-		var details: Dictionary = mods.call("details", name)
+		var details: Dictionary = mods.call("details", mod_name)
 		repo = str(details.get("repo", ""))
 	if repo.is_empty():
 		return
@@ -867,10 +867,10 @@ func _update_mod(name: String) -> void:
 func _update_all() -> void:
 	var repos: Array = []
 	var mods := _mods()
-	for name in _updates.keys():
+	for mod_name in _updates.keys():
 		if mods == null:
 			break
-		var details: Dictionary = mods.call("details", str(name))
+		var details: Dictionary = mods.call("details", str(mod_name))
 		var repo := str(details.get("repo", ""))
 		if not repo.is_empty():
 			repos.append(repo)
@@ -883,8 +883,8 @@ func _update_all() -> void:
 
 func _download_dependencies(dependencies: PackedStringArray) -> void:
 	var names: Array = []
-	for name in dependencies:
-		names.append(str(name))
+	for mod_name in dependencies:
+		names.append(str(mod_name))
 	var browser := get_node_or_null("/root/Spine/Ui/UiRoot/DialogLayer/mod_browser")
 	_open_browser()
 	if browser != null and browser.has_method("install_repos"):
@@ -939,8 +939,8 @@ func _show_error_now(text: String) -> void:
 		ui.call("show_info", text)
 
 
-func _on_mod_error(name: String, details: String) -> void:
-	_show_error("%s: %s" % [name, details])
+func _on_mod_error(mod_name: String, details: String) -> void:
+	_show_error("%s: %s" % [mod_name, details])
 
 
 func _on_import_progress(_path: String, ratio: float) -> void:

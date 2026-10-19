@@ -347,6 +347,9 @@ func _opt(row: Dictionary, key: String) -> String:
 ## `Strings.formatMillis` (`ARC/.../Strings.java:813`): `h:mm:ss`, hours
 ## unpadded, minutes/seconds two digits (`SaveSlot.getPlayTime`).
 func _format_millis(millis: int) -> String:
-	var sign := "-" if millis < 0 else ""
+	var sign_prefix := "-" if millis < 0 else ""
 	millis = absi(millis)
-	return "%s%d:%02d:%02d" % [sign, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000]
+	@warning_ignore("integer_division")
+	return "%s%d:%02d:%02d" % [
+		sign_prefix, millis / 3600000, (millis % 3600000) / 60000, (millis % 60000) / 1000
+	]

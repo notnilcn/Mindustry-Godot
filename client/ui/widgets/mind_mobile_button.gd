@@ -11,7 +11,7 @@ var _listener: Callable = Callable()
 
 
 ## Builds the icon + wrapped label (`MobileButton(icon, text, listener)`).
-func setup(icon_region: String, text: String, listener: Callable) -> void:
+func setup(icon_region: String, label_text: String, listener: Callable) -> void:
 	_listener = listener
 	if not pressed.is_connected(_on_pressed):
 		pressed.connect(_on_pressed)
@@ -21,13 +21,13 @@ func setup(icon_region: String, text: String, listener: Callable) -> void:
 	column.alignment = BoxContainer.ALIGNMENT_CENTER
 	column.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(column)
-	var icon := TextureRect.new()
-	icon.texture = MindWidgets.icon_texture(icon_region)
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	icon.custom_minimum_size = Vector2(48, 48)
-	column.add_child(icon)
+	var icon_rect := TextureRect.new()
+	icon_rect.texture = MindWidgets.icon_texture(icon_region)
+	icon_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	icon_rect.custom_minimum_size = Vector2(48, 48)
+	column.add_child(icon_rect)
 	var label := Label.new()
-	label.text = text
+	label.text = label_text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE

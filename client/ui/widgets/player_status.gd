@@ -80,8 +80,8 @@ func _draw() -> void:
 		# `Scaling.bounded`: shrink to fit, never upscale.
 		var tex_size := _icon.get_size()
 		var bound := Vector2(IMAGE_MAX_WIDTH, size.y)
-		var scale := minf(1.0, minf(bound.x / tex_size.x, bound.y / tex_size.y))
-		var drawn := tex_size * scale
+		var zoom := minf(1.0, minf(bound.x / tex_size.x, bound.y / tex_size.y))
+		var drawn := tex_size * zoom
 		draw_texture_rect(_icon, Rect2(Vector2(image_x, 0) + (bound - drawn) * 0.5, drawn), false)
 
 
@@ -136,9 +136,9 @@ func _quad(rect: Rect2, flip: bool, color: Color, points: Array) -> void:
 	draw_colored_polygon(out, color)
 
 
-func _region(name: String) -> Texture2D:
+func _region(region_name: String) -> Texture2D:
 	var assets := MindWidgets.assets()
 	if assets == null or not assets.has_method("find_region"):
 		return null
-	var texture: Variant = assets.call("find_region", name)
+	var texture: Variant = assets.call("find_region", region_name)
 	return texture as Texture2D

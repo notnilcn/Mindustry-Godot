@@ -266,8 +266,8 @@ func _show_mode_help() -> void:
 		lines.append(
 			"[accent]%s:[] [lightgray]%s" % [_t("@mode.%s.name" % mode), _t("@mode.%s.description" % mode)]
 		)
-	var body := "\n".join(lines)
-	ui.call("show_text", _t("@mode.help.title"), MindWidgets.markup_text(body))
+	var body_text := "\n".join(lines)
+	ui.call("show_text", _t("@mode.help.title"), MindWidgets.markup_text(body_text))
 
 
 ## `CustomRulesDialog(true).show(rules, () -> rules = map.applyRules(mode))`:

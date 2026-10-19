@@ -586,7 +586,7 @@ func _sort_all(node: Node) -> void:
 
 
 ## `category(name)`: a fresh left-aligned rule table.
-func _category(name: String) -> void:
+func _category(category_name: String) -> void:
 	var table := MindTable.new()
 	table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	# `current.left().defaults().fillX().expandX().left().pad(5)`
@@ -594,7 +594,7 @@ func _category(name: String) -> void:
 	# 32 px check row sits on a 42 px pitch (PAR-0430).
 	table.defaults().pad(5.0)
 	_current = table
-	_categories.append({"name": name, "table": table})
+	_categories.append({"name": category_name, "table": table})
 
 
 ## Bundle text with markup tags stripped for plain `Label`/`Button` widgets.
@@ -750,7 +750,12 @@ func _make_number_row(
 			_invalid_field(field, true)
 			return
 		_invalid_field(field, false)
-		cons.call(int(value) if integer else value)
+		var parsed_value: Variant
+		if integer:
+			parsed_value = int(value)
+		else:
+			parsed_value = value
+		cons.call(parsed_value)
 		_refresh_conditions()
 	)
 	row.add(field).left().set_pad_right(100.0 if integer else 50.0)
@@ -848,7 +853,7 @@ func _team(key: String, cons: Callable, prov: Callable) -> void:
 	var team_label := MindWidgets.label(MindWidgets.markup(key))
 	_rule_info(team_label, key)
 	row.add(team_label).left().set_pad_right(5)
-	var buttons: Array[Button] = []
+	var button_row: Array[Button] = []
 	var team_ids: Array[int] = []
 	for team in _base_teams():
 		var id := int(team.get("id", 0))
@@ -867,12 +872,12 @@ func _team(key: String, cons: Callable, prov: Callable) -> void:
 		button.tooltip_text = _t("@team.%s.name" % str(team.get("name", "")))
 		button.pressed.connect(func() -> void:
 			cons.call(id)
-			for index in buttons.size():
-				buttons[index].button_pressed = team_ids[index] == id
+			for index in button_row.size():
+				button_row[index].button_pressed = team_ids[index] == id
 			_refresh_conditions()
 		)
 		row.add(button).pad(1)
-		buttons.append(button)
+		button_row.append(button)
 		team_ids.append(id)
 	_row_into(_current, row)
 
@@ -1192,9 +1197,9 @@ func _music_value(text: String) -> Variant:
 		return null
 	var tracks: Array = []
 	for part in trimmed.split(","):
-		var name := part.strip_edges()
-		if not name.is_empty():
-			tracks.append(name)
+		var track_name := part.strip_edges()
+		if not track_name.is_empty():
+			tracks.append(track_name)
 	return {"tracks": tracks}
 
 
@@ -1204,8 +1209,8 @@ func _music_valid(text: String) -> bool:
 	if trimmed.is_empty():
 		return true
 	for part in trimmed.split(","):
-		var name := part.strip_edges()
-		if name.is_empty() or not name.is_valid_identifier():
+		var track_name := part.strip_edges()
+		if track_name.is_empty() or not track_name.is_valid_identifier():
 			return false
 	return true
 
@@ -1343,13 +1348,13 @@ func _open_weather_add() -> void:
 	var entries: Array = _rules.get("weather", [])
 	var index := 0
 	for name_variant in names:
-		var name := str(name_variant)
-		var button := MindWidgets.button(_t("@weather.%s.name" % name))
+		var weather_name := str(name_variant)
+		var button := MindWidgets.button(_t("@weather.%s.name" % weather_name))
 		button.custom_minimum_size = Vector2(140.0, 50.0)
 		button.pressed.connect(func() -> void:
 			entries.append(
 				{
-					"weather": name,
+					"weather": weather_name,
 					"minFrequency": 97200.0,
 					"maxFrequency": 194400.0,
 					"minDuration": 16200.0,
@@ -1435,27 +1440,27 @@ func _planet_table() -> Control:
 		if listed is Array:
 			names = listed
 	var index := 0
-	var buttons: Array[Button] = []
+	var planet_buttons: Array[Button] = []
 	var planet_names: Array[String] = []
 	for row_variant in names:
 		var row: Dictionary = row_variant
-		var name := str(row.get("name", ""))
+		var planet_name := str(row.get("name", ""))
 		# code-instantiated: one planet toggle per landable planet.
 		var button := Button.new()
-		button.text = _t("@planet.%s.name" % name)
+		button.text = _t("@planet.%s.name" % planet_name)
 		button.theme_type_variation = "flatTogglet"
 		button.toggle_mode = true
-		button.button_pressed = str(_rules.get("planet", "serpulo")) == name
+		button.button_pressed = str(_rules.get("planet", "serpulo")) == planet_name
 		button.custom_minimum_size = Vector2(140.0, 50.0)
 		button.pressed.connect(func() -> void:
-			_apply_planet(name)
-			for i in buttons.size():
-				buttons[i].button_pressed = planet_names[i] == name
+			_apply_planet(planet_name)
+			for i in planet_buttons.size():
+				planet_buttons[i].button_pressed = planet_names[i] == planet_name
 			_refresh_conditions()
 		)
 		table.add(button).pad(1)
-		buttons.append(button)
-		planet_names.append(name)
+		planet_buttons.append(button)
+		planet_names.append(planet_name)
 		index += 1
 		if index % 3 == 0:
 			table.row()
@@ -1469,8 +1474,8 @@ func _planet_table() -> Control:
 		_rules["attributes"] = {}
 		_rules["env"] = _default_env()
 		_rules["planet"] = "sun"
-		for i in buttons.size():
-			buttons[i].button_pressed = false
+		for i in planet_buttons.size():
+			planet_buttons[i].button_pressed = false
 		any.button_pressed = true
 		_refresh_conditions()
 	)
@@ -1478,11 +1483,11 @@ func _planet_table() -> Control:
 	return table
 
 
-func _apply_planet(name: String) -> void:
+func _apply_planet(planet_name: String) -> void:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign == null or not campaign.has_method("apply_planet_rules"):
 		return
-	var updated: Variant = campaign.call("apply_planet_rules", name, JSON.stringify(_rules))
+	var updated: Variant = campaign.call("apply_planet_rules", planet_name, JSON.stringify(_rules))
 	if updated is String and not str(updated).is_empty():
 		var parsed: Variant = JSON.parse_string(str(updated))
 		if parsed is Dictionary:
@@ -1491,10 +1496,10 @@ func _apply_planet(name: String) -> void:
 				_rules[key] = (parsed as Dictionary)[key]
 
 
-func _planet_env(name: String) -> int:
+func _planet_env(planet_name: String) -> int:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign != null and campaign.has_method("planet_default_env"):
-		return int(campaign.call("planet_default_env", name))
+		return int(campaign.call("planet_default_env", planet_name))
 	return 0
 
 
@@ -1620,14 +1625,14 @@ func _overlay_open(title: String, width: float) -> MindTable:
 	layout.add_theme_constant_override("separation", 6)
 	panel_root.add_child(layout)
 	layout.add_child(MindWidgets.styled_label(MindWidgets.markup(title), "techLabel"))
-	var body := MindTable.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	layout.add_child(body)
+	var panel_body := MindTable.new()
+	panel_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	layout.add_child(panel_body)
 	var close := MindWidgets.button(_t("@back"))
 	close.pressed.connect(_close_overlay)
 	layout.add_child(close)
 	_overlay = root
-	return body
+	return panel_body
 
 
 func _close_overlay() -> void:

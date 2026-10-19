@@ -137,12 +137,12 @@ func _finish_landing() -> void:
 	if not bool(state.get("showLandInfo", false)):
 		return
 	var preset := str(state.get("preset", ""))
-	var name := str(state.get("sector", ""))
+	var sector_name := str(state.get("sector", ""))
 	if not preset.is_empty():
 		var key := "sector.%s.name" % preset
 		var localized := _bundle(key)
-		name = localized if not localized.is_empty() and localized != key else preset
-	var text := "[accent]%s" % name
+		sector_name = localized if not localized.is_empty() and localized != key else preset
+	var text := "[accent]%s" % sector_name
 	var resources := _sector_resources(int(state.get("sector", -1)))
 	if not resources.is_empty():
 		var parts := PackedStringArray()
@@ -207,7 +207,7 @@ func _draw() -> void:
 		# `region.width * region.scl()`: world units of the unscaled sprite.
 		var region_size := region.get_size() * CORE_REGION_SUPERSAMPLE
 		var size := float(_core_size())
-		var rotation := pow(fout, 2.0) * 135.0
+		var core_rotation := pow(fout, 2.0) * 135.0
 		# `CoreBlock.java:484-492`.
 		var s := region_size.x * scl * 3.6 * (1.0 - pow(1.0 - fout, 2.0))
 		var frame := 1.0 if fin >= 0.25 else fin / 0.25
@@ -223,7 +223,7 @@ func _draw() -> void:
 		)
 		var offset := (size - 3.0) * 3.0 * scl
 		for i in 4:
-			var v := Vector2.RIGHT.rotated(deg_to_rad(i * 90.0 + rotation))
+			var v := Vector2.RIGHT.rotated(deg_to_rad(i * 90.0 + core_rotation))
 			var base_len := (size * 8.0 / 2.0 + 1.0) * scl
 			if strength > 0.0:
 				draw_circle(
@@ -235,9 +235,9 @@ func _draw() -> void:
 		# `drawLandingThrusters`, `Drawf.spinSprite(region)`, the
 		# `pow4In(thrusterFrame)` thruster pass, then the team region
 		# (`CoreBlock.java:515-525`).
-		_draw_landing_thrusters(frame, rotation, 1.0, scl)
-		_spin_sprite(region, rotation, region_size * scl, Color.WHITE)
-		_draw_landing_thrusters(frame, rotation, pow(frame, 4.0), scl)
+		_draw_landing_thrusters(frame, core_rotation, 1.0, scl)
+		_spin_sprite(region, core_rotation, region_size * scl, Color.WHITE)
+		_draw_landing_thrusters(frame, core_rotation, pow(frame, 4.0), scl)
 		if base != null:
 			var team := MindWidgets.icon_texture("%s-team-%s" % [_block, _team])
 			var tint := Color.WHITE
@@ -245,7 +245,7 @@ func _draw() -> void:
 				team = MindWidgets.icon_texture("%s-team" % _block)
 				tint = _team_color
 			if team != null:
-				_spin_sprite(team, rotation, team.get_size() * CORE_REGION_SUPERSAMPLE * scl, tint)
+				_spin_sprite(team, core_rotation, team.get_size() * CORE_REGION_SUPERSAMPLE * scl, tint)
 	elif _thruster_time > 0.0:
 		# Post-touchdown retraction (`CoreBuild.draw`, `CoreBlock.java:340-355`).
 		_draw_thrusters(1.0 - _thruster_time)
@@ -256,13 +256,13 @@ func _draw() -> void:
 ## edge faces world `+y`) and `rotation` turns counter-clockwise on screen,
 ## both as in Java.
 func _draw_region(
-	texture: Texture2D, center: Vector2, rotation: float, world_size: Vector2, tint: Color
+	texture: Texture2D, center: Vector2, angle: float, world_size: Vector2, tint: Color
 ) -> void:
 	var tex_size := texture.get_size()
 	if tex_size.x <= 0.0 or tex_size.y <= 0.0:
 		return
 	draw_set_transform(
-		center, deg_to_rad(rotation), Vector2(world_size.x / tex_size.x, -world_size.y / tex_size.y)
+		center, deg_to_rad(angle), Vector2(world_size.x / tex_size.x, -world_size.y / tex_size.y)
 	)
 	draw_texture(texture, -tex_size * 0.5, tint)
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
@@ -270,8 +270,8 @@ func _draw_region(
 
 ## `Drawf.spinSprite` (`Drawf.java:606-613`): the region at `r mod 90`, then
 ## again at `r - 90` with alpha `r / 90`, so a 4-fold sprite turns smoothly.
-func _spin_sprite(texture: Texture2D, rotation: float, world_size: Vector2, tint: Color) -> void:
-	var r := fposmod(rotation, 90.0)
+func _spin_sprite(texture: Texture2D, angle: float, world_size: Vector2, tint: Color) -> void:
+	var r := fposmod(angle, 90.0)
 	_draw_region(texture, _position, r, world_size, tint)
 	var faded := tint
 	faded.a *= r / 90.0
@@ -311,7 +311,7 @@ func _draw_streaks(fin: float, fout: float, scl: float) -> void:
 ## by -90 and scales the alpha by `(rotation % 90) / 90`. `base_alpha` is the
 ## caller's alpha (`pow4In(thrusterFrame)` for the second call site); `scl`
 ## is `Draw.xscl` (offsets and plate sizes).
-func _draw_landing_thrusters(frame: float, rotation: float, base_alpha: float, scl: float) -> void:
+func _draw_landing_thrusters(frame: float, angle: float, base_alpha: float, scl: float) -> void:
 	var length := float(THRUSTER_LENGTHS.get(_block, THRUSTER_LENGTH)) * (frame - 1.0) - 0.25
 	for pass_index in 2:
 		for i in 4:
@@ -320,12 +320,12 @@ func _draw_landing_thrusters(frame: float, rotation: float, base_alpha: float, s
 			)
 			if texture == null:
 				continue
-			var rot := i * 90.0 + fmod(rotation, 90.0)
+			var rot := i * 90.0 + fmod(angle, 90.0)
 			var offset := Vector2.RIGHT.rotated(deg_to_rad(rot)) * length * scl
 			var alpha := base_alpha
 			if pass_index == 1:
 				offset = offset.rotated(deg_to_rad(-90.0))
-				alpha = fmod(rotation, 90.0) / 90.0 * base_alpha
+				alpha = fmod(angle, 90.0) / 90.0 * base_alpha
 				rot -= 90.0
 			if alpha <= 0.0:
 				continue
@@ -362,10 +362,12 @@ func _core_size() -> int:
 	if host == null or not host.has_method("block_size"):
 		return 3
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
+	@warning_ignore("integer_division")
 	var tile := Vector2i(int(_position.x) / 8, int(_position.y) / 8)
 	if camera != null and camera.has_method("landing_draw_json"):
 		var parsed: Variant = JSON.parse_string(str(camera.call("landing_draw_json")))
 		if parsed is Dictionary:
+			@warning_ignore("integer_division")
 			tile = Vector2i(
 				int(float(parsed.get("x", 0.0))) / 8, int(float(parsed.get("y", 0.0))) / 8
 			)

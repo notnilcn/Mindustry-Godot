@@ -14,8 +14,6 @@ const MODES := ["normal", "team", "admin"]
 const PREFIXES := ["", "/t", "/a"]
 
 var _messages: PackedStringArray = []
-var _history: PackedStringArray = [""]
-var _history_pos := 0
 var _mode := 0
 var _fade := 0.0
 var _shown := false

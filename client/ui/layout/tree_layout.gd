@@ -13,7 +13,7 @@ var positions: Dictionary = {}
 ## Horizontal gap between sibling nodes.
 var gap := 16.0
 ## Seed used by the radial/branch variants for deterministic jitter.
-var seed := 0
+var seed_value := 0
 
 
 ## Computes `{name: Vector2}` positions for the entry depth tree.
@@ -21,8 +21,8 @@ func layout_entries(entries: Array) -> Dictionary:
 	positions.clear()
 	var cursor := Vector2.ZERO
 	for entry in entries:
-		var name := str((entry as Dictionary).get("name", ""))
-		positions[name] = cursor
+		var entry_name := str((entry as Dictionary).get("name", ""))
+		positions[entry_name] = cursor
 		cursor.x += (entry as Dictionary).get("width", 120.0)
 		cursor.x += gap
 	return positions

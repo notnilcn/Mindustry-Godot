@@ -482,12 +482,12 @@ func _rebuild_command_panel(view: Variant) -> void:
 ## 32px unit icon with the count at the bottom-right; left click keeps the
 ## type, right click drops it.
 func _command_type_cell(entry: Dictionary) -> Control:
-	var name := str(entry.get("name", ""))
+	var unit_name := str(entry.get("name", ""))
 	var count := int(entry.get("count", 0))
 	var button := Button.new()
 	button.custom_minimum_size = Vector2(42, 42)
-	button.tooltip_text = _bundle("unit.%s.name" % name, name)
-	button.icon = MindWidgets.icon_texture("unit-%s-ui" % name)
+	button.tooltip_text = _bundle("unit.%s.name" % unit_name, unit_name)
+	button.icon = MindWidgets.icon_texture("unit-%s-ui" % unit_name)
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 32)
 	button.gui_input.connect(_on_command_type_input.bind(int(entry.get("type", -1))))
@@ -524,9 +524,9 @@ func _command_button_grid(entries: Array, is_command: bool) -> GridContainer:
 		if not (entry_variant is Dictionary):
 			continue
 		var entry: Dictionary = entry_variant
-		var name := str(entry.get("name", ""))
+		var command_name := str(entry.get("name", ""))
 		var active := bool(entry.get("active", false))
-		var label := _bundle(str(entry.get("key", "")), name)
+		var label := _bundle(str(entry.get("key", "")), command_name)
 		# `Icon.icons.get(command.icon, Icon.cancel)`: the Java field name maps
 		# to the port's kebab-case alias; unknown icons fall back.
 		# code-instantiated: one button per command/stance in the live union.
@@ -536,31 +536,31 @@ func _command_button_grid(entries: Array, is_command: bool) -> GridContainer:
 		button.custom_minimum_size = Vector2(50, 50)
 		button.tooltip_text = label
 		if is_command:
-			button.pressed.connect(_set_command.bind(name))
+			button.pressed.connect(_set_command.bind(command_name))
 		else:
-			button.pressed.connect(_toggle_stance.bind(name, active))
+			button.pressed.connect(_toggle_stance.bind(command_name, active))
 		grid.add_child(button)
 	return grid
 
 
 ## `Call.setUnitCommand(player, ids, command)` (`:579-581`).
-func _set_command(name: String) -> void:
+func _set_command(command_name: String) -> void:
 	var input := get_node_or_null("/root/Spine/Input")
 	if input != null and input.has_method("set_unit_command"):
-		input.call("set_unit_command", name)
+		input.call("set_unit_command", command_name)
 
 
 ## `Call.setUnitStance(player, ids, stance, !activeStances.get(...))` (`:602-603`).
-func _toggle_stance(name: String, active: bool) -> void:
+func _toggle_stance(command_name: String, active: bool) -> void:
 	var input := get_node_or_null("/root/Spine/Input")
 	if input != null and input.has_method("set_unit_stance_named"):
-		input.call("set_unit_stance_named", name, not active)
+		input.call("set_unit_stance_named", command_name, not active)
 
 
 ## Java `Icon` field name -> port glyph alias (`downOpen` -> `down-open`); empty
 ## when the port has no such glyph (`Icon.icons.get(..., Icon.cancel)`).
-func _icon_alias(name: String) -> String:
-	var alias := name.to_snake_case().replace("_", "-")
+func _icon_alias(icon_name: String) -> String:
+	var alias := icon_name.to_snake_case().replace("_", "-")
 	if MindIcons.glyph(alias).is_empty():
 		return "cancel"
 	return alias
@@ -1073,6 +1073,7 @@ func _key_combo(display: String) -> String:
 	var fmt := _bundle("placement.blockselectkeys", "\n[lightgray]Key: [{0},")
 	var combo := fmt.replace("{0}", category_key)
 	if index >= 10:
+		@warning_ignore("integer_division")
 		combo += "%s," % binds[mini((index + 1) / 10 - 1, 9)]
 	combo += "%s]" % binds[index % 10]
 	return MindWidgets.markup(combo)
@@ -1281,16 +1282,16 @@ func _category_step(delta: int) -> void:
 ## `updatePick`'s category switch for a successful middle-click pick: the rail
 ## follows the picked block's category (`:166-168`).
 func _sync_category_to_selected() -> void:
-	var name := _block_selected_name()
-	if name.is_empty():
+	var block_name := _block_selected_name()
+	if block_name.is_empty():
 		return
 	var list: Array = _catalog.get("categories", [])
 	for index in list.size():
 		var entry: Dictionary = list[index]
-		if not _block_names(entry).has(name):
+		if not _block_names(entry).has(block_name):
 			continue
 		_selected_category = index
-		_selected_blocks[str(entry.get("name", ""))] = name
+		_selected_blocks[str(entry.get("name", ""))] = block_name
 		_build_categories()
 		_rebuild()
 		return
@@ -1301,8 +1302,8 @@ func _block_selected_name() -> String:
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if host == null or not host.has_method("selected_block"):
 		return ""
-	var name := str(host.call("selected_block"))
-	return "" if name == "air" else name
+	var block_name := str(host.call("selected_block"))
+	return "" if block_name == "air" else block_name
 
 
 ## The live catalogue entry for `_selected_category`.
@@ -1338,18 +1339,18 @@ func _category_index_by_ordinal(ordinal: int) -> int:
 func _get_selected_block(entry: Dictionary) -> String:
 	if entry.is_empty():
 		return ""
-	var name := str(entry.get("name", ""))
-	if _selected_blocks.has(name):
-		return str(_selected_blocks[name])
+	var block_name := str(entry.get("name", ""))
+	if _selected_blocks.has(block_name):
+		return str(_selected_blocks[block_name])
 	var names := _block_names(entry)
 	return names[0] if not names.is_empty() else ""
 
 
 ## Selects a block by content name through `MindInput` (`control.input.block`).
-func _select_block_by_name(name: String) -> void:
-	if name.is_empty():
+func _select_block_by_name(block_name: String) -> void:
+	if block_name.is_empty():
 		return
-	_select_block(get_node_or_null("/root/Spine/SimHost"), name)
+	_select_block(get_node_or_null("/root/Spine/SimHost"), block_name)
 
 
 ## Switches the visible category and re-selects its remembered block
@@ -1444,12 +1445,12 @@ func _select(index: int) -> void:
 
 ## Selects a block through `MindInput` so the placement rotation/state stay in
 ## sync (falls back to the sim host when the input node is absent).
-func _select_block(host: Node, name: String) -> void:
+func _select_block(host: Node, block_name: String) -> void:
 	var input := get_node_or_null("/root/Spine/Input")
 	if input != null and input.has_method("select_block_by_name"):
-		input.call("select_block_by_name", name)
+		input.call("select_block_by_name", block_name)
 	elif host != null:
-		host.call("select_block", name)
+		host.call("select_block", block_name)
 
 
 func _rebuild() -> void:
@@ -1481,19 +1482,19 @@ func _rebuild() -> void:
 	group.allow_unpress = true
 	for block_variant in category.get("blocks", []):
 		var block: Dictionary = block_variant
-		var name := str(block.get("name", ""))
-		var label := _bundle(str(block.get("localized", "")), name)
+		var block_name := str(block.get("name", ""))
+		var label := _bundle(str(block.get("localized", "")), block_name)
 		if not query.is_empty():
-			if not name.to_lower().contains(query) and not label.to_lower().contains(query):
+			if not block_name.to_lower().contains(query) and not label.to_lower().contains(query):
 				continue
 		var button := MindWidgets.image_button_first(
-			PackedStringArray(["block-%s-ui" % name, "block-%s-full" % name, name]), "selecti"
+			PackedStringArray(["block-%s-ui" % block_name, "block-%s-full" % block_name, block_name]), "selecti"
 		)
-		button.name = "block-%s" % name
+		button.name = "block-%s" % block_name
 		button.tooltip_text = label
 		button.toggle_mode = true
 		button.button_group = group
-		button.button_pressed = name == selected
+		button.button_pressed = block_name == selected
 		button.custom_minimum_size = Vector2(46, 46)
 		# `Button.resizeImage(iconMed)`: 46px cell, 32px centred icon.
 		button.expand_icon = true
@@ -1512,8 +1513,8 @@ func _rebuild() -> void:
 			var current := ""
 			if host != null and host.has_method("selected_block"):
 				current = str(host.call("selected_block"))
-			var next := "air" if current == name else name
+			var next := "air" if current == block_name else block_name
 			_selected_blocks[str(category.get("name", ""))] = "" if next == "air" else next
 			_select_block(host, next))
 		blocks.add_child(button)
-		_block_buttons[name] = button
+		_block_buttons[block_name] = button

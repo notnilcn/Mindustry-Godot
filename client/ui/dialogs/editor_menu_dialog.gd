@@ -64,8 +64,8 @@ func _build() -> void:
 		# code-instantiated: one button per `MapEditorDialog` menu entry.
 		var button := MindWidgets.icon_button(str(entry.get("icon", "")), _t(str(entry.get("key", ""))))
 		button.pressed.connect(_run.bind(str(entry.get("action", ""))))
-		var size := WIDE_SIZE if wide else BUTTON_SIZE
-		var cell := grid.add(button).width(size.x).height(size.y).set_colspan(2 if wide else 1)
+		var button_size := WIDE_SIZE if wide else BUTTON_SIZE
+		var cell := grid.add(button).width(button_size.x).height(button_size.y).set_colspan(2 if wide else 1)
 		if wide:
 			cell.set_pad_top(float(entry.get("pad_top", 0.0))).set_pad_bottom(float(entry.get("pad_bottom", 0.0)))
 		else:
@@ -125,16 +125,16 @@ func _save() -> void:
 
 ## Every non-action entry opens a registered editor dialog (`menu.hide()` +
 ## `dialog.show()` upstream).
-func _open_menu_dialog(name: String) -> void:
+func _open_menu_dialog(dialog_name: String) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui == null or not ui.has_method("open_dialog"):
 		return
 	# From the menu the generate dialog applies to the editor (`applyToEditor`).
-	if name == "map_generate":
+	if dialog_name == "map_generate":
 		var dialog := _dialog("map_generate")
 		if dialog != null:
 			dialog.set("applied", true)
-	ui.call("open_dialog", name, "")
+	ui.call("open_dialog", dialog_name, "")
 	_close_pressed()
 
 
@@ -146,10 +146,10 @@ func _edit_in_game() -> void:
 	if _editor == null or not bool(_call("save").get("ok", false)):
 		_notify(_t("@editor.errorsave"))
 		return
-	var name := str(_tags().get("name", ""))
+	var map_name := str(_tags().get("name", ""))
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
-	if name.is_empty() or campaign == null \
-			or not bool(campaign.call("start_map_mode", name, "editor", true, "")):
+	if map_name.is_empty() or campaign == null \
+			or not bool(campaign.call("start_map_mode", map_name, "editor", true, "")):
 		_notify(_t("@editor.errorsave"))
 		return
 	_close_pressed()
@@ -215,11 +215,11 @@ func _tags() -> Dictionary:
 	return value if value is Dictionary else {}
 
 
-func _dialog(name: String) -> Node:
+func _dialog(dialog_name: String) -> Node:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root == null or not ui_root.has_method("dialog"):
 		return null
-	return ui_root.call("dialog", name)
+	return ui_root.call("dialog", dialog_name)
 
 
 func _hide_editor() -> void:

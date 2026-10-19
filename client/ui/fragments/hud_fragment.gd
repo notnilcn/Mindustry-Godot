@@ -235,11 +235,11 @@ func _update_logic_hud() -> void:
 	var parsed: Variant = JSON.parse_string(str(host.call("logic_cutscene_json")))
 	if typeof(parsed) != TYPE_DICTIONARY:
 		return
-	var hide := bool((parsed as Dictionary).get("hideHud", false))
-	if hide == _logic_hud_hidden:
+	var should_hide := bool((parsed as Dictionary).get("hideHud", false))
+	if should_hide == _logic_hud_hidden:
 		return
-	_logic_hud_hidden = hide
-	if hide:
+	_logic_hud_hidden = should_hide
+	if should_hide:
 		_logic_hud_prev_visible = visible
 		visible = false
 	else:
@@ -361,9 +361,9 @@ func refresh() -> void:
 	if waiting_banner != null:
 		waiting_banner.visible = bool(_hud.get("waiting"))
 	if position_label != null:
-		var position := str(_hud.get("position_text"))
-		position_label.text = "[center]" + position
-		position_label.visible = not position.is_empty()
+		var position_text := str(_hud.get("position_text"))
+		position_label.text = "[center]" + position_text
+		position_label.visible = not position_text.is_empty()
 	_refresh_core_items()
 	_refresh_skip_button()
 	_refresh_boss()
@@ -539,7 +539,7 @@ func _on_announce(text: String, duration: float) -> void:
 ## slides back out. Unlocks that arrive while the box lives merge into it as a
 ## 3-column icon grid (`col = 3`, cap = `col * col - 1` = 8; the 9th cell is
 ## `Icon.add`, later unlocks are dropped; cell size `48 / min(n + 1, 3)`).
-func _on_unlock(name: String) -> void:
+func _on_unlock(content_name: String) -> void:
 	# `if(state.isMenu()) return;`
 	if _in_menu():
 		return
@@ -548,9 +548,9 @@ func _on_unlock(name: String) -> void:
 		# `Sounds.uiNotify.play()` (`UI.java:146`).
 		ui.call("play_ui_sound", "uiNotify")
 	if _unlock_box != null and is_instance_valid(_unlock_box):
-		_merge_unlock_icon(name)
+		_merge_unlock_icon(content_name)
 		return
-	_build_unlock_box(name)
+	_build_unlock_box(content_name)
 
 
 ## `state.isMenu()` through the UI root's menu group.
@@ -562,7 +562,7 @@ func _in_menu() -> bool:
 ## First unlock: builds the box, its 48 px icon cell and the slide-in/out tween
 ## (`HudFragment.java:792-826`; the Java `scheduleToast` 3.5 s slot shared with
 ## other toasts is not ported: the port shows it at once when no box lives).
-func _build_unlock_box(name: String) -> void:
+func _build_unlock_box(content_name: String) -> void:
 	var layer := get_node_or_null("/root/Spine/Ui/UiRoot/OverlayLayer")
 	if layer == null:
 		layer = self
@@ -583,7 +583,7 @@ func _build_unlock_box(name: String) -> void:
 	# `table.add(in).padRight(8)`: the icon table becomes the merge grid.
 	var grid := GridContainer.new()
 	grid.columns = 3
-	grid.add_child(_unlock_icon(name, 48.0))
+	grid.add_child(_unlock_icon(content_name, 48.0))
 	row.add_child(grid)
 	var label := MindRichLabel.new()
 	label.text = MindWidgets.markup("@unlocked")
@@ -614,7 +614,7 @@ func _build_unlock_box(name: String) -> void:
 
 ## Merge half (`HudFragment.java:828-869`): re-flow the grid at the Java cell
 ## size and append the new icon (or the `Icon.add` placeholder at the cap).
-func _merge_unlock_icon(name: String) -> void:
+func _merge_unlock_icon(content_name: String) -> void:
 	var grid: GridContainer = _unlock_grid
 	if grid == null or not is_instance_valid(grid):
 		return
@@ -629,7 +629,7 @@ func _merge_unlock_icon(name: String) -> void:
 		if child is Control:
 			(child as Control).custom_minimum_size = Vector2(cell, cell)
 	if count < cap:
-		grid.add_child(_unlock_icon(name, cell))
+		grid.add_child(_unlock_icon(content_name, cell))
 	else:
 		# `else lastUnlockLayout.image(Icon.add)`.
 		var add := MindWidgets.glyph("add", int(cell), Color.WHITE)
@@ -640,16 +640,16 @@ func _merge_unlock_icon(name: String) -> void:
 ## `new Image(content.uiIcon)`: the content's `<type>-<name>-ui` atlas region
 ## (48 px cell, `Scaling.fit`), pad 2 (`in.add(image).size(8 * 6).pad(2)`); the
 ## lock glyph stands in when no region exists (`UnlockableContent.uiIcon`).
-func _unlock_icon(name: String, size: float) -> Control:
+func _unlock_icon(content_name: String, icon_size: float) -> Control:
 	# code-instantiated: unlock icons are content-driven (atlas lookup).
 	var cell := MarginContainer.new()
 	for side in ["left", "top", "right", "bottom"]:
 		cell.add_theme_constant_override("margin_" + side, 2)
-	cell.custom_minimum_size = Vector2(size, size)
+	cell.custom_minimum_size = Vector2(icon_size, icon_size)
 	cell.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var texture: Texture2D = null
 	for type_name in ["block", "item", "unit", "liquid", "status"]:
-		texture = MindWidgets.icon_texture("%s-%s-ui" % [type_name, name])
+		texture = MindWidgets.icon_texture("%s-%s-ui" % [type_name, content_name])
 		if texture != null:
 			break
 	if texture != null:
@@ -661,7 +661,7 @@ func _unlock_icon(name: String, size: float) -> Control:
 		image.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		cell.add_child(image)
 	else:
-		var glyph := MindWidgets.glyph("lock", int(maxf(size - 4.0, 8.0)), Color.WHITE)
+		var glyph := MindWidgets.glyph("lock", int(maxf(icon_size - 4.0, 8.0)), Color.WHITE)
 		cell.add_child(glyph)
 	return cell
 
@@ -678,8 +678,8 @@ func _on_minimap_pan(world_delta: Vector2) -> void:
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
 	if camera == null or not camera.has_method("pan_to"):
 		return
-	var position: Vector2 = camera.get("position")
-	camera.call("pan_to", position.x + world_delta.x, position.y + world_delta.y)
+	var camera_pos: Vector2 = camera.get("position")
+	camera.call("pan_to", camera_pos.x + world_delta.x, camera_pos.y + world_delta.y)
 
 
 ## `Renderer.scaleCamera` step from the widget's absolute zoom ratio.
@@ -713,7 +713,6 @@ func _refresh_boss() -> void:
 	if not boss_bar.visible:
 		return
 	if boss_mind_bar != null:
-		var names: Array = state.get("names", [])
 		var prefix := ""
 		if count > 6:
 			prefix = "[accent]+[] "
@@ -788,18 +787,18 @@ func _refresh_status_icons() -> void:
 	_status_names = signature
 	for child in status_icons.get_children():
 		child.queue_free()
-	for name in names:
-		if name.is_empty():
+	for status_name in names:
+		if status_name.is_empty():
 			continue
 		# code-instantiated: one icon per applied status effect (T9).
 		var icon := TextureRect.new()
 		icon.custom_minimum_size = Vector2(32, 32)
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.texture = MindWidgets.icon_texture("status-%s-ui" % name)
+		icon.texture = MindWidgets.icon_texture("status-%s-ui" % status_name)
 		if icon.texture == null:
-			icon.texture = MindWidgets.icon_texture("status-%s" % name)
-		icon.tooltip_text = MindWidgets.markup("@status.%s.name" % name)
+			icon.texture = MindWidgets.icon_texture("status-%s" % status_name)
+		icon.tooltip_text = MindWidgets.markup("@status.%s.name" % status_name)
 		status_icons.add_child(icon)
 
 

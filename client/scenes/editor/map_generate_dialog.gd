@@ -220,16 +220,16 @@ func _filter_card(index: int) -> Control:
 	card.custom_minimum_size.x = CARD_WIDTH
 	card.size_flags_horizontal = Control.SIZE_FILL
 	# code-instantiated: one card per filter; the stack is runtime-sized.
-	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 0)
-	card.add_child(body)
-	body.add_child(_card_header(index, row))
+	var card_body := VBoxContainer.new()
+	card_body.add_theme_constant_override("separation", 0)
+	card.add_child(card_body)
+	card_body.add_child(_card_header(index, row))
 	var options := VBoxContainer.new()
 	options.add_theme_constant_override("separation", 2)
 	for option_value in _options_of(row):
 		if option_value is Dictionary:
 			options.add_child(_option_row(option_value, index))
-	body.add_child(options)
+	card_body.add_child(options)
 	return card
 
 
@@ -247,8 +247,8 @@ func _card_header(index: int, row: Dictionary) -> Control:
 	var line := HBoxContainer.new()
 	line.add_theme_constant_override("separation", 0)
 	header.add_child(line)
-	var name := str(row.get("name", ""))
-	var label := MindWidgets.label(_t("@filter." + name))
+	var filter_name := str(row.get("name", ""))
+	var label := MindWidgets.label(_t("@filter." + filter_name))
 	label.custom_minimum_size.x = 100.0
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	line.add_child(label)
@@ -360,19 +360,19 @@ func _block_row(option: Dictionary, index: int) -> Control:
 
 
 ## The current value's `uiIcon` button (`b.image(supplier.get().uiIcon)`).
-func _block_button(name: String) -> Button:
-	if name == "air":
+func _block_button(block_name: String) -> Button:
+	if block_name == "air":
 		var air := MindWidgets.glyph_button("cancel", _t("@none"), "clearNonei")
 		air.expand_icon = true
 		return air
 	var button := MindWidgets.image_button_first(
-		PackedStringArray(["block-%s-ui" % name, "block-%s-full" % name]), "clearNonei"
+		PackedStringArray(["block-%s-ui" % block_name, "block-%s-full" % block_name]), "clearNonei"
 	)
 	if button.icon == null:
-		button.text = name
+		button.text = block_name
 	button.expand_icon = true
 	button.add_theme_constant_override("icon_max_width", 36)
-	button.tooltip_text = _localized_block(name)
+	button.tooltip_text = _localized_block(block_name)
 	return button
 
 
@@ -467,9 +467,9 @@ func _move(index: int, direction: int) -> void:
 func _copy_filter(index: int) -> void:
 	if index < 0 or index >= _filters.size() or not (_filters[index] is Dictionary):
 		return
-	var duplicate: Dictionary = (_filters[index] as Dictionary).duplicate(true)
-	duplicate["seed"] = _random_seed()
-	_filters.insert(index + 1, duplicate)
+	var filter_copy: Dictionary = (_filters[index] as Dictionary).duplicate(true)
+	filter_copy["seed"] = _random_seed()
+	_filters.insert(index + 1, filter_copy)
 	_write(_filters)
 	_rows = _read_rows()
 	_rebuild_filters()
@@ -654,19 +654,19 @@ func _open_block_picker(index: int, option: Dictionary) -> void:
 	grid.add_theme_constant_override("v_separation", 4)
 	for row_value in rows:
 		var row: Dictionary = row_value
-		var name := str(row.get("name", ""))
-		var cell := _block_button(name)
+		var block_name := str(row.get("name", ""))
+		var cell := _block_button(block_name)
 		cell.custom_minimum_size = Vector2(PICKER_CELL, PICKER_CELL)
-		if name == "air":
+		if block_name == "air":
 			cell.tooltip_text = _t("@none")
-		cell.pressed.connect(_pick_block.bind(index, str(option.get("field", "")), name))
+		cell.pressed.connect(_pick_block.bind(index, str(option.get("field", "")), block_name))
 		grid.add_child(cell)
 	_show_overlay(_t("@filter.option." + str(option.get("name", ""))), grid, 900.0, 420.0)
 
 
 ## Sets one option value and regenerates (`BlockOption` consumer + `changed`).
-func _pick_block(index: int, field: String, name: String) -> void:
-	_commit_field(index, field, name, false)
+func _pick_block(index: int, field: String, block_name: String) -> void:
+	_commit_field(index, field, block_name, false)
 	_close_overlay()
 	# The button icon reflects the new value (`update(i -> ...setRegion)`).
 	_rebuild_filters()
@@ -726,8 +726,8 @@ func _image_rect() -> Rect2:
 	var texture_size := _preview.texture.get_size()
 	if texture_size.x <= 0.0 or texture_size.y <= 0.0:
 		return Rect2()
-	var scale := minf(box.x / texture_size.x, box.y / texture_size.y)
-	var drawn := texture_size * scale
+	var image_scale := minf(box.x / texture_size.x, box.y / texture_size.y)
+	var drawn := texture_size * image_scale
 	return Rect2((box - drawn) * 0.5, drawn)
 
 
@@ -809,7 +809,7 @@ func _axis_dir(angle: int) -> Vector2:
 
 ## `hit(x, y)`: the closest mirror axis within the 16px pad (or the single
 ## mirror when the pointer is inside the padded image).
-func _hit_mirror(position: Vector2) -> int:
+func _hit_mirror(pointer_pos: Vector2) -> int:
 	if _mirror_overlay == null:
 		return -1
 	var rect := Rect2(Vector2.ZERO, _mirror_overlay.size)
@@ -826,20 +826,20 @@ func _hit_mirror(position: Vector2) -> int:
 		var px := rect.position.x + clampf(float(axis.get("axisX", 0.5)), 0.0, 1.0) * rect.size.x
 		var py := rect.position.y + clampf(float(axis.get("axisY", 0.5)), 0.0, 1.0) * rect.size.y
 		var dir := _axis_dir(int(axis.get("angle", 45)))
-		var ndst: float = absf((position.x - px) * dir.y - (position.y - py) * dir.x)
+		var ndst: float = absf((pointer_pos.x - px) * dir.y - (pointer_pos.y - py) * dir.x)
 		if ndst < dst:
 			dst = ndst
 			best = index
 		amount += 1
 	if best >= 0 and dst <= HIT_PAD:
 		return best
-	if amount == 1 and best >= 0 and rect.grow(HIT_PAD).has_point(position):
+	if amount == 1 and best >= 0 and rect.grow(HIT_PAD).has_point(pointer_pos):
 		return best
 	return -1
 
 
 ## `drag(x, y)`: the normalized axis position from the pointer.
-func _drag_mirror(position: Vector2) -> void:
+func _drag_mirror(pointer_pos: Vector2) -> void:
 	if _dragging < 0 or _dragging >= _filters.size():
 		return
 	if _mirror_overlay == null:
@@ -848,8 +848,8 @@ func _drag_mirror(position: Vector2) -> void:
 	if rect.size.x <= 0.0 or rect.size.y <= 0.0:
 		return
 	var axis: Dictionary = _filters[_dragging]
-	axis["axisX"] = clampf((position.x - rect.position.x) / rect.size.x, 0.0, 1.0)
-	axis["axisY"] = clampf((position.y - rect.position.y) / rect.size.y, 0.0, 1.0)
+	axis["axisX"] = clampf((pointer_pos.x - rect.position.x) / rect.size.x, 0.0, 1.0)
+	axis["axisY"] = clampf((pointer_pos.y - rect.position.y) / rect.size.y, 0.0, 1.0)
 	_write(_filters)
 	if _mirror_overlay != null:
 		_mirror_overlay.queue_redraw()
@@ -914,9 +914,9 @@ func _show_overlay(title: String, content: Control, min_w: float, min_h: float) 
 	box.add_theme_constant_override("separation", 6)
 	margin.add_child(box)
 	var title_row := HBoxContainer.new()
-	var title_label := MindWidgets.label(title)
-	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_row.add_child(title_label)
+	var heading_label := MindWidgets.label(title)
+	heading_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(heading_label)
 	var close := MindWidgets.glyph_button("cancel", "X", "clearNonei")
 	close.custom_minimum_size = Vector2(36.0, 36.0)
 	close.pressed.connect(_close_overlay)
@@ -943,11 +943,11 @@ func _close_overlay() -> void:
 
 
 ## The `@edit` sub-dialog used `dialog.hide()`; mirrors `MindUi` lookups.
-func _dialog(name: String) -> Node:
+func _dialog(dialog_name: String) -> Node:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root == null or not ui_root.has_method("dialog"):
 		return null
-	return ui_root.call("dialog", name)
+	return ui_root.call("dialog", dialog_name)
 
 
 func _toast(key: String, kind: String = "info") -> void:
@@ -1012,11 +1012,11 @@ func _block_rows(predicate: String) -> Array:
 	return parsed if parsed is Array else []
 
 
-func _valid_block(predicate: String, name: String) -> bool:
-	if name.is_empty():
+func _valid_block(predicate: String, block_name: String) -> bool:
+	if block_name.is_empty():
 		return false
 	for row_value in _block_rows(predicate):
-		if row_value is Dictionary and str((row_value as Dictionary).get("name", "")) == name:
+		if row_value is Dictionary and str((row_value as Dictionary).get("name", "")) == block_name:
 			return true
 	return false
 
@@ -1053,8 +1053,8 @@ func _value_string(index: int, field: String) -> String:
 
 
 ## `content.localizedName` (`Core.bundle`) for a block.
-func _localized_block(name: String) -> String:
-	return _t("@block.%s.name" % name)
+func _localized_block(block_name: String) -> String:
+	return _t("@block.%s.name" % block_name)
 
 
 ## An icon + left-aligned label button (the `@add` picker rows).

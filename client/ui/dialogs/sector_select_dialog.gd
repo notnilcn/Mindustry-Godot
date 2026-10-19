@@ -67,8 +67,8 @@ func _rebuild() -> void:
 			continue
 		if str(sector.get("preset", "")).is_empty():
 			continue
-		var name := str(sector.get("name", ""))
-		if not needle.is_empty() and not name.to_lower().contains(needle):
+		var sector_name := str(sector.get("name", ""))
+		if not needle.is_empty() and not sector_name.to_lower().contains(needle):
 			continue
 		entries.append(sector)
 	_layout.set_entries(entries)

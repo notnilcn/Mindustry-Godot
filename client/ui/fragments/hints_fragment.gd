@@ -427,15 +427,15 @@ func _player_unit_moved() -> bool:
 ## and `coreUpgrade` predicates).
 func _placed_has(hints: Dictionary, names: Array) -> bool:
 	var placed: Array = hints.get("placed", [])
-	for name in names:
-		if placed.has(name):
+	for hint_name in names:
+		if placed.has(hint_name):
 			return true
 	return false
 
 
 ## Whether the event set contains `name`.
-func _has_event(hints: Dictionary, name: String) -> bool:
-	return (hints.get("events", []) as Array).has(name)
+func _has_event(hints: Dictionary, event_name: String) -> bool:
+	return (hints.get("events", []) as Array).has(event_name)
 
 
 ## The first boss entry (`boss_json.first`), or `{}`.
@@ -451,11 +451,11 @@ func _boss_root(hints: Dictionary) -> Dictionary:
 
 
 ## `UnlockableContent.unlockedHost()` by name (G05 T4b gates).
-func _content_unlocked(name: String) -> bool:
+func _content_unlocked(content_name: String) -> bool:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign == null or not campaign.has_method("content_unlocked"):
 		return true
-	return bool(campaign.call("content_unlocked", name))
+	return bool(campaign.call("content_unlocked", content_name))
 
 
 ## `state.block.name` (`MindSimHost.selected_block`).
@@ -505,8 +505,8 @@ func _first_selection_has_target() -> bool:
 	return false
 
 
-func _dialog_shown(name: String) -> bool:
-	return _ui != null and _ui.has_method("is_dialog_shown") and bool(_ui.call("is_dialog_shown", name))
+func _dialog_shown(dialog_name: String) -> bool:
+	return _ui != null and _ui.has_method("is_dialog_shown") and bool(_ui.call("is_dialog_shown", dialog_name))
 
 
 func _snapshot_zoom() -> void:

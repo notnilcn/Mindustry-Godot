@@ -126,14 +126,14 @@ func _map_button(map: Dictionary) -> Button:
 	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	frame.add_child(image)
 	row.add_child(frame)
-	var name := MindWidgets.label(str(map.get("display_name", map.get("name", ""))))
-	name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	name.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	name.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	name.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	row.add_child(name)
+	var map_label := MindWidgets.label(str(map.get("display_name", map.get("name", ""))))
+	map_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	map_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	map_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	map_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	map_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(map_label)
 	return button
 
 

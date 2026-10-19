@@ -136,15 +136,15 @@ func _slider_row(component: String, maximum: float, value: float, backdrop: Vari
 ## `Fill.quad(x, y, first, x + w, y, second, ...)`: a left-to-right gradient of
 ## the component (hue: the 128-step hue texture).
 func _draw_gradient(target: Control, component: String) -> void:
-	var size := target.size
+	var target_size := target.size
 	if component == "h":
 		var steps := 36
 		for i in steps:
-			var x0 := size.x * float(i) / steps
-			var x1 := size.x * float(i + 1) / steps
+			var x0 := target_size.x * float(i) / steps
+			var x1 := target_size.x * float(i + 1) / steps
 			var c0 := Color.from_hsv(float(i) / steps, 1.0, 1.0)
 			var c1 := Color.from_hsv(float(i + 1) / steps, 1.0, 1.0)
-			_quad(target, x0, x1, size.y, c0, c1)
+			_quad(target, x0, x1, target_size.y, c0, c1)
 		return
 	var first := _current
 	var second := _current
@@ -160,7 +160,7 @@ func _draw_gradient(target: Control, component: String) -> void:
 			second = Color(_current.r, _current.g, _current.b, 1.0)
 	first.a = first.a if component == "a" else 1.0
 	second.a = 1.0
-	_quad(target, 0.0, size.x, size.y, first, second)
+	_quad(target, 0.0, target_size.x, target_size.y, first, second)
 
 
 func _quad(target: Control, x0: float, x1: float, h: float, c0: Color, c1: Color) -> void:

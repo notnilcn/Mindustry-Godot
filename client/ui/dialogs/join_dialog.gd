@@ -190,8 +190,8 @@ func _build_sections() -> void:
 func _add_section(label_key: String, with_search: bool) -> Control:
 	# code-instantiated: section header + collapsible body repeat for the three
 	# server groups and are toggled at runtime.
-	var body := VBoxContainer.new()
-	body.add_theme_constant_override("separation", 4)
+	var section_body := VBoxContainer.new()
+	section_body.add_theme_constant_override("separation", 4)
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 4)
 	var title := MindWidgets.styled_label(_tm(label_key), "outlineLabel")
@@ -205,7 +205,7 @@ func _add_section(label_key: String, with_search: bool) -> Control:
 	# code-instantiated: the collapse glyph swaps between up-open/down-open.
 	var toggle_glyph := MindWidgets.glyph("up-open", 22, MindStyles.ACCENT)
 	toggle.add_child(toggle_glyph)
-	toggle.pressed.connect(_toggle_section.bind(body, toggle_glyph))
+	toggle.pressed.connect(_toggle_section.bind(section_body, toggle_glyph))
 	header.add_child(toggle)
 	_table.add(header).grow_x_axis().pad(4)
 	_table.row()
@@ -228,14 +228,14 @@ func _add_section(label_key: String, with_search: bool) -> Control:
 		_table.add(search_row).grow_x_axis().pad(4)
 		_table.row()
 
-	_table.add(body).grow_x_axis().pad(4)
+	_table.add(section_body).grow_x_axis().pad(4)
 	_table.row()
-	return body
+	return section_body
 
 
-func _toggle_section(body: Control, glyph: Label) -> void:
-	body.visible = not body.visible
-	glyph.text = MindIcons.glyph("up-open" if body.visible else "down-open")
+func _toggle_section(section_body: Control, glyph: Label) -> void:
+	section_body.visible = not section_body.visible
+	glyph.text = MindIcons.glyph("up-open" if section_body.visible else "down-open")
 
 
 func shown() -> void:
@@ -598,8 +598,8 @@ func _submit_add() -> void:
 
 
 ## Java `moveRemote` (`JoinDialog.java:206-222`): reorder and persist.
-func _move_server(index: int, sign: int) -> void:
-	var target := index + sign
+func _move_server(index: int, direction: int) -> void:
+	var target := index + direction
 	if target < 0 or target >= _servers.size():
 		return
 	var entry: Variant = _servers[index]

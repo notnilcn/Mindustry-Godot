@@ -60,7 +60,7 @@ func build(spec: Dictionary) -> void:
 	var grid := MindTable.new()
 	add_child(grid)
 	var columns := maxi(1, int(spec.get("columns", 5)))
-	var size := float(spec.get("size", 40.0))
+	var cell_size := float(spec.get("size", 40.0))
 	var group := ButtonGroup.new()
 	group.allow_unpress = true
 	if bool(spec.get("separator", false)):
@@ -76,8 +76,8 @@ func build(spec: Dictionary) -> void:
 	for option in options:
 		if not (option is Dictionary):
 			continue
-		var button := _make_button(option, size, group)
-		grid.add(button).size(size)
+		var button := _make_button(option, cell_size, group)
+		grid.add(button).size(cell_size)
 		index += 1
 		if index % columns == 0:
 			grid.row()
@@ -87,7 +87,7 @@ func build(spec: Dictionary) -> void:
 		for _i in range(columns - options.size()):
 			var filler := Control.new()
 			filler.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			grid.add(filler).size(size)
+			grid.add(filler).size(cell_size)
 	# `MindTable` layout needs an explicit pass after a runtime rebuild
 	# (`mind_table.gd sort_now`), repeated once deferred like the dialogs do.
 	grid.sort_now()
@@ -96,24 +96,24 @@ func build(spec: Dictionary) -> void:
 
 ## `UnitFactory.java:311-315`: a size-box `clearNoneTogglei` toggle with the
 ## command's `Icon` glyph and the localized command name as its tooltip.
-func _make_button(option: Dictionary, size: float, group: ButtonGroup) -> Button:
-	var name := str(option.get("name", ""))
+func _make_button(option: Dictionary, cell_size: float, group: ButtonGroup) -> Button:
+	var command_name := str(option.get("name", ""))
 	var icon_name := str(option.get("icon", ""))
 	if not ICON_ALIASES.get(icon_name, "").is_empty():
 		icon_name = str(ICON_ALIASES[icon_name])
 	var button := MindWidgets.glyph_button(icon_name, "", "clearNoneTogglei")
-	button.name = "command-%s" % name
+	button.name = "command-%s" % command_name
 	button.toggle_mode = true
 	button.button_group = group
-	button.custom_minimum_size = Vector2(size, size)
+	button.custom_minimum_size = Vector2(cell_size, cell_size)
 	button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	button.tooltip_text = _localized(str(option.get("label", "")), name)
+	button.tooltip_text = _localized(str(option.get("label", "")), command_name)
 	MindItemSelection.apply_clear_none_toggle(button)
 	for child in button.get_children():
 		if child is Label:
 			# Java draws the `Icon` drawable at the button's image size
 			# (`imageSize = size`), so the glyph fills the cell.
-			(child as Label).add_theme_font_size_override("font_size", int(size))
+			(child as Label).add_theme_font_size_override("font_size", int(cell_size))
 	if bool(option.get("checked", false)):
 		button.set_pressed_no_signal(true)
 	# Java's click listener always configures the command (an uncheck is
@@ -121,7 +121,7 @@ func _make_button(option: Dictionary, size: float, group: ButtonGroup) -> Button
 	button.toggled.connect(
 		func(on: bool) -> void:
 			if on:
-				picked.emit(name)
+				picked.emit(command_name)
 	)
 	return button
 

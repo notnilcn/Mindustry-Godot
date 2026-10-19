@@ -112,11 +112,11 @@ func _build() -> void:
 	scroll.add_child(_list)
 
 	var actions := HBoxContainer.new()
-	var add_button := MindWidgets.button(_t("@add"))
-	add_button.custom_minimum_size.y = 70.0
-	add_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_button.pressed.connect(_show_unit_add)
-	actions.add_child(add_button)
+	var add_btn := MindWidgets.button(_t("@add"))
+	add_btn.custom_minimum_size.y = 70.0
+	add_btn.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_btn.pressed.connect(_show_unit_add)
+	actions.add_child(add_btn)
 	# `t.button(Icon.filter, ...)`: default `ImageButton` (Tex.button frame),
 	# `size(64f, 70f).padLeft(6f)` (`WaveInfoDialog.java:121-139`).
 	var sort_button := MindWidgets.icon_button("filter", "", "defaulti")
@@ -287,9 +287,9 @@ func _sort_groups() -> void:
 func _sort_key(group: Dictionary, sort_value: int) -> float:
 	match sort_value:
 		Sort.HEALTH:
-			var name := str(group.get("type", ""))
+			var unit_name := str(group.get("type", ""))
 			var health: Dictionary = _unit_health()
-			return float(health.get(name, 0.0))
+			return float(health.get(unit_name, 0.0))
 		Sort.TYPE:
 			var order: Array = _type_order if not _type_order.is_empty() else _unit_names()
 			return float(order.find(str(group.get("type", ""))))
@@ -588,42 +588,42 @@ func _connect_picker() -> void:
 		picker.connect("selected", _on_picked)
 
 
-func _on_picked(name: String) -> void:
+func _on_picked(picked_name: String) -> void:
 	var target := _picker_target
 	_picker_target = ""
 	var parts := target.split(":")
 	match parts[0]:
 		"filter":
-			_filter_type = name
+			_filter_type = picked_name
 			_rebuild()
 		"add":
-			if not name.is_empty():
-				_groups.append({"type": name})
+			if not picked_name.is_empty():
+				_groups.append({"type": picked_name})
 				_expanded = _groups.size() - 1
 				_commit()
 				_rebuild()
 		"unit":
 			var unit_index := int(parts[1]) if parts.size() > 1 else -1
-			if unit_index >= 0 and unit_index < _groups.size() and not name.is_empty():
-				_groups[unit_index]["type"] = name
+			if unit_index >= 0 and unit_index < _groups.size() and not picked_name.is_empty():
+				_groups[unit_index]["type"] = picked_name
 				_commit()
 				_rebuild()
 		"effect":
 			var effect_index := int(parts[1]) if parts.size() > 1 else -1
 			if effect_index >= 0 and effect_index < _groups.size():
-				if name.is_empty():
+				if picked_name.is_empty():
 					_groups[effect_index].erase("effect")
 				else:
-					_groups[effect_index]["effect"] = name
+					_groups[effect_index]["effect"] = picked_name
 				_commit()
 				_rebuild()
 		"spawn":
 			var spawn_index := int(parts[1]) if parts.size() > 1 else -1
 			if spawn_index >= 0 and spawn_index < _groups.size():
-				if name.is_empty():
+				if picked_name.is_empty():
 					_groups[spawn_index]["spawn"] = -1
 				else:
-					var coords := name.split(",")
+					var coords := picked_name.split(",")
 					if coords.size() == 2:
 						var x := int(coords[0].strip_edges())
 						var y := int(coords[1].strip_edges())
@@ -633,21 +633,21 @@ func _on_picked(name: String) -> void:
 		"team":
 			var team_index := int(parts[1]) if parts.size() > 1 else -1
 			if team_index >= 0 and team_index < _groups.size():
-				if name.is_empty():
+				if picked_name.is_empty():
 					_groups[team_index].erase("team")
 				else:
-					_groups[team_index]["team"] = _team_id(name)
+					_groups[team_index]["team"] = _team_id(picked_name)
 				_commit()
 				_rebuild()
 		_:
 			pass
 
 
-func _team_id(name: String) -> int:
+func _team_id(team_name: String) -> int:
 	var index := 0
 	for row_value in _editor.call("palette_teams"):
 		var team_row: Dictionary = row_value
-		if str(team_row.get("name", "")) == name:
+		if str(team_row.get("name", "")) == team_name:
 			return index
 		index += 1
 	return -1
@@ -721,11 +721,11 @@ func _commit() -> void:
 		_graph.call("refresh")
 
 
-func _dialog(name: String) -> Node:
+func _dialog(dialog_name: String) -> Node:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root == null or not ui_root.has_method("dialog"):
 		return null
-	return ui_root.call("dialog", name)
+	return ui_root.call("dialog", dialog_name)
 
 
 func _notify(key: String) -> void:

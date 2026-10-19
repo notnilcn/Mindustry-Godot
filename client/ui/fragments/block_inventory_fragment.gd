@@ -100,8 +100,8 @@ func set_items(items: Dictionary) -> void:
 	_cells.clear()
 	_order.clear()
 	for item_name in items:
-		var name := str(item_name)
-		_add_cell(name, int(items[item_name]))
+		var item_key := str(item_name)
+		_add_cell(item_key, int(items[item_name]))
 	visible = not items.is_empty()
 
 
@@ -139,12 +139,12 @@ func _position_panel() -> void:
 	var camera := get_node_or_null("/root/Spine/World/Camera2D")
 	if camera == null or not camera.has_method("world_to_screen"):
 		return
-	var size := 1
+	var block_size := 1
 	var host := get_node_or_null("/root/Spine/SimHost")
 	if host != null and host.has_method("block_size"):
-		size = maxi(1, int(host.call("block_size", _tile.x, _tile.y)))
+		block_size = maxi(1, int(host.call("block_size", _tile.x, _tile.y)))
 	var corner := Vector2(
-		float(_tile.x) * 8.0 + float(size) * 4.0, float(_tile.y) * 8.0 + float(size) * 4.0
+		float(_tile.x) * 8.0 + float(block_size) * 4.0, float(_tile.y) * 8.0 + float(block_size) * 4.0
 	)
 	position = camera.call("world_to_screen", corner.x, corner.y)
 	if panel != null:
@@ -170,20 +170,20 @@ func _refresh() -> void:
 	var items: Dictionary = parsed if parsed is Dictionary else {}
 	var changed := false
 	for item_name in items:
-		var name := str(item_name)
+		var item_key := str(item_name)
 		var amount := int(items[item_name])
-		if _cells.has(name):
-			_cells[name][2] = amount
-			(_cells[name][1] as Label).text = _round(float(amount))
-			_absent.erase(name)
+		if _cells.has(item_key):
+			_cells[item_key][2] = amount
+			(_cells[item_key][1] as Label).text = _round(float(amount))
+			_absent.erase(item_key)
 		else:
-			_add_cell(name, amount)
+			_add_cell(item_key, amount)
 			changed = true
-	for name in _order.duplicate():
-		if items.has(name):
+	for item_key in _order.duplicate():
+		if items.has(item_key):
 			continue
-		_absent[name] = float(_absent.get(name, 0.0)) + REFRESH_INTERVAL * 60.0
-		if float(_absent[name]) >= HOLD_SHRINK:
+		_absent[item_key] = float(_absent.get(item_key, 0.0)) + REFRESH_INTERVAL * 60.0
+		if float(_absent[item_key]) >= HOLD_SHRINK:
 			changed = true
 	if changed:
 		set_items(items)

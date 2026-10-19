@@ -48,7 +48,7 @@ func set_content_inset(left: float, right: float) -> void:
 
 
 ## Builds the check (`Elems.check(text, checked, listener)`).
-func setup(text: String, is_checked: bool, listener: Callable) -> void:
+func setup(label_text: String, is_checked: bool, listener: Callable) -> void:
 	_listener = listener
 	toggle_mode = true
 	button_pressed = is_checked
@@ -71,7 +71,7 @@ func setup(text: String, is_checked: bool, listener: Callable) -> void:
 	_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(_icon)
 	var label := Label.new()
-	label.text = text
+	label.text = label_text
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(label)

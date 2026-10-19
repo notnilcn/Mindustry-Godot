@@ -128,21 +128,21 @@ static func icon_button(
 				)
 		)
 		return result
-	var label := Label.new()
-	label.text = text_value
-	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var text_label := Label.new()
+	text_label.text = text_value
+	text_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	text_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	# Apply the default font up front so the row reports a real minimum width
 	# (the theme font is not available before the node enters the tree).
-	var assets := assets()
-	if assets != null:
-		var default_font: Variant = assets.call("default_font")
+	var asset_store := assets()
+	if asset_store != null:
+		var default_font: Variant = asset_store.call("default_font")
 		if default_font is FontFile and default_font != null:
-			label.add_theme_font_override("font", default_font)
-	label.add_theme_font_size_override("font_size", 18)
-	row.add_child(label)
+			text_label.add_theme_font_override("font", default_font)
+	text_label.add_theme_font_size_override("font_size", 18)
+	row.add_child(text_label)
 	# The text is a child Label, so it never sees the button's disabled state:
 	# Arc `TextButtonStyle.disabledFontColor` (gray for `defaultt`, Styles.java
 	# :138) only reaches it through this hook. `BaseButton.set_disabled`
@@ -153,9 +153,9 @@ static func icon_button(
 				return
 			result.set_meta("_shown_disabled", result.disabled)
 			if result.disabled:
-				label.add_theme_color_override("font_color", result.get_theme_color("font_disabled_color"))
+				text_label.add_theme_color_override("font_color", result.get_theme_color("font_disabled_color"))
 			else:
-				label.remove_theme_color_override("font_color")
+				text_label.remove_theme_color_override("font_color")
 	)
 	# Arc `Button` is a `Table` whose background drawable pads its cells
 	# (`Table.setBackground` -> `getLeftWidth()`...; `Tex.button`'s 9-patch
@@ -191,16 +191,16 @@ static func icon_button(
 ## pads by the drawable's left/right/top/bottom widths). The row grows from its
 ## centre when its content is wider than the padded area, like an Arc `Table`
 ## centring an over-wide cell run (`Table.layout`, `align = center`).
-static func inset_to_content(button: Control, row: Control) -> void:
-	if not is_instance_valid(button) or not is_instance_valid(row):
+static func inset_to_content(btn: Control, row: Control) -> void:
+	if not is_instance_valid(btn) or not is_instance_valid(row):
 		return
 	row.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	row.grow_vertical = Control.GROW_DIRECTION_BOTH
 	# The themed variation (`defaultt`, ...) only resolves inside the tree;
 	# `ready`/`theme_changed` re-apply once it does.
-	if not button.is_inside_tree():
+	if not btn.is_inside_tree():
 		return
-	var box := button.get_theme_stylebox("normal")
+	var box := btn.get_theme_stylebox("normal")
 	if box == null:
 		return
 	row.offset_left = box.get_margin(SIDE_LEFT)
@@ -225,27 +225,27 @@ static func glyph(icon_name: String, font_size: int = 22, color: Color = Color.W
 ## A bundle string translated to Godot BBCode via `MindAssets.bundle_markup`
 ## (`[accent]` colors, `:icon:` tokens, `\n`). Falls back to the bare key.
 static func markup(key: String) -> String:
-	var assets := assets()
-	if assets == null:
+	var asset_store := assets()
+	if asset_store == null:
 		return key.trim_prefix("@")
-	return str(assets.call("bundle_markup", key.trim_prefix("@")))
+	return str(asset_store.call("bundle_markup", key.trim_prefix("@")))
 
 
 ## `Core.bundle.format` + markup translation (see [method markup]).
 static func markup_format(key: String, args: Array) -> String:
-	var assets := assets()
-	if assets == null:
+	var asset_store := assets()
+	if asset_store == null:
 		return key.trim_prefix("@")
-	return str(assets.call("bundle_markup_format", key.trim_prefix("@"), args))
+	return str(asset_store.call("bundle_markup_format", key.trim_prefix("@"), args))
 
 
 ## `render_markup` for a raw markup string that is not a bundle key (H05 T10a
 ## content-stat cells and content descriptions).
 static func markup_text(raw: String) -> String:
-	var assets := assets()
-	if assets == null:
+	var asset_store := assets()
+	if asset_store == null:
 		return raw
-	return str(assets.call("markup_text", raw))
+	return str(asset_store.call("markup_text", raw))
 
 
 static func image(region_name: String) -> TextureRect:
@@ -321,9 +321,9 @@ static func mobile_button(icon_region: String, text_value: String, listener: Cal
 	return result
 
 
-static func req_image(image: Control, valid: Callable) -> MindReqImage:
+static func req_image(image_control: Control, valid: Callable) -> MindReqImage:
 	var result := MindReqImage.new()
-	result.setup(image, valid)
+	result.setup(image_control, valid)
 	return result
 
 
@@ -355,10 +355,10 @@ static func remove_after(node: Node, delay: float) -> void:
 
 ## Resolves an atlas region through the `MindAssets` autoload (null when absent).
 static func icon_texture(region_name: String) -> Texture2D:
-	var assets := assets()
-	if assets == null:
+	var asset_store := assets()
+	if asset_store == null:
 		return null
-	var texture: Variant = assets.call("find_region", region_name)
+	var texture: Variant = asset_store.call("find_region", region_name)
 	return texture as Texture2D
 
 
@@ -370,14 +370,14 @@ static func content_icon(icon_region: String, type_name: String, size: float) ->
 	var texture := icon_texture(icon_region)
 	if texture != null:
 		# code-instantiated: content icons are data-driven (atlas region lookup).
-		var image := TextureRect.new()
-		image.texture = texture
-		image.custom_minimum_size = Vector2(size, size)
+		var image_rect := TextureRect.new()
+		image_rect.texture = texture
+		image_rect.custom_minimum_size = Vector2(size, size)
 		# A `TextureRect`'s minimum size is its texture size; ignore the source
 		# size so the requested cell wins (`b.imageDraw(...).size(iconMed)`).
-		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		return image
+		image_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image_rect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		return image_rect
 	if type_name == "sector" or type_name == "sectorpreset":
 		# code-instantiated: the sector fallback glyph is data-driven.
 		# `SectorPreset.uiIcon` falls back to `Icon.terrain` when the

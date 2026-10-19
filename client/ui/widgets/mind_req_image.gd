@@ -12,8 +12,8 @@ var _overlay: Control = null
 
 
 ## Builds the requirement image with its validity predicate.
-func setup(image: Control, valid: Callable) -> void:
-	_valid = valid
+func setup(image: Control, is_valid: Callable) -> void:
+	_valid = is_valid
 	add_child(image)
 	# code-instantiated: the cross overlay is a private draw-only element with no
 	# static scene (plan 14 §3.3 ReqImage).

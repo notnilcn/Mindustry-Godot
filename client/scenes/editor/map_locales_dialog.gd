@@ -245,8 +245,8 @@ func _build_langs() -> void:
 	_langs.add_child(pane)
 	var rows := VBoxContainer.new()
 	pane.add_child(rows)
-	for name in _available_locales():
-		var locale := str(name)
+	for locale_name in _available_locales():
+		var locale := str(locale_name)
 		if not _locales.has(locale):
 			continue
 		var line := HBoxContainer.new()
@@ -299,7 +299,7 @@ func _build_main() -> void:
 		return
 	var keys: Array = props.keys()
 	keys.sort()
-	var shown := 0
+	var shown_count := 0
 	for key_value in keys:
 		var key := str(key_value)
 		var value := str(props[key])
@@ -314,8 +314,8 @@ func _build_main() -> void:
 		if status == Status.SAME and not _show_same:
 			continue
 		_main.add_child(_property_card(key, value, status))
-		shown += 1
-	_show_empty(shown == 0)
+		shown_count += 1
+	_show_empty(shown_count == 0)
 
 
 ## One `Tex.whitePane` property card (`:217-300`).
@@ -473,8 +473,8 @@ func _confirm_delete_locale(locale: String) -> void:
 ## `addLocaleDialog`: pick any `Vars.locales` entry not present yet.
 func _add_locale_dialog() -> void:
 	var missing: Array = []
-	for name in _available_locales():
-		var locale := str(name)
+	for locale_name in _available_locales():
+		var locale := str(locale_name)
 		if not _locales.has(locale):
 			missing.append(LANGUAGE_SCRIPT.get_display_name(locale))
 	if missing.is_empty():
@@ -627,9 +627,9 @@ func _build_prop_view() -> void:
 	for child in _view_body.get_children():
 		_view_body.remove_child(child)
 		child.queue_free()
-	var shown := 0
-	for name in _available_locales():
-		var locale := str(name)
+	var shown_count := 0
+	for locale_name in _available_locales():
+		var locale := str(locale_name)
 		if not _locales.has(locale):
 			continue
 		var props: Dictionary = _locales[locale] if _locales[locale] is Dictionary else {}
@@ -649,8 +649,8 @@ func _build_prop_view() -> void:
 			if not needle.contains(_search.to_lower()):
 				continue
 		_view_body.add_child(_view_card(locale, value, status))
-		shown += 1
-	if shown == 0:
+		shown_count += 1
+	if shown_count == 0:
 		_view_body.add_child(MindWidgets.label(_t("@empty")))
 
 
@@ -917,8 +917,8 @@ func _connect_icon_select() -> void:
 func _on_locale_picked(display_name: String) -> void:
 	if display_name.is_empty():
 		return
-	for name in _available_locales():
-		var locale := str(name)
+	for locale_name in _available_locales():
+		var locale := str(locale_name)
 		if LANGUAGE_SCRIPT.get_display_name(locale) == display_name:
 			_locales[locale] = {}
 			_selected_locale = locale
@@ -1039,9 +1039,9 @@ func _build_icon_table() -> void:
 		icon_names = assets.call("icon_names")
 	var entries: Array = []
 	for icon_name in icon_names:
-		var name := str(icon_name)
-		if search.is_empty() or name.to_lower().contains(search):
-			entries.append(name)
+		var entry_name := str(icon_name)
+		if search.is_empty() or entry_name.to_lower().contains(search):
+			entries.append(entry_name)
 	added += _icon_section(entries, "icon")
 	# `contentIcons = {item, block, liquid, status, unit}` (`:37`).
 	for type_name in ["item", "block", "liquid", "status", "unit"]:
@@ -1053,24 +1053,24 @@ func _build_icon_table() -> void:
 		var content_entries: Array = []
 		if content is PackedStringArray:
 			for content_name in content:
-				var name := str(content_name)
-				if _content_search_ok(name, search):
-					content_entries.append(name)
+				var entry_name := str(content_name)
+				if _content_search_ok(entry_name, search):
+					content_entries.append(entry_name)
 		added += _icon_section(content_entries, str(type_name))
 	# `Team.baseTeams` with `team-<name>` regions.
 	var teams: Array = []
 	for row_value in get_node_or_null("/root/Spine/MindEditor").call("palette_teams"):
 		var team_row: Dictionary = row_value
-		var name := str(team_row.get("name", ""))
-		if _content_search_ok(name, search):
-			teams.append(name)
+		var team_name := str(team_row.get("name", ""))
+		if _content_search_ok(team_name, search):
+			teams.append(team_name)
 	added += _icon_section(teams, "team")
 	if added == 0:
 		_icon_body.add_child(MindWidgets.label(_t("@empty")))
 
 
-func _content_search_ok(name: String, search: String) -> bool:
-	return search.is_empty() or name.to_lower().contains(search)
+func _content_search_ok(entry_name: String, search: String) -> bool:
+	return search.is_empty() or entry_name.to_lower().contains(search)
 
 
 ## One grid section; returns the number of rendered tiles.
@@ -1082,17 +1082,17 @@ func _icon_section(names: Array, kind: String) -> int:
 	grid.add_theme_constant_override("h_separation", 2)
 	grid.add_theme_constant_override("v_separation", 2)
 	for icon_name in names:
-		var name := str(icon_name)
-		var button := _gallery_button(name, kind)
-		button.pressed.connect(func() -> void: _insert_icon_char(_icon_char(name)))
+		var entry_name := str(icon_name)
+		var button := _gallery_button(entry_name, kind)
+		button.pressed.connect(func() -> void: _insert_icon_char(_icon_char(entry_name)))
 		grid.add_child(button)
 	_icon_body.add_child(grid)
 	return names.size()
 
 
 ## One gallery tile: the Iconc/`uiIcon` texture when resolvable, else the glyph.
-func _gallery_button(name: String, kind: String) -> Button:
-	var candidates := _region_candidates(kind, name)
+func _gallery_button(entry_name: String, kind: String) -> Button:
+	var candidates := _region_candidates(kind, entry_name)
 	var button: Button = null
 	if not candidates.is_empty():
 		button = MindWidgets.image_button_first(candidates, "flati")
@@ -1102,9 +1102,9 @@ func _gallery_button(name: String, kind: String) -> Button:
 		# code-instantiated: one icon-font glyph tile per gallery entry.
 		button = Button.new()
 		button.theme_type_variation = "flati"
-		var glyph := _icon_char(name)
+		var glyph := _icon_char(entry_name)
 		if glyph.is_empty():
-			button.text = name.substr(0, 2)
+			button.text = entry_name.substr(0, 2)
 		else:
 			var label := Label.new()
 			label.text = glyph
@@ -1116,32 +1116,32 @@ func _gallery_button(name: String, kind: String) -> Button:
 			label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			button.add_child(label)
 	button.custom_minimum_size = Vector2(44.0, 44.0)
-	button.tooltip_text = name
+	button.tooltip_text = entry_name
 	return button
 
 
 ## The `Icon.icons`/`uiIcon` region names per gallery kind.
-func _region_candidates(kind: String, name: String) -> PackedStringArray:
+func _region_candidates(kind: String, entry_name: String) -> PackedStringArray:
 	match kind:
 		"icon":
 			# `Icon.icons.get(key)` texture (`Iconc` `<name>|<texture>` pair).
 			var assets := get_node_or_null("/root/MindAssets")
 			if assets != null and assets.has_method("icon_texture"):
-				var texture := str(assets.call("icon_texture", name))
+				var texture := str(assets.call("icon_texture", entry_name))
 				if not texture.is_empty():
 					return PackedStringArray([texture])
 		"item":
-			return PackedStringArray(["item-%s" % name, name])
+			return PackedStringArray(["item-%s" % entry_name, entry_name])
 		"block":
-			return PackedStringArray(["block-%s-ui" % name, "block-%s-full" % name, name])
+			return PackedStringArray(["block-%s-ui" % entry_name, "block-%s-full" % entry_name, entry_name])
 		"liquid":
-			return PackedStringArray(["liquid-%s-ui" % name, "liquid-%s" % name])
+			return PackedStringArray(["liquid-%s-ui" % entry_name, "liquid-%s" % entry_name])
 		"unit":
-			return PackedStringArray(["unit-%s-ui" % name, name])
+			return PackedStringArray(["unit-%s-ui" % entry_name, entry_name])
 		"status":
-			return PackedStringArray(["status-%s" % name, name])
+			return PackedStringArray(["status-%s" % entry_name, entry_name])
 		"team":
-			return PackedStringArray(["team-%s" % name])
+			return PackedStringArray(["team-%s" % entry_name])
 	return PackedStringArray()
 
 

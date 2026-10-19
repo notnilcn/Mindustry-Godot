@@ -142,9 +142,9 @@ func _gui_input(event: InputEvent) -> void:
 
 
 ## `MapView.touchDown`: middle swaps to the `zoom` tool until release.
-func _begin_pan(position: Vector2) -> void:
+func _begin_pan(pointer_pos: Vector2) -> void:
 	_panning = true
-	_pan_position = position
+	_pan_position = pointer_pos
 	if _last_tool.is_empty():
 		_last_tool = str(_editor.call("tool"))
 		_editor.call("set_tool", "zoom")
@@ -194,8 +194,8 @@ func cancel_input() -> void:
 	queue_redraw()
 
 
-func _tile_at(position: Vector2) -> Vector2i:
-	var tile: Vector2 = _editor.call("map_view_project", position.x, position.y, size.x, size.y)
+func _tile_at(pointer_pos: Vector2) -> Vector2i:
+	var tile: Vector2 = _editor.call("map_view_project", pointer_pos.x, pointer_pos.y, size.x, size.y)
 	return Vector2i(int(tile.x), int(tile.y))
 
 

@@ -85,7 +85,7 @@ func _build() -> void:
 
 ## One `EffectsDialog.EffectCell`: a clickable 280 px stack with the animated
 ## preview and the bottom-left outlined name.
-func _effect_cell(name: String) -> Control:
+func _effect_cell(effect_name: String) -> Control:
 	# code-instantiated: one preview cell per LogicFx entry.
 	var button := Button.new()
 	button.custom_minimum_size = Vector2(CELL_SIZE, CELL_SIZE)
@@ -98,7 +98,7 @@ func _effect_cell(name: String) -> Control:
 	preview.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(preview)
-	var label := _outline_label(name)
+	var label := _outline_label(effect_name)
 	label.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_LEFT)
 	label.offset_left = 6.0
 	label.offset_bottom = -4.0
@@ -106,26 +106,26 @@ func _effect_cell(name: String) -> Control:
 	label.offset_right = CELL_SIZE - 6.0
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	button.add_child(label)
-	button.tooltip_text = name
-	button.pressed.connect(_pick.bind(name))
+	button.tooltip_text = effect_name
+	button.pressed.connect(_pick.bind(effect_name))
 	return button
 
 
 ## `LStatement.bundle(entry.name)` (`name.token.<name>` fallback: the name).
-func _outline_label(name: String) -> Label:
+func _outline_label(effect_name: String) -> Label:
 	# code-instantiated: one label per effect cell.
 	var label := Label.new()
-	var key := "name.token." + name
+	var key := "name.token." + effect_name
 	var text := _t(key)
-	label.text = text if text != key else name
+	label.text = text if text != key else effect_name
 	label.add_theme_color_override("font_color", Color.WHITE)
 	label.add_theme_color_override("font_outline_color", Color.BLACK)
 	label.add_theme_constant_override("outline_size", 4)
 	return label
 
 
-func _pick(name: String) -> void:
-	effect_selected.emit(name)
+func _pick(effect_name: String) -> void:
+	effect_selected.emit(effect_name)
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("close_dialog"):
 		if bool(ui.call("close_dialog", "effects")):

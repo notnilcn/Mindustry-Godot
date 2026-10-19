@@ -365,7 +365,7 @@ func _build_teams() -> void:
 	for row_value in _editor.call("palette_teams"):
 		var row: Dictionary = row_value
 		var id := int(row.get("id", 0))
-		var name := str(row.get("name", ""))
+		var team_name := str(row.get("name", ""))
 		var button := Button.new()
 		button.theme_type_variation = "clearNoneTogglei"
 		button.toggle_mode = true
@@ -380,7 +380,7 @@ func _build_teams() -> void:
 		var packed: int = int(row.get("color", 0xFFFFFFFF))
 		swatch.color = Color8((packed >> 24) & 0xFF, (packed >> 16) & 0xFF, (packed >> 8) & 0xFF)
 		button.add_child(swatch)
-		button.pressed.connect(func() -> void: _select_team(name))
+		button.pressed.connect(func() -> void: _select_team(team_name))
 		_team_grid.add_child(button)
 		_team_buttons[id] = button
 
@@ -418,11 +418,11 @@ func _rebuild_palette() -> void:
 		search = " ".join(_search.text.strip_edges().split(" ", false)).to_lower()
 	for row_value in _editor.call("palette_blocks", ""):
 		var row: Dictionary = row_value
-		var name := str(row.get("name", ""))
-		var localized := _block_name(name)
+		var block_key := str(row.get("name", ""))
+		var localized := _block_name(block_key)
 		if not search.is_empty() and not localized.to_lower().contains(search):
 			continue
-		var texture := MindWidgets.icon_texture("block-%s-ui" % name)
+		var texture := MindWidgets.icon_texture("block-%s-ui" % block_key)
 		if texture == null:
 			continue
 		var button := Button.new()
@@ -442,22 +442,22 @@ func _rebuild_palette() -> void:
 		icon.offset_right = half
 		icon.offset_bottom = half
 		button.add_child(icon)
-		button.pressed.connect(func() -> void: _on_block_selected(name))
+		button.pressed.connect(func() -> void: _on_block_selected(block_key))
 		_block_grid.add_child(button)
-		_block_buttons[name] = button
+		_block_buttons[block_key] = button
 
 
 ## `block.localizedName`: `Core.bundle.get("block." + name + ".name", name)`.
-func _block_name(name: String) -> String:
-	if name.is_empty():
-		return name
-	var key := "block.%s.name" % name
+func _block_name(block_key: String) -> String:
+	if block_key.is_empty():
+		return block_key
+	var key := "block.%s.name" % block_key
 	var resolved := _t("@" + key)
-	return name if resolved == key or resolved.is_empty() else resolved
+	return block_key if resolved == key or resolved.is_empty() else resolved
 
 
-func _on_block_selected(name: String) -> void:
-	_call("set_draw_block", name)
+func _on_block_selected(block_key: String) -> void:
+	_call("set_draw_block", block_key)
 	_refresh()
 
 
@@ -471,8 +471,8 @@ func _select_tool(tool: String) -> void:
 	_refresh()
 
 
-func _select_team(name: String) -> void:
-	_call("set_draw_team", name)
+func _select_team(team_name: String) -> void:
+	_call("set_draw_team", team_name)
 	_refresh()
 
 

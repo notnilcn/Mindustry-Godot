@@ -173,8 +173,8 @@ func _port_valid() -> bool:
 		return true
 	if not _port_field.text.is_valid_int():
 		return false
-	var port := _port_field.text.to_int()
-	return port >= 1 and port <= 65535
+	var port_number := _port_field.text.to_int()
+	return port_number >= 1 and port_number <= 65535
 
 
 func _on_port_changed(_text: String) -> void:

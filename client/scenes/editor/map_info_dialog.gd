@@ -204,8 +204,8 @@ func _on_rules_edited(json: String) -> void:
 	_set_tag("rules", json)
 
 
-func _dialog(name: String) -> Node:
+func _dialog(dialog_name: String) -> Node:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root == null or not ui_root.has_method("dialog"):
 		return null
-	return ui_root.call("dialog", name)
+	return ui_root.call("dialog", dialog_name)

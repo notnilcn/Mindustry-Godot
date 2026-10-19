@@ -96,15 +96,15 @@ func _draw_cropped(texture: Texture2D) -> void:
 	var clipped := region.intersection(Rect2(Vector2.ZERO, texture.get_size()))
 	if clipped.size.x <= 0.0 or clipped.size.y <= 0.0 or region.size.x <= 0.0:
 		return
-	var scale := inner.size / region.size
-	var dest := Rect2(inner.position + (clipped.position - region.position) * scale, clipped.size * scale)
+	var render_scale := inner.size / region.size
+	var dest := Rect2(inner.position + (clipped.position - region.position) * render_scale, clipped.size * render_scale)
 	draw_texture_rect_region(texture, dest, clipped)
-	_draw_markers(inner, region, scale)
+	_draw_markers(inner, region, render_scale)
 
 
 ## `MinimapRenderer.drawEntities` + `AttackIndicators.draw`: team-tinted unit
 ## icons and the pulsing damage squares, mapped into the crop.
-func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
+func _draw_markers(inner: Rect2, region: Rect2, render_scale: Vector2) -> void:
 	var node := _provider_node()
 	if node == null:
 		return
@@ -120,7 +120,7 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 		if parsed is Array:
 			var now_s := Time.get_ticks_msec() / 1000.0
 			var fin := fmod(now_s * 2.0, 1.0)
-			var world_to_widget := scale.x / TILE_SIZE
+			var world_to_widget := render_scale.x / TILE_SIZE
 			for row_variant in parsed as Array:
 				if not (row_variant is Array):
 					continue
@@ -130,7 +130,7 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 				# `offset = build.block.offset / tilesize` centres multiblock
 				# squares (`MinimapRenderer.java:266-271`; 0 when no building).
 				var offset := float(row[3]) if row.size() >= 4 else 0.0
-				var position := _map_point(
+				var marker_pos := _map_point(
 					inner,
 					region,
 					tex_size,
@@ -142,7 +142,7 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 				var red := clampf(float(row[2]) / 70.0, 0.0, 1.0)
 				var color := Color(1.0, 0.647, 0.0).lerp(Color(1.0, 0.0, 0.196), red)
 				draw_rect(
-					Rect2(position - Vector2(rad, rad), Vector2(rad, rad) * 2.0),
+					Rect2(marker_pos - Vector2(rad, rad), Vector2(rad, rad) * 2.0),
 					color,
 					false,
 					stroke
@@ -160,15 +160,15 @@ func _draw_markers(inner: Rect2, region: Rect2, scale: Vector2) -> void:
 				var row: Array = row_variant
 				if row.size() < 5:
 					continue
-				var name := str(row[3])
-				var texture_icon := _unit_silhouette(name)
+				var unit_name := str(row[3])
+				var texture_icon := _unit_silhouette(unit_name)
 				if texture_icon == null:
 					continue
-				var position := _map_point(
+				var marker_pos := _map_point(
 					inner, region, tex_size, float(row[0]) / TILE_SIZE, float(row[1]) / TILE_SIZE
 				)
 				var tint := Color(str(row[4]))
-				draw_set_transform(position, deg_to_rad(float(row[2]) - 90.0), Vector2.ONE)
+				draw_set_transform(marker_pos, deg_to_rad(float(row[2]) - 90.0), Vector2.ONE)
 				draw_texture_rect(
 					texture_icon,
 					Rect2(-Vector2(icon_size, icon_size) / 2.0, Vector2(icon_size, icon_size)),
@@ -306,6 +306,6 @@ func _gui_input(event: InputEvent) -> void:
 		var motion := event as InputEventMouseMotion
 		var delta := motion.position - _drag_last
 		_drag_last = motion.position
-		var scale := map_extent / size
-		pan_requested.emit(-delta * scale)
+		var pan_scale := map_extent / size
+		pan_requested.emit(-delta * pan_scale)
 		accept_event()

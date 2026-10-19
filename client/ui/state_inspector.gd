@@ -200,8 +200,8 @@ func _refresh_content() -> void:
 	_content_counts.text = "\n".join(lines)
 	var names: PackedStringArray = _host.call("content_list", content_type)
 	_content_list.clear()
-	for name in names:
-		_content_list.add_item(str(name))
+	for content_name in names:
+		_content_list.add_item(str(content_name))
 
 
 func _cursor_tile_text() -> String:

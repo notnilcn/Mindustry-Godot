@@ -644,7 +644,9 @@ func show_toast(text: String) -> void:
 ## `UI.formatTime`-style playtime (h/m/s) for millisecond values.
 func format_time_ms(milliseconds: int) -> String:
 	var seconds := int(milliseconds / 1000.0)
+	@warning_ignore("integer_division")
 	var hours := seconds / 3600
+	@warning_ignore("integer_division")
 	var minutes := (seconds % 3600) / 60
 	if hours > 0:
 		return "%dh %dm" % [hours, minutes]
@@ -664,8 +666,8 @@ func _live_campaign_views(planet: String) -> Dictionary:
 
 
 ## A named section of the campaign read models (`planets`/`sectors`/…).
-func campaign_section(name: String) -> Array:
-	return campaign_views().get(name, []) as Array
+func campaign_section(section_name: String) -> Array:
+	return campaign_views().get(section_name, []) as Array
 
 
 ## `cont.clearChildren()`: drops every body child. Dialogs whose Java original

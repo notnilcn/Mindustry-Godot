@@ -86,15 +86,15 @@ func _rebuild() -> void:
 	var diff_row := HBoxContainer.new()
 	diff_row.add_theme_constant_override("separation", 0)
 	# code-instantiated: difficulty buttons are the data-driven Difficulty list.
-	for name in ["casual", "easy", "normal", "hard", "eradication"]:
+	for difficulty_name in ["casual", "easy", "normal", "hard", "eradication"]:
 		var button := Button.new()
-		button.text = _t("@difficulty.%s" % name)
+		button.text = _t("@difficulty.%s" % difficulty_name)
 		button.theme_type_variation = "flatTogglet"
 		button.toggle_mode = true
 		button.custom_minimum_size = Vector2(140.0, 50.0)
-		button.button_pressed = name == _difficulty
-		button.tooltip_text = _difficulty_tooltip(name)
-		button.pressed.connect(_set_difficulty.bind(name))
+		button.button_pressed = difficulty_name == _difficulty
+		button.tooltip_text = _difficulty_tooltip(difficulty_name)
+		button.pressed.connect(_set_difficulty.bind(difficulty_name))
 		_apply_option_style(button)
 		diff_row.add_child(button)
 	box.add_child(diff_row)
@@ -188,7 +188,7 @@ func _accent_box() -> StyleBoxFlat:
 
 
 ## Localized `Difficulty.info()` tooltip from the multiplier table.
-func _difficulty_tooltip(name: String) -> String:
+func _difficulty_tooltip(difficulty_name: String) -> String:
 	var modifiers := {
 		"casual": [0.5, 0.5, 2.0],
 		"easy": [1.0, 0.75, 1.5],
@@ -196,7 +196,7 @@ func _difficulty_tooltip(name: String) -> String:
 		"hard": [1.25, 1.5, 0.8],
 		"eradication": [1.5, 2.0, 0.6],
 	}
-	var values: Array = modifiers.get(name, [1.0, 1.0, 1.0])
+	var values: Array = modifiers.get(difficulty_name, [1.0, 1.0, 1.0])
 	var lines := PackedStringArray()
 	var health := _percent_stat(float(values[0]), false)
 	var spawn := _percent_stat(float(values[1]), false)
@@ -221,9 +221,9 @@ func _percent_stat(value: float, negated: bool) -> String:
 	return "%s%+d%%[]" % [tag, delta]
 
 
-func _set_difficulty(name: String) -> void:
-	_difficulty = name
-	_apply("difficulty", name)
+func _set_difficulty(difficulty_name: String) -> void:
+	_difficulty = difficulty_name
+	_apply("difficulty", difficulty_name)
 	_rebuild()
 
 

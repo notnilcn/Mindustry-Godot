@@ -48,12 +48,12 @@ func _rebuild() -> void:
 	for option in options:
 		if not (option is Dictionary):
 			continue
-		var name := str(option.get("name", ""))
-		var label := str(option.get("label", name))
+		var option_name := str(option.get("name", ""))
+		var label := str(option.get("label", option_name))
 		var button := Button.new()
 		button.text = label
 		button.tooltip_text = label
-		button.pressed.connect(func() -> void: _choose(name))
+		button.pressed.connect(func() -> void: _choose(option_name))
 		body.add_child(button)
 
 

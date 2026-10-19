@@ -205,7 +205,9 @@ func _tag_color(tag: String) -> Variant:
 		return null
 	var sentinel := Color(0, 0, 0, 0)
 	var parsed := Color.from_string(found.get_string(1), sentinel)
-	return null if parsed == sentinel else parsed
+	if parsed == sentinel:
+		return null
+	return parsed
 
 
 func _toggle_tag(tag: String) -> void:
@@ -235,7 +237,7 @@ func _rebuild_list() -> void:
 	var schematics := campaign_section("schematics")
 	# `cols = max((int)(screenW / 230), 1)`.
 	var cols := maxi(int(get_viewport_rect().size.x / 230.0), 1)
-	var shown := 0
+	var shown_count := 0
 	_first_index = -1
 	for row_variant in schematics:
 		var schematic: Dictionary = row_variant
@@ -254,10 +256,10 @@ func _rebuild_list() -> void:
 		if _first_index < 0:
 			_first_index = int(schematic.get("index", -1))
 		_list.add(_build_card(schematic)).pad(4)
-		shown += 1
-		if shown % cols == 0:
+		shown_count += 1
+		if shown_count % cols == 0:
 			_list.row()
-	if shown == 0:
+	if shown_count == 0:
 		# `@none.found` when filtering, plain `@none` (light gray) otherwise.
 		if not needle.is_empty() or not _selected_tags.is_empty():
 			_list.add(MindWidgets.label(_t("@none.found")))
@@ -463,16 +465,16 @@ func _delete(index: int) -> void:
 
 func _edit(index: int) -> void:
 	_pending_rename = index
-	var name := ""
+	var schematic_name := ""
 	var schematics := campaign_section("schematics")
 	for row_variant in schematics:
 		var row: Dictionary = row_variant
 		if int(row.get("index", -1)) == index:
-			name = str(row.get("name", ""))
+			schematic_name = str(row.get("name", ""))
 			break
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null:
-		ui.call("show_text_input", _t("@schematic.edit"), _t("@name"), 64, name, false, false)
+		ui.call("show_text_input", _t("@schematic.edit"), _t("@name"), 64, schematic_name, false, false)
 
 
 ## `SchematicsDialog` icon tag picker (`IconSelectDialog`).

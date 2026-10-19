@@ -63,24 +63,24 @@ func rebuild() -> void:
 			rows = parsed
 	for row_variant in rows:
 		var row: Dictionary = row_variant
-		var name := str(row.get("name", ""))
-		if not _search.is_empty() and not name.to_lower().contains(_search):
+		var player_name := str(row.get("name", ""))
+		if not _search.is_empty() and not player_name.to_lower().contains(_search):
 			continue
 		# code-instantiated: player rows are server-driven (plan 21 relay views).
-		var button := MindWidgets.button(name)
-		button.pressed.connect(_on_player.bind(name))
+		var button := MindWidgets.button(player_name)
+		button.pressed.connect(_on_player.bind(player_name))
 		_content.add_child(button)
 
 
-func _on_player(name: String) -> void:
+func _on_player(player_name: String) -> void:
 	# code-instantiated: per-player action menu is data-driven by the relay view.
-	_player_action(name, "spectate")
+	_player_action(player_name, "spectate")
 
 
-func _player_action(name: String, action: String) -> void:
+func _player_action(player_name: String, action: String) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("player_action"):
-		ui.call("player_action", name, action)
+		ui.call("player_action", player_name, action)
 
 
 func _on_menu(action: String) -> void:

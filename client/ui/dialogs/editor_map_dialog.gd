@@ -167,8 +167,8 @@ func _fix_button_height(button: Button) -> void:
 
 
 ## A row tag as the raw `map.tags.get(name, "")` (blank when missing).
-func _tag(name: String) -> String:
-	var value := str(_row.get(name, "")).strip_edges()
+func _tag(tag_name: String) -> String:
+	var value := str(_row.get(tag_name, "")).strip_edges()
 	return "" if value == MISSING_TAG else value
 
 
@@ -244,22 +244,22 @@ func _connect_confirm() -> void:
 
 
 ## The registry row for a map name (`MindPreview.maps_list`).
-func _row_for(name: String) -> Dictionary:
+func _row_for(map_name: String) -> Dictionary:
 	var preview := get_node_or_null("/root/Spine/MindPreview")
 	if preview == null or not preview.has_method("maps_list"):
 		return {}
 	for row_variant in preview.call("maps_list"):
 		var row: Dictionary = row_variant
-		if str(row.get("name", "")) == name:
+		if str(row.get("name", "")) == map_name:
 			return row
 	return {}
 
 
-func _dialog(name: String) -> Node:
+func _dialog(dialog_name: String) -> Node:
 	var ui_root := get_node_or_null("/root/Spine/Ui/UiRoot")
 	if ui_root == null or not ui_root.has_method("dialog"):
 		return null
-	return ui_root.call("dialog", name)
+	return ui_root.call("dialog", dialog_name)
 
 
 ## Bundle lookup with `{0}`-style substitution (`Bundle.format`).

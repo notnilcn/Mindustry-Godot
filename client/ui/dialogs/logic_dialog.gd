@@ -374,40 +374,40 @@ func _rebuild_list() -> void:
 
 
 ## Registry metadata for a statement (`statement_meta`, cached).
-func _meta(name: String) -> Dictionary:
-	if _meta_cache.has(name):
-		return _meta_cache[name]
+func _meta(statement_name: String) -> Dictionary:
+	if _meta_cache.has(statement_name):
+		return _meta_cache[statement_name]
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return {}
 	var info: Dictionary = {}
-	var meta: Variant = logic.call("statement_meta", name)
+	var meta: Variant = logic.call("statement_meta", statement_name)
 	if meta is Dictionary:
 		info = meta as Dictionary
-	_meta_cache[name] = info
+	_meta_cache[statement_name] = info
 	return info
 
 
 ## `LStatement.typeName()`: the Java class name without `Statement`
 ## (`InvalidStatement` -> `Invalid`, `OperationStatement` -> `Operation`).
-func _type_name(name: String) -> String:
-	var variant := str(_meta(name).get("rust_variant", ""))
-	return name if variant.is_empty() else variant
+func _type_name(statement_name: String) -> String:
+	var variant := str(_meta(statement_name).get("rust_variant", ""))
+	return statement_name if variant.is_empty() else variant
 
 
 ## `LStatement.statementKey()`: `typeName().toLowerCase()`.
-func _statement_key(name: String) -> String:
-	return _type_name(name).to_lower()
+func _statement_key(statement_name: String) -> String:
+	return _type_name(statement_name).to_lower()
 
 
 ## `LStatement.localizedName()` (`LStatement.java:371-374`):
 ## `instruction.<statementKey>` with `name()` (`insertSpaces(typeName)`) as the
 ## fallback; the raw name when the `logiclocalization` setting is off.
-func _localized_name(name: String) -> String:
-	var plain := _insert_spaces(_type_name(name))
+func _localized_name(statement_name: String) -> String:
+	var plain := _insert_spaces(_type_name(statement_name))
 	if not _logic_localization():
 		return plain
-	var key := "instruction." + _statement_key(name)
+	var key := "instruction." + _statement_key(statement_name)
 	var resolved := _t(key)
 	return plain if resolved == key else resolved
 
@@ -451,10 +451,10 @@ func _bundle_tooltip(key: String) -> String:
 ## The header title: `localizedName()`, plus `-> <dest>` for a set jump
 ## (`JumpStatement.build`'s title label update).
 func _header_text(row: Dictionary) -> String:
-	var name := str(row.get("name", "noop"))
-	var text := _localized_name(name)
+	var statement_name := str(row.get("name", "noop"))
+	var text := _localized_name(statement_name)
 	var dest := _jump_target(row)
-	if name == "jump" and dest >= 0:
+	if statement_name == "jump" and dest >= 0:
 		text += " -> %d" % dest
 	return text
 
@@ -464,7 +464,7 @@ func _header_text(row: Dictionary) -> String:
 ## fill (`draw`), the 38 px `Tex.whiteui` header (name, growX spacer, address,
 ## `+`/copy/delete `logici` buttons) and the statement's field row.
 func _statement_row(index: int, row: Dictionary) -> Control:
-	var name := str(row.get("name", "noop"))
+	var statement_name := str(row.get("name", "noop"))
 	var category := str(row.get("category", "unknown"))
 	var color: Color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"])
 	var full := _statements.size() >= MAX_INSTRUCTIONS
@@ -528,7 +528,7 @@ func _statement_row(index: int, row: Dictionary) -> Control:
 	# `marginRight(4)` when wrapping); `marginBottom(7)` sits on the frame.
 	var body_margin := MarginContainer.new()
 	body_margin.mouse_filter = Control.MOUSE_FILTER_PASS
-	var wraps := bool(_meta(name).get("use_wrapping", true))
+	var wraps := bool(_meta(statement_name).get("use_wrapping", true))
 	body_margin.add_theme_constant_override("margin_left", 8)
 	body_margin.add_theme_constant_override("margin_right", 8 if wraps else 4)
 	body_margin.add_theme_constant_override("margin_top", 2)
@@ -708,20 +708,20 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return fields_box
-	var name := str(row.get("name", "noop"))
+	var statement_name := str(row.get("name", "noop"))
 	var values: Array = row.get("fields", [])
 	# `SetRuleStatement.rebuild` normalizes `p1` to `@sharded` for team rules;
 	# Java mutates the statement at build time, so the dialog mirrors it.
-	var normalized: Variant = logic.call("editor_normalize", name, PackedStringArray(values))
+	var normalized: Variant = logic.call("editor_normalize", statement_name, PackedStringArray(values))
 	if normalized is PackedStringArray and normalized != PackedStringArray(values):
 		values = Array(normalized)
 		row["fields"] = values
 		_statements[index] = row
 		_modified = true
-	var items: Variant = logic.call("editor_layout", name, PackedStringArray(values))
+	var items: Variant = logic.call("editor_layout", statement_name, PackedStringArray(values))
 	if not (items is Array):
 		return fields_box
-	items = _filter_layout(name, values, items)
+	items = _filter_layout(statement_name, values, items)
 	for entry in items:
 		if not (entry is Dictionary):
 			continue
@@ -746,16 +746,16 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 				edit.custom_minimum_size = Vector2(180, 40)
 				# `ApplyStatusStatement`'s effect field is `.width(240f)`
 				# (`LStatements.java:1447`).
-				if name == "status" and field_index == 1:
+				if statement_name == "status" and field_index == 1:
 					edit.custom_minimum_size.x = 240
 				if bool((entry as Dictionary).get("wide", false)):
 					edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 				_apply_node_field(edit, color)
-				edit.tooltip_text = _bundle_tooltip("%s.%s" % [_insert_spaces(_type_name(name)), label])
+				edit.tooltip_text = _bundle_tooltip("%s.%s" % [_insert_spaces(_type_name(statement_name)), label])
 				edit.text_submitted.connect(_set_field.bind(index, field_index))
 				edit.focus_exited.connect(_commit_field.bind(index, field_index, edit))
 				fields_box.add_child(edit)
-				var picker := _picker_kind(name, field_index, values)
+				var picker := _picker_kind(statement_name, field_index, values)
 				if not picker.is_empty():
 					fields_box.add_child(_picker_button(index, field_index, picker, color))
 				if not label_before and not label.is_empty():
@@ -766,36 +766,36 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 				# `EffectStatement.build` swaps the enum select for a 150-wide
 				# wrapped button that opens `ui.effects`
 				# (`LStatements.java:1801-1812`).
-				if name == "effect" and field_index == 0:
+				if statement_name == "effect" and field_index == 0:
 					fields_box.add_child(_effect_button(index, field_index, color))
 					continue
 				# Java's two-state `table.button`s, not `showSelect` popups:
 				# apply/clear (`:1437-1444`), global/positional (`:2192-2196`),
 				# circle/rect (`:1227-1231`).
-				if name == "status" and field_index == 0:
+				if statement_name == "status" and field_index == 0:
 					fields_box.add_child(_field_toggle(
 						index, field_index, value, "true", "false",
 						"clear", "apply", Vector2(80, 40), color
 					))
 					continue
-				if name == "playsound" and field_index == 0:
+				if statement_name == "playsound" and field_index == 0:
 					fields_box.add_child(_field_toggle(
 						index, field_index, value, "true", "false",
 						"positional", "global", Vector2(160, 40), color
 					))
 					continue
-				if name == "query" and field_index == 0:
+				if statement_name == "query" and field_index == 0:
 					fields_box.add_child(_field_toggle(
 						index, field_index, value, "rect", "circle",
 						"rect", "circle", Vector2(80, 40), color
 					))
 					continue
-				var button := MindWidgets.button(_select_text(name, field_index, value))
+				var button := MindWidgets.button(_select_text(statement_name, field_index, value))
 				# `Styles.logict` tinted with the element colour.
 				button.theme_type_variation = "logict"
 				_apply_logict(button, color)
-				button.custom_minimum_size = _select_button_size(name, field_index, value)
-				button.pressed.connect(_open_select.bind(index, field_index, name, button))
+				button.custom_minimum_size = _select_button_size(statement_name, field_index, value)
+				button.pressed.connect(_open_select.bind(index, field_index, statement_name, button))
 				fields_box.add_child(button)
 			"color":
 				var picker := ColorPickerButton.new()
@@ -828,9 +828,9 @@ func _field_row(index: int, row: Dictionary, color: Color, wraps: bool) -> Contr
 
 ## `LStatements.java:1483-1485` (`ApplyStatusStatement.isPermanent`): the
 ## `seconds` field disappears for a `permanent` status.
-func _filter_layout(name: String, values: Array, items: Variant) -> Array:
+func _filter_layout(statement_name: String, values: Array, items: Variant) -> Array:
 	var out: Array = items if items is Array else []
-	if name != "status" or values.size() < 2 or str(values[0]) == "true":
+	if statement_name != "status" or values.size() < 2 or str(values[0]) == "true":
 		return out
 	var effect := str(values[1])
 	if not _status_permanent(effect):
@@ -851,18 +851,18 @@ func _status_permanent(effect: String) -> bool:
 
 ## The content picker bound to a statement field, if any (`CONTENT_PICKERS`;
 ## `LStatements.java` `showSelectTable` call sites).
-func _picker_kind(name: String, field_index: int, values: Array) -> String:
-	if name == "setmarker" and str(values[0] if not values.is_empty() else "") != "drawLayer":
+func _picker_kind(statement_name: String, field_index: int, values: Array) -> String:
+	if statement_name == "setmarker" and str(values[0] if not values.is_empty() else "") != "drawLayer":
 		return ""
-	if name == "ulocate" and str(values[0] if not values.is_empty() else "") != "ore":
+	if statement_name == "ulocate" and str(values[0] if not values.is_empty() else "") != "ore":
 		return ""
-	var fields: Dictionary = CONTENT_PICKERS.get(name, {})
+	var fields: Dictionary = CONTENT_PICKERS.get(statement_name, {})
 	return str(fields.get(field_index, ""))
 
 
 ## `LStatement.showSelect`'s `cols` argument per call site.
-func _select_columns(name: String, field_index: int) -> int:
-	match name:
+func _select_columns(statement_name: String, field_index: int) -> int:
+	match statement_name:
 		"draw", "control":
 			return 2 if field_index == 0 else 4
 		"radar", "uradar":
@@ -888,8 +888,8 @@ func _select_columns(name: String, field_index: int) -> int:
 
 ## The `sizer` cell override for a select (`showSelect(..., cols, sizer)`),
 ## else the 60x38 default (`LStatement.showSelect`).
-func _select_cell_size(name: String, field_index: int) -> Vector2:
-	match name:
+func _select_cell_size(statement_name: String, field_index: int) -> Vector2:
+	match statement_name:
 		"draw":
 			return Vector2(120, 50) if field_index == 0 else Vector2(60, 38)
 		"control":
@@ -924,8 +924,8 @@ func _select_cell_size(name: String, field_index: int) -> Vector2:
 
 
 ## The select button's size (`table.button(...).size(...)` per call site).
-func _select_button_size(name: String, field_index: int, value: String) -> Vector2:
-	match name:
+func _select_button_size(statement_name: String, field_index: int, value: String) -> Vector2:
+	match statement_name:
 		"draw":
 			return Vector2(120, 40) if field_index == 0 else Vector2(90, 40)
 		"control":
@@ -985,14 +985,14 @@ func _field_toggle(
 	off_value: String,
 	on_label: String,
 	off_label: String,
-	size: Vector2,
+	button_size: Vector2,
 	color: Color
 ) -> Button:
 	# code-instantiated: one toggle per two-state statement field.
 	var button := Button.new()
 	button.theme_type_variation = "logict"
 	_apply_logict(button, color)
-	button.custom_minimum_size = size
+	button.custom_minimum_size = button_size
 	button.text = _field_label_text(on_label if value == on_value else off_label)
 	var next := off_value if value == on_value else on_value
 	button.pressed.connect(func() -> void:
@@ -1117,11 +1117,11 @@ func _field_label(text: String) -> Label:
 
 ## The current option's display text for a select (`LStatement.bundle(Enum)`
 ## then the symbol/name fallback).
-func _select_text(name: String, field_index: int, value: String) -> String:
+func _select_text(statement_name: String, field_index: int, value: String) -> String:
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return value
-	var options: Variant = logic.call("editor_options", name, field_index)
+	var options: Variant = logic.call("editor_options", statement_name, field_index)
 	if options is Array:
 		for option in options:
 			if option is Dictionary and str((option as Dictionary).get("name", "")) == value:
@@ -1144,12 +1144,12 @@ func _option_text(option: Variant) -> String:
 ## `LCanvas.tooltip(Cell, Enum)` (`LCanvas.java:98-105`): the
 ## `<enum-class>.<name>` bundle key first, then `lenum.<name>`. String selects
 ## (`showSelect` over plain tokens) carry no enum tooltip in Java.
-func _select_tooltip(name: String, field_index: int, option: Variant) -> String:
+func _select_tooltip(statement_name: String, field_index: int, option: Variant) -> String:
 	var option_name := str((option as Dictionary).get("name", ""))
 	var enum_class := ""
-	if name == "op":
+	if statement_name == "op":
 		enum_class = "logicop"
-	elif (name == "select" or name == "jump") and field_index == 1:
+	elif (statement_name == "select" or statement_name == "jump") and field_index == 1:
 		enum_class = "conditionop"
 	else:
 		var key := str((option as Dictionary).get("key", ""))
@@ -1163,27 +1163,27 @@ func _select_tooltip(name: String, field_index: int, option: Variant) -> String:
 
 
 ## `showSelect`: a popup of `logicTogglet` buttons (`LStatement.java:233-253`).
-func _open_select(index: int, field_index: int, name: String, button: Button) -> void:
+func _open_select(index: int, field_index: int, statement_name: String, _button: Button) -> void:
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null:
 		return
-	var options: Variant = logic.call("editor_options", name, field_index)
+	var options: Variant = logic.call("editor_options", statement_name, field_index)
 	if not (options is Array):
 		return
 	var popup := PopupPanel.new()
 	# code-instantiated: one transient enum-select popup per open.
 	add_child(popup)
 	var grid := GridContainer.new()
-	grid.columns = _select_columns(name, field_index)
+	grid.columns = _select_columns(statement_name, field_index)
 	popup.add_child(grid)
 	var unit_actions := _unit_actions_enabled()
-	var cell_size := _select_cell_size(name, field_index)
+	var cell_size := _select_cell_size(statement_name, field_index)
 	for option in options:
 		if not (option is Dictionary):
 			continue
 		var option_name := str((option as Dictionary).get("name", ""))
 		# `UnitControlStatement` hides build/deconstruct when the rules disable them.
-		if name == "ucontrol" and not unit_actions and option_name in ["build", "deconstruct"]:
+		if statement_name == "ucontrol" and not unit_actions and option_name in ["build", "deconstruct"]:
 			continue
 		var toggle := Button.new()
 		toggle.text = _option_text(option)
@@ -1191,7 +1191,7 @@ func _open_select(index: int, field_index: int, name: String, button: Button) ->
 		toggle.theme_type_variation = "logicTogglet"
 		toggle.button_pressed = option_name == _current_field_value(index, field_index)
 		toggle.custom_minimum_size = cell_size
-		toggle.tooltip_text = _select_tooltip(name, field_index, option)
+		toggle.tooltip_text = _select_tooltip(statement_name, field_index, option)
 		toggle.pressed.connect(_select_enum.bind(index, field_index, option_name, popup))
 		grid.add_child(toggle)
 	popup.popup_hide.connect(popup.queue_free)
@@ -1286,53 +1286,53 @@ func _picker_rows(kind: String) -> Array:
 		return parsed if parsed is Array else []
 	if host.has_method("content_list"):
 		var rows: Array = []
-		for name in host.call("content_list", kind):
-			rows.append({"name": str(name), "unlocked_now": true})
+		for entry_name in host.call("content_list", kind):
+			rows.append({"name": str(entry_name), "unlocked_now": true})
 		return rows
 	return []
 
 
 ## Java content filters at each `showSelectTable` call site.
 func _picker_visible(row: Dictionary, filter: String) -> bool:
-	var name := str(row.get("name", ""))
-	if name.is_empty():
+	var entry_name := str(row.get("name", ""))
+	if entry_name.is_empty():
 		return false
-	var hidden := bool(row.get("hidden", false))
+	var is_hidden := bool(row.get("hidden", false))
 	var unlocked_now := bool(row.get("unlocked_now", true))
 	match filter:
 		"unit-control":
-			return unlocked_now and not hidden and bool(row.get("logic_controllable", true))
+			return unlocked_now and not is_hidden and bool(row.get("logic_controllable", true))
 		"unit", "block", "item":
-			return unlocked_now and not hidden
+			return unlocked_now and not is_hidden
 		"item-prop":
-			return not hidden
+			return not is_hidden
 		"item-ore":
 			return unlocked_now
 		"liquid-prop":
-			return unlocked_now and not hidden
+			return unlocked_now and not is_hidden
 		"status":
-			return name != "none"
+			return entry_name != "none"
 		"status-prop":
-			return name != "none" and unlocked_now and bool(row.get("show", true))
+			return entry_name != "none" and unlocked_now and bool(row.get("show", true))
 	return true
 
 
-func _content_label(kind: String, name: String) -> String:
+func _content_label(kind: String, entry_name: String) -> String:
 	if kind == "weather":
-		return _field_label_text(name)
+		return _field_label_text(entry_name)
 	if kind == "laccess":
-		var access_key := "laccess.label." + name.to_lower()
+		var access_key := "laccess.label." + entry_name.to_lower()
 		var access_text := _t(access_key)
-		return name if access_text == access_key else access_text
-	var key := "%s.%s.name" % [kind, name]
+		return entry_name if access_text == access_key else access_text
+	var key := "%s.%s.name" % [kind, entry_name]
 	var label := _t(key)
-	return name if label == key else label
+	return entry_name if label == key else label
 
 
-func _content_texture(kind: String, name: String) -> Texture2D:
-	var texture := MindWidgets.icon_texture("%s-%s-ui" % [kind, name])
+func _content_texture(kind: String, entry_name: String) -> Texture2D:
+	var texture := MindWidgets.icon_texture("%s-%s-ui" % [kind, entry_name])
 	if texture == null and kind == "block":
-		texture = MindWidgets.icon_texture("block-%s-full" % name)
+		texture = MindWidgets.icon_texture("block-%s-full" % entry_name)
 	return texture
 
 
@@ -1359,11 +1359,11 @@ func _icon_grid(
 		var row: Dictionary = row_value
 		if not _picker_visible(row, filter):
 			continue
-		var name := str(row.get("name", ""))
+		var entry_name := str(row.get("name", ""))
 		var button := Button.new()
 		button.theme_type_variation = "flati"
 		button.custom_minimum_size = Vector2(cell, cell)
-		var texture := _content_texture(kind, name)
+		var texture := _content_texture(kind, entry_name)
 		if texture != null:
 			var image := TextureRect.new()
 			image.texture = texture
@@ -1373,9 +1373,9 @@ func _icon_grid(
 			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			button.add_child(image)
 		else:
-			button.text = _content_label(kind, name).left(1).to_upper()
-		button.tooltip_text = _content_label(kind, name)
-		button.pressed.connect(on_pick.bind(name))
+			button.text = _content_label(kind, entry_name).left(1).to_upper()
+		button.tooltip_text = _content_label(kind, entry_name)
+		button.pressed.connect(on_pick.bind(entry_name))
 		grid.add_child(button)
 		count += 1
 	if count == 0:
@@ -1389,8 +1389,8 @@ func _open_icon_grid(index: int, field_index: int, kind: String, filter: String)
 	var popup: PopupPanel = parts["popup"]
 	var root: VBoxContainer = parts["root"]
 	var prefix := "@status-" if kind == "status" else "@"
-	root.add_child(_icon_grid(kind, filter, func(name: String) -> void:
-		_pick_value(prefix + name, index, field_index, popup)))
+	root.add_child(_icon_grid(kind, filter, func(entry_name: String) -> void:
+		_pick_value(prefix + entry_name, index, field_index, popup)))
 	popup.popup_centered()
 
 
@@ -1411,14 +1411,14 @@ func _open_status_picker(index: int, field_index: int) -> void:
 		var row: Dictionary = row_value
 		if not _picker_visible(row, "status"):
 			continue
-		var name := str(row.get("name", ""))
+		var entry_name := str(row.get("name", ""))
 		var button := Button.new()
 		button.theme_type_variation = "flatt"
 		button.custom_minimum_size = Vector2(240, 40)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.text = _content_label("status", name)
-		button.icon = _content_texture("status", name)
-		button.pressed.connect(_pick_value.bind("@status-" + name, index, field_index, popup))
+		button.text = _content_label("status", entry_name)
+		button.icon = _content_texture("status", entry_name)
+		button.pressed.connect(_pick_value.bind("@status-" + entry_name, index, field_index, popup))
 		list.add_child(button)
 	if list.get_child_count() == 0:
 		list.add_child(MindWidgets.label(_t("@none.found")))
@@ -1437,12 +1437,12 @@ func _open_weather_picker(index: int, field_index: int) -> void:
 	for row_value in _picker_rows("weather"):
 		if not (row_value is Dictionary):
 			continue
-		var name := str((row_value as Dictionary).get("name", ""))
+		var entry_name := str((row_value as Dictionary).get("name", ""))
 		var button := Button.new()
 		button.theme_type_variation = "flatt"
 		button.custom_minimum_size = Vector2(210, 40)
-		button.text = _content_label("weather", name)
-		button.pressed.connect(_pick_value.bind("@" + name, index, field_index, popup))
+		button.text = _content_label("weather", entry_name)
+		button.pressed.connect(_pick_value.bind("@" + entry_name, index, field_index, popup))
 		grid.add_child(button)
 	if grid.get_child_count() == 0:
 		grid.add_child(MindWidgets.label(_t("@none.found")))
@@ -1466,13 +1466,13 @@ func _open_layer_picker(index: int, field_index: int) -> void:
 			if not (row_value is Dictionary):
 				continue
 			var row: Dictionary = row_value
-			var name := str(row.get("name", ""))
+			var layer_name := str(row.get("name", ""))
 			var value := String.num(float(row.get("value", 0.0)), 1)
 			var button := Button.new()
 			button.theme_type_variation = "logicTogglet"
 			button.custom_minimum_size = Vector2(240, 40)
 			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			button.text = "%s = %s" % [name, value]
+			button.text = "%s = %s" % [layer_name, value]
 			button.pressed.connect(_pick_value.bind(value, index, field_index, popup))
 			list.add_child(button)
 	popup.popup_centered()
@@ -1523,10 +1523,10 @@ func _open_prop_picker(index: int, field_index: int) -> void:
 	var root: VBoxContainer = parts["root"]
 	var pick := func(value: String) -> void: _pick_value(value, index, field_index, popup)
 	var tables: Array = [
-		_icon_grid("item", "item-prop", func(name: String) -> void: pick.call("@" + name)),
-		_icon_grid("liquid", "liquid-prop", func(name: String) -> void: pick.call("@" + name)),
-		_legacy_status_list(func(name: String) -> void: pick.call("@status-" + name)),
-		_access_list("settable", func(name: String) -> void: pick.call("@" + name)),
+		_icon_grid("item", "item-prop", func(entry_name: String) -> void: pick.call("@" + entry_name)),
+		_icon_grid("liquid", "liquid-prop", func(entry_name: String) -> void: pick.call("@" + entry_name)),
+		_legacy_status_list(func(entry_name: String) -> void: pick.call("@status-" + entry_name)),
+		_access_list("settable", func(entry_name: String) -> void: pick.call("@" + entry_name)),
 	]
 	_picker_tabs(root, ["box", "liquid", "effect", "tree"], tables)
 	popup.popup_centered()
@@ -1540,15 +1540,15 @@ func _open_sensor_picker(index: int, field_index: int) -> void:
 	var root: VBoxContainer = parts["root"]
 	var pick := func(value: String) -> void: _pick_value(value, index, field_index, popup)
 	var units_blocks := VBoxContainer.new()
-	units_blocks.add_child(_icon_grid("unit", "unit", func(name: String) -> void:
-		pick.call("@" + name), 6, 40.0, 220.0))
-	units_blocks.add_child(_icon_grid("block", "block", func(name: String) -> void:
-		pick.call("@" + name), 6, 40.0, 220.0))
+	units_blocks.add_child(_icon_grid("unit", "unit", func(entry_name: String) -> void:
+		pick.call("@" + entry_name), 6, 40.0, 220.0))
+	units_blocks.add_child(_icon_grid("block", "block", func(entry_name: String) -> void:
+		pick.call("@" + entry_name), 6, 40.0, 220.0))
 	var tables: Array = [
-		_icon_grid("item", "item", func(name: String) -> void: pick.call("@" + name)),
-		_icon_grid("liquid", "liquid-prop", func(name: String) -> void: pick.call("@" + name)),
+		_icon_grid("item", "item", func(entry_name: String) -> void: pick.call("@" + entry_name)),
+		_icon_grid("liquid", "liquid-prop", func(entry_name: String) -> void: pick.call("@" + entry_name)),
 		units_blocks,
-		_access_list("senseable", func(name: String) -> void: pick.call("@" + name)),
+		_access_list("senseable", func(entry_name: String) -> void: pick.call("@" + entry_name)),
 	]
 	_picker_tabs(root, ["box", "liquid", "units", "tree"], tables)
 	popup.popup_centered()
@@ -1572,14 +1572,14 @@ func _access_list(kind: String, on_pick: Callable) -> Control:
 		rows = logic.call("senseable_accesses", _privileged)
 	if rows is Array or rows is PackedStringArray:
 		for name_value in rows:
-			var name := str(name_value)
+			var access_name := str(name_value)
 			var button := Button.new()
 			button.theme_type_variation = "flatt"
 			button.custom_minimum_size = Vector2(240, 40)
 			button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-			button.text = _content_label("laccess", name)
-			button.tooltip_text = _bundle_tooltip("laccess." + name.to_lower())
-			button.pressed.connect(on_pick.bind(name))
+			button.text = _content_label("laccess", access_name)
+			button.tooltip_text = _bundle_tooltip("laccess." + access_name.to_lower())
+			button.pressed.connect(on_pick.bind(access_name))
 			list.add_child(button)
 	if list.get_child_count() == 0:
 		list.add_child(MindWidgets.label(_t("@none.found")))
@@ -1600,14 +1600,14 @@ func _legacy_status_list(on_pick: Callable) -> Control:
 		var row: Dictionary = row_value
 		if not _picker_visible(row, "status-prop"):
 			continue
-		var name := str(row.get("name", ""))
+		var entry_name := str(row.get("name", ""))
 		var button := Button.new()
 		button.theme_type_variation = "flatt"
 		button.custom_minimum_size = Vector2(240, 40)
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-		button.text = _content_label("status", name)
-		button.icon = _content_texture("status", name)
-		button.pressed.connect(on_pick.bind(name))
+		button.text = _content_label("status", entry_name)
+		button.icon = _content_texture("status", entry_name)
+		button.pressed.connect(on_pick.bind(entry_name))
 		list.add_child(button)
 	if list.get_child_count() == 0:
 		list.add_child(MindWidgets.label(_t("@none.found")))
@@ -1627,12 +1627,11 @@ func _open_sound_picker(index: int, field_index: int) -> void:
 		if not (row_value is Dictionary):
 			continue
 		var row: Dictionary = row_value
-		var name := str(row.get("name", ""))
 		var category := str(row.get("category", ""))
 		choices.append(row)
-		var list: Array = categories.get(category, [])
-		list.append(row)
-		categories[category] = list
+		var category_list: Array = categories.get(category, [])
+		category_list.append(row)
+		categories[category] = category_list
 	if choices.is_empty():
 		return
 	choices.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
@@ -1653,16 +1652,16 @@ func _open_sound_picker(index: int, field_index: int) -> void:
 	var parts := _picker_popup()
 	var popup: PopupPanel = parts["popup"]
 	var root: VBoxContainer = parts["root"]
-	var body := HBoxContainer.new()
-	body.add_theme_constant_override("separation", 4)
-	root.add_child(body)
+	var dialog_body := HBoxContainer.new()
+	dialog_body.add_theme_constant_override("separation", 4)
+	root.add_child(dialog_body)
 	var tabs := VBoxContainer.new()
 	tabs.custom_minimum_size = Vector2(160, 0)
-	body.add_child(tabs)
+	dialog_body.add_child(tabs)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.custom_minimum_size = Vector2(450, 420)
-	body.add_child(scroll)
+	dialog_body.add_child(scroll)
 	var list := VBoxContainer.new()
 	list.add_theme_constant_override("separation", 3)
 	scroll.add_child(list)
@@ -1671,13 +1670,13 @@ func _open_sound_picker(index: int, field_index: int) -> void:
 		for child in list.get_children():
 			list.remove_child(child)
 			child.queue_free()
-		var visible: Array = choices
+		var shown_choices: Array = choices
 		if str(selected_category[0]) != "all":
-			visible = categories.get(str(selected_category[0]), [])
-		if visible.is_empty():
+			shown_choices = categories.get(str(selected_category[0]), [])
+		if shown_choices.is_empty():
 			list.add_child(MindWidgets.label(_t("@none.found")))
 			return
-		for row_value in visible:
+		for row_value in shown_choices:
 			var row: Dictionary = row_value
 			var sound_name := str(row.get("name", ""))
 			var sound_id := str(row.get("id", sound_name))
@@ -1767,12 +1766,12 @@ func _open_effects(index: int, field_index: int) -> void:
 	ui.call("open_dialog", "effects", "{}")
 
 
-func _on_effect_selected(name: String) -> void:
-	if _effect_target.x < 0 or name.is_empty():
+func _on_effect_selected(effect_name: String) -> void:
+	if _effect_target.x < 0 or effect_name.is_empty():
 		return
 	var target := _effect_target
 	_effect_target = Vector2i(-1, -1)
-	_commit_field_value(name, target.x, target.y)
+	_commit_field_value(effect_name, target.x, target.y)
 	_rebuild_list()
 
 
@@ -1816,9 +1815,9 @@ func _select_enum(index: int, field_index: int, option: String, popup: PopupPane
 	if logic == null or index < 0 or index >= _statements.size():
 		return
 	var row: Dictionary = _statements[index]
-	var name := str(row.get("name", "noop"))
+	var statement_name := str(row.get("name", "noop"))
 	var values: Array = row.get("fields", [])
-	var changed: Variant = logic.call("apply_type_change", name, PackedStringArray(values))
+	var changed: Variant = logic.call("apply_type_change", statement_name, PackedStringArray(values))
 	if changed is PackedStringArray:
 		var list: Array = []
 		for value in (changed as PackedStringArray):
@@ -1999,16 +1998,16 @@ func _finish_drag() -> void:
 func _drop_index_at(global_pos: Vector2) -> int:
 	# `DragLayout.layout` builds `seq` without the dragged element and inserts
 	# at the first row whose midpoint is below the dragged top.
-	var position := 0
+	var insert_index := 0
 	for i in _row_nodes.size():
 		var row: Control = _row_nodes[i]
 		if row == _drag_row:
 			continue
 		var rect := row.get_global_rect()
 		if global_pos.y < rect.position.y + rect.size.y * 0.5:
-			return position
-		position += 1
-	return position
+			return insert_index
+		insert_index += 1
+	return insert_index
 
 
 ## Rows currently in the normal layout (the dragged element is under the
@@ -2642,9 +2641,9 @@ func _process(delta: float) -> void:
 	for entry in vars:
 		if not (entry is Dictionary):
 			continue
-		var name := str((entry as Dictionary).get("name", ""))
+		var var_name := str((entry as Dictionary).get("name", ""))
 		for row in _vars_rows:
-			if row[0] == name:
+			if row[0] == var_name:
 				(row[1] as Label).text = _format_var_value(entry)
 
 
@@ -2694,9 +2693,9 @@ func _open_add_dialog(at_index: int = -1) -> void:
 			if not text.is_empty() and not label.to_lower().contains(text) \
 					and not type_name.to_lower().contains(text):
 				continue
-			var name: String = entry["name"]
+			var statement_name: String = entry["name"]
 			if str(matched[0]).is_empty():
-				matched[0] = name
+				matched[0] = statement_name
 			var category: String = entry["category"]
 			# `t.find(category.name)`: one section per category, in first-seen order.
 			if not sections.has(category):
@@ -2814,11 +2813,11 @@ func _add_entries() -> Array:
 		if parsed is Dictionary:
 			unit_allowed = bool((parsed as Dictionary).get("logicUnitControl", true))
 	for name_value in logic.call("statement_names"):
-		var name := str(name_value)
-		var info := _meta(name)
+		var statement_name := str(name_value)
+		var info := _meta(statement_name)
 		if info.is_empty():
 			continue
-		if _type_name(name) == "Invalid":
+		if _type_name(statement_name) == "Invalid":
 			continue
 		if bool(info.get("hidden", false)):
 			continue
@@ -2831,12 +2830,12 @@ func _add_entries() -> Array:
 		if category == "unit" and not _privileged and not unit_allowed:
 			continue
 		out.append({
-			"name": name,
+			"name": statement_name,
 			"category": category,
 			"color": CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"]),
-			"label": _localized_name(name),
-			"type_name": _type_name(name),
-			"tooltip": _bundle_tooltip("lst." + _statement_key(name)),
+			"label": _localized_name(statement_name),
+			"type_name": _type_name(statement_name),
+			"tooltip": _bundle_tooltip("lst." + _statement_key(statement_name)),
 		})
 	return out
 
@@ -2844,11 +2843,11 @@ func _add_entries() -> Array:
 ## Adds a default instance of `name` at `at_index` (`-1` appends):
 ## `canvas.addAt(position == -1 ? size : position, prov.get())`, then
 ## `dialog.hide()`.
-func _add_statement(name: String, at_index: int) -> void:
+func _add_statement(statement_name: String, at_index: int) -> void:
 	var logic := get_node_or_null("/root/Spine/MindLogic")
 	if logic == null or _statements.size() >= MAX_INSTRUCTIONS:
 		return
-	var row: Variant = logic.call("default_statement_row", name)
+	var row: Variant = logic.call("default_statement_row", statement_name)
 	if not (row is Dictionary) or (row as Dictionary).is_empty():
 		return
 	var at := _statements.size() if at_index < 0 else clampi(at_index, 0, _statements.size())

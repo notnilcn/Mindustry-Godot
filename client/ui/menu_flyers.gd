@@ -56,7 +56,7 @@ func _draw() -> void:
 	# A unit sprite is authored facing up and Java draws it at `rotation - 90`
 	# for an up-right `flyerRot`; in Godot's y-down space the clockwise-positive
 	# rotation that faces the sprite up-right is `+flyerRot`.
-	var rotation := deg_to_rad(float(parsed.get("rot", 45.0)))
+	var draw_angle := deg_to_rad(float(parsed.get("rot", 45.0)))
 	var scale_vector := Vector2(draw_scale, draw_scale)
 	for row in rows:
 		if typeof(row) != TYPE_ARRAY or row.size() < 3:
@@ -68,7 +68,7 @@ func _draw() -> void:
 		if page == null:
 			continue
 		var center := offset + Vector2(float(row[0]), float(row[1])) * draw_scale
-		draw_set_transform(center, rotation, scale_vector)
+		draw_set_transform(center, draw_angle, scale_vector)
 		draw_texture_rect_region(
 			page,
 			Rect2(

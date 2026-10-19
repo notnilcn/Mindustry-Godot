@@ -61,13 +61,13 @@ func _set_markup(text: String) -> void:
 	var tag := RegEx.create_from_string("^\\[([#a-zA-Z0-9]+)\\]")
 	var found := tag.search(text)
 	if found != null:
-		var name := found.get_string(1)
-		if name == "accent":
+		var color_name := found.get_string(1)
+		if color_name == "accent":
 			color = MindStyles.ACCENT
-		elif Color.html_is_valid(name):
-			color = Color.html(name)
-		elif Color.from_string(name, Color(0, 0, 0, 0)).a > 0.0:
-			color = Color.from_string(name, Color.WHITE)
+		elif Color.html_is_valid(color_name):
+			color = Color.html(color_name)
+		elif Color.from_string(color_name, Color(0, 0, 0, 0)).a > 0.0:
+			color = Color.from_string(color_name, Color.WHITE)
 	_text.add_theme_color_override("font_color", color)
 	_text.text = RegEx.create_from_string("\\[[#a-zA-Z0-9]*\\]").sub(text, "", true)
 

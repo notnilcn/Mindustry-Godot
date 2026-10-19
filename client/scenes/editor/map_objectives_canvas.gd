@@ -255,8 +255,8 @@ func _draw() -> void:
 		draw_rect(rect, Color(0.2, 0.2, 0.25, 0.9), true)
 		draw_rect(rect, Color("ffd37f") if index == _selected else Color(0.85, 0.42, 0.33),
 			false, 3.0 if index == _selected else 2.0)
-		var name := _type_name(str(value.get("class", "")))
-		draw_string(ThemeDB.fallback_font, rect.position + Vector2(8.0, 24.0), name,
+		var type_label := _type_name(str(value.get("class", "")))
+		draw_string(ThemeDB.fallback_font, rect.position + Vector2(8.0, 24.0), type_label,
 			HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 16.0, 16, Color(0.9, 0.9, 0.9))
 	if _querying:
 		var cell := _query_cell(_cursor)

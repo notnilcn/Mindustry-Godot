@@ -12,9 +12,6 @@
 class_name PlanetView
 extends Control
 
-## Emitted with the `PlanetGrid` tile index under a click (-1 = miss).
-signal sector_picked(tile: int)
-
 ## `PlanetRenderer.camLength`; camera distance is `(radius + camRadius) * this`.
 const CAM_LENGTH := 4.0
 ## Vendored planet-art quad size; the sprite's bright disc is ~0.37 of its width.
@@ -134,19 +131,19 @@ func _build_background(texture: Texture2D) -> void:
 	var width := height * 1152.0 / 648.0
 	quad.size = Vector2(width, height)
 	background.mesh = quad
-	var size := texture.get_size()
-	var cover := maxf(width / size.x, height / size.y)
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.albedo_texture = texture
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
-	material.render_priority = -10
-	var uv_scale := Vector2(width / cover / size.x, height / cover / size.y)
-	material.uv1_scale = Vector3(uv_scale.x, uv_scale.y, 1.0)
-	material.uv1_offset = Vector3((1.0 - uv_scale.x) * 0.5, (1.0 - uv_scale.y) * 0.5, 0.0)
-	background.material_override = material
+	var texture_size := texture.get_size()
+	var cover := maxf(width / texture_size.x, height / texture_size.y)
+	var backdrop_material := StandardMaterial3D.new()
+	backdrop_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	backdrop_material.albedo_texture = texture
+	backdrop_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	backdrop_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	backdrop_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
+	backdrop_material.render_priority = -10
+	var uv_scale := Vector2(width / cover / texture_size.x, height / cover / texture_size.y)
+	backdrop_material.uv1_scale = Vector3(uv_scale.x, uv_scale.y, 1.0)
+	backdrop_material.uv1_offset = Vector3((1.0 - uv_scale.x) * 0.5, (1.0 - uv_scale.y) * 0.5, 0.0)
+	background.material_override = backdrop_material
 	background.visible = true
 
 
@@ -156,14 +153,14 @@ func set_active(active: bool) -> void:
 
 
 ## Loads the planet's grid + params and builds the body/grid meshes.
-func set_planet(name: String) -> bool:
+func set_planet(planet_name: String) -> bool:
 	var campaign := get_node_or_null("/root/Spine/MindCampaign")
 	if campaign == null or not campaign.has_method("planet_view"):
 		return false
-	data = campaign.call("planet_view", name)
+	data = campaign.call("planet_view", planet_name)
 	if data.is_empty():
 		return false
-	planet = name
+	planet = planet_name
 	_sectors = []
 	_tiles = data.get("tiles", PackedVector3Array())
 	_corners = data.get("corners", PackedVector3Array())
@@ -229,11 +226,11 @@ func _rebuild_markers() -> void:
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	var instance := MeshInstance3D.new()
 	instance.mesh = mesh
-	var material := _overlay_material()
+	var fill_material := _overlay_material()
 	# Depth-tested so the globe disc hides the far hemisphere.
-	material.no_depth_test = false
-	material.render_priority = 5
-	instance.material_override = material
+	fill_material.no_depth_test = false
+	fill_material.render_priority = 5
+	instance.material_override = fill_material
 	_markers.add_child(instance)
 
 
@@ -326,13 +323,13 @@ func _add_icon(sector: Dictionary, tile: int) -> void:
 			region = "sector-%s" % preset
 	var plane := _sector_plane(tile)
 	if not region.is_empty():
-		var assets := MindWidgets.assets()
+		var asset_store := MindWidgets.assets()
 		var texture: Texture2D = null
-		if assets != null:
-			texture = assets.call("find_region", region) as Texture2D
+		if asset_store != null:
+			texture = asset_store.call("find_region", region) as Texture2D
 			if texture == null and not region.begins_with("sector-"):
 				for prefix in ["item", "block", "unit", "liquid"]:
-					texture = assets.call("find_region", "%s-%s-ui" % [prefix, region]) as Texture2D
+					texture = asset_store.call("find_region", "%s-%s-ui" % [prefix, region]) as Texture2D
 					if texture != null:
 						break
 		if texture == null:
@@ -545,9 +542,9 @@ func _rebuild_hover_fill() -> void:
 	var mesh := ArrayMesh.new()
 	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
 	hover_fill.mesh = mesh
-	var material := _overlay_material()
-	material.render_priority = 5
-	hover_fill.material_override = material
+	var hover_material := _overlay_material()
+	hover_material.render_priority = 5
+	hover_fill.material_override = hover_material
 
 
 ## Sets the preset whose icon is drawn at the selected sector
@@ -599,8 +596,8 @@ func tile_to_screen(tile: int) -> Variant:
 	if tile < 0 or tile >= _tiles.size():
 		return null
 	var point := camera.unproject_position(tile_position(tile))
-	var size := camera.get_viewport().get_visible_rect().size
-	if point.x < 0.0 or point.y < 0.0 or point.x > size.x or point.y > size.y:
+	var viewport_size := camera.get_viewport().get_visible_rect().size
+	if point.x < 0.0 or point.y < 0.0 or point.x > viewport_size.x or point.y > viewport_size.y:
 		return null
 	return point
 
@@ -671,16 +668,16 @@ func _build_body() -> void:
 	var array_mesh := ArrayMesh.new()
 	array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays, [], {}, flags)
 	body.mesh = array_mesh
-	var material := ShaderMaterial.new()
-	material.shader = load("res://shaders/planet.gdshader")
-	material.render_priority = -8
-	material.set_shader_parameter("u_lightdir", _light_dir)
-	material.set_shader_parameter("u_ambientColor", _vec3(_ambient))
-	material.set_shader_parameter(
+	var planet_material := ShaderMaterial.new()
+	planet_material.shader = load("res://shaders/planet.gdshader")
+	planet_material.render_priority = -8
+	planet_material.set_shader_parameter("u_lightdir", _light_dir)
+	planet_material.set_shader_parameter("u_ambientColor", _vec3(_ambient))
+	planet_material.set_shader_parameter(
 		"u_emissive", 1.0 if bool(mesh_data.get("emissive", false)) else 0.0
 	)
-	body.material_override = material
-	_body_material = material
+	body.material_override = planet_material
+	_body_material = planet_material
 	_update_body_camera()
 	body.visible = true
 
@@ -721,15 +718,15 @@ func _build_clouds() -> void:
 		arrays[Mesh.ARRAY_INDEX] = layer.get("indices", PackedInt32Array())
 		var array_mesh := ArrayMesh.new()
 		array_mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
-		var material := ShaderMaterial.new()
-		material.shader = shader
-		material.render_priority = -7 + _clouds.size()
+		var cloud_material := ShaderMaterial.new()
+		cloud_material.shader = shader
+		cloud_material.render_priority = -7 + _clouds.size()
 		# code-instantiated: one shell per data-driven `HexSkyMesh` layer
 		# (`Planet.cloudMeshLoader`'s `MultiMesh`, Planets.java:49-52,127-130).
 		var instance := MeshInstance3D.new()
 		instance.name = "Clouds%d" % _clouds.size()
 		instance.mesh = array_mesh
-		instance.material_override = material
+		instance.material_override = cloud_material
 		body.get_parent().add_child(instance)
 		_clouds.append(instance)
 		_cloud_speeds.append(float(layer.get("speed", 0.0)))
@@ -742,18 +739,18 @@ func _build_clouds() -> void:
 ## frame, with the light direction rotated by the same angle.
 func _update_clouds() -> void:
 	var alpha := 1.0 - ui_alpha
-	var hidden := absf(alpha) <= 0.01
+	var is_hidden := absf(alpha) <= 0.01
 	for index in _clouds.size():
 		var node: MeshInstance3D = _clouds[index]
-		node.visible = not hidden
-		if hidden:
+		node.visible = not is_hidden
+		if is_hidden:
 			continue
 		var rel := deg_to_rad(_global_time * _cloud_speeds[index] / 40.0)
 		node.rotation = Vector3(0.0, rel, 0.0)
-		var material := node.material_override as ShaderMaterial
-		material.set_shader_parameter("u_alpha", alpha)
-		material.set_shader_parameter("u_lightdir", _light_dir.rotated(Vector3.UP, rel))
-		material.set_shader_parameter("u_ambientColor", Vector3(_ambient.r, _ambient.g, _ambient.b))
+		var cloud_material := node.material_override as ShaderMaterial
+		cloud_material.set_shader_parameter("u_alpha", alpha)
+		cloud_material.set_shader_parameter("u_lightdir", _light_dir.rotated(Vector3.UP, rel))
+		cloud_material.set_shader_parameter("u_ambientColor", Vector3(_ambient.r, _ambient.g, _ambient.b))
 
 
 ## Vendored-art fallback (no hex generator data).
@@ -767,17 +764,17 @@ func _build_body_billboard() -> void:
 	body.visible = texture != null
 	if texture == null:
 		return
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.albedo_texture = texture
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+	var billboard_material := StandardMaterial3D.new()
+	billboard_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	billboard_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	billboard_material.albedo_texture = texture
+	billboard_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	billboard_material.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	# The opaque background is cut out by luminance alpha, so only the disc
 	# writes depth and occludes the far half of the grid.
-	material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
-	material.render_priority = -8
-	body.material_override = material
+	billboard_material.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_ALWAYS
+	billboard_material.render_priority = -8
+	body.material_override = billboard_material
 
 
 func _build_grid() -> void:
@@ -824,18 +821,18 @@ func _build_atmosphere() -> void:
 	sphere.radial_segments = 48
 	sphere.rings = 24
 	atmosphere.mesh = sphere
-	var material := ShaderMaterial.new()
-	material.shader = load("res://shaders/atmosphere.gdshader")
-	material.render_priority = ATMOSPHERE_PRIORITY
+	var atmosphere_material := ShaderMaterial.new()
+	atmosphere_material.shader = load("res://shaders/atmosphere.gdshader")
+	atmosphere_material.render_priority = ATMOSPHERE_PRIORITY
 	var radius := float(data.get("radius", 1.0))
-	material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
-	material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))
-	material.set_shader_parameter("u_color", _vec3(atmos.get("color", Color(0.3, 0.7, 1.0))))
+	atmosphere_material.set_shader_parameter("u_innerRadius", radius + float(atmos.get("rad_in", 0.0)))
+	atmosphere_material.set_shader_parameter("u_outerRadius", radius + float(atmos.get("rad_out", 0.3)))
+	atmosphere_material.set_shader_parameter("u_color", _vec3(atmos.get("color", Color(0.3, 0.7, 1.0))))
 	# `AtmosphereShader.apply` passes `planet.getLightNormal()` against a
 	# world-space camera; the port's camera lives in the planet mesh frame, so
 	# the same sun direction is used in that frame.
-	material.set_shader_parameter("u_light", _light_dir)
-	atmosphere.material_override = material
+	atmosphere_material.set_shader_parameter("u_light", _light_dir)
+	atmosphere.material_override = atmosphere_material
 	_has_atmosphere = true
 	atmosphere.visible = _atmosphere_setting()
 	_update_atmosphere_camera()
@@ -906,9 +903,9 @@ func _update_atmosphere_camera() -> void:
 	atmosphere.visible = _has_atmosphere and _atmosphere_setting()
 	background.rotation = camera.rotation
 	if atmosphere.material_override is ShaderMaterial:
-		var material := atmosphere.material_override as ShaderMaterial
-		material.set_shader_parameter("u_campos", camera.position)
-		material.set_shader_parameter("u_rcampos", camera.position)
+		var atmos_material := atmosphere.material_override as ShaderMaterial
+		atmos_material.set_shader_parameter("u_campos", camera.position)
+		atmos_material.set_shader_parameter("u_rcampos", camera.position)
 	_update_body_camera()
 
 
@@ -1033,25 +1030,25 @@ func _rebuild_sector_icon() -> void:
 	quad.size = Vector2(SECTOR_ICON_SIZE, SECTOR_ICON_SIZE)
 	_sector_icon.mesh = quad
 	_sector_icon.transform = _sector_plane(selected_tile)
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.albedo_texture = texture
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.render_priority = ICON_PRIORITY
-	_sector_icon.material_override = material
+	var icon_material := StandardMaterial3D.new()
+	icon_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	icon_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	icon_material.albedo_texture = texture
+	icon_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR
+	icon_material.cull_mode = BaseMaterial3D.CULL_DISABLED
+	icon_material.render_priority = ICON_PRIORITY
+	_sector_icon.material_override = icon_material
 
 
 func _overlay_material() -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	material.vertex_color_use_as_albedo = true
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	material.cull_mode = BaseMaterial3D.CULL_DISABLED
-	material.no_depth_test = true
-	material.render_priority = 6
-	return material
+	var overlay_surface := StandardMaterial3D.new()
+	overlay_surface.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	overlay_surface.vertex_color_use_as_albedo = true
+	overlay_surface.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	overlay_surface.cull_mode = BaseMaterial3D.CULL_DISABLED
+	overlay_surface.no_depth_test = true
+	overlay_surface.render_priority = 6
+	return overlay_surface
 
 
 ## A `Color` handed to a plain `vec3` uniform is converted sRGB -> linear by

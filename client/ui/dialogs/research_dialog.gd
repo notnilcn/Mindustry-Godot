@@ -180,14 +180,14 @@ func _update_title_button() -> void:
 
 
 ## Spacer cell for the title button row (`b.add().growX()` = -1).
-func _title_spacer(size: float) -> Control:
+func _title_spacer(spacer_size: float) -> Control:
 	# code-instantiated: title row is data-driven (Java `b.add()` cells).
 	var spacer := Control.new()
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	if size < 0.0:
+	if spacer_size < 0.0:
 		spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	else:
-		spacer.custom_minimum_size = Vector2(size, 0.0)
+		spacer.custom_minimum_size = Vector2(spacer_size, 0.0)
 	return spacer
 
 

@@ -188,9 +188,9 @@ func _fetch_url_index(index: int) -> void:
 		_fetch_url_index(index + 1)
 
 
-func _on_list_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_list_completed(result: int, code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 	if result == HTTPRequest.RESULT_SUCCESS and code == 200:
-		var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+		var parsed: Variant = JSON.parse_string(response_body.get_string_from_utf8())
 		if parsed is Array:
 			_parse_listings(parsed)
 			return
@@ -229,11 +229,11 @@ func _refresh_installed() -> void:
 		for entry in mods.call("list"):
 			if not (entry is Dictionary):
 				continue
-			var name := str(entry.get("name", ""))
-			var details: Dictionary = mods.call("details", name)
+			var mod_name := str(entry.get("name", ""))
+			var details: Dictionary = mods.call("details", mod_name)
 			var repo := str(details.get("repo", ""))
 			if not repo.is_empty():
-				_installed_repos[repo] = name
+				_installed_repos[repo] = mod_name
 	_publish_updates()
 
 
@@ -251,11 +251,11 @@ func _publish_updates() -> void:
 		var repo := str(entry.get("repo", ""))
 		if not _installed_repos.has(repo):
 			continue
-		var name := str(_installed_repos[repo])
-		var details: Dictionary = mods.call("details", name) if mods != null else {}
+		var mod_name := str(_installed_repos[repo])
+		var details: Dictionary = mods.call("details", mod_name) if mods != null else {}
 		var latest := _latest_version(entry)
 		if not latest.is_empty() and _version_newer(latest, str(details.get("version", ""))):
-			updates[name] = latest
+			updates[mod_name] = latest
 	mods_dialog.call("set_updates", updates)
 
 
@@ -307,28 +307,28 @@ func _rebuild() -> void:
 		_list.add(MindWidgets.label(_t("@mods.none"))).pad(8)
 		return
 	var query := _search.text.to_lower() if _search != null else ""
-	var visible: Array = []
+	var visible_listings: Array = []
 	for listing in _listings:
 		if not (listing is Dictionary):
 			continue
 		var entry: Dictionary = listing
 		if query.is_empty() or str(entry.get("name", "")).to_lower().contains(query) \
 				or str(entry.get("repo", "")).to_lower().contains(query):
-			visible.append(entry)
+			visible_listings.append(entry)
 	if _order_date:
-		visible.sort_custom(_sort_by_date)
+		visible_listings.sort_custom(_sort_by_date)
 	else:
-		visible.sort_custom(_sort_by_stars)
-	if visible.is_empty():
+		visible_listings.sort_custom(_sort_by_stars)
+	if visible_listings.is_empty():
 		_list.add(MindWidgets.label(_t("@none.found"))).pad(8)
 		return
-	for listing in visible:
+	for listing in visible_listings:
 		_add_listing_row(listing)
 
 
 func _add_listing_row(listing: Dictionary) -> void:
 	var repo := str(listing.get("repo", ""))
-	var name := str(listing.get("name", repo))
+	var mod_name := str(listing.get("name", repo))
 	# code-instantiated: browser rows are data-driven from the fetched `ModListing`s.
 	var box := HBoxContainer.new()
 	box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -338,7 +338,7 @@ func _add_listing_row(listing: Dictionary) -> void:
 	info.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	info.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	info.text = "%s\n%s %s  %s %s" % [
-		name,
+		mod_name,
 		_t("@mods.browser.latest"),
 		str(listing.get("version", "")),
 		"\u2605",
@@ -367,9 +367,9 @@ func _add_listing_details(listing: Dictionary) -> void:
 		box.add_child(MindWidgets.label("%s %s" % [_t("@editor.author"), author]))
 	var description := str(listing.get("description", ""))
 	if not description.is_empty():
-		var body := MindWidgets.label(description)
-		body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		box.add_child(body)
+		var description_label := MindWidgets.label(description)
+		description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		box.add_child(description_label)
 	var min_version := str(listing.get("min_game_version", listing.get("minGameVersion", "")))
 	if not min_version.is_empty():
 		box.add_child(MindWidgets.label(_fmt("@mod.requiresversion", [min_version])))
@@ -458,18 +458,18 @@ func _request_release_zipball(repo: String) -> void:
 		_install_failed(_fmt("@connectfail", ["release"]))
 
 
-func _on_api_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_api_completed(result: int, code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		_install_failed(_fmt("@connectfail", [str(code)]))
 		return
-	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var parsed: Variant = JSON.parse_string(response_body.get_string_from_utf8())
 	var branch := "master"
 	if parsed is Dictionary:
 		branch = str(parsed.get("default_branch", "master"))
 	_request_zipball("%s/repos/%s/zipball/%s" % [GH_API, _pending_repo, branch])
 
 
-func _on_release_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_release_completed(result: int, code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		# Release lookup failed; fall back to the default-branch zipball.
 		_pending_release = ""
@@ -477,7 +477,7 @@ func _on_release_completed(result: int, code: int, _headers: PackedStringArray, 
 		if error != OK:
 			_install_failed(str(error))
 		return
-	var parsed: Variant = JSON.parse_string(body.get_string_from_utf8())
+	var parsed: Variant = JSON.parse_string(response_body.get_string_from_utf8())
 	var zipball := ""
 	if parsed is Dictionary:
 		zipball = str(parsed.get("zipball_url", ""))
@@ -496,7 +496,7 @@ func _request_zipball(url: String) -> void:
 	_status.visible = true
 
 
-func _on_zip_completed(result: int, code: int, _headers: PackedStringArray, body: PackedByteArray) -> void:
+func _on_zip_completed(result: int, code: int, _headers: PackedStringArray, response_body: PackedByteArray) -> void:
 	_downloading = false
 	if result != HTTPRequest.RESULT_SUCCESS or code != 200:
 		_install_failed(_fmt("@connectfail", [str(code)]))
@@ -507,7 +507,7 @@ func _on_zip_completed(result: int, code: int, _headers: PackedStringArray, body
 	if file == null:
 		_install_failed(_t("@mod.delete.error"))
 		return
-	file.store_buffer(body)
+	file.store_buffer(response_body)
 	file.close()
 	var mods := _mods()
 	var imported: Dictionary = mods.call("import_mod", path) if mods != null else {}

@@ -63,17 +63,17 @@ func _on_text_input(text: String) -> void:
 	if not _pending_new_map:
 		return
 	_pending_new_map = false
-	var name := text.strip_edges()
-	if name.is_empty():
+	var map_name := text.strip_edges()
+	if map_name.is_empty():
 		return
-	if not _row_for(name).is_empty():
+	if not _row_for(map_name).is_empty():
 		_notify(_t("@editor.exists"))
 		return
 	var editor := get_node_or_null("/root/Spine/MindEditor")
 	if editor == null or not bool(editor.call("begin_new", NEW_MAP_SIZE, NEW_MAP_SIZE)):
 		_notify("@editor.errorload")
 		return
-	editor.call("set_tag", "name", name)
+	editor.call("set_tag", "name", map_name)
 	_close_pressed()
 	var shell := get_node_or_null("/root/Spine/Ui/EditorDialog")
 	if shell != null and shell.has_method("show_dialog"):
@@ -90,14 +90,14 @@ func _open_import() -> void:
 	ui.call("open_dialog", "file_chooser", JSON.stringify({"open": true, "extensions": ["msav"]}))
 
 
-func _connect_chooser(connect: bool) -> void:
+func _connect_chooser(should_connect: bool) -> void:
 	var chooser := get_node_or_null("/root/Spine/Ui/UiRoot/DialogLayer/file_chooser")
 	if chooser == null or not chooser.has_signal("file_chosen"):
 		return
-	if connect and not chooser.is_connected("file_chosen", _on_file_chosen):
+	if should_connect and not chooser.is_connected("file_chosen", _on_file_chosen):
 		chooser.connect("file_chosen", _on_file_chosen)
 		_chooser_connected = true
-	elif not connect and chooser.is_connected("file_chosen", _on_file_chosen):
+	elif not should_connect and chooser.is_connected("file_chosen", _on_file_chosen):
 		chooser.disconnect("file_chosen", _on_file_chosen)
 		_chooser_connected = false
 
@@ -140,10 +140,10 @@ func _import(overwrite: bool) -> void:
 		_notify("@editor.errorload")
 
 
-func _confirm_overwrite(name: String) -> void:
+func _confirm_overwrite(map_name: String) -> void:
 	var ui := get_node_or_null("/root/MindUi")
 	if ui != null and ui.has_method("show_confirm"):
-		ui.call("show_confirm", MindWidgets.markup_text(_fmt("@editor.overwrite.confirm", [name])))
+		ui.call("show_confirm", MindWidgets.markup_text(_fmt("@editor.overwrite.confirm", [map_name])))
 
 
 func _on_confirm(confirmed: bool) -> void:
@@ -170,10 +170,10 @@ func _open_in_editor(path: String) -> void:
 		shell.call("show_dialog")
 
 
-func _row_for(name: String) -> Dictionary:
+func _row_for(map_name: String) -> Dictionary:
 	for row_variant in _maps():
 		var row: Dictionary = row_variant
-		if str(row.get("name", "")) == name:
+		if str(row.get("name", "")) == map_name:
 			return row
 	return {}
 

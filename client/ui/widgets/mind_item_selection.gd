@@ -32,7 +32,6 @@ var _block := ""
 var _rows := 5
 var _columns := 4
 var _current := ""
-var _close_select := true
 var _options: Array = []
 var _group: ButtonGroup = null
 var _grid: GridContainer = null
@@ -169,10 +168,10 @@ func _visible_options() -> Array:
 ## `ItemSelection.java:70-75`: a 40 px cell with the content icon at
 ## `clamp(selectionSize, 0, 40)`, grouped with min-check 0.
 func _make_button(option: Dictionary) -> Button:
-	var name := str(option.get("name", ""))
+	var option_name := str(option.get("name", ""))
 	# code-instantiated: one toggle per spec option (runtime content count).
 	var button := Button.new()
-	button.name = "option-%s" % name
+	button.name = "option-%s" % option_name
 	button.toggle_mode = true
 	button.button_group = _group
 	button.custom_minimum_size = Vector2(CELL, CELL)
@@ -191,11 +190,11 @@ func _make_button(option: Dictionary) -> Button:
 		center.add_child(icon_rect(texture, float(option.get("size", 24.0))))
 	else:
 		button.text = _label(option)
-	if name == _current:
+	if option_name == _current:
 		# `button.update(() -> button.setChecked(holder.get() == item))`
 		# (`ItemSelection.java:75`) without re-entering `picked`.
 		button.set_pressed_no_signal(true)
-	button.toggled.connect(func(on: bool) -> void: picked.emit(name if on else ""))
+	button.toggled.connect(func(on: bool) -> void: picked.emit(option_name if on else ""))
 	return button
 
 
@@ -204,10 +203,10 @@ func _make_button(option: Dictionary) -> Button:
 ## a `TextureRect` otherwise never shrinks below its ~32 px texture, so the clamp
 ## had no effect (L05 T5, `diff/22-srccfg-zoom.png`).
 static func icon_rect(texture: Texture2D, selection_size: float) -> TextureRect:
-	var size := clampf(selection_size, 0.0, CELL)
+	var icon_size := clampf(selection_size, 0.0, CELL)
 	var icon := TextureRect.new()
 	icon.texture = texture
-	icon.custom_minimum_size = Vector2(size, size)
+	icon.custom_minimum_size = Vector2(icon_size, icon_size)
 	icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -267,6 +266,7 @@ static func _icon_texture(option: Dictionary) -> Texture2D:
 ## `Int` division: Java's `rowCount` counts only broken rows
 ## (`ItemSelection.java:77-80`).
 func _row_count(options: Array) -> int:
+	@warning_ignore("integer_division")
 	return options.size() / _columns
 
 

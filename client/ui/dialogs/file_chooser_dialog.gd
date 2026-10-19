@@ -11,8 +11,6 @@ extends MindDialog
 
 ## Emitted with the selected absolute path.
 signal file_chosen(path: String)
-## Emitted when the chooser is cancelled.
-signal chooser_cancelled
 
 var _open := true
 var _extensions: PackedStringArray = []
@@ -71,16 +69,16 @@ func _rebuild() -> void:
 		up.pressed.connect(func() -> void: _navigate(_directory.path_join("..").simplify_path()))
 		_list.add(up).grow_x_axis().pad(1)
 		_list.row()
-	for name in directory.get_files():
-		if not _extensions.is_empty() and not _matches(name):
+	for file_name in directory.get_files():
+		if not _extensions.is_empty() and not _matches(file_name):
 			continue
-		var file := MindWidgets.button(name)
-		file.pressed.connect(func() -> void: _choose(_directory.path_join(name)))
+		var file := MindWidgets.button(file_name)
+		file.pressed.connect(func() -> void: _choose(_directory.path_join(file_name)))
 		_list.add(file).grow_x_axis().pad(1)
 		_list.row()
-	for name in directory.get_directories():
-		var folder := MindWidgets.button("%s/" % name)
-		folder.pressed.connect(func() -> void: _navigate(_directory.path_join(name)))
+	for dir_name in directory.get_directories():
+		var folder := MindWidgets.button("%s/" % dir_name)
+		folder.pressed.connect(func() -> void: _navigate(_directory.path_join(dir_name)))
 		_list.add(folder).grow_x_axis().pad(1)
 		_list.row()
 
