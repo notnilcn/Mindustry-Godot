@@ -910,6 +910,7 @@ func _rebuild_hover_bars() -> void:
 		bar.setup(
 			_bar_text(entry), _bar_color(entry), float((entry as Dictionary).get("value", 0.0))
 		)
+		_apply_bar_blink(entry, bar)
 		margin.add_child(bar)
 		top_rows.add_child(margin)
 		_hover_bars.append([entry, bar])
@@ -932,6 +933,7 @@ func _refresh_hover_bars() -> void:
 		bar.fraction = float(entry.get("value", 0.0))
 		if str(entry.get("label_args", [])) != str((pair[0] as Dictionary).get("label_args", [])):
 			bar.setup(_bar_text(entry), _bar_color(entry), float(entry.get("value", 0.0)))
+			_apply_bar_blink(entry, bar)
 			_hover_bars[i] = [entry, bar]
 
 
@@ -950,6 +952,15 @@ func _bar_text(entry: Dictionary) -> String:
 	if args is Array and not (args as Array).is_empty():
 		return MindWidgets.markup_format(key, args)
 	return MindWidgets.markup("@%s" % key)
+
+
+## The `health` (`Block.java:710`) and force-projector `shield`
+## (`ForceProjector.java:99`) bars flash white on a drop (`.blink(Color.white)`);
+## every other bar blinks in its own colour.
+func _apply_bar_blink(entry: Dictionary, bar: MindBar) -> void:
+	var key := str(entry.get("key", ""))
+	if key == "health" or key == "shield":
+		bar.blink(Color.WHITE)
 
 
 func _bar_color(entry: Dictionary) -> Color:
