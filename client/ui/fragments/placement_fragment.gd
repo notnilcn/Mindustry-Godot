@@ -67,6 +67,9 @@ const TOP_REFRESH_MS := 250
 var _hover_tile := Vector2i(-1, -1)
 ## Live `Block.setBars` rows: `[[row_dict, MindBar], ...]` (T6).
 var _hover_bars: Array = []
+## `displayConsumption` `ReqImage` validity, keyed `"<row>:<icon>"`; re-read
+## with the bars (`building_consumption_json`).
+var _consume_valid: Dictionary = {}
 ## Command-mode panel state (`PlacementFragment.commandTable`; H03 T3).
 var _command_mode := false
 var _command_json := ""
@@ -619,6 +622,7 @@ func _update_top_table() -> void:
 			if now - _top_refreshed_ms >= TOP_REFRESH_MS:
 				_top_refreshed_ms = now
 				_refresh_hover_bars()
+				_refresh_hover_consumption()
 		return
 	_top_state = state
 	_rebuild_top(display, hover)
@@ -667,6 +671,7 @@ func _rebuild_top(display: String, hover: Dictionary) -> void:
 	_top_amounts.clear()
 	_top_requirements.clear()
 	_hover_bars.clear()
+	_consume_valid.clear()
 	_set_top_bottom_margin(TOP_PAD + TOP_MARGIN)
 	if display.is_empty():
 		_build_hover_row(hover)
@@ -882,6 +887,7 @@ func _build_hover_row(hover: Dictionary) -> void:
 	# `building_bars_json` gates the team).
 	if str(hover.get("kind", "")) == "building" and _hover_tile.x >= 0:
 		_rebuild_hover_bars()
+		_build_hover_consumption()
 		# `table.marginBottom(-5)` closes the building's bar branch
 		# (`BuildingComp.java:1655`): the inner table's bottom margin flips
 		# from 5 to -5, so only 7 px of the 9-patch padding remain under the
@@ -935,6 +941,70 @@ func _refresh_hover_bars() -> void:
 			bar.setup(_bar_text(entry), _bar_color(entry), float(entry.get("value", 0.0)))
 			_apply_bar_blink(entry, bar)
 			_hover_bars[i] = [entry, bar]
+
+
+## `table.row(); table.table(this::displayConsumption).growX()`
+## (`BuildingComp.java:1579-1580`): every consumer's `Consume.build` cell sits
+## in one left-aligned row under the bars. The ported cell is `ItemTurret`'s
+## ammo `MultiReqImage` (`ItemTurret.java:72-81`, `.size(8 * 4)`): the current
+## ammo icon, else each ammo item crossed out in turn (`MultiReqImage.java`).
+func _build_hover_consumption() -> void:
+	var rows: Variant = _hover_consumption_rows()
+	if not (rows is Array) or (rows as Array).is_empty():
+		return
+	# code-instantiated: the consumption row exists only for hovered consumers.
+	var line := HBoxContainer.new()
+	line.add_theme_constant_override("separation", 0)
+	for r in (rows as Array).size():
+		var images: Variant = rows[r]
+		if not (images is Array) or (images as Array).is_empty():
+			continue
+		# code-instantiated: one `MultiReqImage` per consumer cell.
+		var multi := MindMultiReqImage.new()
+		multi.custom_minimum_size = Vector2(32, 32)
+		multi.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		for entry in images:
+			if not (entry is Dictionary):
+				continue
+			var key := "%d:%s" % [r, str((entry as Dictionary).get("icon", ""))]
+			_consume_valid[key] = bool((entry as Dictionary).get("valid", false))
+			# code-instantiated: `new Image(item.uiIcon)` stretched to the cell.
+			var icon := TextureRect.new()
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_SCALE
+			icon.texture = MindWidgets.icon_texture(str((entry as Dictionary).get("icon", "")))
+			multi.add_req(MindWidgets.req_image(icon, func() -> bool: return bool(_consume_valid.get(key, false))))
+		line.add_child(multi)
+	if line.get_child_count() == 0:
+		line.free()
+		return
+	top_rows.add_child(line)
+
+
+## Live re-read of the `ReqImage` predicates (`build.items`/`ammo.peek()`).
+func _refresh_hover_consumption() -> void:
+	if _consume_valid.is_empty():
+		return
+	var rows: Variant = _hover_consumption_rows()
+	if not (rows is Array):
+		return
+	for r in (rows as Array).size():
+		var images: Variant = rows[r]
+		if not (images is Array):
+			continue
+		for entry in images:
+			if entry is Dictionary:
+				var key := "%d:%s" % [r, str((entry as Dictionary).get("icon", ""))]
+				_consume_valid[key] = bool((entry as Dictionary).get("valid", false))
+
+
+func _hover_consumption_rows() -> Variant:
+	var host := get_node_or_null("/root/Spine/SimHost")
+	if host == null or not host.has_method("building_consumption_json") or _hover_tile.x < 0:
+		return null
+	return JSON.parse_string(
+		str(host.call("building_consumption_json", _hover_tile.x, _hover_tile.y))
+	)
 
 
 func _hover_bar_rows() -> Variant:

@@ -352,8 +352,23 @@ impl BuildingBehavior for LiquidVoidBehavior {
 /// `PowerSource` (`PowerSourceBuild.getPowerProduction`): report
 /// `powerProduction` while enabled, `0` otherwise. The lowered placement path
 /// attaches `PowerModule`; the graph merges the source into its grid.
+///
+/// `PowerSource extends PowerNode` (`PowerSource.java:6-12`: `maxNodes = 100`,
+/// the inherited `laserRange = 6`/`autolink = true`), so the source carries the
+/// node config: a placed consumer in range autolinks to it
+/// (`BuildingComp.placed` -> `PowerNode.getNodeLinks`) and taps link like a node.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PowerSourceBehavior;
+
+/// `PowerSource`'s inherited `PowerNode` knobs (`PowerSource.java:11`,
+/// `PowerNode.java:33-35`).
+const POWER_SOURCE_NODE: crate::world::blocks::power::nodes::PowerNodeBehavior =
+    crate::world::blocks::power::nodes::PowerNodeBehavior {
+        max_nodes: 100,
+        laser_range: 6.0,
+        autolink: true,
+        same_block_connection: false,
+    };
 
 impl BuildingBehavior for PowerSourceBehavior {
     fn always_update_when_disabled(&self) -> bool {
@@ -362,7 +377,18 @@ impl BuildingBehavior for PowerSourceBehavior {
         true
     }
 
+    fn on_configure_build_tapped(
+        &self,
+        world: &World,
+        grid: &crate::world::WorldGrid,
+        e: Entity,
+        other: Entity,
+    ) -> super::ConfigTapResult {
+        POWER_SOURCE_NODE.on_configure_build_tapped(world, grid, e, other)
+    }
+
     fn create_state(&self, world: &mut World, e: Entity) {
+        POWER_SOURCE_NODE.create_state(world, e);
         if world
             .get::<crate::world::blocks::power::PowerProduction>(e)
             .is_none()

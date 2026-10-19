@@ -76,6 +76,10 @@ func _build() -> void:
 		# `new BorderImage(map.safeTexture())`: the default `thickness = 4f`
 		# (`BorderImage.java:16`, `EditorMapsDialog.java:108`).
 		image.thickness = 4.0
+		# `map.safeTexture()` is an Arc `Texture` with the default
+		# `TextureFilter.nearest` (Arc `GLTexture.java:18-19`): crisp pixels.
+		# `MindBorderImage._ready` resets `texture_filter` from `force_nearest`.
+		image.force_nearest = true
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		root.add(image).width(MAPSIZE).height(MAPSIZE)
 	else:

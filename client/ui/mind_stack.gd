@@ -18,6 +18,13 @@ func _get_minimum_size() -> Vector2:
 	return result
 
 
+## `Container` sends `NOTIFICATION_SORT_CHILDREN`; a script `_sort_children()`
+## is not a virtual (see `MindTable._notification`), so route it here.
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_SORT_CHILDREN:
+		_sort_children()
+
+
 func _sort_children() -> void:
 	var rect := Rect2(Vector2.ZERO, size)
 	for child in get_children():

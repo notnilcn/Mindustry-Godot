@@ -18,6 +18,9 @@ use crate::sim_host::MindSimHost;
 
 /// `Renderer.lasersopacity`/`bridgeopacity` default 100 (`settings.rs`).
 const OPACITY_DEFAULT: i32 = 100;
+/// `PowerNode.laserScale` (`PowerNode.java:36`); every node kind this pass draws
+/// (`PowerNode`/`PowerSource`) keeps the default.
+const POWER_LASER_SCALE: f32 = 0.25;
 
 /// One resolved draw command.
 enum Cmd {
@@ -141,7 +144,13 @@ impl INode2D for LinkOverlay {
                         });
                     }
                     if let Some(end) = end {
+                        // `Draw.rect(start, x, y, start.width * scale *
+                        // start.scl(), ...)` (`Drawf.java:530-531`): `scl()` is
+                        // `scale * Draw.scl` (Arc `TextureRegion.java:311-313`),
+                        // so the cap is the natural size times
+                        // `PowerNode.laserScale` (`0.25`, `PowerNode.java:36`).
                         let (w, h) = RegionCache::natural_size(&end);
+                        let (w, h) = (w * POWER_LASER_SCALE, h * POWER_LASER_SCALE);
                         cmds.push(Cmd::Region {
                             texture: Some(end.clone()),
                             x: x1,

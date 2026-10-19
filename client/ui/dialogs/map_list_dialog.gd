@@ -682,6 +682,10 @@ func _build_preview(map_name: String, extent: float, thickness: float) -> Contro
 		var image := MindBorderImage.new()
 		image.texture = texture
 		image.thickness = thickness
+		# `map.safeTexture()` is an Arc `Texture` with the default
+		# `TextureFilter.nearest` (Arc `GLTexture.java:18-19`): crisp pixels.
+		# `MindBorderImage._ready` resets `texture_filter` from `force_nearest`.
+		image.force_nearest = true
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		image.custom_minimum_size = Vector2(extent, extent)

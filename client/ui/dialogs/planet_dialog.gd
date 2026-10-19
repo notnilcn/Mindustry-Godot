@@ -1668,6 +1668,11 @@ func _input(event: InputEvent) -> void:
 			return
 		if _over_ui(click.position):
 			return
+		# One wheel tick is one Arc `scrolled` event; Godot (X11) delivers each
+		# tick as a press + release pair, so the release must not step again.
+		if not click.pressed:
+			get_viewport().set_input_as_handled()
+			return
 		# Arc scroll `amountY`: negative scrolling up (SDL `-wheel.y`), and
 		# `zoom + amountY / 10` means up zooms in (`PlanetDialog.java:144`).
 		wheel_view.scroll(-1.0 if click.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0)

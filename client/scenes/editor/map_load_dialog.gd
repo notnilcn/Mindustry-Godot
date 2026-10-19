@@ -118,6 +118,9 @@ func _map_button(map: Dictionary) -> Button:
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var image := TextureRect.new()
 	image.texture = _preview_texture(str(map.get("name", "")))
+	# `map.safeTexture()` is an Arc `Texture` with the default
+	# `TextureFilter.nearest` (Arc `GLTexture.java:18-19`): crisp pixels.
+	image.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
