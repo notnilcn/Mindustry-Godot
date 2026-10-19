@@ -236,7 +236,7 @@ fn blend(src: u32, dst: u32) -> u32 {
 }
 
 /// `MapIO.colorFor(wall, floor, overlay, team)` ported over plan-02 block
-/// metadata (team color arrives with plan 12 `Team`; derelict gray for now).
+/// metadata; synthetic walls take `team.color` ([`team_color`]).
 pub fn color_for(palette: &BlockPalette, wall: u16, floor: u16, overlay: u16, team: u8) -> u32 {
     if palette.synthetic(wall) {
         return team_color(team);
@@ -259,18 +259,10 @@ pub fn color_for(palette: &BlockPalette, wall: u16, floor: u16, overlay: u16, te
     palette.map_color(overlay)
 }
 
-/// Team color (`Team.<t>.color.rgba8888`, `game/Team.java` base teams;
-/// ids past `neoplastic` get a random HSV upstream and fall back to derelict).
+/// Team color (`Team.get(team).color.rgba8888()`, `game/Team.java`): the base
+/// teams plus the generated `team#N` palette colours of the 256-team registry.
 pub fn team_color(team: u8) -> u32 {
-    match team {
-        1 => 0xffd37fff, // sharded (`Pal.accent`)
-        2 => 0xf25555ff, // crux
-        3 => 0xa27ce5ff, // malis
-        4 => 0x54d67dff, // green
-        5 => 0x6c87fdff, // blue
-        6 => 0xe05438ff, // neoplastic
-        _ => 0x4d4e58ff, // derelict
-    }
+    crate::game::team::Team::get(team).color.to_rgba8888()
 }
 
 /// `MapIO.generatePreview(Tiles)`: pixels from a live tile source.
@@ -371,6 +363,38 @@ impl PreviewContext {
     fn index(&self, x: u16, y: u16) -> usize {
         x as usize + y as usize * self.image.width as usize
     }
+
+    /// `CachedTile.onReadBuilding` (`MapIO.java:123-141`): the building's
+    /// team colour fills its whole `size`×`size` footprint on the wall layer
+    /// (`walls.set(drawx, floors.height - 1 - drawy, team.color)`), and a
+    /// core's team joins `Map.teams`.
+    fn paint_building(&mut self, index: usize, team: u8) {
+        let Some(block) = self.block_ids.get(index).copied() else {
+            return;
+        };
+        let width = self.image.width as usize;
+        if width == 0 {
+            return;
+        }
+        let color = team_color(team);
+        let size = self.palette.block_size(block);
+        let offset = -(size - 1) / 2;
+        let (tx, ty) = ((index % width) as i32, (index / width) as i32);
+        let height = self.image.height as i32;
+        for dx in 0..size {
+            for dy in 0..size {
+                let (x, y) = (tx + dx + offset, ty + dy + offset);
+                // `Pixmap.set` ignores out-of-bounds pixels.
+                if x < 0 || y < 0 || y >= height {
+                    continue;
+                }
+                self.image.set(x as u32, (height - 1 - y) as u32, color);
+            }
+        }
+        if self.palette.kind(block) == Some(BlockKind::CoreBlock) {
+            self.teams.insert(team);
+        }
+    }
 }
 
 impl WorldContext for PreviewContext {
@@ -456,14 +480,7 @@ impl WorldContext for PreviewContext {
         } else {
             crate::world::building_io::read_base(&mut decoded, reader, version)?;
         }
-        if self
-            .block_ids
-            .get(index)
-            .copied()
-            .is_some_and(|block| self.palette.kind(block) == Some(BlockKind::CoreBlock))
-        {
-            self.teams.insert(decoded.team);
-        }
+        self.paint_building(index, decoded.team);
         reader.skip_to_end();
         Ok(())
     }
@@ -479,14 +496,7 @@ impl WorldContext for PreviewContext {
         // holds the team byte); the body is skipped like `read_building`.
         let mut decoded = crate::world::building_io::DecodedBase::default();
         crate::world::building_io::read_base_pre_short(&mut decoded, reader, content, block)?;
-        if self
-            .block_ids
-            .get(index)
-            .copied()
-            .is_some_and(|block| self.palette.kind(block) == Some(BlockKind::CoreBlock))
-        {
-            self.teams.insert(decoded.team);
-        }
+        self.paint_building(index, decoded.team);
         reader.skip_to_end();
         Ok(())
     }
@@ -500,9 +510,11 @@ impl WorldContext for PreviewContext {
 
     fn on_read_tile_data(&mut self, index: usize) {
         // `CachedTile.onReadTileData`: minimap colors for data tiles.
+        // Both layers are written on the flipped row (`walls.height - 1 -
+        // tile.y`, `MapIO.java:168-178`).
         let block = self.block_ids[index];
         let x = (index % self.image.width as usize) as u32;
-        let y = (index / self.image.width as usize) as u32;
+        let y = self.image.height - 1 - (index / self.image.width as usize) as u32;
         if !self.palette.synthetic(block) && block != 0 {
             let color = self.palette.block_color(block);
             if color != 0 {
@@ -768,6 +780,38 @@ mod tests {
     /// `OreBlock.java:23`) contributes its item-coloured `mapColor`; air and
     /// the editor overlays keep `OverlayFloor.useColor = false`
     /// (`OverlayFloor.java:13`) and fall back to the floor colour.
+    /// `CachedTile.onReadBuilding` (`MapIO.java:123-141`): a building paints
+    /// `team.color` over its whole footprint on the flipped rows (not the
+    /// derelict `setBlock` colour) and a core joins `Map.teams`; the data-tile
+    /// pass writes on the flipped row too (`MapIO.java:168-178`).
+    #[test]
+    fn read_building_paints_team_footprint() {
+        let registry = test_registry();
+        let core = registry.block_id("core-shard").expect("core").raw();
+        let wall = registry.block_id("stone-wall").expect("wall").raw();
+        let mut ctx = PreviewContext::new(BlockPalette::of(&registry));
+        ctx.resize(8, 6);
+        let center = ctx.index(3, 2);
+        ctx.set_block(center, core);
+        ctx.paint_building(center, 1);
+        assert!(ctx.teams.contains(&1));
+        let image = ctx.image();
+        for x in 2..=4 {
+            for y in 1..=3u32 {
+                assert_eq!(image.get(x, 6 - 1 - y), 0xffd37fff, "({x},{y})");
+            }
+        }
+        assert_eq!(team_color(2), 0xf25555ff);
+        assert_eq!(team_color(3), 0xa27ce5ff);
+
+        let data_tile = ctx.index(6, 0);
+        ctx.set_block(data_tile, wall);
+        ctx.on_read_tile_data(data_tile);
+        assert_eq!(ctx.image().get(6, 5), ctx.palette.block_color(wall));
+        // Nothing lands on the unflipped row.
+        assert_eq!(ctx.image().get(6, 0), 0);
+    }
+
     #[test]
     fn ore_overlays_use_their_map_color() {
         let registry = test_registry();

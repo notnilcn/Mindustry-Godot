@@ -38,20 +38,26 @@ pub fn collect_boot_content(mods: &mut Mods, fs: &dyn FileSystem) -> ModBootCont
     }
 }
 
-/// `createBaseContent` -> mod content -> `init()`/`postInit()` -> patches.
+/// `createBaseContent` -> `loadColors` -> mod content -> `init()`/`postInit()`
+/// -> patches.
 ///
 /// `headless` is the existing `ContentRegistry::new` flag the host passed to
 /// `create_base_content` (the client boots with `true`, which skips
-/// `loadIcon()`/`load()` only).
+/// `loadIcon()`/`load()` only). `block_colors` is row 0 of
+/// `sprites/block_colors.png` (`ContentLoader.loadColors`,
+/// `ClientLauncher.java:166-168`); empty skips it (the headless server never
+/// loads colours).
 pub fn build_registry_with_mods(
     bundle: &dyn BundleView,
     unlocks: &dyn UnlockStore,
     headless: bool,
     boot: &ModBootContent,
+    block_colors: &[u32],
 ) -> Result<(ContentRegistry, ModBootReport), String> {
     let mut report = ModBootReport::default();
     let mut registry = create_base_content(bundle, unlocks, headless)
         .map_err(|error| format!("base content: {error}"))?;
+    registry.load_colors(block_colors);
 
     if !boot.files.is_empty() {
         let mut provider = ModsContentProvider::new(boot.files.clone(), unlocks);
@@ -113,8 +119,14 @@ mod tests {
         mods.load_single(&fs, &dir, &SettingsStore::new())
             .unwrap_or_else(|error| panic!("load {fixture}: {error}"));
         let boot = collect_boot_content(&mut mods, &fs);
-        build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
-            .unwrap_or_else(|error| panic!("boot {fixture}: {error}"))
+        build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &boot,
+            &[],
+        )
+        .unwrap_or_else(|error| panic!("boot {fixture}: {error}"))
     }
 
     /// L08 T3: every `UnlockableContent` field reads from mod JSON into
@@ -518,6 +530,42 @@ mod tests {
         assert_eq!(plain.drawer.kind, DrawerKind::Default);
     }
 
+    /// `ContentLoader.loadColors` (`ContentLoader.java:140-158`) runs in the
+    /// live boot: a `block_colors.png` row sets floor `mapColor`s (opaque),
+    /// `hasColor` and `squareSprite`, and `0`/`255` entries are skipped.
+    #[test]
+    fn live_boot_loads_block_colors() {
+        let base = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base");
+        let stone = base.block_id("stone").expect("stone").index();
+        let sand = base.block_id("sand-floor").expect("sand").index();
+        let mut row = vec![0u32; stone.max(sand) + 1];
+        row[stone] = 0x5a5a6eff;
+        row[sand] = 0xc8a07a19;
+        let (registry, _) = build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &ModBootContent::default(),
+            &row,
+        )
+        .expect("boot");
+        let stone_def = registry.block_by_name("stone").expect("stone");
+        assert_eq!(
+            stone_def.map_color.map(|c| c.to_rgba8888()),
+            Some(0x5a5a6eff)
+        );
+        assert!(stone_def.has_color && stone_def.square_sprite);
+        let sand_def = registry.block_by_name("sand-floor").expect("sand");
+        assert_eq!(
+            sand_def.map_color.map(|c| c.to_rgba8888()),
+            Some(0xc8a07aff)
+        );
+        assert!(sand_def.has_color && !sand_def.square_sprite);
+        // Air (row entry 0) keeps its registry colour.
+        assert_eq!(registry.blocks()[0].map_color, base.blocks()[0].map_color);
+    }
+
     /// I01 T16 finding: the live boot path must install the turret ammo
     /// bullets — without them `defense::register` skips every turret and a
     /// placed turret has no `TurretState` (live-client regression).
@@ -528,6 +576,7 @@ mod tests {
             &MemoryUnlockStore::new(),
             true,
             &ModBootContent::default(),
+            &[],
         )
         .expect("boot");
         let behaviors = crate::world::blocks::default_registry(&registry);
@@ -557,9 +606,14 @@ mod tests {
         mods.load_single(&fs, &dir, &SettingsStore::new())
             .expect("load classes");
         let boot = collect_boot_content(&mut mods, &fs);
-        let (registry, report) =
-            build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
-                .expect("boot with mods");
+        let (registry, report) = build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &boot,
+            &[],
+        )
+        .expect("boot with mods");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
 
         let block = registry
@@ -612,9 +666,14 @@ mod tests {
         mods.load_single(&fs, &dir, &SettingsStore::new())
             .expect("load consumers");
         let boot = collect_boot_content(&mut mods, &fs);
-        let (registry, report) =
-            build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
-                .expect("boot with mods");
+        let (registry, report) = build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &boot,
+            &[],
+        )
+        .expect("boot with mods");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
 
         let block = registry
@@ -659,9 +718,14 @@ mod tests {
         let base = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
             .expect("base content");
 
-        let (registry, report) =
-            build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
-                .expect("boot with mods");
+        let (registry, report) = build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &boot,
+            &[],
+        )
+        .expect("boot with mods");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
 
         let item = registry

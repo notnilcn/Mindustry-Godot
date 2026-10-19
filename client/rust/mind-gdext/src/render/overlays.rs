@@ -6,8 +6,7 @@
 //! Draws the polygon core-protection edges at `Layer::OverlayUi` (the
 //! `updateCoreEdges` half). The input-plan/selection/indicator/status half is
 //! driven by plan 15 data and plan 07 status bars; its pure geometry lives in
-//! `mind_core::render::overlay`. Deviation S16-13: team colors are a fixed
-//! palette until plan 02/12 expose `Team.color`.
+//! `mind_core::render::overlay`. Edge colours are `Team.color`.
 
 use godot::classes::{Mesh, MeshInstance2D, Node2D};
 use godot::prelude::*;
@@ -28,15 +27,9 @@ pub struct OverlayStats {
     pub active: bool,
 }
 
-/// Team color palette (plan 02/12 replacement seam).
+/// Team colour (`Team.get(team).color`, `game/Team.java`), packed RGBA8888.
 pub(crate) fn team_color(team: u8) -> u32 {
-    match team {
-        0 => 0x8f8f8fff,
-        1 => 0xd4816bff,
-        2 => 0xe55454ff,
-        3 => 0x6bb2b2ff,
-        _ => 0x877badff,
-    }
+    mind_core::game::team::Team::get(team).color.to_rgba8888()
 }
 
 /// The core-protection edge overlay.

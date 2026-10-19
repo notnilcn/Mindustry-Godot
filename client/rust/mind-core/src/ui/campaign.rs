@@ -2516,9 +2516,14 @@ mod tests {
         mods.load_single(&fs, &dir, &SettingsStore::new())
             .expect("load allkinds");
         let boot = collect_boot_content(&mut mods, &fs);
-        let (registry, report) =
-            build_registry_with_mods(&MemoryBundle::new(), &MemoryUnlockStore::new(), true, &boot)
-                .expect("boot with mods");
+        let (registry, report) = build_registry_with_mods(
+            &MemoryBundle::new(),
+            &MemoryUnlockStore::new(),
+            true,
+            &boot,
+            &[],
+        )
+        .expect("boot with mods");
         assert!(report.failures.is_empty(), "{:?}", report.failures);
 
         let catalog = block_catalog_from(&registry, None, Some("serpulo"));

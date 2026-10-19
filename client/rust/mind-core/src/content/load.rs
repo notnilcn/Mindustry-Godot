@@ -13,6 +13,7 @@
 
 use std::collections::BTreeMap;
 
+use super::Rgba;
 use super::ctype::{Content, ErrorContent, Mappable, ModId, Unlockable};
 use super::id::{BlockId, BulletId, ItemId, LiquidId, PlanetId, StatusId, TeamEntryId, UnitTypeId};
 use super::names::{self, NameMaps};
@@ -1175,6 +1176,28 @@ impl ContentRegistry {
     /// Mutable bullet record by id.
     pub fn bullet_mut(&mut self, id: BulletId) -> Option<&mut BulletDef> {
         self.bullets.get_mut(id.index())
+    }
+
+    /// `ContentLoader.loadColors` (`core/ContentLoader.java:140-158`): row 0
+    /// of `sprites/block_colors.png` holds one packed `rgba8888` per block id.
+    /// `0`/`255` entries are skipped; otherwise the colour becomes the block's
+    /// `mapColor` (alpha forced to 1), `squareSprite = mapColor.a > 0.5` and
+    /// `hasColor = true`. Java runs it right after `createBaseContent`, so mod
+    /// content and patches see (and may override) the loaded colours.
+    pub fn load_colors(&mut self, row: &[u32]) {
+        for (index, &color) in row.iter().enumerate() {
+            let Some(block) = self.blocks.get_mut(index) else {
+                break;
+            };
+            if color == 0 || color == 255 {
+                continue;
+            }
+            let mut map_color = Rgba::from_rgba8888(color);
+            block.square_sprite = map_color.a > 0.5;
+            map_color.a = 1.0;
+            block.map_color = Some(map_color);
+            block.has_color = true;
+        }
     }
 
     /// Adds an `ErrorContent` fallback record.
