@@ -7,7 +7,19 @@
 //! prompt/toast signals). `hud` (the `MindHud` read-only HUD surface) and the
 //! MSUI `dsl_factory` bridge land with plan 14 M2/M4/M6.
 
+pub mod checks;
+pub mod dialog;
+pub mod dialogs;
+pub mod editor_views;
+pub mod fragments;
 pub mod hud;
+pub mod kit;
+pub mod landing;
+pub mod menu_background;
+pub mod menu_flyers;
+pub mod planet;
+pub mod root;
+pub mod state_inspector;
 pub mod ui_host;
 
 pub use hud::MindHud;

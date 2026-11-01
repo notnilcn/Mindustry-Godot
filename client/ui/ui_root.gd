@@ -71,13 +71,16 @@ func _ready() -> void:
 		_hook_button(node)
 	# Arc `ScrollPane` wheel step + smooth scroll on every pane (MindScroll).
 	for node in get_tree().root.find_children("*", "ScrollContainer", true, false):
+		# Native `MindScroll` panes own the Arc wheel easing already.
+		if node.get_script() == null:
+			continue
 		MindScroll.hook_arc_wheel(node)
 
 
 func _on_node_added(node: Node) -> void:
 	if node is BaseButton:
 		_hook_button(node)
-	elif node is ScrollContainer:
+	elif node is ScrollContainer and node.get_script() != null:
 		MindScroll.hook_arc_wheel(node)
 
 

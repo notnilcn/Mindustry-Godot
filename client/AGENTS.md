@@ -10,7 +10,7 @@ The Godot project for Mindustry-Godot. Gameplay behavior lives in Rust (`client/
 | `mind.gdextension` | Maps `gdext_rust_init` (minimum compatibility 4.7) to `res://bin/rust/{debug,release}/…mind_gdext…`; `tools/build.sh` produces that library. |
 | `shaders/` | Ported Godot shaders (`default`, `water`, `fog`, `planet`, `shield`, `buildbeam`, …), one `.gdshader` per effect. |
 | `audio/bus_layout.json` | Declarative bus table (`Master`, `Music`, `Sound`, `UI`) matching the `MindAudio` buses. |
-| `tools/` | Godot-side `SceneTree` check scripts (`shaders_check.gd`, `ui_widgets_check.gd`, `ui_layout_check.gd`); repo build/gate scripts live in the root `tools/` and are documented in [`tools/AGENTS.md`](../tools/AGENTS.md). |
+| `tools/`, `scenes/tools/` | Native headless UI oracles: `scenes/tools/{shaders,ui_widgets,ui_layout}_check.tscn` root on `MindShadersCheck`/`MindUiWidgetsCheck`/`MindUiLayoutCheck` (`rust/mind-gdext/src/ui/checks.rs`); repo build/gate scripts live in the root `tools/` and are documented in [`tools/AGENTS.md`](../tools/AGENTS.md). |
 | `addons/open_godot_mcp/` | Editor plugin and runtime autoload that back MCP inspection and in-engine playtesting; see its [`AGENTS.md`](addons/open_godot_mcp/AGENTS.md). |
 | `addons/blastbullets2d/`, `addons/phantom_camera/` | Vendored third-party addons (bullet engine; camera tweening). They are present in the tree but **not** listed in `project.godot` `[editor_plugins]`, so they do not load. |
 | `scenarios/` | Generated mirror of the repo-root `scenarios/` (see **Invariants**); gitignored. |
@@ -80,9 +80,9 @@ Run from the repo root.
 
 ```bash
 bash tools/godot.sh --headless --editor --quit --path client                # import/parse gate
-godot4 --headless --path client --script res://tools/shaders_check.gd       # shader compile gate
-godot4 --headless --path client --script res://tools/ui_widgets_check.gd    # widget atlas/min-size gate
-godot4 --headless --path client --script res://tools/ui_layout_check.gd     # MindTable min-size propagation gate
+godot4 --headless --path client res://scenes/tools/shaders_check.tscn     # shader compile gate
+godot4 --headless --path client res://scenes/tools/ui_widgets_check.tscn  # widget/theme/atlas gate
+godot4 --headless --path client res://scenes/tools/ui_layout_check.tscn   # MindTable min-size propagation gate
 ```
 
 `tools/ci.sh` runs the full local gate (composition in [`tools/AGENTS.md`](../tools/AGENTS.md)); in-engine checks run through the `open_godot_mcp` addon — load the `playtest` skill for the launch flow, node map and pid-stamped recipes.

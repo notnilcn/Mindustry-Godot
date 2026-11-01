@@ -142,19 +142,28 @@ if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Ca
 fi
 echo "  godot headless import clean"
 
+say "godot: shader compile check (native MindShadersCheck oracle)"
+if ! bash tools/godot.sh --headless --path client res://scenes/tools/shaders_check.tscn >"$GODOT_LOG" 2>&1 \
+    || ! grep -q 'SHADERCHECK: total=.* failed=0' "$GODOT_LOG"; then
+  echo "FAIL: client/scenes/tools/shaders_check.tscn (MindShadersCheck)" >&2
+  grep -E 'SHADERCHECK|SCRIPT ERROR|ERROR' "$GODOT_LOG" >&2 || tail -n 40 "$GODOT_LOG" >&2
+  exit 1
+fi
+echo "  shader check clean"
+
 say "godot: UI layout-engine check (MindTable min-size propagation, L01 T1)"
-if ! bash tools/godot.sh --headless --path client --script res://tools/ui_layout_check.gd >"$GODOT_LOG" 2>&1 \
+if ! bash tools/godot.sh --headless --path client res://scenes/tools/ui_layout_check.tscn >"$GODOT_LOG" 2>&1 \
     || ! grep -q 'LAYOUTCHECK: failed=0' "$GODOT_LOG"; then
-  echo "FAIL: client/tools/ui_layout_check.gd" >&2
+  echo "FAIL: client/scenes/tools/ui_layout_check.tscn (MindUiLayoutCheck)" >&2
   grep -E 'FAIL|SCRIPT ERROR|LAYOUTCHECK' "$GODOT_LOG" >&2 || tail -n 40 "$GODOT_LOG" >&2
   exit 1
 fi
 echo "  ui layout check clean"
 
 say "godot: UI widget check (atlas regions, row sizes, dialog oracles)"
-if ! bash tools/godot.sh --headless --path client --script res://tools/ui_widgets_check.gd >"$GODOT_LOG" 2>&1 \
+if ! bash tools/godot.sh --headless --path client res://scenes/tools/ui_widgets_check.tscn >"$GODOT_LOG" 2>&1 \
     || ! grep -q 'UICHECK: failed=0' "$GODOT_LOG"; then
-  echo "FAIL: client/tools/ui_widgets_check.gd" >&2
+  echo "FAIL: client/scenes/tools/ui_widgets_check.tscn (MindUiWidgetsCheck)" >&2
   grep -E 'FAIL|SCRIPT ERROR|UICHECK: failed' "$GODOT_LOG" >&2 || tail -n 40 "$GODOT_LOG" >&2
   exit 1
 fi
