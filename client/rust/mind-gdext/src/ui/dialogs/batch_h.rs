@@ -2,11 +2,12 @@
 // Ported from Mindustry (https://github.com/Anuken/Mindustry) — GPL-3.0.
 // Source: core/src/mindustry/ui/dialogs/HostDialog.java,
 //         core/src/mindustry/ui/dialogs/LoadDialog.java,
+//         core/src/mindustry/ui/dialogs/SaveDialog.java,
 //         core/src/mindustry/ui/dialogs/CampaignRulesDialog.java.
 
-//! Host setup, save loading and campaign rules.
+//! Host setup, save loading/saving and campaign rules.
 //!
-//! Three controllers over the shared [`MindDialog`] shell:
+//! Four controllers over the shared [`MindDialog`] shell:
 //!
 //! - `host` (`client/ui/dialogs/host_dialog.gd`, `HostDialog.java`): the
 //!   remembered player name/colour (`name`/`color-0`), the remembered port
@@ -20,6 +21,11 @@
 //!   autosave/delete/rename/export actions; delete and rename answer through
 //!   `MindUi.show_confirm`/`show_text_input`, export/import through the
 //!   `file_chooser` dialog. `slot_selected` is emitted for the card body.
+//! - `save` (`client/ui/dialogs/save_dialog.gd`, `SaveDialog.java`): the same
+//!   controller in save mode (`SaveDialog extends LoadDialog`). `@save.new`
+//!   replaces `@save.import` (prompt `@save.newslot`, then `load_and("@saving")`
+//!   and `MindCampaign.save_slot`), and a card body asks `@save.overwrite`
+//!   before emitting `save_requested(slot)` and closing.
 //! - `campaign_rules` (`client/ui/dialogs/campaign_rules_dialog.gd`,
 //!   `CampaignRulesDialog.java`): the full-screen difficulty + campaign-rule
 //!   page. Values come from `MindCampaign.get_campaign_rules(planet)` with the
@@ -62,6 +68,8 @@ pub fn dispatch(id: &str) -> Option<Box<dyn DialogController>> {
     match id {
         "host" => Some(Box::new(HostDialogController::default())),
         "load" => Some(Box::new(LoadDialogController::default())),
+        // `SaveDialog extends LoadDialog`: same listing, save-mode card action.
+        "save" => Some(Box::new(LoadDialogController::save())),
         "campaign_rules" => Some(Box::new(CampaignRulesDialogController::default())),
         _ => None,
     }
@@ -822,7 +830,7 @@ fn host_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<HostState>>) {
 }
 
 // ---------------------------------------------------------------------------
-// LoadDialogController (manifest id `load`)
+// LoadDialogController (manifest ids `load` and `save`)
 // ---------------------------------------------------------------------------
 
 /// Gamemode filter toggles (`Gamemode.all`; sandbox uses the terrain glyph).
@@ -841,10 +849,27 @@ const LOAD_CONFIRM_HOOK: &str = "_mind_batch_h_load_confirm_hook";
 const LOAD_TEXT_INPUT_HOOK: &str = "_mind_batch_h_load_text_input_hook";
 const LOAD_CHOOSER_HOOK: &str = "_mind_batch_h_load_chooser_hook";
 
+/// Which slot browser a [`LoadDialogController`] drives.
+///
+/// `SaveDialog extends LoadDialog` upstream: the save view keeps the search
+/// row, the gamemode filters, the card grid and the per-card actions, and only
+/// swaps the setup button (`@save.new` for `@save.import`) and the card-body
+/// action (overwrite prompt for load-and-close). One controller with a mode
+/// flag mirrors that inheritance without duplicating the listing code.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LoadKind {
+    /// `load` (`LoadDialog.java`).
+    Load,
+    /// `save` (`SaveDialog.java`).
+    Save,
+}
+
 /// `LoadDialog` state: the live slot snapshot, the search/listing filters and
 /// the pending card-action prompt targets.
 struct LoadState {
     generation: i64,
+    /// `LoadDialog` vs `SaveDialog` ([`LoadKind`]).
+    kind: LoadKind,
     field: Option<Gd<LineEdit>>,
     grid: Option<Gd<MindTable>>,
     /// Gamemode names whose saves are hidden from the grid (`hidden` upstream).
@@ -856,12 +881,17 @@ struct LoadState {
     pending_delete: String,
     pending_rename: String,
     pending_export: String,
+    /// `SaveDialog._pending_slot`: the slot awaiting `@save.overwrite`.
+    pending_save: String,
+    /// `SaveDialog._request_new`: the next text-input answer names a new slot.
+    pending_new_name: bool,
 }
 
 impl Default for LoadState {
     fn default() -> Self {
         Self {
             generation: 0,
+            kind: LoadKind::Load,
             field: None,
             grid: None,
             hidden: HashSet::new(),
@@ -870,17 +900,21 @@ impl Default for LoadState {
             pending_delete: String::new(),
             pending_rename: String::new(),
             pending_export: String::new(),
+            pending_save: String::new(),
+            pending_new_name: false,
         }
     }
 }
 
-/// `LoadDialog` — the "Load Game" slot browser.
+/// `LoadDialog` — the "Load Game" slot browser (`load`) and its `SaveDialog`
+/// subclass view (`save`).
 ///
 /// The listing comes from the live `Saves` store
 /// (`MindCampaign.list_save_slots`) with the `slots` context taking precedence
 /// when supplied; with no slots the grid renders the empty state
-/// (`@save.none`). Clicking a card body emits `slot_selected(name)`, queues the
-/// slot load on the live facade and closes.
+/// (`@save.none`). On `load`, clicking a card body emits `slot_selected(name)`,
+/// queues the slot load on the live facade and closes. On `save` the body asks
+/// `@save.overwrite` first, then emits `save_requested(slot)` and closes.
 pub struct LoadDialogController {
     state: Rc<RefCell<LoadState>>,
 }
@@ -893,9 +927,26 @@ impl Default for LoadDialogController {
     }
 }
 
+impl LoadDialogController {
+    /// The `save` view (`SaveDialog extends LoadDialog`, `save_dialog.gd`).
+    pub fn save() -> Self {
+        Self {
+            state: Rc::new(RefCell::new(LoadState {
+                kind: LoadKind::Save,
+                ..LoadState::default()
+            })),
+        }
+    }
+}
+
 impl DialogController for LoadDialogController {
     fn ready(&mut self, dialog: &mut MindDialog) {
-        dialog.set_title_key("@loadgame");
+        // `LoadDialog(String title)`; `SaveDialog` calls `super("@savegame")`
+        // (`SaveDialog.java:13`).
+        match self.state.borrow().kind {
+            LoadKind::Load => dialog.set_title_key("@loadgame"),
+            LoadKind::Save => dialog.set_title_key("@savegame"),
+        }
         dialog.should_pause = false;
         dialog.enable_full_dialog(true);
         let dialog_gd = dialog.to_gd();
@@ -910,7 +961,7 @@ impl DialogController for LoadDialogController {
     }
 }
 
-/// `LoadDialog._build`: search row, filter toggles, card grid, import + back.
+/// `LoadDialog._build`: search row, filter toggles, card grid, setup + back.
 fn load_build(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
     dialog.clear_content();
     dialog.clear_buttons();
@@ -968,12 +1019,18 @@ fn load_build(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
     load_rebuild_list(dialog, state);
 }
 
-/// `LoadDialog.addSetup`: the `@save.import` button.
+/// `LoadDialog.addSetup`: `@save.import` for `load`, `@save.new` for `save`
+/// (`SaveDialog.addSetup`, `SaveDialog.java:19-27`).
 fn load_add_setup_buttons(
     dialog: &mut MindDialog,
     dialog_gd: &Gd<MindDialog>,
     state: &Rc<RefCell<LoadState>>,
 ) {
+    let kind = state.borrow().kind;
+    if kind == LoadKind::Save {
+        load_add_new_save_button(dialog, state);
+        return;
+    }
     let dialog_for = dialog_gd.clone();
     let state_for = state.clone();
     let callable = Callable::from_fn("load_open_import", move |_args: &[&Variant]| {
@@ -985,6 +1042,23 @@ fn load_add_setup_buttons(
     let mut size = import_button.get_custom_minimum_size();
     size.y = 64.0;
     import_button.set_custom_minimum_size(size);
+}
+
+/// `SaveDialog.addSetup`: `buttons.button("@save.new", Icon.add, …)` replaces
+/// Load's `@save.import`; the GDScript port keeps the shared action-button
+/// width and tags the node `new_save` for the live probes.
+fn load_add_new_save_button(dialog: &mut MindDialog, state: &Rc<RefCell<LoadState>>) {
+    let state_for = state.clone();
+    let callable = Callable::from_fn("save_request_new", move |_args: &[&Variant]| {
+        save_request_new(&state_for);
+        Variant::nil()
+    });
+    let new_text = kit::t("@save.new").to_string();
+    let mut new_button = dialog.add_button(&new_text, Some(callable), "add", 210.0);
+    new_button.set_name("new_save");
+    let mut size = new_button.get_custom_minimum_size();
+    size.y = 64.0;
+    new_button.set_custom_minimum_size(size);
 }
 
 /// `_add_filters`: the gamemode toggles beside the search field.
@@ -1182,8 +1256,9 @@ fn load_build_card(
     {
         let dialog_for = dialog.clone();
         let slot_for = slot.clone();
+        let state_for = state.clone();
         let callable = Callable::from_fn("load_card_pressed", move |_args: &[&Variant]| {
-            load_card_pressed(&dialog_for, &slot_for);
+            load_card_pressed(&dialog_for, &state_for, &slot_for);
             Variant::nil()
         });
         card.connect("pressed", &callable);
@@ -1472,15 +1547,106 @@ fn load_meta_lines(state: &Rc<RefCell<LoadState>>, slot: &VarDictionary) -> Vec<
     lines
 }
 
-/// Card body click. Emits `slot_selected(name)`, queues the load and closes.
-fn load_card_pressed(dialog: &Gd<MindDialog>, slot: &VarDictionary) {
+/// Card body click.
+///
+/// `load`: emits `slot_selected(name)`, queues the load and closes.
+/// `save`: asks `@save.overwrite` first (`SaveDialog.modifyButton`,
+/// `SaveDialog.java:31-39`) and answers on `confirm_result`; the per-card
+/// autosave/delete/rename/export buttons stay the `LoadDialog` ones.
+fn load_card_pressed(
+    dialog: &Gd<MindDialog>,
+    state: &Rc<RefCell<LoadState>>,
+    slot: &VarDictionary,
+) {
+    if state.borrow().kind == LoadKind::Save {
+        let stem = load_slot_stem(slot);
+        if stem.is_empty() {
+            return;
+        }
+        state.borrow_mut().pending_save = stem;
+        ui_show_confirm(&kit::t("@save.overwrite").to_string());
+        return;
+    }
     emit_dialog_signal(
         dialog,
         "slot_selected",
         &[GString::from(dict_string(slot, "name").as_str()).to_variant()],
     );
     load_load_slot(slot);
-    load_close(dialog);
+    load_close(dialog, LoadKind::Load);
+}
+
+/// `SaveDialog._emit_save`: hand the slot to the live facade (which queues the
+/// `.msav` write, PAR-0438) and close the dialog.
+fn save_emit_and_close(dialog: &Gd<MindDialog>, stem: &str) {
+    save_emit(dialog, stem);
+    load_close(dialog, LoadKind::Save);
+}
+
+/// The `save_requested` seam: `_on_save_requested` queues
+/// `MindCampaign.save_slot` (`save_dialog.gd:110-114`) and listeners observe the
+/// slot for MCP/live probes.
+fn save_emit(dialog: &Gd<MindDialog>, stem: &str) {
+    if stem.is_empty() {
+        return;
+    }
+    emit_dialog_signal(
+        dialog,
+        "save_requested",
+        &[GString::from(stem).to_variant()],
+    );
+    campaign_call("save_slot", &[GString::from(stem).to_variant()]);
+}
+
+/// `SaveDialog._request_new`: `ui.showTextInput("@save", "@save.newslot", 30,
+/// "", …)` (`SaveDialog.java:22-25`); the answer arrives on
+/// `text_input_result`.
+fn save_request_new(state: &Rc<RefCell<LoadState>>) {
+    state.borrow_mut().pending_new_name = true;
+    ui_show_text_input(
+        &kit::t("@save").to_string(),
+        &kit::t("@save.newslot").to_string(),
+        30,
+        "",
+    );
+}
+
+/// `text -> ui.loadAnd("@saving", () -> control.saves.addSave(text))`
+/// (`SaveDialog.java:22-27`).
+fn save_on_new_name(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, text: &str) {
+    let name = text.to_string();
+    let dialog_for = dialog.clone();
+    let state_for = state.clone();
+    let run = Callable::from_fn("save_add_save", move |_args: &[&Variant]| {
+        save_add_save(&dialog_for, &state_for, &name);
+        Variant::nil()
+    });
+    let Some(mut ui_root) = kit::node("/root/Spine/Ui/UiRoot") else {
+        save_add_save(dialog, state, text);
+        return;
+    };
+    if !ui_root.has_method("load_and") {
+        save_add_save(dialog, state, text);
+        return;
+    }
+    let text_arg = GString::from("@saving");
+    let _ = ui_root.call("load_and", &[run.to_variant(), text_arg.to_variant()]);
+}
+
+/// `SaveDialog._add_save`: emit the request, then relist (the dialog stays
+/// open, `Core.app.post(this::setup)` upstream).
+fn save_add_save(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, text: &str) {
+    if text.is_empty() || !dialog.is_instance_valid() {
+        return;
+    }
+    save_emit(dialog, text);
+    if !dialog.is_instance_valid() {
+        return;
+    }
+    let mut node = dialog.clone();
+    let mut bound = node.bind_mut();
+    load_refresh_slots(&mut bound, state);
+    load_rebuild_list(&mut bound, state);
 }
 
 /// `LoadDialog.runLoadSave`: hands the slot to the live facade, which queues the
@@ -1719,8 +1885,19 @@ fn load_connect_prompts(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>)
     }
 }
 
-/// `_on_confirm`: answer the `@save.delete.confirm` prompt.
+/// `_on_confirm`: answer the `@save.delete.confirm` prompt (both views) or the
+/// `save` view's `@save.overwrite` prompt.
 fn load_on_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, confirmed: bool) {
+    // `SaveDialog` asks before overwriting a card (`save_dialog.gd:52-64`); the
+    // pending slot is cleared whatever the answer so a cancel cannot fire a
+    // later confirm.
+    let pending_save = std::mem::take(&mut state.borrow_mut().pending_save);
+    if !pending_save.is_empty() {
+        if confirmed {
+            save_emit_and_close(dialog, &pending_save);
+        }
+        return;
+    }
     let stem = {
         let mut st = state.borrow_mut();
         if !confirmed || st.pending_delete.is_empty() {
@@ -1745,8 +1922,18 @@ fn load_on_confirm(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, conf
     load_rebuild_list(&mut bound, state);
 }
 
-/// `_on_text_input`: answer the `@save.rename` prompt.
+/// `_on_text_input`: answer the `save` view's `@save.newslot` prompt, else the
+/// `@save.rename` prompt.
 fn load_on_text_input(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, text: &str) {
+    let naming_new = std::mem::take(&mut state.borrow_mut().pending_new_name);
+    if naming_new {
+        // `SaveDialog._on_name` (`save_dialog.gd:86-95`): an empty answer is a
+        // cancel.
+        if !text.is_empty() {
+            save_on_new_name(dialog, state, text);
+        }
+        return;
+    }
     let stem = {
         let mut st = state.borrow_mut();
         if st.pending_rename.is_empty() || text.trim().is_empty() {
@@ -1774,9 +1961,14 @@ fn load_on_text_input(dialog: &Gd<MindDialog>, state: &Rc<RefCell<LoadState>>, t
     load_rebuild_list(&mut bound, state);
 }
 
-/// `_close`: closes the `load` entry, not whichever dialog happens to be on top.
-fn load_close(dialog: &Gd<MindDialog>) {
-    if !close_named_dialog("load") {
+/// `_close`: closes this view's registry entry (`load`/`save`), not whichever
+/// dialog happens to be on top.
+fn load_close(dialog: &Gd<MindDialog>, kind: LoadKind) {
+    let name = match kind {
+        LoadKind::Load => "load",
+        LoadKind::Save => "save",
+    };
+    if !close_named_dialog(name) {
         hide_dialog_node(dialog);
     }
 }

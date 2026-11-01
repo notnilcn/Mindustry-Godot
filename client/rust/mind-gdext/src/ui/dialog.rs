@@ -675,50 +675,46 @@ impl MindDialog {
         let Some(mut row) = self.buttons_row() else {
             return;
         };
-        let entered = self.base().callable("on_buttons_child_entered");
-        row.connect("child_entered_tree", &entered);
-        let exiting = self.base().callable("on_buttons_child_exiting");
-        row.connect("child_exiting_tree", &exiting);
-        for child in row.get_children().iter_shared() {
-            self.bind_buttons_child(&child.clone());
-        }
+        // A controller adds its buttons from `ready`, while this dialog already
+        // holds the active mutable borrow. A `#[func]` receiver would re-enter
+        // `bind_mut` from `child_entered_tree` (gdext panic), so the hook only
+        // queues the sync and `sync_buttons_row` binds the child hooks later.
+        let dialog = self.to_gd();
+        let changed = Callable::from_fn(
+            "mind_dialog_buttons_changed",
+            move |_args: &[&Variant]| {
+                if dialog.is_instance_valid() {
+                    let mut node = dialog.clone();
+                    let _ = node.call_deferred("sync_buttons_row", &[]);
+                }
+                Variant::nil()
+            },
+        );
+        row.connect("child_entered_tree", &changed);
+        row.connect("child_exiting_tree", &changed);
         self.sync_buttons_row();
     }
 
-    fn bind_buttons_child(&mut self, node: &Gd<Node>) {
-        if let Ok(mut canvas) = node.clone().try_cast::<godot::classes::CanvasItem>() {
-            let callable = self.base().callable("sync_buttons_row");
-            if !canvas.is_connected("visibility_changed", &callable) {
-                canvas.connect("visibility_changed", &callable);
-            }
-        }
-    }
-
-    #[func]
-    fn on_buttons_child_entered(&mut self, node: Gd<Node>) {
-        self.bind_buttons_child(&node);
-        self.base_mut().call_deferred("sync_buttons_row", &[]);
-    }
-
-    #[func]
-    fn on_buttons_child_exiting(&mut self, _node: Gd<Node>) {
-        self.base_mut().call_deferred("sync_buttons_row", &[]);
-    }
-
-    /// Hides the button row while it holds no visible button.
+    /// Hides the button row while it holds no visible button, and keeps each
+    /// button's `visibility_changed` hooked (`BaseDialog.syncButtons`).
     #[func]
     fn sync_buttons_row(&mut self) {
         let Some(mut row) = self.buttons_row() else {
             return;
         };
+        let sync = self.base().callable("sync_buttons_row");
         let mut any = false;
         for child in row.get_children().iter_shared() {
-            if let Ok(canvas) = child.clone().try_cast::<godot::classes::CanvasItem>()
-                && canvas.is_visible()
-                && !canvas.is_queued_for_deletion()
-            {
-                any = true;
-                break;
+            if let Ok(mut canvas) = child.clone().try_cast::<godot::classes::CanvasItem>() {
+                // A fresh button gets its `visibility_changed` hook here: the
+                // `child_entered_tree` callback cannot bind this dialog while a
+                // controller is adding buttons from `ready`.
+                if !canvas.is_connected("visibility_changed", &sync) {
+                    canvas.connect("visibility_changed", &sync);
+                }
+                if canvas.is_visible() && !canvas.is_queued_for_deletion() {
+                    any = true;
+                }
             }
         }
         row.set_visible(any);

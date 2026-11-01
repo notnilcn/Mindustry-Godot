@@ -57,11 +57,11 @@ Foundation (`client/rust/mind-gdext/src/ui/`):
   `batch_campaign2` (research, schematics, loadout, launch_loadout,
   sector_stats, custom/map_play + the shared `MapListDialog` base),
   `batch_d` (widget_gallery, editor_import/export, file_chooser, icon_select,
-  editor_menu, editor_map, save), `batch_e` (map_info, map_resize,
+  editor_menu, editor_map), `batch_e` (map_info, map_resize,
   map_generate, wave_info, map_objectives, map_locales), `batch_f`
   (map_processors, map_load, sector_generate, banned_content, map_assets,
   schematic_info), `batch_g` (picker, mods, mod_browser), `batch_h` (host, load,
-  campaign_rules), `batch_i` (custom_rules, editor_maps, canvas_edit),
+  save, campaign_rules), `batch_i` (custom_rules, editor_maps, canvas_edit),
   `batch_j` (logic, the full mlog editor + `MindLogicOverlay`).
 - `fragments/` — all 14 (performance, fade_in, loading, menu, plan_config, hud,
   minimap, placement, block_config, block_inventory, hints, chat, console,
@@ -89,6 +89,37 @@ bash tools/godot.sh --headless --path client res://scenes/tools/ui_widgets_check
 bash tools/godot.sh --headless --path client --quit-after 300              # boots all facades, exit 0
 bash tools/godot.sh --headless --path client res://scenes/ui/native_probe.tscn --quit-after 30  # `[ui] MindDialog ready`
 ```
+
+Last unit, found and fixed in this run:
+
+- **`save` had no controller.** `controller_for("save")` returned `None` (the old
+  `batch_d` list above named a `save` entry that did not exist), so the save
+  dialog would have opened as an empty shell after the cutover. It is now
+  `LoadDialogController::save()` in `batch_h`: one controller with a `LoadKind`
+  mode that mirrors `SaveDialog extends LoadDialog` — `@save.new` replaces
+  `@save.import` (prompt `@save.newslot` → `UiRoot.load_and("@saving")` →
+  `MindCampaign.save_slot`, dialog stays open), and a card body asks
+  `@save.overwrite` before emitting `save_requested(slot)` and closing for the
+  `save` registry entry.
+- **Controller dialogs panicked in `ready` (shell bug).** The first in-engine
+  instantiation of a controller-driven dialog crashed in
+  `MindDialog::on_buttons_child_entered`: `controller.ready` →
+  `add_close_button` → `add_child` fired `child_entered_tree` synchronously while
+  `ready` held the mutable borrow, so the `#[func]` receiver re-entered
+  `bind_mut` (gdext `already bound` panic). The button-row watcher is now a
+  non-binding `Callable` that defers `sync_buttons_row`, which binds each
+  button's `visibility_changed` hook itself. Every controller dialog was
+  affected; it stayed latent because the pre-cutover scenes still run the
+  GDScript dialogs and the editor gate instantiates `MindDialog` without a
+  controller.
+
+A temporary native probe (the `save` and `load` scenes swapped to
+`RustMindDialog` shells at their manifest paths, both restored afterwards)
+passed 21 in-engine assertions: save title/`@save.new`/card listing, card click
+→ `@save.overwrite` with no write before the answer, confirm →
+`save_requested("probe")`, `@save.new` prompt → `save_requested("probe2")` with
+the dialog staying open, prompt cancel, and the load view's `@save.import`
+button + `slot_selected(name)` + close.
 
 Fixes made while integrating the last batches:
 
@@ -178,3 +209,8 @@ equivalent; each site carries an in-source comment:
   are `set_border_width(Side, i32)` and `set_corner_radius(Corner, i32)`.
 - `SceneTree::quit()` is generated without parameters; pass the exit code
   through `tree.call("quit", &[code.to_variant()])` (the oracles rely on it).
+- A signal that fires **synchronously inside `ready`** must not reach a
+  `#[func]` on the same node: `child_entered_tree` (emitted by `add_child` from
+  a controller's `ready`) re-enters `bind_mut` and gdext panics with
+  `already bound`. Connect a non-binding `Callable::from_fn` that
+  `call_deferred`s the binding work instead (`MindDialog::watch_buttons_row`).
