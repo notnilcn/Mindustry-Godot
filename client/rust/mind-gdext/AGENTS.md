@@ -1,7 +1,7 @@
 # AGENTS.md — mind-gdext (Godot GDExtension)
 
 `mind-gdext` is the `cdylib` that Godot 4.7 loads as the GDExtension, bridging `res://` scenes and
-GDScript UI to `mind-core` and `mind-stdb`. It registers the `Mind*` classes, drives the fixed-step
+the native UI to `mind-core` and `mind-stdb`. It registers the `Mind*` classes, drives the fixed-step
 pump, translates Godot input into core commands, runs the render/audio/FX layers, and wires the
 SpacetimeDB and platform seams. It holds **no game rules**: every simulation mutation crosses into
 `mind-core`, whose guides own the rules and view data. Read the root [`AGENTS.md`](../../../AGENTS.md)
@@ -35,7 +35,7 @@ first; the project- and workspace-level maps are [`client/AGENTS.md`](../../AGEN
 | `src/net/` | `MindNet` multiplayer node and the `relay.rs` runtime mapping. |
 | `src/platform/` | `MindPlatform` plus args, crash, desktop, dialogs, discord, service, update, uri and workshop host glue. |
 | `src/render/` | Render passes mounted under the `BandPlan` children: terrain/light `floor`, `blocks`, `block_extras`, `building_cache`, `cached_cracks`, `shadow`, `light`, `fog`, `weather`, `env`; units/bullets `units`, `unit_parts`, `unit_build`, `unit_overlays`, `unit_abilities`, `bullets`, `turret`, `shields`, `status`, `hazards`; overlays/UI `overlays`, `overlay_top`, `command_overlay`, `plans`, `links`, `logic_displays`, `objective_markers`, `pods`, `build_beam`, `debug`, `minimap`, `menu`, `g3d`, `load`, `pixelate`; shared helpers `canvas`, `atlas_bind`, `shaders`. |
-| `src/ui/` | `MindUi` (dialog registry, pause governor, prompt/toast signals) and the `MindHud` read-only surface. |
+| `src/ui/` | The native UI: `MindUi` (dialog registry, pause governor, prompt/toast signals), the `MindHud` read-only surface, `MindDialog` + the 59 dialog controllers, the 14 fragments, the `kit/` widgets/theme/text/scroll/layout, the roots (`MindUiRoot`, `MindPlanetView`, `MindLandingCore`, menu background/flyers, editor views) and the four headless oracles (`checks.rs`). Guides: `src/ui/PORTING.md` (API contract) and `PORT-STATUS.md` (inventory + cutover record). |
 
 ## Responsibilities
 
@@ -89,6 +89,11 @@ first; the project- and workspace-level maps are [`client/AGENTS.md`](../../AGEN
   exception: its `ready()` creates the voice pool, music player and camera listener, and those
   node-tree mutations re-enter the notification callback while the node is already mutably
   borrowed, so it keeps `ready()`-only initialization with no `on_notification` arm.
+  The native UI (`MindUiRoot`, `MindDialog`, the fragments) has no reload bootstrap either:
+  rebuilding the extension while an editor session is open needs an editor restart. In
+  particular, a class that changes its own `visible` must not implement `on_notification`
+  (the notification is delivered synchronously from inside the bound `ready`/`show_dialog`
+  and re-enters `bind_mut`; see `src/ui/PORT-STATUS.md`).
 - All Godot types stay in this crate; `mind-core` remains Godot-free and tokio-free.
 
 ## Rules

@@ -22,6 +22,9 @@
 //! - [`MindUiLayoutCheck`] — `MindTable` minimum-size propagation through
 //!   `CenterContainer`/`MindScroll`, the PAR-0410 nesting, hidden cells,
 //!   `margin()`, `Table.top()/left()` and colspan deficit distribution.
+//! - [`MindDialogSweepCheck`] — every manifest dialog scene instantiates through
+//!   its native controller and shows/hides/re-shows (the `DialogController`
+//!   build seam the editor import cannot exercise).
 //!
 //! Layout assertions and the next mutation run one step per frame: a
 //! container's placement lands in the next layout pass (the GDScript
@@ -31,8 +34,8 @@ use godot::classes::control::SizeFlags;
 use godot::classes::scroll_container::ScrollMode;
 use godot::classes::{
     CenterContainer, Control, DirAccess, FileAccess, HBoxContainer, INode, Label, Node,
-    PanelContainer, ResourceLoader, ScrollContainer, Shader, ShaderMaterial, TextureRect,
-    VBoxContainer, Window,
+    PackedScene, PanelContainer, ResourceLoader, ScrollContainer, Shader, ShaderMaterial,
+    TextureRect, VBoxContainer, Window,
 };
 use godot::obj::{NewAlloc, NewGd};
 use godot::prelude::*;
@@ -1161,4 +1164,191 @@ fn find_texture_rect(node: &Gd<Node>) -> Option<Gd<TextureRect>> {
         }
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// MindDialogSweepCheck
+// ---------------------------------------------------------------------------
+
+/// Post-cutover dialog sweep: every manifest dialog scene instantiates through
+/// its native controller, builds its button row, and shows/hides/re-shows.
+///
+/// The editor gate only loads scenes; a controller builds its widgets inside
+/// `DialogController::ready`/`shown`, which only runs when a dialog enters the
+/// tree. This oracle drives all 59 manifest dialogs together: build, show, hide
+/// through the 0.1 s fade, re-show, hide and free. A `bind_mut` panic inside a
+/// builder aborts that dialog's `ready`, so the visibility assertions catch it.
+#[derive(GodotClass)]
+#[class(base=Node)]
+pub struct MindDialogSweepCheck {
+    base: Base<Node>,
+    dialogs: Vec<(String, Gd<MindDialog>)>,
+    step: usize,
+    delay: i32,
+    poll: i32,
+    failures: i32,
+}
+
+#[godot_api]
+impl INode for MindDialogSweepCheck {
+    fn init(base: Base<Node>) -> Self {
+        Self {
+            base,
+            dialogs: Vec::new(),
+            step: 0,
+            delay: 0,
+            poll: 0,
+            failures: 0,
+        }
+    }
+
+    fn ready(&mut self) {
+        self.base_mut().set_process(true);
+    }
+
+    fn process(&mut self, _delta: f64) {
+        if self.delay > 0 {
+            self.delay -= 1;
+            return;
+        }
+        match self.step {
+            0 => {
+                self.instantiate_all();
+                self.step = 1;
+                self.delay = 2;
+            }
+            1 => {
+                for (_, dialog) in &mut self.dialogs {
+                    dialog.bind_mut().show_dialog();
+                }
+                self.step = 2;
+                self.delay = 2;
+            }
+            2 => {
+                self.assert_visibility("shows", true);
+                for (_, dialog) in &mut self.dialogs {
+                    dialog.bind_mut().hide_dialog();
+                }
+                self.step = 3;
+                self.poll = 0;
+            }
+            3 => {
+                // `hide_dialog` fades for 0.1 s; poll until every fade completes.
+                if self.all_hidden() {
+                    self.step = 4;
+                    self.delay = 2;
+                } else {
+                    self.poll += 1;
+                    if self.poll > 60 {
+                        self.step = 4;
+                        self.delay = 2;
+                    }
+                }
+            }
+            4 => {
+                self.assert_visibility("hides (fade completes)", false);
+                for (_, dialog) in &mut self.dialogs {
+                    dialog.bind_mut().show_dialog();
+                }
+                self.step = 5;
+                self.delay = 2;
+            }
+            5 => {
+                self.assert_visibility("reshows", true);
+                for (_, dialog) in &mut self.dialogs {
+                    dialog.bind_mut().hide_dialog();
+                }
+                self.step = 6;
+                self.poll = 0;
+            }
+            6 => {
+                if self.all_hidden() || self.poll > 60 {
+                    self.step = 7;
+                    self.delay = 1;
+                } else {
+                    self.poll += 1;
+                }
+            }
+            _ => self.finish(),
+        }
+    }
+}
+
+impl MindDialogSweepCheck {
+    fn check(&mut self, ok: bool, name: &str, what: &str) {
+        if ok {
+            godot_print!("DIALOGCHECK: ok {name}: {what}");
+        } else {
+            self.failures += 1;
+            godot_error!("DIALOGCHECK: FAIL {name}: {what}");
+        }
+    }
+
+    /// Instantiates one dialog per manifest entry and checks its shell.
+    fn instantiate_all(&mut self) {
+        let text = FileAccess::get_file_as_string("res://ui/dialogs_manifest.json");
+        let Ok(manifest) = mind_core::ui::manifest::DialogsManifest::from_json(&text.to_string())
+        else {
+            self.check(false, "<manifest>", "ui/dialogs_manifest.json parses");
+            return;
+        };
+        let mut loader = ResourceLoader::singleton();
+        let mut pending: Vec<(String, Gd<MindDialog>)> = Vec::new();
+        for entry in &manifest.dialogs {
+            let name = entry.name.clone();
+            let Some(resource) = loader.load(&GString::from(entry.scene.as_str())) else {
+                self.check(false, &name, "scene loads");
+                continue;
+            };
+            let Ok(packed) = resource.try_cast::<PackedScene>() else {
+                self.check(false, &name, "scene is a PackedScene");
+                continue;
+            };
+            let Some(node) = packed.instantiate() else {
+                self.check(false, &name, "scene instantiates");
+                continue;
+            };
+            let Ok(dialog) = node.try_cast::<MindDialog>() else {
+                self.check(false, &name, "scene roots on MindDialog");
+                continue;
+            };
+            let shell: Gd<Node> = dialog.clone().upcast();
+            let buttons = shell
+                .get_node_or_null("Center/Panel/Layout/Buttons")
+                .is_some();
+            self.check(buttons, &name, "button row exists");
+            pending.push((name, dialog));
+        }
+        for (_, dialog) in &pending {
+            let node: Gd<Node> = dialog.clone().upcast();
+            self.base_mut().add_child(&node);
+        }
+        self.dialogs = pending;
+    }
+
+    fn assert_visibility(&mut self, what: &str, expected: bool) {
+        let states: Vec<(String, bool)> = self
+            .dialogs
+            .iter()
+            .map(|(name, dialog)| (name.clone(), dialog.bind().is_shown()))
+            .collect();
+        for (name, shown) in states {
+            self.check(shown == expected, &name, what);
+        }
+    }
+
+    fn all_hidden(&self) -> bool {
+        self.dialogs
+            .iter()
+            .all(|(_, dialog)| !dialog.bind().is_shown())
+    }
+
+    fn finish(&mut self) {
+        for (_, dialog) in self.dialogs.drain(..) {
+            dialog.free();
+        }
+        godot_print!("DIALOGCHECK: failed={}", self.failures);
+        let code = if self.failures > 0 { 1 } else { 0 };
+        quit_with_code(&self.base(), code);
+    }
 }

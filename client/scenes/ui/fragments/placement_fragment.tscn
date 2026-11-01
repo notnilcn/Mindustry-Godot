@@ -1,8 +1,7 @@
 [gd_scene format=3 uid="uid://tfmnggmqttkq"]
 
-[ext_resource type="Script" uid="uid://bu42f5ceawxed" path="res://ui/fragments/placement_fragment.gd" id="1_placement"]
 
-[node name="PlacementFragment" type="Control" unique_id=1256349478]
+[node name="PlacementFragment" type="MindPlacementFragment" unique_id=1256349478]
 layout_mode = 3
 anchors_preset = 3
 anchor_left = 1.0
@@ -14,7 +13,6 @@ offset_top = -272.0
 grow_horizontal = 0
 grow_vertical = 0
 mouse_filter = 1
-script = ExtResource("1_placement")
 
 [node name="Panel" type="PanelContainer" parent="." unique_id=1501669738]
 layout_mode = 1
@@ -58,7 +56,7 @@ size_flags_horizontal = 3
 layout_mode = 2
 theme_override_constants/separation = 0
 
-[node name="Scroll" type="ScrollContainer" parent="Panel/Frame/Layout/Left/Rows"]
+[node name="Scroll" type="MindScroll" parent="Panel/Frame/Layout/Left/Rows"]
 custom_minimum_size = Vector2(206, 194)
 layout_mode = 2
 size_flags_vertical = 3

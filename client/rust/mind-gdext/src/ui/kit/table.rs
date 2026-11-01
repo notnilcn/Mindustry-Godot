@@ -234,7 +234,7 @@ impl Drop for Cell<'_> {
 
 /// `MindTable` — Arc `Table` over a Godot `Container`.
 #[derive(GodotClass)]
-#[class(rename = RustMindTable, base=Container, init)]
+#[class(base=Container, init)]
 pub struct MindTable {
     base: Base<Container>,
     entries: Vec<TableEntry>,
@@ -375,6 +375,7 @@ impl MindTable {
     }
 
     /// Forces an immediate layout pass at the current size.
+    #[func]
     pub fn sort_now(&mut self) {
         self.sort_children();
     }
@@ -664,7 +665,7 @@ fn place_control(control: &mut Gd<Control>, rect: Rect2, cell: &CellData) {
 
 /// `MindStack` — Arc `Stack`: children share the full rectangle.
 #[derive(GodotClass)]
-#[class(rename = RustMindStack, base=Container, init)]
+#[class(base=Container, init)]
 pub struct MindStack {
     base: Base<Container>,
 }

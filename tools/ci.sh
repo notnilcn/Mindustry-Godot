@@ -169,6 +169,15 @@ if ! bash tools/godot.sh --headless --path client res://scenes/tools/ui_widgets_
 fi
 echo "  ui widget check clean"
 
+say "godot: native dialog sweep (every manifest dialog builds, shows, hides)"
+if ! bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn >"$GODOT_LOG" 2>&1 \
+    || ! grep -q 'DIALOGCHECK: failed=0' "$GODOT_LOG"; then
+  echo "FAIL: client/scenes/tools/dialog_sweep_check.tscn (MindDialogSweepCheck)" >&2
+  grep -E 'DIALOGCHECK: FAIL|SCRIPT ERROR|panicked' "$GODOT_LOG" >&2 || tail -n 40 "$GODOT_LOG" >&2
+  exit 1
+fi
+echo "  dialog sweep clean"
+
 say "boundary: mind-core must stay godot-free and tokio-free"
 # NOTE: the repo path itself contains "mindustry-godot", so a naive `grep godot`
 # on the default tree (which prints the root path) always matches. `--prefix none`

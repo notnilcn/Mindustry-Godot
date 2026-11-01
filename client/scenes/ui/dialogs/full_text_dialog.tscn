@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://cdlkmg5yycoee"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://cvjq5pgwm1xwf" path="res://ui/dialogs/full_text_dialog.gd" id="2_full"]
 
 [node name="FullTextDialog" unique_id=642330063 instance=ExtResource("1_base")]
-script = ExtResource("2_full")

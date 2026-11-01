@@ -1,12 +1,12 @@
 # AGENTS.md — Mindustry-Godot
 
-Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mind-gdext` GDExtension: a 1:1 parity port of [Mindustry](https://github.com/Anuken/Mindustry). Rust owns behavior; GDScript owns scenes and presentation.
+Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mind-gdext` GDExtension: a 1:1 parity port of [Mindustry](https://github.com/Anuken/Mindustry). Rust owns behavior and the native UI; `.tscn` scenes name the classes.
 
 ## Top-level map
 
 | Path | Responsibility |
 |---|---|
-| `client/` | Godot project: `project.godot`, scenes, GDScript UI, shaders, vendored addons. |
+| `client/` | Godot project: `project.godot`, scenes (rooted on the native UI classes), shaders, vendored addons, the UI manifests. |
 | `client/rust/` | Cargo workspace: `mind-core`, `mind-gdext`, `mind-headless`, `mind-stdb`, `mind-tools`, `mind-atlas` and the proc-macro crates. |
 | `assets/`, `assets-raw/` | Packed runtime assets vs authored art (fonts, icons, source sprites). |
 | `scenarios/` | Canonical scenario JSON; mirrored to `client/scenarios/`. |
@@ -27,7 +27,7 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 
 - Every source file carries `SPDX-License-Identifier: GPL-3.0-only` and cites the upstream Mindustry file it ports; UTF-8/LF only.
 - Toolchain: Rust `1.98.1` (`rust-toolchain.toml`), Godot `4.7.x` (`4.7.2` recommended).
-- Rust owns behavior; GDScript is UI-only and never mutates simulation state. `mind-core` stays Godot-free and tokio-free; hosts call in, never the reverse.
+- Rust owns behavior and the native UI (`client/rust/mind-gdext/src/ui/`); scenes only name the classes and never mutate simulation state. There is no hand-written GDScript outside vendored addons. `mind-core` stays Godot-free and tokio-free; hosts call in, never the reverse.
 - ABIs are append-only: content IDs, entity field order, UI manifests, STDB schema and bindings. Never hand-edit generated outputs.
 
 ## Quickstart (`tools/AGENTS.md` covers every script and gate)
@@ -44,7 +44,7 @@ bash tools/ci.sh            # full local gate
 
 | Guide | Scope |
 |---|---|
-| [`client/AGENTS.md`](client/AGENTS.md) | Scene graph, GDScript UI, dialog/widget conventions, manifest ABI. |
+| [`client/AGENTS.md`](client/AGENTS.md) | Scene graph, native UI classes, dialog/widget conventions, manifest ABI. |
 | [`client/rust/AGENTS.md`](client/rust/AGENTS.md) | Workspace layout, crate dependency direction, lints, toolchain. |
 | [`client/rust/mind-core/AGENTS.md`](client/rust/mind-core/AGENTS.md) | Simulation core: modules, ECS/schedule, determinism, content IDs. |
 | `client/rust/mind-core/src/` — simulation/data | [`sim`](client/rust/mind-core/src/sim/AGENTS.md), [`ai`](client/rust/mind-core/src/ai/AGENTS.md), [`combat`](client/rust/mind-core/src/combat/AGENTS.md), [`content`](client/rust/mind-core/src/content/AGENTS.md), [`maps`](client/rust/mind-core/src/maps/AGENTS.md), [`mods`](client/rust/mind-core/src/mods/AGENTS.md). |

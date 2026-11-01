@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://cofwy4j2648mg"]
 
-[ext_resource type="Script" uid="uid://xroj1litmuf5" path="res://ui/state_inspector.gd" id="1_inspector"]
 
-[node name="StateInspector" type="Control" unique_id=379553688]
+[node name="StateInspector" type="MindStateInspector" unique_id=379553688]
 visible = false
 layout_mode = 3
 anchors_preset = 0
 offset_right = 320.0
 offset_bottom = 200.0
 mouse_filter = 2
-script = ExtResource("1_inspector")
 
 [node name="Background" type="ColorRect" parent="." unique_id=141378442]
 layout_mode = 1

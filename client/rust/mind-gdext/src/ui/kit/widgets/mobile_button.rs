@@ -21,7 +21,7 @@ use super::super::icon_texture;
 
 /// `MobileButton` — `Button` whose content is an icon over a wrapped label.
 #[derive(GodotClass)]
-#[class(rename = RustMindMobileButton, base=Button, init)]
+#[class(base=Button, init)]
 pub struct MindMobileButton {
     base: Base<Button>,
     /// `MobileButton.listener` (`Callable()` until `setup`).

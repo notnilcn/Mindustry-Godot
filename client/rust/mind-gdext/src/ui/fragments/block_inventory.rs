@@ -178,7 +178,7 @@ impl MindBlockInventoryFragment {
 
     /// Cell `gui_input`: a press holds the cell, a release without a hold in
     /// between takes the whole stack.
-    #[func(rename = "_on_cell_input")]
+    #[func(rename = _on_cell_input)]
     pub fn on_cell_input(&mut self, event: Gd<InputEvent>, item_name: GString) {
         let Ok(button) = event.try_cast::<InputEventMouseButton>() else {
             return;

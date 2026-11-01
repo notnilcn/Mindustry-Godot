@@ -337,14 +337,14 @@ impl MindPlacementFragment {
     }
 
     /// The selection re-renders the command table (`mainStack` swap).
-    #[func(rename = "_on_selection_changed")]
+    #[func(rename = _on_selection_changed)]
     pub fn on_selection_changed(&mut self, _units_json: GString) {
         self.command_dirty = true;
     }
 
     /// `Events.on(WorldLoadEvent)`: reset the category, clear the per-category
     /// memory, drop the selected block and re-read the catalogue.
-    #[func(rename = "_on_world_loaded")]
+    #[func(rename = _on_world_loaded)]
     pub fn on_world_loaded(&mut self) {
         self.selected_category = -1;
         self.selected_blocks.clear();
@@ -353,14 +353,14 @@ impl MindPlacementFragment {
     }
 
     /// `Events.on(UnlockEvent)` when the content is a `Block`.
-    #[func(rename = "_on_block_unlocked")]
+    #[func(rename = _on_block_unlocked)]
     pub fn on_block_unlocked(&mut self) {
         self.load_catalog();
     }
 
     /// `PlacementFragment.gridUpdate` hotkey half (digits, arrows, category
     /// cycles and `updatePick`'s category sync).
-    #[func(rename = "_on_hotkey")]
+    #[func(rename = _on_hotkey)]
     pub fn on_hotkey(&mut self, action: GString) {
         let action = action.to_string();
         if !self.command_mode {
@@ -389,7 +389,7 @@ impl MindPlacementFragment {
 
     /// Rebuilds the catalogue when the palette is revealed (and resets the
     /// category when the sim tick went backwards = a new world).
-    #[func(rename = "_ensure_loaded")]
+    #[func(rename = _ensure_loaded)]
     pub fn ensure_loaded(&mut self) {
         if !self.base().is_visible_in_tree() {
             return;
@@ -411,14 +411,14 @@ impl MindPlacementFragment {
 
     /// Rail click (`PlacementFragment.java:730-736`): switch the category and,
     /// when a block is already picked, re-select that category's block.
-    #[func(rename = "_select")]
+    #[func(rename = _select)]
     pub fn select(&mut self, index: i64) {
         let select_block = !self.block_selected_name().is_empty();
         self.select_category(index as i32, select_block);
     }
 
     /// `?` button: `ui.content.show(displayBlock)` (`ContentInfoDialog`).
-    #[func(rename = "_open_content_info")]
+    #[func(rename = _open_content_info)]
     pub fn open_content_info(&mut self, content_name: GString) {
         let Some(mut ui) = kit::ui() else {
             return;
@@ -437,7 +437,7 @@ impl MindPlacementFragment {
     }
 
     /// `InputHandler.buildPlacementUI` icon row routing (`MindUi.open_dialog`).
-    #[func(rename = "_open_input_dialog")]
+    #[func(rename = _open_input_dialog)]
     pub fn open_input_dialog(&mut self, dialog_name: GString) {
         if dialog_name.to_string().is_empty() {
             return;
@@ -455,7 +455,7 @@ impl MindPlacementFragment {
     }
 
     /// `StatValues.stack` cell click (`b.clicked(mouseLeft/mouseRight)`).
-    #[func(rename = "_on_command_type_input")]
+    #[func(rename = _on_command_type_input)]
     pub fn on_command_type_input(&mut self, event: Gd<InputEvent>, type_id: i64) {
         let Ok(mouse) = event.try_cast::<InputEventMouseButton>() else {
             return;
@@ -476,7 +476,7 @@ impl MindPlacementFragment {
     }
 
     /// `Call.setUnitCommand(player, ids, command)`.
-    #[func(rename = "_set_command")]
+    #[func(rename = _set_command)]
     pub fn set_command(&mut self, command_name: GString) {
         let Some(mut input) = self.input_node() else {
             return;
@@ -487,7 +487,7 @@ impl MindPlacementFragment {
     }
 
     /// `Call.setUnitStance(player, ids, stance, !activeStances.get(...))`.
-    #[func(rename = "_toggle_stance")]
+    #[func(rename = _toggle_stance)]
     pub fn toggle_stance(&mut self, command_name: GString, active: bool) {
         let Some(mut input) = self.input_node() else {
             return;
@@ -502,7 +502,7 @@ impl MindPlacementFragment {
 
     /// Block cell target (`PlacementFragment.java:306-307`): clicking the
     /// selected block deselects it (`input.block == block ? null : block`).
-    #[func(rename = "_on_block_pressed")]
+    #[func(rename = _on_block_pressed)]
     pub fn on_block_pressed(&mut self, block_name: GString, category_name: GString) {
         let block_name = block_name.to_string();
         let current = self.selected_block_raw();

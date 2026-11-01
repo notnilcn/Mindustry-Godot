@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://dvw7wmrt7t0sy"]
 
-[ext_resource type="Script" uid="uid://c7we0ccj4ygle" path="res://scenes/editor/map_view.gd" id="1_view"]
 
-[node name="MapView" type="Control" unique_id=1521711370]
+[node name="MapView" type="MindMapView" unique_id=1521711370]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_view")
 
 [node name="ViewportContainer" type="SubViewportContainer" parent="." unique_id=219924903]
 layout_mode = 1

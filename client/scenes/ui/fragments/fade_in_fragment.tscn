@@ -1,12 +1,10 @@
 [gd_scene format=3 uid="uid://bopvf6uifjyr7"]
 
-[ext_resource type="Script" uid="uid://bhdrxysvd00kl" path="res://ui/fragments/fade_in_fragment.gd" id="1_fade"]
 
-[node name="FadeInFragment" type="ColorRect" unique_id=1181448012]
+[node name="FadeInFragment" type="MindFadeInFragment" unique_id=1181448012]
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 1)
-script = ExtResource("1_fade")

@@ -1,9 +1,8 @@
 [gd_scene format=3 uid="uid://sofepk3nelsm"]
 
 [ext_resource type="PackedScene" path="res://scenes/editor/map_view.tscn" id="1_view"]
-[ext_resource type="Script" uid="uid://cpligs6qokbjx" path="res://scenes/editor/map_editor_dialog.gd" id="2_script"]
 
-[node name="MapEditorDialog" type="Control" unique_id=1543945548]
+[node name="MapEditorDialog" type="MindMapEditorDialog" unique_id=1543945548]
 visible = false
 layout_mode = 3
 anchors_preset = 15
@@ -12,7 +11,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
-script = ExtResource("2_script")
 
 [node name="Background" type="ColorRect" parent="." unique_id=1507450710]
 layout_mode = 1
@@ -247,7 +245,7 @@ layout_mode = 2
 layout_mode = 2
 text = "config"
 
-[node name="BlockScroll" type="ScrollContainer" parent="RightPalette" unique_id=1880728245]
+[node name="BlockScroll" type="MindScroll" parent="RightPalette" unique_id=1880728245]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0

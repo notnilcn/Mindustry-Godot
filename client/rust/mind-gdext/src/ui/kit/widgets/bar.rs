@@ -38,7 +38,7 @@ const VALUE_RATE: f64 = 0.15;
 
 /// `MindBar` — a themed 9-patch value bar with a centred name label.
 #[derive(GodotClass)]
-#[class(rename = RustMindBar, base=Control)]
+#[class(base=Control)]
 pub struct MindBar {
     base: Base<Control>,
     /// The centered `Fonts.outline` label; empty draws no text.

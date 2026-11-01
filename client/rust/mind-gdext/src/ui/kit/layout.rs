@@ -15,7 +15,7 @@ use super::widgets::factory;
 
 /// Shared tree-layout math: positions nodes in depth-ordered rows.
 #[derive(GodotClass)]
-#[class(rename = RustMindTreeLayout, base=Control, init)]
+#[class(base=Control, init)]
 pub struct MindTreeLayout {
     base: Base<Control>,
     /// Node positions in local pixels (set by `layout_entries`).
@@ -70,7 +70,7 @@ impl MindTreeLayout {
 /// Row layout used by `SectorSelectDialog`: one button per sector, ordered by
 /// the plan-12 grid id. Emits `sector_activated` on click.
 #[derive(GodotClass)]
-#[class(rename = RustMindRowTreeLayout, base=Control, init)]
+#[class(base=Control, init)]
 pub struct MindRowTreeLayout {
     base: Base<Control>,
     entries: VarArray,

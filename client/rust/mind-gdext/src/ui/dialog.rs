@@ -14,7 +14,6 @@
 //! `mind_dialog_base.tscn` share this one native class.
 
 use godot::builtin::Side;
-use godot::classes::notify::ControlNotification;
 use godot::classes::{
     BoxContainer, Button, ColorRect, Container, Control, IControl, Json, Label, PanelContainer,
     ScrollContainer, StyleBoxEmpty, Tween,
@@ -51,10 +50,12 @@ const TITLE_INSET_BOTTOM: f32 = 8.0;
 const TITLE_CELL_PAD: f32 = 3.0;
 /// Arc `buttons.defaults().pad(3)` above each button.
 const BUTTON_CELL_PAD: f32 = 3.0;
+/// Node meta: a `sync_buttons_row` is already queued for this dialog.
+const BUTTONS_SYNC_PENDING: &str = "_mind_dialog_buttons_sync_pending";
 
 /// `MindDialog` — the shared dialog shell.
 #[derive(GodotClass)]
-#[class(rename = RustMindDialog, base=Control)]
+#[class(base=Control)]
 pub struct MindDialog {
     base: Base<Control>,
 
@@ -699,10 +700,13 @@ impl MindDialog {
     /// button's `visibility_changed` hooked (`BaseDialog.syncButtons`).
     #[func]
     fn sync_buttons_row(&mut self) {
+        if self.base().has_meta(BUTTONS_SYNC_PENDING) {
+            self.base_mut().remove_meta(BUTTONS_SYNC_PENDING);
+        }
         let Some(mut row) = self.buttons_row() else {
             return;
         };
-        let sync = self.base().callable("sync_buttons_row");
+        let sync = self.buttons_sync_hook();
         let mut any = false;
         for child in row.get_children().iter_shared() {
             if let Ok(mut canvas) = child.clone().try_cast::<godot::classes::CanvasItem>() {
@@ -720,6 +724,40 @@ impl MindDialog {
         row.set_visible(any);
         self.buttons_visible = any;
         self.apply_body_bottom(any);
+    }
+
+    /// The deferred re-sync hook for a button's `visibility_changed`.
+    ///
+    /// Hiding or showing the dialog propagates the visibility notification to
+    /// every button synchronously from `hide_dialog`/`show_dialog`, which already
+    /// bind this dialog; a `#[func]` receiver would re-enter `bind_mut` (gdext
+    /// panic). The hook only queues one sync and is stored on the node so
+    /// repeated syncs reuse it instead of stacking connections.
+    fn buttons_sync_hook(&mut self) -> Callable {
+        const META: &str = "_mind_dialog_buttons_sync_hook";
+        if self.base().has_meta(META)
+            && let Ok(existing) = self.base().get_meta(META).try_to::<Callable>()
+        {
+            return existing;
+        }
+        let dialog = self.to_gd();
+        let callable =
+            Callable::from_fn("mind_dialog_buttons_sync", move |_args: &[&Variant]| {
+                if !dialog.is_instance_valid() {
+                    return Variant::nil();
+                }
+                let pending = dialog.has_meta(BUTTONS_SYNC_PENDING)
+                    && dialog.get_meta(BUTTONS_SYNC_PENDING).to::<bool>();
+                if pending {
+                    return Variant::nil();
+                }
+                let mut node = dialog.clone();
+                node.set_meta(BUTTONS_SYNC_PENDING, &true.to_variant());
+                let _ = node.call_deferred("sync_buttons_row", &[]);
+                Variant::nil()
+            });
+        self.base_mut().set_meta(META, &callable.to_variant());
+        callable
     }
 
     /// The shell's `Body` takes the extra 3 px as a bottom inset while a button
@@ -986,17 +1024,13 @@ impl IControl for MindDialog {
         self.controller = controller;
     }
 
-    fn on_notification(&mut self, what: ControlNotification) {
-        // Hot reload does not re-run `ready`; rebuild the controller so the
-        // dialog keeps working after an extension reload.
-        if what == ControlNotification::EXTENSION_RELOADED {
-            let mut controller = super::dialogs::controller_for(&self.dialog_id);
-            if let Some(controller) = controller.as_mut() {
-                controller.ready(self);
-            }
-            self.controller = controller;
-        }
-    }
+    // No `on_notification` override: a dialog changes its own `visible` state in
+    // `ready`/`show_dialog`/`finish_hide`, and `NOTIFICATION_VISIBILITY_CHANGED`
+    // is delivered synchronously. gdext binds the notification virtual mutably,
+    // so handling it here would re-enter `bind_mut` (panic) on every show/hide.
+    // Hot reloading the extension re-creates the Rust instance without re-running
+    // `ready` (gdext callback docs), which the whole native UI tree shares; a
+    // rebuild of the GDExtension needs an editor restart.
 }
 
 /// Parses a JSON object into a dictionary (`{}` on any other JSON shape).

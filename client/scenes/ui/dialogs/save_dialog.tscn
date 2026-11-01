@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://bdtsu0sueak5g"]
 
 [ext_resource type="PackedScene" uid="uid://bl7rulbb5cu37" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://tse4sn6emlw2" path="res://ui/dialogs/save_dialog.gd" id="2_save"]
 
 [node name="SaveDialog" unique_id=1898079632 instance=ExtResource("1_base")]
-script = ExtResource("2_save")

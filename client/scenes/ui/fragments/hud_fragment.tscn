@@ -1,11 +1,6 @@
 [gd_scene format=3 uid="uid://b8751xbl1aaxo"]
 
-[ext_resource type="Script" uid="uid://dmrw1f17j7lal" path="res://ui/fragments/hud_fragment.gd" id="1_hud"]
 [ext_resource type="PackedScene" path="res://scenes/ui/widgets/mind_minimap.tscn" id="2_minimap"]
-[ext_resource type="Script" uid="uid://da6xq1jjp24po" path="res://ui/text/mind_rich_label.gd" id="3_rich"]
-[ext_resource type="Script" uid="uid://cn6bp6oquv5tf" path="res://ui/widgets/core_items_display.gd" id="4_coreitems"]
-[ext_resource type="Script" path="res://ui/widgets/player_status.gd" id="5_playerstatus"]
-[ext_resource type="Script" path="res://ui/widgets/mind_bar.gd" id="6_bar"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_black6"]
 bg_color = Color(0, 0, 0, 0.6)
@@ -21,7 +16,7 @@ content_margin_top = 4.0
 content_margin_right = 4.0
 content_margin_bottom = 4.0
 
-[node name="HudFragment" type="Control" unique_id=1693915975]
+[node name="HudFragment" type="MindHudFragment" unique_id=1693915975]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -29,7 +24,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
-script = ExtResource("1_hud")
 
 [node name="WavesStack" type="VBoxContainer" parent="." unique_id=859926016]
 layout_mode = 1
@@ -53,21 +47,18 @@ layout_mode = 2
 layout_mode = 2
 theme_override_constants/separation = 4
 
-[node name="PlayerStatus" type="Control" parent="WavesStack/WavesMain/StatusRow/Row" unique_id=399553052]
+[node name="PlayerStatus" type="MindPlayerStatus" parent="WavesStack/WavesMain/StatusRow/Row" unique_id=399553052]
 custom_minimum_size = Vector2(120, 80)
 layout_mode = 2
 mouse_filter = 2
-script = ExtResource("5_playerstatus")
 
-[node name="Status" type="RichTextLabel" parent="WavesStack/WavesMain/StatusRow/Row" unique_id=399553049]
+[node name="Status" type="MindRichLabel" parent="WavesStack/WavesMain/StatusRow/Row" unique_id=399553049]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 4
-script = ExtResource("3_rich")
 
-[node name="Info" type="RichTextLabel" parent="WavesStack/WavesMain" unique_id=1511531312]
+[node name="Info" type="MindRichLabel" parent="WavesStack/WavesMain" unique_id=1511531312]
 layout_mode = 2
-script = ExtResource("3_rich")
 
 [node name="StatusIcons" type="HBoxContainer" parent="WavesStack/WavesMain"]
 layout_mode = 2
@@ -122,9 +113,8 @@ layout_mode = 2
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_coreitems")
 
-[node name="CoreItems" type="GridContainer" parent="CoreInfo/CoreItemsPanel" unique_id=1080290227]
+[node name="CoreItems" type="CoreItemsDisplay" parent="CoreInfo/CoreItemsPanel" unique_id=1080290227]
 layout_mode = 2
-script = ExtResource("4_coreitems")
 
 [node name="CoreAttack" type="PanelContainer" parent="CoreInfo"]
 layout_mode = 2
@@ -142,13 +132,11 @@ theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
 
-[node name="Bar" type="Control" parent="CoreInfo/BossBar"]
+[node name="Bar" type="MindBar" parent="CoreInfo/BossBar"]
 layout_mode = 2
-script = ExtResource("6_bar")
 
-[node name="HudText" type="RichTextLabel" parent="CoreInfo" unique_id=1872703018]
+[node name="HudText" type="MindRichLabel" parent="CoreInfo" unique_id=1872703018]
 layout_mode = 2
-script = ExtResource("3_rich")
 
 [node name="MinimapBox" type="VBoxContainer" parent="." unique_id=110911400]
 layout_mode = 1
@@ -171,7 +159,7 @@ custom_minimum_size = Vector2(150, 150)
 layout_mode = 2
 crop_to_region = true
 
-[node name="Position" type="RichTextLabel" parent="MinimapBox" unique_id=336799321]
+[node name="Position" type="MindRichLabel" parent="MinimapBox" unique_id=336799321]
 layout_mode = 2
 mouse_filter = 2
 bbcode_enabled = true
@@ -180,9 +168,8 @@ scroll_active = false
 autowrap_mode = 0
 theme_override_constants/outline_size = 4
 theme_override_colors/font_outline_color = Color(0, 0, 0, 1)
-script = ExtResource("3_rich")
 
-[node name="PausedBanner" type="RichTextLabel" parent="." unique_id=1173120531]
+[node name="PausedBanner" type="MindRichLabel" parent="." unique_id=1173120531]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -192,9 +179,8 @@ anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
 text = "[center]Paused"
-script = ExtResource("3_rich")
 
-[node name="WaitingBanner" type="RichTextLabel" parent="." unique_id=1997578906]
+[node name="WaitingBanner" type="MindRichLabel" parent="." unique_id=1997578906]
 layout_mode = 1
 anchors_preset = 8
 anchor_left = 0.5
@@ -204,7 +190,6 @@ anchor_bottom = 0.5
 grow_horizontal = 2
 grow_vertical = 2
 text = "[center]Waiting for players"
-script = ExtResource("3_rich")
 
 [node name="NearPoint" type="PanelContainer" parent="."]
 layout_mode = 1
@@ -217,14 +202,13 @@ grow_horizontal = 2
 grow_vertical = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_black6")
 
-[node name="Label" type="RichTextLabel" parent="NearPoint"]
+[node name="Label" type="MindRichLabel" parent="NearPoint"]
 layout_mode = 2
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
-script = ExtResource("3_rich")
 
-[node name="Saving" type="RichTextLabel" parent="."]
+[node name="Saving" type="MindRichLabel" parent="."]
 layout_mode = 1
 anchors_preset = 7
 anchor_left = 0.5
@@ -237,4 +221,3 @@ grow_vertical = 0
 bbcode_enabled = true
 fit_content = true
 scroll_active = false
-script = ExtResource("3_rich")

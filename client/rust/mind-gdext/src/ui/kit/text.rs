@@ -19,7 +19,7 @@ use godot::prelude::*;
 /// through this effect. The effect preserves the run colour; an unknown icon
 /// stays invisible rather than rendering a literal name.
 #[derive(GodotClass)]
-#[class(rename = RustMindIconEffect, base=RichTextEffect)]
+#[class(base=RichTextEffect)]
 pub struct MindIconEffect {
     /// The BBCode tag the effect implements (`RichTextEffect.bbcode`).
     #[var]
@@ -100,7 +100,7 @@ fn mirror_font_color(label: &mut RichTextLabel) {
 
 /// `MindRichLabel` — BBCode `RichTextLabel` with the `[icon]` effect attached.
 #[derive(GodotClass)]
-#[class(rename = RustMindRichLabel, base=RichTextLabel, init)]
+#[class(base=RichTextLabel, init)]
 pub struct MindRichLabel {
     base: Base<RichTextLabel>,
 }
@@ -138,7 +138,7 @@ impl MindRichLabel {
 /// `set_source` re-reads the bound value every frame and only assigns `text`
 /// when the formatted value changes (IntFormat parity, plan 14 §3.5/§3.10).
 #[derive(GodotClass)]
-#[class(rename = RustMindLabel, base=RichTextLabel, init)]
+#[class(base=RichTextLabel, init)]
 pub struct MindLabel {
     base: Base<RichTextLabel>,
     source: Option<Callable>,

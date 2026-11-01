@@ -46,7 +46,7 @@ pub(super) fn sort_stack(container: &mut Gd<Container>) {
 
 /// `MindReqImage` — stacks the requirement image under its cross overlay.
 #[derive(GodotClass)]
-#[class(rename = RustMindReqImage, base=Container, init)]
+#[class(base=Container, init)]
 pub struct MindReqImage {
     base: Base<Container>,
     /// `ReqImage.valid` predicate (`Callable()` in the GDScript until setup).

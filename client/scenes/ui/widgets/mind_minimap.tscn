@@ -1,9 +1,7 @@
 [gd_scene format=3 uid="uid://0achppyekdyt"]
 
-[ext_resource type="Script" uid="uid://bc1tps3nygudw" path="res://ui/widgets/mind_minimap.gd" id="1_minimap"]
 
-[node name="MindMinimap" type="Control" unique_id=160101713]
+[node name="MindMinimap" type="MindMinimapWidget" unique_id=160101713]
 custom_minimum_size = Vector2(140, 140)
 layout_mode = 3
 anchors_preset = 0
-script = ExtResource("1_minimap")

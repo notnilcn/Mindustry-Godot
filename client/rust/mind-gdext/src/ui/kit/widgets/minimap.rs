@@ -57,7 +57,7 @@ const CMP_EPSILON: f32 = 0.00001;
 
 /// `MindMinimapWidget` — 140 px map crop with pan/zoom/tap intents.
 #[derive(GodotClass)]
-#[class(rename = RustMindMinimapWidget, base=Control, init)]
+#[class(base=Control, init)]
 pub struct MindMinimapWidget {
     base: Base<Control>,
     /// HUD minimap (`ui/Minimap.java`): draw only `renderer.minimap.getRegion()`

@@ -85,7 +85,7 @@ const OUTLINE_PATH: &str = "ViewportContainer/SubViewport/Outline";
 
 /// `PlanetView` — the campaign globe layer.
 #[derive(GodotClass)]
-#[class(base=Control, rename = RustPlanetView)]
+#[class(base=Control)]
 pub struct MindPlanetView {
     base: Base<Control>,
 

@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://bbdnye3bwatqq"]
 
-[ext_resource type="Script" uid="uid://cj4w41ead8yx5" path="res://ui/fragments/block_config_fragment.gd" id="1_config"]
 
-[node name="BlockConfigFragment" type="Control" unique_id=2090762002]
+[node name="BlockConfigFragment" type="MindBlockConfigFragment" unique_id=2090762002]
 visible = false
 layout_mode = 3
 anchors_preset = 0
 offset_right = 300.0
 offset_bottom = 220.0
 mouse_filter = 1
-script = ExtResource("1_config")
 
 [node name="Panel" type="PanelContainer" parent="." unique_id=1345556897]
 layout_mode = 1

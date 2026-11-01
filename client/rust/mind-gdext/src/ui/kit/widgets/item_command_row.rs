@@ -57,7 +57,7 @@ const ICON_ALIASES: &[(&str, &str)] = &[
 
 /// `MindItemCommandRow` — the `clearNoneTogglei` command cell grid.
 #[derive(GodotClass)]
-#[class(rename = RustMindItemCommandRow, base=PanelContainer, init)]
+#[class(base=PanelContainer, init)]
 pub struct MindItemCommandRow {
     base: Base<PanelContainer>,
     /// Whether the fragment closes the panel after a pick

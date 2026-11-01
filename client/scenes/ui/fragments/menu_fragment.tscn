@@ -1,11 +1,10 @@
 [gd_scene format=3 uid="uid://dmnumw6ho3ep1"]
 
-[ext_resource type="Script" uid="uid://bg7ssx5fi8stv" path="res://ui/fragments/menu_fragment.gd" id="1_menu"]
 
 [sub_resource type="StyleBoxFlat" id="StyleBoxFlat_sidebar"]
 bg_color = Color(0, 0, 0, 0.6)
 
-[node name="MenuFragment" type="Control" unique_id=1836291772]
+[node name="MenuFragment" type="MindMenuFragment" unique_id=1836291772]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -13,7 +12,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 1
-script = ExtResource("1_menu")
 
 [node name="Sidebar" type="PanelContainer" parent="." unique_id=1200000003]
 layout_mode = 1

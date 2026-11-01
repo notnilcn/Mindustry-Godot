@@ -95,7 +95,7 @@ struct Prompt {
 
 /// `MindUiRoot` — the UI layer root (`control.java` `UI.init` equivalent).
 #[derive(GodotClass)]
-#[class(rename = RustMindUiRoot, base=Control)]
+#[class(base=Control)]
 pub struct MindUiRoot {
     base: Base<Control>,
 

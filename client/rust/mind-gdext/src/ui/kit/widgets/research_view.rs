@@ -41,7 +41,7 @@ const STYLE_MARGIN: f32 = 12.0;
 
 /// `MindResearchView` — the tech-tree canvas.
 #[derive(GodotClass)]
-#[class(rename = RustMindResearchView, base=Control)]
+#[class(base=Control)]
 pub struct MindResearchView {
     base: Base<Control>,
     /// `View.panX`/`panY` in Java (y-up) space.

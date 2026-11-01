@@ -518,10 +518,28 @@ pub(crate) fn install_frame_tick(
     if dialog.base().has_meta(&meta) {
         return;
     }
+    // The connection outlives a dialog freed while the tree is alive (editor
+    // dialogs, teardown), so it must never touch the node again: the guard runs
+    // before the queued actions and the tick, and drops the connection.
+    let dialog_gd = dialog.to_gd();
+    let tree_for = tree.clone();
+    let callable_slot: Rc<RefCell<Option<Callable>>> = Rc::new(RefCell::new(None));
+    let slot_for = callable_slot.clone();
     let callable = Callable::from_fn("campaign2_frame", move |_args: &[&Variant]| {
+        if !dialog_gd.is_instance_valid() {
+            if let Some(entry) = slot_for.borrow_mut().take() {
+                let mut tree = tree_for.clone();
+                if tree.is_connected("process_frame", &entry) {
+                    tree.disconnect("process_frame", &entry);
+                }
+            }
+            return Variant::nil();
+        }
         deferred.drain();
         tick();
+        Variant::nil()
     });
+    *callable_slot.borrow_mut() = Some(callable.clone());
     let _ = tree.connect("process_frame", &callable);
     dialog.base_mut().set_meta(&meta, &true.to_variant());
 }

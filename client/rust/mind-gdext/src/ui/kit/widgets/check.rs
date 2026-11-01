@@ -30,7 +30,7 @@ const ICON_SIZE: f32 = 32.0;
 
 /// `MindCheck` — `Elems.check(text, checked, listener)` as a native toggle.
 #[derive(GodotClass)]
-#[class(rename = RustMindCheck, base=Button)]
+#[class(base=Button)]
 pub struct MindCheck {
     base: Base<Button>,
     icon: Option<Gd<TextureRect>>,

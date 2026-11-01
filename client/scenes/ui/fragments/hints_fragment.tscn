@@ -1,9 +1,7 @@
 [gd_scene format=3 uid="uid://deqapucuj7n0m"]
 
-[ext_resource type="Script" uid="uid://8brrxxpglynq" path="res://ui/fragments/hints_fragment.gd" id="1_hints"]
-[ext_resource type="Script" uid="uid://da6xq1jjp24po" path="res://ui/text/mind_rich_label.gd" id="2_rich"]
 
-[node name="HintsFragment" type="Control" unique_id=1616195657]
+[node name="HintsFragment" type="MindHintsFragment" unique_id=1616195657]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -11,7 +9,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("1_hints")
 
 [node name="Panel" type="PanelContainer" parent="." unique_id=1358841325]
 layout_mode = 1
@@ -38,10 +35,9 @@ layout_mode = 2
 size_flags_horizontal = 0
 theme_type_variation = &"black5"
 
-[node name="Label" type="RichTextLabel" parent="Panel/Layout/Box" unique_id=345942507]
+[node name="Label" type="MindRichLabel" parent="Panel/Layout/Box" unique_id=345942507]
 layout_mode = 2
 custom_minimum_size = Vector2(400, 0)
-script = ExtResource("2_rich")
 
 [node name="Skip" type="Button" parent="Panel/Layout" unique_id=345942508]
 layout_mode = 2

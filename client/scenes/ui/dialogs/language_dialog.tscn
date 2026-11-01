@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://df1bmxhejk62b"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://03pk2pv0tmqb" path="res://ui/dialogs/language_dialog.gd" id="2_language"]
 
 [node name="LanguageDialog" unique_id=465152256 instance=ExtResource("1_base")]
-script = ExtResource("2_language")

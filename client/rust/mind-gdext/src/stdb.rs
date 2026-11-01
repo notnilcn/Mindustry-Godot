@@ -286,7 +286,7 @@ impl StdbConnector {
     ///
     /// Rust name is `connect_db`: `Object::connect` exists on `Node` and the
     /// Godot-visible name is pinned by plan 01 §3.11 (`connect`).
-    #[func(rename = "connect")]
+    #[func(rename = connect)]
     pub fn connect_db(&mut self) {
         if let Some(connector) = self.connector.as_mut()
             && let Err(error) = connector.connect()
@@ -309,7 +309,7 @@ impl StdbConnector {
     ///
     /// Rust name is `disconnect_db`: `Object::disconnect` exists on `Node` and
     /// the Godot-visible name is pinned by plan 01 §3.11 (`disconnect`).
-    #[func(rename = "disconnect")]
+    #[func(rename = disconnect)]
     pub fn disconnect_db(&mut self) {
         if let Some(connector) = self.connector.as_mut() {
             connector.disconnect();

@@ -6,36 +6,77 @@ under `client/`. It is the continuation map: the API contract is in
 [`tools/rewire_native_ui.py`](../../../../../tools/rewire_native_ui.py) and the
 cutover is [`tools/finalize_native_ui.py`](../../../../../tools/finalize_native_ui.py).
 
-## Snapshot (current)
+## Cutover landed (branch `native-ui-cutover`)
 
-- **Every porting unit exists in Rust.** All 59 manifest dialog controllers, all
-  14 fragments, all 19 widgets, `MindUiRoot`, `MindPlanetView`, `MindLandingCore`,
-  the four editor views and the three headless oracles are native; ~73.7k lines
-  of UI Rust.
-- `cargo check`, `cargo clippy --all-targets -- -D warnings` and
-  `cargo fmt --check` are **green**; `bash tools/build.sh` is green.
-- The headless editor import gate, the three native oracles, a `scenes/game.tscn`
-  boot and the native probe all pass (see **Verification**).
-- All **122** non-addon `.gd` files are still present and the running project
-  still uses them (the native classes are registered as `Rust*`). **The cutover
-  (`tools/finalize_native_ui.py`) has not been run** — by design, until the
-  project owner takes the cutover decision. `rewire_native_ui.py --check`
-  reports 90 scenes still holding non-addon script `ext_resource`s; finalize
-  rewires and deletes them in one step.
+- **The GDScript UI is gone.** `finalize_native_ui.py --apply` stripped the 29
+  `rename = Rust*` attributes, rewired 83 scenes (they now name the bare native
+  classes), verified zero non-addon script references and deleted all 122 `.gd`
+  files plus their 122 `.gd.uid` sidecars. `rewire_native_ui.py --check` now
+  reports 0 scenes / 0 references; `client/tools/` no longer exists.
+- Every porting unit is native: 59/59 manifest dialog controllers, 14 fragments,
+  19 widgets, `MindUiRoot`, `MindPlanetView`, `MindLandingCore`, the four editor
+  views and four headless oracles (~73.7k lines of UI Rust before the cutover
+  fixes).
+- Scenario files, the manifests and the Rust class names were already the ABI;
+  only the temporary `Rust*` registration names changed.
+- **Hot reloading the GDExtension requires an editor restart while an editor
+  session is open.** gdext re-creates Rust instances on reload without re-running
+  `ready`, and the native UI tree has no reload bootstrap; the old per-dialog
+  notification handler was removed because it re-entered `bind_mut` on every
+  show/hide (see below).
 
-## What the cutover still needs (and only that)
+### Bugs found and fixed during the cutover
 
-1. `python3 tools/finalize_native_ui.py --apply` — removes the `rename = Rust*`
-   attributes, rewires the 90 scenes, verifies no script reference remains and
-   deletes the 122 `.gd` files. Nothing else is pending: no controller, fragment,
-   widget, root node, editor view or oracle is missing.
-2. Rebuild + rerun the gates below (the class names change from `Rust*` to the
-   bare names, so the first run after `--apply` is the real proof).
-3. Optional follow-ups owned by the cutover commit: `mind-core::ui::manifest`
-   scene checks (they only read manifests, no `.gd` coupling),
-   `mind-core/src/ui/builder/style_lookup.rs` (a dev token scan over `.gd` text,
-   harmless when the files are gone) and `client/AGENTS.md`'s UI-layer section
-   (it still describes the GDScript layer — correct until the cutover lands).
+1. **`finalize_native_ui.py` missed a trailing `rename`.** `planet.rs` declared
+   `#[class(base=Control, rename = RustPlanetView)]` (rename last, no trailing
+   comma) so the regex left `MindPlanetView` unregistered while its scene already
+   used the bare name (`Cannot get class 'MindPlanetView'`). The regex now handles
+   both positions; the attribute was removed.
+2. **`#[func(rename = "lit")]` registers the quotes.** gdext stringifies the
+   attribute token stream, so a string literal becomes `""name""`; 25 methods
+   (the placement/minimap/block-config callbacks and `StdbBinder`'s
+   `connect`/`disconnect`) were unreachable and every `callable(...)` connect
+   failed. All uses are now identifier form (`rename = _select`).
+3. **`MindTable::sort_now` was not a `#[func]`.** `batch_b`'s
+   `call_deferred("sort_now")` failed with `Method not found`; the method is now
+   exported.
+4. **`MindDialog::on_notification` panicked on every visibility change.** Hiding
+   or showing a dialog sets its own `visible`, which delivers
+   `NOTIFICATION_VISIBILITY_CHANGED` (and propagates it to buttons) synchronously
+   from inside the bound `ready`/`show_dialog`/`hide_dialog`; the notification
+   virtual then re-entered `bind_mut` (gdext `already bound` panic). The handler
+   is gone; controllers are static per session, which the cutover accepts.
+5. **The button-row hooks must not bind the dialog from signals.** Both
+   `child_entered_tree` (a controller adding buttons from `ready`) and each
+   button's `visibility_changed` (propagated by the dialog's own show/hide) now
+   route through a non-binding `Callable` that defers `sync_buttons_row`; the
+   visibility hook is stored on the node and coalesces to one pending sync.
+6. **Controller frame ticks outlived their dialog.** `batch_c`/`batch_campaign2`
+   drain their deferred queues from a `SceneTree.process_frame` connection that
+   kept running after an editor dialog was freed, panicking on the stored `Gd`
+   (`access to instance ... after it has been freed`). The tick now checks
+   `is_instance_valid` before touching the node and disconnects itself.
+
+### Verification (cutover run)
+
+```bash
+cargo clippy -p mind-gdext --all-targets -- -D warnings   # green
+cargo fmt --all -- --check                               # green
+bash tools/build.sh                                      # green
+bash tools/godot.sh --headless --editor --quit --path client                # exit 0, no errors
+bash tools/godot.sh --headless --path client res://scenes/tools/shaders_check.tscn      # total=30 failed=0
+bash tools/godot.sh --headless --path client res://scenes/tools/ui_layout_check.tscn    # failed=0
+bash tools/godot.sh --headless --path client res://scenes/tools/ui_widgets_check.tscn   # failed=0
+bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn # failed=0 (236 checks)
+bash tools/godot.sh --headless --path client --quit-after 300              # exit 0, no panics
+bash tools/godot.sh --headless --path client res://scenes/ui/native_probe.tscn --quit-after 30
+```
+
+`dialog_sweep_check` (`MindDialogSweepCheck` in `checks.rs`) is new: it
+instantiates every manifest dialog through its controller and asserts the button
+row plus show/hide/re-show/free for all 59 (236 assertions); it is wired into
+`tools/ci.sh`. A temporary GDScript version of the same sweep found bugs 4–6
+before being replaced by the native oracle.
 
 ## Done
 
@@ -75,7 +116,7 @@ Foundation (`client/rust/mind-gdext/src/ui/`):
   `MindShadersCheck`, `MindUiLayoutCheck`, `MindUiWidgetsCheck`, run from
   `client/scenes/tools/*.tscn` (wired into `tools/ci.sh`).
 
-## Verification (this run)
+## Verification (pre-cutover run, `Rust*` registration)
 
 ```bash
 cargo check     --manifest-path client/rust/Cargo.toml -p mind-gdext --target-dir client/bin/rust --all-targets   # green
@@ -146,29 +187,15 @@ construct Godot builtins (`VarDictionary`, `GString`, …) outside a Godot host 
 panic in `godot-ffi` — a pre-existing pattern in this crate, which is why
 `tools/ci.sh` gates on `cargo test -p mind-core` only. Pure-data tests pass.
 
-## Temporary registration names (`Rust*`)
+## Temporary registration names (`Rust*`, removed)
 
 Godot refuses to run while a native class and a GDScript `class_name` share a
-name ("hides a native class"). During the migration the 29 native classes that
-collide keep their Rust type names but register under a `Rust` prefix:
-
-```rust
-#[class(rename = RustMindDialog, base=Control)]
-pub struct MindDialog { ... }
-```
-
-The running project therefore still uses the GDScript UI; the native classes
-are verified by `scenes/ui/native_probe.tscn` (`RustMindDialog`,
-`RustMindScroll`, `RustMindRichLabel`) and by the editor instantiation gate,
-which instantiates every registered extension class. At cutover:
-
-1. delete the remaining `.gd` files,
-2. remove every `rename = Rust*` attribute (the Rust type name becomes the Godot
-   class name again),
-3. `python3 tools/rewire_native_ui.py --apply`, rebuild and playtest.
-
-Do not add `rename` to a new class unless its name collides with a live
-GDScript `class_name`.
+name ("hides a native class"). During the migration the 29 colliding native
+classes kept their Rust type names but registered under a `Rust` prefix
+(`#[class(rename = RustMindDialog, base=Control)]`). The cutover stripped every
+such attribute and deleted the GDScript classes, so the Rust type name is the
+Godot class name again and the scenes name the bare classes. Do not add `rename`
+to a class unless it collides with a live GDScript `class_name`.
 
 ## Porting deviations worth knowing
 
@@ -214,3 +241,21 @@ equivalent; each site carries an in-source comment:
   a controller's `ready`) re-enters `bind_mut` and gdext panics with
   `already bound`. Connect a non-binding `Callable::from_fn` that
   `call_deferred`s the binding work instead (`MindDialog::watch_buttons_row`).
+- **No `on_notification` on a class that changes its own `visible` (or any
+  self-notifying property).** The notification is delivered synchronously from
+  `set_visible`, and gdext's notification virtual binds mutably, so it re-enters
+  `bind_mut` from `ready`/`show_dialog`/`hide_dialog` (`already bound` panic).
+  `MindDialog` therefore has no notification handler; the native UI tree does
+  not rebuild on an extension hot reload (restart the editor instead).
+- **`#[func(rename = ...)]` takes an identifier, not a string literal.** gdext
+  stringifies the token stream, so `rename = "_select"` exposes the method as
+  `"_select"` (quotes included) and every `callable("_select")` is invalid.
+  Same shape for `#[var(rename = ...)]` and `#[class(rename = ...)]`.
+- **A signal connection outlives a freed node.** Controller frame ticks
+  (`SceneTree.process_frame`) and `Callable::from_fn` closures must check
+  `Gd::is_instance_valid()` *before* cloning/calling into the captured node, and
+  should drop the connection when it is gone; `Gd::clone()` itself panics on a
+  freed instance.
+- **`Gd<T>::free()` in oracles**: free dialogs after the last frame that can
+  touch them, or drive the whole sweep from one `_process` state machine (the
+  `MindDialogSweepCheck` pattern).

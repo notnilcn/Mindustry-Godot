@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://bgwg48jjdtgv3"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://ccmgl4nu47lca" path="res://ui/dialogs/keybind_dialog.gd" id="2_controls"]
 
 [node name="KeybindDialog" unique_id=227984304 instance=ExtResource("1_base")]
-script = ExtResource("2_controls")

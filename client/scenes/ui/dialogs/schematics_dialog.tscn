@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://b4i8xal5pd3dw"]
 
 [ext_resource type="PackedScene" uid="uid://bl7rulbb5cu37" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://i0wioi7uxfpt" path="res://ui/dialogs/schematics_dialog.gd" id="2_script"]
 
 [node name="SchematicsDialog" unique_id=14714170 instance=ExtResource("1_base")]
-script = ExtResource("2_script")

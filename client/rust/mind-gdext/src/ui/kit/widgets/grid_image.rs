@@ -28,7 +28,7 @@ fn jump_for(space: f32) -> i32 {
 
 /// `MindGridImage` — `Control` drawing `image_width` × `image_height` cells.
 #[derive(GodotClass)]
-#[class(rename = RustMindGridImage, base=Control, init)]
+#[class(base=Control, init)]
 pub struct MindGridImage {
     base: Base<Control>,
     /// `GridImage.imageWidth` (always at least 1; see [`Self::set_image_size`]).

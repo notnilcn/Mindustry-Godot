@@ -43,7 +43,7 @@ const SHINE_DURATION: f64 = 0.75;
 
 /// `MindResearchItemsDisplay` — the research dialog's `@globalitems` pool.
 #[derive(GodotClass)]
-#[class(rename = RustMindResearchItemsDisplay, base=PanelContainer)]
+#[class(base=PanelContainer)]
 pub struct MindResearchItemsDisplay {
     base: Base<PanelContainer>,
     /// Whether the list is collapsed (Java `ItemsDisplay.collapsed`).

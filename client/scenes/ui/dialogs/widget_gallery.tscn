@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://y7l1b6hjvmin"]
 
-[ext_resource type="Script" uid="uid://b1muws6dpb1l5" path="res://ui/dialogs/widget_gallery.gd" id="1_gallery"]
 
-[node name="WidgetGallery" type="Control" unique_id=838145590]
+[node name="WidgetGallery" type="MindDialog" unique_id=838145590]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_gallery")
 
 [node name="Dim" type="ColorRect" parent="." unique_id=962738629]
 layout_mode = 1
@@ -42,7 +40,7 @@ layout_mode = 2
 text = "Widget Gallery"
 horizontal_alignment = 1
 
-[node name="Body" type="ScrollContainer" parent="Center/Panel/Layout" unique_id=467325180]
+[node name="Body" type="MindScroll" parent="Center/Panel/Layout" unique_id=467325180]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0

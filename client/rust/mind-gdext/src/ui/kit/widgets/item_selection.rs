@@ -46,7 +46,7 @@ const ICON_MARGIN: f32 = 0.0;
 
 /// `MindItemSelection` — `Styles.black6` grid of content-icon toggles.
 #[derive(GodotClass)]
-#[class(rename = RustMindItemSelection, base=PanelContainer, init)]
+#[class(base=PanelContainer, init)]
 pub struct MindItemSelection {
     base: Base<PanelContainer>,
     /// The configured block's name (`Block.selectScroll` writeback key).

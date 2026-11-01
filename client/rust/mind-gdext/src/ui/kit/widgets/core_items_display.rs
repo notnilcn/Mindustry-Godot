@@ -33,7 +33,7 @@ const PAD_RIGHT: i32 = 3;
 
 /// `CoreItemsDisplay` — the core inventory table (GridContainer).
 #[derive(GodotClass)]
-#[class(rename = RustCoreItemsDisplay, base=GridContainer, init)]
+#[class(base=GridContainer, init)]
 pub struct CoreItemsDisplay {
     base: Base<GridContainer>,
     /// Shown item names in content order (the `core_items_json` key order).

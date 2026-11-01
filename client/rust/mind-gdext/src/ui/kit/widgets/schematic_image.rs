@@ -45,7 +45,7 @@ struct SchematicTile {
 
 /// `MindSchematicImage` — the schematic preview canvas.
 #[derive(GodotClass)]
-#[class(rename = RustMindSchematicImage, base=Control)]
+#[class(base=Control)]
 pub struct MindSchematicImage {
     base: Base<Control>,
     width: i64,

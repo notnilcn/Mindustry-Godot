@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://cqe3j42aoauob"]
 
-[ext_resource type="Script" uid="uid://csemruwkahqpc" path="res://ui/dialogs/about_dialog.gd" id="1_about"]
 
-[node name="AboutDialog" type="Control" unique_id=696848139]
+[node name="AboutDialog" type="MindDialog" unique_id=696848139]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_about")
 
 [node name="Dim" type="ColorRect" parent="." unique_id=910996008]
 layout_mode = 1
@@ -42,7 +40,7 @@ layout_mode = 2
 text = "About"
 horizontal_alignment = 1
 
-[node name="Body" type="ScrollContainer" parent="Center/Panel/Layout" unique_id=547673544]
+[node name="Body" type="MindScroll" parent="Center/Panel/Layout" unique_id=547673544]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0

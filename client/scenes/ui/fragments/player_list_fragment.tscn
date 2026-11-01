@@ -1,8 +1,7 @@
 [gd_scene format=3 uid="uid://bqinoo73njfmb"]
 
-[ext_resource type="Script" uid="uid://bd6dl3rfc63mo" path="res://ui/fragments/player_list_fragment.gd" id="1_script"]
 
-[node name="PlayerListFragment" type="Control" unique_id=2040351985]
+[node name="PlayerListFragment" type="MindPlayerListFragment" unique_id=2040351985]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -10,4 +9,3 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("1_script")

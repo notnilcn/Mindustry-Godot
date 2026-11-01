@@ -15,7 +15,7 @@ const RULE_WIDTH: f32 = 3.0;
 
 /// `MindWarningBar` — diagonal stripes with 3 px rules along both edges.
 #[derive(GodotClass)]
-#[class(rename = RustMindWarningBar, base=Control)]
+#[class(base=Control)]
 pub struct MindWarningBar {
     base: Base<Control>,
     /// Stripe width in px (`WarningBar.barWidth`).

@@ -86,7 +86,7 @@ impl IControl for MindMinimapFragment {
 #[godot_api]
 impl MindMinimapFragment {
     /// `MinimapFragment` right-drag: pan the camera by the widget's world delta.
-    #[func(rename = "_on_pan")]
+    #[func(rename = _on_pan)]
     pub fn on_pan(&mut self, world_delta: Vector2) {
         let Some(mut camera) = self.camera() else {
             return;
@@ -99,7 +99,7 @@ impl MindMinimapFragment {
     }
 
     /// `Renderer.scaleCamera`: `(factor / lastZoom - 1) * ZOOM_STEP_DIVISOR`.
-    #[func(rename = "_on_zoom")]
+    #[func(rename = _on_zoom)]
     pub fn on_zoom(&mut self, factor: f32) {
         let Some(mut camera) = self.camera() else {
             return;
@@ -113,7 +113,7 @@ impl MindMinimapFragment {
 
     /// Left-tap on the map: a second toggle closes the overlay
     /// (`MinimapFragment.toggle`).
-    #[func(rename = "_on_tapped")]
+    #[func(rename = _on_tapped)]
     pub fn on_tapped(&mut self) {
         self.toggle();
     }

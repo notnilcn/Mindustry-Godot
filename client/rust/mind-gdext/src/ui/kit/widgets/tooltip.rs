@@ -55,7 +55,7 @@ pub fn resolve(provider: &Variant) -> GString {
 
 /// `MindTooltip` — the static tooltip helper class (`Tooltip`).
 #[derive(GodotClass)]
-#[class(rename = RustMindTooltip, base=RefCounted)]
+#[class(base=RefCounted)]
 pub struct MindTooltip {
     base: Base<RefCounted>,
 }

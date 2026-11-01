@@ -22,7 +22,7 @@ use super::req_image::{MindReqImage, sort_stack, stack_minimum_size};
 
 /// `MindMultiReqImage` — `MultiReqImage`'s cycling requirement stack.
 #[derive(GodotClass)]
-#[class(rename = RustMindMultiReqImage, base=Container, init)]
+#[class(base=Container, init)]
 pub struct MindMultiReqImage {
     base: Base<Container>,
     /// `MultiReqImage.displays`, in add order.

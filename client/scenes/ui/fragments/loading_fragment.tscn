@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://d4cmk1xm03rpo"]
 
-[ext_resource type="Script" uid="uid://byktx3g81fj0" path="res://ui/fragments/loading_fragment.gd" id="1_loading"]
 
-[node name="LoadingFragment" type="Control" unique_id=901535120]
+[node name="LoadingFragment" type="MindLoadingFragment" unique_id=901535120]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_loading")
 
 [node name="Background" type="ColorRect" parent="." unique_id=1820533146]
 layout_mode = 1

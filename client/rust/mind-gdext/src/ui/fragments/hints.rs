@@ -253,7 +253,7 @@ impl MindHintsFragment {
     ///
     /// Exported as `_hint_shown` (its GDScript name) so the predicate table
     /// check can drive it directly.
-    #[func(rename = "_hint_shown")]
+    #[func(rename = _hint_shown)]
     pub fn hint_shown(
         &self,
         hint_name: GString,
@@ -265,7 +265,7 @@ impl MindHintsFragment {
 
     /// The matching `complete()` predicates (`HintsFragment.java:169-304`),
     /// exported as `_hint_complete` (its GDScript name).
-    #[func(rename = "_hint_complete")]
+    #[func(rename = _hint_complete)]
     pub fn hint_complete(
         &mut self,
         hint_name: GString,

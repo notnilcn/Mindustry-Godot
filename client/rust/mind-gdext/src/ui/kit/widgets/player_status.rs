@@ -36,7 +36,7 @@ const HOST_PATH: &str = "/root/Spine/SimHost";
 
 /// `MindPlayerStatus` — 120x80 read-only player status cell.
 #[derive(GodotClass)]
-#[class(rename = RustMindPlayerStatus, base=Control, init)]
+#[class(base=Control, init)]
 pub struct MindPlayerStatus {
     base: Base<Control>,
     /// The eased health fraction the bars chase.

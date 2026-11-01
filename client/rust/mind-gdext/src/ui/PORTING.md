@@ -1,9 +1,11 @@
 # Porting GDScript UI to Rust (agent guide)
 
-This tree replaces every non-addon `.gd` file under `client/` with native Rust
-GDExtension classes. This guide is the contract for the remaining ports: the
-Rust UI kit API, the gdext patterns that bite, and how a ported dialog or
-fragment is wired into the scenes.
+**Status: the port and its cutover are complete.** Every non-addon `.gd` file
+was replaced by native Rust GDExtension classes, `tools/finalize_native_ui.py`
+ran on the `native-ui-cutover` branch, and the scenes now name the native
+classes directly. This guide stays as the contract for UI work: the Rust UI kit
+API, the gdext patterns that bite, and how a dialog or fragment is wired into
+the scenes.
 
 Read [`client/AGENTS.md`](../../../../../../AGENTS.md) and
 [`client/rust/mind-gdext/AGENTS.md`](../../../AGENTS.md) first. The invariants
@@ -130,15 +132,17 @@ The registry dispatch lives in `ui/dialogs/mod.rs`:
 
 ## Scene wiring
 
-`scenes/ui/dialogs/mind_dialog_base.tscn` roots on `type="MindDialog"`; the 46
-derived dialog scenes keep `instance=ExtResource(...)` and **drop** their
-`script = ...` line. The two non-inherited dialogs change
-`type="Control"` → `type="MindDialog"` and drop the script.
+`scenes/ui/dialogs/mind_dialog_base.tscn` roots on `type="MindDialog"`; the
+derived dialog scenes keep `instance=ExtResource(...)` and no longer carry a
+`script = ...` line. The non-inherited dialogs root on `type="MindDialog"`.
 
-Fragment scenes set `type="<RustClass>"` (the widget/fragment class) and drop
-the `script = ...` line. A node that used a script on an engine type
-(`type="Label"` + `mind_rich_label.gd`) becomes `type="MindRichLabel"`.
-`type="ScrollContainer"` becomes `type="MindScroll"`.
+Fragment scenes set `type="<Class>"` (the widget/fragment class). A node that
+used a script on an engine type (`type="Label"` + `mind_rich_label.gd`) is now
+`type="MindRichLabel"`. `type="ScrollContainer"` is `type="MindScroll"`.
+
+Do not reintroduce a GDScript `script` resource: the cutover deleted every
+non-addon `.gd` file (and its `.gd.uid`), and `rewire_native_ui.py` must keep
+reporting 0 scenes / 0 references.
 
 ## Verification
 
@@ -150,15 +154,19 @@ bash tools/godot.sh --headless --editor --quit --path client
 ```
 
 The headless import must report no script errors. `grep -rn "res://.*\.gd" client --include='*.tscn'`
-must be empty when the port is complete.
+must be empty (it is: the cutover left no GDScript).
 
-The three headless oracles are native scenes (no `--script`):
+The four headless oracles are native scenes (no `--script`):
 
 ```bash
 bash tools/godot.sh --headless --path client res://scenes/tools/shaders_check.tscn
 bash tools/godot.sh --headless --path client res://scenes/tools/ui_layout_check.tscn
 bash tools/godot.sh --headless --path client res://scenes/tools/ui_widgets_check.tscn
+bash tools/godot.sh --headless --path client res://scenes/tools/dialog_sweep_check.tscn
 ```
 
-Each prints its summary (`SHADERCHECK`/`LAYOUTCHECK`/`UICHECK: failed=0`) and
-exits non-zero on a failure; `tools/ci.sh` gates on both.
+Each prints its summary (`SHADERCHECK`/`LAYOUTCHECK`/`UICHECK: failed=0`/
+`DIALOGCHECK: failed=0`) and exits non-zero on a failure; `tools/ci.sh` gates on
+all four. `dialog_sweep_check` is the post-cutover safety net: it instantiates
+every manifest dialog through its controller and exercises show/hide/re-show, so
+a `bind_mut` panic in a builder fails the gate instead of shipping.

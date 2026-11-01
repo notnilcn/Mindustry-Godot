@@ -1,6 +1,6 @@
 [gd_scene format=3]
 
-[node name="Probe" type="RustMindDialog"]
+[node name="Probe" type="MindDialog"]
 
 [node name="Center" type="CenterContainer" parent="."]
 layout_mode = 1
@@ -24,7 +24,7 @@ layout_mode = 2
 text = "Probe"
 horizontal_alignment = 1
 
-[node name="Body" type="RustMindScroll" parent="Center/Panel/Layout"]
+[node name="Body" type="MindScroll" parent="Center/Panel/Layout"]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0
@@ -37,6 +37,6 @@ size_flags_horizontal = 3
 layout_mode = 2
 alignment = 1
 
-[node name="Rich" type="RustMindRichLabel" parent="Center/Panel/Layout/Body/Content"]
+[node name="Rich" type="MindRichLabel" parent="Center/Panel/Layout/Body/Content"]
 layout_mode = 2
 text = "[accent]probe[/accent]"

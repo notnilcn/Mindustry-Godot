@@ -1,6 +1,5 @@
 [gd_scene load_steps=3 format=3]
 
-[ext_resource type="Script" path="res://ui/planet_view.gd" id="1_view"]
 
 [sub_resource type="Environment" id="Environment_bloom"]
 background_mode = 3
@@ -15,7 +14,7 @@ glow_bloom = 0.0
 glow_blend_mode = 0
 glow_hdr_threshold = 0.8
 
-[node name="PlanetView" type="Control"]
+[node name="PlanetView" type="MindPlanetView"]
 visible = false
 layout_mode = 3
 anchors_preset = 15
@@ -24,7 +23,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("1_view")
 
 [node name="Space" type="TextureRect" parent="."]
 layout_mode = 1

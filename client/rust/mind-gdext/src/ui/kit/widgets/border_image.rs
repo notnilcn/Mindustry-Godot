@@ -27,7 +27,7 @@ use super::super::icon_texture;
 
 /// `BorderImage` — `TextureRect` plus `Pal.gray` stroke.
 #[derive(GodotClass)]
-#[class(rename = RustMindBorderImage, base=TextureRect, init)]
+#[class(base=TextureRect, init)]
 pub struct MindBorderImage {
     base: Base<TextureRect>,
     /// `BorderImage.thickness` stroke width, in pixels.

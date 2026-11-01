@@ -1,9 +1,7 @@
 [gd_scene format=3 uid="uid://cl431e33k7emq"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://deibgii4at41" path="res://scenes/editor/map_generate_dialog.gd" id="2_script"]
 
 [node name="MapGenerateDialog" unique_id=121759504 instance=ExtResource("1_base")]
-script = ExtResource("2_script")
 editor_path = NodePath("/root/Spine/MindEditor")
 applied = true

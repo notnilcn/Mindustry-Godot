@@ -18,7 +18,7 @@ use crate::ui::kit;
 
 /// `ItemsDisplay` — the launched-items chip row (`ItemsDisplay.java`).
 #[derive(GodotClass)]
-#[class(rename = RustItemsDisplay, base=HBoxContainer, init)]
+#[class(base=HBoxContainer, init)]
 pub struct ItemsDisplay {
     base: Base<HBoxContainer>,
     /// `_amounts`: the `"<name>=<amount>"` signature of the last rebuild.

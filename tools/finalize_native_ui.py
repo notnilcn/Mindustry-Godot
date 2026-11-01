@@ -10,7 +10,8 @@ Run this only when every `.gd` scene script has a Rust replacement. It:
 2. runs `tools/rewire_native_ui.py --apply` to swap every `.tscn` script for a
    native class type and to drop the script `ext_resource`s,
 3. verifies no non-addon script reference remains,
-4. deletes every non-addon `.gd` file under `client/`.
+4. deletes every non-addon `.gd` file under `client/` together with its
+   `.gd.uid` sidecar (the script UID cache would otherwise be orphaned).
 
 `--check` (default) only reports. `--keep-gdscript` performs steps 1–3 without
 deleting the files (for a staged commit).
@@ -28,7 +29,14 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 CLIENT = REPO_ROOT / "client"
 UI_ROOT = REPO_ROOT / "client/rust/mind-gdext/src/ui"
 
-RENAME_RE = re.compile(r"rename = Rust[A-Za-z0-9_]+, ")
+RENAME_RE = re.compile(
+    # `#[class(rename = RustX, base=…)]`
+    r"rename = Rust[A-Za-z0-9_]+, "
+    # `#[class(base=…, rename = RustX)]` (the attribute can be last)
+    r"|, rename = Rust[A-Za-z0-9_]+"
+    # `#[class(rename = RustX)]`
+    r"|rename = Rust[A-Za-z0-9_]+"
+)
 
 # Areas whose every file must be native before the cutover.
 GD_ROOTS = [CLIENT / "ui", CLIENT / "scenes", CLIENT / "tools"]
@@ -116,6 +124,9 @@ def main() -> int:
         return 0
 
     for path in pending:
+        uid = path.with_name(path.name + ".uid")
+        if uid.exists():
+            uid.unlink()
         path.unlink()
     print(f"deleted {len(pending)} non-addon .gd file(s)")
     print("next: rebuild, run the headless import gate and the UI oracles")

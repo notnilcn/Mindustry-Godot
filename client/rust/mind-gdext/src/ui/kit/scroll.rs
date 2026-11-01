@@ -21,7 +21,7 @@ use super::table::MindTable;
 /// Per-pane Arc scroll state: `amount` is the target and `visual` what is
 /// shown, stepped once per frame while they differ (`ScrollPane.act`).
 #[derive(GodotClass)]
-#[class(rename = RustMindScroll, base=ScrollContainer, init)]
+#[class(base=ScrollContainer, init)]
 pub struct MindScroll {
     base: Base<ScrollContainer>,
     content: Option<Gd<MindTable>>,

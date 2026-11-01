@@ -1,7 +1,5 @@
 [gd_scene format=3 uid="uid://cwj04r7iq0vch"]
 
 [ext_resource type="PackedScene" path="res://scenes/ui/dialogs/mind_dialog_base.tscn" id="1_base"]
-[ext_resource type="Script" uid="uid://qypq0ttxsxhy" path="res://ui/dialogs/game_over_dialog.gd" id="2_gameover"]
 
 [node name="GameOverDialog" unique_id=1790002169 instance=ExtResource("1_base")]
-script = ExtResource("2_gameover")

@@ -1,15 +1,13 @@
 [gd_scene format=3 uid="uid://bl7rulbb5cu37"]
 
-[ext_resource type="Script" uid="uid://b4mx74xty3mn8" path="res://ui/mind_dialog.gd" id="1_base"]
 
-[node name="MindDialog" type="Control" unique_id=256314280]
+[node name="MindDialog" type="MindDialog" unique_id=256314280]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-script = ExtResource("1_base")
 
 [node name="Dim" type="ColorRect" parent="." unique_id=1707993811]
 layout_mode = 1
@@ -41,7 +39,7 @@ theme_override_constants/separation = 6
 layout_mode = 2
 horizontal_alignment = 1
 
-[node name="Body" type="ScrollContainer" parent="Center/Panel/Layout" unique_id=1212224080]
+[node name="Body" type="MindScroll" parent="Center/Panel/Layout" unique_id=1212224080]
 layout_mode = 2
 size_flags_vertical = 3
 horizontal_scroll_mode = 0

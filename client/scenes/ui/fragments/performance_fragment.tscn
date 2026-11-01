@@ -1,8 +1,7 @@
 [gd_scene format=3 uid="uid://b62opqjov10ca"]
 
-[ext_resource type="Script" uid="uid://cf3bsc7mp73aa" path="res://ui/fragments/performance_fragment.gd" id="1_perf"]
 
-[node name="PerformanceFragment" type="Control" unique_id=1010017539]
+[node name="PerformanceFragment" type="MindPerformanceFragment" unique_id=1010017539]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -10,7 +9,6 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
-script = ExtResource("1_perf")
 
 [node name="Panel" type="PanelContainer" parent="." unique_id=248597420]
 layout_mode = 1

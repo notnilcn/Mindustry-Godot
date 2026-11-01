@@ -165,7 +165,7 @@ impl MindBlockConfigFragment {
     /// Hides the panel and clears the input's `config.getSelected()` mirror
     /// (`MindInput.close_block_config`; H02 T6). Exported under its GDScript
     /// name because `MindUiRoot.close_hud_panels` probes for `_close`.
-    #[func(rename = "_close")]
+    #[func(rename = _close)]
     pub fn close_panel(&mut self) {
         self.base_mut().set_visible(false);
         let Some(mut input) = kit::node("/root/Spine/Input") else {
@@ -179,7 +179,7 @@ impl MindBlockConfigFragment {
     /// J05 T1: `ItemSelection.buildTable` pick. Picking closes the panel
     /// (`ItemSelection.java:70-71`, `closeSelect`) and re-tapping the checked
     /// icon submits an empty value (`:73`, Java's `null` → `configure(null)`).
-    #[func(rename = "_on_selection_pick")]
+    #[func(rename = _on_selection_pick)]
     pub fn on_selection_pick(&mut self, value: GString) {
         let kind = dict_string(&self.config, "pick_kind", "content").to_string();
         if value.is_empty() {
@@ -195,7 +195,7 @@ impl MindBlockConfigFragment {
     /// reconstructor also closes the panel (`deselect()`,
     /// `Reconstructor.java:230`) while the factory's row leaves it open
     /// (`UnitFactory.java:311-315`).
-    #[func(rename = "_on_command_pick")]
+    #[func(rename = _on_command_pick)]
     pub fn on_command_pick(&mut self, content_name: GString, row: Gd<Node>) {
         self.submit("content", &content_name.to_string());
         let mut row = row;
@@ -211,7 +211,7 @@ impl MindBlockConfigFragment {
 
     /// `sector_select.sector_chosen`: writes the launch destination
     /// (`MindCampaign.set_launch_destination`) and closes the picker.
-    #[func(rename = "_on_launch_destination_chosen")]
+    #[func(rename = _on_launch_destination_chosen)]
     pub fn on_launch_destination_chosen(&mut self, sector: i64) {
         if let Some(mut ui) = kit::ui() {
             let _ = ui.call(
@@ -232,7 +232,7 @@ impl MindBlockConfigFragment {
 
     /// Reads the submitted text from a `LineEdit` or `TextEdit` (kept for the
     /// GDScript surface; no config route calls it today).
-    #[func(rename = "_text_of")]
+    #[func(rename = _text_of)]
     pub fn text_of(&self, field: Gd<Control>) -> GString {
         if let Ok(text_edit) = field.clone().try_cast::<godot::classes::TextEdit>() {
             return text_edit.get_text();

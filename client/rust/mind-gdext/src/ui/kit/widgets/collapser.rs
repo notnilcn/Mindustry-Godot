@@ -15,7 +15,7 @@ const DEFAULT_DURATION: f32 = 0.2;
 
 /// `MindCollapser` — a `Control` that collapses its height on demand.
 #[derive(GodotClass)]
-#[class(rename = RustMindCollapser, base=Control)]
+#[class(base=Control)]
 pub struct MindCollapser {
     base: Base<Control>,
     /// Tween duration in seconds (`Collapser.setDuration`).
