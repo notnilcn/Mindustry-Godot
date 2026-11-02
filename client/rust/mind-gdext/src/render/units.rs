@@ -830,9 +830,6 @@ impl UnitRenderer {
             }
             // `drawWeapons` (`Weapon.draw` mount transform + flip mirror).
             for weapon in &unit.weapons {
-                let Some(region) = self.resolver.find(&weapon.name) else {
-                    continue;
-                };
                 let (wx, wy, wr) = mind_core::render::unit_draw::weapon_mount_transform(
                     unit.x,
                     unit.y,
@@ -844,6 +841,24 @@ impl UnitRenderer {
                     weapon.base_rotation,
                     weapon.recoil,
                 );
+                // `Weapon.draw` (`Weapon.java:238-240`): `if(shadow > 0)
+                // Drawf.shadow(wx, wy, shadow)` — a `circle-shadow` quad at
+                // `(0,0,0,0.4)` inside the `Draw.z(z + layerOffset)` window,
+                // before the region/cell/heat quads. Emitted before the weapon
+                // region so the equal z keeps Java's insertion order.
+                if let Some(shadow) = self.resolver.find("circle-shadow")
+                    && let Some(quad) =
+                        weapon_shadow_quad(wx, wy, weapon.def.shadow, weapon.def.layer_offset, shadow.uv)
+                {
+                    let entry = groups
+                        .entry((bucket, shadow.page))
+                        .or_insert((shadow.texture.clone(), Vec::new()));
+                    entry.1.push(quad);
+                    sprites += 1;
+                }
+                let Some(region) = self.resolver.find(&weapon.name) else {
+                    continue;
+                };
                 let [u0, v0, u1, v1] = region.uv;
                 let uv = if weapon.flip {
                     [u1, v0, u0, v1]
@@ -1043,6 +1058,29 @@ fn weapon_heat_quad(
     })
 }
 
+/// `Weapon.draw` (`Weapon.java:238-240`): `if(shadow > 0)
+/// Drawf.shadow(wx, wy, shadow)`, a `circle-shadow` quad tinted
+/// `(0,0,0,0.4)` (`Drawf.shadow`, `Drawf.java:360-364`) at the weapon's
+/// `layerOffset` z. The default `Weapon.shadow` is `-1` (`Weapon.java:146`),
+/// so most weapons emit nothing.
+fn weapon_shadow_quad(cx: f32, cy: f32, shadow: f32, z: f32, uv: [f32; 4]) -> Option<ZQuad> {
+    if shadow <= 0.0 {
+        return None;
+    }
+    Some(ZQuad {
+        z,
+        quad: UnitQuad {
+            cx,
+            cy,
+            w: shadow,
+            h: shadow,
+            rot: 0.0,
+            uv,
+            color: 0x0000_0066,
+        },
+    })
+}
+
 /// `UnitType.drawWeaponOutlines` (`UnitType.java:1744-1760`): a non-top
 /// weapon's `<name>-outline` sprite, drawn with
 /// `Draw.z(z + mount.weapon.layerOffset)` and rolled back afterwards — so the
@@ -1145,7 +1183,10 @@ pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UnitQuad, ZQuad, sort_unit_quads, weapon_heat_quad, weapon_outline_quad};
+    use super::{
+        UnitQuad, ZQuad, sort_unit_quads, weapon_heat_quad, weapon_outline_quad,
+        weapon_shadow_quad,
+    };
     use mind_core::content::Rgba;
 
     fn zquad(z: f32, color: u32) -> ZQuad {
@@ -1161,6 +1202,25 @@ mod tests {
                 color,
             },
         }
+    }
+
+    /// `Weapon.draw` (`Weapon.java:238-240`): a weapon with `shadow > 0`
+    /// draws a `circle-shadow` quad at `(0,0,0,0.4)` under the weapon region
+    /// (same `layerOffset` z); the `-1` default emits nothing.
+    #[test]
+    fn weapon_shadow_quad_gates_on_positive_shadow() {
+        let uv = [0.0, 0.0, 1.0, 1.0];
+        assert!(weapon_shadow_quad(0.0, 0.0, -1.0, 0.0, uv).is_none());
+        assert!(weapon_shadow_quad(0.0, 0.0, 0.0, 0.0, uv).is_none());
+        let Some(quad) = weapon_shadow_quad(12.0, 34.0, 8.0, 0.0001, uv) else {
+            panic!("positive shadow emits the quad");
+        };
+        assert_eq!(quad.z, 0.0001);
+        assert_eq!(quad.quad.color, 0x0000_0066);
+        assert_eq!(
+            (quad.quad.cx, quad.quad.cy, quad.quad.w, quad.quad.h),
+            (12.0, 34.0, 8.0, 8.0)
+        );
     }
 
     /// L04 T3: `Weapon.layerOffset` and the payload/leg offsets are Java
