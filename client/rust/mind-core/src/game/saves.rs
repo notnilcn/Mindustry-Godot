@@ -24,8 +24,11 @@ use crate::io::save::version::WriteContext;
 use crate::io::save::{SaveOptions, SaveReadState};
 use crate::io::settings::{KEY_LAST_SECTOR_SAVE, KEY_SAVE_INTERVAL, SettingsStore};
 
-/// `saveinterval` default in **seconds** when the setting is absent
+/// `saveinterval` default when the setting is absent
 /// (`SettingsMenuDialog`: `sliderPref("saveinterval", 60, 10, 600, 10, seconds)`).
+/// The slider is *labeled* in seconds upstream but `Saves.update` multiplies the
+/// stored value by 60 (`Saves.java:219`), so the value is **minutes**; the name
+/// is kept for ABI/compat and reads the raw setting, not a duration in seconds.
 pub const DEFAULT_SAVE_INTERVAL_SECONDS: i32 = 60;
 
 /// Legacy beta megabase Serpulo sectors removed by `Saves.clearOldMegabaseSectors`.
@@ -224,10 +227,11 @@ impl Saves {
     }
 
     /// `Saves.update` policy half: playtime accrual and the autosave cadence
-    /// decision. `autosaved` reports that `save_interval_seconds` was crossed
-    /// and the current slot must be written; the caller performs the write
-    /// ([`Saves::update`] inlines a `WriteContext` write, the live host queues
-    /// it at the `IoSet` seam).
+    /// decision. `autosaved` reports that the `saveinterval` threshold was
+    /// crossed and the current slot must be written; the caller performs the
+    /// write ([`Saves::update`] inlines a `WriteContext` write, the live host
+    /// queues it at the `IoSet` seam). `save_interval_seconds` is the raw
+    /// `saveinterval` setting value, which upstream stores in **minutes**.
     pub fn update_policy(
         &mut self,
         update: SavesUpdate,
@@ -252,9 +256,12 @@ impl Saves {
                 .is_some_and(|slot| slot.is_autosave(settings));
         if autosave {
             self.time += update.delta_ticks as f32 / 60.0;
-            // `Saves.update`: `time > saveinterval * 60` in ticks, i.e. the
-            // setting is seconds (`self.time` accrues seconds).
-            let interval = save_interval_seconds.max(0) as f32;
+            // `Saves.java:215-219`: `time += Time.delta` (seconds) then
+            // `time > Core.settings.getInt("saveinterval") * 60` — the stored
+            // setting is MINUTES (its settings slider is mislabeled "seconds"
+            // upstream, `SettingsMenuDialog.java:373`), so the threshold is
+            // `saveinterval * 60` seconds.
+            let interval = save_interval_seconds.max(0) as f32 * 60.0;
             if self.time > interval {
                 self.saving = true;
                 self.time = 0.0;
@@ -675,13 +682,14 @@ mod tests {
         saves.slots[index].set_autosave(&mut settings, true);
 
         let update = SavesUpdate {
-            delta_ticks: 30 * 60,
+            delta_ticks: 30 * 60 * 60,
             is_game: true,
             paused_with_dialog: false,
             game_over: false,
             is_campaign: false,
         };
-        // 60-second interval (`saveinterval` is seconds); 30 s + 30 s + 1 s crosses it on the third update.
+        // 60-minute interval (`saveinterval` is minutes); 30 min + 30 min + ~1 s
+        // crosses it on the third update (`Saves.java:219`).
         let first = saves.update(update, &settings, &fs, &paths, &ctx, &SaveOptions::new());
         assert!(!first.autosaved);
         let second = saves.update(update, &settings, &fs, &paths, &ctx, &SaveOptions::new());
@@ -704,10 +712,13 @@ mod tests {
     }
 
     #[test]
-    fn update_policy_interval_is_seconds() {
-        // `saveinterval` is seconds (`SettingsMenuDialog`: min 10, step 10);
-        // 9 s must not cross a 10 s interval and +2 s must
-        // (`Saves.java:219` `time > saveinterval * 60` in ticks).
+    fn update_policy_interval_is_minutes() {
+        // `saveinterval` is MINUTES despite the upstream slider label
+        // (`SettingsMenuDialog.java:373` formats `setting.seconds`), because
+        // `Saves.java:219` compares `time > saveinterval * 60` seconds. With
+        // saveinterval=10 the threshold is 600 s: 599 s must not cross it and a
+        // further 2 s (601 s total) must. The old seconds reading crossed at 10 s,
+        // so this fails on the pre-fix `time > interval` comparison.
         let mut settings = SettingsStore::new();
         settings.put_i32(KEY_SAVE_INTERVAL, 10);
         let mut saves = Saves::new();
@@ -717,7 +728,7 @@ mod tests {
         saves.current = Some(0);
         saves.slots[0].set_autosave(&mut settings, true);
         let update = SavesUpdate {
-            delta_ticks: 9 * 60,
+            delta_ticks: 599 * 60,
             is_game: true,
             paused_with_dialog: false,
             game_over: false,
