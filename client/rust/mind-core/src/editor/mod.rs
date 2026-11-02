@@ -290,9 +290,11 @@ pub trait EditorGrid {
     fn clear_editor_darkness(&mut self);
     /// Recaches every tile after a load/resize (`EditorRenderer.resize`).
     fn recache_all(&mut self);
-    /// Rebuilds the grid resized by `(width, height)` with every in-bounds tile
-    /// shifted by `(shift_x, shift_y)` and shifted building centers reattached
-    /// (`MapEditor.resize`). Out-of-bounds tiles become the default stone floor.
+    /// Rebuilds the grid resized by `(width, height)`, re-centres the old
+    /// rectangle by `(old - new) / 2`, shifts it by `(shift_x, shift_y)` and
+    /// reattaches the moved building centers (`MapEditor.resize`,
+    /// `MapEditor.java:310`). Tiles outside the new grid become the default
+    /// stone floor.
     fn resize_shift(
         &mut self,
         content: &ContentRegistry,
