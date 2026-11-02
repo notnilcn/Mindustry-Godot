@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-02T14:29:10Z",
+  "updated": "2026-11-02T15:54:11Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -14143,7 +14143,14 @@
             }
           }
         ]
-      }
+      },
+      "notes": [
+        {
+          "at": "2026-11-02T15:09:39Z",
+          "by": "orch-c:shadow",
+          "text": "Per-weapon shadow (Weapon.shadow -> Drawf.shadow, Weapon.java:238-240) landed as PAR-0461 / commit 21830976; this umbrella item's remaining scope may now be empty (legs/parts/cell/soft shadow landed in 92ba15aa + 1e0003af) but was not re-verified end-to-end in this session."
+        }
+      ]
     },
     "PAR-0127": {
       "title": "Campaign weather never happens: no rain, snow, sandstorm or fog",
@@ -16135,23 +16142,43 @@
     },
     "PAR-0365": {
       "title": "Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): UnitType.parts landed in 1e0003af. render/unit_parts.rs:189-232 runs the 3-phase live pass (Under/Over/OverAdditive per band) for unit parts and weapon parts; :577-614 part_params carries mount.warmup/reload/smoothReload/heat/recoil/charge/life; :617-635 draw_weapon_parts draws under/over parts with Weapon.layerOffset and part_recoil; wired at render.rs:1030-1049 (UnitParts-{band}-{phase} nodes); content feed UnitDraw.parts = def.parts (sim_host.rs:6121) with the 31 Erekir DrawPartSpecs; test weapon_part_params_carry_the_mount_state (mind-core/src/fx/parts/weapons.rs:404-423). Java mapping Weapon.java:236-278 matches. Minor unported: Java applyColor team tint on parts. Live pixel leg not run.",
+      "commits": "1e0003af"
     },
     "PAR-0366": {
       "title": "Ability draws missing: ForceField/EnergyField/ArmorPlate/UnitSpawn/MoveLightning/SuppressionField/ShieldArc",
-      "status": "fixing"
+      "status": "fixing",
+      "notes": [
+        {
+          "at": "2026-11-02T15:54:11Z",
+          "by": "orch-c:audit2",
+          "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host.rs:7199-7245), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host.rs:7197-7198 documents them as unmodelled."
+        }
+      ]
     },
     "PAR-0367": {
       "title": "Weapon `layerOffset` not applied when drawing weapons",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "non-top weapon outlines now push z = Weapon.layerOffset (UnitType.java:1744-1760); weapon region/cell + parts already applied layerOffset from 92ba15aa; tests weapon_outline_quad_applies_layer_offset/mirrors_uvs_when_flipped; cargo test -p mind-gdext weapon_outline -> 2 passed; bash tools/build.sh ok",
+      "commits": "2bf7309b"
     },
     "PAR-0368": {
       "title": "`drawCrawl` segments (renale/latum) not drawn",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "drawCrawl is implemented (landed in 92ba15aa) and independently audited this session: mind-core/src/render/unit_draw.rs::crawl_draw_ops (:229) is covered by test crawl_draw_ops_follow_java_order_and_geometry (:1206), which asserts Java UnitType.java:1902-1937 order/geometry (outline pass over all segments before the body, slerp(segmentRot -> rotation, i/(segments-1)), sin(crawlTime + i*phase, scl, mag) offset along the rotation, per-segment cell, segments==1 fallback); the view (mind-gdext/src/render/units.rs:657-706) emits <name>-segment-outline{i}/-segment{i}/-segment-cell{i} (Java:1195-1197) and skips the carrier drawCell for Crawlc (units.rs:807-808 vs Java:1541); the CrawlComp feed is sim_host.rs:5901-5917. Minor unported sub-ops not part of this item: head crawlTime composition (Java:1905-1907, unreachable for vanilla segment children) and the isPayload segmentRot override (Java:1532-1534). Live pixel leg not run.",
+      "commits": "92ba15aa"
     },
     "PAR-0369": {
       "title": "`drawPayload` (mega/quad/oct carrying units/blocks) not drawn",
-      "status": "fixing"
+      "status": "fixing",
+      "notes": [
+        {
+          "at": "2026-11-02T15:44:05Z",
+          "by": "orch-c:crawl",
+          "text": "Independent read-only audit (2026-11-03): block payloads are complete (square shadow + block-<name>-full icon, units.rs:580-620 vs BuildPayload.draw:114-133; z -0.03 matches Java prev(z-0.01)-0.02). Remaining residual for this item: (1) the carried UNIT's soft shadow is missing — Java UnitPayload.draw (UnitPayload.java:152-160) calls unit.type.draw() at elevation 0, which reaches drawSoftShadow (UnitType.java:276 default true, :1527) and emits a circle-shadow quad at payloadZ-0.01 sized max(region.w,region.h)*scl*softShadowScl*1.6; the port (units.rs:499-577) emits outline/body/cell only; (2) payload rotation uses the pickup snapshot (CarriedPayload::Unit.rotation, comp.rs:268-277) while Java pay.set(x,y,unit.rotation) re-rotates to the carrier facing every frame (UnitPayload.set:78-81)."
+        }
+      ]
     },
     "PAR-0370": {
       "title": "Text buttons render the glyph inline in the label with a flat slate fill (no `defaultt` nine-patch/cell layout) (0cf55155)",
@@ -16196,7 +16223,10 @@
     },
     "PAR-0379": {
       "title": "Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "HeaterGenerator.java:38-42 adds the bar.heat row; the shared generator arm now pushes key=heat with Pal.lightOrange 0xf68021ff and value (heat/heatOutput).clamp(0,1) when extras.heat is set (extras.heat comes from HeatState, only HeaterGenerator); test bar_rows_for_the_remaining_families covers neoplasia-reactor ['health','liquid','power','heat'] with bar.heat/0.25/0xf68021ff plus a plain ConsumeGenerator (steam-generator, heat=None) with no heat row; build ok",
+      "acceptance": "Unit test in client/rust/mind-gdext/src/sim_host.rs (extend bar_rows_for_the_remaining_families): def('neoplasia-reactor').kind==BlockKind::HeaterGenerator with BarExtras{ heat: Some((heat, heat_output)), ..default } (heat=0.25*output, plus generator Some) asserts keys == ['health','power','heat'], heat row label_key=='bar.heat', label_args empty, value==0.25, and color==0xf68021ff; also assert a ConsumeGenerator (e.g. 'steam-generator') still emits no heat row. Then 'cargo test -p mind-gdext building_bar_rows' (or tools/build.sh) passes.",
+      "commits": "96b1873a"
     },
     "PAR-0380": {
       "title": "Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)",
@@ -16284,7 +16314,9 @@
     },
     "PAR-0399": {
       "title": "Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the live explosion view half landed in 9e51cfb4. sim_host.rs:949-971 installs HostExplosionSink on the /root/Spine/MindFx bus inside install_sim_seams (rerun after every sim swap at :756,3175,3731); fx/explosion_sink.rs:38-100 emits the explode effect, shake, scorch decal and Sounds.explosion; generator.rs:718 and power/behavior.rs:153 fire it on onDestroyed/meltdown/explode_on_full; tests explosion_sink.rs:169 host_sink_emits_effect_shake_scorch_and_sound and :196. Generic block-break FX goes separately through the live FxSink (sim/mod.rs:1243 BREAK_BLOCK), so no Java explosion path is inert. Only nuance: the test does not assert the AudioEvent::At sound branch; live pixel/audio leg not run.",
+      "commits": "9e51cfb4"
     },
     "PAR-0400": {
       "title": "`Block.depositCooldown` ignored (global deposit gate only) (60e34db5)",
@@ -16323,7 +16355,9 @@
     },
     "PAR-0408": {
       "title": "Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the floor autotile/tiling and liquid-overlay alpha redraw landed in 847f0d4f (ancestor of HEAD). floor_main.rs:37-103 has the autotile bitmask/TileBitmask index/region naming/mid variants/tiling split+cell; mind-gdext/render/floor.rs:687-735,769-830 execute the tiling branch, the autotile branch (overlay same-check) and the liquid 1-overlayAlpha redraw after the overlay; tests floor_main.rs:116-183 and floor.rs:989 tiling_floor_picks_tile_layer_and_carries_cell_coords, :1022 autotile_floor_uses_the_bitmask_region, :1047 autotile_mid_variants..., :1066 liquid_floor_redraws_main_over_its_overlay (0xffff_ff59 at 0.65, 166 at 0.35). The item's autotile.rs path is conveyor-frame math, not floors. Remaining debt is the fresh Java metal-tiles capture only (evidence, not code).",
+      "commits": "847f0d4f"
     },
     "PAR-0409": {
       "title": "F-K1: Custom Game map grid is clipped at the 5th column and does not scroll — with 19 maps only the first 10 cards are reachable, blocking Map Play (sandbox/Caldera)",
@@ -16383,8 +16417,10 @@
     },
     "PAR-0420": {
       "title": "Planet orbit line drawn in the wrong plane (near-horizontal) vs Java renderOrbit's parent-XZ circle (PlanetRenderer.java:171-179)",
-      "status": "fixing",
-      "similarity": 52.3
+      "status": "reference-verified",
+      "similarity": 52.3,
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the orbit plane landed in 9ca2138c (ancestor of HEAD). orbit.rs:175-203 orbit_center_in_planet_frame computes the parent-XZ circle centre (parent position minus the planet position rotated by +getRotation, mirroring Planet.getTransform/lookAt); campaign.rs:5649-5684 feeds that centre into the orbits rows; planet.rs:951+ build_orbits builds the loop as centre + (cos*r, 0, sin*r) with 10*radius points as a closed LINE_STRIP (PlanetRenderer.java:171-179 XZ loop around parent.position); test orbit.rs:252 serpulo_orbit_center_is_the_sun_in_mesh_frame (6 orbit tests green in the landing commit). The old near-horizontal plane is gone; the only remaining diff is Java's uiAlpha<=0.02 visibility gate vs the port's alpha material (cosmetic).",
+      "commits": "9ca2138c"
     },
     "PAR-0421": {
       "title": "Editor shell skin: tool buttons grey-filled with no selected accent frame, square Show-* checks, dot+text Brush row, thin red map frame (Java squareTogglei/flati, round checks, Lines.rect Pal.accent)",
@@ -16501,8 +16537,10 @@
     },
     "PAR-0443": {
       "title": "Planet page sector grid/selection not faded by uiAlpha when zoomed out",
-      "status": "mismatch",
-      "similarity": 58.7
+      "status": "reference-verified",
+      "similarity": 58.7,
+      "evidence": "PlanetDialog.renderSectors (core/src/mindustry/ui/dialogs/PlanetDialog.java:453-499) fades the hover fill with hoverColor.mulA(state.uiAlpha) (:489), the selected sector with drawSelection(selected, state.uiAlpha) (:495, PlanetRenderer.java:228-230 = Pal.accent at uiAlpha) and both borders with drawBorders(..., state.uiAlpha) (:490/:496, Planet.java:562-564). The port (client/rust/mind-gdext/src/ui/planet.rs) hard-coded the hover fill alpha 0.5 and the selection band 1.0 / edge 0.3 and rebuilt them only on hover/selection changes, so they stayed opaque when zoomed out. Now rebuild_hover_fill/rebuild_highlight run both alphas through faded_alpha(base, ui_alpha) and the ui_alpha watermark block (:290-297) also refreshes both overlays; unit test ui::planet::tests::sector_overlay_alpha_scales_with_ui_alpha covers 0.5@1.0=0.5, 0.5@0=0, 0.3@0.5=0.15, clamp; bash tools/build.sh green; committed 16d4ec78.",
+      "commits": "16d4ec78"
     },
     "PAR-0444": {
       "title": "HUD IO loading driver hid every loading overlay one frame after it appeared; MindLabel ignored font_color overrides and 25 sites used Godot's X11 grays for Arc gray/lightGray",
@@ -16511,7 +16549,9 @@
     },
     "PAR-0445": {
       "title": "Save Game dialog is a plain text list; Java uses the Load-dialog layout (search, mode filters, two-column slot cards, New Save in the button row)",
-      "status": "fixing"
+      "status": "reference-verified",
+      "evidence": "Independent read-only audit (HEAD 96b1873a): the Load-layout Save dialog landed in a053dc9a and was carried into the native-Rust UI. ui/dialogs/batch_h.rs:72 maps save to LoadDialogController::save(); :948 title @savegame; :965-1000 builds the load layout with the @save.search LineEdit at :978 and the mode filter toggles (:1065); :1196 the two-column card grid (viewport width / 470, the Java 470 clamp); :1050 the New Save button (@save.new, node new_save) sits in the button row; :1553 asks @save.overwrite. The Save dialog is no longer a plain text list; it extends the Load layout as upstream.",
+      "commits": "a053dc9a"
     },
     "PAR-0446": {
       "title": "unit-cargo-unload-point and the Erekir unit assemblers lack solid = true (UnitCargoUnloadPoint.java:26, UnitAssembler.java:62); affects sim/pathing",
@@ -16525,7 +16565,10 @@
     },
     "PAR-0448": {
       "title": "Hover bar unit icons render as literal [icon name=...] markup (MindBar draws text with a plain font; Java draws the unit icon)",
-      "status": "seeded"
+      "status": "reference-verified",
+      "evidence": "test: CARGO_TARGET_DIR=client/bin/rust cargo test -p mind-core unitcap_label -> ui::text::tests::unitcap_label_uses_content_icon_glyph ok (1 passed); build: bash tools/build.sh -> Finished dev profile (mind-core/mind-headless/mind-gdext), exit 0; live (godot :13 bridge 7000, res://scenes/game.tscn): MindAssets.bundle_markup_format_text_icons('bar.unitcap', [':dagger:','2','8']) -> U+F800 glyph + ' 2/8', no '[icon'; live MindBar theme font: 2 fallbacks, U+F800 advance 19px at 18px (Java xadvance=S). Not verified live: a hovered Dagger-factory bar screenshot.",
+      "acceptance": "Static: (a) placement.rs bar_text (or MindBar) emits the PUA icon char / draws the icon region instead of BBCode [icon ...]; (b) a unit test in sim_host.rs or placement.rs asserts the formatted units-bar label for a factory plan (e.g. dagger, count 2, cap 8) contains the Iconc char for the unit name (or is split into icon+text runs) and the text still reads 2/8; (c) no literal [icon substring can reach MindBar::draw_name (grep + test). Live (playtest skill, unit-factory hover): hover a placed Dagger factory with a plan set; godot_exec-assert the units MindBar under the hover bar table exists, its bar_name contains the unit icon char (or exposes icon state) and NOT [icon, and the text reads 2/8 centred; capture a screenshot (parity/screenshots) showing the dagger icon plus 2/8 at the 18 px line height with no literal brackets. Java metric reference: S = int(lineHeight/scaleY) at font size 18 (port content-icon bitmap font: fixed size 32 scaled to 18 => line*18/32), icon Scaling.fit(48,48,S,S) = SxS, xoffset 0 (square region), yoffset = -S, xadvance = S; the icon glyph has NO outline in Java (registerIcon overwrites the outline font glyph with the raw region), so if the PUA/fallback path draws a 2 px dark stroke behind the icon (draw_string_outline_ex strokes fallback glyphs too), draw the region as a quad instead.",
+      "commits": "e0dffcbc"
     },
     "PAR-0449": {
       "title": "Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped",
@@ -16534,6 +16577,588 @@
     "PAR-0450": {
       "title": "Map previews ignore the tinted ColoredFloor/ColoredWall tile colour (extraData), drawing the default block colour",
       "status": "verified"
+    },
+    "PAR-0451": {
+      "title": "Turret shoot-pattern delays are dropped: every delayed shot spawns on the firing tick (scatter/salvo/swarmer bursts collapse, lancer never charges)",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0451"
+            }
+          }
+        ]
+      },
+      "area": "combat/turrets",
+      "java": "core/src/mindustry/world/blocks/defense/turrets/Turret.java:751-830; core/src/mindustry/type/Weapon.java:471-489; core/src/mindustry/content/Blocks.java:3420-3421,3583,3734-3735,3847-3848",
+      "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:2042-2198; client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:1943-1957; client/rust/mind-core/src/weapons/mod.rs:77-90,139-150,700-713; client/rust/mind-core/src/weapons/pattern.rs:103-113,163-183",
+      "evidence": "Turret.shoot now defers pattern shots with delay>0 through a per-turret pending queue (TurretState.pending = Java queuedBullets, Turret.java:751-830) drained at the top of the turret update; the extracted TurretBuild.bullet() (Turret.java:785-828) recomputes muzzle/angle/lifetime/targetPos and restores the emission barrel (Turret.java:788-795); charging() is now 'pending non-empty && firstShotDelay>0' (Turret.java:718-720) which gates updateShooting, shouldTurn()/moveWhileCharging (Turret.java:672-674; lancer Blocks.java:3594) and no longer pauses reload (reloadWhileCharging default true, Turret.java:88). Java refs: Turret.java:718-720,742,751-830; Weapon.java:471-489 as the analogous unit-vehicle branch; Blocks.java:3420-3421 (scatter shots=2 shotDelay=5), 3583 (lancer firstShotDelay=40), 3733-3734 (swarmer ShootBarrel shots=4 shotDelay=5), 3846-3847 (salvo shots=4 shotDelay=3). New tests in turrets/mod.rs: multi_shot_patterns_fire_on_their_delayed_ticks (salvo T/+3/+6/+9, swarmer T/+5/+10/+15), scatter_fires_one_shot_per_delayed_tick (T/+5), lancer_charges_before_its_delayed_shot (40-tick charge, charge ramp 0.5 at tick 20, frozen rotation, reload continues, exactly 1 bullet at T+40). Pre-fix source with only the tests re-added fails: salvo ticks [0] instead of [0,3,6,9]; scatter [0] instead of [0,5]; lancer spawns a bullet on the queue tick (bullets_created=1). After the fix cargo test -p mind-core passes 2834 tests.",
+      "acceptance": "Add a mind-core turret test in client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs tests: CombatHarness::new(48,16,7), place a copper-wall as target in range, spawn_test_turret(\"scatter\", tx, ty, 1), feed scrap via handle_item, then tick and record harness.bullets.len() per tick. Expected after the fix (Java Blocks.java:3420-3421): exactly 1 new bullet on the first firing tick and the 2nd exactly 5 ticks later — assert deltas [(T,+1),(T+5,+1)] and not [+2 at T]. Repeat with \"salvo\" (plain(4,3.0,0.0)) => +1 at T, T+3, T+6, T+9, and with \"lancer\" (shoot.first_shot_delay = 40.0) => no bullet for 40 ticks after reload completes, then 1, with TurretState.charge rising 1/40 per tick during the charge (charging() true). Also cargo test -p mind-core combat/weapons must stay green.",
+      "commits": "4e6b02fe",
+      "notes": [
+        {
+          "at": "2026-11-02T15:06:12Z",
+          "by": "fixer-a1",
+          "text": "Acceptance adaptation: the proposal's 'place a copper wall' target does not work for scatter because it is anti-air (targetGround=false, Blocks.java:3426; Turret.java:645 uses Units.bestEnemy), so the scatter test uses spawn_test_unit as a stand-in target instead. Adjacent out-of-scope finding (not fixed here, separate item): the air-only branch of turrets/mod.rs find_target tests the predicate !unit_is_flying, inverted vs Java's !e.isGrounded(), so a grounded unit is picked by anti-air turrets; the scatter test only asserts spawn ticks and is written to not depend on the flight flag beyond acquiring a target."
+        }
+      ]
+    },
+    "PAR-0452": {
+      "title": "Sector shield gate is inverted: the three megabase sectors 246/244/242 are locked forever and Stormrider (27) is landable without them",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0452"
+            }
+          }
+        ]
+      },
+      "area": "campaign/sector-rules",
+      "java": "core/src/mindustry/type/Sector.java:125-127,core/src/mindustry/type/SectorPreset.java:112-120,core/src/mindustry/maps/SectorSubmissions.java:82",
+      "rust": "client/rust/mind-core/src/game/sector.rs:701-704,client/rust/mind-core/src/content/registries/sectors.rs:488-506,client/rust/mind-core/src/ui/campaign.rs:939,1310",
+      "evidence": "Java Sector.isShielded() asks whether the *preset's* shield list has an uncaptured sector: 'return preset != null && preset.shieldSectors.size > 0 && !isCaptured() && preset.shieldSectors.contains(s -> !s.isCaptured());'. SectorSubmissions.java:82 gives sector 27 the list [246,244,242], so 27 is shielded while any of the three megabases is uncaptured, and stops being shielded once all three are captured. SectorPreset.init sets the *reverse* visual link on the providers only: 'for(var other : shieldSectors){ other.shieldTarget = sector; }' (used by PlanetDialog.java:519 to draw the arc). The Rust port reuses that reverse link as the gate: 'pub fn is_shielded(&self) -> bool { self.shield_target.is_some() && !self.is_captured(None) }', and registries/sectors.rs link() writes 'sector.shield_target = Some(target)' onto 246/244/242. Result is exactly inverted: 246/244/242 report is_shielded() forever (they have shield_target and can never be captured, so !is_captured stays true) and sector 27 never reports it. The gate is live: ui/campaign.rs:1310 'let base_gate = def.generator != GeneratorKind::None && !sector.is_shielded();' sets view.selectable=false, and :939 'shielded: sector.is_shielded()'. Player-visible: the three endgame megabase sectors are permanently unselectable, and Stormrider can be launched without capturing them (Java's PlanetDialog.java:424 'if(sector.isShielded()) return false;').",
+      "acceptance": "cargo test -p mind-core --lib shield_gate (new test in content/registries/sectors.rs or game/sector.rs): build the campaign from the registry, then assert planet.sectors[27].is_shielded()==true while 246/244/242 are uncaptured and each of 246/244/242 .is_shielded()==false; then mark all three captured (save=Some, info.has_core=true, waves=false, attack=false) and assert sectors[27].is_shielded()==false. Also assert mind-core::ui::campaign's sector view for 246 has selectable==true once captured and 27 shielded==true beforehand (existing sector-view test helpers).",
+      "notes": [
+        {
+          "at": "2026-11-02T14:37:05Z",
+          "by": "orch-b:checker1",
+          "text": "shield_target must stay as the visual arc source (PlanetDialog.java:519 uses sec.shieldTarget for the arc to the guarded sector); only the gate is wrong. Suggested fix: append a resolved shield-provider id list to the runtime Sector (e.g. shield_sectors: Vec<u16> copied from preset.shield_sectors in game/planet.rs:167 next to shield_target) and make the gate take the planet, e.g. is_shielded_in(&Planet) = !shield_sectors.is_empty() && !is_captured(None) && shield_sectors.any(|id| !planet.sector(id).is_captured(None)); update ui/campaign.rs:939/1310. Unrelated residual seen in the same file, NOT part of this item: game/sector.rs threat_bucket compares preset_difficulty == 10.0 but SectorDifficulty.unreasonable = 13 (SectorDifficulty.java:13, content/registries/sectors.rs:31 UNREASONABLE=13), so Stormrider's 'threat.unreasonable' band is dead code and it shows 'eradication'."
+        },
+        {
+          "at": "2026-11-02T14:44:50Z",
+          "by": "orch-b:fixer1",
+          "text": "Fixed: runtime Sector copies the guarded preset's shield_sectors (planet.rs); is_shielded(&Planet) = !list.is_empty() && !captured && any provider uncaptured; shield_target kept as arc source. 27 shielded until 246/244/242 captured; providers never shielded. Tests shield_gate_matches_java + shield_gate_sector_views fail before / pass after; game:: + ui::campaign green; build ok."
+        }
+      ],
+      "commits": "43f454da",
+      "verification": "cargo test -p mind-core --lib shield_gate -> ok (fails before the fix); bash tools/build.sh -> ok; Java evidence Sector.java:125-127 + SectorSubmissions.java:82"
+    },
+    "PAR-0453": {
+      "title": "Sector threat label: 'unreasonable' compares preset difficulty to 10 (eradication) instead of 13 (SectorDifficulty.unreasonable), so Stormrider shows 'eradication' and the megabases show 'unreasonable'",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0453"
+            }
+          }
+        ]
+      },
+      "area": "campaign/sector-rules",
+      "java": "core/src/mindustry/type/Sector.java:80-84,core/src/mindustry/type/SectorDifficulty.java:9-15",
+      "rust": "client/rust/mind-core/src/game/sector.rs:706-714",
+      "evidence": "Java Sector.displayThreat() (core/src/mindustry/type/Sector.java:80-84) picks the bundle key with 'preset != null && Mathf.equal(preset.difficulty, SectorDifficulty.unreasonable) ? \"unreasonable\" : threats[...]', and SectorDifficulty.unreasonable = 13 (core/src/mindustry/type/SectorDifficulty.java:14, commented 'special difficulty reserved for 27'). The Rust port's threat_bucket (client/rust/mind-core/src/game/sector.rs:706-714) tests 'if self.preset_difficulty == 10.0 { return \"unreasonable\"; }' — 10 is SectorDifficulty.eradication (SectorDifficulty.java:13), not unreasonable. Sector 27 is registered with UNREASONABLE=13 (content/registries/sectors.rs:402-410, asserted at :1029) and the megabases 246/244/242 with ERADICATION=10 (:390-392), so the labels are swapped: 27 renders 'threat.eradication' where Java renders 'threat.unreasonable', and each megabase renders 'threat.unreasonable' where Java renders 'threat.eradication'. Dedupe: PAR-0226 is the planet-panel threat colour (verified), PAR-0297 was numbered-sector threat=0; neither covers this constant mismatch.",
+      "acceptance": "cargo test -p mind-core --lib threat_bucket: a sector with preset_difficulty 13.0 -> \"unreasonable\"; 10.0 -> \"eradication\"; 0.0 -> \"low\"; and the campaign sector 27 (SectorSubmissions register(27, UNREASONABLE=13)) -> \"unreasonable\" while 246/244/242 (ERADICATION=10) -> \"eradication\".",
+      "commits": "9d6b6ea1",
+      "verification": "cargo test -p mind-core --lib threat_bucket -> 1 passed (with the old body it returned 'unreasonable' for 10.0 and 'low'/'eradication' for 13.0); bash tools/build.sh -> exit 0; Java evidence Sector.java:80-84 + SectorDifficulty.java:14 (unreasonable=13).",
+      "notes": [
+        {
+          "at": "2026-11-02T14:53:43Z",
+          "by": "orch-b:orch",
+          "text": "Fixed in 9d6b6ea1: threat_bucket compares preset_difficulty against content::registries::sectors::sector_difficulty::UNREASONABLE (13) with Java's Mathf.equal epsilon; 10.0 (eradication) now falls through to the threat index. Endgame megabases no longer render 'threat.unreasonable' and Stormrider (27) does. No gdext change needed (ui/campaign.rs reads threat_band generically)."
+        }
+      ]
+    },
+    "PAR-0454": {
+      "title": "Unit weapon heat overlay (<weapon>-heat, Weapon.java:261-272) is never drawn: firing units show no additive heat glow",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0454"
+            }
+          }
+        ]
+      },
+      "area": "render/unit",
+      "java": "core/src/mindustry/type/Weapon.java:218-285",
+      "rust": "client/rust/mind-gdext/src/render/units.rs:839-909",
+      "evidence": "1:1 port of Java Weapon.draw core/src/mindustry/type/Weapon.java:267-272. units.rs drawWeapons now emits the <weapon>-heat quad after the cell quad when resolver.find(name+'-heat') exists and mount.heat > 0: additive flash_groups (CanvasItemMaterial BlendMode::ADD, same family as the hit flash), z = weapon.def.layer_offset, weapon mount transform, UV mirrored when flipSprite, colour = def.heat_color RGB with alpha round(clamp(heat)*255) (Arc Draw.color(color, alpha) semantics: heatColor.a NOT multiplied). Pure helpers weapon_heat_quad/heat_quad_color/heat_uv in the same file make the emission decision testable without Godot. Tests (new, in units.rs mod tests): weapon_heat_quad_gates_on_heat_and_tints_by_heat_color (heat 0.0 -> None; cleroi red heatColor at heat 1.0 -> 0xff0000ff with z -0.002; heat 0.5 -> alpha 0x80) and weapon_heat_quad_mirrors_uvs_when_flipped ([u0,v0,u1,v1] -> [u1,v0,u0,v1]); both would not compile/exist before the fix. Command: cd client/rust && CARGO_TARGET_DIR=<worktree>/client/bin/rust cargo test -p mind-gdext weapon_heat_quad -> 2 passed, 0 failed (194 filtered). bash tools/build.sh -> OK (dev profile, mind-gdext cdylib + mind-headless, scenarios synced). LIVE: Godot leg NOT run (12-min timebox); twin-verified NOT claimed (needs fresh java+godot runs under runs/PAR-0454). Residual left to PAR-0367: non-top <weapon>-outline z stays 0.0 instead of layerOffset.",
+      "acceptance": "Rust test on the emitted quad list: for a firing mount of a heat-bearing weapon (cleroi-weapon: heat_color red, layer_offset -0.002) with mount.heat = h > 0, exactly one <weapon>-heat quad exists with z == def.layer_offset, colour RGB == heat_color RGB and alpha == round(h*255) (h=1.0 -> 0xff0000ff), UVs mirrored when flip_sprite, and zero heat quads when h == 0 or the region is missing (extend the units.rs tests seam / sort_unit_quads-style pure helper). Live: spawn and fire cleroi or corvus (arc/breach are turrets, not unit weapons), confirm MindRender.get_render_stats().sprites rises by one per firing mount and capture a Godot screenshot showing the additive glow over the barrel, taken on the same tick as the shot.",
+      "commits": "2bf7309b"
+    },
+    "PAR-0455": {
+      "title": "Erekir duct family drops content speed overrides: duct-unloader fires every tick (Java every 4) and duct-router runs at speed 5 (Java 4)",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0455"
+            }
+          }
+        ]
+      },
+      "area": "world/blocks/distribution",
+      "java": "core/src/mindustry/content/Blocks.java:2194-2201,2229-2234; core/src/mindustry/world/blocks/distribution/DuctRouter.java:22,116-141; core/src/mindustry/world/blocks/distribution/DirectionalUnloader.java:25,88-120",
+      "rust": "client/rust/mind-core/src/world/blocks/distribution/duct_router.rs:35-42,116-146; client/rust/mind-core/src/world/blocks/distribution/directional_unloader.rs:46-60,85-147; client/rust/mind-core/src/content/registries/blocks/distribution.rs:243-258,308-330",
+      "evidence": "Java content overrides the class defaults: duct-router speed=4f (Blocks.java:2194-2201, class 5f DuctRouter.java:19) and duct-unloader speed=4f (Blocks.java:2229-2234, class 1f DirectionalUnloader.java:25). Port registered the class defaults, so duct-unloader drained one item per tick (4x) and duct-router moved an item on T+5 instead of T+4. Fix sets both VANILLA speeds to 4.0 and adds Java-derived cadence tests in duct_router.rs / directional_unloader.rs: 'cargo test -p mind-core cadence' -> fails before (router: left 0, right 1 at T+4; unloader: left 40, right 10 at 40 ticks) and passes after (5 passed, 0 failed).",
+      "acceptance": "Add two mind-core tests (BuildHarness, client/rust/mind-core/src/world/blocks/distribution/): (1) duct-unloader cadence: 16x16x7 harness, container centered (2,4) holding 50 copper, duct-unloader (5,4) rotation 0, container centered (6,4); tick exactly 40 times; assert the front container total == 10 (Java Blocks.java:2232 speed 4f = one item per 4 ticks; the port currently reads ~40). (2) duct-router cadence: duct-router (5,4) rotation 0 with a container centered (6,4); feed one copper with transfer::dispatch_handle_item(router, source, copper) then tick one tick at a time; assert the container total becomes 1 on tick 4 (T+4), not tick 5 as today (Java speed 4f: progress -1 + 4*0.5 = 1.0 >= 0.75). Both must pass with cargo test -p mind-core world green.",
+      "notes": [
+        {
+          "at": "2026-11-02T14:40:28Z",
+          "by": "checker-a2",
+          "text": "Line-ref correction: sibling speed constants are duct.rs:193,198 (duct/armored-duct), duct_bridge.rs:40, overflow_duct.rs:43,48 — all 4.0 = the content value; only duct_router.rs:42 (5.0) and directional_unloader.rs:55 (1.0) kept the Java class defaults."
+        }
+      ],
+      "commits": "51f30190"
+    },
+    "PAR-0456": {
+      "title": "Autosave fires 60x too often: saveinterval is minutes in Java (time > saveinterval*60 s), seconds in the Rust port",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0456"
+            }
+          }
+        ]
+      },
+      "area": "game/saves",
+      "java": "core/src/mindustry/game/Saves.java:204-232",
+      "rust": "client/rust/mind-core/src/game/saves.rs:226-268",
+      "evidence": "Java Saves.update accrues time in SECONDS (Time.delta) and compares against saveinterval*60: 'time += Time.delta; ... if(time > Core.settings.getInt(\"saveinterval\") * 60 && !Vars.disableSave)' (Saves.java:216-219), so with the default saveinterval=60 (SettingsMenuDialog.java:373) the autosave is one hour apart. The Rust update_policy accrues seconds too ('self.time += update.delta_ticks as f32 / 60.0') but then compares against the raw setting: 'let interval = save_interval_seconds.max(0) as f32; if self.time > interval' (saves.rs:257-260), so the default writes an autosave every 60 s - 60x more frequent. The in-tree test update_policy_interval_is_seconds (saves.rs:708-742) encodes the wrong reading with the comment 'Saves.java:219 time > saveinterval * 60 in ticks'; Java's  is seconds, not ticks, and the multiply is the minutes->seconds conversion.",
+      "acceptance": "cargo test -p mind-core update_policy_interval_is_minutes (rewritten/new test): a current autosave slot with saveinterval=10 must NOT autosave after 9 min 59 s of accrued ticks and MUST autosave after 10 min 1 s (i.e. threshold = interval * 60 s), replacing the current 10 s assertion at saves.rs:708.",
+      "notes": [
+        {
+          "at": "2026-11-02T14:50:17Z",
+          "by": "orch-b:checker2",
+          "text": "Correction: the phrase in evidence should read \"Java's 'time' field is seconds, not ticks\". Threshold to implement: self.time (seconds) > save_interval_seconds as f32 * 60.0."
+        },
+        {
+          "at": "2026-11-02T15:00:17Z",
+          "by": "orch-b:fixer2",
+          "text": "update_policy now compares time > saveinterval*60 s (saves.rs:264); test rewritten as update_policy_interval_is_minutes (599 s no, 601 s yes); comments fixed at DEFAULT_SAVE_INTERVAL_SECONDS + update_policy. commit e60b0dad."
+        }
+      ],
+      "commits": "e60b0dad",
+      "verification": "cargo test -p mind-core --lib update_policy_interval_is_minutes -> ok (fails before: old interval comparison autosaves at 599 s); cargo test -p mind-core --lib game::saves -> 14 ok; cargo fmt --all -- --check -> ok; bash tools/build.sh -> exit 0; Java Saves.java:204-232 + SettingsMenuDialog.java:373"
+    },
+    "PAR-0457": {
+      "title": "Boosted mechs land on top of grounded units: updateBoosting drops Java's isFlying() && !canLand() hover term",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0457"
+            }
+          }
+        ]
+      },
+      "area": "units/movement",
+      "java": "core/src/mindustry/entities/comp/UnitComp.java:121-129,176-179; core/src/mindustry/entities/Units.java:429-431",
+      "rust": "client/rust/mind-core/src/entities/comp/unit/movement.rs:159-190",
+      "evidence": "movement.rs: added physic_size/is_grounded(elevation<0.001)/is_flying(>=0.09)/on_solid/can_land (physicSize box vs other grounded units' centered hitSize squares, self excluded, BlockUnitComp proxies excluded, TargetDummyComp @Replace -> true) and wired should_boost = boosting || on_solid || (is_flying && !can_land) per UnitComp.java:121-130,176-179, Units.java:429-431, HitboxComp.java:65-67, PosComp.java:64-67, TargetDummyComp.java:27-32. Tests: entities::comp::unit::movement::tests::{can_boost_mech_keeps_hovering_over_grounded_unit, can_land_excludes_self_and_ignores_airborne_units}. Fail-before: with the hover term reverted, the hover test panics 'mech landed on a grounded unit (elevation 0)' after 20 ticks; with the fix both pass. cargo test -p mind-core --lib: 2843 passed, 1 failed (world::blocks::defense::turrets::tests::scatter_fires_one_shot_per_delayed_tick in another agent's in-flight turret/targeting edit, unrelated); tools/build.sh exit 0.",
+      "acceptance": "Unit test over the movement pass: spawn a canBoost mech (e.g. 'mace'/'vanquish' whichever can_boost) at elevation 1 directly over a grounded unit, tick without boost -> elevation stays >= 0.09 (Java isFlying); move/remove the grounded unit -> elevation descends to 0. Add a can_land() helper test (overlap via physicSize, excluding self, grounded only). cargo test -p mind-core unit/movement suites green.",
+      "commits": "c9c31bf973d312230c1b827c395f09e8fa369f4f"
+    },
+    "PAR-0458": {
+      "title": "sensor on a team value crashes to null: @id/@color/@name on @sharded (or any @team result) are never sensed",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0458"
+            }
+          }
+        ]
+      },
+      "area": "logic",
+      "java": "core/src/mindustry/logic/LExecutor.java:680-717 + core/src/mindustry/game/Team.java:17,166-185",
+      "rust": "client/rust/mind-core/src/logic/executor/mod.rs:1175-1200 + client/rust/mind-core/src/logic/access.rs:337-345",
+      "evidence": "access::sense gained a LogicObject::Team arm (Team.sense/senseObject, J/game/Team.java:170-184): @id=Num(id), @color=Num(team_color_bits)=rgba8888/f64::from_bits encoding shared with the building team-colour row (BuildingComp.java:2104), @name=Obj(Str(registry name)). Executor Sensor target match widened to LogicObject::Team; sense_content returns Senseable default 0 for Team (J/logic/Senseable.java:12-14). Tests: logic::tests::team_senses_id_color_name (access::sense direct) and sim::logic_campaign_tests::sensor_reads_team_properties (processor set t @sharded + sensor id/col/nm; id==1, name==\"sharded\", col==Team registry bits==Java Pal.accent ffd37f bits). Both FAIL pre-fix (Obj(None) vs Num(1.0); Some(0.0) vs Some(1.0)) and pass post-fix; cargo test -p mind-core logic = 218 passed; bash tools/build.sh exit 0. Commits 8626c710 (fix) + 94347c19 (unit test).",
+      "acceptance": "Run the executor over 'set t @sharded / sensor id = t @id / sensor col = t @color / sensor nm = t @name': id must be 1 (Team.sharded id, Team.java:34), nm must be the object string sharded (Java Team.name, not the localized form), and col must equal f64::from_bits(team.color.to_rgba8888() as u64) per logic::globals::rgba_to_double_bits — today all three are null. Add the same case as a logic/tests.rs assertion plus a sim/logic_campaign_tests.rs check.",
+      "commits": "8626c710,94347c19"
+    },
+    "PAR-0459": {
+      "title": "Editor Save never replaces an existing same-name map: the registry gains a duplicate entry, the old entry survives and the request writes a raw <name>.msav",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0459"
+            }
+          }
+        ]
+      },
+      "area": "maps",
+      "java": "core/src/mindustry/maps/Maps.java:200-268,464-489",
+      "rust": "client/rust/mind-core/src/maps/mod.rs:313-376, client/rust/mind-gdext/src/editor/mod.rs:2150-2185",
+      "commits": "188d732c",
+      "verification": "cargo test -p mind-core --lib maps:: -> 87 passed, 0 failed (incl. new maps::tests::save_map_replaces_same_name_and_finds_free_file); cargo test -p mind-core --lib editor::maps_glue -> 6 passed; cargo test -p mind-headless --test maps_editor_golden -> 2 passed (maps_roundtrip_matches_golden); cargo fmt --all -- --check -> ok; bash tools/build.sh -> exit 0; Java Maps.java:200-268 (saveMap reuse/remove/findFile) + Maps.java:464-489 (findFile sanitize/_N)",
+      "notes": [
+        {
+          "at": "2026-11-02T15:16:35Z",
+          "by": "orch-b:fixer3",
+          "text": "Fix: mind-core Maps::save_target_file (Java saveMap pre-write half) now backs both save_map paths; editor save() routes through it and registers the entry. map file/registry only; preview/cache _v4 naming untouched (PAR-0114)."
+        }
+      ]
+    },
+    "PAR-0460": {
+      "title": "Thorium reactor cryofluid intake is half Java's (0.02 vs 0.04/tick): the block-class default ratio was used instead of the Blocks.java override",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0460"
+            }
+          }
+        ]
+      },
+      "area": "power",
+      "java": "core/src/mindustry/content/Blocks.java:2638-2647",
+      "rust": "client/rust/mind-core/src/content/registries/blocks/power.rs:274-276",
+      "evidence": "Java content overrides the NuclearReactor class defaults per block: thoriumReactor sets heating = 0.005f (class 0.01, NuclearReactor.java:32) and coolantPower = 0.125f (class 0.5, :47) then consumeLiquid(Liquids.cryofluid, heating / coolantPower).update(false) = 0.04/tick = 2.4/s (Blocks.java:2638-2647). The Rust power registry carried 0.01/0.5 = 0.02, halving the cryofluid demand (and the block-info Input row). Fix: power.rs consume_liquid('cryofluid', 0.005/0.125).update(false). New test world/blocks/power/behavior.rs::thorium_reactor_cryofluid_intake_matches_content_override fails before (amount 0.02) and passes after; cargo test -p mind-core power -> 66 passed; cargo test -p mind-core content::parity -> 5 passed.",
+      "acceptance": "Add a mind-core test beside the power-node config test (world/blocks/power/behavior.rs:1565): build the registry, read thorium-reactor's lowered consumes, find the cryofluid Consume::Liquid and assert amount == 0.005/0.125 (0.04) and update == false (currently 0.02). Then assert the block-info Input row reports cryofluid 2.4/s (Java Display: amount * 60), not 1.2/s. Run 'cargo test -p mind-core power' from client/rust plus a content-stats snapshot. Regenerate power.rs from a block-body-scoped env (or hand-edit the literal) so future runs keep 0.04.",
+      "commits": "5e774f04"
+    },
+    "PAR-0461": {
+      "title": "Unit weapon shadows never drawn: Weapon.shadow circle-shadow quad missing (Weapon.java:238-240)",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0461"
+            }
+          }
+        ]
+      },
+      "area": "render/unit",
+      "java": "core/src/mindustry/type/Weapon.java:146,238-240",
+      "rust": "client/rust/mind-gdext/src/render/units.rs:839-940",
+      "evidence": "Weapon.draw (core/src/mindustry/type/Weapon.java:238-240) draws Drawf.shadow(wx, wy, shadow) inside the Draw.z(z + layerOffset) window when shadow > 0; Drawf.shadow (core/src/mindustry/graphics/Drawf.java:360-364) is the circle-shadow region tinted (0,0,0,0.4). Rust plumbed WeaponDef.shadow (mind-core/src/content/registries/units/weapon.rs:550; standard.rs:1047/1115/1194/1427/1444/1472/1539, erekir.rs:367/1084/2094 set 6..50) but the unit pass never read it. units.rs drawWeapons now emits weapon_shadow_quad before the weapon region quad at the weapon layerOffset z (equal z keeps emission order -> shadow under the sprite); unit test render::units::tests::weapon_shadow_quad_gates_on_positive_shadow covers the -1/0 gate, size, z and colour. bash tools/build.sh green. NOTE: PAR-0126 is the broad phase-1 umbrella item (legs/barrels/cell/shadows); this is the last unimplemented Java draw call in that shadow family, recorded separately so the broad item's scope is not silently re-opened.",
+      "acceptance": "A unit test on a pure weapon_shadow_quad helper: shadow -1/0 -> None, shadow 8 -> Some with w=h=8, z=layerOffset, colour 0x00000066, placed before the weapon region quad at equal z; green build.",
+      "commits": "d37a8148"
+    },
+    "PAR-0462": {
+      "title": "Anti-air-only turrets (scatter/disperse) target grounded units and never aircraft: findEnemy's air branch predicate is inverted",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0462"
+            }
+          }
+        ]
+      },
+      "area": "combat/turrets",
+      "java": "core/src/mindustry/world/blocks/defense/turrets/Turret.java:640-652; core/src/mindustry/entities/comp/UnitComp.java:80-82,84-86",
+      "rust": "client/rust/mind-core/src/world/blocks/defense/turrets/mod.rs:2323-2336; client/rust/mind-core/src/combat/bullet/mod.rs:1382-1388; client/rust/mind-core/src/world/blocks/defense/turrets/advanced.rs:1182-1200,1568-1590",
+      "evidence": "turrets/mod.rs findEnemy: air-only branch accept predicate is !unit_is_grounded (elevation<0.001, physics-flying excluded; new helper next to unit_is_flying) instead of !unit_is_flying; general branch now (grounded||target_air)&&(!grounded||target_ground) per Java. Java refs: Turret.java:640-652, UnitComp.java:80-86, UnitType.java:566. Tests: air_only_turret_targets_aircraft_over_ground, air_only_turret_rejects_grounded_only, air_only_turret_accepts_mid_band_elevation, general_turret_targets_ground_and_air, ground_only_turret_rejects_mid_band_elevation (fail-before: 3 FAILED reverted predicate; pass-after: 41 turret tests ok, cargo test -p mind-core combat 237 ok, tools/build.sh exit 0).",
+      "acceptance": "CombatHarness test: place an air-only turret (scatter, target_air=true/target_ground=false) with one grounded and one flying unit of the enemy team both in range; the chosen target must be the flying unit (today it is the grounded one). With only grounded units in range the turret must have no target. Add a unit test for the new grounded predicate (elevation < 0.001, physics flying excluded) and one for the elevation band (0.05 treated as neither). cargo test -p mind-core combat/turrets green.",
+      "commits": "4186a24b62af24429ba79e222df7f31fe0e44183"
+    },
+    "PAR-0463": {
+      "title": "The skip_wave keybinding is dead: a key bound to skip_wave never skips a wave (Java HudFragment handler absent from the input dispatch)",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0463"
+            }
+          }
+        ]
+      },
+      "area": "input",
+      "java": "core/src/mindustry/ui/fragments/HudFragment.java:461-467;core/src/mindustry/input/Binding.java:92",
+      "rust": "client/rust/mind-gdext/src/input/desktop.rs:822-1108;client/rust/mind-gdext/src/input/desktop.rs:1080-1097",
+      "evidence": "Java HudFragment.java:461-467 + canSkipWave :1234-1236; port now dispatches skip_wave in DesktopBridge::dispatch_action through the same gate as the HUD button (WaveGate::can_skip_wave = waves && wave_sending && !is_spawning && enemies<=0 && has_core, shared with _refresh_skip_button) and the same path (Effect::SkipWave -> MindCampaign.run_wave, as _on_skip_wave); dialog/text-focus guards are the existing handle() text_focus/ui_dialog gates. Tests: skip_wave_gate_matches_the_skip_button + skip_wave_key_dispatches_and_respects_the_gate; cd client/rust && CARGO_TARGET_DIR=client/bin/rust cargo test -p mind-gdext skip_wave -> 2 passed; bash tools/build.sh ok.",
+      "acceptance": "Rebind skip_wave to K (Settings->Controls), launch a campaign sector with waves, press K: MindSimHost.get_wave() increments by 1 exactly like clicking the HUD skip button; with a dialog open or a text field focused the key is ignored (Java guards); a headless/unit seam can prove dispatch_action('skip_wave') reaches the same run_wave path as _on_skip_wave.",
+      "commits": "195b29fa"
+    },
+    "PAR-0464": {
+      "title": "Editor map resize anchors content to the old origin: Java centres the copied rectangle (missing (new-old)/2 offset), so growing/shrinking shifts every tile",
+      "status": "reference-verified",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0464"
+            }
+          }
+        ]
+      },
+      "area": "editor",
+      "java": "core/src/mindustry/editor/MapEditor.java:308-321",
+      "rust": "client/rust/mind-core/src/editor/grid.rs:332-370",
+      "evidence": "Java MapEditor.resize computes a centred source offset before rebuilding the tile array: 'int offsetX = (width() - width) / 2 - shiftX, offsetY = (height() - height) / 2 - shiftY;' (MapEditor.java:310) and then copies with 'int px = offsetX + x, py = offsetY + y; if(previous.in(px, py)){ tiles.set(x, y, previous.getn(px, py));' (:316-318), i.e. old(px) -> new(px - (oldW-newW)/2 + shiftX). Rust EditorGrid::resize_shift does 'let nx = x + shift_x; let ny = y + shift_y;' (grid.rs:363-364) with no centring term, so old(px) -> new(px + shiftX). Neither layer above adds the offset: MapResizeDialog stores the raw field values (mind-gdext/src/ui/dialogs/batch_e.rs:1228-1243 resize_apply -> MindEditor.resize_map) and MapEditor::resize just forwards them (mind-core/src/editor/lifecycle.rs:123-135). Effect: grow 100x100 -> 200x200 with shift 0 keeps the whole map in the bottom-left quadrant of the new map (all new space added top/right) where Java centres it at 50..149; shrink 200 -> 100 then crops only the top/right instead of all four sides, silently deleting a different part of the map. The ported unit test editor::lifecycle::resize_shift_preserves_tiles_and_data (lifecycle.rs:199-215) bakes in the wrong mapping: it expects (3,3)->(2,2) for 8x8->6x6 shift -1 where Java yields offsetX=(8-6)/2-(-1)=2, px=2+x, so old (3,3) lands on new (1,1).",
+      "acceptance": "cd client/rust && CARGO_TARGET_DIR=/home/clintonnguyen/g/code_examples/mg-gap-b/client/bin/rust cargo test -p mind-core editor:: -- --nocapture : a new/updated test must assert the Java mapping new = old - ((old_w-new_w)/2 - shift) on both axes. Concretely for 8x8 -> 12x12 shift (0,0) a tile at (3,3) must land at (5,5) (and floor/block/team/rot/extra_data follow it); for 8x8 -> 6x6 shift (-1,-1) (3,3) must land at (1,1); update resize_shift_preserves_tiles_and_data's expected (2,2)->(1,1). Existing resize_* tests must stay green.",
+      "commits": "bd745b60",
+      "verification": "cargo test -p mind-core --lib editor:: -> 67 passed (new resize_grow_centres_content 8x8->12x12 old(3,3)->new(5,5); resize_shift_preserves_tiles_and_data 8x8->6x6 shift(-1,-1) old(3,3)->new(1,1)); cargo run -p mind-headless -- editor resize-shift --json -> ok:true exit 0; bash tools/build.sh -> exit 0; Java MapEditor.java:308-321.",
+      "notes": [
+        {
+          "at": "2026-11-02T15:43:27Z",
+          "by": "orch-b:orch",
+          "text": "Fixed in bd745b60 (orchestrator, after the session's nested-agent budget was exhausted): grid::resize_shift + the TestGrid double now apply Java's (old-new)/2 centring before the shift; resize_shift_preserves_tiles_and_data updated and resize_grow_centres_content added; headless 'editor resize-shift --json' assertions updated to Java mapping (ok:true). Full mind-core lib 2834 passed, parity goldens PASS, build ok."
+        }
+      ]
+    },
+    "PAR-0465": {
+      "title": "Splash damage never applies the bullet's status: burning/blasted ammo only tags the directly-hit unit, never units caught in the blast",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0465"
+            }
+          }
+        ]
+      },
+      "claimed_by": "orch-a:checker-a5",
+      "claimed_at": "2026-11-02T15:24:57Z",
+      "area": "combat/status-damage",
+      "java": "core/src/mindustry/entities/bullet/BulletType.java:606-614",
+      "rust": "client/rust/mind-core/src/combat/bullet/mod.rs:938-972",
+      "evidence": "JAVA BulletType.createSplashDamage (BulletType.java:606-614) does the radius damage AND then a radius status pass: 'Damage.damage(b.team, x, y, splashDamageRadius, splashDamage * b.damageMultiplier(), splashDamagePierce, collidesAir, collidesGround, scaledSplashDamage, b, armorMultiplier); if(status != StatusEffects.none){ Damage.status(b.team, x, y, splashDamageRadius, status, statusDuration, collidesAir, collidesGround, statusChance); }' — Damage.status (Damage.java:441-457) applies to every enemy unit within the radius, chance-gated by statusChance. RUST create_splash_damage (combat/bullet/mod.rs:938-972) ends at the damage call: 'let _ = super::damage::area::damage_area(ctx.world, ctx.content, Some(team), x, y, def.splash_damage_radius, def.splash_damage, opts);' with no status pass; damage::status::status_area (combat/damage/status.rs:350) exists and is ported but has ZERO call sites (grep 'status_area' finds only the re-export in combat/damage/mod.rs:22). The only unit status application is combat/bullet/mod.rs:1677 in hit_entity, i.e. the single directly-hit unit. Concrete vanilla case: salvo_pyratite / swarmer_pyratite (status=burning) and swarmer_blast / cyclone_blast (status=blasted) all have splash_damage_radius>0 and status_chance=1.0 in both trees; in Java an enemy unit standing 20 units from the impact gets burning, in the port it takes the splash damage and no status at all.",
+      "acceptance": "Headless oracle: place a defense unit at (100,100) on team 2, spawn one swarmer_blast bullet (def.status = blasted, status_chance 1.0, splash radius 20) flying so it detonates at (108,100) — 8 world units from the unit, outside direct collision — step it to detonation, then assert the unit's StatusComp.statuses contains 'blasted' with duration 480 (BulletType.statusDuration default 60*8) and that a second unit at distance 40 has NO entry. Java reference: same fixture in the Java harness shows the blasted entry. Fix passes when status_area is invoked from create_splash_damage with (team, x, y, splash_damage_radius, def.status, def.status_duration, def.status_chance).",
+      "notes": [
+        {
+          "at": "2026-11-02T15:46:42Z",
+          "by": "orch-a:orch-a",
+          "text": "Extra detail for the fixer (verified against Java 2026-11-03): Java createSplashDamage calls Damage.status(b.team, x, y, splashDamageRadius, status, statusDuration, collidesAir, collidesGround, statusChance) (BulletType.java:606-614). Damage.status (Damage.java:475-491) filters entities by 'entity.team == team || !entity.checkTarget(air, ground) || !entity.hittable() || !entity.within(x, y, radius)' before the chance roll, where UnitType.checkTarget(air, ground) = (isGrounded() && ground) || (isFlying() && air). The ported combat::damage::status::status_area (status.rs:350) has NO air/ground params and no hittable check, so the fix should extend status_area with air/ground (+ hittable) and call it from create_splash_damage after damage_area with def.collides_air/collides_ground/def.status_chance. Also note create_splash_damage currently omits Java's 'if(heals()) heal allied buildings in radius' branch (BulletType.java:616-621) - separate gap, do not bundle unless trivial."
+        }
+      ]
+    },
+    "PAR-0466": {
+      "title": "Editor resize does not shift relative build configs (Java BuildPlan.pointConfig p.sub(offsetX, offsetY), ignoreResizeConfig blocks excluded)",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0466"
+            }
+          }
+        ]
+      },
+      "claimed_by": "orch-b:orch",
+      "claimed_at": "2026-11-02T15:47:50Z",
+      "area": "editor/map-data",
+      "java": "core/src/mindustry/editor/MapEditor.java:332-352,core/src/mindustry/entities/units/BuildPlan.java:88-110,core/src/mindustry/world/blocks/logic/LogicBlock.java:58",
+      "rust": "client/rust/mind-core/src/editor/grid.rs:360-410,client/rust/mind-core/src/editor/lifecycle.rs:119-136",
+      "evidence": "Java MapEditor.resize captures each center build's config before re-assigning x/y, then after reassignment runs 'Object out = BuildPlan.pointConfig(tile.block(), config, p -> { if(!tile.build.block.ignoreResizeConfig){ p.sub(offsetX, offsetY); } });' and re-applies it with 'tile.build.configureAny(out)' (MapEditor.java:340-352). Blocks that store relative points (ItemBridge links, LogicBlock positions, logic displays etc.) are therefore translated with the content; blocks with ignoreResizeConfig=true keep their raw config. The Rust editor resize (grid.rs::resize_shift + editor/lifecycle.rs:119-136, comment 'Plan 07 owns live building configs (BuildPlan::point_config); M1 shifts the center builds (block/team/rotation)') reattaches only block/team/rotation and never shifts any config, so after a resize all relative configs point at their pre-resize offsets and links/displays become wrong or stale. PAR-0464 fixed only the tile-centring half of the same Java function; this config half is not covered by any open item (dedupe checked).",
+      "acceptance": "cargo test -p mind-core editor::resize: place an ItemBridge (or a logic block) with a relative config at (3,3), resize 8x8->6x6 shift(-1,-1), assert the config's stored point moved with the tile by the same offset (Java: p.sub(offsetX, offsetY) = -2,-2 there) and that an ignoreResizeConfig block's config is unchanged."
+    },
+    "PAR-0467": {
+      "title": "Block emitLight light sources are a fixed 60 px white circle: Java per-block lightRadius/lightColor dropped (impact reactor 115, differential generator 195, landing pad 90 #eab678)",
+      "status": "seeded",
+      "fork": {
+        "java": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see referenced Java source"
+            }
+          }
+        ]
+      },
+      "action": {
+        "godot": [
+          {
+            "tool": "note",
+            "params": {
+              "text": "see runs/PAR-0467"
+            }
+          }
+        ]
+      },
+      "claimed_by": "orch-c:layers",
+      "claimed_at": "2026-11-02T15:50:45Z",
+      "area": "render",
+      "java": "core/src/mindustry/world/Block.java:344,350-351,493-495",
+      "rust": "client/rust/mind-gdext/src/sim_host.rs:4849-4855 ; client/rust/mind-core/src/content/registries/blocks/mod.rs:2336,2772 ; client/rust/mind-gdext/src/render/light.rs:14-18",
+      "evidence": "Java Block.drawEnvironmentLight (core/src/mindustry/world/Block.java:493-495) emits Drawf.light(x, y, lightRadius, lightColor, lightColor.a) with per-block overrides (Block.java:344/350-351): ImpactReactor 115, ConsumeGenerator 65*size (130 for size 2, 195 for size 3), LandingPad 90 with color #eab678, Accelerator 70 with Pal.accent, NuclearReactor #7f19ea, MendProjector/OverdriveProjector 50. Rust BlockDef carries only emit_light (mind-core/src/content/registries/blocks/mod.rs:2336,2772) and light_sources hardcodes radius 60.0 and color [1,1,1,1] (mind-gdext/src/sim_host.rs:4849-4855), so every emitLight block lights the floor with the same small white circle; light.rs:14-18 documents the deviation (S16-5) but it was never queued. Found by an independent read-only audit at HEAD 96b1873a.",
+      "acceptance": "cargo test -p mind-core asserting BlockDef light_radius/light_color per Java override (impact-reactor 115, landing-pad 90/#eab678, accelerator 70/accent, nuclear-reactor 60/#7f19ea, mend/overdrive 50, differential-generator 195, steam-generator 130) plus a mind-gdext light_sources test that a placed impact-reactor yields radius 115; live: a lit custom game shows the 115 px glow and the landing-pad #eab678 tint."
     }
   },
   "recipes": {

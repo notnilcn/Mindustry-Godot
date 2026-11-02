@@ -297,7 +297,11 @@ def cmd_note(args) -> int:
     with Tx():
         doc = load()
         item = coalesce(doc, args.id)
-        notes = item.setdefault("notes", [])
+        notes = item.get("notes")
+        if not isinstance(notes, list):
+            # `set --field notes=...` may have replaced the list with a string.
+            notes = []
+            item["notes"] = notes
         notes.append({"at": now_utc(), "by": args.agent, "text": args.text})
         dump(doc)
     print(f"noted {args.id}")
