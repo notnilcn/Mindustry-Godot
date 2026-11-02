@@ -33,7 +33,7 @@ use smallvec::SmallVec;
 
 use crate::ai::types::player::PlayerInput;
 use crate::audio::math::AudioRng;
-use crate::combat::bullet::unit_is_flying;
+use crate::combat::bullet::unit_is_grounded;
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
 use crate::combat::targeting::{TargetQueries, UnitSort};
 use crate::content::registries::bullets::BulletDef;
@@ -42,7 +42,7 @@ use crate::content::registries::units::weapon::ShootPatternSpec;
 use crate::content::{BulletId, BulletKind, ContentRegistry, ItemId, LiquidId};
 use crate::entities::comp::unit::comp::UnitCore;
 use crate::entities::comp::{Health, Pos, TeamComp};
-use crate::weapons::pattern::{self, ShotBuffer};
+use crate::weapons::pattern::{self, PatternShot, ShotBuffer};
 use crate::world::PayloadRef;
 use crate::world::blocks::payloads::PayloadKind;
 use crate::world::construct::ConstructState;
@@ -384,6 +384,10 @@ pub struct TurretState {
     pub total_shots: i32,
     /// `TurretBuild.barrelCounter`.
     pub barrel_counter: i32,
+    /// Shots queued by a pattern `delay` (`Turret.java:763-778`
+    /// `queuedBullets`; runtime-only, never saved — upstream `Time.run` tasks
+    /// are not written either).
+    pub pending: SmallVec<[PendingShot; 4]>,
     /// `TurretBuild.ammo` (item entries; empty for liquid/power).
     pub ammo: SmallVec<[AmmoEntry; 4]>,
     /// `TurretBuild.totalAmmo`.
@@ -449,6 +453,22 @@ pub struct BeamEntry {
     pub life: f32,
 }
 
+/// A pattern shot waiting out its `delay` (`Turret.shoot`'s `Time.run(delay,
+/// …)` branch, `Turret.java:763-778`; `queuedBullets` counts these).
+#[derive(Debug, Clone, Copy)]
+pub struct PendingShot {
+    /// Bullet type captured at emission time (`type` in `Turret.shoot`).
+    pub bullet: BulletId,
+    /// Pattern payload (`xOffset`/`yOffset`/`angleOffset`/`mover`).
+    pub shot: PatternShot,
+    /// Remaining delay in ticks.
+    pub delay: f32,
+    /// `barrelCounter` at emission time, restored around the delayed bullet
+    /// (`Turret.java:788-795`: "make sure the barrel is the same as what it was
+    /// when the bullet was queued to fire").
+    pub barrel: i32,
+}
+
 /// One item-ammo stack (`ItemTurret.ItemEntry`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AmmoEntry {
@@ -498,6 +518,7 @@ impl TurretState {
             warmup_hold: 0.0,
             total_shots: 0,
             barrel_counter: 0,
+            pending: SmallVec::new(),
             ammo: SmallVec::new(),
             total_ammo: 0,
             target: None,
@@ -1685,6 +1706,11 @@ fn update_turret(
     let team = ctx.team(e);
     let eff = efficiency(ctx.world, e);
 
+    // `Time.run(delay, …)` tasks run at the start of the frame before the
+    // building update (Arc `Time.update`), so a delayed shot that comes due this
+    // tick fires before reload/charge/shoot (`Turret.java:763-778`).
+    update_pending_shots(ctx, e, state);
+
     // `PayloadTurretBuild.updateTile`: `totalAmmo = payloads.total()`.
     if let TurretAmmo::Payload(_) = &config.ammo {
         state.total_ammo = state.payloads.iter().map(|stack| stack.count).sum();
@@ -1880,9 +1906,12 @@ fn update_turret(
         within_target_range(ctx, target, x, y, turret_range_of(state, ctx.world, e))
     };
 
-    // Turn toward the aim point.
+    // Turn toward the aim point (`if(shouldTurn()) turnToTarget(targetRot)`,
+    // `Turret.java:592-594`).
     let target_rot = angle_to(x, y, state.target_pos.0, state.target_pos.1);
-    state.rotation = move_toward(state.rotation, target_rot, config.rotate_speed * eff);
+    if should_turn(state) {
+        state.rotation = move_toward(state.rotation, target_rot, config.rotate_speed * eff);
+    }
 
     let in_cone = angle_dist(state.rotation, target_rot) < config.shoot_cone;
     if config.always_shooting || (in_cone && can_shoot) {
@@ -1899,9 +1928,10 @@ fn handle_reload(
     config: &TurretConfig,
     eff: f32,
 ) {
-    if charging(state) {
-        return;
-    }
+    // `TurretBuild.handleReload`: `(reloadWhileCharging || !charging()) &&
+    // reloadCounter < reload`. `reloadWhileCharging` is the class default true
+    // (`Turret.java:88`) and no vanilla block overrides it, so charging does not
+    // pause reload here.
     // `baseReloadSpeed() == efficiency`, which is zero without power/heat
     // (`TurretBuild.updateReload` × `updateEfficiencyMultiplier`).
     if !can_consume(state, ctx.world, e, config) {
@@ -1940,13 +1970,48 @@ fn handle_reload(
     }
 }
 
+/// `TurretBuild.charging()` (`Turret.java:718-720`): `queuedBullets > 0 &&
+/// shoot.firstShotDelay > 0` — a shot is waiting out its pattern delay.
 fn charging(state: &TurretState) -> bool {
-    state.charge > 0.0 && state.config.shoot.first_shot_delay > 0.0
+    !state.pending.is_empty() && state.config.shoot.first_shot_delay > 0.0
+}
+
+/// `TurretBuild.shouldTurn()` (`Turret.java:672-674`): `moveWhileCharging ||
+/// !charging()`; `lancer` sets `moveWhileCharging = false` (`Blocks.java:3594`).
+fn should_turn(state: &TurretState) -> bool {
+    state.config.move_while_charging || !charging(state)
+}
+
+/// Fires the queued shots whose `delay` elapsed this tick (`Time.run` task
+/// pass). Order is insertion order, so the pattern's per-shot draws stay
+/// deterministic.
+fn update_pending_shots(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) {
+    if state.pending.is_empty() {
+        return;
+    }
+    let mut due: SmallVec<[PendingShot; 4]> = SmallVec::new();
+    let mut remain: SmallVec<[PendingShot; 4]> = SmallVec::new();
+    for mut shot in std::mem::take(&mut state.pending) {
+        shot.delay -= 1.0;
+        if shot.delay <= 0.0 {
+            due.push(shot);
+        } else {
+            remain.push(shot);
+        }
+    }
+    state.pending = remain;
+    for shot in due {
+        // `bullet(type, xOffset, yOffset, angle, mover)` with the barrel counter
+        // restored (`Turret.java:788-795`).
+        bullet(ctx, e, state, shot.bullet, &shot.shot, shot.barrel);
+    }
 }
 
 /// `TurretBuild.updateShooting`.
 fn update_shooting(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState) {
-    if state.reload_counter >= state.config.reload && state.shoot_warmup >= state.config.min_warmup
+    if state.reload_counter >= state.config.reload
+        && !charging(state)
+        && state.shoot_warmup >= state.config.min_warmup
     {
         if let Some(bullet) = peek_ammo_state(state, ctx.world, e) {
             shoot(ctx, e, state, bullet);
@@ -2039,10 +2104,9 @@ fn update_build(
 }
 
 /// `TurretBuild.shoot`.
-fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: BulletId) {
+fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet_type: BulletId) {
     let config = state.config.clone();
     let (x, y) = position(ctx.world, e).unwrap_or((0.0, 0.0));
-    let team = ctx.team(e);
     let rotation = state.rotation;
 
     // `Turret.shoot`: `chargeSound.at(bulletX, bulletY, random(pitch))` when
@@ -2069,19 +2133,61 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
     );
     state.barrel_counter = barrel;
 
+    // `Turret.shoot`'s handler (`Turret.java:763-778`): `if(delay > 0f)
+    // Time.run(delay, …) else bullet(…)`. The pending queue is `queuedBullets`:
+    // an immediate shot leaves it at once, a delayed one stays until its tick.
+    for shot in &buffer.shots {
+        if shot.delay > 0.0 {
+            state.pending.push(PendingShot {
+                bullet: bullet_type,
+                shot: *shot,
+                delay: shot.delay,
+                barrel: shot.barrel,
+            });
+        } else {
+            bullet(ctx, e, state, bullet_type, shot, shot.barrel);
+        }
+    }
+
+    if config.consume_ammo_once {
+        let _ = use_ammo(state, ctx.world, e);
+    }
+}
+
+/// `TurretBuild.bullet` (`Turret.java:785-828`): spawns one pattern shot from
+/// the turret's *current* pose — a delayed shot recomputes the muzzle position,
+/// angle, spread, lifetime and `targetPos` at fire time and restores `barrel`
+/// for the recoil index.
+fn bullet(
+    ctx: &mut CombatCtx<'_>,
+    e: Entity,
+    state: &mut TurretState,
+    bullet_type: BulletId,
+    shot: &PatternShot,
+    barrel: i32,
+) {
+    let config = state.config.clone();
+    // `if(dead || (!consumeAmmoOnce && !hasAmmo())) return;`
+    if !config.consume_ammo_once && !has_ammo_state(state, ctx.world, e) {
+        return;
+    }
+    let (x, y) = position(ctx.world, e).unwrap_or((0.0, 0.0));
+    let team = ctx.team(e);
+    let rotation = state.rotation;
+
     let def_inaccuracy = ctx
         .content
-        .bullet(bullet)
+        .bullet(bullet_type)
         .map(|def| def.inaccuracy)
         .unwrap_or(0.0);
     let scale_life = ctx
         .content
-        .bullet(bullet)
+        .bullet(bullet_type)
         .map(|def| def.scale_life)
         .unwrap_or(false);
     let bullet_range = ctx
         .content
-        .bullet(bullet)
+        .bullet(bullet_type)
         .map(|def| def.range)
         .unwrap_or(0.0);
     // `Turret.bullet`: `(type.shootSound != none ? type.shootSound : shootSound)`
@@ -2090,7 +2196,7 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
     // stream, so the checksum is unaffected.
     let bullet_sound = ctx
         .content
-        .bullet(bullet)
+        .bullet(bullet_type)
         .map(|def| def.shoot_sound)
         .unwrap_or(SoundId::NONE);
     let shoot_sound = if !bullet_sound.is_none_or_unset() {
@@ -2099,100 +2205,90 @@ fn shoot(ctx: &mut CombatCtx<'_>, e: Entity, state: &mut TurretState, bullet: Bu
         config.shoot_sound
     };
 
-    for shot in &buffer.shots {
-        if !config.consume_ammo_once && !has_ammo_state(state, ctx.world, e) {
-            break;
-        }
-        let x_spread = ctx.rng.range(
+    let x_spread = ctx.rng.range(
+        crate::determinism::RngStream::Sim,
+        -config.x_rand,
+        config.x_rand,
+    );
+    let bx = x + trnsx(
+        rotation - 90.0,
+        config.shoot_x + shot.x + x_spread,
+        config.shoot_y + shot.y,
+    );
+    let by = y + trnsy(
+        rotation - 90.0,
+        config.shoot_x + shot.x + x_spread,
+        config.shoot_y + shot.y,
+    );
+    let angle = rotation
+        + shot.rotation
+        + ctx.rng.range(
             crate::determinism::RngStream::Sim,
-            -config.x_rand,
-            config.x_rand,
+            -(config.inaccuracy + def_inaccuracy),
+            config.inaccuracy + def_inaccuracy,
         );
-        let bx = x + trnsx(
-            rotation - 90.0,
-            config.shoot_x + shot.x + x_spread,
-            config.shoot_y + shot.y,
-        );
-        let by = y + trnsy(
-            rotation - 90.0,
-            config.shoot_x + shot.x + x_spread,
-            config.shoot_y + shot.y,
-        );
-        let angle = rotation
-            + shot.rotation
-            + ctx.rng.range(
-                crate::determinism::RngStream::Sim,
-                -(config.inaccuracy + def_inaccuracy),
-                config.inaccuracy + def_inaccuracy,
-            );
-        let base_life = (1.0 - config.life_rnd)
-            + ctx
-                .rng
-                .range(crate::determinism::RngStream::Sim, 0.0, config.life_rnd)
-            + config.extra_life;
-        let life_scl = if scale_life && bullet_range > 0.0 {
-            let dst =
-                ((state.target_pos.0 - bx).powi(2) + (state.target_pos.1 - by).powi(2)).sqrt();
-            // `Turret.bullet` (`Turret.java:797`): `clamp((baseLife +
-            // scaleLifetimeOffset) * dst / type.range, minRange()/type.range,
-            // range()/type.range)`.
-            let min_range = min_range_of(state, ctx.world, e);
-            let max_range = turret_range_of(state, ctx.world, e);
-            ((base_life + config.scale_lifetime_offset) * dst / bullet_range)
-                .clamp(min_range / bullet_range, max_range / bullet_range)
-        } else {
-            base_life
-        };
-        let velocity_scl = (1.0 - config.velocity_rnd)
-            + ctx
-                .rng
-                .range(crate::determinism::RngStream::Sim, 0.0, config.velocity_rnd)
-            + config.extra_velocity;
-        let spawn = BulletSpawn {
-            def: bullet,
-            owner: Some(e),
-            shooter: Some(e),
-            team,
-            x: bx,
-            y: by,
-            angle,
-            velocity_scl,
-            lifetime_scl: life_scl,
-            aim_x: state.target_pos.0,
-            aim_y: state.target_pos.1,
-            mover: shot.mover,
-            ..BulletSpawn::default()
-        };
-        let _ = ctx.spawn(&spawn);
-        let pitch = {
-            let mut rng = crate::audio::sim::FxAudioRng { rng: &mut *ctx.rng };
-            config.sound_pitch_min
-                + rng.next_f32() * (config.sound_pitch_max - config.sound_pitch_min)
-        };
-        crate::audio::sim::emit_turret_shoot(
-            ctx.audio,
-            shoot_sound,
-            bx,
-            by,
-            config.shoot_sound_volume,
-            pitch,
-        );
-        state.total_shots += 1;
-        if !config.consume_ammo_once {
-            let _ = use_ammo(state, ctx.world, e);
-        }
-    }
+    let base_life = (1.0 - config.life_rnd)
+        + ctx
+            .rng
+            .range(crate::determinism::RngStream::Sim, 0.0, config.life_rnd)
+        + config.extra_life;
+    let life_scl = if scale_life && bullet_range > 0.0 {
+        let dst = ((state.target_pos.0 - bx).powi(2) + (state.target_pos.1 - by).powi(2)).sqrt();
+        // `Turret.bullet` (`Turret.java:797`): `clamp((baseLife +
+        // scaleLifetimeOffset) * dst / type.range, minRange()/type.range,
+        // range()/type.range)`.
+        let min_range = min_range_of(state, ctx.world, e);
+        let max_range = turret_range_of(state, ctx.world, e);
+        ((base_life + config.scale_lifetime_offset) * dst / bullet_range)
+            .clamp(min_range / bullet_range, max_range / bullet_range)
+    } else {
+        base_life
+    };
+    let velocity_scl = (1.0 - config.velocity_rnd)
+        + ctx
+            .rng
+            .range(crate::determinism::RngStream::Sim, 0.0, config.velocity_rnd)
+        + config.extra_velocity;
+    let spawn = BulletSpawn {
+        def: bullet_type,
+        owner: Some(e),
+        shooter: Some(e),
+        team,
+        x: bx,
+        y: by,
+        angle,
+        velocity_scl,
+        lifetime_scl: life_scl,
+        aim_x: state.target_pos.0,
+        aim_y: state.target_pos.1,
+        mover: shot.mover,
+        ..BulletSpawn::default()
+    };
+    let _ = ctx.spawn(&spawn);
+    let pitch = {
+        let mut rng = crate::audio::sim::FxAudioRng { rng: &mut *ctx.rng };
+        config.sound_pitch_min + rng.next_f32() * (config.sound_pitch_max - config.sound_pitch_min)
+    };
+    crate::audio::sim::emit_turret_shoot(
+        ctx.audio,
+        shoot_sound,
+        bx,
+        by,
+        config.shoot_sound_volume,
+        pitch,
+    );
 
-    if config.consume_ammo_once {
+    state.total_shots += 1;
+    if !config.consume_ammo_once {
         let _ = use_ammo(state, ctx.world, e);
     }
-
     state.cur_recoil = 1.0;
     if config.recoils > 0 {
         let count = config.recoils as usize;
-        if state.cur_recoils.len() >= count {
-            state.cur_recoils[state.barrel_counter.rem_euclid(count as i32) as usize] = 1.0;
+        if state.cur_recoils.len() < count {
+            state.cur_recoils.resize(count, 0.0);
         }
+        state.cur_recoils[barrel.rem_euclid(count as i32) as usize] = 1.0;
     }
     state.heat = 1.0;
 }
@@ -2225,7 +2321,11 @@ fn find_target(
 
     let find = |query_range: f32| -> Option<Entity> {
         if config.target_air && !config.target_ground {
-            // `Units.bestEnemy` with `!e.isGrounded()` (`Turret.java:645`).
+            // `Units.bestEnemy` with `!e.isGrounded()` (`Turret.java:645`): the
+            // predicate is an ACCEPT filter and Java's `isGrounded()` is
+            // `elevation < 0.001` (`UnitComp.java:80-82`), so air-only turrets
+            // keep every non-grounded unit — not just `isFlying()`
+            // (`elevation >= 0.09`).
             targets.best_enemy(
                 ctx.world,
                 ctx.content,
@@ -2234,12 +2334,13 @@ fn find_target(
                 y,
                 query_range,
                 sort,
-                &mut |world, _content, unit| !unit_is_flying(world, unit),
+                &mut |world, _content, unit| !unit_is_grounded(world, unit),
             )
         } else {
-            // `Units.bestTarget` (`Turret.java:647-651`): the unit gate keeps
-            // grounded/flying per the target flags and skips missiles unless
-            // the ammo allows them.
+            // `Units.bestTarget` (`Turret.java:647-651`): the unit gate is
+            // `(e.isGrounded() || targetAir) && (!e.isGrounded() || targetGround)`
+            // — grounded needs `targetGround`, non-grounded needs `targetAir` —
+            // and it skips missiles unless the ammo allows them.
             targets.best_target(
                 ctx.world,
                 ctx.content,
@@ -2249,9 +2350,9 @@ fn find_target(
                 query_range,
                 sort,
                 &mut |world, _content, unit| {
-                    let flying = unit_is_flying(world, unit);
-                    (flying || config.target_ground)
-                        && (!flying || config.target_air)
+                    let grounded = unit_is_grounded(world, unit);
+                    (grounded || config.target_air)
+                        && (!grounded || config.target_ground)
                         && (missiles
                             || world
                                 .get::<crate::entities::comp::unit::comp::TimedKillComp>(unit)
@@ -2420,6 +2521,27 @@ fn validate_target(ctx: &CombatCtx<'_>, _e: Entity, state: &TurretState) -> bool
 mod tests {
     use super::*;
     use crate::combat::harness::CombatHarness;
+
+    /// Sets a test unit's `elevation` plus the flying-type mirror
+    /// (`UnitType.java:566`: `unit.elevation = flying ? 1f : 0`), so targeting
+    /// fixtures can occupy Java's elevation bands (`UnitComp.java:80-86`).
+    pub(super) fn set_unit_elevation(
+        harness: &mut CombatHarness,
+        unit: Entity,
+        elevation: f32,
+        physics_flying: bool,
+    ) {
+        use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
+        let world = &mut harness.build.world;
+        world.entity_mut(unit).insert(UnitCore {
+            elevation,
+            ..UnitCore::new(0.0)
+        });
+        world.entity_mut(unit).insert(PhysicsComp {
+            flying: physics_flying,
+            ..PhysicsComp::default()
+        });
+    }
 
     fn turret_at(harness: &mut CombatHarness, name: &str) -> (Entity, Entity) {
         let wall = harness.content().block_id("copper-wall").expect("wall");
@@ -2893,12 +3015,174 @@ mod tests {
         }
         assert!(matched > 0, "hail emitted its own shoot sound");
     }
+
+    /// Runs the harness to the first spawned bullet, then returns the per-tick
+    /// spawn counts for the next `window` ticks (index 0 is the first shot's
+    /// tick). `bullets_created` is monotonic, so hits/expiry cannot hide a
+    /// spawn.
+    fn volley_spawn_counts(harness: &mut CombatHarness, window: usize) -> Vec<u64> {
+        let mut first = None;
+        for _ in 0..240 {
+            let before = harness.bullets_created;
+            harness.tick();
+            if harness.bullets_created > before {
+                first = Some(harness.bullets_created - before);
+                break;
+            }
+        }
+        let first = first.expect("turret fired");
+        let mut counts = vec![first];
+        for _ in 0..window {
+            let before = harness.bullets_created;
+            harness.tick();
+            counts.push(harness.bullets_created - before);
+        }
+        counts
+    }
+
+    /// PAR-0451 (`Turret.java:751-830`): `shoot()` defers every pattern shot
+    /// with `delay > 0` through `Time.run`, so a multi-shot pattern fires one
+    /// bullet per delayed tick instead of collapsing the burst onto the reload
+    /// tick.
+    #[test]
+    fn multi_shot_patterns_fire_on_their_delayed_ticks() {
+        // `Blocks.java:3846-3847`: salvo `shots = 4; shotDelay = 3` => T, +3,
+        // +6, +9. `Blocks.java:3733-3734`: swarmer `ShootBarrel` `shots = 4;
+        // shotDelay = 5` => T, +5, +10, +15.
+        for (name, item, offsets) in [
+            ("salvo", "copper", [0usize, 3, 6, 9]),
+            ("swarmer", "blast-compound", [0, 5, 10, 15]),
+        ] {
+            let mut harness = CombatHarness::new(48, 16, 7);
+            let wall = harness.content().block_id("copper-wall").expect("wall");
+            assert!(harness.place(10, 8, wall, 0, true));
+            let (tx, ty) = CombatHarness::tile_center(4, 8);
+            let turret = harness
+                .spawn_test_turret(name, tx, ty, 1)
+                .unwrap_or_else(|| panic!("turret `{name}`"));
+            let item = harness.content().item_id(item).expect(item);
+            for _ in 0..20 {
+                handle_item(&mut harness.build.world, turret, item);
+            }
+            let counts = volley_spawn_counts(&mut harness, offsets[3] + 1);
+            let ticks: Vec<usize> = counts
+                .iter()
+                .enumerate()
+                .filter(|(_, count)| **count > 0)
+                .map(|(tick, _)| tick)
+                .collect();
+            assert_eq!(
+                ticks, offsets,
+                "`{name}` fires one shot per delayed tick, not a burst"
+            );
+            assert_eq!(counts.iter().sum::<u64>(), 4, "`{name}` 4 shots total");
+        }
+    }
+
+    /// PAR-0451: scatter's 2-shot pattern (`Blocks.java:3420-3421`
+    /// `shotDelay = 5; shots = 2`) spreads over T and T+5. Scatter is anti-air
+    /// (`targetGround = false`, `Turret.java:645`), so the harness supplies an
+    /// airborne stand-in target (`!isGrounded()`, `UnitComp.java:80-82`); the
+    /// assertion only covers spawn ticks.
+    #[test]
+    fn scatter_fires_one_shot_per_delayed_tick() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("scatter", tx, ty, 1)
+            .expect("scatter");
+        let scrap = harness.content().item_id("scrap").expect("scrap");
+        for _ in 0..10 {
+            handle_item(&mut harness.build.world, turret, scrap);
+        }
+        // A grounded stand-in would be rejected by the air-only branch; this
+        // one hovers at elevation 1, like a flying unit type
+        // (`UnitType.java:566`).
+        let target = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, target, 1.0, true);
+        let counts = volley_spawn_counts(&mut harness, 6);
+        let ticks: Vec<usize> = counts
+            .iter()
+            .enumerate()
+            .filter(|(_, count)| **count > 0)
+            .map(|(tick, _)| tick)
+            .collect();
+        assert_eq!(ticks, vec![0, 5], "scatter T and T+5, not 2 at T");
+        assert_eq!(counts.iter().sum::<u64>(), 2);
+    }
+
+    /// PAR-0451 (`Turret.java:718-720,742,751-830`): `charging()` is
+    /// `queuedBullets > 0 && shoot.firstShotDelay > 0`, so lancer's 40-tick
+    /// `firstShotDelay` queues its only shot, ramps `charge` at 1/40 per tick,
+    /// freezes rotation (`moveWhileCharging = false`, `Blocks.java:3594`) and
+    /// gates `updateShooting` until the shot fires.
+    #[test]
+    fn lancer_charges_before_its_delayed_shot() {
+        let mut harness = CombatHarness::new(48, 16, 7);
+        let wall = harness.content().block_id("copper-wall").expect("wall");
+        assert!(harness.place(10, 8, wall, 0, true));
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = harness
+            .spawn_test_turret("lancer", tx, ty, 1)
+            .expect("lancer");
+        {
+            let mut state = harness.build.world.get_mut::<TurretState>(turret).unwrap();
+            // `reload = 80` (`Blocks.java:3586`): start full so the first tick
+            // queues the charged shot; aim already on the wall (angle 0) and a
+            // zeroed retarget timer acquire it immediately.
+            state.reload_counter = 80.0;
+            state.target_timer = 0.0;
+            state.rotation = 0.0;
+        }
+        // Tick 1 queues the shot: nothing spawns, and `charge` is still 0 (it is
+        // updated before `updateShooting`).
+        harness.tick();
+        let state = harness.turret_state(turret).unwrap();
+        assert_eq!(harness.bullets_created, 0, "no bullet on the queue tick");
+        assert_eq!(state.total_shots, 0);
+        assert_eq!(state.charge, 0.0);
+        // Freeze probe: aim the turret away; `shouldTurn()` is false while
+        // charging, so the rotation must not follow the target.
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .unwrap()
+            .rotation = 90.0;
+        let mut charge_mid = 0.0f32;
+        for k in 2..=40 {
+            harness.tick();
+            let state = harness.turret_state(turret).unwrap();
+            assert_eq!(harness.bullets_created, 0, "no bullet on charge tick {k}");
+            assert_eq!(state.rotation, 90.0, "rotation frozen on charge tick {k}");
+            if k == 21 {
+                charge_mid = state.charge;
+            }
+        }
+        let state = harness.turret_state(turret).unwrap();
+        assert!(
+            (charge_mid - 0.5).abs() < 0.01,
+            "charge ramps 1/40 per tick, got {charge_mid} at tick 21"
+        );
+        assert!(
+            state.reload_counter > 30.0,
+            "reload continues while charging (`reloadWhileCharging`): {}",
+            state.reload_counter
+        );
+        // The 40th tick after queueing fires the single charged shot.
+        harness.tick();
+        let state = harness.turret_state(turret).unwrap();
+        assert_eq!(harness.bullets_created, 1, "exactly one charged shot");
+        assert_eq!(state.total_shots, 1);
+        assert_eq!(state.charge, 0.0, "charge resets after firing");
+    }
 }
 
 /// J04 T1 (`Turret.findTarget`, `Turret.java:631-677`): unit sorts, min-range
 /// lifetime clamp and tracking range.
 #[cfg(test)]
 mod find_target_tests {
+    use super::tests::set_unit_elevation;
     use super::*;
     use crate::combat::harness::CombatHarness;
     use crate::entities::comp::Health;
@@ -3125,5 +3409,128 @@ mod find_target_tests {
         harness.update_turrets_only();
         assert!(harness.turret_state(turret).unwrap().target.is_some());
         assert_eq!(harness.turret_state(turret).unwrap().target_timer, 40.0);
+    }
+
+    /// `Turret.findEnemy` air-only branch (`Turret.java:644-646`): scatter
+    /// (`targetGround = false`) rejects grounded units
+    /// (`isGrounded = elevation < 0.001`, `UnitComp.java:80-82`) and targets
+    /// aircraft. The accept predicate is `!e.isGrounded()` — not the
+    /// `isFlying()` (`elevation >= 0.09`) band.
+    #[test]
+    fn air_only_turret_targets_aircraft_over_ground() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scatter", tx, ty, "scrap", "scatter_scrap");
+        let config = harness.turret_state(turret).expect("state").config.clone();
+        assert!(
+            config.target_air && !config.target_ground,
+            "scatter is air-only"
+        );
+        // Grounded enemy 40 px away: nearest, but not a legal target.
+        harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        // Flying enemy 100 px away: the only legal target.
+        let flying = harness.spawn_test_unit(tx + 100.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, flying, 1.0, true);
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            Some(flying),
+            "`!isGrounded()` keeps the aircraft and drops the grounded unit"
+        );
+    }
+
+    /// Air-only turret with only grounded enemies in range: no target
+    /// (`Turret.java:645` rejects every `isGrounded()` unit).
+    #[test]
+    fn air_only_turret_rejects_grounded_only() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scatter", tx, ty, "scrap", "scatter_scrap");
+        harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        harness.spawn_test_unit(tx + 120.0, ty, 2, Vec::new());
+        harness.update_turrets_only();
+        assert_eq!(harness.turret_state(turret).expect("state").target, None);
+    }
+
+    /// Java's air-only gate is `!isGrounded()` (`elevation < 0.001`), so a unit
+    /// in the 0.001..0.09 band is a legal target even though `isFlying()`
+    /// (`elevation >= 0.09`, `UnitComp.java:84-86`) is false — the air-only
+    /// branch must not be written as `isFlying()`.
+    #[test]
+    fn air_only_turret_accepts_mid_band_elevation() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scatter", tx, ty, "scrap", "scatter_scrap");
+        let band = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, band, 0.05, false);
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            Some(band),
+            "0.05 elevation is not grounded, so the air-only branch keeps it"
+        );
+    }
+
+    /// General branch (`Turret.java:647-651`): a `targetGround && targetAir`
+    /// turret keeps both bands — `(isGrounded() || targetAir) &&
+    /// (!isGrounded() || targetGround)`.
+    #[test]
+    fn general_turret_targets_ground_and_air() {
+        for (elevation, physics_flying) in [(0.0, false), (1.0, true)] {
+            let mut harness = CombatHarness::new(64, 64, 7);
+            let (tx, ty) = CombatHarness::tile_center(4, 8);
+            let turret = armed_turret(&mut harness, "duo", tx, ty, "copper", "duo_copper");
+            let config = harness.turret_state(turret).expect("state").config.clone();
+            assert!(
+                config.target_air && config.target_ground,
+                "duo targets both"
+            );
+            let unit = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+            set_unit_elevation(&mut harness, unit, elevation, physics_flying);
+            harness.update_turrets_only();
+            assert_eq!(
+                harness.turret_state(turret).expect("state").target,
+                Some(unit),
+                "targetAir && targetGround keeps elevation {elevation}"
+            );
+        }
+    }
+
+    /// General branch with `targetAir = false` (hail, `Blocks.java`): a unit in
+    /// the 0.001..0.09 band is not grounded, so Java rejects it in both terms
+    /// (`(isGrounded() || targetAir)` is false and `!isGrounded()` alone is not
+    /// enough without the first term).
+    #[test]
+    fn ground_only_turret_rejects_mid_band_elevation() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "hail", tx, ty, "graphite", "hail_graphite");
+        let config = harness.turret_state(turret).expect("state").config.clone();
+        assert!(
+            config.target_ground && !config.target_air,
+            "hail is ground-only"
+        );
+        let band = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, band, 0.05, false);
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            None,
+            "0.05 elevation is not grounded and hail has targetAir = false"
+        );
+        // A truly grounded unit at the same distance is still targeted.
+        let grounded = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .expect("state")
+            .target_timer = 0.0;
+        harness.update_turrets_only();
+        let _ = band;
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            Some(grounded)
+        );
     }
 }

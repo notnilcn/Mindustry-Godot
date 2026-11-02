@@ -271,9 +271,14 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         update: Some(true),
         consumes: vec![
             consume_items(vec![stack("thorium", 1)]),
-            // Upstream `consumeLiquid(cryofluid, …).update(false)`: the reactor
-            // removes coolant in its own `updateTile`, never the generic pass.
-            consume_liquid("cryofluid", 0.02f32).update(false),
+            // Upstream `consumeLiquid(cryofluid, heating / coolantPower)
+            // .update(false)` (`Blocks.java:2644`). The block body overrides
+            // both the class defaults: `heating = 0.005f` (default 0.01) and
+            // `coolantPower = 0.125f` (default 0.5), so the demand is
+            // `0.005 / 0.125 = 0.04`/tick (2.4/s), not 0.01 / 0.5 = 0.02.
+            // The reactor removes coolant in its own `updateTile`, never the
+            // generic pass.
+            consume_liquid("cryofluid", 0.005f32 / 0.125f32).update(false),
         ],
         ..spec("thorium-reactor", BlockKind::NuclearReactor)
     })?;

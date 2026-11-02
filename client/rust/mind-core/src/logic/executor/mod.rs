@@ -1185,7 +1185,10 @@ impl Instruction {
                     ) {
                     crate::logic::access::Sensed::Num(1.0)
                 } else if let Some(
-                    t @ (LogicObject::Building(_) | LogicObject::Unit(_) | LogicObject::Content(_)),
+                    t @ (LogicObject::Building(_)
+                    | LogicObject::Unit(_)
+                    | LogicObject::Content(_)
+                    | LogicObject::Team(_)),
                 ) = &target
                 {
                     match &selector_obj {

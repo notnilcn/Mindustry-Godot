@@ -1628,6 +1628,44 @@ mod tests {
         assert_eq!(calls.load(Ordering::Relaxed), 1);
     }
 
+    /// PAR-0460: `thoriumReactor` overrides both reactor class defaults
+    /// (`heating = 0.005f` vs 0.01, `coolantPower = 0.125f` vs 0.5,
+    /// `Blocks.java:2638-2647`), so its coolant consumer is
+    /// `heating / coolantPower` = 0.04/tick (2.4/s), not 0.01 / 0.5 = 0.02.
+    #[test]
+    fn thorium_reactor_cryofluid_intake_matches_content_override() {
+        let harness = BuildHarness::new(8, 8, 7);
+        let block = harness
+            .content()
+            .block_id("thorium-reactor")
+            .expect("thorium-reactor");
+        let def = harness.content().block(block).expect("block def");
+        let cryo = harness.content().liquid_id("cryofluid").expect("cryofluid");
+        let spec = def
+            .consumes
+            .iter()
+            .find(|spec| {
+                matches!(
+                    &spec.consume,
+                    crate::content::Consume::Liquid { liquid, .. } if *liquid == cryo
+                )
+            })
+            .expect("cryofluid consumer");
+        match &spec.consume {
+            crate::content::Consume::Liquid { amount, .. } => {
+                assert!(
+                    (*amount - 0.005 / 0.125).abs() < 1e-6,
+                    "cryofluid amount {amount} (want 0.005 / 0.125 = 0.04)"
+                );
+            }
+            _ => unreachable!("filtered to Consume::Liquid"),
+        }
+        assert!(
+            !spec.update,
+            "the reactor consumes coolant in its own updateTile (.update(false))"
+        );
+    }
+
     #[test]
     fn variable_reactor_explosion_gates_on_heat() {
         let mut harness = BuildHarness::new(8, 8, 7);

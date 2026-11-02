@@ -38,8 +38,10 @@ pub struct DuctRouterBehavior {
 }
 
 impl DuctRouterBehavior {
-    /// Vanilla `duct-router` (`speed = 5`).
-    pub const VANILLA: DuctRouterBehavior = DuctRouterBehavior { speed: 5.0 };
+    /// Vanilla `duct-router`: the class default is `speed = 5f`
+    /// (`DuctRouter.java:19`) but content overrides it to `4f`
+    /// (`Blocks.java:2194-2201`), like the duct family around it.
+    pub const VANILLA: DuctRouterBehavior = DuctRouterBehavior { speed: 4.0 };
 }
 
 /// The `DuctRouterBuild.target()` proximity scan shared by `DuctRouter` and
@@ -284,5 +286,41 @@ mod tests {
             .build_at(5, 4)
             .map(|e| crate::world::config::read_config(&harness.world, e));
         assert_eq!(read, Some(ConfigValue::Item(copper)));
+    }
+
+    /// `DuctRouter` content override (`Blocks.java:2194-2201`): `speed = 4f`.
+    /// A dispatched item is in transit for exactly four ticks
+    /// (`progress` starts at `-1`, `+= edelta / speed * 2`, gate `1 - 1/speed`).
+    #[test]
+    fn duct_router_cadence_is_four_ticks() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let copper = harness.content().item_id("copper").expect("copper");
+        let router = harness.content().block_id("duct-router").expect("router");
+        let container = harness.content().block_id("container").expect("container");
+        assert!(harness.place(5, 4, router, 0, true));
+        assert!(harness.place(6, 4, container, 0, true));
+        let router_e = harness.build_at(5, 4).expect("router entity");
+        transfer::dispatch_handle_item(&mut harness.world, router_e, router_e, copper);
+        let front_total = |harness: &BuildHarness| {
+            harness
+                .build_at(6, 4)
+                .and_then(|e| harness.world.get::<ItemModule>(e))
+                .map(|m| m.total)
+                .unwrap_or(0)
+        };
+        for _ in 0..3 {
+            harness.tick();
+        }
+        assert_eq!(
+            front_total(&harness),
+            0,
+            "item must still be in transit at tick 3"
+        );
+        harness.tick();
+        assert_eq!(
+            front_total(&harness),
+            1,
+            "item reaches the front container on tick 4"
+        );
     }
 }
