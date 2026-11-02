@@ -52,9 +52,11 @@ pub struct DirectionalUnloaderBehavior {
 }
 
 impl DirectionalUnloaderBehavior {
-    /// Vanilla `duct-unloader`.
+    /// Vanilla `duct-unloader`: the class default is `speed = 1f`
+    /// (`DirectionalUnloader.java:25`) but content overrides it to `4f`
+    /// (`Blocks.java:2229-2234`), so it drains one item every four ticks.
     pub const VANILLA: DirectionalUnloaderBehavior = DirectionalUnloaderBehavior {
-        speed: 1.0,
+        speed: 4.0,
         allow_core_unload: false,
     };
 }
@@ -248,5 +250,39 @@ mod tests {
             .map(|m| m.total)
             .unwrap_or(0);
         assert!(drained > 0, "front container total={drained}");
+    }
+
+    /// `DirectionalUnloader` content override (`Blocks.java:2229-2234`):
+    /// `speed = 4f`, so 50 stocked items drain one every four ticks -- 10 in
+    /// 40 ticks, not one per tick (the class default `1f`).
+    #[test]
+    fn duct_unloader_cadence_is_four_ticks() {
+        let mut harness = BuildHarness::new(16, 16, 7);
+        let copper = harness.content().item_id("copper").expect("copper");
+        let unloader = harness
+            .content()
+            .block_id("duct-unloader")
+            .expect("duct-unloader");
+        let container = harness.content().block_id("container").expect("container");
+        // 2x2 back container at (3,4) touches the unloader's back edge (4,4).
+        assert!(harness.place(3, 4, container, 0, true));
+        assert!(harness.place(5, 4, unloader, 0, true));
+        assert!(harness.place(6, 4, container, 0, true));
+        let back = harness.build_at(3, 4).expect("back");
+        harness
+            .world
+            .get_mut::<ItemModule>(back)
+            .expect("items")
+            .add(copper, 50, 300);
+        for _ in 0..40 {
+            harness.tick();
+        }
+        let front = harness.build_at(6, 4).expect("front");
+        let total = harness
+            .world
+            .get::<ItemModule>(front)
+            .map(|m| m.total)
+            .unwrap_or(0);
+        assert_eq!(total, 10, "40 ticks at speed 4 drains exactly 10 items");
     }
 }
