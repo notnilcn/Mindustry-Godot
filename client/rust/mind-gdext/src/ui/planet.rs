@@ -291,6 +291,11 @@ impl IControl for MindPlanetView {
             || (self.preset_pulse() - self.built_pulse).abs() > 0.04
         {
             self.rebuild_markers();
+            // `PlanetDialog.renderSectors` fades the hover fill and the selected
+            // sector's band/borders by `uiAlpha` too (`:489-496`), so those
+            // overlays must refresh when the zoom-driven alpha moves.
+            self.rebuild_hover_fill();
+            self.rebuild_highlight();
         }
         self.global_time += delta * 60.0;
         self.update_clouds();
@@ -1428,7 +1433,14 @@ impl MindPlanetView {
             Vector3::ZERO
         };
         let corners: Vec<Vector3> = ids.iter().map(|id| self.corner(*id) * arad).collect();
-        let accent_fill = Color::from_rgba(ACCENT.r, ACCENT.g, ACCENT.b, 0.5);
+        // `hoverColor = Pal.accent.a(0.5f)` (`PlanetRenderer.java:19`) faded by
+        // `mulA(state.uiAlpha)` (`PlanetDialog.java:489`).
+        let accent_fill = Color::from_rgba(
+            ACCENT.r,
+            ACCENT.g,
+            ACCENT.b,
+            faded_alpha(0.5, self.ui_alpha),
+        );
         let mut fan: Vec<Vector3> = Vec::new();
         let mut colors: Vec<Color> = Vec::new();
         for index in 0..corners.len() {
@@ -1487,6 +1499,14 @@ impl MindPlanetView {
         // inner_i+1, inner_i)).
         let mut band: Vec<Vector3> = Vec::new();
         let mut band_colors: Vec<Color> = Vec::new();
+        // `drawSelection(selected, state.uiAlpha)` (`PlanetDialog.java:495`)
+        // tints the band with `Pal.accent` at alpha `uiAlpha`.
+        let band_color = Color::from_rgba(
+            ACCENT.r,
+            ACCENT.g,
+            ACCENT.b,
+            faded_alpha(1.0, self.ui_alpha),
+        );
         for index in 0..outers.len() {
             let next = (index + 1) % outers.len();
             band.push(outers[index]);
@@ -1495,7 +1515,7 @@ impl MindPlanetView {
             band.push(outers[index]);
             band.push(inners[next]);
             band.push(inners[index]);
-            band_colors.extend(std::iter::repeat_n(ACCENT, 6));
+            band_colors.extend(std::iter::repeat_n(band_color, 6));
         }
         let mut band_arrays = new_arrays();
         band_arrays.set(
@@ -1514,10 +1534,17 @@ impl MindPlanetView {
         }
         self.rebuild_sector_icon();
 
-        // Outline loop (`drawBorders`, `borderColor` = accent at 30%).
+        // Outline loop (`drawBorders`, `borderColor` = accent at 30%),
+        // `borderColor.write.cpy().a((base.a + 0.3f) * alpha)` with
+        // `alpha = state.uiAlpha` (`Planet.java:563-564`, `PlanetDialog.java:496`).
         let mut outline_loop: Vec<Vector3> = Vec::new();
         let mut loop_colors: Vec<Color> = Vec::new();
-        let edge = Color::from_rgba(ACCENT.r, ACCENT.g, ACCENT.b, 0.3);
+        let edge = Color::from_rgba(
+            ACCENT.r,
+            ACCENT.g,
+            ACCENT.b,
+            faded_alpha(0.3, self.ui_alpha),
+        );
         for index in 0..outers.len() {
             outline_loop.push(outers[index]);
             outline_loop.push(outers[(index + 1) % outers.len()]);
@@ -1880,4 +1907,32 @@ fn row_packed_i32(row: &VarDictionary, key: &str) -> PackedInt32Array {
     value(row, key)
         .and_then(|value| value.try_to::<PackedInt32Array>().ok())
         .unwrap_or_default()
+}
+
+/// `Color.a * state.uiAlpha` for the sector overlays the dialog fades while
+/// zooming (`PlanetDialog.renderSectors`: `hoverColor.mulA(uiAlpha)` at
+/// `PlanetDialog.java:489`, `drawSelection(selected, uiAlpha)` at `:495`,
+/// `drawBorders(..., uiAlpha)` at `:490/:496`). Clamped like a colour channel.
+fn faded_alpha(base: f32, ui_alpha: f32) -> f32 {
+    (base * ui_alpha).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::faded_alpha;
+
+    /// Java's overlay alphas: `hoverColor = Pal.accent.a(0.5f)` and
+    /// `borderColor = Pal.accent.a(0.3f)` (`PlanetRenderer.java:19`), the
+    /// selection band `Pal.accent` at alpha `uiAlpha`
+    /// (`PlanetRenderer.drawSelection`, `:228-230`), each multiplied by the
+    /// zoom-driven `state.uiAlpha` (`PlanetDialog.java:489-496`).
+    #[test]
+    fn sector_overlay_alpha_scales_with_ui_alpha() {
+        assert_eq!(faded_alpha(0.5, 1.0), 0.5);
+        assert_eq!(faded_alpha(0.5, 0.0), 0.0);
+        assert_eq!(faded_alpha(0.3, 0.5), 0.15);
+        assert_eq!(faded_alpha(1.0, 0.25), 0.25);
+        assert_eq!(faded_alpha(1.0, 2.0), 1.0);
+        assert_eq!(faded_alpha(1.0, -1.0), 0.0);
+    }
 }
