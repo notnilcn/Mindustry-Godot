@@ -331,7 +331,8 @@ fn block_def(world: &World, e: Entity) -> Option<std::sync::Arc<crate::content::
 /// `SensorI` dispatch for a numeric or object accessor.
 ///
 /// Ported from `BuildingComp.sense`/`senseObject` and `UnitComp.sense`/
-/// `senseObject` (`entities/comp/{BuildingComp,UnitComp}.java`). Returns
+/// `senseObject` (`entities/comp/{BuildingComp,UnitComp}.java`), and
+/// `Team.sense`/`senseObject` (`game/Team.java:170-184`). Returns
 /// [`Sensed::Num`] for unknown accessors, matching upstream `sense`'s `default`
 /// branch (objects use [`Sensed::Obj(None)`]).
 pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
@@ -340,8 +341,36 @@ pub fn sense(world: &World, target: &LogicObject, a: LAccess) -> Sensed {
         LogicObject::Building(e) => sense_building(world, *e, a),
         LogicObject::Unit(e) => sense_unit(world, *e, a),
         LogicObject::Content(c) => sense_content_accessor(world, *c, a),
+        LogicObject::Team(id) => sense_team(*id, a),
         _ => Sensed::Obj(None),
     }
+}
+
+/// `Team.sense`/`senseObject` (`J/game/Team.java:170-184`): `@id` is the team
+/// id, `@color` is [`team_color_bits`], `@name` is the registry name (object
+/// output); every other accessor is Java's `NaN`/`noSensed` (null).
+fn sense_team(id: u8, a: LAccess) -> Sensed {
+    match a {
+        LAccess::Id => Sensed::Num(id as f64),
+        LAccess::Color => Sensed::Num(team_color_bits(id)),
+        LAccess::Name => Sensed::Obj(Some(LogicObject::Str(
+            crate::game::team::Team::get(id).name.clone(),
+        ))),
+        _ => Sensed::Num(f64::NAN),
+    }
+}
+
+/// `Team.color` as the `@color` double bits (`Team.sense(color)` ->
+/// `Color.toDoubleBits`), encoded exactly like the building team-colour row
+/// (`BuildingComp.java:2104`) so both report the same team colour.
+fn team_color_bits(id: u8) -> f64 {
+    let color = crate::game::team::Team::get(id).color;
+    crate::logic::globals::rgba_u8_to_double_bits(
+        (color.r * 255.0).round() as i32,
+        (color.g * 255.0).round() as i32,
+        (color.b * 255.0).round() as i32,
+        255,
+    )
 }
 
 /// `Block/UnitType/Item/Liquid.sense(LAccess)` (`J/world/Block.java:1674-1708`,
@@ -450,6 +479,11 @@ pub fn sense_content(world: &World, target: &LogicObject, c: crate::content::Con
     let LogicObject::Building(e) = target else {
         if let LogicObject::Unit(e) = target {
             return unit_content_count(world, *e, c);
+        }
+        // `Team` is `Senseable` but does not override `sense(Content)`, so it
+        // keeps the interface default `0` (`J/logic/Senseable.java:12-14`).
+        if matches!(target, LogicObject::Team(_)) {
+            return 0.0;
         }
         return f64::NAN;
     };
@@ -689,16 +723,7 @@ fn sense_building(world: &World, e: Entity, a: LAccess) -> Sensed {
                 .map(|d| (d.range / 8.0) as f64)
                 .unwrap_or(0.0),
         ),
-        LAccess::Color => {
-            let id = entity_team(world, e).unwrap_or(0);
-            let color = crate::game::team::Team::get(id).color;
-            Sensed::Num(crate::logic::globals::rgba_u8_to_double_bits(
-                (color.r * 255.0).round() as i32,
-                (color.g * 255.0).round() as i32,
-                (color.b * 255.0).round() as i32,
-                255,
-            ))
-        }
+        LAccess::Color => Sensed::Num(team_color_bits(entity_team(world, e).unwrap_or(0))),
         LAccess::DisplayWidth => Sensed::Num(display_dimension(world, e, true)),
         LAccess::DisplayHeight => Sensed::Num(display_dimension(world, e, false)),
         // `bufferSize`/`operations` read the ROOT display

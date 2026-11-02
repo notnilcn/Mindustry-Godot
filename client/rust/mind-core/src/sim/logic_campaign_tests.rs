@@ -2809,3 +2809,49 @@ fn ucontrol_within_is_strict() {
     assert_eq!(processor_num(&sim, 10, 10, "inside"), Some(1.0), "inside");
     assert_events_drained(&sim);
 }
+
+/// PAR-0458: `SenseI.run` dispatches on `target instanceof Senseable`
+/// (`J/logic/LExecutor.java:671-700`) and `Team implements Senseable`
+/// (`J/game/Team.java:17`), so a team value senses like any other object.
+#[test]
+fn sensor_reads_team_properties() {
+    let mut sim = campaign_sim();
+    place_world_processor(
+        &mut sim,
+        10,
+        10,
+        "set t @sharded\nsensor id t @id\nsensor col t @color\nsensor nm t @name\nstop\n",
+    );
+    tick(&mut sim, 20);
+    assert_eq!(
+        processor_num(&sim, 10, 10, "id"),
+        Some(1.0),
+        "Team.sense(id) is the team id"
+    );
+    assert_eq!(
+        processor_obj(&sim, 10, 10, "nm"),
+        Some(LogicObject::Str("sharded".to_owned())),
+        "Team.senseObject(name) is the registry name"
+    );
+    // `Team.sense(color)` is `color.toDoubleBits()` (`J/game/Team.java:173`);
+    // sharded's color is `Pal.accent` = `ffd37f` (`J/graphics/Pal.java:79`),
+    // encoded like the building team-colour row (`J/entities/comp/BuildingComp.java:2104`).
+    let color = crate::game::team::Team::get(1).color;
+    let expected = crate::logic::globals::rgba_to_double_bits((
+        (color.r * 255.0).round() as u8,
+        (color.g * 255.0).round() as u8,
+        (color.b * 255.0).round() as u8,
+        255,
+    ));
+    assert_eq!(
+        expected,
+        f64::from_bits(0xffd3_7fff_u64),
+        "sharded color bits from Team.java + Pal.accent"
+    );
+    assert_eq!(
+        processor_num(&sim, 10, 10, "col"),
+        Some(expected),
+        "Team.sense(color) is the team color double bits"
+    );
+    assert_events_drained(&sim);
+}
