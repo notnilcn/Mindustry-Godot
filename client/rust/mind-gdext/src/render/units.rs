@@ -749,27 +749,19 @@ impl UnitRenderer {
                     weapon.base_rotation,
                     weapon.recoil,
                 );
-                let [u0, v0, u1, v1] = outline.uv;
-                let uv = if weapon.flip {
-                    [u1, v0, u0, v1]
-                } else {
-                    [u0, v0, u1, v1]
-                };
                 let entry = groups
                     .entry((bucket, outline.page))
                     .or_insert((outline.texture.clone(), Vec::new()));
-                entry.1.push(ZQuad {
-                    z: 0.0,
-                    quad: UnitQuad {
-                        cx: wx,
-                        cy: wy,
-                        w: outline.w * self.sprite_scale,
-                        h: outline.h * self.sprite_scale,
-                        rot: wr,
-                        uv,
-                        color: 0xffff_ffff,
-                    },
-                });
+                entry.1.push(weapon_outline_quad(
+                    wx,
+                    wy,
+                    wr,
+                    outline.w * self.sprite_scale,
+                    outline.h * self.sprite_scale,
+                    outline.uv,
+                    weapon.flip,
+                    weapon.def.layer_offset,
+                ));
                 sprites += 1;
             }
             // `drawBody` (`rotation - 90`; the port draws trimmed sizes, which
@@ -906,6 +898,32 @@ impl UnitRenderer {
                     });
                     sprites += 1;
                 }
+                // `Weapon.draw` (`Weapon.java:267-272`): `<weapon>-heat` is
+                // drawn additive with the heat colour and `mount.heat` as
+                // alpha, still inside the `Draw.xscl` flip window and before
+                // the over-parts loop. The port routes it to the additive
+                // `flash_groups` and keeps the weapon's `layerOffset` z so it
+                // sorts with the region/cell quads.
+                if let Some(heat) = self.resolver.find(&format!("{}-heat", weapon.name))
+                    && let Some(quad) = weapon_heat_quad(
+                        wx,
+                        wy,
+                        wr,
+                        heat.w * self.sprite_scale,
+                        heat.h * self.sprite_scale,
+                        heat.uv,
+                        weapon.flip,
+                        weapon.def.layer_offset,
+                        weapon.def.heat_color,
+                        weapon.mount.heat,
+                    )
+                {
+                    let entry = flash_groups
+                        .entry((bucket, heat.page))
+                        .or_insert((heat.texture.clone(), Vec::new()));
+                    entry.1.push(quad);
+                    sprites += 1;
+                }
             }
         }
 
@@ -986,6 +1004,93 @@ impl UnitRenderer {
     }
 }
 
+/// `Weapon.draw` heat overlay (`Weapon.java:267-272`): builds the additive
+/// `<weapon>-heat` quad from plain mount values, or `None` when the mount is
+/// cold (`mount.heat > 0` gate) so the emission decision is testable without
+/// Godot.
+///
+/// `heat_color` is `Weapon.heatColor` (`Weapon.java:149`); `Draw.color(color,
+/// alpha)` (`Arc` `Draw.java:214-216`) keeps the colour's RGB and replaces the
+/// alpha with the clamped mount heat (it is NOT multiplied by
+/// `heatColor.a`).
+#[allow(clippy::too_many_arguments)] // the mount transform + resolved region fields
+fn weapon_heat_quad(
+    cx: f32,
+    cy: f32,
+    rot: f32,
+    w: f32,
+    h: f32,
+    uv: [f32; 4],
+    flip: bool,
+    z: f32,
+    heat_color: mind_core::content::Rgba,
+    heat: f32,
+) -> Option<ZQuad> {
+    if heat <= 0.0 {
+        return None;
+    }
+    Some(ZQuad {
+        z,
+        quad: UnitQuad {
+            cx,
+            cy,
+            w,
+            h,
+            rot,
+            uv: mirrored_uv(uv, flip),
+            color: heat_quad_color(heat_color, heat),
+        },
+    })
+}
+
+/// `UnitType.drawWeaponOutlines` (`UnitType.java:1744-1760`): a non-top
+/// weapon's `<name>-outline` sprite, drawn with
+/// `Draw.z(z + mount.weapon.layerOffset)` and rolled back afterwards — so the
+/// quad carries the weapon's `layerOffset` as its z. The mount transform and
+/// `Draw.xscl` UV mirroring match the weapon region quad.
+#[allow(clippy::too_many_arguments)] // the mount transform + resolved region fields
+fn weapon_outline_quad(
+    cx: f32,
+    cy: f32,
+    rot: f32,
+    w: f32,
+    h: f32,
+    uv: [f32; 4],
+    flip: bool,
+    layer_offset: f32,
+) -> ZQuad {
+    ZQuad {
+        z: layer_offset,
+        quad: UnitQuad {
+            cx,
+            cy,
+            w,
+            h,
+            rot,
+            uv: mirrored_uv(uv, flip),
+            color: 0xffff_ffff,
+        },
+    }
+}
+
+/// `Draw.color(heatColor, mount.heat)` packed as RGBA8888: the heat colour's
+/// RGB plus `round(clamp(heat) * 255)` as alpha.
+fn heat_quad_color(heat_color: mind_core::content::Rgba, heat: f32) -> u32 {
+    let alpha = (heat.clamp(0.0, 1.0) * 255.0).round() as u32;
+    (heat_color.to_rgba8888() & 0xffff_ff00) | alpha
+}
+
+/// `Draw.xscl *= -Mathf.sign(flipSprite)` mirrored UVs for a flipped mount
+/// (shared by the weapon region, heat and outline quads).
+fn mirrored_uv(uv: [f32; 4], flip: bool) -> [f32; 4] {
+    let [u0, v0, u1, v1] = uv;
+    if flip {
+        [u1, v0, u0, v1]
+    } else {
+        [u0, v0, u1, v1]
+    }
+}
+
 /// `Draw.mixcol(color, alpha)`: lerp an RGBA8888 toward `target`'s RGB.
 fn mix_rgba(base: u32, target: u32, t: f32) -> u32 {
     let t = t.clamp(0.0, 1.0);
@@ -1040,7 +1145,8 @@ pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
 
 #[cfg(test)]
 mod tests {
-    use super::{UnitQuad, ZQuad, sort_unit_quads};
+    use super::{UnitQuad, ZQuad, sort_unit_quads, weapon_heat_quad, weapon_outline_quad};
+    use mind_core::content::Rgba;
 
     fn zquad(z: f32, color: u32) -> ZQuad {
         ZQuad {
@@ -1074,5 +1180,107 @@ mod tests {
         sort_unit_quads(&mut quads);
         let order: Vec<u32> = quads.iter().map(|q| q.quad.color).collect();
         assert_eq!(order, vec![5, 2, 1, 4, 3, 6]);
+    }
+
+    /// `cleroi-weapon` ships `heatColor = Color.red` (`erekir.rs:1419`);
+    /// `Weapon.java:267-272` draws `<weapon>-heat` only when
+    /// `mount.heat > 0`, tinted by the heat colour's RGB with the clamped
+    /// mount heat as alpha and the weapon's `layerOffset` z.
+    #[test]
+    fn weapon_heat_quad_gates_on_heat_and_tints_by_heat_color() {
+        let red = Rgba::new(1.0, 0.0, 0.0, 1.0);
+        let uv = [0.0, 0.0, 1.0, 1.0];
+        let cold = weapon_heat_quad(10.0, 20.0, 30.0, 4.0, 8.0, uv, false, -0.002, red, 0.0);
+        assert!(cold.is_none(), "cold mount must emit no heat quad");
+
+        let Some(hot) = weapon_heat_quad(10.0, 20.0, 30.0, 4.0, 8.0, uv, false, -0.002, red, 1.0)
+        else {
+            panic!("hot mount emits the heat quad");
+        };
+        assert_eq!(hot.quad.color, 0xff00_00ff);
+        assert_eq!(hot.z, -0.002);
+        assert_eq!(
+            (
+                hot.quad.cx,
+                hot.quad.cy,
+                hot.quad.rot,
+                hot.quad.w,
+                hot.quad.h
+            ),
+            (10.0, 20.0, 30.0, 4.0, 8.0)
+        );
+
+        let Some(half) = weapon_heat_quad(0.0, 0.0, 0.0, 4.0, 8.0, uv, false, 0.0, red, 0.5) else {
+            panic!("half heat still draws");
+        };
+        assert_eq!(half.quad.color, 0xff00_0080);
+    }
+
+    /// The heat quad sits inside `Draw.xscl` (`Weapon.java:253`), so it mirrors
+    /// its UVs exactly like the region/cell quads when `flipSprite` is set.
+    #[test]
+    fn weapon_heat_quad_mirrors_uvs_when_flipped() {
+        let uv = [0.1, 0.2, 0.3, 0.4];
+        let Some(plain) = weapon_heat_quad(
+            0.0,
+            0.0,
+            0.0,
+            4.0,
+            8.0,
+            uv,
+            false,
+            -0.002,
+            Rgba::WHITE,
+            0.75,
+        ) else {
+            panic!("hot mount emits the heat quad");
+        };
+        assert_eq!(plain.quad.uv, [0.1, 0.2, 0.3, 0.4]);
+        let Some(flipped) =
+            weapon_heat_quad(0.0, 0.0, 0.0, 4.0, 8.0, uv, true, -0.002, Rgba::WHITE, 0.75)
+        else {
+            panic!("hot mount emits the heat quad");
+        };
+        assert_eq!(flipped.quad.uv, [0.3, 0.2, 0.1, 0.4]);
+    }
+
+    /// PAR-0367: `UnitType.drawWeaponOutlines` (`UnitType.java:1744-1760`)
+    /// wraps each non-top weapon's `drawOutline` in
+    /// `Draw.z(z + mount.weapon.layerOffset)`; the outline quad carries that
+    /// offset (vanilla: `conquer` `+0.1` at `erekir.rs:1074`, `cleroi-weapon`
+    /// `-0.002` at `erekir.rs:1417`), not a flat `0.0`.
+    #[test]
+    fn weapon_outline_quad_applies_layer_offset() {
+        let uv = [0.0, 0.0, 1.0, 1.0];
+        let cleroi = weapon_outline_quad(0.0, 0.0, 0.0, 4.0, 8.0, uv, false, -0.002);
+        assert_eq!(cleroi.z, -0.002);
+        let conquer = weapon_outline_quad(0.0, 0.0, 0.0, 4.0, 8.0, uv, false, 0.1);
+        assert_eq!(conquer.z, 0.1);
+        let top = weapon_outline_quad(0.0, 0.0, 0.0, 4.0, 8.0, uv, false, 0.0);
+        assert_eq!(top.z, 0.0, "a zero layerOffset keeps the baseline z");
+    }
+
+    /// The outline quad shares the weapon region's mount transform and
+    /// `Draw.xscl` UV mirroring (`Weapon.java:253`), and stays pure white
+    /// (`Draw.reset()` before the outline pass).
+    #[test]
+    fn weapon_outline_quad_mirrors_uvs_when_flipped() {
+        let uv = [0.1, 0.2, 0.3, 0.4];
+        let plain = weapon_outline_quad(10.0, 20.0, 30.0, 4.0, 8.0, uv, false, -0.002);
+        assert_eq!(plain.quad.uv, [0.1, 0.2, 0.3, 0.4]);
+        assert_eq!(plain.quad.color, 0xffff_ffff);
+        assert_eq!(
+            (
+                plain.quad.cx,
+                plain.quad.cy,
+                plain.quad.rot,
+                plain.quad.w,
+                plain.quad.h
+            ),
+            (10.0, 20.0, 30.0, 4.0, 8.0)
+        );
+        let flipped = weapon_outline_quad(10.0, 20.0, 30.0, 4.0, 8.0, uv, true, -0.002);
+        assert_eq!(flipped.quad.uv, [0.3, 0.2, 0.1, 0.4]);
+        assert_eq!(flipped.z, -0.002);
     }
 }
