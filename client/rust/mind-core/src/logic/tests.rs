@@ -280,3 +280,36 @@ fn crlf_does_not_corrupt_tokens() {
     assert_eq!(exec.instructions.len(), 2);
     assert!(Assembler::assemble("loop:\r\njump loop always\r\n", true).is_ok());
 }
+
+/// PAR-0458: `SenseI` dispatches on `target instanceof Senseable`
+/// (`J/logic/LExecutor.java:671-700`) and `Team implements Senseable`
+/// (`J/game/Team.java:17`): `@id`/`@color` are numeric, `@name` is the
+/// registry name object (`Team.java:170-184`).
+#[test]
+fn team_senses_id_color_name() {
+    let world = bevy_ecs::world::World::new();
+    let target = LogicObject::Team(1);
+    assert_eq!(
+        crate::logic::access::sense(&world, &target, crate::logic::LAccess::Id),
+        crate::logic::access::Sensed::Num(1.0)
+    );
+    assert_eq!(
+        crate::logic::access::sense(&world, &target, crate::logic::LAccess::Name),
+        crate::logic::access::Sensed::Obj(Some(LogicObject::Str("sharded".to_owned())))
+    );
+    // `Team.sense(color)` = `color.toDoubleBits()`; sharded's color is
+    // `Pal.accent` = `ffd37f` (`J/graphics/Pal.java:79`), encoded like the
+    // building team-colour row (`J/entities/comp/BuildingComp.java:2104`).
+    let color = crate::game::team::Team::get(1).color;
+    let expected = crate::logic::globals::rgba_to_double_bits((
+        (color.r * 255.0).round() as u8,
+        (color.g * 255.0).round() as u8,
+        (color.b * 255.0).round() as u8,
+        255,
+    ));
+    assert_eq!(expected, f64::from_bits(0xffd3_7fff_u64));
+    assert_eq!(
+        crate::logic::access::sense(&world, &target, crate::logic::LAccess::Color),
+        crate::logic::access::Sensed::Num(expected)
+    );
+}
