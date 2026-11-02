@@ -295,7 +295,7 @@ pub fn save_map_e2e(
     paths: &Paths,
     pipeline: &mut PreviewPipeline,
     maps: &mut Maps,
-    file: &Path,
+    dir: &Path,
     grid: &WorldGrid,
     registry: &mut ContentRegistry,
     base_tags: StringMap,
@@ -307,7 +307,7 @@ pub fn save_map_e2e(
     let map = maps.save_map(
         fs,
         paths,
-        file,
+        dir,
         &source,
         registry,
         base_tags,
@@ -319,7 +319,7 @@ pub fn save_map_e2e(
     let image = pipeline
         .texture_for(&map)
         .cloned()
-        .ok_or_else(|| MapError::NotFound(file.display().to_string()))?;
+        .ok_or_else(|| MapError::NotFound(map.file.display().to_string()))?;
     Ok((map, image))
 }
 
@@ -524,7 +524,6 @@ mod tests {
 
         let mut maps = Maps::new();
         let mut pipeline = PreviewPipeline::new();
-        let file = std::path::PathBuf::from("/data/maps/e2e.msav");
         let mut tags = IndexMap::new();
         tags.insert("name".to_owned(), "E2E".to_owned());
         let base = editor_base_tags(8, 8, "E2E");
@@ -533,7 +532,7 @@ mod tests {
             &paths,
             &mut pipeline,
             &mut maps,
-            &file,
+            &paths.maps(),
             &grid,
             &mut content,
             base,
@@ -543,6 +542,7 @@ mod tests {
         .unwrap();
         assert_eq!(maps.len(), 1);
         assert_eq!(map.name(), "E2E");
+        assert_eq!(map.file, paths.maps().join("E2E.msav"));
         assert_eq!(map.spawns, spawns);
         assert!(fs.exists(&crate::maps::preview_file(&paths, &map)));
         assert_eq!(image.rgba.len(), 8 * 8 * 4);
@@ -557,7 +557,7 @@ mod tests {
             &mut imported_pipeline,
             &mut imported_maps,
             &dir,
-            &file,
+            &map.file,
             &mut content,
         )
         .unwrap();

@@ -5570,7 +5570,6 @@ fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
     tags.insert("name".to_owned(), "Roundtrip".to_owned());
     tags.insert("author".to_owned(), "lane/f25-maps".to_owned());
     let base = editor_base_tags(16, 16, "Roundtrip");
-    let file = paths.maps().join("roundtrip.msav");
 
     let mut maps = Maps::new();
     let mut pipeline = PreviewPipeline::new();
@@ -5579,7 +5578,7 @@ fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
         &paths,
         &mut pipeline,
         &mut maps,
-        &file,
+        &paths.maps(),
         &grid,
         &mut content,
         base,
@@ -5599,7 +5598,7 @@ fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
         &mut imported_pipeline,
         &mut imported_maps,
         &import_dir,
-        &file,
+        &map.file,
         &mut content,
     )?;
     let checksum_import = preview_image_checksum(&image2);
