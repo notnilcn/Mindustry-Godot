@@ -157,6 +157,10 @@ pub enum Effect {
     /// Call a `#[func]` on the `/root/MindUi` autoload by name
     /// (`toggle_power_lines` F5 / `toggle_fullscreen` F11).
     UiCall(String),
+    /// `logic.skipWave()` from the `skip_wave` binding
+    /// (`HudFragment.java:461-467`): `MindInput` calls `MindCampaign.run_wave`,
+    /// the same facade path as the HUD skip button (`_on_skip_wave`).
+    SkipWave,
     /// The RTS selection changed; payload is a JSON id array.
     SelectionChanged(String),
 }
@@ -322,6 +326,36 @@ fn parse_selectable_units(json: &str) -> Vec<SelectableUnit> {
         .collect()
 }
 
+/// `HudFragment.canSkipWave` inputs (`HudFragment.java:1234-1236`):
+/// `state.rules.waves && state.rules.waveSending && ((net.server() ||
+/// player.admin) || !net.active()) && state.enemies == 0 &&
+/// !spawner.isSpawning()`. The single-player client satisfies the net clause
+/// (`!net.active()`), so only the wave/enemy/spawn half is left; the skip
+/// button also requires a live core (`_refresh_skip_button`). `MindInput`
+/// snapshots the values from `/root/MindHud` each frame.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WaveGate {
+    /// `state.rules.waves`.
+    pub waves: bool,
+    /// `state.rules.waveSending`.
+    pub wave_sending: bool,
+    /// `spawner.isSpawning()`.
+    pub is_spawning: bool,
+    /// `state.enemies`.
+    pub enemies: i64,
+    /// `state.teams.playerCores().size > 0` (`has_core`).
+    pub has_core: bool,
+}
+
+impl WaveGate {
+    /// `canSkipWave()` as the skip-wave button applies it
+    /// (`_refresh_skip_button`, `ui/fragments/hud.rs`): waves on, wave sending
+    /// on, not mid-spawn, no enemies left, a live core.
+    pub fn can_skip_wave(self) -> bool {
+        self.waves && self.wave_sending && !self.is_spawning && self.enemies <= 0 && self.has_core
+    }
+}
+
 /// Live desktop interaction state (kept out of `MindInput`'s Godot glue).
 pub struct DesktopBridge {
     /// Pure controller: `InputState` + `BuildQueue` + `ActionBatcher`.
@@ -418,6 +452,10 @@ pub struct DesktopBridge {
     /// Per-block remembered config scroll offset (`Block.selectScroll`,
     /// `ItemSelection.java:103-108`), keyed by block content name.
     config_scroll: HashMap<String, f32>,
+    /// `canSkipWave()` snapshot for the `skip_wave` binding
+    /// (`HudFragment.java:461-467/1234-1236`), refreshed by `MindInput` from
+    /// `/root/MindHud`.
+    pub wave_gate: WaveGate,
 }
 
 impl Default for DesktopBridge {
@@ -467,6 +505,7 @@ impl DesktopBridge {
             build_autopause: false,
             build_was_auto_paused: false,
             config_scroll: HashMap::new(),
+            wave_gate: WaveGate::default(),
         }
     }
 
@@ -1102,6 +1141,20 @@ impl DesktopBridge {
                 if let Some(mut camera) = self.camera.clone() {
                     let following = camera.bind().is_following();
                     camera.bind_mut().set_follow(!following);
+                }
+                self.fire_hotkey(name);
+            }
+            "skip_wave" => {
+                // `HudFragment.java:461-467`: `keyTap(skipWave) &&
+                // canSkipWave() && !scene.hasDialog() && !scene.hasField()` ->
+                // `logic.skipWave()`. The key-edge path in `handle` already
+                // drops text-focus edges and dialog edges (the Java
+                // `hasField`/`hasDialog` guards), and the gate is the same one
+                // the skip button uses (`_refresh_skip_button`). Offline the
+                // Java `net.client() && player.admin` branch is unreachable,
+                // so this is `logic.skipWave()`.
+                if self.wave_gate.can_skip_wave() {
+                    self.effects.push(Effect::SkipWave);
                 }
                 self.fire_hotkey(name);
             }
@@ -3902,6 +3955,79 @@ fn camera_world_corner(camera: &Gd<MindCamera2D>, x: f32, y: f32) -> (f32, f32) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn skip_wave_gate_matches_the_skip_button() {
+        // `HudFragment.canSkipWave` (`HudFragment.java:1234-1236`) with the
+        // button's extra `has_core` requirement (`_refresh_skip_button`).
+        let ready = WaveGate {
+            waves: true,
+            wave_sending: true,
+            is_spawning: false,
+            enemies: 0,
+            has_core: true,
+        };
+        assert!(ready.can_skip_wave());
+        let mut gate = ready;
+        gate.waves = false;
+        assert!(!gate.can_skip_wave(), "waves off");
+        gate.waves = true;
+        gate.wave_sending = false;
+        assert!(!gate.can_skip_wave(), "wave sending off");
+        gate.wave_sending = true;
+        gate.is_spawning = true;
+        assert!(!gate.can_skip_wave(), "spawn in flight");
+        gate.is_spawning = false;
+        gate.enemies = 1;
+        assert!(!gate.can_skip_wave(), "enemies alive");
+        gate.enemies = 0;
+        gate.has_core = false;
+        assert!(!gate.can_skip_wave(), "no core");
+        // A negative enemy counter stays skippable (the port button gate is
+        // `enemies <= 0`, PAR-0463 keeps the key on the same predicate).
+        assert!(
+            WaveGate {
+                enemies: -1,
+                ..ready
+            }
+            .can_skip_wave()
+        );
+    }
+
+    #[test]
+    fn skip_wave_key_dispatches_and_respects_the_gate() {
+        // `HudFragment.java:461-467`: the key runs `logic.skipWave()` only when
+        // `canSkipWave()` holds. Before PAR-0463 the binding fell through the
+        // `_ => {}` arm, so `last_action` never became `skip_wave`.
+        let mut bridge = DesktopBridge::new();
+        bridge.in_game = true;
+        let mut bindings = BindingState::new();
+        bindings.set_key(ids::SKIP_WAVE, "k");
+
+        // Closed gate: the action is recognised but emits no skip.
+        bridge.handle(&bindings, RawEvent::key_down("k"));
+        assert_eq!(bridge.last_action, "skip_wave");
+        assert!(!bridge.effects.contains(&Effect::SkipWave));
+        bridge.handle(&bindings, RawEvent::key_up("k"));
+
+        // Open gate: the desktop bridge queues the same skip the button runs.
+        bridge.wave_gate = WaveGate {
+            waves: true,
+            wave_sending: true,
+            is_spawning: false,
+            enemies: 0,
+            has_core: true,
+        };
+        bridge.handle(&bindings, RawEvent::key_down("k"));
+        assert!(bridge.effects.contains(&Effect::SkipWave));
+        bridge.handle(&bindings, RawEvent::key_up("k"));
+
+        // Text focus wins over the gate (`!scene.hasField()`).
+        bridge.take_effects();
+        bridge.text_focus = true;
+        bridge.handle(&bindings, RawEvent::key_down("k"));
+        assert!(!bridge.effects.contains(&Effect::SkipWave));
+    }
 
     #[test]
     fn command_mode_hold_tracks_the_shared_default_key() {

@@ -575,6 +575,20 @@ impl MindInput {
                     .try_to::<bool>()
                     .unwrap_or(false)
             });
+        // `HudFragment.canSkipWave` inputs (`HudFragment.java:1234-1236`); the
+        // `MindHud` surface mirrors the campaign read model. Missing nodes keep
+        // the default (skip locked).
+        self.bridge.wave_gate = self
+            .base()
+            .try_get_node_as::<Node>("/root/MindHud")
+            .map(|hud| desktop::WaveGate {
+                waves: hud.get("waves").try_to::<bool>().unwrap_or(false),
+                wave_sending: hud.get("wave_sending").try_to::<bool>().unwrap_or(false),
+                is_spawning: hud.get("is_spawning").try_to::<bool>().unwrap_or(false),
+                enemies: hud.get("enemies").try_to_relaxed::<i64>().unwrap_or(0),
+                has_core: hud.get("has_core").try_to::<bool>().unwrap_or(false),
+            })
+            .unwrap_or_default();
     }
 
     /// Top of `MindUi.dialog_stack()` (the research/planet close keys read it).
@@ -785,6 +799,17 @@ impl MindInput {
                     // live as `#[func]`s on the `/root/MindUi` autoload.
                     if let Some(mut ui) = self.base().try_get_node_as::<Node>("/root/MindUi") {
                         let _ = ui.call(&name, &[]);
+                    }
+                }
+                Effect::SkipWave => {
+                    // `HudFragment.java:461-467` -> `logic.skipWave()`: the
+                    // same campaign facade the HUD skip button calls
+                    // (`_on_skip_wave` -> `MindCampaign.run_wave`).
+                    if let Some(mut campaign) = self
+                        .base()
+                        .try_get_node_as::<Node>("/root/Spine/MindCampaign")
+                    {
+                        let _ = campaign.call("run_wave", &[]);
                     }
                 }
                 Effect::SelectionChanged(json) => {
