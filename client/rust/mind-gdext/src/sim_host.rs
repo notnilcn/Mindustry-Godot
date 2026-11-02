@@ -11437,6 +11437,21 @@ pub fn building_bar_rows(
                     value: generator.efficiency.clamp(0.0, 1.0),
                 });
             }
+            // `HeaterGenerator.java:38-42`: `super.setBars()` (the power row
+            // above) then `addBar("heat", ... Pal.lightOrange ...)`. Only
+            // `HeaterGenerator` carries `HeatState`, so the other generators
+            // stay power-only without a block-name check.
+            if let Some((heat, output)) = extras.heat
+                && output > 0.0
+            {
+                rows.push(BarRow {
+                    key: "heat",
+                    label_key: String::from("bar.heat"),
+                    label_args: Vec::new(),
+                    color: 0xf680_21ff,
+                    value: (heat / output).clamp(0.0, 1.0),
+                });
+            }
         }
         BlockKind::OverdriveProjector => {
             if let Some((boost, max)) = extras.overdrive {
@@ -11778,6 +11793,40 @@ mod tests {
         assert_eq!(output.label_key, "bar.poweroutput");
         assert_eq!(output.label_args, ["60.0"]);
         assert_eq!(output.value, 0.5);
+
+        // `HeaterGenerator.java:38-42`: the power row plus `bar.heat`
+        // (`Pal.lightOrange`, `entity.heat / heatOutput`).
+        let heater = BarExtras {
+            generator: Some(GeneratorBars {
+                production: 1.0,
+                usage: 0.0,
+                efficiency: 0.5,
+            }),
+            heat: Some((2.5, 10.0)),
+            time_scale: 1.0,
+            ..BarExtras::default()
+        };
+        let neoplasia = rows_for("neoplasia-reactor", &heater);
+        assert_eq!(def("neoplasia-reactor").kind, BlockKind::HeaterGenerator);
+        assert_eq!(keys(&neoplasia), ["health", "liquid", "power", "heat"]);
+        let Some(heat_bar) = neoplasia.iter().find(|row| row.key == "heat") else {
+            panic!("heater heat bar");
+        };
+        assert_eq!(heat_bar.label_key, "bar.heat");
+        assert!(heat_bar.label_args.is_empty());
+        assert_eq!(heat_bar.value, 0.25);
+        assert_eq!(heat_bar.color, 0xf680_21ff);
+        // Only `HeaterGenerator` carries `HeatState`, so a plain
+        // `ConsumeGenerator` gets `extras.heat == None` and stays power-only.
+        let steam = rows_for(
+            "steam-generator",
+            &BarExtras {
+                heat: None,
+                ..heater
+            },
+        );
+        assert!(!steam.iter().any(|row| row.key == "heat"));
+        assert!(steam.iter().any(|row| row.key == "power"));
 
         // `NuclearReactor.java:103`, `VariableReactor.java:57-63`.
         let reactor = rows_for(
