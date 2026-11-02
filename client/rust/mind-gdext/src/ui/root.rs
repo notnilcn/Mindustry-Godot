@@ -17,6 +17,7 @@
 //! (`resolve_confirm`/`resolve_text_input`) so the signal round-trip stays
 //! identical to the GDScript port.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use godot::builtin::Side;
@@ -29,10 +30,10 @@ use godot::classes::tween::{EaseType, TransitionType};
 use godot::classes::{
     BaseButton, Button, CenterContainer, ColorRect, Control, FileAccess, HBoxContainer, IControl,
     InputEvent, InputEventKey, Json, Label, LineEdit, Node, PanelContainer, RichTextLabel,
-    ScrollContainer, StyleBoxFlat, TextEdit, Time, VBoxContainer,
+    StyleBoxFlat, TextEdit, Time, VBoxContainer,
 };
 use godot::global::{HorizontalAlignment, Key};
-use godot::obj::{NewAlloc, NewGd, Singleton};
+use godot::obj::{InstanceId, NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
 
 use super::kit::widgets::factory;
@@ -49,6 +50,35 @@ const TOAST_SLOT_MS: f64 = 3500.0;
 
 /// `FadeInFragment.start` default duration (the former GDScript default).
 const BOOT_FADE_SECONDS: f64 = 0.5;
+
+thread_local! {
+    /// Buttons that entered the tree while a `MindUiRoot` method was already
+    /// bound, waiting for the next `process` drain (`UI.java:146` click sound).
+    static PENDING_NODE_HOOKS: RefCell<Vec<InstanceId>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Queues one node that entered the tree for the global click-sound hook.
+///
+/// `Tree.node_added` fires synchronously from `Node::add_child`, and the UI
+/// itself adds nodes from *bound* `MindUiRoot` methods (`announce_box`,
+/// `toast_label`, the prompt builders). A `#[func]` signal receiver would take
+/// a second mutable borrow of the root and panic with
+/// `Gd<T>::bind_mut() failed, already bound` — the landing cutscene's
+/// `announce` did exactly that (PAR-0019). The listener therefore records only
+/// the instance id (no Godot borrow) and `process` hooks it.
+fn queue_node_hook(node: &Gd<Node>) {
+    push_node_hook(node.instance_id());
+}
+
+/// The borrow-free half of [`queue_node_hook`] (unit-testable without an engine).
+fn push_node_hook(id: InstanceId) {
+    PENDING_NODE_HOOKS.with(|queue| queue.borrow_mut().push(id));
+}
+
+/// Takes the nodes queued since the last drain, in arrival order.
+fn take_node_hooks() -> Vec<InstanceId> {
+    PENDING_NODE_HOOKS.with(|queue| std::mem::take(&mut *queue.borrow_mut()))
+}
 
 /// The Esc/back path of one transient prompt (`_prompt_cancel` in GDScript).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -138,6 +168,8 @@ pub struct MindUiRoot {
     background_paused: bool,
     /// Whether the game was already paused when the focus loss arrived.
     background_was_paused: bool,
+    /// The installed `Tree.node_added` listener (the borrow-free queue hook).
+    node_added_hook: Option<Callable>,
 }
 
 #[godot_api]
@@ -167,6 +199,7 @@ impl IControl for MindUiRoot {
             last_toast_ms: 0.0,
             background_paused: false,
             background_was_paused: false,
+            node_added_hook: None,
         }
     }
 
@@ -200,6 +233,10 @@ impl IControl for MindUiRoot {
         self.refresh_join_loading();
         self.tick_mod_init_failure();
         self.tick_uiscale(delta);
+        // Nodes queued by `Tree.node_added` — including the ones the calls
+        // above added while this object was bound — are hooked here, outside
+        // the borrow (`UI.java:146` click sound).
+        self.drain_node_hooks();
     }
 
     /// Transient prompts take Esc before the GUI (a focused `LineEdit` would
@@ -865,14 +902,12 @@ impl MindUiRoot {
 
     // ---- global button click sound (`UI.java:146`) ------------------------
 
+    /// `Tree.node_added` receiver kept for the ABI: it only queues, never
+    /// hooks, so connecting it to the signal by hand cannot re-enter the borrow
+    /// (see [`queue_node_hook`]).
     #[func]
-    fn on_node_added(&mut self, node: Gd<Node>) {
-        if node.clone().try_cast::<BaseButton>().is_ok() {
-            self.hook_button(&node);
-        } else if node.clone().try_cast::<ScrollContainer>().is_ok() {
-            // Arc `ScrollPane` wheel step + smooth scroll now lives on
-            // `MindScroll` itself, so the former global scroll hook is a no-op.
-        }
+    fn on_node_added(&self, node: Gd<Node>) {
+        queue_node_hook(&node);
     }
 
     /// `UI.java:146` `ClickListener.clicked = () -> Sounds.uiButton.play()`.
@@ -1226,9 +1261,24 @@ impl MindUiRoot {
     /// `BaseButton` in the tree and on every later addition.
     fn install_global_hooks(&mut self) {
         let mut tree = self.base().get_tree();
-        let callable = self.base().callable("on_node_added");
-        if !tree.is_connected("node_added", &callable) {
-            tree.connect("node_added", &callable);
+        if self.node_added_hook.is_none() {
+            // A custom callable, *not* a `#[func]` receiver: `node_added` is
+            // emitted synchronously from `add_child`, which the UI calls from
+            // bound `MindUiRoot` methods (`announce_box`/`toast_label`/prompt
+            // builders). A `#[func]` receiver would `bind_mut()` the root a
+            // second time and panic (PAR-0019): this one only records the
+            // instance id and `process` hooks it outside the borrow.
+            let hook = Callable::from_fn("mind_ui_node_added", |args: &[&Variant]| {
+                if let Some(node) = args
+                    .first()
+                    .and_then(|value| value.try_to::<Gd<Node>>().ok())
+                {
+                    queue_node_hook(&node);
+                }
+                Variant::nil()
+            });
+            let _ = tree.connect("node_added", &hook);
+            self.node_added_hook = Some(hook);
         }
         // `owned = false`: the default `owned = true` finds nothing under the
         // ownerless root Window, so code-instantiated buttons would be missed.
@@ -1239,6 +1289,19 @@ impl MindUiRoot {
             .owned(false)
             .done();
         for node in buttons.iter_shared() {
+            self.hook_button(&node);
+        }
+    }
+
+    /// Hooks every node queued by the `node_added` listener since the last
+    /// drain — outside the borrow, so an add from a bound method cannot panic.
+    fn drain_node_hooks(&mut self) {
+        for id in take_node_hooks() {
+            // A node queued and freed before the drain (a toast/en-route box)
+            // is skipped instead of holding a dangling pointer.
+            let Ok(node) = Gd::<Node>::try_from_instance_id(id) else {
+                continue;
+            };
             self.hook_button(&node);
         }
     }
@@ -2132,6 +2195,20 @@ mod tests {
         assert!((4.0f32 + 3.0 + 4.0 + 2.0 - 13.0).abs() < f32::EPSILON);
         // body 4 + `cont` 3 + buttons 3 + button 2 (+1 line box).
         assert!((4.0f32 + 3.0 + 3.0 + 2.0 + 1.0 - 13.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn node_hook_queue_drains_in_arrival_order() {
+        // The `Tree.node_added` listener only records instance ids — it never
+        // binds the root, so an add from a bound method cannot panic. The queue
+        // contract is engine-free: FIFO, and a drain empties it.
+        let first = InstanceId::from_i64(1);
+        let second = InstanceId::from_i64(2);
+        PENDING_NODE_HOOKS.with(|queue| queue.borrow_mut().clear());
+        push_node_hook(first);
+        push_node_hook(second);
+        assert!(take_node_hooks() == vec![first, second]);
+        assert!(take_node_hooks().is_empty());
     }
 
     #[test]

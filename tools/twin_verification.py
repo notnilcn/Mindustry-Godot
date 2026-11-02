@@ -13,6 +13,20 @@ is two index-aligned lists (java, godot) of canonical AVIF frames.  Only
 verified items that are fixed or twin-verified get images; every other item's
 PNGs stay in the gitignored runs/ tree.
 
+Since the 2026-11-02 native-UI re-verification, each item's fresh evidence
+lives in a single per-item folder with one leg subfolder each:
+
+    runs/PAR-0042/java/20261102-112233-01-menu.png
+    runs/PAR-0042/godot/20261102-112233-01-menu.png
+    runs/PAR-0042/20261102-112233-run.md
+    runs/PAR-0042/20261102-112233-java-game.log
+
+The terminal statuses are `reference-verified` (Godot-only run matched the
+recorded reference; no code change needed) and `twin-verified` (a gap was
+fixed and fresh Java+Godot legs match).  The legacy statuses remain accepted
+while the queue migrates; see docs/TWIN-RUNS.md.  runs/archive/** is frozen
+reference evidence and is never migrated into the per-item folders.
+
 The five Java-only recipes are paired 1:1 with a Godot recipe.  A pair that
 does not reproduce the full Java action carries a `gap` string.
 
@@ -628,7 +642,20 @@ def check(doc: dict[str, Any]) -> list[str]:
         errors.append("recipes is empty")
     if not doc.get("gaps"):
         errors.append("gaps list is empty")
-    statuses = {"seeded", "reference", "in-progress", "mismatch", "fixing", "verified", "blocked", "wontfix"}
+    statuses = {
+        # Terminal statuses of the 2026-11-02 native-UI re-verification.
+        "reference-verified",
+        "twin-verified",
+        # Legacy statuses, still accepted while the queue migrates.
+        "seeded",
+        "reference",
+        "in-progress",
+        "mismatch",
+        "fixing",
+        "verified",
+        "blocked",
+        "wontfix",
+    }
 
     for iid, item in items.items():
         if not re.fullmatch(r"PAR-\d{4}", iid):

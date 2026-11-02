@@ -860,3 +860,57 @@ Run: runs/20261014-s3-verify3/ (java-*.png).
 - A synthetic FocusIn does NOT clear background pause; for in-game frames flip `backgroundpause` offline with
   `SetSettings` (2026-10-14 entry), relaunch into a sub-run dir (so `twin_launch` does not overwrite the original
   `settings.bin.bak`), and copy the ORIGINAL backup back after `twin_stop` (done in `runs/20261018-s2-L01-T3/logic`).
+
+## 2026-11-02 — PAR-0008 fixer: first menu click after boot, and a dialog `Back` click, swallowed
+
+- Symptom: on display `:10` with a fresh `Mindustry.jar` launch (window 1152x648 at (830,474), origin from
+  `xwininfo -name Mindustry`), `java_input.py hover 1940 1099` + `click 1940 1099` (window-relative
+  (1110,625), the Discord banner) left the main menu unchanged; a later identical hover+click opened
+  `DiscordDialog`. The same session, `Back` (`(830+576, 474+569)`) inside the Settings dialog did not close it,
+  while ESC (`keydown Escape`/`keyup Escape`, two calls) did.
+- Workaround: re-hover (~0.4 s) + click again, or close the top dialog with `keydown/keyup Escape`; only then
+  treat a click as evidence. Captures taken after a swallowed click are valid menu frames — do not file them as
+  the action result (the PAR-0008 retries were deleted from `runs/PAR-0008/java/`).
+- Runs: `runs/PAR-0008/java/20261102-104326-01-menu-banner.png`, `…-104500-02-discord-dialog.png`.
+
+## 2026-11-02 — PAR-0010 fixer: the first `java_input.py` click after focus is swallowed
+
+- Symptom: fresh `Mindustry.jar` launch, window normalized to frame (45,69) / client (50,98), then
+  `java_input.py click 280 247 left` (`Play`, client (230,149)). Capture showed the menu with no Play
+  submenu. A second identical click opened it (Campaign at client (472,150)); the same held for the chooser
+  walk afterwards. `_NET_ACTIVE_WINDOW`/`XGetInputFocus` already pointed at `Mindustry` before the first
+  click, so this is SDL's activation-click swallow, not a window-manager focus miss.
+- Cause: SDL discards the click that gives the window mouse focus; `java_input.py` re-activates the window
+  before every call, so the very first click of a walk is the one at risk.
+- Fix: click once, capture to `/tmp`, and only then click again (clicking twice blindly would toggle the
+  Play submenu closed if the first click did land). Park the pointer with `move 80 600` before the verdict
+  capture — a hover over a planet card draws the accent outline and changes the frame.
+- Run: `runs/PAR-0010/java/20261102-113706-01-chooser.png` (log
+  `runs/PAR-0010/20261102-113509-java-game.log`, load 2528 ms).
+
+## 2026-11-02 — PAR-0011 fixer: `window_ctl.py move` prints frame-relative geometry; the Play submenu toggles
+
+- `window_ctl.py move Mindustry 45 69` reported `x=5 y=29 w=1152 h=648` even though the move worked: the
+  helper prints `win.get_geometry()`, which for a reparented window is relative to the WM frame (the
+  decoration offset), not the screen. Do not "fix" the move on that printout — confirm the client origin
+  from `capture_screen.py`'s reported `region` (in this run `[50, 98, 1152, 648]` = frame (45,69) +
+  decoration (5,29)), which is also what the client-area click maths assumes.
+- The desktop Play row toggles its submenu on click: the first click after launch opened it, the second
+  (identical) click closed it, and a third reopened it (`currentMenu == out[0]` in `MenuFragment.buttons`).
+  Capturing after each click is the only reliable way to know the state; a hover does not populate the
+  submenu, and `move` to the same point emits no motion, so move away (e.g. `move 700 500`) before
+  re-hovering.
+- This run the first click was *not* swallowed (window had been raised/activated first), unlike PAR-0010 —
+  so the activation-click swallow is probabilistic; verify with a `/tmp` capture, never assume.
+- Run: `runs/PAR-0011/java/20261102-120413-01-serpulo-selected.png` (log
+  `runs/PAR-0011/20261102-120219-java-game.log`, load 3036 ms).
+
+## 2026-11-02 13:25 — removing `settings.bin` is not a fresh Java profile: the client falls back to `settings_backup.bin` (PAR-0018 fixer)
+
+- Symptom: after `cp settings.bin /tmp/...` + `mv saves /tmp/...` + `rm settings.bin`, the boot log said
+  `Loaded backup settings file successfully!` and the first-run chooser would not appear: Mindustry falls
+  back to `parity-java-home/.local/share/Mindustry/settings_backup.bin` when `settings.bin` is missing.
+- Fix for a genuinely fresh profile: move **both** `settings.bin` and `settings_backup.bin` out of the data
+  dir (and leave `saves/` aside). Keep `settings_backups/` (timestamped copies the game writes; not loaded
+  at boot). Restore both files after the leg.
+- Run: `runs/PAR-0018/` (fixer Java leg, pid 3393801 stopped and relaunched).

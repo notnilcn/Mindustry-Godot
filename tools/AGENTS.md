@@ -27,6 +27,7 @@
 | `watch.sh` | Watch `client/rust/**` for `.rs`/`Cargo.toml` edits and re-run `build.sh`; ignores `client/rust/target/` and `client/bin/`. |
 | `twin.sh` + `twin_pointer.py` | Sourced Java↔Godot twin-walk harness (J10 T1): `JW`/`JM`/`JD`/`JK`/`JS` (Java leg; the click origin is re-read from `xwininfo` on every call), `GC`/`GW`/`GK`/`GS`/`GE`/`GP` (Godot leg; `GP` warps the real pointer over the engine window via `twin_pointer.py`), `SIDE`/`ZOOM` compare, and the `twin_launch`/`twin_place_java`/`twin_stop` lifecycle (settings.bin backup/restore, save-snapshot teardown). |
 | `java_xkeys.py` | XSendEvent key delivery to the Java reference window on a parity-session display (XTEST focus stays on Godot); literal text or `@Keysym`, `--hold-ms` for held movement keys. |
+| `twin_item.sh` | Per-item twin evidence (2026-11-02): `dir PAR-####` creates `runs/PAR-####/{java,godot}`, `godot-shot`/`java-shot` write timestamped frames into the matching leg folder, and `note`/`log` write the run report or captured log at the item root. Never migrates `runs/archive/**`; see [`docs/TWIN-RUNS.md`](../docs/TWIN-RUNS.md). |
 
 ## Responsibilities
 

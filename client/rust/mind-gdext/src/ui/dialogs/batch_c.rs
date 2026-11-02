@@ -597,6 +597,16 @@ fn planet_ready(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>) {
     {
         dim.set_mouse_filter(MouseFilter::IGNORE);
     }
+    // `PanelContainer` defaults to STOP, so the bubble from the empty page area
+    // (the globe is behind `Center/Panel/Layout/Body`) died at `Panel` before it
+    // reached the dialog root — real mouse motion/click never ran `planet_input`
+    // (PAR-0018). The planet page's panel is a transparent full-screen layout
+    // shell, so let the pointer pass through to the root; the rail, sector list
+    // and footer buttons still stop their own events, and `planet_over_ui`
+    // additionally rejects their rects.
+    if let Some(mut panel) = dialog.panel() {
+        panel.set_mouse_filter(MouseFilter::PASS);
+    }
     let target = dialog.to_gd();
     let state_for_click = state.clone();
     let callable = Callable::from_fn("planet_gui_input", move |args: &[&Variant]| {
@@ -1034,10 +1044,16 @@ fn planet_show_select(
     let caption = factory::label(&kit::tm("@campaign.none").to_string());
     {
         let mut label = rich(&caption);
-        label.set_autowrap_mode(godot::classes::text_server::AutowrapMode::WORD_SMART);
         label.set_horizontal_alignment(godot::global::HorizontalAlignment::CENTER);
         label.add_theme_font_size_override("normal_font_size", 20);
-        label.add_theme_constant_override("line_separation", -8);
+        // `PlanetDialog.java:181-214`: the caption is a font-20 `Label` whose
+        // line advance is the font's own line height — 20 px in the reference
+        // frames (PAR-0010 glyphs 448..461 / 468..485; the selected blurb in
+        // PAR-0011 keeps the same 20 px advance). `RichTextLabel` adds
+        // `line_separation` on top of that height, so leave it at the theme
+        // default: the former -8 override collapsed the 20 px line box to a
+        // 12 px pitch and drew the two lines on top of each other.
+        label.add_theme_constant_override("line_separation", 0);
     }
     {
         let mut control: Gd<Control> = caption.clone().upcast();
@@ -1074,12 +1090,28 @@ fn planet_show_select(
         row.add_child(&card);
     }
 
+    // `PlanetDialog.java:181-214`: the caption sits 8 px below the card row
+    // (Java glyph top 448 under cards ending at 440). The table cell already
+    // contributes 3 px, so a 4 px pad pins the vertically-centred block at the
+    // reference card row: y=120 with the two-line chooser caption. (The
+    // selected-state blurb is PAR-0011's surface.)
     root.bind_mut()
         .add(&caption)
         .grow_x()
         .max_width(440.0)
-        .pad_top(2.0);
+        .pad_top(4.0);
     root.bind_mut().row();
+    // `PlanetDialog.java:205`: `.width(440f).wrap()`. `MindLabel::ready()` runs on
+    // tree entry and `configure_rich_label` resets `autowrap_mode` to OFF, so the
+    // wrap must be applied *after* `add()`: with wrap off the fit-content minimum
+    // width is the unwrapped paragraph (788 px), `Control.size` clamps up to it and
+    // the cell's `max_width(440)` is defeated (PAR-0011: cards y=110 instead of 90).
+    // With WORD_SMART the label's minimum width is ~1 px, so the 440 px cell wins
+    // and both locale paragraphs wrap to two lines (5 line boxes, 100 px tall).
+    {
+        let mut label = rich(&caption);
+        label.set_autowrap_mode(godot::classes::text_server::AutowrapMode::WORD_SMART);
+    }
 
     dialog.clear_buttons();
     planet_build_dimmed_footer(dialog, st);
@@ -1346,6 +1378,18 @@ fn planet_on_select_ok(dialog: &mut MindDialog, state: &Rc<RefCell<PlanetState>>
     }
     let selected = st.selected_planet.clone();
     planet_show_planet(dialog, state, &mut st, &selected, true);
+    // `PlanetDialog.java:209-210`: after the starting campaign is chosen, Java
+    // centres the camera on the planet's start sector (`lookAt(startSector)`)
+    // before selecting it. The port dropped that call, so the fresh chooser
+    // path kept the default polar camera and Ground Zero sat near the limb
+    // instead of the reference framing (PAR-0018). `planet_show_planet` has
+    // already stored the start tile in `selected_tile`.
+    if let Some(mut view) = planet_view() {
+        let tile = view.get("selected_tile").try_to::<i64>().unwrap_or(-1);
+        if tile >= 0 {
+            planet_view_call(&mut view, "look_at_tile", &[tile.to_variant()]);
+        }
+    }
 }
 
 /// `PlanetDialog.java:216-222`: the one-time Serpulo remap notice.

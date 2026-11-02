@@ -1,10 +1,10 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-10-19T12:08:46Z",
+  "updated": "2026-11-02T04:05:59Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -153,7 +153,7 @@
     },
     "PAR-0002": {
       "title": "Boot menu: Play button opens the Play submenu",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -380,7 +380,7 @@
     },
     "PAR-0003": {
       "title": "Boot menu: Database button opens the Database submenu",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -606,7 +606,7 @@
     },
     "PAR-0004": {
       "title": "Boot menu: Editor button opens the maps/editor dialog",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -832,7 +832,7 @@
     },
     "PAR-0005": {
       "title": "Boot menu: Mods button opens the Mods dialog",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -1058,7 +1058,7 @@
     },
     "PAR-0006": {
       "title": "Boot menu: Settings button opens the Settings dialog",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -1284,7 +1284,7 @@
     },
     "PAR-0007": {
       "title": "Boot menu: Quit button exits the client (classify at teardown)",
-      "status": "reference",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -1505,7 +1505,7 @@
     },
     "PAR-0008": {
       "title": "Boot menu: Discord button renders banner + icon and opens the Discord dialog",
-      "status": "reference",
+      "status": "twin-verified",
       "fork": {
         "java": [
           {
@@ -1680,7 +1680,7 @@
     },
     "PAR-0009": {
       "title": "Boot menu: Campaign opens the campaign planet flow",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -1813,161 +1813,9 @@
             "params": {
               "action": "eval",
               "params": {
-                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
+                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick(), \"stack\": str(get_node(\"/root/MindUi\").call(\"dialog_stack\"))}"
+              },
+              "note": "pid/tick; menu when stack []"
             }
           }
         ]
@@ -1984,313 +1832,215 @@
         ],
         "godot": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "godot_exec",
             "params": {
-              "ref": "path.godot (fast-forward) + steps[]",
-              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
-            }
-          },
-          {
-            "tool": "godot_game",
-            "params": {
-              "action": "stop"
-            }
-          },
-          {
-            "tool": "godot_game",
-            "params": {
-              "action": "play",
+              "action": "eval",
               "params": {
-                "scene": "res://scenes/game.tscn"
-              }
+                "code": "var menu = get_node(\"/root/Spine/Ui/UiRoot/MenuGroup/menu\")\nvar b = menu.get_node(\"Sidebar/Buttons\").get_child(0) as Button\nvar c = (b as Control).get_global_rect().get_center()\nreturn {\"x\": int(c.x), \"y\": int(c.y)}"
+              },
+              "note": "live-resolve Play -> (230,149)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              },
+              "note": "Play (live-resolved)"
             }
           },
           {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
-              "code": "var menu = get_node(\\\"/root/Spine/Ui/UiRoot/MenuGroup/menu\\\")\\nvar b = menu.get_node(\\\"Sidebar/Buttons\\\").get_child(0) as Button\\nvar c = (b as Control).get_global_rect().get_center()\\nreturn {\\\"x\\\": int(c.x), \\\"y\\\": int(c.y)}"
-            },
-            "note": "live-resolve Play -> (230,149)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_motion",
-              "position": {
-                "x": 230,
-                "y": 149
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar menu = get_node(\"/root/Spine/Ui/UiRoot/MenuGroup/menu\")\nvar btn = menu.get_node(\"Submenu/Buttons\").get_child(1) as Button\nvar cc = (btn as Control).get_global_rect().get_center()\nreturn {\"submenu\": menu.get_node(\"Submenu\").visible, \"x\": int(cc.x), \"y\": int(cc.y)}"
               },
-              "coords": "viewport"
+              "note": "submenu visible, 5 children; Campaign child 1 -> (460,149)"
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 230,
-                "y": 149
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
               },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 230,
-                "y": 149
-              },
-              "coords": "viewport",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar menu = get_node(\\\"/root/Spine/Ui/UiRoot/MenuGroup/menu\\\")\\nreturn {\\\"visible\\\": menu.get_node(\\\"Submenu\\\").visible, \\\"count\\\": menu.get_node(\\\"Submenu/Buttons\\\").get_child_count()}"
-            },
-            "note": "Submenu visible, 5 children"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var menu = get_node(\\\"/root/Spine/Ui/UiRoot/MenuGroup/menu\\\")\\nvar btn = menu.get_node(\\\"Submenu/Buttons\\\").get_child(1) as Button\\nvar cc = (btn as Control).get_global_rect().get_center()\\nreturn {\\\"x\\\": int(cc.x), \\\"y\\\": int(cc.y), \\\"labels\\\": str(btn.find_children(\\\"*\\\", \\\"Label\\\", true, false).map(func(l): return l.text))}"
-            },
-            "note": "Campaign child 1 -> (460,149)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_motion",
-              "position": {
-                "x": 460,
-                "y": 149
-              },
-              "coords": "viewport"
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 460,
-                "y": 149
-              },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 460,
-                "y": 149
-              },
-              "coords": "viewport",
-              "pressed": false
+              "note": "Campaign (live-resolved)"
             }
           },
           {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar ui = get_node(\\\"/root/MindUi\\\")\\nvar dlg = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nvar sel = int(dlg.get(\\\"_selected_sector\\\")) if dlg != null else -999\\nreturn {\\\"stack\\\": str(ui.call(\\\"dialog_stack\\\")), \\\"planet_visible\\\": dlg != null and dlg.visible, \\\"sel\\\": sel}"
-            },
-            "note": "stack [planet], chooser state sel -1"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var p = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nvar cs = p.find_children(\\\"*\\\", \\\"Button\\\", true, false).filter(func(b): return b.is_visible_in_tree() and b.toggle_mode and b.custom_minimum_size.y > 100)\\nvar out = cs.map(func(b):\\n\\tvar c = (b as Control).get_global_rect().get_center()\\n\\treturn {\\\"x\\\": int(c.x), \\\"y\\\": int(c.y), \\\"pressed\\\": b.button_pressed, \\\"name\\\": str(b.name)})\\nreturn out"
-            },
-            "note": "Serpulo card (412,194), Erekir (740,194)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_motion",
-              "position": {
-                "x": 412,
-                "y": 194
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn {\"stack\": str(get_node(\"/root/MindUi\").call(\"dialog_stack\")), \"title\": str(d.get_node(\"Center/Panel/Layout/Title\").text), \"visible\": d.visible}"
               },
-              "coords": "viewport"
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 412,
-                "y": 194
-              },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 412,
-                "y": 194
-              },
-              "coords": "viewport",
-              "pressed": false
+              "note": "expect stack [planet], title Select Starting Campaign"
             }
           },
           {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar d = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nreturn {\\\"selected_planet\\\": str(d.get(\\\"_selected_planet\\\")), \\\"sel\\\": int(d.get(\\\"_selected_sector\\\"))}"
-            },
-            "note": "selected_planet serpulo"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nvar row = d.get_node(\\\"Center/Panel/Layout/Buttons\\\")\\nvar b = row.get_child(0) as Button\\nvar c = (b as Control).get_global_rect().get_center()\\nreturn {\\\"x\\\": int(c.x), \\\"y\\\": int(c.y), \\\"disabled\\\": bool(b.disabled)}"
-            },
-            "note": "OK enabled at (499,634)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_motion",
-              "position": {
-                "x": 499,
-                "y": 634
+              "params": {
+                "code": "var t = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet/Center/Panel/Layout/Body/Content\").get_child(0)\nvar b = t.get_child(0).get_child(0) as Button\nvar c = (b as Control).get_global_rect().get_center()\nreturn {\"x\": int(c.x), \"y\": int(c.y)}"
               },
-              "coords": "viewport"
+              "note": "Serpulo card -> (412,285)"
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 499,
-                "y": 634
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 412,
+                        "y": 285
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 412,
+                        "y": 285
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
               },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 499,
-                "y": 634
-              },
-              "coords": "viewport",
-              "pressed": false
+              "note": "Serpulo card"
             }
           },
           {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
-              "code": "Input.flush_buffered_events()\\nvar d = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nvar sel = int(d.get(\\\"_selected_sector\\\")) if d != null else -999\\nreturn {\\\"sel\\\": sel, \\\"selected_planet\\\": str(d.get(\\\"_selected_planet\\\"))}"
-            },
-            "note": "first probe can read -1 (view-build race)"
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nvar t = d.get_node(\"Center/Panel/Layout/Body/Content\").get_child(0)\nvar row = t.get_child(0)\nvar ok = d.get_node(\"Center/Panel/Layout/Buttons\").get_child(0)\nvar c = (ok as Control).get_global_rect().get_center()\nreturn {\"serpulo\": bool(row.get_child(0).button_pressed), \"ok_disabled\": bool(ok.disabled), \"x\": int(c.x), \"y\": int(c.y)}"
+              },
+              "note": "checked outline + OK enabled -> (575,610)"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              },
+              "note": "OK"
+            }
           },
           {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
-              "code": "var d = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nvar sel = int(d.get(\\\"_selected_sector\\\")) if d != null else -999\\nvar sec = d.call(\\\"_find_sector\\\", \\\"serpulo\\\", sel) if d != null else {}\\nvar act = d.call(\\\"_sector_action\\\", sec) if d != null else {}\\nreturn {\\\"sel\\\": sel, \\\"sector_name\\\": str(sec.get(\\\"name\\\", \\\"\\\")), \\\"action\\\": str(act)}"
-            },
-            "note": "re-probe self-resolves: sel 15, groundZero, @sectors.go"
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nreturn {\"stack\": str(get_node(\"/root/MindUi\").call(\"dialog_stack\")), \"title\": str(d.get_node(\"Center/Panel/Layout/Title\").text), \"view\": get_node(\"/root/Spine/Planet/PlanetView\").visible, \"labels\": d.find_children(\"*\", \"RichTextLabel\", true, false).filter(func(l): return l.is_visible_in_tree() and str(l.text) != \"\").map(func(l): return str(l.text))}"
+              },
+              "note": "planet page: title empty, rail Erekir/Serpulo/Difficulty, panel Ground Zero/Threat: Low/Launch"
+            }
           },
           {
             "tool": "godot_screenshot",
             "params": {
               "action": "game"
             },
-            "note": "-> godot/step-planet-page.png"
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var d = get_node_or_null(\\\"/root/Spine/Ui/UiRoot/DialogLayer/planet\\\")\\nvar row = d.get_node_or_null(\\\"Center/Panel/Layout/Buttons\\\") if d != null else null\\nvar inner = row.find_children(\\\"*\\\", \\\"Button\\\", true, false).filter(func(b): return b.is_visible_in_tree() and b.get_parent() != row) if row != null else []\\nvar b = inner[0] as Control if not inner.is_empty() else null\\nvar p = b.get_global_rect().get_center() if b != null else Vector2(-1, -1)\\nreturn {\\\"x\\\": int(p.x), \\\"y\\\": int(p.y), \\\"n\\\": inner.size()}"
-            },
-            "note": "sector action button (576,613); Ground Zero has a core so Go launches directly at 7825590 (launch_loadout stays hidden; it is for free launches)"
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_motion",
-              "position": {
-                "x": 576,
-                "y": 613
-              },
-              "coords": "viewport"
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 576,
-                "y": 613
-              },
-              "coords": "viewport",
-              "pressed": true
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "button": "MOUSE_BUTTON_LEFT",
-              "position": {
-                "x": 576,
-                "y": 613
-              },
-              "coords": "viewport",
-              "pressed": false
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "code": "var ui = get_node(\\\"/root/MindUi\\\")\\nvar c = get_node(\\\"/root/Spine/MindCampaign\\\")\\nreturn {\\\"stack\\\": str(ui.call(\\\"dialog_stack\\\")), \\\"sector\\\": str(c.get_sector_state()), \\\"tick\\\": get_node(\\\"/root/Spine/SimHost\\\").get_tick()}"
-            },
-            "note": "launched: campaign true, sector 15, hasCore true; HUD visible, menu hidden"
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
-            },
-            "note": "-> godot/step-launched.png"
+            "note": "verdict frame runs/PAR-0009/godot/<stamp>-02-planet-page.png"
           }
         ]
       },
@@ -2298,94 +2048,60 @@
     },
     "PAR-0010": {
       "title": "Campaign first-run chooser renders (Select Starting Campaign)",
-      "status": "verified",
+      "status": "twin-verified",
       "fork": {
         "java": [
           {
             "tool": "shell",
             "params": {
-              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-052658-seed-campaign/java/game.log 2>&1 </dev/null &"
+              "cmd": "cd $REPO && cp parity-java-home/.local/share/Mindustry/settings.bin /tmp/par-java-settings-<stamp>.bin && mv parity-java-home/.local/share/Mindustry/saves /tmp/par-java-saves-<stamp>",
+              "note": "first-run profile: settings + saves aside (restored after the leg)"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "until grep -q 'Total time to load' runs/20261009-052658-seed-campaign/java/game.log; do sleep 2; done"
+              "cmd": "mkdir -p /tmp/par-settingsfix && cp runs/archive/20261010-142753-PAR-0010/java/settingsfix/SetSettings.java /tmp/par-settingsfix/ && /usr/lib/jvm/java-17-openjdk-amd64/bin/javac -cp ../Mindustry/desktop/build/libs/Mindustry.jar -d /tmp/par-settingsfix /tmp/par-settingsfix/SetSettings.java && /usr/lib/jvm/java-17-openjdk-amd64/bin/java -cp \"../Mindustry/desktop/build/libs/Mindustry.jar:/tmp/par-settingsfix\" SetSettings $REPO/parity-java-home/.local/share/Mindustry campaignselect false",
+              "note": "offline Core.settings reset: campaignselect false"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69"
+              "cmd": "cd $REPO && setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/PAR-0010/<stamp>-java-game.log 2>&1 </dev/null &"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry  # before EVERY capture/click"
+              "cmd": "until grep -q 'Total time to load' $REPO/runs/PAR-0010/<stamp>-java-game.log; do sleep 2; done",
+              "note": "readiness ~2.6-3.0 s; never gate a relative path from a different cwd"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 275,
-              "y": 218
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "Play"
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 522,
-              "y": 220
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69",
+              "note": "frame (45,69) -> client area (50,98); screen = client + (50,98)"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "Campaign row"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 459,
-              "y": 309
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "Serpulo card (first-run chooser)"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 622,
-              "y": 676
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "OK"
-            }
-          },
-          {
-            "tool": "capture_screen.py",
-            "params": {
-              "--window-title": "Mindustry",
-              "--output": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png"
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry",
+              "note": "before every click/capture"
             }
           }
         ],
@@ -2400,16 +2116,8 @@
             "tool": "godot_editor_read",
             "params": {
               "action": "state"
-            }
-          },
-          {
-            "tool": "godot_editor_edit",
-            "params": {
-              "action": "open_scene",
-              "params": {
-                "path": "res://scenes/game.tscn"
-              }
-            }
+            },
+            "note": "project_path must be <repo>/client/"
           },
           {
             "tool": "godot_game",
@@ -2424,193 +2132,171 @@
             "tool": "godot_game",
             "params": {
               "action": "status"
-            }
+            },
+            "note": "runtime_connected true, viewport 1152x648"
           },
           {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
               "params": {
-                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+                "code": "var ui = get_node(\"/root/MindUi\")\nreturn {\"pid\": OS.get_process_id(), \"stack\": ui.dialog_stack(), \"campaignselect\": ui.settings_get_flag(\"campaignselect\")}"
               }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
-            }
+            },
+            "note": "fork guard: stack [] and campaignselect false; if true, ui.settings_put_flag(\"campaignselect\", false) then godot_game stop + play"
           }
         ]
       },
       "action": {
         "java": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "shell",
             "params": {
-              "ref": "path.java (fast-forward) + steps[]",
-              "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/java_input.py click 280 247 left",
+              "note": "Play at client (230,149); the first click after focus can be consumed as activation -- repeat once if the submenu stays closed"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/java_input.py click 522 248 left",
+              "note": "Campaign at client (472,150)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY /home/clintonnguyen/g/code_examples/.claude/skills/parity-eval/scripts/java_input.py move 80 600",
+              "note": "park the pointer; a card hover would draw the accent outline"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh java-shot PAR-0010 01-chooser",
+              "note": "chooser frame: cards (253,120) 320x320 gap 6, caption glyph 448/468, OK bottom 640"
             }
           }
         ],
         "godot": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "godot_exec",
             "params": {
-              "ref": "path.godot (fast-forward) + steps[]",
-              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+              "action": "eval",
+              "params": {
+                "code": "var menu = get_node(\"/root/Spine/Ui/UiRoot/MenuGroup/menu\")\nvar b = menu.get_node(\"Sidebar/Buttons\").get_child(0) as Button\nvar c = (b as Control).get_global_rect().get_center()\nreturn {\"x\": int(c.x), \"y\": int(c.y)}"
+              }
+            },
+            "note": "live-resolve Play -> (230,149)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "Play (live-resolved)"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar menu = get_node(\"/root/Spine/Ui/UiRoot/MenuGroup/menu\")\nvar sub = menu.get_node(\"Submenu/Buttons\")\nvar c = (sub.get_child(1) as Button).get_global_rect().get_center()\nreturn {\"n\": sub.get_child_count(), \"x\": int(c.x), \"y\": int(c.y)}"
+              }
+            },
+            "note": "flush, then live-resolve Campaign: 5 children (spacer + Play submenu entries), child 1 -> (460,149)"
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            },
+            "note": "Campaign (live-resolved)"
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()\nvar d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nvar t = d.get_node(\"Center/Panel/Layout/Body/Content\").get_child(0)\nvar cap = t.get_child(1)\nvar ok = d.find_children(\"*\", \"Button\", true, false).filter(func(b): return int((b as Control).get_global_rect().size.y) == 64)\nreturn {\"stack\": get_node(\"/root/MindUi\").dialog_stack(), \"title\": d.get_node(\"Center/Panel/Layout/Title\").text, \"cap_yh\": [int((cap as Control).get_global_rect().position.y), int((cap as Control).get_global_rect().size.y)], \"sep\": cap.get_theme_constant(\"line_separation\"), \"cards\": t.get_child(0).get_children().map(func(c): var r = (c as Control).get_global_rect(); return [int(r.position.x), int(r.position.y), int(r.size.x), int(r.size.y)]), \"ok\": ok.map(func(b): var r = (b as Control).get_global_rect(); return [int(r.position.x), int(r.position.y), int(r.size.x), int(r.size.y), bool(b.disabled)])}"
+              }
+            },
+            "note": "expect stack [planet], title Select Starting Campaign, caption (447,40) with line_separation 0, cards (252,120,320,320) x2, OK (425,578,300,64) disabled"
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0010 01-chooser",
+              "note": "chooser frame: caption glyph 448/468, cards y 120"
             }
           }
         ]
       },
-      "similarity": 90.4,
+      "similarity": 96.0,
       "images": {
         "java": [
           "parity/twin/PAR-0010/java/01-action.avif"
@@ -2622,31 +2308,31 @@
     },
     "PAR-0011": {
       "title": "Campaign chooser: planet cards select Serpulo/Erekir",
-      "status": "verified",
+      "status": "twin-verified",
       "fork": {
         "java": [
           {
             "tool": "shell",
             "params": {
-              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-052658-seed-campaign/java/game.log 2>&1 </dev/null &"
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/PAR-0011/<stamp>-java-game.log 2>&1 </dev/null &"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "until grep -q 'Total time to load' runs/20261009-052658-seed-campaign/java/game.log; do sleep 2; done"
+              "cmd": "until grep -q 'Total time to load' runs/PAR-0011/<stamp>-java-game.log; do sleep 2; done"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69"
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py move Mindustry 45 69"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry  # before EVERY capture/click"
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry  # before EVERY capture/click"
             }
           },
           {
@@ -2920,7 +2606,7 @@
             "tool": "TWIN-VERIFICATION.json",
             "params": {
               "ref": "path.java (fast-forward) + steps[]",
-              "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
+              "coords": "window frame +45+69, client +50+98; Play(280,247) Campaign(522,248) Serpulo(463,378) Erekir(789,378) OK(626,706); park pointer (80,600) before every capture"
             }
           }
         ],
@@ -2929,7 +2615,7 @@
             "tool": "TWIN-VERIFICATION.json",
             "params": {
               "ref": "path.godot (fast-forward) + steps[]",
-              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,280) Erekir(738,280); park pointer (80,600) before every capture"
             }
           }
         ]
@@ -2946,7 +2632,7 @@
     },
     "PAR-0012": {
       "title": "Campaign chooser: OK confirms and opens the planet page",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -3564,7 +3250,7 @@
     },
     "PAR-0013": {
       "title": "Campaign chooser: Back cancels to the menu",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -3888,7 +3574,7 @@
     },
     "PAR-0014": {
       "title": "Campaign chooser: Tech Tree footer entry",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -4212,7 +3898,7 @@
     },
     "PAR-0015": {
       "title": "Campaign planet page renders (planet, rail, sector panel)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -4536,94 +4222,31 @@
     },
     "PAR-0016": {
       "title": "Campaign planet page: sector panel lockdown text renders color markup",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
             "tool": "shell",
             "params": {
-              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-052658-seed-campaign/java/game.log 2>&1 </dev/null &"
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >>runs/PAR-0016/java-game.log 2>&1 </dev/null &"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "until grep -q 'Total time to load' runs/20261009-052658-seed-campaign/java/game.log; do sleep 2; done"
+              "cmd": "until grep -q 'Total time to load' runs/PAR-0016/java-game.log; do sleep 2; done"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69"
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py move Mindustry 45 69"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry  # before EVERY capture/click"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 275,
-              "y": 218
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "Play"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 522,
-              "y": 220
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "Campaign row"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 459,
-              "y": 309
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "Serpulo card (first-run chooser)"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 622,
-              "y": 676
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "OK"
-            }
-          },
-          {
-            "tool": "capture_screen.py",
-            "params": {
-              "--window-title": "Mindustry",
-              "--output": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png"
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry  # frame (45,69), client origin (50,98); parity-java-home already holds the attacked sector-serpulo-170 save"
             }
           }
         ],
@@ -4676,69 +4299,45 @@
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
               }
             }
           },
@@ -4754,60 +4353,45 @@
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
               }
             }
           },
@@ -4817,6 +4401,400 @@
               "action": "eval",
               "params": {
                 "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 412,
+                        "y": 280
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 412,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 412,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 613
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 578,
+                        "y": 613
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 578,
+                        "y": 613
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return get_node(\"/root/Spine/MindCampaign\").call(\"get_sector_state\")"
+              }
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "stop"
+            }
+          },
+          {
+            "tool": "godot_game",
+            "params": {
+              "action": "play",
+              "params": {
+                "scene": "res://scenes/game.tscn"
+              }
+            }
+          }
+        ]
+      },
+      "action": {
+        "java": [
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY $PARITY_SKILL/scripts/window_ctl.py raise Mindustry"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 280,
+              "y": 248
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "button": "left",
+              "note": "Play"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 522,
+              "y": 248
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "button": "left",
+              "note": "Campaign"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 625,
+              "y": 427
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "button": "left",
+              "note": "Ground Zero hex (attacked sector)"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/PAR-0016/java/01-panel-page.png"
+            }
+          },
+          {
+            "tool": "computer-mcp_mouse_move",
+            "params": {
+              "x": 586,
+              "y": 653
+            }
+          },
+          {
+            "tool": "computer-mcp_click",
+            "params": {
+              "button": "left",
+              "note": "Stats"
+            }
+          },
+          {
+            "tool": "capture_screen.py",
+            "params": {
+              "--window-title": "Mindustry",
+              "--output": "runs/PAR-0016/java/02-stats-lockdown.png"
+            }
+          }
+        ],
+        "godot": [
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var ui = get_node(\"/root/MindUi\")\nreturn {\"pid\": OS.get_process_id(), \"opened\": ui.call(\"open_dialog\", \"planet\", \"{}\")}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1002,
+                        "y": 33
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1002,
+                        "y": 33
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1002,
+                        "y": 33
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 1000,
+                        "y": 138
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1000,
+                        "y": 138
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 1000,
+                        "y": 138
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var p = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nvar out = []\nfor l in p.find_children(\"*\", \"RichTextLabel\", true, false):\n\tvar t = str(l.get(\"text\"))\n\tif t.length() > 3:\n\t\tout.append({\"text\": t, \"parsed\": str(l.call(\"get_parsed_text\"))})\nreturn {\"panel\": out}"
               }
             }
           },
@@ -4825,25 +4803,74 @@
             "params": {
               "action": "game"
             }
-          }
-        ]
-      },
-      "action": {
-        "java": [
+          },
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "godot_input",
             "params": {
-              "ref": "path.java (fast-forward) + steps[]",
-              "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 578,
+                        "y": 567
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 578,
+                        "y": 567
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 578,
+                        "y": 567
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
             }
-          }
-        ],
-        "godot": [
+          },
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "godot_exec",
             "params": {
-              "ref": "path.godot (fast-forward) + steps[]",
-              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/sector_stats\")\nvar out = []\nfor l in d.find_children(\"*\", \"RichTextLabel\", true, false):\n\tvar t = str(l.get(\"text\"))\n\tif t.length() > 3:\n\t\tout.append({\"text\": t, \"parsed\": str(l.call(\"get_parsed_text\"))})\nreturn {\"stats\": out}"
+              }
+            }
+          },
+          {
+            "tool": "godot_screenshot",
+            "params": {
+              "action": "game"
             }
           }
         ]
@@ -4860,7 +4887,7 @@
     },
     "PAR-0017": {
       "title": "Campaign planet page: 'Select Launch Destination' appears in the left rail",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -4965,15 +4992,6 @@
             }
           },
           {
-            "tool": "godot_editor_edit",
-            "params": {
-              "action": "open_scene",
-              "params": {
-                "path": "res://scenes/game.tscn"
-              }
-            }
-          },
-          {
             "tool": "godot_game",
             "params": {
               "action": "play",
@@ -4993,37 +5011,187 @@
             "params": {
               "action": "eval",
               "params": {
-                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+                "code": "var ui = get_node(\"/root/MindUi\")\nui.call(\"settings_put_flag\", \"campaignselect\", false)\nreturn {\"pid\": OS.get_process_id(), \"campaignselect\": ui.call(\"settings_get_flag\", \"campaignselect\")}"
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 2
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 2
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 410,
+                        "y": 280
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 410,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 410,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 2
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 575,
+                        "y": 611
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 611
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 611
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 2
               }
             }
           },
@@ -5032,122 +5200,8 @@
             "params": {
               "action": "eval",
               "params": {
-                "code": "Input.flush_buffered_events()"
+                "code": "return {\"stack\": get_node(\"/root/MindUi\").call(\"dialog_stack\"), \"planet_view\": get_node(\"/root/Spine/Planet/PlanetView\").visible, \"menu\": get_node(\"/root/Spine/Ui/UiRoot/MenuGroup\").visible}"
               }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
             }
           }
         ]
@@ -5155,150 +5209,18 @@
       "action": {
         "godot": [
           {
-            "tool": "godot_game",
-            "params": {
-              "action": "play",
-              "params": {
-                "scene": "res://scenes/game.tscn"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
             "tool": "godot_exec",
             "params": {
               "action": "eval",
               "params": {
-                "code": "Input.flush_buffered_events()"
+                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\nvar labels = d.find_children(\"*\", \"RichTextLabel\", true, false).filter(func(l): return l.is_visible_in_tree() and str(l.get_parsed_text()) != \"\").map(func(l): return [str(l.get_parsed_text()), l.get_global_rect()])\nreturn {\"labels\": labels.slice(0, 10), \"launchselect_count\": labels.filter(func(l): return str(l[0]).find(\"Select Launch Destination\") >= 0).size()}"
               }
             }
           },
           {
-            "tool": "godot_exec",
+            "tool": "godot_screenshot",
             "params": {
-              "action": "eval",
-              "params": {
-                "code": "var d = get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\")\\nreturn d.find_children(\"*\", \"RichTextLabel\", true, false).filter(func(l): return l.is_visible_in_tree() and str(l.text) != \"\").map(func(l): return str(l.text))"
-              }
+              "action": "game"
             }
           }
         ]
@@ -5315,94 +5237,86 @@
     },
     "PAR-0018": {
       "title": "Campaign planet page: sector hex selection (Ground Zero)",
-      "status": "verified",
+      "status": "twin-verified",
       "fork": {
         "java": [
           {
             "tool": "shell",
             "params": {
-              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-052658-seed-campaign/java/game.log 2>&1 </dev/null &"
+              "cmd": "set -e; mkdir -p /tmp/par18-fixer-java; D=parity-java-home/.local/share/Mindustry; cp -a \"$D/settings.bin\" \"$D/settings_backup.bin\" /tmp/par18-fixer-java/; mv \"$D/saves\" /tmp/par18-fixer-java/saves; rm -f \"$D/settings.bin\" \"$D/settings_backup.bin\"; echo \"profile reset to first-run: both settings files and saves/ moved to /tmp/par18-fixer-java (restore after the leg)\"",
+              "note": "fresh Java profile"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "until grep -q 'Total time to load' runs/20261009-052658-seed-campaign/java/game.log; do sleep 2; done"
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >>runs/PAR-0018/20261102-132145-java-game.log 2>&1 </dev/null &"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69"
+              "cmd": "timeout 180 bash -c 'until grep -q \"Total time to load\" runs/PAR-0018/20261102-132145-java-game.log; do sleep 2; done'"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry  # before EVERY capture/click"
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" unmaximize Mindustry && \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" resize Mindustry 1152 648 && \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" move Mindustry 45 69"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 275,
-              "y": 218
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/java_input.py\" click 280 246 left"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "Play"
+              "cmd": "sleep 1"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 522,
-              "y": 220
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/java_input.py\" click 527 249 left"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "Campaign row"
+              "cmd": "sleep 1"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 459,
-              "y": 309
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/java_input.py\" click 463 338 left"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "Serpulo card (first-run chooser)"
+              "cmd": "sleep 1"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 622,
-              "y": 676
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/java_input.py\" click 626 705 left"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "OK"
+              "cmd": "sleep 2"
             }
           },
           {
-            "tool": "capture_screen.py",
+            "tool": "shell",
             "params": {
-              "--window-title": "Mindustry",
-              "--output": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png"
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/twin_item.sh java-shot PAR-0018 01-planet-fork"
             }
           }
         ],
@@ -5420,12 +5334,9 @@
             }
           },
           {
-            "tool": "godot_editor_edit",
+            "tool": "godot_game",
             "params": {
-              "action": "open_scene",
-              "params": {
-                "path": "res://scenes/game.tscn"
-              }
+              "action": "stop"
             }
           },
           {
@@ -5448,37 +5359,61 @@
             "params": {
               "action": "eval",
               "params": {
-                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+                "code": "return {\"pid\": OS.get_process_id(), \"frames\": Engine.get_process_frames()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var ui = get_node(\"/root/MindUi\"); ui.call(\"settings_put_flag\", \"campaignselect\", false); return ui.call(\"settings_get_flag\", \"campaignselect\")"
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
               }
             }
           },
@@ -5494,30 +5429,99 @@
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 485,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 410,
+                        "y": 280
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 410,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 410,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
               }
             }
           },
@@ -5533,60 +5537,45 @@
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 575,
+                        "y": 611
+                      },
+                      "coords": "viewport"
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 611
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 611
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
               }
             }
           },
@@ -5600,9 +5589,12 @@
             }
           },
           {
-            "tool": "godot_screenshot",
+            "tool": "godot_exec",
             "params": {
-              "action": "game"
+              "action": "eval",
+              "params": {
+                "code": "var v = get_node(\"/root/Spine/Planet/PlanetView\"); var p = v.call(\"tile_to_screen\", 170); return {\"selected\": v.get(\"selected_tile\"), \"hover\": v.get(\"hover_tile\"), \"x\": int(p.x), \"y\": int(p.y)}"
+              }
             }
           }
         ]
@@ -5610,24 +5602,220 @@
       "action": {
         "java": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "shell",
             "params": {
-              "ref": "path.java (fast-forward) + steps[]",
-              "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/java_input.py\" hover 625 425"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 1"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/twin_item.sh java-shot PAR-0018 02-hover-ground-zero"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/java_input.py\" click 625 425 left"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 1"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "PARITY_PY=${PARITY_PY:-$HOME/.local/share/parity-eval/venv/bin/python}; PARITY_SKILL=${PARITY_SKILL:-/home/clintonnguyen/g/code_examples/.claude/skills/parity-eval}; DISPLAY=:10 \"$PARITY_PY\" \"$PARITY_SKILL/scripts/window_ctl.py\" raise Mindustry && tools/twin_item.sh java-shot PAR-0018 03-click-ground-zero"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "JPID=$(pgrep -f \"Mindustry[.]jar\" | head -1); kill \"$JPID\"; D=parity-java-home/.local/share/Mindustry; cp -a /tmp/par18-fixer-java/settings.bin \"$D/settings.bin\"; cp -a /tmp/par18-fixer-java/settings_backup.bin \"$D/settings_backup.bin\"; mv /tmp/par18-fixer-java/saves \"$D/saves\"; echo \"java stopped, profile restored\"",
+              "note": "cleanup"
             }
           }
         ],
         "godot": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "godot_exec",
             "params": {
-              "ref": "path.godot (fast-forward) + steps[]",
-              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+              "action": "eval",
+              "params": {
+                "code": "var sv = get_node(\"/root/Spine/Planet/PlanetView/ViewportContainer/SubViewport\"); return {\"sel\": sv.get_node(\"Selection\").mesh != null, \"outline\": sv.get_node(\"Outline\").mesh != null, \"hover\": sv.get_node(\"Hover\").mesh != null, \"icon\": sv.get_node(\"SectorIcon\").mesh != null}"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0018 01-planet-fork"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 576,
+                        "y": 324
+                      },
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var v = get_node(\"/root/Spine/Planet/PlanetView\"); var sv = v.get_node(\"ViewportContainer/SubViewport\"); return {\"hover\": v.get(\"hover_tile\"), \"hover_mesh\": sv.get_node(\"Hover\").mesh != null, \"label\": str(v.get_node(\"SectorLabel\").get_parsed_text()), \"visible\": v.get_node(\"SectorLabel\").is_visible()}"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0018 02-hover-ground-zero"
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_motion",
+                    "params": {
+                      "position": {
+                        "x": 150,
+                        "y": 400
+                      },
+                      "coords": "viewport"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var v = get_node(\"/root/Spine/Planet/PlanetView\"); return {\"hover\": v.get(\"hover_tile\"), \"label_visible\": v.get_node(\"SectorLabel\").is_visible()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_input",
+            "params": {
+              "action": "sequence",
+              "params": {
+                "frame_delay": 1,
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 324
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "Input.flush_buffered_events()"
+              }
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var v = get_node(\"/root/Spine/Planet/PlanetView\"); var sv = v.get_node(\"ViewportContainer/SubViewport\"); return {\"selected\": v.get(\"selected_tile\"), \"hover\": v.get(\"hover_tile\"), \"sel_mesh\": sv.get_node(\"Selection\").mesh != null, \"hover_mesh\": sv.get_node(\"Hover\").mesh != null, \"icon_mesh\": sv.get_node(\"SectorIcon\").mesh != null}"
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0018 03-click-ground-zero"
+            }
+          },
+          {
+            "tool": "godot_log",
+            "params": {
+              "action": "errors",
+              "params": {
+                "max": 50
+              }
             }
           }
         ]
       },
-      "similarity": 54.5,
+      "similarity": 56.4,
       "images": {
         "java": [
           "parity/twin/PAR-0018/java/01-action.avif"
@@ -5639,117 +5827,63 @@
     },
     "PAR-0019": {
       "title": "Campaign planet page: sector action button (Launch / Go)",
-      "status": "verified",
+      "status": "twin-verified",
       "fork": {
         "java": [
           {
             "tool": "shell",
             "params": {
-              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >runs/20261009-052658-seed-campaign/java/game.log 2>&1 </dev/null &"
+              "cmd": "setsid env DISPLAY=:10 HOME=$PWD/parity-java-home XDG_DATA_HOME=$PWD/parity-java-home/.local/share XDG_CONFIG_HOME=$PWD/parity-java-home/.config XDG_CACHE_HOME=$PWD/parity-java-home/.cache /usr/lib/jvm/java-17-openjdk-amd64/bin/java -jar ../Mindustry/desktop/build/libs/Mindustry.jar >>runs/PAR-0019/$(date +%Y%m%d-%H%M%S)-java-game.log 2>&1 &"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "until grep -q 'Total time to load' runs/20261009-052658-seed-campaign/java/game.log; do sleep 2; done"
+              "cmd": "until grep -q 'Total time to load' runs/PAR-0019/*-java-game.log; do sleep 2; done"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648 && $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69"
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py unmaximize Mindustry; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py resize Mindustry 1152 648; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py move Mindustry 45 69"
             }
           },
           {
             "tool": "shell",
             "params": {
-              "cmd": "DISPLAY=:10 $PARITY_PY .opencode/skills/parity-eval/scripts/window_ctl.py raise Mindustry  # before EVERY capture/click"
+              "cmd": "# fresh campaign: campaignselect=false + empty saves (back up, reset offline with an arc.Settings program). clicks below are SCREEN coords for client origin (50,98); re-read xwininfo -name Mindustry before re-running. Play -> Campaign"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 275,
-              "y": 218
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/java_input.py click 282 245 left; sleep 1.2; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/java_input.py click 505 246 left"
             }
           },
           {
-            "tool": "computer-mcp_click",
+            "tool": "shell",
             "params": {
-              "button": "left",
-              "note": "Play"
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/java_input.py click 460 378 left; sleep 1.0; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/java_input.py click 627 708 left"
             }
           },
           {
-            "tool": "computer-mcp_mouse_move",
+            "tool": "shell",
             "params": {
-              "x": 522,
-              "y": 220
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "Campaign row"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 459,
-              "y": 309
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "Serpulo card (first-run chooser)"
-            }
-          },
-          {
-            "tool": "computer-mcp_mouse_move",
-            "params": {
-              "x": 622,
-              "y": 676
-            }
-          },
-          {
-            "tool": "computer-mcp_click",
-            "params": {
-              "button": "left",
-              "note": "OK"
-            }
-          },
-          {
-            "tool": "capture_screen.py",
-            "params": {
-              "--window-title": "Mindustry",
-              "--output": "runs/20261009-052658-seed-campaign/seed/step-04-planet-java.png"
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; tools/twin_item.sh java-shot PAR-0019 01-fork-planet-page"
             }
           }
         ],
         "godot": [
           {
-            "tool": "godot_health",
+            "tool": "godot_game",
             "params": {
-              "action": "check"
+              "action": "stop"
             }
           },
           {
-            "tool": "godot_editor_read",
+            "tool": "shell",
             "params": {
-              "action": "state"
-            }
-          },
-          {
-            "tool": "godot_editor_edit",
-            "params": {
-              "action": "open_scene",
-              "params": {
-                "path": "res://scenes/game.tscn"
-              }
+              "cmd": "rm -f ~/.local/share/godot/app_userdata/Mindustry-Godot/saves/*.msav ~/.local/share/godot/app_userdata/Mindustry-Godot/saves/*.msav-backup.msav"
             }
           },
           {
@@ -5772,37 +5906,77 @@
             "params": {
               "action": "eval",
               "params": {
-                "code": "return {\"pid\": OS.get_process_id(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+                "code": "return {\"pid\": OS.get_process_id(), \"flag\": get_node(\"/root/MindUi\").call(\"settings_put_flag\", \"campaignselect\", false), \"saves\": DirAccess.get_files_at(\"user://saves\")}"
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 230,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 230,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 460,
+                        "y": 149
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
               }
             }
           },
@@ -5811,122 +5985,84 @@
             "params": {
               "action": "eval",
               "params": {
-                "code": "Input.flush_buffered_events()"
+                "code": "return {\"pid\": OS.get_process_id(), \"stack\": get_node(\"/root/MindUi\").call(\"dialog_stack\")}"
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": true
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 412,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 412,
+                        "y": 280
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
               }
             }
           },
           {
             "tool": "godot_input",
             "params": {
-              "action": "mouse_button",
+              "action": "sequence",
               "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 460,
-                  "y": 149
-                },
-                "coords": "viewport",
-                "pressed": false
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 575,
+                        "y": 610
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
               }
             }
           },
           {
-            "tool": "godot_exec",
+            "tool": "shell",
             "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 412,
-                  "y": 194
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": true
-              }
-            }
-          },
-          {
-            "tool": "godot_input",
-            "params": {
-              "action": "mouse_button",
-              "params": {
-                "button": "MOUSE_BUTTON_LEFT",
-                "position": {
-                  "x": 499,
-                  "y": 634
-                },
-                "coords": "viewport",
-                "pressed": false
-              }
-            }
-          },
-          {
-            "tool": "godot_exec",
-            "params": {
-              "action": "eval",
-              "params": {
-                "code": "Input.flush_buffered_events()"
-              }
-            }
-          },
-          {
-            "tool": "godot_screenshot",
-            "params": {
-              "action": "game"
+              "cmd": "tools/twin_item.sh godot-shot PAR-0019 01-fork-planet-page"
             }
           }
         ]
@@ -5934,24 +6070,90 @@
       "action": {
         "java": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "shell",
             "params": {
-              "ref": "path.java (fast-forward) + steps[]",
-              "coords": "window +45+69; Play(275,218) Campaign(522,220) Serpulo(459,309) OK(622,676)"
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/java_input.py click 626 713 left  # Launch (content 576,615)"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 14  # world load + Java's 8 s playtime gate before the desktopMove hint shows"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "DISPLAY=:10 $PARITY_PY .claude/skills/parity-eval/scripts/window_ctl.py raise Mindustry; tools/twin_item.sh java-shot PAR-0019 02-launched-ground-zero"
             }
           }
         ],
         "godot": [
           {
-            "tool": "TWIN-VERIFICATION.json",
+            "tool": "godot_input",
             "params": {
-              "ref": "path.godot (fast-forward) + steps[]",
-              "coords": "viewport; Play(230,149) Campaign(460,149) Serpulo(412,194) OK(499,634)"
+              "action": "sequence",
+              "params": {
+                "steps": [
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 615
+                      },
+                      "coords": "viewport",
+                      "pressed": true
+                    }
+                  },
+                  {
+                    "type": "mouse_button",
+                    "params": {
+                      "button": "MOUSE_BUTTON_LEFT",
+                      "position": {
+                        "x": 576,
+                        "y": 615
+                      },
+                      "coords": "viewport",
+                      "pressed": false
+                    }
+                  }
+                ],
+                "frame_delay": 1
+              }
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "sleep 8"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "var hud = get_node(\"/root/MindHud\")\nreturn {\"pid\": OS.get_process_id(), \"status_text\": str(hud.status_text), \"stack\": get_node(\"/root/MindUi\").call(\"dialog_stack\"), \"loading\": get_node(\"/root/Spine/Ui/UiRoot/LoadingLayer/loading\").is_visible(), \"sector\": get_node(\"/root/Spine/MindCampaign\").get_sector_state(), \"tick\": get_node(\"/root/Spine/SimHost\").get_tick()}"
+              }
+            }
+          },
+          {
+            "tool": "godot_log",
+            "params": {
+              "action": "errors"
+            }
+          },
+          {
+            "tool": "shell",
+            "params": {
+              "cmd": "tools/twin_item.sh godot-shot PAR-0019 02-launched-ground-zero"
             }
           }
         ]
       },
-      "similarity": 49.5,
+      "similarity": 76.2,
       "images": {
         "java": [
           "parity/twin/PAR-0019/java/01-action.avif"
@@ -5963,7 +6165,7 @@
     },
     "PAR-0020": {
       "title": "Campaign planet page: Back returns to the menu",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -6186,7 +6388,7 @@
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
                   "x": 412,
-                  "y": 194
+                  "y": 280
                 },
                 "coords": "viewport",
                 "pressed": true
@@ -6201,7 +6403,7 @@
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
                   "x": 412,
-                  "y": 194
+                  "y": 280
                 },
                 "coords": "viewport",
                 "pressed": false
@@ -6215,8 +6417,8 @@
               "params": {
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
-                  "x": 499,
-                  "y": 634
+                  "x": 575,
+                  "y": 610
                 },
                 "coords": "viewport",
                 "pressed": true
@@ -6230,8 +6432,8 @@
               "params": {
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
-                  "x": 499,
-                  "y": 634
+                  "x": 575,
+                  "y": 610
                 },
                 "coords": "viewport",
                 "pressed": false
@@ -6251,6 +6453,15 @@
             "tool": "godot_screenshot",
             "params": {
               "action": "game"
+            }
+          },
+          {
+            "tool": "godot_exec",
+            "params": {
+              "action": "eval",
+              "params": {
+                "code": "return {\"stack\": str(get_node(\"/root/MindUi\").call(\"dialog_stack\")), \"stack_planet\": bool(get_node(\"/root/Spine/Ui/UiRoot/DialogLayer/planet\").visible)}"
+              }
             }
           }
         ]
@@ -6328,7 +6539,7 @@
     },
     "PAR-0021": {
       "title": "Campaign planet page: Tech Tree opens research",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -6551,7 +6762,7 @@
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
                   "x": 412,
-                  "y": 194
+                  "y": 280
                 },
                 "coords": "viewport",
                 "pressed": true
@@ -6566,7 +6777,7 @@
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
                   "x": 412,
-                  "y": 194
+                  "y": 280
                 },
                 "coords": "viewport",
                 "pressed": false
@@ -6580,8 +6791,8 @@
               "params": {
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
-                  "x": 499,
-                  "y": 634
+                  "x": 575,
+                  "y": 610
                 },
                 "coords": "viewport",
                 "pressed": true
@@ -6595,8 +6806,8 @@
               "params": {
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
-                  "x": 499,
-                  "y": 634
+                  "x": 575,
+                  "y": 610
                 },
                 "coords": "viewport",
                 "pressed": false
@@ -6652,7 +6863,7 @@
     },
     "PAR-0022": {
       "title": "Campaign planet page: planet switch (Erekir/Serpulo)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -6964,7 +7175,7 @@
           }
         ]
       },
-      "similarity": 52.2,
+      "similarity": 56.0,
       "images": {
         "java": [
           "parity/twin/PAR-0022/java/01-action.avif"
@@ -6976,7 +7187,7 @@
     },
     "PAR-0023": {
       "title": "Campaign planet page: Difficulty dialog",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -7199,7 +7410,7 @@
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
                   "x": 412,
-                  "y": 194
+                  "y": 280
                 },
                 "coords": "viewport",
                 "pressed": true
@@ -7214,7 +7425,7 @@
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
                   "x": 412,
-                  "y": 194
+                  "y": 280
                 },
                 "coords": "viewport",
                 "pressed": false
@@ -7228,8 +7439,8 @@
               "params": {
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
-                  "x": 499,
-                  "y": 634
+                  "x": 575,
+                  "y": 610
                 },
                 "coords": "viewport",
                 "pressed": true
@@ -7243,8 +7454,8 @@
               "params": {
                 "button": "MOUSE_BUTTON_LEFT",
                 "position": {
-                  "x": 499,
-                  "y": 634
+                  "x": 575,
+                  "y": 610
                 },
                 "coords": "viewport",
                 "pressed": false
@@ -7442,7 +7653,7 @@
           }
         ]
       },
-      "similarity": 12.4,
+      "similarity": 92.1,
       "images": {
         "java": [
           "parity/twin/PAR-0023/java/01-action.avif"

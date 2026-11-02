@@ -27,7 +27,7 @@ Godot 4.7 client over the Rust simulation in `client/rust/`, exported as the `mi
 
 - Every source file carries `SPDX-License-Identifier: GPL-3.0-only` and cites the upstream Mindustry file it ports; UTF-8/LF only.
 - Toolchain: Rust `1.98.1` (`rust-toolchain.toml`), Godot `4.7.x` (`4.7.2` recommended).
-- Rust owns behavior and the native UI (`client/rust/mind-gdext/src/ui/`); scenes only name the classes and never mutate simulation state. There is no hand-written GDScript outside vendored addons. `mind-core` stays Godot-free and tokio-free; hosts call in, never the reverse.
+- Rust owns behavior and the native UI (`client/rust/mind-gdext/src/ui/`); scenes only name the classes and never mutate simulation state. **All non-addon code is `.rs` or `.tscn`**: there is no hand-written GDScript outside vendored addons, no `.gd`/`.gd.uid` file, and no `script = ExtResource(...)` on a non-addon scene. `mind-core` stays Godot-free and tokio-free; hosts call in, never the reverse.
 - ABIs are append-only: content IDs, entity field order, UI manifests, STDB schema and bindings. Never hand-edit generated outputs.
 
 ## Quickstart (`tools/AGENTS.md` covers every script and gate)

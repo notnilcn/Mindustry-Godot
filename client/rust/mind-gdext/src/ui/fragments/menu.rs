@@ -408,7 +408,10 @@ impl MindMenuFragment {
         icon.set_text(&kit::glyph(entry.icon));
         let mut icon_control: Gd<Control> = icon.clone().upcast();
         self.apply_icon_font_to(&mut icon_control);
-        icon.add_theme_font_size_override("font_size", 26);
+        // `Fonts.java:76`: the icon font is generated at 30 px and `Icon.*`
+        // drawables are glyphs rasterized at that size (`Table.button(text,
+        // icon, ...)` draws the image at `imageSize()`, not at 26 px).
+        icon.add_theme_font_size_override("font_size", 30);
         icon.set_custom_minimum_size(Vector2::new(30.0, 0.0));
         icon.set_horizontal_alignment(HorizontalAlignment::CENTER);
         icon.set_vertical_alignment(VerticalAlignment::CENTER);

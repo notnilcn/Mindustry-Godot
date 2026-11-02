@@ -2498,3 +2498,200 @@ Run: runs/20261014-s3-verify3/.
   `get_mouse_position() == (575,607)`, dialog closed; `GW 700 380 MOUSE_BUTTON_RIGHT` -> pointer (764,444);
   `TWIN_G_POINTER=0 GC ...` left the pointer where it was. Every L01 walk this session used the new default.
 - Text entry (L08 T5 item 1) is the L01 T4 `GT`/`gmcp.py --text` path (entry above).
+
+## 2026-11-02 — twin checker (PAR-0002): `Submenu/Buttons` first child is a spacer, not a button
+
+- Symptom: an eval that walked `MenuGroup/menu/Submenu/Buttons` with `var row = b.get_child(0)` for every child
+  logged `Index p_index = 0 is out of bounds (… = 0)` + `Attempt to call function 'get_child' in base 'null
+  instance'`, TIMEOUTed after 15 s, and tripped the editor break-on-error (debugger `paused: true`, frame loop
+  pinned).
+- Cause: `MindMenuFragment::show_submenu` prepends a top-spacer `Control` before the entries, so
+  `get_child_count()` is entries+1 and the spacer has no children. The same walk over `Sidebar/Buttons` is safe
+  (only buttons there).
+- Recovery: `godot_game stop` + `play res://scenes/game.tscn`; `resume` re-breaks. The click had already landed
+  (`submenu.visible == true`, `Play.button_pressed == true`, 5 children), so no re-click was needed for the read —
+  but the frames were retaken after the restart.
+- Run: `runs/PAR-0002/`.
+- Bullet (same day, PAR-0008): a second pinned eval — `for c in dlg.find_children("*", "", true, false)` with
+  `c.is_visible_in_tree()` / `c.get("text")` errored on a `Timer` child (`Invalid call. Nonexistent function
+  'is_visible_in_tree' in base 'Timer'`). Filter by a concrete type (`"Control"`/`"Label"`) or guard with
+  `if c is Control:` before touching Control-only methods, and never call `get()` on an unknown property.
+
+## 2026-11-02 — PAR-0008 fixer: `godot_input sequence` mouse steps ignore `x`/`y`; hover needs the real pointer
+
+- Symptom: the first PAR-0008 Godot click silently did nothing — `godot_input
+  {"action":"sequence","params":{"steps":[{"type":"mouse_button","params":{"x":1110,"y":625,…}}]}}` returned
+  `{"executed":3,"ok":true}` but `DialogLayer/discord.visible` stayed `false` and no error was logged.
+- Cause: the runtime handlers read `params.get("position")` (`_input_mouse_button`/`_input_mouse_motion` in
+  `client/addons/open_godot_mcp/runtime/runtime_autoload.gd`); `x`/`y` are ignored, so press/release landed at
+  the event default (0,0). Working shape (also what `tools/twin.sh` `GC` sends):
+  `{"type":"mouse_button","params":{"button":"MOUSE_BUTTON_LEFT","position":{"x":1110,"y":625},"coords":"viewport","pressed":true}}`.
+- Also: `get_tree().root.gui_get_hovered_control()` read `MenuGroup/menu` (not `Discord`) even with the
+  synthetic motion at the banner, because Godot's hover UI follows the **real** X pointer. Warp it first
+  (`tools/twin_pointer.py move <win_x+x> <win_y+y> --jiggle`, window origin from `xwininfo -root -tree` →
+  `Godot_Engine`), then inject the sequence. The Java client overlapping the game window also swallows the
+  warp — stop Java before the Godot leg.
+- Run: `runs/PAR-0008/` (`godot/20261102-110101-01-menu-banner.png`, `…-110114-02-discord-dialog.png`).
+
+## 2026-11-02 — twin checker (PAR-0009): typed `as Array` cast on a Variant pins the loop
+
+- Symptom: an eval reading the planet view (`var v = get_node_or_null("/root/Spine/Planet/PlanetView")`;
+  `(v.get("sectors") as Array).size()`) TIMEOUTed after 15 s, logged `Invalid cast: could not convert value to
+  'Array'.`, and tripped break-on-error (`godot_debugger sessions` → `paused: true`).
+- Cause: `Object.get()` returns a Variant; `as Array` does not convert a `VarArray`/nil the way a typed local
+  does. Read the Variant once and guard with `typeof(...) == TYPE_ARRAY` (or `str(v.get(...))`) instead of
+  casting in the expression.
+- Recovery: `godot_game stop` + `play res://scenes/game.tscn` (resume re-breaks); re-open the Campaign page.
+- Run: `runs/PAR-0009/`.
+
+## 2026-11-02 — PAR-0010 fixer: every eval that errors pins the frame loop; the 2026-11-02 traps
+
+- Symptom: five `godot_exec` calls in a row TIMEOUTed after 15 s with only a stale error list, and
+  `godot_debugger sessions` showed `paused: true` each time; plain evals still answered (`frames` frozen at
+  25043 across two calls) until `godot_game stop` + `play` recovered the loop.
+- Cause: any runtime error inside an eval body trips the editor break-on-error and pins the frame loop. The
+  concrete bodies that did it here (all avoidable):
+  - `get_node("/root/Spine/MindUi")` — the `MindUi` facade autoload is **`/root/MindUi`**; `/root/Spine/Ui`
+    is the `CanvasLayer` scene root and has no `settings_put_flag`/`dialog_stack` (`Invalid call. Nonexistent
+    function 'settings_put_flag' in base 'CanvasLayer'`). Use `/root/MindUi` for `dialog_stack()`,
+    `settings_get_flag`, `settings_put_flag`.
+  - `cap.size.width` — `Vector2` has `x`/`y` only (`Invalid access to property or key 'width'`).
+  - `cap.queue_sort()` — `MindLabel` is a `RichTextLabel`, not a `Container`; a theme-constant override
+    re-lays out on its own (`Invalid call. Nonexistent function 'queue_sort'`).
+  - `menu.get_node("Submenu/Buttons").get_child(1)` before the first Play click — the submenu column is
+    populated lazily by `show_submenu`, so it is empty (spacer + entries only after a click) and `child 1`
+    is `null` (`Invalid access … 'text' on a base object of type 'Nil'`).
+- Fix: keep eval bodies to `get_node_or_null` + `get_class()`/rect reads, check `has_method` on the right
+  autoload, and recover a pinned loop with `godot_game stop` + `play` (resume re-breaks). The lazy submenu is
+  also a useful fork assertion: after the Play click it holds 5 children (spacer + Play submenu entries).
+- Run: `runs/PAR-0010/` (pids 3311782 → 3329457 across the rebuild cycles).
+
+## 2026-11-02 — PAR-0010 fixer: the editor relaunch needs `DISPLAY=:10` or the bridge never binds
+
+- Symptom: relaunching the editor after `tools/build.sh` with
+  `OPEN_GODOT_MCP_PORT=6970 setsid godot --editor --path client >>runs/editor-console.log 2>&1 &` left
+  `godot_health` at `BRIDGE_NOT_CONNECTED` and no `godot-real` process; `runs/editor-console.log` ends with
+  `ERROR: X11 Display is not available` → Wayland fallback → `Unable to create DisplayServer`.
+- Cause: the shell tool's environment has no `DISPLAY`, and the editor needs display `:10` (the same one the
+  Java leg captures from).
+- Fix: `DISPLAY=:10 OPEN_GODOT_MCP_PORT=6970 setsid godot --editor --path client …`; wait for the port
+  (20-60 s) before `godot_health check` / `godot_editor_read state`.
+- Run: `runs/PAR-0010/` (final editor pid 3329233).
+
+## 2026-11-02 — PAR-0010 fixer: `tools/twin_item.sh godot-shot --full` is broken (`--max-width`)
+
+- Symptom: `tools/twin_item.sh godot-shot PAR-0010 01-chooser --full` exits 2 with
+  `gmcp.py: error: unrecognized arguments: --max-width`.
+- Cause: the `--full` branch appends `--max-width 0`, but `tools/gmcp.py` only accepts `--screenshot`
+  (`--eval`, `--text`, `--batch`, …); there is no size flag.
+- Fix: capture without `--full` — `gmcp.py --screenshot` already writes the full 1152x648 viewport (verified
+  byte-identical `sha256` to `godot_screenshot game` output). The helper's `--full` flag needs a follow-up.
+- Run: `runs/PAR-0010/godot/20261102-114441-01-chooser.png`.
+
+## 2026-11-02 — PAR-0011 checker: archived AVIF references need the parity venv's Pillow
+
+- Symptom: `python3 -c "from PIL import Image; Image.open('parity/twin/PAR-0011/java/01-action.avif')"`
+  raises `UnidentifiedImageError: cannot identify image file` — the system Pillow has no AVIF codec.
+- Fix: open/convert the archived AVIFs with the parity-eval venv python
+  (`$HOME/.local/share/parity-eval/venv/bin/python`, Pillow 12.3.0), e.g.
+  `im.convert('RGB').save('/tmp/par11-java.png')` before `read_image`; `frame_diff.py` from the same venv
+  reads the AVIFs directly.
+- Run: `runs/PAR-0011/` (checker frame `runs/PAR-0011/godot/20261102-115704-01-serpulo-selected.png`).
+
+## 2026-11-02 — PAR-0011 fixer: `godot_input` needs `position:{x,y}`, and a bad eval method name pins the loop
+
+- Symptom: a `godot_input` sequence with `{"x": 230, "y": 149, "button": "left", …}` clicked nothing (the
+  submenu never opened, `godot_log` clean, no error). `_input_mouse_button` reads
+  `params.get("position", {"x": 0, "y": 0})`, so bare `x`/`y` silently click at (0,0).
+- Fix: always send `"position": {"x": …, "y": …}` plus `"coords": "viewport"` (window == viewport here).
+  A real-injection click then resolves the same Control centre the eval read reported.
+- Second trap: `MindDialog` has **no** `dialog_title()`; the title is the shell label
+  `Center/Panel/Layout/Title.text`. Calling a missing method in an eval errors and pins the frame loop
+  (`godot_debugger sessions` → `paused: true`); recover with `godot_game stop` + `play`. The static dialog
+  instances are built at boot (`planet_ready` → `planet_show_select`), so the title label is already set
+  while the dialog is hidden — use `visible`/`dialog_stack()`, not the title text, to tell whether it is open.
+- `godot_log clear` empties the editor-side buffer (it survives game stop/play), so a probe error from an
+  earlier process stays listed until cleared; note it in the run report rather than passing it off.
+- Run: `runs/PAR-0011/godot/20261102-120836-01-serpulo-selected.png` (game pid 3343411, final pid 3345550).
+
+## 2026-11-02 12:25 — eval with a nested `var` + chained filters pins the loop (twin checker PAR-0012..)
+
+- Symptom: `godot_exec eval` returned `TIMEOUT after 15.0s`; afterwards `Engine.get_process_frames()`
+  read the same value twice (1465 → 1465) while the pid stayed alive — the frame loop was pinned.
+- Failing body: `var p = get_node_or_null(...)` then, **inside an `if p != null:` block**, `var views =
+  p.call("campaign_views")` + two `rows.filter(...)`. Nested `var` declarations in a block are the
+  documented trap (keep every `var` at the eval top level); the chained `filter` over the 272-row view
+  made the pinned call even heavier.
+- Recovery: `godot_game stop` + `play` (resume re-breaks). No state survives, so re-fork from the menu.
+- Workaround: read the planet dialog's `campaign_views()` in one eval that only *returns* counts via
+  top-level vars, and filter on the returned rows in a second eval or in the run report — or query one
+  sector with `MindCampaign.sector_record_json("serpulo", 15)` instead of the whole view.
+- Run: `runs/PAR-0012/` (game pid 3354852, replayed with pid 3356114).
+
+## 2026-11-02 13:0x — a `for` loop over `get_node` in an eval pins the frame loop mid-planet-page
+
+- Symptom: after a `for p in [...]` eval that called `get_node` on five dialog paths, `godot_exec` returned
+  `TIMEOUT after 15.0s`; `Engine.get_process_frames()` then stayed at 40000 while `Time.get_ticks_msec()`
+  advanced, `godot_debugger sessions` reported `paused: true`, and the next `godot_input sequence` timed
+  out. Screenshots taken after the timeout were byte-identical (stale), which can masquerade as "the UI
+  does not react".
+- Recovery: `godot_game stop` + `play` (resume re-breaks). No state survives — re-fork from the menu.
+- Workaround: one known node per eval; read each rect/filter with a separate single-node eval
+  (`d.get_node(p).get_global_rect()`), never a loop over paths.
+- Run: `runs/PAR-0017/`, `runs/PAR-0018/` (checker batch, game pid 3371287).
+
+## 2026-11-02 13:05 — auto-generated `@MindTable@NNNN` node names change after a page rebuild
+
+- Symptom: `godot_exec eval` using a resolved path
+  `.../Body/Content/@MindTable@2813/@MindTable@4283` (read minutes earlier) returned
+  `TIMEOUT after 15.0s`; the loop was pinned (`godot_debugger sessions` → `paused: true`) and the next
+  evals only answered while frames stayed fixed.
+- Cause: the planet page rebuilds its content table on every planet/sector action, so Godot's
+  auto-generated child names are new each time. An eval that hits a stale path errors and pins the loop
+  like any bad body.
+- Workaround: resolve by content with a scoped `find_children(...).filter(...)` from the dialog (no
+  path), or re-resolve the path in the same eval that reads it; never cache an `@Auto@####` name across
+  a rebuild.
+- Recovery: `godot_game stop` + `play`.
+- Run: `runs/PAR-0018/` (checker batch, pid 3378936).
+
+## 2026-11-02 13:20 — `Object.get()` on a non-`#[var]` Rust field + `.size()` pins the loop (PAR-0018 fixer)
+
+- Symptom: `godot_exec eval` `var v = get_node(".../PlanetView"); ... "rows": v.get("tile_corners").size()` returned
+  `TIMEOUT after 15.0s`; `godot_debugger sessions` then reported `paused: true`.
+- Cause: `MindPlanetView.tile_corners` is a plain Rust field (no `#[var]`), so `Object.get("tile_corners")` does not
+  answer a Variant; chaining `.size()` on the null result errors and pins the frame loop like any bad eval body.
+  Read it from `v.get("data")["tile_corners"]` instead, and query each overlay mesh with one `get_node` per eval.
+- Recovery: `godot_game stop` + `play`; the chooser fork had to be replayed from the menu.
+- Run: `runs/PAR-0018/` (fixer, pid 3387557 pinned; re-forked as pid 3388405).
+
+## 2026-11-02 13:39 — campaign launch panics inside `MindUiRoot::on_node_added` a few seconds AFTER the click (PAR-0019)
+
+- Symptom: the launch leg (`Play → Campaign → chooser → Serpulo → OK → Launch`) succeeded and the world
+  ran, but `godot_log errors` later showed `Gd<T>::bind_mut() failed, already bound; T = MindUiRoot ...
+  in MindUiRoot::on_node_added()` (3–4 entries) and a new crash report for every launch. An error check
+  right after the click (tick 61) read **empty**; the panic appeared only after the loading layer/HUD
+  build finished (tick ~300, ~2–4 s later). Re-check errors after the world settles, and treat a
+  `crash-report-*.txt` newer than the launch as a failure even when the process survived.
+- Cause: `on_node_added` (root.rs:869) takes `&mut self`, and its tree `node_added` hook fires while the
+  launch path already holds a mutable `MindUiRoot` borrow (dialog close + loading/HUD construction).
+- Repro: fresh profile (`campaignselect=false`, empty `saves/`) → Play(230,149) → Campaign(460,149) →
+  Serpulo(412,280) → OK(575,610) → Launch(578,613); wait ~3 s; `godot_log errors`.
+- Run: `runs/PAR-0019/` (checker evidence `20261102-134200-godot-panic-launch.md`), game pids 3396891
+  and 3402803 (reproduced), crash reports 13:37:46 and 13:39:10.
+
+## 2026-11-02 14:05 — `Node.callable()` / wrong-arity `#[func]` in an eval pins the loop (PAR-0019 fixer)
+
+- Symptom: two `godot_exec eval` calls returned `TIMEOUT after 15.0s` and the next evals only answered while
+  frames stayed fixed (`godot_debugger sessions` → `paused: true`); `godot_log errors` showed
+  `Invalid call. Nonexistent function 'callable' in base 'MindUiRoot'` and
+  `godot-rust function call failed: MindCampaign::clear_planet_campaign_saves() Reason: function has 1
+  parameter, but received 0 arguments`.
+- Cause: `Node.callable(...)` is a godot-rust API, not a GDScript method, and
+  `clear_planet_campaign_saves` takes the planet name. Either error aborts the eval body and pins the frame
+  loop, exactly like any other bad eval body — the eval budget then reads as a timeout, not as a DIAG.
+- Workaround: to prove a button is hooked from GDScript, count
+  `node.get_signal_connection_list("pressed").size()` (or check `get_method()`); to clear campaign saves use
+  `clear_planet_campaign_saves("serpulo")`. Keep one known method per eval.
+- Recovery: `godot_game stop` + `play` (resume re-breaks); re-run the leg if the log check must be clean.
+- Run: `runs/PAR-0019/` (fixer, game pids 3416790 and 3417865 pinned; final clean leg pid 3417865).

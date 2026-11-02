@@ -1836,10 +1836,32 @@ fn row_dict(row: &VarDictionary, key: &str) -> VarDictionary {
         .unwrap_or_default()
 }
 
+/// A non-null array field of a read-model row.
+///
+/// The campaign read-model producers hand GDScript-shaped **typed** arrays
+/// (`Array[PackedInt32Array]` for `tile_corners`, `Array[Dictionary]` for
+/// `orbits`), while JSON-born rows are untyped. gdext 0.5.5 refuses to convert
+/// a typed array to `Array<Variant>` (`ElementType::is_compatible_with`), which
+/// silently left `PlanetView.tile_corners` empty and dead-ended every overlay
+/// build (`rebuild_highlight`/`rebuild_hover_fill`/`rebuild_markers`) on the
+/// bounds check — PAR-0018. Read the runtime array type through `AnyArray` and
+/// rebuild an untyped array element by element; this keeps both producer shapes
+/// working without changing the UI ABI.
 fn row_array(row: &VarDictionary, key: &str) -> VarArray {
-    value(row, key)
-        .and_then(|value| value.try_to::<VarArray>().ok())
-        .unwrap_or_default()
+    let Some(value) = value(row, key) else {
+        return VarArray::new();
+    };
+    if let Ok(array) = value.try_to::<VarArray>() {
+        return array;
+    }
+    let Ok(array) = value.try_to::<AnyArray>() else {
+        return VarArray::new();
+    };
+    let mut out = VarArray::new();
+    for element in array.iter_shared() {
+        out.push(&element);
+    }
+    out
 }
 
 fn row_packed_vector3(row: &VarDictionary, key: &str) -> PackedVector3Array {

@@ -3,7 +3,8 @@
 The Rust side of Mindustry-Godot: one Cargo workspace that implements essentially all behavior —
 the deterministic simulation, content, world, IO, assets, the Godot 4.7 GDExtension, the
 SpacetimeDB client, the headless oracle/dedicated server, and the offline asset CLI. The Godot tree
-in `../` owns scenes and GDScript UI; behavior lives here. Read the root
+in `../` owns the `.tscn` scene graph and assets; all non-addon code is `.rs` or `.tscn` (the native
+UI classes live in `mind-gdext/src/ui/`), and behavior lives here. Read the root
 [`AGENTS.md`](../../AGENTS.md) first; the client-level map is [`client/AGENTS.md`](../AGENTS.md).
 This file owns the workspace shape — members, dependency direction, lints, toolchain and workspace
 commands. Crate-internal detail lives in the crate guides below.
