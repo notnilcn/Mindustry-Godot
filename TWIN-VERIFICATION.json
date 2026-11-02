@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-02T14:25:11Z",
+  "updated": "2026-11-02T14:29:10Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -14466,7 +14466,7 @@
     },
     "PAR-0135": {
       "title": "Choosing a language shows the restart prompt but is never persisted - the UI stays English after restart",
-      "status": "reference-verified",
+      "status": "verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/ui/dialogs/LanguageDialog.java:78"
@@ -14485,8 +14485,7 @@
           "locale_selected has no listener (grep client/** -> only the signal declaration and the emit), and the locale key the bundle reads (LOCALE_SETTING = \"mindustry/locale\", assets/loader.rs:18-29) is never written anywhere (grep mindustry/locale -> read-only).",
           "After restart the bundle is still English and project setting mindustry/locale is unset; re-opening the dialog shows English selected."
         ]
-      },
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      }
     },
     "PAR-0136": {
       "title": "Join Game forgets added servers and the Remote server list is always empty",
@@ -15173,8 +15172,7 @@
     },
     "PAR-0163": {
       "title": "Launch dialogs show capacity 0: launch_capacity is absent from the campaign read model",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0164": {
       "title": "Settings store fan-out: MindUi.settings_put_flag does not reset MindCampaign in-memory copy",
@@ -15294,8 +15292,7 @@
     },
     "PAR-0188": {
       "title": "Doors/switches/sorters show no state sprites; no damage cracks",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0189": {
       "title": "Plans: queued-plan ghost staging impossible (plans build in ~2 ticks or are dropped)",
@@ -15374,8 +15371,7 @@
     },
     "PAR-0204": {
       "title": "UI sounds are never played",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0205": {
       "title": "Payload pickup/drop and block configure sounds are missing",
@@ -15389,8 +15385,7 @@
     },
     "PAR-0207": {
       "title": "Item withdraw/deposit use a phantom relay stack; no range/acceptStack; no tap-unit deposit",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0208": {
       "title": "Even-size blocks are placed one tile off the cursor",
@@ -15412,8 +15407,7 @@
     },
     "PAR-0212": {
       "title": "Hint seams absent (take_hint_keys, command-mode objective input)",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0213": {
       "title": "Player input matrix incomplete (mouse bindings C/F5/F11)",
@@ -15484,8 +15478,7 @@
     },
     "PAR-0227": {
       "title": "Hints auto-complete after 15 s; no playtime gate / hide-vs-complete semantics",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0228": {
       "title": "Enemy GroundAI ignores the core flowfield (nearest-building anchor)",
@@ -15573,13 +15566,11 @@
     },
     "PAR-0246": {
       "title": "Sector rules never reach the renderer; light pass placeholder",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0247": {
       "title": "Hints: 22 remaining predicates and input completions absent",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0248": {
       "title": "Planet Env bits used enum order: Serpulo rules.env 31 (Java 233), Erekir 33 (Java 17), Tantros 65 (Java 5); the player mech never spawned",
@@ -15845,9 +15836,8 @@
     },
     "PAR-0302": {
       "title": "Hint predicates/events: fungal pass, cores destroyed, cannotupgrade, factorycontrol -> I04 T3",
-      "status": "reference-verified",
-      "similarity": 85.3,
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified",
+      "similarity": 85.3
     },
     "PAR-0303": {
       "title": "Planet globe cannot be dragged or zoomed; last sector not stored; no preset reveal -> I04 T8",
@@ -15859,8 +15849,7 @@
     },
     "PAR-0305": {
       "title": "Dialogs hide instantly (Java fades 0.1 s) -> I04 T12",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0306": {
       "title": "Block palette keeps the previous planet's blocks after a sector switch -> I04 T1",
@@ -15919,8 +15908,7 @@
     },
     "PAR-0317": {
       "title": "Tapping enemy buildings opened config; empty tap kept panels (H08 T4 42c91529)",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0318": {
       "title": "Config/inventory panels drew over the pause menu (H08 T14 aec06cc3)",
@@ -16101,8 +16089,7 @@
     },
     "PAR-0355": {
       "title": "`map_editor_dialog`'s Back/Escape left without the Java confirm; `MindUi` prompts rendered behind `Ui/EditorDialog` (4540431d)",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0356": {
       "title": "UI-edited generation filters were silently dropped: GDScript JSON round-trips wrote \"seed\": 0.0, so `read_filters` fell back to the default stack (c6a3807f)",
@@ -16123,8 +16110,7 @@
     },
     "PAR-0360": {
       "title": "Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0361": {
       "title": "Custom maps load without generation filters (no ores/boulders): `World.loadMap` never ran `FilterContext`/`applyFilters` (396c9886)",
@@ -16271,8 +16257,7 @@
     },
     "PAR-0393": {
       "title": "Mod content missing from the quick-select binds and map previews (base-only registries) (f45ed9ac)",
-      "status": "reference-verified",
-      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
+      "status": "verified"
     },
     "PAR-0394": {
       "title": "Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)",
