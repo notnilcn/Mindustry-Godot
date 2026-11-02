@@ -435,8 +435,8 @@ fn attribute_crafter_stats(
     );
 }
 
-/// Attribute index (`AttributeCrafterDef.attribute`) -> registry name; `-1` has
-/// no port representation (`Attribute.spores` is not in the port's `Attribute`).
+/// Attribute index (`AttributeCrafterDef.attribute`) -> registry name (the
+/// `world::attributes::ATTRIBUTE_NAMES` order); `-1` means no attribute.
 fn attribute_name(index: i16) -> Option<&'static str> {
     const NAMES: [&str; 5] = ["heat", "spores", "water", "light", "steam"];
     usize::try_from(index)
@@ -1209,6 +1209,39 @@ mod tests {
             !row(&stats, Stat::ProductionTime).is_empty(),
             "production time"
         );
+    }
+
+    #[test]
+    fn attribute_crafter_affinities_rows() {
+        let registry = registry();
+        let bundle = bundle();
+        let table = BlockTable::build_default(&registry).expect("table");
+        let ctx = ctx(&registry, &bundle, &table);
+        // PAR-0439: `Blocks.java:2952-2972` cultivator declares
+        // `attribute = Attribute.spores` + the default `baseEfficiency = 1`, so
+        // `AttributeCrafter.setStats` emits the **Affinities** row (the spores
+        // floors: moss/spore-moss/tainted water) and not the bare Tiles row.
+        let id = registry.block_id("cultivator").expect("cultivator");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        let affinities = row(&stats, Stat::Affinities);
+        assert_eq!(affinities.len(), 1, "affinities row: {affinities:?}");
+        assert!(
+            affinities[0]
+                .iter()
+                .any(|cell| matches!(cell, Cell::Panel { .. })),
+            "spores affinity list missing: {affinities:?}"
+        );
+        assert!(
+            row(&stats, Stat::Tiles).is_empty(),
+            "tiles row must be gone"
+        );
+
+        // `Blocks.java:3000-3006` vent-condenser: `attribute = Attribute.steam`
+        // with `baseEfficiency = 0` -> the Tiles row.
+        let id = registry.block_id("vent-condenser").expect("vent-condenser");
+        let stats = content_stats(&ctx, crate::content::ContentRef::block(id));
+        assert_eq!(row(&stats, Stat::Tiles).len(), 1, "vent tiles row");
+        assert!(row(&stats, Stat::Affinities).is_empty(), "vent affinities");
     }
 
     #[test]

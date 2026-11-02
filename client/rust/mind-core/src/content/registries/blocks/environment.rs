@@ -232,6 +232,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         albedo: Some(0.9),
         // `Blocks.java:243`: `cacheLayer = CacheLayer.water`.
         cache_layer: Some(CacheLayerId::Water),
+        // `Blocks.java:245`: `attributes.set(Attribute.spores, 0.15f)`.
+        attributes: vec![("spores", 0.15f32)],
         ..spec("tainted-water", BlockKind::Floor)
     })?;
 
@@ -246,6 +248,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         albedo: Some(0.9),
         // `Blocks.java:258`: `cacheLayer = CacheLayer.water`.
         cache_layer: Some(CacheLayerId::Water),
+        // `Blocks.java:260`: `attributes.set(Attribute.spores, 0.15f)`.
+        attributes: vec![("spores", 0.15f32)],
         ..spec("deep-tainted-water", BlockKind::Floor)
     })?;
 
@@ -258,6 +262,8 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         floor_status: Some("wet"),
         floor_status_duration: Some(60.0),
         albedo: Some(0.9),
+        // `Blocks.java:268`: `attributes.set(Attribute.spores, 0.1f)`.
+        attributes: vec![("spores", 0.1f32)],
         ..spec("darksand-tainted-water", BlockKind::ShallowLiquid)
     })?;
 
@@ -612,14 +618,22 @@ pub fn load(sink: &mut dyn BlockSink) -> Result<(), ContentError> {
         ..spec("shale", BlockKind::Floor)
     })?;
 
-    sink.push(spec("moss", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:594`: `attributes.set(Attribute.spores, 0.15f)`.
+        attributes: vec![("spores", 0.15f32)],
+        ..spec("moss", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         allow_core_placement: Some(true),
         ..spec("core-zone", BlockKind::Floor)
     })?;
 
-    sink.push(spec("spore-moss", BlockKind::Floor))?;
+    sink.push(BlockSpec {
+        // `Blocks.java:596`: `attributes.set(Attribute.spores, 0.3f)`.
+        attributes: vec![("spores", 0.3f32)],
+        ..spec("spore-moss", BlockKind::Floor)
+    })?;
 
     sink.push(BlockSpec {
         solid: Some(true),

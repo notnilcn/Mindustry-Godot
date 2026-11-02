@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-02T14:04:37Z",
+  "updated": "2026-11-02T14:25:11Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -9888,7 +9888,7 @@
     },
     "PAR-0047": {
       "title": "Tech tree dialog: Back / Core Database / planet tab / node research click",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -9916,7 +9916,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0048": {
       "title": "Campaign world: block picker (bottom-right) - category button + block grid",
@@ -10887,7 +10888,7 @@
     },
     "PAR-0056": {
       "title": "Fresh Ground Zero launch stocks the core with 100 copper (Java: empty core)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -10948,7 +10949,8 @@
         "godot": [
           "parity/twin/PAR-0056/godot/01-action.avif"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0057": {
       "title": "HUD minimap: widget shows the whole map with fallback-grey terrain colours",
@@ -11031,7 +11033,7 @@
     },
     "PAR-0059": {
       "title": "Campaign: sector preset rules apply on launch (captureWave -> winWave, noLighting)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -11135,7 +11137,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0060": {
       "title": "HUD wave pane: wave/enemy/status text tracks the campaign; skip button and capture toast",
@@ -11307,7 +11310,7 @@
     },
     "PAR-0061": {
       "title": "Engine spine: scenario load + step(60) matches the committed golden checksum",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -11387,7 +11390,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0062": {
       "title": "Sim spine: deterministic pause/step + API and mouse place/break (click and drag)",
@@ -11704,7 +11708,7 @@
     },
     "PAR-0063": {
       "title": "Input: keyboard paths update get_input_state_json (Q clear, Shift command mode, hold vs tap)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -11937,7 +11941,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0064": {
       "title": "UI: injected clicks reach runtime-created Controls (menu Play, paused Settings)",
@@ -12115,7 +12120,7 @@
     },
     "PAR-0065": {
       "title": "Custom Game: live map grid renders 18 registry rows with real metadata",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -12239,7 +12244,8 @@
             "note": "AFTER a ~4 s settle returns [custom]; the same call immediately after the click panics (see the sibling mismatch item)"
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0065 (live Godot custom-game grid leg, pid 1594839)"
     },
     "PAR-0066": {
       "title": "MindUi.dialog_stack() panics (Gd bind already bound) in the Custom Game dialog build window",
@@ -12439,7 +12445,7 @@
     },
     "PAR-0068": {
       "title": "Database: planet tabs + category/tag grid + unlocked cell opens ContentInfoDialog",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -12646,11 +12652,12 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0068 (live Godot database/content-info leg, pid 1594839)"
     },
     "PAR-0069": {
       "title": "Settings: Game Data action rows + confirm prompt + export backend",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           {
@@ -12842,7 +12849,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0069 (live Godot settings leg, pid 1594839)"
     },
     "PAR-0070": {
       "title": "Live gameplay shows no bullet impacts, explosions, smoke, wreck or spawn effects (and no screen shake)",
@@ -12980,7 +12988,7 @@
     },
     "PAR-0075": {
       "title": "Fuel generators produce no power: conveyors cannot insert coal/radioactive fuel",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "place an item source (coal) adjacent to a combustion generator; read the generator panel (Power Output: 60.0) and the battery charge"
@@ -12988,11 +12996,12 @@
         "godot": [
           "feed a combustion generator coal and assert the power output and fuel consumption"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0076": {
       "title": "Reconstructors cannot be supplied with items and upgrade units without the item/power cost",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "place an additive reconstructor + ground factory; feed silicon+graphite via item sources; watch a Dagger upgrade to Mace with the items draining"
@@ -13000,11 +13009,12 @@
         "godot": [
           "supply a reconstructor and assert accept_item + the item/power gate and the upgrade"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0077": {
       "title": "Sandbox sources/voids do nothing: sources never output and voids never drain",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "place source + void adjacent: items emitted by the source vanish in the void with no storage"
@@ -13012,11 +13022,12 @@
         "godot": [
           "assert the source emits and the void drains"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0078": {
       "title": "Pumps produce water on any ground and ignore the floor liquid (oil/slag/cryofluid)",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "place a mechanical pump on a liquid floor and read the liquid it produces (slag on Molten Lake / water on water tiles)"
@@ -13024,11 +13035,12 @@
         "godot": [
           "place a pump on a slag/water tile and assert it produces the FLOOR's liquid, and produces nothing on solid ground"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0079": {
       "title": "Erekir beam drills and cliff crushers never produce (plasma-bore/cliff-crusher inert)",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "Launch the pinned Java client on Erekir; place a plasma-bore facing a beryllium/tungsten wall and a cliff-crusher next to sand walls.",
@@ -13038,7 +13050,8 @@
           "In the Godot client on Erekir, place a plasma-bore facing a wall and a cliff-crusher beside sand walls, both powered.",
           "Read block_items_json over several craft cycles: nothing is ever produced and no beam targets exist."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0080": {
       "title": "Researching any tech node (or capturing any sector) free-unlocks the objective-free early tech tree",
@@ -13077,7 +13090,7 @@
     },
     "PAR-0081": {
       "title": "Campaign sector progression is forgotten after a client restart (captures, attempts, stored items, import/export routes reset)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "client relaunch -> Play > Campaign -> planet page keeps the captured sector hexes + panel (the stored twin frames)"
@@ -13108,7 +13121,8 @@
         "godot": [
           "parity/twin/PAR-0081/godot/01-action.avif"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0082": {
       "title": "Sectors never report or accumulate production while you play them (offline production, exports and the sector panel stay empty)",
@@ -13146,7 +13160,7 @@
     },
     "PAR-0083": {
       "title": "Campaign attack/submission sectors are absent: those planet cells never load their authored maps and never count as enemy bases",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "SectorPresets.load -> SectorSubmissions.registerSectors(); Planet.getData().presets/attackSectors (Planet.java:477-489); SectorPreset.initialize remap"
@@ -13174,11 +13188,12 @@
         "godot": [
           "parity/twin/PAR-0083/godot/01-action.avif"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0084": {
       "title": "Losing a sector and re-attacking it restores your base instead of applying the loss damage",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "Control.playSector's no-core branch (Control.java:456-537): core re-place + SectorDamage(1f) + derelict/plan restore from the loss save"
@@ -13198,7 +13213,8 @@
           "same steps in the port: the launch takes the resume branch (play_sector.rs:415-431 sees the stale has_core=true) and loads the last save as-is",
           "maps::sector_damage::apply has no live caller, so no simulated loss damage and no plan-based restore happen"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0085": {
       "title": "The launch loadout picked in Configure Loadout is ignored - every campaign launch uses the empty/default loadout",
@@ -13224,7 +13240,7 @@
     },
     "PAR-0086": {
       "title": "Placed turrets never acquire targets, rotate or fire: no turret behavior is registered and no turret update pass runs in the shipped client",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/world/blocks/defense/turrets/Turret.java:568",
@@ -13244,11 +13260,12 @@
         "godot": [
           "feed a duo and spawn an enemy in range; assert target acquisition, rotation, ammo drain and bullet fire"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0087": {
       "title": "Turret coolant cannot be supplied: water/cryofluid is rejected by item/power turrets and 19 turret blocks report has_liquids=false",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/content/Blocks.java:3343",
@@ -13270,11 +13287,12 @@
         "godot": [
           "supply a duo with water and assert the coolant liquid fills and reload speeds up"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0088": {
       "title": "Bullets with a spawnUnit payload never spawn their unit: scathe volleys and the anthicus/quell/disrupt missile weapons deal no damage",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/entities/bullet/BulletType.java:932",
@@ -13295,7 +13313,8 @@
         "godot": [
           "Harness: `turret_at(&mut harness, \"scathe\")` + 12 carbide, 200 ticks -> `total_shots > 0` but no unit entity appears and the target HP is unchanged (the shipped client has no live turret pass yet, see the turret-inert finding)."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0089": {
       "title": "Sublimate fires with any trace of fuel and never consumes ozone/cyanogen (no liquid activation window)",
@@ -13325,7 +13344,7 @@
     },
     "PAR-0090": {
       "title": "Save/load drops all fires and puddles: no entity save path reaches their codecs",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/io/SaveVersion.java:423",
@@ -13347,11 +13366,12 @@
         "godot": [
           "Create a FireState and a PuddleState in the live sim world, run SimIoHandler Capture+Apply (or SaveSlot round-trip): after load neither entity exists; `write_fire`/`write_puddle` are only referenced by their own unit tests."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0091": {
       "title": "Deposited puddles never react, evaporate or apply status: no live fire/puddle update system runs",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/core/Logic.java:475",
@@ -13373,7 +13393,8 @@
         "godot": [
           "deposit a fire/puddle and assert update_fires/update_puddles run live (burn, evaporate, status)"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0092": {
       "title": "Unit factories, reconstructors and payload blocks cannot be configured: the panel is empty or lists unrelated items",
@@ -13460,7 +13481,7 @@
     },
     "PAR-0098": {
       "title": "Placing a block builds it instantly anywhere: no build plan, builder travel or construction progress",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "DesktopInput.pollInputPlayer release -> flushPlans(linePlans)/flushPlans(selectPlans) -> player.unit().addBuild",
@@ -13482,7 +13503,8 @@
           "launch Ground Zero; select a block; click the same far tile; screenshot + get_state_json for that tile in the same frame",
           "the finished block is present immediately, with no queued plan, no construct progress and no unit travel; the core's items are charged at once"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0099": {
       "title": "Schematic copy mode is dead: F does nothing, so an area cannot be copied into select plans, flipped or placed",
@@ -13584,7 +13606,7 @@
     },
     "PAR-0103": {
       "title": "No in-game logic editor: processor code cannot be viewed or edited; tapping a processor opens a dead one-line field",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/logic/LogicDialog.java",
@@ -13613,11 +13635,12 @@
           "Type `set x 1` and press OK -> nothing is stored: configure_building maps the kind to ConfigValue::String (input/mod.rs:877-885) and LogicBlockBehavior ignores String for non-privileged processors (logic_block.rs:539-548).",
           "grep client/ui + client/scenes for MindLogic consumers -> none; dialogs_manifest.json has no `logic` entry and client/ui/dialogs/ has no logic dialog."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0104": {
       "title": "World-processor side effects never happen: messages, effects, setrule, flags and sounds stay inert in the live client",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/logic/LExecutor.java",
@@ -13637,7 +13660,8 @@
         "godot": [
           "run a processor with an effect statement and assert the world effect fires"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0105": {
       "title": "Logic displays stay blank: drawflush output is never rendered and tileable displays never link into one canvas",
@@ -13667,7 +13691,7 @@
     },
     "PAR-0106": {
       "title": "Processors read frozen globals: @tick/@time/@wave never advance in the live client",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/core/Logic.java",
@@ -13688,11 +13712,12 @@
           "Same program in the live client -> t stays 0 forever: @tick is initialized to 0 (globals.rs:192) and GlobalVars::update/update_world has no caller outside mind-headless (only logic_scenarios.rs:145); Sim::tick (sim/mod.rs:383-398) never touches globals.",
           "Executor::refresh_globals (executor/mod.rs:1813-1834) reads the ECS GlobalVars resource every run, so the stale values are exactly what a running processor observes."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0107": {
       "title": "`lookup` returns null for every id (mlog content-by-id lookups always fail)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/logic/LExecutor.java",
@@ -13712,7 +13737,8 @@
           "Same program -> r is null: the run branch always writes a null object (executor/mod.rs:1066-1071).",
           "The lowering already drops the content type (`Statement::Lookup { result, id, .. }`, executor/mod.rs:2055-2059) even though Statement::Lookup carries type/from fields (statement.rs:274)."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0108": {
       "title": "Tapping a switch opens an empty config panel and never toggles it (no Boolean config path)",
@@ -13771,7 +13797,7 @@
     },
     "PAR-0111": {
       "title": "Leaving the map editor silently discards unsaved changes (no confirm)",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "In the Java editor, draw anything, open the menu and press Quit: a @confirm/@editor.unsaved dialog appears; cancel keeps editing, confirm runs logic.reset() then hide()."
@@ -13781,11 +13807,12 @@
           "Observe: the editor hides instantly and the editor_maps dialog opens; no confirm appears and the loaded world is left in place.",
           "Code check: `try_exit` has zero GDScript callers and MindEditor.try_exit -> EditorPlayState::try_exit (playtest.rs:160-162) is a stub returning true without showing anything or resetting."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0112": {
       "title": "Planet-generated campaign sectors have no core and no enemy base: launch loadout, ruins and base walls are skipped",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "Launch the Java client on a sector without a stored map (planet generator path). Observe: a player core with the launch loadout at the spawn, derelict ruins scattered around ore, and (for enemy-base sectors) enemy core loadouts with walls and cleared unit paths."
@@ -13795,7 +13822,8 @@
           "Count core blocks / enemy blocks: zero cores and no base structures; also check MindSimHost's sector rules report player_cores == 0 so the campaign records no capture (campaign.rs:583-590).",
           "Editor route: Editor -> Sector Generate Apply additionally returns false ('awaits the plan-06 load_sector host'), so the generated preview is not even reachable there."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0113": {
       "title": "Editor map view cannot pan or temporarily pick/zoom: no drag/WASD pan, no shift-alt pick, no middle-click zoom",
@@ -13814,7 +13842,7 @@
     },
     "PAR-0114": {
       "title": "Map previews never render: custom game and editor map lists show a placeholder instead of the map image",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "Java client: Custom Game / Editor maps show each map's generated preview texture (MapListDialog.java:213, Map.safeTexture with the error.png fallback); previews are generated on first client load by Maps.createAllPreviews."
@@ -13825,11 +13853,12 @@
           "Save a map in the editor: MindEditor.save uses save_editor_map (no PreviewPipeline; editor/mod.rs:1011-1058) unlike maps_glue::save_map_e2e, so the saved map still has no preview."
         ]
       },
-      "similarity": 46.1
+      "similarity": 46.1,
+      "evidence": "live: runs/PAR-0114/godot/20261103-002425-01-custom-game-map-previews.png (pid 1609062; real map previews render)"
     },
     "PAR-0115": {
       "title": "Installing a mod changes nothing in the game: modded blocks, items and units never appear",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "Copy a JSON content mod (e.g. a mod shipping content/items + content/blocks) into the Java mods directory and launch Mindustry.",
@@ -13840,11 +13869,12 @@
           "Open the Mods dialog: the mod is listed Enabled.",
           "Open the build palette / database / content info: no <mod>-prefixed block or item exists (MindSimHost.content_snapshot has no mod records)."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0116": {
       "title": "Mods that ship scripts never run and get no unsupported warning",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "Install a mod shipping scripts/main.js that logs or registers behavior, launch Mindustry, and observe the script's effect (and the @mod.scripts.disable error dialog path on failure, Mods.java:671)."
@@ -13853,11 +13883,12 @@
           "Install a mod shipping scripts/main.js under user://mods and launch client/.",
           "Open the Mods dialog: the mod shows Enabled, no error/@mod.errors row; nothing the script would do happens."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0117": {
       "title": "Disabling a mod does not stick: after a restart every mod is enabled again",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "Disable a mod in the Java Mods dialog, restart, and open the dialog: the mod is still disabled (Core.settings 'mod-<name>-enabled' persisted)."
@@ -13866,7 +13897,8 @@
           "Open the Mods dialog, toggle a mod off, quit the client, relaunch, and open the Mods dialog again.",
           "The mod is enabled again; user://config/settings.bin has no mod-<name>-enabled key."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0118": {
       "title": "After a mod-caused crash the client keeps loading every mod and offers no Restore button",
@@ -14115,7 +14147,7 @@
     },
     "PAR-0127": {
       "title": "Campaign weather never happens: no rain, snow, sandstorm or fog",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -14163,7 +14195,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0128": {
       "title": "Effect, decal and weather sprites draw as flat colour rectangles (no atlas region execution in the FX pass)",
@@ -14246,7 +14279,7 @@
     },
     "PAR-0130": {
       "title": "Items travelling on conveyor belts are invisible",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -14294,7 +14327,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0131": {
       "title": "Sector launch has no landing cutscene: the core does not drop in and the camera does not zoom",
@@ -14378,7 +14412,7 @@
     },
     "PAR-0133": {
       "title": "Map Play 'Play' neither loads the selected map nor applies the selected gamemode",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/ui/dialogs/MapPlayDialog.java:54",
@@ -14402,7 +14436,8 @@
           "campaign.rs:662-668 start_map clones session.rules, sets mode_name and calls play_map - the map name is never resolved to terrain and the mode is never applied; the sim host is not reloaded (only load_sector at sim_host.rs:939 loads a grid, and only for campaign sectors).",
           "Observe: the previously loaded world stays (or an empty menu world), and rules keep the prior session values - sandbox shows no infinite resources, PvP/attack flags never set."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0134": {
       "title": "Load Game 'Import Save' does nothing: no .msav is imported after picking a file",
@@ -14431,7 +14466,7 @@
     },
     "PAR-0135": {
       "title": "Choosing a language shows the restart prompt but is never persisted - the UI stays English after restart",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "../Mindustry/core/src/mindustry/ui/dialogs/LanguageDialog.java:78"
@@ -14450,7 +14485,8 @@
           "locale_selected has no listener (grep client/** -> only the signal declaration and the emit), and the locale key the bundle reads (LOCALE_SETTING = \"mindustry/locale\", assets/loader.rs:18-29) is never written anywhere (grep mindustry/locale -> read-only).",
           "After restart the bundle is still English and project setting mindustry/locale is unset; re-opening the dialog shows English selected."
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0136": {
       "title": "Join Game forgets added servers and the Remote server list is always empty",
@@ -14479,7 +14515,7 @@
     },
     "PAR-0137": {
       "title": "Ground units move at full speed across slow terrain (floor speed multipliers ignored)",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "reference Ground Zero (or any map with deep-water/sand-water): move a ground unit onto deep water; per-tick speed drops by Floor.speedMultiplier (deep-water 0.2) via UnitComp.speed()/floorSpeedMultiplier()",
@@ -14489,11 +14525,12 @@
           "same map in the Godot client or headless unit harness: move the same unit onto deep water; per-tick displacement is unchanged from stone",
           "code: ai/types/ground.rs:113-120 and ai/types/flying.rs:47-58 compute speed as physics.speed * status.speed_multiplier only; ai/types/player.rs:74-77 has the comment that boost/floor/strafe multipliers are not modeled; world::behavior::environment::floor_speed_multiplier has no movement caller (only crawl.rs:87 / tank.rs:95 tread kinematics and water_move tests)"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0138": {
       "title": "Carrier units cannot pick up or drop blocks/units (payload pickup/drop is a no-op)",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "reference: control a payload unit, press [ near a ground unit/block: InputHandler.tryPickupPayload picks it up and the payload list grows; ] drops it (PayloadComp.pickup/dropLastPayload)"
@@ -14502,11 +14539,12 @@
           "in-game: with a carrier unit, press [ (pickupCargo binding) or ] -> the client logs `relay command rejected by sim: command unsupported: payload` (input/desktop.rs:542-543 routes the binding to RemoteAction::Payload; sim/mod.rs:635-644 returns CommandError::Unsupported(\"payload\"))",
           "code: unit PayloadComp carries only `capacity` (entities/comp/unit/comp.rs:249-254) and sim/world_apply.rs:17-18 documents the pickup/drop runtime as unported"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0139": {
       "title": "Enemy attack/base AI never runs: no RTS squads and no BaseBuilderAI construction in the live sim",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "reference frames only (runs/20261010-234250-ref-PAR-0070-combat-fx/): wave pathing/attack captured; RTS/base halves not capturable there"
@@ -14526,7 +14564,8 @@
           "launch the same sector: enemy units only walk toward the nearest enemy building (sim/unit_runtime.rs:833-877 acquire_target -> update_ground); no squad orders, no base construction, no core prebuild units",
           "code: ai/rts_ai.rs:469 ensure_rts_ai and :479 update, and ai/base_builder_ai.rs:580 ensure_build_ai and :594 update_team_data, have no caller outside ai/ tests (grep only finds the ai/mod.rs re-exports); TeamData (game/teams.rs:117-119) is never a live resource and no schedule entry runs a per-team AI tick"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0140": {
       "title": "RTS unit selection and orders do nothing: the selectable list is never fed and commands never reach live units",
@@ -14557,7 +14596,7 @@
     },
     "PAR-0141": {
       "title": "Direct bullet hits pass through units: only splash/EMP/ability damage can kill them",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           "reference: Logic.update runs Groups.bullet.update() then Groups.bullet.collide() (Logic.java:495-496); the collide pass walks EntityCollisions.checkCollide (EntityCollisions.java:144-167/218-243) and BulletComp.collision (BulletComp.java:124-143) so basic projectiles damage units and notify the unit controller"
@@ -14566,7 +14605,8 @@
           "live runtime: two hostile daggers in weapon range (or a target unit in front of a firing turret) shoot each other indefinitely with both at full health; bullet collision only raycasts tile.build (combat/bullet/mod.rs:724-889 `collide_bullet`), and EntitySet::PhysicsBullets/PhysicsUnits in sim/schedule.rs:427-437 have no registered systems at all",
           "only splash (damage/damage_area hits units), EMP radius, abilities/status DoT and the unit-branch of hit_building (unreachable: hit_building is only ever called with building targets from collide_bullet/point/sap) can reduce unit health"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0142": {
       "title": "Planet globe surface renders flat: Java sphere surface shader (term/gloss/shadow) + bloom pass missing (atmosphere halo ported)",
@@ -14783,7 +14823,7 @@
     },
     "PAR-0144": {
       "title": "Database dialog: planet filter row renders icons in Java (eye + planet glyphs) vs the port's All/Erekir/Serpulo text buttons",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           {
@@ -14802,11 +14842,12 @@
           }
         ]
       },
-      "similarity": 4.8
+      "similarity": 4.8,
+      "evidence": "batch: PAR-0068 (live Godot database/content-info leg, pid 1594839)"
     },
     "PAR-0145": {
       "title": "Research dialog content: Java's connected node graph (TechTreeNode + TreeLayout + connectors, planet tab, hover/purchase) vs the port's overlapping row list",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           {
@@ -14825,7 +14866,8 @@
           }
         ]
       },
-      "similarity": 2.4
+      "similarity": 2.4,
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0146": {
       "title": "Planet page opened from the in-game map button draws over the live world + HUD (Java covers with the space backdrop)",
@@ -14981,7 +15023,7 @@
     },
     "PAR-0153": {
       "title": "Campaign sector autosave never runs: resuming a sector loses the played progress (objectives, mined totals, core items)",
-      "status": "verified",
+      "status": "reference-verified",
       "action": {
         "java": [
           {
@@ -15005,7 +15047,8 @@
             }
           }
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0154": {
       "title": "Planet globe draws no sector grid: owned/enemy-base/padlock cells and their icons are absent (only the selected hex renders)",
@@ -15029,7 +15072,7 @@
     },
     "PAR-0155": {
       "title": "MSAV import fails for a subset of authored maps: cruxscape.msav and the hidden submission maps error with 'JSON error: expected value' while others import",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "SaveIO reads the authored MSAV (Arc JsonReader accepts bare Infinity)"
@@ -15046,11 +15089,12 @@
         "godot": [
           "SimHost.load_sector('serpulo', 76): warning 'JSON error: expected value at line 1 column 4016'; the generator fallback world loads instead"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0156": {
       "title": "Enemy AI residuals: prebuildAi core defenders never spawn and estimateStats ignores turret DPS",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           "Logic.java:582-590: with `rules.prebuildAi` every core spawns its `CoreBlock.unitType` defender flagged to the core tile"
@@ -15068,7 +15112,8 @@
           "start_sector(225) with prebuildAi staged: no core defenders spawn",
           "RtsAI target picks ignore enemy turret DPS (estimateStats sees units only)"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0157": {
       "title": "Command mode draws no selection overlay: selected units get no hexagon ring, target line or move-square (InputHandler.drawCommanded)",
@@ -15089,7 +15134,7 @@
     },
     "PAR-0158": {
       "title": "The Select Starting Campaign chooser reappears on every boot even after a planet was chosen and a sector has a base",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "godot": [
           "godot_game play",
@@ -15104,19 +15149,23 @@
         "godot": [
           "same; chooser appears"
         ]
-      }
+      },
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0159": {
       "title": "Live unit status effects and abilities never update: applied statuses deal no damage and support abilities never tick",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0160": {
       "title": "Research dialog cannot show node costs or partial progress: the read model never materializes node requirements",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0161": {
       "title": "Saves drop every per-kind building body on load: EditorContext::read_building decodes only the base record",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0162": {
       "title": "Imported user schematics never appear in the campaign read model: only vanilla loadouts load and load_file re-sorts `all` with stale loadout indices",
@@ -15124,55 +15173,68 @@
     },
     "PAR-0163": {
       "title": "Launch dialogs show capacity 0: launch_capacity is absent from the campaign read model",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0164": {
       "title": "Settings store fan-out: MindUi.settings_put_flag does not reset MindCampaign in-memory copy",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0069 (live Godot settings leg, pid 1594839)"
     },
     "PAR-0165": {
       "title": "place_block/apply_sim_command_json report true for rejected placements (occupied or out-of-bounds tiles)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0166": {
       "title": "Java's one-time Campaign Changes Notice after a Serpulo remap is missing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0167": {
       "title": "Research dialog listed only the root row: ResearchView rows carried no tree name",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0168": {
       "title": "Enemy base-builder AI queues no plans (units_base_build golden: 0 of 28)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0169": {
       "title": "BaseBuilderAI scatter regression (units_base_build golden: 0 of 28)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0170": {
       "title": "Units with laser/rail/sap weapons have range -4 versus the JVM",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0171": {
       "title": "Line weapons (laser, continuous, shrapnel, rail, sap) never damage units",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0172": {
       "title": "Heal bullets damage the player's own buildings",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0173": {
       "title": "Team rule multipliers ignored by combat",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0174": {
       "title": "Player unit never respawns after death; core unit type ignored",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0175": {
       "title": "Unit possession / unit clear do nothing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0176": {
       "title": "No boss list (state.boss()/teams.bosses): no boss bar can be fed",
@@ -15180,7 +15242,8 @@
     },
     "PAR-0177": {
       "title": "Blocks without a consumer override reject all items and liquids",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0178": {
       "title": "Power-node knobs reset to defaults; Configure link toggle and diodes dead",
@@ -15188,27 +15251,33 @@
     },
     "PAR-0179": {
       "title": "Incinerators accept and destroy nothing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0180": {
       "title": "Drill period ignores hardness; burst drills never burst",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0181": {
       "title": "Menders/overdrive affect enemy buildings and never consume boost items",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0182": {
       "title": "Repair point never heals friendly units",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0183": {
       "title": "Placed blocks show no placement ghost, rotation arrow or range circle",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0184": {
       "title": "Queued build plans and the build beam are invisible",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0185": {
       "title": "Bullets are not drawn at all",
@@ -15220,87 +15289,108 @@
     },
     "PAR-0187": {
       "title": "Hovered buildings show no health/items/power bars",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0188": {
       "title": "Doors/switches/sorters show no state sprites; no damage cracks",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0189": {
       "title": "Plans: queued-plan ghost staging impossible (plans build in ~2 ticks or are dropped)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0190": {
       "title": "Configure may not reach BuildingBehavior::configured() (sorter/door state did not change)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0191": {
       "title": "No place/break/rotate block effects",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0192": {
       "title": "Sector resume drops units/fires/puddles/markers/wavetime/stats",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0193": {
       "title": "Wave countdown runs 60x too slowly; isWaitingWave missing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0194": {
       "title": "Objectives: completion not saved; Timer 60x slow; DestroyUnits never completes; DestroyBlock instant",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0195": {
       "title": "Capture leaves the enemy base active; coreDestroyClear missing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0196": {
       "title": "Sector map/save rules dropped (limitMapArea, weather, ...); planet ruleSetter + campaign load overrides missing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0197": {
       "title": "T2 regression: the legacy UBJson markers region broke preset reloads",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0198": {
       "title": "Launch pads never launch; landing pads never land",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0199": {
       "title": "Unit weapons are silent: no shoot/charge sounds",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0200": {
       "title": "Most turrets have no shoot sound",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0201": {
       "title": "Weather attributes never reach generators",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0202": {
       "title": "Sandstorm/sporestorm wind force does not move units",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0203": {
       "title": "Fresh sectors never call planet addWeather",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0204": {
       "title": "UI sounds are never played",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0205": {
       "title": "Payload pickup/drop and block configure sounds are missing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0206": {
       "title": "Player unit never aims, fires or faces from desktop input",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0207": {
       "title": "Item withdraw/deposit use a phantom relay stack; no range/acceptStack; no tap-unit deposit",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0208": {
       "title": "Even-size blocks are placed one tile off the cursor",
@@ -15308,11 +15398,13 @@
     },
     "PAR-0209": {
       "title": "Build plans drop their config (rebuild/sorter nextConfig)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0210": {
       "title": "Rebuild ghosts never clear; B rebuild select missing; right-drag does not cancel queued plans",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0211": {
       "title": "Wheel scroll does not zoom/rotate as DesktopInput",
@@ -15320,11 +15412,13 @@
     },
     "PAR-0212": {
       "title": "Hint seams absent (take_hint_keys, command-mode objective input)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0213": {
       "title": "Player input matrix incomplete (mouse bindings C/F5/F11)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0214": {
       "title": "Block hotkey combos/pick/F1 not implemented",
@@ -15332,43 +15426,53 @@
     },
     "PAR-0215": {
       "title": "Live player:Some placements apply instantly instead of queuing (player_can_build())",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0216": {
       "title": "mlog wait 0/negative waits hang the processor",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0217": {
       "title": "mlog op strictEqual always 0; format inverted; print of blocks/units/content prints ids",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0218": {
       "title": "sensor returns 0 for most properties instead of Java values/null; building/unit @x/@y in pixels",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0219": {
       "title": "@thisx/@thisy are 8x the tile coordinate",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0220": {
       "title": "Processor links cannot be created by tapping; control enabled ignores link range",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0221": {
       "title": "ucontrol/ubind mostly inert; LogicAI never runs",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0222": {
       "title": "radar sorts health/shield/armor backwards and ignores range",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0223": {
       "title": "control shoot cannot aim turrets",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0224": {
       "title": "Objective completionLogicCode runs in a throwaway world",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0225": {
       "title": "Canvas blocks render blank",
@@ -15380,47 +15484,58 @@
     },
     "PAR-0227": {
       "title": "Hints auto-complete after 15 s; no playtime gate / hide-vs-complete semantics",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0228": {
       "title": "Enemy GroundAI ignores the core flowfield (nearest-building anchor)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0229": {
       "title": "FlyingAI main target ignores targetFlags",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0230": {
       "title": "WaveSpawner: wrong per-spawn group counts, no flyer edge spawns, no drop-zone shockwave",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0231": {
       "title": "Units never mine (generic MinerComp/MinerAI, mono mine command)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0232": {
       "title": "RepairAI missing for the repair command",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0233": {
       "title": "BuilderAI absent for non-player builders (team ghost-plan pickup)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0234": {
       "title": "Live unit stances (holdFire, boost, pursueTarget, holdPosition, mine items) ignored",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0235": {
       "title": "Unit cap ignored (Units.canCreate/getCap)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0236": {
       "title": "Unit environment update missing (drowning, floor status/drag, bounds, solid kill, drop-zone push)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0237": {
       "title": "No unit death explosions; ExplosionShield ignored; fire env rules missing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0238": {
       "title": "BuildDamageEvent never emitted (minimap damage feed)",
@@ -15428,7 +15543,8 @@
     },
     "PAR-0239": {
       "title": "Commanded units do not track attack targets",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0240": {
       "title": "HUD: boss bar, guardian warnings, core-attack/drop-point warnings absent",
@@ -15452,135 +15568,168 @@
     },
     "PAR-0245": {
       "title": "Game-over dialog opens on the wrong trigger and shows no stats",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0245 (live Godot game-over dialog leg, pid 1594839)"
     },
     "PAR-0246": {
       "title": "Sector rules never reach the renderer; light pass placeholder",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0247": {
       "title": "Hints: 22 remaining predicates and input completions absent",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0248": {
       "title": "Planet Env bits used enum order: Serpulo rules.env 31 (Java 233), Erekir 33 (Java 17), Tantros 65 (Java 5); the player mech never spawned",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0249": {
       "title": "fillItems refilled every core (player included) and exit saves panicked on resume (513eed69, 8a39f6fc)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0250": {
       "title": "Planet Env bits used enum order (Serpulo rules.env 31, Java 233); the player never spawned",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0251": {
       "title": "Building and bullet tile coordinates were half a tile off (H01 T1 8e7b68b8)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0252": {
       "title": "Pathfinder had no floor data or Java costs; wave daggers drowned (H01 T15 c6bcf17a)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0253": {
       "title": "Weapons used one target per unit instead of per mount (H01 T2 36e76496)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0254": {
       "title": "Enemy AI units lived on captured sectors; drop-zone push on non-hasSpawns maps (H01 T5 cb9cb9e2)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0255": {
       "title": "Dead flying units vanished instead of falling as wrecks (H01 T6 fcfa753e)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0256": {
       "title": "Flying target flags ignored working buildings without items (targetFlagActive, H01 T8 d8ab1c64)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0257": {
       "title": "DefenderAI/FlyingFollowAI/HugAI/NoAI never ran (H01 T9 8f3477e3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0258": {
       "title": "Ground Zero wave-1 fight acceptance (H01 T14 0e1f9b60)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0259": {
       "title": "Wave ground units had no stuck avoidance (H01 T11 c4002abc)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0260": {
       "title": "Assist command / BuilderAI follow did nothing (H01 T12 43554571)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0261": {
       "title": "CargoAI/AssemblerAI never ran (H01 T13 cdd2133a)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0262": {
       "title": "Campaign cores never incinerated overflow; belts backed up (H02 T1 dbb2ca2b)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0263": {
       "title": "Turrets aimed at stale positions and never led targets (H02 T16 be80e18a)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0264": {
       "title": "Placement guard ignored team, deep water, rotation, derelicts, core radius, visibility, bans (H02 T2/T3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0265": {
       "title": "Cores could not be upgraded; core-foundation placeable on free ground (H02 T4 0d1d4484)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0266": {
       "title": "Drill liquid boost/warmup ignored per-block values (H02 T8 655c2de5)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0267": {
       "title": "Bridges/nodes/drivers could not be linked by tapping (H02 T6 e2f58037)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0268": {
       "title": "Liquid modules had no current liquid; conduits mixed liquids (H02 T10 55032f91)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0269": {
       "title": "Overdrive affected canOverdrive=false blocks (H02 T9 3513060a)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0270": {
       "title": "Shock mines and conveyor unit transport were inert (H02 T11 158b7d1d)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0271": {
       "title": "Surge walls never arced lightning; phase walls never deflected (H02 T12 b7b79d3c)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0272": {
       "title": "RepairTurret and cargo unload point had no save body (H02 T13 e8e2ca2a)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0273": {
       "title": "UnitCargoLoader has no save body (needs unit ids across saves) -> I01 T10",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0274": {
       "title": "UnitAssembler has no save body and drones never arrange -> I01 T11",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0275": {
       "title": "Thermal generators never produced (floor heat attributes, H02 T14 9c4f0e80)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0276": {
       "title": "Unloaders ran 5.45x too fast (H02 T14 9c4f0e80)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0277": {
       "title": "Beam nodes connected nothing (H02 T15 e6e675c8)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0278": {
       "title": "Minimap attack indicators lived 15 min and aged while paused (H03 T4)",
@@ -15592,7 +15741,8 @@
     },
     "PAR-0280": {
       "title": "Packed shader copies shadowed client/shaders edits (H03 T6)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0281": {
       "title": "Erekir fog placeholder painted the screen black; real fog rendering (H03 T12)",
@@ -15604,7 +15754,8 @@
     },
     "PAR-0283": {
       "title": "Fires and puddles were invisible (H03 T7 589e41aa)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0284": {
       "title": "Crafter/generator DrawBlock chains never drawn (H03 T8 8a1eb257)",
@@ -15620,39 +15771,48 @@
     },
     "PAR-0287": {
       "title": "Unit-command wire encoded EntitySeq as f32 (H08 2b6d7cd1)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0288": {
       "title": "Campaign turn clock and offline production lost to a stale campaign copy (H04 T1)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0289": {
       "title": "Sectors never produced while away (H04 T2)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0290": {
       "title": "Resume ignored the sector record (H04 T3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0291": {
       "title": "Invasions of the played sector never restarted waves (H04 T4, headless)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0292": {
       "title": "Unit save chunk lost statuses/items/shields/commands (H04 T9)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0293": {
       "title": "Loaded units came back with GroundAI instead of CommandAI (H04 T13)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0294": {
       "title": "Java save import dropped units, fires and puddles (H04 T10, headless)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0295": {
       "title": "Prepared sector records never reached the live campaign (69820d5b)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0296": {
       "title": "Interplanetary Accelerator is a stub",
@@ -15660,11 +15820,13 @@
     },
     "PAR-0297": {
       "title": "attackSectors never marked; numbered-sector threat 0 (H05 T1 ba24fe66)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0298": {
       "title": "Generated sectors ignored the sector polygon for building (H05 T3 ab9f87e8)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0299": {
       "title": "No toast for sector invasions (H05 T7 6781351f)",
@@ -15672,17 +15834,20 @@
     },
     "PAR-0300": {
       "title": "Strings.autoFixed rounded instead of truncating (H05 T9 df856e3f)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0301": {
       "title": "Content info dialog shows no stats (T10a/T10b landed; families remain: I04 T4-T6)",
-      "status": "verified",
-      "similarity": 93.0
+      "status": "reference-verified",
+      "similarity": 93.0,
+      "evidence": "batch: PAR-0068 (live Godot database/content-info leg, pid 1594839)"
     },
     "PAR-0302": {
       "title": "Hint predicates/events: fungal pass, cores destroyed, cannotupgrade, factorycontrol -> I04 T3",
-      "status": "verified",
-      "similarity": 85.3
+      "status": "reference-verified",
+      "similarity": 85.3,
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0303": {
       "title": "Planet globe cannot be dragged or zoomed; last sector not stored; no preset reveal -> I04 T8",
@@ -15694,55 +15859,68 @@
     },
     "PAR-0305": {
       "title": "Dialogs hide instantly (Java fades 0.1 s) -> I04 T12",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0306": {
       "title": "Block palette keeps the previous planet's blocks after a sector switch -> I04 T1",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0307": {
       "title": "Item turrets other than duo had maxAmmo 0 (H06 T7 0d8a92c5)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0308": {
       "title": "Every gun overlapped: no voice policy (H07 T1 9604cf09)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0309": {
       "title": "Factory/reconstructor/mender/door/mass driver/force projector/payload-void sounds missing (H07 T2)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0310": {
       "title": "Mech step and floor walk sounds missing (H07 T3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0311": {
       "title": "Bullet hit pitch never varied; heal bullets and abilities silent (H07 T4)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0312": {
       "title": "Snow wind-howl volume used the wrong noise (H07 T8)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0313": {
       "title": "Weather env attributes ignored by the water extractor (H07 T9)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0314": {
       "title": "Continuous-weapon beam loop sound missing (H07 T11)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0315": {
       "title": "Line drags pointed the wrong way vertically (H08 T1 29ebd1b3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0316": {
       "title": "Line placement ignored block line flags (H08 T2/T3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0317": {
       "title": "Tapping enemy buildings opened config; empty tap kept panels (H08 T4 42c91529)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0318": {
       "title": "Config/inventory panels drew over the pause menu (H08 T14 aec06cc3)",
@@ -15750,100 +15928,124 @@
     },
     "PAR-0319": {
       "title": "Erekir fog of war was never simulated (H09 T1/T3)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0320": {
       "title": "Turrets and units targeted enemies hidden in fog; building into fog allowed (H09 T2)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0321": {
       "title": "Derelict and outside-map-area buildings kept running (H09 T4)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0322": {
       "title": "Fires never threw fireballs or burned units (H09 T5)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0323": {
       "title": "Building explosions were too weak; no lightning or fireballs (H09 T7)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0324": {
       "title": "Enemy cores were never filled (fillItems, H09 T8)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0325": {
       "title": "Erekir cores stored non-buildable items (H09 T9)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0326": {
       "title": "Game-over and planet stats never counted builds/losses (H09 T10)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0327": {
       "title": "Explored fog was lost on save/resume (H09 T11)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0328": {
       "title": "CoreItem objective shows stored items (T1 15ac41d0)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0329": {
       "title": "Closed doors are not solid (T2 8a5fe999)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0330": {
       "title": "Ammo rangeChange ignored (T5 56c79542)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0331": {
       "title": "Area damage ignores air/ground (T6 fd5af539)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0332": {
       "title": "Erekir cores ignore core zone (T7 2987a714)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0333": {
       "title": "Legacy collideLine floored tile coordinates (T3 d64a8911)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0334": {
       "title": "Pathfinder packs stale/def health; control paths use uniform cost (T4 0080fc57)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0335": {
       "title": "env blocks blocked by build darkness; dead BeamDrillState; markers region (T8 79396fbf)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0336": {
       "title": "Coolant consumers ignore liquids.current() (T9 8df5a940)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0337": {
       "title": "fog_debug_json stalls on no arguments (T15 6efa56c3, in-engine)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0338": {
       "title": "7 Serpulo presets fail the legacy import (rules JSON)",
-      "status": "verified",
-      "similarity": 46.1
+      "status": "reference-verified",
+      "similarity": 46.1,
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0339": {
       "title": "Live content boot drops turret ammo (no turret behaviors in-engine) (T16 cd2d751f)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0340": {
       "title": "BuilderAI boost tail unported (T16 cd2d751f; floor terms limited to deep floors)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0341": {
       "title": "Turret block-unit proxies are fog/target/damage sources (T12 346da687; scan filters)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0342": {
       "title": "`Wall.flashHit` (phase walls) never flashed; the wall kinds drew cached instead of dynamic (T4 622df962)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0343": {
       "title": "`DrawBlock` parts before `DrawDefault` (`-bottom`, `DrawLiquidTile`) drew above the base sprite (T7 d152f6ab)",
@@ -15851,7 +16053,8 @@
     },
     "PAR-0344": {
       "title": "Beam nodes/towers drew no lasers (T5 4ae65c09)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0345": {
       "title": "MCP evals with mixed indentation hang the frame loop",
@@ -15871,7 +16074,8 @@
     },
     "PAR-0349": {
       "title": "A raw door config can close a door under a unit; the `Units.anyEntities(tile) && !open` guard exists only on the tap path (Door.java:49)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0350": {
       "title": "Unlock toast never shows (no `MindHud.push_unlock` producer) (T2)",
@@ -15879,11 +16083,13 @@
     },
     "PAR-0351": {
       "title": "Authored maps' fastjson `rules` tag silently fell back to `Rules::default()` (gamemode + map rules dropped) (41c7804f)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0352": {
       "title": "UI-edited rules JSON failed to parse (whole floats vs integer fields) (67bde842)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0353": {
       "title": "`MindTable` counted invisible cells (collapsers overflowed the dialog) (777d30e0)",
@@ -15895,11 +16101,13 @@
     },
     "PAR-0355": {
       "title": "`map_editor_dialog`'s Back/Escape left without the Java confirm; `MindUi` prompts rendered behind `Ui/EditorDialog` (4540431d)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0356": {
       "title": "UI-edited generation filters were silently dropped: GDScript JSON round-trips wrote \"seed\": 0.0, so `read_filters` fell back to the default stack (c6a3807f)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0357": {
       "title": "The block/unit content picker never opened from the objectives dialog: `SimHost.content_list` returns a `PackedStringArray` and the `is Array` guard rejected it (412a0383)",
@@ -15915,16 +16123,19 @@
     },
     "PAR-0360": {
       "title": "Floor/wall pass rendered vertically mirrored against Java in the world and editor bakers (found while fixing PAR-0359; b33dce04)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0361": {
       "title": "Custom maps load without generation filters (no ores/boulders): `World.loadMap` never ran `FilterContext`/`applyFilters` (396c9886)",
-      "status": "verified",
-      "similarity": 90.6
+      "status": "reference-verified",
+      "similarity": 90.6,
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0362": {
       "title": "Committed goldens predate deliberate H01-T1 position and I-round content changes: `blocks_golden`, `audio_golden` (audio_events_sim), `input_golden`, `logistics_golden`, `maps_editor_golden` all fail on main (regen pending)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0363": {
       "title": "Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames",
@@ -15932,8 +16143,9 @@
     },
     "PAR-0364": {
       "title": "Inert graphics settings: `bloomintensity`/`bloomblur` and `linear` never reached the renderer (5325720c)",
-      "status": "verified",
-      "similarity": 100.0
+      "status": "reference-verified",
+      "similarity": 100.0,
+      "evidence": "batch: PAR-0069 (live Godot settings leg, pid 1594839)"
     },
     "PAR-0365": {
       "title": "Unit `UnitType.parts` not drawn (31 Erekir parts; needs per-mount warmup/smoothReload/heat/charge + a turret-style live pass)",
@@ -15965,7 +16177,8 @@
     },
     "PAR-0372": {
       "title": "Sliders render as thin Godot sliders through the text (no `defaultSlider` skin) (65dd3052)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0069 (live Godot settings leg, pid 1594839)"
     },
     "PAR-0373": {
       "title": "Map list order used second-precision mtimes; Java `MapPriority.recent` reads milliseconds (a17dda0f)",
@@ -15984,7 +16197,8 @@
     },
     "PAR-0376": {
       "title": "Turrets always target the closest unit (no UnitSorts/minRange/trackingRange/newTargetInterval) (e5b94549)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0377": {
       "title": "Custom-game saves write `mapname: sim`, so the Load card shows `Map: Unknown` (SaveVersion.java:133)",
@@ -16038,8 +16252,9 @@
     },
     "PAR-0389": {
       "title": "Tech tree rendered an opaque backdrop, generic map glyphs and an unframed planet header (aec5bde4)",
-      "status": "verified",
-      "similarity": 69.9
+      "status": "reference-verified",
+      "similarity": 69.9,
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0390": {
       "title": "HUD toasts had no shared 3.5 s slot (`HudFragment.scheduleToast`) (9ab01188)",
@@ -16051,11 +16266,13 @@
     },
     "PAR-0392": {
       "title": "ClassMap: ~120 parse-relevant aliases (Consumers/Drawers/Parts/Bullets/Effects/AIs/Blocks/Abilities/Data) were unreachable and `consumes` had no JSON parse (f63ef648, 13548c98)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0393": {
       "title": "Mod content missing from the quick-select binds and map previews (base-only registries) (f45ed9ac)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0394": {
       "title": "Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)",
@@ -16067,15 +16284,18 @@
     },
     "PAR-0396": {
       "title": "Explosive items never damage generators or fire `Trigger.blastGenerator`; `itemDurationMultipliers` ignored (fefc574)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0397": {
       "title": "Crafters dump output liquids on every side (`liquidOutputDirections` ignored) (d236e4a7)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0398": {
       "title": "Generator/reactor explosions apply no side effects (radius damage, fires, props, fireballs, puddles) — sim half (501f2727)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0399": {
       "title": "Explosion view half: no live `ExplosionSink` host, so effect/sound/shake/scorch are not visible",
@@ -16083,11 +16303,13 @@
     },
     "PAR-0400": {
       "title": "`Block.depositCooldown` ignored (global deposit gate only) (60e34db5)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0401": {
       "title": "Power turrets report `rangeChange`/`minRangeChange` = 0 (TurretAmmo::Power kept only the bullet id) (8986959a)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0402": {
       "title": "J04 T6 recorded residuals: unit-assembler output gate/hand-off, `router` ControlBlock, bullet suppression + findPierce/findLaser pre-pass, `UnitTetherComp.spawnerUnitId`, `DrawLiquidOutputs` side regions, `itemEffMultiplier` stats row, generator spark/explode effects",
@@ -16107,7 +16329,8 @@
     },
     "PAR-0406": {
       "title": "`ecs::TeamId::SHARDED` is the derelict id, not Java `Team.sharded.id = 1` (ddeae35d)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0407": {
       "title": "J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)",
@@ -16119,8 +16342,9 @@
     },
     "PAR-0409": {
       "title": "F-K1: Custom Game map grid is clipped at the 5th column and does not scroll — with 19 maps only the first 10 cards are reachable, blocking Map Play (sandbox/Caldera)",
-      "status": "wontfix",
-      "similarity": 95.5
+      "status": "reference-verified",
+      "similarity": 95.5,
+      "evidence": "batch/live: runs/PAR-0409/godot (pid 1594839; grid scrolls past the first 10 cards); accepted difference no longer reproduces"
     },
     "PAR-0410": {
       "title": "F-K2: Custom Game search empties the grid for an existing map name and stays empty after reopen (needs a real-typing retest)",
@@ -16129,8 +16353,9 @@
     },
     "PAR-0411": {
       "title": "Floor decorations are guessed as '<floor>-boulder' by name, so stone/sand/ice/darksand/… floors get no boulders in custom maps and generated sectors (Java sets Floor.decoration per floor, Blocks.java:700-822)",
-      "status": "verified",
-      "similarity": 68.1
+      "status": "reference-verified",
+      "similarity": 68.1,
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0412": {
       "title": "F-K4: Menu background camera scale ~2x closer than MenuRenderer",
@@ -16139,8 +16364,9 @@
     },
     "PAR-0413": {
       "title": "F-K5: Graphics slider rows render a ~10 px outlined track through the title with a slim grey grabber; Java's sliderBack nine-patch fills the ~32 px row with a full-height accent knob",
-      "status": "verified",
-      "similarity": 82.2
+      "status": "reference-verified",
+      "similarity": 82.2,
+      "evidence": "batch: PAR-0069 / PAR-0435 (live Godot settings graphics list, pid 1594839)"
     },
     "PAR-0414": {
       "title": "F-K6: Planet page Erekir/Serpulo/Difficulty buttons centred top vs Java top-left; globe drawn smaller",
@@ -16158,11 +16384,13 @@
     },
     "PAR-0417": {
       "title": "ItemSelection lists hidden items (fissile matter, dormant cyst): config_spec carries no hidden flag (Java ItemSelection.java:68 skips isHidden())",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0418": {
       "title": "Editor Map Info lays out at the bottom on first open and top-aligned after (stale minimum size)",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0419": {
       "title": "Fill dialogs top-align their content (pause menu, editor menu, Game Over); Java BaseDialog centres cont vertically",
@@ -16204,13 +16432,15 @@
     },
     "PAR-0427": {
       "title": "Content info prints '0 %' where Java prints '0%' and wraps the description wider (stat formatting)",
-      "status": "verified",
-      "similarity": 93.0
+      "status": "reference-verified",
+      "similarity": 93.0,
+      "evidence": "batch: PAR-0068 (live Godot database/content-info leg, pid 1594839)"
     },
     "PAR-0428": {
       "title": "Research dialog bottom buttons ~14 px low; Planet Items button 41 px tall vs Java 71",
-      "status": "verified",
-      "similarity": 93.0
+      "status": "reference-verified",
+      "similarity": 93.0,
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0429": {
       "title": "Editor Map Info: boxed unwrapped description field and separately bordered buttons vs Java's single scrolling frame",
@@ -16254,7 +16484,8 @@
     },
     "PAR-0437": {
       "title": "Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0438": {
       "title": "Save Game -> New Save with a typed name writes no file, and the dialog shows the raw key 'save.name'",
@@ -16263,8 +16494,9 @@
     },
     "PAR-0439": {
       "title": "Cultivator content info has no Affinities row: the sim gives the attribute -1 and no spores attribute",
-      "status": "seeded",
-      "similarity": 93.0
+      "status": "fixing",
+      "similarity": 93.0,
+      "evidence": "fix landed, Godot read-model+live verified: runs/PAR-0439 (affinities row); unit test attribute_crafter_affinities_rows; fresh Java leg pending"
     },
     "PAR-0440": {
       "title": "Game Over left the HUD drawn behind it (MindUi.hud_set_visible only stored a flag)",
@@ -16273,12 +16505,14 @@
     },
     "PAR-0441": {
       "title": "Tech tree node view clipped above the bottom button row (Java draws under the buttons)",
-      "status": "verified",
-      "similarity": 95.4
+      "status": "reference-verified",
+      "similarity": 95.4,
+      "evidence": "batch: PAR-0047 (live Godot research/tech-tree leg, pid 1594839)"
     },
     "PAR-0442": {
       "title": "Campaign game-over title shows the preset id ('Sector groundZero lost!') instead of the localized name ('Ground Zero')",
-      "status": "mismatch"
+      "status": "fixing",
+      "evidence": "fix landed, live Godot verified: runs/PAR-0442/godot/20261103-001721-02-live-gameover-headline.png headline 'Sector Ground Zero lost!'; fresh Java leg pending"
     },
     "PAR-0443": {
       "title": "Planet page sector grid/selection not faded by uiAlpha when zoomed out",
@@ -16296,11 +16530,13 @@
     },
     "PAR-0446": {
       "title": "unit-cargo-unload-point and the Erekir unit assemblers lack solid = true (UnitCargoUnloadPoint.java:26, UnitAssembler.java:62); affects sim/pathing",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0447": {
       "title": "maps/filters block_info::is_overlay/is_floor omit SpawnBlock and RemoveOre, which Java counts as OverlayFloor/Floor — check whether the map filters are affected",
-      "status": "verified"
+      "status": "reference-verified",
+      "evidence": "batch: PAR-0061 (sim/headless oracle: cargo test -p mind-core 2833 passed 0 failed + tools/parity.sh; native-UI cutover did not touch mind-core/mind-headless)"
     },
     "PAR-0448": {
       "title": "Hover bar unit icons render as literal [icon name=...] markup (MindBar draws text with a plain font; Java draws the unit icon)",

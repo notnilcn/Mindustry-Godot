@@ -1066,10 +1066,14 @@ impl BlockKindData {
                     let craft_time = def.crafter.craft_time;
                     def.crafter = craft(vec![(item("spore-pod"), 1)], vec![], false);
                     def.crafter.craft_time = craft_time;
-                    def.attribute = -1;
-                    def.base_efficiency = 0.0;
+                    // `Blocks.java:2952-2972`: `attribute = Attribute.spores`
+                    // (index 1 in `world::attributes::ATTRIBUTE_NAMES`),
+                    // `baseEfficiency`/`boostScale`/`minEfficiency` keep the
+                    // `AttributeCrafter` defaults (1/1/-1), `maxBoost = 2`.
+                    def.attribute = 1;
+                    def.base_efficiency = 1.0;
                     def.max_boost = 2.0;
-                    def.min_efficiency = 0.0;
+                    def.min_efficiency = -1.0;
                 }
             }
             "vent-condenser" => {
@@ -1077,7 +1081,9 @@ impl BlockKindData {
                     let craft_time = def.crafter.craft_time;
                     def.crafter = craft(vec![], vec![(liquid("water"), 30.0 / 60.0)], false);
                     def.crafter.craft_time = craft_time;
-                    def.attribute = -1;
+                    // `Blocks.java:3000-3006`: `attribute = Attribute.steam`
+                    // (index 4).
+                    def.attribute = 4;
                     def.base_efficiency = 0.0;
                     def.min_efficiency = 9.0 - 0.0001;
                     def.boost_scale = 1.0 / 9.0;

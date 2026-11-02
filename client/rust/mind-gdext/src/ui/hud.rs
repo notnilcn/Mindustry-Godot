@@ -374,6 +374,23 @@ impl MindHud {
         let was_captured = dict_bool(&state, "wasCaptured");
         let enemy_cores = dict_i64(&state, "enemyCores") as i32;
         let sector_name = dict_string(&state, "sectorName");
+        // `state.getSector().name()` is `SectorPreset.localizedName` in Java
+        // (`Control.java` sector-lost toast, `GameOverDialog` headline): the
+        // display name, not the internal `groundZero` preset id (PAR-0442).
+        // `sectorName` above stays the raw preset name for signals/logs.
+        let sector_display = campaign
+            .call(
+                "sector_name_localized",
+                &[
+                    GString::from(dict_string(&state, "planet").as_str()).to_variant(),
+                    dict_i64(&state, "sector").to_variant(),
+                ],
+            )
+            .try_to::<GString>()
+            .ok()
+            .map(|name| name.to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| sector_name.clone());
         let sector_key = format!(
             "{}:{}",
             dict_string(&state, "planet"),
@@ -429,20 +446,9 @@ impl MindHud {
                 // H03 T17: `state.getSector().name()` is the localized preset
                 // name (`Control.java` sector-lost toast), not the internal
                 // `groundZero`.
-                let localized = campaign
-                    .call(
-                        "sector_name_localized",
-                        &[
-                            GString::from(dict_string(&state, "planet").as_str()).to_variant(),
-                            dict_i64(&state, "sector").to_variant(),
-                        ],
-                    )
-                    .try_to::<GString>()
-                    .ok()
-                    .map(|name| name.to_string())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or_else(|| sector_name.clone());
-                let text = self.bundle.format("sector.lost", &[localized.as_str()]);
+                let text = self
+                    .bundle
+                    .format("sector.lost", &[sector_display.as_str()]);
                 self.push_toast(GString::from(text.as_str()), GString::from("warning"));
                 let _ = self.base_mut().emit_signal(
                     "sector_event",
@@ -478,7 +484,9 @@ impl MindHud {
             GString::from("@paused")
         };
         self.enemy_cores = enemy_cores;
-        self.sector_name = GString::from(sector_name.as_str());
+        // `GameOverDialog`/landing read `sector_name` as the display name
+        // (PAR-0442); the raw preset id stays in `sectorName`/signals above.
+        self.sector_name = GString::from(sector_display.as_str());
 
         // Objective/mission text comes from the live rules; the Godot-free
         // `hud_text` model filters/format-icons the qualified rows.
