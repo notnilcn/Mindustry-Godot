@@ -78,13 +78,19 @@ def load() -> dict:
 
 
 def dump(doc: dict) -> None:
-    """Write atomically; byte-stable for untouched parts."""
+    """Write atomically; byte-stable for untouched parts.
+
+    The queue path is a symlink into the main checkout from a session
+    worktree, so resolve it first: `os.replace` on the symlink path would
+    replace the link itself and silently fork the queue.
+    """
     doc["updated"] = now_utc()
-    fd, tmp = tempfile.mkstemp(dir=str(QUEUE.parent), prefix=".twin-", suffix=".json")
+    target = QUEUE.resolve()
+    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=".twin-", suffix=".json")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
-        os.replace(tmp, QUEUE)
+        os.replace(tmp, target)
     except BaseException:
         try:
             os.unlink(tmp)
