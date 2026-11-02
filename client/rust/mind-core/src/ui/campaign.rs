@@ -936,7 +936,7 @@ fn sector_view(planet: &Planet, sector: &Sector, registry: &ContentRegistry) -> 
         captured: sector.is_captured(None),
         attacked: sector.is_attacked(None),
         frozen: sector.is_frozen(None),
-        shielded: sector.is_shielded(),
+        shielded: sector.is_shielded(planet),
         has_enemy_base: sector.has_enemy_base(),
         is_last: sector_is_last(&planet.name, sector),
         capture_wave: sector.preset_capture_wave,
@@ -1307,7 +1307,7 @@ pub fn annotate_globe(
                     }),
                 }
         };
-        let base_gate = def.generator != GeneratorKind::None && !sector.is_shielded();
+        let base_gate = def.generator != GeneratorKind::None && !sector.is_shielded(planet);
         view.selectable = if !base_gate {
             false
         } else if sector.has_base() || sector.id == def.start_sector as u16 {
@@ -2754,5 +2754,83 @@ mod tests {
             a: 1.0,
         };
         assert_eq!(hex(&color), "ff0080");
+    }
+
+    /// PAR-0452: `PlanetDialog.canSelect` (`PlanetDialog.java:424`) refuses a
+    /// shielded sector, and `Sector.isShielded` (`Sector.java:125-127`) reads
+    /// the *guarded* preset's shield list. Stormrider (27) is shielded (and
+    /// unselectable) while sector 246/244/242 are uncaptured; a captured
+    /// megabase is neither shielded nor blocked.
+    #[test]
+    fn shield_gate_sector_views() {
+        use crate::content::{MemoryBundle, MemoryUnlockStore, create_base_content};
+        use crate::game::planet::EmptyNeighborhood;
+
+        const PROVIDERS: [u16; 3] = [246, 244, 242];
+        const STORMRIDER: u16 = 27;
+
+        let registry = create_base_content(&MemoryBundle::new(), &MemoryUnlockStore::new(), true)
+            .expect("base content");
+        let mut campaign = Campaign::from_registry(&registry, &EmptyNeighborhood);
+        let serpulo = campaign.planet_id_by_name("serpulo").expect("serpulo");
+        let globe = |campaign: &Campaign| {
+            let ctx = CampaignObjectiveContext::new(&registry, campaign);
+            let planet = campaign.planet(serpulo).expect("serpulo");
+            annotate_globe(
+                sector_views(planet, registry.sectors(), &registry),
+                &registry,
+                planet,
+                &ctx,
+                None,
+                0,
+                &|_| Vec::new(),
+            )
+        };
+        let capture = |campaign: &mut Campaign, id: u16| {
+            let sector = campaign
+                .planet_mut(serpulo)
+                .expect("serpulo")
+                .sectors
+                .get_mut(id as usize)
+                .expect("provider sector");
+            sector.save = Some(format!("sector-serpulo-{id}"));
+            sector.info.info.has_core = true;
+            sector.info.info.waves = false;
+            sector.info.info.attack = false;
+        };
+
+        let views = globe(&campaign);
+        let view = |id: u16| views.iter().find(|view| view.id == id).expect("view");
+        assert!(view(STORMRIDER).shielded, "Stormrider is shielded");
+        assert!(
+            !view(STORMRIDER).selectable,
+            "a shielded sector cannot be selected"
+        );
+        for id in PROVIDERS {
+            assert!(!view(id).shielded, "`{id}` is a provider, not shielded");
+        }
+
+        // Capturing one megabase unlocks that sector but not Stormrider.
+        capture(&mut campaign, PROVIDERS[0]);
+        let views = globe(&campaign);
+        let view = |id: u16| views.iter().find(|view| view.id == id).expect("view");
+        assert!(
+            view(PROVIDERS[0]).selectable,
+            "a captured megabase is selectable"
+        );
+        assert!(
+            view(STORMRIDER).shielded,
+            "Stormrider stays shielded while 244/242 are uncaptured"
+        );
+
+        // All three captured: Stormrider is no longer shielded.
+        capture(&mut campaign, PROVIDERS[1]);
+        capture(&mut campaign, PROVIDERS[2]);
+        let views = globe(&campaign);
+        let view = |id: u16| views.iter().find(|view| view.id == id).expect("view");
+        assert!(!view(STORMRIDER).shielded, "Stormrider unlocked");
+        for id in PROVIDERS {
+            assert!(!view(id).shielded);
+        }
     }
 }

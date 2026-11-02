@@ -16,6 +16,7 @@
 use indexmap::IndexMap;
 
 use super::campaign_rules::CampaignRules;
+use super::planet::Planet;
 use super::rules::Rules;
 use crate::content::{PlanetId, SectorId};
 use crate::io::json::rules::{ExportStat, SectorInfo};
@@ -553,6 +554,9 @@ pub struct Sector {
     pub preset_allow_launch_schematics: bool,
     /// Visual shield target sector index.
     pub shield_target: Option<u16>,
+    /// Guarded preset's `shieldSectors` (`SectorPreset.java:46`): this sector
+    /// stays shielded while any listed sector is uncaptured.
+    pub shield_sectors: Vec<u16>,
     /// Difficulty based on nearby bases.
     pub threat: f32,
     /// Generate an enemy base here.
@@ -586,6 +590,7 @@ impl Sector {
             preset_allow_launch_loadout: false,
             preset_allow_launch_schematics: false,
             shield_target: None,
+            shield_sectors: Vec::new(),
             threat: 0.0,
             generate_enemy_base: false,
             save: None,
@@ -698,15 +703,30 @@ impl Sector {
         }
     }
 
-    /// `Sector.isShielded`.
-    pub fn is_shielded(&self) -> bool {
-        self.shield_target.is_some() && !self.is_captured(None)
+    /// `Sector.isShielded` (`Sector.java:125-127`): the guarded preset's
+    /// `shieldSectors` list is non-empty, this sector is uncaptured and at
+    /// least one listed sector is still uncaptured. The reverse
+    /// `shieldTarget` link is only the `PlanetDialog` arc source, not the gate.
+    pub fn is_shielded(&self, planet: &Planet) -> bool {
+        !self.shield_sectors.is_empty()
+            && !self.is_captured(None)
+            && self.shield_sectors.iter().any(|id| {
+                planet
+                    .sector(*id)
+                    .is_some_and(|sector| !sector.is_captured(None))
+            })
     }
 
     /// `Sector.displayThreat` (threat bucket; color is the caller's).
+    ///
+    /// `Sector.java:84` special-cases exactly `SectorDifficulty.unreasonable`
+    /// (13, "special difficulty reserved for 27"), not `eradication` (10), and
+    /// otherwise reads `threats[(int)(threat / 0.25)]`.
     pub fn threat_bucket(&self) -> &'static str {
         const THREATS: [&str; 5] = ["low", "medium", "high", "extreme", "eradication"];
-        if self.preset_difficulty == 10.0 {
+        const UNREASONABLE: f32 =
+            crate::content::registries::sectors::sector_difficulty::UNREASONABLE as f32;
+        if (self.preset_difficulty - UNREASONABLE).abs() < 0.000_001 {
             return "unreasonable";
         }
         let index = ((self.threat / 0.25) as usize).min(THREATS.len() - 1);
@@ -1036,5 +1056,29 @@ mod tests {
         loaded.load_info(&settings, "serpulo");
         assert_eq!(loaded.info.info.wave, 9);
         assert_eq!(loaded.info.info.items.get("lead"), Some(&50));
+    }
+
+    /// PAR-0453: `Sector.displayThreat` (`Sector.java:80-84`) special-cases
+    /// `SectorDifficulty.unreasonable` (13, "special difficulty reserved for
+    /// 27"), NOT `eradication` (10); every other sector falls through to
+    /// `threats[(int)(threat / 0.25)]`.
+    #[test]
+    fn threat_bucket_uses_unreasonable_difficulty() {
+        let mut sector = Sector::new(PlanetId::new(5), 27);
+        sector.preset_difficulty = 13.0; // SectorDifficulty.unreasonable
+        sector.threat = 0.0;
+        assert_eq!(sector.threat_bucket(), "unreasonable");
+
+        // 10 is eradication: the label comes from the threat value instead.
+        sector.preset_difficulty = 10.0;
+        sector.threat = 0.0;
+        assert_eq!(sector.threat_bucket(), "low");
+        sector.threat = 1.0;
+        assert_eq!(sector.threat_bucket(), "eradication");
+
+        // No preset (0.0) and a normal first sector.
+        sector.preset_difficulty = 0.0;
+        sector.threat = 0.3;
+        assert_eq!(sector.threat_bucket(), "medium");
     }
 }

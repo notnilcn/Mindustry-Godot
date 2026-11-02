@@ -302,9 +302,24 @@ impl Maps {
         }
     }
 
+    /// `Maps.saveMap` pre-write half (`Maps.java:206-221`): a map with the same
+    /// exact display name is dropped from the registry and its file reused;
+    /// otherwise `findFile` resolves a sanitized, collision-free name
+    /// (`Maps.java:464-489`).
+    pub fn save_target_file(&mut self, fs: &dyn FileSystem, dir: &Path, name: &str) -> PathBuf {
+        if let Some(index) = self.maps.iter().position(|map| map.name() == name) {
+            return self.maps.remove(index).file;
+        }
+        self.find_file(fs, dir, name)
+    }
+
     /// `Maps.saveMap` registry half (plan 06 §3.9 / plan 19 M7): write a live
     /// tile source as a native `MGRS` map, fill the spawn/team preview metadata,
     /// write the cache file and re-sort.
+    ///
+    /// `dir` is the custom map directory (`Maps.customMapDirectory`); the target
+    /// file is resolved from the map's display name by
+    /// [`Maps::save_target_file`] like upstream — the caller never picks it.
     ///
     /// Pixel/PNG generation stays in plan 19 (`PreviewPipeline`); this method
     /// only owns the file, the registry entry and the cache file. `map_tags`
@@ -314,7 +329,7 @@ impl Maps {
         &mut self,
         fs: &dyn FileSystem,
         paths: &Paths,
-        file: &Path,
+        dir: &Path,
         source: &dyn MapSource,
         content: &ContentRegistry,
         base_tags: StringMap,
@@ -324,7 +339,7 @@ impl Maps {
         self.save_map_with_patches(
             fs,
             paths,
-            file,
+            dir,
             source,
             content,
             base_tags,
@@ -340,7 +355,7 @@ impl Maps {
         &mut self,
         fs: &dyn FileSystem,
         paths: &Paths,
-        file: &Path,
+        dir: &Path,
         source: &dyn MapSource,
         content: &ContentRegistry,
         base_tags: StringMap,
@@ -348,9 +363,22 @@ impl Maps {
         embed_assets: bool,
         patches: Option<&dyn crate::io::save::state::PatchSetIo>,
     ) -> Result<Map, MapError> {
+        // `Maps.saveMap`: `String name = tags.get("name")` (base tags, with the
+        // map tags written over them); a missing name is a programming error.
+        let Some(name) = map_tags
+            .get("name")
+            .or_else(|| base_tags.get("name"))
+            .cloned()
+        else {
+            return Err(MapError::exception(
+                dir.to_path_buf(),
+                "Can't save a map with no name. How did this happen?",
+            ));
+        };
+        let file = self.save_target_file(fs, dir, &name);
         write_map_source_with_patches(
             fs,
-            file,
+            &file,
             source,
             content,
             base_tags,
@@ -358,7 +386,7 @@ impl Maps {
             embed_assets,
             patches,
         )?;
-        let header = MapIo::create_map(fs, file, true)?;
+        let header = MapIo::create_map(fs, &file, true)?;
         let mut map = Map::from_header(&header, true);
         let scan = scan_map_source(source, content);
         map.spawns = scan.spawns;
@@ -596,6 +624,99 @@ mod tests {
         fs.write(&first, b"x").unwrap();
         let second = maps.find_file(&fs, &dir, "My Map?");
         assert_eq!(second, dir.join("My Map__1.msav"));
+    }
+
+    /// `Maps.saveMap` (`Maps.java:200-268`): a re-save reuses the existing map
+    /// file and replaces its registry entry (no duplicate display name), a new
+    /// name is sanitized, and a colliding file on disk takes the `_N` suffix.
+    #[test]
+    fn save_map_replaces_same_name_and_finds_free_file() {
+        let fs = MockFs::new();
+        let registry = test_registry();
+        let paths = Paths::new("/data");
+        let dir = PathBuf::from("/data/maps");
+        let mut maps = Maps::new();
+
+        let source = FixtureWorld::synthetic(&registry, 16, 16);
+        let mut tags = base_meta_tags(16, 16, 0, "Foo");
+        tags.insert("name".to_owned(), "Foo".to_owned());
+        let first = maps
+            .save_map(
+                &fs,
+                &paths,
+                &dir,
+                &source,
+                &registry,
+                tags,
+                StringMap::new(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(maps.len(), 1, "one registry entry after the first save");
+        assert_eq!(first.file, dir.join("Foo.msav"));
+
+        // Re-save the same display name with a different size: the old entry is
+        // dropped and its file reused, so the header now reads the new size.
+        let source24 = FixtureWorld::synthetic(&registry, 24, 24);
+        let mut tags = base_meta_tags(24, 24, 0, "Foo");
+        tags.insert("name".to_owned(), "Foo".to_owned());
+        let second = maps
+            .save_map(
+                &fs,
+                &paths,
+                &dir,
+                &source24,
+                &registry,
+                tags,
+                StringMap::new(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(maps.len(), 1, "re-save must replace, not duplicate");
+        assert_eq!(second.file, first.file, "existing map file is reused");
+        let header = MapIo::create_map(&fs, &second.file, true).unwrap();
+        assert_eq!((header.width, header.height), (24, 24));
+        assert!(maps.by_name("Foo").is_some());
+
+        // `findFile` sanitizes the display name into the filename.
+        let source = FixtureWorld::synthetic(&registry, 16, 16);
+        let mut tags = base_meta_tags(16, 16, 0, "My/Map");
+        tags.insert("name".to_owned(), "My/Map".to_owned());
+        let sanitized = maps
+            .save_map(
+                &fs,
+                &paths,
+                &dir,
+                &source,
+                &registry,
+                tags,
+                StringMap::new(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(sanitized.file, dir.join("My_Map.msav"));
+        assert_eq!(maps.len(), 2);
+
+        // An unrelated `Foo.msav` already on disk forces the `_1` suffix.
+        let other_fs = MockFs::new();
+        other_fs.write(&dir.join("Foo.msav"), b"unrelated").unwrap();
+        let mut fresh = Maps::new();
+        let source = FixtureWorld::synthetic(&registry, 16, 16);
+        let mut tags = base_meta_tags(16, 16, 0, "Foo");
+        tags.insert("name".to_owned(), "Foo".to_owned());
+        let probed = fresh
+            .save_map(
+                &other_fs,
+                &paths,
+                &dir,
+                &source,
+                &registry,
+                tags,
+                StringMap::new(),
+                false,
+            )
+            .unwrap();
+        assert_eq!(probed.file, dir.join("Foo_1.msav"));
     }
 
     /// Writes the committed map fixtures used by `mind-headless maps list`

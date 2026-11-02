@@ -192,9 +192,10 @@ mod tests {
         assert_eq!((map.width, map.height), (16, 12));
     }
 
-    /// `editor::tests::resize_shift_preserves_tiles` (plan 19 §5): the in-bounds
-    /// rectangle (with data bytes) shifts by `(shift_x, shift_y)`; the border
-    /// becomes the default air floor.
+    /// `editor::tests::resize_shift_preserves_tiles` (plan 19 §5):
+    /// `MapEditor.resize` (`MapEditor.java:310`) re-centres the copied
+    /// rectangle by `(old - new) / 2` before applying `(shift_x, shift_y)`, so
+    /// shrinking 8x8 -> 6x6 crops all four sides instead of only the far edge.
     #[test]
     fn resize_shift_preserves_tiles_and_data() {
         let content = crate::content::test_support::test_registry();
@@ -207,17 +208,35 @@ mod tests {
         grid.set_extra_data(3, 3, 0x1234);
         grid.set_data(3, 3, 7, 8, 9);
 
+        // offset = (8 - 6) / 2 - (-1) = 2 -> old (3,3) lands at new (1,1).
         editor.resize(&mut grid, &content, 6, 6, -1, -1);
         assert_eq!((grid.width(), grid.height()), (6, 6));
-        assert_eq!(grid.block_id(2, 2), wall);
-        assert_eq!(grid.floor_id(2, 2), ice);
-        assert_eq!(grid.team_id(2, 2), 2);
-        assert_eq!(grid.rotation(2, 2), 1);
-        assert_eq!(grid.tile_data(2, 2).3, 0x1234);
-        assert_eq!(grid.tile_data(2, 2).0, 7);
-        // Out-of-bounds source tile (7,7) is dropped; the earlier (0,0) air
-        // floor shifts to a valid slot only when it was non-default.
+        assert_eq!(grid.block_id(1, 1), wall);
+        assert_eq!(grid.floor_id(1, 1), ice);
+        assert_eq!(grid.team_id(1, 1), 2);
+        assert_eq!(grid.rotation(1, 1), 1);
+        assert_eq!(grid.tile_data(1, 1).3, 0x1234);
+        assert_eq!(grid.tile_data(1, 1).0, 7);
+        assert_eq!(grid.block_id(2, 2), BlockId::AIR, "old (3,3) moved");
+        // Out-of-bounds source tiles are dropped; the op stack is cleared.
         assert!(!editor.can_undo(), "resize clears the op stack");
+    }
+
+    /// `MapEditor.resize` re-centres when growing too: 8x8 -> 12x12 with no
+    /// shift puts old (3,3) at new (5,5) (`offset = (8 - 12) / 2 = -2`).
+    #[test]
+    fn resize_grow_centres_content() {
+        let content = crate::content::test_support::test_registry();
+        let mut editor = MapEditor::new();
+        let mut grid = TestGrid::new(8, 8);
+        let wall = content.block_id("copper-wall").unwrap();
+        grid.set_block(3, 3, wall, 0, 0);
+
+        editor.resize(&mut grid, &content, 12, 12, 0, 0);
+        assert_eq!((grid.width(), grid.height()), (12, 12));
+        assert_eq!(grid.block_id(5, 5), wall);
+        assert_eq!(grid.block_id(3, 3), BlockId::AIR, "old (3,3) moved");
+        assert_eq!(grid.block_id(0, 0), BlockId::AIR, "new space is empty");
     }
 
     #[test]

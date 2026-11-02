@@ -182,6 +182,10 @@ impl Planet {
                 sector.preset_override_launch_defaults = preset.override_launch_defaults;
                 sector.preset_allow_launch_loadout = preset.allow_launch_loadout;
                 sector.preset_allow_launch_schematics = preset.allow_launch_schematics;
+                // The guarded preset's `shieldSectors` list gates landing
+                // (`Sector.isShielded`); the reverse `shield_target` link above
+                // is only the `PlanetDialog` arc source.
+                sector.shield_sectors = preset.shield_sectors.clone();
             }
             sectors.push(sector);
             neighbors.push(Vec::new());
@@ -777,6 +781,61 @@ mod tests {
         assert!(
             !second.contains(&cell),
             "a shown preset is not collected again"
+        );
+    }
+
+    /// PAR-0452: `Sector.isShielded` (`Sector.java:125-127`) asks whether the
+    /// *guarded* preset's `shieldSectors` list has an uncaptured sector.
+    /// `SectorSubmissions.java:82` gives Stormrider (27) `[246,244,242]`, so 27
+    /// is shielded until all three megabases are captured and the megabases
+    /// themselves are never shielded (the reverse `shieldTarget` link is only
+    /// the `PlanetDialog` arc source).
+    #[test]
+    fn shield_gate_matches_java() {
+        const PROVIDERS: [u16; 3] = [246, 244, 242];
+        const STORMRIDER: u16 = 27;
+
+        let registry = registry();
+        let serpulo_def = registry.planet_by_name("serpulo").unwrap();
+        let mut serpulo = Planet::from_def(&registry, serpulo_def, 0.0);
+
+        assert_eq!(
+            serpulo.sector(STORMRIDER).unwrap().shield_sectors,
+            PROVIDERS.to_vec(),
+            "the guarded preset owns the shield list"
+        );
+        for id in PROVIDERS {
+            let provider = serpulo.sector(id).expect("megabase sector");
+            assert_eq!(
+                provider.shield_sectors,
+                Vec::<u16>::new(),
+                "`{id}` has no shield list of its own"
+            );
+            assert!(
+                !provider.is_shielded(&serpulo),
+                "`{id}` is a provider, not shielded"
+            );
+        }
+        assert!(
+            serpulo.sector(STORMRIDER).unwrap().is_shielded(&serpulo),
+            "Stormrider is shielded while a megabase is uncaptured"
+        );
+
+        for id in PROVIDERS {
+            let provider = serpulo.sectors.get_mut(id as usize).expect("megabase");
+            provider.save = Some(format!("sector-serpulo-{id}"));
+            provider.info.info.has_core = true;
+            provider.info.info.waves = false;
+            provider.info.info.attack = false;
+        }
+        for id in PROVIDERS {
+            let provider = serpulo.sector(id).expect("megabase sector");
+            assert!(provider.is_captured(None), "`{id}` is captured");
+            assert!(!provider.is_shielded(&serpulo));
+        }
+        assert!(
+            !serpulo.sector(STORMRIDER).unwrap().is_shielded(&serpulo),
+            "Stormrider unlocks once all three megabases are captured"
         );
     }
 }

@@ -4592,10 +4592,16 @@ fn cmd_editor_resize_shift(json: bool) -> anyhow::Result<i32> {
         editor.resize(&mut world, &content, 80, 80, -10, -10);
     }
 
+    // `MapEditor.resize` (`MapEditor.java:310`) re-centres the old rectangle by
+    // `(old - new) / 2 = +10` before the -10 shift, so old (20..59) lands at
+    // new (0..39): old (30,30) with the extra data goes to (10,10).
     let ok = grid.tiles.width == 80
         && grid.tiles.height == 80
         && grid.tiles.get(10, 10).block == wall
-        && grid.tiles.get(20, 20).extra_data == 0x4321
+        && grid.tiles.get(10, 10).extra_data == 0x4321
+        && grid.tiles.get(0, 0).block == wall
+        && grid.tiles.get(39, 39).block == wall
+        && grid.tiles.get(40, 40).block != wall
         && grid.tiles.get(0, 0).floor == stone;
 
     let report = serde_json::json!({
@@ -4604,7 +4610,7 @@ fn cmd_editor_resize_shift(json: bool) -> anyhow::Result<i32> {
         "width": grid.tiles.width,
         "height": grid.tiles.height,
         "preserved_tile": grid.tiles.get(10, 10).block.raw(),
-        "preserved_extra": grid.tiles.get(20, 20).extra_data,
+        "preserved_extra": grid.tiles.get(10, 10).extra_data,
         "border_floor": grid.tiles.get(0, 0).floor.raw(),
         "ok": ok,
     });
@@ -5570,7 +5576,6 @@ fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
     tags.insert("name".to_owned(), "Roundtrip".to_owned());
     tags.insert("author".to_owned(), "lane/f25-maps".to_owned());
     let base = editor_base_tags(16, 16, "Roundtrip");
-    let file = paths.maps().join("roundtrip.msav");
 
     let mut maps = Maps::new();
     let mut pipeline = PreviewPipeline::new();
@@ -5579,7 +5584,7 @@ fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
         &paths,
         &mut pipeline,
         &mut maps,
-        &file,
+        &paths.maps(),
         &grid,
         &mut content,
         base,
@@ -5599,7 +5604,7 @@ fn cmd_maps_roundtrip(json: bool) -> anyhow::Result<i32> {
         &mut imported_pipeline,
         &mut imported_maps,
         &import_dir,
-        &file,
+        &map.file,
         &mut content,
     )?;
     let checksum_import = preview_image_checksum(&image2);

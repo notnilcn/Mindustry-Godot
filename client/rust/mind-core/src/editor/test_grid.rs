@@ -188,11 +188,15 @@ impl EditorGrid for TestGrid {
     ) {
         let old = self.clone();
         let (old_w, old_h) = (old.width, old.height);
+        // `MapEditor.resize` (`MapEditor.java:310`) re-centres the copied
+        // rectangle: `offset = (old - new) / 2 - shift`, old `x` -> `x - offset`.
+        let offset_x = (old_w - width) / 2 - shift_x;
+        let offset_y = (old_h - height) / 2 - shift_y;
         *self = TestGrid::new(width, height);
         for y in 0..old_h {
             for x in 0..old_w {
-                let nx = x + shift_x;
-                let ny = y + shift_y;
+                let nx = x - offset_x;
+                let ny = y - offset_y;
                 if !self.in_bounds(nx, ny) {
                     continue;
                 }

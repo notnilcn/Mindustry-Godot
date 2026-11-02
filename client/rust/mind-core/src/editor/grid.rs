@@ -353,6 +353,12 @@ impl EditorGrid for WorldEditorGrid<'_> {
 
         let old = self.grid.tiles.clone();
         let (old_w, old_h) = (old.width, old.height);
+        // `MapEditor.resize` (`MapEditor.java:310`): `offsetX = (width() - width) / 2
+        // - shiftX` with `width()` still the old size, and the copy reads the old
+        // tile at `offsetX + x`. The inverse below maps old `x` to
+        // `x - offsetX`, i.e. the old rectangle is re-centred and then shifted.
+        let offset_x = (old_w - width) / 2 - shift_x;
+        let offset_y = (old_h - height) / 2 - shift_y;
         let stone = content.block_id("stone").map(|b| b.raw()).unwrap_or(0);
         let mut new_tiles = Tiles::new(width, height);
         for tile in new_tiles.array_mut() {
@@ -360,8 +366,8 @@ impl EditorGrid for WorldEditorGrid<'_> {
         }
         for y in 0..old_h {
             for x in 0..old_w {
-                let nx = x + shift_x;
-                let ny = y + shift_y;
+                let nx = x - offset_x;
+                let ny = y - offset_y;
                 if !new_tiles.in_bounds(nx, ny) {
                     continue;
                 }
@@ -381,8 +387,8 @@ impl EditorGrid for WorldEditorGrid<'_> {
 
         // Reattach the shifted center builds; the ECS host spawns the entities.
         for (pos, block, team, rot) in builds {
-            let nx = pos.x() as i32 + shift_x;
-            let ny = pos.y() as i32 + shift_y;
+            let nx = pos.x() as i32 - offset_x;
+            let ny = pos.y() as i32 - offset_y;
             if !self.grid.tiles.in_bounds(nx, ny) {
                 continue;
             }

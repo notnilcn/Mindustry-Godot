@@ -2109,10 +2109,12 @@ impl MindEditor {
         }
     }
 
-    /// `Maps.saveMap` shell: writes `user://maps/<name>.msav`.
+    /// `Maps.saveMap` shell: resolves the target file through the map registry
+    /// (`Maps.java:206-221`: a same-name map's file is reused, otherwise
+    /// `findFile` sanitizes and probes `_N`) and writes it there.
     ///
-    /// M3 keeps the tile+tag save path; the M7 rules/objectives reset and
-    /// built-in overwrite guard append in their milestone.
+    /// M3 keeps the tile+tag save path; the M7 rules/objectives reset appends in
+    /// its milestone.
     #[func]
     pub fn save(&mut self) -> VarDictionary {
         let Some(content) = self.content.as_ref() else {
@@ -2128,27 +2130,26 @@ impl MindEditor {
                 ("error", GString::from("noname").to_variant()),
             ]);
         }
+        let root = crate::assets::loader::user_data_root();
+        let dir = mind_core::io::fs::Paths::new(&root).maps();
         // `MapEditorDialog.save` -> `handleSaveBuiltin`: a built-in map is
         // never overwritten (`ui.showErrorMessage("@editor.save.overwrite")`,
         // `MapEditorDialog.java:442-445`).
         if let Some(current) = self.file.as_ref() {
-            let user_maps = PathBuf::from(
-                ProjectSettings::singleton()
-                    .globalize_path("user://maps")
-                    .to_string(),
-            );
-            if !current.starts_with(&user_maps) {
+            if !current.starts_with(&dir) {
                 return dict(vec![
                     ("ok", false.to_variant()),
                     ("error", GString::from("overwrite").to_variant()),
                 ]);
             }
         }
-        let dir = PathBuf::from(
-            ProjectSettings::singleton()
-                .globalize_path("user://maps")
-                .to_string(),
-        );
+        let mut maps = crate::assets::loader::load_map_registry(&root);
+        if maps.by_name(&name).is_some_and(|map| !map.custom) {
+            return dict(vec![
+                ("ok", false.to_variant()),
+                ("error", GString::from("overwrite").to_variant()),
+            ]);
+        }
         if let Err(error) = std::fs::create_dir_all(&dir) {
             return dict(vec![
                 ("ok", false.to_variant()),
@@ -2158,7 +2159,7 @@ impl MindEditor {
                 ),
             ]);
         }
-        let file = dir.join(format!("{name}.msav"));
+        let file = maps.save_target_file(&NativeFs, &dir, &name);
         let base = editor_base_tags(
             self.grid.tiles.width as u16,
             self.grid.tiles.height as u16,
@@ -2183,6 +2184,14 @@ impl MindEditor {
                 self.file = Some(file.clone());
                 self.editor.saved = true;
                 self.clear_error();
+                // `Maps.saveMap` ends with `maps.add(map); maps.sort()`: register
+                // the fresh entry (the replaced one is already gone). The live
+                // map list (`MindPreview.maps_list`) reloads from disk when the
+                // maps dialog is shown (`Maps.load`), so one backing file means
+                // exactly one entry.
+                if let Ok(header) = MapIo::create_map(&NativeFs, &file, true) {
+                    maps.add(Map::from_header(&header, true));
+                }
                 dict(vec![
                     ("ok", true.to_variant()),
                     (
@@ -2190,6 +2199,11 @@ impl MindEditor {
                         GString::from(file.display().to_string().as_str()).to_variant(),
                     ),
                     ("custom", true.to_variant()),
+                    (
+                        "name",
+                        GString::from(maps.by_name(&name).map_or(name.as_str(), Map::name))
+                            .to_variant(),
+                    ),
                 ])
             }
             Err(error) => {
