@@ -498,6 +498,25 @@ mod tests {
     }
 
     #[test]
+    fn unitcap_label_uses_content_icon_glyph() {
+        // `bar.unitcap = {0} {1}/{2}` with `Fonts.getUnicodeStr(unit.name)`
+        // (`UnitFactory.java:119-137`); `dagger` = 63488 = 0xF800
+        // (`assets/icons/icons.properties:242`, `unit-dagger-ui`).
+        let table = Iconc::from_properties("63488=dagger|unit-dagger-ui\n");
+        let label = ":dagger: 2/8";
+        // Plain-font labels (`MindBar`) need the raw PUA glyph.
+        let text_icons = render_markup_text_icons(label, &table);
+        assert_eq!(text_icons, "\u{f800} 2/8");
+        assert!(text_icons.contains('\u{f800}'));
+        assert!(!text_icons.contains("[icon"));
+        // The BBCode path keeps the icon tag (RichTextLabel labels).
+        assert_eq!(
+            render_markup(label, &table),
+            "[icon name=\"dagger\"][/icon] 2/8"
+        );
+    }
+
+    #[test]
     fn pua_icon_normalization() {
         let table = iconc();
         let pua = table.unicode_str("spawn").unwrap();

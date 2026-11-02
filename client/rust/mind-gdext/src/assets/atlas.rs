@@ -589,6 +589,24 @@ impl MindAssets {
         GString::from(mind_core::ui::text::render_markup(&raw, &self.iconc).as_str())
     }
 
+    /// [`MindAssets::bundle_markup_format`] emitting raw content-icon PUA
+    /// glyphs instead of `[icon name="…"]` tags (`render_markup_text_icons`),
+    /// for labels drawn with a plain `draw_string_ex` font rather than a
+    /// BBCode label — the hover-bar `bar.unitcap` unit icon (`UnitFactory.java
+    /// :119-137`, `Fonts.getUnicodeStr`).
+    #[func]
+    pub fn bundle_markup_format_text_icons(&self, key: GString, args: PackedStringArray) -> GString {
+        let key = key.to_string();
+        let owned: Vec<String> = args
+            .as_slice()
+            .iter()
+            .map(|value| value.to_string())
+            .collect();
+        let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let raw = self.bundle.format(&key, &refs);
+        GString::from(mind_core::ui::text::render_markup_text_icons(&raw, &self.iconc).as_str())
+    }
+
     /// `UI.formatIcons` (`render_markup`) for a raw markup string that is not a
     /// bundle key (H05 T10a content-stat cells / descriptions).
     #[func]

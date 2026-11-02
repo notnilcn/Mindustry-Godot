@@ -138,6 +138,23 @@ pub fn tm_format(key: &str, args: &[&str]) -> GString {
         .bundle_markup_format(GString::from(resolved), packed)
 }
 
+/// `Core.bundle.format` + markup translation that emits raw content-icon PUA
+/// glyphs (`render_markup_text_icons`) instead of `[icon name="…"]` BBCode, for
+/// labels drawn with a plain font (`bar.unitcap` in `MindBar`, PAR-0448).
+pub fn tm_format_text_icons(key: &str, args: &[&str]) -> GString {
+    let resolved = key.strip_prefix('@').unwrap_or(key);
+    let Some(assets) = assets() else {
+        return GString::from(resolved);
+    };
+    let mut packed = PackedStringArray::new();
+    for arg in args {
+        packed.push(*arg);
+    }
+    assets
+        .bind()
+        .bundle_markup_format_text_icons(GString::from(resolved), packed)
+}
+
 /// `render_markup` for a raw markup string that is not a bundle key.
 pub fn markup_text(raw: &str) -> GString {
     match assets() {
