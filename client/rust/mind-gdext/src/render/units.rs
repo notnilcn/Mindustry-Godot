@@ -847,8 +847,13 @@ impl UnitRenderer {
                 // before the region/cell/heat quads. Emitted before the weapon
                 // region so the equal z keeps Java's insertion order.
                 if let Some(shadow) = self.resolver.find("circle-shadow")
-                    && let Some(quad) =
-                        weapon_shadow_quad(wx, wy, weapon.def.shadow, weapon.def.layer_offset, shadow.uv)
+                    && let Some(quad) = weapon_shadow_quad(
+                        wx,
+                        wy,
+                        weapon.def.shadow,
+                        weapon.def.layer_offset,
+                        shadow.uv,
+                    )
                 {
                     let entry = groups
                         .entry((bucket, shadow.page))
@@ -1184,8 +1189,7 @@ pub(crate) fn build_unit_mesh(quads: &[UnitQuad]) -> Option<Gd<ArrayMesh>> {
 #[cfg(test)]
 mod tests {
     use super::{
-        UnitQuad, ZQuad, sort_unit_quads, weapon_heat_quad, weapon_outline_quad,
-        weapon_shadow_quad,
+        UnitQuad, ZQuad, sort_unit_quads, weapon_heat_quad, weapon_outline_quad, weapon_shadow_quad,
     };
     use mind_core::content::Rgba;
 

@@ -595,7 +595,11 @@ impl MindAssets {
     /// BBCode label — the hover-bar `bar.unitcap` unit icon (`UnitFactory.java
     /// :119-137`, `Fonts.getUnicodeStr`).
     #[func]
-    pub fn bundle_markup_format_text_icons(&self, key: GString, args: PackedStringArray) -> GString {
+    pub fn bundle_markup_format_text_icons(
+        &self,
+        key: GString,
+        args: PackedStringArray,
+    ) -> GString {
         let key = key.to_string();
         let owned: Vec<String> = args
             .as_slice()
