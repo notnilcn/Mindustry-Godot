@@ -280,22 +280,74 @@ impl MindBar {
             ((size.x - text_size.x) * 0.5 - 1.0).round(),
             ((size.y + text_size.y) * 0.5 - 5.0).round(),
         );
-        self.base_mut()
-            .draw_string_outline_ex(&font, pos, &text)
-            .alignment(HorizontalAlignment::LEFT)
-            .width(-1.0)
-            .font_size(font_size)
-            .size(LABEL_OUTLINE_SIZE)
-            .modulate(LABEL_OUTLINE_COLOR)
-            .done();
-        self.base_mut()
-            .draw_string_ex(&font, pos, &text)
-            .alignment(HorizontalAlignment::LEFT)
-            .width(-1.0)
-            .font_size(font_size)
-            .modulate(Color::WHITE)
-            .done();
+        // `Fonts.registerIcon` installs the content-icon bitmap glyph in both
+        // `Fonts.def` and `Fonts.outline` with no border (`Fonts.java:137-160`),
+        // so the `bar.unitcap` unit icon inside the label is not stroked by the
+        // 2 px outline; Godot's `draw_string_outline_ex` strokes every glyph of
+        // the run, so outline only the text runs and fill the icon glyphs
+        // plain (PAR-0448).
+        if text.chars().iter().all(|ch| !is_content_icon_glyph(*ch)) {
+            self.base_mut()
+                .draw_string_outline_ex(&font, pos, &text)
+                .alignment(HorizontalAlignment::LEFT)
+                .width(-1.0)
+                .font_size(font_size)
+                .size(LABEL_OUTLINE_SIZE)
+                .modulate(LABEL_OUTLINE_COLOR)
+                .done();
+            self.base_mut()
+                .draw_string_ex(&font, pos, &text)
+                .alignment(HorizontalAlignment::LEFT)
+                .width(-1.0)
+                .font_size(font_size)
+                .modulate(Color::WHITE)
+                .done();
+            return;
+        }
+        let mut runs: Vec<(bool, String)> = Vec::new();
+        for ch in text.chars().iter().copied() {
+            let icon = is_content_icon_glyph(ch);
+            match runs.last_mut() {
+                Some((last, run)) if *last == icon => run.push(ch),
+                _ => runs.push((icon, ch.to_string())),
+            }
+        }
+        let mut x = pos.x;
+        for (icon, run) in runs {
+            let at = Vector2::new(x, pos.y);
+            if !icon {
+                self.base_mut()
+                    .draw_string_outline_ex(&font, at, &run)
+                    .alignment(HorizontalAlignment::LEFT)
+                    .width(-1.0)
+                    .font_size(font_size)
+                    .size(LABEL_OUTLINE_SIZE)
+                    .modulate(LABEL_OUTLINE_COLOR)
+                    .done();
+            }
+            self.base_mut()
+                .draw_string_ex(&font, at, &run)
+                .alignment(HorizontalAlignment::LEFT)
+                .width(-1.0)
+                .font_size(font_size)
+                .modulate(Color::WHITE)
+                .done();
+            x += font
+                .get_string_size_ex(&run)
+                .alignment(HorizontalAlignment::LEFT)
+                .width(-1.0)
+                .font_size(font_size)
+                .done()
+                .x;
+        }
     }
+}
+
+/// True for a glyph injected by `Fonts.registerIcon` (`Fonts.java:137-160`);
+/// every `assets/icons/icons.properties` codepoint lies in the Unicode
+/// private-use area (`0xE000..=0xF8FF`), e.g. `dagger` = `0xF800`.
+fn is_content_icon_glyph(ch: char) -> bool {
+    matches!(ch as u32, 0xE000..=0xF8FF)
 }
 
 /// Atlas splits `[left, right, top, bottom]` for a 9-patch region.

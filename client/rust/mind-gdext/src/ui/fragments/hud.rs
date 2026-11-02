@@ -41,6 +41,7 @@ use godot::global::{MouseButton, VerticalAlignment};
 use godot::obj::{NewAlloc, NewGd, Singleton};
 use godot::prelude::*;
 
+use crate::input::desktop::WaveGate;
 use crate::ui::kit;
 use crate::ui::kit::MindRichLabel;
 use crate::ui::kit::styles;
@@ -561,18 +562,21 @@ impl MindHudFragment {
 
     /// `HudFragment.canSkipWave` (client half): waves enabled, wave sending on,
     /// no enemies left, not mid-spawn (`state.rules.waveSending` is false in the
-    /// tutorial map, so the skip stays hidden there - PAR-0030).
+    /// tutorial map, so the skip stays hidden there - PAR-0030). The same
+    /// `WaveGate` backs the `skip_wave` binding (`input/desktop.rs`).
     #[func]
     fn _refresh_skip_button(&mut self) {
         let Some(mut skip) = self.skip_button.clone() else {
             return;
         };
-        let visible = self.hud_bool("waves")
-            && self.hud_bool("wave_sending")
-            && !self.hud_bool("is_spawning")
-            && self.hud_i64("enemies") <= 0
-            && self.hud_bool("has_core");
-        skip.set_visible(visible);
+        let gate = WaveGate {
+            waves: self.hud_bool("waves"),
+            wave_sending: self.hud_bool("wave_sending"),
+            is_spawning: self.hud_bool("is_spawning"),
+            enemies: self.hud_i64("enemies"),
+            has_core: self.hud_bool("has_core"),
+        };
+        skip.set_visible(gate.can_skip_wave());
     }
 
     /// `Logic.skipWave` via the existing campaign facade (`run_wave`).

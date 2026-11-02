@@ -1990,7 +1990,10 @@ impl MindPlacementFragment {
             .unwrap_or_default();
         if !args.is_empty() {
             let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            return kit::tm_format(&key, &refs).to_string();
+            // `Bar` labels are drawn by `MindBar::draw_name` with a plain font,
+            // not a BBCode label: content icons must arrive as their raw PUA
+            // glyph (`Fonts.getUnicodeStr`, `UnitFactory.java:119-137`).
+            return kit::tm_format_text_icons(&key, &refs).to_string();
         }
         kit::tm(&format!("@{key}")).to_string()
     }
