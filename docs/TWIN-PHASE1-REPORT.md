@@ -57,7 +57,7 @@ was not run in this session was left non-terminal (see deferrals).
 
 | Group | Items | Representative evidence | Shared code path |
 |---|---:|---|---|
-| Sim / headless / campaign core | 217 | `runs/PAR-0061/20261103-002044-run.md` — `cargo test -p mind-core` (2833 passed, 0 failed) + `bash tools/parity.sh` (goldens PASS, smoke 4/4, exit 0) | `client/rust/mind-core/**`, `client/rust/mind-headless/**` |
+| Sim / headless / campaign core | 215 | `runs/PAR-0061/20261103-002044-run.md` — `cargo test -p mind-core` (2833 passed, 0 failed) + `bash tools/parity.sh` (goldens PASS, smoke 4/4, exit 0) | `client/rust/mind-core/**`, `client/rust/mind-headless/**` |
 | Database + content info | 4 | `runs/PAR-0068/…-run.md`, `runs/PAR-0068/godot/…-01-database-grid.png`, `runs/PAR-0439/godot/…-01-content-info-affinities.png` | `MindDatabaseDialog` / `ContentInfoDialog` + `mind-core::ui::content_stats` |
 | Research / tech tree | 7 | `runs/PAR-0047/…-run.md`, `runs/PAR-0047/godot/20261103-001551-01-research-tree.png` | research read model + `MindTreeLayout` |
 | Settings (+ graphics list) | 5 | `runs/PAR-0069/…-run.md`, `02-settings-categories.png`, `runs/PAR-0435/godot/20261103-001900-02-settings-graphics-list.png` | `SettingsMenuDialog` + `settings_hub` + `MindStyles` |
@@ -67,7 +67,10 @@ was not run in this session was left non-terminal (see deferrals).
 | Verified re-check | 1 | `runs/PAR-0114/…-run.md` — real per-map previews render in every card (`01-custom-game-map-previews.png`) | `MindPreview` / `MindGridImage` |
 
 `PAR-0120` / `PAR-0123` (Multiplayer) were accidentally swept into the sim batch
-and have been reverted to `verified`: multiplayer is deferred (see below).
+and have been reverted to `verified`: multiplayer is deferred (see below). The
+batch sweep covered 234 unique items (PAR-0427 appears in both the sim sweep and
+the database group because they share the content-stats read model); 232 remain
+`reference-verified`.
 
 ## Deferrals (concrete reasons)
 
