@@ -1387,6 +1387,29 @@ pub fn unit_is_flying(world: &World, unit: Entity) -> bool {
             .is_some_and(|c| c.elevation >= 0.09)
 }
 
+/// Whether a unit counts as grounded for target gates
+/// (`UnitComp.isGrounded`: `elevation < 0.001`; a flying unit type hovers at
+/// elevation 1 — `UnitType.java:566` — mirrored here by
+/// [`PhysicsComp::flying`], so a physics-flying unit is never grounded).
+///
+/// This is deliberately not the negation of [`unit_is_flying`]
+/// (`elevation >= 0.09`, `UnitComp.java:84-86`): a unit between the two
+/// thresholds is neither grounded nor flying, which is exactly what
+/// `Turret.findEnemy`'s air-only branch accepts (`!e.isGrounded()`,
+/// `Turret.java:645`) and what its general branch gates on
+/// (`Turret.java:647-651`).
+///
+/// [`PhysicsComp::flying`]: crate::entities::comp::unit::comp::PhysicsComp
+pub fn unit_is_grounded(world: &World, unit: Entity) -> bool {
+    use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
+    if world.get::<PhysicsComp>(unit).is_some_and(|p| p.flying) {
+        return false;
+    }
+    world
+        .get::<UnitCore>(unit)
+        .is_none_or(|c| c.elevation < 0.001)
+}
+
 /// `EntityCollisions.collide` swept AABB test (Arc port): `r1` moves by
 /// `(vx1, vy1)`, `r2` by `(vx2, vy2)`; returns the entry point of `r1`'s
 /// center on contact.

@@ -33,7 +33,7 @@ use smallvec::SmallVec;
 
 use crate::ai::types::player::PlayerInput;
 use crate::audio::math::AudioRng;
-use crate::combat::bullet::unit_is_flying;
+use crate::combat::bullet::unit_is_grounded;
 use crate::combat::bullet::{BulletSpawn, CombatCtx};
 use crate::combat::targeting::{TargetQueries, UnitSort};
 use crate::content::registries::bullets::BulletDef;
@@ -2321,7 +2321,11 @@ fn find_target(
 
     let find = |query_range: f32| -> Option<Entity> {
         if config.target_air && !config.target_ground {
-            // `Units.bestEnemy` with `!e.isGrounded()` (`Turret.java:645`).
+            // `Units.bestEnemy` with `!e.isGrounded()` (`Turret.java:645`): the
+            // predicate is an ACCEPT filter and Java's `isGrounded()` is
+            // `elevation < 0.001` (`UnitComp.java:80-82`), so air-only turrets
+            // keep every non-grounded unit — not just `isFlying()`
+            // (`elevation >= 0.09`).
             targets.best_enemy(
                 ctx.world,
                 ctx.content,
@@ -2330,12 +2334,13 @@ fn find_target(
                 y,
                 query_range,
                 sort,
-                &mut |world, _content, unit| !unit_is_flying(world, unit),
+                &mut |world, _content, unit| !unit_is_grounded(world, unit),
             )
         } else {
-            // `Units.bestTarget` (`Turret.java:647-651`): the unit gate keeps
-            // grounded/flying per the target flags and skips missiles unless
-            // the ammo allows them.
+            // `Units.bestTarget` (`Turret.java:647-651`): the unit gate is
+            // `(e.isGrounded() || targetAir) && (!e.isGrounded() || targetGround)`
+            // — grounded needs `targetGround`, non-grounded needs `targetAir` —
+            // and it skips missiles unless the ammo allows them.
             targets.best_target(
                 ctx.world,
                 ctx.content,
@@ -2345,9 +2350,9 @@ fn find_target(
                 query_range,
                 sort,
                 &mut |world, _content, unit| {
-                    let flying = unit_is_flying(world, unit);
-                    (flying || config.target_ground)
-                        && (!flying || config.target_air)
+                    let grounded = unit_is_grounded(world, unit);
+                    (grounded || config.target_air)
+                        && (!grounded || config.target_ground)
                         && (missiles
                             || world
                                 .get::<crate::entities::comp::unit::comp::TimedKillComp>(unit)
@@ -2516,6 +2521,27 @@ fn validate_target(ctx: &CombatCtx<'_>, _e: Entity, state: &TurretState) -> bool
 mod tests {
     use super::*;
     use crate::combat::harness::CombatHarness;
+
+    /// Sets a test unit's `elevation` plus the flying-type mirror
+    /// (`UnitType.java:566`: `unit.elevation = flying ? 1f : 0`), so targeting
+    /// fixtures can occupy Java's elevation bands (`UnitComp.java:80-86`).
+    pub(super) fn set_unit_elevation(
+        harness: &mut CombatHarness,
+        unit: Entity,
+        elevation: f32,
+        physics_flying: bool,
+    ) {
+        use crate::entities::comp::unit::comp::{PhysicsComp, UnitCore};
+        let world = &mut harness.build.world;
+        world.entity_mut(unit).insert(UnitCore {
+            elevation,
+            ..UnitCore::new(0.0)
+        });
+        world.entity_mut(unit).insert(PhysicsComp {
+            flying: physics_flying,
+            ..PhysicsComp::default()
+        });
+    }
 
     fn turret_at(harness: &mut CombatHarness, name: &str) -> (Entity, Entity) {
         let wall = harness.content().block_id("copper-wall").expect("wall");
@@ -3055,8 +3081,9 @@ mod tests {
 
     /// PAR-0451: scatter's 2-shot pattern (`Blocks.java:3420-3421`
     /// `shotDelay = 5; shots = 2`) spreads over T and T+5. Scatter is anti-air
-    /// (`targetGround = false`, `Turret.java:645`), so the harness supplies a
-    /// stand-in target; the assertion only covers spawn ticks.
+    /// (`targetGround = false`, `Turret.java:645`), so the harness supplies an
+    /// airborne stand-in target (`!isGrounded()`, `UnitComp.java:80-82`); the
+    /// assertion only covers spawn ticks.
     #[test]
     fn scatter_fires_one_shot_per_delayed_tick() {
         let mut harness = CombatHarness::new(48, 16, 7);
@@ -3068,10 +3095,11 @@ mod tests {
         for _ in 0..10 {
             handle_item(&mut harness.build.world, turret, scrap);
         }
-        // The harness stand-in unit carries no flight flag (grounded); the
-        // port's anti-air query is the `bestEnemy` pass, and only the shot
-        // timing is asserted here.
-        harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        // A grounded stand-in would be rejected by the air-only branch; this
+        // one hovers at elevation 1, like a flying unit type
+        // (`UnitType.java:566`).
+        let target = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, target, 1.0, true);
         let counts = volley_spawn_counts(&mut harness, 6);
         let ticks: Vec<usize> = counts
             .iter()
@@ -3154,6 +3182,7 @@ mod tests {
 /// lifetime clamp and tracking range.
 #[cfg(test)]
 mod find_target_tests {
+    use super::tests::set_unit_elevation;
     use super::*;
     use crate::combat::harness::CombatHarness;
     use crate::entities::comp::Health;
@@ -3380,5 +3409,128 @@ mod find_target_tests {
         harness.update_turrets_only();
         assert!(harness.turret_state(turret).unwrap().target.is_some());
         assert_eq!(harness.turret_state(turret).unwrap().target_timer, 40.0);
+    }
+
+    /// `Turret.findEnemy` air-only branch (`Turret.java:644-646`): scatter
+    /// (`targetGround = false`) rejects grounded units
+    /// (`isGrounded = elevation < 0.001`, `UnitComp.java:80-82`) and targets
+    /// aircraft. The accept predicate is `!e.isGrounded()` — not the
+    /// `isFlying()` (`elevation >= 0.09`) band.
+    #[test]
+    fn air_only_turret_targets_aircraft_over_ground() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scatter", tx, ty, "scrap", "scatter_scrap");
+        let config = harness.turret_state(turret).expect("state").config.clone();
+        assert!(
+            config.target_air && !config.target_ground,
+            "scatter is air-only"
+        );
+        // Grounded enemy 40 px away: nearest, but not a legal target.
+        harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        // Flying enemy 100 px away: the only legal target.
+        let flying = harness.spawn_test_unit(tx + 100.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, flying, 1.0, true);
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            Some(flying),
+            "`!isGrounded()` keeps the aircraft and drops the grounded unit"
+        );
+    }
+
+    /// Air-only turret with only grounded enemies in range: no target
+    /// (`Turret.java:645` rejects every `isGrounded()` unit).
+    #[test]
+    fn air_only_turret_rejects_grounded_only() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scatter", tx, ty, "scrap", "scatter_scrap");
+        harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+        harness.spawn_test_unit(tx + 120.0, ty, 2, Vec::new());
+        harness.update_turrets_only();
+        assert_eq!(harness.turret_state(turret).expect("state").target, None);
+    }
+
+    /// Java's air-only gate is `!isGrounded()` (`elevation < 0.001`), so a unit
+    /// in the 0.001..0.09 band is a legal target even though `isFlying()`
+    /// (`elevation >= 0.09`, `UnitComp.java:84-86`) is false — the air-only
+    /// branch must not be written as `isFlying()`.
+    #[test]
+    fn air_only_turret_accepts_mid_band_elevation() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "scatter", tx, ty, "scrap", "scatter_scrap");
+        let band = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, band, 0.05, false);
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            Some(band),
+            "0.05 elevation is not grounded, so the air-only branch keeps it"
+        );
+    }
+
+    /// General branch (`Turret.java:647-651`): a `targetGround && targetAir`
+    /// turret keeps both bands — `(isGrounded() || targetAir) &&
+    /// (!isGrounded() || targetGround)`.
+    #[test]
+    fn general_turret_targets_ground_and_air() {
+        for (elevation, physics_flying) in [(0.0, false), (1.0, true)] {
+            let mut harness = CombatHarness::new(64, 64, 7);
+            let (tx, ty) = CombatHarness::tile_center(4, 8);
+            let turret = armed_turret(&mut harness, "duo", tx, ty, "copper", "duo_copper");
+            let config = harness.turret_state(turret).expect("state").config.clone();
+            assert!(
+                config.target_air && config.target_ground,
+                "duo targets both"
+            );
+            let unit = harness.spawn_test_unit(tx + 40.0, ty, 2, Vec::new());
+            set_unit_elevation(&mut harness, unit, elevation, physics_flying);
+            harness.update_turrets_only();
+            assert_eq!(
+                harness.turret_state(turret).expect("state").target,
+                Some(unit),
+                "targetAir && targetGround keeps elevation {elevation}"
+            );
+        }
+    }
+
+    /// General branch with `targetAir = false` (hail, `Blocks.java`): a unit in
+    /// the 0.001..0.09 band is not grounded, so Java rejects it in both terms
+    /// (`(isGrounded() || targetAir)` is false and `!isGrounded()` alone is not
+    /// enough without the first term).
+    #[test]
+    fn ground_only_turret_rejects_mid_band_elevation() {
+        let mut harness = CombatHarness::new(64, 64, 7);
+        let (tx, ty) = CombatHarness::tile_center(4, 8);
+        let turret = armed_turret(&mut harness, "hail", tx, ty, "graphite", "hail_graphite");
+        let config = harness.turret_state(turret).expect("state").config.clone();
+        assert!(
+            config.target_ground && !config.target_air,
+            "hail is ground-only"
+        );
+        let band = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
+        set_unit_elevation(&mut harness, band, 0.05, false);
+        harness.update_turrets_only();
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            None,
+            "0.05 elevation is not grounded and hail has targetAir = false"
+        );
+        // A truly grounded unit at the same distance is still targeted.
+        let grounded = harness.spawn_test_unit(tx + 60.0, ty, 2, Vec::new());
+        harness
+            .build
+            .world
+            .get_mut::<TurretState>(turret)
+            .expect("state")
+            .target_timer = 0.0;
+        harness.update_turrets_only();
+        let _ = band;
+        assert_eq!(
+            harness.turret_state(turret).expect("state").target,
+            Some(grounded)
+        );
     }
 }
