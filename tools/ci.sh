@@ -53,6 +53,12 @@ cargo check --manifest-path "$MANIFEST" --workspace
 say "cargo test -p mind-core"
 cargo test --manifest-path "$MANIFEST" -p mind-core
 
+# Phantom Camera port: the easing/smoothing unit tests are Godot-free (they check
+# the oracle's `_smooth_damp`); the in-engine parity benchmark
+# (`tools/pcam_parity.sh`) is too slow for this gate and stays manual/nightly.
+say "cargo test -p phantom-camera-rust"
+cargo test --manifest-path "$MANIFEST" -p phantom-camera-rust
+
 # Plan 23 §7f: matrix + registry drift + T0 catalog smoke. Read-only, no
 # Godot/GPU. `--tests` turns on the "every landed matrix row resolves" gate.
 say "parity check (matrix + registries) + T0 smoke"
@@ -141,6 +147,24 @@ if grep -nE 'SCRIPT ERROR|SHADER ERROR|Parse Error|Failed to load|Cannot open|Ca
   exit 1
 fi
 echo "  godot headless import clean"
+
+# The Phantom Camera port is a second GDExtension library: a stale
+# `.godot/extension_list.cfg`, a missing cdylib or a clashing class name all show
+# up here first. `PcamRustProbe::ready` prints the registered class count, so the
+# grep fails when the library did not load at all. `bash tools/pcam_parity.sh`
+# proves behavior; this only proves the loading path.
+say "godot: phantom camera addon class registration"
+if ! bash tools/godot.sh --headless --path client --quit-after 5 res://addons/phantom_camera_rust/dev/probe_check.tscn >"$GODOT_LOG" 2>&1; then
+  echo "FAIL: res://addons/phantom_camera_rust/dev/probe_check.tscn (PcamRustProbe)" >&2
+  tail -n 40 "$GODOT_LOG" >&2
+  exit 1
+fi
+if ! grep -qF 'phantom_camera_rust] loaded' "$GODOT_LOG"; then
+  echo "FAIL: phantom_camera_rust GDExtension did not load (no probe banner)" >&2
+  tail -n 40 "$GODOT_LOG" >&2
+  exit 1
+fi
+echo "  phantom camera addon registered"
 
 say "godot: shader compile check (native MindShadersCheck oracle)"
 if ! bash tools/godot.sh --headless --path client res://scenes/tools/shaders_check.tscn >"$GODOT_LOG" 2>&1 \

@@ -6,10 +6,11 @@
 
 | Script | Responsibility |
 |---|---|
-| `build.sh` | Build `mind-gdext` + `mind-headless` into `client/bin/rust` (debug profile; pass `--release` for `client/bin/rust/release/libmind_gdext.so`), then run `sync_scenarios.sh` when present. |
+| `build.sh` | Build `mind-gdext` + `mind-headless` + the addon cdylib `phantom-camera-rust` into `client/bin/rust` (debug profile; pass `--release` for `client/bin/rust/release/libmind_gdext.so`), then run `sync_scenarios.sh` when present. |
 | `ci.sh` | Full local gate; exact stage composition is documented under **Responsibilities**. |
 | `godot.sh` | Resolve the Godot 4.7 binary (`$GODOT_BIN` → `godot4` → `godot4-mono` → `godot`) and launch it against `client/` unless `--path` is passed. |
 | `parity.sh` | Local driver for the `mind-headless parity …` harness (structural check, mirror, suites, gate reports, bench, soak, checksums). |
+| `pcam_parity.sh` | Phantom Camera port harness: `--baseline` re-installs the GDScript oracle from `parity/pcam_oracle/` and records goldens, `--candidate` records the Rust addon, `--compare` diffs the per-frame camera telemetry and signal stream (`tools/pcam_compare.py`). Restores the tree on exit. |
 | `server.sh` | Run `mind-headless server`, or drive a running server's console socket over TCP. |
 | `sync_scenarios.sh` | Mirror canonical `scenarios/*.json` into the gitignored `client/scenarios/`. |
 | `pack.sh` | Forward arguments to the offline asset pipeline `mind-tools` (release). |
@@ -28,6 +29,7 @@
 | `twin.sh` + `twin_pointer.py` | Sourced Java↔Godot twin-walk harness (J10 T1): `JW`/`JM`/`JD`/`JK`/`JS` (Java leg; the click origin is re-read from `xwininfo` on every call), `GC`/`GW`/`GK`/`GS`/`GE`/`GP` (Godot leg; `GP` warps the real pointer over the engine window via `twin_pointer.py`), `SIDE`/`ZOOM` compare, and the `twin_launch`/`twin_place_java`/`twin_stop` lifecycle (settings.bin backup/restore, save-snapshot teardown). |
 | `java_xkeys.py` | XSendEvent key delivery to the Java reference window on a parity-session display (XTEST focus stays on Godot); literal text or `@Keysym`, `--hold-ms` for held movement keys. |
 | `twin_item.sh` | Per-item twin evidence (2026-11-02): `dir PAR-####` creates `runs/PAR-####/{java,godot}`, `godot-shot`/`java-shot` write timestamped frames into the matching leg folder, and `note`/`log` write the run report or captured log at the item root. Never migrates `runs/archive/**`; see [`docs/TWIN-RUNS.md`](../docs/TWIN-RUNS.md). |
+| `windows/java_leg.py` | Windows driver for the Java twin leg (2026-11-02 port): `launch` (`java -jar Mindustry.jar -maximized false -width/-height`), `find`, `move` (client area exactly 1152x648 at 0,0, per-monitor-DPI aware), `shot` (Pillow `ImageGrab` of the client area), `click`/`mouse`/`key`/`text` (user32 `SendInput`), `stop`, `data-dir`. Replaces the retired X11 `window_ctl.py`/`java_input.py`/`capture_screen.py`; see [`docs/TWIN-WINDOWS.md`](../docs/TWIN-WINDOWS.md). |
 
 ## Responsibilities
 

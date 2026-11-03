@@ -1,0 +1,10 @@
+[gd_scene format=3]
+
+[node name="Recorder" type="Node"]
+
+[node name="PcamRecorder" type="PcamRecorder" parent="."]
+out_path = "user://pcam_record.jsonl"
+frames = 240
+camera_path = NodePath("")
+host_path = NodePath("")
+require_class = ""

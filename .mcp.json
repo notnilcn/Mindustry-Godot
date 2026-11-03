@@ -4,7 +4,7 @@
       "type": "stdio",
       "command": "open-godot-mcp",
       "args": [],
-      "env": { "OPEN_GODOT_MCP_PORT": "6970" }
+      "env": { "OPEN_GODOT_MCP_PORT": "6971" }
     }
   }
 }

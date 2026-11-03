@@ -1,0 +1,22 @@
+[package]
+name = "phantom-camera-rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Rust GDExtension port of the Phantom Camera addon (v0.11.0.3) for Godot 4.7."
+
+[lib]
+name = "phantom_camera_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+godot.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"

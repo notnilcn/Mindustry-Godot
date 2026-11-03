@@ -18,6 +18,7 @@ commands. Crate-internal detail lives in the crate guides below.
 | `mind-gdext` | Godot 4.7 GDExtension `cdylib`: the `Mind*` classes, fixed-step frame pump, view drivers, input, audio, FX, net and platform glue. Holds no game rules. | [`mind-gdext/AGENTS.md`](mind-gdext/AGENTS.md) |
 | `mind-stdb` | SpacetimeDB client facade: connector lifecycle, subscription waves, typed table binders, checksums and the ordered command relay. | [`mind-stdb/AGENTS.md`](mind-stdb/AGENTS.md) |
 | `mind-tools` | Offline asset pipeline CLI (`migrate`, `pack`, `icons`, `sounds`, `shaders`, `determinism`, `mods classmap`); library half shared with tests. | [`mind-tools/AGENTS.md`](mind-tools/AGENTS.md) |
+| `phantom-camera-rust` | Second GDExtension `cdylib`: Rust port of the Phantom Camera addon (2D/3D camera rigs, host, noise, tween director). Consumed by `../addons/phantom_camera_rust/`; depends only on `godot`. Not in `default-members`. | [`phantom-camera-rust/AGENTS.md`](phantom-camera-rust/AGENTS.md) |
 | `mind-atlas` | Pure-Rust sprite atlas library: pixmaps, packer, autotile, ninepatch, manifests, PNG IO. | — |
 | `mind-macros` | Proc macros for sim component/entity metadata (`SimComponent`, `entity_def!`, `LoadRegions`); emits metadata impls only. | — |
 | `mind-derive` | Proc macros for entity IO codegen (`EntityIo`, `ObjectiveFields`), revision-aware save/sync read and write chains. | — |

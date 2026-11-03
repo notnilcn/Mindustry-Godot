@@ -7665,7 +7665,7 @@
     },
     "PAR-0024": {
       "title": "Launch flow: 'Configure Loadout' dialog appears on a free launch",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -7838,7 +7838,7 @@
     },
     "PAR-0028": {
       "title": "Campaign world: Ground Zero launch state (tutorial objectives vs waves)",
-      "status": "verified",
+      "status": "reference-verified",
       "fork": {
         "java": [
           {
@@ -7937,7 +7937,7 @@
     },
     "PAR-0029": {
       "title": "Campaign world: tutorial Skip control",
-      "status": "verified",
+      "status": "mismatch",
       "action": {
         "java": [
           {
