@@ -1,0 +1,7 @@
+[gd_resource type="PhantomCameraTween" format=3 uid="uid://euybd2w0bax"]
+
+
+[resource]
+duration = 0.6
+transition = 3
+ease = 1

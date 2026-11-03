@@ -1,0 +1,12 @@
+[configuration]
+entry_symbol = "gdext_rust_init"
+compatibility_minimum = 4.7
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "res://bin/rust/debug/phantom_camera_rust.dll"
+windows.release.x86_64 = "res://bin/rust/release/phantom_camera_rust.dll"
+linux.debug.x86_64 = "res://bin/rust/debug/libphantom_camera_rust.so"
+linux.release.x86_64 = "res://bin/rust/release/libphantom_camera_rust.so"
+macos.debug = "res://bin/rust/debug/libphantom_camera_rust.dylib"
+macos.release = "res://bin/rust/release/libphantom_camera_rust.dylib"

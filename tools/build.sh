@@ -3,6 +3,9 @@
 #
 # Builds the Rust side of the Godot client (mind-gdext cdylib + mind-headless)
 # into client/bin/rust so mind.gdextension can find the shared library.
+# Also builds the phantom-camera-rust addon cdylib, which
+# addons/phantom_camera_rust/phantom_camera_rust.gdextension loads as a second,
+# independent GDExtension library next to mind-gdext.
 # Afterwards, syncs scenarios only if the Lane-B-owned sync script exists.
 
 set -euo pipefail
@@ -11,7 +14,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cargo build \
   --manifest-path "$REPO_ROOT/client/rust/Cargo.toml" \
-  -p mind-gdext -p mind-headless \
+  -p mind-gdext -p mind-headless -p phantom-camera-rust \
   --target-dir "$REPO_ROOT/client/bin/rust" \
   "$@"
 

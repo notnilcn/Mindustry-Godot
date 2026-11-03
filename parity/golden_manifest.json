@@ -754,6 +754,150 @@
       "path": "client/rust/mind-headless/tests/golden/render/render_layers_full.json",
       "owner_plan": "16",
       "sha256": "3ad5d9b8758105abd0b37f67900df32159f12ecae1c368c7c5aef0629c230eb4"
+    },
+    {
+      "id": "pcam_2d_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "f0c55ef2f833c47a223110a8ea42d2ec0fcff09e40161501b759b869102cd99d",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_2d_follow_framed_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_follow_framed_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "ecbcb635479b1c498b7053c3c055fceaceb3961502b09b6ee284a31a56ea0119",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_2d_follow_group_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_follow_group_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "a97a30df546ba7ec11130340930a400627d037fbd6032ff52c7a6710b355586d",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_2d_follow_path_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_follow_path_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "28d88a2e4a45135a42bc66a305afc8f2bf68dd125ef6a759978cc9aab1b02bdb",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_2d_limit_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_limit_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "a6c1499270e6a6f9c6130e0dad4750a663f8a1df1f84990b0d3ee46377ca3f7b",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_2d_noise_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_noise_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "de67997646d6ac3572716e615dcfa8a2608ff6fce3afa1b7eaf974a96c49dacd",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_2d_tweening_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/2d_tweening_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "58ce326bc201101bd541c27add7ee7e96826ec18b93ef7ee2b8f78edad5fbcaf",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "b38017bf199dfa46616fab5a7f9737d84bf2765625fdfb64fd88b889044d17dc",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_framed_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_framed_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "97faff7c3167fd3afc6f29606290248cead631fd9368110690b22ac601c86805",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_glued_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_glued_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "924596b1dcfebd67943754f8c5d3b230fb408a98133bd5f7e8825347c7995a23",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_group_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_group_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "59627899c0fd4efff502db95d89691445454d60eb0f2cb4d3f9955475c3eb27e",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_path_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_path_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "6191f6a57d585e0c806cbcab8f106bb6f7cbd311a65b26bea56ce37d287b94f0",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_simple_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_simple_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "436ea31043f38ad2228cd105c0cbf82add03ff2d00ac678ca6db210c7d840fb4",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_third_person_attribtues_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_third_person_attribtues_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "aedde5f6f16666e17fa3eba5f5b0a66bd3c3ce7947f427cdd34f5f4a26c31318",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_follow_third_person_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_follow_third_person_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "61175fecf4271a0663557aa73f4eb776e95bbe885487806086a7c5a1f18055a9",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_look_at_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_look_at_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "24218e42e5e7c4a791bf48f93e65d4cc52996ea736b8788362133156e1ccaa91",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_noise_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_noise_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "56ed2907df07e653aeb3a02cccbf3d99f09174658eeca84c5e24c20303e2bc86",
+      "regen": "bash tools/pcam_parity.sh --baseline"
+    },
+    {
+      "id": "pcam_3d_tweening_example_scene",
+      "kind": "harness",
+      "path": "parity/pcam_golden/3d_tweening_example_scene.jsonl",
+      "owner_plan": "addon-port",
+      "sha256": "921088e2ac0c7033c0b5764f28c5971649792d9204b844255d5b7b3562701033",
+      "regen": "bash tools/pcam_parity.sh --baseline"
     }
   ]
 }

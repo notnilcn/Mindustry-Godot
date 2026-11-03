@@ -21,6 +21,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+PhantomCameraManager="*res://addons/phantom_camera_rust/phantom_camera_manager.tscn"
 McpRuntimeAutoload="*res://addons/open_godot_mcp/runtime/runtime_autoload.gd"
 MindAssets="*res://scenes/autoloads/mind_assets.tscn"
 MindMods="*res://scenes/autoloads/mind_mods.tscn"

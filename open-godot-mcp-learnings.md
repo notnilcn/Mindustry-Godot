@@ -2695,3 +2695,28 @@ Run: runs/20261014-s3-verify3/.
   `clear_planet_campaign_saves("serpulo")`. Keep one known method per eval.
 - Recovery: `godot_game stop` + `play` (resume re-breaks); re-run the leg if the log check must be clean.
 - Run: `runs/PAR-0019/` (fixer, game pids 3416790 and 3417865 pinned; final clean leg pid 3417865).
+
+## 2026-11-02 15:45 — PAR-0024..0029 checker: MindUi.* from eval pins the loop; hooks for a fresh GZ launch
+
+- **Every MindUi method call from godot_exec pins the frame loop** on this build
+  (MindUi.dialog_stack(), MindUi.open_dialog(name, ctx), MindUi.hint_finished(name) — each
+  returned Request timed out and left godot_debugger sessions -> `paused: true`; plain evals
+  and godot_screenshot keep answering from the pinned frame). Node-level reads are safe:
+  `get_node(path).visible`, `get_global_rect()`, `text`, `is_visible_in_tree()`,
+  and `MindCampaign.get_total_playtime()`. Recover with godot_game stop + play.
+- **MindUi.open_dialog takes (name, ctx_json: String)** (ui_host.rs:194) — a Dictionary second
+  arg is a type error (and therefore a pin), and the residual's
+  `open_dialog("launch_loadout", {"planet":…})` snippet must be passed as a JSON string.
+- **The campaign saves on this host are a *resume* profile**: `sector-serpulo-170.msav` makes the
+  planet page show Ground Zero "Under attack!" + **Go**, and the *loadout dialog is unreachable*
+  either way (`allowNumberedLaunch` needs a size >= 4 core; GZ is `core-shard`). Move
+  `%APPDATA%\Godot\app_userdata\Mindustry-Godot\saves\*.msav` aside for the free-launch fork;
+  `godot_game stop` writes an exit save, so clear again before the next fresh launch.
+- **Hints need forcing on this profile**: `desktopMove-hint-done` is persisted in
+  `config/settings.bin` and `zoom` self-completes on the launch zoom change, so no hint shows by
+  itself. `get_node("/root/Spine/Ui/UiRoot/HudGroup/hints").show_hint("desktopMove")` is a safe
+  `#[func]` and renders the panel (this is how the PAR-0029 Skip contrast defect was caught).
+- **Focus matters**: clicking another window pauses the campaign ("Paused" banner) and freezes
+  hint/tween progress. Restore with `user32.ShowWindow(hwnd, 9)` + `SetForegroundWindow(hwnd)`
+  (PowerShell is DPI-unaware; `MainWindowHandle` is the real hwnd, not the pid) — no input is
+  needed to unpause, the banner clears on refocus.
