@@ -1,6 +1,6 @@
 {
   "schema": "mindustry-godot/twin-verification@1",
-  "updated": "2026-11-02T15:54:11Z",
+  "updated": "2026-11-03T09:23:50Z",
   "items": {
     "PAR-0001": {
       "title": "Boot parity: Java main menu vs Godot main menu render",
@@ -7937,7 +7937,7 @@
     },
     "PAR-0029": {
       "title": "Campaign world: tutorial Skip control",
-      "status": "mismatch",
+      "status": "fixing",
       "action": {
         "java": [
           {
@@ -7970,7 +7970,9 @@
         "godot": [
           "parity/twin/PAR-0029/godot/01-action.avif"
         ]
-      }
+      },
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0030": {
       "title": "Campaign world: Godot in-game pause button (558,54) with no Java HUD counterpart",
@@ -10954,7 +10956,7 @@
     },
     "PAR-0057": {
       "title": "HUD minimap: widget shows the whole map with fallback-grey terrain colours",
-      "status": "reference",
+      "status": "fixing",
       "fork": {
         "godot": [
           {
@@ -10997,7 +10999,9 @@
             }
           }
         ]
-      }
+      },
+      "claimed_by": "p1b",
+      "claimed_at": "2026-11-03T09:21:19Z"
     },
     "PAR-0058": {
       "title": "Tutorial: the player unit offloads mined ore into the nearest core within mineTransferRange (MinerComp offload branch)",
@@ -13981,7 +13985,14 @@
           "Insert a row as the peer (second client or reducer call) and re-read the chat fragment log: add_message is never invoked because MindNet never binds my_match_chat (attach_binders, net/mod.rs:222-234; the table is in GAME_TABLES, waves.rs:43).",
           "Press Enter in game: the \"chat\" binding (binding.rs:775) falls through the desktop bridge `_ => {}` (desktop.rs:599), so the fragment is not even opened. enableVotekick exists only as a config spec (config.rs:106-108) and PlayerAction::Vote only fails (player_list.rs:26,151-163)."
         ]
-      }
+      },
+      "notes": [
+        {
+          "at": "2026-11-03T09:21:24Z",
+          "by": "orch-p1",
+          "text": "DEFERRED (phase-1 close-out): multiplayer is explicitly out of scope for this phase per the user's instruction; no live match/network leg was run, status left unchanged."
+        }
+      ]
     },
     "PAR-0122": {
       "title": "Multiplayer: the player list is always empty and its kick/ban/trace/team actions cannot execute; Admins/Bans dialogs always show 'none'",
@@ -14010,7 +14021,14 @@
           "Open admins/bans (or ui.open_dialog(\"admins\",\"\")): the dialogs read _context.admins/_context.banned (admins_dialog.gd:30, bans_dialog.gd:29) but player_list_fragment._open passes \"\" (player_list_fragment.gd:97-100), so they always show @server.admins.none / @server.bans.none; trace has no reducer/view at all (only the dialog shell trace_dialog.gd:25-34).",
           "Press Tab: the player_list binding (binding.rs:769) falls through `_ => {}` (desktop.rs:599) - there is no live toggle; a kicked peer also never sees my_kick (waves.rs:37, never bound in net/mod.rs:222-234)."
         ]
-      }
+      },
+      "notes": [
+        {
+          "at": "2026-11-03T09:21:24Z",
+          "by": "orch-p1",
+          "text": "DEFERRED (phase-1 close-out): multiplayer is explicitly out of scope for this phase per the user's instruction; no live match/network leg was run, status left unchanged."
+        }
+      ]
     },
     "PAR-0123": {
       "title": "Multiplayer: joining a running match does not sync the world (no late-join map load or snapshot catch-up)",
@@ -14063,7 +14081,14 @@
           "Send `status` and `players`: the console host command went through LocalHost (commands.rs:381), so the report is the local synthetic fixture with 0 players; `spacetime sql mindustry \"SELECT match_id,map_id,status FROM relay_match\"` returns no row because NetHost::host (net_host.rs:277-302, the create_match path) is never called.",
           "Send `kick <name>` / `say hi` / `runwave`: kick and say go to state.net (commands.rs:466/435) whose session has no match, so they fail with 'no match is hosted' (or act offline-mirror-only), and runwave increments the local fixture wave (commands.rs:775-780 -> host.rs:351-355) instead of emitting admin_run_wave (net_host.rs:324-335)."
         ]
-      }
+      },
+      "notes": [
+        {
+          "at": "2026-11-03T09:21:24Z",
+          "by": "orch-p1",
+          "text": "DEFERRED (phase-1 close-out): multiplayer is explicitly out of scope for this phase per the user's instruction; no live match/network leg was run, status left unchanged."
+        }
+      ]
     },
     "PAR-0125": {
       "title": "Chat filters/mutes are database-global and apply to every match on the SpacetimeDB database, not per match",
@@ -14088,7 +14113,14 @@
           "Create two matches in the same database (or reason from the schema): chat_filter/chat_rate have no match_id (chat/mod.rs:29-81), so send_chat loads every filter row for whichever match is calling (chat/mod.rs:128-143) and a mute pattern added for match A drops the same text in match B.",
           "Check the management surface too: no client or console caller invokes Connector::admin_add_chat_filter/admin_remove_chat_filter (connector.rs:889-905) - there is currently no UI/console way to manage filters at all."
         ]
-      }
+      },
+      "notes": [
+        {
+          "at": "2026-11-03T09:21:24Z",
+          "by": "orch-p1",
+          "text": "DEFERRED (phase-1 close-out): multiplayer is explicitly out of scope for this phase per the user's instruction; no live match/network leg was run, status left unchanged."
+        }
+      ]
     },
     "PAR-0126": {
       "title": "Units render as one flat body sprite: no mech legs, weapon barrels, health cell or shadows",
@@ -14150,7 +14182,9 @@
           "by": "orch-c:shadow",
           "text": "Per-weapon shadow (Weapon.shadow -> Drawf.shadow, Weapon.java:238-240) landed as PAR-0461 / commit 21830976; this umbrella item's remaining scope may now be empty (legs/parts/cell/soft shadow landed in 92ba15aa + 1e0003af) but was not re-verified end-to-end in this session."
         }
-      ]
+      ],
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0127": {
       "title": "Campaign weather never happens: no rain, snow, sandstorm or fog",
@@ -14984,7 +15018,7 @@
     },
     "PAR-0151": {
       "title": "Host dialog content: Java's floating Name/colour-picker/Port/Host/? layout vs the port's boxed panel with raw mode.* keys",
-      "status": "seeded",
+      "status": "fixing",
       "action": {
         "java": [
           {
@@ -15003,7 +15037,9 @@
           }
         ]
       },
-      "similarity": 2.1
+      "similarity": 2.1,
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0152": {
       "title": "Placed buildings render the 'Wrong texture folder' placeholder sprite in the live world",
@@ -15814,7 +15850,9 @@
     },
     "PAR-0296": {
       "title": "Interplanetary Accelerator is a stub",
-      "status": "fixing"
+      "status": "fixing",
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0297": {
       "title": "attackSectors never marked; numbered-sector threat 0 (H05 T1 ba24fe66)",
@@ -16057,7 +16095,9 @@
     },
     "PAR-0346": {
       "title": "power-node laser shimmer uses ticks where Java uses `Time.time` seconds (T5 note)",
-      "status": "wontfix"
+      "status": "fixing",
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0347": {
       "title": "`$I.configure_building` on a door can time out and stall the frame loop",
@@ -16132,7 +16172,9 @@
     },
     "PAR-0363": {
       "title": "Turrets draw without shadow/outline/parts/liquid (DrawTurret stub): base chain + shadow + outline + liquid/top + additive heat + parts (9 turrets) + ammoParts landed (16d2a336); residual scathe/smite/malign/lustre part trees + firing/heat pixel frames",
-      "status": "fixing"
+      "status": "fixing",
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0364": {
       "title": "Inert graphics settings: `bloomintensity`/`bloomblur` and `linear` never reached the renderer (5325720c)",
@@ -16155,7 +16197,9 @@
           "by": "orch-c:audit2",
           "text": "Independent read-only audit (HEAD 96b1873a): 4 of the 7 abilities are drawn - ForceField + ShieldArc in render/shields.rs:143,161,213-249, EnergyField + SuppressionField in render/unit_abilities.rs:95,146,217 backed by unit_ability_draws (sim_host.rs:7199-7245), landed in 1e0003af. Remaining residual: ArmorPlateAbility.draw (core/src/mindustry/entities/abilities/ArmorPlateAbility.java:46), UnitSpawnAbility.draw (:65) and MoveLightningAbility.draw (:100) are still undrawn - the three kinds do not exist in AbilityKind (mind-core/src/content/registries/units/ability.rs:20-45) and sim_host.rs:7197-7198 documents them as unmodelled."
         }
-      ]
+      ],
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0367": {
       "title": "Weapon `layerOffset` not applied when drawing weapons",
@@ -16178,7 +16222,9 @@
           "by": "orch-c:crawl",
           "text": "Independent read-only audit (2026-11-03): block payloads are complete (square shadow + block-<name>-full icon, units.rs:580-620 vs BuildPayload.draw:114-133; z -0.03 matches Java prev(z-0.01)-0.02). Remaining residual for this item: (1) the carried UNIT's soft shadow is missing — Java UnitPayload.draw (UnitPayload.java:152-160) calls unit.type.draw() at elevation 0, which reaches drawSoftShadow (UnitType.java:276 default true, :1527) and emits a circle-shadow quad at payloadZ-0.01 sized max(region.w,region.h)*scl*softShadowScl*1.6; the port (units.rs:499-577) emits outline/body/cell only; (2) payload rotation uses the pickup snapshot (CarriedPayload::Unit.rotation, comp.rs:268-277) while Java pay.set(x,y,unit.rotation) re-rotates to the carrier facing every frame (UnitPayload.set:78-81)."
         }
-      ]
+      ],
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0370": {
       "title": "Text buttons render the glyph inline in the label with a flat slate fill (no `defaultt` nine-patch/cell layout) (0cf55155)",
@@ -16219,7 +16265,9 @@
     },
     "PAR-0378": {
       "title": "`update_proximity` transfers orthogonally only (diagonal proximity transfer gap, found staging J04 T1)",
-      "status": "wontfix"
+      "status": "fixing",
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0379": {
       "title": "Hovered-block bars: remaining families not emitted (turrets, power nodes/diodes, generators, reactors, overdrive/force, pumps, payload loaders, assemblers, campaign pads; factory 3-arg units bar; HeatCrafter heatpercent; GenericCrafter output liquids)",
@@ -16230,7 +16278,9 @@
     },
     "PAR-0380": {
       "title": "Bespoke configs missing: TargetDummy fields, CoreBlock team toggles, LightBlock ColorPicker dialog, MessageBlock newline cap (LaunchPad/Accelerator tracked under PAR-0296)",
-      "status": "fixing"
+      "status": "fixing",
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0381": {
       "title": "Rebind Keys shows raw `[red]`/`[]` markup and white keys (8b197956)",
@@ -16291,7 +16341,9 @@
     },
     "PAR-0394": {
       "title": "Map data-asset client half: no `ModDataManager` owner/decorator; map saves write `patches: None` (J08 T5 blocked)",
-      "status": "fixing"
+      "status": "fixing",
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0395": {
       "title": "Script mods: unsupported reason was not shown in the Mods dialog row (9f33ceaa)",
@@ -16351,7 +16403,9 @@
     },
     "PAR-0407": {
       "title": "J08 recorded residuals: WASD bindings + resetSaved guard, logic bitmap-font rasteriser + unicodeToName, display/canvas four, logic-picker five, sub-dialog five (map assets dialog J09-gated)",
-      "status": "fixing"
+      "status": "fixing",
+      "claimed_by": "p1a",
+      "claimed_at": "2026-11-03T09:20:56Z"
     },
     "PAR-0408": {
       "title": "Floors always draw the plain random variant: no autotile/tiling branches and no liquid-overlay alpha redraw (847f0d4f; Godot-verified, fresh Java capture pending)",
@@ -16448,8 +16502,10 @@
     },
     "PAR-0426": {
       "title": "Core Database rows sit 10-16 px lower than Java",
-      "status": "mismatch",
-      "similarity": 95.2
+      "status": "fixing",
+      "similarity": 95.2,
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0427": {
       "title": "Content info prints '0 %' where Java prints '0%' and wraps the description wider (stat formatting)",
@@ -16485,8 +16541,10 @@
     },
     "PAR-0433": {
       "title": "Logic editor: 'Built-in Variables' clipped on one line over Add (Java wraps to two lines); Java pauses the game behind the editor",
-      "status": "mismatch",
-      "similarity": 95.2
+      "status": "fixing",
+      "similarity": 95.2,
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0434": {
       "title": "World Processors empty-state text left-aligned (Java centres it)",
@@ -16495,13 +16553,17 @@
     },
     "PAR-0435": {
       "title": "Settings Graphics list starts 9 px higher than Java",
-      "status": "mismatch",
-      "similarity": 82.2
+      "status": "fixing",
+      "similarity": 82.2,
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0436": {
       "title": "Planet atmosphere rim drawn on the dark side too (Java glows only on the lit side)",
-      "status": "mismatch",
-      "similarity": 52.3
+      "status": "fixing",
+      "similarity": 52.3,
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0437": {
       "title": "Repair tower never heals units (RepairTower.java:62-80 unported); build turret's suppression efficiency cut also unported",
@@ -16517,7 +16579,9 @@
       "title": "Cultivator content info has no Affinities row: the sim gives the attribute -1 and no spores attribute",
       "status": "fixing",
       "similarity": 93.0,
-      "evidence": "fix landed, Godot read-model+live verified: runs/PAR-0439 (affinities row); unit test attribute_crafter_affinities_rows; fresh Java leg pending"
+      "evidence": "fix landed, Godot read-model+live verified: runs/PAR-0439 (affinities row); unit test attribute_crafter_affinities_rows; fresh Java leg pending",
+      "claimed_by": "p1b",
+      "claimed_at": "2026-11-03T09:21:19Z"
     },
     "PAR-0440": {
       "title": "Game Over left the HUD drawn behind it (MindUi.hud_set_visible only stored a flag)",
@@ -16533,7 +16597,9 @@
     "PAR-0442": {
       "title": "Campaign game-over title shows the preset id ('Sector groundZero lost!') instead of the localized name ('Ground Zero')",
       "status": "fixing",
-      "evidence": "fix landed, live Godot verified: runs/PAR-0442/godot/20261103-001721-02-live-gameover-headline.png headline 'Sector Ground Zero lost!'; fresh Java leg pending"
+      "evidence": "fix landed, live Godot verified: runs/PAR-0442/godot/20261103-001721-02-live-gameover-headline.png headline 'Sector Ground Zero lost!'; fresh Java leg pending",
+      "claimed_by": "p1b",
+      "claimed_at": "2026-11-03T09:21:19Z"
     },
     "PAR-0443": {
       "title": "Planet page sector grid/selection not faded by uiAlpha when zoomed out",
@@ -16572,7 +16638,9 @@
     },
     "PAR-0449": {
       "title": "Hover info panel grows downward under the block palette; tall bar lists (accelerator powerbuffer) are clipped",
-      "status": "seeded"
+      "status": "fixing",
+      "claimed_by": "p1c",
+      "claimed_at": "2026-11-03T09:23:50Z"
     },
     "PAR-0450": {
       "title": "Map previews ignore the tinted ColoredFloor/ColoredWall tile colour (extraData), drawing the default block colour",
@@ -17062,7 +17130,7 @@
     },
     "PAR-0465": {
       "title": "Splash damage never applies the bullet's status: burning/blasted ammo only tags the directly-hit unit, never units caught in the blast",
-      "status": "seeded",
+      "status": "fixing",
       "fork": {
         "java": [
           {
@@ -17083,8 +17151,8 @@
           }
         ]
       },
-      "claimed_by": "orch-a:checker-a5",
-      "claimed_at": "2026-11-02T15:24:57Z",
+      "claimed_by": "p1b",
+      "claimed_at": "2026-11-03T09:21:18Z",
       "area": "combat/status-damage",
       "java": "core/src/mindustry/entities/bullet/BulletType.java:606-614",
       "rust": "client/rust/mind-core/src/combat/bullet/mod.rs:938-972",
@@ -17100,7 +17168,7 @@
     },
     "PAR-0466": {
       "title": "Editor resize does not shift relative build configs (Java BuildPlan.pointConfig p.sub(offsetX, offsetY), ignoreResizeConfig blocks excluded)",
-      "status": "seeded",
+      "status": "fixing",
       "fork": {
         "java": [
           {
@@ -17121,8 +17189,8 @@
           }
         ]
       },
-      "claimed_by": "orch-b:orch",
-      "claimed_at": "2026-11-02T15:47:50Z",
+      "claimed_by": "p1b",
+      "claimed_at": "2026-11-03T09:21:18Z",
       "area": "editor/map-data",
       "java": "core/src/mindustry/editor/MapEditor.java:332-352,core/src/mindustry/entities/units/BuildPlan.java:88-110,core/src/mindustry/world/blocks/logic/LogicBlock.java:58",
       "rust": "client/rust/mind-core/src/editor/grid.rs:360-410,client/rust/mind-core/src/editor/lifecycle.rs:119-136",
@@ -17131,7 +17199,7 @@
     },
     "PAR-0467": {
       "title": "Block emitLight light sources are a fixed 60 px white circle: Java per-block lightRadius/lightColor dropped (impact reactor 115, differential generator 195, landing pad 90 #eab678)",
-      "status": "seeded",
+      "status": "fixing",
       "fork": {
         "java": [
           {
@@ -17152,8 +17220,8 @@
           }
         ]
       },
-      "claimed_by": "orch-c:layers",
-      "claimed_at": "2026-11-02T15:50:45Z",
+      "claimed_by": "p1b",
+      "claimed_at": "2026-11-03T09:21:18Z",
       "area": "render",
       "java": "core/src/mindustry/world/Block.java:344,350-351,493-495",
       "rust": "client/rust/mind-gdext/src/sim_host.rs:4849-4855 ; client/rust/mind-core/src/content/registries/blocks/mod.rs:2336,2772 ; client/rust/mind-gdext/src/render/light.rs:14-18",
