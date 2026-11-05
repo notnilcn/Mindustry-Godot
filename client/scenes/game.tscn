@@ -47,7 +47,12 @@ fx = NodePath("../../MindFx")
 landing_core = NodePath("../LandingCore")
 ui_root = NodePath("../../Ui/UiRoot")
 
-[node name="LandingCore" type="MindLandingCore" parent="World" unique_id=1600000021]
+[node name="LandingCore" type="MindLandingCore" parent="World" unique_id=1600000021 node_paths=PackedStringArray("sim_host", "camera", "fx", "ui_root", "campaign")]
+sim_host = NodePath("../../SimHost")
+camera = NodePath("../Camera2D")
+fx = NodePath("../../MindFx")
+ui_root = NodePath("../../Ui/UiRoot")
+campaign = NodePath("../../MindCampaign")
 
 [node name="Bloom" type="Node2D" parent="World" unique_id=1685205082]
 
@@ -94,7 +99,8 @@ ui_root = NodePath("../Ui/UiRoot")
 [node name="Ui" type="CanvasLayer" parent="." unique_id=541018541]
 layer = 2
 
-[node name="MenuBackground" type="MindMenuBackground" parent="Ui" unique_id=1600000001]
+[node name="MenuBackground" type="MindMenuBackground" parent="Ui" unique_id=1600000001 node_paths=PackedStringArray("render")]
+render = NodePath("../../MindRender")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -102,7 +108,8 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 
-[node name="MenuFlyers" type="MindMenuFlyers" parent="Ui/MenuBackground" unique_id=1600000031]
+[node name="MenuFlyers" type="MindMenuFlyers" parent="Ui/MenuBackground" unique_id=1600000031 node_paths=PackedStringArray("render")]
+render = NodePath("../../../MindRender")
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
@@ -118,7 +125,11 @@ editor_dialog = NodePath("../EditorDialog")
 platform = NodePath("../../MindPlatform")
 campaign = NodePath("../../MindCampaign")
 
-[node name="StateInspector" parent="Ui" unique_id=1200639430 instance=ExtResource("1_inspector")]
+[node name="StateInspector" parent="Ui" unique_id=1200639430 instance=ExtResource("1_inspector") node_paths=PackedStringArray("sim_host", "camera", "audio", "editor")]
+sim_host = NodePath("../../SimHost")
+camera = NodePath("../../World/Camera2D")
+audio = NodePath("../../MindAudio")
+editor = NodePath("../../MindEditor")
 
 [connection signal="state_changed" from="SimHost" to="Ui/StateInspector" method="_on_state_changed"]
 [connection signal="world_changed" from="SimHost" to="World/TileGrid" method="redraw_requested"]

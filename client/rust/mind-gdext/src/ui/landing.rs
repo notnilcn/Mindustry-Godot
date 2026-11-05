@@ -18,10 +18,10 @@
 //! screen fade starts when the landing begins (`CoreBlock.beginLaunch`) and the
 //! sector announce fires when it ends (`Time.run(launchDuration())`).
 //!
-//! View-only: every read goes through the camera/fx/campaign/sim facades
-//! (`get_node_or_null` + `has_method` + `call`, exactly like the GDScript) and
-//! nothing here mutates simulation state. No nodes are created in code — the
-//! drawn textures are atlas regions resolved through `kit::icon_texture`.
+//! View-only: the camera/fx/campaign/sim facades are scene-wired from
+//! `game.tscn` (`#[export]` refs, silent when absent); nothing here mutates
+//! simulation state. No nodes are created in code — the drawn textures are
+//! atlas regions resolved through `kit::icon_texture`.
 //!
 //! Note: Arc is y-up; the world camera flips the canvas y axis (zoom `(z, -z)`,
 //! `MindCamera2D::process`), so world coordinates and counter-clockwise angles
@@ -32,7 +32,13 @@ use godot::classes::{INode2D, Json, Node2D, Texture2D, Time};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
+use crate::camera::MindCamera2D;
+use crate::campaign::MindCampaign;
+use crate::fx::MindFx;
+use crate::sim_host::MindSimHost;
 use crate::ui::kit;
+use crate::ui::root::MindUiRoot;
+use crate::wiring;
 
 /// Region pixels -> world pixels (block regions are 4x supersampled).
 const CORE_REGION_SUPERSAMPLE: f32 = 0.25;
@@ -68,6 +74,21 @@ const D4: [Vector2; 4] = [
 #[class(base=Node2D)]
 pub struct MindLandingCore {
     base: Base<Node2D>,
+    /// Scene-wired sim host (`Spine/SimHost`); optional, silent when absent.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Scene-wired camera (`Spine/World/Camera2D`) for the landing draw state.
+    #[export]
+    pub camera: Option<Gd<MindCamera2D>>,
+    /// Scene-wired FX facade (`Spine/MindFx`) for the touchdown `launch` effect.
+    #[export]
+    pub fx: Option<Gd<MindFx>>,
+    /// Scene-wired UI root (`Spine/Ui/UiRoot`) for the boot fade cover.
+    #[export]
+    pub ui_root: Option<Gd<MindUiRoot>>,
+    /// Scene-wired campaign facade (`Spine/MindCampaign`) for the sector announce.
+    #[export]
+    pub campaign: Option<Gd<MindCampaign>>,
     /// Whether the last `process` saw an active landing (`_active`).
     active: bool,
     /// Announced once per landing (`_announced`).
@@ -94,6 +115,11 @@ impl INode2D for MindLandingCore {
     fn init(base: Base<Node2D>) -> Self {
         Self {
             base,
+            sim_host: None,
+            camera: None,
+            fx: None,
+            ui_root: None,
+            campaign: None,
             active: false,
             announced: false,
             block: String::new(),
@@ -107,6 +133,13 @@ impl INode2D for MindLandingCore {
     }
 
     fn ready(&mut self) {
+        // Scene-wired spine deps; all optional and silent so a scene without
+        // the full `game.tscn` spine still boots and just skips the draw.
+        self.sim_host = wiring::optional(&self.sim_host);
+        self.camera = wiring::optional(&self.camera);
+        self.fx = wiring::optional(&self.fx);
+        self.ui_root = wiring::optional(&self.ui_root);
+        self.campaign = wiring::optional(&self.campaign);
         self.base_mut().set_process(true);
     }
 
@@ -261,17 +294,10 @@ impl INode2D for MindLandingCore {
 impl MindLandingCore {
     /// Player-team colour for the flame circles (`team.color`, Java).
     fn refresh_team_color(&mut self) {
-        let host = self.base().get_node_or_null("/root/Spine/SimHost");
-        let Some(mut host) = host else {
+        let Some(host) = self.sim_host.clone() else {
             return;
         };
-        if !host.has_method("player_team_color") {
-            return;
-        }
-        let packed = host
-            .call("player_team_color", &[])
-            .try_to_relaxed::<i64>()
-            .unwrap_or_default();
+        let packed = host.bind().player_team_color();
         self.team_color = Color::from_rgba8(
             ((packed >> 24) & 0xff) as u8,
             ((packed >> 16) & 0xff) as u8,
@@ -284,8 +310,9 @@ impl MindLandingCore {
     fn start_landing(&mut self) {
         self.announced = false;
         let fade = self
-            .base()
-            .get_node_or_null("/root/Spine/Ui/UiRoot/OverlayLayer/fade_in");
+            .ui_root
+            .clone()
+            .and_then(|root| root.bind().fade_in_node());
         let Some(mut fade) = fade else {
             return;
         };
@@ -305,42 +332,20 @@ impl MindLandingCore {
         // Touchdown (`CoreBlock.java:412,650` + `Effect.shake(5, 5)`).
         self.thruster_time = 1.0;
         let position = self.position;
-        let fx = self.base().get_node_or_null("/root/Spine/MindFx");
-        if let Some(mut fx) = fx
-            && fx.has_method("spawn_effect")
-        {
-            let _ = fx.call(
-                "spawn_effect",
-                &[
-                    GString::from("launch").to_variant(),
-                    position.x.to_variant(),
-                    position.y.to_variant(),
-                    0.0f32.to_variant(),
-                ],
-            );
+        if let Some(mut fx) = self.fx.clone() {
+            let _ =
+                fx.bind_mut()
+                    .spawn_effect(GString::from("launch"), position.x, position.y, 0.0);
         }
-        let shake_camera = self.base().get_node_or_null("/root/Spine/World/Camera2D");
-        if let Some(mut shake_camera) = shake_camera
-            && shake_camera.has_method("apply_shake_event")
-        {
-            let _ = shake_camera.call(
-                "apply_shake_event",
-                &[5.0f32.to_variant(), 5.0f32.to_variant()],
-            );
+        if let Some(mut camera) = self.camera.clone() {
+            camera.bind_mut().apply_shake_event(5.0, 5.0);
         }
         self.base_mut().queue_redraw();
-        let campaign = kit::campaign();
         let ui = kit::ui();
-        let (Some(mut campaign), Some(mut ui)) = (campaign, ui) else {
+        let (Some(campaign), Some(mut ui)) = (self.campaign.clone(), ui) else {
             return;
         };
-        if !campaign.has_method("get_sector_state") {
-            return;
-        }
-        let state = campaign.call("get_sector_state", &[]);
-        let Some(state) = Self::json_dict(&state) else {
-            return;
-        };
+        let state = campaign.bind().get_sector_state();
         // `state.isCampaign() && Vars.showSectorLandInfo && preset.showSectorLandInfo`
         // (`CoreBlock.java:414`), resolved in mind-core.
         let show_land_info = state
@@ -372,7 +377,7 @@ impl MindLandingCore {
             .get("sector")
             .and_then(|value| value.try_to_relaxed::<i64>().ok())
             .unwrap_or(-1);
-        let resources = Self::sector_resources(sector_id);
+        let resources = self.sector_resources(sector_id);
         if !resources.is_empty() {
             let parts: Vec<String> = resources.iter().map(|item| format!(":{item}:")).collect();
             text = format!(
@@ -392,16 +397,12 @@ impl MindLandingCore {
     }
 
     /// `SectorInfo.resources` item names from the live campaign sector row.
-    fn sector_resources(id: i64) -> Vec<String> {
-        let campaign = kit::campaign();
-        let Some(mut campaign) = campaign else {
+    fn sector_resources(&self, id: i64) -> Vec<String> {
+        let Some(campaign) = self.campaign.clone() else {
             return Vec::new();
         };
-        if !campaign.has_method("campaign_views_json") {
-            return Vec::new();
-        }
-        let payload = campaign.call("campaign_views_json", &[GString::new().to_variant()]);
-        let Some(views) = Self::json_dict(&payload) else {
+        let payload = campaign.bind().campaign_views_json(GString::new());
+        let Some(views) = Self::json_dict(&payload.to_variant()) else {
             return Vec::new();
         };
         let Some(sectors) = views
@@ -463,12 +464,9 @@ impl MindLandingCore {
     /// `MindCamera2D.landing_draw_json()` as a dictionary; `None` without the
     /// camera or a non-dictionary payload.
     fn landing_draw_state(&self) -> Option<VarDictionary> {
-        let mut camera = self.base().get_node_or_null("/root/Spine/World/Camera2D")?;
-        if !camera.has_method("landing_draw_json") {
-            return None;
-        }
-        let payload = camera.call("landing_draw_json", &[]);
-        Self::json_dict(&payload)
+        let camera = self.camera.clone()?;
+        let payload = camera.bind().landing_draw_json();
+        Self::json_dict(&payload.to_variant())
     }
 
     /// Arc `Draw.rect(region, x, y, w, h, rotation)` in the y-up world: the
@@ -526,24 +524,14 @@ impl MindLandingCore {
     /// (`landing_streaks_json`), stroke `scl * ffin * pf * 3`, length
     /// `(ffin * 20 + 1) * scl`.
     fn draw_streaks(&mut self, fin: f64, fout: f64, scl: f64) {
-        let camera = self.base().get_node_or_null("/root/Spine/World/Camera2D");
-        let Some(mut camera) = camera else {
+        let Some(camera) = self.camera.clone() else {
             return;
         };
-        if !camera.has_method("landing_streaks_json") {
-            return;
-        }
         // `pfin = Interp.pow3Out(fin)`, `pf = Interp.pow2In(fout)`.
         let pfin = 1.0 - (1.0 - fin).powf(3.0);
         let pf = fout * fout;
-        let payload = camera.call(
-            "landing_streaks_json",
-            &[pfin.to_variant(), (800.0 * scl * pfin).to_variant()],
-        );
-        let Ok(text) = payload.try_to::<GString>() else {
-            return;
-        };
-        let Ok(rows) = Json::parse_string(&text).try_to::<VarArray>() else {
+        let payload = camera.bind().landing_streaks_json(pfin, 800.0 * scl * pfin);
+        let Ok(rows) = Json::parse_string(&payload).try_to::<VarArray>() else {
             return;
         };
         let position = self.position;
@@ -650,13 +638,9 @@ impl MindLandingCore {
 
     /// Live core block size (`3` for every core; the flame lengths use it).
     fn core_size(&mut self) -> i32 {
-        let host = self.base().get_node_or_null("/root/Spine/SimHost");
-        let Some(mut host) = host else {
+        let Some(host) = self.sim_host.clone() else {
             return 3;
         };
-        if !host.has_method("block_size") {
-            return 3;
-        }
         let mut tile = ((self.position.x as i32) / 8, (self.position.y as i32) / 8);
         if let Some(state) = self.landing_draw_state() {
             let x = state
@@ -669,10 +653,7 @@ impl MindLandingCore {
                 .unwrap_or(0.0);
             tile = ((x as i32) / 8, (y as i32) / 8);
         }
-        host.call("block_size", &[tile.0.to_variant(), tile.1.to_variant()])
-            .try_to_relaxed::<i32>()
-            .unwrap_or(1)
-            .max(1)
+        host.bind().block_size(tile.0, tile.1).max(1)
     }
 
     /// `Mathf.sample(values, t)`: linear interpolation over `t * (len - 1)`,

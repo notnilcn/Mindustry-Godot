@@ -13,6 +13,12 @@
 use godot::classes::{Control, IControl, ItemList, Label, Texture2D, TextureRect};
 use godot::prelude::*;
 
+use crate::audio::MindAudio;
+use crate::camera::MindCamera2D;
+use crate::editor::MindEditor;
+use crate::sim_host::MindSimHost;
+use crate::wiring;
+
 /// Poll interval in seconds (plan §3.10 extension contract).
 const POLL_INTERVAL: f64 = 0.25;
 
@@ -36,11 +42,25 @@ pub struct MindStateInspector {
     /// Path to the plan-19 editor facade (`/root/Spine/MindEditor`).
     #[export]
     pub editor_path: NodePath,
+    /// Scene-wired sim host; required in `game.tscn` (the `host_path` export is
+    /// the dev-scene fallback).
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Scene-wired camera for the cursor-tile readout.
+    #[export]
+    pub camera: Option<Gd<MindCamera2D>>,
+    /// Scene-wired plan-18 audio driver.
+    #[export]
+    pub audio: Option<Gd<MindAudio>>,
+    /// Scene-wired plan-19 editor facade.
+    #[export]
+    pub editor: Option<Gd<MindEditor>>,
     /// Content type listed in `ContentList`, e.g. `item`, `block`.
     #[export]
     pub content_type: GString,
     host: Option<Gd<Node>>,
-    camera: Option<Gd<Node>>,
+    /// Resolved camera: the typed `camera` first, `camera_path` when unwired.
+    camera_node: Option<Gd<Node>>,
     elapsed: f64,
 }
 
@@ -119,19 +139,19 @@ impl MindStateInspector {
 
     /// Plan-18 §3.10 `Audio` row: bus/music/lowpass/voice state.
     fn refresh_audio(&mut self) {
-        let Some(mut audio) = self.base().get_node_or_null(&self.audio_path.clone()) else {
+        let audio = self.audio.clone().or_else(|| {
+            self.base()
+                .get_node_or_null(&self.audio_path.clone())?
+                .try_cast::<MindAudio>()
+                .ok()
+        });
+        let Some(audio) = audio else {
             if let Some(mut label) = self.label("Audio") {
                 label.set_text("audio: -");
             }
             return;
         };
-        if !audio.has_method("stats") {
-            if let Some(mut label) = self.label("Audio") {
-                label.set_text("audio: -");
-            }
-            return;
-        }
-        let stats = audio.call("stats", &[]).to::<VarDictionary>();
+        let stats = audio.bind().stats();
         let paused = stats
             .get("sound_paused")
             .map(|value| value.to::<bool>())
@@ -168,7 +188,12 @@ impl MindStateInspector {
 
     /// Plan-19 M3 inspector `Editor` tab: tool/brush/selection/op stack.
     fn refresh_editor(&mut self) {
-        let Some(mut editor) = self.base().get_node_or_null(&self.editor_path.clone()) else {
+        let editor = self
+            .editor
+            .clone()
+            .map(|editor| editor.upcast::<Node>())
+            .or_else(|| self.base().get_node_or_null(&self.editor_path.clone()));
+        let Some(mut editor) = editor else {
             if let Some(mut label) = self.label("Editor") {
                 label.set_text("editor: -");
             }
@@ -310,10 +335,10 @@ impl MindStateInspector {
     }
 
     fn cursor_tile_text(&mut self) -> String {
-        if self.camera.is_none() {
-            self.camera = self.base().get_node_or_null(&self.camera_path.clone());
+        if self.camera_node.is_none() {
+            self.camera_node = self.base().get_node_or_null(&self.camera_path.clone());
         }
-        let Some(mut camera) = self.camera.clone() else {
+        let Some(mut camera) = self.camera_node.clone() else {
             return "-".to_string();
         };
         let Some(viewport) = self.base().get_viewport() else {
@@ -402,20 +427,28 @@ fn wave_text(connector: &mut Gd<Node>, wave: &str) -> &'static str {
 #[godot_api]
 impl IControl for MindStateInspector {
     fn ready(&mut self) {
-        self.host = self.base().get_node_or_null(&self.host_path.clone());
-        if self.host.is_none() {
-            self.host = self.base().get_node_or_null("/root/Spine/SimHost");
-        }
+        // Scene-wired spine deps: `game.tscn` sets them on the instance root;
+        // the dev scene falls back to the retained `*_path` exports.
+        self.sim_host = wiring::required("MindStateInspector", "sim_host", &self.sim_host);
+        self.camera = wiring::optional(&self.camera);
+        self.audio = wiring::optional(&self.audio);
+        self.editor = wiring::optional(&self.editor);
+        self.host = self
+            .sim_host
+            .clone()
+            .map(|host| host.upcast::<Node>())
+            .or_else(|| self.base().get_node_or_null(&self.host_path.clone()));
         if let Some(mut host) = self.host.clone() {
             let callable = self.base().callable("on_state_changed");
             if !host.is_connected("state_changed", &callable) {
                 host.connect("state_changed", &callable);
             }
         }
-        self.camera = self.base().get_node_or_null(&self.camera_path.clone());
-        if self.camera.is_none() {
-            self.camera = self.base().get_node_or_null("/root/Spine/World/Camera2D");
-        }
+        self.camera_node = self
+            .camera
+            .clone()
+            .map(|camera| camera.upcast::<Node>())
+            .or_else(|| self.base().get_node_or_null(&self.camera_path.clone()));
         let callable = self.base().callable("on_visibility_changed");
         self.base_mut().connect("visibility_changed", &callable);
         if self.base().is_visible() {

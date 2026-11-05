@@ -11,7 +11,9 @@
 use godot::classes::{ITextureRect, Texture2D, TextureRect};
 use godot::prelude::*;
 
+use crate::render::MindRender;
 use crate::ui::kit;
+use crate::wiring;
 
 /// `1 - MenuRenderer.darkness`.
 const DARKNESS: f32 = 0.7;
@@ -21,11 +23,15 @@ const DARKNESS: f32 = 0.7;
 #[class(base=TextureRect, init)]
 pub struct MindMenuBackground {
     base: Base<TextureRect>,
+    /// Scene-wired render facade (`Spine/MindRender`).
+    #[export]
+    pub render: Option<Gd<MindRender>>,
 }
 
 #[godot_api]
 impl ITextureRect for MindMenuBackground {
     fn ready(&mut self) {
+        self.render = wiring::required("MindMenuBackground", "render", &self.render);
         self.base_mut()
             .set_anchors_and_offsets_preset(godot::classes::control::LayoutPreset::FULL_RECT);
         self.base_mut()
@@ -45,22 +51,15 @@ impl MindMenuBackground {
     /// Bakes (or re-bakes) the menu world texture.
     #[func]
     pub fn generate(&mut self) {
-        let Some(mut render) = self.base().get_node_or_null("/root/Spine/MindRender") else {
+        let Some(mut render) = self.render.clone() else {
             return;
         };
-        if !render.has_method("build_menu_texture") {
-            return;
-        }
         let mobile = kit::ui()
             .and_then(|mut ui| ui.call("is_mobile", &[]).try_to::<bool>().ok())
             .unwrap_or(false);
         let seed = godot::global::randi();
-        let generated = render.call(
-            "build_menu_texture",
-            &[seed.to_variant(), mobile.to_variant()],
-        );
-        if let Ok(texture) = generated.try_to::<Gd<Texture2D>>() {
-            self.base_mut().set_texture(&texture);
+        if let Some(texture) = render.bind_mut().build_menu_texture(seed, mobile) {
+            self.base_mut().set_texture(&texture.upcast::<Texture2D>());
         } else {
             log::warn!("[menu] background bake unavailable");
         }

@@ -103,7 +103,7 @@ ui_root = NodePath("../Ui/UiRoot")
 4. **Optional deps stay silent** (the class already guards the path and its output survives): `WorldRenderer.{ui_root, landing_core, tile_grid}`,
    `Render.{camera, tile_grid}`, `Minimap.camera`, `Camera.fx` (landing dust), `SimHost.{fx, preview}`, `Net.{campaign, ui_root}`, `Input.{campaign, audio}`,
    `UiRoot.{menu_background, editor_dialog, platform, campaign}`, `Audio.{sim_host, camera, ui_root, menu_background, editor_dialog}`, `Campaign.{camera, audio, fx, editor,
-   ui_root}`, `StateInspector.{audio, editor}`, `LandingCore.{fx, ui_root}`.
+   ui_root}`, `StateInspector.{camera, audio, editor}`, `LandingCore.{sim_host, camera, fx, ui_root, campaign}`.
 5. **Resolve in `ready()`/`bootstrap()`**, never in `process`; classes with a `bootstrap()` re-adopt the same fields on `EXTENSION_RELOADED`.
    `MindUiRoot`, `MindDialog` and the fragments must **not** gain an `on_notification` arm (re-entrant `bind_mut`).
 6. **Late injection still works:** keep existing `#[func]` injectors (`MindTileGrid::set_host`) for the runtime/spawner path; the export wins when
@@ -136,10 +136,13 @@ keep `dialog(name)`, `set_menu_visible`, `set_editor_open`. Internally swap `con
 (typed `show_dialog`), and `kit::campaign()` for `campaign` (typed `reset_to_menu`/`check_playtest`/`get_sector_state`). Wire `Ui/UiRoot` **on the
 instance root**.
 
-**S4 — facades/display.** `audio/mod.rs` (sim_host, camera, ui_root, menu_background, editor_dialog); `campaign.rs` (sim_host, camera, audio, fx,
-editor, ui_root); `ui/state_inspector.rs` (typed sim_host, camera, audio, editor; net may stay an autoload lookup); `ui/menu_background.rs` +
-`ui/menu_flyers.rs` (render); `ui/landing.rs` (sim_host, camera, fx, ui_root — fade-in via `ui_root.fade_in_node()`). Wire `MindAudio`, `MindCampaign`,
-`Ui/StateInspector`, `Ui/MenuBackground`, `MenuFlyers`, `World/LandingCore`.
+**S4a — facades.** `audio/mod.rs` (sim_host, camera, ui_root, menu_background, editor_dialog); `campaign.rs` (sim_host, camera, audio, fx, editor,
+ui_root). Wire `MindAudio`, `MindCampaign`.
+
+**S4b — inspector/menu/landing.** `ui/state_inspector.rs` (sim_host required, camera/audio/editor optional; net may stay an autoload lookup; the
+`*_path` exports stay as the dev-scene fallback); `ui/menu_background.rs` + `ui/menu_flyers.rs` (render); `ui/landing.rs` (sim_host, camera, fx,
+ui_root, campaign — all optional; fade-in via `ui_root.fade_in_node()`, sector announce via the wired `campaign`). Wire `Ui/StateInspector`,
+`Ui/MenuBackground`, `MenuFlyers`, `World/LandingCore`.
 
 **S5 — conformance.** Update the text this refactor invalidates: `client/rust/mind-gdext/AGENTS.md` ("scene nodes are addressed by fixed `/root/...`
 paths"), `client/AGENTS.md` (the `scenes/game.tscn` map, the `/root/Spine/MindEditor` note), and `src/ui/PORTING.md` if it repeats it. Optional
@@ -159,7 +162,7 @@ code) — untouched.
 | `World/TileGrid` | MindTileGrid | sim_host | `../../SimHost` |
 | `World/Camera2D` | MindCamera2D | sim_host, input, fx | `../../SimHost`, `../../Input`, `../../MindFx` |
 | `World/Renderer` | MindWorldRenderer | sim_host, camera, fx, landing_core, ui_root, (tile_grid) | `../../SimHost`, `../Camera2D`, `../../MindFx`, `../LandingCore`, `../../Ui/UiRoot`, (`../TileGrid`) |
-| `World/LandingCore` | MindLandingCore | sim_host, camera, fx, ui_root | `../../SimHost`, `../Camera2D`, `../../MindFx`, `../../Ui/UiRoot` |
+| `World/LandingCore` | MindLandingCore | sim_host, camera, fx, ui_root, campaign | `../../SimHost`, `../Camera2D`, `../../MindFx`, `../../Ui/UiRoot`, `../../MindCampaign` |
 | `World/MinimapProvider` | MindMinimap | sim_host, camera | `../../SimHost`, `../Camera2D` |
 | `MindRender` | MindRender | renderer, tile_grid, camera, sim_host | `../World/Renderer`, `../World/TileGrid`, `../World/Camera2D`, `../SimHost` |
 | `MindFx` | MindFx | camera | `../World/Camera2D` |
@@ -189,8 +192,9 @@ grep -rn '"\.\./'      --include="*.rs" client/rust/mind-gdext/src | wc -l
 **Expected new warnings if a wiring line is missed** — ``{class}: missing required `{property}` (wire it in the owning scene)``, one per class/property,
 in the boot log and `user://last_log.txt`: `MindTileGrid` sim_host · `MindCamera2D` sim_host, input · `MindFx` camera · `MindWorldRenderer` sim_host,
 camera, fx · `MindRender` renderer, sim_host · `MindMinimap` sim_host · `MindSimHost` input, camera · `MindNet` sim_host · `MindInput` sim_host,
-camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host, camera · `MindLandingCore` sim_host, camera
-· `MindMenuBackground` render · `MindMenuFlyers` render. Optional deps (§4.4) log nothing. `MindAudio` has no required deps (all five are optional).
+camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host
+· `MindMenuBackground` render · `MindMenuFlyers` render. Optional deps (§4.4) log nothing: `MindAudio` has no required deps (all five are optional),
+`MindLandingCore` is all-optional, and `MindStateInspector`'s camera/audio/editor are optional too.
 
 **Known baseline (pre-existing, not caused by this refactor):** scoped clippy currently fails on `clippy::collapsible_if` at `client/rust/mind-gdext/src/editor/mod.rs:2138` — `if let Some(current) = self.file.as_ref() {` wrapping a single `if !current.starts_with(&dir)` at :2139, in the editor facade S2–S4 do not touch. Do not fix it here; S5 records it as a `CI_PENDING.json` exception or leaves it to the CI fixer.
 

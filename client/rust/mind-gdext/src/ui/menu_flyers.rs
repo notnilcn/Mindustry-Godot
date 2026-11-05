@@ -12,7 +12,9 @@
 use godot::classes::{Control, IControl};
 use godot::prelude::*;
 
+use crate::render::MindRender;
 use crate::ui::kit;
+use crate::wiring;
 
 /// `1 - MenuRenderer.darkness`: Java darkens the whole frame (background *and*
 /// flyers) after `drawFlyers`, so the squadron carries the same modulate.
@@ -23,11 +25,15 @@ const DARKNESS: f32 = 0.7;
 #[class(base=Control, init)]
 pub struct MindMenuFlyers {
     base: Base<Control>,
+    /// Scene-wired render facade (`Spine/MindRender`).
+    #[export]
+    pub render: Option<Gd<MindRender>>,
 }
 
 #[godot_api]
 impl IControl for MindMenuFlyers {
     fn ready(&mut self) {
+        self.render = wiring::required("MindMenuFlyers", "render", &self.render);
         self.base_mut()
             .set_anchors_and_offsets_preset(godot::classes::control::LayoutPreset::FULL_RECT);
         self.base_mut()
@@ -44,16 +50,13 @@ impl IControl for MindMenuFlyers {
     }
 
     fn draw(&mut self) {
-        let Some(mut render) = self.base().get_node_or_null("/root/Spine/MindRender") else {
+        let Some(mut render) = self.render.clone() else {
             return;
         };
         let Some(assets) = kit::assets() else {
             return;
         };
-        let payload = render.call("menu_flyers_json", &[]);
-        let Ok(payload) = payload.try_to::<GString>() else {
-            return;
-        };
+        let payload = render.bind_mut().menu_flyers_json();
         let parsed = godot::classes::Json::parse_string(&payload);
         let Ok(dictionary) = parsed.try_to::<VarDictionary>() else {
             return;
