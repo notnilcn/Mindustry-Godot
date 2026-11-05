@@ -28,6 +28,7 @@ use mind_core::world::build::can_replace;
 use mind_core::world::{ConfigKind, TilePos, WorldGrid};
 
 use crate::camera::MindCamera2D;
+use crate::campaign::MindCampaign;
 use crate::sim_host::MindSimHost;
 
 /// Maximum tiles one drag action emits (defensive; previews cap at `MAX_LENGTH`).
@@ -374,6 +375,8 @@ pub struct DesktopBridge {
     pub host: Option<Gd<MindSimHost>>,
     /// Scene camera (screen↔tile, zoom, recenter).
     pub camera: Option<Gd<MindCamera2D>>,
+    /// Scene campaign facade (`content_unlocked` for the config spec).
+    pub campaign: Option<Gd<MindCampaign>>,
     /// Selectable units fed by the sim/GDScript (`set_selectable_units_json`).
     pub selectable: Vec<SelectableUnit>,
     /// `Block.lastConfig` per block (`Block.java:827-832` `nextConfig`): the
@@ -476,6 +479,7 @@ impl DesktopBridge {
             catalog_category: 0,
             host: None,
             camera: None,
+            campaign: None,
             selectable: Vec::new(),
             last_config: HashMap::new(),
             config_selected: None,
@@ -3239,7 +3243,7 @@ impl DesktopBridge {
         let host = self.host.clone()?;
         // Fetched before the sim-host bind: `MindCampaign` owns the campaign
         // tech state (`content_unlocked`) that `unlockedNow()` reads.
-        let campaign = host.try_get_node_as::<Node>("/root/Spine/MindCampaign");
+        let campaign = self.campaign.clone();
         let guard = host.bind();
         let content = guard.content_registry()?;
         let (Ok(tx), Ok(ty)) = (i16::try_from(x), i16::try_from(y)) else {

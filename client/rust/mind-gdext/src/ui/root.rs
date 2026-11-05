@@ -38,6 +38,11 @@ use godot::prelude::*;
 
 use super::kit::widgets::factory;
 use super::kit::{self, MindRichLabel, icons, styles};
+use crate::campaign::MindCampaign;
+use crate::platform::MindPlatform;
+use crate::ui::editor_views::MindMapEditorDialog;
+use crate::ui::menu_background::MindMenuBackground;
+use crate::wiring;
 
 /// The dialog/fragment inventory this root binds (`_DIALOGS_MANIFEST`).
 const DIALOGS_MANIFEST: &str = "res://ui/dialogs_manifest.json";
@@ -129,6 +134,19 @@ struct Prompt {
 pub struct MindUiRoot {
     base: Base<Control>,
 
+    /// `Ui/MenuBackground` — optional; the standalone `ui_root.tscn` has none.
+    #[export]
+    pub menu_background: Option<Gd<MindMenuBackground>>,
+    /// `Ui/EditorDialog` — optional; the full-screen map-editor shell.
+    #[export]
+    pub editor_dialog: Option<Gd<MindMapEditorDialog>>,
+    /// `Spine/MindPlatform` — optional; `finish_launch` on the first menu show.
+    #[export]
+    pub platform: Option<Gd<MindPlatform>>,
+    /// `Spine/MindCampaign` — optional; campaign reset/playtest/map state.
+    #[export]
+    pub campaign: Option<Gd<MindCampaign>>,
+
     /// Theme build time in milliseconds (plan 14 §7d budget probe).
     #[var]
     pub theme_build_ms: i64,
@@ -177,6 +195,10 @@ impl IControl for MindUiRoot {
     fn init(base: Base<Control>) -> Self {
         Self {
             base,
+            menu_background: None,
+            editor_dialog: None,
+            platform: None,
+            campaign: None,
             theme_build_ms: 0,
             menu_group: None,
             hud_group: None,
@@ -213,6 +235,13 @@ impl IControl for MindUiRoot {
     }
 
     fn ready(&mut self) {
+        // Scene-wired optional spine deps: `game.tscn` sets them on the
+        // instance root; a standalone `ui_root.tscn` has none and stays silent.
+        // No `on_notification` re-adopt here (re-entrant `bind_mut` hazard).
+        self.menu_background = wiring::optional(&self.menu_background);
+        self.editor_dialog = wiring::optional(&self.editor_dialog);
+        self.platform = wiring::optional(&self.platform);
+        self.campaign = wiring::optional(&self.campaign);
         self.menu_group = self.control_at("MenuGroup");
         self.hud_group = self.control_at("HudGroup");
         self.dialog_layer = self.control_at("DialogLayer");
@@ -299,10 +328,8 @@ impl MindUiRoot {
     /// through `MindCampaign.reset_to_menu`, then the standalone menu.
     #[func]
     pub fn return_to_menu(&mut self) {
-        if let Some(mut campaign) = kit::campaign()
-            && campaign.has_method("reset_to_menu")
-        {
-            let _ = campaign.call("reset_to_menu", &[]);
+        if let Some(mut campaign) = self.campaign.clone() {
+            campaign.bind_mut().reset_to_menu();
         }
         self.set_menu_visible(true);
     }
@@ -320,7 +347,7 @@ impl MindUiRoot {
         if let Some(mut group) = self.hud_group.clone() {
             group.set_visible(!menu_visible && !editor_open);
         }
-        if let Some(mut background) = self.control_at("../MenuBackground") {
+        if let Some(mut background) = self.menu_background.clone() {
             background.set_visible(menu_visible && !editor_open);
         }
         self.hide_loading();
@@ -329,10 +356,8 @@ impl MindUiRoot {
             // `Vars.finishLaunch` (ClientLauncher.java:253): the main menu is
             // up, so the launch succeeded — drop the crash marker and record
             // lastBuild.
-            if let Some(mut platform) = kit::node("/root/Spine/MindPlatform")
-                && platform.has_method("finish_launch")
-            {
-                let _ = platform.call("finish_launch", &[]);
+            if let Some(mut platform) = self.platform.clone() {
+                let _ = platform.bind_mut().finish_launch();
             }
         }
     }
@@ -363,7 +388,7 @@ impl MindUiRoot {
         if let Some(mut group) = self.hud_group.clone() {
             group.set_visible(false);
         }
-        if let Some(mut background) = self.control_at("../MenuBackground") {
+        if let Some(mut background) = self.menu_background.clone() {
             background.set_visible(false);
         }
         self.close_hud_panels();
@@ -397,18 +422,11 @@ impl MindUiRoot {
     /// and reopens the playtested map in `MindEditor`.
     #[func]
     pub fn check_playtest(&mut self) -> bool {
-        let Some(mut campaign) = kit::campaign() else {
+        let Some(mut campaign) = self.campaign.clone() else {
             return false;
         };
-        if !campaign.has_method("check_playtest") {
-            return false;
-        }
-        let Ok(result) = campaign
-            .call("check_playtest", &[])
-            .try_to::<VarDictionary>()
-        else {
-            return false;
-        };
+        // Guard is a temporary: it never spans the UI calls below.
+        let result = campaign.bind_mut().check_playtest();
         let playtest = result
             .get("playtest")
             .map(|value| value.try_to::<bool>().unwrap_or(false))
@@ -421,12 +439,9 @@ impl MindUiRoot {
             .map(|value| value.try_to::<bool>().unwrap_or(false))
             .unwrap_or(false);
         let mut shown = false;
-        if resumed
-            && let Some(mut shell) = kit::node("/root/Spine/Ui/EditorDialog")
-            && shell.has_method("show_dialog")
-        {
+        if resumed && let Some(mut shell) = self.editor_dialog.clone() {
             // `beginEditMap` -> `show()`; the shell hides the standalone menu.
-            let _ = shell.call("show_dialog", &[]);
+            shell.bind_mut().show_dialog();
             shown = true;
         }
         if !shown {
@@ -1091,7 +1106,7 @@ impl MindUiRoot {
     /// the loading overlay is cleared and the black boot cover fades out.
     fn boot(&mut self) {
         self.set_menu_visible(true);
-        if let Some(mut fade) = self.base().get_node_or_null("OverlayLayer/fade_in")
+        if let Some(mut fade) = self.fade_in_node()
             && fade.has_method("start")
         {
             // `FadeInFragment.start(duration)`; the former GDScript default was
@@ -1677,8 +1692,10 @@ impl MindUiRoot {
         }
         // The editor shell owns keys while it is open (`MapEditorDialog.doInput`);
         // its Escape opens the editor menu, never the pause menu.
-        if let Some(editor_dialog) = self.control_at("/root/Spine/Ui/EditorDialog")
-            && editor_dialog.is_visible()
+        if self
+            .editor_dialog
+            .as_ref()
+            .is_some_and(|editor_dialog| editor_dialog.is_visible())
         {
             return false;
         }
@@ -1970,6 +1987,45 @@ impl MindUiRoot {
         }
     }
 
+    // ---- owner-mediator accessors (Rust-only, no ABI change) --------------
+
+    /// The cached HUD layer group (`HudGroup`), resolved lazily when a migrated
+    /// class asks before `ready` cached it.
+    pub(crate) fn hud_group_node(&self) -> Option<Gd<Control>> {
+        self.hud_group
+            .clone()
+            .or_else(|| self.control_at("HudGroup"))
+    }
+
+    /// One HUD fragment by manifest name (`block_config`, `console`, ...): the
+    /// mediator seam that replaces the `../Ui/UiRoot/HudGroup/...` walks in
+    /// `MindInput`/`MindAudio`/`MindLandingCore`.
+    pub(crate) fn hud_fragment(&self, name: &str) -> Option<Gd<Control>> {
+        let group = self.hud_group_node()?;
+        group.get_node_or_null(name)?.try_cast::<Control>().ok()
+    }
+
+    /// The cached menu layer group (`MenuGroup`), resolved lazily.
+    pub(crate) fn menu_group_node(&self) -> Option<Gd<Control>> {
+        self.menu_group
+            .clone()
+            .or_else(|| self.control_at("MenuGroup"))
+    }
+
+    /// `state.isMenu()` for the input binding gates: the menu group is shown.
+    /// Consumed by `MindAudio`/`MindLandingCore` in S4, hence the allow.
+    #[allow(dead_code)] // owner-mediator seam; no caller until S4
+    pub(crate) fn is_menu_visible(&self) -> bool {
+        self.menu_group_node()
+            .is_some_and(|group| group.is_visible_in_tree())
+    }
+
+    /// The boot fade cover (`OverlayLayer/fade_in`); `MindLandingCore` starts it
+    /// in S4.
+    pub(crate) fn fade_in_node(&self) -> Option<Gd<Node>> {
+        self.base().get_node_or_null("OverlayLayer/fade_in")
+    }
+
     // ---- small helpers ----------------------------------------------------
 
     /// A direct child of this root as a `Control` (`get_node_or_null(path)`).
@@ -1980,13 +2036,10 @@ impl MindUiRoot {
             .ok()
     }
 
-    /// A direct child of `HudGroup` as a `Control`.
+    /// A direct child of `HudGroup` as a `Control` (the internal short form of
+    /// [`Self::hud_fragment`], so there is one lookup implementation).
     fn hud_child(&self, name: &str) -> Option<Gd<Control>> {
-        self.hud_group
-            .as_ref()?
-            .get_node_or_null(name)?
-            .try_cast::<Control>()
-            .ok()
+        self.hud_fragment(name)
     }
 
     /// The loading fragment under `LoadingLayer`.
@@ -2039,52 +2092,43 @@ impl MindUiRoot {
     /// Hosted-state map id: `planet/sector` for a live campaign sector, the
     /// custom map's `Rules.mode_name`, else the default spine world.
     fn current_map_id(&self) -> String {
-        if let Some(mut campaign) = kit::campaign() {
-            if campaign.has_method("get_sector_state")
-                && let Ok(state) = campaign
-                    .call("get_sector_state", &[])
-                    .try_to::<VarDictionary>()
-            {
-                let planet = state
-                    .get("planet")
-                    .and_then(|value| value.try_to::<GString>().ok())
-                    .unwrap_or_default()
-                    .to_string();
-                let is_campaign = state
-                    .get("campaign")
-                    .map(|value| value.try_to::<bool>().unwrap_or(false))
-                    .unwrap_or(false);
-                if is_campaign && !planet.is_empty() {
-                    let sector = state
-                        .get("sector")
-                        .map(|value| value.try_to_relaxed::<i64>().unwrap_or(0))
-                        .unwrap_or(0);
-                    return format!("{planet}-{sector}");
-                }
-                // I08 T4: the live custom map's name (non-campaign worlds).
-                let map_name = state
-                    .get("mapName")
-                    .and_then(|value| value.try_to::<GString>().ok())
-                    .unwrap_or_default()
-                    .to_string();
-                if !map_name.is_empty() {
-                    return map_name;
-                }
-            }
-            if campaign.has_method("get_rules_json") {
-                let raw = campaign
-                    .call("get_rules_json", &[])
-                    .try_to::<GString>()
-                    .unwrap_or_default();
-                let parsed = Json::parse_string(&raw);
-                if let Ok(rules) = parsed.try_to::<VarDictionary>()
-                    && let Some(mode_name) = rules.get("modeName")
-                    && let Ok(name_text) = mode_name.try_to::<GString>()
-                    && !name_text.is_empty()
-                {
-                    return name_text.to_string();
-                }
-            }
+        let Some(campaign) = self.campaign.clone() else {
+            return "spine".to_string();
+        };
+        let state = campaign.bind().get_sector_state();
+        let planet = state
+            .get("planet")
+            .and_then(|value| value.try_to::<GString>().ok())
+            .unwrap_or_default()
+            .to_string();
+        let is_campaign = state
+            .get("campaign")
+            .map(|value| value.try_to::<bool>().unwrap_or(false))
+            .unwrap_or(false);
+        if is_campaign && !planet.is_empty() {
+            let sector = state
+                .get("sector")
+                .map(|value| value.try_to_relaxed::<i64>().unwrap_or(0))
+                .unwrap_or(0);
+            return format!("{planet}-{sector}");
+        }
+        // I08 T4: the live custom map's name (non-campaign worlds).
+        let map_name = state
+            .get("mapName")
+            .and_then(|value| value.try_to::<GString>().ok())
+            .unwrap_or_default()
+            .to_string();
+        if !map_name.is_empty() {
+            return map_name;
+        }
+        let raw = campaign.bind().get_rules_json();
+        let parsed = Json::parse_string(&raw);
+        if let Ok(rules) = parsed.try_to::<VarDictionary>()
+            && let Some(mode_name) = rules.get("modeName")
+            && let Ok(name_text) = mode_name.try_to::<GString>()
+            && !name_text.is_empty()
+        {
+            return name_text.to_string();
         }
         "spine".to_string()
     }

@@ -30,23 +30,36 @@ use mind_core::input::{
 };
 use mind_core::world::config::ConfigValue;
 
+use crate::audio::MindAudio;
 use crate::camera::MindCamera2D;
+use crate::campaign::MindCampaign;
 use crate::sim_host::MindSimHost;
+use crate::ui::root::MindUiRoot;
+use crate::wiring;
 
 use desktop::{DesktopBridge, Effect};
-
-/// Path of the block-config overlay in the UI root.
-const BLOCK_CONFIG_PATH: &str = "../Ui/UiRoot/HudGroup/block_config";
-/// Path of the block-inventory overlay in the UI root.
-const BLOCK_INVENTORY_PATH: &str = "../Ui/UiRoot/HudGroup/block_inventory";
-/// Path of a HUD fragment under the UI root (`minimap`, `console`, ...).
-const HUD_FRAGMENT_DIR: &str = "../Ui/UiRoot/HudGroup";
 
 /// The `/root/Spine/Input` input node.
 #[derive(GodotClass)]
 #[class(base=Node)]
 pub struct MindInput {
     base: Base<Node>,
+    /// Sibling `SimHost` (`../SimHost`) — required; the sim command target.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `World/Camera2D` (`../World/Camera2D`) — required; aim/pan maths.
+    #[export]
+    pub camera: Option<Gd<MindCamera2D>>,
+    /// Sibling `MindCampaign` (`../MindCampaign`) — optional; campaign gates,
+    /// skip-wave and schematic seams.
+    #[export]
+    pub campaign: Option<Gd<MindCampaign>>,
+    /// Sibling `MindAudio` (`../MindAudio`) — optional; the block-config click.
+    #[export]
+    pub audio: Option<Gd<MindAudio>>,
+    /// `Ui/UiRoot` (`../Ui/UiRoot`) — required; the HUD fragment mediator.
+    #[export]
+    pub ui_root: Option<Gd<MindUiRoot>>,
     /// Client-local bind values (`Binding.state`).
     bindings: BindingState,
     /// Input locks (`InputHandler.inputLocks`).
@@ -81,6 +94,11 @@ impl INode for MindInput {
         KeyBindTable::init();
         Self {
             base,
+            sim_host: None,
+            camera: None,
+            campaign: None,
+            audio: None,
+            ui_root: None,
             bindings: BindingState::new(),
             locks: InputLocks::new(),
             focus: FocusState::default(),
@@ -300,12 +318,17 @@ impl MindInput {
         self.bridge.set_block_replace(Self::read_block_replace());
         self.bridge
             .set_build_autopause(Self::read_build_autopause());
-        // Scene wiring (tscn-first): the spine declares SimHost as a sibling of
-        // Input and Camera2D under World.
-        self.bridge.host = self.base().try_get_node_as::<MindSimHost>("../SimHost");
-        self.bridge.camera = self
-            .base()
-            .try_get_node_as::<MindCamera2D>("../World/Camera2D");
+        // Scene wiring (tscn-first): `game.tscn` declares the spine
+        // dependencies on this node; re-adopted on every bootstrap so a reload
+        // keeps them.
+        self.sim_host = wiring::required("MindInput", "sim_host", &self.sim_host);
+        self.camera = wiring::required("MindInput", "camera", &self.camera);
+        self.ui_root = wiring::required("MindInput", "ui_root", &self.ui_root);
+        self.campaign = wiring::optional(&self.campaign);
+        self.audio = wiring::optional(&self.audio);
+        self.bridge.host = self.sim_host.clone();
+        self.bridge.camera = self.camera.clone();
+        self.bridge.campaign = self.campaign.clone();
         self.bridge.refresh_items();
         self.sync_selected_block();
         self.load_catalog();
@@ -457,11 +480,12 @@ impl MindInput {
     /// Whether the console or chat fragment is visible (`consolefrag.shown()`
     /// / `chatfrag.shown()`; PAR-0100).
     fn console_or_chat_visible(&self) -> bool {
-        for path in [
-            "../Ui/UiRoot/HudGroup/console",
-            "../Ui/UiRoot/HudGroup/chat",
-        ] {
-            if let Some(fragment) = self.base().try_get_node_as::<Control>(path)
+        let Some(ui_root) = self.ui_root.clone() else {
+            return false;
+        };
+        for name in ["console", "chat"] {
+            let fragment = ui_root.bind().hud_fragment(name);
+            if let Some(fragment) = fragment
                 && fragment.is_visible_in_tree()
             {
                 return true;
@@ -562,19 +586,20 @@ impl MindInput {
     /// campaign session means campaign. Missing nodes default to in game so
     /// headless/partial scenes keep working.
     fn refresh_game_state(&mut self) {
+        // The bind guard is dropped before the visibility read, so nothing can
+        // re-enter the root's borrow while it is held.
         self.bridge.in_game = self
-            .base()
-            .try_get_node_as::<Control>("../Ui/UiRoot/MenuGroup")
-            .is_none_or(|menu| !menu.is_visible_in_tree());
+            .ui_root
+            .clone()
+            .map(|ui_root| {
+                let menu = ui_root.bind().menu_group_node();
+                menu.is_none_or(|menu| !menu.is_visible_in_tree())
+            })
+            .unwrap_or(true);
         self.bridge.campaign_active = self
-            .base()
-            .try_get_node_as::<Node>("/root/Spine/MindCampaign")
-            .is_some_and(|mut campaign| {
-                campaign
-                    .call("campaign_active", &[])
-                    .try_to::<bool>()
-                    .unwrap_or(false)
-            });
+            .campaign
+            .as_ref()
+            .is_some_and(|campaign| campaign.bind().campaign_active());
         // `HudFragment.canSkipWave` inputs (`HudFragment.java:1234-1236`); the
         // `MindHud` surface mirrors the campaign read model. Missing nodes keep
         // the default (skip locked).
@@ -670,10 +695,14 @@ impl MindInput {
         }
     }
 
-    /// Calls `hide_panel()` on a fragment (or clears `visible` when the
+    /// Calls `hide_panel()` on a HUD fragment (or clears `visible` when the
     /// fragment has no such method).
-    fn hide_panel_at(&self, path: &str) {
-        let Some(mut node) = self.base().try_get_node_as::<Node>(path) else {
+    fn hide_panel_at(&self, name: &str) {
+        let Some(ui_root) = self.ui_root.clone() else {
+            return;
+        };
+        let fragment = ui_root.bind().hud_fragment(name);
+        let Some(mut node) = fragment else {
             return;
         };
         if node.has_method("hide_panel") {
@@ -700,8 +729,11 @@ impl MindInput {
                     }
                 }
                 Effect::ToggleFragment(name) => {
-                    let path = format!("{HUD_FRAGMENT_DIR}/{name}");
-                    let Some(mut node) = self.base().try_get_node_as::<Node>(&path) else {
+                    let Some(ui_root) = self.ui_root.clone() else {
+                        continue;
+                    };
+                    let fragment = ui_root.bind().hud_fragment(&name);
+                    let Some(mut node) = fragment else {
                         continue;
                     };
                     if node.has_method("toggle") {
@@ -715,8 +747,11 @@ impl MindInput {
                     // `input.config.getSelected()` mirror (H03 T3): the panel
                     // hides later; the accessor re-checks `visible`.
                     self.config_tile = Some((x, y));
-                    let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH)
-                    else {
+                    let Some(ui_root) = self.ui_root.clone() else {
+                        continue;
+                    };
+                    let config = ui_root.bind().hud_fragment("block_config");
+                    let Some(mut node) = config else {
                         continue;
                     };
                     let _ = node.call(
@@ -730,16 +765,13 @@ impl MindInput {
                     // `build.block.configureSound.at(build.x, build.y, 1, 1,
                     // control.sound.uiBus)`. Tile centre (size-1 blocks);
                     // `block_offset` would refine multi-tile blocks.
-                    if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
-                        audio.call(
-                            "play_at_ui",
-                            &[
-                                GString::from("click").to_variant(),
-                                (f64::from(x) * 8.0 + 4.0).to_variant(),
-                                (f64::from(y) * 8.0 + 4.0).to_variant(),
-                                1.0.to_variant(),
-                                1.0.to_variant(),
-                            ],
+                    if let Some(mut audio) = self.audio.clone() {
+                        audio.bind_mut().play_at_ui(
+                            GString::from("click"),
+                            f64::from(x) * 8.0 + 4.0,
+                            f64::from(y) * 8.0 + 4.0,
+                            1.0,
+                            1.0,
                         );
                     }
                 }
@@ -749,8 +781,11 @@ impl MindInput {
                     screen,
                     items,
                 } => {
-                    let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_INVENTORY_PATH)
-                    else {
+                    let Some(ui_root) = self.ui_root.clone() else {
+                        continue;
+                    };
+                    let inventory = ui_root.bind().hud_fragment("block_inventory");
+                    let Some(mut node) = inventory else {
                         continue;
                     };
                     node.set("position", &Vector2::new(screen.0, screen.1).to_variant());
@@ -776,14 +811,17 @@ impl MindInput {
                     }
                 }
                 Effect::HideInventory => {
-                    self.hide_panel_at(BLOCK_INVENTORY_PATH);
+                    self.hide_panel_at("block_inventory");
                 }
                 Effect::HidePanels => {
                     // `config.hideConfig(); inv.hide(); planConfig.hide();`
                     // (`InputHandler.tileTapped` empty-tile branch).
-                    self.hide_panel_at(BLOCK_INVENTORY_PATH);
-                    if let Some(mut node) = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH) {
-                        node.set("visible", &false.to_variant());
+                    self.hide_panel_at("block_inventory");
+                    if let Some(ui_root) = self.ui_root.clone() {
+                        let config = ui_root.bind().hud_fragment("block_config");
+                        if let Some(mut node) = config {
+                            node.set("visible", &false.to_variant());
+                        }
                     }
                     // The tap dispatch only reacts while a panel is open (H02 T6).
                     self.config_tile = None;
@@ -805,11 +843,8 @@ impl MindInput {
                     // `HudFragment.java:461-467` -> `logic.skipWave()`: the
                     // same campaign facade the HUD skip button calls
                     // (`_on_skip_wave` -> `MindCampaign.run_wave`).
-                    if let Some(mut campaign) = self
-                        .base()
-                        .try_get_node_as::<Node>("/root/Spine/MindCampaign")
-                    {
-                        let _ = campaign.call("run_wave", &[]);
+                    if let Some(mut campaign) = self.campaign.clone() {
+                        let _ = campaign.bind_mut().run_wave();
                     }
                 }
                 Effect::SelectionChanged(json) => {
@@ -1342,7 +1377,8 @@ impl MindInput {
     /// for probes through [`Self::config_selected_json`].
     pub fn config_selected(&self) -> Option<(i32, i32)> {
         let (x, y) = self.config_tile?;
-        let node = self.base().try_get_node_as::<Node>(BLOCK_CONFIG_PATH)?;
+        let ui_root = self.ui_root.clone()?;
+        let node = ui_root.bind().hud_fragment("block_config")?;
         let visible = node.get("visible").try_to::<bool>().unwrap_or(false);
         visible.then_some((x, y))
     }
@@ -1439,10 +1475,7 @@ impl MindInput {
         if !self.bridge.in_game {
             return false;
         }
-        let Some(campaign) = self
-            .base()
-            .try_get_node_as::<crate::campaign::MindCampaign>("/root/Spine/MindCampaign")
-        else {
+        let Some(campaign) = self.campaign.clone() else {
             return false;
         };
         let Some(schem) = campaign.bind().schematic_at(index) else {

@@ -49,7 +49,7 @@ owning `.tscn` wires them directly.
 | `sim_host.rs` | 6 (2 code + 4 doc) | 3 | input, camera, fx, preview |
 | `net/mod.rs` | 4 | 1 | sim_host, campaign, ui_root |
 | `input/mod.rs` | 4 | 8 | sim_host, camera, campaign, audio, ui_root |
-| `ui/root.rs` | 3 | 2 | menu_background, editor_dialog, platform |
+| `ui/root.rs` | 3 | 2 | menu_background, editor_dialog, platform, campaign |
 | `audio/mod.rs` | 3 | 2 | sim_host, camera, ui_root, menu_background, editor_dialog |
 | `ui/state_inspector.rs` | 2 | 0 | sim_host, camera, audio, editor |
 | `ui/menu_background.rs` | 1 | 0 | render |
@@ -102,7 +102,7 @@ ui_root = NodePath("../Ui/UiRoot")
    Option<Gd<T>>` (~40 lines) — so the format cannot drift; inlining the identical string is the fallback if S2 rejects a new module.
 4. **Optional deps stay silent** (the class already guards the path and its output survives): `WorldRenderer.{ui_root, landing_core, tile_grid}`,
    `Render.{camera, tile_grid}`, `Minimap.camera`, `Camera.fx` (landing dust), `SimHost.{fx, preview}`, `Net.{campaign, ui_root}`, `Input.{campaign, audio}`,
-   `UiRoot.{menu_background, editor_dialog, platform}`, `Audio.{ui_root, menu_background, editor_dialog}`, `Campaign.{camera, audio, fx, editor,
+   `UiRoot.{menu_background, editor_dialog, platform, campaign}`, `Audio.{ui_root, menu_background, editor_dialog}`, `Campaign.{camera, audio, fx, editor,
    ui_root}`, `StateInspector.{audio, editor}`, `LandingCore.{fx, ui_root}`.
 5. **Resolve in `ready()`/`bootstrap()`**, never in `process`; classes with a `bootstrap()` re-adopt the same fields on `EXTENSION_RELOADED`.
    `MindUiRoot`, `MindDialog` and the fragments must **not** gain an `on_notification` arm (re-entrant `bind_mut`).
@@ -129,10 +129,12 @@ replaces the path lookup). Wire `SimHost`, `MindNet`.
 
 **S3b — input + UI root.** `input/mod.rs` (sim_host, camera, campaign, audio, ui_root): delete `BLOCK_CONFIG_PATH`, `BLOCK_INVENTORY_PATH`,
 `HUD_FRAGMENT_DIR` and the literal `../Ui/UiRoot/HudGroup/…`/`MenuGroup` paths — route through `MindUiRoot` methods. `ui/root.rs` (menu_background,
-editor_dialog, platform) plus owner-mediator accessors: `#[func] hud_group_node() -> Option<Gd<Control>>`, `hud_fragment(name) -> Option<Gd<Control>>`,
-`menu_group_node()`, `fade_in_node()`, `is_menu_visible()`; keep `dialog(name)`, `set_menu_visible`, `set_editor_open`. Internally swap
-`control_at("../MenuBackground")` for the new `menu_background` field and `kit::node("/root/Spine/Ui/EditorDialog")` for `editor_dialog`. Wire
-`Ui/UiRoot` **on the instance root**.
+editor_dialog, platform, campaign) plus owner-mediator accessors (**`pub(crate)`, not `#[func]`** — Rust-only, so no ABI change):
+`hud_group_node() -> Option<Gd<Control>>`, `hud_fragment(name) -> Option<Gd<Control>>`, `menu_group_node()`, `fade_in_node()`, `is_menu_visible()`;
+keep `dialog(name)`, `set_menu_visible`, `set_editor_open`. Internally swap `control_at("../MenuBackground")` for the new `menu_background` field,
+`kit::node("/root/Spine/MindPlatform")` for `platform` (typed `finish_launch`), `kit::node("/root/Spine/Ui/EditorDialog")` for `editor_dialog`
+(typed `show_dialog`), and `kit::campaign()` for `campaign` (typed `reset_to_menu`/`check_playtest`/`get_sector_state`). Wire `Ui/UiRoot` **on the
+instance root**.
 
 **S4 — facades/display.** `audio/mod.rs` (sim_host, camera, ui_root, menu_background, editor_dialog); `campaign.rs` (sim_host, camera, audio, fx,
 editor, ui_root); `ui/state_inspector.rs` (typed sim_host, camera, audio, editor; net may stay an autoload lookup); `ui/menu_background.rs` +
@@ -165,7 +167,7 @@ code) — untouched.
 | `MindNet` | MindNet | sim_host, campaign, ui_root | `../SimHost`, `../MindCampaign`, `../Ui/UiRoot` |
 | `Ui/MenuBackground` | MindMenuBackground | render | `../../MindRender` |
 | `Ui/MenuBackground/MenuFlyers` | MindMenuFlyers | render | `../../../MindRender` |
-| `Ui/UiRoot` **(instance root)** | MindUiRoot | menu_background, editor_dialog, platform | `../MenuBackground`, `../EditorDialog`, `../../MindPlatform` |
+| `Ui/UiRoot` **(instance root)** | MindUiRoot | menu_background, editor_dialog, platform, campaign | `../MenuBackground`, `../EditorDialog`, `../../MindPlatform`, `../../MindCampaign` |
 | `Ui/StateInspector` **(instance root)** | MindStateInspector | sim_host, camera, audio, editor | `../../SimHost`, `../../World/Camera2D`, `../../MindAudio`, `../../MindEditor` |
 
 `node_paths` is a node-header attribute after `instance=ExtResource(...)` when present; attribute order is irrelevant to the parser (Godot rewrites the file on save).
@@ -199,8 +201,8 @@ camera, ui_root · `MindAudio` sim_host, camera · `MindCampaign` sim_host · `M
   controllers read `ctx.sim_host`, `ctx.ui`, `ctx.campaign` instead of path strings, leaving the manifest ABI and node names untouched.
 - **Render pass children (c).** In no `.tscn`; `MindWorldRenderer` builds them with `new_alloc()`, so it must inject (`StatusRenderer`,
   `WeatherRenderer`, … gain `inject(sim_host, camera)` right after construction) — the spawner branch, not a scene edit.
-- **`ui/root.rs` residual.** `return_to_menu`/`check_playtest` still resolve the campaign via `kit::campaign()`; a `campaign` export on `MindUiRoot`
-  is safe but was outside S3b's scope. Same for `ui/kit/mod.rs`'s five path helpers, which serve bucket (b).
+- **`ui/kit/mod.rs` residual.** Its five path helpers (`campaign`, `sim_host`, `editor`, `net`, `logic`) still serve bucket (b), which cannot take
+  scene-wired refs.
 - **Component suffix naming** is for new classes only: retrofitting `Component2D` onto `MindTileGrid`/`MindWorldRenderer`/`MindFx` would rename
   registered classes and every `.tscn` naming them — an ABI break with no behavioural gain.
 - **`Spine` → `Main`.** Kept: `Spine` is referenced by docs, MCP recipes (`$"/root/Spine/..."`), the `playtest` skill and `AGENTS.md`; renaming is

@@ -13,7 +13,12 @@ camera = NodePath("../World/Camera2D")
 fx = NodePath("../MindFx")
 preview = NodePath("../MindPreview")
 
-[node name="Input" type="MindInput" parent="." unique_id=293949483]
+[node name="Input" type="MindInput" parent="." unique_id=293949483 node_paths=PackedStringArray("sim_host", "camera", "campaign", "audio", "ui_root")]
+sim_host = NodePath("../SimHost")
+camera = NodePath("../World/Camera2D")
+campaign = NodePath("../MindCampaign")
+audio = NodePath("../MindAudio")
+ui_root = NodePath("../Ui/UiRoot")
 
 [node name="MindAudio" type="MindAudio" parent="." unique_id=889813358]
 
@@ -96,7 +101,11 @@ mouse_filter = 2
 
 [node name="EditorDialog" parent="Ui" unique_id=1972126241 instance=ExtResource("3_editor")]
 
-[node name="UiRoot" parent="Ui" unique_id=1318437125 instance=ExtResource("2_uiroot")]
+[node name="UiRoot" parent="Ui" unique_id=1318437125 instance=ExtResource("2_uiroot") node_paths=PackedStringArray("menu_background", "editor_dialog", "platform", "campaign")]
+menu_background = NodePath("../MenuBackground")
+editor_dialog = NodePath("../EditorDialog")
+platform = NodePath("../../MindPlatform")
+campaign = NodePath("../../MindCampaign")
 
 [node name="StateInspector" parent="Ui" unique_id=1200639430 instance=ExtResource("1_inspector")]
 
