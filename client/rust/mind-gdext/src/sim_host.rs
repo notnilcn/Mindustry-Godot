@@ -21,6 +21,7 @@ use godot::prelude::*;
 use crate::camera::MindCamera2D;
 use crate::input::MindInput;
 use crate::settings;
+use crate::wiring;
 use mind_core::content::registries::units::parts::DrawPartSpec;
 use mind_core::content::registries::units::weapon::WeaponDef;
 use mind_core::weapons::WeaponMount;
@@ -526,7 +527,9 @@ pub struct MindSimHost {
     /// forced to zero.
     input_locked: bool,
     /// Plan-17 `MindFx` sibling (`../MindFx`); the one-way sim→view tick hook.
-    fx_host: Option<Gd<Node>>,
+    /// Optional: absent in headless/no-FX scenes.
+    #[export]
+    pub fx: Option<Gd<crate::fx::MindFx>>,
     /// Plan-21 relay queue: commands drained and applied at the next tick
     /// start (never mid-frame). Populated by `MindNet`/MCP via
     /// `enqueue_sim_command`/`apply_sim_command_json`.
@@ -544,9 +547,19 @@ pub struct MindSimHost {
     /// the installed runtime (the lost-sector replay restores its survivors'
     /// plans alongside).
     sector_plans: Vec<(i32, Vec<mind_core::io::save::state::TeamPlan>)>,
+    /// Sibling `World/Camera2D` (`../World/Camera2D`); clicks the GUI did not
+    /// claim map to a tile through its `screen_to_tile`.
+    #[export]
+    pub camera: Option<Gd<MindCamera2D>>,
     /// Sibling `Input`; the player move axis is uploaded to the sim each frame
     /// (`DesktopInput.updateMovement`).
-    input: Option<Gd<MindInput>>,
+    #[export]
+    pub input: Option<Gd<MindInput>>,
+    /// Sibling `MindPreview` (`../MindPreview`); bare `load_map_world` names
+    /// resolve through its registry rows (`map_path`). Optional: absent in
+    /// headless scenes.
+    #[export]
+    pub preview: Option<Gd<crate::editor::MindPreview>>,
     /// Enemy spawn-overlay count of the last loaded sector grid.
     sector_spawns: i32,
     /// Turret `BaseTurret.range` cache for `block_place_range` (`config_for`
@@ -606,13 +619,15 @@ impl INode for MindSimHost {
             revision: 0,
             world_loads: 0,
             input_locked: false,
-            fx_host: None,
+            fx: None,
             pending_commands: VecDeque::new(),
             relay_outbox: None,
             audio_log: SharedAudioLog::new(),
             sector_rules: None,
             sector_plans: Vec::new(),
+            camera: None,
             input: None,
+            preview: None,
             sector_spawns: 0,
             place_range_cache: std::cell::RefCell::new(std::collections::HashMap::new()),
             sector_resume: None,
@@ -683,11 +698,7 @@ impl INode for MindSimHost {
         }
         let position = mouse.get_position();
 
-        let Some(camera) = self
-            .base()
-            .try_get_node_as::<MindCamera2D>("../World/Camera2D")
-        else {
-            log::warn!("MindSimHost input ignored: no MindCamera2D at ../World/Camera2D");
+        let Some(camera) = self.camera.as_ref() else {
             return;
         };
         let tile = camera
@@ -770,7 +781,10 @@ impl MindSimHost {
         // the command-mode gate (`command_mode_allowed`), so ordered RTS units
         // could never be selected after a restart (PAR-0140). The selected block
         // starts at AIR and the settings file is still written on exit.
-        self.input = self.base().try_get_node_as::<MindInput>("../Input");
+        self.input = wiring::required("MindSimHost", "input", &self.input);
+        // `World/Camera2D` maps unclaimed GUI clicks to a tile (required: the
+        // scene spine always has one).
+        self.camera = wiring::required("MindSimHost", "camera", &self.camera);
 
         self.capture = parse_capture_args();
         // The STDB connection is owned by the `StdbConnector` autoload (plan 01
@@ -782,7 +796,10 @@ impl MindSimHost {
         // Plan-17 sim→view hook: the FX host advances one fixed view tick per
         // sim tick (one-way; the sim never reads the view). Optional: absent in
         // headless/no-FX scenes.
-        self.fx_host = self.base().try_get_node_as::<Node>("../MindFx");
+        self.fx = wiring::optional(&self.fx);
+        // Bare `load_map_world` names resolve through the map registry; optional
+        // (headless/no-preview scenes fall through to the file paths above).
+        self.preview = wiring::optional(&self.preview);
 
         log::info!(
             "MindSimHost ready ({}x{} seed {} selected `{}`, mind-core {})",
@@ -943,17 +960,14 @@ impl MindSimHost {
     }
 
     /// Installs the live `MindFx` bus on the sim's unit runtime so every
-    /// `FxSink` call reaches the view instead of the noop sink (`MindFx` sits
-    /// at `/root/Spine/MindFx`; `FxBus` is `Send + Sync`). No-op when the FX
-    /// host or unit runtime is absent.
+    /// `FxSink` call reaches the view instead of the noop sink (the scene-wired
+    /// `fx` dependency; `FxBus` is `Send + Sync`). No-op when the FX host or
+    /// unit runtime is absent.
     fn install_fx_sink(&mut self) {
-        let Some(bus) = self
-            .base()
-            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
-            .map(|fx| fx.bind().bus_handle())
-        else {
+        let Some(fx) = self.fx.as_ref() else {
             return;
         };
+        let bus = fx.bind().bus_handle();
         // Reactor/generator explosions (`ExplosionSink`) share the same bus so
         // their effect/sound/shake/scorch reach the view (PAR-0399).
         self.sim.ecs.0.insert_resource(
@@ -3428,11 +3442,8 @@ impl MindSimHost {
         if raw.is_empty() {
             return None;
         }
-        let mut preview = self.base().get_node_or_null("/root/Spine/MindPreview")?;
-        let resolved = preview
-            .call("map_path", &[GString::from(raw.as_str()).to_variant()])
-            .try_to::<GString>()
-            .ok()?;
+        let preview = self.preview.as_ref()?;
+        let resolved = preview.bind().map_path(GString::from(raw.as_str()));
         (!resolved.is_empty()).then(|| resolved.to_string())
     }
 
@@ -6759,10 +6770,8 @@ impl MindSimHost {
 
     /// Advances the plan-17 `MindFx` view by one fixed tick (sim→view hook).
     fn tick_fx_view(&mut self) {
-        if let Some(node) = self.fx_host.as_mut()
-            && node.has_method("tick_view")
-        {
-            let _ = node.call("tick_view", &[]);
+        if let Some(fx) = self.fx.as_mut() {
+            fx.bind_mut().tick_view();
         }
     }
 

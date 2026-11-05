@@ -42,6 +42,7 @@ use mind_stdb::{
 
 use crate::settings_hub;
 use crate::sim_host::MindSimHost;
+use crate::wiring;
 
 use self::relay::RelayRuntime;
 
@@ -128,7 +129,17 @@ pub struct MindNet {
     pub offline: bool,
     connector: Option<Connector>,
     session: MatchSession,
-    sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `SimHost` (`../SimHost`); relayed commands queue into its pump.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `MindCampaign` (`../MindCampaign`); rules/join-world facade.
+    /// Optional: silent when a scene has no campaign node.
+    #[export]
+    pub campaign: Option<Gd<crate::campaign::MindCampaign>>,
+    /// `Ui/UiRoot` (`../Ui/UiRoot`); hides the menu once a joined world is live.
+    /// Optional.
+    #[export]
+    pub ui_root: Option<Gd<crate::ui::root::MindUiRoot>>,
     runtime: Option<RelayRuntime>,
     sender: Option<CommandSender>,
     match_binder: Option<TableBinder<MyMatchTableAccessor>>,
@@ -203,6 +214,8 @@ impl INode for MindNet {
             connector: None,
             session: MatchSession::new(),
             sim_host: None,
+            campaign: None,
+            ui_root: None,
             runtime: None,
             sender: None,
             match_binder: None,
@@ -344,13 +357,11 @@ impl MindNet {
         }
         self.connector = Some(connector);
         self.online_mode = online;
-        self.sim_host = self
-            .base()
-            .try_get_node_as::<MindSimHost>("../SimHost")
-            .or_else(|| {
-                self.base()
-                    .try_get_node_as::<MindSimHost>("/root/Spine/SimHost")
-            });
+        // Scene-wired spine references (`game.tscn` wires the `Spine`
+        // siblings); re-adopted on every bootstrap so a reload keeps them.
+        self.sim_host = wiring::required("MindNet", "sim_host", &self.sim_host);
+        self.campaign = wiring::optional(&self.campaign);
+        self.ui_root = wiring::optional(&self.ui_root);
     }
 
     /// Registers the table binders on a freshly built connector. Shared by
@@ -1308,11 +1319,9 @@ impl MindNet {
         }
     }
 
-    /// Reads a `GString`-returning method on `/root/Spine/MindCampaign`.
+    /// Reads a `GString`-returning method on the scene-wired `MindCampaign`.
     fn campaign_call(&self, method: &str) -> Option<String> {
-        let mut campaign = self
-            .base()
-            .try_get_node_as::<crate::MindCampaign>("/root/Spine/MindCampaign")?;
+        let mut campaign = self.campaign.as_ref()?.clone();
         if !campaign.has_method(method) {
             return None;
         }
@@ -1791,9 +1800,9 @@ impl MindNet {
             return false;
         }
         let started = self
-            .base()
-            .try_get_node_as::<crate::MindCampaign>("/root/Spine/MindCampaign")
-            .map(|mut campaign| {
+            .campaign
+            .as_mut()
+            .map(|campaign| {
                 campaign
                     .bind_mut()
                     .start_joined_world(GString::from(header.rules_json.as_str()))
@@ -1810,8 +1819,8 @@ impl MindNet {
             runtime.skip_through(header.command_id);
         }
         // Java: the state leaves the menu when the world is live.
-        if let Some(mut ui_root) = self.base().get_node_or_null("/root/Spine/Ui/UiRoot") {
-            ui_root.call("set_menu_visible", &[false.to_variant()]);
+        if let Some(ui_root) = self.ui_root.as_mut() {
+            ui_root.bind_mut().set_menu_visible(false);
         }
         self.pending_join = false;
         self.join_load = None;

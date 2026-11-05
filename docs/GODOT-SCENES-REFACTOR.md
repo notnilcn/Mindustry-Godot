@@ -101,7 +101,7 @@ ui_root = NodePath("../Ui/UiRoot")
    in the owning scene)")``. Add one shared helper in S2 — `src/wiring.rs`, `pub(crate) fn required<T: Inherits<Node>>(owner, property, dep) ->
    Option<Gd<T>>` (~40 lines) — so the format cannot drift; inlining the identical string is the fallback if S2 rejects a new module.
 4. **Optional deps stay silent** (the class already guards the path and its output survives): `WorldRenderer.{ui_root, landing_core, tile_grid}`,
-   `Render.{camera, tile_grid}`, `Minimap.camera`, `Camera.fx` (landing dust), `SimHost.preview`, `Net.{campaign, ui_root}`, `Input.{campaign, audio}`,
+   `Render.{camera, tile_grid}`, `Minimap.camera`, `Camera.fx` (landing dust), `SimHost.{fx, preview}`, `Net.{campaign, ui_root}`, `Input.{campaign, audio}`,
    `UiRoot.{menu_background, editor_dialog, platform}`, `Audio.{ui_root, menu_background, editor_dialog}`, `Campaign.{camera, audio, fx, editor,
    ui_root}`, `StateInspector.{audio, editor}`, `LandingCore.{fx, ui_root}`.
 5. **Resolve in `ready()`/`bootstrap()`**, never in `process`; classes with a `bootstrap()` re-adopt the same fields on `EXTENSION_RELOADED`.
@@ -123,8 +123,9 @@ camera). Add `src/wiring.rs`; wire `game.tscn` (6 nodes, §6). `MindWorldRendere
 `MindRender`): wire it only if S2 moves that method, else omit it.
 
 **S3a — pump.** `sim_host.rs` (input, camera, fx, preview; `fx_host: Option<Gd<Node>>` becomes `fx: Option<Gd<MindFx>>` and `install_fx_sink` reads
-the field instead of re-looking it up); `net/mod.rs` (sim_host, campaign, ui_root; `campaign_call` becomes a direct `MindCampaign` call). Wire
-`SimHost`, `MindNet`.
+the field instead of re-looking it up; `tick_view`/`map_path` are typed calls); `net/mod.rs` (sim_host, campaign, ui_root; `campaign_call` calls the
+wired `MindCampaign` under its dynamic `has_method` guard; the join path uses typed `start_joined_world`, and `ui_root.set_menu_visible(false)`
+replaces the path lookup). Wire `SimHost`, `MindNet`.
 
 **S3b — input + UI root.** `input/mod.rs` (sim_host, camera, campaign, audio, ui_root): delete `BLOCK_CONFIG_PATH`, `BLOCK_INVENTORY_PATH`,
 `HUD_FRAGMENT_DIR` and the literal `../Ui/UiRoot/HudGroup/…`/`MenuGroup` paths — route through `MindUiRoot` methods. `ui/root.rs` (menu_background,
@@ -185,7 +186,7 @@ grep -rn '"\.\./'      --include="*.rs" client/rust/mind-gdext/src | wc -l
 
 **Expected new warnings if a wiring line is missed** — ``{class}: missing required `{property}` (wire it in the owning scene)``, one per class/property,
 in the boot log and `user://last_log.txt`: `MindTileGrid` sim_host · `MindCamera2D` sim_host, input · `MindFx` camera · `MindWorldRenderer` sim_host,
-camera, fx · `MindRender` renderer, sim_host · `MindMinimap` sim_host · `MindSimHost` input, camera, fx · `MindNet` sim_host · `MindInput` sim_host,
+camera, fx · `MindRender` renderer, sim_host · `MindMinimap` sim_host · `MindSimHost` input, camera · `MindNet` sim_host · `MindInput` sim_host,
 camera, ui_root · `MindAudio` sim_host, camera · `MindCampaign` sim_host · `MindStateInspector` sim_host, camera · `MindLandingCore` sim_host, camera
 · `MindMenuBackground` render · `MindMenuFlyers` render. Optional deps (§4.4) log nothing.
 

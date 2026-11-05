@@ -7,7 +7,11 @@
 
 [node name="Spine" type="Node" unique_id=1959762537]
 
-[node name="SimHost" type="MindSimHost" parent="." unique_id=842240592]
+[node name="SimHost" type="MindSimHost" parent="." unique_id=842240592 node_paths=PackedStringArray("input", "camera", "fx", "preview")]
+input = NodePath("../Input")
+camera = NodePath("../World/Camera2D")
+fx = NodePath("../MindFx")
+preview = NodePath("../MindPreview")
 
 [node name="Input" type="MindInput" parent="." unique_id=293949483]
 
@@ -56,7 +60,10 @@ camera = NodePath("../World/Camera2D")
 
 [node name="MindLogic" type="MindLogic" parent="." unique_id=1522895067]
 
-[node name="MindNet" type="MindNet" parent="." unique_id=709721595]
+[node name="MindNet" type="MindNet" parent="." unique_id=709721595 node_paths=PackedStringArray("sim_host", "campaign", "ui_root")]
+sim_host = NodePath("../SimHost")
+campaign = NodePath("../MindCampaign")
+ui_root = NodePath("../Ui/UiRoot")
 
 [node name="MindEditor" type="MindEditor" parent="." unique_id=1226968200]
 
