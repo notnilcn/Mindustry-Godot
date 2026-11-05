@@ -23,7 +23,7 @@ Navigation map only; behavior and conventions are in **Responsibilities** and **
 
 | Path | What lives there |
 |---|---|
-| `scenes/game.tscn` | Main scene (`Spine`): `SimHost`, `Input`, `MindAudio`, `World/*` render nodes, the `Mind*` Rust facades, `Planet/PlanetView`, and `Ui/{MenuBackground,EditorDialog,UiRoot,StateInspector}`. |
+| `scenes/game.tscn` | Main scene (`Spine`): `SimHost`, `Input`, `MindAudio`, `World/*` render nodes, the `Mind*` Rust facades, `Planet/PlanetView`, and `Ui/{MenuBackground,EditorDialog,UiRoot,StateInspector}`. Its spine nodes carry the `node_paths`-wired `#[export]` deps (see **Invariants**). |
 | `scenes/autoloads/` | One `.tscn` per scene autoload (`mind_assets`, `mind_mods`, `stdb_connector`, `mind_ui`, `mind_hud`); each root node is the matching native `Mind*` class. `McpRuntimeAutoload` is a script autoload from the addon (also injected at editor startup). |
 | `scenes/editor/` | Map-editor shell and tool scenes rooted on native classes: `map_editor_dialog`, `map_view`, `wave_graph`, `map_objectives_canvas`, `wave_info_dialog`, `banned_content_dialog`, `sector_generate_dialog`, plus the map info/load/resize/locales/objectives/processors/generate dialogs and `data/map_assets_dialog`. |
 | `scenes/ui/*.tscn` | `ui_root.tscn` (five layer groups plus a static instance of every manifest dialog/fragment), `state_inspector.tscn` (read-only spine overlay), `planet_view.tscn`. |
@@ -40,7 +40,7 @@ Navigation map only; behavior and conventions are in **Responsibilities** and **
 - `MindMenuFragment` renders the standalone menu in `MenuGroup`: the `MINDISTRY` logo, the left sidebar button tree (icons are Mindustry icon-font glyphs via `MindAssets`) with fade-in submenus, the Discord banner and quit. `MindMenuBackground` under `Ui/MenuBackground` asks `MindRender.build_menu_texture` for the procedural `MenuRenderer` world baked to a texture and darkens it behind the menu.
 - `MindDialog` (`rust/mind-gdext/src/ui/dialog.rs`) is the base for all dialogs: one native root class per manifest dialog, dispatched to a `DialogController` by registry key. `MindUi` owns visibility and the active-dialog stack; the node renders and calls `show_dialog`/`hide_dialog`.
 - Fragments bind to the read-only `MindHud` properties and signals or to `MindUi` JSON endpoints; they never touch sim state.
-- Editor dialogs read and write `/root/Spine/MindEditor` (tool dispatch, rotation, undo/redo and palette order are resolved in Rust).
+- Editor dialogs read and write `/root/Spine/MindEditor` (tool dispatch, rotation, undo/redo and palette order are resolved in Rust). They are one of the remaining path-based controller groups — deferred, unchanged by the scene-spine refactor; see [`docs/GODOT-SCENES-REFACTOR.md`](../docs/GODOT-SCENES-REFACTOR.md).
 - The native nodes (`MindSimHost`, `MindWorldRenderer`, `MindFx`, `MindCampaign`, `MindLogic`, `MindNet`, `MindEditor`, `MindPlatform`, `MindAudio`, `MindAssets`, `MindMods`, `StdbConnector`) are the interface to the Rust behavior; scenes only name them.
 
 ## Key types
@@ -54,6 +54,7 @@ Navigation map only; behavior and conventions are in **Responsibilities** and **
 ## Invariants
 
 - **`.tscn`-first.** Static UI, world scaffolding, autoloads and debug views live in scenes so the project is navigable in the editor. Rust owns behavior, not static scene construction.
+- **Scene-spine deps are injected.** The spine classes take collaborators as `#[export] Option<Gd<T>>` fields wired from `scenes/game.tscn` (`node_paths` + `NodePath`), adopted in `ready`/`bootstrap` through `wiring::{required, optional}`; a missing required dep warns once and degrades. Migrated: `MindTileGrid`, `MindCamera2D`, `MindFx`, `MindWorldRenderer`, `MindRender`, `MindMinimap`, `MindSimHost`, `MindNet`, `MindInput` (+ `DesktopBridge`), `MindUiRoot`, `MindAudio`, `MindCampaign`, `MindStateInspector`, `MindMenuBackground`, `MindMenuFlyers`, `MindLandingCore`. UI dialog/fragment controllers and the code-built render-pass children still use the `kit::*`/path helpers — documented follow-up in [`docs/GODOT-SCENES-REFACTOR.md`](../docs/GODOT-SCENES-REFACTOR.md).
 - Any node built in code needs a `# code-instantiated: <specific reason>` comment at the site (`spawned at runtime`, `pooled/high-churn`, `count driven by server rows`).
 - **The UI is native Rust.** All non-addon code is `.rs` or `.tscn`. There is no GDScript in `client/` (outside vendored addons), no `.gd`/`.gd.uid` file, and no `script = ExtResource(...)` on a non-addon scene: UI nodes are `Mind*` classes from `mind-gdext/src/ui/`, which read sim JSON/signals (`get_state_json`, `state_changed`) and never mutate sim state. Extend the native class or the scene instead.
 - **Manifest ABI.** A new dialog or fragment must be added to three places: the static instance under its layer group in `scenes/ui/ui_root.tscn`, `ui/dialogs_manifest.json`, and the `EXPECTED_*_DIALOGS`/fragment lists in `mind-core::ui::manifest`. `MindUiRoot::bind_manifest`/`verify_manifest` and `MindThemeBuilder.verify()` cross-check the manifests at boot.

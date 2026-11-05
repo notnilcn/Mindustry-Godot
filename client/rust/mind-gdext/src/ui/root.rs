@@ -2012,16 +2012,8 @@ impl MindUiRoot {
             .or_else(|| self.control_at("MenuGroup"))
     }
 
-    /// `state.isMenu()` for the input binding gates: the menu group is shown.
-    /// Consumed by `MindAudio`/`MindLandingCore` in S4, hence the allow.
-    #[allow(dead_code)] // owner-mediator seam; no caller until S4
-    pub(crate) fn is_menu_visible(&self) -> bool {
-        self.menu_group_node()
-            .is_some_and(|group| group.is_visible_in_tree())
-    }
-
-    /// The boot fade cover (`OverlayLayer/fade_in`); `MindLandingCore` starts it
-    /// in S4.
+    /// The boot fade cover (`OverlayLayer/fade_in`) used by the menu boot
+    /// and by `MindLandingCore` on touchdown.
     pub(crate) fn fade_in_node(&self) -> Option<Gd<Node>> {
         self.base().get_node_or_null("OverlayLayer/fade_in")
     }

@@ -79,7 +79,14 @@ first; the project- and workspace-level maps are [`client/AGENTS.md`](../../AGEN
 - No game rules in this crate; `mind-core` owns all simulation. The crate depends only on `godot`,
   `mind-core`, `mind-stdb`, `bevy_ecs`, `serde_json`, `indexmap`, `smallvec` and `log`.
 - Relay/foreign commands apply only at fixed-tick starts, never mid-frame. Mouse input routes through
-  `MindCamera2D::screen_to_tile`; scene nodes are addressed by fixed `/root/...` paths.
+  `MindCamera2D::screen_to_tile`.
+- **Scene-spine deps are injected, not looked up.** The migrated scene-spine classes take collaborators as
+  `#[export] Option<Gd<T>>` fields wired from `client/scenes/game.tscn` (`node_paths` + `NodePath`, relative to
+  the node carrying the property) and adopt them in `ready`/`bootstrap` through `wiring::{required, optional}`.
+  A missing required dep warns once (``{class}: missing required `{property}` (wire it in the owning scene)``)
+  and the class degrades; optional deps stay silent. UI dialog/fragment controllers and the code-built
+  render-pass children still resolve nodes through the `kit::*`/path helpers — deferred, see
+  [`docs/GODOT-SCENES-REFACTOR.md`](../../../docs/GODOT-SCENES-REFACTOR.md).
 - Render layers are append-only `BandPlan` entries; the minimap batches tile updates and rebuilds
   from the `world_revision` counter.
 - Scene `Mind*` nodes rebuild Godot-derived state in `bootstrap()` in response to the
@@ -100,6 +107,12 @@ first; the project- and workspace-level maps are [`client/AGENTS.md`](../../AGEN
 
 - Use `#[derive(GodotClass)]`, `#[class(base=...)]`, `#[godot_api]`, `#[func]` and `#[signal]` for any
   class surface; exported names are part of the MCP/test contract and stay append-only.
+- **No new spine path lookups.** Never add a `/root/Spine` or `"../"` lookup to a migrated scene-spine
+  class; wire the dependency in the owning scene instead (`node_paths` + `NodePath` on the node that owns
+  the property). Required deps go through `wiring::required` — exactly one
+  ``{class}: missing required `{property}` (wire it in the owning scene)`` warning, then degrade — and
+  optional deps through `wiring::optional` (silent). Wire new deps as additions only; class, `#[func]`
+  and `#[signal]` names stay append-only.
 - Log through the `log` crate (`log::info!`/`warn!`/`error!`) so messages reach both Godot and
   `last_log.txt`.
 - Nodes created in code carry a `# code-instantiated: <reason>` comment.
