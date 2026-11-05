@@ -61,8 +61,14 @@ use mind_core::render::g3d::mesh_data::build_planet_grid;
 use mind_core::ui::content_stats::{Cell, StatCtx, content_stats as compute_content_stats};
 use mind_core::world::modules::ItemModule;
 
+use crate::audio::MindAudio;
+use crate::camera::MindCamera2D;
+use crate::editor::MindEditor;
+use crate::fx::MindFx;
 use crate::settings_hub;
 use crate::sim_host::MindSimHost;
+use crate::ui::root::MindUiRoot;
+use crate::wiring;
 
 /// `PlanetRenderer.outlineRad`: the sector-grid shell scale over `radius`.
 const OUTLINE_RAD: f32 = 1.17;
@@ -76,6 +82,28 @@ type SectorInventory = Vec<(SectorRef, Vec<(String, i32)>)>;
 #[class(base=Node)]
 pub struct MindCampaign {
     base: Base<Node>,
+    /// Sibling `SimHost` (`../SimHost`) — required; the live sim/runtime host.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `World/Camera2D` (`../World/Camera2D`) — optional; landing/
+    /// accelerator cutscenes and shake.
+    #[export]
+    pub camera: Option<Gd<MindCamera2D>>,
+    /// Sibling `MindAudio` (`../MindAudio`) — optional; landing cue and
+    /// accelerator sounds.
+    #[export]
+    pub audio: Option<Gd<MindAudio>>,
+    /// Sibling `MindFx` (`../MindFx`) — optional; accelerator effect spawns.
+    #[export]
+    pub fx: Option<Gd<MindFx>>,
+    /// Sibling `MindEditor` (`../MindEditor`) — optional; the playtest reopen
+    /// (`resumeAfterPlaytest`).
+    #[export]
+    pub editor: Option<Gd<MindEditor>>,
+    /// `Ui/UiRoot` (`../Ui/UiRoot`) — optional; the menu restore on an invalid
+    /// map.
+    #[export]
+    pub ui_root: Option<Gd<MindUiRoot>>,
     session: PlaySession,
     campaign: Option<Campaign>,
     registry: Option<ContentRegistry>,
@@ -119,6 +147,12 @@ impl INode for MindCampaign {
     fn init(base: Base<Node>) -> Self {
         Self {
             base,
+            sim_host: None,
+            camera: None,
+            audio: None,
+            fx: None,
+            editor: None,
+            ui_root: None,
             session: PlaySession::default(),
             campaign: None,
             registry: None,
@@ -207,6 +241,14 @@ impl MindCampaign {
     /// `importData` exits without loading saves, so the remap - and the
     /// one-time remap notice it arms - happen on the next boot.
     fn bootstrap_with(&mut self, run_saves_load: bool) {
+        // Scene-wired spine deps: `game.tscn` sets them on the instance root;
+        // `ready()` and `EXTENSION_RELOADED` both re-adopt here.
+        self.sim_host = wiring::required("MindCampaign", "sim_host", &self.sim_host);
+        self.camera = wiring::optional(&self.camera);
+        self.audio = wiring::optional(&self.audio);
+        self.fx = wiring::optional(&self.fx);
+        self.editor = wiring::optional(&self.editor);
+        self.ui_root = wiring::optional(&self.ui_root);
         // Campaign state lives in the same settings store the sim host writes
         // (`user://config/settings.bin`), so unlocks/rules survive restarts.
         let root = godot::classes::ProjectSettings::singleton()
@@ -284,9 +326,9 @@ impl MindCampaign {
         }
     }
 
-    /// The sibling `MindSimHost` that owns the live sim/runtime.
+    /// The wired `MindSimHost` that owns the live sim/runtime.
     fn host(&self) -> Option<Gd<MindSimHost>> {
-        self.base().try_get_node_as::<MindSimHost>("../SimHost")
+        wiring::optional(&self.sim_host)
     }
 
     /// `Saves.SaveSlot.savePreview` on the live world (`Saves.java:343-358`):
@@ -1319,20 +1361,13 @@ impl MindCampaign {
                     .best_core_position_px()
                     .map(|(x, y)| (x, y, guard.best_core_block()))
             })
-            && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
+            && let Some(mut camera) = wiring::optional(&self.camera)
         {
-            camera.call(
-                "show_landing",
-                &[
-                    core_x.to_variant(),
-                    core_y.to_variant(),
-                    core_block.to_variant(),
-                ],
-            );
+            camera.bind_mut().show_landing(core_x, core_y, core_block);
             // G07 T7: `Trigger.newGame` audio — `coreLand.at(camera)` +
             // `Musics.land` (`Control.java:198-222`).
-            if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
-                audio.call("play_landing", &[]);
+            if let Some(mut audio) = wiring::optional(&self.audio) {
+                audio.bind_mut().play_landing();
             }
         }
 
@@ -1579,20 +1614,13 @@ impl MindCampaign {
                     .best_core_position_px()
                     .map(|(x, y)| (x, y, guard.best_core_block()))
             })
-            && let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D")
+            && let Some(mut camera) = wiring::optional(&self.camera)
         {
-            camera.call(
-                "show_landing",
-                &[
-                    core_x.to_variant(),
-                    core_y.to_variant(),
-                    core_block.to_variant(),
-                ],
-            );
+            camera.bind_mut().show_landing(core_x, core_y, core_block);
             // G07 T7: `Trigger.newGame` audio — `coreLand.at(camera)` +
             // `Musics.land` (`Control.java:198-222`).
-            if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
-                audio.call("play_landing", &[]);
+            if let Some(mut audio) = wiring::optional(&self.audio) {
+                audio.bind_mut().play_landing();
             }
         }
         self.runtime_installed = installed;
@@ -1745,10 +1773,10 @@ impl MindCampaign {
     /// `Core.scene` menu restore for an invalid map (`World.loadMap` posts
     /// `state.set(State.menu)`, `World.java:391`).
     fn set_menu_visible(&self, visible: bool) {
-        let Some(mut ui_root) = self.base().get_node_or_null("/root/Spine/Ui/UiRoot") else {
+        let Some(mut ui_root) = wiring::optional(&self.ui_root) else {
             return;
         };
-        ui_root.call("set_menu_visible", &[visible.to_variant()]);
+        ui_root.bind_mut().set_menu_visible(visible);
     }
 
     /// Starts a custom map by name (`Logic.playMap`, survival rules).
@@ -3951,18 +3979,11 @@ impl MindCampaign {
         };
         // "no exit save here"; `logic.reset()`.
         self.reset_to_menu();
-        let resumed = self
-            .base()
-            .get_node_or_null("/root/Spine/MindEditor")
-            .is_some_and(|mut editor| {
-                editor
-                    .call(
-                        "resume_after_playtest",
-                        &[GString::from(path.as_str()).to_variant()],
-                    )
-                    .try_to::<bool>()
-                    .unwrap_or(false)
-            });
+        let resumed = wiring::optional(&self.editor).is_some_and(|mut editor| {
+            editor
+                .bind_mut()
+                .resume_after_playtest(GString::from(path.as_str()))
+        });
         if !resumed {
             log::warn!("check_playtest: could not reopen `{path}` in the editor");
             self.show_error("@editor.errorload");
@@ -4189,11 +4210,8 @@ impl MindCampaign {
             .try_to::<Vector2>()
             .map(|center| (center.x, center.y))
             .unwrap_or((x as f32 * 8.0, y as f32 * 8.0));
-        if let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D") {
-            camera.call(
-                "show_accelerator_launch",
-                &[world.0.to_variant(), world.1.to_variant()],
-            );
+        if let Some(mut camera) = wiring::optional(&self.camera) {
+            camera.bind_mut().show_accelerator_launch(world.0, world.1);
         }
         // `Fx.coreLaunchConstruct.at(x, y, launchBlock.size)` (core-nucleus
         // size 5) + `chargeSound`/`constructSound` (Accelerator.java:338,
@@ -4222,30 +4240,20 @@ impl MindCampaign {
     }
 
     fn accelerator_fx(&self, name: &str, world: (f32, f32), rotation: f32) {
-        if let Some(mut fx) = self.base().get_node_or_null("/root/Spine/MindFx") {
-            fx.call(
-                "spawn_effect",
-                &[
-                    GString::from(name).to_variant(),
-                    world.0.to_variant(),
-                    world.1.to_variant(),
-                    rotation.to_variant(),
-                ],
-            );
+        if let Some(mut fx) = wiring::optional(&self.fx) {
+            fx.bind_mut()
+                .spawn_effect(GString::from(name), world.0, world.1, rotation);
         }
     }
 
     fn accelerator_sound(&self, name: &str, world: (f32, f32)) {
-        if let Some(mut audio) = self.base().get_node_or_null("/root/Spine/MindAudio") {
-            audio.call(
-                "play_at_ui",
-                &[
-                    GString::from(name).to_variant(),
-                    f64::from(world.0).to_variant(),
-                    f64::from(world.1).to_variant(),
-                    1.0f64.to_variant(),
-                    1.0f64.to_variant(),
-                ],
+        if let Some(mut audio) = wiring::optional(&self.audio) {
+            audio.bind_mut().play_at_ui(
+                GString::from(name),
+                f64::from(world.0),
+                f64::from(world.1),
+                1.0,
+                1.0,
             );
         }
     }
@@ -4267,12 +4275,9 @@ impl MindCampaign {
             self.accelerator_fx("coreLaunchConstruct", pending.world, 5.0);
             self.accelerator_fx("launchAccelerator", pending.world, 0.0);
             self.accelerator_sound("acceleratorLaunch", pending.world);
-            if let Some(mut camera) = self.base().get_node_or_null("/root/Spine/World/Camera2D") {
+            if let Some(mut camera) = wiring::optional(&self.camera) {
                 // `Effect.shake(10f, 14f, this)`.
-                camera.call(
-                    "apply_shake_event",
-                    &[10.0f64.to_variant(), 14.0f64.to_variant()],
-                );
+                camera.bind_mut().apply_shake_event(10.0, 14.0);
             }
         }
         if pending.elapsed < ACCELERATOR_SWITCH_TICKS {

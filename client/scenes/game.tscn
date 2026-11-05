@@ -20,7 +20,12 @@ campaign = NodePath("../MindCampaign")
 audio = NodePath("../MindAudio")
 ui_root = NodePath("../Ui/UiRoot")
 
-[node name="MindAudio" type="MindAudio" parent="." unique_id=889813358]
+[node name="MindAudio" type="MindAudio" parent="." unique_id=889813358 node_paths=PackedStringArray("sim_host", "camera", "ui_root", "menu_background", "editor_dialog")]
+sim_host = NodePath("../SimHost")
+camera = NodePath("../World/Camera2D")
+ui_root = NodePath("../Ui/UiRoot")
+menu_background = NodePath("../Ui/MenuBackground")
+editor_dialog = NodePath("../Ui/EditorDialog")
 
 [node name="World" type="Node2D" parent="." unique_id=1855719485]
 
@@ -61,7 +66,13 @@ sim_host = NodePath("../SimHost")
 [node name="MindFx" type="MindFx" parent="." unique_id=102409333 node_paths=PackedStringArray("camera")]
 camera = NodePath("../World/Camera2D")
 
-[node name="MindCampaign" type="MindCampaign" parent="." unique_id=2074069977]
+[node name="MindCampaign" type="MindCampaign" parent="." unique_id=2074069977 node_paths=PackedStringArray("sim_host", "camera", "audio", "fx", "editor", "ui_root")]
+sim_host = NodePath("../SimHost")
+camera = NodePath("../World/Camera2D")
+audio = NodePath("../MindAudio")
+fx = NodePath("../MindFx")
+editor = NodePath("../MindEditor")
+ui_root = NodePath("../Ui/UiRoot")
 
 [node name="MindLogic" type="MindLogic" parent="." unique_id=1522895067]
 

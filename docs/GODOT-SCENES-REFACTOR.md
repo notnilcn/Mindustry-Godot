@@ -102,7 +102,7 @@ ui_root = NodePath("../Ui/UiRoot")
    Option<Gd<T>>` (~40 lines) — so the format cannot drift; inlining the identical string is the fallback if S2 rejects a new module.
 4. **Optional deps stay silent** (the class already guards the path and its output survives): `WorldRenderer.{ui_root, landing_core, tile_grid}`,
    `Render.{camera, tile_grid}`, `Minimap.camera`, `Camera.fx` (landing dust), `SimHost.{fx, preview}`, `Net.{campaign, ui_root}`, `Input.{campaign, audio}`,
-   `UiRoot.{menu_background, editor_dialog, platform, campaign}`, `Audio.{ui_root, menu_background, editor_dialog}`, `Campaign.{camera, audio, fx, editor,
+   `UiRoot.{menu_background, editor_dialog, platform, campaign}`, `Audio.{sim_host, camera, ui_root, menu_background, editor_dialog}`, `Campaign.{camera, audio, fx, editor,
    ui_root}`, `StateInspector.{audio, editor}`, `LandingCore.{fx, ui_root}`.
 5. **Resolve in `ready()`/`bootstrap()`**, never in `process`; classes with a `bootstrap()` re-adopt the same fields on `EXTENSION_RELOADED`.
    `MindUiRoot`, `MindDialog` and the fragments must **not** gain an `on_notification` arm (re-entrant `bind_mut`).
@@ -189,8 +189,8 @@ grep -rn '"\.\./'      --include="*.rs" client/rust/mind-gdext/src | wc -l
 **Expected new warnings if a wiring line is missed** — ``{class}: missing required `{property}` (wire it in the owning scene)``, one per class/property,
 in the boot log and `user://last_log.txt`: `MindTileGrid` sim_host · `MindCamera2D` sim_host, input · `MindFx` camera · `MindWorldRenderer` sim_host,
 camera, fx · `MindRender` renderer, sim_host · `MindMinimap` sim_host · `MindSimHost` input, camera · `MindNet` sim_host · `MindInput` sim_host,
-camera, ui_root · `MindAudio` sim_host, camera · `MindCampaign` sim_host · `MindStateInspector` sim_host, camera · `MindLandingCore` sim_host, camera
-· `MindMenuBackground` render · `MindMenuFlyers` render. Optional deps (§4.4) log nothing.
+camera, ui_root · `MindCampaign` sim_host · `MindStateInspector` sim_host, camera · `MindLandingCore` sim_host, camera
+· `MindMenuBackground` render · `MindMenuFlyers` render. Optional deps (§4.4) log nothing. `MindAudio` has no required deps (all five are optional).
 
 **Known baseline (pre-existing, not caused by this refactor):** scoped clippy currently fails on `clippy::collapsible_if` at `client/rust/mind-gdext/src/editor/mod.rs:2138` — `if let Some(current) = self.file.as_ref() {` wrapping a single `if !current.starts_with(&dir)` at :2139, in the editor facade S2–S4 do not touch. Do not fix it here; S5 records it as a `CI_PENDING.json` exception or leaves it to the CI fixer.
 

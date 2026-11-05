@@ -14,9 +14,7 @@ pub mod decorator;
 pub mod streams;
 pub mod voices;
 
-use godot::classes::{
-    AudioListener2D, AudioServer, AudioStreamPlayer, Camera2D, INode, Node as GdNode,
-};
+use godot::classes::{AudioListener2D, AudioServer, AudioStreamPlayer, INode, Node as GdNode};
 use godot::obj::{Base, Singleton};
 use godot::prelude::*;
 
@@ -31,6 +29,8 @@ use mind_core::audio::{
     TickedAudioEvent, bus_for_sound, plan_one_shot, settings_keys,
 };
 
+use crate::wiring;
+
 use buses::{BusLayout, LOWPASS_DRY_HZ, LOWPASS_WET_HZ};
 use streams::StreamCache;
 use voices::{LoopVoicePool, VoicePool};
@@ -40,6 +40,21 @@ use voices::{LoopVoicePool, VoicePool};
 #[class(base=Node)]
 pub struct MindAudio {
     base: Base<GdNode>,
+    /// Sibling `SimHost` (`../SimHost`) — optional; phase and audio game state.
+    #[export]
+    pub sim_host: Option<Gd<crate::sim_host::MindSimHost>>,
+    /// Sibling `World/Camera2D` (`../World/Camera2D`) — optional; the listener.
+    #[export]
+    pub camera: Option<Gd<crate::camera::MindCamera2D>>,
+    /// `Ui/UiRoot` (`../Ui/UiRoot`) — optional; HUD group visibility.
+    #[export]
+    pub ui_root: Option<Gd<crate::ui::root::MindUiRoot>>,
+    /// `Ui/MenuBackground` (`../Ui/MenuBackground`) — optional; menu music.
+    #[export]
+    pub menu_background: Option<Gd<crate::ui::menu_background::MindMenuBackground>>,
+    /// `Ui/EditorDialog` (`../Ui/EditorDialog`) — optional; editor music.
+    #[export]
+    pub editor_dialog: Option<Gd<crate::ui::editor_views::MindMapEditorDialog>>,
     ready: bool,
     bus: BusLayout,
     streams: StreamCache,
@@ -85,7 +100,7 @@ pub struct MindAudio {
     preview_voice: Option<i64>,
     /// `_process` dispatch counter (T1 liveness probe / PAR-0072 gate).
     frames: u64,
-    /// Plan-18 sim→client sink, fetched from `/root/Spine/SimHost`.
+    /// Plan-18 sim→client sink, fetched from the wired `sim_host`.
     audio_log: Option<SharedAudioLog>,
     /// Events applied through the sink drain (inspector stat).
     events_applied: u64,
@@ -130,6 +145,11 @@ impl INode for MindAudio {
     fn init(base: Base<GdNode>) -> Self {
         MindAudio {
             base,
+            sim_host: None,
+            camera: None,
+            ui_root: None,
+            menu_background: None,
+            editor_dialog: None,
             ready: false,
             bus: BusLayout::default(),
             streams: StreamCache::default(),
@@ -174,6 +194,14 @@ impl INode for MindAudio {
     }
 
     fn ready(&mut self) {
+        // Scene-wired optional spine deps: `game.tscn` sets them on the
+        // instance root; an audio-only scene has none and stays silent.
+        self.sim_host = wiring::optional(&self.sim_host);
+        self.camera = wiring::optional(&self.camera);
+        self.ui_root = wiring::optional(&self.ui_root);
+        self.menu_background = wiring::optional(&self.menu_background);
+        self.editor_dialog = wiring::optional(&self.editor_dialog);
+
         let seed = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_nanos() as u64)
@@ -209,10 +237,9 @@ impl INode for MindAudio {
         self.land_player = Some(land_player);
 
         // Audio listener on the spine camera (plan 18 §3.10).
-        if let Some(camera) = self.find_camera() {
+        if let Some(mut camera) = wiring::optional(&self.camera) {
             let mut listener = AudioListener2D::new_alloc();
             listener.make_current();
-            let mut camera = camera;
             camera.add_child(&listener);
         }
 
@@ -268,7 +295,7 @@ impl INode for MindAudio {
 
         // `Core.audio.setPaused(soundBus.id, state.isPaused())`
         // (`SoundControl.java:151`).
-        if let Some(host) = self.sim_host() {
+        if let Some(host) = wiring::optional(&self.sim_host) {
             self.sound_paused = host.bind().is_paused();
         }
 
@@ -283,7 +310,7 @@ impl INode for MindAudio {
         // Plan-18 sink drain: fetch the sim log lazily (the `SimHost` may
         // finish `_ready` after `MindAudio`) and apply every queued event.
         if self.audio_log.is_none() {
-            self.audio_log = self.sim_host().map(|host| host.bind().audio_log());
+            self.audio_log = wiring::optional(&self.sim_host).map(|host| host.bind().audio_log());
         }
         let events = self
             .audio_log
@@ -298,8 +325,7 @@ impl INode for MindAudio {
         // frame, leaving the game, or a backwards sim tick (a fresh sector)
         // resets `lastPlayed` and stops the sound bus + loops.
         let in_game = !context.is_menu;
-        let tick = self
-            .sim_host()
+        let tick = wiring::optional(&self.sim_host)
             .map(|host| host.bind().get_tick())
             .unwrap_or(0);
         let in_game_changed = self.last_in_game != Some(in_game);
@@ -342,7 +368,7 @@ impl INode for MindAudio {
         let delta_ms = delta * 1000.0;
         let due = self.poller.accum_ms + delta_ms >= self.poller.interval_ms;
         if due && in_game {
-            if let Some(host) = self.sim_host() {
+            if let Some(host) = wiring::optional(&self.sim_host) {
                 host.bind().ambient_snapshot(&mut self.ambient);
             } else {
                 self.ambient.entries.clear();
@@ -360,7 +386,7 @@ impl INode for MindAudio {
         // tractor beam) and turret `SoundLoop` instances
         // (`Turret.updateTile`, `Turret.java:304,504`).
         if in_game && !context.paused {
-            if let Some(host) = self.sim_host() {
+            if let Some(host) = wiring::optional(&self.sim_host) {
                 let host = host.bind();
                 host.audio_frame_loops(&mut self.frame_loops);
                 host.audio_turret_loops(&mut self.turret_loop_sources);
@@ -495,18 +521,6 @@ impl INode for MindAudio {
 }
 
 impl MindAudio {
-    fn sim_host(&self) -> Option<Gd<crate::sim_host::MindSimHost>> {
-        let base = self.base();
-        let node = base.get_node_or_null("../SimHost")?;
-        node.try_cast::<crate::sim_host::MindSimHost>().ok()
-    }
-
-    fn find_camera(&self) -> Option<Gd<Camera2D>> {
-        let base = self.base();
-        let node = base.get_node_or_null("../World/Camera2D")?;
-        node.try_cast::<Camera2D>().ok()
-    }
-
     /// Current camera listener (`calcFalloff`/`calcPan` frame).
     ///
     /// `Sound.calcPan` divides by `camera.width / 2` in **world units**
@@ -519,8 +533,7 @@ impl MindAudio {
             .map(|viewport| viewport.get_visible_rect().size.x)
             .filter(|width| *width > 0.0)
             .unwrap_or(1.0);
-        let (x, y, zoom) = self
-            .find_camera()
+        let (x, y, zoom) = wiring::optional(&self.camera)
             .as_ref()
             .map(|camera| {
                 let position = camera.get_global_position();
@@ -539,7 +552,7 @@ impl MindAudio {
     /// `MenuBackground` while `HudGroup` stays hidden; PAR-0072). `dialog` is
     /// `state.isGame() && Core.scene.hasDialog()` (`SoundControl.java:120,130-132`).
     fn music_context(&self, now_ms: f64, delta_frames: f32) -> MusicContext {
-        let (state, paused, game) = match self.sim_host() {
+        let (state, paused, game) = match wiring::optional(&self.sim_host) {
             Some(host) => {
                 let host = host.bind();
                 (
@@ -551,10 +564,9 @@ impl MindAudio {
             None => (String::from("menu"), false, AudioGameState::default()),
         };
         let menu_background = self
-            .base()
-            .get_node_or_null("/root/Spine/Ui/MenuBackground")
-            .and_then(|node| node.get("visible").try_to::<bool>().ok())
-            .unwrap_or(false);
+            .menu_background
+            .as_ref()
+            .is_some_and(|background| background.is_visible());
         // Read the dialog stack once per frame.
         let stack = self.dialog_stack();
         let hud_visible = self.hud_group_visible();
@@ -606,20 +618,19 @@ impl MindAudio {
             .unwrap_or_default()
     }
 
-    /// `/root/Spine/Ui/UiRoot/HudGroup.visible` (hidden at the main menu).
+    /// `Ui/UiRoot/HudGroup.visible` (hidden at the main menu).
     fn hud_group_visible(&self) -> bool {
-        self.base()
-            .get_node_or_null("/root/Spine/Ui/UiRoot/HudGroup")
-            .and_then(|node| node.get("visible").try_to::<bool>().ok())
-            .unwrap_or(false)
+        self.ui_root
+            .as_ref()
+            .and_then(|root| root.bind().hud_group_node())
+            .is_some_and(|group| group.is_visible())
     }
 
-    /// `/root/Spine/Ui/EditorDialog.visible` (`ui.editor.isShown()`).
+    /// `Ui/EditorDialog.visible` (`ui.editor.isShown()`).
     fn editor_dialog_visible(&self) -> bool {
-        self.base()
-            .get_node_or_null("/root/Spine/Ui/EditorDialog")
-            .and_then(|node| node.get("visible").try_to::<bool>().ok())
-            .unwrap_or(false)
+        self.editor_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.is_visible())
     }
 
     /// Pulls the sound settings from the `MindUi` store (`Core.settings` is
@@ -1073,8 +1084,7 @@ impl MindAudio {
     pub fn music_debug(&self) -> VarDictionary {
         let mut dict = VarDictionary::new();
         let key = |name: &str| GString::from(name);
-        let game = self
-            .sim_host()
+        let game = wiring::optional(&self.sim_host)
             .map(|host| host.bind().audio_game_state())
             .unwrap_or_default();
         let context = self.music_context(0.0, 1.0);
