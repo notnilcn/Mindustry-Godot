@@ -29,6 +29,7 @@ mod sim_host;
 mod stdb;
 mod tile_grid;
 mod ui;
+mod wiring;
 
 pub use assets::MindAssets;
 pub use audio::MindAudio;

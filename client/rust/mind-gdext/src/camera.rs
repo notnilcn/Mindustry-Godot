@@ -24,6 +24,7 @@ use mind_core::render::cutscene::{
 
 use crate::input::MindInput;
 use crate::sim_host::MindSimHost;
+use crate::wiring;
 
 /// Default `screenshake` setting (`Renderer` reads it each frame).
 const DEFAULT_SCREENSHAKE: i32 = 4;
@@ -49,10 +50,15 @@ pub struct MindCamera2D {
     shadow_position: (f32, f32),
     /// Last zoom exchanged with the Godot node (echo guard).
     shadow_scale: f32,
-    /// Scene sim host; a world-size change recenters the camera on it.
-    host: Option<Gd<MindSimHost>>,
-    /// Sibling `MindInput`; pan/boost come from the binding state.
-    input: Option<Gd<MindInput>>,
+    /// Scene-wired `MindSimHost`; a world-size change recenters the camera on it.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `MindInput` (scene-wired); pan/boost come from the binding state.
+    #[export]
+    pub input: Option<Gd<MindInput>>,
+    /// Sibling `MindFx` (scene-wired); landing dust is skipped when absent.
+    #[export]
+    pub fx: Option<Gd<crate::fx::MindFx>>,
     /// World size the rig last adopted (`Control` world-load camera snap).
     world_dims: (i32, i32),
     /// World-load counter the rig last adopted (recenters on a same-size load).
@@ -97,8 +103,9 @@ impl ICamera2D for MindCamera2D {
             screenshake: DEFAULT_SCREENSHAKE,
             shadow_position: (0.0, 0.0),
             shadow_scale: 1.0,
-            host: None,
+            sim_host: None,
             input: None,
+            fx: None,
             world_dims: (0, 0),
             world_loads: 0,
             cutscene: Cutscene::new(1.0),
@@ -144,7 +151,7 @@ impl ICamera2D for MindCamera2D {
         // `logicCutsceneZoom`; while `Renderer.isCutscene()` runs the zoom is
         // forced to -1 and the pan is suppressed, `InputHandler.java:946-950`).
         let logic = self
-            .host
+            .sim_host
             .as_ref()
             .map(|host| host.bind().logic_cutscene_state())
             .unwrap_or_default();
@@ -170,11 +177,11 @@ impl ICamera2D for MindCamera2D {
             // it each tick) and the camera follows the unit instead of panning
             // (`DesktopInput.updateMovement` / `:283-289`).
             let player = self
-                .host
+                .sim_host
                 .as_ref()
                 .and_then(|host| host.bind().player_unit_position());
             let paused = self
-                .host
+                .sim_host
                 .as_ref()
                 .map(|host| host.bind().is_paused())
                 .unwrap_or(false);
@@ -259,7 +266,7 @@ impl ICamera2D for MindCamera2D {
 
         // `CutsceneI shake` (`Renderer.shake(p1, p2 * 60)`): the pending request
         // is consumed once (`InputHandler` forwards it the frame it arrives).
-        if let Some(mut host) = self.host.clone()
+        if let Some(mut host) = self.sim_host.clone()
             && let Some((intensity, duration)) = host.bind_mut().take_logic_shake()
         {
             self.camera.on_fx_event(&FxEvent::Shake {
@@ -280,7 +287,7 @@ impl ICamera2D for MindCamera2D {
         // scale with the animator's `zoomLaunch()` (0.02 -> 4, ending at the
         // normal scale, `Renderer.java:186,198`); otherwise the rig's own scale.
         let sim_paused = self
-            .host
+            .sim_host
             .as_ref()
             .map(|host| host.bind().is_paused())
             .unwrap_or(false);
@@ -422,7 +429,7 @@ impl MindCamera2D {
         // `CoreBuild.team` name for the `<block>-team-<team>` region
         // (`teamRegions[team.id]`, CoreBlock.java:523-525).
         let team = self
-            .host
+            .sim_host
             .as_ref()
             .map(|host| host.bind().player_team())
             .map(|id| mind_core::game::team::Team::get(id).name.clone())
@@ -490,17 +497,14 @@ impl MindCamera2D {
         {
             return;
         }
-        let Some(host) = self.host.as_ref() else {
+        let Some(host) = self.sim_host.as_ref() else {
             return;
         };
         let tiles = host.bind().linked_tile_floors(cx, cy);
         let Some(effect) = mind_core::content::effect_by_name("coreLandDust") else {
             return;
         };
-        let Some(mut fx) = self
-            .base()
-            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
-        else {
+        let Some(mut fx) = wiring::optional(&self.fx) else {
             return;
         };
         let mut fx = fx.bind_mut();
@@ -540,11 +544,13 @@ impl MindCamera2D {
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {
         self.base_mut().make_current();
-        // Scene-wired sim host (tscn-first): the spine declares SimHost as a
-        // sibling of World, so the camera follows world loads.
-        self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
-        // Sibling `Input` owns the binding state (`BindingState`).
-        self.input = self.base().try_get_node_as::<MindInput>("../../Input");
+        // Scene-wired sim host (tscn-first): `game.tscn` wires the
+        // `Spine/SimHost` sibling so the camera follows world loads.
+        self.sim_host = wiring::required("MindCamera2D", "sim_host", &self.sim_host);
+        // Sibling `MindInput` owns the binding state (`BindingState`).
+        self.input = wiring::required("MindCamera2D", "input", &self.input);
+        // Sibling `MindFx` renders the landing dust; optional.
+        self.fx = wiring::optional(&self.fx);
         // `smoothcamera` (T10): the WorldLoadEvent re-reads it too.
         self.smooth_camera = self.read_smooth_camera();
         let position = self.base().get_position();
@@ -564,7 +570,7 @@ impl MindCamera2D {
     /// the camera to the player's best core (`camera.position.set(player.bestCore())`),
     /// falling back to the world middle when the map has no core.
     fn follow_world(&mut self) {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = self.sim_host.clone() else {
             return;
         };
         let (width, height) = host.bind().world_size();
@@ -754,7 +760,7 @@ impl MindCamera2D {
     /// (`DesktopInput.update` player/core follow).
     #[func]
     pub fn recenter_player(&mut self) {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = self.sim_host.clone() else {
             return;
         };
         let Some((x, y)) = host.bind().best_core_position_px() else {

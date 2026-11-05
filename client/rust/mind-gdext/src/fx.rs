@@ -38,6 +38,8 @@ use env::EnvFxInput;
 use mind_core::render::draw::PrimKind;
 use mind_core::render::layer::Layer;
 
+use crate::wiring;
+
 /// Converts a core `Rgba` to a Godot `Color`.
 fn to_color(color: Rgba) -> Color {
     Color::from_rgba(color.r, color.g, color.b, color.a)
@@ -75,6 +77,9 @@ pub struct MindFx {
     /// Frame's `PrimKind::Light` prims `(x, y, radius, rgba, opacity)`,
     /// collected instead of drawn (H03 T16); forwarded to the light pass.
     view_lights: Vec<(f32, f32, f32, [f32; 4], f32)>,
+    /// Sibling `World/Camera2D` (scene-wired); receives `FxEvent::Shake`.
+    #[export]
+    pub camera: Option<Gd<crate::camera::MindCamera2D>>,
 }
 
 #[godot_api]
@@ -100,6 +105,7 @@ impl INode2D for MindFx {
             env: None,
             region_cache: HashMap::new(),
             view_lights: Vec::new(),
+            camera: None,
         }
     }
 
@@ -148,6 +154,8 @@ impl MindFx {
     /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {
+        // Scene-wired sibling camera (`game.tscn`) owns the shake offset.
+        self.camera = wiring::required("MindFx", "camera", &self.camera);
         self.base_mut().queue_redraw();
     }
 
@@ -624,11 +632,7 @@ impl MindFx {
                     // `screenshake` setting is applied in `ShakeState.offset`
                     // (`RendererView.shakeIntensity * screenshake / 4 * 0.75`),
                     // so pass the raw event through.
-                    if let Some(mut camera) =
-                        self.base().try_get_node_as::<crate::camera::MindCamera2D>(
-                            "/root/Spine/World/Camera2D",
-                        )
-                    {
+                    if let Some(mut camera) = wiring::optional(&self.camera) {
                         camera
                             .bind_mut()
                             .apply_shake_event(f64::from(intensity), f64::from(duration));

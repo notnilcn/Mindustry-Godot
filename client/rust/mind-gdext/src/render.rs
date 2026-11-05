@@ -40,6 +40,7 @@ use crate::render::floor::{
     PendingQuad, RegionAtlas, floor_draw_base_quads, resolved_uv, tile_quads,
 };
 use crate::sim_host::MindSimHost;
+use crate::wiring;
 
 mod atlas_bind;
 mod block_extras;
@@ -239,7 +240,21 @@ impl RenderStats {
 #[class(base=Node2D)]
 pub struct MindWorldRenderer {
     base: Base<Node2D>,
-    host: Option<Gd<MindSimHost>>,
+    /// `Spine/SimHost` — required; the frame pipeline reads the live sim.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `World/Camera2D` — required; the culling view.
+    #[export]
+    pub camera: Option<Gd<Camera2D>>,
+    /// Sibling `MindFx` — required; band z-index, view effects, light feed.
+    #[export]
+    pub fx: Option<Gd<crate::fx::MindFx>>,
+    /// `World/LandingCore` — optional; z-index when present.
+    #[export]
+    pub landing_core: Option<Gd<crate::ui::landing::MindLandingCore>>,
+    /// `Ui/UiRoot` — optional; inherits the atlas texture filter.
+    #[export]
+    pub ui_root: Option<Gd<crate::ui::root::MindUiRoot>>,
     /// Atlas autoload captured at boot for the menu-background bake.
     assets: Option<Gd<MindAssets>>,
     band_plan: BandPlan,
@@ -352,7 +367,11 @@ impl INode2D for MindWorldRenderer {
     fn init(base: Base<Node2D>) -> Self {
         Self {
             base,
-            host: None,
+            sim_host: None,
+            camera: None,
+            fx: None,
+            landing_core: None,
+            ui_root: None,
             assets: None,
             band_plan: BandPlan::new(),
             band_nodes: Vec::new(),
@@ -436,11 +455,13 @@ impl MindWorldRenderer {
     /// Rebuilds the Godot-derived pipeline state (adopts persisted band
     /// children) after `ready()` or a hot reload.
     fn bootstrap(&mut self) {
-        if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
-            self.host = Some(host);
-        } else {
-            log::warn!("MindWorldRenderer: no MindSimHost at ../../SimHost");
-        }
+        // Scene-wired spine deps (`game.tscn`); required deps warn once when a
+        // wiring line is missing, optional deps stay silent.
+        self.sim_host = wiring::required("MindWorldRenderer", "sim_host", &self.sim_host);
+        self.camera = wiring::required("MindWorldRenderer", "camera", &self.camera);
+        self.fx = wiring::required("MindWorldRenderer", "fx", &self.fx);
+        self.landing_core = wiring::optional(&self.landing_core);
+        self.ui_root = wiring::optional(&self.ui_root);
         self.build_bands();
         self.build_floor();
         self.build_markers();
@@ -555,27 +576,19 @@ impl MindWorldRenderer {
             self.band_nodes.push(node);
         }
 
-        // The FX host (`/root/Spine/MindFx`) executes its whole program on one
-        // `Node2D`; park it at the `Layer.effect` band so combat FX covers the
-        // world bands but stays under fog/overlayUI (`Draw.z` for effects,
+        // The sibling `MindFx` host executes its whole program on one `Node2D`;
+        // park it at the `Layer.effect` band so combat FX covers the world
+        // bands but stays under fog/overlayUI (`Draw.z` for effects,
         // `Layer.effect = 110`). Without this the node's default z sits under
         // every non-floor band and effects are invisible.
-        if let Some(mut fx) = self
-            .base()
-            .get_node_or_null("/root/Spine/MindFx")
-            .and_then(|node| node.try_cast::<Node2D>().ok())
-        {
+        if let Some(mut fx) = wiring::optional(&self.fx) {
             fx.set_z_index(self.band_plan.band(BandKey::base(Layer::Effect)));
         }
 
         // The landing core (`CoreBlock.drawLaunch`) runs at `Layer.space`
         // (160) in Java — above every world layer — so the dropping core
         // covers the real building until touchdown (G03 T18).
-        if let Some(mut landing) = self
-            .base()
-            .get_node_or_null("/root/Spine/World/LandingCore")
-            .and_then(|node| node.try_cast::<Node2D>().ok())
-        {
+        if let Some(mut landing) = wiring::optional(&self.landing_core) {
             landing.set_z_index(self.band_plan.band(BandKey::base(Layer::Space)));
             landing.set_z_as_relative(false);
         }
@@ -801,17 +814,14 @@ impl MindWorldRenderer {
             TextureFilter::NEAREST
         };
         self.base_mut().set_texture_filter(filter);
-        if let Some(mut ui) = self
-            .base()
-            .try_get_node_as::<godot::classes::Control>("/root/Spine/Ui/UiRoot")
-        {
+        if let Some(mut ui) = wiring::optional(&self.ui_root) {
             ui.set_texture_filter(filter);
         }
     }
 
     /// Constructs the plan-16 floor + dynamic block passes.
     fn build_floor(&mut self) {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             return;
         };
         let mut assets = self
@@ -1232,7 +1242,7 @@ impl MindWorldRenderer {
     /// Current camera as a `mind-core` [`CameraView`] for culling.
     fn camera_view(&self) -> CameraView {
         let mut view = CameraView::default();
-        let Some(camera) = self.base().try_get_node_as::<Camera2D>("../Camera2D") else {
+        let Some(camera) = wiring::optional(&self.camera) else {
             return view;
         };
         let position = camera.get_position();
@@ -1297,7 +1307,7 @@ impl MindWorldRenderer {
         self.rules_poll = self.rules_poll.wrapping_add(1);
         if !self.rules_override
             && self.rules_poll.is_multiple_of(30)
-            && let Some(host) = self.host.clone()
+            && let Some(host) = wiring::optional(&self.sim_host)
         {
             let view = host
                 .bind()
@@ -1385,9 +1395,7 @@ impl MindWorldRenderer {
             self.stats.missing_regions += unit_stats.missing_regions as i64;
         }
         if !view_effects.is_empty()
-            && let Some(mut fx) = self
-                .base()
-                .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+            && let Some(mut fx) = wiring::optional(&self.fx)
         {
             let mut fx = fx.bind_mut();
             for (effect, x, y, rotation, color) in view_effects {
@@ -1414,9 +1422,7 @@ impl MindWorldRenderer {
         let draw_light = self.draw_light;
         // H03 T16: the FX system's collected `Drawf.light` requests feed the
         // light pass (`LightRenderer.add` on the Java side).
-        let fx_lights: Vec<(f32, f32, f32, [f32; 4], f32)> = self
-            .base()
-            .try_get_node_as::<crate::fx::MindFx>("/root/Spine/MindFx")
+        let fx_lights: Vec<(f32, f32, f32, [f32; 4], f32)> = wiring::optional(&self.fx)
             .map(|fx| fx.bind().view_lights().to_vec())
             .unwrap_or_default();
         if let Some(light) = self.light.as_mut() {
@@ -1765,7 +1771,7 @@ impl MindWorldRenderer {
         self.menu.generate(seed as i32, mobile);
         let world = self.menu.world()?.clone();
         let assets = self.assets.clone()?;
-        let host = self.host.clone()?;
+        let host = wiring::optional(&self.sim_host)?;
         let texture = {
             let host = host.bind();
             let registry = host.content_registry()?;
@@ -1790,7 +1796,7 @@ impl MindWorldRenderer {
         let Some(world) = self.menu.world().cloned() else {
             return GString::from("{\"rows\":[]}");
         };
-        let speed = match self.host.clone() {
+        let speed = match wiring::optional(&self.sim_host) {
             Some(host) => {
                 let host = host.bind();
                 host.content_registry()
@@ -2122,7 +2128,18 @@ fn build_menu_image(
 #[class(base=Node)]
 pub struct MindRender {
     base: Base<Node>,
-    renderer: Option<Gd<MindWorldRenderer>>,
+    /// Sibling `World/Renderer` — required; the facade forwards to it.
+    #[export]
+    pub renderer: Option<Gd<MindWorldRenderer>>,
+    /// `World/TileGrid` — optional; debug grid visibility toggle.
+    #[export]
+    pub tile_grid: Option<Gd<crate::tile_grid::MindTileGrid>>,
+    /// `World/Camera2D` — optional; pose pinning for captures.
+    #[export]
+    pub camera: Option<Gd<Camera2D>>,
+    /// `Spine/SimHost` — required; render stats read the live tick.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
     menu_seed: i64,
     /// Mounted editor view spec (plan 19 §3.7); `None` when unmounted.
     editor_view: Option<VarDictionary>,
@@ -2134,6 +2151,9 @@ impl INode for MindRender {
         Self {
             base,
             renderer: None,
+            tile_grid: None,
+            camera: None,
+            sim_host: None,
             menu_seed: 0,
             editor_view: None,
         }
@@ -2152,15 +2172,13 @@ impl INode for MindRender {
 }
 
 impl MindRender {
-    /// Re-resolves the world renderer (runs from `ready()` and on
+    /// Re-adopts the scene-wired deps (runs from `ready()` and on
     /// `EXTENSION_RELOADED`, which does not re-run `ready()`).
     fn bootstrap(&mut self) {
-        self.renderer = self
-            .base()
-            .try_get_node_as::<MindWorldRenderer>("../World/Renderer");
-        if self.renderer.is_none() {
-            log::warn!("MindRender: no MindWorldRenderer at ../World/Renderer");
-        }
+        self.renderer = wiring::required("MindRender", "renderer", &self.renderer);
+        self.sim_host = wiring::required("MindRender", "sim_host", &self.sim_host);
+        self.tile_grid = wiring::optional(&self.tile_grid);
+        self.camera = wiring::optional(&self.camera);
     }
 
     fn renderer(&self) -> Option<Gd<MindWorldRenderer>> {
@@ -2181,10 +2199,7 @@ impl MindRender {
     /// Toggles the plan-00 debug tile grid (default hidden after M1).
     #[func]
     pub fn set_tile_grid_visible(&mut self, visible: bool) {
-        if let Some(mut grid) = self
-            .base()
-            .try_get_node_as::<crate::tile_grid::MindTileGrid>("../World/TileGrid")
-        {
+        if let Some(mut grid) = wiring::optional(&self.tile_grid) {
             grid.set_visible(visible);
         }
     }
@@ -2304,8 +2319,8 @@ impl MindRender {
     /// Pins the camera at tile `(x, y)` with `zoom`.
     #[func]
     pub fn set_camera_pose(&mut self, x: f64, y: f64, zoom: f64) {
-        let Some(mut camera) = self.base().try_get_node_as::<Camera2D>("../World/Camera2D") else {
-            log::warn!("MindRender.set_camera_pose: no Camera2D at ../World/Camera2D");
+        let Some(mut camera) = wiring::optional(&self.camera) else {
+            log::warn!("MindRender.set_camera_pose: no camera wired in the owning scene");
             return;
         };
         let size = TILESIZE as f64;
@@ -2322,10 +2337,7 @@ impl MindRender {
     /// The renderer's counters as a dictionary (`tick` refreshed first).
     #[func]
     pub fn get_render_stats(&mut self) -> VarDictionary {
-        if let (Some(renderer), Some(host)) = (
-            self.renderer(),
-            self.base().try_get_node_as::<MindSimHost>("../SimHost"),
-        ) {
+        if let (Some(renderer), Some(host)) = (self.renderer(), wiring::optional(&self.sim_host)) {
             let tick = host.bind().get_tick();
             let mut renderer = renderer;
             renderer.bind_mut().stats_mut().tick = tick;

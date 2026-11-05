@@ -16,6 +16,7 @@ use mind_core::config::TILESIZE;
 use mind_core::content::BlockId;
 
 use crate::sim_host::MindSimHost;
+use crate::wiring;
 
 /// Grid line color (white, low alpha).
 const GRID_COLOR: Color = Color::from_rgba(1.0, 1.0, 1.0, 0.08);
@@ -29,13 +30,18 @@ const STONE_WALL_COLOR: Color = Color::from_rgb(0.55, 0.56, 0.62);
 #[class(base=Node2D)]
 pub struct MindTileGrid {
     base: Base<Node2D>,
-    host: Option<Gd<MindSimHost>>,
+    /// `Spine/SimHost` — required; the grid pulls `tile_blocks()` from it.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
 }
 
 #[godot_api]
 impl INode2D for MindTileGrid {
     fn init(base: Base<Node2D>) -> Self {
-        Self { base, host: None }
+        Self {
+            base,
+            sim_host: None,
+        }
     }
 
     fn ready(&mut self) {
@@ -50,7 +56,7 @@ impl INode2D for MindTileGrid {
     }
 
     fn draw(&mut self) {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             return;
         };
         let (width, height, tiles) = {
@@ -100,22 +106,19 @@ impl INode2D for MindTileGrid {
 #[godot_api]
 impl MindTileGrid {
     /// Rebuilds the node's Godot-derived state (runs from `ready()` and on
-    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The host lookup
-    /// overwrites, so a re-run never duplicates.
+    /// `EXTENSION_RELOADED`, which does not re-run `ready()`). The scene-injected
+    /// host is re-adopted, so a re-run never duplicates state.
     fn bootstrap(&mut self) {
-        // Scene-wired host (tscn-first): the spine declares SimHost as a sibling.
-        if let Some(host) = self.base().try_get_node_as::<MindSimHost>("../../SimHost") {
-            self.host = Some(host);
-        } else {
-            log::warn!("MindTileGrid: no MindSimHost at ../../SimHost (call set_host)");
-        }
+        // Scene-wired host (tscn-first): `game.tscn` wires the `Spine/SimHost`
+        // sibling; `set_host` remains the runtime-injector fallback.
+        self.sim_host = wiring::required("MindTileGrid", "sim_host", &self.sim_host);
         self.base_mut().queue_redraw();
     }
 
     /// Binds the sim host the grid pulls `tile_blocks()` from.
     #[func]
     pub fn set_host(&mut self, host: Gd<MindSimHost>) {
-        self.host = Some(host);
+        self.sim_host = Some(host);
         self.base_mut().queue_redraw();
     }
 

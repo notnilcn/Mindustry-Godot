@@ -15,7 +15,7 @@ use std::collections::HashSet;
 
 use godot::classes::notify::CanvasItemNotification;
 use godot::classes::{Image, ImageTexture, Node2D, Texture2D};
-use godot::obj::{Base, WithBaseField};
+use godot::obj::Base;
 use godot::prelude::*;
 
 use mind_core::config::TILESIZE;
@@ -27,6 +27,7 @@ use mind_core::render::minimap::{
 use mind_core::world::darkness::get_static_darkness;
 
 use crate::sim_host::MindSimHost;
+use crate::wiring;
 
 use super::atlas_bind::color_from;
 
@@ -64,7 +65,12 @@ type DarknessKey = (i64, bool, Option<(i32, i32, i32, i32)>);
 #[class(base=Node2D)]
 pub struct MindMinimap {
     base: Base<Node2D>,
-    host: Option<Gd<MindSimHost>>,
+    /// `Spine/SimHost` — required; the minimap rebuilds from its world.
+    #[export]
+    pub sim_host: Option<Gd<MindSimHost>>,
+    /// Sibling `World/Camera2D` — optional; the crop falls back to the origin.
+    #[export]
+    pub camera: Option<Gd<godot::classes::Camera2D>>,
     palette: Option<BlockPalette>,
     image: Option<Gd<Image>>,
     texture: Option<Gd<ImageTexture>>,
@@ -87,7 +93,8 @@ impl INode2D for MindMinimap {
     fn init(base: Base<Node2D>) -> Self {
         Self {
             base,
-            host: None,
+            sim_host: None,
+            camera: None,
             palette: None,
             image: None,
             texture: None,
@@ -114,7 +121,7 @@ impl INode2D for MindMinimap {
     }
 
     fn process(&mut self, delta: f64) {
-        let Some(mut host) = self.host.clone() else {
+        let Some(mut host) = wiring::optional(&self.sim_host) else {
             return;
         };
         // Feed is the minimap's (single drain consumer; H03 T4):
@@ -161,12 +168,10 @@ impl INode2D for MindMinimap {
 }
 
 impl MindMinimap {
-    /// Re-resolves the sim host and rebuilds the texture (idempotent).
+    /// Re-adopts the scene-wired deps and rebuilds the texture (idempotent).
     fn bootstrap(&mut self) {
-        self.host = self.base().try_get_node_as::<MindSimHost>("../../SimHost");
-        if self.host.is_none() {
-            log::warn!("MindMinimap: no MindSimHost at ../../SimHost");
-        }
+        self.sim_host = wiring::required("MindMinimap", "sim_host", &self.sim_host);
+        self.camera = wiring::optional(&self.camera);
         self.rebuild_all();
     }
 
@@ -176,7 +181,7 @@ impl MindMinimap {
     }
 
     fn rebuild_all(&mut self) {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             return;
         };
         let (width, height, rgba) = {
@@ -234,7 +239,7 @@ impl MindMinimap {
         if self.dirty.is_empty() {
             return;
         }
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             self.dirty.clear();
             return;
         };
@@ -342,15 +347,13 @@ impl MindMinimap {
 
     /// The camera crop in tiles (`[x, y, w, h]`).
     pub fn region_tiles(&self) -> [f32; 4] {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             return [0.0; 4];
         };
         let host = host.bind();
         let (width, height) = host.world_size();
         // `Core.camera.position` (world px, y-up): the sibling `World/Camera2D`.
-        let camera = self
-            .base()
-            .try_get_node_as::<godot::classes::Camera2D>("../Camera2D")
+        let camera = wiring::optional(&self.camera)
             .map(|camera| camera.get_position())
             .unwrap_or_default();
         region_for_camera(
@@ -431,7 +434,7 @@ impl MindMinimap {
     /// square centres on the building).
     #[func]
     pub fn indicators_json(&self) -> GString {
-        let host = self.host.clone();
+        let host = wiring::optional(&self.sim_host);
         let rows: Vec<[f32; 4]> = self
             .indicators
             .iter()
@@ -462,7 +465,7 @@ impl MindMinimap {
     /// (`MinimapRenderer.drawEntities`: `unit.icon()`, tinted `team.color`).
     #[func]
     pub fn minimap_units_json(&self) -> GString {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             return GString::from("[]");
         };
         let units = host.bind().unit_draws_full();
@@ -495,7 +498,7 @@ impl MindMinimap {
     #[func]
     pub fn set_zoom(&mut self, amount: f64) {
         let (width, height) = self
-            .host
+            .sim_host
             .clone()
             .map(|host| host.bind().world_size())
             .unwrap_or((0, 0));
@@ -526,7 +529,7 @@ impl MindMinimap {
     /// Test hook: the RGBA8888 pixel for a tile (plan 16 §7c-3 oracle).
     #[func]
     pub fn minimap_color_at(&self, x: i32, y: i32) -> i64 {
-        let Some(host) = self.host.clone() else {
+        let Some(host) = wiring::optional(&self.sim_host) else {
             return 0;
         };
         let host = host.bind();
